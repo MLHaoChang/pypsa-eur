@@ -166,7 +166,7 @@ A new hook, `useSiteResults(project, objects, components)`, takes the site's obj
 | Line | `p0` (`/results/lines`) | MW, loading %, direction |
 | Transformer | `p0` (`/results/transformers`) | MW, loading %, direction |
 
-Capacity denominators come from one helper: `*_nom_opt` if finite and > 0, else `*_nom` if > 0, else no share (the label shows MW only). In multi-period runs the capacity is the **period-effective** one (the context's vintage rule, moved into a shared pure module). A load's share is of its **profile peak** (load-profile metadata × the largest scaler, else |p_set|), clamped to 0–1, and the label always shows MW. Link values are **MW in** at bus0 (there is no bulk p1 series). Loading uses `s_nom_opt`/`s_nom`, as the other canvases do (they ignore `s_max_pu`; so does this, and the label says "of rating"). Every share's label names its capacity ("SoC 64 % of 160 MWh"), because the drawn size (E6) and the denominator can differ.
+Capacity denominators come from one helper: `*_nom_opt` if finite and > 0, else `*_nom` if > 0, else no share (the label shows MW only). In multi-period runs the capacity is the **period-effective** one (the context's vintage rule, moved into a shared pure module). A load's share is of its **peak**: a profile load's profile peak (load-profile metadata) × the largest factor the solver applies to it over the network's investment periods (per carrier bucket, then the legacy map; multi-period runs only — backend `load_scale_factors`), a static load's |p_set| unscaled; clamped to 0–1, and the label always shows MW. *(Amended at the WP5 gate: the first draft scaled every load by the largest scaler of any carrier.)* Link values are **MW in** at bus0 (there is no bulk p1 series). Loading uses `s_nom_opt`/`s_nom`, as the other canvases do (they ignore `s_max_pu`; so does this, and the label says "of rating"). Every share's label names its capacity ("SoC 64 % of 160 MWh"), because the drawn size (E6) and the denominator can differ.
 
 ### 6.2 Pure mapping
 
@@ -179,6 +179,8 @@ Three rules, because no existing observer is reliable (the status bar polls `/si
 1. The hook **owns a status poll** (same query key as the status bar, every 3 s while the Eye is on), independent of the simulation store's state. Its data never triggers the status bar's toast.
 2. It **drops the map** as soon as any component list the site reads refetches after the map was built (an edit), without waiting for the poll. Placement writes go to the sites sidecar and do not count.
 3. It **rejects a chunk fetched before the latest transition to fresh** (a re-solve), so the previous solve's values are never shown as current.
+
+*Amended at the WP5 gate.* "Fresh" is per solve (objective and solve time), so fresh A → fresh B with no poll in between counts. On each fresh solve the view refetches the status and the component lists it reads and records their data; it is **current** only while the lists still hold that data (an edit — a list that refetches with new data — ends it at once; an identical refetch does not). The first solve seen as the view opens is trusted at once only when the cached status answer is recent (another view is polling it), so a warm cache opens filled; otherwise it waits for that confirmation. A chunk, or the vintage breakdown, fetched before the latest solve or invalidated by the finished job is never shown; a stale one is refetched once per solve. A series that answers nothing drops only its class; the last map is held only for the same solve and source.
 
 ### 6.4 Rendering
 
@@ -201,6 +203,8 @@ A `ResultsLayer` inside the Canvas reads the map for the current snapshot and dr
 - The schematic looks transformer flows up in the Lines map (`TopologyCanvas.tsx:931–933`).
 - Result chunks are not invalidated after a network edit; the canvases can show stale values until a chunk boundary.
 - No bulk `Link p1` endpoint (the context's comment names one that does not exist).
-- `SnapshotPicker`: no `aria-label` on the slider, no `aria-live` timestamp, playback ignores reduced motion.
+- `SnapshotPicker`: no `aria-live` timestamp, and playback ignores reduced motion (the slider's `aria-label` / `aria-valuetext` were added in WP6).
 - `packaging`: `pypsa-gui.spec` lacks `gridspine.drivers.year_study` (pre-existing test failure).
 - **Creating a three-port Link drops `bus2`/`efficiency2`** unless a Link in the network already has a `bus2` column: `network_crud._drop_unknown_extras` keeps only catalog input attributes, and PyPSA's catalog does not list the multi-port fields. The palette's CHP item therefore creates a plain gas → electricity link with no heat output (found by the Phase 2 WP1 smoke; the 3D view correctly draws what the model holds). Fix: allow `bus\d+` / `efficiency\d+` in the filter.
+- The period-effective capacity (the context's vintage rule, shared with the 3D view in `site3d/capacity.ts`) ignores a vintage's `lifetime`, so a retired vintage still counts (WP5 gate).
+- The vintage breakdown is not invalidated by a finished solve (`useJobTerminalInvalidation` covers results, status, meta and the bundle); the 3D view refetches it itself, the schematic's asset-group capacities do not.

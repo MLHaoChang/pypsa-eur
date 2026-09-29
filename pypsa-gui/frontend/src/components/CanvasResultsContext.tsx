@@ -139,12 +139,13 @@ function useChunkedSeriesQuery(
 ) {
   const { project, source, idx, enabled, prefetchNext = false } = opts
 
-  const { data: probe } = useQuery({
+  const probeQuery = useQuery({
     queryKey: nk(project, 'results', name, source, 'probe'),
     queryFn: () => fetch(source, PROBE),
     enabled,
     staleTime: Infinity,
   })
+  const probe = probeQuery.data
 
   const total = probe?.range?.total ?? 0
   const chunk = useMemo(
@@ -201,7 +202,7 @@ function useChunkedSeriesQuery(
     const next = chunkBounds(bounds.to + 1, chunk, total)
     void qc.prefetchQuery({ queryKey: nk(project, 'results', name, source, next.from), queryFn: () => fetch(source, next) })
   }, [nearEnd, bounds.to, chunk, total, project, name, source, fetch, qc])
-  return { query, queryKey, bounds, total }
+  return { query, probeQuery, queryKey, bounds, total }
 }
 
 interface ChunkedSeriesOpts {
@@ -227,10 +228,13 @@ export interface ChunkedSeriesMeta {
   /** When the chunk was fetched (ms); 0 before. */
   dataUpdatedAt: number
   isFetching: boolean
+  isError: boolean
   queryKey: unknown[]
   bounds: { from: number; to: number }
   /** The series' horizon (0 before the probe answers). */
   total: number
+  /** The probe answered with no series (204) or failed: there is nothing to fetch. */
+  absent: boolean
 }
 
 /** The same chunk and cache, plus when it was fetched (the 3D view rejects chunks older than a re-solve, spec §6.3). */
@@ -239,8 +243,9 @@ export function useChunkedSeriesMeta(
   fetch: (source: ResultSource, range?: TSRange) => Promise<TSPayload | null>,
   opts: ChunkedSeriesOpts,
 ): ChunkedSeriesMeta {
-  const { query, queryKey, bounds, total } = useChunkedSeriesQuery(name, fetch, opts)
-  return { data: query.data, dataUpdatedAt: query.dataUpdatedAt, isFetching: query.isFetching, queryKey, bounds, total }
+  const { query, probeQuery, queryKey, bounds, total } = useChunkedSeriesQuery(name, fetch, opts)
+  const absent = !probeQuery.isFetching && (probeQuery.isError || (probeQuery.isSuccess && total === 0))
+  return { data: query.data, dataUpdatedAt: query.dataUpdatedAt, isFetching: query.isFetching, isError: query.isError, queryKey, bounds, total, absent }
 }
 
 export function CanvasResultsProvider({ children }: { children: ReactNode }) {

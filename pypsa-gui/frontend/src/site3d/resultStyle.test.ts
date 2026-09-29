@@ -68,6 +68,8 @@ describe('visualFor', () => {
     expect(e.emissive).toBeCloseTo(0.81)
     expect(e.label).toBe('Electrolyser · 8.1 MW in · 81 % of 10 MW')
     expect(visualFor(T('heatPump'), { kind: 'link', mw: -2, cap: 10 }, obj('HP')).emissive).toBe(0)
+    expect(visualFor(T('heatPump'), { kind: 'link', mw: -2, cap: 10 }, obj('HP')).label).toBe('HP · -2.0 MW in · 0 % of 10 MW')   // a share never reads negative
+    expect(visualFor(T('pv'), { kind: 'output', mw: -0.1, cap: 20 }, obj('PV')).label).toBe('PV · -0.1 MW · 0 % of 20 MW')
   })
   it('loads glow with their share of the peak, and the label shows MW', () => {
     const l = visualFor(T('load'), { kind: 'load', mw: 4.2, peak: 7.6 }, obj('Data hall A'))
@@ -94,6 +96,7 @@ describe('visualFor', () => {
     expect(dc.label).toBe('DC · 10.0 MW → B · 50 % of 20 MW rating')
     const idle = visualFor(T('feeder'), { kind: 'branch', p0: 0, cap: 20, unit: 'MW', bus0: 'B', bus1: 'Far' }, obj('I', 'B'))
     expect(idle.flow!.dir).toBe(0)
+    expect(idle.label).toBe('I · idle · 0 % of 20 MW rating')
     const noCap = visualFor(T('feeder'), { kind: 'branch', p0: 5, cap: null, unit: 'MVA', bus0: 'B', bus1: 'Far' }, obj('N', 'B'))
     expect(noCap.flow).toEqual({ dir: 1, pct: null })
     expect(noCap.color).toBeUndefined()

@@ -14,6 +14,8 @@ import type { SimulationStatus } from '../api/types'
 import { nk } from '../utils/queryKeys'
 
 export const STATUS_POLL_MS = 3000
+/** A cached status answer this recent is trusted on first sight (someone is polling it). */
+const RECENT_STATUS_MS = 2 * STATUS_POLL_MS
 
 export interface DispatchFreshness {
   fresh: boolean
@@ -32,8 +34,13 @@ export function useDispatchFresh(project: string | null): DispatchFreshness {
     enabled: !!project,
     refetchInterval: STATUS_POLL_MS,
   })
-  const fresh = data?.dispatch === 'fresh'
-  return { fresh, dispatch: data?.dispatch, solveId: !data ? undefined : fresh ? `${data.objective ?? ''}|${data.solve_time ?? ''}` : null }
+  return { fresh: data?.dispatch === 'fresh', dispatch: data?.dispatch, solveId: solveIdOf(data) }
+}
+
+/** A fresh solve's identity (objective and solve time); null when not fresh; undefined before an answer. */
+export function solveIdOf(data: SimulationStatus | undefined): string | null | undefined {
+  if (!data) return undefined
+  return data.dispatch === 'fresh' ? `${data.objective ?? ''}|${data.solve_time ?? ''}` : null
 }
 
 export interface SolveSettled {
@@ -72,8 +79,12 @@ export function useSolveSettled(project: string | null, solveId: string | null |
     const freshSince = first.current.solveId !== solveId ? Date.now() : 0
     let cancelled = false
     const ks = keysRef.current
-    Promise.all(ks.map(k => qc.refetchQueries({ queryKey: nk(project, k), exact: true }))).then(() => {
-      if (!cancelled) setSettled({ project, solveId, refs: ks.map(k => qc.getQueryData(nk(project, k))), freshSince })
+    const statusKey = nk(project, 'simulationStatus')
+    // The status is refetched too: settle only on a confirmed, current answer
+    // (a cached "fresh" may predate an edit made while the view was closed).
+    Promise.all([statusKey, ...ks.map(k => nk(project, k))].map(queryKey => qc.refetchQueries({ queryKey, exact: true }))).then(() => {
+      if (cancelled || solveIdOf(qc.getQueryData<SimulationStatus>(statusKey)) !== solveId) return
+      setSettled({ project, solveId, refs: ks.map(k => qc.getQueryData(nk(project, k))), freshSince })
     }, () => { /* a failed refetch leaves the view not current: installed sizes, no results */ })
     return () => { cancelled = true }
   }, [project, solveId, qc])
@@ -83,8 +94,10 @@ export function useSolveSettled(project: string | null, solveId: string | null |
     return { current, freshSince: current ? settled.freshSince : 0 }
   }
   // Not settled yet. The first solve seen as the view opens is trusted at
-  // once (a warm cache opens filled; the settle refetch follows); a later
-  // solve waits for its lists.
+  // once when the cached status is recent — another view polls it, so the
+  // warm cache opens filled while the settle refetch runs; an old cached
+  // answer, or a later solve, waits for the settle.
   const firstSight = first.current.project !== project || first.current.solveId === null || first.current.solveId === solveId
-  return { current: firstSight, freshSince: 0 }
+  const statusAt = qc.getQueryState(nk(project, 'simulationStatus'))?.dataUpdatedAt ?? 0
+  return { current: firstSight && Date.now() - statusAt <= RECENT_STATUS_MS, freshSince: 0 }
 }

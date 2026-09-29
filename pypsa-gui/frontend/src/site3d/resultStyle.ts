@@ -62,7 +62,7 @@ const EPS = 1e-3
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
 const mw = (v: number) => `${v.toFixed(1)} MW`
 const num = (v: number) => (Number.isInteger(v) ? `${v}` : v.toFixed(1))
-const pct = (share: number) => `${Math.round(share * 100)} %`
+const pct = (share: number) => `${Math.round(Math.max(0, share) * 100)} %`
 /** Tanks read "fill"; batteries and other storage "SoC". */
 const FILL_WORD: Record<string, string> = { h2store: 'fill', thermalStore: 'fill', store: 'fill' }
 
@@ -99,7 +99,8 @@ export function visualFor(type: AssetType, state: AssetState, obj: { name: strin
       const loading = state.cap ? (Math.abs(state.p0) / state.cap) * 100 : null
       const dir = Math.abs(state.p0) <= EPS ? 0 : (Math.sign(state.p0) * (obj.bus === state.bus0 ? 1 : -1)) as 1 | -1
       const dest = state.p0 >= 0 ? state.bus1 : state.bus0
-      const label = `${name} · ${mw(Math.abs(state.p0))} → ${dest}${loading != null ? ` · ${Math.round(loading)} % of ${num(state.cap!)} ${state.unit} rating` : ''}`
+      const flowText = dir === 0 ? 'idle' : `${mw(Math.abs(state.p0))} → ${dest}`
+      const label = `${name} · ${flowText}${loading != null ? ` · ${Math.round(loading)} % of ${num(state.cap!)} ${state.unit} rating` : ''}`
       return { flow: { dir, pct: loading }, ...(loading != null ? { color: loadingColor(loading) } : {}), label }
     }
   }

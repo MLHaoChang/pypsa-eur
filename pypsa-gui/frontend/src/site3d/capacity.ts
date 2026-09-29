@@ -3,6 +3,7 @@
 // period-effective vintage rule moved here unchanged).
 import type { LoadProfileMeta, SolverConfig } from '../api/types'
 import type { TSPayload } from '../pages/results/shared'
+import { loadCarrierKey } from '../pages/results/carrierAliases'
 
 export type VintageResults = Record<string, Record<string, {
   initial_capacity: number
@@ -39,21 +40,29 @@ export function periodAt(payload: Pick<TSPayload, 'periods'> | null | undefined,
   return ps && localIdx >= 0 && localIdx < ps.length ? (ps[localIdx] as number) : null
 }
 
-/** The largest load multiplier the solver may apply (legacy and per-carrier maps), never below 1. */
-export function maxLoadScaler(cfg: Pick<SolverConfig, 'load_scalers' | 'load_scalers_by_carrier'> | undefined): number {
-  const vals = [
-    ...Object.values(cfg?.load_scalers ?? {}),
-    ...Object.values(cfg?.load_scalers_by_carrier ?? {}).flatMap(m => Object.values(m)),
-  ].filter(v => Number.isFinite(v))
-  return Math.max(1, ...vals)
-}
+type ScalerConfig = Pick<SolverConfig, 'multi_investment_periods' | 'load_scalers' | 'load_scalers_by_carrier'>
 
 /**
- * A load's peak, the denominator of its share: its profile's peak (from the
- * profile metadata, not the fetched chunk, whose max may be lower), else
- * |p_set|, times the largest scaler. Null when there is none.
+ * A load's peak, the denominator of its share. A profile load: its
+ * profile's peak (from the metadata, not the fetched chunk, whose max may
+ * be lower) times the largest factor the solver applies to it over the
+ * network's investment periods — per carrier bucket first, then the legacy map, 1
+ * where neither says (backend demand.py `load_scale_factors`; multi-period
+ * runs only, time series only). A static load: |p_set|, never scaled.
+ * Null when there is none.
  */
-export function loadPeak(load: { name: string; p_set?: number }, profile: LoadProfileMeta | undefined, scaler: number): number | null {
-  const base = profile?.has_profile ? profile.peak : Math.abs(load.p_set ?? 0)
-  return Number.isFinite(base) && base > 0 ? base * scaler : null
+export function loadPeak(load: { name: string; carrier?: string; p_set?: number }, profile: LoadProfileMeta | undefined, cfg: ScalerConfig | undefined, periods: readonly number[] | undefined): number | null {
+  if (profile?.has_profile) {
+    const peak = profile.peak
+    if (!Number.isFinite(peak) || peak <= 0) return null
+    if (!cfg?.multi_investment_periods || !periods?.length) return peak
+    const block = cfg.load_scalers_by_carrier?.[loadCarrierKey(load.carrier)]
+    const factors = periods.map(p => {
+      const f = block?.[String(p)] ?? cfg.load_scalers?.[String(p)]
+      return f != null && Number.isFinite(f) ? f : 1
+    })
+    return peak * Math.max(...factors)
+  }
+  const base = Math.abs(load.p_set ?? 0)
+  return Number.isFinite(base) && base > 0 ? base : null
 }

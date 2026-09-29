@@ -1,7 +1,7 @@
 // Phase 2 plan Task 5.4 / spec §6.1: capacity denominators for the 3D
 // view's results. Pure, no three.
 import { describe, it, expect } from 'vitest'
-import { capOf, periodEffectiveCap, periodAt, loadPeak, maxLoadScaler, type VintageResults } from './capacity'
+import { capOf, periodEffectiveCap, periodAt, loadPeak, type VintageResults } from './capacity'
 
 describe('capOf', () => {
   it('*_nom_opt when finite and > 0, else *_nom when > 0, else null', () => {
@@ -44,17 +44,21 @@ describe('periodAt', () => {
   })
 })
 
-describe('load peak', () => {
-  it('the profile peak x the largest scaler, else |p_set| x the scaler, else null', () => {
-    expect(loadPeak({ name: 'L', p_set: 3 }, { has_profile: true, peak: 20 } as never, 1.1)).toBeCloseTo(22)
-    expect(loadPeak({ name: 'L', p_set: -3 }, { has_profile: false } as never, 1)).toBe(3)
-    expect(loadPeak({ name: 'L', p_set: -3 }, undefined, 2)).toBe(6)
-    expect(loadPeak({ name: 'L', p_set: 0 }, undefined, 1)).toBeNull()
+describe('load peak (as the solver scales demand: demand.py load_scale_factors)', () => {
+  const cfg = { multi_investment_periods: true, load_scalers: { 2030: 1.25 }, load_scalers_by_carrier: { heat: { 2030: 3 } } }
+  const P = [2026, 2030]
+  it('a profile load: its profile peak x the largest factor over the periods for its carrier', () => {
+    expect(loadPeak({ name: 'L', carrier: 'AC', p_set: 3 }, { has_profile: true, peak: 20 } as never, cfg as never, P)).toBeCloseTo(25)   // legacy 1.25
+    expect(loadPeak({ name: 'H', carrier: 'heat', p_set: 3 }, { has_profile: true, peak: 20 } as never, cfg as never, P)).toBeCloseTo(60)  // heat 3
   })
-  it('the largest scaler over the legacy and per-carrier maps, never below 1', () => {
-    expect(maxLoadScaler(undefined)).toBe(1)
-    expect(maxLoadScaler({ load_scalers: { 2026: 1, 2030: 1.2 } } as never)).toBe(1.2)
-    expect(maxLoadScaler({ load_scalers: { 2030: 0.8 }, load_scalers_by_carrier: { heat: { 2030: 1.5 } } } as never)).toBe(1.5)
-    expect(maxLoadScaler({ load_scalers: { 2030: 0.8 } } as never)).toBe(1)
+  it('periods without a factor count as 1; all factors below 1 lower the peak', () => {
+    expect(loadPeak({ name: 'L', carrier: 'AC' }, { has_profile: true, peak: 20 } as never, { ...cfg, load_scalers: { 2030: 0.8 }, load_scalers_by_carrier: {} } as never, P)).toBe(20)
+    expect(loadPeak({ name: 'L', carrier: 'AC' }, { has_profile: true, peak: 20 } as never, { ...cfg, load_scalers: { 2026: 0.8, 2030: 0.9 }, load_scalers_by_carrier: {} } as never, P)).toBeCloseTo(18)
+  })
+  it('no scaling unless multi-period, and never for a static p_set (the solver scales only the time series)', () => {
+    expect(loadPeak({ name: 'L', carrier: 'AC' }, { has_profile: true, peak: 20 } as never, { ...cfg, multi_investment_periods: false } as never, P)).toBe(20)
+    expect(loadPeak({ name: 'L', carrier: 'AC', p_set: -3 }, { has_profile: false } as never, cfg as never, P)).toBe(3)
+    expect(loadPeak({ name: 'L', carrier: 'AC', p_set: -3 }, undefined, cfg as never, P)).toBe(3)
+    expect(loadPeak({ name: 'L', carrier: 'AC', p_set: 0 }, undefined, undefined, P)).toBeNull()
   })
 })

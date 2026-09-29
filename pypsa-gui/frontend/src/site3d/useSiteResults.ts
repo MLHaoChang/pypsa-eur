@@ -21,7 +21,7 @@ import { useChunkedSeriesMeta, type ChunkedSeriesMeta } from '../components/Canv
 import { horizonOf, localRow } from '../pages/results/chunking'
 import type { TSPayload } from '../pages/results/shared'
 import { nk } from '../utils/queryKeys'
-import { capOf, loadPeak, maxLoadScaler, periodAt, periodEffectiveCap, type VintageResults } from './capacity'
+import { capOf, loadPeak, periodAt, periodEffectiveCap, type VintageResults } from './capacity'
 import type { AssetState } from './resultStyle'
 
 export interface SiteResultObject { type: string; name: string; kind: string; bus: string }
@@ -103,22 +103,41 @@ export function useSiteResults(input: SiteResultsInput): SiteResults {
     queryKey: nk(project, 'solverConfig'), queryFn: simulationApi.getSolverConfig,
     enabled: active && classes.has('Load'),
   })
-  const { data: vintage } = useQuery({
-    queryKey: nk(project, 'vintage_results'), queryFn: () => networkApi.listVintageResults(),
-    enabled: active,
+  const { data: periods } = useQuery({
+    queryKey: nk(project, 'investmentPeriods'), queryFn: networkApi.getInvestmentPeriods,
+    enabled: active && classes.has('Load') && !!solverConfig?.multi_investment_periods,
   })
+  // The vintage breakdown changes with every solve and nothing invalidates
+  // it: it counts only when fetched after the latest solve (like a chunk).
+  const vintageKey = nk(project, 'vintage_results')
+  const { data: vintage, dataUpdatedAt: vintageAt } = useQuery({
+    queryKey: vintageKey, queryFn: () => networkApi.listVintageResults(), enabled: active,
+  })
+  const vintageStale = active && vintageAt < freshSince
 
-  // Rule 3: a chunk from before the latest solve is not shown; refetch it.
+  // Rule 3: a chunk from before the latest solve (fetched earlier, or
+  // invalidated by the finished job) is not shown. A chunk fetched earlier
+  // is refetched — once per solve, so a refetch that keeps failing does not
+  // loop.
   const qc = useQueryClient()
+  const invalidated = (m: ChunkedSeriesMeta) => !!qc.getQueryState(m.queryKey)?.isInvalidated
+  const invSig = NAMES.map(n => (invalidated(meta[n]) ? 1 : 0)).join('')
   const staleKeys = NAMES.filter(n => needed.has(n) && meta[n].data && meta[n].dataUpdatedAt < freshSince && !meta[n].isFetching)
     .map(n => JSON.stringify(meta[n].queryKey))
+  if (vintageStale) staleKeys.push(JSON.stringify(vintageKey))
   const staleSig = active ? staleKeys.join('|') : ''
+  const refetched = useRef(new Set<string>())
   useEffect(() => {
     if (!staleSig) return
-    for (const k of staleSig.split('|')) void qc.invalidateQueries({ queryKey: JSON.parse(k) as unknown[], exact: true })
-  }, [staleSig, qc])
+    for (const k of staleSig.split('|')) {
+      const once = `${freshSince}|${k}`
+      if (refetched.current.has(once)) continue
+      refetched.current.add(once)
+      void qc.invalidateQueries({ queryKey: JSON.parse(k) as unknown[], exact: true })
+    }
+  }, [staleSig, freshSince, qc])
 
-  const held = useRef<{ project: string | null; freshSince: number; value: SiteResults } | null>(null)
+  const held = useRef<{ key: string; value: SiteResults } | null>(null)
   const payloads = NAMES.map(n => meta[n].data)
   const stamps = NAMES.map(n => meta[n].dataUpdatedAt)
 
@@ -126,18 +145,32 @@ export function useSiteResults(input: SiteResultsInput): SiteResults {
     if (!active) return EMPTY
     const valid = (n: SeriesName): TSPayload | null => {
       const m = meta[n]
-      return m.data && m.dataUpdatedAt >= freshSince ? m.data : null
+      return m.data && m.dataUpdatedAt >= freshSince && !invalidated(m) ? m.data : null
     }
+    // Per series: its payload, or absent (answered null / failed: that class
+    // shows nothing), or loading (hold the last map).
     const want = [...needed]
-    const horizon = horizonOf(want.map(valid))
-    if (horizon === 0) return 'pending'
+    let loading = vintageStale
+    const payload = {} as Record<SeriesName, TSPayload | null>
+    for (const n of want) {
+      payload[n] = valid(n)
+      const m = meta[n]
+      const absent = !payload[n] && (m.absent || (m.data === null && !m.isFetching) || (m.isError && !m.isFetching))
+      if (!payload[n] && !absent) loading = true
+    }
+    if (loading) return 'pending'
+    const present = want.filter(n => payload[n])
+    const horizon = horizonOf(present.map(n => payload[n]))
+    if (horizon === 0) return { states: new Map(), idx: 0, iso: '' }
     const at = Math.max(0, Math.min(idx, horizon - 1))
     const rows = {} as Record<SeriesName, Map<string, number> | null>
     for (const n of want) {
-      rows[n] = rowOf(valid(n), at)
-      if (!rows[n]) return 'pending'     // this series' chunk for the snapshot is still loading
+      rows[n] = payload[n] ? rowOf(payload[n], at) : null
+      if (payload[n] && !rows[n]) return 'pending'     // this series' chunk for the snapshot is still loading
     }
-    const any = valid(want[0])
+    const empty = new Map<string, number>()
+    for (const n of want) rows[n] ??= empty
+    const any = payload[present[0]]
     const period = periodAt(any, localRow(any, at))
     const vr = vintage?.results as VintageResults | undefined
     const eff = (cls: string, name: string, cap: number | null) => {
@@ -147,7 +180,6 @@ export function useSiteResults(input: SiteResultsInput): SiteResults {
     const by = <T extends { name: string }>(xs: T[]) => new Map(xs.map(x => [x.name, x]))
     const gens = by(components.generators), sus = by(components.storageUnits), sts = by(components.stores), lds = by(components.loads)
     const lks = by(components.links), lns = by(components.lines), trs = by(components.transformers)
-    const scaler = maxLoadScaler(solverConfig)
 
     const states = new Map<string, AssetState>()
     for (const o of objects) {
@@ -163,7 +195,8 @@ export function useSiteResults(input: SiteResultsInput): SiteResults {
           const mw = rows.storage_dispatch!.get(o.name), s = sus.get(o.name)
           if (mw == null || !s) break
           const p = eff('StorageUnit', o.name, capOf(s as never, 'p_nom'))
-          states.set(key, { kind: 'storage', mw, energy: rows.storage!.get(o.name) ?? null, energyCap: p != null ? p * ((s.max_hours ?? 0) || 1) : null })
+          // max_hours 0: no energy rating, so no SoC share.
+          states.set(key, { kind: 'storage', mw, energy: rows.storage!.get(o.name) ?? null, energyCap: p != null && (s.max_hours ?? 0) > 0 ? p * s.max_hours : null })
           break
         }
         case 'Store': {
@@ -175,7 +208,7 @@ export function useSiteResults(input: SiteResultsInput): SiteResults {
         case 'Load': {
           const mw = rows.loads!.get(o.name), l = lds.get(o.name)
           if (mw == null || !l) break
-          states.set(key, { kind: 'load', mw, peak: loadPeak(l, profiles?.[o.name], scaler) })
+          states.set(key, { kind: 'load', mw, peak: loadPeak(l, profiles?.[o.name], solverConfig, periods?.periods) })
           break
         }
         case 'Link': {
@@ -198,13 +231,16 @@ export function useSiteResults(input: SiteResultsInput): SiteResults {
     }
     return { states, idx: at, iso: any?.index[localRow(any, at)] ?? '' }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- payloads/stamps stand for `meta`
-  }, [active, freshSince, idx, needed, objects, components, profiles, solverConfig, vintage, ...payloads, ...stamps])
+  }, [active, freshSince, idx, needed, objects, components, profiles, solverConfig, periods, vintage, vintageStale, invSig, ...payloads, ...stamps])
 
+  // The hold is for one solve, one source: the Eye going off, a new solve
+  // or another source (lopf / ac_pf) never shows a held map.
+  const holdKey = `${project}|${freshSince}|${source}`
+  if (!active) held.current = null
   if (value !== 'pending') {
-    if (active) held.current = { project, freshSince, value }
+    if (active) held.current = { key: holdKey, value }
     return value
   }
-  // Pending: hold the last map of this solve, if any (a chunk boundary).
   const h = held.current
-  return h && h.project === project && h.freshSince === freshSince ? h.value : EMPTY
+  return h && h.key === holdKey ? h.value : EMPTY
 }
