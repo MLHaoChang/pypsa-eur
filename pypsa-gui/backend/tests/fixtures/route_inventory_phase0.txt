@@ -171,6 +171,25 @@ PUT     /api/projects/{name}/layout                              -> put_layout_a
 GET     /api/projects/{name}/members                             -> get_project_members_api_projects__name__members_get
 PUT     /api/projects/{name}/members                             -> put_project_members_api_projects__name__members_put
 POST    /api/projects/{name}/rename                              -> rename_project_api_projects__name__rename_post
+GET     /api/projects/{name}/reports                             -> list_reports_api_projects__name__reports_get
+POST    /api/projects/{name}/reports                             -> create_report_api_projects__name__reports_post
+POST    /api/projects/{name}/reports/generate                    -> generate_report_api_projects__name__reports_generate_post
+POST    /api/projects/{name}/reports/generate/abort              -> abort_generate_api_projects__name__reports_generate_abort_post
+GET     /api/projects/{name}/reports/generate/status             -> get_generate_status_api_projects__name__reports_generate_status_get
+DELETE  /api/projects/{name}/reports/{report_id}                 -> delete_report_api_projects__name__reports__report_id__delete
+GET     /api/projects/{name}/reports/{report_id}                 -> get_report_api_projects__name__reports__report_id__get
+POST    /api/projects/{name}/reports/{report_id}/export          -> export_report_api_projects__name__reports__report_id__export_post
+GET     /api/projects/{name}/reports/{report_id}/figures/{figure_id} -> get_report_figure_api_projects__name__reports__report_id__figures__figure_id__get
+POST    /api/projects/{name}/reports/{report_id}/sections/{section_id}/regenerate-> regenerate_section_api_projects__name__reports__report_id__sections__section_id__regenerate_post
+GET     /api/projects/{name}/reports/{report_id}/template        -> get_template_api_projects__name__reports__report_id__template_get
+POST    /api/projects/{name}/reports/{report_id}/template        -> bind_template_api_projects__name__reports__report_id__template_post
+POST    /api/projects/{name}/reports/{report_id}/template/plan   -> propose_template_plan_api_projects__name__reports__report_id__template_plan_post
+PUT     /api/projects/{name}/reports/{report_id}/template/plan   -> put_template_plan_api_projects__name__reports__report_id__template_plan_put
+GET     /api/projects/{name}/reports/{report_id}/versions/{version} -> get_report_version_api_projects__name__reports__report_id__versions__version__get
+GET     /api/projects/{name}/reports/capabilities                -> get_report_capabilities_api_projects__name__reports_capabilities_get
+GET     /api/projects/{name}/reports/evidence_hash                -> get_evidence_hash_api_projects__name__reports_evidence_hash_get
+POST    /api/projects/{name}/reports/{report_id}/roundtrip       -> roundtrip_report_api_projects__name__reports__report_id__roundtrip_post
+GET     /api/projects/{name}/reports/{report_id}/versions/{a}/diff/{b} -> diff_report_versions_api_projects__name__reports__report_id__versions__a__diff__b__get
 GET     /api/projects/{name}/results-summary                     -> get_results_summary_api_projects__name__results_summary_get
 GET     /api/projects/{name}/results_bundle                      -> get_results_bundle_api_projects__name__results_bundle_get
 PATCH   /api/projects/{name}/scenario                            -> update_scenario_metadata_api_projects__name__scenario_patch

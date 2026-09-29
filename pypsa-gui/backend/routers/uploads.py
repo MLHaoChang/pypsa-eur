@@ -36,6 +36,7 @@ from starlette.responses import FileResponse, JSONResponse
 from db.models import User
 from db.session import get_db
 from deps import optional_user
+from models.upload_schemas import ALL_UPLOAD_KINDS, UPLOADABLE_KINDS
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from routers.projects import _check_project_lock
 from services import upload_service
@@ -155,9 +156,35 @@ def _validate_filename(filename: str | None) -> str:
     return filename
 
 
+def _upload_kind_or_400(kind: str | None, allowed: frozenset[str], *, default: str | None) -> str | None:
+    """
+    The `?kind=` query parameter, allowlisted. On upload only `user_upload`,
+    `report_template` and `report_roundtrip` may be asked for (`agent_export`
+    is assigned by the tools that produce one); on list any known kind
+    filters. Anything else
+    is 400 `unsupported_upload_kind` — a typo must not silently list nothing
+    or file a template as a plain upload.
+    """
+    if kind is None:
+        return default
+    if kind not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_kind": "unsupported_upload_kind",
+                "message": (
+                    f"upload kind {kind!r} is not supported here; "
+                    f"use one of: {', '.join(sorted(allowed))}"
+                ),
+            },
+        )
+    return kind
+
+
 @router.post("/{name}/uploads")
 async def post_upload(
     file: UploadFile = File(...),
+    kind: str | None = None,
     project: AuthorizedProject = ProjectAccessDep,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
@@ -166,6 +193,14 @@ async def post_upload(
     Upload a file to the project's ``uploads/`` directory. Idempotent on bytes
     (same SHA256 returns the existing entry's meta). Validates size,
     MIME (sniffed from bytes), and quota before writing.
+
+    ``?kind=report_template`` files the upload as a report template (the
+    report viewer's picker lists these; the study-report routes bind one to
+    a report); ``?kind=report_roundtrip`` files an exported report the user
+    edited in Word, to be merged back by ``POST …/reports/{id}/roundtrip``.
+    Only ``user_upload`` (the default), ``report_template`` and
+    ``report_roundtrip`` may be asked for — 400 ``unsupported_upload_kind``
+    otherwise.
 
     The ``{name}`` path parameter is consumed by `ProjectAccessDep`, which
     resolves it inside the caller's org and ACL-gates it (404 otherwise). The
@@ -180,6 +215,7 @@ async def post_upload(
     are read or written to disk.
     """
     _check_project_lock(db, _lock_target(project), user)
+    upload_kind = _upload_kind_or_400(kind, UPLOADABLE_KINDS, default="user_upload")
     filename = _validate_filename(file.filename)
 
     # Bound the read to 25 MB + 1 byte. read_capped from upload_guard
@@ -234,17 +270,20 @@ async def post_upload(
         file_bytes=blob_bytes,
         filename=filename,
         sniffed_mime=sniffed_mime,
+        kind=upload_kind,
     )
     return JSONResponse(content=meta.model_dump(), status_code=200)
 
 
 @router.get("/{name}/uploads")
-def get_uploads(project: AuthorizedProject = ProjectAccessDep) -> list[dict]:
-    """List uploads for the project, newest first."""
+def get_uploads(kind: str | None = None,
+                project: AuthorizedProject = ProjectAccessDep) -> list[dict]:
+    """List uploads for the project, newest first; ``?kind=`` filters by kind."""
+    list_kind = _upload_kind_or_400(kind, ALL_UPLOAD_KINDS, default=None)
     return [
         m.model_dump()
         for m in upload_service.list_uploads(
-            project.name, project_dir=project.directory
+            project.name, project_dir=project.directory, kind=list_kind,
         )
     ]
 
