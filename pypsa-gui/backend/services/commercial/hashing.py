@@ -46,6 +46,7 @@ FIELDS_AFTER_V1: dict[tuple[str, str], Any] = {
     ("CommercialConfig", "grid_cfe_share_ref"): None,    # WP2.2-0
     ("CommercialConfig", "site_party"): "site",          # WP2.2c
     ("Tariff", "unsupported_fields"): [],                # WP2.4b-i
+    ("CommercialConfig", "value_flows"): None,           # P3 WP3.0
 }
 
 

@@ -151,7 +151,8 @@ class BufferedLogQueue:
         with self._sub_lock:
             self._subscribers.pop(sub_id, None)
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 
 from db.models import User
@@ -516,14 +517,30 @@ def update_solver_config(
     # used to reset voll/discount_rate/sclopf back to defaults).
     submitted = cfg.model_dump(exclude_unset=True)
     stored_commercial = getattr(_state["solver_config"], "commercial", None)
+    rebound = False
     if "commercial" in submitted and (cfg.commercial is not None
                                       or stored_commercial is not None):
+        if cfg.commercial is not None and "value_flows" in cfg.commercial.model_fields_set:
+            # Read BEFORE binding: `resolve_tariff_ref` re-validates from a dump,
+            # after which every field reads as set (IC P3 WP3.0, review D2). An
+            # unchanged echo (a client re-sending the whole block) is fine; a
+            # change must go through the value-flows route (full validation,
+            # If-Match).
+            stored_vf = (stored_commercial or {}).get("value_flows") \
+                if isinstance(stored_commercial, dict) else None
+            if cfg.commercial.value_flows != stored_vf:
+                raise HTTPException(422, {
+                    "code": "value_flows_via_dedicated_route",
+                    "message": "change value_flows through PUT "
+                               "/api/simulation/commercial/value_flows (it validates the "
+                               "parties and checks If-Match); omit the key here"})
         # A direct in-process call (chat tools) passes no user: the Depends
         # default is not a User, and `_bind_commercial` then uses the project org.
         # An explicit null clears the layer (and its FCA stress entry); a null
         # when nothing is stored (a full-payload PUT from the settings form)
         # touches nothing (WP1.4 round 3 #6).
         submitted["commercial"] = _bind_commercial(cfg.commercial, user)
+        rebound = submitted["commercial"] is not None
     # Legacy mode 'lpf' was removed in v1.x — coerce to 'lopf' silently so
     # old saved configs and stale frontend caches don't 400 the user. Same
     # treatment applied in projects.py at load time.
@@ -536,9 +553,85 @@ def update_solver_config(
     _gate_user_code(submitted, db, user)
     with PyPSAService.get_solver_state_lock():
         merged = asdict(_state["solver_config"])
+        if rebound:
+            # The value-flow config is owned by its own route: keep what is
+            # stored NOW (read under the lock, so a concurrent value-flows edit
+            # is never lost to this save; plan C7).
+            current = merged.get("commercial")
+            submitted["commercial"]["value_flows"] = (
+                current.get("value_flows") if isinstance(current, dict) else None)
         merged.update(submitted)
         _state["solver_config"] = SolverConfig(**merged)
         return asdict(_state["solver_config"])
+
+
+class ValueFlowsIn(BaseModel):
+    value_flows: dict[str, Any] | None = None
+
+
+def _value_flows_state(commercial) -> dict:
+    from services.commercial import participants as P
+
+    if not isinstance(commercial, dict):
+        return {"value_flows": None, "digest": P.value_flows_digest(None),
+                "status": "no_commercial_config"}
+    raw = commercial.get("value_flows")
+    out = {"value_flows": raw, "digest": P.value_flows_digest(raw),
+           "status": "not_set" if raw is None else "ok"}
+    try:
+        P.parse_value_flows(raw)
+    except P.ValueFlowsInvalid as exc:
+        out.update(status=exc.code, message=str(exc))
+    return out
+
+
+@router.get("/commercial/value_flows")
+def get_value_flows():
+    """The stored value-flow config and its `If-Match` digest (IC P3 WP3.0)."""
+    return _value_flows_state(getattr(_state["solver_config"], "commercial", None))
+
+
+@router.put("/commercial/value_flows")
+def put_value_flows(body: ValueFlowsIn, if_match: str | None = Header(default=None)):
+    """Set (or clear, with null) the participants and value-flow assignment
+    (IC P3 WP3.0). Merged into the stored commercial config server-side under
+    the solver-state lock; the parties are checked against the contracts, the
+    network and the group contract; no commercial re-binding (nothing at solve
+    time reads it). `If-Match` (the GET's digest) refuses a stale edit (412)."""
+    from models.commercial import CommercialConfig
+    from services.commercial import participants as P
+
+    if _solver_in_flight_ctx(PyPSAService.get_active_context()):
+        raise HTTPException(409, {"code": "solver_in_flight",
+                                  "message": "a solve is running on this project; change the "
+                                             "participants after it finishes"})
+    with PyPSAService.get_solver_state_lock():
+        commercial = getattr(_state["solver_config"], "commercial", None)
+        if not isinstance(commercial, dict):
+            raise HTTPException(409, {"code": "no_commercial_config",
+                                      "message": "set the commercial config (poc_link) first"})
+        current = commercial.get("value_flows")
+        if if_match is not None and if_match != P.value_flows_digest(current):
+            raise HTTPException(412, {"code": "value_flows_changed",
+                                      "message": "the value-flow config changed since it was "
+                                                 "read; reload and re-apply the edit"})
+        new = None
+        if body.value_flows is not None:
+            try:
+                vf = P.parse_value_flows(body.value_flows)
+            except P.ValueFlowsInvalid as exc:
+                raise HTTPException(422, {"code": exc.code, "message": str(exc)}) from exc
+            problems = P.value_flows_problems(vf, CommercialConfig.model_validate(commercial),
+                                              PyPSAService.get_network())
+            if problems:
+                raise HTTPException(422, {"code": "value_flows_invalid",
+                                          "message": "; ".join(problems),
+                                          "problems": problems})
+            new = vf.model_dump(mode="json")
+        merged = asdict(_state["solver_config"])
+        merged["commercial"] = {**commercial, "value_flows": new}
+        _state["solver_config"] = SolverConfig(**merged)
+        return _value_flows_state(merged["commercial"])
 
 
 @router.get("/check_solvers")

@@ -376,13 +376,132 @@ export interface ConnectionAgreement {
   available_from: string
   group?: string | null
 }
-/** A settled contract (IC P2 WP2.2), discriminated by `type`; the per-type fields follow the backend models. */
-export interface CommercialContract {
-  type: 'ppa' | 'cfd' | 'dr' | 'lease' | 'eaas' | 'retail'
+/** Fields every settled contract carries (IC P2 WP2.2). */
+interface ContractBase {
   id: string
-  reference_price?: LibraryRef | null
+  base_year?: number | null
   library_ref?: LibraryItemRef | null
-  [field: string]: unknown
+}
+/** Mirrors backend `PpaContract` (IC P2 WP2.2a/b, WP2.2d `changes_dispatch`). */
+export interface PpaContract extends ContractBase {
+  type: 'ppa'
+  kind: 'pay_as_produced' | 'baseload' | 'as_consumed_btm' | 'sleeved'
+  price: number
+  indexation_pct_per_year?: number
+  volume_cap_mwh_per_year?: number | null
+  floor?: number | null
+  cap?: number | null
+  tenor_years: number
+  seller: string
+  buyer: string
+  asset_ids: string[]
+  reference_price?: LibraryRef | null
+  changes_dispatch?: boolean
+  pricing?: 'fixed' | 'market_plus_premium'
+  premium_eur_per_mwh?: number | null
+  baseload_mw?: number | null
+  sleeving_fee_eur_per_mwh?: number | null
+  sleeving_party?: string | null
+}
+export interface CfdContract extends ContractBase {
+  type: 'cfd'
+  strike: number
+  reference_price?: LibraryRef | null
+  tenor_years: number
+  asset_ids: string[]
+  generator_owner?: string | null
+  counterparty?: string | null
+  indexation_pct_per_year?: number
+  reference?: 'interval' | 'monthly_capture'
+  suspend_on_negative_price?: boolean
+}
+export interface DrContract extends ContractBase {
+  type: 'dr'
+  availability_eur_per_mw_year: number
+  activation_eur_per_mwh: number
+  max_events?: number | null
+  max_duration_h?: number | null
+  notice_h?: number | null
+  asset_ids?: string[]
+  load_ids?: string[]
+  counterparty?: string | null
+  contracted_mw?: number | null
+}
+export interface LeaseContract extends ContractBase {
+  type: 'lease'
+  lessor: string
+  lessee: string
+  annual_payment: number
+  tenor_years: number
+  asset_ids: string[]
+}
+export interface EaasContract extends ContractBase {
+  type: 'eaas'
+  provider: string
+  customer: string
+  fee_eur_per_mwh?: number | null
+  fee_eur_per_year?: number | null
+  tenor_years: number
+  asset_ids: string[]
+}
+export interface RetailContract extends ContractBase {
+  type: 'retail'
+  retailer: string
+  customer: string
+  tariff_id: string
+  tenor_years: number
+}
+/** A settled contract (IC P2 WP2.2), discriminated by `type` (IC P3 WP3.0 types each variant). */
+export type CommercialContract =
+  | PpaContract | CfdContract | DrContract | LeaseContract | EaasContract | RetailContract
+
+// ── Participants and value flows (IC P3 WP3.0; spec §7) ─────────────────────
+export type ParticipantRole =
+  | 'site_owner' | 'developer' | 'investor' | 'lender' | 'tax_equity' | 'dso' | 'tso'
+  | 'retailer' | 'tenant' | 'landlord' | 'hub_member' | 'offtaker' | 'other'
+export type ValueStreamKind =
+  | 'energy_import' | 'energy_export' | 'network_capacity' | 'network_energy'
+  | 'demand_charge' | 'retail_fixed' | 'ancillary' | 'dr_availability' | 'dr_activation'
+  | 'ppa_settlement' | 'cfd_settlement' | 'certificates' | 'lease' | 'eaas_fee' | 'fuel'
+  | 'fom' | 'vom' | 'capex' | 'incentive' | 'tax' | 'debt_service' | 'other'
+export interface Participant {
+  id: string; name: string; role: ParticipantRole; currency?: string
+}
+export interface AllocationKey {
+  basis: 'contracted_capacity' | 'peak_contribution' | 'energy' | 'fixed_shares'
+  /** participant id → share, for fixed_shares (sum 1) */
+  shares?: Record<string, number> | null
+}
+/** Item id wins over kind; one of the two is set. */
+export interface TariffPayeeRule {
+  kind?: TariffItem['kind'] | null; item_id?: string | null; payee: string
+}
+export interface AssetOwnership {
+  asset_id: string
+  component: 'Generator' | 'StorageUnit' | 'Store' | 'Link' | 'Line' | 'Transformer'
+  /** Must be a participant. */
+  owner: string
+}
+export interface HubMember { link: string; participant: string; contracted_mw?: number | null }
+export interface ValueFlowConfig {
+  template?: 'single_owner' | 'btm_ppa' | 'landlord_tenant' | 'dso_developer' | 'energy_hub' | 'custom'
+  template_version?: string | null
+  built_digest?: string | null
+  participants?: Participant[]
+  /** Default: retailer, dso, tso, market, tax_authority, capex_supplier, om_contractor. */
+  externals?: string[]
+  tariff_payees?: TariffPayeeRule[]
+  asset_owners?: AssetOwnership[]
+  hub_members?: HubMember[]
+  allocation?: AllocationKey | null
+  export_revenue_to?: 'site_party' | 'asset_owner'
+}
+/** GET/PUT /api/simulation/commercial/value_flows (IC P3 WP3.0). Send `digest` back as If-Match. */
+export interface ValueFlowsState {
+  value_flows: ValueFlowConfig | null
+  digest: string
+  status: 'ok' | 'not_set' | 'no_commercial_config' | 'value_flows_invalid'
+  message?: string
 }
 
 export interface CommercialConfig {
@@ -414,6 +533,13 @@ export interface CommercialConfig {
   initial_peak_lower_bound?: Record<string, number>
   /** Site power factor for per-kVA tariff items (IC P2 WP2.1a-i). */
   power_factor?: number | null
+  /**
+   * Participants and value-flow assignment (IC P3 WP3.0). Stored raw and
+   * validated by the server on write (PUT /api/simulation/commercial/value_flows
+   * only — PUT /solver_config refuses a change to it); a stored value that no
+   * longer validates makes the ledger answer `value_flows_invalid`.
+   */
+  value_flows?: ValueFlowConfig | null
 }
 /**
  * Actionable failure card for a finished solve. Produced by the backend's

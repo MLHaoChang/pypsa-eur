@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 
 from datetime import date
-from typing import Annotated, Literal, Union
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import AfterValidator, BaseModel, Field, model_validator
 
@@ -74,6 +74,63 @@ class AllocationKey(BaseModel):
             if abs(total - 1.0) > 1e-9:
                 raise ValueError(f"fixed shares must sum to 1, got {total}")
         return self
+
+
+# ------------------------------------------------------------------ value flows (P3 WP3.0)
+
+# The default external counterparties of a value-flow ledger (plan P3 WP3.0).
+# Tariff items default to `retailer` (energy, fixed, certificate), `dso`
+# (demand, capacity) and `tax_authority` (tax_levy); asset costs go to the
+# supplier externals; the export price and grid-side commodity to `market`.
+DEFAULT_EXTERNALS = ("retailer", "dso", "tso", "market", "tax_authority",
+                     "capex_supplier", "om_contractor")
+
+
+class TariffPayeeRule(BaseModel):
+    """Who is paid a tariff item: by item id (wins) or by item kind."""
+
+    kind: TariffItemKind | None = None
+    item_id: str | None = None
+    payee: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _names_a_target(self) -> "TariffPayeeRule":
+        if self.kind is None and self.item_id is None:
+            raise ValueError("a tariff payee rule names a kind or an item_id")
+        return self
+
+
+class AssetOwnership(BaseModel):
+    asset_id: str = Field(min_length=1)
+    component: Literal["Generator", "StorageUnit", "Store", "Link", "Line", "Transformer"]
+    owner: str = Field(min_length=1)
+
+
+class HubMember(BaseModel):
+    link: str = Field(min_length=1)
+    participant: str = Field(min_length=1)
+    contracted_mw: float | None = Field(default=None, gt=0)
+
+
+class ValueFlowConfig(BaseModel):
+    """Participants and the assignment of every money flow (spec §7; P3 WP3.0).
+
+    Structural checks only: parties are checked against the contracts and the
+    network at the value-flows route (`services.commercial.participants`), so a
+    stale party is a ledger flag, never an invalid commercial config. Stored RAW
+    on `CommercialConfig.value_flows` and validated lazily (plan C8)."""
+
+    template: Literal["single_owner", "btm_ppa", "landlord_tenant", "dso_developer",
+                      "energy_hub", "custom"] = "custom"
+    template_version: str | None = None
+    built_digest: str | None = None
+    participants: list[Participant] = Field(default_factory=list)
+    externals: list[str] = Field(default_factory=lambda: list(DEFAULT_EXTERNALS))
+    tariff_payees: list[TariffPayeeRule] = Field(default_factory=list)
+    asset_owners: list[AssetOwnership] = Field(default_factory=list)
+    hub_members: list[HubMember] = Field(default_factory=list)
+    allocation: AllocationKey | None = None
+    export_revenue_to: Literal["site_party", "asset_owner"] = "site_party"
 
 
 # ------------------------------------------------------------------ series refs
@@ -593,6 +650,12 @@ class CommercialConfig(BaseModel):
     # The site's power factor for tariff items billed per kVA (P2 WP2.1a-i);
     # absent ⇒ a `per_kva_year` item is not established (ADR-0001).
     power_factor: float | None = Field(default=None, gt=0, le=1)
+    # Participants and value-flow assignment (P3 WP3.0), stored RAW: validated
+    # into `ValueFlowConfig` lazily by `services.commercial.participants`, so a
+    # stored value that later fails a rule never fails a solve or invalidates
+    # the commercial rows. Written only through its own route; never read by
+    # the LP or any committed hash (decision 9).
+    value_flows: dict[str, Any] | None = None
 
     @model_validator(mode="before")
     @classmethod

@@ -272,6 +272,8 @@ POST    /api/simulation/abort                                    -> abort_api_si
 GET     /api/simulation/asset_costs                              -> asset_costs_api_simulation_asset_costs_get
 GET     /api/simulation/capabilities                             -> capabilities_api_simulation_capabilities_get
 GET     /api/simulation/check_solvers                            -> check_solvers_api_simulation_check_solvers_get
+GET     /api/simulation/commercial/value_flows                   -> get_value_flows_api_simulation_commercial_value_flows_get
+PUT     /api/simulation/commercial/value_flows                   -> put_value_flows_api_simulation_commercial_value_flows_put
 POST    /api/simulation/force_reset                              -> force_reset_api_simulation_force_reset_post
 GET     /api/simulation/lock_status                              -> lock_status_api_simulation_lock_status_get
 GET     /api/simulation/log_history                              -> get_log_history_api_simulation_log_history_get
