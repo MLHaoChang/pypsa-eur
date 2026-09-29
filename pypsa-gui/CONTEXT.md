@@ -81,3 +81,24 @@ so the two must never share a representation — see
 which one it means by carrying an explicit flag beside the value; a bare `0.0`
 asserts a real zero.
 _Avoid_: missing, empty, N/A, no data, zero
+
+**Site**:
+A user-drawn boundary on the map around one or more member Buses, drawn in
+3D by the site view (`frontend/src/pages/SiteCanvas.tsx`). Sites and the
+user's placements of objects inside them live in the project's `sites.json`
+sidecar (`GET/PUT /api/projects/{name}/sites`), never in the network, so
+moving an object is not an Asset write and does not touch results.
+_Avoid_: campus, plant, zone (a zone is the packer's placement band)
+
+**Site results**:
+The 3D site view's per-object values at the selected time step — output,
+state of charge, loading and flow direction — as one map per time step,
+`"Class:name"` → state (`frontend/src/site3d/useSiteResults.ts`). They show
+only while the dispatch is **fresh** for the network as it is now: the
+solver status says `dispatch: 'fresh'` for this solve (objective and solve
+time), the component lists the site reads were refetched for that solve and
+still hold the same data (an edit ends it at once), and every result chunk
+shown was fetched after that solve and not invalidated since
+(`site3d/useDispatchFresh.ts`). Otherwise the site shows no results rather
+than stale ones.
+_Avoid_: overlay (the canvases' per-bus aggregation), playback
