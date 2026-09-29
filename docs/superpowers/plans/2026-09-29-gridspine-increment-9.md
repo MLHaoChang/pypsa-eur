@@ -125,15 +125,19 @@ overturn that.
   later"): the output is per hour, which is the raw material for that, but
   no scheduling is attempted.
 
-## Open question for the owner
+## Decided by the owner, 2026-09-29: balancing is pro-rata over committed units
 
-**Balancing.** When the new load draws P at bus B, who supplies it?
+When the new load draws P at bus B, the **committed synchronous units** supply
+it in proportion to their available upward headroom (`p_max - p` at that
+hour). The slack takes only what those units cannot, and the losses as
+always. A generation connection is the mirror image: committed units back
+down in proportion to their downward headroom (`p - p_min`), and the slack
+absorbs what is left.
 
-- *Slack only:* the external grid equivalent takes it all. This is simple,
-  reproducible and common in quick hosting-capacity screens, but on case39 it
-  routes every added MW toward BUS_31, which makes the answer depend on where
-  the slack sits.
-- *Pro-rata over committed synchronous units:* each unit takes a share in
-  proportion to its available headroom, with the slack taking what the units
-  cannot. This is closer to how the system would actually re-dispatch, and
-  less sensitive to the slack's position.
+Slack-only was the alternative. It was rejected because on case39 it routes
+every added MW toward BUS_31, which makes the answer depend on where the
+slack happens to sit. Pro-rata is closer to how the system would re-dispatch.
+The choice is ledgered on every capacity result. It also means the DC
+sensitivity is to a **distributed** balancing vector, not to the reference
+bus: the PTDF column for B minus the headroom-weighted sum of the committed
+units' columns, re-derived per hour because commitment changes by hour.
