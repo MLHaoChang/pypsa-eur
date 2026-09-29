@@ -107,13 +107,20 @@ def test_a_negative_net_rate_is_refused_naming_the_item():
         L.materialise_poc_prices(v6_network(), v6_commercial(bad))
 
 
-def test_a_net_revenue_item_keeps_gross_export_pricing():
-    n = v6_network()
-    applied = L.materialise_poc_prices(n, v6_commercial(NET_REVENUE))
-    assert not hasattr(n, L.GROUP_NET_SPEC_ATTR)
-    assert np.allclose(n.links_t.marginal_cost["export"], -0.03 * 1000.0)
-    assert "net_split_by_direction" in applied.facts["notes"]
-    applied.undo()
+@pytest.mark.parametrize("items", [(NET_REVENUE,), (NET_TOU, LEVY, NET_REVENUE)],
+                         ids=["alone", "beside_the_net_cost_item"])
+def test_a_net_revenue_item_on_the_group_stays_refused(items):
+    """Review #1: priced on gross export beside a circulation-neutral net cost
+    item, it pays the LP to import through a member and export at once."""
+    with pytest.raises(L.CommercialBindingError, match="net_credit"):
+        L.validate_for_network(v6_network(), v6_commercial(*items))
+
+
+def test_an_unrated_group_net_item_is_refused_at_config_time():
+    """Review #2: the config route and preflight see what the solve refuses."""
+    night_only = {**NET_TOU, "periods": [NET_TOU["periods"][0]]}
+    with pytest.raises(L.CommercialBindingError, match="no period covering"):
+        L.validate_for_network(v6_network(), v6_commercial(night_only))
 
 
 def test_one_member_or_no_export_keeps_the_p1_pricing():
@@ -159,6 +166,9 @@ def test_v6_the_lp_row_is_the_bill_to_the_cent_and_the_gap_is_zero():
                   timezone=None)
     assert bill.per_item == pytest.approx(direct.per_item, rel=1e-12)
     assert abs(compute_objective_decomposition(n, cb)["gap_pct"]) < 1e-6
+    # Members importing while another exports is metering here, not a
+    # mispricing: no `simultaneous_import_export` (review #3).
+    assert "simultaneous_import_export" not in cb["commercial"]["flags"]
     gap = billing_vs_lp_gap(n, commercial, bill_site(n, commercial))
     energy = gap["periods"][None]["energy"]
     assert abs(energy["unattributed"]) < 0.01, energy

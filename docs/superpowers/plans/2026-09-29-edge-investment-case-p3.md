@@ -458,6 +458,10 @@ recomputation to the cent). R2-1: clearing the group contract after the hub was 
 `HubInputs` (no group links), so every allocation line is None flagged `hub_members_stale` (tested).
 Not binding, taken in WP3.4: the payload's `flags` name the lines' `allocation_not_established:*`.
 
+**WP3.3a review round 3 (fa2aabc): PASS.** R2-1 verified (the cleared group gives None lines flagged
+`hub_members_stale`, conservation None); no regressions (probes re-run, ratchet split to the cent,
+35k rows × 6 members 1.58 s). **WP3.3a closed.**
+
 ---
 
 ## WP3.3b Group net-import LP variable (P2 carry-in)
@@ -512,6 +516,24 @@ removal from adders (no double pricing); reload; P1 and P2 drivers green.
 - Tests: `test_group_net_import.py` (9; V6 = three members, the third a must-run PV exporting through
   the group's export Link, so the group nets and net-exports), the V6 case in
   `test_commercial_objective_reconciliation.py` (save → load) and so in `test_billing_gap.py`.
+
+**WP3.3b review round 1 (0c052c9): PASS WITH CONDITIONS** — binding #1–#2; #3–#4 taken; #5–#7 INFO.
+The reviewer held the row = bill to the cent under zero-rate periods (degenerate split), a timezone,
+years/objective weighting, representative weeks, extendable Links, rolling with overlap, myopic, a
+net demand item beside it, the V6 value-flow ledger (all five checks), an infeasible re-solve (nothing
+committed) and a re-solve without the item (record cleared, drift flagged); QA drivers green.
+- #1 MEDIUM: a net REVENUE item on the group was let through on gross export beside the now
+  circulation-neutral net cost item — the LP imported through a member and exported at once (12.6 of
+  13.4 GWh). → stays refused (as in P1), naming the item; the plan's "keeps the existing gross-export
+  pricing … or is refused" resolves to refused (tested alone and beside the cost item).
+- #2 LOW–MEDIUM: `_adders` skips group net items before its rate check, so the config route and
+  preflight passed an unrated item the solve refuses. → `validate_for_network` dry-runs
+  `_group_net_spec` (tested).
+- #3 (taken): `simultaneous_import_export` is not raised when every net item is priced on the group's
+  net import (members importing while another exports is metering there, asserted on V6).
+- #4 (taken): the gap joins the committed net amount on the RECORD, not the current config.
+- #5 INFO: a scenario network is refused earlier for every commercial term (pre-existing). #6 INFO:
+  rolling / myopic objective gaps are pre-existing (last window / period). #7 INFO: confirmed points.
 
 ---
 

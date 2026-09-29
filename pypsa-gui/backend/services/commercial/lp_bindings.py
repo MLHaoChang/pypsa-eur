@@ -683,16 +683,25 @@ def validate_for_network(n, cfg: CommercialConfig | dict, *,
                 "is the PoC's")
         grid_bus = n.links.at[cfg.poc_link, "bus0"]
         # A net COST item on a multi-member group with an export Link is priced
-        # on the group's net import (P3 WP3.3b; P1 refused it); a net REVENUE
-        # item keeps the gross-export pricing with its `net_split_by_direction`
-        # gap cause, as on a single PoC. A negative rate would pay the LP to
-        # import: refused, naming the item.
+        # on the group's net import (P3 WP3.3b; P1 refused it). A negative rate
+        # would pay the LP to import: refused, naming the item. A net REVENUE
+        # item stays refused (WP3.3b review #1): priced on gross export next to
+        # a circulation-neutral net cost item, it pays the LP to import through
+        # a member and export at once.
         for item in group_net_items(cfg):
             neg = [p.name for p in item.periods if p.rate < 0]
             if neg:
                 raise CommercialBindingError(
                     f"net energy item {item.id!r} on the group has a negative rate in "
                     f"period(s) {neg}; the group's net import is priced only at rates >= 0")
+        revenue = [i.id for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
+                   if i.measured_on == "net" and i.direction == "revenue" and not _is_demand(i)]
+        if revenue and cfg.export_link is not None and len(cfg.group_members) > 1:
+            raise CommercialBindingError(
+                f"net revenue items ({revenue}) on a multi-member group with an export Link "
+                "would be priced on gross export, which pays the LP to import through a member "
+                "and export at once; not supported (price them on export instead)")
+        _group_net_spec(n, cfg)   # dry run: a group net item no period covers (review #2)
         for member in cfg.group_members:
             _require_link(n, member, "group_members")
             _require_one_way(n, member, "group_members")
@@ -2221,7 +2230,15 @@ def energy_cost_rows(n, commercial: dict | None) -> dict | None:
            "energy_export": row([exp_link] if exp_link else [], "energy_export"),
            "included_in_total": True}
     imp_p0 = [p0_of(link) for link in imp_links]
-    if imp_links and exp_link and all(v is not None for v in imp_p0) \
+    # With every net item of a group priced on its net import (WP3.3b), a member
+    # importing while another exports is ordinary metering, not a mispricing
+    # (review #3): the flag is for net items split by direction.
+    group_net = {i.id for i in group_net_items(cfg)} if cfg is not None else set()
+    split_net = cfg is None or any(
+        i.measured_on == "net" and not _is_demand(i) and i.id not in group_net
+        for i in (cfg.import_tariff.items if cfg.import_tariff is not None else []))
+    exact_group = bool(group_net) and not split_net and n.meta.get(META_GROUP_NET)
+    if imp_links and exp_link and not exact_group and all(v is not None for v in imp_p0) \
             and p0_of(exp_link) is not None:
         both = (sum(imp_p0) > 1e-6) & (p0_of(exp_link) > 1e-6)
         if bool(both.any()):

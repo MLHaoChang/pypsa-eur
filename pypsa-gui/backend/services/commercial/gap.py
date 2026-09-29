@@ -450,9 +450,11 @@ def billing_vs_lp_gap(n, commercial, site_bill, *, settlement_lines: list | None
         energy_total = ax.by_period(committed - sum(nonconvex.values(), np.zeros(len(ax.w))))
     else:
         energy_total = None
-    if energy_total is not None and items and _lp.group_net_items(cfg):
+    if energy_total is not None and n.meta.get(_lp.META_GROUP_NET):
         # The group net-import term (P3 WP3.3b) rides its own record, not the
-        # adders: its committed amount joins the LP's energy.
+        # adders: its committed amount joins the LP's energy — keyed on the
+        # RECORD, so an item edited out since stays in the LP side and the
+        # drift explains it (review #4).
         net_amounts = _lp.group_net_amounts(n)
         energy_total = (None if net_amounts is None else
                         {p: v + net_amounts.get(p, 0.0) for p, v in energy_total.items()})
