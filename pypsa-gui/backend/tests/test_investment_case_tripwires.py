@@ -31,7 +31,7 @@ import pytest
 _SERVICES = pathlib.Path(__file__).resolve().parent.parent / "services"
 IC_PACKAGES = ("commercial", "finance", "library")
 # Results-side modules this programme adds (P0: the physical-quantity seam).
-IC_RESULTS_MODULES = ("physical_quantities",)
+IC_RESULTS_MODULES = ("physical_quantities", "value_flows")
 # Leaf packages must not reach the solve stack. `services.solver` (the carved
 # modules) is equally off-limits: finance never runs a solve.
 FORBIDDEN_PREFIXES = ("routers", "services.solver_service", "services.solver.")
