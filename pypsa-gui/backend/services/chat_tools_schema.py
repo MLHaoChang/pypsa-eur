@@ -94,7 +94,7 @@ RESULTS_ENUM = [
     "losses", "carrier_kpis", "emissions", "transformers", "unit_commitment",
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
-    "asset_economics",
+    "asset_economics", "billing", "cfe_score",
 ]
 RESULTS_SOURCE_ENUM = ["lopf", "ac_pf"]
 # Task 14 — per-asset results chat tools (get_asset_results /
@@ -351,6 +351,13 @@ TOOLS: list[dict[str, Any]] = [
         "forwarded where the underlying handler accepts it. "
         "Returns (dispatch kinds): {index:[iso], columns:[name], data:[[float]]}; "
         "(cost_breakdown): {total, capex, opex, by_component, by_carrier, by_period}. "
+        "(billing): {per_period: {'_'|period: {per_item, per_item_sampled, total, "
+        "flags, monthly, demand_lines, fixed_lines}}, flags, contracts: {lines: "
+        "[{period, contract_id, payer, payee, value_stream, quantity_mwh, amount, "
+        "flags}], flags}, gap: {periods, gates, ...}, provenance}; "
+        "(cfe_score): {per_period: {'_'|period: {score, load_mwh, clean_mwh, "
+        "matched_mwh, ...}}, flags, notes}. A null amount or total is unknown, "
+        "never zero. "
         "Returns {status:'no_data', kind, message} when the underlying endpoint "
         "has nothing to serve — an unsolved or stale network, or a solve that "
         "produced none of this kind (lost_load on a run that shed nothing). "

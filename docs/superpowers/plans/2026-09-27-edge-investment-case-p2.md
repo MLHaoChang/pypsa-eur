@@ -1246,6 +1246,35 @@ Files: `services/results/billing.py`, `services/results/cfe_score.py`, `routers/
 - [ ] Red: seam cases; facade test with the two new names (existing entries unchanged); CFE hand fixture (PV +
   load + export, one day) to 1e-9; `get_results(result_kind="billing")` returns the payload.
 
+- **As implemented:**
+  - **`services/results/billing.compute_billing(n, cfg, *, state=None, result_df)`** is the network-level driver. It returns None (204) without a commercial config or before a solve. Its payload:
+    - `per_period` (keys "_" or the period as a string, WP2.3 L8): `per_item`, `per_item_sampled`, `total` (None when incomplete), `total_supported`, `complete`, `flags`, `notes`, `unsupported_items`, `monthly`, `demand_lines`, `fixed_lines`;
+    - `flags`;
+    - `contracts`: `lines`, `flags` (`contract_not_settled:<id>:<reason>` for a `ContractError`), `retail` parties;
+    - `gap` (WP2.3);
+    - `provenance`: the bill's, plus `contracts` = `contracts_record`.
+  - **Settlement inputs** (`settlement_lines`), built per period on the site-clock index:
+    - from the `physical_quantities` intervals: generators, loads, storage discharge, `links_p1_output`;
+    - from the commercial meter's export;
+    - from the readers: `reference_price` per contract and `dsr_activation`;
+    - plus `site_generators` and `site_party`.
+  - **Dispatch PPA.** A `changes_dispatch` PPA's energy line is re-priced at the committed `ic_ppa_price`, the cost row's formula, so line = row by construction (WP2.2d #6). Without the frame it is None + `ppa_price_not_committed`.
+  - **Frames.** The compact frames go to `state` (`store_billing_frames`). Interval lines are in those frames, not in the payload (deviation from "lines" in the payload: a 15-min year × items is too large for JSON).
+  - **`services/results/cfe_score.compute_cfe_score(n, cfg, *, result_df=None, clean_carriers=None)`** implements the plan's formula:
+    - the site is `_meter_sides`; loads are behind the meter; clean = `co2_emissions == 0`, or the override;
+    - the on-site clean share of export is pro rata to all on-site output;
+    - off-site PPAs count when the site buys them and every asset is clean (baseload uses `baseload_mw`; `as_consumed_btm` is skipped; a volume cap is noted);
+    - grid × `ic_grid_cfe_share`, else `grid_cfe_share_missing`;
+    - energy per row is MW × the objective weighting, grouped into local hours per period;
+    - notes: `storage_shifted_clean_not_credited`, and carriers that are not defined.
+  - **Routes.** `get_billing` / `get_cfe_score` (GET `/api/results/billing`, `/cfe_score`) are thin, and 204 when absent.
+    - Chat: `_RESULTS_ENUM`, `_RESULTS_HANDLER_NAMES` and `RESULTS_ENUM` gain `billing` / `cfe_score` (the enum-count test goes 28 → 30), and the `get_results` description names both payloads.
+    - The facade `_HANDLER_PARAMS` / `_LIFTED` gain both. The inventory is regenerated: +2.
+  - **Tests:**
+    - `tests/test_results_billing.py` (8): the payload bills, settles and reconciles (PPA line = row, gap attributed, contracts record, frames stored, JSON with `allow_nan=False`); two periods; 204s; the handler equals compute; chat `get_results`; two CFE hand fixtures to 1e-9 (no grid share; grid share plus an off-site PPA).
+    - The seam test gains the no-config case.
+    - Regression: 773 passed.
+
 ---
 
 ## Phase 2 e2e QA gate

@@ -583,7 +583,7 @@ _RESULTS_ENUM = (
     "losses", "carrier_kpis", "emissions", "transformers", "unit_commitment",
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
-    "asset_economics",
+    "asset_economics", "billing", "cfe_score",
 )
 
 
@@ -617,6 +617,9 @@ _RESULTS_HANDLER_NAMES: dict[str, str] = {
     "lost_load": "get_lost_load",
     "loads": "get_load_results",
     "asset_economics": "get_asset_economics",
+    # Edge Investment Case P2 WP2.5.
+    "billing": "get_billing",
+    "cfe_score": "get_cfe_score",
 }
 
 
