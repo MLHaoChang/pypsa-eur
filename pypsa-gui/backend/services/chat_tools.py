@@ -290,76 +290,34 @@ def diagnose_network() -> dict:
     Dangling bus refs are deliberately NOT re-checked here: the preflight
     already reports them, and a second differently-worded copy is how two
     sources of truth start disagreeing.
+
+    The graph walk itself is `topology_analyzer.analyse_topology`, the same
+    one preflight and the study report read: two walks of one graph is how
+    the chat and the preflight start describing different networks. This
+    function only reshapes its islands into the tool's payload.
     """
+    from services.topology_analyzer import analyse_topology
+
     n = PyPSAService.get_network()
-    buses = list(n.buses.index)
-    if not buses:
+    report = analyse_topology(n)
+    if not report["n_islands"]:
         return {
             "bus_count": 0, "island_count": 0, "islands": [],
             "isolated_buses": [], "islands_without_generation": [],
             "islands_truncated": False, "verdict": "empty",
         }
 
-    # Union-find over the bus graph. Every branch class joins, including a
-    # multi-port Link's bus2/bus3/… — those extra ports are exactly how
-    # sector coupling reaches heat and hydrogen buses, so walking only
-    # bus0/bus1 would report a coupled network as a pile of fragments.
-    parent = {b: b for b in buses}
-
-    def find(x: str) -> str:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(a: str, b: str) -> None:
-        if a in parent and b in parent:
-            ra, rb = find(a), find(b)
-            if ra != rb:
-                parent[ra] = rb
-
-    for attr in ("lines", "links", "transformers"):
-        df = getattr(n, attr, None)
-        if df is None or df.empty:
-            continue
-        ports = [c for c in df.columns if c.startswith("bus")]
-        for row in df[ports].itertuples(index=False):
-            attached = [str(v) for v in row if isinstance(v, str) and v]
-            for other in attached[1:]:
-                union(attached[0], other)
-
-    groups: dict[str, list[str]] = {}
-    for b in buses:
-        groups.setdefault(find(b), []).append(b)
-
-    # Which buses can serve load, and how much load sits where.
-    supply: set[str] = set()
-    for attr in ("generators", "storage_units", "stores"):
-        df = getattr(n, attr, None)
-        if df is not None and not df.empty and "bus" in df.columns:
-            supply.update(str(b) for b in df["bus"])
-
-    load_by_bus: dict[str, float] = {}
-    loads = getattr(n, "loads", None)
-    if loads is not None and not loads.empty and "bus" in loads.columns:
-        p_set_t = getattr(n.loads_t, "p_set", None)
-        for name, bus in loads["bus"].items():
-            peak = 0.0
-            if p_set_t is not None and name in getattr(p_set_t, "columns", []):
-                series = p_set_t[name]
-                peak = float(series.max()) if len(series) else 0.0
-            else:
-                peak = float(loads.at[name, "p_set"]) if "p_set" in loads.columns else 0.0
-            load_by_bus[str(bus)] = load_by_bus.get(str(bus), 0.0) + peak
-
+    # `has_generation` is presence, not size: any generator, storage unit or
+    # store makes an island servable in the sense this tool reports. Peak load
+    # is the analyser's — summed across loads per snapshot, then maxed — so
+    # two loads peaking in different hours do not add into a phantom peak.
     islands = []
-    for members in groups.values():
-        members = sorted(members)
-        peak = sum(load_by_bus.get(b, 0.0) for b in members)
+    for island in report["islands"]:
+        peak = island["peak_load_mw"]
         islands.append({
-            "size": len(members),
-            "buses": members[:_MAX_BUSES_PER_ISLAND],
-            "has_generation": any(b in supply for b in members),
+            "size": island["n_buses"],
+            "buses": island["buses"][:_MAX_BUSES_PER_ISLAND],
+            "has_generation": island["has_supply_asset"],
             "has_load": peak > 0,
             "peak_load_mw": round(peak, 6),
         })
@@ -371,22 +329,22 @@ def diagnose_network() -> dict:
     # a defect — flagging the rest would train the agent to ignore the field.
     stranded = [i for i in islands if i["has_load"] and not i["has_generation"]]
 
-    branch_free = {
-        b for b in buses
-        if len(groups[find(b)]) == 1
-    }
-    isolated = sorted(branch_free)
+    # An island of one, which is wider than the analyser's degree-zero
+    # `isolated_buses`: a bus whose only branch is a self-loop or points at a
+    # missing bus is still stranded on its own.
+    isolated = sorted(i["buses"][0] for i in report["islands"]
+                      if i["n_buses"] == 1)
 
     if stranded:
         verdict = "infeasible_topology"
-    elif len(groups) > 1:
+    elif report["n_islands"] > 1:
         verdict = "fragmented"
     else:
         verdict = "connected"
 
     return {
-        "bus_count": len(buses),
-        "island_count": len(groups),
+        "bus_count": len(n.buses.index),
+        "island_count": report["n_islands"],
         "islands": islands[:_MAX_ISLANDS_REPORTED],
         "islands_truncated": len(islands) > _MAX_ISLANDS_REPORTED,
         "isolated_buses": isolated[:_MAX_ISLANDS_REPORTED],
@@ -5027,7 +4985,18 @@ DISPATCHERS: dict[str, Any] = {
 # module-level functions stay unwrapped, so in-process callers that deliberately
 # bypass the chat surface (tests, smoke harnesses) are unaffected.
 
-_LOCK_GATE_PREFIXES = ("/api/network/", "/api/io/", "/api/simulation/")
+# Kept in step with `main._FOREIGN_LOCK_GATE_PREFIXES` DELIBERATELY, not
+# incidentally: this is the chat surface's copy of the same decision, and the two
+# drifted the moment the HTTP gate gained "/api/results/" (2026-09-12) while this
+# one did not. That drift was latent -- `TOOL_ROUTES` maps no tool to the five
+# adequacy-study POSTs today -- and would have become a real hole the day an
+# adequacy-study tool was added, which is exactly the "nothing to remember"
+# guarantee `_lock_gated_tool_names` claims below. Caught by an independent QA
+# review; `tests/test_chat_tools_lock_gate_parity.py` now fails if they diverge
+# again, so this comment is not the only thing holding them together.
+_LOCK_GATE_PREFIXES = (
+    "/api/network/", "/api/io/", "/api/simulation/", "/api/results/",
+)
 # Explicit allowlist, not a prefix — mirrors `main.py`'s
 # `_FOREIGN_LOCK_GATE_EXEMPT_EXACT` / `_FOREIGN_LOCK_GATE_EXEMPT_PATTERNS`.
 # A queue route is exempt only when it acts on a JOB or names its project in

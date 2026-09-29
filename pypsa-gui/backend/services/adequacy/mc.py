@@ -730,7 +730,8 @@ def _cov(mean: float, sem: float) -> float:
 
 def mc_adequacy(inputs: MCInputs, *, draws: int = 500, seed=0,
                 cov_target: float = 0.05, max_draws: int = MAX_DRAWS,
-                batch: int = 250, stop_event=None, **sim_kwargs) -> dict:
+                batch: int = 250, stop_event=None, blocks_fn=None,
+                **sim_kwargs) -> dict:
     """
     Batch until ``CoV(mean LOLE) ≤ cov_target`` or ``max_draws`` (spec §2.5).
 
@@ -750,7 +751,15 @@ def mc_adequacy(inputs: MCInputs, *, draws: int = 500, seed=0,
     spec v1.2). Reported ALWAYS, not only when the answer is zero — a converged
     0.0 h and "below the floor" are different claims, and only the second one
     is true. None when no positive weight exists (degenerate horizon).
+
+    ``blocks_fn`` (default ``None`` → ``_simulate_blocks``) swaps the
+    per-batch block simulation while keeping the batching, convergence and
+    aggregation above in ONE place. Only the EH zonal path
+    (``mc_zonal.zonal_mc_adequacy``) passes it; it must return the
+    ``_simulate_blocks`` shape for ``inputs.periods``. Every existing call
+    site omits it and is unchanged bit for bit.
     """
+    simulate_blocks = _simulate_blocks if blocks_fn is None else blocks_fn
     seq = seed if isinstance(seed, np.random.SeedSequence) \
         else np.random.SeedSequence(seed)
     labels = [b[0] for b in inputs.periods]
@@ -766,8 +775,8 @@ def mc_adequacy(inputs: MCInputs, *, draws: int = 500, seed=0,
     eue_all = np.zeros(0)
 
     while True:
-        blocks = _simulate_blocks(inputs, draws=size, seed=seq.spawn(1)[0],
-                                  **sim_kwargs)
+        blocks = simulate_blocks(inputs, draws=size, seed=seq.spawn(1)[0],
+                                 **sim_kwargs)
         batch_lole = np.zeros(size, dtype=np.float64)
         batch_eue = np.zeros(size, dtype=np.float64)
         for lab in labels:

@@ -442,16 +442,20 @@ is the most expensive question a modeller asks.
 
 `services/topology_analyzer.py` returns one row per island — `n_buses`,
 `peak_load_mw`, `nameplate_mw`, `extendable`, `verdict`, `reason` — where
-`verdict` is `ok` / `no_demand` / `no_supply` / `under_capacity`. Islanding and
-unservable islands also reach preflight as warnings.
+`verdict` is `ok` / `no_demand` / `no_supply` / `under_capacity`, plus
+`has_supply_asset` (any Generator, StorageUnit or Store, whatever its size).
+Islanding and unservable islands also reach preflight as warnings. It is the
+only walk of the bus graph: `diagnose_network` reshapes these islands into its
+own payload rather than walking the graph again, so the chat, the preflight and
+the study report cannot disagree about the network's shape.
 
 Three rules keep it from over-claiming:
 
 - **Links count as connections.** PyPSA's `sub_networks` deliberately exclude
   them (a converter is not an impedance), but for the energy balance a link
   plainly connects its buses — reporting an electrolyser bus as islanded would
-  send the user chasing a line that should not exist. Multi-port `bus2..bus4`
-  count too.
+  send the user chasing a line that should not exist. Every multi-port
+  `busN` counts too, however many ports the link has.
 - **A shortfall is claimed only when it is certain.** Nameplate is an upper
   bound on dispatch, so "peak demand exceeds total nameplate" is
   one-directional: when it fires the island genuinely cannot be served, and
@@ -607,7 +611,7 @@ its reliability in none. The tools below close that gap.
 | `run_mc_study` | execution | Sequential Monte Carlo — LOLE / EUE, optional ELCC table |
 | `run_coupling_loop` | execution | Drive a plan to an LOLE target on the **energy** lever (ENS cap) |
 | `run_margin_loop` | execution | Same target, on the **firm-capacity** lever (reserve margin) |
-| `run_eh_study` | execution | Energy Hub archetype pack study → `ReferenceDesignReport` (ENS plan → frontier → MC LOLE certify → FMEA top-N → redundancy / levers / DtC; every stage budget-charged, `skipped` / `not_established` with a reason rather than silently overrun) |
+| `run_eh_study` | execution | Energy Hub archetype pack study → `ReferenceDesignReport` (ENS plan → frontier → MC LOLE certify on the hub side of the import Link — Link outages sampled, and each grid behind it as its own area (grid storage dispatched grid-first; an opt-in `common_mode_rate` on the Link takes it and its grid down together), when occurrence data allows (`certification.import_model`: `zonal` / `sampled_unit` / `firm_block` / `islanded`; `fmea_top.copt_metrics.import_exact` is the analytic cross-check — zonal / common-mode path only, no storage) → FMEA top-N → redundancy / levers / DtC; every stage budget-charged, `skipped` / `not_established` with a reason rather than silently overrun) |
 | `abort_adequacy_study` | destructive | Stop any of the six studies at its next boundary |
 
 Three properties are worth knowing before reading a transcript:

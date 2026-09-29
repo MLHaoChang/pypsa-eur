@@ -132,6 +132,15 @@ def _rm_onexc(func, path, _exc):  # noqa: ANN001 — shutil callback signature
     is genuinely locked, so re-raise and let `_force_rmtree`'s retry loop back
     off and try the whole tree again.
     """
+    if os.path.islink(path):
+        # NEVER chmod through a link. `shutil.rmtree` refuses a symlink root
+        # by routing `Cannot call rmtree on a symbolic link` here with
+        # `func=os.path.islink` — and `os.path.islink(path)` does not raise, so
+        # the old body SWALLOWED that refusal after chmod-ing the link's TARGET
+        # to 0o200. Measured: `_force_rmtree` on `snapshots/<id> -> /some/dir`
+        # returned normally, left the target in place unreadable and
+        # untraversable, and the delete route answered 204. Re-raise instead.
+        raise OSError(f"refusing to remove a symbolic link: {path}")
     try:
         os.chmod(path, stat.S_IWRITE)
     except OSError:
@@ -156,8 +165,12 @@ def _force_rmtree(target: pathlib.Path) -> None:
       * transient locks (OneDrive sync handle, AV scan, an open file) — the
         whole call is retried a few times with a short backoff.
 
-    Raises the final ``OSError`` if the tree genuinely can't be removed.
+    Raises the final ``OSError`` if the tree genuinely can't be removed — and
+    refuses a symlink outright rather than retrying it four times, since no
+    amount of backoff turns a link into a tree.
     """
+    if target.is_symlink():
+        raise OSError(f"refusing to remove a symbolic link: {target}")
     last: OSError | None = None
     for attempt in range(4):
         try:
@@ -1081,9 +1094,31 @@ async def import_bundle(
         active_project.set_active_project(db, session, _imported_project)
 
     cfg_path = dest / "solver_config.json"
-    from routers.simulation import _state
+    from routers.simulation import _state, user_code_authorized
+    stripped_fields: list[str] = []
     if cfg_path.exists():
         cfg_data = json.loads(cfg_path.read_text())
+        # `extra_functionality_code` is exec()-ed in-process with full FS and
+        # network privileges, and `PUT /api/simulation/solver_config` refuses to
+        # set it for a non-admin. A bundle is a SECOND writer of the same field
+        # (`_solver_config_from_dict` keeps every live SolverConfig key), so
+        # without this an unprivileged member reached the identical capability by
+        # uploading a zip -- verified end to end before this fix.
+        #
+        # Stripped from the FILE as well as the loaded config, not just the
+        # loaded config: leaving it on disk plants it in a project an ADMIN may
+        # later open, and `load_project` would then hand it to a solve. That is
+        # the same escalation one session removed.
+        #
+        # Stripped and reported rather than 403-ing the whole import: the bundle
+        # is already extracted by this point, and refusing here would leave a
+        # half-imported project. The response names the field so this is never
+        # a silent difference between what was uploaded and what was imported.
+        if str(cfg_data.get("extra_functionality_code") or "").strip():
+            if not user_code_authorized(db, user):
+                cfg_data.pop("extra_functionality_code", None)
+                stripped_fields.append("extra_functionality_code")
+                cfg_path.write_text(json.dumps(cfg_data, indent=2))
         # Shared legacy-tolerant loader (filter unknown keys + coerce removed
         # enum values) — same path load_project uses, so a bundle from an older
         # GUI version imports instead of 500-ing on an unexpected key.
@@ -1166,6 +1201,10 @@ async def import_bundle(
     return {
         "imported": target_name,
         "library_issues": library_issues,
+        # Present only when the import dropped something the caller was not
+        # authorized to set, so a stripped field is never a silent difference
+        # between the uploaded bundle and the imported project.
+        **({"stripped": stripped_fields} if stripped_fields else {}),
         "summary": ImportSummary(
             buses=len(n.buses),
             generators=len(n.generators),

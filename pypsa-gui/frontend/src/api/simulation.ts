@@ -664,6 +664,89 @@ export interface EhTeaBlock {
 export type EhCertificationVerdict =
   | 'certified' | 'failed' | 'no_target' | 'not_established'
 
+/**
+ * How the import enters the hub's MC / COPT fleet (plan 2026-09-27):
+ * a sampled two-state Link unit, a firm block at the planning cap, an
+ * islanded Link (0 MW), a mix of those, or the zonal two-area path that also
+ * samples the grid behind the Link.
+ */
+export type EhImportModel =
+  | 'sampled_unit' | 'firm_block' | 'islanded' | 'mixed' | 'zonal'
+
+export type EhImportFirmness =
+  | 'planning_limit_only' | 'outage_sampled' | 'partially_outage_sampled'
+  | 'grid_sampled' | 'outage_and_grid_sampled' | 'common_mode_sampled'
+  | 'outage_and_common_mode_sampled'
+
+/** One import Link in `fleet_scope.import_link_models`. */
+export interface EhImportLinkModel {
+  name: string
+  model: 'sampled_unit' | 'firm_block' | 'islanded'
+  cap_mw_max: number
+  q?: number | null
+  mttr_hours?: number | null
+  basis?: string | null
+  source?: string
+  reason?: string | null
+}
+
+/** One grid-side area in `fleet_scope.grid_areas` (null = not resolvable). */
+export interface EhGridArea {
+  area: number
+  links: string[]
+  buses?: string[]
+  sampled: boolean
+  reason?: string | null
+  units: string[]
+  n_units: number
+  capacity_mw: number | null
+  demand_peak_mw: number | null
+  storage: string[]
+  storage_dispatched: boolean
+  copt_surplus_fraction_min?: number | null
+  /** Why the expected surplus could not be computed (screening fell back to v1). */
+  copt_note?: string | null
+  note?: string | null
+}
+
+/** One entry in `fleet_scope.import_common_mode`. */
+export interface EhCommonModeEvent {
+  link: string
+  rate: number
+  mttr_hours: number | null
+  basis: string
+  area: number | null
+  applied: boolean
+  reason: string | null
+}
+
+/** Which fleet the MC / COPT saw (`fleet_scope` on certification / fmea_top). */
+export interface EhFleetScope {
+  mode: 'hub_side' | 'whole_network'
+  import_links?: string[]
+  excluded_buses?: string[]
+  excluded_units?: string[]
+  import_model?: EhImportModel | null
+  import_firmness?: EhImportFirmness | null
+  import_firm_mw_max?: number | null
+  import_cap_mw_max?: number | null
+  import_link_models?: EhImportLinkModel[]
+  /** One entry per grid area behind the hub (zonal only; plan 2026-09-28). */
+  grid_areas?: EhGridArea[]
+  /** How the COPT screening (fmea_top class A) holds the import. */
+  copt_import_model?: 'expected_surplus_profile' | 'two_state' | 'firm_block' | null
+  copt_import_note?: string | null
+  /** Common-mode events from opt-in Link data (applied or with a reason). */
+  import_common_mode?: EhCommonModeEvent[]
+  /** True when an applied event with a positive rate is sampled. */
+  import_common_mode_sampled?: boolean
+  /** How the screening holds common-mode events ('event_mixture' = exact). */
+  copt_common_mode?: 'event_mixture' | null
+  /** Unit name in the MC / COPT fleet → import Link name. */
+  import_units?: Record<string, string>
+  note?: string
+}
+
 /** `sections.certification.payload` from the mc_certify stage. */
 export interface EhCertificationPayload {
   metric?: string
@@ -679,6 +762,9 @@ export interface EhCertificationPayload {
   ens_met?: boolean | null
   verdict?: EhCertificationVerdict
   warning?: string | null
+  import_model?: EhImportModel | null
+  import_firmness?: EhImportFirmness | null
+  fleet_scope?: EhFleetScope | null
 }
 
 /** One ε-constraint point in `sections.frontier.payload.points`. */

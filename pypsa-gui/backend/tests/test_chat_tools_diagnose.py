@@ -212,3 +212,89 @@ def test_a_big_fragmented_network_stays_inside_the_result_budget(install_network
     assert len(json.dumps(out, default=str)) < 4000
     assert out["islands_truncated"] is True
     assert len(out["islands"]) < 400
+
+
+def test_peak_load_is_simultaneous_not_a_sum_of_each_loads_own_peak(install_network):
+    """
+    Two loads peaking in different hours never draw 200 MW together. Summing
+    each load's own maximum reported a peak that never happens — and on a
+    stranded island that is the number the agent quotes back to the user.
+    """
+    n = _net()
+    n.add("Bus", "A")
+    n.add("Load", "L1", bus="A", p_set=[100.0, 0.0])
+    n.add("Load", "L2", bus="A", p_set=[0.0, 100.0])
+    install_network(n, name="Staggered")
+
+    out = chat_tools.diagnose_network()
+
+    assert out["islands"][0]["peak_load_mw"] == pytest.approx(100.0)
+    assert out["islands_without_generation"][0]["peak_load_mw"] == \
+        pytest.approx(100.0)
+
+
+def test_a_link_port_beyond_bus4_is_joined(install_network):
+    """PyPSA sets no ceiling on a link's ports, so neither may the walk."""
+    n = _net()
+    for b in ("AC", "H2", "Heat", "O2", "Water", "Far"):
+        n.add("Bus", b)
+    n.add("Link", "plant", bus0="AC", bus1="H2", bus2="Heat", bus3="O2",
+          bus4="Water", bus5="Far", p_nom=10)
+    n.add("Generator", "G", bus="AC", p_nom=10)
+    n.add("Load", "L", bus="Far", p_set=[1.0, 1.0])
+    install_network(n, name="SixPort")
+
+    out = chat_tools.diagnose_network()
+
+    assert out["island_count"] == 1
+    assert out["isolated_buses"] == []
+    assert out["verdict"] == "connected"
+
+
+def test_a_zero_mw_generator_still_counts_as_generation(install_network):
+    """`has_generation` is presence, not nameplate — the contract as shipped."""
+    n = _net()
+    n.add("Bus", "Main")
+    n.add("Bus", "Side")
+    n.add("Generator", "G", bus="Main", p_nom=10)
+    n.add("Generator", "Z", bus="Side", p_nom=0)
+    n.add("Load", "L", bus="Side", p_set=[1.0, 1.0])
+    install_network(n, name="ZeroGen")
+
+    out = chat_tools.diagnose_network()
+
+    assert out["islands_without_generation"] == []
+    assert all(i["has_generation"] for i in out["islands"])
+
+
+def test_payload_keys_are_unchanged(install_network):
+    """The chat contract: delegating the walk must not reshape the payload."""
+    n = _net()
+    n.add("Bus", "A")
+    n.add("Bus", "B")
+    n.add("Load", "L", bus="B", p_set=[1.0, 2.0])
+    n.add("Generator", "G", bus="A", p_nom=5)
+    install_network(n, name="Keys")
+
+    out = chat_tools.diagnose_network()
+
+    assert set(out) == {
+        "bus_count", "island_count", "islands", "islands_truncated",
+        "isolated_buses", "isolated_buses_truncated",
+        "islands_without_generation", "verdict",
+    }
+    assert set(out["islands"][0]) == {
+        "size", "buses", "has_generation", "has_load", "peak_load_mw",
+    }
+    assert out["isolated_buses"] == ["A", "B"]
+    assert out["verdict"] == "infeasible_topology"
+
+
+def test_an_empty_network_payload_is_unchanged(install_network):
+    install_network(_net(), name="EmptyKeys")
+
+    assert chat_tools.diagnose_network() == {
+        "bus_count": 0, "island_count": 0, "islands": [],
+        "isolated_buses": [], "islands_without_generation": [],
+        "islands_truncated": False, "verdict": "empty",
+    }

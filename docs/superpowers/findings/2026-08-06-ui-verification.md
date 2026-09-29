@@ -1,5 +1,8 @@
 # UI verification of the four 2026-08-05 myopic/Compare fixes
 
+**Status: CLOSED — this is a verification record, not a defect report.** All four fixes
+verified PASS. Added 2026-09-12 by a triage pass — this file had no status line.
+
 **Date:** 2026-08-06
 **Scope:** independent verification of the four fixes shipped 2026-08-05,
 driven against the backend package directly (`PyPSAService` + `run_simulation`

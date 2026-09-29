@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { projectsApi } from '../api/projects'
+import type { ProjectInfo } from '../api/types'
 import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
 import { appLog, useSimulationStore } from '../store/simulationStore'
@@ -344,6 +345,34 @@ export async function releaseProjectLock(projectId: string): Promise<void> {
   } catch { /* best effort — the TTL reclaims it anyway */ }
 }
 
+/** The project kind of a planning → dynamics (gridspine) study. */
+const STUDY_KIND = 'planning_dynamics'
+
+/**
+ * `ref` (an id or a name) as a planning → dynamics STUDY, or null when it is an
+ * ordinary project — or when that cannot be established.
+ *
+ * Read from the ['projects'] cache when it is warm, fetched once when it is not:
+ * the path that needs it most is `/app?project=<id>` on a fresh page load, where
+ * nothing has populated the cache yet. A failed lookup returns null so the
+ * switch proceeds exactly as it did before studies existed, rather than failing
+ * in a new way.
+ */
+async function studyFor(ref: string | null, qc: QueryClient): Promise<ProjectInfo | null> {
+  if (!ref) return null
+  const match = (projects: ProjectInfo[] | undefined) =>
+    projects?.find(p => p.id === ref || p.name === ref)
+  let project = match(qc.getQueryData<ProjectInfo[]>(['projects']))
+  if (!project) {
+    try {
+      project = match(await projectsApi.list())
+    } catch {
+      return null
+    }
+  }
+  return project?.project_kind === STUDY_KIND ? project : null
+}
+
 /**
  * B8 — INSTANT in-memory project switch (the C2 payoff).
  *
@@ -373,6 +402,19 @@ export async function switchToProject(target: string, qc: QueryClient): Promise<
   const currentProject = ui.currentProject
   if (target === currentProject) return { status: 'noop' }
 
+  // A planning → dynamics STUDY has no network: it is a config and a run
+  // directory, and `/activate` — which hydrates a network context from
+  // `network.nc` — 404s for every one of them. So both ends of a switch treat
+  // a study as network-less, exactly as the new-project wizard always has (it
+  // never calls /activate): entering one sets the current project and opens
+  // the study panel; leaving one skips the save, because the only network the
+  // backend could be holding belongs to some other project, and writing it
+  // under the study's name would put a stray network.nc in the study.
+  const [targetStudy, currentIsStudy] = await Promise.all([
+    studyFor(target, qc),
+    studyFor(currentProject, qc).then(Boolean),
+  ])
+
   // Is the CURRENT project mid-solve via the QUEUE dispatcher? If so, switching
   // away is SAFE and must NOT abort it: the dispatcher solves the active project
   // in place on a CAPTURED ctx (its own network/lock/state sink), so moving the
@@ -384,7 +426,21 @@ export async function switchToProject(target: string, qc: QueryClient): Promise<
     j => j.project_id === currentProject && j.status === 'running',
   )
 
-  if (!currentSolvingInQueue) {
+  if (targetStudy) {
+    if (currentProject && !currentIsStudy && !currentSolvingInQueue) {
+      // Leaving a NETWORK project for a study: the outgoing edits still get the
+      // same durability save an ordinary switch gives them.
+      const stopped = await abortRunningSim()
+      if (!stopped) return { status: 'abort-failed' }
+      await saveProjectQuietly(currentProject)
+    }
+    useUIStore.getState().setCurrentProject(targetStudy.name, targetStudy.id ?? undefined)
+    useUIStore.getState().setProjectName(targetStudy.name)
+    useUIStore.getState().setSlidePanel('gridspine')
+    return { status: 'switched' }
+  }
+
+  if (!currentSolvingInQueue && !currentIsStudy) {
     // 1. Abort any LEGACY foreground /run solve on the current project (a queue
     //    solve is handled above — left running in the background).
     const stopped = await abortRunningSim()
