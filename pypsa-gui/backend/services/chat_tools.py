@@ -4452,6 +4452,106 @@ def set_report_mapping(report_id: str, plan: dict, strict: bool = False) -> dict
     return _route(_h, report_id, body, project=project)
 
 
+# ── WP13: the round trip ────────────────────────────────────────────────────
+#
+# Thin wrappers over the round-trip routes (`routers/reports.py`), called
+# in-process for the active project. An edited copy is DATA: its text becomes
+# the report's `user_edit` sections and its comments become pending
+# instructions the user chooses to apply; nothing found in it is followed by
+# the assistant.
+
+
+def list_report_roundtrips() -> list[dict]:
+    """The active project's uploads of kind `report_roundtrip`, newest first."""
+    from services import upload_service
+
+    name = _require_active_project()
+    return [
+        {
+            "file_id": m.file_id,
+            "filename": m.filename,
+            "mime": m.mime,
+            "kind": m.kind,
+            "size_kb": round(m.size / 1024, 1),
+            "uploaded_at": m.uploaded_at,
+        }
+        for m in upload_service.list_uploads(name, kind="report_roundtrip")
+    ]
+
+
+def import_edited_report(report_id: str, file_id: str, bind_as_template: bool = True) -> dict:
+    """Merge an edited Word copy back as the report's next version; the route's answer plus a summary."""
+    from routers.reports import RoundTripBody, roundtrip_report as _h
+
+    project = _report_project()
+    result = _route(_h, report_id, RoundTripBody(file_id=file_id, bind_as_template=bool(bind_as_template)),
+                    project=project)
+    rt = result.get("result") or {}
+    sections = rt.get("sections") or []
+    changed = [s.get("section_id") for s in sections if s.get("changed") and s.get("section_id")]
+    commented = [s.get("section_id") for s in sections if s.get("comments") and s.get("section_id")]
+    unmatched = rt.get("unmatched") or []
+    parts = [f"Report {report_id} is now version {result.get('version')}: "
+             f"{len(changed)} section(s) edited by the user ({', '.join(changed) or 'none'}), "
+             f"{rt.get('accepted_tracked_changes', 0)} tracked change(s) accepted."]
+    if commented:
+        parts.append(f"Comments became pending instructions on: {', '.join(commented)} — "
+                     "regenerate_report_section(report_id, section_id) with no instruction "
+                     "applies each.")
+    if unmatched:
+        parts.append(f"{len(unmatched)} piece(s) of content could not be placed in any "
+                     "section and were NOT merged; relay them to the user.")
+    if result.get("template_file_id") == file_id:
+        parts.append("The edited file is now the report's template, so its styling "
+                     "survives the next export.")
+    return {**result, "changed": changed, "commented": commented, "message": " ".join(parts)}
+
+
+def diff_report_versions(report_id: str, a: int, b: int) -> dict:
+    """Per-section change between two versions, with the changed/added/removed ids summarised."""
+    from routers.reports import diff_report_versions as _h
+
+    project = _report_project()
+    out = _route(_h, report_id, int(a), int(b), project=project)
+    rows = out.get("sections") or []
+    return {
+        **out,
+        "changed": [r["section_id"] for r in rows if r.get("change") == "changed"],
+        "added": [r["section_id"] for r in rows if r.get("change") == "added"],
+        "removed": [r["section_id"] for r in rows if r.get("change") == "removed"],
+    }
+
+
+def export_report_pdf(
+    report_id: str | None = None,
+    version: int | None = None,
+    filename: str | None = None,
+) -> dict:
+    """
+    One report version as a PDF in the active project's uploads/ dir, when
+    this host has LibreOffice (501 `pdf_not_available` otherwise; the .docx
+    export always works).
+    """
+    from routers.reports import ExportReportBody, export_report as _h
+
+    project = _report_project()
+    rid = report_id if report_id is not None else _newest_report_id(project)
+    meta = _route(_h, rid, ExportReportBody(version=version, filename=filename, format="pdf"),
+                  project=project)
+    return {
+        "file_id": meta["file_id"],
+        "filename": meta["filename"],
+        "mime": meta["mime"],
+        "size": meta["size"],
+        "kind": meta["kind"],
+        "report_id": rid,
+        "message": (
+            f"Exported '{meta['filename']}' ({meta['size']} bytes) as PDF. It's "
+            "available as a downloadable file in the chat panel's file strip."
+        ),
+    }
+
+
 def build_study_report(project: str | None = None) -> dict:
     """
     Assemble the client-facing reliability write-up from everything this
@@ -5217,6 +5317,11 @@ DISPATCHERS: dict[str, Any] = {
     "get_report_template": get_report_template,
     "propose_report_mapping": propose_report_mapping,
     "set_report_mapping": set_report_mapping,
+    # reports (WP13) — the round trip over the round-trip routes
+    "list_report_roundtrips": list_report_roundtrips,
+    "import_edited_report": import_edited_report,
+    "diff_report_versions": diff_report_versions,
+    "export_report_pdf": export_report_pdf,
     # uploads — bulk delete (1, locked decision row 7: independent of chat history)
     "clear_uploads": clear_uploads,
     # asset_results (3) — Task 14: per-asset results chat surface

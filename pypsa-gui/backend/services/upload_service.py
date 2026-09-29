@@ -51,7 +51,7 @@ from dataclasses import dataclass
 
 from fastapi import HTTPException
 
-from models.upload_schemas import DeleteUploadResponse, UploadMeta, UploadKind
+from models.upload_schemas import PROMOTABLE_KINDS, DeleteUploadResponse, UploadMeta, UploadKind
 from services.filename_service import safe_upload_filename
 
 logger = logging.getLogger(__name__)
@@ -354,9 +354,10 @@ def add_upload(
 
     with _project_upload_lock(name):
         # Dedup hit: existing meta + ready blob → return as-is — except that a
-        # user upload re-sent AS A TEMPLATE is promoted to the template kind,
-        # so the report viewer's picker (which lists `report_template` only)
-        # shows it. Never the other direction: a template stays a template.
+        # user upload re-sent AS A TEMPLATE (or as a round-trip copy) is
+        # promoted to that kind, so the report viewer's picker (which lists
+        # one kind only) shows it. Never the other direction: a template
+        # stays a template, a round-trip copy stays one.
         existing = _read_meta(meta_path)
         if existing is not None and existing.blob_ready:
             if existing.sha256 != sha256_full:
@@ -371,7 +372,7 @@ def add_upload(
                         ),
                     },
                 )
-            if kind == "report_template" and existing.kind == "user_upload":
+            if kind in PROMOTABLE_KINDS and existing.kind == "user_upload":
                 existing = existing.model_copy(update={"kind": kind})
                 _atomic_write_meta(meta_path, existing)
             return existing

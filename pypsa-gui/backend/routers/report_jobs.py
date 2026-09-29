@@ -5,7 +5,10 @@ Report generation routes (WP3) — `/api/projects/{name}/reports/generate…`.
   GET  /{name}/reports/generate/status                          the job record (204 when never run)
   POST /{name}/reports/generate/abort                           set the stop event (idempotent; 404 never run)
   POST /{name}/reports/{report_id}/sections/{section_id}/regenerate
-                                                                one section again → version+1
+                                                                one section again → version+1; with no
+                                                                `instruction` the section's
+                                                                `pending_instruction` (WP12/13) is used
+                                                                and cleared on the new version
   POST /{name}/reports/{report_id}/template/plan                the "mapping" job (WP11): propose how an
                                                                 untagged template's headings map onto the report
 
@@ -58,6 +61,7 @@ from services.pypsa_service import PyPSAService
 from services.reports import store, templates
 from services.reports.report_job import (
     ReportJobInFlight,
+    pending_instruction_of,
     public_record,
     start_mapping_job,
     start_report_job,
@@ -295,6 +299,12 @@ def regenerate_section(report_id: str, section_id: str, body: RegenerateSectionB
     Write one section again, with an optional instruction, from the latest
     version of the report; the result is saved as the next version with
     every other section unchanged.
+
+    WP13: when `instruction` is omitted and the section carries a
+    `pending_instruction` (a comment the user left in Word, stored by the
+    round trip), the job uses it; either way the new version clears it.
+    The answer says which was used (`instruction_source`: "body",
+    "pending" or null).
     """
     try:
         store.validate_report_id(report_id)
@@ -305,17 +315,24 @@ def regenerate_section(report_id: str, section_id: str, body: RegenerateSectionB
         base = store.load_report(project.directory, report_id)
     except store.ReportStoreError as exc:
         raise _http(exc) from exc
-    if section_id not in {s.section_id for s in base.sections}:
+    section = next((s for s in base.sections if s.section_id == section_id), None)
+    if section is None:
         raise HTTPException(404, {
             "error_kind": "report_section_not_found",
             "message": f"Report {report_id} has no section {section_id!r}.",
         })
+    instruction = (body.instruction or "").strip() or None
+    source: str | None = "body" if instruction else None
+    if instruction is None:
+        instruction = pending_instruction_of(section)
+        source = "pending" if instruction else None
     profile = _resolve_profile()
     provider = _provider_or_400(profile)
     evidence, figure_pngs = _evidence_for(project)
     _start(
         project, evidence=evidence, figure_pngs=figure_pngs, profile=profile,
         provider=provider, language=body.language or base.language or "en",
-        instruction=body.instruction, base_document=base,
+        instruction=instruction, base_document=base,
         regenerate_section=section_id)
-    return {"status": "running", "report_id": report_id, "version": base.version}
+    return {"status": "running", "report_id": report_id, "version": base.version,
+            "instruction_source": source}

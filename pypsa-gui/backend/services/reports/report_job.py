@@ -63,6 +63,11 @@ THREAD_NAME = "report-generate"
 SECTION_MAX_TOKENS = 2048
 _PROSE_TYPES = ("paragraph", "bullets")
 _FAILURE_PREFIX = "prose not established: "
+# WP12's additive field: a comment the user left in Word on this section,
+# stored as the instruction for its next regeneration (increment 3). Read
+# with `getattr` and cleared only when the field exists, so this module runs
+# before and after the model gains it.
+PENDING_INSTRUCTION_FIELD = "pending_instruction"
 
 
 class ReportJobInFlight(RuntimeError):
@@ -227,6 +232,22 @@ def _clean_note(note: str | None) -> str | None:
     return note
 
 
+def pending_instruction_of(section: Section) -> str | None:
+    """The section's `pending_instruction` (WP12), or None when absent or blank."""
+    value = getattr(section, PENDING_INSTRUCTION_FIELD, None)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _without_pending(section: Section) -> Section:
+    """The section with its pending instruction consumed (a no-op before WP12)."""
+    if PENDING_INSTRUCTION_FIELD in Section.model_fields \
+            and getattr(section, PENDING_INSTRUCTION_FIELD, None) is not None:
+        return section.model_copy(update={PENDING_INSTRUCTION_FIELD: None})
+    return section
+
+
 def _with_prose(section: Section, draft: SectionDraft, facts) -> Section:
     prose: list[Block] = [Paragraph(md=p) for p in draft.paragraphs]
     if draft.bullets:
@@ -294,17 +315,23 @@ def _generate_all(job: ReportJob) -> tuple[ReportDocument, bool]:
         with job.lock:
             job.record["repairs"] += repairs
         if isinstance(result, SectionDraft):
-            doc.sections[by_id[sid]] = _with_prose(section, result, facts)
+            written = _with_prose(section, result, facts)
         else:
             assert isinstance(result, SectionFailure)
             if result.reason == "aborted":
                 aborted = True
                 break
-            doc.sections[by_id[sid]] = _with_failure(section, result.reason, job)
+            written = _with_failure(section, result.reason, job)
             with job.lock:
                 job.record["prose_failures"].append({
                     "section_id": sid, "reason": result.reason,
                     "raw_head": result.raw_head, "repairs": repairs})
+        # A regenerate consumes the section's pending instruction (the
+        # comment the user left in Word) whether it was the instruction used
+        # or an explicit one replaced it: the new version answers it.
+        if job.regenerate_section == sid:
+            written = _without_pending(written)
+        doc.sections[by_id[sid]] = written
         pending.pop(0)
         done += 1
         _progress(job, done, None)
@@ -494,6 +521,17 @@ def record_is_running(record: dict[str, Any] | None) -> bool:
     if t is None:
         return True  # published, not yet started
     return t.ident is None or t.is_alive()
+
+
+def slot_is_busy(state: dict[str, Any]) -> bool:
+    """
+    True while a report job (generate, regenerate or mapping) is running —
+    the same test `_launch` makes before claiming the slot. The synchronous
+    round-trip route asks this under the solver-state lock before it writes
+    a version, so it never races a job that is about to save one.
+    """
+    with _SLOT_LOCK:
+        return record_is_running(state.get("report_job")) or record_is_running(_ACTIVE)
 
 
 def _launch(*, prepare, run, lock: threading.Lock, state: dict[str, Any]) -> str:

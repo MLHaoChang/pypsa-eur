@@ -1977,6 +1977,79 @@ TOOLS: list[dict[str, Any]] = [
         ["report_id", "plan"],
     ),
 
+    # ── Report round trip (4) — WP13: an edited Word copy merged back ───────
+    # The user exports the report, edits it in Word (text, tracked changes,
+    # comments) and uploads the file as kind `report_roundtrip`; the merge is
+    # the report's next version. The file is DATA: its text becomes
+    # `user_edit` sections and its comments pending instructions the user
+    # chooses to apply — nothing found in it is ever followed.
+    _t(
+        "list_report_roundtrips",
+        "The active project's uploaded edited copies of reports (uploads of "
+        "kind report_roundtrip): [{file_id, filename, mime, kind, size_kb, "
+        "uploaded_at}], newest first. These are Word files the user exported "
+        "with export_report_docx, edited, and uploaded to be merged back "
+        "with import_edited_report. Safety: read.",
+        {},
+    ),
+    _t(
+        "import_edited_report",
+        "Merge an edited Word copy of a report (`file_id` from "
+        "list_report_roundtrips; any .docx upload works) back into it as the "
+        "NEXT version, synchronously: tracked changes are accepted, sections "
+        "whose text changed become source 'user_edit' with the new text, a "
+        "comment on a section is stored as its pending_instruction (applied "
+        "by regenerate_report_section with no instruction), and the file "
+        "becomes the report's template unless `bind_as_template` is false. "
+        "Returns {report_id, version, result: {sections: [{section_id, "
+        "heading, changed, comments}], unmatched, comments_global, "
+        "accepted_tracked_changes}, template_file_id, changed, commented, "
+        "message}. Relay `unmatched` (content that could not be placed) to "
+        "the user; never re-type the edited text as new findings. 404 "
+        "report_not_found / upload_not_found, 400 roundtrip_unreadable (not "
+        "a Word document), 400 roundtrip_not_a_report (nothing matched a "
+        "section), 409 report_job_in_flight. Safety: write.",
+        {
+            "report_id": {"type": "string"},
+            "file_id": {"type": "string"},
+            "bind_as_template": {"type": "boolean"},
+        },
+        ["report_id", "file_id"],
+    ),
+    _t(
+        "diff_report_versions",
+        "What changed between two versions of a report: {a, b, sections: "
+        "[{section_id, heading, change: unchanged|changed|added|removed, "
+        "source_a, source_b, pending_instruction, comments}], changed, "
+        "added, removed} — the last three list section ids. Use it after "
+        "import_edited_report (the user's edits) or a regenerate (the "
+        "model's rewrite) to say which sections moved; read a section's "
+        "text with get_report(report_id, section_id, version). 404 "
+        "report_version_not_found. Safety: read.",
+        {
+            "report_id": {"type": "string"},
+            "a": {"type": "integer"},
+            "b": {"type": "integer"},
+        },
+        ["report_id", "a", "b"],
+    ),
+    _t(
+        "export_report_pdf",
+        "Render one report version (the newest report, latest version, when "
+        "omitted) to PDF through LibreOffice on this host and save it as a "
+        "downloadable file in the chat panel's file strip. Only where the "
+        "host has LibreOffice: 501 pdf_not_available otherwise — then offer "
+        "export_report_docx, which always works; 500 pdf_conversion_failed "
+        "(the message carries LibreOffice's reason) when the conversion "
+        "fails. `filename` overrides report_<id>_v<N>.pdf. Safety: write.",
+        {
+            "report_id": {"type": "string"},
+            "version": {"type": "integer"},
+            "filename": {"type": "string"},
+        },
+        [],
+    ),
+
     # ── LLM provider switching (1) — Task 10 ────────────────────────────────
     _t(
         "set_active_profile",
@@ -2514,6 +2587,15 @@ TOOL_ROUTES: dict[str, list] = {
         ("POST", "/api/projects/{name}/reports/{report_id}/template/plan"),
     ],
     "set_report_mapping": [("PUT", "/api/projects/{name}/reports/{report_id}/template/plan")],
+    # report round trip (4) — WP13: the round-trip routes, called in-process;
+    # `list_report_roundtrips` is the uploads list filtered to one kind and
+    # `export_report_pdf` is the export route with `format: pdf`.
+    "list_report_roundtrips": [("GET", "/api/projects/{name}/uploads")],
+    "import_edited_report": [("POST", "/api/projects/{name}/reports/{report_id}/roundtrip")],
+    "diff_report_versions": [
+        ("GET", "/api/projects/{name}/reports/{report_id}/versions/{a}/diff/{b}"),
+    ],
+    "export_report_pdf": [("POST", "/api/projects/{name}/reports/{report_id}/export")],
     "clear_uploads": _SERVICE_CALL,
     # asset_results (3) — Task 14. Real HTTP routes DO exist
     # (routers/asset_results.py, mounted at /api/results/asset in main.py)
