@@ -20,7 +20,7 @@
 // This module is loaded lazily (App.tsx) and is the only importer of three.js
 // (and of the site3d modules that import it).
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls, Line, PivotControls } from '@react-three/drei'
@@ -36,14 +36,15 @@ import {
   buildingsGeometry, linesToRibbons, areasGeometry, heightmapToDisplacement, terrainSampler, groundHeightAt,
   groundMode, hillshadeCanvas, terrainCellMetres, RIBBON_COLOR, AREA_COLOR, BUILDING_COLOR, OSM_ATTRIBUTION, type HeightAt,
 } from '../site3d/context'
-import { buildSiteLayout, objectKey, type SiteObject, type Part } from '../site3d/layout'
-import { partShape } from '../site3d/partGeometry'
+import { buildSiteLayout, objectKey, type SiteObject } from '../site3d/layout'
+import { objectGeometry } from '../site3d/objectGeometry'
+import { emissiveFor } from '../site3d/resultStyle'
 import { DEFAULT_LIBRARY, legendFor } from '../site3d/assetLibrary'
 import { matrixFor, placementFromMatrix } from '../site3d/placementMath'
 import { screenToGround, groundToScreen } from '../site3d/raycast'
 import { registerSiteDropTarget, unregisterSiteDropTarget } from '../site3d/dropRegistry'
 import SiteOverlay from '../components/SiteOverlay'
-import { toScene, toBoxArgs, fitCamera, chooseSite, unionBounds, halfSizeFor, type Bounds } from '../site3d/scene'
+import { toScene, fitCamera, chooseSite, unionBounds, halfSizeFor, type Bounds } from '../site3d/scene'
 import { useSitesStore } from '../site3d/sitesStore'
 import { writeActiveSite } from '../site3d/activeSite'
 import { boundaryToLocal } from '../site3d/boundary'
@@ -56,18 +57,13 @@ import type { Site, SiteContext } from '../site3d/types'
 // ── One object = one group of boxes, one click target ────────────────────────
 
 /**
- * One part's geometry, built once per part shape (partGeometry.ts): the
- * cylinder's axis is baked in there, not applied by an `onUpdate` callback
- * (r3f ran it twice at mount, which turned lying cylinders upright again).
+ * One site object: its merged body (every part except the rotor blades, one
+ * vertex-coloured mesh — Phase 2 E5) and one rotor group per turbine, pivoted
+ * at its hub so the results layer can spin it. Selection, hover and the
+ * outside-the-boundary warning glow through the emissive channel only
+ * (`emissiveFor`); vertex colours keep each part's own colour.
  */
-function PartGeometry({ part }: { part: Part }) {
-  const geometry = useMemo(() => partShape(part),
-    [part.shape, part.axis, part.size[0], part.size[1], part.size[2]]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => () => geometry.dispose(), [geometry])
-  return <primitive object={geometry} attach="geometry" />
-}
-
-function SiteObjectMesh({ obj, selected, hovered, outside, pivot, onHover, onSelect }: {
+const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hovered, outside, pivot, onHover, onSelect }: {
   obj: SiteObject
   selected: boolean
   hovered: boolean
@@ -82,9 +78,12 @@ function SiteObjectMesh({ obj, selected, hovered, outside, pivot, onHover, onSel
   countRender(`mesh:${obj.type}:${obj.name}`)
   const [ox, oy] = pivot ? [0, 0] : obj.origin
   const heading = pivot ? 0 : obj.heading
-  const tint = selected ? '#ffffff' : hovered ? '#fde68a' : undefined
-  const emissive = selected ? obj.color : outside ? '#dc2626' : '#000000'
-  const emissiveIntensity = selected ? 0.6 : outside ? 0.45 : 0
+  const geom = useMemo(() => objectGeometry(obj.parts, obj.color, obj.anchors), [obj.parts, obj.color, obj.anchors])
+  useEffect(() => () => { geom.body?.dispose(); for (const r of geom.rotors) r.geometry.dispose() }, [geom])
+  const glow = emissiveFor({ selected, hovered, outside }, obj.color)
+  const material = (
+    <meshStandardMaterial vertexColors emissive={glow.color} emissiveIntensity={glow.intensity} roughness={0.7} metalness={0.1} />
+  )
   return (
     <group
       name={`${obj.type}:${obj.name}`}
@@ -95,27 +94,15 @@ function SiteObjectMesh({ obj, selected, hovered, outside, pivot, onHover, onSel
       onPointerOver={(e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); onHover(objectKey(obj)) }}
       onPointerOut={() => onHover(null)}
     >
-      {obj.parts.map((p, i) => (
-        <mesh
-          key={i}
-          position={toScene(p.pos[0], p.pos[1], p.pos[2])}
-          rotation={[p.rotX ?? 0, p.rotZ ?? 0, -(p.rotN ?? 0)]}
-          castShadow
-          receiveShadow
-        >
-          <PartGeometry part={p} />
-          <meshStandardMaterial
-            color={tint ?? p.color ?? obj.color}
-            emissive={emissive}
-            emissiveIntensity={emissiveIntensity}
-            roughness={0.7}
-            metalness={0.1}
-          />
-        </mesh>
+      {geom.body && <mesh geometry={geom.body} castShadow receiveShadow>{material}</mesh>}
+      {geom.rotors.map(r => (
+        <group key={r.turbine} name={`rotor:${r.turbine}`} position={r.origin}>
+          <mesh geometry={r.geometry} castShadow>{material}</mesh>
+        </group>
       ))}
     </group>
   )
-}
+})
 
 // ── Hover / selection labels: plain DOM over the canvas ──────────────────────
 //
@@ -403,9 +390,17 @@ function SelectedPivot({ obj, enabled, onCommit, children }: {
 
 // ── The view ──────────────────────────────────────────────────────────────────
 
-export default function SiteCanvas() {
+// Memoised: it takes no props, and App re-renders on every store change
+// (including each snapshot step); the site must not (Phase 2 plan Task 2.2).
+export default React.memo(SiteCanvas)
+
+function SiteCanvas() {
   countRender('SiteCanvas')
-  const { currentProject, selectedComponent, setSelectedComponent } = useUIStore()
+  // Selectors, never the whole store: a snapshot step (resultsSnapshotIdx)
+  // must not re-render the site (Phase 2 plan Task 2.2).
+  const currentProject = useUIStore(s => s.currentProject)
+  const selectedComponent = useUIStore(s => s.selectedComponent)
+  const setSelectedComponent = useUIStore(s => s.setSelectedComponent)
   const activeSiteId = useUIStore(s => s.activeSiteId)
   const setActiveSiteId = useUIStore(s => s.setActiveSiteId)
   const sitesDoc = useSitesStore(s => s.docFor(currentProject))
@@ -631,6 +626,8 @@ export default function SiteCanvas() {
   const groundTexture = mode === 'imagery' ? texture : mode === 'hillshade' ? hillshadeTexture : null
 
   const [hovered, setHovered] = useState<string | null>(null)
+  // Stable, so the memoised object meshes re-render only when their own props change.
+  const onSelectObject = useCallback((obj: SiteObject) => setSelectedComponent({ type: obj.type, name: obj.name }), [setSelectedComponent])
   const labelRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   // ── Empty states ──────────────────────────────────────────────────────────
@@ -705,7 +702,7 @@ export default function SiteCanvas() {
               outside={outsideSet.has(key)}
               pivot={isSelected}
               onHover={setHovered}
-              onSelect={obj => setSelectedComponent({ type: obj.type, name: obj.name })}
+              onSelect={onSelectObject}
             />
           )
           // Each object stands at the ground height under its origin; the
