@@ -34,6 +34,7 @@ from models.study import (
     AccuracyBand,
     AssumptionsLedger,
     DecisionQuestion,
+    LedgerDomain,
     LedgerRange,
     LedgerRow,
     StudyMaturity,
@@ -44,7 +45,8 @@ __all__ = [
     "CSV_COLUMNS", "LedgerEditError", "LedgerImportError", "LoadProvenance",
     "apply_user_row", "diff_against_defaults", "key_driver_rows",
     "ledger_rows_from_csv", "ledger_to_csv", "load_provenance",
-    "maturity_from_ledger", "refresh_derived", "reseed_ledger",
+    "maturity_from_ledger", "refresh_derived", "reseed_ledger", "reset_rows",
+    "with_study_currency_year",
 ]
 
 LoadProvenance = Literal["uploaded", "synthetic", "missing"]
@@ -57,6 +59,30 @@ class LedgerEditError(ValueError):
 
 class LedgerImportError(ValueError):
     """A CSV row the reader refuses; the message names the line and row."""
+
+
+# Why a row with no value cannot be typed over (gate S2 BC-S2-2). The code is
+# the row's `unavailable["value"]` flag.
+_NOT_EDITABLE = {
+    "not_used_in_mvp1": "MVP-1 does not model this row (not_used_in_mvp1)",
+    "not_applicable": "not applicable under the chosen tariff (not_applicable)",
+    "tariff_descriptor": ("the tariff is chosen or supplied at the tariff step, "
+                          "not typed into the ledger"),
+}
+_NOT_APPLICABLE_WHY = {"demand_charge_price": "the chosen tariff has no demand charge"}
+
+# A user row a re-seed could not keep as it was is flagged in the ledger's
+# honesty notes as `needs_attention:<key>:<reason>`; it must be reset before
+# it can be edited again, so it is never silently re-customised.
+_ATTENTION = "needs_attention:"
+
+
+def _attention_notes(ledger: AssumptionsLedger, key: str) -> list[str]:
+    return [n for n in ledger.honesty_notes if n.startswith(f"{_ATTENTION}{key}:")]
+
+
+def _money(unit: str) -> str:
+    return unit.split("/", 1)[0] if "/" in unit else unit
 
 
 # ── edits ─────────────────────────────────────────────────────────────────
@@ -103,10 +129,28 @@ def apply_user_row(ledger: AssumptionsLedger, key: str, value: float, *,
     ``provenance`` (``user`` unless the caller states ``measured`` or
     ``imported``), ``status=customised``, the editor and the time. ``source`` defaults to
     "User entry" and ``source_year`` to the year of the edit.
-    ``currency_year`` keeps the row's unless given.
+
+    Refused, with the row named (gate S2): a row with no value that MVP-1
+    does not use, that the tariff makes inapplicable, or that describes the
+    tariff (BC-S2-2); a row a re-seed flagged, until it is reset (BC-S2-2);
+    a value outside the row's physical ``domain`` (BC-S2-3); a
+    ``currency_year`` other than the row's, since nothing is converted
+    (BC-S2-4). An omitted ``currency_year`` means the row's.
     """
     i = _row_index(ledger, key)
     row = ledger.rows[i]
+    if row.value is None and row.unavailable.get("value") in _NOT_EDITABLE:
+        code = row.unavailable["value"]
+        why = _NOT_EDITABLE[code]
+        if code == "not_applicable" and key in _NOT_APPLICABLE_WHY:
+            why = f"{_NOT_APPLICABLE_WHY[key]} ({code})"
+        raise LedgerEditError(f"{key}: cannot be edited: {why}")
+    flagged = _attention_notes(ledger, key)
+    if flagged:
+        reason = flagged[0][len(f"{_ATTENTION}{key}:"):]
+        raise LedgerEditError(
+            f"{key}: needs attention after a re-seed ({reason}); reset the row, "
+            "then enter a value")
     if not unit or not str(unit).strip():
         raise LedgerEditError(f"{key}: a unit is required (the row is in {row.unit!r})")
     if unit.strip() != row.unit:
@@ -121,6 +165,16 @@ def apply_user_row(ledger: AssumptionsLedger, key: str, value: float, *,
         raise LedgerEditError(f"{key}: {value!r} is not a number") from None
     if not math.isfinite(value):
         raise LedgerEditError(f"{key}: the value must be finite, got {value!r}")
+    if row.domain is not None and not row.domain.contains(value):
+        raise LedgerEditError(
+            f"{key}: {value!r} is outside the row's domain {row.domain} "
+            f"(in {row.unit})")
+    if (currency_year is not None and row.currency_year is not None
+            and currency_year != row.currency_year):
+        raise LedgerEditError(
+            f"{key}: the value is given in {currency_year} money but the row is in "
+            f"{row.currency_year} {_money(row.unit)}; enter the value in "
+            f"{row.currency_year} {_money(row.unit)} (nothing is converted)")
     changed_at = changed_at or datetime.now(tz=UTC)
     data = row.model_dump()
     data.update(
@@ -151,25 +205,92 @@ def reseed_ledger(existing: AssumptionsLedger,
     Re-seed: library rows refreshed, user rows kept.
 
     A fresh seed (library values, the intake's tariff, the question's key
-    drivers), then every non-library row of ``existing`` replaces its seed
+    drivers), then every row the user set in ``existing`` replaces its seed
     row, with the sensitivity flag re-read from the question. A user row
     whose key the library no longer carries is kept at the end and named in
     an honesty note, so a user's number is never dropped silently.
+
+    Gate S2 BC-S2-2: a kept user row that no longer applies (its fresh seed
+    is ``not_applicable`` or ``not_used_in_mvp1``) or whose fresh seed is in
+    another unit is marked ``needs_attention`` and named in a
+    ``needs_attention:<key>:<reason>`` note; it is never silently kept as
+    ``customised``. :func:`reset_rows` clears it. Rows that came with a
+    supplied tariff are re-derived from the intake, not kept.
     """
     fresh = seed_ledger(question, intake, library)
     drivers = set(key_drivers_of(question))
-    kept = {r.key: r for r in existing.rows if r.provenance != "library"}
+    kept = {r.key: r for r in existing.rows
+            if r.provenance != "library" and r.changed_at is not None}
     rows = []
+    notes = list(fresh.honesty_notes)
     for row in fresh.rows:
         user = kept.pop(row.key, None)
-        rows.append(row if user is None else user.model_copy(
-            update={"sensitivity_flag": row.key in drivers}))
-    notes = list(fresh.honesty_notes)
+        if user is None:
+            rows.append(row)
+            continue
+        reason = None
+        if row.value is None and row.unavailable.get("value") in _NOT_EDITABLE:
+            reason = row.unavailable["value"]
+        elif row.unit != user.unit:
+            reason = f"unit_changed_{user.unit}_to_{row.unit}"
+        status = "needs_attention" if reason else "customised"
+        if reason:
+            notes.append(f"{_ATTENTION}{row.key}:{reason}")
+        rows.append(user.model_copy(
+            update={"sensitivity_flag": row.key in drivers, "status": status}))
     for key, user in kept.items():
         rows.append(user.model_copy(update={"sensitivity_flag": key in drivers}))
         notes.append(f"user_row_not_in_library:{key}")
     return refresh_derived(fresh.model_copy(
         update={"rows": rows, "honesty_notes": tuple(notes)}))
+
+
+def reset_rows(ledger: AssumptionsLedger, keys: Iterable[str],
+               question: DecisionQuestion | Iterable[str],
+               intake: Mapping[str, Any] | None,
+               library: Library) -> AssumptionsLedger:
+    """
+    Put rows back to their fresh seed (library and intake), dropping the
+    user's value and any ``needs_attention`` note. A user row the seed no
+    longer carries is removed. An unknown key is refused.
+    """
+    fresh = {r.key: r for r in seed_ledger(question, intake, library).rows}
+    keys = list(keys)
+    present = {r.key for r in ledger.rows}
+    for key in keys:
+        if key not in present:
+            raise LedgerEditError(f"{key}: no such ledger row")
+    drivers = set(key_drivers_of(question))
+    rows = []
+    for row in ledger.rows:
+        if row.key not in keys:
+            rows.append(row)
+        elif row.key in fresh:
+            rows.append(fresh[row.key].model_copy(
+                update={"sensitivity_flag": row.key in drivers}))
+    notes = tuple(n for n in ledger.honesty_notes
+                  if not any(n.startswith(f"{_ATTENTION}{k}:") for k in keys))
+    return refresh_derived(ledger.model_copy(
+        update={"rows": rows, "honesty_notes": notes}))
+
+
+_STUDY_YEAR_NOTE = "study_currency_year_"
+
+
+def with_study_currency_year(ledger: AssumptionsLedger,
+                             study_year: int | None) -> AssumptionsLedger:
+    """
+    Gate S2 BC-S2-4: name a study currency year that differs from the year
+    of the ledger's money rows (recognised by a currency unit, ``EUR/...``).
+    Nothing is converted. Idempotent; a matching or unset year leaves no note.
+    """
+    notes = [n for n in ledger.honesty_notes if not n.startswith(_STUDY_YEAR_NOTE)]
+    years = sorted({r.currency_year for r in ledger.rows
+                    if r.currency_year is not None and r.unit.startswith("EUR")})
+    if study_year is not None and years and years != [study_year]:
+        notes.append(f"{_STUDY_YEAR_NOTE}{study_year}_differs_from_ledger_"
+                     f"{'_'.join(map(str, years))}_nothing_converted")
+    return ledger.model_copy(update={"honesty_notes": tuple(notes)})
 
 
 def diff_against_defaults(ledger: AssumptionsLedger,
@@ -248,6 +369,12 @@ def maturity_from_ledger(ledger: AssumptionsLedger,
     A key driver the tariff makes inapplicable (value ``None`` flagged
     ``not_applicable``, e.g. the demand charge of a tariff without one) is
     not a default the user could customise, so it does not hold the badge.
+
+    Gate S2 BC-S2-1: the tariff row holds the badge at screening unless the
+    tariff is one the user supplied (``provenance`` ``user``, ``imported`` or
+    ``measured``, never ``library``) and is not marked ``illustrative``;
+    the reason reads ``"tariff: <tariff_id> (<source>, <provenance>)"``.
+    Re-entering a seed tariff's prices does not make it the user's.
     """
     drivers = key_driver_rows(ledger)
     reasons: list[str] = []
@@ -259,6 +386,12 @@ def maturity_from_ledger(ledger: AssumptionsLedger,
             continue
         if not _established(row):
             reasons.append(f"{row.key}: {row.status} ({row.provenance})")
+    tariffs = [r for r in ledger.rows if r.key == "tariff"]
+    if not tariffs:
+        reasons.append("tariff: the ledger names no tariff (re-seed it)")
+    for t in tariffs:
+        if t.provenance == "library" or t.source.strip().lower() == "illustrative":
+            reasons.append(f"tariff: {t.technical_name} ({t.source}, {t.provenance})")
     if load != "uploaded":
         reasons.append(f"load: {load} (upload metered load to raise maturity)")
     cls = "screening" if reasons else "feasibility"
@@ -271,12 +404,12 @@ def maturity_from_ledger(ledger: AssumptionsLedger,
 CSV_COLUMNS = (
     "key", "label", "technical_name", "value", "unit", "basis",
     "currency_year", "source", "source_year", "source_url", "range_low",
-    "range_high", "range_source", "provenance", "status", "sensitivity_flag",
+    "range_high", "range_source", "domain", "provenance", "status", "sensitivity_flag",
     "changed_by", "changed_at", "unavailable",
 )
 _TEXT_COLUMNS = frozenset({
     "key", "label", "technical_name", "unit", "basis", "source", "source_url",
-    "range_source", "provenance", "status", "changed_by", "unavailable",
+    "range_source", "domain", "provenance", "status", "changed_by", "unavailable",
 })
 # A spreadsheet evaluates a cell that starts with one of these as a formula
 # (OWASP "CSV injection"). The backend has no shared CSV writer that guards
@@ -313,6 +446,7 @@ def ledger_to_csv(ledger: AssumptionsLedger) -> str:
             "range_low": _num(r.range.low if r.range else None),
             "range_high": _num(r.range.high if r.range else None),
             "range_source": (r.range.source or "") if r.range else "",
+            "domain": str(r.domain) if r.domain else "",
             "provenance": r.provenance, "status": r.status,
             "sensitivity_flag": "true" if r.sensitivity_flag else "false",
             "changed_by": r.changed_by or "",
@@ -366,6 +500,7 @@ def ledger_rows_from_csv(text: str) -> list[LedgerRow]:
                 source_url=cell["source_url"] or None,
                 range=None if low is None and high is None else LedgerRange(
                     low=low, high=high, source=cell["range_source"] or None),
+                domain=LedgerDomain.parse(cell["domain"]) if cell["domain"] else None,
                 provenance=cell["provenance"], status=cell["status"],
                 sensitivity_flag=cell["sensitivity_flag"].lower() == "true",
                 changed_by=cell["changed_by"] or None,

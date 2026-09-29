@@ -34,6 +34,7 @@ from models.energy_hub import SectionState, SectionStatus
 
 __all__ = [
     "AssumptionsLedger", "Basis", "DecisionQuestion", "DecisionReport",
+    "LedgerDomain",
     "DecisionStudy", "DemandCharge", "Fidelity", "Figure", "FinancialBasis",
     "Findings", "InvestmentCase", "LedgerRow", "OptionResult", "OptionSpec",
     "Perspective", "SectionState", "SectionStatus", "StudyMaturity", "Tariff",
@@ -210,6 +211,64 @@ class LedgerRange(_Model):
         return self
 
 
+_DOMAIN_RE = re.compile(
+    r"^\s*([\[(])\s*(-inf|[-+0-9.eE]+)\s*,\s*(inf|[-+0-9.eE]+)\s*([\])])\s*$")
+
+
+def _fmt_bound(v: float) -> str:
+    return str(int(v)) if float(v).is_integer() else repr(float(v))
+
+
+class LedgerDomain(_Model):
+    """
+    The physical domain of a ledger value, as an interval (gate S2 BC-S2-3):
+    an efficiency is in ``(0, 1]``, a cost in ``[0, inf)``, a lifetime in
+    ``[1, inf)``. ``None`` is an unbounded end. Written and parsed in
+    interval notation (``str(domain)``, :meth:`parse`), so the library CSV
+    carries the rule as data.
+    """
+
+    low: float | None = None
+    high: float | None = None
+    low_open: bool = False
+    high_open: bool = False
+
+    @model_validator(mode="after")
+    def _unbounded_ends_are_open(self):
+        # One spelling per interval, so a parsed domain equals the built one.
+        if self.low is None:
+            self.low_open = True
+        if self.high is None:
+            self.high_open = True
+        if self.low is not None and self.high is not None and self.low > self.high:
+            raise ValueError(f"domain low {self.low} > high {self.high}")
+        return self
+
+    def contains(self, value: float) -> bool:
+        if self.low is not None and (value <= self.low if self.low_open else value < self.low):
+            return False
+        if self.high is not None and (value >= self.high if self.high_open else value > self.high):
+            return False
+        return True
+
+    def __str__(self) -> str:
+        lo = "(-inf" if self.low is None else (
+            ("(" if self.low_open else "[") + _fmt_bound(self.low))
+        hi = "inf)" if self.high is None else (
+            _fmt_bound(self.high) + (")" if self.high_open else "]"))
+        return f"{lo}, {hi}"
+
+    @classmethod
+    def parse(cls, text: str) -> LedgerDomain:
+        m = _DOMAIN_RE.match(text or "")
+        if not m:
+            raise ValueError(f"{text!r} is not an interval such as '(0, 1]'")
+        lb, lo, hi, hb = m.groups()
+        return cls(low=None if lo == "-inf" else float(lo),
+                   high=None if hi == "inf" else float(hi),
+                   low_open=lb == "(", high_open=hb == ")")
+
+
 class LedgerRow(_FigureBlock):
     _figure_fields: ClassVar[tuple[str, ...]] = ("value",)
 
@@ -219,8 +278,10 @@ class LedgerRow(_FigureBlock):
     value: float | None
     unit: str
     basis: Basis = Basis.real
-    # The year the money value is expressed in (review v1 N10). None only for
-    # a row that is not a money value (hours, a share, a lifetime).
+    # The year the money value is expressed in (review v1 N10). S2 also sets
+    # it on rows that scale or discount money (a price multiplier, the real
+    # discount rate) and keeps the source's year on lifetimes and
+    # efficiencies; a money row is recognised by its unit, not by this field.
     currency_year: int | None = None
     source: str
     source_year: int | None = None
@@ -231,6 +292,17 @@ class LedgerRow(_FigureBlock):
     sensitivity_flag: bool = False
     changed_by: str | None = None
     changed_at: datetime | None = None
+    # S2 (gate BC-S2-3): the value's physical domain; a value outside it is
+    # refused here and, with the row named, by `ledger.apply_user_row`.
+    domain: LedgerDomain | None = None
+
+    @model_validator(mode="after")
+    def _value_in_domain(self):
+        if (self.domain is not None and self.value is not None
+                and not self.domain.contains(self.value)):
+            raise ValueError(
+                f"{self.key}: {self.value} is outside its domain {self.domain}")
+        return self
 
 
 class AssumptionsLedger(_Model):

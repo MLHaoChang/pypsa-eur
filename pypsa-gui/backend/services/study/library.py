@@ -38,6 +38,7 @@ import yaml
 from models.study import (
     AssumptionsLedger,
     DecisionQuestion,
+    LedgerDomain,
     LedgerRange,
     LedgerRow,
     Tariff,
@@ -63,7 +64,7 @@ BESS_KEY_DRIVERS: tuple[str, ...] = (
 TECH_COLUMNS = (
     "technology", "parameter", "value", "unit", "basis", "currency_year",
     "source", "source_year", "source_url", "range_low", "range_high",
-    "range_source", "note",
+    "range_source", "domain", "projection_year", "note",
 )
 TARIFF_COLUMNS = (
     "tariff_id", "name", "source", "source_year", "currency", "currency_year",
@@ -156,6 +157,10 @@ class TechnologyRow:
     range_high: float | None
     range_source: str | None
     note: str
+    # Gate S2: the physical domain (BC-S2-3) and the year technology-data
+    # projected the cost for (BC-S2-5; `costs_2030.csv` rows are 2030).
+    domain: LedgerDomain | None = None
+    projection_year: int | None = None
 
 
 @dataclass(frozen=True)
@@ -216,6 +221,13 @@ def _parse_technology(path: pathlib.Path) -> tuple[TechnologyRow, ...]:
         high = _opt_float(raw["range_high"], where)
         if (low is None) != (high is None):
             raise LibraryError(f"{where}: {key} has half a range")
+        try:
+            domain = LedgerDomain.parse(raw["domain"])
+        except ValueError as exc:
+            raise LibraryError(f"{where}: {key} domain: {exc}") from None
+        for label_, v in (("value", value), ("range_low", low), ("range_high", high)):
+            if v is not None and not domain.contains(v):
+                raise LibraryError(f"{where}: {key} {label_} {v} is outside {domain}")
         out.append(TechnologyRow(
             key=key, label=label, technical_name=technical,
             technology=ident[0], parameter=ident[1], value=value,
@@ -226,6 +238,8 @@ def _parse_technology(path: pathlib.Path) -> tuple[TechnologyRow, ...]:
             source_url=raw["source_url"].strip() or None,
             range_low=low, range_high=high,
             range_source=raw["range_source"].strip() or None, note=note,
+            domain=domain,
+            projection_year=_opt_int(raw["projection_year"], where),
         ))
     by_key = {r.key: r for r in out}
     if len(by_key) != len(out):
@@ -367,8 +381,10 @@ def _assumed_30(value: float) -> LedgerRange:
 
 
 def _tech_row(r: TechnologyRow) -> dict[str, Any]:
+    # BC-S2-5: a 2030 projection says so wherever the label is shown.
+    label = f"{r.label} ({r.projection_year} projection)" if r.projection_year else r.label
     row: dict[str, Any] = dict(
-        key=r.key, label=r.label, technical_name=r.technical_name,
+        key=r.key, label=label, technical_name=r.technical_name, domain=r.domain,
         value=r.value, unit=r.unit, basis=r.basis,
         currency_year=r.currency_year, source=r.source,
         source_year=r.source_year, source_url=r.source_url,
@@ -379,34 +395,72 @@ def _tech_row(r: TechnologyRow) -> dict[str, Any]:
     return row
 
 
-def _intake_tariff(intake: Mapping[str, Any], library: Library) -> Tariff:
+_TARIFF_PROVENANCES = frozenset({"user", "imported"})
+
+
+def _intake_tariff(intake: Mapping[str, Any], library: Library) -> tuple[Tariff, str]:
+    """
+    The study's tariff and where it came from: ``library`` for a seed tariff
+    chosen by id (or the library default when none is chosen), ``user`` (or
+    ``imported``) for one the intake supplies as ``{"custom": {...}}``.
+    """
     chosen = (intake.get("tariff") or {}) if isinstance(intake, Mapping) else {}
-    tid = chosen.get("tariff_id") if isinstance(chosen, Mapping) else None
+    if not isinstance(chosen, Mapping):
+        raise LibraryError("intake tariff must be an object")
+    tid, custom = chosen.get("tariff_id"), chosen.get("custom")
+    if tid is not None and custom is not None:
+        raise LibraryError("intake tariff names a library tariff_id AND a custom "
+                           "tariff; give one")
+    if custom is not None:
+        provenance = chosen.get("provenance", "user")
+        if provenance not in _TARIFF_PROVENANCES:
+            raise LibraryError(f"a supplied tariff's provenance is user or imported, "
+                               f"not {provenance!r}")
+        try:
+            return Tariff.model_validate(custom), provenance
+        except ValueError as exc:
+            raise LibraryError(f"intake custom tariff: {exc}") from None
     if tid is None:
-        return library.tariffs[library.default_tariff_id]
+        return library.tariffs[library.default_tariff_id], "library"
     if tid not in library.tariffs:
         raise LibraryError(
             f"intake tariff {tid!r} is not in the library "
             f"({sorted(library.tariffs)})")
-    return library.tariffs[tid]
+    return library.tariffs[tid], "library"
 
 
-def _tariff_rows(tariff: Tariff) -> list[dict[str, Any]]:
+def _tariff_rows(tariff: Tariff, provenance: str) -> list[dict[str, Any]]:
+    """
+    The tariff's ledger rows: a descriptor row ``tariff`` that records which
+    tariff the study prices with and where it came from (the maturity badge
+    reads it; gate S2 BC-S2-1), and the two key-driver rows it sets. On a
+    tariff the user supplied, those prices are the user's own figures.
+    """
     tariff_source = f"Tariff {tariff.name!r} ({tariff.source})"
+    supplied = provenance != "library"
+    who = {"provenance": provenance, "status": "customised" if supplied else "default"}
+    descriptor = dict(
+        key="tariff", label=f"Tariff: {tariff.name}", technical_name=tariff.tariff_id,
+        # Not a number: the tariff is chosen or supplied at the tariff step,
+        # never typed into the ledger (`ledger.apply_user_row` refuses it).
+        value=None, unavailable={"value": "tariff_descriptor"}, unit="tariff",
+        currency_year=tariff.currency_year, source=tariff.source,
+        source_year=tariff.source_year, **who,
+    )
     dc = tariff.demand_charge
     demand: dict[str, Any] = dict(
         key="demand_charge_price", label="Demand charge on peak import",
         technical_name="SolverConfig.demand_charge.price_per_mw_per_period",
         unit=f"{tariff.currency}/MW/{tariff.billing_period}",
         currency_year=tariff.currency_year, source=tariff_source,
-        source_year=tariff.source_year,
+        source_year=tariff.source_year, domain=LedgerDomain(low=0.0),
     )
     if dc is None:
-        demand.update(value=None, range=None,
+        demand.update(value=None, range=None, provenance=provenance, status="default",
                       unavailable={"value": "not_applicable"})
     else:
         demand.update(value=dc.price_per_mw_per_period,
-                      range=_assumed_30(dc.price_per_mw_per_period))
+                      range=_assumed_30(dc.price_per_mw_per_period), **who)
     level = dict(
         key="energy_price_level", label="Energy price level (multiplier on the tariff's bands)",
         technical_name="links_t.marginal_cost scale on grid_import",
@@ -414,8 +468,9 @@ def _tariff_rows(tariff: Tariff) -> list[dict[str, Any]]:
         # The multiplier scales the tariff's prices, so it carries their year.
         currency_year=tariff.currency_year, source=tariff_source,
         source_year=tariff.source_year, range=_assumed_30(1.0),
+        domain=LedgerDomain(low=0.0, low_open=True), **who,
     )
-    return [demand, level]
+    return [descriptor, demand, level]
 
 
 def _finance_rows(library: Library) -> list[dict[str, Any]]:
@@ -430,6 +485,7 @@ def _finance_rows(library: Library) -> list[dict[str, Any]]:
         source=dr["source"], source_year=int(dr["source_year"]),
         source_url=dr.get("source_url"),
         range=_range(rng.get("low"), rng.get("high"), rng.get("source")),
+        domain=LedgerDomain.parse(dr["domain"]),
     )]
 
 
@@ -437,22 +493,30 @@ def seed_ledger(question: DecisionQuestion | Iterable[str],
                 intake: Mapping[str, Any] | None,
                 library: Library) -> AssumptionsLedger:
     """
-    A fresh ledger from the library and the intake: every row
+    A fresh ledger from the library and the intake: every library row
     ``provenance=library, status=default``, ``sensitivity_flag`` on the
     question's key drivers. ``question`` is a :class:`DecisionQuestion` or,
     until S4 ships the template, the key-driver list itself.
 
-    The tariff rows follow ``intake["tariff"]["tariff_id"]`` (the library's
-    first tariff when none is chosen). A key driver that no row carries is
-    recorded as an honesty note, never silently dropped.
+    The tariff rows follow ``intake["tariff"]``: ``{"tariff_id": ...}`` picks a
+    library seed (the library's first tariff when none is chosen), and
+    ``{"custom": {...}}`` is a tariff the user supplied, whose rows carry
+    ``provenance=user`` (or ``imported``) rather than ``library``. A key
+    driver that no row carries is recorded as an honesty note, never
+    silently dropped.
     """
     drivers = set(key_drivers_of(question))
-    tariff = _intake_tariff(intake or {}, library)
+    tariff, tariff_provenance = _intake_tariff(intake or {}, library)
     raw = ([_tech_row(r) for r in library.technology]
-           + _tariff_rows(tariff) + _finance_rows(library))
-    rows = [LedgerRow(**r, provenance="library", status="default",
+           + _tariff_rows(tariff, tariff_provenance) + _finance_rows(library))
+    rows = [LedgerRow(**{"provenance": "library", "status": "default", **r},
                       sensitivity_flag=r["key"] in drivers) for r in raw]
     notes: list[str] = []
+    # BC-S2-5: the vintage of the technology costs, so a reader in 2026 is
+    # not told these are current prices.
+    for proj, cy in sorted({(r.projection_year, r.currency_year) for r in library.technology
+                            if r.projection_year is not None}):
+        notes.append(f"technology_costs_are_{proj}_projections_in_{cy}_eur")
     missing = sorted(drivers - {r.key for r in rows})
     if missing:
         notes.append("key_drivers_without_a_row:" + ",".join(missing))

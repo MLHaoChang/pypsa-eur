@@ -360,13 +360,16 @@ class LedgerPut(BaseModel):
     ``rows`` are applied in order over the stored ledger (seeded first when
     there is none). ``reseed`` first re-seeds: library rows refreshed from
     the library and the current intake (e.g. a newly chosen tariff), user
-    rows kept.
+    rows kept, and a user row that no longer applies flagged
+    ``needs_attention``. ``reset`` (after the re-seed, before the edits)
+    puts the named rows back to their seed, which clears that flag.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     rows: list[LedgerEdit] = Field(default_factory=list, max_length=200)
     reseed: bool = False
+    reset: list[str] = Field(default_factory=list, max_length=200)
 
 
 def _key_drivers(study: DecisionStudy) -> tuple[str, ...]:
@@ -384,15 +387,18 @@ def _library_or_500() -> study_library.Library:
 
 
 def _current_ledger(study: DecisionStudy):
-    """(ledger, stored): the stored ledger, or a fresh in-memory seed."""
+    """
+    (ledger, stored): the stored ledger, or a fresh in-memory seed; either
+    names a study currency year that differs from the ledger's (BC-S2-4).
+    """
     if study.ledger is not None:
-        return study.ledger, True
+        return study_ledger.with_study_currency_year(study.ledger, study.currency_year), True
     try:
         seeded = study_library.seed_ledger(_key_drivers(study), study.intake,
                                            _library_or_500())
     except study_library.LibraryError as exc:
         raise HTTPException(422, str(exc)) from None
-    return seeded, False
+    return study_ledger.with_study_currency_year(seeded, study.currency_year), False
 
 
 def _ledger_out(study: DecisionStudy, ledger, stored: bool, maturity=None) -> dict:
@@ -429,6 +435,11 @@ def put_ledger(study_id: str, body: LedgerPut,
             if body.reseed:
                 ledger = study_ledger.reseed_ledger(
                     ledger, _key_drivers(study), study.intake, _library_or_500())
+            if body.reset:
+                ledger = study_ledger.reset_rows(
+                    ledger, body.reset, _key_drivers(study), study.intake,
+                    _library_or_500())
+            ledger = study_ledger.with_study_currency_year(ledger, study.currency_year)
             now = _now()
             changed_by = str(user.id) if user is not None else None
             for edit in body.rows:

@@ -32,14 +32,16 @@ discount_rate:
   basis: real
   source: >-
     PyPSA-Eur v2026.02.0 config/config.default.yaml, costs.fill_values
-    'discount rate' (the default rate PyPSA-Eur annualises technology-data
-    costs with)
+    'discount rate' (the fill-in rate for technologies whose technology-data
+    row carries no discount rate of its own)
   source_year: 2026
   source_url: https://github.com/PyPSA/pypsa-eur/blob/v2026.02.0/config/config.default.yaml
   range:
     low: 0.049
     high: 0.091
     source: assumed
+  # The physical domain of a real rate a user may enter (gate S2 BC-S2-3).
+  domain: "[0, 1)"
 
 # Two lifetimes, one StorageUnit (plan S2): the pro forma horizon is the
 # storage block's lifetime, and the inverter is replaced every inverter

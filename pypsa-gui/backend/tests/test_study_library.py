@@ -41,9 +41,29 @@ def library():
     return lib.load_library()
 
 
+# A tariff the user supplied (their own bill), as the intake carries it. The
+# illustrative library tariffs never establish a study beyond screening
+# (gate S2, BC-S2-1); this one can.
+USER_TARIFF = {
+    "tariff_id": "site_a_contract", "name": "Site A supply contract",
+    "source": "Site A electricity bill, August 2026", "source_year": 2026,
+    "currency": "EUR", "currency_year": 2020, "billing_period": "month",
+    "energy_bands": [{"label": "all hours", "price_per_mwh": 125.0}],
+    "demand_charge": {"price_per_mw_per_period": 7000.0},
+    "export": {"price_per_mwh": 35.0},
+}
+USER_INTAKE = {"tariff": {"custom": USER_TARIFF}}
+
+
 @pytest.fixture
 def seeded(library):
     return lib.seed_ledger(KEY_DRIVERS, {}, library)
+
+
+@pytest.fixture
+def seeded_user(library):
+    """Seeded on a tariff the user supplied."""
+    return lib.seed_ledger(KEY_DRIVERS, USER_INTAKE, library)
 
 
 def _row(ledger: AssumptionsLedger, key: str):
@@ -54,7 +74,9 @@ def _row(ledger: AssumptionsLedger, key: str):
 def _customise_key_drivers(ledger, *, provenance="user"):
     for key in KEY_DRIVERS:
         row = _row(ledger, key)
-        value = row.value if row.value is not None else 1.0
+        if row.value is None:  # not applicable under this tariff: not editable
+            continue
+        value = row.value
         ledger = L.apply_user_row(ledger, key, value * 1.1, unit=row.unit,
                                   changed_by="u1", changed_at=NOW,
                                   provenance=provenance)
@@ -331,8 +353,9 @@ def test_a_seeded_ledger_is_screening_and_names_every_row_holding_it(seeded):
     assert any(r.startswith("load:") for r in m.reasons), m.reasons
 
 
-def test_maturity_moves_to_feasibility_when_key_rows_are_customised_and_load_uploaded(seeded):
-    led = _customise_key_drivers(seeded)
+def test_maturity_moves_to_feasibility_when_key_rows_are_customised_and_load_uploaded(
+        seeded_user):
+    led = _customise_key_drivers(seeded_user)
     m = L.maturity_from_ledger(led, L.load_provenance({"load": {"source": "upload"}}))
     assert m.class_ == "feasibility", m.reasons
     assert (m.accuracy_band.low_pct, m.accuracy_band.high_pct) == (-30.0, 50.0)
@@ -340,17 +363,17 @@ def test_maturity_moves_to_feasibility_when_key_rows_are_customised_and_load_upl
     assert m.reasons == []
 
 
-def test_a_synthetic_load_keeps_a_customised_ledger_at_screening(seeded):
-    led = _customise_key_drivers(seeded)
+def test_a_synthetic_load_keeps_a_customised_ledger_at_screening(seeded_user):
+    led = _customise_key_drivers(seeded_user)
     for intake in ({"load": {"source": "sector_profile"}}, {}):
         m = L.maturity_from_ledger(led, L.load_provenance(intake))
         assert m.class_ == "screening", intake
         assert len(m.reasons) == 1 and m.reasons[0].startswith("load:"), m.reasons
 
 
-def test_one_default_key_row_keeps_it_at_screening_and_is_named(seeded):
-    led = _customise_key_drivers(seeded)
-    led = L.reseed_ledger(led, KEY_DRIVERS, {}, lib.load_library())  # no-op for user rows
+def test_one_default_key_row_keeps_it_at_screening_and_is_named(seeded_user):
+    led = _customise_key_drivers(seeded_user)
+    led = L.reseed_ledger(led, KEY_DRIVERS, USER_INTAKE, lib.load_library())  # no-op for user rows
     led = led.model_copy(update={"rows": [
         r.model_copy(update={"provenance": "library", "status": "default"})
         if r.key == "discount_rate" else r for r in led.rows]})
@@ -359,14 +382,22 @@ def test_one_default_key_row_keeps_it_at_screening_and_is_named(seeded):
     assert m.reasons == ["discount_rate: default (library)"]
 
 
-def test_measured_rows_count_as_established(seeded):
-    led = _customise_key_drivers(seeded, provenance="measured")
+def test_measured_rows_count_as_established(seeded_user):
+    """
+    A measured row counts even at status `default` (gate S2 N8: the earlier
+    version also set `customised`, so it passed without the measured clause).
+    """
+    led = _customise_key_drivers(seeded_user, provenance="measured")
+    led = led.model_copy(update={"rows": [
+        r.model_copy(update={"status": "default"}) if r.key in KEY_DRIVERS else r
+        for r in led.rows]})
     assert {_row(led, k).provenance for k in KEY_DRIVERS} == {"measured"}
+    assert {_row(led, k).status for k in KEY_DRIVERS} == {"default"}
     assert L.maturity_from_ledger(led, "uploaded").class_ == "feasibility"
 
 
-def test_a_needs_attention_key_row_keeps_it_at_screening(seeded):
-    led = _customise_key_drivers(seeded)
+def test_a_needs_attention_key_row_keeps_it_at_screening(seeded_user):
+    led = _customise_key_drivers(seeded_user)
     led = led.model_copy(update={"rows": [
         r.model_copy(update={"status": "needs_attention"})
         if r.key == "energy_price_level" else r for r in led.rows]})
@@ -380,6 +411,203 @@ def test_a_ledger_without_key_drivers_is_never_feasibility(library):
     m = L.maturity_from_ledger(led, "uploaded")
     assert m.class_ == "screening"
     assert m.reasons and "key driver" in m.reasons[0]
+
+
+# ── gate S2 binding conditions ───────────────────────────────────────────
+
+# BC-S2-1: an illustrative tariff holds the badge at screening.
+
+@pytest.mark.parametrize("tariff_id", ["de_industrial_illustrative",
+                                       "tou_reference_illustrative"])
+def test_an_illustrative_tariff_holds_the_badge_at_screening(library, tariff_id):
+    """
+    Every key driver re-entered (so `customised`) and the load uploaded: the
+    library's illustrative tariff still keeps the study at screening, and the
+    tariff row is the one reason.
+    """
+    led = lib.seed_ledger(KEY_DRIVERS, {"tariff": {"tariff_id": tariff_id}}, library)
+    led = _customise_key_drivers(led)
+    m = L.maturity_from_ledger(led, "uploaded")
+    assert m.class_ == "screening"
+    assert m.reasons == [f"tariff: {tariff_id} (illustrative, library)"]
+
+
+def test_the_tariff_row_records_where_the_tariff_came_from(library, seeded, seeded_user):
+    lib_row, user_row = _row(seeded, "tariff"), _row(seeded_user, "tariff")
+    assert (lib_row.provenance, lib_row.source) == ("library", "illustrative")
+    assert lib_row.technical_name == "de_industrial_illustrative"
+    assert user_row.provenance == "user"
+    assert user_row.source == USER_TARIFF["source"]
+    imported = lib.seed_ledger(
+        KEY_DRIVERS, {"tariff": {"custom": USER_TARIFF, "provenance": "imported"}}, library)
+    assert _row(imported, "tariff").provenance == "imported"
+    # The prices a user tariff carries are the user's, not library defaults.
+    dc = _row(seeded_user, "demand_charge_price")
+    assert (dc.value, dc.provenance, dc.status) == (7000.0, "user", "customised")
+
+
+def test_the_tariff_row_cannot_be_typed_over(seeded):
+    """Re-entering an illustrative tariff by hand does not make it the user's."""
+    with pytest.raises(L.LedgerEditError, match="tariff"):
+        L.apply_user_row(seeded, "tariff", 1.0, unit="tariff",
+                         changed_by="u1", changed_at=NOW)
+
+
+def test_a_user_tariff_reaches_feasibility(seeded_user):
+    m = L.maturity_from_ledger(_customise_key_drivers(seeded_user), "uploaded")
+    assert m.class_ == "feasibility", m.reasons
+
+
+def test_a_not_applicable_demand_charge_does_not_hold_the_badge(library):
+    """
+    Gate S2 [S7]: a user tariff with no demand charge leaves
+    `demand_charge_price` null and flagged `not_applicable`; that row is not a
+    default the user could customise, so it must not hold the badge.
+    """
+    no_dc = {**USER_TARIFF, "demand_charge": None}
+    led = lib.seed_ledger(KEY_DRIVERS, {"tariff": {"custom": no_dc}}, library)
+    assert _row(led, "demand_charge_price").unavailable == {"value": "not_applicable"}
+    m = L.maturity_from_ledger(_customise_key_drivers(led), "uploaded")
+    assert m.class_ == "feasibility", m.reasons
+
+
+# BC-S2-2: edits to unused or inapplicable rows are refused; re-seed flags.
+
+def test_an_edit_to_a_row_not_used_in_mvp1_is_refused(seeded):
+    key = "battery_storage_degradation_calendar_pct_per_year"
+    with pytest.raises(L.LedgerEditError, match=f"{key}.*not_used_in_mvp1"):
+        L.apply_user_row(seeded, key, 2.0, unit="%/year", changed_by="u1",
+                         changed_at=NOW)
+
+
+def test_a_demand_charge_edit_on_a_tariff_without_one_is_refused(library):
+    led = lib.seed_ledger(KEY_DRIVERS, {"tariff": {"tariff_id": "tou_reference_illustrative"}},
+                          library)
+    with pytest.raises(L.LedgerEditError,
+                       match="demand_charge_price.*no demand charge"):
+        L.apply_user_row(led, "demand_charge_price", 5000.0, unit="EUR/MW/month",
+                         changed_by="u1", changed_at=NOW)
+
+
+def test_reseed_flags_a_user_row_the_new_tariff_makes_inapplicable(library, seeded):
+    led = L.apply_user_row(seeded, "demand_charge_price", 8000.0, unit="EUR/MW/month",
+                           changed_by="u1", changed_at=NOW)
+    again = L.reseed_ledger(led, KEY_DRIVERS,
+                            {"tariff": {"tariff_id": "tou_reference_illustrative"}}, library)
+    row = _row(again, "demand_charge_price")
+    assert (row.value, row.provenance, row.status) == (8000.0, "user", "needs_attention")
+    assert any("demand_charge_price" in n and "not_applicable" in n
+               for n in again.honesty_notes), again.honesty_notes
+    assert "demand_charge_price: needs_attention (user)" in \
+        L.maturity_from_ledger(again, "uploaded").reasons
+    # Not silently re-customisable: it must be reset first.
+    with pytest.raises(L.LedgerEditError, match="demand_charge_price.*reset"):
+        L.apply_user_row(again, "demand_charge_price", 9000.0, unit="EUR/MW/month",
+                         changed_by="u1", changed_at=NOW)
+
+
+def test_reseed_flags_a_user_row_whose_unit_changed(library, seeded):
+    led = L.apply_user_row(seeded, "battery_storage_eur_per_kwh", 150.0, unit="EUR/kWh",
+                           changed_by="u1", changed_at=NOW)
+    newer = dataclasses.replace(library, technology=tuple(
+        dataclasses.replace(r, unit="EUR/MWh", value=r.value * 1000,
+                            range_low=r.range_low * 1000, range_high=r.range_high * 1000)
+        if r.key == "battery_storage_eur_per_kwh" else r for r in library.technology))
+    again = L.reseed_ledger(led, KEY_DRIVERS, {}, newer)
+    row = _row(again, "battery_storage_eur_per_kwh")
+    assert (row.value, row.unit, row.status) == (150.0, "EUR/kWh", "needs_attention")
+    assert any("battery_storage_eur_per_kwh" in n and "unit" in n
+               for n in again.honesty_notes), again.honesty_notes
+
+
+def test_reset_puts_the_seed_row_back(library, seeded):
+    led = L.apply_user_row(seeded, "demand_charge_price", 8000.0, unit="EUR/MW/month",
+                           changed_by="u1", changed_at=NOW)
+    tou = {"tariff": {"tariff_id": "tou_reference_illustrative"}}
+    again = L.reseed_ledger(led, KEY_DRIVERS, tou, library)
+    back = L.reset_rows(again, ["demand_charge_price"], KEY_DRIVERS, tou, library)
+    row = _row(back, "demand_charge_price")
+    assert (row.value, row.provenance, row.status) == (None, "library", "default")
+    with pytest.raises(L.LedgerEditError, match="no_such_key"):
+        L.reset_rows(again, ["no_such_key"], KEY_DRIVERS, tou, library)
+
+
+# BC-S2-3: values outside a row's physical domain are refused.
+
+@pytest.mark.parametrize("key,value,unit,domain", [
+    ("battery_inverter_efficiency", 96.0, "per unit", "(0, 1]"),
+    ("battery_inverter_efficiency", 0.0, "per unit", "(0, 1]"),
+    ("battery_round_trip_efficiency", 1.2, "per unit", "(0, 1]"),
+    ("battery_storage_lifetime_years", 0.0, "years", "[1, inf)"),
+    ("battery_inverter_lifetime_years", 0.5, "years", "[1, inf)"),
+    ("battery_storage_eur_per_kwh", -100.0, "EUR/kWh", "[0, inf)"),
+    ("battery_inverter_fom_pct_per_year", -1.0, "%/year", "[0, 100]"),
+    ("battery_inverter_fom_pct_per_year", 101.0, "%/year", "[0, 100]"),
+    ("demand_charge_price", -1.0, "EUR/MW/month", "[0, inf)"),
+    ("energy_price_level", 0.0, "multiplier", "(0, inf)"),
+    ("discount_rate", -0.5, "per unit", "[0, 1)"),
+    ("discount_rate", 1.0, "per unit", "[0, 1)"),
+])
+def test_a_value_outside_the_rows_domain_is_refused(seeded, key, value, unit, domain):
+    with pytest.raises(L.LedgerEditError) as exc:
+        L.apply_user_row(seeded, key, value, unit=unit, changed_by="u1", changed_at=NOW)
+    assert key in str(exc.value) and domain in str(exc.value), str(exc.value)
+
+
+@pytest.mark.parametrize("key,value,unit", [
+    ("battery_inverter_efficiency", 1.0, "per unit"),
+    ("discount_rate", 0.0, "per unit"),
+    ("battery_storage_lifetime_years", 1.0, "years"),
+    ("battery_storage_eur_per_kwh", 0.0, "EUR/kWh"),
+])
+def test_a_value_on_a_closed_bound_is_accepted(seeded, key, value, unit):
+    led = L.apply_user_row(seeded, key, value, unit=unit, changed_by="u1", changed_at=NOW)
+    assert _row(led, key).value == value
+
+
+def test_every_row_carries_its_domain_and_the_defaults_sit_inside(seeded, library):
+    """The domain is data on the row (the library CSV's `domain` column)."""
+    assert all(r.domain for r in library.technology), [
+        r.key for r in library.technology if not r.domain]
+    for row in seeded.rows:
+        if row.key == "tariff":
+            continue
+        assert row.domain is not None, row.key
+        if row.value is not None:
+            assert row.domain.contains(row.value), (row.key, row.value, row.domain)
+
+
+# BC-S2-4: one currency year, never mixed silently.
+
+def test_a_value_in_another_currency_year_is_refused_naming_both(seeded):
+    with pytest.raises(L.LedgerEditError) as exc:
+        L.apply_user_row(seeded, "battery_storage_eur_per_kwh", 150.0, unit="EUR/kWh",
+                         changed_by="u1", changed_at=NOW, currency_year=2026)
+    text = str(exc.value)
+    assert "battery_storage_eur_per_kwh" in text and "2026" in text and "2020" in text
+    same = L.apply_user_row(seeded, "battery_storage_eur_per_kwh", 150.0, unit="EUR/kWh",
+                            changed_by="u1", changed_at=NOW, currency_year=2020)
+    assert _row(same, "battery_storage_eur_per_kwh").currency_year == 2020
+
+
+def test_a_study_currency_year_other_than_the_ledgers_is_named(seeded):
+    noted = L.with_study_currency_year(seeded, 2026)
+    [note] = [n for n in noted.honesty_notes if "currency_year" in n and "2026" in n]
+    assert "2020" in note
+    assert L.with_study_currency_year(seeded, 2020).honesty_notes == seeded.honesty_notes
+    assert L.with_study_currency_year(seeded, None).honesty_notes == seeded.honesty_notes
+    # Idempotent: applying it twice names the mismatch once.
+    assert L.with_study_currency_year(noted, 2026).honesty_notes == noted.honesty_notes
+
+
+# BC-S2-5: the 2030 projection is labelled.
+
+def test_the_cost_rows_are_labelled_2030_projections(library, seeded):
+    sourced = [r for r in library.technology if r.value is not None]
+    assert {r.projection_year for r in sourced} == {2030}
+    assert "technology_costs_are_2030_projections_in_2020_eur" in seeded.honesty_notes
+    for r in sourced:
+        assert "(2030 projection)" in _row(seeded, r.key).label, r.key
 
 
 # ── CSV export (import is MVP-2; the reader is internal) ─────────────────

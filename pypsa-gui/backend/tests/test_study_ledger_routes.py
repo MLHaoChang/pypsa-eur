@@ -21,7 +21,8 @@ import local_mode
 from routers import studies as studies_router
 from services.study import library as lib
 from tests import test_studies_routes as _s1
-from tests.test_studies_routes import _create, _is_lock_refusal
+from tests.test_studies_routes import BODY, _create, _is_lock_refusal
+from tests.test_study_library import USER_TARIFF
 
 # The S1 route tests' fixtures, registered here under their own names.
 studies_on = _s1.studies_on
@@ -38,6 +39,11 @@ def _edits(ledger, keys=KEY_DRIVERS, factor=1.1):
     rows = {r["key"]: r for r in ledger["rows"]}
     return [{"key": k, "value": (rows[k]["value"] or 1.0) * factor,
              "unit": rows[k]["unit"]} for k in keys]
+
+
+# A study on a tariff the user supplied: the only kind that can reach
+# feasibility (gate S2, BC-S2-1).
+USER_BODY = {**BODY, "intake": {**BODY["intake"], "tariff": {"custom": USER_TARIFF}}}
 
 
 def _sidecar(project_storage_dir, name, sid):
@@ -64,7 +70,7 @@ def test_get_seeds_a_ledger_without_storing_it(client, api_project, studies_on,
 def test_put_stores_edits_and_recomputes_maturity(client, api_project, studies_on,
                                                   project_storage_dir):
     name = api_project("led-put")
-    s = _create(client, name)
+    s = _create(client, name, USER_BODY)
     sid = s["study_id"]
     seeded = client.get(_url(name, sid)).json()["ledger"]
 
@@ -100,7 +106,7 @@ def test_an_intake_patch_moves_a_stored_ledgers_maturity(client, api_project,
                                                         studies_on):
     """The badge reads the load too: uploading it moves the stored maturity."""
     name = api_project("led-patch")
-    s = _create(client, name)
+    s = _create(client, name, USER_BODY)
     sid = s["study_id"]
     seeded = client.get(_url(name, sid)).json()["ledger"]
     assert client.put(_url(name, sid), json={"rows": _edits(seeded)}).status_code == 200
@@ -211,3 +217,85 @@ def test_the_ledger_handlers_refuse_when_called_as_plain_functions(monkeypatch):
             call()
         assert exc.value.status_code == 404, label
         assert exc.value.detail["code"] == "decision_studies_unavailable", label
+
+
+# ── gate S2 binding conditions, through the routes ────────────────────────
+
+def test_an_illustrative_tariff_keeps_the_route_badge_at_screening(client, api_project,
+                                                                   studies_on):
+    """BC-S2-1: every key driver re-entered and the load uploaded, on the seed tariff."""
+    name = api_project("led-illus")
+    sid = _create(client, name)["study_id"]
+    client.patch(f"/api/projects/{name}/studies/{sid}",
+                 json={"step": "load", "intake": {"load": {"source": "upload"}}})
+    seeded = client.get(_url(name, sid)).json()["ledger"]
+    r = client.put(_url(name, sid), json={"rows": _edits(seeded, factor=1.0)})
+    assert r.status_code == 200, r.text
+    assert r.json()["maturity"]["class"] == "screening"
+    assert r.json()["maturity"]["reasons"] == [
+        "tariff: de_industrial_illustrative (illustrative, library)"]
+
+
+@pytest.mark.parametrize("edit,needles", [
+    # BC-S2-2: a row MVP-1 does not use.
+    ({"key": "battery_storage_degradation_calendar_pct_per_year", "value": 2.0,
+      "unit": "%/year"}, ["battery_storage_degradation_calendar_pct_per_year",
+                         "not_used_in_mvp1"]),
+    # BC-S2-3: outside the physical domain.
+    ({"key": "battery_inverter_efficiency", "value": 96.0, "unit": "per unit"},
+     ["battery_inverter_efficiency", "(0, 1]"]),
+    # BC-S2-4: another currency year.
+    ({"key": "battery_storage_eur_per_kwh", "value": 150.0, "unit": "EUR/kWh",
+      "currency_year": 2026}, ["battery_storage_eur_per_kwh", "2026", "2020"]),
+])
+def test_put_refuses_and_names_the_row_and_the_reason(client, api_project, studies_on,
+                                                      project_storage_dir, edit, needles):
+    name = api_project("led-refuse")
+    sid = _create(client, name)["study_id"]
+    before = _sidecar(project_storage_dir, name, sid)
+    r = client.put(_url(name, sid), json={"rows": [edit]})
+    assert r.status_code == 422, r.text
+    for needle in needles:
+        assert needle in r.json()["detail"], (needle, r.text)
+    assert _sidecar(project_storage_dir, name, sid) == before
+
+
+def test_put_refuses_a_demand_charge_on_a_tariff_without_one_and_reset_restores(
+        client, api_project, studies_on):
+    """BC-S2-2 through the route, and the `reset` that clears a flagged row."""
+    name = api_project("led-tou")
+    sid = _create(client, name)["study_id"]
+    item = f"/api/projects/{name}/studies/{sid}"
+    seeded = client.get(_url(name, sid)).json()["ledger"]
+    assert client.put(_url(name, sid), json={
+        "rows": _edits(seeded, ["demand_charge_price"])}).status_code == 200
+    client.patch(item, json={"step": "tariff", "intake": {
+        "tariff": {"tariff_id": "tou_reference_illustrative"}}})
+    r = client.put(_url(name, sid), json={"reseed": True})
+    row = {x["key"]: x for x in r.json()["ledger"]["rows"]}["demand_charge_price"]
+    assert row["status"] == "needs_attention"
+    # The flagged row cannot be typed over: it must be reset first.
+    r = client.put(_url(name, sid), json={"rows": [
+        {"key": "demand_charge_price", "value": 5000.0, "unit": "EUR/MW/month"}]})
+    assert r.status_code == 422, r.text
+    assert "reset" in r.json()["detail"]
+    r = client.put(_url(name, sid), json={"reset": ["demand_charge_price"]})
+    assert r.status_code == 200, r.text
+    row = {x["key"]: x for x in r.json()["ledger"]["rows"]}["demand_charge_price"]
+    assert (row["value"], row["provenance"], row["status"]) == (None, "library", "default")
+    r = client.put(_url(name, sid), json={"rows": [
+        {"key": "demand_charge_price", "value": 5000.0, "unit": "EUR/MW/month"}]})
+    assert r.status_code == 422, r.text
+    assert "demand_charge_price" in r.json()["detail"]
+    assert "no demand charge" in r.json()["detail"]
+
+
+def test_a_study_currency_year_other_than_the_ledgers_is_named(client, api_project,
+                                                               studies_on):
+    """BC-S2-4: the study's stated year and the ledger's differ; the ledger says so."""
+    name = api_project("led-cy")
+    sid = _create(client, name)["study_id"]
+    assert client.patch(f"/api/projects/{name}/studies/{sid}",
+                        json={"settings": {"currency_year": 2026}}).status_code == 200
+    notes = client.get(_url(name, sid)).json()["ledger"]["honesty_notes"]
+    assert [n for n in notes if "2026" in n and "2020" in n], notes
