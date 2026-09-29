@@ -27,7 +27,7 @@ Each round's findings, and what was done about them, are in the plan under the W
 | Check | Result |
 |---|---|
 | `tests/qa_value_flows.py` | **222/222** (35 s). See "The driver" below. |
-| All QA drivers (`tests/run_qa_drivers.py`) | _pending_ |
+| All QA drivers (`tests/run_qa_drivers.py`) | **25/25 passed** (includes `qa_value_flows`, `qa_billing_contracts`, `qa_commercial_lp`) |
 | Full backend suite (`-m "not slow"`, Python 3.12 venv) | _pending_ |
 | Frontend `vitest run` (on 2b908e3) | **248 files, 2,753 tests passed** |
 | Frontend `tsc --noEmit` | clean |
