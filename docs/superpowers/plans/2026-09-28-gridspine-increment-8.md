@@ -138,3 +138,30 @@ writes each site's rating as `sn_mva`. It is committed separately, test first.
   and the Q reference from the load flow. A unit dispatched outside its
   `Qmin`/`Qmax` would fail to initialise, and nothing here runs a dynamics
   engine to catch that.
+
+## The browser run, 2026-09-29
+
+The real app (local mode, dev servers on this branch, fresh app data) was
+driven in Chromium through every surface this increment changed:
+
+- **Shared upload cap.** Two 33 MiB tables, each under the 64 MiB table cap
+  but not together, were refused with **413 in about 1 s**. The server's
+  sentence was shown inline, and the study's source was left unchanged. The
+  real pair was then accepted.
+- **Study to bundle.** The study ran to `completed`, and hour 0's bundle was
+  downloaded through the UI. Its `.dyr` holds 9 GENROU, 1 GENSAL, and a
+  REGCA1 + REECA1 pair for each of the five inverters, at the `.raw`'s own
+  (bus, ID). The `.raw` states the inverters' MBASE as **600 / 500 while
+  dispatching 416.9 MW**, so the MBASE fix holds through the app.
+  `manifest.json`: 15 written, none omitted.
+- **Ledger.** `ledger.md` carries the Converter dynamics section and every
+  inverter's 65 values, each tagged. The GUI's ledger panel reads 0 measured,
+  78 datasheet, 415 assumed.
+- **Read-back.** A bus and branch CSV uploaded together through the shared cap
+  gave PASS, 39/39 buses and 46/46 branches, so the MBASE change did not move
+  the load flow.
+
+**Found and fixed.** The 413 toasted "That dispatch could not be read". That
+sends an engineer looking for a fault in files the server never read. The
+toast now says "Those files are too large to upload" (test first, then
+re-checked in the browser). The inline line was already right.
