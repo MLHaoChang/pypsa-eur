@@ -1,8 +1,14 @@
 # Open items
 
-**Verified against the tree on 2026-09-12**, except the entries marked
-**(2026-09-28)**, which were added or re-read on that date. Every entry below was
-reproduced or re-read in source on its own date, not carried forward on trust.
+**Verified against the tree on 2026-09-12.** Every entry below was reproduced or
+re-read in source on that date, not carried forward on trust.
+
+**2026-09-29:** four items closed and removed per the convention below — the
+user-timeseries tenancy item, and the three follow-ups fixing it uncovered (an
+obsolete `persist_user_ts` predicate at three call sites, a hydrate that ignored
+its project's `user_ts.json`, and an adequacy-sweep test that could not fail for
+its own regression). Their findings carry the detail. Nothing else was re-verified
+on that date, so the entries below still date from 2026-09-12.
 
 This file exists because GitHub Issues is **disabled** on this repository, so
 there is nowhere else to keep a queue. It is deliberately thin: one entry per
@@ -120,22 +126,6 @@ behind the untrusted-fence bypass (fixed in #18) and the
 sink. `services/upload_service.py`'s `_FILE_ID_RE` shows the right pattern,
 anchored and narrow, and it is not applied to names generally. Source: gap 3 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
-
-### 14. An adequacy-sweep guard is pinned by a test that cannot fail for it **(2026-09-28)**
-
-`tests/test_adequacy_stress.py::test_contingency_mutation_survives_the_user_ts_reapply`
-does `monkeypatch.setattr(network_router, "_user_ts", store)`, but
-`_reapply_user_ts_to_network` is defined in `services/user_timeseries.py` and
-resolves `_user_ts` in THAT module's namespace — so the store it reads stays
-empty and the reapply is a no-op regardless of the guard. Measured: delete the
-`not _transient_profiles` half of the gate in `services/solver_service.py` — the
-exact regression the test is named for — and the test still passes. Positive
-control in the same finding: with the series written into the real store, the
-gate's removal fails the test with its own intended message, so the guard does
-real work and only the test's wiring is wrong. Verified three-line remedy, and
-the general shape (patching a facade re-export reaches nothing defined in the
-service behind it):
-`findings/2026-09-28-the-adequacy-reapply-test-patches-a-name-the-code-never-reads.md`.
 
 ---
 
