@@ -1,4 +1,4 @@
-# Edge Investment Case — Phase 3: participants and value flows (plan v0.3)
+# Edge Investment Case — Phase 3: participants and value flows (plan v0.4)
 
 **Spec:** `docs/superpowers/specs/2026-09-26-edge-investment-case-design.md` §7 (participants), §12 (UI), §13
 (P3 row), §15 (conservation doctrine), decision 4 (participants first-class), decision 9 (splits never enter
@@ -85,15 +85,17 @@ Four checks per period; `conservation_ok` (`GatesBlock`, P0) is `True` only when
    Σ over participants of net outflow to externals (participant → external positive, external →
    participant negative)
    = `cost_breakdown` total
-   − the LP commercial rows (`commercial_cost_terms`: import / export / demand / tier / tariff-capacity /
-     connection fee / dispatch PPA)
+   − **every** `commercial_cost_terms` item (import, export, demand, tiers, tariff capacity, connection fee,
+     dispatch PPA, and any later term such as WP3.3b's `energy_net_group`)
    + the billed tariff items **whose resolved payee is external**, signed from the participants' side
    + the connection fees **whose payee is external** (the `included_in_total: False` fixed fee too)
    + the contract lines with **one external party**, signed from the participants' side
    − the export-price revenue (Σ w·p0(export_link)·`ic_export_price`, received by participants).
 
-   Closes to the cent. Lines between participants never enter it (they net out); lines between two
-   externals cannot exist (asset owners are participants, below). **Not in either side:** the DSR slack
+   Closes to the cent. Lines between participants never enter it (they net out); a line between two
+   externals (a contract naming two externals) is excluded from both sides and listed in `notes`. A line
+   whose party is not established cannot be classed internal or external: it makes check 4 and
+   `conservation_ok` `None` (`ledger_incomplete`), like a `None` amount. **Not in either side:** the DSR slack
    cost and VoLL shedding — transient LP terms absent from `cost_breakdown` (they are the objective
    decomposition's residual, `objective_decomposition.py:94-100`); the ledger discloses their amounts
    (from `buses_t["ic_dsr_p"]` and the lost-load capture) as `dsr_slack_not_a_cash_flow` /
@@ -162,8 +164,12 @@ CommercialConfig.value_flows: dict[str, Any] | None = None   # raw JSON; see bel
   uses the same route. Nothing at solve time reads `value_flows`.
 - **`PUT /solver_config` keeps the stored `value_flows`** when the submitted `commercial` omits the key
   (it replaces the commercial block today, `routers/simulation.py:401-417`, and `bind_commercial` dumps the
-  whole model back); only an explicit `value_flows` (or `null`) in that body changes it. Test: a tariff
-  save after a value-flows edit keeps the edit.
+  whole model back). Mechanism: the route reads `"value_flows" in commercial.model_fields_set` **before**
+  `bind_commercial` (after it, `resolve_tariff_ref` re-validates from a dump and every field reads as set,
+  `binding.py:62-64`) and re-inserts the stored value when the key was omitted. An **explicit**
+  `value_flows` in this body (including chat's `update_solver_config`) is refused with a 422 naming the
+  value-flows route (it would bypass the full validation and `If-Match`). Tests: omitted, `null`, explicit,
+  and a Library-tariff-ref config; a tariff save after a value-flows edit keeps the edit.
 - **Hashing:** `("CommercialConfig", "value_flows"): None` in `FIELDS_AFTER_V1`. The adequacy
   `_config_hash` (`services/adequacy/report.py:55`, `asdict(cfg)`) **pops `commercial.value_flows`
   whatever its value** (`bind_commercial` will dump `value_flows: null` into every commercial dict), so
@@ -173,7 +179,8 @@ CommercialConfig.value_flows: dict[str, Any] | None = None   # raw JSON; see bel
   documented as derived).
 - **types.ts:** `Participant`, `ParticipantRole`, `ValueStreamKind`, `AllocationKey`, `ValueFlowConfig` and
   parts; the typed contract variants (`PpaContract` … `RetailContract`) with `CommercialContract` kept as
-  their union; `CommercialConfig.value_flows`.
+  their union; `CommercialConfig.value_flows: ValueFlowConfig | null` (commented: stored raw, validated by
+  the server on write; a stored bad value makes the ledger answer `value_flows_invalid`).
 
 **Tests:** round trip; every P2 driver config validates unchanged; the route's party cases (typo, case,
 disjointness, stale party at ledger time → flag, not an invalid config); `If-Match` 412; the
@@ -190,7 +197,8 @@ disjointness, stale party at ledger time → flag, not an invalid config); `If-M
 ```python
 ValueFlowLine(period: str, payer: str, payee: str, value_stream: ValueStreamKind, source: str,
               source_id: str, tariff_item: str | None, tariff_item_kind: str | None,
-              contract_id: str | None, asset: str | None, basis: Literal["cash","annuity"],
+              contract_id: str | None, asset: str | None,
+              basis: Literal["cash","annuity","model_only"],
               amount: float | None, flags: list[str])
 build_ledger(inputs: LedgerInputs, vf: ValueFlowConfig, *, site_party: str) -> Ledger
 check_conservation(ledger, inputs) -> ConservationResult(ok: bool | None, checks, flags)
@@ -205,14 +213,22 @@ commercial package never calls `physical_quantities` / `asset_economics` (they i
 | Connection agreement: `n.meta["ic_connection_fee"]` (fee × `p_nom_opt`) and `ic_connection_fixed_fee` | site_party → `dso` (or the agreement's payee rule) | `network_capacity` |
 | Curtailment compensation (`curtailment_compensation_eur_per_mwh` set) | `None` + `curtailment_compensation_not_computed` (nothing computes it yet) | `network_capacity` |
 | Export price: Σ w·p0(export_link)·`links_t["ic_export_price"]` per period (signed: a negative price means the site pays) | `market` → site_party (or the asset owners, `export_revenue_to`) | `energy_export` |
-| Grid-side assets (`lp_bindings._meter_sides`: not behind the meter), any class | VOM: site_party → `market`, flag `commodity_from_grid_side_generator` (`energy_import`); fixed cost: site_party → `market`, flag `grid_side_asset_cost` (`other`); never an owned asset | `energy_import`, `other` |
+| Grid-side assets (the meter-side classifier below), any class | VOM: site_party → `market`, flag `commodity_from_grid_side_generator` (`energy_import`); fixed cost: site_party → `market`, flag `grid_side_asset_cost` (`other`), `basis="model_only"` (a modelling proxy, not a cash flow: excluded from the P4 conversion, labelled in the table, kept in check 4); never an owned asset | `energy_import`, `other` |
 | Settlement lines (P2 `settlement_lines`) | payer → payee; a negative amount reversed | ppa_energy, ppa_sleeving_fee → `ppa_settlement`; cfd_difference → `cfd_settlement`; dr_availability / dr_activation → same; lease_payment → `lease`; eaas_fee → `eaas_fee`; unknown → `other` + `unmapped_stream:<s>`. `ppa_excess_mwh` is a volume with no money: disclosed in `notes`, no line |
-| Site-side assets and network assets (Lines, Transformers), enumerated from the **`physical_quantities` superset** plus Lines / Transformers — **not** `asset_economics` (it excludes Lines and Transformers and skips assets on price-less buses or without a dispatch column, `asset_economics.py:79-85, 340-349, 465-472`) | owner → `capex_supplier`: annualised capex = per-horizon rate × `p_nom_opt` × active(p), `basis="annuity"`; owner → `om_contractor`: FOM, same arithmetic, `basis="cash"`; owner → `om_contractor`: VOM from the per-snapshot `marginal_cost` × dispatch arithmetic `cost_breakdown.opex` uses (storage on discharge, Links on p0; PyPSA has no VOM/fuel split, so one `vom` line). Network assets default to site_party (assignable). An asset `_meter_sides` cannot classify → its lines carry `asset_side_unclassified` (never dropped) | `capex`, `fom`, `vom` |
+| Site-side assets and network assets (Lines, Transformers), enumerated from the **`physical_quantities` superset** plus Lines / Transformers — **not** `asset_economics` (it excludes Lines and Transformers and skips assets on price-less buses or without a dispatch column, `asset_economics.py:79-85, 340-349, 465-472`) | owner → `capex_supplier`: annualised capex = per-horizon rate × `p_nom_opt` × active(p), `basis="annuity"`; owner → `om_contractor`: FOM, same arithmetic, `basis="cash"`; owner → `om_contractor`: per-asset operational expenditure from **`n.statistics()` "Operational Expenditure"** — the source `cost_breakdown.opex` reads (it covers storage and quadratic cost terms); PyPSA has no VOM/fuel split, so one `vom` line. Network assets default to site_party (assignable). An asset `_meter_sides` cannot classify → its lines carry `asset_side_unclassified` (never dropped) | `capex`, `fom`, `vom` |
 
 - **No double counting:** the LP's `energy_import` / `energy_export` / `demand_charge` / tier / capacity
   cost rows are never ledger sources (they are the LP's view; P2's gap compares them). A `changes_dispatch`
   PPA appears once (its settlement line). The tariff's export items and the export price are separate
   sources (the LP's `energy_export` row mixes them).
+- **Meter-side classifier** (`participants.classify_buses`, tested on its own): `lp_bindings._meter_sides`
+  returns only `(seen, bypass)` — the site-side buses and the grid-side buses reachable from the site
+  without crossing the meter (`lp_bindings.py:483-522`) — so it cannot place the V1 `grid_supply` generator
+  on bus `grid`. The classifier: **site-side** = `seen`; **grid-side** = the meter Links' grid buses plus
+  everything reachable from them without crossing the meter; `bypass` buses are grid-side and flagged
+  `meter_bypass`; **unclassified** = reachable from neither (flag `asset_side_unclassified`, never dropped).
+  **Meter Links** (import, export, group members: the PoC capital cost or connection extension) are
+  site-side assets owned by site_party; the connection fee stays its own line.
 - **Not money, disclosed:** the DSR slack cost and VoLL shedding (not in `cost_breakdown` either; amounts
   in `notes` with `dsr_slack_not_a_cash_flow` / `voll_not_a_cash_flow`).
 - **Export attribution** (`export_revenue_to="asset_owner"`): covers the export-price revenue **and** the
@@ -222,7 +238,7 @@ commercial package never calls `physical_quantities` / `asset_economics` (they i
 - **P4 mapping (pinned now):** a `ValueFlowLine` becomes one `CashflowLine` per operating year with
   `participant` = the side whose cash it is (both sides for internal lines), `counterparty` = the other,
   `amount` signed from the participant, `provenance.source` carrying `source` / `source_id` /
-  `contract_id` (drill-down survives); `basis="annuity"` lines are **not** converted — P4 assigns the
+  `contract_id` (drill-down survives); `basis="annuity"` and `basis="model_only"` lines are **not** converted — P4 assigns the
   overnight capex (`overnight_cost` + `capex_phasing`) to the owner from `asset_owners`; a `None` line makes
   that participant's returns `not_established` in P4 (never 0).
 
@@ -274,8 +290,10 @@ template on its fixture; drafts for missing contracts; `template_version` pinned
     billed kW; ties → the first maximal interval; when a ratchet floor binds, the contributions in the
     month that set the floor. `demand_lines` records neither the peak interval nor the floor's source month
     (`tariff_engine.py:898`), and the engine is P2-gated, so `allocate` **recomputes both** from the engine's
-    `interval_key` and `_ratchet_floor_prior` (no engine change); a floor from meter history (no modelled
-    month) → `allocation_not_established:<item>`; non-demand items under this key fall back to `energy`
+    `interval_key` and the candidate months of `_ratchet_floor_prior` (it returns only the value and a
+    missing flag, `tariff_engine.py:287-326`): the floor's source month is the **argmax over the same
+    candidate months** for all three modes (range, cyclic, designated months), earliest on ties; a floor
+    from meter history (no modelled month) → `allocation_not_established:<item>`; non-demand items under this key fall back to `energy`
     (disclosed);
   - `energy` — per-period member import energy (Σ w·p0 per member in the period), **not** the
     years-weighted `ic_group.energy_share`;
@@ -521,3 +539,14 @@ P2 model; invalid combinations surface the 422; a11y.
 - **C12** provenance carries the source ids; P4 reads `asset_owners` for overnight capex.
 - **C13** id→index mapping tested; the DAG payload assertion.
 - The adequacy hash pops `value_flows` whatever its value.
+
+**Round 3 (PASS WITH CONDITIONS; none blocking WP3.0) → v0.4, all closed in text.** The reviewer walked check 4 on V1 and V4 term by term and both close; C1–C13 verified. Closed here:
+- **D1** a meter-side classifier (site, grid, bypass, unclassified; meter Links site-side) replaces the bare `_meter_sides`, which cannot place the V1 grid generator;
+- **D2** the `PUT /solver_config` mechanism (`model_fields_set` before bind) and an explicit `value_flows` there refused;
+- **D3** grid-side fixed cost is `basis="model_only"`;
+- **D4** VOM from `n.statistics()` operational expenditure;
+- **D5** external↔external lines excluded and noted; an unresolved party makes check 4 `None`;
+- **D6** the bridge subtracts every `commercial_cost_terms` item;
+- **D7** the floor's source month is the argmax over `_ratchet_floor_prior`'s candidate months, earliest on ties.
+
+**Plan status: PASS** (round 3 conditions closed in text; no open plan-level items). Implementation starts at WP3.0.
