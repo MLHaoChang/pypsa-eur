@@ -172,6 +172,10 @@ hiddenimports = [
     # from the bundle without a build error.
     "cloudpickle",
     "gridspine.drivers.study", "gridspine.drivers.status",
+    # `gridspine_service` imports `check_external` from it inside the gridspine
+    # guard; the packaging test derives the guarded imports and this was the
+    # one it named (red on master since #58).
+    "gridspine.drivers.year_study",
     # `drivers.readback` reached that guard with the PowerFactory read-back
     # (increment 6) and never reached this list. Analysis follows a try/except
     # import today, so this is not a fix for a broken build — it is the rule
