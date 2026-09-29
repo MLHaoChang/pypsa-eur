@@ -281,7 +281,9 @@ const DEBUG_ENABLED = import.meta.env.DEV || (typeof location !== 'undefined' &&
  * Render counters for the debug hook (Phase 2 plan Tasks 0.4, 2.2, 6.2): how
  * often each component has rendered, so a browser test can show that a
  * snapshot step re-renders only the results driver. Counted only when the
- * hook is enabled.
+ * hook is enabled. They count render CALLS, not commits (StrictMode doubles
+ * them in a dev build) and are never reset: compare deltas across an action,
+ * never absolute values.
  */
 const renderCounts: Record<string, number> = {}
 function countRender(name: string): void {

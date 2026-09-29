@@ -430,7 +430,7 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
         const soc = socMap.get(s.name)
         if (soc == null) continue
         // p_nom_opt is set after solve when extendable; fall back to p_nom.
-        const pNom = ((s as unknown as { p_nom_opt?: number }).p_nom_opt
+        const pNom = (s.p_nom_opt
           ?? s.p_nom ?? 0)
         const cap = (s.max_hours ?? 0) * pNom
         bumpSoC(s.bus, soc, cap)
@@ -440,7 +440,7 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
       for (const s of stores as Store[]) {
         const e = eMap.get(s.name)
         if (e == null) continue
-        const cap = ((s as unknown as { e_nom_opt?: number }).e_nom_opt
+        const cap = (s.e_nom_opt
           ?? s.e_nom ?? 0)
         bumpSoC(s.bus, e, cap)
       }
@@ -460,7 +460,7 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
         const p0 = linMap.get(ln.name)
         if (p0 == null) continue
         const q0 = qMap ? (qMap.get(ln.name) ?? null) : null
-        const sNomOpt = (ln as unknown as { s_nom_opt?: number }).s_nom_opt
+        const sNomOpt = ln.s_nom_opt
         const sNom = (sNomOpt && Number.isFinite(sNomOpt) && sNomOpt > 0)
           ? sNomOpt
           : (ln.s_nom ?? 0)
@@ -486,7 +486,7 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
       for (const lk of links as LinkT[]) {
         const p0 = linkMap.get(lk.name)
         if (p0 == null) continue
-        const pNomOpt = (lk as unknown as { p_nom_opt?: number }).p_nom_opt
+        const pNomOpt = lk.p_nom_opt
         const pNom = (pNomOpt && Number.isFinite(pNomOpt) && pNomOpt > 0)
           ? pNomOpt
           : (lk.p_nom ?? 0)
@@ -557,19 +557,19 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
       byAssetGroupCapacity.set(k, (byAssetGroupCapacity.get(k) ?? 0) + mw)
     }
     for (const g of generators as Generator[]) {
-      const fallback = ((g as unknown as { p_nom_opt?: number }).p_nom_opt
+      const fallback = (g.p_nom_opt
         ?? g.p_nom ?? 0)
       const cap = effectiveCapForAsset('Generator', g.name, fallback)
       bumpCap(g.bus, isRenewableCarrier(g.carrier) ? 'Renewables' : 'Thermal', cap)
     }
     for (const s of storageUnits as StorageUnit[]) {
-      const fallback = ((s as unknown as { p_nom_opt?: number }).p_nom_opt
+      const fallback = (s.p_nom_opt
         ?? s.p_nom ?? 0)
       const cap = effectiveCapForAsset('StorageUnit', s.name, fallback)
       bumpCap(s.bus, 'Storage', cap)
     }
     for (const s of stores as Store[]) {
-      const fallback = ((s as unknown as { e_nom_opt?: number }).e_nom_opt
+      const fallback = (s.e_nom_opt
         ?? s.e_nom ?? 0)
       const cap = effectiveCapForAsset('Store', s.name, fallback)
       bumpCap(s.bus, 'Storage', cap)

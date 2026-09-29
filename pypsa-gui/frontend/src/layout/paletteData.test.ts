@@ -4,7 +4,7 @@
 // with what the sidebar shows and what the creation form submits.
 import { describe, it, expect } from 'vitest'
 import { PALETTE_SECTIONS_DATA, PALETTE_ITEM_IDS, PALETTE_COMPONENT_TYPE, paletteDefaults } from './paletteData'
-import { PALETTE_ICONS } from './Sidebar'
+import { PALETTE_ICONS } from './paletteIcons'
 import { FIELD_MAP } from './CreationForm'
 
 describe('palette data', () => {
