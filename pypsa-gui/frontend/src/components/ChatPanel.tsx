@@ -2347,6 +2347,22 @@ export default function ChatPanel() {
           qc.invalidateQueries({ queryKey: nk(d.to, 'simulationStatus') })
           qc.invalidateQueries({ queryKey: nk(d.to, 'snapshots') })
           toast(`Active project: ${d.to}`, { icon: '🔀' })
+        } else if (d.to == null && useUIStore.getState().currentProject != null) {
+          // A network import (`import_network_nc`, `import_csv_bundle`,
+          // `import_excel`, `import_matpower`) replaced the backend's network
+          // with an UNBOUND draft (P27a gate finding 3). Keeping the old name
+          // would be wrong twice over: the tab would show a project the
+          // backend no longer holds, and the save identity guard lets an
+          // unbound network through, so the next autosave would write the
+          // import over the old project's folder. Show the unbound state
+          // instead — Save asks for a name, as for any new network.
+          const was = useUIStore.getState().currentProject
+          useUIStore.getState().setCurrentProject(null)
+          qc.invalidateQueries({ queryKey: nk(null, 'meta') })
+          qc.invalidateQueries({ queryKey: nk(null, 'simulationStatus') })
+          qc.invalidateQueries({ queryKey: nk(null, 'snapshots') })
+          toast(`The assistant replaced the network — it is no longer '${was}' and is not saved to a project yet. Save it under a name to keep it.`,
+            { icon: '🔀' })
         }
         // Render a small tool-line so the conversation explains what
         // happened.
