@@ -22,6 +22,15 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "adequacy/metrics.py": (4, "HOURS_PER_YEAR constant + prose; weights are hours (WP1.0)"),
     "adequacy/occurrence.py": (2, "8760 h/yr in events/yr = 8760·rate/MTTR — a unit"),
     "adequacy/sweep.py": (3, "same occurrence formula as occurrence.py — a unit"),
+    "adequacy/eh_stages.py": (1, "common-mode occurrence 8760·q/MTTR events/yr — the "
+                                 "occurrence.py formula, a unit"),
+    "adequacy/eh_study.py": (1, "modelled hours = nyears × 8760 (nyears is Σ weights / 8760, "
+                                "weights in hours) — a unit"),
+    "adequacy/levers.py": (2, "annualise to MWh/yr: Σ w·p × 8760 / Σ w and p_nom × 8760 — "
+                              "8760 h/yr, weights in hours; a unit"),
+    "solver/adequacy.py": (3, "EH import-energy cap: E MWh/yr × Σ w / 8760 per period "
+                              "(formula, code, message) — a unit"),
+    "solver_service.py": (1, "comment restating the solver/adequacy.py cap formula"),
     "asset_results/compute.py": (2, "prose explaining why Σweights/8760 is avoided"),
     "chat_service.py": (1, "prompt text about CSV row counts"),
     "solver/periodized_costs.py": (3, "HOURS_PER_YEAR converts Σ objective weights to years "
@@ -78,6 +87,6 @@ def test_every_hourly_assumption_site_is_listed_with_a_reason():
 
 
 def test_the_inventory_is_pinned():
-    assert sum(c for c, _ in ALLOWED.values()) == 51
-    assert len(ALLOWED) == 24
+    assert sum(c for c, _ in ALLOWED.values()) == 59
+    assert len(ALLOWED) == 29
     assert all(reason for _, reason in ALLOWED.values())
