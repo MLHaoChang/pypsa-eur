@@ -385,3 +385,43 @@ No processes are left running. There is no backend change, so row 2 stands at 15
   - A mismatched tab shows the backend's data under its own name.
   - An external sweep reaches the Guided buttons only on their next fetch.
 - **Gate file:** `docs/superpowers/qa/2026-09-29-guided-mode-deferred-gate-P27b.md`.
+
+### P32 phase note (implementation, 2026-09-29, base `6135c7601`)
+
+D-8 = (a), deferred spec §7.1. FE only; no backend, prompt, `TOOLS` or packaging change.
+
+**Anchor drift** (spec §7.1 anchors predate the master merge, P27a and P27b; re-verified on `6135c7601`):
+
+| Spec anchor | On `6135c7601` |
+|---|---|
+| parent spec `2026-09-27-guided-mode.md:41` (§1 non-goal), `:224` (§3.4 last paragraph), `:263-273` (§3.7) | `:41`, `:225`, `:263-273`; the §10 "G4 new projects" row (`:718`) says the same thing and is marked superseded too |
+| `ChatPanel.tsx:2322-2345` `project_rebound` handler | `:2338-2383` (P27b added the `to: null` branch); `setCurrentProject(d.to)` `:2352`, toast `:2358` |
+| `uiStore.ts:647-660` `noteNewProjectCreated`, `:652-658` explicit re-read | `:662-676`, `:667-673` |
+| `uiStore.ts:640-642` §3.7 pruning in `setUiMode` | `:655-658` (`setUiMode` `:644`) |
+| `App.tsx:197-208` P23 auto-open | `:200-211` |
+| `smoke-guided.mjs:96` `PHASES`, `:1885-1890` dispatcher | `:124`, `:2445-2452` |
+| red tests in `ChatPanel.sendRequest.test.tsx` | the rebound handler's tests live in `ChatPanel.rebound.test.tsx` (P27b), whose harness already mocks the toast: the P32 cases went there |
+
+**What was built.** `ChatPanel.tsx` rebound handler, in the named-rebind branch, after `setCurrentProject(d.to)` / `setProjectName` / `touchTab`: `create_project_from_template` → `noteNewProjectCreated('template')`, `import_project_bundle` → `noteNewProjectCreated('file')`. No second explicit-choice rule (the one in `noteNewProjectCreated` re-reads `ui-mode-explicit` from storage). The §10 addendum "D-8 (2026-09-28, product owner)" is in the parent spec, with pointers at §1 (`:41`), §3.4 (`:225`) and the §10 G4 row. Smoke `--phase P32` = P25, then stub branch 7 from the dock in two fresh contexts seeded with the P25 project as `network-diagram:current-project` and `ui-mode = expert` (implicit: no explicit flag → Guided, `hub-card-site`, "Active project: <name>" toast, dock still open, no `project-mismatch` banner 8 s later and no `[project_mismatch]` refusal; explicit: `ui-mode-explicit = 1` → stays Expert, no `hub-card-site`).
+
+**Network imports do not flip (decision, kept to the spec).** P27a added `import_network_nc`, `import_csv_bundle`, `import_excel`, `import_matpower` to the rebinding set; they announce `to: null` and P27b clears `currentProject`. They are not new projects: nothing is created, the tab is unbound, and Guided has nothing to show without a project (the auto-open and the §3.7 swap both need `currentProject`; a flip would close the user's panel and leave an empty Guided shell). It also matches the UI: `ImportExport.tsx:130` calls `noteNewProjectCreated('file')` only for a bundle imported as a NEW project, never for a raw network import. A later Save As of the unbound draft is a save, which the addendum excludes. Pinned by four `it.each` cases.
+
+**The mismatch fence during the rebind.** The flip changes no binding and sends no write; `setCurrentProject(d.to)` runs first, so the detection's meta key is the new project's and its first sample agrees. Pinned in the unit test (`projectMismatch` stays null) and the smoke (no banner 8 s after, beyond the two-sample window). The first P32 smoke run showed the fence doing its job: the explicit context opened the P25 project while the backend was still bound to the implicit context's new project, and the confirmation card's Approve was disabled with the mismatch sentence. The smoke now activates the P25 project through the API before each context (as a user's backend would be); not a product defect.
+
+**Red → green and mutants.** `ChatPanel.rebound.test.tsx` "P32" (15 cases): 6 red before the fix (template, bundle, after-`setCurrentProject`, explicit — the spy was never called —, other-tab explicit, dock + toast), 9 guards green on arrival (saves / opens and the four imports not flipping, no mismatch). Mutations (`scratchpad/p32/mutate.py`, log `mutations.log`): **7 / 7 killed** — call removed (6 fail); kinds swapped (3); bundle branch dropped (2); `save_project_as` also flips (1); explicit rule bypassed with a direct `setUiMode('guided')` (4); flip before `setCurrentProject` (1: the panel became null, not `hubDesign`); a `to: null` import flips (4). `uiStore.uiMode.test.ts` unchanged.
+
+**Deviations.** (1) Tests in `ChatPanel.rebound.test.tsx`, not `ChatPanel.sendRequest.test.tsx` (above). (2) Extra cases beyond §7.1(f): `activate_project` / `load_project` do not flip; an explicit choice made in another tab (storage only) is adopted; the four network imports; no mismatch. (3) The spec's smoke says the transcript shows `Active project: <name>`: that text is the rebind **toast** (the transcript tool line reads `🔀 active project: a → b`, and the dock follows the rebind to the new project's own chat, as P27a noted), so the smoke reads it from the toast, as P27a does. (4) §7.1 Risks says the rebind toast and the mode toast (`uiModeToast`) show together: `uiModeToast` is shown only by the header switch and the command palette; `noteNewProjectCreated` shows none, so only the rebind toast appears. (5) The implementation landed in the orchestrator's snapshot commit `e7f07b37b` (a container restart); this note and the gate evidence are committed on top of it.
+
+**Gate rows** (cwd `pypsa-gui/frontend` unless stated):
+
+| Row | Command | Result |
+|---|---|---|
+| 1 / 2 | backend | not re-run: no backend change since P27b (`git diff 6135c7601 -- pypsa-gui/backend` is empty); the brief's files `tests/test_guided_mode_prompt.py tests/test_stub_openai_endpoint.py tests/test_chat_tool_dispatch_loop_seam.py` (`PYTHONPATH=/home/user/pypsa-eur:/home/user/pypsa-eur/pypsa-gui/backend /tmp/claude-0/venv/bin/python -m pytest <files> -p no:cacheprovider -W ignore -q -o addopts=""`, cwd `pypsa-gui/backend`): 87 passed |
+| 3 | `npx tsc --noEmit -p .` | 0 errors |
+| 4 | `npx vitest run` | 241 files / 2701 passed (P27b 2686 + 15 P32 cases) |
+| 4s | `for i in $(seq 10); do npx vitest run src/components/ChatPanel src/App. src/store/uiStore src/pages/hubDesign src/api/client.mismatch src/components/ProjectMismatchBanner src/hooks/useProjectMismatch; done` | 10 / 10 green (40 files / 618 tests each) |
+| 5 | `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs --phase P32 --out <scratchpad>/smoke32…` | PASS, 14 screenshots (twice: before and after the container restart) |
+| 5 | same, `--phase P27b` / `P27a` / `P26` / `P25` / `P23` | PASS 54 (banner ~6.5 s; FMEA 8 / 4 / 6 settled) / PASS 14 ("is running" toast) / PASS 38 / PASS 12 / PASS 13 |
+| 7 | `git diff 6135c7601 -- 'pypsa-gui/frontend/src/**' \| grep -c uiMode` | 13, all in `ChatPanel.rebound.test.tsx`; no product `uiMode` branch changed; the `*.expertUnchanged.*` snapshots pass in row 4 |
+
+No processes are left running.
