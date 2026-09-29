@@ -1098,15 +1098,53 @@ async def chat_stream(
     # is what the HTTP path passes there too.
     _chat_tools.set_acting_session(getattr(acting_session, "id", None))
 
-    session = chat_service.get_or_create_session(
+    _acting_user_id = (
+        str(getattr(getattr(request.state, "auth_user", None), "id", None) or "")
+        or None
+    )
+    session, _session_created = chat_service.get_or_create_session_reporting(
         body.session_id, model=body.model or chat_service.DEFAULT_MODEL,
         # Same source the tool layer binds from two lines above, rather than a
         # second resolution that could disagree with it.
-        owner_user_id=(
-            str(getattr(getattr(request.state, "auth_user", None), "id", None) or "")
-            or None
-        ),
+        owner_user_id=_acting_user_id,
     )
+    # Authorization, not just authentication — the fourth route to need it.
+    # `session_owner_allows` was added for /confirm, /rewind and /abort; this
+    # one resolves a CALLER-SUPPLIED session_id through a process-global
+    # registry that sets the owner on CREATE ONLY, so an existing session
+    # belonging to someone else came back as-is and the turn ran inside it.
+    # That is worse than what the three closed: the outbound message array is
+    # seeded from that session's history, so a stranger's conversation (and the
+    # tool results in it) goes to the provider on the caller's behalf and can
+    # be elicited in the reply; the caller's message lands in the stranger's
+    # thread; and the tools run with the CALLER's authority. The id is not
+    # secret — /confirm's own comment records that GET /history hands
+    # `last_session_id` to any co-member who activates the project.
+    #
+    # Scoped to sessions that ALREADY EXISTED: minting one for a caller-chosen
+    # id is what every first turn does, and refusing that would break it.
+    #
+    # A refusal rather than quietly minting a different session for the caller:
+    # the client uses the id it SENT for /abort and /confirm (see this
+    # handler's docstring), so handing back another one would leave both
+    # pointing at a session that is not running the turn. Unlike the three
+    # routes above, this one does not hide the session's existence behind a
+    # 404 — the caller was given the id by /history on a project they belong
+    # to, so there is nothing left to conceal, and a clear refusal beats a turn
+    # that runs and then blocks on a confirmation they can never answer.
+    if not _session_created and not chat_service.session_owner_allows(
+        session, _acting_user_id,
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error_kind": "session_not_yours",
+                "message": (
+                    "that chat session belongs to another user; omit "
+                    "`session_id` to start your own"
+                ),
+            },
+        )
 
     # #26 — in-memory token-bucket rate limit, keyed per session_id (a session
     # is one conversation = one rate-limit subject). Disabled by default

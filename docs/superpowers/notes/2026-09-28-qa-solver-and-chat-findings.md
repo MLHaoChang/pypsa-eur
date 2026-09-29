@@ -55,7 +55,11 @@ re-raise. Key the scaling registry by weak reference, or discard in a `finally`.
 
 ### SL-2 — a queued solve is saved beside a config that did not produce it
 
-**Serious. VERIFIED, not yet fixed.**
+**Serious. VERIFIED. FIXED** — `_save_context` takes a `solver_config_override`,
+which the queue passes. An override rather than writing the snapshot into the live
+context: the user may have edited their config after enqueueing, and that edit is
+theirs. Guard: `tests/test_queued_solve_saves_its_own_config.py`, including a test
+that the live context is undisturbed.
 
 `services/solve_queue.py::_run_solve_job` deliberately solves with the *enqueue-time*
 config snapshot (`job.solver_config_json`) rather than the context's — the comment at
@@ -271,10 +275,13 @@ The header comment asserting that "/api/projects/* write tools already call
 
 ### CH-5 — `GET /api/chat/history` clears a live session and can poison it
 
-**Serious. VERIFIED, not yet fixed.** The `session_was_freshly_minted` guard wraps
-only the three-line profile adoption; the `sess.messages.clear()` rebuild directly
-below it runs unconditionally — under a comment that explains at length why a live
-session must not be disturbed.
+**Serious. VERIFIED. FIXED** — the rebuild is skipped while `_turn_in_flight`. The
+`session_was_freshly_minted` guard had wrapped only the three-line profile adoption,
+under a comment explaining at length why a live session must not be disturbed.
+Guard: `tests/test_history_does_not_clobber_a_live_session.py`, which carries a
+guard-on-the-guard (the fixture must actually reach the session the handler
+resolves — the first version did not, and passed against the broken code) and a
+control that an IDLE session is still rehydrated.
 
 `routers/chat.py::chat_history` does `sess.messages.clear()` and rebuilds from disk
 unconditionally; only the profile adoption is guarded by `session_was_freshly_minted`.
@@ -284,8 +291,39 @@ that makes every later turn 400 at the provider.
 
 ### CH-6 — chat session ownership is not enforced on `/stream` or `/history`
 
-**Moderate. VERIFIED, not yet fixed.** `session_owner_allows` is called at three
-sites — `/confirm`, `/rewind`, `/abort` — and `chat_stream` is not one of them.
+**`/stream` half: VERIFIED and FIXED. `/history` half: VERIFIED, left open by
+design — see below.**
+
+`session_owner_allows` was added for `/confirm`, `/rewind` and `/abort`; `/stream`
+was not one of the three, and it is the worst of the four to leave open. It resolves
+a caller-supplied `session_id` through a process-global registry whose owner is set
+on CREATE ONLY, so an existing session belonging to someone else came back as-is and
+the turn ran inside it: the outbound message array is seeded from that session's
+history, so a stranger's conversation and its tool results reach the provider on the
+caller's behalf and can be elicited in the reply; the caller's message lands in the
+stranger's thread; and the tools run with the CALLER's authority.
+
+Fixed with a 403 `session_not_yours`, scoped to sessions that ALREADY existed
+(minting one for a caller-chosen id is what every first turn does). A refusal rather
+than quietly minting a different session, because the client uses the id it SENT for
+`/abort` and `/confirm` — handing back another would leave both pointing at a session
+that is not running the turn. The frontend now recovers: `api/chat.ts` carries the
+server's `error_kind` on the Error, and `ChatPanel` calls `startNewChat()` on
+`session_not_yours` instead of retrying an id the server will refuse forever.
+
+**The `/history` half is left open deliberately.** `chat_history` mints the session
+owned by whoever fetches first, and `last_session_id` comes from the project's SHARED
+`chat.jsonl` — so a co-member can end up owning a session that is really someone
+else's thread. Every available repair is worse than the disease: reassigning the
+owner reopens exactly the hole `session_owner_allows` closes; minting it owner-less
+trips the deliberate fail-closed rule and locks everyone out; and not minting at all
+breaks the rehydration the route exists for. The real defect is deriving a PER-USER
+session identity from a shared file, and fixing that is a design change, not a patch.
+
+Note the interaction, which is the honest cost of the `/stream` fix: where that case
+occurs, the rightful user now meets a clear 403 at stream time and is moved onto a
+fresh session, instead of having their turn run and then block on a confirmation card
+they can never answer until the 300s TTL expires. Worse before, and visible now.
 
 `/confirm`, `/rewind` and `/abort` all call `session_owner_allows`; `chat_stream` does
 not, and `chat_history` mints the session owned by whoever fetched it first. Since

@@ -110,7 +110,27 @@ export function createChatStream(
         signal: controller.signal,
       })
       if (!resp.ok) {
-        onError?.(new Error(`chat stream HTTP ${resp.status}`))
+        // Carry the server's `error_kind` on the Error so a caller can act on
+        // it. `session_not_yours` in particular is RECOVERABLE — the client is
+        // holding a session id that belongs to another user (GET /history
+        // hands `last_session_id` to any co-member of the project), and the
+        // cure is to start a fresh session rather than to keep retrying the
+        // same id forever.
+        let kind: string | undefined
+        let detailMsg: string | undefined
+        try {
+          const body = await resp.json()
+          const detail = (body as { detail?: unknown })?.detail
+          if (detail && typeof detail === 'object') {
+            kind = (detail as { error_kind?: string }).error_kind
+            detailMsg = (detail as { message?: string }).message
+          }
+        } catch {
+          // Not JSON, or an empty body — fall back to the status line.
+        }
+        const err = new Error(detailMsg ?? `chat stream HTTP ${resp.status}`)
+        ;(err as Error & { kind?: string }).kind = kind
+        onError?.(err)
         return
       }
       const reader = resp.body?.getReader()
