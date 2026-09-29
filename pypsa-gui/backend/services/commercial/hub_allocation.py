@@ -49,8 +49,10 @@ def is_metered(item) -> bool:
 
 def is_peak_item(item) -> bool:
     """A demand item the `peak_contribution` key splits by the billed interval
-    (a capacity item on the annual peak is not one: it falls back to energy)."""
-    return item.kind != "capacity" and TE._is_demand(item)
+    of the members' IMPORT. A capacity item on the annual peak is not one, nor
+    an export-measured demand item — the members' import says nothing about an
+    export peak (WP3.3a review #3): both fall back to energy, disclosed."""
+    return item.kind != "capacity" and item.measured_on != "export" and TE._is_demand(item)
 
 
 def floor_source_month(ratchet, month: str, k: int, charged: dict) -> str | None:
@@ -163,35 +165,46 @@ def _peak_split(item, group, members: dict[str, np.ndarray], export: np.ndarray,
 
 def period_hub(idx: pd.DatetimeIndex, members: dict[str, np.ndarray], export: np.ndarray,
                weights: np.ndarray, tariff, *, step_hours, timezone: str | None,
-               billing_period, represents_hours, group) -> HubPeriod:
+               billing_period, represents_hours, group, peak: bool = True) -> HubPeriod:
     """One period's allocation inputs (see the module notes). `members`:
     participant → import MW per row (every group member's); `group`: the
-    group bill's `RatingResult` for the period (None: not billed)."""
+    group bill's `RatingResult` for the period (None: not billed); `peak`:
+    whether the key reads the peak split (only `peak_contribution` does)."""
     flags: list[str] = []
     energy = {p: (None if np.isnan(v).any() else float((weights * v).sum()))
               for p, v in members.items()}
     metered: dict[str, dict[str, float | None] | None] = {}
-    peak: dict[str, dict[str, float] | None] = {}
+    splits: dict[str, dict[str, float] | None] = {}
+    reasons: dict[str, str] = {}
     if tariff is None or group is None:
-        return HubPeriod(energy_mwh=energy, metered=metered, peak=peak, flags=flags)
+        return HubPeriod(energy_mwh=energy, metered=metered, peak=splits, flags=flags,
+                         reason="group_bill_not_established")
     local = idx.tz_convert(timezone) if idx.tz is not None else idx
     dur = TE._durations(idx, step_hours)
     month_key = np.asarray(local.strftime("%Y-%m"))
-    for item in tariff.items:
-        if is_metered(item):
-            one = tariff.model_copy(update={"items": [item], "unsupported_fields": []})
-            got: dict[str, float | None] = {}
-            for p, v in members.items():
-                res = TE.rate(pd.DataFrame({"import_mw": v, "export_mw": np.zeros(len(v))},
-                                           index=idx), one, step_hours=step_hours,
-                              timezone=timezone, billing_period=billing_period,
-                              represents_hours=represents_hours)
-                got[p] = res.per_item_sampled.get(item.id)
-            metered[item.id] = got
-        elif is_peak_item(item):
+    linear = [item for item in tariff.items if is_metered(item)]
+    if linear:
+        # One rating per member with every linear item (review #5): per item
+        # sampled, as the group bill is read.
+        many = tariff.model_copy(update={"items": linear, "unsupported_fields": []})
+        by_member = {}
+        for p, v in members.items():
+            res = TE.rate(pd.DataFrame({"import_mw": v, "export_mw": np.zeros(len(v))},
+                                       index=idx), many, step_hours=step_hours,
+                          timezone=timezone, billing_period=billing_period,
+                          represents_hours=represents_hours)
+            by_member[p] = res.per_item_sampled
+        for item in linear:
+            metered[item.id] = {p: by_member[p].get(item.id) for p in members}
+    if peak:
+        for item in tariff.items:
+            if not is_peak_item(item):
+                continue
             split, reason = _peak_split(item, group, members, export, idx, local, dur,
                                         month_key)
-            peak[item.id] = split
+            splits[item.id] = split
             if reason:
+                reasons[item.id] = reason
                 flags.append(f"allocation_not_established:{item.id}:{reason}")
-    return HubPeriod(energy_mwh=energy, metered=metered, peak=peak, flags=flags)
+    return HubPeriod(energy_mwh=energy, metered=metered, peak=splits, flags=flags,
+                     peak_reason=reasons)

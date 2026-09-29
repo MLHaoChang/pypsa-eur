@@ -426,6 +426,31 @@ ratchet-floor month; missing-key refusals; conservation checks 3–4 still close
   unknown key / rating; config refusals; live: a solved two-member V1 hub closes under every key (flat
   and multi-period).
 
+**WP3.3a review round 1 (271d9d5): PASS WITH CONDITIONS** — binding #1–#3; #4–#5 taken; #6–#8 noted.
+The reviewer confirmed (independent recomputation to the cent) TOU windows with 30-min / hourly
+settlement across DST, all ratchet modes with windowed and convex tiers, representative weeks,
+multi-period, net / peak_import demand, an asset-owner export split with a hub, and that coverage
+fails on every tampering of an allocation line.
+- #1 HIGH: a hub made stale by a later `group_members` change (the solver-config route does not
+  re-validate `value_flows`) was split silently over the remaining members. → `HubInputs.group_links`;
+  the ledger refuses every allocation line (`allocation_not_established:<id>:hub_members_stale`) when
+  the hub members' Links are not exactly the group's, or fixed shares key other participants.
+- #2 MEDIUM: the specific reason (e.g. `ratchet_floor_from_meter_history`) never reached the ledger.
+  → `HubPeriod.peak_reason` / `reason`; the line's flag carries it; peaks are computed only under the
+  `peak_contribution` key (no spurious reasons under other keys).
+- #3 MEDIUM: an export-measured demand item was split by the members' IMPORT in the export peak
+  interval. → not a peak item: it falls back to energy, disclosed `allocation_fallback_energy`
+  (recorded choice).
+- #4 (taken): a linear import item is metered or not split (`member_rating_unknown` /
+  `period_not_rated`), never keyed — `HubInputs.metered_items` / `peak_items` are known whether or not
+  a period rated.
+- #5 (taken): each member is rated once with all its linear items (was once per item).
+- #6: members are sorted case-insensitively (`strip().casefold()`, the party-matching rule) — the
+  remainder member does not depend on capitalisation. #7: V5 stays one naive month; windows, DST,
+  ratchets and ties are pinned by the engine-parity tests (and the reviewer's recomputation). #8:
+  noted.
+- Tests: +7 (34 in `test_value_flow_allocation.py`).
+
 ---
 
 ## WP3.3b Group net-import LP variable (P2 carry-in)

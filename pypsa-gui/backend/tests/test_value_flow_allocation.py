@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from models.commercial import CommercialConfig, Ratchet, Tariff, TariffItem, ValueFlowConfig
+from models.commercial import CommercialConfig, Ratchet, Tariff, ValueFlowConfig
 from services.commercial import hub_allocation as HA
 from services.commercial import participants as P
 from services.commercial import tariff_engine as TE
@@ -82,9 +82,16 @@ def _v5_inputs():
         curtailment_compensation=False, export_revenue={"_": V5["export_price_revenue"]},
         export_split=None, assets=[], cost_breakdown_total={"_": 0.0},
         lp_commercial={"_": 0.0}, disclosures={},
-        hub=P.HubInputs(members=[(s["link"], m) for m, s in V5["profile"]["members"].items()],
-                        periods={"_": hp}))
+        hub=_hub_inputs(tariff, {"_": hp}))
     return inputs, group, hp
+
+
+def _hub_inputs(tariff, periods, links=None):
+    members = [(s["link"], m) for m, s in V5["profile"]["members"].items()]
+    return P.HubInputs(members=members, periods=periods,
+                       group_links=links or [link for link, _m in members],
+                       metered_items=[i.id for i in tariff.items if HA.is_metered(i)],
+                       peak_items=[i.id for i in tariff.items if HA.is_peak_item(i)])
 
 
 def _vf(basis, *, shares=None):
@@ -338,6 +345,110 @@ def test_no_allocation_key_leaves_the_bill_with_the_hub():
     raw["allocation"] = None
     ledger = P.build_ledger(inputs, ValueFlowConfig.model_validate(raw))
     assert not [ln for ln in ledger.periods["_"] if ln.source == "allocation"]
+
+
+# ── review round 1: stale hubs, reasons on the lines, export demand ────────
+
+
+def _alloc(ledger, sid):
+    return [ln for ln in ledger.periods["_"] if ln.source == "allocation" and ln.source_id == sid]
+
+
+@pytest.mark.parametrize("links", [["la", "lb"], ["la", "lb", "lc", "ld"]],
+                         ids=["member_left_the_group", "group_member_outside_the_hub"])
+def test_a_hub_that_no_longer_matches_the_group_is_not_split(links):
+    """#1: the solver-config route can change `group_members` under a saved
+    value-flows config; the ledger then refuses the split, never renormalises."""
+    inputs, _g, _hp = _v5_inputs()
+    inputs.hub.group_links = links
+    vf = _vf("energy")
+    ledger = P.build_ledger(inputs, vf)
+    lines = [ln for ln in ledger.periods["_"] if ln.source == "allocation"]
+    assert lines and all(ln.amount is None for ln in lines)
+    assert all(any(f.endswith(":hub_members_stale") for f in ln.flags) for ln in lines)
+    assert P.check_conservation(ledger, inputs, vf).ok is None
+
+
+def test_fixed_shares_on_other_participants_are_stale():
+    inputs, _g, _hp = _v5_inputs()
+    vf = _vf("fixed_shares", shares=V5["keys"]["fixed_shares"])
+    raw = vf.model_dump(mode="json")
+    raw["allocation"]["shares"] = {"member_a": 0.5, "member_b": 0.25, "someone": 0.25}
+    ledger = P.build_ledger(inputs, ValueFlowConfig.model_validate(raw))
+    assert all(ln.amount is None for ln in _alloc(ledger, "connection:fee"))
+
+
+def test_the_ledger_line_names_why_a_peak_split_is_unknown():
+    """#2: the specific reason reaches the ledger, not a generic one."""
+    idx = pd.date_range("2029-02-01", periods=96, freq="15min")
+    a, b = np.full(96, 1.0), np.full(96, 1.0)
+    tariff = _demand_tariff(ratchet={"lookback_months": 1, "share": 1.0})
+    group = TE.rate(pd.DataFrame({"import_mw": a + b, "export_mw": np.zeros(96)}, index=idx),
+                    tariff, step_hours=0.25, timezone=None, meter_history={"2029-01": 5000.0})
+    hp = HA.period_hub(idx, {"member_a": a, "member_b": b}, np.zeros(96), np.full(96, 0.25),
+                       tariff, step_hours=0.25, timezone=None, billing_period=None,
+                       represents_hours=None, group=group)
+    items = {"demand": P.BillItem("demand", "demand", "import", "cost")}
+    inputs = P.LedgerInputs(
+        periods=["_"], site_party="hub", bill_items=items,
+        bill={"_": dict(group.per_item_sampled)}, bill_flags={}, retailer=None, settlement=[],
+        connection_fee={}, connection_fixed_fee={}, curtailment_compensation=False,
+        export_revenue={}, export_split=None, assets=[], cost_breakdown_total={"_": 0.0},
+        lp_commercial={"_": 0.0}, disclosures={},
+        hub=P.HubInputs(members=[("la", "member_a"), ("lb", "member_b")], periods={"_": hp},
+                        group_links=["la", "lb"], metered_items=[], peak_items=["demand"]))
+    vf = ValueFlowConfig.model_validate({
+        "participants": [{"id": "hub", "name": "Hub", "role": "site_owner"},
+                         {"id": "member_a", "name": "a", "role": "hub_member"},
+                         {"id": "member_b", "name": "b", "role": "hub_member"}],
+        "hub_members": [{"link": "la", "participant": "member_a"},
+                        {"link": "lb", "participant": "member_b"}],
+        "allocation": {"basis": "peak_contribution"}})
+    (line, *_rest) = _alloc(P.build_ledger(inputs, vf), "bill:demand")
+    assert "allocation_not_established:demand:ratchet_floor_from_meter_history" in line.flags
+
+
+def test_an_export_demand_item_is_never_split_by_import():
+    """#3: an export-measured demand item falls back to energy, disclosed."""
+    item = {"id": "demx", "kind": "demand", "unit": "per_kw_month", "measured_on": "export",
+            "periods": [{"name": "all", "rate": 3.0}]}
+    tariff = Tariff.model_validate({**V5["tariff"], "items": [*V5["tariff"]["items"], item]})
+    assert not HA.is_peak_item(tariff.items[-1])
+    idx, members, export = _v5_dispatch()
+    group = _rate_group(tariff, idx, members, export)
+    hp = HA.period_hub(idx, members, export, np.full(len(idx), 0.25), tariff, step_hours=0.25,
+                       timezone=None, billing_period=None, represents_hours=None, group=group)
+    assert "demx" not in hp.peak
+    inputs, _g, _hp = _v5_inputs()
+    inputs.bill_items["demx"] = P.BillItem("demx", "demand", "export", "cost")
+    inputs.bill["_"]["demx"] = group.per_item_sampled["demx"]
+    inputs.hub = _hub_inputs(tariff, {"_": hp})
+    ledger = P.build_ledger(inputs, _vf("peak_contribution"))
+    lines = _alloc(ledger, "bill:demx")
+    assert lines and all("allocation_fallback_energy" in ln.flags for ln in lines)
+    assert P.check_conservation(ledger, inputs, _vf("peak_contribution")).ok is True
+
+
+def test_a_metered_item_with_no_rating_is_never_keyed():
+    """#4: a period that could not be rated leaves a linear item unknown."""
+    inputs, _g, _hp = _v5_inputs()
+    inputs.hub.periods["_"] = P.HubPeriod(energy_mwh={m: 1.0 for m in MEMBERS}, metered={},
+                                          peak={}, reason="period_not_rated")
+    ledger = P.build_ledger(inputs, _vf("contracted_capacity"))
+    lines = _alloc(ledger, "bill:energy")
+    assert lines and all(ln.amount is None for ln in lines)
+    assert any(f.endswith(":period_not_rated") for f in lines[0].flags)
+    assert all(ln.amount is not None for ln in _alloc(ledger, "connection:fee"))
+
+
+def test_the_peak_split_is_computed_only_for_the_peak_key():
+    tariff = Tariff.model_validate(V5["tariff"])
+    idx, members, export = _v5_dispatch()
+    group = _rate_group(tariff, idx, members, export)
+    hp = HA.period_hub(idx, members, export, np.full(len(idx), 0.25), tariff, step_hours=0.25,
+                       timezone=None, billing_period=None, represents_hours=None, group=group,
+                       peak=False)
+    assert hp.peak == {} and set(hp.metered) == {"energy", "levy"}
 
 
 # ── live: a solved two-member hub closes under every key ───────────────────

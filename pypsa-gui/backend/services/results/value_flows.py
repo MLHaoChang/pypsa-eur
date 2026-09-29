@@ -254,10 +254,16 @@ def _hub_inputs(n, parsed, vf, bill) -> P.HubInputs | None:
         return None
     by_link = {m.link: m.participant for m in vf.hub_members}
     members = [(link, by_link[link]) for link in parsed.group_members if link in by_link]
+    items = parsed.import_tariff.items if parsed.import_tariff is not None else []
+    hub = P.HubInputs(members=members, periods={}, group_links=list(parsed.group_members),
+                      metered_items=[i.id for i in items if _HA.is_metered(i)],
+                      peak_items=[i.id for i in items if _HA.is_peak_item(i)])
+    if sorted(parsed.group_members) != sorted(by_link):
+        return hub                    # stale: the ledger refuses the split (review #1)
     p0 = getattr(n.links_t, "p0", None)
     links = [link for link, _p in members] + ([parsed.export_link] if parsed.export_link else [])
     if p0 is None or any(link not in p0.columns for link in links):
-        return P.HubInputs(members=members, periods={})
+        return hub
     scratch: list[str] = []
     flows = {part: _billing._flow(p0, link, scratch) for link, part in members}
     exp_all = (_billing._flow(p0, parsed.export_link, scratch) if parsed.export_link
@@ -277,12 +283,14 @@ def _hub_inputs(n, parsed, vf, bill) -> P.HubInputs | None:
             periods[_key(p)] = _HA.period_hub(
                 idx, {part: v[sel] for part, v in flows.items()}, exp_all[sel], w_all[sel],
                 parsed.import_tariff, step_hours=step, timezone=parsed.timezone,
-                billing_period=billing_period, represents_hours=represents, group=group)
+                billing_period=billing_period, represents_hours=represents, group=group,
+                peak=vf.allocation.basis == "peak_contribution")
         except ValueError as exc:                   # the results path never raises
             periods[_key(p)] = P.HubPeriod(
                 energy_mwh={part: None for _l, part in members}, metered={}, peak={},
-                flags=[f"allocation_not_established:{_key(p)}:{str(exc)[:120]}"])
-    return P.HubInputs(members=members, periods=periods)
+                reason="period_not_rated", flags=[f"period_not_rated:{str(exc)[:120]}"])
+    hub.periods = periods
+    return hub
 
 
 def _disclosures(n, cfg, lost_load) -> dict[str, dict[str, float | None]]:

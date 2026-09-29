@@ -288,12 +288,22 @@ class HubPeriod:
     metered: dict[str, dict[str, float | None] | None]
     peak: dict[str, dict[str, float] | None]
     flags: list[str] = field(default_factory=list)
+    # Why an item's peak split is None (WP3.3a review #2), and why the whole
+    # period could not be rated (None: it was).
+    peak_reason: dict[str, str] = field(default_factory=dict)
+    reason: str | None = None
 
 
 @dataclass
 class HubInputs:
     members: list[tuple[str, str]]                    # (group member Link, participant)
     periods: dict[str, HubPeriod]
+    # The group's member Links now (a stale value-flows config is refused at
+    # ledger time, review #1) and the tariff's item classes, known whether or
+    # not a period rated (review #4).
+    group_links: list[str] = field(default_factory=list)
+    metered_items: list[str] = field(default_factory=list)
+    peak_items: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -580,6 +590,20 @@ def _key_weights(vf: ValueFlowConfig, hp: HubPeriod | None,
     return w, basis
 
 
+def _stale_hub(hub: HubInputs, vf: ValueFlowConfig) -> bool:
+    """The saved hub no longer matches the group (the solver-config route can
+    change `group_members` without re-validating `value_flows`): a member
+    outside the hub, a hub member outside the group, or fixed shares keyed on
+    other participants (WP3.3a review #1)."""
+    links = sorted(m.link for m in vf.hub_members)
+    if sorted(hub.group_links) != links:
+        return True
+    if vf.allocation.basis == "fixed_shares":
+        keys = sorted(k.strip().casefold() for k in (vf.allocation.shares or {}))
+        return keys != sorted(m.participant.strip().casefold() for m in vf.hub_members)
+    return False
+
+
 def _allocation_sources(shared: list[_Source], inputs: LedgerInputs, vf: ValueFlowConfig,
                         p: str) -> list[_Source]:
     hub = inputs.hub
@@ -587,8 +611,11 @@ def _allocation_sources(shared: list[_Source], inputs: LedgerInputs, vf: ValueFl
         return []
     site = inputs.site_party
     hp = hub.periods.get(p)
+    # Sorted by id, case-insensitively (the party matching rule), so the
+    # remainder member does not depend on capitalisation.
     members = sorted((m.participant for m in vf.hub_members),
                      key=lambda x: x.strip().casefold())
+    stale = _stale_hub(hub, vf)
     out: list[_Source] = []
     for src in shared:
         if src.source not in _SHARED:
@@ -599,19 +626,24 @@ def _allocation_sources(shared: list[_Source], inputs: LedgerInputs, vf: ValueFl
         item = src.source_id if src.source == "bill" else None
         raw: dict[str, float] | None = None
         method, reason = vf.allocation.basis, None
-        if item is not None and hp is not None and item in hp.metered:
+        period_reason = None if hp is None else hp.reason
+        if stale:
+            reason = "hub_members_stale"
+        elif item is not None and item in hub.metered_items:
+            # A linear import item is metered or not split — never keyed
+            # (review #4): a key would misallocate a TOU rate.
             method = "metered"
-            got = hp.metered[item]
+            got = None if hp is None else hp.metered.get(item)
             if got is None or any(v is None or not _finite(v)
                                   for v in (got.get(m) for m in members)):
-                reason = "member_rating_unknown"
+                reason = period_reason or "member_rating_unknown"
             else:
                 raw = {m: got[m] for m in members}
-        elif item is not None and method == "peak_contribution" and hp is not None \
-                and item in hp.peak:
-            got = hp.peak[item]
+        elif item is not None and method == "peak_contribution" and item in hub.peak_items:
+            got = None if hp is None else hp.peak.get(item)
             if got is None:
-                reason = "peak_split_unknown"
+                reason = (period_reason or (hp.peak_reason.get(item) if hp is not None else None)
+                          or "peak_split_unknown")
             else:
                 raw = {m: got.get(m, 0.0) for m in members}
         if raw is None and reason is None:
