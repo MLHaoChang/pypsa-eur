@@ -104,6 +104,16 @@ def test_defaults_are_the_pinned_ones():
     assert empty.note is None
     assert empty.audit.unverified == []
     assert empty.audit.verified == []
+    # Increment 3 (WP12): the round trip's additive fields default to "nothing".
+    assert empty.pending_instruction is None
+    assert empty.comments == []
+    meta = ReportMeta(
+        report_id="0123456789abcdef", title="t",
+        created_at="2026-09-28T10:00:00+00:00",
+        updated_at="2026-09-28T10:05:00+00:00",
+        latest_version=1, mode="evidence_only", evidence_hash="b" * 64,
+    )
+    assert meta.roundtrip_file_id is None
 
 
 def test_unknown_keys_are_ignored_at_every_level():
@@ -177,3 +187,20 @@ def test_report_meta_round_trips_and_ignores_unknown_keys():
     raw = json.loads(meta.model_dump_json())
     raw["future"] = 1
     assert ReportMeta.model_validate(raw) == meta
+
+
+def test_round_trip_fields_survive_json():
+    sec = Section(section_id="s", heading="S", source="user_edit", status="ok",
+                  pending_instruction="tighten the wording", comments=["a", "b"])
+    back = Section.model_validate_json(sec.model_dump_json())
+    assert back.pending_instruction == "tighten the wording"
+    assert back.comments == ["a", "b"]
+    meta = ReportMeta(
+        report_id="0123456789abcdef", title="t",
+        created_at="2026-09-28T10:00:00+00:00",
+        updated_at="2026-09-28T10:05:00+00:00",
+        latest_version=3, mode="generated", evidence_hash="b" * 64,
+        roundtrip_file_id="0123456789abcdef",
+    )
+    assert ReportMeta.model_validate_json(meta.model_dump_json()).roundtrip_file_id == \
+        "0123456789abcdef"
