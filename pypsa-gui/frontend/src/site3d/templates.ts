@@ -266,13 +266,13 @@ function turbineArray(p: Record<string, ParamValue>, input: TemplateInput): Temp
     const c = i % perRow, r = Math.floor(i / perRow)
     const x = -w / 2 + c * spacing, y = -d / 2 + r * spacing
     parts.push({ pos: [x, y, hub / 2], size: [td, td, hub], shape: 'cylinder', axis: 'up', color: tower, heroable: true })   // tower
-    parts.push({ pos: [x, y - 3, hub], size: [4, 10, 4], color: tower })                                                      // nacelle
+    parts.push({ pos: [x, y - 3, hub], size: [4, 10, 4], color: tower, heroable: true })                                      // nacelle
     const hubPos: [number, number, number] = [x, y - 8, hub]
     rotors.push({ turbine: i, hub: hubPos })
     for (let b = 0; b < 3; b++) {                                                                                             // blades, rotor facing south
       const a = b * (2 * Math.PI / 3)
       // Radial: the blade's east axis turns to (cos a, sin a) in the (east, up) plane, i.e. rotN = −a.
-      parts.push({ pos: [x + Math.cos(a) * rotor / 4, y - 8, hub + Math.sin(a) * rotor / 4], size: [rotor / 2, 0.5, 3], rotN: -a, color: blade, anchor: 'rotor', turbine: i })
+      parts.push({ pos: [x + Math.cos(a) * rotor / 4, y - 8, hub + Math.sin(a) * rotor / 4], size: [rotor / 2, 0.5, 3], rotN: -a, color: blade, anchor: 'rotor', turbine: i, heroable: true })
     }
   }
   const footprint: [number, number] = [w + rotor, d + rotor]

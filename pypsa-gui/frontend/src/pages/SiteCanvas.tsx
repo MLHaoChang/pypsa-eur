@@ -37,8 +37,11 @@ import {
   groundMode, hillshadeCanvas, terrainCellMetres, RIBBON_COLOR, AREA_COLOR, BUILDING_COLOR, OSM_ATTRIBUTION, type HeightAt,
 } from '../site3d/context'
 import { buildSiteLayout, objectKey, type SiteObject } from '../site3d/layout'
-import { objectGeometry } from '../site3d/objectGeometry'
+import { objectGeometry, type ObjectGeometry } from '../site3d/objectGeometry'
 import { emissiveFor } from '../site3d/resultStyle'
+import { HERO_MODELS } from '../site3d/heroes'
+import { HeroInstances, preloadHeroes, useHero } from '../site3d/heroLoader'
+import SceneErrorBoundary from '../site3d/SceneErrorBoundary'
 import { DEFAULT_LIBRARY, legendFor } from '../site3d/assetLibrary'
 import { matrixFor, placementFromMatrix } from '../site3d/placementMath'
 import { screenToGround, groundToScreen } from '../site3d/raycast'
@@ -56,6 +59,9 @@ import type { Site, SiteContext } from '../site3d/types'
 
 /** The one empty list the component queries fall back to (stable identity). */
 const NONE: never[] = []
+
+/** The hero models' credit (CC0 needs none; the spec gives it anyway, §5.1). */
+const MODELS_ATTRIBUTION = 'Models: Kenney (CC0)'
 
 /**
  * What an object's geometry is made of, as a string: the layout returns new
@@ -95,12 +101,31 @@ const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hover
   const [ox, oy] = pivot ? [0, 0] : obj.origin
   const heading = pivot ? 0 : obj.heading
   const sig = geometrySignature(obj)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const geom = useMemo(() => objectGeometry(obj.parts, obj.color, obj.anchors), [sig])
-  useEffect(() => () => { geom.body?.dispose(); for (const r of geom.rotors) r.geometry.dispose() }, [geom])
+  const heroId = DEFAULT_LIBRARY.find(t => t.id === obj.kind)?.hero
+  const model = heroId ? HERO_MODELS[heroId] : null
+  const hero = useHero(model)
+  /* eslint-disable react-hooks/exhaustive-deps */
+  const parts = useMemo(() => obj.parts, [sig])
+  // Everything parametric (no hero, or while the hero loads / if it fails) …
+  const all = useMemo(() => objectGeometry(obj.parts, obj.color, obj.anchors), [sig])
+  // … and what stays parametric beside a hero (skids, stacks, BoP).
+  const rest = useMemo(() => (model ? objectGeometry(obj.parts, obj.color, obj.anchors, q => !q.heroable) : null), [sig, model])
+  /* eslint-enable react-hooks/exhaustive-deps */
+  useEffect(() => () => { all.body?.dispose(); for (const r of all.rotors) r.geometry.dispose() }, [all])
+  useEffect(() => () => { rest?.body?.dispose(); for (const r of rest?.rotors ?? []) r.geometry.dispose() }, [rest])
   const glow = emissiveFor({ selected, hovered, outside }, obj.color)
   const material = (
     <meshStandardMaterial vertexColors emissive={glow.color} emissiveIntensity={glow.intensity} roughness={0.7} metalness={0.1} />
+  )
+  const parametric = (g: ObjectGeometry) => (
+    <>
+      {g.body && <mesh geometry={g.body} castShadow receiveShadow>{material}</mesh>}
+      {g.rotors.map(r => (
+        <group key={r.turbine} name={`rotor:${r.turbine}`} position={r.origin}>
+          <mesh geometry={r.geometry} castShadow receiveShadow>{material}</mesh>
+        </group>
+      ))}
+    </>
   )
   return (
     <group
@@ -112,12 +137,14 @@ const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hover
       onPointerOver={(e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); onHover(objectKey(obj)) }}
       onPointerOut={() => onHover(null)}
     >
-      {geom.body && <mesh geometry={geom.body} castShadow receiveShadow>{material}</mesh>}
-      {geom.rotors.map(r => (
-        <group key={r.turbine} name={`rotor:${r.turbine}`} position={r.origin}>
-          <mesh geometry={r.geometry} castShadow receiveShadow>{material}</mesh>
-        </group>
-      ))}
+      {model && rest && hero.status === 'ready' ? (
+        // The parametric form while the model loads and if it fails (E8); the
+        // boundary only guards drawing a loaded model.
+        <SceneErrorBoundary fallback={parametric(all)} resetKey={model.id}>
+          {parametric(rest)}
+          <HeroInstances parts={parts} pieces={hero.value} model={model} tint={obj.color} glow={glow} />
+        </SceneErrorBoundary>
+      ) : parametric(all)}
     </group>
   )
 }, (a, b) =>
@@ -343,6 +370,8 @@ function Site3dDebugHook({ objects, site, context, groundMode: mode, heightAt }:
       objects: objects.map(o => ({ key: `${o.type}:${o.name}`, kind: o.kind, origin: o.origin, heading: o.heading, parts: o.parts.length, summary: o.summary })),
       /** Draw calls of the last frame (the shadow pass counts too). */
       calls: () => gl.info.render.calls,
+      /** Instanced hero meshes in the scene (0 while loading or after a failed load). */
+      heroMeshes: () => { let n = 0; scene.traverse(o => { if (o.name === 'hero' || o.name === 'hero-rotor') n++ }); return n },
       renders: () => ({ ...renderCounts }),
       site: { id: site.id, name: site.name, placements: site.placements },
       context: context ? { buildings: context.buildings.length, lines: context.lines.length, areas: context.areas.length, terrain: !!context.terrain, missingTiles: context.terrain?.missing_tiles ?? null } : null,
@@ -419,6 +448,7 @@ export default React.memo(SiteCanvas)
 
 function SiteCanvas() {
   countRender('SiteCanvas')
+  useEffect(() => { preloadHeroes() }, [])
   // Selectors, never the whole store: a snapshot step (resultsSnapshotIdx)
   // must not re-render the site (Phase 2 plan Task 2.2).
   const currentProject = useUIStore(s => s.currentProject)
@@ -821,7 +851,7 @@ function SiteCanvas() {
         )}
         {/* The OSM credit is not taken from the document: ODbL requires it
             whenever OSM data is drawn, whatever the cache says. */}
-        {[ESRI_ATTRIBUTION, ...(context ? [OSM_ATTRIBUTION] : []), ...(context?.attribution ?? []).filter(a => !/openstreetmap/i.test(a))].join(' · ')}
+        {[ESRI_ATTRIBUTION, ...(context ? [OSM_ATTRIBUTION] : []), ...(context?.attribution ?? []).filter(a => !/openstreetmap/i.test(a)), MODELS_ATTRIBUTION].join(' · ')}
       </div>
     </div>
   )

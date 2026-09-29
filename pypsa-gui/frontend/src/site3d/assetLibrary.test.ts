@@ -39,6 +39,20 @@ describe('DEFAULT_LIBRARY', () => {
   })
 })
 
+describe('hero models', () => {
+  it('the types that look like a hero model name it, and only known models', () => {
+    const heroOf = Object.fromEntries(DEFAULT_LIBRARY.filter(t => t.hero).map(t => [t.id, t.hero]))
+    expect(heroOf).toEqual({
+      pvRoof: 'pvTable', pv: 'pvTable', wind: 'turbine', thermal: 'container', h2store: 'tank', bess: 'container',
+      electrolyser: 'container', fuelCell: 'container', heatPump: 'container', load: 'hall',
+    })
+  })
+  it('refuses an unknown hero', () => {
+    const lib = clone(DEFAULT_LIBRARY); (lib.find(t => t.id === 'bess') as { hero?: string }).hero = 'teapot'
+    expect(() => validateLibrary(lib)).toThrow(/bess.*hero/)
+  })
+})
+
 describe('validateLibrary', () => {
   const bad = (edit: (lib: AssetType[]) => void) => { const lib = clone(DEFAULT_LIBRARY); edit(lib); return () => validateLibrary(lib) }
   it('rejects a zero or non-finite number, naming the field', () => {

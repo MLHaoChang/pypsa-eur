@@ -69,6 +69,13 @@ describe('objectGeometry', () => {
     expect(bodyVerts).toBe(nonRotor)
   })
 
+  it('a hero turbine drops the parametric tower, nacelle and rotors (they are all heroable)', () => {
+    const out = run('wind', 15)
+    const g = objectGeometry(out.parts, '#000', out.anchors, p => !p.heroable)
+    expect(g.body).toBeNull()
+    expect(g.rotors).toHaveLength(0)
+  })
+
   it('omits the parts a caller leaves out (heroes, WP3), and an empty body is null', () => {
     const out = run('bess', 40)
     const g = objectGeometry(out.parts, '#000', out.anchors, p => !p.heroable)

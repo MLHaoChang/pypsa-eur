@@ -41,14 +41,15 @@ function placed(parts: Part[], color: string, offset?: [number, number, number])
 }
 
 /**
- * Merge an object's parts. `keep` filters parts out of the body (a hero
- * stands in for them, WP3); rotor parts always go to their turbine's rotor.
+ * Merge an object's parts. `keep` filters parts out (a hero stands in for
+ * them, WP3) — from the body and from the rotors alike; a kept rotor part
+ * goes to its turbine's rotor.
  */
 export function objectGeometry(parts: Part[], color: string, anchors?: Anchors, keep: (p: Part) => boolean = () => true): ObjectGeometry {
   const body = placed(parts.filter(p => p.anchor !== 'rotor' && keep(p)), color)
   const rotors = (anchors?.rotors ?? []).map(r => {
     const origin = toScene(...r.hub)
-    return { turbine: r.turbine, origin, geometry: placed(parts.filter(p => p.anchor === 'rotor' && p.turbine === r.turbine), color, origin) }
+    return { turbine: r.turbine, origin, geometry: placed(parts.filter(p => p.anchor === 'rotor' && p.turbine === r.turbine && keep(p)), color, origin) }
   }).filter((r): r is ObjectGeometry['rotors'][number] => r.geometry !== null)
   return { body, rotors }
 }

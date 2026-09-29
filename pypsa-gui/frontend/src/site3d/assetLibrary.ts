@@ -12,6 +12,7 @@
 
 import type { Geometry, ParamValue, TemplateId } from './templates'
 import { TEMPLATE_IDS } from './templates'
+import { HERO_IDS, type HeroModel } from './heroes'
 import { H2_BUS_RE, HEAT_BUS_RE, GAS_BUS_RE, H2_CARRIER_RE } from '../utils/busCarriers'
 
 export type PyPSAClass = 'Bus' | 'Generator' | 'StorageUnit' | 'Store' | 'Load' | 'Transformer' | 'Line' | 'Link'
@@ -66,6 +67,8 @@ export interface AssetType {
   geometry: Geometry
   summary: (s: SummaryInfo) => string
   flags?: { bay?: boolean; infrastructure?: boolean }
+  /** A hero model that stands in for this type's heroable units (spec §5); absent = parametric only. */
+  hero?: HeroModel['id']
 }
 
 // ── helpers for the summaries ───────────────────────────────────────────────
@@ -90,21 +93,21 @@ const OFFTAKE_RE = /(^|[^a-z])(h2|hydrogen)([^a-z]|$)|heat|gas/i
 const LIB: AssetType[] = [
   // ── Generators ────────────────────────────────────────────────────────────
   {
-    id: 'pvRoof', label: 'Rooftop PV', color: '#22c55e', zone: 'roof',
+    id: 'pvRoof', hero: 'pvTable', label: 'Rooftop PV', color: '#22c55e', zone: 'roof',
     match: [{ cls: 'Generator', carrier: /rooftop/i }],
     size: { Generator: { param: 'p_nom', unit: 'MW' } },
     geometry: { template: 'pvRoof', params: { m2PerMwp: 6000, minMw: 0.05, rowLength: 10, tableDepth: 2, tableGap: 1, tiltDeg: 10, canopyHeight: 4, postColor: '#9ca3af' } },
     summary: s => `Rooftop PV — ${fmt(s.amount, 'MW')} (no land take)${eachBox(s.each, 'table')}`,
   },
   {
-    id: 'pv', label: 'PV field', color: '#16a34a', zone: 'south',
+    id: 'pv', hero: 'pvTable', label: 'PV field', color: '#16a34a', zone: 'south',
     match: [{ cls: 'Generator', carrier: SOLAR_PV_RE }],
     size: { Generator: { param: 'p_nom', unit: 'MW' } },
     geometry: { template: 'pvField', params: { haPerMwp: 2.5, minMw: 0.05, rowLength: 30, rowPitch: 6, tableDepth: 2.2, tableGap: 2, tiltDeg: 25, lift: 1.2 } },
     summary: s => `PV field — ${fmt(s.amount, 'MW')} on ~${(s.areaM2 / 10_000).toFixed(1)} ha${eachBox(s.each, 'table')}`,
   },
   {
-    id: 'wind', label: 'Wind turbines', color: '#15803d', zone: 'south',
+    id: 'wind', hero: 'turbine', label: 'Wind turbines', color: '#15803d', zone: 'south',
     match: [{ cls: 'Generator', carrier: /wind/i }],
     size: { Generator: { param: 'p_nom', unit: 'MW' } },
     geometry: { template: 'turbineArray', params: { per: 5, hubHeight: 100, rotorDiameter: 140, spacingD: 4, perRow: 4, towerDiameter: 4, ratedRpm: 12, towerColor: STEEL, bladeColor: '#f3f4f6' } },
@@ -120,7 +123,7 @@ const LIB: AssetType[] = [
   {
     // The Generator fallback: engine gensets for gas, diesel, oil, biogas,
     // biomass; a generic plant block, named by its carrier, for anything else.
-    id: 'thermal', color: '#dc2626', zone: 'west',
+    id: 'thermal', hero: 'container', color: '#dc2626', zone: 'west',
     label: gensetLabel,
     match: [{ cls: 'Generator' }],
     size: { Generator: { param: 'p_nom', unit: 'MW' } },
@@ -151,7 +154,7 @@ const LIB: AssetType[] = [
     summary: s => `Compressed air storage — ${fmt(s.amount, 'MW')}`,
   },
   {
-    id: 'h2store', label: 'H₂ storage', color: '#0e7490', zone: 'east',
+    id: 'h2store', hero: 'tank', label: 'H₂ storage', color: '#0e7490', zone: 'east',
     match: [{ cls: 'Store', carrier: H2_CARRIER_RE }, { cls: 'StorageUnit', carrier: H2_CARRIER_RE }],
     size: { Store: { param: 'e_nom', unit: 'MWh' }, StorageUnit: { param: 'mwh', unit: 'MWh' } },
     geometry: { template: 'tankArray', params: { diameter: 3, length: 20, axis: 'north', per: 20, perRow: 6, gap: 2, heroable: true } },
@@ -166,7 +169,7 @@ const LIB: AssetType[] = [
   },
   {
     // The StorageUnit fallback: battery containers (Phase 1 drew every StorageUnit so).
-    id: 'bess', label: 'Battery storage', color: '#7c3aed', zone: 'east',
+    id: 'bess', hero: 'container', label: 'Battery storage', color: '#7c3aed', zone: 'east',
     match: [{ cls: 'Store', carrier: /batter|li-?ion|bess/i }, { cls: 'StorageUnit' }],
     size: { StorageUnit: { param: 'mwh', unit: 'MWh' }, Store: { param: 'e_nom', unit: 'MWh' } },
     geometry: { template: 'unitGrid', params: { unitW: 6.1, unitD: 2.44, unitH: 2.9, per: 4, perRow: 8, gap: 1.5, extra: 'pcs', extraColor: '#a78bfa', heroable: true, anchor: 'fill' } },
@@ -183,7 +186,7 @@ const LIB: AssetType[] = [
 
   // ── Conversion (Links) ────────────────────────────────────────────────────
   {
-    id: 'electrolyser', label: 'Electrolyser', color: '#0891b2', zone: 'west',
+    id: 'electrolyser', hero: 'container', label: 'Electrolyser', color: '#0891b2', zone: 'west',
     match: [
       { cls: 'Link', carrier: /electroly/i, port: 'bus0' },
       { cls: 'Link', carrier: /^h2$/i, farCarrier: { port: 'bus1', carrier: H2_BUS_RE }, port: 'bus0' },
@@ -193,7 +196,7 @@ const LIB: AssetType[] = [
     summary: s => `Electrolyser — ${fmt(s.amount, 'MW')} in ${plural(s.count, 'skid')}${eachBox(s.each)}`,
   },
   {
-    id: 'fuelCell', label: 'Fuel cells', color: '#0d9488', zone: 'west',
+    id: 'fuelCell', hero: 'container', label: 'Fuel cells', color: '#0d9488', zone: 'west',
     match: [
       { cls: 'Link', carrier: /fuel.?cell/i, port: 'bus1' },
       { cls: 'Link', carrier: /^h2$/i, farCarrier: { port: 'bus0', carrier: H2_BUS_RE }, port: 'bus1' },
@@ -203,7 +206,7 @@ const LIB: AssetType[] = [
     summary: s => `Fuel cells — ${fmt(s.amount, 'MW')} in ${plural(s.count, 'container')}${eachBox(s.each)}`,
   },
   {
-    id: 'heatPump', label: 'Heat pumps / e-boilers', color: '#f97316', zone: 'west',
+    id: 'heatPump', hero: 'container', label: 'Heat pumps / e-boilers', color: '#f97316', zone: 'west',
     match: [{ cls: 'Link', carrier: /heat.?pump|resistive|electric.?boiler|^e-?boiler$/i, port: 'bus0' }],
     size: { Link: { param: 'p_nom', unit: 'MW' } },
     geometry: { template: 'unitGrid', params: { unitW: 6.1, unitD: 2.44, unitH: 2.9, per: 5, perRow: 6, gap: 2, extra: 'coolers', extraColor: '#cbd5e1', heroable: true, anchor: 'emissive' } },
@@ -227,7 +230,7 @@ const LIB: AssetType[] = [
   },
   {
     // The Load fallback: a data hall, sized from its IT load.
-    id: 'load', label: 'Data hall', color: '#d97706', zone: 'northeast',
+    id: 'load', hero: 'hall', label: 'Data hall', color: '#d97706', zone: 'northeast',
     match: [{ cls: 'Link', carrier: /data.?cent/i, port: 'bus0' }, { cls: 'Load' }],
     size: { Load: { param: 'p_set', unit: 'MW' }, Link: { param: 'p_nom', unit: 'MW' } },
     geometry: { template: 'hall', params: { minM2: 200, m2PerMw: 800, aspect: 1.6, height: 12, roofColor: '#fbbf24' } },
@@ -287,6 +290,7 @@ export function validateLibrary(lib: readonly AssetType[]): void {
     if (ids.has(t.id)) throw new Error(`asset library: duplicate id '${t.id}'`)
     ids.add(t.id)
     if (!(TEMPLATE_IDS as string[]).includes(t.geometry.template)) throw new Error(`asset library: ${t.id} has unknown template '${t.geometry.template}'`)
+    if (t.hero !== undefined && !(HERO_IDS as string[]).includes(t.hero)) throw new Error(`asset library: ${t.id} names an unknown hero model '${t.hero}'`)
     for (const [k, v] of Object.entries(t.geometry.params as Record<string, ParamValue>)) {
       if (typeof v === 'number' && !(Number.isFinite(v) && v > 0)) throw new Error(`asset library: ${t.id}.geometry.params.${k} must be a finite number > 0 (got ${v})`)
     }
