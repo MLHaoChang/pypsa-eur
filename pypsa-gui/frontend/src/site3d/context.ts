@@ -23,6 +23,8 @@ export const RIBBON_WIDTH_M: Record<ContextLineKind, number> = { road: 6, rail: 
 export const RIBBON_COLOR: Record<ContextLineKind, string> = { road: '#4b5563', rail: '#7c6f64', fence: '#9ca3af', power_line: '#6b7280' }
 export const AREA_COLOR: Record<ContextAreaKind, string> = { water: '#7fb3d5', power_substation: '#c7bfe6', landuse: '#000000' }
 export const BUILDING_COLOR = '#c9c3b8'
+/** ODbL credit, shown whenever context data is drawn (not read from the cached document). */
+export const OSM_ATTRIBUTION = '© OpenStreetMap contributors (ODbL)'
 
 /**
  * Lifts above the ground so co-planar surfaces never z-fight: areas, then

@@ -24,6 +24,7 @@ import io
 import json
 import logging
 import math
+import re
 import os
 import time
 from datetime import datetime, timezone
@@ -31,6 +32,7 @@ from typing import Any
 
 import httpx
 from PIL import Image
+from shapely import STRtree
 from shapely.geometry import Polygon
 
 log = logging.getLogger(__name__)
@@ -46,9 +48,22 @@ TERRARIUM_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}
 TERRAIN_URL_ENV = "PYPSAGUI_TERRAIN_URL"
 USER_AGENT = "pypsa-gui/1.0.0 (3D site view; site context fetch)"
 
-# The frontend's axios client times out at 30 s; the whole fetch stays under it.
+# The frontend's axios client times out at 30 s; the whole fetch stays under
+# it: the Overpass leg may take connect + read ≤ the budget, and every tile
+# GET is clamped to what is left of the budget when it starts.
 TOTAL_BUDGET_S = 25.0
 OVERPASS_TIMEOUT_S = 20.0
+OVERPASS_CONNECT_S = 5.0
+TILE_TIMEOUT_S = 10.0
+# Ceilings: a boundary is a site, not a district. The padded bbox may not
+# exceed MAX_BBOX_KM2, the Overpass body may not exceed MAX_OVERPASS_BYTES
+# (read as a stream and cut off), and the document keeps at most
+# MAX_FEATURES buildings and MAX_FEATURES lines (nearest the bbox centre).
+MAX_BBOX_KM2 = 25.0
+MAX_OVERPASS_BYTES = 32 * 1024 * 1024
+MAX_FEATURES = 20_000
+# Web-Mercator's usable latitude; a padded bbox is clamped to it.
+MAX_MERCATOR_LAT = 85.05
 TERRAIN_GRID = 64
 TERRAIN_ZOOM = 12
 MIN_PAD_M = 150.0
@@ -70,6 +85,10 @@ class SiteContextUnavailable(RuntimeError):
     """An upstream refused or failed; the message says which and what to do."""
 
 
+class SiteContextTooLarge(SiteContextUnavailable):
+    """The request itself is out of bounds (bbox ceiling); a smaller site is the fix, not a retry."""
+
+
 # ── pure core ──────────────────────────────────────────────────────────────
 
 def padded_bbox(boundary: list[list[float]]) -> tuple[float, float, float, float]:
@@ -87,12 +106,21 @@ def padded_bbox(boundary: list[list[float]]) -> tuple[float, float, float, float
     depth_m = (max_lat - min_lat) * m_per_deg_lat
     pad_x = max(MIN_PAD_M, width_m * PAD_FRACTION)
     pad_y = max(MIN_PAD_M, depth_m * PAD_FRACTION)
+    clamp = lambda lat: max(-MAX_MERCATOR_LAT, min(MAX_MERCATOR_LAT, lat))  # noqa: E731
     return (
         min_lng - pad_x / m_per_deg_lng,
-        min_lat - pad_y / m_per_deg_lat,
+        clamp(min_lat - pad_y / m_per_deg_lat),
         max_lng + pad_x / m_per_deg_lng,
-        max_lat + pad_y / m_per_deg_lat,
+        clamp(max_lat + pad_y / m_per_deg_lat),
     )
+
+
+def bbox_area_km2(bbox: tuple[float, float, float, float]) -> float:
+    min_lng, min_lat, max_lng, max_lat = bbox
+    mid_lat = (min_lat + max_lat) / 2
+    m_per_deg_lat = 111_319.5
+    m_per_deg_lng = m_per_deg_lat * math.cos(math.radians(mid_lat))
+    return abs((max_lng - min_lng) * m_per_deg_lng) * abs((max_lat - min_lat) * m_per_deg_lat) / 1e6
 
 
 def overpass_query(bbox: tuple[float, float, float, float], timeout_s: int = int(OVERPASS_TIMEOUT_S)) -> str:
@@ -112,12 +140,21 @@ def overpass_query(bbox: tuple[float, float, float, float], timeout_s: int = int
     )
 
 
+_HEIGHT_RE = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*(m|metres?|meters?|ft|feet|')?\s*$", re.IGNORECASE)
+
+
 def _parse_float(v: Any) -> float | None:
-    try:
-        f = float(str(v).replace("m", "").strip())
-        return f if math.isfinite(f) and f > 0 else None
-    except (TypeError, ValueError):
+    """An OSM height value: metres by default, feet converted; anything else is None (falls through the rule)."""
+    if v is None:
         return None
+    m = _HEIGHT_RE.match(str(v))
+    if not m:
+        return None
+    f = float(m.group(1).replace(",", "."))
+    unit = (m.group(2) or "").lower()
+    if unit in ("ft", "feet", "'"):
+        f *= 0.3048
+    return f if math.isfinite(f) and f > 0 else None
 
 
 def building_height(tags: dict[str, str], landuse: str | None) -> tuple[float, str]:
@@ -176,6 +213,7 @@ def elements_to_context(elements: list[dict]) -> dict:
     lines: list[dict] = []
     areas: list[dict] = []
     landuse_polys: list[tuple[Polygon, str]] = []
+    truncated = False
 
     ways = [e for e in elements if e.get("type") == "way"]
     for el in ways:
@@ -193,6 +231,9 @@ def elements_to_context(elements: list[dict]) -> dict:
             except ValueError:
                 pass
 
+    # Containment through an STRtree: a district's worth of buildings against
+    # its land-use polygons is O(n log n), not buildings × polygons.
+    tree = STRtree([poly for poly, _lu in landuse_polys]) if landuse_polys else None
     for el in ways:
         tags = el.get("tags") or {}
         if "building" in tags:
@@ -200,14 +241,13 @@ def elements_to_context(elements: list[dict]) -> dict:
             if len(ring) < 3:
                 continue
             landuse = None
-            try:
-                centroid = Polygon(ring).centroid
-                for poly, lu in landuse_polys:
-                    if poly.contains(centroid):
-                        landuse = lu
-                        break
-            except ValueError:
-                pass
+            if tree is not None:
+                try:
+                    hits = tree.query(Polygon(ring).centroid, predicate="within")
+                    if len(hits):
+                        landuse = landuse_polys[int(hits[0])][1]
+                except (ValueError, TypeError):
+                    pass
             height, source = building_height(tags, landuse)
             buildings.append({"id": el["id"], "polygon": ring, "height_m": height, "height_source": source, "tags": tags})
             continue
@@ -217,7 +257,17 @@ def elements_to_context(elements: list[dict]) -> dict:
             if len(pts) >= 2:
                 lines.append({"id": el["id"], "kind": kind, "points": pts, "tags": tags})
 
-    return {"buildings": buildings, "lines": lines, "areas": areas}
+    if len(buildings) > MAX_FEATURES or len(lines) > MAX_FEATURES:
+        # Keep what is nearest the centre of what was asked for.
+        truncated = True
+        pts = [p for b in buildings for p in b["polygon"]] + [p for l in lines for p in l["points"]]
+        cx = sum(p[0] for p in pts) / len(pts)
+        cy = sum(p[1] for p in pts) / len(pts)
+        buildings.sort(key=lambda b: (b["polygon"][0][0] - cx) ** 2 + (b["polygon"][0][1] - cy) ** 2)
+        lines.sort(key=lambda l: (l["points"][0][0] - cx) ** 2 + (l["points"][0][1] - cy) ** 2)
+        del buildings[MAX_FEATURES:]
+        del lines[MAX_FEATURES:]
+    return {"buildings": buildings, "lines": lines, "areas": areas, "truncated": truncated}
 
 
 # ── terrain ────────────────────────────────────────────────────────────────
@@ -270,8 +320,12 @@ def terrain_grid(
             if tile is None:
                 heights.append(None)
                 continue
-            px = min(255, max(0, int((tx - int(tx)) * 256)))
-            py = min(255, max(0, int((ty - int(ty)) * 256)))
+            th, tw = len(tile), (len(tile[0]) if tile else 0)
+            if not th or not tw:
+                heights.append(None)
+                continue
+            px = min(tw - 1, max(0, int((tx - int(tx)) * tw)))
+            py = min(th - 1, max(0, int((ty - int(ty)) * th)))
             heights.append(tile[py][px])
     known = [h for h in heights if h is not None]
     fill = sum(known) / len(known) if known else 0.0
@@ -294,6 +348,7 @@ def context_document(bbox: tuple[float, float, float, float], features: dict, te
         "buildings": features["buildings"],
         "lines": features["lines"],
         "areas": features["areas"],
+        "truncated": bool(features.get("truncated", False)),
         "terrain": terrain,
         "attribution": list(ATTRIBUTION),
     }
@@ -313,11 +368,39 @@ def _client(transport: httpx.BaseTransport | None = None) -> httpx.Client:
     # Default `trust_env` so proxies and the CA bundle behave exactly as the
     # packaged app's LLM calls do (services/llm_openai_compat.py).
     return httpx.Client(
-        timeout=httpx.Timeout(OVERPASS_TIMEOUT_S, connect=10.0),
+        timeout=httpx.Timeout(OVERPASS_TIMEOUT_S, connect=OVERPASS_CONNECT_S),
         headers={"User-Agent": USER_AGENT},
         transport=transport,
         follow_redirects=True,
     )
+
+
+def _post_capped(client: httpx.Client, url: str, data: dict) -> bytes:
+    """POST and read the body as a stream, refusing more than MAX_OVERPASS_BYTES."""
+    with client.stream("POST", url, data=data) as r:
+        if r.status_code != 200:
+            raise SiteContextUnavailable(
+                f"Overpass at {url} answered HTTP {r.status_code}"
+                + (" (rate limited)" if r.status_code == 429 else "")
+                + f"; set {OVERPASS_URL_ENV} to a private endpoint or try again later."
+            )
+        declared = r.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > MAX_OVERPASS_BYTES:
+            raise SiteContextTooLarge(
+                f"Overpass returned {int(declared) / 1e6:.0f} MB for this site's surroundings; the limit is "
+                f"{MAX_OVERPASS_BYTES / 1e6:.0f} MB. Draw a smaller boundary."
+            )
+        chunks: list[bytes] = []
+        size = 0
+        for chunk in r.iter_bytes():
+            size += len(chunk)
+            if size > MAX_OVERPASS_BYTES:
+                raise SiteContextTooLarge(
+                    f"Overpass returned more than {MAX_OVERPASS_BYTES / 1e6:.0f} MB for this site's "
+                    "surroundings. Draw a smaller boundary."
+                )
+            chunks.append(chunk)
+        return b"".join(chunks)
 
 
 def fetch_context(
@@ -335,36 +418,39 @@ def fetch_context(
     """
     start = clock()
     bbox = padded_bbox(boundary)
+    area = bbox_area_km2(bbox)
+    if area > MAX_BBOX_KM2:
+        raise SiteContextTooLarge(
+            f"The site's surroundings span {area:.0f} km²; the context fetch covers at most "
+            f"{MAX_BBOX_KM2:.0f} km². Draw a smaller boundary (a site, not a district)."
+        )
     url = overpass_url()
     with _client(transport) as client:
         try:
-            r = client.post(url, data={"data": overpass_query(bbox)})
+            body = _post_capped(client, url, {"data": overpass_query(bbox)})
         except httpx.HTTPError as exc:
             raise SiteContextUnavailable(
                 f"Overpass at {url} could not be reached ({exc.__class__.__name__}); "
                 f"set {OVERPASS_URL_ENV} to a reachable endpoint or try again later."
             ) from exc
-        if r.status_code != 200:
-            raise SiteContextUnavailable(
-                f"Overpass at {url} answered HTTP {r.status_code}"
-                + (" (rate limited)" if r.status_code == 429 else "")
-                + f"; set {OVERPASS_URL_ENV} to a private endpoint or try again later."
-            )
         try:
-            elements = r.json().get("elements", [])
+            elements = json.loads(body).get("elements", [])
         except ValueError as exc:
             raise SiteContextUnavailable(f"Overpass at {url} returned something that is not JSON.") from exc
         features = elements_to_context(elements)
 
         tiles: dict[tuple[int, int, int], list[list[float]] | None] = {}
         for key in terrain_tiles_for(bbox):
-            if clock() - start > budget_s:
+            remaining = budget_s - (clock() - start)
+            if remaining <= 0:
                 log.warning("site context: terrain fetch stopped at the %.0f s budget", budget_s)
                 tiles[key] = None
                 continue
             z, x, y = key
             try:
-                tr = client.get(terrain_url().format(z=z, x=x, y=y), timeout=10.0)
+                # Never past the budget: a tile that hangs cannot push the
+                # whole answer past the frontend's timeout.
+                tr = client.get(terrain_url().format(z=z, x=x, y=y), timeout=min(TILE_TIMEOUT_S, remaining))
                 tiles[key] = decode_terrarium(tr.content) if tr.status_code == 200 else None
             except (httpx.HTTPError, OSError):
                 tiles[key] = None

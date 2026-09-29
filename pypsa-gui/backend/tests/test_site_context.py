@@ -88,6 +88,15 @@ def test_height_rule_every_branch():
     assert (by_id[1005]["height_m"], by_id[1005]["height_source"]) == (5.0, "default")
 
 
+@pytest.mark.parametrize("raw, expected", [
+    ("12", 12.0), ("12 m", 12.0), ("12m", 12.0), ("12,5", 12.5), ("3 metres", 3.0),
+    ("40 ft", pytest.approx(12.192)), ("40'", pytest.approx(12.192)),
+    ("0", None), ("-5", None), ("nan", None), ("12 cm", None), ("tall", None), (None, None),
+])
+def test_height_tag_parsing_handles_units(raw, expected):
+    assert sc._parse_float(raw) == expected
+
+
 def test_landuse_containment_supplies_a_height_for_a_plain_building():
     els = elements()
     # A plain building inside the industrial landuse polygon.
@@ -271,3 +280,83 @@ def test_terrain_url_env_override_points_the_tile_fetch_at_a_mirror(monkeypatch)
     assert doc["terrain"]["missing_tiles"] == 0
     monkeypatch.delenv(sc.TERRAIN_URL_ENV)
     assert sc.terrain_url() == sc.TERRARIUM_URL
+
+
+
+# ── gate fixes: budget, ceilings, edge cases ────────────────────────────────
+
+def test_a_tile_started_late_is_clamped_to_the_remaining_budget(monkeypatch):
+    """Overpass answers at 24 s of a 25 s budget: the first tile may take at most 1 s."""
+    monkeypatch.delenv(sc.OVERPASS_URL_ENV, raising=False)
+    monkeypatch.delenv(sc.TERRAIN_URL_ENV, raising=False)
+    timeouts = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            timeouts.append(request.extensions["timeout"]["read"])
+            return httpx.Response(200, content=terrarium_png(lambda x, y: 1.0))
+        return httpx.Response(200, content=json.dumps({"elements": []}))
+
+    ticks = iter([0.0, 24.0])
+    sc.fetch_context(BOUNDARY, transport=httpx.MockTransport(handler), budget_s=25.0, clock=lambda: next(ticks, 24.0))
+    assert timeouts and all(t == pytest.approx(1.0) for t in timeouts)
+
+
+def test_overpass_connect_plus_read_fits_the_budget():
+    assert sc.OVERPASS_CONNECT_S + sc.OVERPASS_TIMEOUT_S <= sc.TOTAL_BUDGET_S
+
+
+def test_a_district_sized_boundary_is_refused_before_any_request():
+    seen = []
+    transport = httpx.MockTransport(lambda r: seen.append(r) or httpx.Response(200, content=b"{}"))
+    big = [[6.70, 53.40], [6.80, 53.40], [6.80, 53.45], [6.70, 53.45]]  # ~6.6 km × 5.6 km
+    assert sc.bbox_area_km2(sc.padded_bbox(big)) > sc.MAX_BBOX_KM2
+    with pytest.raises(sc.SiteContextTooLarge, match="smaller boundary"):
+        sc.fetch_context(big, transport=transport)
+    assert seen == []
+
+
+def test_an_oversized_overpass_answer_is_cut_off(monkeypatch):
+    monkeypatch.delenv(sc.OVERPASS_URL_ENV, raising=False)
+    monkeypatch.setattr(sc, "MAX_OVERPASS_BYTES", 1000)
+
+    def declared(request):
+        return httpx.Response(200, headers={"content-length": "5000"}, content=b"x" * 5000)
+
+    with pytest.raises(sc.SiteContextTooLarge, match="MB"):
+        sc.fetch_context(BOUNDARY, transport=httpx.MockTransport(declared))
+
+    def streamed(request):
+        # No content-length: the cap is enforced while reading.
+        return httpx.Response(200, content=iter([b"x" * 600, b"x" * 600]))
+
+    with pytest.raises(sc.SiteContextTooLarge):
+        sc.fetch_context(BOUNDARY, transport=httpx.MockTransport(streamed))
+
+
+def test_features_are_capped_nearest_the_centre(monkeypatch):
+    assert sc.elements_to_context(elements())["truncated"] is False
+    monkeypatch.setattr(sc, "MAX_FEATURES", 2)
+    ctx = sc.elements_to_context(elements())
+    assert ctx["truncated"] is True
+    assert len(ctx["buildings"]) == 2 and len(ctx["lines"]) == 2
+    doc = sc.context_document((1, 2, 3, 4), ctx, None)
+    assert doc["truncated"] is True
+
+
+def test_padding_never_crosses_the_mercator_limit():
+    bbox = sc.padded_bbox([[0.0, 85.04], [0.01, 85.04], [0.01, 85.049]])
+    assert bbox[3] <= sc.MAX_MERCATOR_LAT
+    assert sc.terrain_tiles_for(bbox)  # no math domain error
+
+
+def test_terrain_grid_samples_any_tile_size():
+    """A 512 px mirror: the ramp's east half must be reachable, not just the north-west quadrant."""
+    bbox = sc.padded_bbox(BOUNDARY)
+    keys = sc.terrain_tiles_for(bbox)
+    big = [[float(x) for x in range(512)] for _y in range(512)]  # height = column index
+    g = sc.terrain_grid({k: big for k in keys}, bbox, grid=8)
+    x0, _ = sc.lnglat_to_tile(bbox[0], bbox[3], sc.TERRAIN_ZOOM)
+    x1, _ = sc.lnglat_to_tile(bbox[2], bbox[3], sc.TERRAIN_ZOOM)
+    assert g["heights_m"][0] == pytest.approx(int((x0 - int(x0)) * 512), abs=1)
+    assert g["heights_m"][7] == pytest.approx(int((x1 - int(x1)) * 512), abs=1)

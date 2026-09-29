@@ -458,3 +458,28 @@ def test_context_other_org_cannot_read_write_or_clear(client, other_org_client, 
     assert client.post(f"/api/projects/{name}/sites/site_a/context").status_code == 200
     for method in ("get", "post", "delete"):
         assert getattr(other_org_client, method)(f"/api/projects/{name}/sites/site_a/context").status_code == 404
+
+
+def test_context_post_422_for_a_district_sized_site(client, api_project, monkeypatch):
+    from services import site_context as sc
+
+    _stub_fetch(monkeypatch, error=sc.SiteContextTooLarge("The site's surroundings span 40 km²; draw a smaller boundary"))
+    name = api_project("ctx422")
+    assert client.put(f"/api/projects/{name}/sites", json=DOC).status_code == 200
+    r = client.post(f"/api/projects/{name}/sites/site_a/context")
+    assert r.status_code == 422, r.text
+    assert "smaller boundary" in r.json()["detail"]
+
+
+def test_context_routes_surface_a_permission_denial(client, api_project, monkeypatch):
+    """Like GET /sites: an unreadable sites.json is an access error, never a 500 or a 'not found'."""
+    name = api_project("ctxperm")
+    assert client.put(f"/api/projects/{name}/sites", json=DOC).status_code == 200
+
+    def denied(_src):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(ss, "read_sites", denied)
+    r = client.get(f"/api/projects/{name}/sites/site_a/context")
+    assert r.status_code not in (404, 500), r.text
+    assert r.status_code == client.get(f"/api/projects/{name}/sites").status_code

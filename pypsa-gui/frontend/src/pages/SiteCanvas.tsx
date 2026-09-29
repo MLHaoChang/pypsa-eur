@@ -22,8 +22,8 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber'
-import { OrbitControls, Html, Line, PivotControls } from '@react-three/drei'
+import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
+import { OrbitControls, Line, PivotControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
@@ -31,10 +31,10 @@ import { networkApi } from '../api/network'
 import { busLatLng } from '../utils/geo'
 import { tileRangeAround, mosaicExtent, zoomFor, tileCount, fromLocal, type LngLat, type LocalExtent } from '../site3d/geo'
 import { buildGroundMosaic, ESRI_ATTRIBUTION } from '../site3d/imagery'
-import { sitesApi, contextErrorMessage } from '../api/sites'
+import { sitesApi, contextErrorMessage, contextFailureBacksOff } from '../api/sites'
 import {
   buildingsGeometry, linesToRibbons, areasGeometry, heightmapToDisplacement, terrainSampler, groundHeightAt,
-  groundMode, hillshadeCanvas, terrainCellMetres, RIBBON_COLOR, AREA_COLOR, BUILDING_COLOR, type HeightAt,
+  groundMode, hillshadeCanvas, terrainCellMetres, RIBBON_COLOR, AREA_COLOR, BUILDING_COLOR, OSM_ATTRIBUTION, type HeightAt,
 } from '../site3d/context'
 import { buildSiteLayout, objectKey, KIND_COLOR, KIND_LABEL, type SiteObject, type SiteKind } from '../site3d/layout'
 import { matrixFor, placementFromMatrix } from '../site3d/placementMath'
@@ -61,7 +61,8 @@ function SiteObjectMesh({ obj, selected, hovered, outside, pivot, onHover, onSel
   outside: boolean
   /** Wrapped in a PivotControls whose matrix carries position and heading — render at identity. */
   pivot?: boolean
-  onHover: (name: string | null) => void
+  /** Called with the object's key (`Class:name`) on pointer-over, null on pointer-out. */
+  onHover: (key: string | null) => void
   onSelect: (obj: SiteObject) => void
 }) {
   const [ox, oy] = pivot ? [0, 0] : obj.origin
@@ -69,7 +70,6 @@ function SiteObjectMesh({ obj, selected, hovered, outside, pivot, onHover, onSel
   const tint = selected ? '#ffffff' : hovered ? '#fde68a' : undefined
   const emissive = selected ? obj.color : outside ? '#dc2626' : '#000000'
   const emissiveIntensity = selected ? 0.6 : outside ? 0.45 : 0
-  const top = Math.max(...obj.parts.map(p => p.pos[2] + p.size[2] / 2), 2)
   return (
     <group
       name={`${obj.type}:${obj.name}`}
@@ -77,7 +77,7 @@ function SiteObjectMesh({ obj, selected, hovered, outside, pivot, onHover, onSel
       // Heading is clockwise from north; a rotation about the up axis by −heading.
       rotation={[0, (-heading * Math.PI) / 180, 0]}
       onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onSelect(obj) }}
-      onPointerOver={(e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); onHover(obj.name) }}
+      onPointerOver={(e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); onHover(objectKey(obj)) }}
       onPointerOut={() => onHover(null)}
     >
       {obj.parts.map((p, i) => (
@@ -98,16 +98,41 @@ function SiteObjectMesh({ obj, selected, hovered, outside, pivot, onHover, onSel
           />
         </mesh>
       ))}
-      {(selected || hovered) && (
-        <Html position={toScene(0, 0, top + 4)} center zIndexRange={[200, 100]} style={{ pointerEvents: 'none' }}>
-          <div className="whitespace-nowrap rounded bg-bg/95 border border-border px-2 py-1 text-[11px] text-text shadow">
-            <div className="font-semibold">{obj.name}{outside ? <span className="ml-2 text-[10px] text-accent">outside the boundary</span> : null}</div>
-            <div className="text-muted">{obj.summary}</div>
-          </div>
-        </Html>
-      )}
     </group>
   )
+}
+
+// ── Hover / selection labels: plain DOM over the canvas ──────────────────────
+//
+// Not drei's <Html>: that renders each label through its own React root and
+// unmounts it synchronously in a layout-effect cleanup, which React warns
+// about when the 3D tree tears down mid-render (Open in 3D) and which
+// occasionally threw "removeChild … not a child of this node" (Phase 1 QA).
+// The labels are ordinary elements in the page's own tree; this component
+// only moves them, once per frame, to the projected top of their object.
+
+function LabelTracker({ keys, refs }: { keys: string[]; refs: React.MutableRefObject<Record<string, HTMLDivElement | null>> }) {
+  const scene = useThree(s => s.scene)
+  const camera = useThree(s => s.camera)
+  const size = useThree(s => s.size)
+  const box = useMemo(() => new THREE.Box3(), [])
+  const v = useMemo(() => new THREE.Vector3(), [])
+  useFrame(() => {
+    for (const key of keys) {
+      const el = refs.current[key]
+      if (!el) continue
+      const o = scene.getObjectByName(key)
+      if (!o) { el.style.visibility = 'hidden'; continue }
+      box.setFromObject(o)
+      box.getCenter(v)
+      v.y = box.max.y + 4
+      v.project(camera)
+      if (v.z > 1) { el.style.visibility = 'hidden'; continue }
+      el.style.visibility = 'visible'
+      el.style.transform = `translate(${((v.x + 1) / 2) * size.width}px, ${((1 - v.y) / 2) * size.height}px) translate(-50%, -100%)`
+    }
+  })
+  return null
 }
 
 // ── Ground plane: the tile mosaic, or a flat grey slab while it loads ────────
@@ -202,7 +227,7 @@ function ContextScenery({ context, origin, heightAt }: { context: SiteContext; o
   )
 }
 
-/** A failed fetch is not retried for this long: a rate-limited Overpass must not be hit on every view switch. */
+/** An upstream failure is not retried for this long: a rate-limited Overpass must not be hit on every view switch. Refresh bypasses it. */
 const CONTEXT_RETRY_MS = 5 * 60_000
 const contextFailures = new Map<string, { at: number; message: string }>()
 
@@ -407,24 +432,33 @@ export default function SiteCanvas() {
   // one fetch when online; a failure is shown, not retried in a loop. ──────
   const [context, setContext] = useState<SiteContext | null>(null)
   const [contextStatus, setContextStatus] = useState<string>('')
+  const [contextBusy, setContextBusy] = useState(false)
+  // Refresh: bump the nonce with the force flag set; the effect then skips
+  // the cache and the backoff and re-POSTs (the cache is replaced only when
+  // the new fetch succeeds, so a failed refresh keeps what was there).
+  const [contextNonce, setContextNonce] = useState(0)
+  const forceContextRef = useRef(false)
   const siteId = site?.id ?? null
   useEffect(() => {
-    setContext(null)
+    const force = forceContextRef.current
+    forceContextRef.current = false
+    if (!force) setContext(null)
     if (!siteId) { setContextStatus(''); return }
     if (!currentProject) { setContextStatus('site context needs a saved project'); return }
     let cancelled = false
     const key = `${currentProject}/${siteId}`
-    setContextStatus('reading site context…')
+    setContextStatus(force ? 'refreshing site context…' : 'reading site context…')
+    setContextBusy(true)
     ;(async () => {
       try {
-        let doc = await sitesApi.getContext(currentProject, siteId)
+        let doc = force ? null : await sitesApi.getContext(currentProject, siteId)
         if (!doc) {
           if (typeof navigator !== 'undefined' && navigator.onLine === false) {
             if (!cancelled) setContextStatus('offline: no cached site context')
             return
           }
           const failed = contextFailures.get(key)
-          if (failed && Date.now() - failed.at < CONTEXT_RETRY_MS) {
+          if (!force && failed && Date.now() - failed.at < CONTEXT_RETRY_MS) {
             if (!cancelled) setContextStatus(`site context unavailable: ${failed.message}`)
             return
           }
@@ -440,12 +474,14 @@ export default function SiteCanvas() {
         setContextStatus(contextSummary(doc))
       } catch (err: unknown) {
         const message = contextErrorMessage(err)
-        contextFailures.set(key, { at: Date.now(), message })
+        if (contextFailureBacksOff(err)) contextFailures.set(key, { at: Date.now(), message })
         if (!cancelled) setContextStatus(`site context unavailable: ${message}`)
+      } finally {
+        if (!cancelled) setContextBusy(false)
       }
     })()
     return () => { cancelled = true }
-  }, [currentProject, siteId])
+  }, [currentProject, siteId, contextNonce])
 
   // Heights relative to the site origin: the origin stays at y = 0 (the
   // packed layout, placements and the drop plane all live there) and the
@@ -548,6 +584,7 @@ export default function SiteCanvas() {
   const groundTexture = mode === 'imagery' ? texture : mode === 'hillshade' ? hillshadeTexture : null
 
   const [hovered, setHovered] = useState<string | null>(null)
+  const labelRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   // ── Empty states ──────────────────────────────────────────────────────────
   if (isLoading) {
@@ -571,6 +608,7 @@ export default function SiteCanvas() {
   const selectedKey = selectedType && selectedName ? `${selectedType}:${selectedName}` : null
   const selectedObj = objects.find(o => objectKey(o) === selectedKey) ?? null
   const selectedPlacedKey = selectedKey && layout.placed.includes(selectedKey) ? selectedKey : null
+  const labelObjects = objects.filter(o => { const k = objectKey(o); return k === selectedKey || k === hovered })
 
   return (
     <div className="relative h-full w-full bg-canvas">
@@ -616,7 +654,7 @@ export default function SiteCanvas() {
               key={key}
               obj={o}
               selected={isSelected}
-              hovered={o.name === hovered}
+              hovered={key === hovered}
               outside={outsideSet.has(key)}
               pivot={isSelected}
               onHover={setHovered}
@@ -648,8 +686,24 @@ export default function SiteCanvas() {
         />
         <FitCamera bounds={plotExtent} />
         <DropTargetRegistrar siteId={site.id} />
+        <LabelTracker keys={labelObjects.map(objectKey)} refs={labelRefs} />
         {DEBUG_ENABLED && <Site3dDebugHook objects={objects} site={site} context={context} groundMode={mode} />}
       </Canvas>
+
+      {/* Hover / selection labels (LabelTracker positions them every frame). */}
+      <div className="pointer-events-none absolute inset-0 z-[300] overflow-hidden">
+        {labelObjects.map(o => {
+          const key = objectKey(o)
+          return (
+            <div key={key} ref={el => { labelRefs.current[key] = el }} data-testid="site-label"
+              className="absolute left-0 top-0 whitespace-nowrap rounded bg-bg/95 border border-border px-2 py-1 text-[11px] text-text shadow"
+              style={{ visibility: 'hidden' }}>
+              <div className="font-semibold">{o.name}{outsideSet.has(key) ? <span className="ml-2 text-[10px] text-accent">outside the boundary</span> : null}</div>
+              <div className="text-muted">{o.summary}</div>
+            </div>
+          )
+        })}
+      </div>
 
       <SiteOverlay
         sites={sitesDoc.sites}
@@ -680,7 +734,24 @@ export default function SiteCanvas() {
       <div className="absolute right-3 bottom-12 z-[400] max-w-[45%] rounded bg-bg/80 px-1.5 py-0.5 text-right text-[10px] text-muted">
         {tileStatus ? `${tileStatus} · ` : ''}
         {contextStatus ? <span data-testid="context-status">{contextStatus} · </span> : null}
-        {[ESRI_ATTRIBUTION, ...(context?.attribution ?? [])].join(' · ')}
+        {currentProject && (
+          <>
+            <button
+              type="button"
+              data-testid="context-refresh"
+              className="underline decoration-dotted hover:text-text disabled:no-underline disabled:opacity-50"
+              disabled={readOnly || contextBusy}
+              title={readOnly ? 'Read-only: the site context cannot be refetched now' : 'Fetch the OpenStreetMap buildings, lines and terrain for this site again'}
+              onClick={() => { forceContextRef.current = true; setContextNonce(n => n + 1) }}
+            >
+              Refresh context
+            </button>
+            {' · '}
+          </>
+        )}
+        {/* The OSM credit is not taken from the document: ODbL requires it
+            whenever OSM data is drawn, whatever the cache says. */}
+        {[ESRI_ATTRIBUTION, ...(context ? [OSM_ATTRIBUTION] : []), ...(context?.attribution ?? []).filter(a => !/openstreetmap/i.test(a))].join(' · ')}
       </div>
     </div>
   )

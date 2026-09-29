@@ -3443,7 +3443,10 @@ def _site_context_dir(dest: pathlib.Path, site_id: str) -> tuple[pathlib.Path, d
         target = site_service.site_dir(dest, site_id)
     except site_service.SitesInvalid as exc:
         raise HTTPException(404, f"Site '{site_id}' not found") from exc
-    doc = site_service.read_sites(dest)
+    try:
+        doc = site_service.read_sites(dest)
+    except PermissionError as exc:
+        raise _access_denied(dest / site_service.SITES_FILE) from exc
     for site in doc["sites"]:
         if site.get("id") == site_id:
             return target, site
@@ -3497,6 +3500,9 @@ def fetch_site_context(
     target, site = _site_context_dir(dest, site_id)
     try:
         doc = site_context.fetch_context(site["boundary"])
+    except site_context.SiteContextTooLarge as exc:
+        # The request is the problem (a district-sized boundary), not the upstream.
+        raise HTTPException(422, str(exc)) from exc
     except site_context.SiteContextUnavailable as exc:
         raise HTTPException(502, str(exc)) from exc
     try:
