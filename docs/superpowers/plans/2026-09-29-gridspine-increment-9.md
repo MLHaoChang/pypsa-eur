@@ -192,3 +192,46 @@ differently. That is what stage B runs.
   not capped; power factor ignored; DC N-1 ignored; voltage not checked; the
   cap reported as infinity; decommitted units given a share.
 - Cost: about 0.3–0.7 s per AC search on case39 (5–12 evaluations).
+
+## Stage B, as built: the study and the backend
+
+**Amended while building.** The plan put the AC search inside the study, at
+the requested buses. Reading the driver changed that: an AC search costs
+about 0.5 s per bus, per kind, per hour, and asking about a different bus
+would have meant re-running the whole study. So:
+
+- **The study** writes the **DC screen for every bus, both kinds, at every
+  selected hour**: `capacity.csv` in the run directory and each hour's rows in
+  its bundle (listed in the bundle manifest). The three capacity ledger lines
+  (definition, the owner's balancing rule, power factor and DC-vs-AC) ride
+  with every screened run.
+- **The AC answer is on demand.** `POST /api/gridspine/{name}/capacity {bus,
+  kind}` rebuilds each selected hour's network exactly as the handoff pass
+  does (`load_case39_res` plus `apply_snapshot` from the run's own
+  `dispatch.csv` and `loads.csv`) and runs the search. It upserts the result
+  into `capacity.csv` and into each bundle's copy, so a downloaded bundle
+  carries it.
+- `GET /api/gridspine/{name}/capacity` returns the table, with NaN as null.
+
+**Refusals and safety:**
+- 404 before a screened run, with the reason.
+- 409 while a study is queued or running, since it is about to rewrite the
+  run directory.
+- 422 for an unknown bus (the driver's message) or a malformed request
+  (pydantic: `kind` is `load` or `generation`, `bus` is 1–64 characters).
+- The search runs in the threadpool.
+- A per-run lock serialises the upserts, so two concurrent searches cannot
+  lose one another's rows.
+- `gridspine.drivers.capacity` was added to the app's PyInstaller hidden
+  imports. The packaging guard would otherwise have failed, as it did for
+  `year_study` at the #22/#58 merge.
+- The route inventory was regenerated with `tools/openapi_diff.py`, and the
+  diff is exactly the two new routes.
+
+**Tests:**
+- 8 study-level tests on a real two-hour run.
+- 14 backend tests: the real solved-study fixture for behaviour, stubs for
+  wiring.
+- Six mutations, each caught: upsert appending, bundles not updated, bundle
+  dropping the file, ledger omitting the rule, the spec entry missing, and
+  the search run on the event loop.

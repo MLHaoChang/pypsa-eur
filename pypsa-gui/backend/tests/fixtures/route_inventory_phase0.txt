@@ -38,6 +38,8 @@ POST    /api/chat/{session_id}/confirm                           -> chat_confirm
 POST    /api/chat/{session_id}/rewind                            -> chat_rewind_api_chat__session_id__rewind_post
 POST    /api/gridspine/projects                                  -> create_study_api_gridspine_projects_post
 GET     /api/gridspine/{name}/bundles/{hour}                     -> export_handoff_bundle_api_gridspine__name__bundles__hour__get
+GET     /api/gridspine/{name}/capacity                           -> get_capacity_api_gridspine__name__capacity_get
+POST    /api/gridspine/{name}/capacity                           -> compute_capacity_api_gridspine__name__capacity_post
 GET     /api/gridspine/{name}/config                             -> get_config_api_gridspine__name__config_get
 PUT     /api/gridspine/{name}/config                             -> update_config_api_gridspine__name__config_put
 POST    /api/gridspine/{name}/dispatch-source                    -> set_dispatch_source_api_gridspine__name__dispatch_source_post

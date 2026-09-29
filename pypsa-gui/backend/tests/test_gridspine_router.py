@@ -352,3 +352,50 @@ def test_the_two_tables_share_one_cap(client, study, monkeypatch):
     )
     assert resp.status_code == 413, resp.text
     assert called == []
+
+
+# --------------------------------------------------------------------------
+# connection capacity (increment 9)
+# --------------------------------------------------------------------------
+
+def test_get_capacity_calls_the_service(client, study, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(gs, "get_capacity", lambda project: seen.setdefault("name", project.name) and {"rows": []})
+    resp = client.get("/api/gridspine/Router Study/capacity")
+    assert resp.status_code == 200, resp.text
+    assert seen["name"] == "Router Study"
+
+
+def test_post_capacity_passes_bus_and_kind_and_runs_off_the_event_loop(client, study, monkeypatch):
+    # An AC search is seconds of CPU per request: on the loop it would stall
+    # every other request the process serves.
+    seen = {}
+
+    def fake(project, bus, kind):
+        seen.update(name=project.name, bus=bus, kind=kind, on_the_loop=_running_on_the_event_loop())
+        return {"rows": []}
+
+    monkeypatch.setattr(gs, "compute_capacity", fake)
+    resp = client.post("/api/gridspine/Router Study/capacity", json={"bus": "BUS_16", "kind": "generation"})
+    assert resp.status_code == 200, resp.text
+    assert seen == {"name": "Router Study", "bus": "BUS_16", "kind": "generation", "on_the_loop": False}
+
+
+@pytest.mark.parametrize("body", [
+    {"bus": "BUS_16", "kind": "storage"},
+    {"bus": "", "kind": "load"},
+    {"bus": "B" * 200, "kind": "load"},
+    {"kind": "load"},
+])
+def test_post_capacity_refuses_a_malformed_request_before_the_service(client, study, monkeypatch, body):
+    called = []
+    monkeypatch.setattr(gs, "compute_capacity", lambda *a: called.append(1))
+    resp = client.post("/api/gridspine/Router Study/capacity", json=body)
+    assert resp.status_code == 422, resp.text
+    assert called == []
+
+
+def test_another_orgs_capacity_is_404(other_org_client, study):
+    assert other_org_client.get("/api/gridspine/Router Study/capacity").status_code == 404
+    resp = other_org_client.post("/api/gridspine/Router Study/capacity", json={"bus": "BUS_16", "kind": "load"})
+    assert resp.status_code == 404

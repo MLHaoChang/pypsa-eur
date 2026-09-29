@@ -181,6 +181,7 @@ hiddenimports = [
     # by `test_the_spec_names_every_gridspine_module_the_backend_guard_imports`,
     # which derives the list from the guard instead of trusting this one.
     "gridspine.drivers.readback",
+    "gridspine.drivers.capacity",
     # `drivers.year_study` (check_external, increment 7) reached the guard on
     # master and missed this list; the guard test caught it at the merge.
     "gridspine.drivers.year_study",

@@ -64,6 +64,20 @@ from gridspine.static.lodf import dc_base
 
 PROBE_NAME = "CAPACITY_PROBE"
 
+#: What every capacity number in a bundle rests on; the study ledger carries it.
+CAPACITY_LEDGER = (
+    "connection capacity: the most MW at a bus that creates no new violation and "
+    "worsens no existing one (by more than 0.5 % loading / 0.002 pu), intact and "
+    "under every N-1 outage, on the N-1 screen's criteria (100 % loading, "
+    "0.9-1.1 pu)",
+    "connection capacity balancing: added MW are supplied (load) or displaced "
+    "(generation) by the committed synchronous units pro-rata to their headroom; "
+    "the slack takes what they cannot (owner's decision, 2026-09-29)",
+    "connection capacity: a new load at power factor 0.98 lagging, new generation "
+    "at unity; the DC figure is an estimate (no voltage, reactive power or losses, "
+    "branch outages only), the AC figure is a bisection to 1 MW",
+)
+
 
 @dataclasses.dataclass(frozen=True)
 class CapacityCriteria:
@@ -330,3 +344,22 @@ def capacity_dc(net, buses, kind, criteria=DEFAULT_CRITERIA) -> pd.DataFrame:
     out = pd.DataFrame.from_dict(rows, orient="index")
     out.index.name = "bus"
     return out
+
+
+def dc_rows(net, hour: int, criteria=DEFAULT_CRITERIA) -> pd.DataFrame:
+    """The in-study screen: every bus, both kinds, DC only. ``net`` carries ``hour``."""
+    buses = list(net.bus["name"])
+    rows = []
+    for kind in KINDS:
+        dc = capacity_dc(net, buses, kind, criteria)
+        for bus, r in dc.iterrows():
+            capped = r["dc_binding_element"] is None
+            rows.append({
+                "bus": bus, "hour": int(hour), "kind": kind, "capacity_mw": float("nan"),
+                "dc_estimate_mw": r["dc_estimate_mw"],
+                "binding_kind": "none_up_to_cap" if capped else (
+                    "thermal_n1" if r["dc_binding_contingency"] else "thermal_intact"),
+                "binding_element": r["dc_binding_element"],
+                "binding_contingency": r["dc_binding_contingency"], "method": "dc",
+            })
+    return validate_capacity(pd.DataFrame(rows))

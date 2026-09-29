@@ -32,6 +32,7 @@ queue a job kind rather than inventing a second one here.
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -260,6 +261,31 @@ async def upload_external_dispatch(
         _row(proj, db), dispatch_bytes, dispatch.filename,
         loads_bytes, loads.filename if loads is not None else None,
     )
+
+
+class CapacityRequest(BaseModel):
+    """One AC connection-capacity search: a bus name and what connects there."""
+    bus: str = Field(min_length=1, max_length=64)
+    kind: Literal["load", "generation"]
+
+
+@router.get("/{name}/capacity")
+def get_capacity(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """Increment 9: the run's connection-capacity table (DC for every bus, plus
+    any AC answers computed since)."""
+    return gs.get_capacity(_row(proj, db))
+
+
+@router.post("/{name}/capacity")
+async def compute_capacity(
+    body: CapacityRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+):
+    """The AC connection capacity at one bus, every selected hour. Seconds of
+    CPU (an AC load flow and an N-1 batch per bisection step), so off the event
+    loop, as the uploads are."""
+    return await run_in_threadpool(gs.compute_capacity, _row(proj, db), body.bus, body.kind)
 
 
 @router.get("/{name}/readback")

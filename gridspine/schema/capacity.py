@@ -16,6 +16,8 @@ import pandas as pd
 from gridspine.schema.contracts import ContractError
 
 KINDS = ("load", "generation")
+#: The table's file name, in the run directory and in every bundle.
+CAPACITY_CSV = "capacity.csv"
 METHODS = ("ac", "dc")
 BINDING_KINDS = (
     "thermal_intact", "thermal_n1",
