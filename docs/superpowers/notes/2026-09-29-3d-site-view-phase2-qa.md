@@ -5,7 +5,18 @@ Scope: the QA stage of `docs/superpowers/plans/2026-09-29-3d-site-view-phase2.md
 
 ## 1. Backend
 
-Full `pytest` on a still tree at `7b6832d` (later commits touch docs only) — **running at the time of writing; results are added here when it finishes.**
+Full `pytest` on a still tree at `7b6832d` (later commits touch docs only). Phase 2 changes no backend file (`git diff 4e9ecc0^..HEAD -- pypsa-gui/backend` is empty).
+
+| Result | Count |
+|---|---|
+| passed | 6163 |
+| skipped | 27 |
+| failed | 2 |
+
+(Counted from pytest's progress lines; this configuration prints no totals line.)
+
+- `tests/test_packaging_requirements.py::test_the_spec_names_every_gridspine_module_the_backend_guard_imports` — the pre-existing failure the plan allows (`pypsa-gui.spec` lacks `gridspine.drivers.year_study`), as at the Phase 1 close.
+- `tests/test_chat_sse.py::test_invalid_decision_returns_400_and_preserves_token` — the retry after the invalid decision answered **409** instead of 200. It **passes** alone, with its module (18/18) and with every `tests/test_chat*.py` module together (1169 passed), so another module earlier in the full run leaves state behind (a 409 is the lock / in-flight guard). It did not fail at the Phase 1 close. Nothing in Phase 2 touches the backend or the chat service, so it is recorded as a follow-up (§6) rather than fixed here; its root cause is not established.
 
 ## 2. Frontend
 
@@ -80,6 +91,7 @@ Each work package had a review agent that had not written the code. It read the 
 - A three-port Link loses `bus2` on creation (`network_crud._drop_unknown_extras`).
 - The shared period-effective capacity ignores vintage `lifetime`; the vintage breakdown is not invalidated by a finished solve for the schematic.
 - A component whose name contains "/" cannot be updated (405).
+- `test_chat_sse.py::test_invalid_decision_returns_400_and_preserves_token` fails only in the full backend run (order-dependent 409; §1).
 
 ## Appendix — the QA fixture
 

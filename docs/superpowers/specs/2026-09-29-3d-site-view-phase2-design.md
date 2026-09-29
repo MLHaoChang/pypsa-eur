@@ -209,3 +209,4 @@ A `ResultsLayer` inside the Canvas reads the map for the current snapshot and dr
 - The period-effective capacity (the context's vintage rule, shared with the 3D view in `site3d/capacity.ts`) ignores a vintage's `lifetime`, so a retired vintage still counts (WP5 gate).
 - The vintage breakdown is not invalidated by a finished solve (`useJobTerminalInvalidation` covers results, status, meta and the bundle); the 3D view refetches it itself, the schematic's asset-group capacities do not.
 - A component whose name contains "/" cannot be updated: `PUT /api/network/transformers/TR2%20110%2F33` answers 405 (the encoded slash splits the route), and the app's `updateTransformer` encodes names the same way (found at the WP6 gate).
+- `tests/test_chat_sse.py::test_invalid_decision_returns_400_and_preserves_token` fails only in the full backend run (409 on the retry; passes alone and with the chat modules): order-dependent state from another module (Phase 2 QA).
