@@ -262,7 +262,6 @@ def _holds_work(ctx: Any) -> bool:
 def flush_all(
     *,
     contexts: list[Any],
-    active: Any,
     save: Callable[[Any, bool], None],
     flush_chat: Callable[[], None],
     safe: bool,
@@ -270,24 +269,25 @@ def flush_all(
     """
     Persist every resident context. Returns the ones that could NOT be saved.
 
-    `persist_user_ts` is `ctx is active`, and the asymmetry is NO LONGER
-    required — kept here unchanged because removing it is a separate change with
-    its own tests to update. The reason it existed was that
-    `_serialize_user_ts` read a process-global store belonging to the foreground,
-    so True for everything stamped the foreground's series onto every project.
-    The store is per-`ProjectContext` now and `_save_context` serialises the
-    context it is saving, so True for everything would write each project's own
-    series. Meanwhile the `False` half still has the cost it always had — it
-    loses the open project's unsaved profile edits — and after Step 0b `active`
-    (`PyPSAService._active`, read directly by `desktop/gui.py`) is None once a
-    session has adopted the foreground, so EVERY context takes the False branch.
-    Recorded in `docs/superpowers/findings/2026-09-28-every-shutdown-flush-saves-with-persist-user-ts-false.md`
-    and `docs/superpowers/OPEN-ITEMS.md`.
+    `persist_user_ts` is `holds_user_series(ctx)` — each context judged on what
+    IT holds. It used to be `ctx is active`, and the `active` parameter went with
+    it: that predicate answered "is this the open project" only before Step 0b,
+    and `PyPSAService._active` is a bootstrap slot now, handed to the first
+    session that asks and set to None. `desktop/gui.py` read it directly, so at
+    quit time it was None, every context took the False branch, and the flush
+    rewrote `network.nc` while leaving `user_ts.json` stale — the next open then
+    restored the stale sidecar over the fresher `_t` tables and reverted any
+    profile uploaded since the last explicit save.
+
+    Taking the parameter away rather than passing a better value is the point:
+    there is no longer anything for a caller to get wrong, and the `_active`
+    read that made it wrong is gone from the desktop path entirely.
 
     `safe=False` means the abort did not finish, so a 409 is expected rather
     than surprising — it is still reported, because the point is to tell the
     user what was not written.
     """
+    from services.project_context import holds_user_series
     from fastapi import HTTPException
 
     problems: list[str] = []
@@ -295,7 +295,7 @@ def flush_all(
     for ctx in contexts:
         name = _context_label(ctx)
         try:
-            save(ctx, ctx is active)
+            save(ctx, holds_user_series(ctx))
         except HTTPException as exc:
             # Caught SPECIFICALLY. A 409 means the write was REFUSED rather
             # than failed, which the user needs to hear about — but the cause

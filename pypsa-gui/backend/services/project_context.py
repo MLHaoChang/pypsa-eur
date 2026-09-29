@@ -320,6 +320,42 @@ ABORTABLE_STUDIES = ("coupling_loop", "margin_loop", "mc", "frontier",
                      "fmea_sweep", "eh_study")
 
 
+def holds_user_series(ctx: Any) -> bool:
+    """
+    True when `ctx` holds user-uploaded time series that a save must persist.
+
+    THE ONE DEFINITION, because the two callers are the two places a project is
+    written to disk WITHOUT the user asking — the desktop shutdown flush and the
+    resident-cap eviction — and a guard that differs between them is not a guard.
+
+    It replaces `ctx is PyPSAService._active`, which both call sites used to ask.
+    That predicate meant "is this the open project" only before Step 0b; `_active`
+    is a BOOTSTRAP slot now, handed to the first session that asks and set to None
+    (`adopt_process_foreground`), so it answered False for every real project and
+    both paths silently stopped writing `user_ts.json`. See
+    `docs/superpowers/findings/2026-09-28-every-shutdown-flush-saves-with-persist-user-ts-false.md`.
+
+    ★ NOT simply `True`. A save with `persist_user_ts=True` serialises this
+    context's store, and `_save_context` UNLINKS `user_ts.json` when that store is
+    empty. A context hydrated from disk HAS an empty store — `_hydrate_context_from_disk`
+    does not restore the sidecar (OPEN-ITEMS 13) — so `True` for everything would
+    delete a good file for any project the user merely opened, and after
+    representative-week sampling would replace a full-year series on disk with the
+    168-row `_t` view. Asking what the context actually holds gets both halves right.
+
+    KNOWN RESIDUAL: a user who deletes every uploaded series and then quits
+    without saving keeps a stale `user_ts.json`, because an empty store is
+    indistinguishable here from a never-populated one. Fixing that needs a
+    per-context "user series were touched" flag, which is not worth a bool on
+    every context until someone reports it.
+
+    `getattr` rather than attribute access because `shutdown.flush_all` is
+    deliberately driven with stub contexts in its tests and types its contexts
+    `Any`, the same reason `_context_label` and `_holds_work` are defensive.
+    """
+    return bool(getattr(ctx, "user_ts", None))
+
+
 def record_is_running(record) -> bool:
     """True while a study record's worker thread is genuinely alive.
 

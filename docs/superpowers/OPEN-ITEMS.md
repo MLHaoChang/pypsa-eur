@@ -57,27 +57,6 @@ OrgMembership. The predicate should be "is a super-admin", not "has no
 membership". Server only.
 
 
-### 12. Every shutdown flush saves with `persist_user_ts=False` **(2026-09-28)**
-
-`desktop/gui.py:331` passes `active = PyPSAService._active` and
-`services/shutdown.py`'s `flush_all` saves each resident context with
-`persist_user_ts=(ctx is active)`. After Step 0b `_active` is a bootstrap slot
-that the first session ADOPTS and clears, so at quit time it is None and every
-context takes the `False` branch — the one `flush_all`'s own docstring describes
-as "loses the active project's" series. The flush still rewrites `network.nc`
-but skips `user_ts.json`, so the next open restores the stale file and reapplies
-it over the fresher `_t` tables: a profile uploaded after the last explicit save
-is reverted on reopen, silently.
-
-Now cheap to fix, and deliberately not fixed here: `_save_context` serialises
-the context it is saving (`store=ctx.user_ts`) since the per-context store
-landed, so `True` for every context would write each project's own profiles.
-What stops it being a one-line change is that
-`tests/test_chat_state_carry.py:156` and `tests/test_shutdown.py:1049` pin the
-current `False`. Source, reproduction status and the one unobserved step:
-`findings/2026-09-28-every-shutdown-flush-saves-with-persist-user-ts-false.md`.
-
-
 ## Medium
 
 ### 5. Chat sessions have no owner, so the confirmation gate rests on id secrecy
@@ -160,6 +139,13 @@ path reapplies before exporting; what is lost is any part of a series that lies
 outside the saved snapshot range. Not fixed here because it changes what a cold
 activate serves, which wants its own tests rather than a line inside the tenancy
 fix. Background: the same 2026-09-12 finding, "what a fix has to establish".
+
+Two things wait on this. `services/solve_queue.py` still passes
+`ctx is PyPSAService._active` for queue saves — the last holdout of a predicate
+retired everywhere else (`findings/2026-09-28-every-shutdown-flush-saves-with-persist-user-ts-false.md`)
+— and "should a background solve rewrite the sidecar at all" is only answerable
+once a hydrated context's store is faithful. Until then its `False` is correct
+for the wrong reason.
 
 ### 14. An adequacy-sweep guard is pinned by a test that cannot fail for it **(2026-09-28)**
 

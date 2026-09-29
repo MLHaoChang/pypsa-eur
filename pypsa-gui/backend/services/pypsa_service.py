@@ -1022,6 +1022,7 @@ class PyPSAService:
             import pathlib
 
             from routers.projects import _save_context
+            from services.project_context import holds_user_series
             # Save under the ctx's own NAME and its own org-scoped storage
             # directory — NOT under `victim_id`, which since Step 0a is the
             # composite `org:uuid` registry key. Passing `storage_dir` also
@@ -1032,7 +1033,16 @@ class PyPSAService:
                 victim_ctx,
                 victim_ctx.loaded_project,
                 expect=victim_ctx.loaded_project,
-                persist_user_ts=False,
+                # The victim's OWN series. This was `False`, on the same
+                # obsolete reasoning as the shutdown flush: the store was a
+                # process global, so writing it here would have stamped the
+                # foreground's profiles onto whatever the cap happened to evict.
+                # It is per-context now and `_save_context` serialises the
+                # context it is saving, so the only question left is whether
+                # this one has anything to write — and answering `False`
+                # unconditionally meant an eviction silently dropped the
+                # project's uploaded profiles, with no user action involved.
+                persist_user_ts=holds_user_series(victim_ctx),
                 storage_dir=(
                     pathlib.Path(victim_ctx.storage_dir)
                     if victim_ctx.storage_dir

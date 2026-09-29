@@ -8,10 +8,11 @@ that resolves to the calling session's context. All four criteria below are
 asserted directly by `pypsa-gui/backend/tests/test_user_ts_tenancy.py`, and each
 was proven red on the pre-fix code for the reason stated here (org B served
 `777.0`; A's `777.0` written into B's `user_ts.json`; A's in-flight upload
-discarded by B's load) before the fix landed. Two follow-ups this uncovered are
-NOT part of that fix and are tracked in `../OPEN-ITEMS.md`: the shutdown flush's
-`persist_user_ts=False` (its own finding, 2026-09-28) and
-`_hydrate_context_from_disk` still not restoring `user_ts.json`.
+discarded by B's load) before the fix landed. Two follow-ups this uncovered were
+recorded separately: the obsolete `persist_user_ts=False` predicate (its own
+2026-09-28 finding, FIXED 2026-09-29 at both the shutdown flush and the
+resident-cap eviction) and `_hydrate_context_from_disk` still not restoring
+`user_ts.json` (OPEN-ITEMS 13, still open).
 Found by an independent QA review; reproduced independently before being written
 up.
 **Scope:** the multi-tenant server for the cross-tenant leak. The desktop build
