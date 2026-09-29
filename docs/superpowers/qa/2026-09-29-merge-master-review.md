@@ -242,7 +242,7 @@ The decisions doc numbers them S1–S16. The brief's "decision 3", "decision 5" 
 | `merge_audit.py --self-test` | PASS (29 assertions) |
 | `merge_audit.py` (both parents, inventories) | 10 findings, all traced (§2.1) |
 | `ruff F821,F811` | no new findings versus the parents |
-| Targeted EH, chat, Guided, security, packaging set (`test_energy_hub*`, `test_eh_*`, `test_chat_*`, `test_guided*`, `test_live_network_untouched`, `test_packaging*`, the worksheet lock and stress tests, the error-kind manifest, and all 17 test files master's security commits touched) | TARGETED_RESULT |
+| Targeted EH, chat, Guided, security, packaging set (`test_energy_hub*`, `test_eh_*`, `test_chat_*`, `test_guided*`, `test_live_network_untouched`, `test_packaging*`, the worksheet lock and stress tests, the error-kind manifest, and all 17 test files master's security commits touched) | 117 files: 2185 passed, 2 skipped, 0 failed (exit 0) |
 | `tsc --noEmit` | clean |
 | `vitest run` | 234 files, 2610 tests passed |
 | EH QA driver `tests/qa_eh_reference_design.py` | 110/110 PASS, exit 0 |
