@@ -1327,6 +1327,93 @@ def update_solver_config(partial: dict) -> dict:
     return _h(body)
 
 
+# ── Library (4) — Edge Investment Case P2 WP2.4c ────────────────────────────
+# Router handlers called through `_route`, so the acting user's org and the
+# Library ACL apply exactly as over HTTP.
+
+
+def _library_kind(kind: str):
+    from routers.library import ItemKind
+
+    try:
+        return ItemKind(kind)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "unknown_library_kind",
+            "message": f"kind is one of {[k.value for k in ItemKind]}, got {kind!r}"}) from exc
+
+
+def list_library_items(kind: str) -> list[dict]:
+    from routers.library import list_items as _h
+    return [r.model_dump(mode="json") for r in _route(_h, _library_kind(kind))]
+
+
+def get_library_item(kind: str, name: str, version: int | None = None) -> dict:
+    from routers.library import get_item as _h
+    return _route(_h, _library_kind(kind), name, version=version).model_dump(mode="json")
+
+
+def _urdb_rate(data):
+    """The rate object of an uploaded URDB file: the object itself, the first
+    item of an OpenEI response, or a REopt scenario's `urdb_response`."""
+    if isinstance(data, dict) and isinstance(data.get("items"), list) and data["items"]:
+        return data["items"][0]
+    if isinstance(data, dict) and isinstance(data.get("ElectricTariff"), dict) \
+            and isinstance(data["ElectricTariff"].get("urdb_response"), dict):
+        return data["ElectricTariff"]["urdb_response"]
+    return data
+
+
+def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
+                       accept_partial: bool = False, valid_from: str | None = None) -> dict:
+    """An UPLOADED URDB JSON file (never an LLM-emitted blob) → a Library tariff."""
+    from routers.library import UrdbImportIn, import_urdb as _h
+    from services import upload_service
+
+    project = _require_active_project()
+    blob = upload_service.get_upload_path(project, file_id)
+    try:
+        data = json.loads(blob.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "urdb_upload_unreadable",
+            "message": f"upload {file_id!r} is not a JSON file: {type(exc).__name__}"}) from exc
+    rate = _urdb_rate(data)
+    if not isinstance(rate, dict):
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "urdb_upload_unreadable",
+            "message": "the upload holds no URDB rate object"})
+    try:
+        body = UrdbImportIn(urdb_response=rate, name=name, cyclic_year=cyclic_year,
+                            accept_partial=accept_partial, valid_from=valid_from)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "urdb_invalid", "message": str(exc)[:300]}) from exc
+    return _route(_h, body).model_dump(mode="json")
+
+
+def attach_tariff(name: str, version: int | None = None) -> dict:
+    """Set `commercial.import_tariff_ref` to a Library tariff through the
+    solver-config route (which resolves and pins it)."""
+    from models.schemas import SolverConfigSchema
+    from routers.library import ItemKind, get_item as _get
+    from routers.simulation import get_solver_config as _cfg, update_solver_config as _put
+
+    ref = _route(_get, ItemKind.tariff, name, version=version).ref.model_dump(mode="json")
+    commercial = dict((_cfg() or {}).get("commercial") or {})
+    if not commercial.get("poc_link"):
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "no_commercial_config",
+            "message": "set the commercial config's poc_link first "
+                       "(update_solver_config), then attach the tariff"})
+    # The ref replaces any inline or bare-id tariff: the route resolves it.
+    commercial.pop("import_tariff", None)
+    commercial.pop("import_tariff_id", None)
+    commercial["import_tariff_ref"] = ref
+    out = _route(_put, SolverConfigSchema(commercial=commercial))
+    return {"import_tariff_ref": ref, "commercial": out.get("commercial")}
+
+
 # ── Validation (3) ──────────────────────────────────────────────────────────
 
 
@@ -4645,6 +4732,10 @@ DISPATCHERS: dict[str, Any] = {
     "gridspine_export_handoff_bundle": gridspine_export_handoff_bundle,
     "gridspine_get_readback": gridspine_get_readback,
     "gridspine_fetch_result_figure": gridspine_fetch_result_figure,
+    "list_library_items": list_library_items,
+    "get_library_item": get_library_item,
+    "import_urdb_tariff": import_urdb_tariff,
+    "attach_tariff": attach_tariff,
     # project_mgmt (21)
     "list_projects": list_projects,
     "load_project": load_project,

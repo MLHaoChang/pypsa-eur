@@ -1179,6 +1179,31 @@ routes; ADR-0002 live-API probe recorded.
 
 - [ ] Red: the four guard tests (schema match, arg shape, endpoint map, identity) include the tools.
 
+- **As implemented:**
+  - **Tools** (`services/chat_tools.py`, a "Library (4)" section; schemas in `chat_tools_schema.TOOLS`, routes in `TOOL_ROUTES`, `DISPATCHERS`):
+    - `list_library_items(kind)` (Safety: read);
+    - `get_library_item(kind, name, version?)` (read), which returns `{ref, payload, meta}`;
+    - `import_urdb_tariff(file_id, name, cyclic_year?, accept_partial?, valid_from?)` (write):
+      - it reads the chat UPLOAD by id through `upload_service` in the active project, never an LLM-emitted blob;
+      - it accepts a rate object, an OpenEI `{items: [...]}` response (the first item) or a REopt scenario (`ElectricTariff.urdb_response`);
+      - an unreadable upload is 422 `urdb_upload_unreadable`;
+    - `attach_tariff(name, version?)` (write):
+      - it reads the item through `get_item`, so the ACL and a missing version (404) apply;
+      - it replaces any inline or bare-id tariff with `import_tariff_ref` and PUTs the commercial block through the solver-config route (`_route` injects the acting user), which resolves and pins it;
+      - with no `poc_link` it is 409 `no_commercial_config`.
+    - Every tool goes through `_route`, so the acting user's org and the Library ACL apply as over HTTP. No acting user gives 401.
+  - **Inventory.** `tests/fixtures/route_inventory_phase0.txt` is regenerated (`tools/openapi_diff.py --phase0-fixture`): +6 routes (items, `import_urdb`, `series/upload`, `meter_data`), and none removed.
+  - **Tests.** `tests/test_chat_tools_library.py` has 8 tests:
+    - tiers;
+    - list/get with 404 and 422;
+    - import from an uploaded REopt scenario and from an OpenEI response, with 422 refusals and a partial import;
+    - a non-JSON upload;
+    - attach through the route (409 without a commercial config, resolved inline copy, 404 version);
+    - 401 without an acting user.
+
+    The four guard suites cover the tools through the registries: chat tool suites plus library tests give 605 passed.
+  - **ADR-0002 live-API probe: NOT RUN.** This environment has no provider credentials (no Anthropic key, no local Ollama). The tools are exercised in process through `DISPATCHERS`; the model-facing schemas are covered by the guard suites. The live probe (`test_live_probe_anthropic_wire` or the openai-wire probe with the new tools) is **owed** and carried to the Phase 2 QA gate's findings as an open item.
+
 ## WP2.5 `compute_billing` / `compute_cfe_score` thin results
 
 Files: `services/results/billing.py`, `services/results/cfe_score.py`, `routers/results.py` (`get_billing`,

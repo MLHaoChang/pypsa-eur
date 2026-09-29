@@ -1977,6 +1977,63 @@ TOOLS: list[dict[str, Any]] = [
         },
         ["project_id", "hour", "name"],
     ),
+
+    # ── Library (4) — Edge Investment Case P2 WP2.4c ─────────────────────
+    _t(
+        "list_library_items",
+        "List the latest version of every Library item of one kind in the "
+        "user's organization: tariffs, contract templates or connection "
+        "agreements. Returns [{kind, id, version, hash}]; `id` is the item's "
+        "name. Safety: read.",
+        {"kind": {"type": "string", "enum": ["tariff", "contract", "connection_agreement"]}},
+        ["kind"],
+    ),
+    _t(
+        "get_library_item",
+        "Read one Library item: {ref: {kind, id, version, hash}, payload, meta}. "
+        "The payload is the tariff, contract template or connection agreement "
+        "itself; meta says where it came from (source, provider, notes such as "
+        "an importer's assumptions). `version` defaults to the latest. "
+        "Safety: read.",
+        {
+            "kind": {"type": "string", "enum": ["tariff", "contract", "connection_agreement"]},
+            "name": {"type": "string"},
+            "version": {"type": "integer"},
+        },
+        ["kind", "name"],
+    ),
+    _t(
+        "import_urdb_tariff",
+        "Import a URDB (OpenEI Utility Rate Database) rate the user UPLOADED "
+        "as a JSON file into the Library as tariff `name`. `file_id` is the "
+        "upload's id (list_uploads); never paste rate JSON into the call. "
+        "Accepts one rate object, an OpenEI response {items: [...]} (the first "
+        "item) or a REopt scenario (ElectricTariff.urdb_response). Fields the "
+        "importer cannot map are refused by name (422 with refusals) unless "
+        "accept_partial=true, which stores them in the tariff's "
+        "unsupported_fields and bills it as incomplete. cyclic_year makes a "
+        "range-mode ratchet wrap within the rate year. valid_from (YYYY-MM-DD) "
+        "is required when the rate has no startdate. Returns {ref, notes, "
+        "refusals, unsupported_fields}. Safety: write.",
+        {
+            "file_id": {"type": "string"},
+            "name": {"type": "string"},
+            "cyclic_year": {"type": "boolean"},
+            "accept_partial": {"type": "boolean"},
+            "valid_from": {"type": "string"},
+        },
+        ["file_id", "name"],
+    ),
+    _t(
+        "attach_tariff",
+        "Make Library tariff `name` (latest, or `version`) the project's import "
+        "tariff: sets commercial.import_tariff_ref through the solver-config "
+        "route, which resolves it into the inline tariff the solve uses and "
+        "pins it. Needs a commercial config with poc_link already set. Returns "
+        "{import_tariff_ref, commercial}. Safety: write.",
+        {"name": {"type": "string"}, "version": {"type": "integer"}},
+        ["name"],
+    ),
 ]
 
 
@@ -2272,6 +2329,13 @@ TOOL_ROUTES: dict[str, list] = {
     "gridspine_export_handoff_bundle": _SERVICE_CALL,
     "gridspine_get_readback": _SERVICE_CALL,
     "gridspine_fetch_result_figure": _SERVICE_CALL,
+    # Library (4) — P2 WP2.4c: router handlers, called in process with the
+    # acting user (the Library ACL is the org's).
+    "list_library_items": [("GET", "/api/library/items/{kind}")],
+    "get_library_item": [("GET", "/api/library/items/{kind}/{name}")],
+    "import_urdb_tariff": [("POST", "/api/library/items/tariff/import_urdb")],
+    "attach_tariff": [("GET", "/api/library/items/{kind}/{name}"),
+                      ("PUT", "/api/simulation/solver_config")],
 }
 
 
