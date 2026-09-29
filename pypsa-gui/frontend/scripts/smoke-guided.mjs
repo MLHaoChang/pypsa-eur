@@ -5,7 +5,7 @@
  *
  *   cd pypsa-gui/frontend
  *   PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs \
- *     --phase P22.9|P23|P24-BE|P24|P25|P26|P27a [--template eh_datacenter] [--out <dir>] [--keep]
+ *     --phase P22.9|P23|P24-BE|P24|P25|P26|P27a|P27b [--template eh_datacenter] [--out <dir>] [--keep]
  *
  * P24 walks the Guided hub design (spec §5) as a first-time user: the
  * template from /projects opens hubDesign at Site; Site rows match the
@@ -64,6 +64,23 @@
  * tool returns a result (not `project_switched_mid_turn`), and a manual
  * save (Ctrl+S) answers 200 with no 409 in the console.
  *
+ * P27b (deferred spec 2026-09-28 §2.5) — P22.9 and P26 (every step), then:
+ * (a) restart: with the P22.9 data-center project open in an Expert tab,
+ * only uvicorn is stopped (`stop`) and started again on the same RUN dirs;
+ * once /api/health answers, another project is activated through the API.
+ * The page is never reloaded. The tab shows `project-mismatch` naming both
+ * projects within 10 s; a Properties-panel bus edit sends no PUT (one
+ * `project_mismatch` refusal in the console); no autosave POST for 10 s;
+ * Enter in the dock shows `chat-send-gate` and no /api/chat/stream leaves.
+ * Reload → the banner goes, `meta.loaded_project` is the tab's project, the
+ * same edit succeeds and Send is enabled again. (b) mid-study switch, Guided:
+ * a study runs on the data-center project → the Start card's other template
+ * is disabled with STUDY_RUNNING_SWITCH and the project does not change; once
+ * the study is done the template opens project 2 with the P26 greeting, no
+ * Improve list, and `fmea_modes` rows that are not project 1's. (c) FMEA
+ * counts: the P26 settle loop stays the gate (spec §2.2: replaced only once
+ * ten runs are stable); a one-shot read after the extra tick is logged.
+ *
  * It starts its own uvicorn (local mode, ANTHROPIC_API_KEY unset, app data
  * and projects under a scratch dir), Vite on 5173 and — after the send-gate
  * check — the OpenAI-wire stub model, then walks the phase path in a fresh
@@ -104,7 +121,7 @@ const TEMPLATE_NAMES = {
   eh_h2_hub: 'Industrial Hydrogen Hub',
   eh_microgrid: 'Island Microgrid',
 }
-const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25', 'P26', 'P27a'])
+const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25', 'P26', 'P27a', 'P27b'])
 
 // ── args ────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
@@ -172,6 +189,23 @@ async function stopAll() {
     }
     console.log(`           stopped ${name}`)
   }
+}
+/** Stop ONE started process (its process group, SIGTERM → SIGKILL as
+ *  `stopAll` does) and drop it from `procs`, so `stopAll` never touches it
+ *  again. `stopAll` itself cannot serve here: it stops everything and
+ *  reverses `procs` in place. */
+async function stop(name) {
+  const i = procs.findIndex(x => x.name === name && x.p.exitCode === null && x.p.signalCode === null)
+  if (i < 0) throw new ToolingError(`no running process named ${name}`)
+  const { p } = procs[i]
+  try { process.kill(-p.pid, 'SIGTERM') } catch { /* gone */ }
+  for (let k = 0; k < 40 && p.exitCode === null && p.signalCode === null; k++) await sleep(100)
+  if (p.exitCode === null && p.signalCode === null) {
+    try { process.kill(-p.pid, 'SIGKILL') } catch { /* gone */ }
+    for (let k = 0; k < 40 && p.exitCode === null && p.signalCode === null; k++) await sleep(100)
+  }
+  procs.splice(i, 1)
+  console.log(`           stopped ${name} (pid ${p.pid})`)
 }
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => { void stopAll().then(() => process.exit(130)) })
@@ -258,8 +292,12 @@ function saveReviewTranscript() {
 async function activateStubProfile({ replyDelayMs = 0 } = {}) {
   // SMOKE_STUB: a stub script to use instead of the committed one (a
   // reviewer's scratch probe, or a branch not landed yet).
-  start('stub', PYTHON, [process.env.SMOKE_STUB ?? path.join(BACKEND, 'smoke', 'stub_openai_endpoint.py')],
-    { cwd: BACKEND, env: { ...process.env, STUB_REPLY_DELAY_MS: String(replyDelayMs) } })
+  // A phase that runs two base phases (P27b = P22.9 + P26) reuses the stub
+  // the first one started — a second one could not bind the port.
+  if (!procs.some(x => x.name === 'stub' && x.p.exitCode === null && x.p.signalCode === null)) {
+    start('stub', PYTHON, [process.env.SMOKE_STUB ?? path.join(BACKEND, 'smoke', 'stub_openai_endpoint.py')],
+      { cwd: BACKEND, env: { ...process.env, STUB_REPLY_DELAY_MS: String(replyDelayMs) } })
+  }
   await waitFor(`http://127.0.0.1:${STUB_PORT}/v1/models`, 'stub model', 30_000)
   await api('PUT', `/api/chat/settings/llm/profiles/${STUB_PROFILE}`, {
     label: 'Smoke stub', preset: 'custom', wire: 'openai',
@@ -1563,6 +1601,7 @@ async function phaseP26(browser) {
   }
   fs.writeFileSync(path.join(args.out, 'p26-verdicts.json'), JSON.stringify(results, null, 2))
   info(`verdicts ${path.join(args.out, 'p26-verdicts.json')}`)
+  return results
 }
 
 async function p26Template(browser, tpl) {
@@ -1598,6 +1637,7 @@ async function p26Template(browser, tpl) {
     await byId('new-project-wizard').waitFor({ state: 'visible', timeout: 15_000 })
     await page.getByRole('button', { name: new RegExp(TEMPLATE_NAMES[tpl.id]) }).click()
     await page.waitForURL(/\/app\?project=/, { timeout: 60_000 })
+    out.project = new URL(page.url()).searchParams.get('project')
     await byId('ui-mode-switch').waitFor({ state: 'visible', timeout: 30_000 })
     check(await pressed('guided') && !(await pressed('expert')), 'ui-mode-switch: guided pressed')
     await byId('hub-design-panel').waitFor({ state: 'visible', timeout: 30_000 })
@@ -1757,6 +1797,18 @@ async function p26Template(browser, tpl) {
     check(sweep?.status === 'done', `sweep done (base_restored=${sweep?.base_restored})`)
     await byId('hub-improve-open-fmea').click()
     await byId('results-tab-fmea').waitFor({ state: 'visible', timeout: 30_000 })
+    if (args.phase === 'P27b') {
+      // P27b (c), spec §2.2: with the extra tick, ONE read after the modes
+      // leave `running` + 2.5 s should already be the true count. Logged as
+      // evidence for the gate; the settle loop below stays the assertion
+      // until ten runs in a row agree.
+      const u = Date.now() + 60_000
+      while (Date.now() < u && (await api('GET', '/api/results/fmea_modes'))?.sweep_status === 'running') await sleep(500)
+      await sleep(2500)
+      const once = await page.locator('[data-testid="fmea-table"] tbody tr').count()
+      out.fmeaOneShot = once
+      info(`P27b (c) one-shot read after the extra tick: ${once} rows (expected ${tpl.fmeaRows})`)
+    }
     // P26 gate note 1: right after the sweep the tab can show the partial
     // rows for ~2 s while its shared query catches up. Wait until "Sweeping…"
     // is gone and the row count has held for 3 s, then assert the true count.
@@ -2087,7 +2139,258 @@ async function phaseP27a(browser) {
   }
 }
 
+// ── the P27b extension (deferred spec 2026-09-28 §2.5) ─────────────────────
+const MISMATCH_SENTENCE = (tab, backend) =>
+  `This tab shows ${tab}, but the app is now on ${backend}. Changes from this tab are paused.`
+const STUDY_RUNNING_SWITCH =
+  'A study is still running — wait for it to finish or abort it before switching project.'
+
+async function phaseP27b(browser) {
+  const { project: dc } = await phaseP229(browser)
+  const p26 = await phaseP26(browser)
+  const other = p26.find(r => r.id === 'eh_h2_hub')?.project
+  check(Boolean(dc) && Boolean(other) && dc !== other, `tab project ${dc}, other project ${other}`)
+  await p27bRestart(browser, dc, other)
+  await p27bMidStudySwitch(browser, dc)
+  const oneShot = p26.map(r => `${r.id}: ${r.fmeaOneShot} (settled ${r.fmeaRows})`).join('; ')
+  info(`P27b (c) FMEA one-shot reads after the extra tick — ${oneShot}`)
+}
+
+async function p27bRestart(browser, dc, other) {
+  const consoleLines = []
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  await seedStorageOnce(context, {
+    'network-diagram:ui-mode': 'expert',
+    'network-diagram:ui-mode-explicit': '1',
+    'network-diagram:autosave': 'true',
+  })
+  const page = await context.newPage()
+  page.on('console', m => consoleLines.push(`[${m.type()}] ${m.text()}`))
+  page.on('pageerror', e => consoleLines.push(`[pageerror] ${e.message}`))
+  const writes = []
+  page.on('request', r => {
+    const u = new URL(r.url())
+    if (u.pathname.startsWith('/api/') && r.method() !== 'GET') writes.push(`${r.method()} ${u.pathname}`)
+  })
+  const byId = id => page.locator(`[data-testid="${id}"]`)
+  const resultsNav = () => page.getByRole('button', { name: 'Results', exact: true }).first()
+  await page.addInitScript(() => {
+    window.__toasts = []
+    new MutationObserver(() => {
+      for (const el of document.querySelectorAll('[role="status"]')) {
+        if (el.__seen) continue
+        el.__seen = true
+        window.__toasts.push((el.textContent ?? '').trim())
+      }
+    }).observe(document, { childList: true, subtree: true })
+  })
+
+  async function openAnyBusEdit(names) {
+    for (let i = 0; i < 3; i++) {
+      for (const n of names) {
+        const node = page.locator('.react-flow__node', { hasText: n }).first()
+        if (!(await node.count())) continue
+        await node.click().catch(() => {})
+        try {
+          await byId('props-edit-bus').waitFor({ state: 'visible', timeout: 5_000 })
+          return n
+        } catch { /* try the next one */ }
+      }
+    }
+    throw new Error(`no bus of ${JSON.stringify(names.slice(0, 5))} could be opened on the Properties panel`)
+  }
+  async function saveBusControl(value) {
+    if (!(await byId('eh-bus-fields').isVisible().catch(() => false))) await byId('props-edit-bus').click()
+    await byId('eh-bus-fields').waitFor({ state: 'visible', timeout: 10_000 })
+    const shell = byId('eh-bus-fields')
+      .locator('xpath=ancestor::div[contains(@class, "border-accent/30")][1]')
+    await shell.locator('select').filter({ has: page.locator('option[value="Slack"]') })
+      .first().selectOption(value)
+    await shell.getByRole('button', { name: 'Save', exact: true }).click()
+  }
+
+  try {
+    step(`P27b (a): open ${dc} in an Expert tab (autosave on), then restart only the backend`)
+    await page.goto(`${WEB}/app?project=${encodeURIComponent(dc)}`, { waitUntil: 'domcontentloaded' })
+    await resultsNav().waitFor({ timeout: 60_000 })
+    await page.waitForFunction(() => !new URL(location.href).searchParams.get('project'), null, { timeout: 30_000 })
+    const m0 = await api('GET', '/api/network/meta')
+    check(m0.loaded_project === dc, `before the restart meta.loaded_project=${m0.loaded_project}`)
+    const dcBuses = (await api('GET', '/api/network/buses')).map(b => b.name)
+    const pageUrl = page.url()
+
+    await stop('uvicorn')
+    startBackend()
+    await waitFor(`${API}/api/health`, 'uvicorn (restarted)', 180_000)
+    ok('uvicorn restarted on the same RUN dirs; /api/health 200')
+    const after = await api('GET', '/api/network/meta')
+    info(`after the restart the backend is bound to ${JSON.stringify(after.loaded_project)}`)
+    await api('POST', `/api/projects/${encodeURIComponent(other)}/activate`)
+    check((await api('GET', '/api/network/meta')).loaded_project === other,
+      `POST /api/projects/${other}/activate → meta.loaded_project=${other}`)
+    const tAct = Date.now()
+
+    step('the tab (not reloaded) shows project-mismatch within 10 s, naming both projects')
+    await byId('project-mismatch').waitFor({ state: 'visible', timeout: 10_000 })
+    info(`banner after ${((Date.now() - tAct) / 1000).toFixed(1)} s`)
+    check(page.url() === pageUrl, 'the page was not reloaded (same URL, same document)')
+    const bannerText = (await byId('project-mismatch').textContent()) ?? ''
+    check(bannerText.includes(MISMATCH_SENTENCE(dc, other)), `banner: "${MISMATCH_SENTENCE(dc, other)}"`)
+    check((await byId('project-mismatch-reload').textContent()) === `Reload ${dc}`, `button "Reload ${dc}"`)
+    check((await byId('project-mismatch-switch').textContent()) === `Switch to ${other}`, `button "Switch to ${other}"`)
+    await shot(page, 'p27b-mismatch-banner')
+
+    step('a Properties-panel bus edit sends no PUT; one project_mismatch refusal in the console')
+    const otherBuses = (await api('GET', '/api/network/buses')).map(b => b.name)
+    const bus = await openAnyBusEdit([...dcBuses, ...otherBuses])
+    const w0 = writes.length
+    const c0 = consoleLines.length
+    await saveBusControl('PV')
+    await sleep(2000)
+    const sent = writes.slice(w0)
+    check(!sent.some(w => w.startsWith('PUT /api/network/')), `no PUT left the tab (writes: ${JSON.stringify(sent)})`)
+    const refusals = consoleLines.slice(c0).filter(l => l.includes('[project_mismatch]') && l.includes('/network/buses'))
+    check(refusals.length === 1, `one project_mismatch refusal in the console: ${refusals[0]}`)
+    await shot(page, 'p27b-edit-refused')
+
+    step('no autosave POST /api/projects/<tab> for 10 s')
+    const w1 = writes.length
+    await sleep(10_000)
+    // `writes` holds URL pathnames, so the name is percent-encoded there.
+    const posts = writes.slice(w1).filter(w => w === `POST /api/projects/${encodeURIComponent(dc)}`)
+    check(posts.length === 0, `autosave did not fire (${writes.slice(w1).length} writes in 10 s: ${JSON.stringify(writes.slice(w1))})`)
+
+    step('Enter in the dock → chat-send-gate with the sentence, no /api/chat/stream')
+    const input = byId('chat-input')
+    await page.waitForSelector(
+      '[data-testid="chat-input"]:visible, [data-testid="assistant-dock-launcher"]:visible', { timeout: 30_000 })
+    if (!(await input.isVisible().catch(() => false))) await byId('assistant-dock-launcher').click()
+    await input.waitFor({ state: 'visible', timeout: 15_000 })
+    const w2 = writes.length
+    await input.fill('Please change a bus')
+    await input.press('Enter')
+    await sleep(1500)
+    check((await byId('chat-send-gate').textContent()) === MISMATCH_SENTENCE(dc, other), 'chat-send-gate shows the sentence')
+    check(await byId('chat-send').isDisabled(), 'chat-send disabled')
+    check(!writes.slice(w2).some(w => w.startsWith('POST /api/chat/stream')), 'no /api/chat/stream request left')
+    await shot(page, 'p27b-chat-gated')
+
+    step(`Reload ${dc} → the banner goes, meta.loaded_project=${dc}, the edit succeeds, Send enabled`)
+    await byId('project-mismatch-reload').click()
+    await byId('project-mismatch').waitFor({ state: 'detached', timeout: 60_000 })
+    check((await api('GET', '/api/network/meta')).loaded_project === dc, `meta.loaded_project=${dc}`)
+    const before = (await api('GET', '/api/network/buses')).find(b => b.name === bus)
+    const target = before?.control === 'PV' ? 'PQ' : 'PV'
+    if (!(await byId('props-edit-bus').isVisible().catch(() => false))
+      && !(await byId('eh-bus-fields').isVisible().catch(() => false))) await openAnyBusEdit([bus])
+    const put = page.waitForResponse(r => r.request().method() === 'PUT'
+      && new URL(r.url()).pathname === `/api/network/buses/${encodeURIComponent(bus)}`, { timeout: 30_000 })
+    await saveBusControl(target)
+    check((await put).status() === 200, `PUT /api/network/buses/${bus} → 200`)
+    await page.waitForFunction(() => window.__toasts.some(t => t.includes('Bus updated')), null, { timeout: 15_000 })
+    const row = (await api('GET', '/api/network/buses')).find(b => b.name === bus)
+    check(row.control === target, `bus ${bus} control is now ${row.control}`)
+    await input.fill('hello again')
+    check(!(await byId('chat-send').isDisabled()), 'chat-send enabled again')
+    check((await byId('chat-send-gate').count()) === 0, 'no chat-send-gate')
+    await input.fill('')
+    await shot(page, 'p27b-reloaded')
+  } catch (e) {
+    try { await shot(page, 'FAILURE-p27b-restart') } catch { /* page gone */ }
+    const logFile = path.join(args.out, 'FAILURE-p27b-restart-console.log')
+    fs.writeFileSync(logFile, consoleLines.join('\n'))
+    info(`console log ${logFile}`)
+    throw e
+  } finally {
+    await context.close()
+  }
+}
+
+async function p27bMidStudySwitch(browser, dc) {
+  const consoleLines = []
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  await seedStorageOnce(context, {
+    'network-diagram:ui-mode': 'guided',
+    'network-diagram:ui-mode-explicit': '1',
+  })
+  const page = await context.newPage()
+  page.on('console', m => consoleLines.push(`[${m.type()}] ${m.text()}`))
+  page.on('pageerror', e => consoleLines.push(`[pageerror] ${e.message}`))
+  const byId = id => page.locator(`[data-testid="${id}"]`)
+  try {
+    step(`P27b (b): Guided, ${dc} — run a study, then try to switch template from the Start card`)
+    await page.goto(`${WEB}/app?project=${encodeURIComponent(dc)}`, { waitUntil: 'domcontentloaded' })
+    await byId('hub-design-panel').waitFor({ state: 'visible', timeout: 60_000 })
+    await page.waitForFunction(() => !new URL(location.href).searchParams.get('project'), null, { timeout: 30_000 })
+    check((await api('GET', '/api/network/meta')).loaded_project === dc, `meta.loaded_project=${dc}`)
+    const dcModes = new Set(((await api('GET', '/api/results/fmea_modes'))?.per_mode ?? []).map(r => r.name))
+    await byId('hub-rail-step-goal').click()
+    await byId('hub-goal-run').waitFor({ state: 'visible', timeout: 30_000 })
+    await page.waitForFunction(() => !document.querySelector('[data-testid="hub-goal-run"]')?.disabled,
+      null, { timeout: 60_000 })
+    await byId('hub-goal-run').click()
+    await byId('hub-goal-running').waitFor({ state: 'visible', timeout: 30_000 })
+    check((await api('GET', '/api/results/eh_study'))?.status === 'running', 'eh_study running')
+    await byId('hub-rail-step-start').click()
+    const t2 = byId('hub-start-template-eh_h2_hub')
+    await t2.waitFor({ state: 'visible', timeout: 15_000 })
+    await page.waitForFunction(() => document.querySelector('[data-testid="hub-start-template-eh_h2_hub"]')?.disabled,
+      null, { timeout: 15_000 })
+    check(await t2.isDisabled(), 'template 2 disabled while the study runs')
+    check((await t2.getAttribute('title')) === STUDY_RUNNING_SWITCH, `its line: "${STUDY_RUNNING_SWITCH}"`)
+    await t2.click({ force: true }).catch(() => {})
+    await sleep(1500)
+    check((await api('GET', '/api/network/meta')).loaded_project === dc, 'no project change')
+    await shot(page, 'p27b-switch-refused-mid-study')
+
+    step('wait for the study; template 2 then opens project 2')
+    const until = Date.now() + 10 * 60_000
+    let st = null
+    while (Date.now() < until) {
+      st = await api('GET', '/api/results/eh_study')
+      if (st?.status !== 'running') break
+      await sleep(1000)
+    }
+    check(st?.status === 'done', `study ${st?.status}`)
+    await page.waitForFunction(() => !document.querySelector('[data-testid="hub-start-template-eh_h2_hub"]')?.disabled,
+      null, { timeout: 30_000 })
+    await t2.click()
+    await page.waitForFunction(async (old) => {
+      const r = await fetch('/api/network/meta'); const m = await r.json()
+      return m.loaded_project && m.loaded_project !== old
+    }, dc, { timeout: 120_000, polling: 1000 })
+    const p2 = (await api('GET', '/api/network/meta')).loaded_project
+    ok(`project 2: ${p2}`)
+    await byId('hub-card-site').waitFor({ state: 'visible', timeout: 60_000 })
+    await page.waitForSelector(
+      '[data-testid="chat-launch-solve"]:visible, [data-testid="assistant-dock-launcher"]:visible', { timeout: 30_000 })
+    if (!(await byId('chat-launch-solve').isVisible().catch(() => false))) await byId('assistant-dock-launcher').click()
+    // P28 changes this to "No study has run yet — …"; until then the P26 greeting.
+    await page.waitForFunction(() =>
+      document.querySelector('[data-testid="chat-launch-solve"]')?.textContent === 'Not solved yet.',
+    null, { timeout: 30_000 })
+    ok('greeting on project 2: "Not solved yet." (the P26 greeting; P28 rewords it)')
+    check((await byId('hub-improve-list').count()) === 0, 'no hub-improve-list on project 2')
+    const p2Modes = ((await api('GET', '/api/results/fmea_modes'))?.per_mode ?? [])
+    const p2Names = p2Modes.map(r => r.name)
+    check(p2Modes.every(r => r.failure_class !== 'B' && r.failure_class !== 'C'),
+      `project 2's fmea_modes carry no sweep rows (${p2Modes.length} rows)`)
+    check(p2Names.length === 0 || p2Names.some(n => !dcModes.has(n)) || dcModes.size !== p2Names.length,
+      `project 2's rows are not project 1's (${JSON.stringify(p2Names.slice(0, 6))})`)
+    await shot(page, 'p27b-project-2')
+  } catch (e) {
+    try { await shot(page, 'FAILURE-p27b-switch') } catch { /* page gone */ }
+    const logFile = path.join(args.out, 'FAILURE-p27b-switch-console.log')
+    fs.writeFileSync(logFile, consoleLines.join('\n'))
+    info(`console log ${logFile}`)
+    throw e
+  } finally {
+    await context.close()
+  }
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
+let startBackend = () => { throw new ToolingError('backend not configured yet') }
 let code = 0
 let browser
 try {
@@ -2119,8 +2422,10 @@ try {
     PYPSAGUI_LOCAL_MODE: '1', PYPSAGUI_APP_DATA_DIR: appData, PYPSAGUI_PROJECTS_ROOT: projects,
     PYTHONPATH: `${REPO}:${BACKEND}` }
   delete env.ANTHROPIC_API_KEY
-  start('uvicorn', PYTHON, ['-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', '8000'],
-    { cwd: BACKEND, env })
+  // Kept so P27b can start the backend again on the same RUN dirs and env.
+  startBackend = () => start('uvicorn', PYTHON,
+    ['-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', '8000'], { cwd: BACKEND, env })
+  startBackend()
   start('vite', path.join(FRONTEND, 'node_modules', '.bin', 'vite'),
     ['--host', '127.0.0.1', '--port', '5173', '--strictPort'], { cwd: FRONTEND, env: process.env })
   await waitFor(`${API}/api/health`, 'uvicorn', 180_000)
@@ -2135,6 +2440,7 @@ try {
   else if (args.phase === 'P25') await phaseP25(browser)
   else if (args.phase === 'P26') await phaseP26(browser)
   else if (args.phase === 'P27a') await phaseP27a(browser)
+  else if (args.phase === 'P27b') await phaseP27b(browser)
   console.log(`\nPASS — ${shots.length} screenshots in ${args.out}`)
 } catch (e) {
   code = e instanceof ToolingError ? 3 : 1
