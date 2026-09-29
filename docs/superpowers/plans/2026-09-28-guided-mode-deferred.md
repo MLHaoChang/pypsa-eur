@@ -248,3 +248,26 @@ Test-first in every phase: each item's red test is written and seen failing befo
 | 11 | D-8 presentation | D1 / D-8 |
 
 **Non-binding suggestions:** all adopted (A3 carrier `/chat/profiles`; A2 smoke asserts the refused PUT; A5 `finalising` fallback; B3 helper in `worksheet.py` + hub reads the field; B2 snapshot timing; C4 self-test after recovery; corrected test paths; row-2 superset). **Rejected:** none. **Pushback:** review §2 item 1 (missing margin-loop HTTP test) is already satisfied by `test_live_network_untouched.py:243`.
+
+## P27a result: GO at re-gate on `5751e2b82`, 2026-09-29
+
+- **First gate: NO-GO (B1).** Eight write-tier chat tools changed the live network during a sweep, even though the same HTTP routes returned 409.
+- **B1 fix.** The chat tools now pass through a derived seam gate, `_study_gated_tool_names()`. It gates 29 tools and is derived from the foreign-lock seam, so tools added later are covered automatically. `delete_timeseries` is in the gate; the four imports and `cluster_network` keep their swap guard. Findings 1, 2, 3 and 5 are also fixed; finding 3 adds the four network imports to `PROJECT_REBINDING_TOOLS`.
+- **Evidence at the re-gate:**
+
+  | Check | Result |
+  |---|---|
+  | Full backend suite (`-m "not slow"`) | 6660 passed, 31 skipped, 11 deselected, 0 failed; `--collect-only` matches HEAD |
+  | Row 2 | 1626 passed |
+  | `tsc` | clean |
+  | Smoke P27a | PASS |
+  | Smoke P26 | PASS |
+  | Reviewer's probes | 21/21 get 409 and leave the network unchanged |
+  | Mutants | 14/14 killed |
+
+- **Gate file:** `docs/superpowers/qa/2026-09-29-guided-mode-deferred-gate-P27a.md`.
+- **Carried to P27b:**
+  - The Properties card's refusal toast should show the backend sentence instead of "Request failed with status code 409".
+  - ChatPanel should handle a `project_rebound` frame with `to: null` (a network import unbinds the tab), with a vitest.
+- **Still on record:** the small race before a sweep publishes its study record, and the middleware's fallback when request binding fails.
+

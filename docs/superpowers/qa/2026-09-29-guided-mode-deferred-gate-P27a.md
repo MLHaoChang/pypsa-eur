@@ -103,3 +103,58 @@ Every automated row is green. The lock work (A1) and the rebind announcement (A8
 1. Fix B1: a derived, seam-level study gate for the chat write tools, and a derived parametrised test (it should fail today on `set_snapshots`, `upload_timeseries` and the others).
 2. Recommended in the same change: an AST pin for the four live call sites passing `lock` (finding 1).
 3. Re-run rows 1, 2 and 5 (P27a).
+
+---
+
+## Re-gate (2026-09-29, HEAD `5751e2b82`; diff `fc260c825..HEAD`: `c3c0f177b`, `5751e2b82`)
+
+### Verdict: GO
+
+B1 is fixed and pinned. Findings 1, 2, 3 and 5 are fixed and pinned. Every probe and every mutant I ran against HEAD is refused or killed. Rows 1, 2 and 5 are green. I edited no source or test file. The only change is this appended section.
+
+### B1: the chat seam study gate
+- **Mechanism:** `chat_tools._study_gated_tool_names()` (29 tools) is derived from `_lock_gated_tool_names()`. It keeps only the non-read tools with a write route under `/api/network/` or `/api/io/`, plus the routeless mutators, and excludes the five swap tools. The set is applied through `DISPATCHERS.update` after the lock gate, so `chat_service` dispatches through it.
+- **My probes at HEAD:** `test_probe_chat_writes.py`, `test_probe_chat_writes2.py` and `test_probe_http.py` gave 21 of 21 passing. Every chat write tool from the first gate, including all eight that previously changed the network, now raises 409 `study_in_flight` with `changed=False`. HTTP parity still holds.
+- **Completeness:** I enumerated every non-read `DISPATCHERS` entry outside the gate. The ungated ones are justified as follows:
+  - **Swap tools** (`import_*` ×4, `cluster_network`): refused over every study by `reset_network` / the re-cluster swap guard. That guard is stricter than the edit gate. This is pinned by `test_swap_tools_keep_their_own_guard`.
+  - **Project tools** (`save_project*`, `activate_project`, `load_project`, `create_project_from_template`, `import_project_bundle`, `restore_project_snapshot`, `rename_project`, `delete_project`, `create_scenario`, snapshots, layout): each has its own endpoint guard, or writes only on-disk files and sidecars.
+  - **Studies and solves** (`run_*`, `run_simulation`, `run_ac_pf_stage`, `solve_queue_enqueue`): refused by the 409 mesh (`blocking_study_detail` / `running_study_key`).
+  - **Abort and stop tools** (`abort_adequacy_study`, `abort_simulation`, `force_reset_simulation`, `solve_queue_abort`): correctly **not** gated, so an abort stays available during a sweep. The mutant that widens the gate to `/api/results/` is killed by the exact-set test.
+  - **Other tools:** `update_solver_config` writes config, not the network, and the HTTP route `/api/simulation/solver_config` is not gated either. `gridspine_*` writes its own study store, and `gridspine_service` never writes to `get_network()`. `record_asset_health` and `put_stress_scenarios` write the sidecar ledger. The rest are exports, uploads, chat history, the audit log, profiles and campaigns.
+  - **Read tools:** none are gated. `test_read_tools_are_not_gated_and_still_answer_during_a_sweep` pins this.
+- **`delete_timeseries` belongs in the gate.** The handler (`network_time_axis.py:1266`) deletes `_user_ts` entries and drops `_t` columns in place, with no `reset_network` and no swap guard. `DELETE /api/network/timeseries` is refused by the middleware, so parity requires it in the gate. The spec's "destructive-tier, already swaps" row was wrong for this tool. Mutant N3, which treats it as a swap, is killed.
+- **`undo_last`** now gets the study dict on the chat path, before the swap string. This matches HTTP, and the swap guard stays behind it for `mc` / `eh_study`.
+
+### Finding 3: the network imports are now rebinding tools
+- **Swap guard kept:** the four `import_*` tools are **excluded** from the edit gate (`_STUDY_GATE_SWAP_TOOLS`) and still pass through `io._reset_with_ts_clear` → `reset_network` → `refuse_if_study_running`, over **all** `STUDY_KEYS`. A refused import leaves `loaded_project` unchanged, so no frame is sent. This is pinned by `test_an_import_that_fails_before_the_swap_emits_nothing`.
+- **Frontend with `to: null`:** `ChatPanel.tsx:2322-2350` guards the rebind branch with `if (d.to && …)`. The store update, the tab `touchTab`, the invalidations and the toast are all skipped, and the transcript line renders `X → (unbound)` via `??`. The stream does not break, and no tab is created or renamed.
+  - **Residual, already recorded for P27b:** the frontend's `currentProject` stays on the old name while the backend is unbound. This is exactly the behaviour before P27a, when no frame was sent at all, so the frame makes nothing worse.
+  - **The gain:** a second tool in the same turn after an import is no longer refused. This is pinned by `test_a_second_tool_in_the_same_turn_still_dispatches_after_an_import`.
+  - **Test gap:** no vitest covers `to: null`. Add one in P27b along with the fix.
+
+### Mutants (`qa27a/mutate2.py`, fresh scratch copy at HEAD, log `qa27a/mutations2.log`): 14 of 14 killed
+
+| Mutant | Killed by |
+|---|---|
+| M13 / M14 / M14b / M14c: sweep / frontier / coupling / margin call site drops `lock` (previously survived) | `test_the_live_study_call_sites_pass_the_runners_lock` |
+| M16 / M16b: GC update / create chokepoint removed (previously survived) | `test_the_handler_chokepoints_refuse_a_bare_call_during_a_sweep[…-GlobalConstraint]` |
+| M16c: bus-rename chokepoint removed | the same bare-call test |
+| N1: seam study gate not applied | `test_every_chat_network_write_is_refused_during_a_sweep[…]` |
+| N2: the wrapper does not refuse | same |
+| N3: `delete_timeseries` treated as a swap tool | `…[delete_timeseries]` |
+| N4: `set_snapshots` dropped from the gate | `…[set_snapshots]` |
+| N5 / N6: `import_network_nc` / `import_matpower` dropped from `PROJECT_REBINDING_TOOLS` | `test_a_network_import_announces_the_unbind[…]` |
+| N7: gate widened to `/api/results/` (abort would be gated) | `test_the_seam_study_gate_is_exactly_the_derived_set` |
+
+### Rows
+
+| Row | Result |
+|---|---|
+| 1 | Implementer's log `scratchpad/p27a-full2.log`: **6660 passed, 31 skipped, 11 deselected, 0 failed**. I checked it against HEAD. `--collect-only -m "not slow"` at HEAD gives 6702 tests, 11 deselected, and the log's 6660 + 31 + 11 = 6702 is the same count. The log ends 60 s before the commit timestamps, which fits a run on the final tree followed by the commit. |
+| 2 | My run at HEAD, with the same 75-file set as the first gate (`qa27a/row2.files`): **1626 passed, 19 skipped**, exit 0 (`qa27a/row2-regate.log`). The implementer's 1637 comes from a slightly larger file set, and is not a discrepancy in results. |
+| 3 / 4 | No frontend source change in the re-gate diff (only the `smoke-guided.mjs` wording); the first-gate results stand. |
+| 5 | `--phase P27a` at HEAD: **PASS**, 14 screenshots (`qa27a/p27a-regate/`). The finding-5 line now reads "the browser save was sent while the sweep ran, and was refused". I read screenshot 11 and it matches the first gate. No processes are left running. |
+
+### Carried forward, not blocking
+- **P27b:** the Properties toast should carry the "is running" sentence (deviation 3), and the frontend should handle `project_rebound` with `to: null`: clear or unbind `currentProject`, and add a vitest.
+- **Recorded:** the time-of-check window before a sweep publishes its record (finding 4), and the middleware's foreground fallback when binding fails (finding 6).
