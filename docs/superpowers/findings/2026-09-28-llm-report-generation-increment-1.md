@@ -131,12 +131,12 @@ untagged body rebuild). **Phase 4 gate: GREEN.**
 | Unit | `test_report_docx_reader.py` 29, `test_report_template_tagged.py` 16, `test_report_template_untagged.py` 25, `test_report_templates_routes.py` 28, `test_chat_report_template_tools.py` 12, `test_report_prompts.py` 7 (+2), plus every other `test_report_*`, `test_chat_report_*`, `test_chat_uploads.py`, parity/manifest/packaging | 425 passed (one run on the merged tree) |
 | Regression | chunk 1 (`tests/test_chat_*.py` + manifest + packaging) | 1255 passed, 2 skipped |
 | Regression | chunk 2a (`tests/test_upload*.py tests/test_desktop*.py tests/test_project*.py`) | 242 passed, 1 skipped |
-| Regression | chunk 2b (`tests/test_energy_hub_*.py` / `tests/test_adequacy_*.py`) | Energy Hub: 308 passed; adequacy: _(run in progress at commit time; filled in the next commit)_ |
+| Regression | chunk 2b (`tests/test_energy_hub_*.py` / `tests/test_adequacy_*.py`) | Energy Hub: 308 passed; adequacy: 663 passed, 11 deselected in 290.42s (0:04:50) |
 | Regression | remainder (four groups) | unchanged since §1: phase 4 touches no file those groups import; re-run owed before merge to `master` |
 | Regression | frontend `npx vitest run` + `npx tsc -b` (after `npm ci` with the new lockfile) | 187 files, 2104 tests passed; tsc clean |
 | Integration | `test_report_templates_routes.py` (bind/unbind, GET, mapping job with the fake provider, PUT strict/non-strict, tagged export on the real fixture, untagged export, generate with `template_file_id` defaulting the language, every error kind) | 28 passed (counted above) |
 | End-to-end QA | `tests/qa_reports_phase4.py` (real study → both fixtures uploaded as `report_template` → tagged bind → export with the title, looped FMEA rows, evidence hash in the footer, no `{{` left → corporate bind → mapping job on the fake provider → GET plan → PUT an edited plan → export with cover and "Confidential" footer intact, renamed heading, `updateFields` set, `sec:fmea_top` bookmark → generate on the German template → `language == "de"` → unbind → default writer) | 47/47 PASS, 0 skipped |
-| End-to-end QA | drivers 0–2 re-run on this tree | phase 0 18/18; phases 1–2 _(run in progress at commit time; filled in the next commit)_ |
+| End-to-end QA | drivers 0–2 re-run on this tree | phase 0 18/18, phase 1 38/38, phase 2 47/47 — all PASS |
 
 **Recorded corrections.** The two WP11 halves were built in parallel against
 one route contract stated identically to both; they merged without a single
@@ -156,7 +156,7 @@ desktop shell.
 
 ## Increment 1 — status
 
-Phases 0–3 delivered on `claude/fmea-llm-reporting-feasibility-jtm6w1`. Not
-done: increment 2 (templates) and increment 3 (round trip), and the
-workstation checks above. `export_eh_report_docx` (WP0) remains alongside
+Phases 0–4 delivered on `claude/fmea-llm-reporting-feasibility-jtm6w1`
+(increments 1 and 2). Not done: increment 3 (the edited-document round trip,
+phase 5) and the workstation checks above. `export_eh_report_docx` (WP0) remains alongside
 `export_report_docx`; keep as the no-LLM shortcut or remove in review.
