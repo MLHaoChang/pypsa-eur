@@ -138,7 +138,7 @@ function UrdbImport({ onDone }: { onDone: () => void }) {
     <section aria-labelledby="lib-urdb" className="space-y-1">
       <h4 id="lib-urdb" className="font-semibold">Import a URDB tariff</h4>
       <label>URDB or OpenEI JSON file{' '}
-        <input type="file" accept="application/json,.json"
+        <input type="file" accept="application/json,.json" disabled={busy}
                onChange={async e => {
                  const f = e.target.files?.[0]
                  setResult(null); setError(null); setRefusals([])
@@ -152,7 +152,8 @@ function UrdbImport({ onDone }: { onDone: () => void }) {
         // Stays visible once a rate is picked, so the choice can be seen and
         // changed (WP3.7a review #2).
         <label className="block">The file holds several rates; pick one{' '}
-          <select aria-label="Rate" className={input} value={index ?? ''}
+          {/* Fixed while an import is in flight: its refusals are that rate's (round 3). */}
+          <select aria-label="Rate" className={input} value={index ?? ''} disabled={busy}
                   onChange={e => pick(file, e.target.value === '' ? undefined : Number(e.target.value))}>
             <option value="">choose…</option>
             {(choice.rates ?? []).map(r => <option key={r.index} value={r.index}>{r.label}</option>)}

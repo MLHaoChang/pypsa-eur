@@ -865,6 +865,10 @@ refusal and re-imports. Optional: the timestamps-label select is named by its vi
 taken): a hand-edited `solver_config.json` could carry an inline tariff that does not hash to its ref
 (`replacesInline` trusts the PUT check) — the load path does not re-check; noted for P4 hygiene.
 
+**WP3.7a review round 3 — PASS.** R2-1 fixed and tested. Low, taken: the rate select and the file input
+are disabled while an import is in flight (a switch within the round trip would otherwise receive the
+old rate's refusals). **WP3.7a closed.**
+
 ## WP3.7b Tariff builder + bill preview
 
 Items / periods / tiers (per-period `tier_rates` for windowed items) / ratchets (range, cyclic, months) /
