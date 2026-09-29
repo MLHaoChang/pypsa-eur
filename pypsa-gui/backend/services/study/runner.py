@@ -209,9 +209,9 @@ def _read_option(n, cfg, tariff, opt, fidelity: Fidelity, currency_year) -> dict
     p0 = getattr(n.links_t, "p0", None)
     imp = p0[packs.IMPORT_LINK] if p0 is not None and packs.IMPORT_LINK in p0 else None
     exp = p0[packs.EXPORT_LINK] if p0 is not None and packs.EXPORT_LINK in p0 else None
-    bill = study_tariff.BillCalculator().bill(imp, exp, tariff, n.snapshot_weightings)
     # The calculator does not know which run the dispatch came from.
-    bill = bill.model_copy(update={"fidelity": fidelity})
+    bill = study_tariff.BillCalculator().bill(imp, exp, tariff, n.snapshot_weightings,
+                                              fidelity=fidelity)
     detail["bill"] = bill.model_dump(mode="json")
     try:
         from services.results.cost_breakdown import compute_cost_breakdown
@@ -744,7 +744,10 @@ def get_study_run(study_id: str, *, base_row, base_dir) -> dict | None:
     if ctx is not None:
         with ctx.solver_state_lock:
             rec = ctx.solver_state.get(STUDY_KEY)
-            if rec and rec.get("study_id") == study_id and rec.get("status") == "running":
+            # S6: the slot also holds a running tornado (`kind="tornado"`),
+            # which has its own status route.
+            if (rec and rec.get("study_id") == study_id and rec.get("status") == "running"
+                    and rec.get("kind", "run") == "run"):
                 return _public(rec)
     return store.load_aux(base_dir, study_id, "run")
 
@@ -757,7 +760,7 @@ def abort_study_run(study_id: str, *, base_row, base_dir) -> dict:
     if ctx is not None:
         with ctx.solver_state_lock:
             rec = ctx.solver_state.get(STUDY_KEY)
-            if rec and rec.get("study_id") == study_id:
+            if rec and rec.get("study_id") == study_id and rec.get("kind", "run") == "run":
                 ev, status = rec.get("stop_event"), rec.get("status")
                 if ev is not None:
                     ev.set()

@@ -74,7 +74,7 @@ from services.study import questions as Q
 from services.study import tariff as study_tariff
 
 __all__ = [
-    "BILL_COMPONENTS", "ProformaError", "build_investment_case", "irr", "npv",
+    "BILL_COMPONENTS", "EPSILON_MW", "ProformaError", "is_zero_size", "build_investment_case", "irr", "npv",
     "payback",
 ]
 
@@ -88,6 +88,16 @@ BILL_COMPONENTS: tuple[tuple[str, str], ...] = (
     ("export_credit", "Export credit"),
 )
 ENGINES = ("cash_flow_expander", "bill_calculator", "lp", "lp_duals", "ledger")
+# S6 (gate S5 carry): a size at or below this is "no investment" — judged by
+# its size, never by the sign of an NPV that is 0 +- solver noise. The ONE
+# threshold; `services/study/findings.py` reads it from here.
+EPSILON_MW = 1e-3
+
+
+def is_zero_size(p_mw: float | None) -> bool:
+    """The ONE size rule: at or below ``EPSILON_MW`` is no investment."""
+    return p_mw is not None and p_mw <= EPSILON_MW
+
 _OPERATING_FLAGS = {
     "resilience_value": "not_in_mvp1",
     "tax": "pre_tax_basis",
@@ -554,10 +564,13 @@ def build_investment_case(n_option, cfg_option, n_baseline, ledger: AssumptionsL
     # and with it IRR >= r and discounted payback <= H whenever there is an
     # investment. Magnitudes inform; the signs are the LP's, not evidence.
     notes.append("npv_nonnegative_at_optimum_by_construction")
-    if capex_total > 0:
-        notes.append("irr_and_discounted_payback_bounded_at_optimum_by_construction")
-    else:
+    sizes = [p_bat] if has_bat else []
+    if has_pv:
+        sizes.append(q_pv)
+    if all(is_zero_size(q) for q in sizes):
         notes.append("size_zero_no_investment")
+    elif capex_total > 0:
+        notes.append("irr_and_discounted_payback_bounded_at_optimum_by_construction")
     notes.append("market_revenue_at_duals_excluded_from_cash_flow")
     if salvage is None:
         notes += ["salvage_not_computed", "npv_excludes_uncomputed_salvage"]

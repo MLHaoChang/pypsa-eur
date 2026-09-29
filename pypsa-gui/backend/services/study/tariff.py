@@ -49,6 +49,7 @@ from models.study import (
     DemandCharge,
     EnergyBand,
     ExportCompensation,
+    Fidelity,
     Tariff,
     TimeRule,
 )
@@ -365,7 +366,13 @@ class BillCalculator:
         return float(price_per_mw_per_period) * sum(peaks.values()), peaks
 
     def bill(self, import_mw: pd.Series | None, export_mw: pd.Series | None,
-             tariff: Tariff, snapshot_weightings) -> Bill:
+             tariff: Tariff, snapshot_weightings, *,
+             fidelity: Fidelity | str | None = None) -> Bill:
+        """
+        The bill (``models.study.Bill``, the one class; this module only
+        re-exports it). ``fidelity`` names the run the dispatch came from —
+        the calculator cannot know it, the caller states it (gate S3 N3).
+        """
         w = _weights(snapshot_weightings)
         idx = _require_datetime_index(w.index, "the bill")
         imp = _aligned(import_mw, idx, "import")
@@ -473,6 +480,7 @@ class BillCalculator:
             peak_mw_by_billing_period=peaks, billing_periods=periods,
             horizon_hours=hours, currency=tariff.currency,
             currency_year=tariff.currency_year, unavailable=bill_flags,
+            fidelity=None if fidelity is None else Fidelity(fidelity),
             honesty_notes=tuple(notes), partial_billing_periods=partial)
 
 

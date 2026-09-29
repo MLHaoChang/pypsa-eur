@@ -114,10 +114,12 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
 # note in `_create_scenario_db`.
 _BUNDLE_DIRS = ("uploads", "studies")
 
-# The metadata keys a decision-study option fork carries (S4). Literals, like
+# The metadata keys a decision-study option fork carries (S4), and a tornado's
+# throw-away fork (S6: `owner_variant_id`, `throwaway`). Literals, like
 # `_BUNDLE_FILES`, to keep the router free of a services.study import;
 # `tests/test_study_forks.py` pins them equal to `forks.OWNER_KEYS`.
-_STUDY_FORK_META_KEYS = ("owner_study_id", "owner_base_project", "owner_option_id")
+_STUDY_FORK_META_KEYS = ("owner_study_id", "owner_base_project", "owner_option_id",
+                         "owner_variant_id", "throwaway")
 
 # Cap on the serialized blank-canvas layout document. Even a large network's
 # schematic is a few hundred KB of coordinates; 4 MB bounds a malformed or

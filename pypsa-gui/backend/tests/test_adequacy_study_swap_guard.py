@@ -254,8 +254,14 @@ def test_abortable_studies_matches_the_routes_that_actually_exist():
     # Decision study (S4, review v2 BC-5): its abort lives on the study router,
     # `/api/projects/{name}/studies/{study_id}/run/abort`, and stops the run
     # held on the study's base context.
+    # S6: the fixed-size tornado runs under the same `decision_study` key and
+    # has its own abort, `.../findings/tornado/abort`; either route makes the
+    # key abortable, and BOTH must exist for the refusal's "abort it" to hold
+    # whichever of the two is running.
     studies_src = pathlib.Path("routers/studies.py").read_text()
-    if re.search(r'@router\.post\("/\{study_id\}/run/abort"\)', studies_src):
+    if (re.search(r'@router\.post\("/\{study_id\}/run/abort"\)', studies_src)
+            and re.search(r'@router\.post\("/\{study_id\}/findings/tornado/abort"\)',
+                          studies_src)):
         have_abort.add("decision_study")
     assert have_abort == set(ABORTABLE_STUDIES), (
         f"studies with an /abort route: {sorted(have_abort)}; "

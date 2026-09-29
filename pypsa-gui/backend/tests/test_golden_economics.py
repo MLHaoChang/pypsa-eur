@@ -646,6 +646,15 @@ NO_ADAPTER_REASONS: dict[str, str] = {
         "The same case written to a workbook; its NPV cell is evaluated "
         "against the case's NPV by tests/test_proforma_xlsx.py."
     ),
+    # ── Plan S6: the findings ───────────────────────────────────────────
+    "decision_findings": (
+        "Battery NPVs (alone, or against a PV-only reference) built from "
+        "investment_case on the SITE golden fixture, and tornado bars at "
+        "fixed sizes — no annuitised horizon CAPEX to compare here. Checked "
+        "instead by tests/test_study_tornado_lp.py: the PV rows cancel "
+        "exactly against the reference, a centre bound reproduces the centre "
+        "NPV, and a price bound matches its closed form."
+    ),
 }
 
 

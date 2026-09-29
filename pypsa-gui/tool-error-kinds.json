@@ -251,6 +251,10 @@
       "surface": "inline",
       "why": "One tool exceeded its budget. The turn continues and the model can route around it."
     },
+    "tornado_never_run": {
+      "surface": "inline",
+      "why": "Decision study (S6): asking for the fixed-size tornado's progress, or aborting it, before it was ever run. A client-side sequencing slip on a route-only surface, not a condition the user must act on."
+    },
     "turn_already_in_flight": {
       "surface": "inline",
       "why": "A second turn arrived while one was running. Route-level, on an `error` frame, and the composer state already says so."

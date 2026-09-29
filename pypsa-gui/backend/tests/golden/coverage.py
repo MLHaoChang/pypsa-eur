@@ -54,6 +54,10 @@ SURFACES = (
     # the annuitised horizon CAPEX the generic loop compares.
     "investment_case",
     "investment_case_xlsx",
+    # ── Plan S6: the findings (the battery's value per option, the verdict,
+    # the value streams, the fixed-size tornado). Built on investment_case;
+    # checked on the site fixture by tests/test_study_tornado_lp.py.
+    "decision_findings",
 )
 
 FIXTURE_CLASSES = frozenset({"Generator", "Line", "Link", "StorageUnit"})
@@ -166,6 +170,11 @@ COVERAGE: dict[str, set[str]] = {
     # routers/studies.py::get_option_case_xlsx -> services/study/
     # proforma_xlsx.py::write_proforma_xlsx over the same case.
     "investment_case_xlsx":    {"Generator", "StorageUnit"},
+    # routers/studies.py::get_findings -> services/study/findings.py::
+    # assemble_findings. The battery StorageUnit (its NPV, alone or against a
+    # PV-only reference) and the PV Generator (whose rows cancel in that
+    # attribution) of each option's case.
+    "decision_findings":       {"Generator", "StorageUnit"},
 }
 
 EXCLUSIONS: dict[tuple[str, str], str] = {
@@ -377,5 +386,15 @@ EXCLUSIONS: dict[tuple[str, str], str] = {
     ("investment_case_xlsx", "Link"): (
         "Same case as investment_case: the grid links are priced by the bill "
         "calculator, not booked as an asset of the case."
+    ),
+    ("decision_findings", "Line"): (
+        "The findings are built on investment_case (services/study/findings.py"
+        "::assemble_findings), asset-scoped to the option's battery and PV; the "
+        "site pack has no Line."
+    ),
+    ("decision_findings", "Link"): (
+        "The grid links are the tariff's connection: their energy reaches the "
+        "findings only through the bill calculator's bills (value streams and "
+        "savings), never as an asset of an option."
     ),
 }

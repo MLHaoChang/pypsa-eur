@@ -33,7 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from models.energy_hub import SectionState, SectionStatus
 
 __all__ = [
-    "AssumptionsLedger", "Basis", "DecisionQuestion", "DecisionReport",
+    "AssumptionsLedger", "Basis", "BatteryAttribution", "DecisionQuestion", "DecisionReport",
     "LedgerDomain",
     "DecisionStudy", "DemandCharge", "Fidelity", "Figure", "FinancialBasis",
     "Findings", "InvestmentCase", "LedgerRow", "OptionResult", "OptionSpec",
@@ -186,6 +186,27 @@ class Figure(_Model):
                 f"ADR-0001: Figure {self.key!r} has a value and an "
                 f"unavailable reason")
         return self
+
+    @model_validator(mode="after")
+    def _provenance_is_stated(self):
+        """
+        Gate S1 [S] (enforced from S6): a money figure states its basis and
+        currency year, and a figure a run produced states its fidelity.
+        """
+        if self.unit.split("/")[0].strip().upper() in _CURRENCIES and (
+                self.basis is None or self.currency_year is None):
+            raise ValueError(
+                f"Figure {self.key!r} is money ({self.unit}) without its basis "
+                "and currency year")
+        if self.engine in _RUN_ENGINES and self.fidelity is None:
+            raise ValueError(
+                f"Figure {self.key!r} comes from a run ({self.engine}) without "
+                "its fidelity")
+        return self
+
+
+_CURRENCIES = frozenset({"EUR", "USD", "GBP", "CHF"})
+_RUN_ENGINES = frozenset({"lp", "lp_duals", "bill_calculator", "cash_flow_expander"})
 
 
 def _completeness_agrees(sections: dict[str, SectionStatus],
@@ -884,10 +905,24 @@ class InvestmentCase(_Model):
 class Verdict(_Model):
     status: SectionStatus = "not_established"
     class_: VerdictClass | None = Field(default=None, alias="class")
+    # S6: the sentence is a fixed template whose numbers are `{{fact_id}}`
+    # references into `facts` (no free prose, no bare digits);
+    # `sentence_template` names the template.
     sentence: str | None = None
+    sentence_template: str | None = None
+    facts: dict[str, Figure] = Field(default_factory=dict)
     headline_kpis: list[Figure] = Field(default_factory=list, max_length=3)
     drivers: list[str] = Field(default_factory=list, max_length=3)
     main_caveat: str | None = None
+    # S6: the option the verdict names (None when it names none).
+    option_id: str | None = None
+    # S6 (gate S5 carry): codes shown beside the centre figures — the NPV,
+    # IRR >= rate and discounted payback <= horizon are bounded at the LP
+    # optimum by construction.
+    disclosures: tuple[str, ...] = ()
+    # S6: why the verdict is not established, or what it could not judge
+    # (codes, no digits).
+    reasons: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _ok_has_a_class(self):
@@ -897,15 +932,31 @@ class Verdict(_Model):
 
 
 class TornadoRow(_FigureBlock):
+    """
+    One key driver at its two bounds (S6). ``npv_low`` / ``npv_high`` /
+    ``swing`` are the BATTERY NPV (``BatteryAttribution.battery_npv``) of the
+    option the tornado runs on, at the driver's low and high value, sizes
+    held fixed; ``swing = |npv_high - npv_low|``.
+    """
+
     _figure_fields: ClassVar[tuple[str, ...]] = ("npv_low", "npv_high", "swing")
 
     key: str
     label: str
+    # Gate S1 nit: the bounds carry their unit (the energy-price row is a
+    # multiplier, not a price).
+    unit: str | None = None
+    centre_value: float | None = None
     low_value: float
     high_value: float
     npv_low: float | None
     npv_high: float | None
     swing: float | None
+    # How the bounds were evaluated: `redispatch` (a fixed-size re-dispatch
+    # at the perturbed tariff), `capex_only` or `rate_only` (no solve).
+    evaluation: Literal["redispatch", "capex_only", "rate_only"] | None = None
+    # Codes, e.g. `range_recentred_on_user_value`.
+    notes: tuple[str, ...] = ()
 
 
 class Breakeven(_FigureBlock):
@@ -943,6 +994,13 @@ class Robustness(_Model):
     # (an abort, a budget) — named, so "not established" says what is missing.
     pending: list[str] = Field(default_factory=list)
     note: str | None = None
+    # S6: the option the tornado ran on, its centre battery NPV, the rows it
+    # skipped (key -> code, e.g. a price level with no effect on one flat
+    # band) and the solves it charged.
+    option_id: str | None = None
+    npv_centre: float | None = None
+    skipped: dict[str, str] = Field(default_factory=dict)
+    solves_charged: int = 0
 
 
 class FindingsHashes(_Model):
@@ -955,6 +1013,41 @@ class FindingsHashes(_Model):
     ledger_hash: str | None = None
     base_network_hash: str | None = None
     option_network_hashes: dict[str, str] = Field(default_factory=dict)
+
+
+class BatteryAttribution(_FigureBlock):
+    """
+    The battery's share of one option's value (S6): "Do I need a BESS?".
+
+    * ``battery_only``: ``battery_npv`` is the option's NPV.
+    * ``battery_removed_same_pv`` (a ``bess_pv`` option): the option less a
+      PV-only reference — the same fork with the StorageUnit OMITTED (never
+      fixed at zero, BC-1) and PV fixed at the option's size, re-dispatched.
+      The PV rows of the two cases cancel exactly.
+
+    ``status`` is ``not_established`` when the reference was never computed
+    (the verdict then cannot name the option), ``skipped`` for a battery
+    sized to zero (``size_zero_no_investment``: judged by its size, its NPV
+    is not read for a sign).
+    """
+
+    _figure_fields: ClassVar[tuple[str, ...]] = (
+        "battery_npv", "option_npv", "reference_npv", "battery_p_nom_mw",
+        "battery_payback_simple")
+
+    option_id: str
+    status: SectionStatus = "not_established"
+    method: Literal["battery_only", "battery_removed_same_pv"]
+    battery_p_nom_mw: float | None
+    battery_npv: float | None
+    option_npv: float | None
+    reference_npv: float | None
+    battery_payback_simple: float | None = None
+    currency_year: int | None = None
+    basis: FinancialBasis = Field(default_factory=FinancialBasis)
+    fidelity: Fidelity | None = None
+    engine: Engine = "cash_flow_expander"
+    notes: tuple[str, ...] = ()
 
 
 class Findings(_Model):
@@ -970,6 +1063,12 @@ class Findings(_Model):
     explain: list[dict[str, Any]] = Field(default_factory=list)
     completeness: dict[str, SectionStatus] = Field(default_factory=dict)
     honesty_notes: tuple[str, ...] = ()
+    # S6: the battery's value per option, and the value streams of the option
+    # the verdict names (the bill's six components in four streams).
+    battery_attribution: list[BatteryAttribution] = Field(default_factory=list)
+    value_streams: list[ValueStream] = Field(default_factory=list)
+    value_streams_option: str | None = None
+    value_streams_status: SectionStatus = "not_established"
 
     @model_validator(mode="after")
     def _completeness_matches_sections(self):

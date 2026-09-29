@@ -298,7 +298,9 @@ def estimate_solves(n, study: str, **kwargs) -> int:
     if study == "decision_study":
         # One LP solve per option fork (S4 M1); `n` is not read — the options
         # are the question template's, filtered by the intake. The S6 tornado
-        # is charged separately when it lands.
+        # is costed by its own engine (`services/study/findings.py::
+        # estimate_tornado_solves`), checked before its first solve and
+        # charged one solve at a time under this same study key.
         options = kwargs.get("options")
         if options is None:
             raise CampaignBudgetError(

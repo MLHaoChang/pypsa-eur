@@ -941,3 +941,145 @@ def get_option_case_xlsx(study_id: str, option_id: str,
         headers={"Content-Disposition": content_disposition(
             f"{study.name} - {option_id} - pro forma.xlsx")},
     )
+
+
+# ── S6: findings — verdict, value streams, fixed-size tornado, explain ────
+
+class TornadoRequest(BaseModel):
+    """``budget_solves`` caps the tornado's own campaign when none is open."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    budget_solves: int | None = Field(default=None, ge=1, le=120)
+
+
+def _refuse_while_a_run_runs(project: AuthorizedProject, study_id: str) -> None:
+    """
+    The findings read the option forks from disk; a RUN of this study is
+    replacing them, so reading now would mix two runs (409). A running
+    tornado does not touch them (its forks are its own), so it is no bar.
+    Context-parameterised: the path project's own context, not the active one.
+    """
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.get_context(project.registry_key)
+    if ctx is None:
+        return
+    with ctx.solver_state_lock:
+        rec = ctx.solver_state.get(study_runner.STUDY_KEY)
+        if (rec and rec.get("study_id") == study_id and rec.get("status") == "running"
+                and rec.get("kind", "run") == "run"):
+            raise HTTPException(409, detail={
+                "error_kind": "study_running",
+                "message": "the study is running; its findings follow when it finishes"})
+
+
+@router.get("/{study_id}/findings")
+def get_findings(study_id: str,
+                 project: AuthorizedProject = ProjectAccessDep,
+                 db: DBSession = Depends(get_db),
+                 user: User | None = Depends(optional_user)) -> dict:
+    """
+    The findings of the last run (plan S6, `services/study/findings.py::
+    assemble_findings`): the battery's value per option, the verdict, the
+    named option's value streams, the tornado when one ran on this run's
+    forks and ledger, and the sizing explanation of each option's battery
+    and PV. ``available`` (ADR-0003) is false when the run did not solve its
+    options; each section carries its own status. 404 when never run, 409
+    while a run replaces the forks or when the ledger changed since the run.
+    """
+    from services.study import findings as study_findings
+
+    _refuse_unless_enabled()
+    study = _load(project, study_id)
+    if _base_row(project, db, user) is None:
+        raise HTTPException(404, f"Project '{project.name}' not found")
+    _refuse_while_a_run_runs(project, study_id)
+    try:
+        findings = study_findings.assemble_findings(study, _project_dir(project), db,
+                                                    project.uuid)
+    except study_findings.FindingsRefused as exc:
+        raise HTTPException(exc.status, detail=exc.detail) from None
+    return {"available": (findings.options_status == "ok"
+                          and findings.baseline.solve_status == "ok"),
+            **findings.model_dump(mode="json", by_alias=True)}
+
+
+@router.post("/{study_id}/findings/tornado", status_code=202)
+def start_findings_tornado(study_id: str, body: TornadoRequest | None = None,
+                           project: AuthorizedProject = ProjectAccessDep,
+                           db: DBSession = Depends(get_db),
+                           user: User | None = Depends(optional_user)) -> dict:
+    """
+    Start the fixed-size tornado (plan S6): the PV-only references, then
+    each key driver at its bounds on the best battery option, sizes held
+    fixed, each re-dispatch on a throw-away study-owned fork, charged to the
+    study's campaign. The solver-in-flight exemption covers this route
+    (BC-3), so it takes its own context-parameterised check: the study mesh
+    and the in-flight test on the STUDY'S base context, claimed under its
+    locks (`tornado_runner.start_tornado`). 409 while any study or a solve
+    holds the base project, when the ledger or an option fork changed since
+    the run, and naming the shortfall when the budget is too small.
+    """
+    from routers.projects import _enforce_project_lock
+    from services.study import tornado_runner
+
+    _refuse_unless_enabled()
+    body = body or TornadoRequest()
+    base = _base_row(project, db, user)
+    if base is None:
+        raise HTTPException(404, f"Project '{project.name}' not found")
+    _enforce_project_lock(db, base, user)
+    _load(project, study_id)
+    try:
+        return tornado_runner.start_tornado(study_id, base_row=base, db=db, user_id=user.id,
+                                            budget_solves=body.budget_solves)
+    except study_runner.RunRefused as exc:
+        raise _run_error(exc) from None
+
+
+@router.get("/{study_id}/findings/tornado")
+def get_findings_tornado(study_id: str,
+                         project: AuthorizedProject = ProjectAccessDep,
+                         db: DBSession = Depends(get_db),
+                         user: User | None = Depends(optional_user)) -> dict:
+    """The running tornado's progress, else the last one's record (404 if never run)."""
+    from services.study import tornado_runner
+
+    _refuse_unless_enabled()
+    _load(project, study_id)
+    base = _base_row(project, db, user)
+    if base is None:
+        raise HTTPException(404, f"Project '{project.name}' not found")
+    rec = tornado_runner.get_tornado(study_id, base_row=base, base_dir=_project_dir(project))
+    if rec is None:
+        raise HTTPException(404, detail={"error_kind": "tornado_never_run",
+                                         "message": "the tornado has not been run"})
+    return rec
+
+
+@router.post("/{study_id}/findings/tornado/abort")
+def abort_findings_tornado(study_id: str,
+                           project: AuthorizedProject = ProjectAccessDep,
+                           db: DBSession = Depends(get_db),
+                           user: User | None = Depends(optional_user)) -> dict:
+    """
+    Ask a running tornado to stop before its next solve: the bars computed
+    so far are kept, the drivers never reached are named in
+    ``robustness.pending``, and every throw-away fork is removed.
+    Idempotent; 404 when the tornado never ran.
+    """
+    from routers.projects import _enforce_project_lock
+    from services.study import tornado_runner
+
+    _refuse_unless_enabled()
+    base = _base_row(project, db, user)
+    if base is None:
+        raise HTTPException(404, f"Project '{project.name}' not found")
+    _enforce_project_lock(db, base, user)
+    _load(project, study_id)
+    try:
+        return tornado_runner.abort_tornado(study_id, base_row=base,
+                                            base_dir=_project_dir(project))
+    except study_runner.RunRefused as exc:
+        raise _run_error(exc) from None

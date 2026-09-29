@@ -223,6 +223,12 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/studies.py", "get_ledger_csv"):        frozenset(),
     ("routers/studies.py", "get_option_case"):       frozenset({"investment_case"}),
     ("routers/studies.py", "get_option_case_xlsx"):  frozenset({"investment_case_xlsx"}),
+    # S6: the findings report the battery's value; the tornado routes start,
+    # report and stop the worker whose result the findings read.
+    ("routers/studies.py", "get_findings"):           frozenset({"decision_findings"}),
+    ("routers/studies.py", "start_findings_tornado"): frozenset(),
+    ("routers/studies.py", "get_findings_tornado"):   frozenset(),
+    ("routers/studies.py", "abort_findings_tornado"): frozenset(),
 }
 
 

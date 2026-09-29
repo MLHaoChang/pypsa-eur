@@ -45,12 +45,16 @@ from datetime import UTC, datetime
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "FORK_SEPARATOR", "ForkError", "OWNER_KEYS", "create_option_fork",
-    "delete_fork", "fork_name", "is_study_owned", "owned_forks",
+    "FORK_SEPARATOR", "ForkError", "OWNER_KEYS", "VARIANT_SEPARATOR",
+    "create_option_fork", "create_variant_fork", "delete_fork", "fork_name",
+    "is_study_owned", "owned_forks", "variant_fork_name",
 ]
 
 FORK_SEPARATOR = "-opt-"
-OWNER_KEYS = ("owner_study_id", "owner_base_project", "owner_option_id")
+# S6 (M2): the tornado's throw-away forks.
+VARIANT_SEPARATOR = "-var-"
+OWNER_KEYS = ("owner_study_id", "owner_base_project", "owner_option_id",
+              "owner_variant_id", "throwaway")
 # What a fork's copy walk leaves behind (plan S4 M1, review v2 BC-4).
 SKIPPED = frozenset({"studies", "results_state.pkl"})
 _OPTION_RE = re.compile(r"^[a-z0-9][a-z0-9_]{0,31}$")
@@ -179,12 +183,45 @@ def create_option_fork(db, user_id, *, base_row, study_id: str, option_id: str,
     ``network`` and ``solver_config``, owned by ``study_id``. Returns the
     fork's `Project` row.
     """
+    return _create_fork(
+        db, user_id, base_row=base_row, study_id=study_id,
+        name=fork_name(base_row.name, option_id),
+        description=f"Decision study option {option_id} (study-owned)",
+        owner={"owner_option_id": option_id},
+        network=network, solver_config=solver_config)
+
+
+def variant_fork_name(base_name: str, variant_id: str) -> str:
+    if not _OPTION_RE.fullmatch(variant_id or ""):
+        raise ForkError("variant_id_invalid", f"variant id {variant_id!r} is not a slug", 422)
+    return f"{base_name}{VARIANT_SEPARATOR}{variant_id}"
+
+
+def create_variant_fork(db, user_id, *, base_row, study_id: str, variant_id: str,
+                        network, solver_config):
+    """
+    A THROW-AWAY fork for one tornado re-dispatch (plan S4 M2, S6):
+    ``<base>-var-<variant_id>``, study-owned exactly like an option fork
+    (metadata owner keys AND a database row whose parent is the base), marked
+    ``throwaway``. The caller deletes it (:func:`delete_fork`) once the
+    variant's NPV is read, on abort and on failure too. Option forks are
+    never re-solved: a variant is always a fork of its own.
+    """
+    return _create_fork(
+        db, user_id, base_row=base_row, study_id=study_id,
+        name=variant_fork_name(base_row.name, variant_id),
+        description=f"Decision study tornado variant {variant_id} (study-owned, throw-away)",
+        owner={"owner_variant_id": variant_id, "throwaway": True},
+        network=network, solver_config=solver_config)
+
+
+def _create_fork(db, user_id, *, base_row, study_id: str, name: str, description: str,
+                 owner: dict, network, solver_config):
     from routers.projects import _force_rmtree, _write_meta
     from services import project_registry
     from services.atomic_io import atomic_write_text
 
     user = _user(db, user_id)
-    name = fork_name(base_row.name, option_id)
     existing = project_registry.find_project(db, user, name)
     if existing is not None:
         if not delete_fork(db, existing, study_id=study_id, base_uuid=str(base_row.id)):
@@ -195,7 +232,7 @@ def create_option_fork(db, user_id, *, base_row, study_id: str, option_id: str,
     base_dir = project_registry.project_dir(base_row)
     child = project_registry.create_scenario(
         db, user, base_row, name,
-        scenario_description=f"Decision study option {option_id} (study-owned)",
+        scenario_description=description,
         scenario_type="scenario",
     )
     child_dir = project_registry.ensure_project_dir(child)
@@ -211,11 +248,11 @@ def create_option_fork(db, user_id, *, base_row, study_id: str, option_id: str,
             "objective": None, "has_results": False, "condition": None,
             "solve_time": None, "user_ts_count": 0,
             "parent_project": base_row.name,
-            "scenario_description": f"Decision study option {option_id} (study-owned)",
+            "scenario_description": description,
             "scenario_type": "scenario",
             "owner_study_id": study_id,
             "owner_base_project": str(base_row.id),
-            "owner_option_id": option_id,
+            **owner,
         })
     except Exception:
         try:
