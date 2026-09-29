@@ -2487,7 +2487,9 @@ def _check_commercial(n, solver_config) -> list[Issue]:
             for sev, code, cls, name, msg in commercial_findings(
                 n, getattr(solver_config, "commercial", None), solve_strategy=strategy,
                 multi_period=multi,
-                dsr_buses=list(getattr(solver_config, "dsr_buses", None) or []))]
+                dsr={"buses": list(getattr(solver_config, "dsr_buses", None) or []),
+                     "price": float(getattr(solver_config, "dsr_price_eur_per_mwh", 0.0) or 0.0),
+                     "share": float(getattr(solver_config, "dsr_share_of_load", 0.0) or 0.0)})]
 
 
 def has_errors(issues: list[Issue]) -> bool:

@@ -852,15 +852,36 @@ Files: `models/commercial.py` (`CommercialConfig.contracts: list[Contract]` disc
       - DR on `asset_ids` (P5);
       - DR `load_ids` that are not loads.
     - **`commercial.contract_tariff_mismatch`**: a retail `tariff_id` that is not the import tariff's id.
-  - **Warnings** (`preflight._contract_warnings`):
-    - **`commercial.ppa_export_double_count`**: the site (`seller == site_party`) sells a PPA without `changes_dispatch` on an ON-SITE Generator (bus ≠ the PoC's grid bus) while an export Link is configured. The buyer case, `changes_dispatch`, and no export do not warn.
-    - **`commercial.dr_double_count`**: a DR contract's load sits on one of the solver config's `dsr_buses`. The DSR slack is already paid in the LP. `validation_service._check_commercial` passes `dsr_buses`.
-    - **`commercial.sleeved_commodity_double_count`**: a sleeved PPA while the import tariff has an energy item that is not export-only.
+  - **Warnings** (`preflight._contract_warnings(n, cfg, dsr)`), as redesigned in review round 1:
+    - **`commercial.ppa_export_double_count`** fires only when all of these hold:
+      - the site earns export revenue (`export_price_ref`, or an export or net tariff item);
+      - the site sells (`same_party(seller, site_party)`, trimmed and case-insensitive) a PPA without `changes_dispatch`;
+      - the PPA is on an ON-SITE Generator (`lp_bindings.site_generators`: reached from the import members' bus1 over lines, transformers and links, not through the PoC Links).
+    - **`commercial.dr_without_dsr`** replaces `dr_double_count`, which had the logic backwards. A DR contract's payment is settled on the DSR activation (`buses_t["ic_dsr_p"]`). If the load's bus has no active DSR (in `dsr_buses`, with price > 0 and share > 0), the contract settles `dr_activation_not_established`. The DSR slack cost in the LP is the site's own shedding value, not the counterparty's payment, so the two do not double-count.
+    - **`commercial.sleeved_commodity_double_count`** ("the import tariff may charge it again"): a sleeved PPA while the import tariff has an energy or certificate item that is not export-only.
+    - **`commercial.eaas_on_poc`** (new): an EaaS asset that is the PoC Link.
+    - `contract_problems` findings that do not change dispatch (settlement-only) are warnings at preflight and at solve. `binding.bind_commercial` (PUT) still refuses them (`refuse_settlement_contracts=True`).
     - `commercial.capacity_double_count` is unchanged.
-  - **Settlement drift record.** At solve commit, `ic_contracts = {hash (versioned recipe), hash_version, ids}` is written when the config has contracts and cleared otherwise. `settlement_inputs.contracts_state(n, cfg)` gives None, "config" (→ `config_changed_since_solve`) or "not_recorded". WP2.5's settlement consumes it.
+    - `validation_service._check_commercial` passes `dsr={"buses", "price", "share"}`.
+  - **Settlement drift record.**
+    - The solve no longer records contracts that only settle. It pops the legacy `ic_contracts`, and so does `clear()` without a config.
+    - `settlement_inputs.contracts_record(cfg)` is order-insensitive and includes `site_party`.
+    - `contracts_state(record, cfg)` gives None, "config" (→ `config_changed_since_solve`) or "not_recorded". It is a helper for WP2.5's settlement record.
+    - The dispatch-changing PPA keeps its own LP record (`ic_ppa`, WP2.2d).
   - **Round trips.** Contracts with reference series go through `PUT /solver_config` → save → load (readers resolve after the reload) → bundle. The sidecar pins the reference series, and another org reports it `missing`.
   - **Acceptance: P1 WP1.8's recorded deviation is closed.** The PPA/export-price and DR/`dsr_buses` checks now exist.
-  - **Tests:** `tests/test_contracts_config.py` has 17 tests.
+  - **Tests:** `tests/test_contracts_config.py` has 21 tests (after review round 1).
+- **WP2.2c review round 1 → FAIL; all findings fixed (design changes recorded above):**
+  1. HIGH: `dr_double_count` had the logic backwards (it warned on every DR contract that can settle). → replaced by `dr_without_dsr`.
+  2. MEDIUM: `clear()` left `ic_contracts` behind. → the solve no longer writes it, and `clear()` pops the legacy key.
+  3. MEDIUM: `ppa_export_double_count` false positives. → it needs export revenue, uses `site_generators` topology, and matches parties with `same_party`, which the WP2.2d buyer check uses too.
+  4. MEDIUM: a settlement-only contract problem blocked the solve. → it is a warning at preflight and solve, and refused at PUT.
+  5. MEDIUM: `contracts_state` read the network for a record the solve should not own. → it is now a settlement-record helper for WP2.5.
+  6. LOW: the sleeved warning said the tariff *does* charge again. → reworded, and certificate items are included.
+  7. LOW: an EaaS asset on the PoC was silent. → `eaas_on_poc` warning.
+  8. LOW: retail with no import tariff passed. → `contract_tariff_mismatch`.
+
+  Regression: 548 passed across the commercial, contract, library, LP, reconciliation and validation suites.
 
 ## WP2.2d `changes_dispatch` PPA in the LP (buyer case only)
 
@@ -882,7 +903,7 @@ an asset not a Generator.
   - **Commit.** It writes `generators_t["ic_ppa_price"]` and `meta["ic_ppa"] = {contracts, generators, hash, hash_version}`, and clears both after a solve without one. `LP_RECIPE = 5`; `facts.ppa_dispatch`.
   - **Rows.** `ppa_settlement` is Σ w_obj × p_gen × the committed €/MWh per period, ADDED like the energy rows (in the objective, out of the statistics).
   - **Drift and recipe.** A hash mismatch is `config_changed_since_solve`. With no record while one is wanted: `ppa_settlement_not_established`, plus `ppa_recipe_changed` for a solve under an older recipe. `billing._drift_flags` does the same.
-  - **Tests:** `tests/test_lp_ppa_dispatch.py` has 12 tests:
+  - **Tests:** `tests/test_lp_ppa_dispatch.py` has 13 tests (the `same_party` buyer test added with WP2.2c round 1):
     - the refusals;
     - the indexed adder and undo;
     - the PV curtails when the price exceeds its value (imports at 20 €/MWh instead);

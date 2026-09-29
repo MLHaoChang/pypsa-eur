@@ -178,3 +178,11 @@ def test_preflight_and_binding_refuse_an_unbindable_dispatch_ppa():
     assert codes == {"commercial.binding_invalid"}
     with pytest.raises(L.CommercialBindingError, match="pay_as_produced"):
         L.validate_for_network(_site(), bad)
+
+
+
+def test_the_buyer_matches_the_site_party_trimmed_and_in_any_case():
+    """WP2.2c round 1 #3 applies to the buyer check too."""
+    applied = L.materialise_poc_prices(_site(), _commercial({**PPA, "buyer": " SITE "}))
+    assert applied.facts["ppa_dispatch"] == {"ppa1": ["pv"]}
+    applied.undo()

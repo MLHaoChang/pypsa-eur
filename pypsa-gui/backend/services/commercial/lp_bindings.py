@@ -474,37 +474,84 @@ _CONTRACT_ASSET_CLASSES = {"ppa": ("generators",), "cfd": ("generators",),
                            "eaas": ("generators", "storage_units", "links")}
 
 
-def _validate_contracts(n, cfg: CommercialConfig) -> None:
-    """`commercial.contract_asset_missing` / `commercial.contract_tariff_mismatch`:
-    a contract naming what the network cannot settle is refused before a solve
-    whose settlement would then fail (WP2.2c)."""
+def same_party(a: str | None, b: str | None) -> bool:
+    """Party names compare trimmed and case-insensitive (review 2.2c #3)."""
+    return a is not None and b is not None and a.strip().casefold() == b.strip().casefold()
+
+
+def site_generators(n, cfg: CommercialConfig) -> list[str]:
+    """The Generators BEHIND the commercial meter: on buses reachable from the
+    import members' site side (bus1) without crossing an import or export
+    Link (lines, transformers and other Links connect). One definition for
+    the preflight and the settlement inputs (review 2.2c #3)."""
+    meter = set(import_links(cfg)) | ({cfg.export_link} if cfg.export_link else set())
+    starts = [str(n.links.at[m, "bus1"]) for m in import_links(cfg) if m in n.links.index]
+    edges: dict[str, set[str]] = {}
+
+    def join(a, b):
+        if a and b and a != "nan" and b != "nan":
+            edges.setdefault(a, set()).add(b)
+            edges.setdefault(b, set()).add(a)
+
+    for comp, ends in (("lines", ("bus0", "bus1")), ("transformers", ("bus0", "bus1")),
+                       ("links", ("bus0", "bus1", "bus2", "bus3", "bus4"))):
+        df = getattr(n, comp)
+        cols = [c for c in ends if c in df.columns]
+        for name, row in df[cols].iterrows():
+            if comp == "links" and name in meter:
+                continue
+            buses = [str(row[c]).strip() for c in cols if str(row[c]).strip()]
+            for x in buses[1:]:
+                join(buses[0], x)
+    seen, todo = set(), list(starts)
+    while todo:
+        b = todo.pop()
+        if b in seen:
+            continue
+        seen.add(b)
+        todo.extend(edges.get(b, ()))
+    return [str(g) for g in n.generators.index if str(n.generators.at[g, "bus"]) in seen]
+
+
+def contract_problems(n, cfg: CommercialConfig) -> list[tuple[str, str, bool]]:
+    """(code, message, changes_dispatch) for each contract naming what the
+    network cannot settle (`commercial.contract_asset_missing` /
+    `commercial.contract_tariff_mismatch`). A settlement-only contract does
+    not shape the LP: it is refused when the config is bound, a WARNING at
+    preflight and solve time; a dispatch-changing one is an error everywhere
+    (review 2.2c #4)."""
+    out: list[tuple[str, str, bool]] = []
     for c in cfg.contracts:
+        dispatch = c.type == "ppa" and bool(getattr(c, "changes_dispatch", False))
         allowed = _CONTRACT_ASSET_CLASSES.get(c.type)
         if allowed is not None:
             missing = [a for a in c.asset_ids
                        if not any(a in getattr(n, cls).index for cls in allowed)]
             if missing:
-                raise CommercialBindingError(
-                    f"commercial.contract_asset_missing: {c.type} contract {c.id!r} names "
-                    f"{missing}, which are not {' / '.join(allowed)} of this network")
+                out.append(("commercial.contract_asset_missing",
+                            f"{c.type} contract {c.id!r} names {missing}, which are not "
+                            f"{' / '.join(allowed)} of this network", dispatch))
         if c.type == "dr":
             if c.asset_ids:
-                raise CommercialBindingError(
-                    f"commercial.contract_asset_missing: DR contract {c.id!r} names assets "
-                    f"{list(c.asset_ids)}; DR on assets arrives in P5 — name load_ids")
+                out.append(("commercial.contract_asset_missing",
+                            f"DR contract {c.id!r} names assets {list(c.asset_ids)}; DR on "
+                            "assets arrives in P5 — name load_ids", False))
             missing = [l for l in c.load_ids if l not in n.loads.index]
             if missing:
-                raise CommercialBindingError(
-                    f"commercial.contract_asset_missing: DR contract {c.id!r} names loads "
-                    f"{missing} that are not in this network")
-        if c.type == "retail" and cfg.import_tariff is not None \
-                and c.tariff_id != cfg.import_tariff.id:
-            raise CommercialBindingError(
-                f"commercial.contract_tariff_mismatch: retail contract {c.id!r} names tariff "
-                f"{c.tariff_id!r}, but the import tariff is {cfg.import_tariff.id!r}")
+                out.append(("commercial.contract_asset_missing",
+                            f"DR contract {c.id!r} names loads {missing} that are not in this "
+                            "network", False))
+        if c.type == "retail":
+            tid = cfg.import_tariff.id if cfg.import_tariff is not None else None
+            if c.tariff_id != tid:
+                out.append(("commercial.contract_tariff_mismatch",
+                            f"retail contract {c.id!r} names tariff {c.tariff_id!r}, but the "
+                            f"import tariff is {tid!r}", False))
+    return out
 
 
-def validate_for_network(n, cfg: CommercialConfig | dict) -> None:
+def validate_for_network(n, cfg: CommercialConfig | dict, *,
+                         refuse_settlement_contracts: bool = False) -> None:
     """Refuse a commercial config this network cannot bind. The config route
     runs this, so the user hears about a bad config when editing it rather than
     at solve time. It checks everything except the export price, which the
@@ -531,7 +578,10 @@ def validate_for_network(n, cfg: CommercialConfig | dict) -> None:
         raise CommercialBindingError(
             "commercial.capacity_double_count: the import tariff has a capacity item and the "
             "connection agreement a capacity_fee on the same PoC; keep one")
-    _validate_contracts(n, cfg)
+    for code, msg, dispatch in contract_problems(n, cfg):
+        # Binding refuses them all; a solve only what shapes its LP.
+        if dispatch or refuse_settlement_contracts:
+            raise CommercialBindingError(f"{code}: {msg}")
     _ppa_dispatch_spec(n, cfg)   # a dispatch PPA that cannot bind is refused here too
     if cfg.demand_items:
         # Not implemented in P1: every demand item of the tariff is charged, so
@@ -1586,13 +1636,13 @@ def _ppa_dispatch_spec(n, cfg: CommercialConfig) -> dict[str, np.ndarray] | None
     ppas = dispatch_ppas(cfg)
     if not ppas:
         return None
-    grid_bus = str(n.links.at[cfg.poc_link, "bus0"]) if cfg.poc_link in n.links.index else None
+    onsite = set(site_generators(n, cfg))
     inv = (np.asarray(n.snapshots.get_level_values(0)) if isinstance(n.snapshots, pd.MultiIndex)
            else None)
     out: dict[str, np.ndarray] = {}
     for c in ppas:
         why = None
-        if c.buyer != cfg.site_party:
+        if not same_party(c.buyer, cfg.site_party):
             why = (f"the site ({cfg.site_party!r}) is not the buyer; only the buyer case "
                    "changes dispatch in P2")
         elif c.kind != "pay_as_produced":
@@ -1605,8 +1655,8 @@ def _ppa_dispatch_spec(n, cfg: CommercialConfig) -> dict[str, np.ndarray] | None
             for a in c.asset_ids:
                 if a not in n.generators.index:
                     why = f"asset {a!r} is not a Generator"
-                elif str(n.generators.at[a, "bus"]) == grid_bus:
-                    why = f"asset {a!r} is not on-site (it sits on the PoC's grid bus)"
+                elif a not in onsite:
+                    why = f"asset {a!r} is not on-site (not behind the PoC meter)"
                 elif a in out:
                     why = f"asset {a!r} is in two changes_dispatch PPAs"
                 if why:
@@ -1655,6 +1705,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
             n.meta.pop(META_GROUP, None)
             n.meta.pop(META_CAPACITY, None)
             n.meta.pop(META_PPA, None)
+            n.meta.pop("ic_contracts", None)   # the pre-review solve record (WP2.2c #2)
             if n.generators_t.get(PPA_PRICE_ATTR) is not None:
                 n.generators_t[PPA_PRICE_ATTR] = pd.DataFrame(index=n.snapshots)
 
@@ -1794,12 +1845,9 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
                               # The LP recipe of this solve (see `LP_RECIPE`):
                               # dates a solve with no demand or tier record.
                               "lp_recipe": LP_RECIPE}
-        from services.commercial import settlement_inputs as _SI
-
-        if cfg.contracts:
-            n.meta[_SI.META_CONTRACTS] = _SI.contracts_record(cfg)
-        else:
-            n.meta.pop(_SI.META_CONTRACTS, None)
+        # Settlement-only contracts are not solve state (review 2.2c #5): the
+        # settlement records their hash; a dispatch PPA is `ic_ppa` below.
+        n.meta.pop("ic_contracts", None)
         if ppa_adders:
             n.generators_t[PPA_PRICE_ATTR] = pd.DataFrame(ppa_adders, index=n.snapshots)
             n.meta[META_PPA] = {"contracts": [c.id for c in dispatch_ppas(cfg)],

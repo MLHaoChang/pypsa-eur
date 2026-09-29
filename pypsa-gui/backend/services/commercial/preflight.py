@@ -68,7 +68,7 @@ def _max_step_h(snapshots: pd.Index) -> float | None:
 
 
 def commercial_findings(n, commercial, *, solve_strategy: str = "full",
-                        multi_period: bool = False, dsr_buses: list[str] | None = None
+                        multi_period: bool = False, dsr: dict | None = None
                         ) -> list[tuple[str, str, str, str, str]]:
     """`solve_strategy` is the strategy that will RUN
     (`lp_bindings.effective_strategy`), so a refusal that depends on it is
@@ -98,8 +98,7 @@ def commercial_findings(n, commercial, *, solve_strategy: str = "full",
         return [("error", "commercial.binding_invalid", "", "",
                  f"The commercial config cannot bind to this network: {exc}")]
     try:
-        return _warnings(n, cfg, adders, price, demand) + _contract_warnings(
-            n, cfg, dsr_buses or [])
+        return _warnings(n, cfg, adders, price, demand) + _contract_warnings(n, cfg, dsr or {})
     except Exception as exc:  # noqa: BLE001 — preflight never takes validation down
         return [("warning", "commercial.preflight_incomplete", "", "",
                  f"Some commercial preflight checks could not run ({type(exc).__name__}: "
@@ -166,37 +165,60 @@ def _warnings(n, cfg, adders, price, demand) -> list[tuple[str, str, str, str, s
     return out
 
 
-def _contract_warnings(n, cfg, dsr_buses: list[str]) -> list[tuple[str, str, str, str, str]]:
-    """Double counts between contracts and the rest of the config (P2 WP2.2c;
-    closes P1 WP1.8's deviation)."""
+def _contract_warnings(n, cfg, dsr: dict) -> list[tuple[str, str, str, str, str]]:
+    """Contract findings that do not stop the solve (P2 WP2.2c; closes P1
+    WP1.8's deviation): settlement-only contracts naming what the network
+    cannot settle (warnings here, refused at binding), and double counts."""
     out: list[tuple[str, str, str, str, str]] = []
-    grid_bus = str(n.links.at[cfg.poc_link, "bus0"]) if cfg.poc_link in n.links.index else None
-    exports = cfg.export_link is not None
+    for code, msg, dispatch in _lp.contract_problems(n, cfg):
+        if not dispatch:
+            out.append(("warning", code, "", "", f"{msg}: its settlement is not established"))
     items = cfg.import_tariff.items if cfg.import_tariff is not None else []
-    commodity = [i.id for i in items if i.kind == "energy" and i.measured_on != "export"]
+    earns_export = cfg.export_link is not None and (
+        cfg.export_price_ref is not None
+        or any(i.measured_on in ("export", "net") for i in items))
+    onsite = set(_lp.site_generators(n, cfg))
+    commodity = [i.id for i in items
+                 if i.kind in ("energy", "certificate") and i.measured_on != "export"]
     load_bus = n.loads["bus"].astype(str).to_dict() if not n.loads.empty else {}
+    active_dsr = ({str(b) for b in dsr.get("buses") or []}
+                  if (dsr.get("price") or 0) > 0 and (dsr.get("share") or 0) > 0 else set())
+    meter = set(_lp.import_links(cfg)) | ({cfg.export_link} if cfg.export_link else set())
     for c in cfg.contracts:
-        if c.type == "ppa" and exports and not c.changes_dispatch and c.seller == cfg.site_party:
-            onsite = [a for a in c.asset_ids if a in n.generators.index
-                      and str(n.generators.at[a, "bus"]) != grid_bus]
-            if onsite:
+        if c.type == "ppa" and earns_export and not c.changes_dispatch \
+                and _lp.same_party(c.seller, cfg.site_party):
+            sold = [a for a in c.asset_ids if a in onsite]
+            if sold:
                 out.append(("warning", "commercial.ppa_export_double_count", "Generator",
-                            onsite[0],
+                            sold[0],
                             f"The site ({cfg.site_party!r}) sells PPA {c.id!r}'s output of "
-                            f"{onsite}, and its exported share also earns the export price "
-                            f"through {cfg.export_link!r}: the same MWh is paid twice. Settle "
-                            "one of them, or let the PPA change dispatch (changes_dispatch)."))
+                            f"{sold} behind the meter, and its exported share also earns the "
+                            f"export price through {cfg.export_link!r}: the same MWh is paid "
+                            "twice. Settle one of them, or let the PPA change dispatch."))
         if c.type == "dr":
-            on_dsr = sorted({load_bus.get(l) for l in c.load_ids} & {str(b) for b in dsr_buses})
-            if on_dsr:
-                out.append(("warning", "commercial.dr_double_count", "Bus", on_dsr[0],
-                            f"DR contract {c.id!r} is settled on the DSR dispatch of bus(es) "
-                            f"{on_dsr}, which the LP already pays at the DSR price: the "
-                            "activation is valued twice. Keep the DSR price at the contract's "
-                            "activation rate, or report one of them."))
+            # DR activation is settled on the DSR dispatch of its loads' buses
+            # (WP2.2b): a DR load on a bus without active DSR can never settle
+            # (review 2.2c #1). The LP dispatches DSR at the DSR price without
+            # the contract's revenue (settled afterwards; P5 co-optimises).
+            off = sorted({load_bus.get(l) for l in c.load_ids if l in load_bus} - active_dsr)
+            if off:
+                out.append(("warning", "commercial.dr_without_dsr", "Bus", off[0],
+                            f"DR contract {c.id!r} settles its activation on the DSR dispatch "
+                            f"of its loads' buses, but {off} have no active demand response "
+                            "(opt the bus in, with a DSR price and share above 0): the "
+                            "activation is not established."))
         if c.type == "ppa" and c.kind == "sleeved" and commodity:
             out.append(("warning", "commercial.sleeved_commodity_double_count", "", c.id,
                         f"Sleeved PPA {c.id!r} buys the commodity, and the import tariff's "
-                        f"energy item(s) {commodity} charge it again on PoC import. Remove "
-                        "the tariff's commodity item and keep network and levy items."))
+                        f"per-kWh item(s) {commodity} may charge it again on PoC import. "
+                        "A tariff item does not say whether it is a commodity or a network / "
+                        "levy charge: remove the commodity (and certificate) share and keep "
+                        "network and levy items."))
+        if c.type == "eaas":
+            on_meter = [a for a in c.asset_ids if a in meter]
+            if on_meter:
+                out.append(("warning", "commercial.eaas_on_poc", "Link", on_meter[0],
+                            f"EaaS contract {c.id!r} bills delivery on {on_meter}, a PoC / "
+                            "export Link: every MWh the site imports would count as "
+                            "delivered. Name the asset the provider operates."))
     return out

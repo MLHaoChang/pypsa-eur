@@ -102,7 +102,7 @@ def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
 
     commercial = resolve_tariff_ref(commercial, resolve_item)
     try:
-        lp_bindings.validate_for_network(n, commercial)
+        lp_bindings.validate_for_network(n, commercial, refuse_settlement_contracts=True)
     except lp_bindings.CommercialBindingError as exc:
         raise BindingRefusal(422, exc.code, str(exc)) from exc
 
