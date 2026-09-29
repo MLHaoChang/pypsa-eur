@@ -1045,8 +1045,12 @@ function ConnectionSection({ name, locked, assessAt }: {
     <div data-testid="connection-section" ref={ref}>
       <PageSection
         title="Connection-point assessment"
-        hint="Steady-state screen of a load plus on-site unit against EU RfG/DCC (Continental Europe) — not a compliance certificate"
+        hint="A load plus on-site unit, against EU RfG/DCC (Continental Europe)"
       >
+        <p className="text-[11.5px] text-muted mb-2">
+          A steady-state screen for the connection engineer, not a compliance certificate: fault
+          ride-through and dynamic support need the RMS/EMT study the handoff bundle is for.
+        </p>
         <div className="flex flex-wrap items-end gap-3 mb-2">
           <Field label="Facility bus">
             <input className={`${INPUT} w-[110px] font-mono`} value={bus} onChange={e => setBus(e.target.value)} />
@@ -1085,7 +1089,7 @@ function ConnectionSection({ name, locked, assessAt }: {
                 <label className="flex items-center gap-1">
                   Facility
                   <select
-                    aria-label="Assessment"
+                    aria-label="Assessed facility"
                     className="bg-transparent border border-border rounded px-1"
                     value={current}
                     onChange={e => { setShown(e.target.value); setHour(null) }}

@@ -191,6 +191,23 @@ def test_the_reactive_range_is_the_dcc_maximum_and_a_weak_line_cannot_deliver_it
     assert _row(_ok, "q_lag")["status"] == "pass"
 
 
+def test_a_reactive_end_that_passes_on_a_high_poc_says_the_poc_is_outside_the_band():
+    """The rule is no new or worsened violation. A POC already above the band
+    passes the absorbing end (absorbing pulls it down), and the detail must
+    say it is outside the band, not claim it is within. Found in the browser
+    run on case39 (BUS_04 at 1.061 pu read "within 0.9-1.05 pu")."""
+    net = _net(km=5.0, kv=345.0)
+    net.ext_grid.at[net.ext_grid.index[0], "vm_pu"] = 1.08       # band 0.90-1.05 at 345 kV
+    out = assess_connection(net, Facility(bus="BUS_02", load_mw=40.0), branch_contingencies(net), PROFILE)
+    lag = _row(out, "q_lag")
+    assert lag["status"] == "pass" and lag["value"] > 1.05
+    assert "within" not in lag["detail"]
+    assert "outside 0.9-1.05 pu" in lag["detail"] and "not worsened" in lag["detail"]
+    ok = assess_connection(_net(km=5.0, kv=345.0), Facility(bus="BUS_02", load_mw=40.0),
+                           branch_contingencies(_net(km=5.0, kv=345.0)), PROFILE)
+    assert "within 0.9-1.05 pu" in _row(ok, "q_lag")["detail"]
+
+
 def test_the_connection_check_uses_the_no_new_no_worse_rule():
     net = _net(parallel=True)
     ok = assess_connection(net, Facility(bus="BUS_02", load_mw=50.0), branch_contingencies(net), PROFILE)

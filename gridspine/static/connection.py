@@ -233,8 +233,14 @@ def assess_connection(net, fac: Facility, contingencies, profile: dict, criteria
                              q_frac["clause"], q_frac["source"]))
             continue
         breaches = _compare(reference, state, crit, "intact", None, ids, names)
-        detail = what + ("; " + "; ".join(_words(b) for b in breaches) if breaches
-                         else f"; POC at {state[1][poc]:.3f} pu, within {poc_band['v_min']:g}-{poc_band['v_max']:g} pu")
+        vm, band = float(state[1][poc]), f"{poc_band['v_min']:g}-{poc_band['v_max']:g} pu"
+        if breaches:
+            detail = what + "; " + "; ".join(_words(b) for b in breaches)
+        elif poc_band["v_min"] <= vm <= poc_band["v_max"]:
+            detail = f"{what}; POC at {vm:.3f} pu, within {band}"
+        else:
+            # passes under no-new-no-worse: already outside, and this end did not worsen it
+            detail = f"{what}; POC at {vm:.3f} pu, outside {band} already, not worsened"
         rows.append(_row(check, "fail" if breaches else "pass", float(state[1][poc]), "pu", limit,
                          detail, q_frac["clause"], q_frac["source"]))
 
