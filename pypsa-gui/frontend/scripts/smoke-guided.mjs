@@ -2032,13 +2032,11 @@ async function phaseP27a(browser) {
       // ONE toast (no double toast: `study_in_flight` is already in the
       // client's QUIET_TOAST_CODES on master, so the interceptor stays quiet
       // and the Properties card's own onError is the one toast). Spec §1.5
-      // wants its text to contain "is running"; today that card toasts
-      // `e.message` (axios' "Request failed with status code 409"), not
-      // `detail.message` — a frontend change, recorded for P27b (A1-FE).
+      // wants its text to contain "is running": since P27b (A1-FE) the card
+      // toasts `detail.message` through `blockerMessage`.
       check(shown.length === 1, `exactly one toast for the refused save: "${shown[0]}"`)
-      if (!shown[0].includes('is running')) {
-        info('DEVIATION (FE, P27b): the toast does not carry the backend sentence "… is running …"')
-      }
+      // P27b (A1-FE): the card's toast carries the backend's sentence.
+      check(shown[0].includes('is running'), 'the toast carries the backend sentence ("… is running …")')
       const row = (await api('GET', '/api/network/buses')).find(b => b.name === bus.name)
       // Mid-sweep the solve's topology pass shows its own `control` (P22.9
       // bug 3; put back when the sweep ends) — so "unchanged" here means the
