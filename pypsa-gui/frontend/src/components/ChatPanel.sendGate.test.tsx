@@ -182,3 +182,49 @@ describe('Send gate follows the session profile (gate B1)', () => {
     expect(screen.getByTestId('chat-send-gate')).toBeTruthy()
   })
 })
+
+// A2 (deferred spec 2026-09-28 §2.1, "Writes that bypass axios" (a)): the
+// chat stream is a raw fetch and the assistant's tools write into the
+// BACKEND's project — so while this tab shows another one, Send is gated and
+// the existing gate element shows the banner's sentence; card requests are
+// dropped (they must not fire into whichever project a later Switch lands on).
+describe('Send gate while the tab and the backend disagree (A2)', () => {
+  const SENTENCE = 'This tab shows Demo, but the app is now on Other. Changes from this tab are paused.'
+  beforeEach(() => {
+    vi.mocked(getChatHealth).mockResolvedValue(health(true))
+    useUIStore.setState({ projectMismatch: { tab: 'Demo', backend: 'Other' } })
+  })
+  afterEach(() => { useUIStore.setState({ projectMismatch: null }) })
+
+  it('mismatch → Send disabled, chat-send-gate shows the banner sentence, Enter does not send', async () => {
+    renderPanel()
+    await waitFor(() => expect(getChatHealth).toHaveBeenCalled())
+    const user = await typeHello()
+    const send = screen.getByTestId('chat-send') as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+    expect(send.title).toBe(SENTENCE)
+    expect(screen.getByTestId('chat-send-gate').textContent).toBe(SENTENCE)
+    await user.keyboard('{Enter}')
+    expect(createChatStream).not.toHaveBeenCalled()
+  })
+
+  it('a card request is dropped while mismatched, not sent', async () => {
+    renderPanel()
+    await waitFor(() => expect(getChatHealth).toHaveBeenCalled())
+    act(() => { useChatStore.setState({ lastRequest: null }); useChatStore.getState().sendRequest('Do it') })
+    await new Promise(r => setTimeout(r, 50))
+    expect(createChatStream).not.toHaveBeenCalled()
+    expect(useChatStore.getState().requestQueue).toHaveLength(0)
+  })
+
+  it('cleared → Send enabled again', async () => {
+    renderPanel()
+    await waitFor(() => expect(getChatHealth).toHaveBeenCalled())
+    await typeHello()
+    const send = screen.getByTestId('chat-send') as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+    act(() => { useUIStore.setState({ projectMismatch: null }) })
+    await waitFor(() => expect(send.disabled).toBe(false))
+    expect(screen.queryByTestId('chat-send-gate')).toBeNull()
+  })
+})

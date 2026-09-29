@@ -6,6 +6,7 @@ import { effectiveLockState, type LockState, type ReadOnlyReason } from '../util
 // Results.tsx enforcing the same number independently is how they can drift.
 import { RAIL_MIN_W } from '../pages/results/railWidth'
 import { appLog } from './simulationStore'
+import type { ProjectMismatch } from '../utils/projectMismatch'
 
 interface SelectedComponent { type: string; name: string }
 // CreationRequest is set when the user wants to add a new asset to the network.
@@ -406,6 +407,13 @@ interface UIStore {
   // newly-loaded network under the OLD project's name (silent cross-project
   // overwrite). In-memory only; defaults false.
   projectSwitchInProgress: boolean
+  // A2 (deferred spec §2.1): the tab's `currentProject` and the backend's
+  // binding (`/network/meta.loaded_project`) disagree — after a backend
+  // restart another tab's project was resumed, or an external client swapped
+  // it. While set, the axios interceptor refuses the tab's writes, autosave
+  // is suspended, chat Send is gated and ProjectMismatchBanner offers Reload
+  // or Switch. In-memory only; cleared by an agreeing sample or a switch.
+  projectMismatch: ProjectMismatch | null
   // Docked comparison rail (lives inside the Results view). Independent of
   // activeSlidePanel so the A-vs-B CompareView can coexist with the live
   // Results tabs and persist across result-tab switches until explicitly
@@ -518,6 +526,7 @@ interface UIStore {
   constrainDockWidth: (desired: number, available: number) => number
   readStoredDockOpen: () => boolean
   setProjectSwitchInProgress: (v: boolean) => void
+  setProjectMismatch: (v: ProjectMismatch | null) => void
   setCompareRailOpen: (v: boolean) => void
   toggleCompareRail: () => void
   setCompareRailWidth: (px: number) => void
@@ -587,6 +596,7 @@ export const useUIStore = create<UIStore>((set) => ({
   assistantDockWidth: storedAssistantDockWidth(),
   assistantSpeakEnabled: storedAssistantSpeak(),
   projectSwitchInProgress: false,
+  projectMismatch: null,
   compareRailOpen: storedCompareRailOpen(),
   compareRailWidth: storedCompareRailWidth(),
   bottomTabRequest: null,
@@ -734,6 +744,7 @@ export const useUIStore = create<UIStore>((set) => ({
     return { assistantDockOpen: next }
   }),
   setProjectSwitchInProgress: (v) => set({ projectSwitchInProgress: v }),
+  setProjectMismatch: (v) => set({ projectMismatch: v }),
   setCompareRailOpen: (v) => {
     try { localStorage.setItem(COMPARE_RAIL_KEY, v ? 'true' : 'false') } catch { /* noop */ }
     set({ compareRailOpen: v })

@@ -33,6 +33,8 @@ import RescaleDialogHost from './components/RescaleDialogHost'
 import { GuidedTourHost } from './components/GuidedTour'
 import CrashRecoveryBanner from './components/CrashRecoveryBanner'
 import LockBanner from './components/LockBanner'
+import ProjectMismatchBanner from './components/ProjectMismatchBanner'
+import { useProjectMismatchDetection } from './hooks/useProjectMismatchDetection'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import AssistantDock from './components/AssistantDock'
 import { useUIStore, type SlidePanel } from './store/uiStore'
@@ -227,12 +229,20 @@ export default function App() {
   // no longer exist on disk (after a delete from another tab), (2) seed
   // lastSavedByProject from metadata.created_at when the in-memory map has no
   // entry for a known project (typical on a fresh browser session).
-  const { data: backendProjects } = useQuery({
+  const { data: backendProjects, isPending: projectsPending } = useQuery({
     queryKey: ['projects'],
     queryFn: projectsApi.list,
     staleTime: 10_000,
     refetchInterval: 30_000,
   })
+
+  // A2 (deferred spec §2.1): the tab / backend project-mismatch check. A study
+  // (planning → dynamics) has no network, so the backend's binding is some
+  // other project by design — never a mismatch; while the project list is
+  // still loading we cannot tell, so the check waits for it.
+  const tabIsStudy = projectsPending || (!!currentProject && !!backendProjects
+    && recoveryFor(backendProjects, currentProject) === 'study')
+  useProjectMismatchDetection(tabIsStudy)
 
   useEffect(() => {
     if (!backendProjects) return
@@ -456,6 +466,10 @@ export default function App() {
       try {
         const meta = await networkApi.getMeta()
         if (cancelled) return
+        // The backend is bound to ANOTHER project: that is the A2 mismatch
+        // (ProjectMismatchBanner offers Reload / Switch), not an empty
+        // network to re-load silently over someone else's binding.
+        if (meta?.loaded_project != null && meta.loaded_project !== currentProject) return
         // Heuristic: empty in-memory network. The bus_count check is the
         // strong signal — a freshly-reset PyPSA instance has zero buses.
         if ((meta?.bus_count ?? 0) > 0) return
@@ -603,6 +617,11 @@ export default function App() {
         {/* Renders only when another user holds this project's edit lock
             (auth mode). Hidden otherwise so it takes no vertical space. */}
         <LockBanner />
+
+        {/* ── Tab / backend project mismatch (A2) ───────────────────── */}
+        {/* Renders only while this tab's project and the backend's binding
+            disagree; the tab's writes are paused until Reload or Switch. */}
+        <ProjectMismatchBanner />
 
         {/* ── App header ─────────────────────────────────────────────── */}
         <AppHeader />

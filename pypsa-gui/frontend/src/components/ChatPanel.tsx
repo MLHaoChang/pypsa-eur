@@ -39,6 +39,7 @@ import {
 } from '../api/chat'
 import { useChatProfiles, CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
 import { nk } from '../utils/queryKeys'
+import { mismatchSentence } from '../utils/projectMismatch'
 import { invalidateAssetQueries, isMutatingTier } from '../utils/assetWrite'
 import {
   deleteUpload,
@@ -1510,6 +1511,12 @@ export default function ChatPanel() {
   })
   const notReady = chatHealth?.chat_ready === false
     && (profileId == null || profileId === chatHealth.active_profile?.id)
+  // A2 (deferred spec §2.1): while this tab and the backend disagree about the
+  // open project, the assistant's tools would write into the BACKEND's project
+  // (the stream is a raw fetch — the axios mismatch block never sees it). Send
+  // is gated with the banner's sentence until Reload or Switch.
+  const projectMismatch = useUIStore((s) => s.projectMismatch)
+  const mismatchLine = projectMismatch ? mismatchSentence(projectMismatch) : null
 
   const currentProject = useUIStore((s) => s.currentProject)
   // Read only for the autoscroll effect below — see the dependency-array
@@ -2472,7 +2479,7 @@ export default function ChatPanel() {
 
   const onSend = useCallback(() => {
     const text = input.trim()
-    if (!text || streaming || notReady) return
+    if (!text || streaming || notReady || mismatchLine) return
     const attachIds = useChatStore.getState().attachedFileIds.slice()
     // First-send confirmation modal (default-ON friction killer).
     const firstAck = readPref('chat:firstSendAck') === '1'
@@ -2482,7 +2489,7 @@ export default function ChatPanel() {
       return
     }
     dispatchSend(text, attachIds)
-  }, [input, streaming, notReady, dispatchSend])
+  }, [input, streaming, notReady, mismatchLine, dispatchSend])
 
   const confirmSendWithAttachments = useCallback(() => {
     if (pendingSendText == null) return
@@ -2523,6 +2530,14 @@ export default function ChatPanel() {
   // once a key is added — and the key form below says what to do.
   useEffect(() => {
     if (requestCount === 0) return
+    // A2: a card request made while the tab is mismatched is dropped, like
+    // the no-key case below — it must not fire into whichever project a later
+    // Reload / Switch lands on.
+    if (mismatchLine) {
+      useChatStore.setState({ requestQueue: [] })
+      toast(`${mismatchLine} Nothing was sent to the assistant.`)
+      return
+    }
     if (notReady) {
       useChatStore.setState({ requestQueue: [] })
       toast('Add an API key for the assistant first — nothing was sent.')
@@ -2532,7 +2547,7 @@ export default function ChatPanel() {
     const req = useChatStore.getState().takeNextRequest()
     if (!req) return
     dispatchSend(req.text, [], { fromCard: true, label: req.label })
-  }, [requestCount, streaming, pendingCard, pendingSendText, notReady, dispatchSend])
+  }, [requestCount, streaming, pendingCard, pendingSendText, notReady, mismatchLine, dispatchSend])
 
   const onAbort = useCallback(async () => {
     // Stopping a turn has to stop the VOICE as well. A synthesiser that keeps
@@ -3190,7 +3205,10 @@ export default function ChatPanel() {
       />
       {/* The key form, inline, while Send is gated — unless the error
           banner above already shows it for a missing_api_key turn. */}
-      {notReady && chatError?.error_kind !== 'missing_api_key' && (
+      {mismatchLine ? (
+        <div className="px-3 py-2 border-t border-border bg-bg-2 shrink-0 text-[12px] text-muted"
+             data-testid="chat-send-gate">{mismatchLine}</div>
+      ) : notReady && chatError?.error_kind !== 'missing_api_key' && (
         <div className="px-3 py-2 border-t border-border bg-bg-2 shrink-0 text-[12px] text-muted"
              data-testid="chat-send-gate">
           The assistant needs an API key for the active model before it can answer.
@@ -3324,10 +3342,12 @@ export default function ChatPanel() {
           <button
             className="self-end px-3 py-1.5 text-xs rounded bg-accent text-bg disabled:opacity-50 max-w-[260px]"
             onClick={onSend}
-            disabled={streaming || !input.trim() || notReady}
+            disabled={streaming || !input.trim() || notReady || !!mismatchLine}
             data-testid="chat-send"
             title={
-              notReady
+              mismatchLine
+                ? mismatchLine
+                : notReady
                 ? 'Add an API key first (Settings → Assistant)'
                 : attachedFileIds.length > 0
                 ? `Sending with ${attachedFileIds.length} file(s): ` +
