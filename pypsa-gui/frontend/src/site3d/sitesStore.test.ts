@@ -111,13 +111,40 @@ describe('writes', () => {
     expect(putSites).not.toHaveBeenCalled()
   })
 
-  it('after a Save-As the flush to the new name carries the previous project\'s pending document', async () => {
+  it('after a Save-a-Copy the new name gets a copy and the original still receives its own write', async () => {
     useSitesStore.getState().setPlacement('p', 'site_a', 'Generator:G1', { x: 7, y: 7, heading: 0 })
     const r = await flushPendingSitesToServer('p-copy', { previousProject: 'p' })
     expect(r.status).toBe('server')
     expect(putSites.mock.calls[0][0]).toBe('p-copy')
     expect(putSites.mock.calls[0][1].sites[0].placements['Generator:G1'].x).toBe(7)
     expect(useSitesStore.getState().docFor('p-copy').sites[0].placements['Generator:G1'].x).toBe(7)
+    await vi.advanceTimersByTimeAsync(SITES_SAVE_DEBOUNCE_MS + 1)
+    expect(putSites.mock.calls.map(c => c[0]).sort()).toEqual(['p', 'p-copy'])
+  })
+
+  it('a scratch network\'s document MOVES to the first-saved project and its local slot is cleared', async () => {
+    useSitesStore.getState().resetForTests()
+    getSites.mockResolvedValue(doc())
+    useSitesStore.getState().upsertSite(null, site())
+    await vi.advanceTimersByTimeAsync(SITES_SAVE_DEBOUNCE_MS + 1)
+    expect(localStorage.getItem(localSitesKey(null))).not.toBeNull()
+    const r = await flushPendingSitesToServer('fresh', { previousProject: null })
+    expect(r.status).toBe('server')
+    expect(putSites.mock.calls[0][0]).toBe('fresh')
+    expect(localStorage.getItem(localSitesKey(null))).toBeNull()
+    await useSitesStore.getState().ensureLoaded(null)
+    expect(useSitesStore.getState().docFor(null).sites).toEqual([])
+  })
+
+  it('a write that lands while the initial GET is in flight is not clobbered by it', async () => {
+    useSitesStore.getState().resetForTests()
+    let resolveGet: (d: SitesDocument) => void = () => {}
+    getSites.mockReturnValue(new Promise<SitesDocument>(res => { resolveGet = res }))
+    const loading = useSitesStore.getState().ensureLoaded('p')
+    useSitesStore.getState().upsertSite('p', site({ id: 'site_new', name: 'Typed first' }))
+    resolveGet(doc())
+    await loading
+    expect(useSitesStore.getState().docFor('p').sites.map(x => x.id)).toEqual(['site_new'])
   })
 
   it('a failed PUT writes localStorage and a later success clears it', async () => {

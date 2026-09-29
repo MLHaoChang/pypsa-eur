@@ -3422,7 +3422,12 @@ def put_sites(
         site_service.write_sites(dest, sites)
     except site_service.SitesTooLarge as exc:
         raise HTTPException(413, str(exc)) from exc
-    site_service.prune_site_dirs(dest, sites, rmtree=_force_rmtree)
+    # The document is on disk; a problem listing or removing orphan context
+    # caches must not turn that success into a 500.
+    try:
+        site_service.prune_site_dirs(dest, sites, rmtree=_force_rmtree)
+    except OSError:
+        logger.warning("sites: orphan context prune failed for %s", name, exc_info=True)
     return {"saved": name, "sites": len(sites["sites"])}
 
 

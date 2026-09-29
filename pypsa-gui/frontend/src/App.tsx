@@ -14,8 +14,8 @@ import MapCanvas from './pages/MapCanvas'
 // The 3D site view is the only lazily-loaded canvas: three.js and its React
 // bindings are ~300 kB gzipped that a user who never opens it should never
 // download. Vite splits the dynamic import into its own chunk on its own.
-const SiteCanvas = React.lazy(() => import('./pages/SiteCanvas'))
 import { useSitesLifecycle } from './site3d/sitesStore'
+const SiteCanvas = React.lazy(() => import('./pages/SiteCanvas'))
 import TimeSeriesManager from './pages/TimeSeriesManager'
 import SolverSettings from './pages/SolverSettings'
 import ModelHorizon from './pages/ModelHorizon'

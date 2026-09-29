@@ -73,7 +73,13 @@ def read_sites(project_dir: pathlib.Path) -> dict:
     path = project_dir / SITES_FILE
     if not path.exists():
         return empty_document()
-    raw = path.read_text(encoding="utf-8")  # PermissionError propagates
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except PermissionError:
+        raise
+    except (OSError, UnicodeDecodeError):
+        # A directory named sites.json, an I/O error: unusable, not denied.
+        return empty_document()
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, UnicodeDecodeError):

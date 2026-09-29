@@ -793,18 +793,19 @@ function ProjectSectionContent({
         } else if (r.status === 'local') {
           appLog('WARN', `Layout server write failed — kept ${r.nodes} node(s) + ${r.edges} edge(s) in localStorage`)
         }
-        // The 3D site sidecar flushes beside the layout, same reasons, same
-        // debounce: a Save-As re-homes the pending document to the new name.
-        try {
-          const { flushPendingSitesToServer } = await import('../site3d/sitesStore')
-          const sr = await flushPendingSitesToServer(result.saved, { previousProject: currentProject })
-          if (sr.status === 'local') appLog('WARN', 'Sites server write failed — kept the site document in localStorage')
-        } catch (e) {
-          appLog('WARN', `Sites flush failed: ${e instanceof Error ? e.message : String(e)}`)
-        }
+
       } catch (e) {
         layoutFlushResult = 'error'
         appLog('WARN', `Layout flush failed for '${result.saved}': ${String((e as Error)?.message ?? e)}`)
+      }
+      // The 3D site sidecar flushes beside the layout, same reasons, same
+      // debounce: a Save-As re-homes the pending document to the new name.
+      try {
+        const { flushPendingSitesToServer } = await import('../site3d/sitesStore')
+        const sr = await flushPendingSitesToServer(result.saved, { previousProject: cur })
+        if (sr.status === 'local') appLog('WARN', 'Sites server write failed — kept the site document in localStorage')
+      } catch (e) {
+        appLog('WARN', `Sites flush failed: ${e instanceof Error ? e.message : String(e)}`)
       }
       if (setAsCurrent) setCurrentProject(name)
       markProjectSaved(name)

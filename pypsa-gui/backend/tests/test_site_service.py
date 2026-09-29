@@ -54,9 +54,15 @@ def test_empty_document_when_missing(tmp_path):
     assert ss.read_sites(tmp_path) == {"version": 1, "sites": []}
 
 
-@pytest.mark.parametrize("raw", ["{not json", "[1, 2]", "42", ""])
+@pytest.mark.parametrize("raw", ["{not json", "[1, 2]", "42", "", '{"version": 1}'])
 def test_corrupt_file_degrades_to_empty(tmp_path, raw):
     (tmp_path / ss.SITES_FILE).write_text(raw)
+    assert ss.read_sites(tmp_path) == {"version": 1, "sites": []}
+
+
+def test_unreadable_but_not_denied_degrades_to_empty(tmp_path):
+    """A directory named sites.json is unusable, not denied — same as /layout."""
+    (tmp_path / ss.SITES_FILE).mkdir()
     assert ss.read_sites(tmp_path) == {"version": 1, "sites": []}
 
 
@@ -84,19 +90,30 @@ def test_validate_accepts_spec_example():
     "mutate, needle",
     [
         (lambda d: d.__setitem__("version", 2), "version"),
+        (lambda d: d.pop("version"), "version"),
+        (lambda d: d.__setitem__("sites", {}), "sites must be a list"),
+        (lambda d: d["sites"].__setitem__(0, "not an object"), "sites[0]: must be an object"),
         (lambda d: d["sites"].append(copy.deepcopy(d["sites"][0])), "duplicate"),
-        (lambda d: d["sites"][0].__setitem__("id", ""), "id"),
-        (lambda d: d["sites"][0].__setitem__("id", ".."), "id"),
-        (lambda d: d["sites"][0].__setitem__("id", "a/b"), "id"),
-        (lambda d: d["sites"][0].__setitem__("id", "x" * 65), "id"),
-        (lambda d: d["sites"][0].__setitem__("id", "sïte"), "id"),
-        (lambda d: d["sites"][0].__setitem__("buses", ["ok", 3]), "buses"),
-        (lambda d: d["sites"][0].__setitem__("boundary", [[6.8, 53.4], [6.9, 53.4]]), "boundary"),
-        (lambda d: d["sites"][0].__setitem__("boundary", [[6.8, 53.4], [6.9, 53.4], [200.0, 53.4]]), "boundary"),
-        (lambda d: d["sites"][0]["placements"]["Generator:Gas gensets"].__setitem__("x", float("nan")), "placements"),
-        (lambda d: d["sites"][0]["placements"].__setitem__("no-colon", {"x": 0, "y": 0, "heading": 0}), "placements"),
-        (lambda d: d["sites"][0]["placements"].__setitem__("Carrier:gas", {"x": 0, "y": 0, "heading": 0}), "placements"),
-        (lambda d: d["sites"][0].__setitem__("origin", {"lng": 6.8}), "origin"),
+        (lambda d: d["sites"][0].__setitem__("id", ""), "sites[0].id"),
+        (lambda d: d["sites"][0].__setitem__("id", ".."), "sites[0].id"),
+        (lambda d: d["sites"][0].__setitem__("id", "a/b"), "sites[0].id"),
+        (lambda d: d["sites"][0].__setitem__("id", "x" * 65), "sites[0].id"),
+        (lambda d: d["sites"][0].__setitem__("id", "sïte"), "sites[0].id"),
+        (lambda d: d["sites"][0].__setitem__("name", 7), ".name"),
+        (lambda d: d["sites"][0].__setitem__("buses", ["ok", 3]), ".buses"),
+        (lambda d: d["sites"][0].__setitem__("boundary", [[6.8, 53.4], [6.9, 53.4]]), ".boundary"),
+        (lambda d: d["sites"][0].__setitem__("boundary", [[6.8, 53.4], [6.9, 53.4], [200.0, 53.4]]), ".boundary"),
+        (lambda d: d["sites"][0].__setitem__("boundary", [[6.8, 53.4], [6.9, 53.4], [6.9]]), ".boundary"),
+        (lambda d: d["sites"][0].__setitem__("origin", {"lng": 6.8}), ".origin"),
+        (lambda d: d["sites"][0].__setitem__("origin", {"lng": "6.8", "lat": 53.4}), ".origin"),
+        (lambda d: d["sites"][0].__setitem__("origin", {"lng": True, "lat": 53.4}), ".origin"),
+        (lambda d: d["sites"][0].__setitem__("placements", []), ".placements"),
+        (lambda d: d["sites"][0]["placements"]["Generator:Gas gensets"].__setitem__("x", float("nan")), ".placements"),
+        (lambda d: d["sites"][0]["placements"]["Generator:Gas gensets"].__setitem__("x", "12"), ".placements"),
+        (lambda d: d["sites"][0]["placements"]["Generator:Gas gensets"].__setitem__("heading", float("inf")), ".placements"),
+        (lambda d: d["sites"][0]["placements"].__setitem__("no-colon", {"x": 0, "y": 0, "heading": 0}), ".placements"),
+        (lambda d: d["sites"][0]["placements"].__setitem__("Generator:", {"x": 0, "y": 0, "heading": 0}), ".placements"),
+        (lambda d: d["sites"][0]["placements"].__setitem__("Carrier:gas", {"x": 0, "y": 0, "heading": 0}), ".placements"),
     ],
 )
 def test_validate_rejects(mutate, needle):
@@ -174,7 +191,7 @@ def test_site_dir_is_contained(tmp_path):
     assert d.resolve().is_relative_to(tmp_path.resolve())
 
 
-def test_prune_site_dirs_removes_only_orphans(tmp_path):
+def test_prune_site_dirs_removes_only_orphans(tmp_path, caplog):
     for name in ("a", "b", "..weird"):
         (tmp_path / ss.SITES_DIR / name).mkdir(parents=True)
         (tmp_path / ss.SITES_DIR / name / "context.json").write_text("{}")
@@ -190,8 +207,9 @@ def test_prune_site_dirs_removes_only_orphans(tmp_path):
     ss.prune_site_dirs(tmp_path, doc, rmtree=rm)
     assert removed == [tmp_path / ss.SITES_DIR / "b"]
     assert (tmp_path / ss.SITES_DIR / "a").exists()
-    # A name that fails the id rule is not ours to delete — left alone.
+    # A name that fails the id rule is not ours to delete — left alone, logged.
     assert (tmp_path / ss.SITES_DIR / "..weird").exists()
+    assert any("..weird" in r.getMessage() for r in caplog.records), caplog.text
 
 
 def test_prune_site_dirs_without_sites_dir_is_a_noop(tmp_path):

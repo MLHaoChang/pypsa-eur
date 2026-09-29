@@ -71,7 +71,7 @@ def test_put_invalid_422_names_the_field(client, api_project):
     name = api_project("bad")
     r = client.put(f"/api/projects/{name}/sites", json=_with_site_id(DOC, "../x"))
     assert r.status_code == 422, r.text
-    assert "id" in r.text
+    assert r.json()["detail"].startswith("sites[0].id")
     # Nothing was written.
     assert client.get(f"/api/projects/{name}/sites").json() == {"version": 1, "sites": []}
 
@@ -83,14 +83,38 @@ def test_put_over_limit_413(client, api_project):
     assert client.put(f"/api/projects/{name}/sites", json=d).status_code == 413
 
 
-def test_put_removes_orphan_site_dirs(client, api_project, project_storage_dir):
+def test_put_removes_orphan_site_dirs(client, api_project, project_storage_dir, monkeypatch):
+    """Through `_force_rmtree` (the symlink-refusing remover), not a bare rmtree."""
+    import routers.projects as projects_router
+
     name = api_project("orphans")
     pdir = project_storage_dir(name)
     _seed_context(pdir, "site_a")
     _seed_context(pdir, "zzz")
+    removed = []
+    real = projects_router._force_rmtree
+
+    def recording(target):
+        removed.append(target)
+        real(target)
+
+    monkeypatch.setattr(projects_router, "_force_rmtree", recording)
     assert client.put(f"/api/projects/{name}/sites", json=DOC).status_code == 200
     assert (pdir / ss.SITES_DIR / "site_a").exists()
     assert not (pdir / ss.SITES_DIR / "zzz").exists()
+    assert removed == [pdir / ss.SITES_DIR / "zzz"]
+
+
+def test_put_succeeds_when_orphan_prune_fails(client, api_project, monkeypatch):
+    """The document is on disk; a prune problem is logged, not a 500."""
+    name = api_project("prunefail")
+
+    def boom(*a, **k):
+        raise OSError("cannot list")
+
+    monkeypatch.setattr(ss, "prune_site_dirs", boom)
+    assert client.put(f"/api/projects/{name}/sites", json=DOC).status_code == 200
+    assert client.get(f"/api/projects/{name}/sites").json() == DOC
 
 
 def test_get_permission_denied_is_access_error(client, api_project, monkeypatch):
@@ -101,9 +125,9 @@ def test_get_permission_denied_is_access_error(client, api_project, monkeypatch)
 
     monkeypatch.setattr(ss, "read_sites", deny)
     r = client.get(f"/api/projects/{name}/sites")
-    assert r.status_code != 200
-    assert r.json() != {"version": 1, "sites": []}
-    assert "permission" in r.text.lower() or "access" in r.text.lower()
+    # The `_access_denied` shape: 503 with an actionable message naming the file.
+    assert r.status_code == 503, r.text
+    assert "denied" in r.json()["detail"] and ss.SITES_FILE in r.json()["detail"]
 
 
 def test_other_org_cannot_read_or_write(client, other_org_client, api_project):
@@ -216,15 +240,36 @@ def _doc_with(key):
     return d
 
 
-@pytest.mark.parametrize("collection, cls, old", [
-    ("generators", "Generator", "gas"),
-    ("loads", "Load", "L1"),
+def _add_second_bus_and_components(client):
+    """Every placeable class on the fixture network (B1, gas, solar, L1)."""
+    assert client.post("/api/network/buses", json={"name": "B2", "v_nom": 110.0}).status_code in (200, 201)
+    made = [
+        ("storage_units", {"name": "su1", "bus": "B1", "p_nom": 1.0, "max_hours": 2.0}),
+        ("stores", {"name": "st1", "bus": "B1", "e_nom": 1.0}),
+        ("lines", {"name": "ln1", "bus0": "B1", "bus1": "B2", "s_nom": 10.0, "r": 0.01, "x": 0.1}),
+        ("links", {"name": "lk1", "bus0": "B1", "bus1": "B2", "p_nom": 10.0}),
+        ("transformers", {"name": "tr1", "bus0": "B1", "bus1": "B2", "s_nom": 10.0, "r": 0.001, "x": 0.1}),
+    ]
+    for collection, body in made:
+        r = client.post(f"/api/network/{collection}", json=body)
+        assert r.status_code in (200, 201), (collection, r.text)
+
+
+@pytest.mark.parametrize("collection, cls, old, body", [
+    ("generators", "Generator", "gas", {"bus": "B1"}),
+    ("loads", "Load", "L1", {"bus": "B1"}),
+    ("storage_units", "StorageUnit", "su1", {"bus": "B1"}),
+    ("stores", "Store", "st1", {"bus": "B1"}),
+    ("lines", "Line", "ln1", {"bus0": "B1", "bus1": "B2"}),
+    ("links", "Link", "lk1", {"bus0": "B1", "bus1": "B2"}),
+    ("transformers", "Transformer", "tr1", {"bus0": "B1", "bus1": "B2"}),
 ])
-def test_rename_via_put_renames_placement(client, api_project, collection, cls, old):
+def test_rename_via_put_renames_placement(client, api_project, collection, cls, old, body):
     name = api_project("ren")
+    _add_second_bus_and_components(client)
     assert client.put(f"/api/projects/{name}/sites", json=_doc_with(f"{cls}:{old}")).status_code == 200
-    # `bus` is a required body field on the component PUT schemas; the rest merges.
-    r = client.put(f"/api/network/{collection}/{old}", json={"name": f"{old}_renamed", "bus": "B1"})
+    # The terminal field(s) are required on the component PUT schemas; the rest merges.
+    r = client.put(f"/api/network/{collection}/{old}", json={"name": f"{old}_renamed", **body})
     assert r.status_code == 200, r.text
     placements = client.get(f"/api/projects/{name}/sites").json()["sites"][0]["placements"]
     assert placements == {f"{cls}:{old}_renamed": {"x": 1.0, "y": 2.0, "heading": 3}}
@@ -239,13 +284,18 @@ def test_rename_bus_route_renames_placement(client, api_project):
     assert "Bus:B1x" in placements and "Bus:B1" not in placements
 
 
-def test_rename_hook_noops_without_storage_dir(client, install_network):
+def test_rename_hook_noops_without_storage_dir(client, install_network, monkeypatch):
     """A scratch network bound to no project: the rename works, nothing is written."""
     from tests.conftest import build_network
 
     install_network(build_network())
+    seen = []
+    real = ss.rename_component_on_disk
+    monkeypatch.setattr(ss, "rename_component_on_disk", lambda d, *a: (seen.append(d), real(d, *a)))
+    monkeypatch.setattr(ss, "write_sites", lambda *a, **k: pytest.fail("nothing may be written for a scratch network"))
     r = client.put("/api/network/generators/gas", json={"name": "gas_scratch", "bus": "B1"})
     assert r.status_code == 200, r.text
+    assert seen == [None]
 
 
 def test_rename_hook_failure_never_fails_the_rename(client, api_project, monkeypatch):

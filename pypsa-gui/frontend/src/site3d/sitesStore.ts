@@ -93,6 +93,9 @@ interface SitesState {
 }
 
 const keyOf = (project: string | null): string => project ?? '__local__'
+// One frozen instance: `docFor` is used as a selector, and a fresh object per
+// call would re-render every subscriber on every store change.
+const EMPTY_DOC: SitesDocument = Object.freeze({ version: 1, sites: Object.freeze([]) as unknown as Site[] }) as SitesDocument
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
 
 function canWrite(): boolean {
@@ -117,7 +120,7 @@ export const useSitesStore = create<SitesState>((set, get) => {
     docs: {},
     loaded: {},
     dirty: {},
-    docFor: project => get().docs[keyOf(project)] ?? emptySitesDocument(),
+    docFor: project => get().docs[keyOf(project)] ?? EMPTY_DOC,
     siteById: (project, siteId) => get().docFor(project).sites.find(s => s.id === siteId) ?? null,
     ensureLoaded: async project => {
       const k = keyOf(project)
@@ -135,7 +138,11 @@ export const useSitesStore = create<SitesState>((set, get) => {
           doc = readLocal(project) ?? emptySitesDocument()
         }
       }
-      set(s => ({ docs: { ...s.docs, [k]: doc }, loaded: { ...s.loaded, [k]: true } }))
+      set(s => ({
+        // A write that landed while the GET was in flight wins over the fetch.
+        docs: s.dirty[k] ? s.docs : { ...s.docs, [k]: doc },
+        loaded: { ...s.loaded, [k]: true },
+      }))
     },
     upsertSite: (project, site) => {
       assertSiteValid(site)
@@ -232,18 +239,27 @@ export async function flushPendingSitesToServer(
   const store = useSitesStore.getState()
   const k = keyOf(project)
   let dirtyKey: string | null = store.dirty[k] ? k : null
+  let movedFromScratch = false
   if (!dirtyKey && opts.previousProject !== undefined) {
     const pk = keyOf(opts.previousProject)
     if (store.dirty[pk]) {
-      // Re-home: the new project owns the edited document from now on.
+      // Re-home: the new project owns a COPY of the edited document. The
+      // previous project's own pending write is left armed — a Save-a-Copy
+      // keeps the user on the original, and its edits must still reach it.
+      // Only a scratch network (no project) is a MOVE: it has nowhere else
+      // to go, and its localStorage slot must not resurrect on the next
+      // scratch network.
       const doc = store.docFor(opts.previousProject)
+      movedFromScratch = opts.previousProject === null
       useSitesStore.setState(s => {
-        const dirty = { ...s.dirty }
-        delete dirty[pk]
-        return { docs: { ...s.docs, [k]: doc }, loaded: { ...s.loaded, [k]: true }, dirty: { ...dirty, [k]: true } }
+        const dirty = { ...s.dirty, [k]: true as const }
+        if (movedFromScratch) delete dirty[pk]
+        return { docs: { ...s.docs, [k]: doc }, loaded: { ...s.loaded, [k]: true }, dirty }
       })
-      const t = timers.get(pk)
-      if (t) { clearTimeout(t); timers.delete(pk) }
+      if (movedFromScratch) {
+        const t = timers.get(pk)
+        if (t) { clearTimeout(t); timers.delete(pk) }
+      }
       dirtyKey = k
     }
   }
@@ -251,6 +267,7 @@ export async function flushPendingSitesToServer(
   const t = timers.get(dirtyKey)
   if (t) { clearTimeout(t); timers.delete(dirtyKey) }
   const status = await persist(project)
+  if (status === 'server' && movedFromScratch) clearLocal(null)
   return { status, sites: useSitesStore.getState().docFor(project).sites.length }
 }
 
