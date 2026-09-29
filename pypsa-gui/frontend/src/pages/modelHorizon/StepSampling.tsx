@@ -11,6 +11,8 @@
 
 export interface StepSamplingProps {
   canSampleWeeks: boolean
+  /** `not_supported_for_freq` on a sub-hourly axis (WP1.0); other text otherwise. */
+  sampleWeeksReason?: string | null
   sampleNWeeks: string
   onSampleNWeeksChange: (value: string) => void
   sampleSeed: string
@@ -21,7 +23,7 @@ export interface StepSamplingProps {
 }
 
 export function StepSampling({
-  canSampleWeeks, sampleNWeeks, onSampleNWeeksChange, sampleSeed, onSampleSeedChange,
+  canSampleWeeks, sampleWeeksReason, sampleNWeeks, onSampleNWeeksChange, sampleSeed, onSampleSeedChange,
   onSampleWeeks, sampleWeeksPending, sampledWeeks,
 }: StepSamplingProps) {
   return (
@@ -35,9 +37,10 @@ export function StepSampling({
         <code>days-in-month / (weeks × 7)</code> so dispatch, cost and
         emissions still aggregate to a full year.{' '}
         {!canSampleWeeks && (
-          <span className="text-warn">
-            Disabled — upload a full-year hourly profile on the Time Series
-            page first.
+          <span className="text-warn" data-testid="sample-weeks-disabled">
+            {sampleWeeksReason === 'not_supported_for_freq'
+              ? 'Disabled — sampling builds hourly weeks, and this model runs at sub-hourly resolution. Switch the horizon to hourly to sample.'
+              : 'Disabled — upload a full-year hourly profile on the Time Series page first.'}
           </span>
         )}
       </p>

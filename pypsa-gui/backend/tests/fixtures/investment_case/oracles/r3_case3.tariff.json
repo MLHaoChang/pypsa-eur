@@ -1,0 +1,105 @@
+{
+ "id": "r3",
+ "name": "REopt lookback custom rate (derived)",
+ "jurisdiction": "US",
+ "valid_from": "2022-01-01",
+ "items": [
+  {
+   "id": "demand",
+   "kind": "demand",
+   "unit": "per_kw_month",
+   "settlement": "h",
+   "periods": [
+    {
+     "name": "facility",
+     "rate": 10.0,
+     "months": [
+      1
+     ]
+    },
+    {
+     "name": "facility",
+     "rate": 10.0,
+     "months": [
+      2
+     ]
+    },
+    {
+     "name": "facility",
+     "rate": 20.0,
+     "months": [
+      3
+     ]
+    },
+    {
+     "name": "facility",
+     "rate": 50.0,
+     "months": [
+      4
+     ]
+    },
+    {
+     "name": "facility",
+     "rate": 20.0,
+     "months": [
+      5
+     ]
+    },
+    {
+     "name": "facility",
+     "rate": 10.0,
+     "months": [
+      6
+     ]
+    },
+    {
+     "name": "facility",
+     "rate": 20.0,
+     "months": [
+      7
+     ]
+    },
+    {
+     "name": "facility",
+     "rate": 20.0,
+     "months": [
+      8
+     ]
+    },
+    {
+     "name": "facility",
+     "rate": 20.0,
+     "months": [
+      9
+     ]
+    },
+    {
+     "name": "facility",
+     "rate": 20.0,
+     "months": [
+      10
+     ]
+    },
+    {
+     "name": "facility",
+     "rate": 20.0,
+     "months": [
+      11
+     ]
+    },
+    {
+     "name": "facility",
+     "rate": 5.0,
+     "months": [
+      12
+     ]
+    }
+   ],
+   "ratchet": {
+    "lookback_months": 6,
+    "share": 0.75,
+    "cyclic_year": true
+   }
+  }
+ ]
+}

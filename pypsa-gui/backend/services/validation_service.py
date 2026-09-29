@@ -1794,7 +1794,14 @@ def _check_lopf(n, solver_config) -> list[Issue]:
     # routinely sit at COP 3-5; electric trains, regenerative drives, and
     # H2-from-electrolysis-then-back-to-power chains can also push beyond
     # 1 on some legs. Allow any positive value on the primary efficiency.
-    out += _check_extendable_bounds(n.links, "Link", "p_nom", True)
+    link_issues = _check_extendable_bounds(n.links, "Link", "p_nom", True)
+    priced_poc = _capacity_priced_poc(solver_config)
+    if priced_poc is not None:
+        # A tariff capacity item prices the PoC's size in the LP (IC P2
+        # WP2.1c-iii): it is not "built free up to the max".
+        link_issues = [i for i in link_issues
+                       if not (i.code == "link_no_capital_cost" and i.name == priced_poc)]
+    out += link_issues
     out += _check_efficiency(n.links, "Link", "efficiency", upper=None)
     # Multi-link efficiency2 / efficiency3 / efficiency4 are validated only
     # on rows where the target bus_n is populated — PyPSA ignores eff_n
@@ -2474,11 +2481,50 @@ def validate_for_run(n, solver_config) -> list[Issue]:
         # margin left in the config cannot make an AC power flow wrong, and
         # blocking one on it would be a refusal with no standard behind it.
         issues += _check_reserve_margin(n, solver_config)
+        # Edge Investment Case commercial layer (P1 WP1.8): the solve's own
+        # binding refusals, stated at preflight, plus the warnings that bind
+        # but mislead (arbitrage loop, demand resolution / partial months,
+        # tariff validity).
+        issues += _check_commercial(n, solver_config)
     else:
         issues.append(_err("unknown_mode", "", "",
             f"Solver mode '{mode}' not recognised (expected lopf/pf)."))
 
     return issues
+
+
+def _capacity_priced_poc(solver_config) -> str | None:
+    """The PoC Link a contracted tariff capacity item prices (rate > 0), or None."""
+    commercial = getattr(solver_config, "commercial", None)
+    if not commercial:
+        return None
+    try:
+        from services.commercial.lp_bindings import _parse, capacity_lp_items
+
+        cfg = _parse(commercial)
+    except Exception:  # noqa: BLE001 — the commercial check reports a bad config
+        return None
+    priced = [i for i in capacity_lp_items(cfg)
+              if i.measured_on != "peak_import" and i.periods[0].rate > 0]
+    return cfg.poc_link if priced else None
+
+
+def _check_commercial(n, solver_config) -> list[Issue]:
+    from services.commercial.preflight import commercial_findings
+
+    from services.commercial.lp_bindings import effective_strategy
+
+    multi = bool(getattr(solver_config, "multi_investment_periods", False))
+    strategy = effective_strategy(getattr(solver_config, "solve_strategy", "full"),
+                                  sclopf=bool(getattr(solver_config, "sclopf", False)),
+                                  multi_period=multi)
+    return [Issue(severity=sev, code=code, component_class=cls, name=name, message=msg)
+            for sev, code, cls, name, msg in commercial_findings(
+                n, getattr(solver_config, "commercial", None), solve_strategy=strategy,
+                multi_period=multi,
+                dsr={"buses": list(getattr(solver_config, "dsr_buses", None) or []),
+                     "price": float(getattr(solver_config, "dsr_price_eur_per_mwh", 0.0) or 0.0),
+                     "share": float(getattr(solver_config, "dsr_share_of_load", 0.0) or 0.0)})]
 
 
 def has_errors(issues: list[Issue]) -> bool:

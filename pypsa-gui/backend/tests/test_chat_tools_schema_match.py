@@ -36,7 +36,9 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
+from models import commercial as _commercial
 from models import schemas as model_schemas
+from routers import library as _library
 from services.chat_tools_schema import TOOLS
 
 
@@ -49,6 +51,10 @@ AUDIT_TABLE: list[tuple[str, type[BaseModel]]] = [
     ("import_matpower",     model_schemas.ImportSummary),
     ("list_projects",       model_schemas.ProjectInfo),
     ("list_scenarios",      model_schemas.ProjectInfo),
+    # Edge Investment Case P2 WP2.4c (review M5).
+    ("list_library_items",  _commercial.LibraryItemRef),
+    ("get_library_item",    _commercial.LibraryItemRef),
+    ("import_urdb_tariff",  _library.UrdbImportOut),
 ]
 
 

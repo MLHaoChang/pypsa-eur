@@ -444,6 +444,19 @@ def compute_cost_breakdown(n, cfg):
             ox *= years
             _accumulate(comp, carrier, row_period, cx, ox, fom_v)
 
+    # Edge Investment Case (spec §5.1, WP1.3/WP1.4a): the commercial terms the
+    # last solve charged. They were applied for the solve and undone, so they
+    # are not in `n.statistics()`; `commercial_cost_terms` recomputes them from
+    # what the solve committed (identical after a reload), and they fold in
+    # as the component "Commercial" so Σ by_component == totals, per period
+    # too. Same years weighting as the statistics rows.
+    from services.commercial.cost_rows import commercial_cost_terms
+    _commercial = commercial_cost_terms(n, getattr(cfg, "commercial", None),
+                                        years=_years_for_period)
+    for _label, _period, _cx, _ox in _commercial["items"]:
+        _yrs = _years_for_period(_period) if _period is not None else 1.0
+        _accumulate("Commercial", _label, _period, _cx * _yrs, _ox * _yrs)
+
     # Materialise by_carrier as a flat list now that all rows have been folded.
     for (comp, carrier), v in by_carrier_dict.items():
         by_carrier.append({
@@ -679,6 +692,7 @@ def compute_cost_breakdown(n, cfg):
             ),
         })
     return {
+        "commercial": _commercial["block"],
         "capex": capex_total,
         "capex_lifetime": capex_lifetime_total,
         "capex_expansion": capex_expansion_total,

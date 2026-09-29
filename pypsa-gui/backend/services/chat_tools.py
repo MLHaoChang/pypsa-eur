@@ -147,8 +147,12 @@ def _validated_update_payload(
     schema_name = _COMPONENT_CREATE_SCHEMAS[component_class]
     Schema = _get_schema(schema_name)
     prefill = _identity_prefill(component_class, name)
-    # Prefill first; agent attrs win on conflict.
-    instance = Schema(name=name, **{**prefill, **attrs})
+    # Prefill first; agent attrs win on conflict. A `name` among the attrs is
+    # a rename (as in the PUT body): it replaces the schema's `name` rather
+    # than being passed a second time, and stays in the payload so
+    # `_update_component` pops it and renames.
+    fields = {**prefill, **attrs}
+    instance = Schema(name=fields.pop("name", name), **fields)
     dumped = instance.model_dump()
     return {k: dumped[k] for k in attrs if k in dumped}
 
@@ -541,7 +545,7 @@ _RESULTS_ENUM = (
     "losses", "carrier_kpis", "emissions", "transformers", "unit_commitment",
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
-    "asset_economics",
+    "asset_economics", "billing", "cfe_score",
 )
 
 
@@ -575,6 +579,9 @@ _RESULTS_HANDLER_NAMES: dict[str, str] = {
     "lost_load": "get_lost_load",
     "loads": "get_load_results",
     "asset_economics": "get_asset_economics",
+    # Edge Investment Case P2 WP2.5.
+    "billing": "get_billing",
+    "cfe_score": "get_cfe_score",
 }
 
 
@@ -704,38 +711,63 @@ def update_component(
     """
     v6 F1/F2/F3 dispatcher with EXPLICIT routing:
 
-      Bus + new_name → rename_bus  (n.rename_component_names preserves dependent
-                                    bus0/bus1 refs on lines/links/transformers)
-      Bus, no new_name → update_bus  (coord-change line-length recompute)
+      Bus + new_name, no attrs → rename_bus  (n.rename_component_names
+                                    preserves dependent bus0/bus1 refs)
+      Bus otherwise → update_bus  (coord-change line-length recompute; a
+                                   rename via attrs["name"] or new_name goes
+                                   through the PUT rename path)
       Transformer → update_transformer  (voltage validation + type sanitise)
       GlobalConstraint → update_global_constraint  (partial-PUT mitigation;
                                                    NOT in _COMPONENT_ATTRS)
       Other 7 classes (Carrier/Line/Link/Generator/StorageUnit/Store/Load/
                        ShuntImpedance) → _update_component direct
+
+    On every class, attrs["name"] (or new_name) renames, as the PUT body does.
     """
     attrs = dict(attrs or {})
 
-    # F1: Bus rename has its own endpoint
-    if component_class == "Bus" and new_name:
+    # F1: a bare Bus rename has its own endpoint
+    if component_class == "Bus" and new_name and not attrs:
         from routers.network import rename_bus
         return rename_bus(name, {"new_name": new_name})
 
-    # Bus non-rename: dedicated handler preserves coord-change recompute
+    # A rename can also arrive as attrs["name"], exactly as in the PUT body.
+    # Every path below builds the Create schema with the TARGET name and never
+    # passes `name` a second time (`Schema(name=name, **attrs)` with a `name`
+    # among the attrs was a TypeError on every class); the PUT handler then
+    # pops it from the merged row and renames under its own guards (404, 409
+    # on an occupied name, the reserved `ic:` bus prefix) and re-points
+    # dependents via `_rename_component_safely`.
+    if new_name:
+        if "name" in attrs and attrs["name"] != new_name:
+            raise HTTPException(
+                400,
+                f"new_name {new_name!r} and attrs.name {attrs['name']!r} "
+                "name different targets",
+            )
+        attrs["name"] = new_name
+    if "name" in attrs and not str(attrs["name"] or "").strip():
+        raise HTTPException(400, "new name cannot be empty")
+
+    # Bus: dedicated handler preserves coord-change recompute
     if component_class == "Bus":
         from routers.network import update_bus
-        bus = _get_schema("BusCreate")(name=name, **attrs)
+        target = attrs.pop("name", name)
+        bus = _get_schema("BusCreate")(name=target, **attrs)
         return update_bus(name, bus)
 
     # F2: Transformer needs voltage validation
     if component_class == "Transformer":
         from routers.network import update_transformer
-        tr = _get_schema("TransformerCreate")(name=name, **attrs)
+        target = attrs.pop("name", name)
+        tr = _get_schema("TransformerCreate")(name=target, **attrs)
         return update_transformer(name, tr)
 
     # F3: GlobalConstraint dedicated CRUD
     if component_class == "GlobalConstraint":
         from routers.network import update_global_constraint
-        gc = _get_schema("GlobalConstraintCreate")(name=name, **attrs)
+        target = attrs.pop("name", name)
+        gc = _get_schema("GlobalConstraintCreate")(name=target, **attrs)
         return update_global_constraint(name, gc)
 
     # Bare passthrough classes — direct _update_component
@@ -1282,13 +1314,272 @@ def update_solver_config(partial: dict) -> dict:
     from routers.simulation import update_solver_config as _h
     from models.schemas import SolverConfigSchema
     body = SolverConfigSchema(**partial)
-    # The handler's user-code admin gate needs `db` + `actor` (83d50f049).
+    # The handler's user-code admin gate needs `db` + `user` (83d50f049; renamed from `actor` in 3e9f17d).
     # Called bare they were `Depends` sentinels (merge review N6). With no
     # acting identity bound, pass None: the gate then refuses user code
     # (fail closed) and every other knob works as before.
     if acting_user_id() is None:
-        return _h(body, db=None, actor=None)
+        return _h(body, db=None, user=None)
     return _route(_h, body)
+
+
+# ── Library (4) — Edge Investment Case P2 WP2.4c ────────────────────────────
+# Router handlers called through `_route`, so the acting user's org and the
+# Library ACL apply exactly as over HTTP. Results stay compact (the chat's
+# per-result cap): a paged list, a tariff SUMMARY unless asked for the full
+# payload or one item, a small attach receipt (review M3).
+
+# The chat forwards at most ~1000 characters of an error: the listings are
+# compact strings, as many as fit, with the totals stated first (round 2 N2).
+_LIBRARY_ERROR_BUDGET = 700
+# Route / binding refusals carry `{"code": …}`; the chat's forwarder reads
+# `error_kind`. Library tools re-raise them under their code (review L1).
+# Written as `error_kind` literals so the manifest guard sees every kind
+# (round 2 N1).
+_LIBRARY_ERROR_KINDS = (
+    {"error_kind": "urdb_refused"}, {"error_kind": "urdb_invalid"},
+    {"error_kind": "library_ref_stale"}, {"error_kind": "import_tariff_ref_conflict"},
+    {"error_kind": "commercial_binding_invalid"}, {"error_kind": "solver_in_flight"},
+)
+_LIBRARY_CODES = {d["error_kind"]: d["error_kind"] for d in _LIBRARY_ERROR_KINDS}
+
+
+def _safe_text(value, limit: int = 60) -> str:
+    """Free text from an uploaded file (a rate's name) as the model may see it
+    in an error: printable word characters and spaces only (round 3)."""
+    import re as _re
+
+    return _re.sub(r"[^\w .,()/-]", "_", str(value))[:limit]
+
+
+def _fit(entries: list[str], budget: int = _LIBRARY_ERROR_BUDGET) -> list[str]:
+    out, used = [], 0
+    for e in entries:
+        e = e[:budget]   # the first entry is always admitted: never oversized (P2 gate)
+        if out and used + len(e) + 4 > budget:
+            break
+        out.append(e)
+        used += len(e) + 4
+    return out
+
+
+def _safe_field(name) -> str:
+    """A refused URDB field name as the model may see it: it comes from an
+    uploaded file, so it is reduced to an identifier (review L1)."""
+    import re as _re
+
+    return _re.sub(r"[^A-Za-z0-9_./]", "_", str(name))[:64]
+
+
+def _library_call(handler, *args, **kwargs):
+    try:
+        return _route(handler, *args, **kwargs)
+    except HTTPException as exc:
+        d = exc.detail
+        if isinstance(d, dict) and d.get("code") in _LIBRARY_CODES:
+            detail = {"error_kind": _LIBRARY_CODES[d["code"]],
+                      "message": str(d.get("message", ""))[:500]}
+            if isinstance(d.get("refusals"), list):
+                refusals = [r for r in d["refusals"] if isinstance(r, dict)]
+                shown = _fit([f"{_safe_field(r.get('field'))}: {str(r.get('reason'))[:60]}"
+                              for r in refusals])
+                detail = {"error_kind": detail["error_kind"],
+                          "refusals_total": len(refusals), "refusals_shown": len(shown),
+                          "refusals": shown,
+                          "message": detail["message"][:200]}
+            raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+        raise
+
+
+def _library_kind(kind: str):
+    from routers.library import ItemKind
+
+    try:
+        return ItemKind(kind)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "unknown_library_kind",
+            "message": f"kind is one of {[k.value for k in ItemKind]}, got {kind!r}"}) from exc
+
+
+def list_library_items(kind: str, offset: int = 0, limit: int | None = None) -> dict:
+    from routers.library import list_items as _h
+    rows = [r.model_dump(mode="json") for r in _library_call(_h, _library_kind(kind))]
+    return _paginate(rows, offset, limit)
+
+
+def _tariff_summary(payload: dict) -> dict:
+    items = []
+    for it in payload.get("items") or []:
+        periods = it.get("periods") or []
+        rates = [float(p.get("rate", 0.0)) for p in periods]
+        rates += [float(r) for p in periods for r in (p.get("tier_rates") or [])]
+        rates += [float(t.get("rate", 0.0)) for t in it.get("tiers") or []]
+        items.append({"id": it.get("id"), "kind": it.get("kind"), "unit": it.get("unit"),
+                      "direction": it.get("direction", "cost"),
+                      "periods": len(periods),
+                      "windows": sorted({str(p.get("name")) for p in periods}),
+                      "tiers": len(it.get("tiers") or []),
+                      "ratchet": it.get("ratchet") is not None,
+                      "rate_min": min(rates) if rates else None,
+                      "rate_max": max(rates) if rates else None})
+    return {"id": payload.get("id"), "name": payload.get("name"),
+            "jurisdiction": payload.get("jurisdiction"), "valid_from": payload.get("valid_from"),
+            "valid_to": payload.get("valid_to"),
+            "unsupported_fields": payload.get("unsupported_fields") or [], "items": items}
+
+
+def get_library_item(kind: str, name: str, version: int | None = None,
+                     detail: str = "summary", item_id: str | None = None) -> dict:
+    from routers.library import get_item as _h
+    out = _library_call(_h, _library_kind(kind), name, version=version).model_dump(mode="json")
+    payload = out["payload"]
+    if item_id is not None:
+        if kind != "tariff":
+            raise HTTPException(status_code=422, detail={
+                "error_kind": "unknown_library_kind",
+                "message": "item_id selects one item of a TARIFF"})
+        match = [i for i in payload.get("items") or [] if i.get("id") == item_id]
+        if not match:
+            raise HTTPException(status_code=404, detail=f"tariff {name!r} has no item {item_id!r}")
+        return {"ref": out["ref"], "meta": out["meta"], "item": match[0]}
+    if kind == "tariff" and detail != "full":
+        return {"ref": out["ref"], "meta": out["meta"], "summary": _tariff_summary(payload)}
+    return out
+
+
+def _urdb_rate(data, item_index: int | None = None):
+    """The rate object of an uploaded URDB file: the object itself, one item
+    of an OpenEI response, or a REopt scenario's `urdb_response`."""
+    def unreadable(message: str):
+        return HTTPException(status_code=422, detail={"error_kind": "urdb_upload_unreadable",
+                                                      "message": message})
+
+    if isinstance(data, dict) and isinstance(data.get("items"), list):
+        items = data["items"]
+        if not items:
+            raise unreadable("the OpenEI response lists no rates")
+        if item_index is None and len(items) > 1:
+            # A utility query returns many rates (superseded versions too):
+            # never pick one silently (review M4).
+            listing = _fit([f"{i}: {_safe_text(r.get('name') or r.get('label'))} "
+                            f"({_safe_text(r.get('startdate'), 24)})"
+                            for i, r in enumerate(items) if isinstance(r, dict)])
+            raise HTTPException(status_code=422, detail={
+                "error_kind": "urdb_multiple_rates", "rates_total": len(items),
+                "rates_shown": len(listing), "rates": listing,
+                "message": f"the upload holds {len(items)} rates; pass item_index"})
+        i = item_index or 0
+        if not 0 <= i < len(items):
+            raise unreadable(f"item_index {i} is outside the {len(items)} rates")
+        return items[i]
+    if item_index not in (None, 0):
+        raise unreadable("item_index applies to an OpenEI response with several rates")
+    if isinstance(data, dict) and isinstance(data.get("ElectricTariff"), dict):
+        et = data["ElectricTariff"]
+        if isinstance(et.get("urdb_response"), dict):
+            return et["urdb_response"]
+        label = et.get("urdb_label")
+        raise unreadable(f"the REopt scenario names URDB rate {_safe_text(label, 40)!r} "
+                         "but carries no "
+                         "urdb_response; upload the OpenEI rate itself" if label else
+                         "the REopt scenario carries no urdb_response")
+    return data
+
+
+def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
+                       accept_partial: bool = False, valid_from: str | None = None,
+                       item_index: int | None = None, tariff_id: str | None = None,
+                       jurisdiction: str | None = None) -> dict:
+    """An UPLOADED URDB JSON file (never an LLM-emitted blob) → a Library tariff."""
+    from routers.library import UrdbImportIn, import_urdb as _h
+    from services import upload_service
+
+    with _acting():   # identity before the file is read (review L4)
+        pass
+    project = _require_active_project()
+    blob = upload_service.get_upload_path(project, file_id)
+    try:
+        data = json.loads(blob.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "urdb_upload_unreadable",
+            "message": f"upload {file_id!r} is not a JSON file: {type(exc).__name__}"}) from exc
+    rate = _urdb_rate(data, item_index)
+    if not isinstance(rate, dict):
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "urdb_upload_unreadable",
+            "message": "the upload holds no URDB rate object"})
+    try:
+        body = UrdbImportIn(urdb_response=rate, name=name, cyclic_year=cyclic_year,
+                            accept_partial=accept_partial, valid_from=valid_from,
+                            tariff_id=tariff_id, jurisdiction=jurisdiction)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "urdb_invalid", "message": _safe_text(exc, 300)}) from exc
+    out = _library_call(_h, body).model_dump(mode="json")
+    refusals = out.get("refusals") or []
+    out["refusals_total"] = len(refusals)
+    out["refusals"] = _fit([f"{_safe_field(r.get('field'))}: {_safe_text(r.get('reason'))}"
+                            for r in refusals])
+    fields = out.get("unsupported_fields") or []
+    out["unsupported_fields"] = _fit([_safe_field(f) for f in fields])
+    out["unsupported_fields_total"] = len(fields)
+    return out
+
+
+def attach_tariff(name: str, version: int | None = None, replace_inline: bool = False) -> dict:
+    """Set `commercial.import_tariff_ref` to a Library tariff through the
+    solver-config route (which resolves and pins it). An inline tariff that is
+    not this item is never replaced silently (review M2)."""
+    from models.schemas import SolverConfigSchema
+    from routers.library import ItemKind, get_item as _get
+    from routers.simulation import get_solver_config as _cfg, update_solver_config as _put
+
+    ref = _library_call(_get, ItemKind.tariff, name, version=version).ref.model_dump(mode="json")
+    commercial = dict((_cfg() or {}).get("commercial") or {})
+    # The value-flow config is owned by its own route: omit it so the solver-config
+    # route keeps whatever is stored when this PUT lands (IC P3 WP3.0, plan C7).
+    commercial.pop("value_flows", None)
+    if not commercial.get("poc_link"):
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "no_commercial_config",
+            "message": "set the commercial config's poc_link first "
+                       "(update_solver_config), then attach the tariff"})
+    inline = commercial.get("import_tariff")
+    old_ref = commercial.get("import_tariff_ref")
+    replaced = None
+    if inline is not None or commercial.get("import_tariff_id"):
+        same = isinstance(old_ref, dict) and old_ref.get("hash") == ref["hash"]
+        if not same and isinstance(old_ref, dict) and inline is not None:
+            # The inline copy IS the old Library item (unedited): a plain
+            # switch between Library tariffs, nothing hand-made is lost (L5).
+            from models.commercial import Tariff
+            from services.commercial import hashing as _H
+
+            try:
+                same = _H.library_item_digest(Tariff.model_validate(inline)) == \
+                    old_ref.get("hash")
+            except ValueError:
+                same = False
+        replaced = {"id": (inline or {}).get("id") or commercial.get("import_tariff_id"),
+                    "name": (inline or {}).get("name"), "had_ref": old_ref is not None}
+        if not same and not replace_inline:
+            raise HTTPException(status_code=409, detail={
+                "error_kind": "inline_tariff_would_be_replaced",
+                "message": (f"the project's import tariff {replaced['id']!r} would be "
+                            f"replaced by Library tariff {name!r}; confirm with the user, "
+                            "then call again with replace_inline=true"),
+                "current": replaced})
+    commercial.pop("import_tariff", None)
+    commercial.pop("import_tariff_id", None)
+    commercial["import_tariff_ref"] = ref
+    out = _library_call(_put, SolverConfigSchema(commercial=commercial))
+    bound = (out.get("commercial") or {}).get("import_tariff") or {}
+    return {"import_tariff_ref": ref,
+            "import_tariff": {"id": bound.get("id"), "name": bound.get("name"),
+                              "items": len(bound.get("items") or [])},
+            "replaced": replaced}
 
 
 # ── Validation (3) ──────────────────────────────────────────────────────────
@@ -3472,8 +3763,8 @@ def reconstruct_network_from_image(
         for b in buses_in:
             try:
                 bname = str(b.get("name") or "").strip()
-                if not bname or bname in existing_bus_names:
-                    continue
+                if not bname or bname in existing_bus_names or bname.startswith("ic:"):
+                    continue  # `ic:` is reserved (P2 WP2.2-0)
                 px = float(b.get("px") or 0.0)
                 py = float(b.get("py") or 0.0)
                 gx = (px - origin_x) * scale_x
@@ -5304,6 +5595,10 @@ DISPATCHERS: dict[str, Any] = {
     "gridspine_export_handoff_bundle": gridspine_export_handoff_bundle,
     "gridspine_get_readback": gridspine_get_readback,
     "gridspine_fetch_result_figure": gridspine_fetch_result_figure,
+    "list_library_items": list_library_items,
+    "get_library_item": get_library_item,
+    "import_urdb_tariff": import_urdb_tariff,
+    "attach_tariff": attach_tariff,
     # project_mgmt (21)
     "list_projects": list_projects,
     "load_project": load_project,

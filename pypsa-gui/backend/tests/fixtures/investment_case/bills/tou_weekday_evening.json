@@ -1,0 +1,29 @@
+{
+  "_comment": "Hand-rated. 4 MW import for 15 min = 1 MWh = 1000 kWh per interval. Peak 0.30 EUR/kWh Mon-Fri 17:00-21:00 in January, else 0.10. Mon 2030-01-07 16:45 is off-peak (100.00), 17:00/17:15/17:30 are peak (300.00 each). Sat 2030-01-12 17:00 is a weekend: off-peak (100.00). Total 1100.00.",
+  "timezone": "Europe/Berlin",
+  "tariff": {
+    "id": "tou_test", "name": "TOU test", "jurisdiction": "DE", "valid_from": "2030-01-01",
+    "items": [{
+      "id": "energy_tou", "kind": "energy", "unit": "per_kwh", "settlement": "15min",
+      "measured_on": "import", "direction": "cost",
+      "periods": [
+        {"name": "peak", "rate": 0.30, "months": [1], "weekdays": [0,1,2,3,4], "start_hour": 17, "end_hour": 21},
+        {"name": "offpeak", "rate": 0.10}
+      ]
+    }]
+  },
+  "dispatch": [
+    ["2030-01-07 16:45", 4.0, 0.0],
+    ["2030-01-07 17:00", 4.0, 0.0],
+    ["2030-01-07 17:15", 4.0, 0.0],
+    ["2030-01-07 17:30", 4.0, 0.0],
+    ["2030-01-12 17:00", 4.0, 0.0]
+  ],
+  "step_hours": 0.25,
+  "expected": {
+    "per_interval": {"energy_tou": [100.00, 300.00, 300.00, 300.00, 100.00]},
+    "per_item": {"energy_tou": 1100.00},
+    "monthly": {"2030-01": {"energy_tou": 1100.00}},
+    "total": 1100.00
+  }
+}

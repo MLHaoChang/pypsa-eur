@@ -81,6 +81,7 @@ from routers import (
     gridspine,
     guides,
     io,
+    library,
     local_settings,
     network,
     project_network,
@@ -1100,6 +1101,8 @@ app.include_router(
     tags=["admin"],
     dependencies=[Depends(local_mode.reject_in_local_mode)],
 )
+# Edge Investment Case (P1 WP1.1b): the org-scoped Library.
+app.include_router(library.router, prefix="/api/library", tags=["library"])
 app.include_router(network.router, prefix="/api/network", tags=["network"])
 # Mount /api/network/cluster from the dedicated clustering router. Sharing the
 # /api/network prefix keeps the endpoint adjacent to other network mutations.

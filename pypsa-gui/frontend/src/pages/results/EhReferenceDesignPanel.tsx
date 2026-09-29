@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { CompletenessChips, statusTone as sharedStatusTone } from '../../components/CompletenessChips'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FileText, Hexagon, Square } from 'lucide-react'
 import {
@@ -213,12 +214,9 @@ export function completenessRows(
   return out
 }
 
+// Shared with the Investment tab since IC P3 WP3.5; re-exported for callers.
 export function statusTone(status: EhSectionStatus): string {
-  // The theme's success token: the accent is the brand red, which read as an
-  // error on every "ok" chip (click-through obstacle 5).
-  if (status === 'ok') return 'text-success'
-  if (status === 'skipped') return 'text-muted'
-  return 'text-warn'
+  return sharedStatusTone(status)
 }
 
 /** Sections that are not_established with a reason, in chip order.
@@ -1596,24 +1594,12 @@ export function EhReferenceDesignPanel() {
                 </ul>
               )}
 
-              {completeness.length > 0 && (
-                <ul
-                  className="flex flex-wrap gap-1.5"
-                  data-testid="eh-completeness"
-                >
-                  {completeness.map(({ name, status }) => (
-                    <li
-                      key={name}
-                      className={`text-[10px] border border-border rounded px-1.5 py-0.5 ${statusTone(status)}`}
-                      data-testid={`eh-section-${name}`}
-                      data-status={status}
-                      title={report.sections?.[name]?.note ?? undefined}
-                    >
-                      {name}: {status}
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <CompletenessChips
+                rows={completeness.map(({ name, status }) => ({
+                  name, status, note: report.sections?.[name]?.note ?? null }))}
+                testId="eh-completeness"
+                itemTestIdPrefix="eh-section-"
+              />
 
               {notEstablishedNotes(report).length > 0 && (
                 <ul

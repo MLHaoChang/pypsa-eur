@@ -1262,6 +1262,10 @@ class SolveQueue:
                 # inherits the previous project's adequacy verdict.
                 last_lost_load=None, adequacy_report=None,
                 last_reserve_margin=None,
+                # Edge Investment Case keys: same rule as the foreground /run
+                # claim — a new solve invalidates the case built on the last.
+                investment_case_report=None, billing_frames=None,
+                last_commercial_terms=None,
                 lopf_results=None, ac_pf_results=None,
                 ac_pf_convergence=None, ac_pf_convergence_list=None,
                 ac_pf_slack_bus_used=None, ac_pf_stripped_voll_slacks=None,

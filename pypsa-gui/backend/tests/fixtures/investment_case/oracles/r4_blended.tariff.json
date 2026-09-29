@@ -1,0 +1,30 @@
+{
+ "id": "r4",
+ "name": "REopt no_techs blended rates (hand-translated)",
+ "jurisdiction": "US",
+ "valid_from": "2017-01-01",
+ "items": [
+  {
+   "id": "energy",
+   "kind": "energy",
+   "unit": "per_kwh",
+   "periods": [
+    {
+     "name": "all",
+     "rate": 0.1
+    }
+   ]
+  },
+  {
+   "id": "demand",
+   "kind": "demand",
+   "unit": "per_kw_month",
+   "periods": [
+    {
+     "name": "all",
+     "rate": 10.0
+    }
+   ]
+  }
+ ]
+}

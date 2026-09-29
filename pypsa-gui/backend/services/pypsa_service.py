@@ -7,6 +7,10 @@ from contextvars import ContextVar
 
 import pypsa
 
+# Installs the PyPSA load-warning filter for the `ic:` reference frames at
+# app start (P2 WP2.2-0), before any loader runs.
+from services.commercial import settlement_inputs as _ic_settlement_inputs  # noqa: F401
+
 from services.project_context import (
     STUDY_KEYS,
     ProjectContext,
@@ -682,7 +686,19 @@ class PyPSAService:
         """
         from services.adequacy.eh_columns import normalise_eh_columns
         from services.adequacy.occurrence import normalise_flag_column
+        from services.commercial.settlement_inputs import install_log_filter
+
+        install_log_filter()  # the `ic:` reference frames are not buses (P2 WP2.2-0)
         n.import_from_netcdf(str(path))
+        from services.commercial.settlement_inputs import reserved_bus_name
+
+        bad = [str(b) for b in n.buses.index if reserved_bus_name(b)]
+        if bad:
+            # A saved project from before the guards: loaded, but said
+            # (a bundle import refuses it before the load).
+            logging.getLogger(__name__).warning(
+                "bus names starting 'ic:' are reserved for the commercial reference "
+                "frames: %s", bad[:5])
         normalise_flag_column(n)
         normalise_eh_columns(n)
 
