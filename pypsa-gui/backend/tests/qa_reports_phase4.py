@@ -47,6 +47,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 # THE load-bearing import, and it must come first: `qa_support` pins the
 # sandbox before anything imports `main` or `settings`.
 from tests import qa_support          # noqa: E402
+from services.reports.evidence import fmea_top_modes  # noqa: E402
 
 from tests.eh_stage_fixtures import VOLL, certifiable_weak_network  # noqa: E402
 
@@ -219,7 +220,7 @@ def section_1_real_study() -> dict | None:
         return None
     rep = r.json()
     comp = rep.get("completeness") or {}
-    top = ((rep.get("sections") or {}).get("fmea_top") or {}).get("payload", {}).get("top") or []
+    top = fmea_top_modes(((rep.get("sections") or {}).get("fmea_top") or {}).get("payload"))
     _step("fmea_top is established with at least one ranked mode",
           comp.get("fmea_top") == "ok" and len(top) >= 1,
           f"status={comp.get('fmea_top')} rows={len(top)}")
@@ -304,7 +305,7 @@ def section_3_tagged(rep: dict, ids: dict[str, str]) -> str | None:
           "QA phase-4 tagged report" in text and "meta.title" not in text)
     _step("no tag is left anywhere (body, tables, header, footer)",
           "{{" not in text and "{%" not in text)
-    top = ((rep.get("sections") or {}).get("fmea_top") or {}).get("payload", {}).get("top") or []
+    top = fmea_top_modes(((rep.get("sections") or {}).get("fmea_top") or {}).get("payload"))
     table = word.tables[0] if word.tables else None
     rows = [[cell.text for cell in row.cells] for row in table.rows] if table is not None else []
     fmea_rows = (doc.get("tables") or {}).get("fmea_top", {}).get("rows") or []

@@ -292,6 +292,7 @@ def _current_study_report() -> dict | None:
 def _render_figures(eh_report: dict | None) -> dict[str, bytes]:
     """WP4's three PNGs from the EH sections that are established; each may be absent."""
     from services.reports.figures import capacity_mix_png, fmea_pareto_png, frontier_png
+    from services.reports.evidence import fmea_top_modes
 
     out: dict[str, bytes] = {}
     if not isinstance(eh_report, dict):
@@ -308,7 +309,7 @@ def _render_figures(eh_report: dict | None) -> dict[str, bytes]:
     frontier = payload("frontier")
     sizing = payload("sizing")
     for figure_id, png in (
-        ("fmea_pareto", fmea_pareto_png(fmea.get("top")) if fmea else None),
+        ("fmea_pareto", fmea_pareto_png(fmea_top_modes(fmea)) if fmea else None),
         ("frontier", frontier_png(frontier.get("points"), frontier.get("knee_index"))
          if frontier else None),
         ("capacity_mix", capacity_mix_png(sizing.get("by_carrier")) if sizing else None),

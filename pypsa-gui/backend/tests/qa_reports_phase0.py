@@ -26,6 +26,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 # THE load-bearing import, and it must come first: `qa_support` pins the
 # sandbox before anything imports `main` or `settings`.
 from tests import qa_support          # noqa: E402
+from services.reports.evidence import fmea_top_modes  # noqa: E402
 
 from tests.eh_stage_fixtures import VOLL, certifiable_weak_network  # noqa: E402
 
@@ -141,7 +142,7 @@ def section_2_real_study_to_docx() -> None:
     rep = r.json()
     comp = rep.get("completeness") or {}
     fmea = (rep.get("sections") or {}).get("fmea_top") or {}
-    top = (fmea.get("payload") or {}).get("top") or []
+    top = fmea_top_modes(fmea.get("payload"))
     _step("fmea_top is established with at least one ranked mode",
           comp.get("fmea_top") == "ok" and len(top) >= 1,
           f"status={comp.get('fmea_top')} rows={len(top)} note={str(fmea.get('note'))[:120]}")

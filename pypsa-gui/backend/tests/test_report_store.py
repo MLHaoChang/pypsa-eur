@@ -72,9 +72,11 @@ def test_the_id_errors_are_value_errors_the_router_can_map():
 
 
 def test_an_accepted_id_is_rebuilt_from_the_alphabet_and_equals_the_input():
-    """CodeQL `py/path-injection` (PR #64): the string that names a directory
+    """
+    CodeQL `py/path-injection` (PR #64): the string that names a directory
     is re-spelled from `_ID_ALPHABET`, and that re-spelling is the identity
-    for every id the regexes accept — the fix must not rename anything."""
+    for every id the regexes accept — the fix must not rename anything.
+    """
     for rid in ("0123456789abcdef", "ffffffffffffffff", "00000000deadbeef"):
         out = store.validate_report_id(rid)
         assert out == rid and out is not rid

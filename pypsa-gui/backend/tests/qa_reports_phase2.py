@@ -41,6 +41,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 # THE load-bearing import, and it must come first: `qa_support` pins the
 # sandbox before anything imports `main` or `settings`.
 from tests import qa_support          # noqa: E402
+from services.reports.evidence import fmea_top_modes  # noqa: E402
 
 from tests.eh_stage_fixtures import VOLL, certifiable_weak_network  # noqa: E402
 
@@ -220,7 +221,7 @@ def section_1_real_study() -> dict | None:
     rep = r.json()
     comp = rep.get("completeness") or {}
     fmea = (rep.get("sections") or {}).get("fmea_top") or {}
-    top = (fmea.get("payload") or {}).get("top") or []
+    top = fmea_top_modes(fmea.get("payload"))
     _step("fmea_top is established with at least one ranked mode",
           comp.get("fmea_top") == "ok" and len(top) >= 1,
           f"status={comp.get('fmea_top')} rows={len(top)}")
@@ -246,7 +247,7 @@ def _plan_script(rep: dict) -> tuple[list[str], list[dict], dict]:
     others = [s for s in ok_sections if s != "fmea_top"]
     repair_section = others[0]
     garbage_section = others[1] if len(others) > 1 else "fmea_top"
-    top = ((rep.get("sections") or {}).get("fmea_top") or {}).get("payload", {}).get("top") or []
+    top = fmea_top_modes(((rep.get("sections") or {}).get("fmea_top") or {}).get("payload"))
     right_value = float(top[0].get("criticality_eur_per_year") or 0.0)
     right_number = f"{right_value:.1f}"
 
@@ -361,7 +362,7 @@ def section_2_generate(rep: dict, seam: _Seam) -> tuple[str, dict] | None:
           f"mode={meta.get('mode')} latest_version={meta.get('latest_version')} "
           f"generation={str(generation)[:160]}")
 
-    top = ((rep.get("sections") or {}).get("fmea_top") or {}).get("payload", {}).get("top") or []
+    top = fmea_top_modes(((rep.get("sections") or {}).get("fmea_top") or {}).get("payload"))
     page = _as_session(chat_tools.get_report_table, rid, "fmea_top", limit=1)
     _step("get_report_table pages the fmea_top rows",
           page.get("total_count") == len(top) and page.get("returned") == 1

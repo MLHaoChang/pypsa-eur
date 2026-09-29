@@ -507,10 +507,48 @@ def _t_sizing(payload: dict) -> EvidenceTable:
         source_path="/sections/sizing/payload")
 
 
+def fmea_top_modes(payload: dict | None) -> list[dict]:
+    """
+    The ranked failure modes of an ``fmea_top`` payload, whichever build
+    wrote it. Since master's per-class ranks (19e9460) the study writes the
+    Class-B Link sweep under ``rows`` and the zero-solve class-A COPT
+    screening under ``class_a.rows``; builds before that merged both into
+    one list under ``top``. A stored report is read as it was written, in
+    the order the Energy Hub panel's ``fmeaTopModes`` shows it: ``top`` when
+    present, else the class-B rows then the class-A rows, each ranked by
+    position within its class (the two criticalities come from different
+    engines, which is why they are not interleaved). Rows are copied; the
+    report is never mutated.
+    """
+    payload = payload if isinstance(payload, dict) else {}
+    top = payload.get("top")
+    if isinstance(top, list):
+        return [dict(r) for r in top if isinstance(r, dict)]
+
+    def _ranked(rows: object, default_class: str, **defaults: str) -> list[dict]:
+        out: list[dict] = []
+        for r in rows if isinstance(rows, list) else []:
+            if not isinstance(r, dict):
+                continue
+            mode = {**r}
+            mode.setdefault("failure_class", default_class)
+            for key, value in defaults.items():
+                mode.setdefault(key, value)
+            if mode.get("name") is None:
+                mode["name"] = mode.get("mode_id")
+            mode["rank"] = len(out) + 1
+            out.append(mode)
+        return out
+
+    class_a = payload.get("class_a")
+    class_a_rows = class_a.get("rows") if isinstance(class_a, dict) else None
+    return (_ranked(payload.get("rows"), "B", component_class="Link")
+            + _ranked(class_a_rows, "A"))
+
+
 def _t_fmea_top(payload: dict) -> EvidenceTable:
     rows = []
-    for r in payload.get("top") or []:
-        r = r if isinstance(r, dict) else {}
+    for r in fmea_top_modes(payload):
         rows.append([
             F.fmt_number(r.get("rank")),
             F.fmt_text(r.get("failure_class")),
@@ -532,7 +570,9 @@ def _t_fmea_top(payload: dict) -> EvidenceTable:
                  f"{F.fmt_number(payload.get('n_total_modes'))} modes in "
                  f"total; VoLL "
                  f"{F.fmt_number(payload.get('voll_eur_per_mwh'), unit='€/MWh')}"),
-        source_path="/sections/fmea_top/payload/top")
+        source_path=("/sections/fmea_top/payload/top"
+                     if isinstance(payload.get("top"), list)
+                     else "/sections/fmea_top/payload/rows"))
 
 
 def _t_expert_rows(payload: dict) -> EvidenceTable:

@@ -4039,6 +4039,7 @@ def export_eh_report_docx(filename: str | None = None) -> dict:
         render_reference_design_docx,
     )
     from services.reports.figures import fmea_pareto_png
+    from services.reports.evidence import fmea_top_modes
 
     name = _require_active_project()
     body = results_router.get_eh_reference_design()
@@ -4058,7 +4059,7 @@ def export_eh_report_docx(filename: str | None = None) -> dict:
         worksheet = None
     figures: dict[str, bytes] = {}
     fmea_section = (body.get("sections") or {}).get("fmea_top") or {}
-    png = fmea_pareto_png((fmea_section.get("payload") or {}).get("top"))
+    png = fmea_pareto_png(fmea_top_modes(fmea_section.get("payload")))
     if png:
         figures["fmea_top"] = png
     data = render_reference_design_docx(

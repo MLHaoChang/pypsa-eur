@@ -33,6 +33,7 @@ from services.reports.evidence import (
     evidence_hash,
     flatten_numbers,
     slice_for,
+    _t_fmea_top,
 )
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "eh_archetypes"
@@ -514,3 +515,39 @@ def test_slice_for_adequacy_section_carries_caveat_and_its_disclosures():
     assert not any("reserve margin" in d for d in piece["required_disclosures"])
     keys = _all_keys(piece)
     assert "margin" not in keys and "top" not in keys
+
+
+def test_fmea_top_modes_reads_the_per_class_shape_master_writes():
+    """
+    Master 19e9460 stores the class-B ranking under `rows` and the class-A
+    screening under `class_a.rows`; older reports merged both under `top`.
+    The collector reads both, in the panel's order, and never mutates the
+    payload.
+    """
+    from services.reports.evidence import fmea_top_modes
+
+    per_class = {
+        "rows": [{"mode_id": "link:L1:forced_outage", "name": "L1",
+                  "criticality_eur_per_year": 5.0}],
+        "top_n": 3,
+        "class_a": {"status": "ok", "rows": [
+            {"rank": 1, "mode_id": "gen:g:forced_outage", "name": "g",
+             "failure_class": "A", "component_class": "Generator",
+             "criticality_eur_per_year": 9.0},
+        ]},
+    }
+    frozen = copy.deepcopy(per_class)
+    modes = fmea_top_modes(per_class)
+    assert per_class == frozen
+    assert [(m["rank"], m["failure_class"], m["name"]) for m in modes] == [
+        (1, "B", "L1"), (1, "A", "g")]
+    assert modes[0]["component_class"] == "Link"
+
+    merged = {"top": [{"rank": 1, "mode_id": "x", "name": "x"}], "rows": []}
+    assert fmea_top_modes(merged) == [{"rank": 1, "mode_id": "x", "name": "x"}]
+    assert fmea_top_modes(None) == [] and fmea_top_modes({}) == []
+    assert fmea_top_modes({"rows": "not a list", "class_a": None}) == []
+
+    table = _t_fmea_top(per_class)
+    assert len(table.rows) == 2 and table.source_path == "/sections/fmea_top/payload/rows"
+    assert _t_fmea_top(merged).source_path == "/sections/fmea_top/payload/top"
