@@ -664,3 +664,17 @@ def test_capacity_refuses_a_capacity_expansion_project(plain_project):
         with pytest.raises(HTTPException) as exc:
             call()
         assert exc.value.status_code == 409
+
+
+
+def test_capacity_filters_narrow_the_rows_but_not_the_table_they_come_from(ran):
+    _db, row = ran
+    whole = gs.get_capacity(row)
+    hours = whole["hours"]
+    one_bus = gs.get_capacity(row, bus="BUS_16", kind="load")
+    assert len(one_bus["rows"]) == len(hours)
+    assert {r["bus"] for r in one_bus["rows"]} == {"BUS_16"}
+    assert one_bus["hours"] == hours and one_bus["buses"] == whole["buses"]
+    one_row = gs.get_capacity(row, bus="BUS_16", kind="generation", hour=hours[0])
+    assert len(one_row["rows"]) == 1 and one_row["rows"][0]["hour"] == hours[0]
+    assert gs.get_capacity(row, bus="BUS_99")["rows"] == []

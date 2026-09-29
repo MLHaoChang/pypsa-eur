@@ -34,7 +34,7 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
@@ -270,10 +270,16 @@ class CapacityRequest(BaseModel):
 
 
 @router.get("/{name}/capacity")
-def get_capacity(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+def get_capacity(
+    bus: str | None = Query(None, max_length=64),
+    kind: Literal["load", "generation"] | None = None,
+    hour: int | None = Query(None, ge=0),
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+):
     """Increment 9: the run's connection-capacity table (DC for every bus, plus
-    any AC answers computed since)."""
-    return gs.get_capacity(_row(proj, db))
+    any AC answers computed since), optionally narrowed by bus, kind and hour."""
+    return gs.get_capacity(_row(proj, db), bus=bus, kind=kind, hour=hour)
 
 
 @router.post("/{name}/capacity")

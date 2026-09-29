@@ -886,17 +886,31 @@ def _capacity_records(table) -> list:
     ]
 
 
-def get_capacity(project) -> dict:
+def get_capacity(project, bus: str | None = None, kind: str | None = None,
+                 hour: int | None = None) -> dict:
     """Increment 9: the run's connection-capacity table. It holds the DC screen
     the study writes for every bus and kind at each selected hour, plus any AC
-    answers computed since. 404 with the reason before a screened run exists."""
+    answers computed since. 404 with the reason before a screened run exists.
+
+    ``bus``, ``kind`` and ``hour`` narrow ``rows``. The full table is 78 rows
+    per hour on case39, which is fine for the panel but too much to hand a
+    model. ``hours`` and ``buses`` always describe the whole table, so a
+    filtered answer still says what else exists. A filter matching nothing
+    returns no rows rather than an error: "no row for that bus" is an answer."""
     require_planning(project)
     try:
         table = _capacity_table(run_dir(project))
     except ContractError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    rows = table
+    if bus is not None:
+        rows = rows[rows["bus"] == bus]
+    if kind is not None:
+        rows = rows[rows["kind"] == kind]
+    if hour is not None:
+        rows = rows[rows["hour"] == _hour(hour)]
     return {
-        "rows": _capacity_records(table),
+        "rows": _capacity_records(rows),
         "hours": sorted(int(h) for h in table["hour"].unique()),
         "buses": sorted(table["bus"].unique().tolist()),
     }

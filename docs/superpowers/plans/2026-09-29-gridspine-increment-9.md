@@ -288,3 +288,26 @@ study completes:
 
 All three were fixed test-first, except the layout, which was re-checked by
 screenshot.
+
+## Amended at the owner's request: capacity chat tools
+
+The plan held a chat tool back until the table's shape had settled in use.
+The browser run settled it, and the owner asked for the tools in this PR:
+
+- **`gridspine_get_capacity`** (read), with optional `bus`, `kind` and `hour`
+  filters. The unfiltered table is 78 rows per hour on case39, too much to
+  hand a model. The filters live in the service, and the GET route takes them
+  as query parameters, so the tool and the UI share one code path. `hours` and
+  `buses` always describe the whole table, so a narrowed answer still says
+  what else exists.
+- **`gridspine_compute_capacity`** (write). It rewrites run artifacts and
+  costs seconds, so it gets the confirmation card like the other writes.
+
+The read tool's description tells the model what the panel tells a person:
+when `binding_preexisting` is true, the bus is blocked by an existing
+overload, and the MW figure must not be presented as headroom. A test pins
+that sentence, since a model reading the raw row would otherwise report
+"13.8 MW available".
+
+As for every gridspine tool, the ADR 0002 live-model probe has not run:
+there is no Anthropic key in this environment.

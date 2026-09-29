@@ -358,12 +358,22 @@ def test_the_two_tables_share_one_cap(client, study, monkeypatch):
 # connection capacity (increment 9)
 # --------------------------------------------------------------------------
 
-def test_get_capacity_calls_the_service(client, study, monkeypatch):
+def test_get_capacity_calls_the_service_with_its_filters(client, study, monkeypatch):
     seen = {}
-    monkeypatch.setattr(gs, "get_capacity", lambda project: seen.setdefault("name", project.name) and {"rows": []})
+    monkeypatch.setattr(gs, "get_capacity", lambda project, bus=None, kind=None, hour=None:
+                        seen.update(name=project.name, bus=bus, kind=kind, hour=hour) or {"rows": []})
     resp = client.get("/api/gridspine/Router Study/capacity")
     assert resp.status_code == 200, resp.text
-    assert seen["name"] == "Router Study"
+    assert seen == {"name": "Router Study", "bus": None, "kind": None, "hour": None}
+    resp = client.get("/api/gridspine/Router Study/capacity", params={"bus": "BUS_16", "kind": "load", "hour": 19})
+    assert resp.status_code == 200, resp.text
+    assert seen == {"name": "Router Study", "bus": "BUS_16", "kind": "load", "hour": 19}
+
+
+@pytest.mark.parametrize("params", [{"kind": "storage"}, {"hour": -1}, {"bus": "B" * 200}])
+def test_get_capacity_refuses_a_malformed_filter(client, study, monkeypatch, params):
+    monkeypatch.setattr(gs, "get_capacity", lambda *a, **k: {"rows": []})
+    assert client.get("/api/gridspine/Router Study/capacity", params=params).status_code == 422
 
 
 def test_post_capacity_passes_bus_and_kind_and_runs_off_the_event_loop(client, study, monkeypatch):
