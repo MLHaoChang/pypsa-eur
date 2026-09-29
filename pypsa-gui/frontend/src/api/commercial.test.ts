@@ -65,7 +65,7 @@ describe('commercialApi value flows', () => {
   it('reads the config and its digest', async () => {
     get.mockResolvedValue({ status: 200, data: { value_flows: null, digest: 'd0', status: 'not_set' } })
     await expect(commercialApi.getValueFlows()).resolves.toMatchObject({ digest: 'd0' })
-    expect(get).toHaveBeenCalledWith('/simulation/commercial/value_flows')
+    expect(get).toHaveBeenCalledWith('/simulation/commercial/value_flows', { skipErrorToast: true })
   })
 
   it('always sends If-Match and wraps the body', async () => {
@@ -185,6 +185,7 @@ describe('commercialApi results', () => {
   it('builds a template without saving it', async () => {
     post.mockResolvedValue({ status: 200, data: { config: {}, draft_contracts: [], notes: [] } })
     await commercialApi.buildTemplate('btm_ppa')
-    expect(post).toHaveBeenCalledWith('/simulation/value_flows/template', { template: 'btm_ppa' })
+    expect(post).toHaveBeenCalledWith('/simulation/value_flows/template', { template: 'btm_ppa' },
+                                      { skipErrorToast: true })
   })
 })

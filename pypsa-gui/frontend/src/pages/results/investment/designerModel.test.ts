@@ -43,6 +43,15 @@ describe('designer model', () => {
       .toMatchObject({ availability_eur_per_mw_year: 10, contracted_mw: 2, load_ids: ['l'] })
   })
 
+  it('routes on the server\'s phrasing, never on a name inside it', () => {
+    expect(problemSection("contract 'c' generator_owner 'Owner Co' is neither a participant nor an external")).toBe('participants')
+    expect(problemSection("contract 'group_ppa' seller 'x' is neither a participant nor an external")).toBe('participants')
+    expect(problemSection("participant 'item 1' is also an external")).toBe('participants')
+    expect(problemSection("Generator 'pv' is owned twice")).toBe('assets')
+    expect(problemSection('hub_members need a group contract')).toBe('hub')
+    expect(problemSection('the contracted_capacity key needs contracted_mw on every hub member')).toBe('hub')
+  })
+
   it('places a server problem beside its section', () => {
     expect(problemSection("asset 'ghost' is not a Generator of the network")).toBe('assets')
     expect(problemSection("tariff payee 'x' is neither a participant nor an external")).toBe('payees')

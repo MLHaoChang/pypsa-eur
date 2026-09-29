@@ -214,7 +214,8 @@ const orNull = <T,>(r: { status: number; data: T }) => (r.status === 204 ? null 
 
 export const commercialApi = {
   getValueFlows: () =>
-    client.get<ValueFlowsState>('/simulation/commercial/value_flows').then(r => r.data),
+    client.get<ValueFlowsState>('/simulation/commercial/value_flows', QUIET)
+      .then(r => r.data, typed),
   /** `ifMatch` is the digest of the GET this edit started from — always sent. */
   putValueFlows: (valueFlows: ValueFlowConfig | null, ifMatch: string) =>
     client.put<ValueFlowsState>('/simulation/commercial/value_flows',
@@ -222,7 +223,7 @@ export const commercialApi = {
       { headers: { 'If-Match': ifMatch }, skipErrorToast: true })
       .then(r => r.data, typed),
   buildTemplate: (template: NonNullable<ValueFlowConfig['template']>) =>
-    client.post<TemplateResult>('/simulation/value_flows/template', { template })
+    client.post<TemplateResult>('/simulation/value_flows/template', { template }, QUIET)
       .then(r => r.data),
   /**
    * Replace commercial sub-trees (tariff, contracts, connection, …) on the

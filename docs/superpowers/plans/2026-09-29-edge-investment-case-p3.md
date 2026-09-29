@@ -763,6 +763,33 @@ not `PageKit.Toggle`).
   422 per section, 412 reload, drafts priced before saving and nothing saved on Use, no commercial
   config; `expectAllButtonsNamed`). Full vitest 2695 passed; tsc clean.
 
+**WP3.6 review round 1 (96dea5e WP3.6 parts, 23e1ad2): FAIL** — binding #1–#5; #6, #7, #9, #10, #11
+(CSV), #12, #13 taken; #8 (LOW), #11 (FE merge — the server now canonicalises, WP3.4 review #3) and
+#14 noted. Confirmed: the Sankey mapping and the two-way pair, nothing drawn unless conservation is
+ok, null money never zero, no currency symbol, the app's Dialog, If-Match always sent, the designer
+route's sides for Links / Lines / Transformers / islands (an `unclassified` asset ownable, as the
+ledger defaults it to the site party), CSV text injection-safe, 300 parties / 3,000 links in 0.8 s.
+- #1 HIGH: "Reload" after a 412 re-seeded from the stale cache and resent the old digest. → it
+  fetches the state (`fetchQuery`, `staleTime: 0`) and re-seeds from it; the seeding effect never
+  reads a cache that is being refetched (tested: save after Reload sends the new digest).
+- #2: hub problems were invisible without a group contract. → the hub section shows whenever hub
+  settings exist, with "Remove hub settings"; hub problems fall back to a visible list (tested).
+- #3: a failed state GET left "Loading…" forever → handled like the context error (tested);
+  `getValueFlows` is quiet and typed.
+- #4: appending a template's drafts now invalidates the results and the commercial config too
+  (tested); the message says N contracts were saved and the participants are not yet.
+- #5: the default payee ignored kind rules → `resolvedPayee` (item rule, kind rule, default); kind
+  rules are listed with a Remove (tested).
+- #6: a stored config that does not validate is named, with "saving replaces it" (tested). #7:
+  `problemSection` anchors on the server's phrasing (a name inside a problem cannot route it;
+  tested). #9: Save is disabled while in flight. #10: externals deduped (case / spacing) and blank
+  dropped, the site party's id read-only, contracted MW disabled without a member, a cleared share
+  or a removed member drops its share key. #11: `csvCell` leaves finite numbers as numbers (a
+  negative net was written as text). #12: a shell period with no data is said; flags "+N more". #13:
+  the template build is quiet (no double toast).
+- **Carry-forward closed:** per-asset export parts as line metadata — WP3.6 has no per-asset
+  drill-down (the table splits by stream); P4 reopens it if the returns need it.
+
 ---
 
 ## WP3.7a Library browser

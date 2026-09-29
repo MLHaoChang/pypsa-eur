@@ -126,3 +126,89 @@ describe('ParticipantsDesigner', () => {
       .toContain('point of connection')
   })
 })
+
+describe('ParticipantsDesigner — review round 1', () => {
+  it('saves after a Reload with the NEW digest and the new config (#1)', async () => {
+    api.putValueFlows.mockRejectedValueOnce(new StaleEditError('changed'))
+    renderDesigner()
+    await screen.findByTestId('vf-designer')
+    fireEvent.click(screen.getByRole('button', { name: 'Save participants' }))
+    const stale = await screen.findByTestId('vf-stale')
+    api.getValueFlows.mockResolvedValue({ digest: 'd9', status: 'ok', value_flows: {
+      participants: [{ id: 'site', name: 'NEW', role: 'site_owner' }] } })
+    fireEvent.click(within(stale).getByRole('button', { name: 'Reload' }))
+    await waitFor(() => expect((screen.getByLabelText('Participant 1 name') as HTMLInputElement).value)
+      .toBe('NEW'))
+    api.putValueFlows.mockResolvedValue({ value_flows: null, digest: 'd10', status: 'ok' })
+    fireEvent.click(screen.getByRole('button', { name: 'Save participants' }))
+    await waitFor(() => expect(api.putValueFlows).toHaveBeenCalledTimes(2))
+    expect(api.putValueFlows.mock.calls[1][1]).toBe('d9')
+  })
+
+  it('shows hub problems with no group contract and can remove the settings (#2)', async () => {
+    api.getValueFlows.mockResolvedValue({ digest: 'd0', status: 'ok', value_flows: {
+      participants: [{ id: 'site', name: 'site', role: 'site_owner' }],
+      hub_members: [{ link: 'import', participant: 'site' }], allocation: { basis: 'energy' } } })
+    api.putValueFlows.mockRejectedValue(Object.assign(new Error('422'), { response: { status: 422,
+      data: { detail: { problems: ['hub_members need a group contract',
+                                   'an allocation key needs a group contract'] } } } }))
+    renderDesigner()
+    await screen.findByTestId('vf-designer')
+    fireEvent.click(screen.getByRole('button', { name: 'Save participants' }))
+    const hub = await screen.findByRole('heading', { name: 'Energy hub' })
+    await waitFor(() => expect(within(hub.parentElement!).getAllByRole('listitem').length).toBe(2))
+    fireEvent.click(within(hub.parentElement!).getByRole('button', { name: 'Remove hub settings' }))
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Energy hub' })).toBeNull())
+    // …and the problems stay visible (the fallback list).
+    expect(screen.getAllByText(/need(s)? a group contract/).length).toBe(2)
+  })
+
+  it('says why when the state cannot be read (#3)', async () => {
+    api.getValueFlows.mockRejectedValue(new Error('boom'))
+    renderDesigner()
+    expect((await screen.findByTestId('vf-designer-unavailable')).textContent)
+      .toContain('could not be loaded')
+  })
+
+  it('invalidates the results after appending contracts (#4)', async () => {
+    api.buildTemplate.mockResolvedValue({ config: { participants: [] },
+      draft_contracts: [{ type: 'lease', id: 'l', annual_payment: null }], notes: [] })
+    api.appendContracts.mockResolvedValue({} as never)
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    render(<QueryClientProvider client={qc}><ParticipantsDesigner /></QueryClientProvider>)
+    await screen.findByTestId('vf-designer')
+    fireEvent.click(screen.getByRole('button', { name: 'Build' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('annual payment'), { target: { value: '1' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save contracts and use' }))
+    await waitFor(() => expect(spy.mock.calls.some(([f]) =>
+      JSON.stringify(f?.queryKey).includes('results'))).toBe(true))
+    expect(await screen.findByText(/1 contract\(s\) saved/)).toBeTruthy()
+  })
+
+  it('shows a kind rule as the payee and can remove it (#5)', async () => {
+    api.getValueFlows.mockResolvedValue({ digest: 'd0', status: 'ok', value_flows: {
+      participants: [{ id: 'site', name: 'site', role: 'site_owner' }],
+      tariff_payees: [{ kind: 'energy', payee: 'dso' }] } })
+    renderDesigner()
+    await screen.findByTestId('vf-designer')
+    const select = screen.getByLabelText('Payee of energy') as HTMLSelectElement
+    expect(select.options[0].textContent).toBe('dso (the energy rule)')
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the energy payee rule' }))
+    expect((screen.getByLabelText('Payee of energy') as HTMLSelectElement).options[0].textContent)
+      .toBe('retailer (default)')
+  })
+
+  it('names a stored config that does not validate, keeps the site id, dedupes externals', async () => {
+    api.getValueFlows.mockResolvedValue({ digest: 'd0', status: 'value_flows_invalid',
+      message: 'participants: bad', value_flows: { participants: 'x' } as never })
+    renderDesigner()
+    expect((await screen.findByTestId('vf-stored-invalid')).textContent).toContain('participants: bad')
+    expect((screen.getByLabelText('Participant 1 id') as HTMLInputElement).readOnly).toBe(true)
+    fireEvent.change(screen.getByLabelText('New external'), { target: { value: ' RETAILER ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add external' }))
+    expect(screen.getAllByRole('button', { name: /Remove external/i })
+      .filter(b => /retailer/i.test(b.getAttribute('aria-label') ?? '')).length).toBe(1)
+  })
+})

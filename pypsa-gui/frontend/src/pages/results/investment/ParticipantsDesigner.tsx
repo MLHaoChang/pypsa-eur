@@ -16,8 +16,9 @@ import { Dialog } from '../../../components/Dialog'
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import {
-  draftNeeds, fillDraft, initialConfig, ownerOf, payeeOf, problemSection, ROLES, setOwner,
-  setPayee, TEMPLATES, update, type Section, type TemplateName,
+  addExternal, clearHub, draftNeeds, fillDraft, initialConfig, ownerOf, payeeOf, problemSection,
+  removeHubMember, removeKindRule, resolvedPayee, ROLES, setOwner, setPayee, TEMPLATES, update,
+  type Section, type TemplateName,
 } from './designerModel'
 
 const input = 'border border-border rounded px-1 py-0.5 text-[11px] bg-bg'
@@ -119,14 +120,16 @@ export default function ParticipantsDesigner() {
   const [problems, setProblems] = useState<string[]>([])
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
   const [stale, setStale] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [newExternal, setNewExternal] = useState('')
 
-  // Start from what the server holds, once per load (a reload resets it).
+  // Start from what the server holds — never from a cache that is being
+  // refetched (review #1): once per load; a reload re-seeds explicitly.
   useEffect(() => {
-    if (state.data && ctx.data && cfg === null) {
+    if (state.data && ctx.data && cfg === null && !state.isFetching) {
       setCfg(initialConfig(state.data, ctx.data)); setDigest(state.data.digest)
     }
-  }, [state.data, ctx.data, cfg])
+  }, [state.data, state.isFetching, ctx.data, cfg])
 
   const bySection = useMemo(() => {
     const out: Record<Section, string[]> = { participants: [], assets: [], payees: [], hub: [] }
@@ -134,8 +137,8 @@ export default function ParticipantsDesigner() {
     return out
   }, [problems])
 
-  if (ctx.isError) {
-    const e = ctx.error
+  if (ctx.isError || state.isError) {
+    const e = ctx.isError ? ctx.error : state.error
     return <p className="text-[11px] text-muted py-2" data-testid="vf-designer-unavailable">
       {e instanceof NoCommercialConfigError
         ? 'Set up the commercial config (the point of connection) before defining participants.'
@@ -145,16 +148,24 @@ export default function ParticipantsDesigner() {
   if (!cfg || !ctx.data) return <p className="text-[11px] text-muted py-2">Loading the designer…</p>
   const c: DesignerContext = ctx.data
   const participants = cfg.participants ?? []
+  const siteIndex = participants.findIndex(p => p.id.trim().toLowerCase()
+                                                === c.site_party.trim().toLowerCase())
+  const hubShown = c.group_members.length > 0 || (cfg.hub_members?.length ?? 0) > 0 || !!cfg.allocation
   const parties = [...participants.map(p => p.id), ...(cfg.externals ?? [])]
   const byBus = new Map<string, DesignerContext['assets']>()
   for (const a of c.assets) byBus.set(a.bus, [...(byBus.get(a.bus) ?? []), a])
 
   const reload = async () => {
-    setStale(false); setProblems([]); setMessage(null); setCfg(null)
-    await qc.invalidateQueries({ queryKey: nk(project, 'value_flows') })
+    setStale(false); setProblems([]); setMessage(null)
+    // Fetch the CURRENT state (not the cache) and re-seed from it (review #1).
+    const fresh = await qc.fetchQuery({ queryKey: nk(project, 'value_flows', 'state'),
+                                        queryFn: () => commercialApi.getValueFlows(), staleTime: 0 })
+    await qc.invalidateQueries({ queryKey: nk(project, 'value_flows', 'designer') })
+    setCfg(initialConfig(fresh, c)); setDigest(fresh.digest)
   }
   const save = async (value: ValueFlowConfig) => {
-    setProblems([]); setMessage(null)
+    if (saving) return
+    setSaving(true); setProblems([]); setMessage(null)
     try {
       const out = await commercialApi.putValueFlows(value, digest ?? '')
       setDigest(out.digest)
@@ -167,15 +178,21 @@ export default function ParticipantsDesigner() {
       if (list) { setProblems(list); return }
       setMessage({ tone: 'error', text: e instanceof SolverInFlightError
         ? 'A solve is running; save after it finishes.' : 'The participants could not be saved.' })
-    }
+    } finally { setSaving(false) }
   }
   const applyTemplate = async (value: ValueFlowConfig, drafts: Array<Record<string, unknown>>) => {
     if (drafts.length) {
       await commercialApi.appendContracts(drafts)
+      // Contracts change the bill, the settlement and the ledger without a
+      // re-solve (review #4).
       await qc.invalidateQueries({ queryKey: nk(project, 'value_flows', 'designer') })
+      await qc.invalidateQueries({ queryKey: nk(project, 'results') })
+      await qc.invalidateQueries({ queryKey: nk(project, 'commercial') })
     }
     setCfg(value); setBuilt(null)
-    setMessage({ tone: 'ok', text: 'Template loaded — review it, then save.' })
+    setMessage({ tone: 'ok', text: drafts.length
+      ? `${drafts.length} contract(s) saved to the project. The template is loaded; the participants are not saved yet — review them, then save.`
+      : 'Template loaded — review it, then save.' })
   }
 
   return (
@@ -189,6 +206,11 @@ export default function ParticipantsDesigner() {
       {message && (
         <p role="status" className={message.tone === 'ok' ? 'text-success' : 'text-danger'}>
           {message.text}</p>
+      )}
+      {state.data?.status === 'value_flows_invalid' && (
+        <p role="alert" className="text-warn" data-testid="vf-stored-invalid">
+          The stored participants do not validate{state.data.message ? `: ${state.data.message}` : ''}.
+          The editor starts afresh; saving replaces the stored config.</p>
       )}
 
       <section aria-labelledby="vf-d-template" className="flex flex-wrap items-center gap-2">
@@ -217,6 +239,8 @@ export default function ParticipantsDesigner() {
             {participants.map((p, i) => (
               <tr key={i}>
                 <td><input aria-label={`Participant ${i + 1} id`} className={input} value={p.id}
+                           readOnly={i === siteIndex}
+                           title={i === siteIndex ? 'The site party keeps its id' : undefined}
                            onChange={e => setCfg(update(cfg, { participants: participants.map((x, j) =>
                              j === i ? { ...x, id: e.target.value } : x) }))} /></td>
                 <td><input aria-label={`Participant ${i + 1} name`} className={input} value={p.name}
@@ -228,7 +252,7 @@ export default function ParticipantsDesigner() {
                   {ROLES.map(r => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}
                 </select></td>
                 <td><button type="button" aria-label={`Remove participant ${p.id || i + 1}`}
-                            disabled={p.id === c.site_party}
+                            disabled={i === siteIndex}
                             onClick={() => setCfg(update(cfg, { participants: participants.filter((_, j) => j !== i) }))}>
                   ×</button></td>
               </tr>
@@ -240,11 +264,11 @@ export default function ParticipantsDesigner() {
         <div className="space-y-1">
           <div>Externals (parties outside the investment case):</div>
           <ul className="flex flex-wrap gap-1">
-            {(cfg.externals ?? []).map(x => (
-              <li key={x} className="border border-border rounded px-1">
+            {(cfg.externals ?? []).map((x, k) => (
+              <li key={`${k}:${x}`} className="border border-border rounded px-1">
                 {x}{' '}
                 <button type="button" aria-label={`Remove external ${x}`}
-                        onClick={() => setCfg(update(cfg, { externals: (cfg.externals ?? []).filter(y => y !== x) }))}>
+                        onClick={() => setCfg(update(cfg, { externals: (cfg.externals ?? []).filter((_, j) => j !== k) }))}>
                   ×</button>
               </li>
             ))}
@@ -252,8 +276,8 @@ export default function ParticipantsDesigner() {
           <input aria-label="New external" className={input} value={newExternal}
                  onChange={e => setNewExternal(e.target.value)} />
           <button type="button" className="underline ml-1" disabled={!newExternal.trim()}
-                  onClick={() => { setCfg(update(cfg, { externals: [...(cfg.externals ?? []), newExternal.trim()] }))
-                                   setNewExternal('') }}>Add external</button>
+                  onClick={() => { setCfg(addExternal(cfg, newExternal)); setNewExternal('') }}>
+            Add external</button>
           {c.contract_parties.length > 0 && (
             <p className="text-muted">The contracts name: {c.contract_parties.join(', ')}.</p>
           )}
@@ -288,15 +312,27 @@ export default function ParticipantsDesigner() {
       <section aria-labelledby="vf-d-payees" className="space-y-1">
         <h4 id="vf-d-payees" className="font-semibold">Who is paid each tariff item</h4>
         {c.tariff_items.length === 0 && <p className="text-muted">The project has no import tariff.</p>}
-        {c.tariff_items.map(it => (
-          <label key={it.id} className="flex items-center gap-2">
-            <span className="w-56">{it.id} ({it.kind})</span>
-            <select aria-label={`Payee of ${it.id}`} className={input} value={payeeOf(cfg, it.id)}
-                    onChange={e => setCfg(setPayee(cfg, it.id, e.target.value))}>
-              <option value="">{it.default_payee} (default)</option>
-              {parties.filter(Boolean).map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
-          </label>
+        {c.tariff_items.map(it => {
+          // Without an item rule the item resolves by kind, then by default.
+          const inherited = resolvedPayee({ ...cfg, tariff_payees: (cfg.tariff_payees ?? [])
+            .filter(r => r.item_id !== it.id) }, it)
+          return (
+            <label key={it.id} className="flex items-center gap-2">
+              <span className="w-56">{it.id} ({it.kind})</span>
+              <select aria-label={`Payee of ${it.id}`} className={input} value={payeeOf(cfg, it.id)}
+                      onChange={e => setCfg(setPayee(cfg, it.id, e.target.value))}>
+                <option value="">{inherited.payee} ({inherited.by === 'kind' ? `the ${it.kind} rule` : 'default'})</option>
+                {parties.filter(Boolean).map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </label>
+          )
+        })}
+        {(cfg.tariff_payees ?? []).filter(r => !r.item_id && r.kind).map(r => (
+          <div key={`kind:${r.kind}`} className="flex items-center gap-2" data-testid={`vf-kind-rule-${r.kind}`}>
+            <span>Every {r.kind} item is paid to {r.payee}</span>
+            <button type="button" className="underline" aria-label={`Remove the ${r.kind} payee rule`}
+                    onClick={() => setCfg(removeKindRule(cfg, r.kind!))}>Remove</button>
+          </div>
         ))}
         <label className="flex items-center gap-2">
           <span className="w-56">Export revenue goes to</span>
@@ -310,15 +346,22 @@ export default function ParticipantsDesigner() {
         <Problems list={bySection.payees} />
       </section>
 
-      {c.group_members.length > 0 && (
+      {hubShown && (
         <section aria-labelledby="vf-d-hub" className="space-y-1">
           <h4 id="vf-d-hub" className="font-semibold">Energy hub</h4>
+          {c.group_members.length === 0 && (
+            <p className="text-warn">The project has no group contract, so hub settings cannot be
+              saved.{' '}
+              <button type="button" className="underline" onClick={() => setCfg(clearHub(cfg))}>
+                Remove hub settings</button></p>
+          )}
           {c.group_members.map(link => {
             const m = (cfg.hub_members ?? []).find(x => x.link === link)
             const setMember = (patch: { participant?: string; contracted_mw?: number | null }) => {
-              const rest = (cfg.hub_members ?? []).filter(x => x.link !== link)
               const next = { link, participant: m?.participant ?? '', contracted_mw: m?.contracted_mw ?? null, ...patch }
-              setCfg(update(cfg, { hub_members: next.participant ? [...rest, next] : rest }))
+              if (!next.participant) { setCfg(removeHubMember(cfg, link)); return }
+              const rest = (cfg.hub_members ?? []).filter(x => x.link !== link)
+              setCfg(update(cfg, { hub_members: [...rest, next] }))
             }
             return (
               <div key={link} className="flex items-center gap-2">
@@ -329,7 +372,7 @@ export default function ParticipantsDesigner() {
                   {participants.filter(p => p.id).map(p => <option key={p.id} value={p.id}>{p.id}</option>)}
                 </select>
                 <label>contracted MW{' '}
-                  <input type="number" min={0} step="any" className={input}
+                  <input type="number" min={0} step="any" className={input} disabled={!m}
                          aria-label={`Contracted MW for ${link}`} value={m?.contracted_mw ?? ''}
                          onChange={e => setMember({ contracted_mw: e.target.value === '' ? null : Number(e.target.value) })} />
                 </label>
@@ -354,17 +397,22 @@ export default function ParticipantsDesigner() {
               <input type="number" min={0} max={1} step="any" className={input}
                      aria-label={`Share of ${m.participant}`}
                      value={cfg.allocation?.shares?.[m.participant] ?? ''}
-                     onChange={e => setCfg(update(cfg, { allocation: { basis: 'fixed_shares',
-                       shares: { ...(cfg.allocation?.shares ?? {}), [m.participant]: Number(e.target.value) } } }))} />
+                     onChange={e => {
+                       const shares = { ...(cfg.allocation?.shares ?? {}) }
+                       if (e.target.value === '') delete shares[m.participant]
+                       else shares[m.participant] = Number(e.target.value)
+                       setCfg(update(cfg, { allocation: { basis: 'fixed_shares', shares } }))
+                     }} />
             </label>
           ))}
           <Problems list={bySection.hub} />
         </section>
       )}
+      {!hubShown && <Problems list={bySection.hub} />}
 
       <div className="flex gap-2">
-        <button type="button" className="px-2 py-1 rounded bg-accent text-on-accent"
-                onClick={() => save(cfg)}>Save participants</button>
+        <button type="button" className="px-2 py-1 rounded bg-accent text-on-accent disabled:opacity-50"
+                disabled={saving} onClick={() => save(cfg)}>Save participants</button>
         <button type="button" className="px-2 py-1 underline" onClick={reload}>Discard changes</button>
       </div>
 

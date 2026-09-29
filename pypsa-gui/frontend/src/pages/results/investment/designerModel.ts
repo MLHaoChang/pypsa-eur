@@ -69,11 +69,60 @@ export function fillDraft(draft: Record<string, unknown>,
 
 export type Section = 'participants' | 'assets' | 'payees' | 'hub'
 
-/** Where a server problem (PUT value_flows 422) is shown. */
+/** Where a server problem (PUT value_flows 422) is shown — anchored on the
+ *  server's own phrasing (`participants.value_flows_problems`), so a party or
+ *  contract NAME cannot route it (WP3.6 review #7). */
 export function problemSection(problem: string): Section {
-  const p = problem.toLowerCase()
-  if (/tariff payee|tariff item|item /.test(p)) return 'payees'
-  if (/hub member|allocation|fixed_shares|contracted_mw|group/.test(p)) return 'hub'
-  if (/^asset |owner|owned/.test(p)) return 'assets'
+  const p = problem.trim()
+  if (/^tariff payee|^tariff_payees/i.test(p)) return 'payees'
+  if (/^(hub member|hub_members|an allocation key|the contracted_capacity key|fixed_shares|the energy_hub template)/i.test(p)) {
+    return 'hub'
+  }
+  if (/^asset '|^(Generator|StorageUnit|Store|Link|Line|Transformer) '.*' is owned twice|^asset_owners/.test(p)) {
+    return 'assets'
+  }
   return 'participants'
+}
+
+const norm = (x: string) => x.trim().toLowerCase()
+
+/** The payee an item resolves to, as the server resolves it: a rule for the
+ *  item, then a rule for its kind, then the designer's default (WP3.6 review #5). */
+export function resolvedPayee(cfg: ValueFlowConfig, item: { id: string; kind: string;
+                                                           default_payee: string }): {
+  payee: string; by: 'item' | 'kind' | 'default'
+} {
+  const byItem = (cfg.tariff_payees ?? []).find(r => r.item_id === item.id)
+  if (byItem) return { payee: byItem.payee, by: 'item' }
+  const byKind = (cfg.tariff_payees ?? []).find(r => !r.item_id && r.kind === item.kind)
+  if (byKind) return { payee: byKind.payee, by: 'kind' }
+  return { payee: item.default_payee, by: 'default' }
+}
+
+export function removeKindRule(cfg: ValueFlowConfig, kind: string): ValueFlowConfig {
+  return update(cfg, { tariff_payees: (cfg.tariff_payees ?? []).filter(r => r.item_id || r.kind !== kind) })
+}
+
+/** Add an external unless it is blank or already there (case and spacing
+ *  aside, as the server matches parties). */
+export function addExternal(cfg: ValueFlowConfig, name: string): ValueFlowConfig {
+  const x = name.trim()
+  if (!x || (cfg.externals ?? []).some(e => norm(e) === norm(x))) return cfg
+  return update(cfg, { externals: [...(cfg.externals ?? []), x] })
+}
+
+/** Drop a hub member (and its fixed share). */
+export function removeHubMember(cfg: ValueFlowConfig, link: string): ValueFlowConfig {
+  const gone = (cfg.hub_members ?? []).find(m => m.link === link)
+  const shares = { ...(cfg.allocation?.shares ?? {}) }
+  if (gone) delete shares[gone.participant]
+  return update(cfg, {
+    hub_members: (cfg.hub_members ?? []).filter(m => m.link !== link),
+    allocation: cfg.allocation ? { ...cfg.allocation,
+      shares: cfg.allocation.basis === 'fixed_shares' ? shares : cfg.allocation.shares } : null,
+  })
+}
+
+export function clearHub(cfg: ValueFlowConfig): ValueFlowConfig {
+  return update(cfg, { hub_members: [], allocation: null })
 }

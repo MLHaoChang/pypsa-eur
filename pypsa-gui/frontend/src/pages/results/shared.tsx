@@ -795,6 +795,9 @@ export function stampWithPeriod(s: string, period?: number): string {
 // classic CSV-injection vector when names like "=cmd|'/c calc'!A1" sneak in).
 export function csvCell(v: unknown): string {
   if (v == null) return ''
+  // A finite number is data, never a formula: `-800` stays a number (only
+  // TEXT that starts like a formula is quoted).
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v)
   let s = String(v)
   if (/^[=+\-@\t\r]/.test(s)) s = "'" + s
   return /[,"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s

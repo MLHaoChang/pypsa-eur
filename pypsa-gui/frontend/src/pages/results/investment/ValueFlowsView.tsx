@@ -159,6 +159,10 @@ export default function ValueFlowsView({ payload, sankeyWidth }: {
 
   return (
     <div className="space-y-3" data-testid="vf-view">
+      {fromShell && !keys.includes(fromShell) && (
+        <p className="text-[11px] text-muted" data-testid="vf-period-missing">
+          No value flows for {fromShell}; showing {periodLabel(periodKey)}.</p>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <ConservationChip state={state} />
         {keys.length > 1 && !(fromShell && keys.includes(fromShell)) && (
@@ -196,6 +200,7 @@ export default function ValueFlowsView({ payload, sankeyWidth }: {
             {flags.length > 0 && (
               <ul className="text-[11px] text-muted pl-3">
                 {flags.slice(0, 12).map(f => <li key={f}>{f}</li>)}
+                {flags.length > 12 && <li>+{flags.length - 12} more</li>}
               </ul>
             )}
           </div>
