@@ -506,7 +506,7 @@ def _gate_user_code(submitted: dict, db, actor) -> None:
 def update_solver_config(
     cfg: SolverConfigSchema,
     db: DBSession = Depends(get_db),
-    actor: User | None = Depends(optional_user),
+    user: User | None = Depends(optional_user),
 ):
     # Real partial-PUT: merge submitted fields over the existing config so
     # callers can flip a single knob without echoing the rest of the
@@ -523,7 +523,7 @@ def update_solver_config(
         # An explicit null clears the layer (and its FCA stress entry); a null
         # when nothing is stored (a full-payload PUT from the settings form)
         # touches nothing (WP1.4 round 3 #6).
-        submitted["commercial"] = _bind_commercial(cfg.commercial, actor)
+        submitted["commercial"] = _bind_commercial(cfg.commercial, user)
     # Legacy mode 'lpf' was removed in v1.x — coerce to 'lopf' silently so
     # old saved configs and stale frontend caches don't 400 the user. Same
     # treatment applied in projects.py at load time.
@@ -533,7 +533,7 @@ def update_solver_config(
     # observe the same baseline and clobber a sibling's update.
     # BEFORE the merge: a 403 that still stored the code would read as
     # protection while the next run executed it.
-    _gate_user_code(submitted, db, actor)
+    _gate_user_code(submitted, db, user)
     with PyPSAService.get_solver_state_lock():
         merged = asdict(_state["solver_config"])
         merged.update(submitted)
