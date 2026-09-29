@@ -12,7 +12,8 @@ import type { LibraryItemRef, Tariff } from '../../../api/types'
 import { Dialog } from '../../../components/Dialog'
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
-import { pinnedVersion, replacesInline, urdbRate, type RateChoice } from './libraryModel'
+import { formatApiDetail } from '../../../api/client'
+import { pinnedVersions, replacesInline, urdbRate, type RateChoice } from './libraryModel'
 
 const input = 'border border-border rounded px-1 py-0.5 text-[11px] bg-bg'
 const KINDS: Array<{ id: LibraryItemKind; label: string }> = [
@@ -20,16 +21,35 @@ const KINDS: Array<{ id: LibraryItemKind; label: string }> = [
   { id: 'connection_agreement', label: 'Connection agreements' },
 ]
 
+/** The server's reason, whatever its shape — a string, `{message}`, or
+ *  FastAPI's validation list (WP3.7a review #5). */
 function detailText(e: unknown): string {
   const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
-  if (typeof d === 'string') return d
-  if (d && typeof d === 'object' && 'message' in d) return String((d as { message: unknown }).message)
+  if (d != null) return formatApiDetail(d)
   return e instanceof Error ? e.message : 'the request failed'
 }
 
 function tariffSummary(t: Tariff): string {
   const kinds = t.items.map(i => `${i.id} (${i.kind})`).join(', ')
-  return `${t.name} — ${t.jurisdiction}, from ${t.valid_from}; items: ${kinds}`
+  const partial = t.unsupported_fields?.length
+    ? `; NOT imported: ${t.unsupported_fields.join(', ')} (the bill is marked incomplete)` : ''
+  return `${t.name} — ${t.jurisdiction}, from ${t.valid_from}; items: ${kinds}${partial}`
+}
+
+/** A contract's or agreement's one-line summary (the JSON has the rest). */
+function itemSummary(kind: LibraryItemKind, p: Record<string, unknown>): string {
+  if (kind === 'tariff') return tariffSummary(p as unknown as Tariff)
+  if (kind === 'connection_agreement') {
+    return `${String(p.kind)} connection, import cap ${String(p.import_cap_mw)} MW${
+      p.export_cap_mw != null ? `, export cap ${String(p.export_cap_mw)} MW` : ''}, from ${String(p.available_from)}${
+      p.capacity_fee ? ', with a capacity fee' : ''}`
+  }
+  const parties = ['seller', 'buyer', 'lessor', 'lessee', 'provider', 'customer', 'retailer',
+                   'counterparty', 'generator_owner'].filter(k => p[k]).map(k => `${k} ${String(p[k])}`)
+  const money = ['price', 'strike', 'annual_payment', 'fee_eur_per_mwh', 'fee_eur_per_year',
+                 'availability_eur_per_mw_year'].filter(k => p[k] != null).map(k => `${k.replace(/_/g, ' ')} ${String(p[k])}`)
+  return `${String(p.type ?? 'contract').toUpperCase()}${p.kind ? ` (${String(p.kind)})` : ''}: ${
+    [...parties, ...money].join(', ')}${p.tenor_years ? `; ${String(p.tenor_years)} years` : ''}`
 }
 
 function ItemView({ kind, refItem, onAttach }: {
@@ -41,7 +61,7 @@ function ItemView({ kind, refItem, onAttach }: {
                           queryFn: () => libraryApi.getItem(kind, refItem.id, version) })
   const commercial = useQuery({ queryKey: nk(project, 'commercial', 'config'),
                                 queryFn: () => commercialApi.getCommercial() })
-  const pinned = pinnedVersion(commercial.data, kind, refItem.id)
+  const pins = pinnedVersions(commercial.data, kind, refItem.id)
   return (
     <div className="space-y-2 border border-border rounded p-2" data-testid="lib-item-view">
       <div className="flex flex-wrap items-center gap-2">
@@ -53,9 +73,10 @@ function ItemView({ kind, refItem, onAttach }: {
               <option key={v} value={v}>v{v}{v === refItem.version ? ' (latest)' : ''}</option>))}
           </select>
         </label>
-        {pinned != null && (
+        {pins.length > 0 && (
           <span className="text-muted" data-testid="lib-pinned">
-            pinned by this project: v{pinned}{pinned !== refItem.version ? ' (a newer version exists)' : ''}
+            pinned by this project: {pins.map(v => `v${v}`).join(', ')}
+            {pins.some(v => v !== refItem.version) ? ' (a newer version exists)' : ''}
           </span>
         )}
         {kind === 'tariff' && item.data && (
@@ -66,7 +87,7 @@ function ItemView({ kind, refItem, onAttach }: {
       {item.isError && <p role="alert" className="text-danger">{detailText(item.error)}</p>}
       {item.data && (
         <>
-          {kind === 'tariff' && <p>{tariffSummary(item.data.payload as unknown as Tariff)}</p>}
+          <p data-testid="lib-item-summary">{itemSummary(kind, item.data.payload as Record<string, unknown>)}</p>
           <details>
             <summary>JSON</summary>
             <pre className="text-[10px] overflow-auto max-h-64">
@@ -115,7 +136,7 @@ function UrdbImport({ onDone }: { onDone: () => void }) {
     <section aria-labelledby="lib-urdb" className="space-y-1">
       <h4 id="lib-urdb" className="font-semibold">Import a URDB tariff</h4>
       <label>URDB or OpenEI JSON file{' '}
-        <input type="file" accept="application/json,.json" aria-label="URDB file"
+        <input type="file" accept="application/json,.json"
                onChange={async e => {
                  const f = e.target.files?.[0]
                  setResult(null); setError(null); setRefusals([])
@@ -125,18 +146,20 @@ function UrdbImport({ onDone }: { onDone: () => void }) {
                }} />
       </label>
       {choice?.kind === 'error' && <p role="alert" className="text-danger">{choice.message}</p>}
-      {choice?.kind === 'choose' && (
+      {(choice?.kind === 'choose' || (choice?.kind === 'rate' && choice.rates)) && (
+        // Stays visible once a rate is picked, so the choice can be seen and
+        // changed (WP3.7a review #2).
         <label className="block">The file holds several rates; pick one{' '}
           <select aria-label="Rate" className={input} value={index ?? ''}
                   onChange={e => pick(file, e.target.value === '' ? undefined : Number(e.target.value))}>
             <option value="">choose…</option>
-            {choice.rates.map(r => <option key={r.index} value={r.index}>{r.label}</option>)}
+            {(choice.rates ?? []).map(r => <option key={r.index} value={r.index}>{r.label}</option>)}
           </select>
         </label>
       )}
       {choice?.kind === 'rate' && (
         <div className="flex flex-wrap items-center gap-2">
-          <label>Library name <input aria-label="Tariff name in the Library" className={input}
+          <label>Library name <input className={input} maxLength={128}
                                      value={name} onChange={e => setName(e.target.value)} /></label>
           <label>valid from <input type="date" aria-label="Valid from (when the rate has no start date)"
                                    className={input} value={validFrom}
@@ -221,7 +244,7 @@ function SeriesPanel() {
             <option value="price">price series</option><option value="meter">meter data</option></select></label>
           <label>file <input type="file" aria-label="Series file" accept=".csv,.xlsx"
                              onChange={e => setFile(e.target.files?.[0] ?? null)} /></label>
-          <label>name <input aria-label="Series name" className={input} value={name}
+          <label>name <input aria-label="Series name" className={input} value={name} maxLength={128}
                              onChange={e => setName(e.target.value)} /></label>
           <label>time zone <input aria-label="Time zone of the file (blank: the snapshot clock)"
                                   className={input} value={tz} placeholder="Europe/Berlin"
@@ -265,11 +288,13 @@ export default function LibraryBrowser() {
   const project = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
   const [kind, setKind] = useState<LibraryItemKind>('tariff')
-  const [open, setOpen] = useState<LibraryItemRef | null>(null)
+  const [openId, setOpenId] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<LibraryItemRef | null>(null)
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
   const items = useQuery({ queryKey: nk(project, 'library', 'items', kind),
                            queryFn: () => libraryApi.listItems(kind) })
+  // The open item follows the list: a new version imported shows at once (review #6).
+  const open = (items.data ?? []).find(r => r.id === openId) ?? null
 
   const attach = async (ref: LibraryItemRef) => {
     setMessage(null)
@@ -284,16 +309,16 @@ export default function LibraryBrowser() {
     }
   }
   const requestAttach = async (ref: LibraryItemRef) => {
-    const commercial = await qc.fetchQuery({ queryKey: nk(project, 'commercial', 'config'),
-                                             queryFn: () => commercialApi.getCommercial(), staleTime: 0 })
-    const old = commercial?.import_tariff_ref
-    let oldPayload: Tariff | null = null
-    if (old && old.hash !== ref.hash) {
-      try { oldPayload = (await libraryApi.getItem<Tariff>('tariff', old.id, old.version)).payload }
-      catch { oldPayload = null }
+    setMessage(null)
+    try {
+      const commercial = await qc.fetchQuery({ queryKey: nk(project, 'commercial', 'config'),
+                                               queryFn: () => commercialApi.getCommercial(), staleTime: 0 })
+      if (replacesInline(commercial)) setConfirm(ref)
+      else await attach(ref)
+    } catch (e) {
+      // Nothing is lost silently, a failed read included (review #4).
+      setMessage({ tone: 'error', text: `The tariff could not be attached: ${detailText(e)}` })
     }
-    if (replacesInline(commercial, ref, oldPayload)) setConfirm(ref)
-    else await attach(ref)
   }
 
   return (
@@ -302,7 +327,7 @@ export default function LibraryBrowser() {
         {KINDS.map(k => (
           <label key={k.id} className="flex items-center gap-1">
             <input type="radio" name="lib-kind" checked={kind === k.id}
-                   onChange={() => { setKind(k.id); setOpen(null) }} />{k.label}</label>
+                   onChange={() => { setKind(k.id); setOpenId(null); setMessage(null) }} />{k.label}</label>
         ))}
       </div>
       {message && <p role="status" className={message.tone === 'ok' ? 'text-success' : 'text-danger'}>
@@ -311,14 +336,15 @@ export default function LibraryBrowser() {
       <ul className="space-y-1" data-testid="lib-items">
         {(items.data ?? []).map(r => (
           <li key={r.id} className="flex items-center gap-2">
-            <button type="button" className="underline" aria-expanded={open?.id === r.id}
-                    onClick={() => setOpen(open?.id === r.id ? null : r)}>{r.id}</button>
+            <button type="button" className="underline" aria-expanded={openId === r.id}
+                    onClick={() => setOpenId(openId === r.id ? null : r.id)}>{r.id}</button>
             <span className="text-muted">v{r.version}</span>
           </li>
         ))}
         {items.data?.length === 0 && <li className="text-muted">No items of this kind yet.</li>}
       </ul>
-      {open && <ItemView key={`${kind}:${open.id}`} kind={kind} refItem={open} onAttach={requestAttach} />}
+      {open && <ItemView key={`${kind}:${open.id}:${open.version}`} kind={kind} refItem={open}
+                         onAttach={r => { void requestAttach(r) }} />}
       {kind === 'tariff' && (
         <UrdbImport onDone={() => { void qc.invalidateQueries({ queryKey: nk(project, 'library', 'items', 'tariff') }) }} />
       )}

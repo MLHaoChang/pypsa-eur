@@ -838,6 +838,25 @@ states; a11y.
   asking; confirm and cancel; URDB choice → refusals → partial import; meter unit required and the
   conflict; `expectAllButtonsNamed`).
 
+**WP3.7a review round 1 — FAIL (5 binding + 4 optional); fixed.**
+1. `replacesInline` asked on a plain switch between Library tariffs → with a ref the stored inline
+   copy IS that ref's payload (the solver-config route refuses any other, `import_tariff_ref_conflict`),
+   so the rule is now "an inline tariff or id with NO ref" (one argument; no payload fetch).
+2. The rate picker vanished after a pick and its labels showed raw epoch seconds → `urdbRate` returns
+   `rates`/`index` with the picked rate, the select stays visible and changeable; `urdbDate` formats
+   URDB start/end dates as YYYY-MM-DD.
+3. Pins covered only the import tariff → `pinnedVersions(commercial, kind, id)` also scans
+   `contracts[].library_ref` and `connection.library_ref`; contracts and agreements get a one-line
+   summary (`itemSummary`), `unsupported_fields` shown on a partial tariff.
+4. `requestAttach` swallowed a failed config read → try/catch, "could not be attached: <reason>".
+5. `detailText` dropped FastAPI's validation list → `formatApiDetail` (loc: msg; …).
+Optional taken: #6 the open item follows the list (a new version shows at once); #8 the file input is
+named by its label, the Library-name input by its label (maxLength 128); #9 the message clears on a
+kind switch; the library write calls pass `skipErrorToast` (the browser shows its own errors).
+Tests: `libraryModel.test.ts` 4, `LibraryBrowser.test.tsx` 9 (+ Library switch without the dialog,
+failed read, 422 list, contract pin and summary; the picker stays after a pick), `commercial.test.ts`
+quiet calls.
+
 ## WP3.7b Tariff builder + bill preview
 
 Items / periods / tiers (per-period `tier_rates` for windowed items) / ratchets (range, cyclic, months) /

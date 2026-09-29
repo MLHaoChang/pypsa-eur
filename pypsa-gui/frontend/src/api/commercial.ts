@@ -95,10 +95,10 @@ export const libraryApi = {
     client.get<LibraryItem<P>>(`/library/items/${kind}/${enc(name)}`,
       { params: version === undefined ? {} : { version } }).then(r => r.data),
   putItem: (kind: LibraryItemKind, name: string, payload: unknown, meta: Record<string, unknown> = {}) =>
-    client.put<LibraryItemRef>(`/library/items/${kind}/${enc(name)}`, { payload, meta })
+    client.put<LibraryItemRef>(`/library/items/${kind}/${enc(name)}`, { payload, meta }, QUIET)
       .then(r => r.data),
   importUrdb: (body: UrdbImportRequest) =>
-    client.post<UrdbImportResult>('/library/items/tariff/import_urdb', body).then(r => r.data),
+    client.post<UrdbImportResult>('/library/items/tariff/import_urdb', body, QUIET).then(r => r.data),
   listSeries: () => client.get<LibraryRef[]>('/library/series').then(r => r.data),
   getSeries: (name: string, version?: number) =>
     client.get<SeriesDetail>(`/library/series/${enc(name)}`,
@@ -109,7 +109,7 @@ export const libraryApi = {
     form.append('name', opts.name)
     if (opts.timezone) form.append('timezone', opts.timezone)
     if (opts.source) form.append('source', opts.source)
-    return client.post<LibraryRef>('/library/series/upload', form).then(r => r.data)
+    return client.post<LibraryRef>('/library/series/upload', form, QUIET).then(r => r.data)
   },
   uploadMeterData: (file: File, opts: { name: string; unit: string; settlement?: string;
                                         label?: string; timezone?: string | null }) => {
@@ -120,7 +120,7 @@ export const libraryApi = {
     if (opts.settlement) form.append('settlement', opts.settlement)
     if (opts.label) form.append('label', opts.label)
     if (opts.timezone) form.append('timezone', opts.timezone)
-    return client.post<MeterDataResult>('/library/meter_data', form).then(r => r.data)
+    return client.post<MeterDataResult>('/library/meter_data', form, QUIET).then(r => r.data)
   },
 }
 

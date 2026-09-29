@@ -91,11 +91,19 @@ describe('LibraryBrowser', () => {
                                unsupported_fields: ['mincharge'] })
     renderBrowser()
     await screen.findByTestId('library-browser')
-    fireEvent.change(screen.getByLabelText('URDB file'), { target: { files: [
-      file('rates.json', JSON.stringify({ items: [{ name: 'Old', startdate: 1 }, { name: 'New', startdate: 2 }] }))] } })
-    const rate = await screen.findByLabelText('Rate')
-    fireEvent.change(rate, { target: { value: '1' } })
-    fireEvent.change(await screen.findByLabelText('Tariff name in the Library'), { target: { value: 'imp' } })
+    fireEvent.change(screen.getByLabelText('URDB or OpenEI JSON file'), { target: { files: [
+      file('rates.json', JSON.stringify({ items: [{ name: 'Old', startdate: 1672531200 },
+                                                  { name: 'New', startdate: 1704067200 }] }))] } })
+    const rate = await screen.findByLabelText('Rate') as HTMLSelectElement
+    expect([...rate.options].map(o => o.textContent)).toEqual(
+      ['choose…', 'Old (from 2023-01-01)', 'New (from 2024-01-01)'])
+    fireEvent.change(rate, { target: { value: '0' } })
+    // The choice stays visible and changeable after a pick (review #2).
+    const again = await screen.findByLabelText('Rate') as HTMLSelectElement
+    expect(again.value).toBe('0')
+    fireEvent.change(again, { target: { value: '1' } })
+    await waitFor(() => expect((screen.getByLabelText('Rate') as HTMLSelectElement).value).toBe('1'))
+    fireEvent.change(await screen.findByLabelText('Library name'), { target: { value: 'imp' } })
     fireEvent.click(screen.getByRole('button', { name: 'Import' }))
     const refusals = await screen.findByTestId('lib-urdb-refusals')
     expect(refusals.textContent).toContain('mincharge: not supported')
@@ -104,6 +112,61 @@ describe('LibraryBrowser', () => {
     fireEvent.click(within(refusals).getByRole('button', { name: /Import without them/ }))
     expect((await screen.findByTestId('lib-urdb-done')).textContent).toContain('not imported: mincharge')
     expect(lib.importUrdb.mock.calls[1][0]).toMatchObject({ accept_partial: true })
+  })
+
+  it('attaches without asking on a switch between Library tariffs (the inline copy is the ref\'s)', async () => {
+    api.getCommercial.mockResolvedValue({ poc_link: 'import', import_tariff: TARIFF,
+      import_tariff_ref: { ...REF, id: 'de', hash: 'hd' } } as never)
+    api.saveCommercial.mockResolvedValue({} as never)
+    renderBrowser()
+    fireEvent.click(await screen.findByRole('button', { name: 'nl' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Attach v2 as the import tariff' }))
+    await waitFor(() => expect(api.saveCommercial).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('says so when the project cannot be read before attaching (review #4)', async () => {
+    renderBrowser()
+    fireEvent.click(await screen.findByRole('button', { name: 'nl' }))
+    const attach = await screen.findByRole('button', { name: 'Attach v2 as the import tariff' })
+    api.getCommercial.mockRejectedValue(Object.assign(new Error('500'), { response: { status: 500,
+      data: { detail: 'the project is locked' } } }))
+    fireEvent.click(attach)
+    await waitFor(() => expect(screen.getByRole('status').textContent)
+      .toContain('could not be attached: the project is locked'))
+    expect(api.saveCommercial).not.toHaveBeenCalled()
+  })
+
+  it('shows a FastAPI validation list as its messages (review #5)', async () => {
+    api.getCommercial.mockResolvedValue({ poc_link: 'import' } as never)
+    api.saveCommercial.mockRejectedValue(Object.assign(new Error('422'), { response: { status: 422,
+      data: { detail: [{ loc: ['body', 'import_tariff_ref'], msg: 'unknown version' }] } } }))
+    renderBrowser()
+    fireEvent.click(await screen.findByRole('button', { name: 'nl' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Attach v2 as the import tariff' }))
+    await waitFor(() => expect(screen.getByRole('status').textContent)
+      .toContain('import_tariff_ref: unknown version'))
+  })
+
+  it('shows a contract with its summary and the versions its contracts pin (review #3)', async () => {
+    const CREF = { kind: 'contract' as const, id: 'ppa', version: 3, hash: 'c3' }
+    lib.listItems.mockImplementation(async k => (k === 'contract' ? [CREF] : [REF]))
+    lib.getItem.mockImplementation(async (_k, name, version) => ({
+      ref: { ...CREF, id: name, version: version ?? 3 },
+      payload: { type: 'ppa', id: 'ppa', kind: 'baseload', seller: 'dev', buyer: 'site', price: 55,
+                 tenor_years: 10 } as never, meta: {} }))
+    api.getCommercial.mockResolvedValue({ poc_link: 'import', contracts: [
+      { type: 'ppa', id: 'p1', library_ref: { ...CREF, version: 2 } }] } as never)
+    renderBrowser()
+    await screen.findByTestId('library-browser')
+    fireEvent.click(screen.getByLabelText('Contracts'))
+    fireEvent.click(await screen.findByRole('button', { name: 'ppa' }))
+    const view = await screen.findByTestId('lib-item-view')
+    expect((await within(view).findByTestId('lib-pinned')).textContent)
+      .toContain('v2 (a newer version exists)')
+    expect((await within(view).findByTestId('lib-item-summary')).textContent)
+      .toBe('PPA (baseload): seller dev, buyer site, price 55; 10 years')
+    expect(within(view).queryByRole('button', { name: /Attach/ })).toBeNull()
   })
 
   it('needs a meter unit and shows a meter conflict', async () => {

@@ -35,14 +35,15 @@ describe('libraryApi', () => {
     expect(get).toHaveBeenLastCalledWith('/library/items/contract/ppa%20one', { params: { version: 3 } })
     put.mockResolvedValue({ status: 200, data: { kind: 'tariff', id: 't', version: 2, hash: 'h2' } })
     await libraryApi.putItem('tariff', 't', { id: 't' }, { source: 'builder' })
-    expect(put).toHaveBeenCalledWith('/library/items/tariff/t', { payload: { id: 't' }, meta: { source: 'builder' } })
+    expect(put).toHaveBeenCalledWith('/library/items/tariff/t', { payload: { id: 't' }, meta: { source: 'builder' } },
+                                { skipErrorToast: true })
   })
 
   it('imports a URDB rate with its options', async () => {
     post.mockResolvedValue({ status: 200, data: { ref: {}, notes: [], refusals: [], unsupported_fields: [] } })
     await libraryApi.importUrdb({ urdb_response: { name: 'r' }, name: 'r1', accept_partial: true })
     expect(post).toHaveBeenCalledWith('/library/items/tariff/import_urdb',
-      { urdb_response: { name: 'r' }, name: 'r1', accept_partial: true })
+      { urdb_response: { name: 'r' }, name: 'r1', accept_partial: true }, { skipErrorToast: true })
   })
 
   it('uploads series and meter data as multipart forms', async () => {
@@ -58,6 +59,8 @@ describe('libraryApi', () => {
     expect(url2).toBe('/library/meter_data')
     expect((form2 as FormData).get('unit')).toBe('kW')
     expect((form2 as FormData).get('timezone')).toBeNull()
+    // The browser shows these errors itself (no second toast).
+    expect(post.mock.calls.map(c => c[2])).toEqual([{ skipErrorToast: true }, { skipErrorToast: true }])
   })
 })
 
