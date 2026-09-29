@@ -78,10 +78,16 @@ function typed(e: unknown): never {
   throw e
 }
 
-/** A result GET: 404 (a route this server does not have yet) reads as "no
- *  result", like a 204; 409 and the rest become the typed errors. The tab
- *  shows the state itself, so these requests never toast. */
-function resultError(e: unknown): null {
+/** Result requests never toast (the tab shows the state itself), so their
+ *  callers MUST render an error state: nothing is toasted or logged. 409s become
+ *  the typed errors. */
+function resultError(e: unknown): never {
+  return typed(e)
+}
+/** The same, but a 404 reads as "no result": for routes that land later in
+ *  IC P3 (GET /results/value_flows in WP3.4, POST /results/billing/preview in
+ *  WP3.7b). TODO: drop this when both routes ship (a P3 gate item). */
+function notYetDeployed(e: unknown): null {
   if (detailOf(e).status === 404) return null
   return typed(e)
 }
@@ -237,8 +243,8 @@ export const commercialApi = {
   getCfeScore: () =>
     client.get<CfeScorePayload>('/results/cfe_score', QUIET).then(orNull, resultError),
   getValueFlowsResult: () =>
-    client.get<ValueFlowsPayload>('/results/value_flows', QUIET).then(orNull, resultError),
+    client.get<ValueFlowsPayload>('/results/value_flows', QUIET).then(orNull, notYetDeployed),
   previewBilling: (tariff: Tariff) =>
     client.post<BillingPayload>('/results/billing/preview', { tariff }, QUIET)
-      .then(orNull, resultError),
+      .then(orNull, notYetDeployed),
 }

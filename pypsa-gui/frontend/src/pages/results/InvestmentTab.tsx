@@ -5,7 +5,9 @@
 // a zero (ADR-0001).
 import { useRef, useState, type KeyboardEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { commercialApi, type BillingPayload, type ValueFlowsPayload } from '../../api/commercial'
+import {
+  commercialApi, SolverInFlightError, type BillingPayload, type ValueFlowsPayload,
+} from '../../api/commercial'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { CompletenessChips, type CompletenessRow } from '../../components/CompletenessChips'
@@ -26,8 +28,16 @@ export function fmtAmount(v: number | null | undefined): string {
   return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+/** The error a result query ended in, as the user should read it. */
+export function loadFailure(error: unknown): string {
+  return error instanceof SolverInFlightError
+    ? 'A solve is running; the result follows when it finishes.'
+    : 'It could not be loaded.'
+}
+
 export function completeness(billing: BillingPayload | null | undefined,
-                             flows: ValueFlowsPayload | null | undefined): CompletenessRow[] {
+                             flows: ValueFlowsPayload | null | undefined,
+                             billingError?: unknown): CompletenessRow[] {
   // `ok` only when EVERY period has a total: one missing period of a
   // multi-period bill is a bill not established (never "ok").
   const periods = Object.entries(billing?.summary ?? {})
@@ -37,16 +47,22 @@ export function completeness(billing: BillingPayload | null | undefined,
     : flows?.status === 'value_flows_invalid' ? 'failed' : 'not_established'
   const cons = flows?.conservation_ok
   return [
-    { name: 'bill', status: billOk ? 'ok' : 'not_established',
-      note: !billing ? 'no bill: solve with a commercial config first'
-        : missing.length ? `not established for ${missing.join(', ')}` : null },
+    { name: 'bill', status: billingError ? 'failed' : billOk ? 'ok' : 'not_established',
+      note: billingError ? loadFailure(billingError)
+        : !billing ? 'no bill: solve with a commercial config first'
+          : missing.length ? `not established for ${missing.join(', ')}` : null },
     { name: 'participants', status: participants,
       note: flows?.status === 'ok' ? null : (flows?.reason ?? 'no value-flow result') },
     { name: 'conservation', status: cons === true ? 'ok' : cons === false ? 'failed' : 'not_established' },
   ]
 }
 
-function BillSection({ billing }: { billing: BillingPayload | null | undefined }) {
+function BillSection({ billing, error }: { billing: BillingPayload | null | undefined;
+                                           error: unknown }) {
+  if (error) {
+    return <p className="text-[11px] text-warn py-2" data-testid="ic-bill-error">
+      The bill: {loadFailure(error)}</p>
+  }
   if (!billing) {
     return <p className="text-[11px] text-muted py-2">No bill: solve with a commercial config first.</p>
   }
@@ -104,7 +120,7 @@ export default function InvestmentTab() {
   }
 
   const participantsText = flows.isError
-    ? 'The value-flow result could not be loaded.'
+    ? `The value-flow result: ${loadFailure(flows.error)}`
     : flows.data == null
       ? 'No value-flow result yet: solve the project with a commercial config.'
       : flows.data.status === 'ok'
@@ -115,7 +131,9 @@ export default function InvestmentTab() {
 
   return (
     <div className="space-y-3" data-testid="investment-tab">
-      <CompletenessChips rows={completeness(billing.data, flows.data)} testId="ic-completeness"
+      <CompletenessChips rows={completeness(billing.data, flows.data,
+                                            billing.isError ? billing.error : undefined)}
+                         testId="ic-completeness"
                          itemTestIdPrefix="ic-section-" label="Investment case completeness" />
       <div role="tablist" aria-label="Investment case sections" className="flex gap-1 border-b border-border">
         {SECTIONS.map((s, i) => (
@@ -131,7 +149,9 @@ export default function InvestmentTab() {
       </div>
       <div role="tabpanel" id={`ic-panel-${section}`} aria-labelledby={`ic-tab-${section}`}
            tabIndex={0}>
-        {section === 'bill' && <BillSection billing={billing.data} />}
+        {section === 'bill' && (
+          <BillSection billing={billing.data} error={billing.isError ? billing.error : null} />
+        )}
         {section === 'participants' && (
           <p className="text-[11px] text-muted py-2" data-testid="ic-participants-state">
             {participantsText}

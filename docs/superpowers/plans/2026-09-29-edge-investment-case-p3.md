@@ -472,6 +472,10 @@ omission, `tsc` clean.
   - #10 `saveCommercial` is GET-then-PUT, and any save re-binds the commercial config: WP3.6/3.7 handle `library_ref_stale` / `import_tariff_ref_conflict`.
   - #11 WP3.4: `by_participant` sums skip None lines, so its totals should be `number | null` (None when a party has a None line).
   - #12 WP3.6/3.7 editors invalidate the results queries after a save.
+- **Review round 2 → PASS WITH CONDITIONS, closed (fixed and covered by tests; no round 3):**
+  - A: quiet result requests hid billing failures. The Bill section and chip now show `failed` with "could not be loaded" or "a solve is running". Every caller of a quiet result request must render its own error state: nothing is toasted or logged.
+  - B: the 404→no-result mapping is limited to the two routes not yet deployed (`/results/value_flows`, `/results/billing/preview`).
+  - C: WP3.7b maps the preview's 422 to fields (already planned).
 ---
 
 ## WP3.6 Participants designer, per-participant table, Sankey
@@ -538,6 +542,8 @@ P2 model; invalid combinations surface the 422; a11y.
   `docs/superpowers/findings/<date>-ic-p3-participants.md`; assessor verdict recorded here.
 - [ ] ADR-0002: the live probe for P2's and P3's chat changes run and recorded, or stated as owed in the
   verdict (the chat surface is then not done).
+- [ ] `notYetDeployed` (frontend `api/commercial.ts`) removed once `/results/value_flows` and
+  `/results/billing/preview` ship (WP3.5 review round 2 B).
 
 ## Scope boundaries (not P3)
 

@@ -147,12 +147,18 @@ describe('commercialApi results', () => {
   })
 
   it.each(['getBilling', 'getCfeScore', 'getValueFlowsResult'] as const)(
-    '%s turns a solve-in-flight 409 into its error and a 404 into null', async (fn) => {
+    '%s turns a solve-in-flight 409 into its error', async (fn) => {
       get.mockRejectedValue(axiosError(409, { code: 'solver_in_flight', message: 'busy' }))
       await expect(commercialApi[fn]()).rejects.toBeInstanceOf(SolverInFlightError)
-      get.mockRejectedValue(axiosError(404, 'Not Found'))
-      await expect(commercialApi[fn]()).resolves.toBeNull()
     })
+
+  it('a 404 reads as no result only for the routes not deployed yet', async () => {
+    const notFound = axiosError(404, 'Not Found')
+    get.mockRejectedValue(notFound)
+    await expect(commercialApi.getValueFlowsResult()).resolves.toBeNull()
+    await expect(commercialApi.getBilling()).rejects.toBe(notFound)       // a real fault
+    await expect(commercialApi.getCfeScore()).rejects.toBe(notFound)
+  })
 
   it('previewBilling types its errors too', async () => {
     post.mockRejectedValue(axiosError(409, { code: 'solver_in_flight', message: 'busy' }))

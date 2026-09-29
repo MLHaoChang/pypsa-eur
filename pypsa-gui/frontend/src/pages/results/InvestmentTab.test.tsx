@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
-import { commercialApi } from '../../api/commercial'
+import { commercialApi, SolverInFlightError } from '../../api/commercial'
 import InvestmentTab from './InvestmentTab'
 import { expectAllButtonsNamed } from '../../test-utils/accessibleName'
 
@@ -81,7 +81,7 @@ describe('InvestmentTab', () => {
     cleanup()
     vi.mocked(commercialApi.getValueFlowsResult).mockRejectedValue(new Error('boom'))
     renderTab()
-    await waitFor(() => expect(screen.getByTestId('ic-participants-state').textContent).toMatch(/could not be loaded/))
+    await waitFor(() => expect(screen.getByTestId('ic-participants-state').textContent).toMatch(/could not be loaded/i))
     cleanup()
     vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(
       { status: 'value_flows_invalid', reason: 'participants: not a list' } as never)
@@ -126,5 +126,24 @@ describe('InvestmentTab', () => {
       if (id) expect(document.getElementById(id)).not.toBeNull()
     }
     expectAllButtonsNamed(container)
+  })
+})
+
+
+describe('InvestmentTab billing failures', () => {
+  it('a failed bill is failed, never "solve first"', async () => {
+    vi.mocked(commercialApi.getBilling).mockRejectedValue(new Error('500'))
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(FLOWS as never)
+    renderTab()
+    await waitFor(() => expect(screen.getByTestId('ic-section-bill').getAttribute('data-status')).toBe('failed'))
+    fireEvent.click(await screen.findByRole('tab', { name: 'Bill' }))
+    expect((await screen.findByTestId('ic-bill-error')).textContent).toMatch(/could not be loaded/i)
+  })
+
+  it('a solve in flight says so', async () => {
+    vi.mocked(commercialApi.getBilling).mockRejectedValue(new SolverInFlightError('busy'))
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(FLOWS as never)
+    renderTab()
+    await waitFor(() => expect(screen.getByTestId('ic-section-bill').getAttribute('title')).toMatch(/solve is running/))
   })
 })
