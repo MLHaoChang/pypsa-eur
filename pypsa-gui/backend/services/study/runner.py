@@ -497,13 +497,10 @@ def _release_base(key: str, registered: bool) -> None:
         in_use = key in PyPSAService._session_active_keys()
     except Exception:  # noqa: BLE001
         in_use = True
-    # Lift the exemption BEFORE the drop (gate S6): once the context is gone a
-    # poll reads the terminal record from disk, and must then find nothing
-    # exempt. Meanwhile the live record still says "running", which keeps
-    # the context protected from eviction for the instant it is counted.
-    PyPSAService.unmark_study_owned(key)
-    if not in_use:
-        PyPSAService.drop(key)
+    # Unmark and drop atomically (gate S6, BC-S6-v2-2): between two separate
+    # calls the base would be resident but not exempt, and a concurrent
+    # registration at the cap could evict it (BC-S4-1 in a two-line window).
+    PyPSAService.release_study_owned(key, drop=not in_use)
 
 
 def _set(ctx, record: dict, **kw) -> None:
@@ -606,10 +603,8 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
                     "error": job.error}
             outcomes[opt.option_id] = outcome
             try:
-                PyPSAService.drop(key)
+                PyPSAService.release_study_owned(key, drop=True)
             except Exception:  # noqa: BLE001
-                pass
-            finally:
                 PyPSAService.unmark_study_owned(key)
             with ctx.solver_state_lock:
                 if outcome["result"].solve_status == "ok":

@@ -769,6 +769,24 @@ class PyPSAService:
             cls._study_owned.discard(key)
 
     @classmethod
+    def release_study_owned(cls, key: str, *, drop: bool) -> None:
+        """
+        Lift `key`'s cap exemption and, when `drop`, remove the context, in ONE
+        `_registry_lock` critical section (gate S6, BC-S6-v2-2). Done as two
+        calls, either order leaves a window: unmark-then-drop leaves a resident
+        context that is no longer exempt, so a concurrent registration at the
+        cap could evict it and write a study context back to disk; drop-then-
+        unmark leaves an exemption for a context no longer resident. The
+        eviction path reads `_study_owned` and `_contexts` under this lock, so
+        it sees both before or both after. `drop` itself takes no lock of its
+        own (`bind_project` only sets attributes), so nesting it is safe.
+        """
+        with cls._registry_lock:
+            cls._study_owned.discard(key)
+            if drop:
+                cls.drop(key)
+
+    @classmethod
     def _session_active_keys(cls) -> set[str]:
         """
         Registry keys every live session currently points at (Step 0b).

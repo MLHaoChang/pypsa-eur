@@ -586,3 +586,44 @@ def test_a_run_reports_done_only_after_it_has_released_everything(
     assert wait_run(client, "rel-late", sid)["status"] == "done"
     assert PyPSAService._study_owned == set(), sorted(PyPSAService._study_owned)
     assert _left_behind(registry_key_for, "rel-late") == {"exempt": False, "resident": False}
+
+
+class _WatchedSet(set):
+    """Records, at each discard, whether `_registry_lock` was held."""
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.discards: list[bool] = []
+
+    def discard(self, key):
+        self.discards.append(PyPSAService._registry_lock._is_owned())
+        super().discard(key)
+
+
+@pytest.mark.parametrize("in_use", [False, True])
+def test_releasing_the_base_unmarks_and_drops_in_one_critical_section(monkeypatch, in_use):
+    """
+    Gate S6 re-gate BC-S6-v2-2: between a separate unmark and drop the base
+    is resident but no longer exempt, so a concurrent registration at the cap
+    could evict it and write it back (BC-S4-1 in a two-statement window).
+    Both must happen under ONE hold of `_registry_lock`: the drop runs with
+    the lock held and finds the mark already gone.
+    """
+    key = "org:release-atomic"
+    watched = _WatchedSet()
+    monkeypatch.setattr(PyPSAService, "_study_owned", watched)
+    monkeypatch.setattr(PyPSAService, "_session_active_keys",
+                        classmethod(lambda cls: {key} if in_use else set()))
+    seen: list[tuple[bool, bool]] = []
+    real_drop = PyPSAService.drop.__func__
+
+    def drop(cls, project_id):
+        seen.append((cls._registry_lock._is_owned(), project_id in cls._study_owned))
+        real_drop(cls, project_id)
+
+    monkeypatch.setattr(PyPSAService, "drop", classmethod(drop))
+    PyPSAService.mark_study_owned(key)
+    R._release_base(key, True)
+    assert key not in PyPSAService._study_owned
+    assert watched.discards == [True]
+    assert seen == ([] if in_use else [(True, False)])

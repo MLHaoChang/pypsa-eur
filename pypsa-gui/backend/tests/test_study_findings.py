@@ -246,6 +246,14 @@ def test_unjudged_options_leave_only_what_the_judged_ones_decide():
     v = F.verdict(atts, _rob("bess_2h", (4e5, 2e5)), fidelity="full_study", expected=expected)
     assert (v.status, v.class_) == ("ok", "recommended")
     assert "options_not_all_judged" in v.reasons
+    # Re-gate BC-S6-v2-1: the client reads the scope, not only `reasons`.
+    assert v.sentence_template == "recommended_among_judged"
+    assert "not judged" in v.sentence and F.sentence_is_digit_free(v.sentence)
+    assert "options_not_all_judged" in v.disclosures
+    full = F.verdict([_att(o, 3e5 if o == "bess_2h" else 1e5) for o in expected], _rob("bess_2h", (4e5, 2e5)),
+                     fidelity="full_study", expected=expected)
+    assert full.sentence_template == "recommended"
+    assert "options_not_all_judged" not in full.disclosures
     v = F.verdict(atts, _rob("bess_2h", (4e5, -2e5)), fidelity="full_study", expected=expected)
     assert (v.status, v.class_) == ("not_established", None)
     assert "options_not_all_judged" in v.reasons

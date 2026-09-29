@@ -139,10 +139,9 @@ class ForkSolver:
             return solved
         finally:
             try:
-                PyPSAService.drop(key)
+                PyPSAService.release_study_owned(key, drop=True)
             except Exception:  # noqa: BLE001
-                pass
-            PyPSAService.unmark_study_owned(key)
+                PyPSAService.unmark_study_owned(key)
             self._delete(row)
 
 

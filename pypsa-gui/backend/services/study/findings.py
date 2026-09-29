@@ -767,6 +767,15 @@ _TEMPLATES = {
         "Recommended: a battery of {{battery_p_nom_mw}} MW with {{battery_max_hours}} "
         "hours of storage has a positive battery NPV of {{battery_npv}} at the centre "
         "and at every tornado bound{pv}."),
+    # Gate S6 re-gate BC-S6-v2-1: an unjudged option could be better at the
+    # centre, and could itself flip, so the recommendation is scoped to the
+    # options judged and says so in the sentence the client reads.
+    "recommended_among_judged": (
+        "Recommended among the battery options the study could judge: a battery of "
+        "{{battery_p_nom_mw}} MW with {{battery_max_hours}} hours of storage has a "
+        "positive battery NPV of {{battery_npv}} at the centre and at every tornado "
+        "bound{pv}. Other battery options were not judged, so a different size may "
+        "be better."),
     "marginal": (
         "Marginal: a battery of {{battery_p_nom_mw}} MW with {{battery_max_hours}} "
         "hours of storage has a battery NPV of {{battery_npv}} at the centre{pv}, "
@@ -815,13 +824,16 @@ def verdict(attributions: list[BatteryAttribution], robustness: Robustness | Non
     ``expected`` names every battery option the run was asked to judge (gate
     S6 BC-S6-1). One with no ``ok`` or ``skipped`` attribution — pending,
     failed, never run, changed since the run, or not attributable — is
-    UNJUDGED, and the verdict then states only what the judged options
-    already decide without it: ``recommended`` stands (one judged battery is
-    worth building at the centre and at every bound, whatever the others
-    turn out to be; the reason ``options_not_all_judged`` says the named one
-    may not be the best), while ``marginal`` and ``not_recommended`` become
+    UNJUDGED. ``marginal`` and ``not_recommended`` then become
     ``not_established`` (an unjudged option could be the robust one, or the
-    one worth building).
+    one worth building). ``recommended`` stands only as a scoped statement:
+    a judged battery pays at the centre and at every bound, which establishes
+    that a battery pays here, but NOT that this size is the one to build (an
+    unjudged option better at the centre that flips at a bound would make
+    the complete verdict ``marginal`` on another size). So the sentence is
+    ``recommended_among_judged``, which says so, and
+    ``options_not_all_judged`` is a disclosure as well as a reason (gate S6
+    re-gate BC-S6-v2-1).
     """
     reasons: list[str] = []
     batteries = [a for a in attributions if Q.max_hours(Q.option(question, a.option_id))]
@@ -898,7 +910,8 @@ def verdict(attributions: list[BatteryAttribution], robustness: Robustness | Non
     if with_pv:
         facts["pv_p_nom_mw"] = _fig("pv_p_nom_mw", "PV power", pv_mw, "MW", "lp",
                                     fidelity=fidelity)
-    sentence = _TEMPLATES[klass].replace("{pv}", _PV_CLAUSE if with_pv else "")
+    tpl = "recommended_among_judged" if unjudged else klass
+    sentence = _TEMPLATES[tpl].replace("{pv}", _PV_CLAUSE if with_pv else "")
     drivers = (flips or [r.key for r in robustness.tornado])
     drivers = list(dict.fromkeys(drivers))[:3]
     top = max((s for s in streams or [] if s.annual_value is not None),
@@ -916,8 +929,10 @@ def verdict(attributions: list[BatteryAttribution], robustness: Robustness | Non
         disclosures.append("size_at_upper_bound")
     if best.method == "battery_removed_same_pv":
         disclosures.append("battery_value_against_pv_only_reference")
+    if unjudged:
+        disclosures.append("options_not_all_judged")
     return Verdict(
-        status="ok", class_=klass, sentence=sentence, sentence_template=klass, facts=facts,
+        status="ok", class_=klass, sentence=sentence, sentence_template=tpl, facts=facts,
         headline_kpis=[facts["battery_npv"], facts["battery_p_nom_mw"],
                        facts["battery_payback_simple"]],
         drivers=drivers, main_caveat=main, option_id=best.option_id,
