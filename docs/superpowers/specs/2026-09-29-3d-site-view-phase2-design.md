@@ -203,3 +203,4 @@ A `ResultsLayer` inside the Canvas reads the map for the current snapshot and dr
 - No bulk `Link p1` endpoint (the context's comment names one that does not exist).
 - `SnapshotPicker`: no `aria-label` on the slider, no `aria-live` timestamp, playback ignores reduced motion.
 - `packaging`: `pypsa-gui.spec` lacks `gridspine.drivers.year_study` (pre-existing test failure).
+- **Creating a three-port Link drops `bus2`/`efficiency2`** unless a Link in the network already has a `bus2` column: `network_crud._drop_unknown_extras` keeps only catalog input attributes, and PyPSA's catalog does not list the multi-port fields. The palette's CHP item therefore creates a plain gas → electricity link with no heat output (found by the Phase 2 WP1 smoke; the 3D view correctly draws what the model holds). Fix: allow `bus\d+` / `efficiency\d+` in the filter.

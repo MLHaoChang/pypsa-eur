@@ -36,7 +36,8 @@ import {
   buildingsGeometry, linesToRibbons, areasGeometry, heightmapToDisplacement, terrainSampler, groundHeightAt,
   groundMode, hillshadeCanvas, terrainCellMetres, RIBBON_COLOR, AREA_COLOR, BUILDING_COLOR, OSM_ATTRIBUTION, type HeightAt,
 } from '../site3d/context'
-import { buildSiteLayout, objectKey, KIND_COLOR, KIND_LABEL, type SiteObject, type SiteKind } from '../site3d/layout'
+import { buildSiteLayout, objectKey, type SiteObject, type Part } from '../site3d/layout'
+import { DEFAULT_LIBRARY, legendFor } from '../site3d/assetLibrary'
 import { matrixFor, placementFromMatrix } from '../site3d/placementMath'
 import { screenToGround, groundToScreen } from '../site3d/raycast'
 import { registerSiteDropTarget, unregisterSiteDropTarget } from '../site3d/dropRegistry'
@@ -52,6 +53,20 @@ import type { Bus } from '../api/types'
 import type { Site, SiteContext } from '../site3d/types'
 
 // ── One object = one group of boxes, one click target ────────────────────────
+
+/**
+ * One part's geometry. A box is sized (east, height, north) in scene axes; a
+ * cylinder keeps the same size order (spec E4) and lies along its axis: three's
+ * cylinder stands along scene Y (up), so a north-lying one is turned about X
+ * and an east-lying one about Z.
+ */
+function PartGeometry({ part }: { part: Part }) {
+  if (part.shape !== 'cylinder') return <boxGeometry args={toBoxArgs(part.size)} />
+  const [e, n, h] = part.size
+  if (part.axis === 'north') return <cylinderGeometry args={[e / 2, e / 2, n, 16]} onUpdate={g => g.rotateX(Math.PI / 2)} />
+  if (part.axis === 'east') return <cylinderGeometry args={[n / 2, n / 2, e, 16]} onUpdate={g => g.rotateZ(Math.PI / 2)} />
+  return <cylinderGeometry args={[e / 2, e / 2, h, 16]} />
+}
 
 function SiteObjectMesh({ obj, selected, hovered, outside, pivot, onHover, onSelect }: {
   obj: SiteObject
@@ -74,7 +89,7 @@ function SiteObjectMesh({ obj, selected, hovered, outside, pivot, onHover, onSel
   return (
     <group
       name={`${obj.type}:${obj.name}`}
-      position={toScene(ox, oy, 0)}
+      position={toScene(ox, oy, obj.elevation ?? 0)}
       // Heading is clockwise from north; a rotation about the up axis by −heading.
       rotation={[0, (-heading * Math.PI) / 180, 0]}
       onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onSelect(obj) }}
@@ -89,7 +104,7 @@ function SiteObjectMesh({ obj, selected, hovered, outside, pivot, onHover, onSel
           castShadow
           receiveShadow
         >
-          <boxGeometry args={toBoxArgs(p.size)} />
+          <PartGeometry part={p} />
           <meshStandardMaterial
             color={tint ?? p.color ?? obj.color}
             emissive={emissive}
@@ -308,7 +323,7 @@ function Site3dDebugHook({ objects, site, context, groundMode: mode, heightAt }:
       if (!obj || !first) return null
       const local = new THREE.Vector3(...toScene(first.pos[0], first.pos[1], first.pos[2]))
         .applyAxisAngle(new THREE.Vector3(0, 1, 0), (-obj.heading * Math.PI) / 180)
-      const world = local.add(new THREE.Vector3(...toScene(obj.origin[0], obj.origin[1], heightAt(obj.origin[0], obj.origin[1]))))
+      const world = local.add(new THREE.Vector3(...toScene(obj.origin[0], obj.origin[1], heightAt(obj.origin[0], obj.origin[1]) + (obj.elevation ?? 0))))
       camera.updateMatrixWorld()
       const v = world.project(camera)
       const rect = gl.domElement.getBoundingClientRect()
@@ -431,9 +446,17 @@ export default function SiteCanvas() {
 
   // The packed layout for one bus alone, in that bus's frame — what the
   // empty state needs to size a default boundary.
+  // Every network bus's carrier (not only the site's): the asset library
+  // tells an electrolyser from a fuel cell by the far bus's carrier, and a
+  // switchyard from an H₂/heat manifold by the bus's own.
+  const busCarrier = useMemo(() => {
+    const byName = new Map((buses as Bus[]).map(b => [b.name, b.carrier]))
+    return (name: string) => byName.get(name)
+  }, [buses])
+
   const layoutForBus = (busName: string) => {
     const bus = buses.find(b => b.name === busName)
-    return buildSiteLayout({ buses: [{ name: busName, v_nom: bus?.v_nom ?? 0, offset: [0, 0] }], generators, storageUnits, stores, loads, transformers, lines, links })
+    return buildSiteLayout({ buses: [{ name: busName, v_nom: bus?.v_nom ?? 0, offset: [0, 0] }], generators, storageUnits, stores, loads, transformers, lines, links, busCarrier })
   }
 
   // Member buses with a position; a member that is not placed cannot be
@@ -448,9 +471,9 @@ export default function SiteCanvas() {
   // The layout is in the SITE frame already: one yard per bus at its
   // offset, placements honoured.
   const layout = useMemo(() => (site && memberInputs.length > 0
-    ? buildSiteLayout({ buses: memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, placements: site.placements })
+    ? buildSiteLayout({ buses: memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, placements: site.placements, busCarrier })
     : null),
-  [site, memberInputs, generators, storageUnits, stores, loads, transformers, lines, links])
+  [site, memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, busCarrier])
   const objects: SiteObject[] = layout?.objects ?? []
 
   // ── Site context (WP5): the cache first (never an upstream call), then
@@ -627,7 +650,7 @@ export default function SiteCanvas() {
     )
   }
 
-  const kindsPresent = Array.from(new Set(objects.map(o => o.kind))) as SiteKind[]
+  const legend = legendFor(objects)
   const selectedName = selectedComponent?.name ?? null
   const selectedType = selectedComponent?.type ?? null
   const selectedKey = selectedType && selectedName ? `${selectedType}:${selectedName}` : null
@@ -734,7 +757,7 @@ export default function SiteCanvas() {
         sites={sitesDoc.sites}
         site={site}
         onPickSite={id => { setActiveSiteId(id); writeActiveSite(currentProject, id) }}
-        assetCount={objects.filter(o => o.kind !== 'switchyard').length}
+        assetCount={objects.filter(o => !DEFAULT_LIBRARY.find(t => t.id === o.kind)?.flags?.infrastructure).length}
         fit={fit}
         unplacedMembers={unplacedMembers}
         selectedPlacedKey={selectedPlacedKey}
@@ -745,10 +768,10 @@ export default function SiteCanvas() {
 
       {/* Legend — under the picker. */}
       <div className="absolute left-3 top-[5.5rem] z-[400] flex flex-wrap gap-x-3 gap-y-1 rounded-md border border-border bg-bg/95 px-2 py-1.5 text-[11px] shadow max-w-[60%]">
-        {kindsPresent.map(k => (
-          <span key={k} className="flex items-center gap-1 text-muted">
-            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: KIND_COLOR[k] }} />
-            {KIND_LABEL[k]}
+        {legend.map(e => (
+          <span key={e.id} className="flex items-center gap-1 text-muted">
+            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: e.color }} />
+            {e.label}
           </span>
         ))}
       </div>

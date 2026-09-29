@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildSiteLayout, objectKey, type SiteInput } from './layout'
-import { DEFAULT_ASSET_RULES } from './assetRules'
+import { DEFAULT_LIBRARY, type AssetType } from './assetLibrary'
 import type { Generator, Load, StorageUnit, Store, Transformer, Line, Link } from '../api/types'
 
 // Minimal component factories: only the fields the layout reads, cast to the
@@ -61,7 +61,8 @@ describe('buildSiteLayout', () => {
       links: [lk({ name: 'ely', carrier: 'electrolysis', bus1: 'H2BUS' }), lk({ name: 'hvdc', carrier: 'DC' })],
     })
     const kinds = Object.fromEntries(objects.map(o => [o.name, o.kind]))
-    expect(kinds).toMatchObject({ pv: 'pv', w: 'wind', ccgt: 'thermal', h2: 'h2store', ely: 'electrolyser', hvdc: 'feeder' })
+    // Phase 2 (spec §4.2): CCGT has its own type; every other id is Phase 1's.
+    expect(kinds).toMatchObject({ pv: 'pv', w: 'wind', ccgt: 'gasTurbine', h2: 'h2store', ely: 'electrolyser', hvdc: 'feeder' })
   })
 
   it('an electrolyser is only one when this bus is its electrical side', () => {
@@ -216,23 +217,113 @@ describe('buildSiteLayout — several buses, placements, rules (WP3)', () => {
     expect(objectKey({ type: 'Generator', name: 'gB' })).toBe('Generator:gB')
   })
 
-  it('the rules table drives the geometry: halving MWh per container doubles the container count and nothing else', () => {
+  it('the library drives the geometry: halving MWh per container doubles the container count and nothing else', () => {
+    // Phase 2 (plan Task 1.3): the numbers live in the library entries.
+    const halfBess = (lib: readonly AssetType[]): AssetType[] => lib.map(t => t.id !== 'bess' ? t : { ...t, geometry: { ...t.geometry, params: { ...t.geometry.params, per: 2 } } })
     const input = { ...empty, storageUnits: [su({ p_nom: 10, max_hours: 4 })] }
     const a = buildSiteLayout(input).objects[1]
-    const b = buildSiteLayout({ ...input, rules: { ...DEFAULT_ASSET_RULES, mwhPerBessContainer: 2 } }).objects[1]
+    const b = buildSiteLayout({ ...input, library: halfBess(DEFAULT_LIBRARY) }).objects[1]
     expect(a.summary).toContain('10 containers')
     expect(b.summary).toContain('20 containers')
-    const c = buildSiteLayout({ ...empty, generators: [gen({ carrier: 'solar', p_nom: 4 })], rules: { ...DEFAULT_ASSET_RULES, mwhPerBessContainer: 2 } }).objects[1]
+    const c = buildSiteLayout({ ...empty, generators: [gen({ carrier: 'solar', p_nom: 4 })], library: halfBess(DEFAULT_LIBRARY) }).objects[1]
     const c0 = buildSiteLayout({ ...empty, generators: [gen({ carrier: 'solar', p_nom: 4 })] }).objects[1]
     expect(c.areaM2).toBe(c0.areaM2)
   })
 
-  it('invalid rules are refused with the field named', () => {
-    expect(() => buildSiteLayout({ ...empty, rules: { ...DEFAULT_ASSET_RULES, mwPerTurbine: 0 } })).toThrow(/mwPerTurbine/)
+  it('an invalid library is refused with the field named', () => {
+    const lib = DEFAULT_LIBRARY.map(t => t.id !== 'wind' ? t : { ...t, geometry: { ...t.geometry, params: { ...t.geometry.params, per: 0 } } })
+    expect(() => buildSiteLayout({ ...empty, library: lib })).toThrow(/wind.*per/)
   })
 
   it('is deterministic with placements and two buses', () => {
     const input = { ...two, placements: { 'Generator:gB': { x: 1, y: 2, heading: 3 } } }
     expect(buildSiteLayout(input)).toEqual(buildSiteLayout(input))
   })
+
+  // ── Phase 2: owner after match, three-port links, rooftop PV (plan Tasks 1.4–1.5) ──
+
+  const carriers: Record<string, string> = { B: 'AC', H: 'H2', Q: 'heat', G: 'gas' }
+  const multi = (buses: string[], extra: Partial<SiteInput> = {}): SiteInput => ({
+    ...empty, ...extra,
+    buses: buses.map((name, i) => ({ name, v_nom: carriers[name] === 'AC' ? 110 : 0, offset: [i * 300, 0] as [number, number] })),
+    busCarrier: (n: string) => carriers[n],
+  })
+
+  it('an electrolyser with both its AC and H₂ buses as members is one object, drawn from the AC bus', () => {
+    const { objects } = buildSiteLayout(multi(['H', 'B'], { links: [lk({ name: 'ely', carrier: 'H2', bus0: 'B', bus1: 'H' })] }))
+    const ely = objects.filter(o => o.name === 'ely')
+    expect(ely).toHaveLength(1)
+    expect([ely[0].kind, ely[0].bus]).toEqual(['electrolyser', 'B'])
+  })
+
+  it('a fuel cell is drawn from its electrical side (bus1), once', () => {
+    const { objects } = buildSiteLayout(multi(['H', 'B'], { links: [lk({ name: 'fc', carrier: 'H2', bus0: 'H', bus1: 'B' })] }))
+    const fc = objects.filter(o => o.name === 'fc')
+    expect(fc).toHaveLength(1)
+    expect([fc[0].kind, fc[0].bus]).toEqual(['fuelCell', 'B'])
+  })
+
+  it('an electrolyser whose H₂ bus is not a member is still drawn, from the AC bus', () => {
+    const { objects } = buildSiteLayout(multi(['B'], { links: [lk({ name: 'ely', carrier: 'H2', bus0: 'B', bus1: 'H' })] }))
+    expect(objects.find(o => o.name === 'ely')?.kind).toBe('electrolyser')
+  })
+
+  it('a CHP is drawn once: from its electrical port when that is a member, else as a feeder from the member it touches', () => {
+    const chp = lk({ name: 'chp', carrier: 'gas', bus0: 'G', bus1: 'B', bus2: 'Q' })
+    const all = buildSiteLayout(multi(['G', 'B', 'Q'], { links: [chp] })).objects.filter(o => o.name === 'chp')
+    expect(all).toHaveLength(1)
+    expect([all[0].kind, all[0].bus]).toEqual(['chp', 'B'])
+    const heatOnly = buildSiteLayout(multi(['Q'], { links: [chp] })).objects.filter(o => o.name === 'chp')
+    expect(heatOnly).toHaveLength(1)
+    expect([heatOnly[0].kind, heatOnly[0].bus]).toEqual(['feeder', 'Q'])
+  })
+
+  it('an empty-string bus2 counts as absent', () => {
+    const { objects } = buildSiteLayout(multi(['B'], { links: [lk({ name: 'g', carrier: 'gas', bus0: 'G', bus1: 'B', bus2: '' })] }))
+    expect(objects.find(o => o.name === 'g')?.kind).toBe('feeder')
+  })
+
+  it('a branch knows its owner and its far bus', () => {
+    const { objects } = buildSiteLayout({ ...empty, lines: [ln({ name: 'L', bus0: 'FAR', bus1: 'B' })] })
+    const l = objects.find(o => o.name === 'L')!
+    expect([l.bus, l.far]).toEqual(['B', 'FAR'])
+  })
+
+  it('an H₂ bus member is a manifold, an AC bus a switchyard', () => {
+    const { objects } = buildSiteLayout(multi(['B', 'H']))
+    expect(objects.filter(o => o.type === 'Bus').map(o => [o.name, o.kind])).toEqual([['B', 'switchyard'], ['H', 'manifold']])
+  })
+
+  it('rooftop PV sits on the largest data hall, follows the hall\'s placement, and takes no land', () => {
+    const input = multi(['B', 'Q'], {
+      loads: [ld({ name: 'hall-small', bus: 'B', p_set: 2 }), ld({ name: 'hall-big', bus: 'B', p_set: 20 })],
+      generators: [gen({ name: 'roof', bus: 'B', carrier: 'solar-rooftop', p_nom: 1 })],
+    })
+    const packed = buildSiteLayout(input)
+    const hall = packed.objects.find(o => o.name === 'hall-big')!
+    const roof = packed.objects.find(o => o.name === 'roof')!
+    expect(roof.kind).toBe('pvRoof')
+    expect(roof.origin).toEqual(hall.origin)
+    expect(roof.elevation).toBeGreaterThan(0)
+    expect(roof.areaM2).toBe(0)
+    const moved = buildSiteLayout({ ...input, placements: { 'Load:hall-big': { x: 500, y: -200, heading: 30 } } })
+    const roof2 = moved.objects.find(o => o.name === 'roof')!
+    expect(roof2.origin).toEqual([500, -200])
+    expect(roof2.heading).toBe(30)
+    // Exempt from the no-overlap rule (it is on the roof), and fit.ts land sum excludes it (areaM2 0).
+  })
+
+  it('rooftop PV without a hall stands on a canopy in the south zone', () => {
+    const { objects } = buildSiteLayout({ ...empty, generators: [gen({ name: 'roof', carrier: 'solar-rooftop', p_nom: 1 })] })
+    const roof = objects.find(o => o.name === 'roof')!
+    expect(roof.origin[1]).toBeLessThan(0)
+    expect(roof.elevation ?? 0).toBe(0)
+    expect(roof.parts.some(p => p.pos[2] >= 4)).toBe(true)
+  })
+
+  it('switchyard width counts bays from the library flags, not kind names', () => {
+    const one = buildSiteLayout({ ...empty, lines: Array.from({ length: 5 }, (_, i) => ln({ name: `L${i}` })) })
+    expect(one.objects[0].footprint[0]).toBe(12 + 5 * 8)
+  })
 })
+
