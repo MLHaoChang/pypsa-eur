@@ -357,9 +357,23 @@ accepted plan so a re-export does not re-ask the model.
 **Files.** `services/reports/docx_reader.py`, `tests/test_report_docx_reader.py`, fixtures `tests/fixtures/report_templates/{tagged_minimal.docx, corporate_untagged.docx, with_textbox.docx}` **built by a committed script** `tests/fixtures/report_templates/_build.py` (python-docx; no opaque binaries — the test builds them into `tmp_path` and the script exists so a human can regenerate them).
 **Acceptance.** tagged fixture → `mode == "tagged"`, every `{{ }}`/`{% %}` found even when Word split it across runs; untagged fixture → `mode == "untagged"`, headings with levels and style names, `body_start_index` = first Heading 1 after the TOC field (or the first heading), `has_toc` true when a `TOC \o` field exists, placeholders `[…]`/`<…>` listed, tables with header rows, header/footer text; text box → `"text box"` in `unsupported`; `detect_language` says `de` for German headings ("Zusammenfassung", "Einleitung") and `en` for English, `None` when undecidable; a non-docx (a PNG) raises a `ValueError` subclass, never a crash.
 
-### WP9 — tagged rendering (Jinja2 in the document)
+### WP9 — tagged rendering (Jinja2 in the document) — done
 **Files.** `services/reports/template_tagged.py`, `tests/test_report_template_tagged.py`.
-**Acceptance.** `{{ meta.title }}` in a heading renders; a tag split across three runs renders with the first run's formatting; `{% for row in tables.fmea_top.rows %}` in a table row yields N rows; `{{ figures.fmea_pareto }}` yields one inline picture; `{{ fields.fmea_top.text }}` yields the paragraphs; an unknown name → `TaggedRenderError` naming it and listing the known names; header/footer tags render too; a template without tags renders unchanged text (no crash) — the caller decides the mode, not this module.
+**Acceptance.**
+- [x] `{{ meta.title }}` in a Title paragraph renders (style kept).
+- [x] A tag split across three runs renders with the first run's formatting (bold), the other runs dropped.
+- [x] `{% for row in tables.fmea_top.rows %}` in a table row yields N rows with `{{ row[i] }}` cells filled and the template row gone; `{% endfor %}` accepted at the end of the row's last cell or as its own following row (removed); `loop.index` bound.
+- [x] `{{ figures.fmea_pareto }}` alone in a paragraph yields one inline picture (header/footer parts included); inside other text it renders the caption; no bytes → a "not produced" sentence.
+- [x] `{{ fields.fmea_top.text }}` yields one paragraph per blank-line chunk, each in the original paragraph's style, with bold/italic/code runs from the writer's `tokenize_inline`.
+- [x] `{{ fields.nope.text }}` → `TaggedRenderError` naming `nope`, quoting the paragraph, listing the top-level names and the known field ids (tables/figures likewise).
+- [x] `{% for %}` without `endfor` → `TaggedRenderError` (syntax) in a paragraph and in a table row.
+- [x] Footer `{{ meta.evidence_hash }}` renders.
+- [x] A template without tags renders its text unchanged; `settings.xml` and `sectPr` untouched.
+- [x] `{% if fields.certification.status == "ok" %}…{% endif %}` hides the paragraph on a skipped section (Word smart quotes inside tags straightened).
+- [x] Context keys: `meta{title, version, evidence_hash, profile_id, model, created_at, mode, language}`, `fields[section_id]{heading, status, paragraphs, bullets, text, note, <Field key>…}`, `headline[key]` (executive summary Field blocks), `tables[id]{columns, rows, caption}`, `figures[id]`, `disclosures`, `gaps`, `unverified[section_id]`.
+
+**TDD evidence (2026-09-29, worktree branch `worktree-agent-a222df63ab96cb0d8`):**
+red — `ModuleNotFoundError: No module named 'services.reports.template_tagged'` (16 tests uncollectable) → first green run 15 passed / 1 failed (`_ONLY_TAG` matched a paragraph holding two tags, `{{ a }} / {{ b }}`, as one expression → Jinja "chunk after expression"; the only-a-tag path now requires exactly one `{{` and no `{%`) → green — `test_report_template_tagged.py` 16, `test_report_docx_writer.py` 27 unchanged (43 passed); `ruff check` clean on both files. No `docxtpl`: run-merged paragraphs, row loops and pictures are implemented on python-docx directly (`Run.add_picture` so a header/footer picture lands in its own part). The run-merging helper is private to the module; WP8's `merged_paragraph_text` replaces it at merge.
 
 ### WP10 — untagged rendering (mapping plan, body rebuild)
 **Files.** `services/reports/template_untagged.py`, `services/reports/prompts.py` (add `mapping_user_message`), `tests/test_report_template_untagged.py`.
