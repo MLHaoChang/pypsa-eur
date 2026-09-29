@@ -246,7 +246,7 @@ The decisions doc numbers them S1–S16. The brief's "decision 3", "decision 5" 
 | `tsc --noEmit` | clean |
 | `vitest run` | 234 files, 2610 tests passed |
 | EH QA driver `tests/qa_eh_reference_design.py` | 110/110 PASS, exit 0 |
-| P26 smoke `smoke-guided.mjs --phase P26` | P26_RESULT |
+| P26 smoke `smoke-guided.mjs --phase P26` | PASS, exit 0 (38 screenshots). Verdicts unchanged: datacenter `fail`, h2_hub none, microgrid `inconclusive` |
 | Full backend `-m "not slow"` | FULL_RESULT |
 | Repro B1 (`test_repro_chat_stress_lock.py`) | 2 failed, 1 control passed |
 | Repro B2 (`test_repro_knee_rule.py`) | 2 failed |
