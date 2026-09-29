@@ -114,3 +114,11 @@ No verdict changed, and no smoke expectation was edited. The templates' grid sup
 1. **Common-mode event on a Link without its own outage data (S6).** Master counted such a Link as a firm block and sampled the event. Under decision 6 the Link is not counted, so the event is disclosed as not applied. Should a common-mode event alone qualify an import as "outages modelled"?
 2. **One FMEA ranking or two (S10).** Master merges class A (COPT) and class B (LP re-solve) into one top-N. The branch spec says top-5 Class-B Link modes. The merge keeps them separate: Class-B `rows` decide the section, and `class_a` sits beside them. The panel lists both in one table, B first. Should the two engines' criticalities be ranked together?
 3. **Frontier point floor.** Master required 3 points; P12 requires 2. The merge keeps 2 (gated). Confirm.
+
+## Product owner decisions on the merger's open questions (2026-09-29)
+
+| # | Question | Decision |
+|---|---|---|
+| Q1 | A common-mode event on a grid-import Link that has no outage data of its own | **Exclude and disclose.** The Link is not counted, and the report states that the event was not applied. The merged behaviour stands. |
+| Q2 | One FMEA ranking or two (class A COPT screen vs class B LP re-solve) | **Two lists, kept separate.** Class B decides the section, and class A sits beside it as `class_a`. The merged behaviour stands. |
+| Q3 | Frontier minimum points | **A curve needs at least 2 points; the knee needs 3.** The frontier is reported from 2 points. Below 3 points the knee is `not_established` (never reported). This must be verified in code before the merge into master, and fixed test-first if it is not already so. |
