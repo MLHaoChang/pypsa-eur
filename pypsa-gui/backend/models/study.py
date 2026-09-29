@@ -390,8 +390,18 @@ class DecisionQuestion(_Model):
 # ── maturity (spec decision 12, pulled into MVP-1 by §13) ─────────────────
 
 class AccuracyBand(_Model):
+    """
+    Indicative accuracy in the spirit of AACE International RP 18R-97, whose
+    classes give each end as a range (Class 5: low -20 to -50 %, high +30 to
+    +100 %). ``low_pct``/``high_pct`` are the wide ends; the ``_narrow``
+    fields (S2) are the narrow ends, and ``reference`` names the analogy.
+    """
+
     low_pct: float
     high_pct: float
+    low_pct_narrow: float | None = None
+    high_pct_narrow: float | None = None
+    reference: str | None = None
 
 
 class StudyMaturity(_FigureBlock):
@@ -454,6 +464,9 @@ class DecisionStudy(_Model):
     currency_year: int | None = None
     intake: dict[str, Any] = Field(default_factory=dict)
     ledger_version: str | None = None
+    # S2: the stored ledger; None until the first PUT (a GET seeds one in
+    # memory from the library and the intake).
+    ledger: AssumptionsLedger | None = None
     fidelity_last_run: Fidelity | None = None
     budget: StudyBudget = Field(default_factory=StudyBudget)
     maturity: StudyMaturity = Field(default_factory=StudyMaturity)

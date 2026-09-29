@@ -33,7 +33,7 @@ import threading
 import uuid
 from datetime import datetime, UTC
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -51,7 +51,10 @@ from models.study import (
     Perspective,
 )
 from routers.deps import AuthorizedProject, ProjectAccessDep
+from services.http_filenames import content_disposition
 from services.study import FLAG_ENV, flag_set, store
+from services.study import ledger as study_ledger
+from services.study import library as study_library
 
 OPEN_ITEMS_1 = (
     "OPEN-ITEMS 1 (docs/superpowers/OPEN-ITEMS.md, item 1: the user-timeseries "
@@ -297,6 +300,12 @@ def patch_study(study_id: str, body: StudyPatch,
         except ValidationError as exc:
             raise HTTPException(422, exc.errors(include_url=False,
                                                 include_context=False)) from None
+        if updated.ledger is not None:
+            # S2: the badge reads the intake's load too, so an intake step
+            # (e.g. a meter upload) moves it without waiting for a ledger PUT.
+            updated = updated.model_copy(update={
+                "maturity": study_ledger.maturity_from_ledger(
+                    updated.ledger, study_ledger.load_provenance(updated.intake))})
         return _save(project, updated)
 
 
@@ -322,3 +331,138 @@ def delete_study(study_id: str,
         except store.StudyNotFound:
             raise HTTPException(404, "Study not found") from None
     return Response(status_code=204)
+
+
+# ── S2: the assumptions ledger ────────────────────────────────────────────
+#
+# The ledger lives on the study record (`DecisionStudy.ledger`). Until the
+# first PUT it is None and GET answers with a seed computed in memory from the
+# library and the intake (`stored: false`), so a read never writes. Every PUT
+# stores the ledger and recomputes `maturity` from it and the intake's load.
+
+class LedgerEdit(BaseModel):
+    """One user row. The unit is required and must be the row's own."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(min_length=1, max_length=128)
+    value: float
+    unit: str = Field(min_length=1, max_length=64)
+    provenance: Literal["user", "measured"] = "user"
+    source: str | None = Field(default=None, max_length=500)
+    source_year: int | None = Field(default=None, ge=1900, le=2200)
+    source_url: str | None = Field(default=None, max_length=2000)
+    currency_year: int | None = Field(default=None, ge=1900, le=2200)
+
+
+class LedgerPut(BaseModel):
+    """
+    ``rows`` are applied in order over the stored ledger (seeded first when
+    there is none). ``reseed`` first re-seeds: library rows refreshed from
+    the library and the current intake (e.g. a newly chosen tariff), user
+    rows kept.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    rows: list[LedgerEdit] = Field(default_factory=list, max_length=200)
+    reseed: bool = False
+
+
+def _key_drivers(study: DecisionStudy) -> tuple[str, ...]:
+    # S4 replaces this with the question template's `key_drivers`
+    # (`services/study/questions.py`). MVP-1 has one template, the BESS one.
+    return study_library.BESS_KEY_DRIVERS
+
+
+def _library_or_500() -> study_library.Library:
+    try:
+        return study_library.load_library()
+    except (study_library.LibraryError, OSError) as exc:
+        raise HTTPException(500, detail={
+            "code": "study_library_unreadable", "message": str(exc)}) from None
+
+
+def _current_ledger(study: DecisionStudy):
+    """(ledger, stored): the stored ledger, or a fresh in-memory seed."""
+    if study.ledger is not None:
+        return study.ledger, True
+    try:
+        seeded = study_library.seed_ledger(_key_drivers(study), study.intake,
+                                           _library_or_500())
+    except study_library.LibraryError as exc:
+        raise HTTPException(422, str(exc)) from None
+    return seeded, False
+
+
+def _ledger_out(study: DecisionStudy, ledger, stored: bool, maturity=None) -> dict:
+    maturity = maturity or study_ledger.maturity_from_ledger(
+        ledger, study_ledger.load_provenance(study.intake))
+    return {
+        "study_id": study.study_id,
+        "stored": stored,
+        "ledger": ledger.model_dump(mode="json", by_alias=True),
+        "maturity": maturity.model_dump(mode="json", by_alias=True),
+    }
+
+
+@router.get("/{study_id}/ledger")
+def get_ledger(study_id: str,
+               project: AuthorizedProject = ProjectAccessDep) -> dict:
+    _refuse_unless_enabled()
+    study = _load(project, study_id)
+    ledger, stored = _current_ledger(study)
+    return _ledger_out(study, ledger, stored)
+
+
+@router.put("/{study_id}/ledger")
+def put_ledger(study_id: str, body: LedgerPut,
+               project: AuthorizedProject = ProjectAccessDep,
+               db: DBSession = Depends(get_db),
+               user: User | None = Depends(optional_user)) -> dict:
+    _refuse_unless_enabled()
+    _check_lock(db, project, user)
+    with _WRITE_LOCK:
+        study = _load(project, study_id)
+        ledger, _stored = _current_ledger(study)
+        try:
+            if body.reseed:
+                ledger = study_ledger.reseed_ledger(
+                    ledger, _key_drivers(study), study.intake, _library_or_500())
+            now = _now()
+            changed_by = str(user.id) if user is not None else None
+            for edit in body.rows:
+                ledger = study_ledger.apply_user_row(
+                    ledger, edit.key, edit.value, unit=edit.unit,
+                    changed_by=changed_by, changed_at=now,
+                    provenance=edit.provenance, source=edit.source,
+                    source_year=edit.source_year, source_url=edit.source_url,
+                    currency_year=edit.currency_year)
+        except (study_ledger.LedgerEditError, study_library.LibraryError) as exc:
+            raise HTTPException(422, str(exc)) from None
+        maturity = study_ledger.maturity_from_ledger(
+            ledger, study_ledger.load_provenance(study.intake))
+        updated = study.model_copy(update={
+            "ledger": ledger, "ledger_version": ledger.ledger_version,
+            "maturity": maturity, "updated_at": _now()})
+        _save(project, updated)
+        return _ledger_out(updated, ledger, True, maturity)
+
+
+@router.get("/{study_id}/ledger.csv")
+def get_ledger_csv(study_id: str,
+                   project: AuthorizedProject = ProjectAccessDep) -> Response:
+    """
+    The ledger as CSV, export only (import is MVP-2). Text cells a
+    spreadsheet would evaluate as a formula are neutralised
+    (`services/study/ledger.py::ledger_to_csv`).
+    """
+    _refuse_unless_enabled()
+    study = _load(project, study_id)
+    ledger, _stored = _current_ledger(study)
+    return Response(
+        content=study_ledger.ledger_to_csv(ledger),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": content_disposition(
+            f"{study.name} - ledger.csv")},
+    )

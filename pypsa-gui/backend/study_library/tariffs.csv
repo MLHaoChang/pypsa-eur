@@ -1,0 +1,14 @@
+tariff_id,name,source,source_year,currency,currency_year,billing_period,component,label,price,unit,basis,months,weekdays,hours,note
+de_industrial_illustrative,German-style industrial tariff (illustrative),illustrative,2026,EUR,2020,month,energy_band,Energy (all hours),110.0,EUR/MWh,,,,,
+de_industrial_illustrative,German-style industrial tariff (illustrative),illustrative,2026,EUR,2020,month,network_charge,Network energy charge (Arbeitspreis),20.0,EUR/MWh,per_mwh,,,,
+de_industrial_illustrative,German-style industrial tariff (illustrative),illustrative,2026,EUR,2020,month,demand_charge,Monthly capacity charge on peak import (Leistungspreis),9000.0,EUR/MW/month,billing_period_peak,,,,
+de_industrial_illustrative,German-style industrial tariff (illustrative),illustrative,2026,EUR,2020,month,fixed_charge,Metering and account charge,400.0,EUR/month,,,,,
+de_industrial_illustrative,German-style industrial tariff (illustrative),illustrative,2026,EUR,2020,month,export,Export compensation,40.0,EUR/MWh,,,,,
+de_industrial_illustrative,German-style industrial tariff (illustrative),illustrative,2026,EUR,2020,month,honesty_note,,,,,,,,"Illustrative figures of a plausible order of magnitude, not a published tariff: replace them with the site's own bill."
+de_industrial_illustrative,German-style industrial tariff (illustrative),illustrative,2026,EUR,2020,month,honesty_note,,,,,,,,"German network operators bill the capacity charge on the ANNUAL peak (Jahresleistungspreis); this seed bills each month's peak because MVP-1 models one monthly demand charge."
+tou_reference_illustrative,Time-of-use reference tariff (illustrative),illustrative,2026,EUR,2020,month,energy_band,Peak (weekdays 08:00-20:00),160.0,EUR/MWh,,,0-4,8-19,
+tou_reference_illustrative,Time-of-use reference tariff (illustrative),illustrative,2026,EUR,2020,month,energy_band,Off-peak (weekday nights),90.0,EUR/MWh,,,0-4,0-7;20-23,
+tou_reference_illustrative,Time-of-use reference tariff (illustrative),illustrative,2026,EUR,2020,month,energy_band,Off-peak (weekends),90.0,EUR/MWh,,,5-6,,
+tou_reference_illustrative,Time-of-use reference tariff (illustrative),illustrative,2026,EUR,2020,month,fixed_charge,Account charge,50.0,EUR/month,,,,,
+tou_reference_illustrative,Time-of-use reference tariff (illustrative),illustrative,2026,EUR,2020,month,export,Export compensation,30.0,EUR/MWh,,,,,
+tou_reference_illustrative,Time-of-use reference tariff (illustrative),illustrative,2026,EUR,2020,month,honesty_note,,,,,,,,"Illustrative figures, not a published tariff. No demand charge: the reference isolates energy time-shift value; the bands partition every hour of the week."

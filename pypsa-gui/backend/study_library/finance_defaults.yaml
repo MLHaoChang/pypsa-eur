@@ -1,0 +1,62 @@
+# Finance defaults for the guided investment study (MVP-1, plan S2).
+# Vendored with the technology library; the runtime never downloads.
+# Every number carries its source. Rules (horizon, replacement) are named
+# after ledger keys so a user edit to a lifetime moves them.
+
+library_version: technology-data v0.14.0
+
+# One stated currency year for the whole study: technology-data v0.14.0
+# expresses every cost row in 2020 EUR, and the seed tariffs are stated in
+# the same year so no row needs a price-index conversion.
+currency_year: 2020
+currency_year_source: >-
+  technology-data v0.14.0 outputs/costs_2030.csv, column currency_year (2020
+  on every seeded row)
+
+# Spec decision 7: the one labelled convention (IRENA): real terms, pre-tax,
+# without subsidy. MVP-1 implements this basis only.
+basis:
+  terms: real
+  tax: pre
+  subsidy: excl
+basis_source: >-
+  Guided investment study spec, decision 7 (IRENA convention: real, pre-tax,
+  without subsidy)
+
+perspective: site_owner
+perspective_source: Guided investment study plan v2, honest scope (MVP-1 models the site owner only)
+
+discount_rate:
+  value: 0.07
+  unit: per unit
+  basis: real
+  source: >-
+    PyPSA-Eur v2026.02.0 config/config.default.yaml, costs.fill_values
+    'discount rate' (the default rate PyPSA-Eur annualises technology-data
+    costs with)
+  source_year: 2026
+  source_url: https://github.com/PyPSA/pypsa-eur/blob/v2026.02.0/config/config.default.yaml
+  range:
+    low: 0.049
+    high: 0.091
+    source: assumed
+
+# Two lifetimes, one StorageUnit (plan S2): the pro forma horizon is the
+# storage block's lifetime, and the inverter is replaced every inverter
+# lifetime strictly inside that horizon (10 y inverter, 25 y storage:
+# replacements in years 10 and 20), booked as explicit
+# `replacement_inverter` rows. This is the only replacement MVP-1 models.
+horizon_rule:
+  horizon_years: battery_storage_lifetime_years
+  source: Guided investment study plan v2, S2 "Two lifetimes, one StorageUnit"
+replacement_rules:
+  - key: replacement_inverter
+    component: battery inverter
+    every_years: battery_inverter_lifetime_years
+    within: horizon_exclusive
+    cost: battery_inverter_eur_per_kw
+    source: Guided investment study plan v2, S2 "Two lifetimes, one StorageUnit"
+
+# Degradation is deferred (plan, honest scope); the ledger carries the
+# placeholder rows marked not_used_in_mvp1.
+degradation: not_used_in_mvp1
