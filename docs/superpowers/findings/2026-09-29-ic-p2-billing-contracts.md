@@ -33,8 +33,9 @@ Each round's findings, and what was done about them, are in the plan under the W
 |---|---|
 | `tests/qa_billing_contracts.py` | **38/38.** A: R1 imported through the URDB route, attached by `import_tariff_ref` through the config route; REopt parity to the cent for 2023 and 2024, both branches. B: R2 and R3′ imported; R3 (cases 2 and 3), R4a and R4b to the cent; the engine on a 15-min year with 8 items takes **0.27 s** (bound 10 s). C: the US site with a PPA, a CfD on a Library reference price, and DR on an active DSR bus; every settlement line matches its hand formula to the cent; the gap is fully attributed; the objective residual equals the DSR slack cost exactly. D: a `changes_dispatch` PPA with a Library tariff and reference price; gap 0 before and after save → load and after a bundle round trip; the line equals the row; both pins are carried. |
 | All QA drivers (`tests/run_qa_drivers.py`) | **24/24 passed** (includes `qa_billing_contracts` and `qa_commercial_lp`) |
-| Full backend suite (`-m "not slow"`) | SUITE_RESULT |
-| Frontend `vitest run` | VITEST_RESULT |
+| Full backend suite (`-m "not slow"`, Python 3.12 venv), on the tree at 40b0c4f, run while the review fixes landed | **6,785 passed, 31 skipped, 3 failed** (44 min). Two failures were the route registries (WP2.5 review F2), fixed in f618d84. The third (`test_chat_e2e::test_run_simulation_dispatcher_targets_route_handler_not_service_fn`) reads source at run time; the source watcher attributes it to concurrent edits, and it passes on the head. |
+| Every test file touched after the full run started (chat tools, manifest, results billing/seam/facade/range/golden, gap, site billing, contracts, series, library, URDB, PPA, settlement, seam, tripwires, audit) | **1,122 passed, 18 skipped, 0 failed** on the head |
+| Frontend `vitest run` | **178 files, 1,966 tests passed**. An earlier run concurrent with the backend suite had 3 transient failures that did not reproduce. |
 | Frontend `tsc --noEmit` | clean |
 
 ## Findings and carried items
