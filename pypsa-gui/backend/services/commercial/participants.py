@@ -166,6 +166,13 @@ def value_flows_problems(vf: ValueFlowConfig, commercial: CommercialConfig, n) -
             problems.append(f"hub member participant {m.participant!r} is listed twice")
         hub_parts.append(m.participant)
         hub_links.append(m.link)
+    if vf.allocation is not None and grouped:
+        # The allocation splits the WHOLE group bill: a group member that is no
+        # hub member would leave its share with nobody (WP3.3a).
+        unlisted = [link for link in commercial.group_members if link not in hub_links]
+        if unlisted:
+            problems.append("an allocation key needs every group member as a hub member "
+                            f"(missing: {unlisted})")
     if vf.allocation is not None and vf.allocation.basis == "contracted_capacity":
         missing = [m.link for m in vf.hub_members if m.contracted_mw is None]
         if missing or not vf.hub_members:
@@ -270,6 +277,25 @@ class AssetCost:
 
 
 @dataclass
+class HubPeriod:
+    """One period's allocation inputs of an energy hub (WP3.3a; built by
+    `hub_allocation.period_hub`): per participant, the import energy (MWh),
+    the metered linear import items and the peak-contribution split of the
+    demand items — site-view amounts; None = not established."""
+
+    energy_mwh: dict[str, float | None]
+    metered: dict[str, dict[str, float | None] | None]
+    peak: dict[str, dict[str, float] | None]
+    flags: list[str] = field(default_factory=list)
+
+
+@dataclass
+class HubInputs:
+    members: list[tuple[str, str]]                    # (group member Link, participant)
+    periods: dict[str, HubPeriod]
+
+
+@dataclass
 class LedgerInputs:
     periods: list[str]
     site_party: str
@@ -300,6 +326,8 @@ class LedgerInputs:
     curtailment_penalty: float | None = None
     # Contracts whose seller is external but whose assets are modelled here.
     external_ppa_assets: list[str] = field(default_factory=list)
+    # An energy hub's allocation inputs (WP3.3a); None without an allocation key.
+    hub: HubInputs | None = None
 
 
 @dataclass
@@ -501,6 +529,115 @@ def _sources(inputs: LedgerInputs, vf: ValueFlowConfig, p: str) -> list[_Source]
                 out.append(_Source("asset", f"{kind}:{tag}", stream,
                                    legs=[(owner, payee, value)], basis=basis, meta=meta,
                                    flags=[*a.flags, *extra]))
+    return out + _allocation_sources(out, inputs, vf, p)
+
+
+# ── energy-hub allocation (WP3.3a) ─────────────────────────────────────────
+#
+# The hub (= site_party, the group-contract holder) pays the group's bill, fees
+# and receives its export revenue; each shared source's HUB amount (site view:
+# + the hub pays) is split into internal lines member → hub (a revenue share,
+# negative, runs hub → member). Linear import items are metered per member;
+# the rest is keyed (`vf.allocation.basis`). Shares are exact floats; the last
+# member in sorted-id order takes `amount − Σ others`, after the residual of
+# the unrounded split is checked (≤ 1e-9 relative). Contract and asset lines
+# name their parties already and are never allocated.
+
+_SHARED = ("bill", "connection", "export_price")
+_RESIDUAL = 1e-9
+
+
+def _hub_amount(src: _Source, site: str) -> tuple[bool, float | None]:
+    """(touches the hub, its site-view amount of `src`)."""
+    total, touched = 0.0, False
+    for d, c, v in src.legs:
+        sign = 1.0 if same_party(d, site) else (-1.0 if same_party(c, site) else 0.0)
+        if not sign:
+            continue
+        touched = True
+        if v is None or total is None:
+            total = None
+        else:
+            total += sign * v
+    return touched, total
+
+
+def _key_weights(vf: ValueFlowConfig, hp: HubPeriod | None,
+                 members: list[str]) -> tuple[dict[str, float] | None, str]:
+    basis = vf.allocation.basis
+    if basis == "contracted_capacity":
+        by = {m.participant.strip().casefold(): m.contracted_mw for m in vf.hub_members}
+        w = {p: by.get(p.strip().casefold()) for p in members}
+    elif basis == "fixed_shares":
+        by = {k.strip().casefold(): v for k, v in (vf.allocation.shares or {}).items()}
+        w = {p: by.get(p.strip().casefold()) for p in members}
+    else:                                   # energy, and peak_contribution's fallback
+        w = {p: (hp.energy_mwh.get(p) if hp is not None else None) for p in members}
+        basis = "energy"
+    if any(v is None or not _finite(v) or v < 0 for v in w.values()) or sum(w.values()) <= 0:
+        return None, basis
+    return w, basis
+
+
+def _allocation_sources(shared: list[_Source], inputs: LedgerInputs, vf: ValueFlowConfig,
+                        p: str) -> list[_Source]:
+    hub = inputs.hub
+    if hub is None or vf.allocation is None or not vf.hub_members:
+        return []
+    site = inputs.site_party
+    hp = hub.periods.get(p)
+    members = sorted((m.participant for m in vf.hub_members),
+                     key=lambda x: x.strip().casefold())
+    out: list[_Source] = []
+    for src in shared:
+        if src.source not in _SHARED:
+            continue
+        touched, amount = _hub_amount(src, site)
+        if not touched or amount == 0:
+            continue
+        item = src.source_id if src.source == "bill" else None
+        raw: dict[str, float] | None = None
+        method, reason = vf.allocation.basis, None
+        if item is not None and hp is not None and item in hp.metered:
+            method = "metered"
+            got = hp.metered[item]
+            if got is None or any(v is None or not _finite(v)
+                                  for v in (got.get(m) for m in members)):
+                reason = "member_rating_unknown"
+            else:
+                raw = {m: got[m] for m in members}
+        elif item is not None and method == "peak_contribution" and hp is not None \
+                and item in hp.peak:
+            got = hp.peak[item]
+            if got is None:
+                reason = "peak_split_unknown"
+            else:
+                raw = {m: got.get(m, 0.0) for m in members}
+        if raw is None and reason is None:
+            weights, method = _key_weights(vf, hp, members)
+            if weights is None:
+                reason = f"{method}_key_not_established"
+            elif amount is not None:
+                tot = sum(weights.values())
+                raw = {m: amount * weights[m] / tot for m in members}
+        flags = [f"allocation:{method}"]
+        if vf.allocation.basis == "peak_contribution" and method == "energy":
+            flags.append("allocation_fallback_energy")
+        if raw is not None and amount is not None and \
+                abs(sum(raw.values()) - amount) > _RESIDUAL * max(1.0, abs(amount)):
+            raw, reason = None, "residual"
+        if amount is None:
+            reason = reason or "shared_amount_unknown"
+        if raw is None or amount is None:
+            legs = [(m, site, None) for m in members if not same_party(m, site)]
+            flags.append(f"allocation_not_established:{src.source_id}:{reason}")
+        else:
+            shares = [raw[m] for m in members[:-1]]
+            shares.append(amount - sum(shares))            # the last member: the remainder
+            legs = [(m, site, v) for m, v in zip(members, shares) if not same_party(m, site)]
+        if legs:
+            out.append(_Source("allocation", f"{src.source}:{src.source_id}", src.stream,
+                               legs=legs, meta=dict(src.meta), flags=flags))
     return out
 
 

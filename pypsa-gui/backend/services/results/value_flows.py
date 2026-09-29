@@ -242,6 +242,49 @@ def _export_split(n, parsed, sides, bill, export_intervals, flags: list[str]) ->
     return out
 
 
+def _hub_inputs(n, parsed, vf, bill) -> P.HubInputs | None:
+    """An energy hub's allocation inputs (WP3.3a): per period, each group
+    member's import on the group bill's own rating arguments (the ones
+    `billing.bill_site` passes — step, represented hours, billing period, the
+    site clock), rated by `hub_allocation.period_hub`."""
+    from services.commercial import billing as _billing
+    from services.commercial import hub_allocation as _HA
+
+    if vf is None or vf.allocation is None or not vf.hub_members or not parsed.group_members:
+        return None
+    by_link = {m.link: m.participant for m in vf.hub_members}
+    members = [(link, by_link[link]) for link in parsed.group_members if link in by_link]
+    p0 = getattr(n.links_t, "p0", None)
+    links = [link for link, _p in members] + ([parsed.export_link] if parsed.export_link else [])
+    if p0 is None or any(link not in p0.columns for link in links):
+        return P.HubInputs(members=members, periods={})
+    scratch: list[str] = []
+    flows = {part: _billing._flow(p0, link, scratch) for link, part in members}
+    exp_all = (_billing._flow(p0, parsed.export_link, scratch) if parsed.export_link
+               else np.zeros(len(n.snapshots)))
+    w_all = n.snapshot_weightings.objective.to_numpy(dtype=float)
+    multi = isinstance(n.snapshots, pd.MultiIndex)
+    periods: dict[str, P.HubPeriod] = {}
+    for p in _periods(n):
+        sel = _period_mask(n, p)
+        ts = pd.DatetimeIndex(n.snapshots[sel].get_level_values(-1) if multi
+                              else n.snapshots[sel])
+        idx = ts.tz_localize("UTC") if parsed.timezone and ts.tz is None else ts
+        step = _billing._step_hours(ts)
+        represents, billing_period = _billing._represented(ts, w_all[sel], step)
+        group = bill.per_period.get(p) if bill is not None else None
+        try:
+            periods[_key(p)] = _HA.period_hub(
+                idx, {part: v[sel] for part, v in flows.items()}, exp_all[sel], w_all[sel],
+                parsed.import_tariff, step_hours=step, timezone=parsed.timezone,
+                billing_period=billing_period, represents_hours=represents, group=group)
+        except ValueError as exc:                   # the results path never raises
+            periods[_key(p)] = P.HubPeriod(
+                energy_mwh={part: None for _l, part in members}, metered={}, peak={},
+                flags=[f"allocation_not_established:{_key(p)}:{str(exc)[:120]}"])
+    return P.HubInputs(members=members, periods=periods)
+
+
 def _disclosures(n, cfg, lost_load) -> dict[str, dict[str, float | None]]:
     from services.commercial import settlement_inputs as _SI
 
@@ -346,7 +389,7 @@ def ledger_inputs(n, cfg, *, result_df, lost_load=None) -> P.LedgerInputs | None
         disclosures=_disclosures(n, cfg, lost_load),
         input_flags=sorted(set(input_flags)), unsettled_contracts=unsettled,
         curtailment_penalty=_fin((cb or {}).get("curtailment_cost")),
-        external_ppa_assets=external_ppa)
+        external_ppa_assets=external_ppa, hub=_hub_inputs(n, parsed, vf, bill))
 
 
 def value_flow_ledger(n, cfg, *, result_df, lost_load=None):

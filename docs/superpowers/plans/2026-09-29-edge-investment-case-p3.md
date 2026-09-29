@@ -398,6 +398,34 @@ INFO left: `_contract_parties` / `same_party` / the models are outside `code_sha
 **Tests:** V5 under all four keys with the working in the fixture; remainder exactness; tie rule; the
 ratchet-floor month; missing-key refusals; conservation checks 3–4 still close after allocation.
 
+**WP3.3a implementation.**
+- `services/commercial/hub_allocation.py` (pure): `period_hub(...)` → `participants.HubPeriod`
+  (`energy_mwh`, `metered`, `peak`, `flags`); `is_metered`, `is_peak_item`, `floor_source_month`.
+  `services/results/value_flows._hub_inputs` feeds it each group member's `p0` on the rating arguments
+  `bill_site` uses (step, represented hours, billing period, site clock) and the group bill's own
+  `RatingResult` per period (`LedgerInputs.hub`).
+- The allocation is a ledger SOURCE (`source="allocation"`, `source_id="<source>:<id>"`, the shared
+  source's stream), so the coverage check covers it: `participants._allocation_sources` splits the
+  hub's own legs of every bill item, connection fee and export-price revenue (an `asset_owner` export
+  split already paid to owners is not re-split); contract and asset lines are never allocated;
+  curtailment compensation (always None) is not split.
+- Peak contribution: the group's billed interval per (month, window) is re-derived from the engine's
+  `interval_key` means and checked against the bill's `peak_kw`; a binding floor splits on its source
+  month (argmax over the same candidate months, earliest on ties), checked against the engine's floor
+  — a floor from meter history → `allocation_not_established:<item>:ratchet_floor_from_meter_history`.
+- A residual above 1e-9 relative, an unknown member rating or key, or an unknown shared amount gives
+  None lines flagged `allocation_not_established:<id>:<reason>` (ADR-0001), never a guess.
+- **Deviations (recorded):** per-kWh import levies and certificates (no tiers) are metered like energy
+  items (a key would misallocate them as it would a TOU rate); `value_flows_problems` requires every
+  group member to be a hub member when an allocation key is set (a member outside the hub would leave
+  its share with nobody); a hub member that IS `site_party` gets no line to itself.
+- Tests: `test_value_flow_allocation.py` (27): V5 regenerates from `fixtures/investment_case/hub/
+  v5_arithmetic.py` (stdlib only, no half-cent ties) and every share matches to the cent under all four
+  keys with conservation ok; remainder exact; revenue direction; energy fallback disclosed; tie rule;
+  ratchet floor month (and parity with `_ratchet_floor_prior` in the three modes); meter-history floor;
+  unknown key / rating; config refusals; live: a solved two-member V1 hub closes under every key (flat
+  and multi-period).
+
 ---
 
 ## WP3.3b Group net-import LP variable (P2 carry-in)
