@@ -225,9 +225,15 @@ def test_npv_is_the_lp_saving_annuitised_by_construction(cases):
         assert saving > 0
         assert case.kpis.npv == pytest.approx(
             saving * oracle.annuity_pv_factor(rate, horizon), rel=1e-6)
-    assert "npv_nonnegative_at_optimum_by_construction" in cases["bess_2h"].honesty_notes
-    assert "npv_nonnegative_approximate_with_pv" in cases["bess_pv_2h"].honesty_notes
-    assert "npv_nonnegative_at_optimum_by_construction" not in cases["bess_pv_2h"].honesty_notes
+    # Gate S5 BC-S5-2: exact for EVERY option on the annuity salvage basis,
+    # PV included — and so are IRR >= r and discounted payback <= horizon.
+    for option, case in cases.items():
+        assert "npv_nonnegative_at_optimum_by_construction" in case.honesty_notes, option
+        assert "npv_nonnegative_approximate_with_pv" not in case.honesty_notes, option
+        assert ("irr_and_discounted_payback_bounded_at_optimum_by_construction"
+                in case.honesty_notes), option
+        assert case.kpis.irr >= rate
+        assert case.kpis.payback_discounted <= horizon
 
 
 def test_lcos_is_on_discounted_energy(cases):
@@ -299,6 +305,8 @@ def test_an_uncomputed_salvage_is_flagged_never_a_zero():
     assert case.years[-1].unavailable["salvage"].startswith("salvage_not_computed")
     assert case.salvage_basis is None
     assert "salvage_not_computed" in case.honesty_notes
+    # The NPV then books no residual value: said, not implied (gate S5 N1).
+    assert "npv_excludes_uncomputed_salvage" in case.honesty_notes
 
 
 def test_a_salvage_without_a_basis_or_a_null_without_a_flag_is_refused(cases):
@@ -462,3 +470,29 @@ def test_the_baseline_has_no_case():
     with pytest.raises(P.ProformaError) as exc:
         _case("none")
     assert exc.value.code == "baseline_has_no_case"
+
+
+# ── gate S5 BC-S5-3: the tariff's own honesty notes reach the case ───────
+
+def test_the_tariffs_notes_reach_the_case_as_codes(cases):
+    for option, case in cases.items():
+        assert "tariff_illustrative" in case.honesty_notes, option
+        assert "tariff_demand_charge_monthly_peak_not_annual" in case.honesty_notes, option
+
+
+def test_a_supplied_tariffs_prose_note_is_flagged_never_dropped():
+    ledger = sf.site_ledger()
+    tariff = sf.site_tariff(ledger)
+    prose = tariff.model_copy(update={"honesty_notes": [
+        *tariff.honesty_notes, "Our 2026 supplier contract, renegotiated in May."]})
+    case = _case("bess_2h", ledger=ledger, tariff=prose)
+    assert "tariff_has_uncoded_notes" in case.honesty_notes
+    assert all(re.fullmatch(r"[a-z]+(_[a-z]+)*", n) for n in case.honesty_notes)
+
+
+def test_bill_lives_in_the_models_with_a_fidelity():
+    from models import study as M
+    from services.study import tariff as T
+
+    assert T.Bill is M.Bill and T.BillComponents is M.BillComponents
+    assert "fidelity" in M.Bill.model_fields

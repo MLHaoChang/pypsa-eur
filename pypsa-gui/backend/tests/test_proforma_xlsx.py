@@ -155,6 +155,8 @@ def test_assumptions_are_the_ledger_and_provenance_is_complete(book):
     for engine in ("cash_flow_expander", "bill_calculator", "lp_duals", "ledger"):
         assert engine in prov["engines"]
     assert prov["salvage_basis"] == "annuity_pv"
+    notes = {r[1].value for r in wb["Provenance"].iter_rows() if r[0].value == "honesty_note"}
+    assert {"tariff_illustrative", "tariff_demand_charge_monthly_peak_not_annual"} <= notes
 
 
 def test_a_ledger_text_that_looks_like_a_formula_stays_text():

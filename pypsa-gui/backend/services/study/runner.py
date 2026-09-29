@@ -172,6 +172,27 @@ def _solved_network(row):
     return n
 
 
+def fork_network_from_disk(row) -> tuple[object, str | None]:
+    """
+    (network, sha256[:16] of its ``network.nc``) read from the fork's
+    directory — never the resident context, which a user may have opened
+    and edited, and which must not be touched without its lock (gate S5
+    BC-S5-1). The file is hashed before and after the read; a file that
+    changed in between answers a ``None`` hash, which matches nothing.
+    """
+    import pypsa
+
+    from services import project_registry
+
+    path = project_registry.project_dir(row) / "network.nc"
+    before = _network_hash(path)
+    n = pypsa.Network()
+    with PyPSAService.get_netcdf_io_lock():
+        PyPSAService.import_network_from_netcdf(n, path)
+    after = _network_hash(path)
+    return n, (before if before == after else None)
+
+
 def _opt_value(value) -> float | None:
     try:
         v = float(value)
@@ -189,6 +210,8 @@ def _read_option(n, cfg, tariff, opt, fidelity: Fidelity, currency_year) -> dict
     imp = p0[packs.IMPORT_LINK] if p0 is not None and packs.IMPORT_LINK in p0 else None
     exp = p0[packs.EXPORT_LINK] if p0 is not None and packs.EXPORT_LINK in p0 else None
     bill = study_tariff.BillCalculator().bill(imp, exp, tariff, n.snapshot_weightings)
+    # The calculator does not know which run the dispatch came from.
+    bill = bill.model_copy(update={"fidelity": fidelity})
     detail["bill"] = bill.model_dump(mode="json")
     try:
         from services.results.cost_breakdown import compute_cost_breakdown

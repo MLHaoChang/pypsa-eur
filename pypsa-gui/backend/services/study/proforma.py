@@ -35,7 +35,7 @@ and scoped to the option's OWN assets (the battery StorageUnit and, for
   annuity_pv``): the PV array, and the inverter bought at the last
   replacement (the year-20 inverter has five of its ten years left at 25).
   With that rule the case's NPV is the LP's objective saving over the
-  baseline times the annuity factor — exactly, for the battery.
+  baseline times the annuity factor — exactly, for every option (PV too).
 * **Flat-network path** (N12): a flat year has no ``by_period``; the annual
   values are expanded over ``horizon_years``. A multi-period network is
   refused.
@@ -49,6 +49,7 @@ the baseline option. A bill that could not be computed makes the case
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -250,14 +251,19 @@ def _p_nom_opt(df: pd.DataFrame, name: str) -> float:
     return max(v, 0.0)
 
 
-def _upfront_series(n, cfg, comp_class: str, name: str) -> float | None:
-    """`upfront_cost_series` per MW for one asset, None when it cannot resolve."""
+def _upfront_series(n, comp_class: str, name: str) -> float | None:
+    """
+    `upfront_cost_series` per MW for one asset, None when it cannot resolve.
+
+    Read-only on ``n`` (gate S5 BC-S5-1): no periodized-cost fill and revert,
+    which would write the network's cost columns. The pack sets everything
+    the read needs (PV ``overnight_cost``; the battery's ``lifetime`` and
+    ``discount_rate`` for the back-calculation the gap discloses).
+    """
     from services.solver.periodized_costs import upfront_cost_series
-    from services.solver_service import with_periodized_cost_defaults
 
     try:
-        with with_periodized_cost_defaults(n, cfg, for_back_calculation=True):
-            v = float(upfront_cost_series(n, comp_class)[name])
+        v = float(upfront_cost_series(n, comp_class)[name])
     except (KeyError, ValueError, TypeError):
         return None
     return v if math.isfinite(v) else None
@@ -272,6 +278,21 @@ def _pack_notes(n) -> list[str]:
         if code and code.replace("_", "").isalpha() and code.islower():
             out.append(code)
     return out
+
+
+_CODE_RE = re.compile(r"[a-z]+(_[a-z]+)*")
+
+
+def _tariff_codes(tariff: Tariff) -> list[str]:
+    """
+    The tariff's own honesty notes (gate S5 BC-S5-3). The library's seed
+    tariffs carry codes; a supplied tariff may carry prose, which is never
+    dropped silently: it is named ``tariff_has_uncoded_notes``.
+    """
+    codes = [n for n in tariff.honesty_notes if _CODE_RE.fullmatch(n)]
+    if len(codes) != len(tariff.honesty_notes):
+        codes.append("tariff_has_uncoded_notes")
+    return codes
 
 
 def _codes(notes) -> list[str]:
@@ -403,7 +424,7 @@ def build_investment_case(n_option, cfg_option, n_baseline, ledger: AssumptionsL
         remaining = last_buy + inv_life - horizon
         salvage_by["battery_inverter"] = (inverter_replacement * _annuity(rate, inv_life)
                                           * _annuity_pv_factor(rate, remaining))
-        back = _upfront_series(n_option, cfg_option, "StorageUnit", packs.BATTERY_NAME)
+        back = _upfront_series(n_option, "StorageUnit", packs.BATTERY_NAME)
         back_total = None if back is None else back * p_bat
         gaps.append(UpfrontGap(
             asset=packs.BATTERY_NAME, ledger_upfront_eur=capex_by[packs.BATTERY_NAME],
@@ -413,7 +434,7 @@ def build_investment_case(n_option, cfg_option, n_baseline, ledger: AssumptionsL
                   "battery_upfront_from_ledger_not_back_calculated"]
     if has_pv:
         q_pv = _p_nom_opt(n_option.generators, packs.PV_NAME)
-        per_mw = _upfront_series(n_option, cfg_option, "Generator", packs.PV_NAME)
+        per_mw = _upfront_series(n_option, "Generator", packs.PV_NAME)
         if per_mw is None:
             raise ProformaError("pv_upfront_unresolved",
                                 "the PV upfront cost does not resolve (upfront_cost_series)")
@@ -527,12 +548,22 @@ def build_investment_case(n_option, cfg_option, n_baseline, ledger: AssumptionsL
             key=key, label=label, annual_value=delta, share=share, engine="bill_calculator",
             unavailable={} if share is not None else {"share": "zero_savings"}))
 
-    if has_pv:
-        notes.append("npv_nonnegative_approximate_with_pv")
+    # Exact for every option on the annuity salvage basis (gate S5 BC-S5-2):
+    # upfront CAPEX, replacements and salvage discount to the annuities the
+    # LP charged, so NPV = LP objective saving x AF(r, H) >= 0 at the optimum,
+    # and with it IRR >= r and discounted payback <= H whenever there is an
+    # investment. Magnitudes inform; the signs are the LP's, not evidence.
+    notes.append("npv_nonnegative_at_optimum_by_construction")
+    if capex_total > 0:
+        notes.append("irr_and_discounted_payback_bounded_at_optimum_by_construction")
     else:
-        notes.append("npv_nonnegative_at_optimum_by_construction")
+        notes.append("size_zero_no_investment")
     notes.append("market_revenue_at_duals_excluded_from_cash_flow")
-    notes.append("salvage_not_computed" if salvage is None else "salvage_annuity_pv_remaining_life")
+    if salvage is None:
+        notes += ["salvage_not_computed", "npv_excludes_uncomputed_salvage"]
+    else:
+        notes.append("salvage_annuity_pv_remaining_life")
+    notes += _tariff_codes(tariff)
     notes += _pack_notes(n_option)
     notes += _codes(base_bill.honesty_notes) + _codes(opt_bill.honesty_notes)
     notes += _codes(ledger.honesty_notes)

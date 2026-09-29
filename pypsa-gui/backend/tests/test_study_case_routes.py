@@ -144,3 +144,71 @@ def test_a_case_handler_called_as_a_plain_function_refuses_in_auth_mode(monkeypa
             fn("x", "bess_2h", project=project, db=None, user=None)
         assert exc.value.status_code == 404
         assert exc.value.detail["code"] == "decision_studies_unavailable"
+
+
+# ── gate S5 BC-S5-1: the case is built from the fork the run solved ──────
+
+def _fork_nc(project_storage_dir, name, option):
+    return project_storage_dir(f"{name}-opt-{option}") / "network.nc"
+
+
+def test_a_fork_edited_after_the_run_is_refused_not_mixed(
+        client, api_project, studies_on, fake, project_storage_dir):
+    """
+    The run record's bills and hashes belong to the network the run solved.
+    A fork edited afterwards (the Expert view opens it) must not be priced
+    with them, nor attested by the run's model hash.
+    """
+    import pypsa
+
+    sid = _setup(client, api_project, "case-edit")
+    _run(client, "case-edit", sid)
+    path = _fork_nc(project_storage_dir, "case-edit", "bess_2h")
+    n = pypsa.Network(str(path))
+    n.storage_units.loc["battery", "p_nom_opt"] *= 5
+    n.export_to_netcdf(str(path))
+    for suffix in ("case", "case.xlsx"):
+        r = client.get(f"/api/projects/case-edit/studies/{sid}/options/bess_2h/{suffix}")
+        assert r.status_code == 409, (suffix, r.status_code, r.text[:300])
+        assert r.json()["detail"]["error_kind"] == "fork_changed_since_run"
+
+
+def test_building_a_case_never_reads_or_touches_a_resident_fork(
+        client, api_project, studies_on, fake, project_storage_dir, registry_key_for):
+    """A resident fork context is neither read nor mutated (no fill, no revert)."""
+    import pypsa
+
+    from services.pypsa_service import PyPSAService
+
+    sid = _setup(client, api_project, "case-res")
+    _run(client, "case-res", sid)
+    resident = pypsa.Network(str(_fork_nc(project_storage_dir, "case-res", "bess_2h")))
+    resident.storage_units.loc["battery", "p_nom_opt"] = 99.0
+    before = {attr: getattr(resident, attr).copy(deep=True)
+              for attr in ("storage_units", "generators", "links")}
+    key = registry_key_for("case-res-opt-bess_2h")
+    ctx = PyPSAService.build_context()
+    ctx.network = resident
+    PyPSAService.mark_study_owned(key)
+    PyPSAService.register(key, ctx)
+    try:
+        r = client.get(f"/api/projects/case-res/studies/{sid}/options/bess_2h/case")
+        assert r.status_code == 200, r.text
+        ledger = client.get(f"/api/projects/case-res/studies/{sid}/ledger").json()["ledger"]
+        v = {row["key"]: row["value"] for row in ledger["rows"]}
+        upfront = (v["battery_inverter_eur_per_kw"] + 2 * v["battery_storage_eur_per_kwh"]) * 1000.0
+        # The disk fork's 0.3 MW, not the resident's 99 MW.
+        assert r.json()["kpis"]["capex_total"] == pytest.approx(upfront * 0.3, rel=1e-9)
+        assert PyPSAService.get_context(key) is ctx and ctx.network is resident
+        for attr, frame in before.items():
+            assert getattr(resident, attr).equals(frame), attr
+    finally:
+        PyPSAService.drop(key)
+        PyPSAService.unmark_study_owned(key)
+
+
+def test_the_run_records_the_bills_fidelity(client, api_project, studies_on, fake):
+    sid = _setup(client, api_project, "case-fid")
+    rec = _run(client, "case-fid", sid)
+    assert rec["details"]["bess_2h"]["bill"]["fidelity"] == "quick_screen"
+    assert rec["details"]["none"]["bill"]["fidelity"] == "quick_screen"

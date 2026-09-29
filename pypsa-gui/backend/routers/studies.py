@@ -818,10 +818,6 @@ def get_ledger_csv(study_id: str,
 
 # ── S5: the investment case (pro forma), JSON and XLSX ────────────────────
 
-def _case_error(status: int, code: str, message: str) -> HTTPException:
-    return HTTPException(status, detail={"error_kind": code, "message": message})
-
-
 def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
                  db: DBSession, user: User | None):
     """
@@ -848,18 +844,20 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
                                          "message": "The run record cannot be read."}) from None
     question = study_questions.get_question(study.question_id)
     if run is None or findings is None or question is None:
-        raise _case_error(404, "study_never_run", "this study has not been run")
+        raise HTTPException(404, detail={"error_kind": "study_never_run",
+                                         "message": "this study has not been run"})
     if option_id not in {o.option_id for o in question.options}:
-        raise _case_error(404, "option_unknown", f"the question has no option {option_id!r}")
+        raise HTTPException(404, detail={"error_kind": "option_unknown",
+                                         "message": f"the question has no option {option_id!r}"})
     if not any(o.free_assets for o in question.options if o.option_id == option_id):
-        raise _case_error(422, "baseline_has_no_case",
-                          f"{option_id!r} is the baseline every case is measured against")
+        raise HTTPException(422, detail={"error_kind": "baseline_has_no_case", "message": (
+            f"{option_id!r} is the baseline every case is measured against")})
     _refuse_if_running(project, db, user, study_id)
     result = next((o for o in findings.get("options") or []
                    if o.get("option_id") == option_id), None)
     if result is None or result.get("solve_status") != "ok" or not result.get("project_ref"):
-        raise _case_error(404, "option_not_solved",
-                          f"the last run did not solve option {option_id!r}")
+        raise HTTPException(404, detail={"error_kind": "option_not_solved", "message": (
+            f"the last run did not solve option {option_id!r}")})
     if _base_row(project, db, user) is None:
         raise HTTPException(404, f"Project '{project.name}' not found")
     try:
@@ -868,15 +866,26 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
         fork = None
     if fork is None or not study_forks.is_study_owned(
             fork, study_id=study_id, base_uuid=project.uuid):
-        raise _case_error(404, "option_not_solved",
-                          f"option {option_id!r} has no fork this study owns")
+        raise HTTPException(404, detail={"error_kind": "option_not_solved", "message": (
+            f"option {option_id!r} has no fork this study owns")})
+    hashes = findings.get("hashes") or {}
     ledger, _stored = _current_ledger(study)
-    if packs.ledger_hash(ledger) != (findings.get("hashes") or {}).get("ledger_hash"):
-        raise _case_error(409, "ledger_changed_since_run", (
+    if packs.ledger_hash(ledger) != hashes.get("ledger_hash"):
+        raise HTTPException(409, detail={"error_kind": "ledger_changed_since_run", "message": (
             "the assumptions ledger changed after the run; re-run the study "
-            "before reading its cases (the LP sized the options on the old one)"))
+            "before reading its cases (the LP sized the options on the old one)")})
     library = _library_or_500()
-    network = study_runner._solved_network(fork)
+    # Gate S5 BC-S5-1: the fork's file, never its resident context, and only
+    # when it is the network the run solved — the run record's bills and
+    # asset economics belong to that network, and the case's model hash
+    # attests it.
+    network, disk_hash = study_runner.fork_network_from_disk(fork)
+    recorded = (hashes.get("option_network_hashes") or {}).get(str(fork.id))
+    if recorded is None or disk_hash != recorded:
+        raise HTTPException(409, detail={"error_kind": "fork_changed_since_run", "message": (
+            f"option {option_id!r}'s network changed after the run (opened, "
+            "edited or re-solved outside the study); its case would price one "
+            "network with another's bills. Re-run the study.")})
     details = (run.get("details") or {})
     bills = {"baseline": (details.get("none") or {}).get("bill"),
              "option": (details.get(option_id) or {}).get("bill")}
@@ -888,11 +897,10 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
             tariff=tariff, fidelity=result.get("fidelity"),
             asset_economics=(details.get(option_id) or {}).get("asset_economics"),
             study_currency_year=study.currency_year, question=question,
-            project_ref=str(fork.id),
-            model_hash=((findings.get("hashes") or {}).get("option_network_hashes")
-                        or {}).get(str(fork.id)))
+            project_ref=str(fork.id), model_hash=disk_hash)
     except (proforma.ProformaError, packs.PackError) as exc:
-        raise _case_error(422, exc.code, exc.message) from None
+        raise HTTPException(422, detail={"error_kind": exc.code,
+                                         "message": exc.message}) from None
     return study, ledger, case
 
 

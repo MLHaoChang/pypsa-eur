@@ -37,7 +37,7 @@ __all__ = [
     "LedgerDomain",
     "DecisionStudy", "DemandCharge", "Fidelity", "Figure", "FinancialBasis",
     "Findings", "InvestmentCase", "LedgerRow", "OptionResult", "OptionSpec",
-    "CaseKpis", "CaseProvenance", "CashFlowYear", "MarketRevenueAtDuals",
+    "Bill", "BillComponents", "CaseKpis", "CaseProvenance", "CashFlowYear", "MarketRevenueAtDuals",
     "UpfrontGap", "ValueStream",
     "Perspective", "SectionState", "SectionStatus", "StudyMaturity", "Tariff",
     "VerdictClass",
@@ -419,7 +419,67 @@ class Tariff(_Model):
     network_charges: list[NetworkCharge] = Field(default_factory=list)
     export: ExportCompensation = Field(default_factory=ExportCompensation)
     connection_limit_mw: float | None = None
+    # Snake_case codes (S5, gate S5 BC-S5-3); a supplied tariff may still
+    # carry prose, which the case flags as `tariff_has_uncoded_notes`.
     honesty_notes: list[str] = Field(default_factory=list)
+    # The sentence behind each code, for the guided flow and the report.
+    honesty_help: dict[str, str] = Field(default_factory=dict)
+
+
+# ── the bill (S3; moved here from `services/study/tariff.py` at S5) ─────
+#
+# `services/study/tariff.py` re-exports both names, so `tariff.Bill` is this
+# class. The calculator that fills them stays there.
+
+class BillComponents(_FigureBlock):
+    """
+    Signed contributions to the bill over the modelled horizon, in the
+    tariff's currency: charges are positive, `export_credit` is negative (a
+    credit), and the bill is their sum. `capacity` is the tariff's
+    `CapacityCharge`, pro-rated by horizon hours / 8760.
+    """
+
+    _figure_fields: ClassVar[tuple[str, ...]] = (
+        "energy", "demand", "capacity", "fixed", "network", "export_credit")
+
+    energy: float | None
+    demand: float | None
+    capacity: float | None
+    fixed: float | None
+    network: float | None
+    export_credit: float | None
+
+
+class Bill(_FigureBlock):
+    """
+    The site's grid bill (spec §4.4; ADR-0001). `total` covers the modelled
+    snapshots; `annual_bill` is the same figure when they are one year and
+    null (`horizon_not_one_year`) otherwise, never extrapolated.
+
+    `honesty_notes` are stable snake_case codes, never prose (S7's prose
+    validator rejects digits): `partial_billing_period_charged_in_full`
+    (a period in `partial_billing_periods` carries a per-period charge in
+    full) and `capacity_charge_prorated_by_hours` (horizon hours / a year).
+    """
+
+    _figure_fields: ClassVar[tuple[str, ...]] = ("total", "annual_bill")
+
+    total: float | None
+    annual_bill: float | None
+    by_component: BillComponents
+    peak_mw_by_billing_period: dict[str, float] = Field(default_factory=dict)
+    billing_periods: list[str] = Field(default_factory=list)
+    horizon_hours: float
+    basis: FinancialBasis = Field(default_factory=FinancialBasis)
+    currency: str = "EUR"
+    currency_year: int | None = None
+    engine: Literal["bill_calculator"] = "bill_calculator"
+    # Gate S3 N3 (carried to S5): which run the dispatch came from; the
+    # calculator itself does not know, the runner stamps it.
+    fidelity: Fidelity | None = None
+    honesty_notes: tuple[str, ...] = ()
+    # Billing periods the snapshots cover only in part (labels, not prose).
+    partial_billing_periods: list[str] = Field(default_factory=list)
 
 
 # ── 4.2 DecisionQuestion ──────────────────────────────────────────────────

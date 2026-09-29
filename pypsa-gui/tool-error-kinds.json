@@ -47,6 +47,10 @@
       "surface": "inline",
       "why": "The user pressed stop. Announcing their own action in a banner is noise."
     },
+    "baseline_has_no_case": {
+      "surface": "inline",
+      "why": "Decision study (S5): the investment case was asked for the grid-only baseline, which every case is measured against. Route-only today; a client-side slip, nothing for the user to fix."
+    },
     "capability_unsupported": {
       "surface": "banner",
       "why": "The profile cannot do what the turn needs (vision, tools). A configuration problem only the user can fix, and the turn is over. It already had KIND_COPY and did not route — the same unreachable-copy shape as inactive_acting_user."
@@ -78,6 +82,10 @@
     "file_too_large": {
       "surface": "banner",
       "why": "Upload rejected against the 25 MB cap. The user must act."
+    },
+    "fork_changed_since_run": {
+      "surface": "inline",
+      "why": "Decision study (S5): an option fork's network changed after the run (opened, edited or re-solved outside the study), so its case would price one network with another's bills. Route-only today; the message tells the user to re-run the study."
     },
     "fork_has_children": {
       "surface": "inline",
@@ -131,6 +139,10 @@
       "surface": "inline",
       "why": "Raised by POST /chat/import validating a pasted transcript. Route-only — no tool imports transcripts."
     },
+    "ledger_changed_since_run": {
+      "surface": "inline",
+      "why": "Decision study (S5): the assumptions ledger was edited after the run, so the solved options no longer match it. Route-only today; the message tells the user to re-run the study."
+    },
     "load_not_found": {
       "surface": "banner",
       "why": "The named load is not in the network. The user gave a name that does not exist."
@@ -150,6 +162,14 @@
     "not_authorized": {
       "surface": "banner",
       "why": "The account may not take this action (e.g. switching the instance-wide profile). Terminal for the request and needs an administrator."
+    },
+    "option_not_solved": {
+      "surface": "inline",
+      "why": "Decision study (S5): the last run did not solve the option, or the study does not own its fork. Route-only today; the option list already shows which options solved."
+    },
+    "option_unknown": {
+      "surface": "inline",
+      "why": "Decision study (S5): the question has no such option id. Route-only today; a client-side slip, not a condition the user must act on."
     },
     "parallel_destructive_not_allowed": {
       "surface": "banner",

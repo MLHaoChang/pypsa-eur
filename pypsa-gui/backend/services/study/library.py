@@ -28,6 +28,7 @@ import csv
 import functools
 import math
 import pathlib
+import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -302,6 +303,9 @@ def _int_list(text: str, where: str) -> list[int]:
     return out
 
 
+_NOTE_CODE_RE = re.compile(r"[a-z]+(_[a-z]+)*")
+
+
 def _parse_tariffs(path: pathlib.Path) -> dict[str, Tariff]:
     grouped: dict[str, dict[str, Any]] = {}
     for line, raw in enumerate(_read_csv(path, TARIFF_COLUMNS), start=2):
@@ -315,6 +319,7 @@ def _parse_tariffs(path: pathlib.Path) -> dict[str, Tariff]:
             "currency_year": _opt_int(raw["currency_year"], where),
             "billing_period": raw["billing_period"].strip(),
             "energy_bands": [], "network_charges": [], "honesty_notes": [],
+            "honesty_help": {},
         })
         kind, label = raw["component"].strip(), raw["label"].strip()
         price = _opt_float(raw["price"], where)
@@ -341,7 +346,14 @@ def _parse_tariffs(path: pathlib.Path) -> dict[str, Tariff]:
         elif kind == "connection_limit":
             t["connection_limit_mw"] = price
         elif kind == "honesty_note":
-            t["honesty_notes"].append(raw["note"].strip())
+            # Gate S5 BC-S5-3: the code (label column) travels into the case
+            # and the report; the sentence (note column) is its help text.
+            if not _NOTE_CODE_RE.fullmatch(label):
+                raise LibraryError(
+                    f"{where}: {tid} honesty_note needs a snake_case code without "
+                    f"digits in the label column, got {label!r}")
+            t["honesty_notes"].append(label)
+            t["honesty_help"][label] = raw["note"].strip()
         else:
             raise LibraryError(f"{where}: unknown tariff component {kind!r}")
     try:

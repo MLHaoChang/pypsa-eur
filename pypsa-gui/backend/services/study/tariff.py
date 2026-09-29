@@ -37,20 +37,20 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import ClassVar, Literal
+from typing import Literal
 
 import numpy as np
 import pandas as pd
-from pydantic import Field, ValidationError
+from pydantic import ValidationError
 
 from models.study import (
+    Bill,
+    BillComponents,
     DemandCharge,
     EnergyBand,
     ExportCompensation,
-    FinancialBasis,
     Tariff,
     TimeRule,
-    _FigureBlock,
 )
 
 __all__ = [
@@ -325,54 +325,6 @@ def parse_demand_charge_config(raw: Mapping) -> DemandChargeSpec:
 
 
 # ── the bill ──────────────────────────────────────────────────────────────
-
-class BillComponents(_FigureBlock):
-    """
-    Signed contributions to the bill over the modelled horizon, in the
-    tariff's currency: charges are positive, `export_credit` is negative (a
-    credit), and the bill is their sum. `capacity` is the tariff's
-    `CapacityCharge`, pro-rated by horizon hours / 8760.
-    """
-
-    _figure_fields: ClassVar[tuple[str, ...]] = (
-        "energy", "demand", "capacity", "fixed", "network", "export_credit")
-
-    energy: float | None
-    demand: float | None
-    capacity: float | None
-    fixed: float | None
-    network: float | None
-    export_credit: float | None
-
-
-class Bill(_FigureBlock):
-    """
-    The site's grid bill (spec §4.4; ADR-0001). `total` covers the modelled
-    snapshots; `annual_bill` is the same figure when they are one year and
-    null (`horizon_not_one_year`) otherwise, never extrapolated.
-
-    `honesty_notes` are stable snake_case codes, never prose (S7's prose
-    validator rejects digits): `partial_billing_period_charged_in_full`
-    (a period in `partial_billing_periods` carries a per-period charge in
-    full) and `capacity_charge_prorated_by_hours` (horizon hours / a year).
-    """
-
-    _figure_fields: ClassVar[tuple[str, ...]] = ("total", "annual_bill")
-
-    total: float | None
-    annual_bill: float | None
-    by_component: BillComponents
-    peak_mw_by_billing_period: dict[str, float] = Field(default_factory=dict)
-    billing_periods: list[str] = Field(default_factory=list)
-    horizon_hours: float
-    basis: FinancialBasis = Field(default_factory=FinancialBasis)
-    currency: str = "EUR"
-    currency_year: int | None = None
-    engine: Literal["bill_calculator"] = "bill_calculator"
-    honesty_notes: tuple[str, ...] = ()
-    # Billing periods the snapshots cover only in part (labels, not prose).
-    partial_billing_periods: list[str] = Field(default_factory=list)
-
 
 def _weights(snapshot_weightings) -> pd.Series:
     if isinstance(snapshot_weightings, pd.DataFrame):

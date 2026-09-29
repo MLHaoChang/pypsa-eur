@@ -665,3 +665,26 @@ def test_an_import_row_without_a_unit_is_refused_with_the_row_named(seeded):
     assert rows[2]["key"] in str(exc.value)
     assert "line 4" in str(exc.value)
     assert "unit" in str(exc.value)
+
+
+# ── gate S5 BC-S5-3: a seed tariff's honesty notes are codes ─────────────
+
+SEED_TARIFF_NOTES = {
+    "de_industrial_illustrative": {"tariff_illustrative",
+                                   "tariff_demand_charge_monthly_peak_not_annual"},
+    "tou_reference_illustrative": {"tariff_illustrative",
+                                   "tariff_isolates_energy_time_shift"},
+}
+
+
+@pytest.mark.parametrize("tariff_id", sorted(SEED_TARIFF_NOTES))
+def test_each_seed_tariffs_notes_are_digit_free_codes_with_their_prose_kept(
+        library, tariff_id):
+    import re
+
+    tariff = library.tariffs[tariff_id]
+    assert set(tariff.honesty_notes) == SEED_TARIFF_NOTES[tariff_id]
+    assert all(re.fullmatch(r"[a-z]+(_[a-z]+)*", n) for n in tariff.honesty_notes)
+    # The sentence a reader sees stays, keyed by its code.
+    assert set(tariff.honesty_help) == set(tariff.honesty_notes)
+    assert all(len(text) > 25 for text in tariff.honesty_help.values())
