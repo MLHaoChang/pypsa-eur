@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useUIStore } from '../store/uiStore'
+import toast from 'react-hot-toast'
 import { siteDropTarget } from '../site3d/dropRegistry'
+import { readOnlyMessage, READ_ONLY_MUTATION_MESSAGE } from '../utils/mutationGuard'
 
 // ── Palette drag, extracted from Sidebar.tsx ─────────────────────────────────
 // Manual pointer-event drag, NOT HTML5 drag-and-drop: the HTML5 API was
@@ -126,7 +128,14 @@ export function useAssetDrag(): {
       }
 
       const drop = resolveDrop(ev.clientX, ev.clientY)
-      if (drop.canvas === null) return  // released outside both canvases — cancel silently
+      if (drop.canvas === null) return  // released outside every canvas — cancel silently
+      // The 3D site view is the first canvas that gates editing on read-only
+      // (design D12); the other two rely on the backend's 409. A site drop
+      // would also write a placement, which the store refuses anyway.
+      if (drop.canvas === 'site' && useUIStore.getState().readOnly) {
+        toast.error(readOnlyMessage(useUIStore.getState().readOnlyReason) ?? READ_ONLY_MUTATION_MESSAGE)
+        return
+      }
 
       setCreationItem({
         id: item.id,

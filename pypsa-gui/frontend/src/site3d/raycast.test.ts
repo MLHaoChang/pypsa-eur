@@ -38,6 +38,11 @@ describe('screen ↔ ground', () => {
     expect(screenToGround(level, rect, 100 + 400, 50 + 500)).not.toBeNull()
   })
 
+  it('a ground point behind the camera projects to null', () => {
+    const c = camera()  // at (0, 300, 400) looking north-down; far south is behind it
+    expect(groundToScreen(c, rect, 0, -5000)).toBeNull()
+  })
+
   it('a degenerate rect yields null', () => {
     expect(screenToGround(camera(), { left: 0, top: 0, width: 0, height: 0 } as DOMRect, 0, 0)).toBeNull()
   })

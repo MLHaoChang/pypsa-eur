@@ -97,6 +97,44 @@ describe('a drop onto the 3D site', () => {
     expect(useSitesStore.getState().docFor('Demo').sites[0].placements['Bus:New bus']).toEqual({ x: 120, y: -40, heading: 0 })
   })
 
+  it('a typed bus outside the site is refused: no create, no placement', async () => {
+    const { networkApi } = await import('../api/network')
+    renderForm({ id: 'thermal', label: 'Thermal', dropSite: drop })
+    fireEvent.change(fieldInput(/^Name/), { target: { value: 'Off-site' } })
+    fireEvent.change(fieldInput(/^Attach to Bus/), { target: { value: 'Outsider' } })
+    await userEvent.click(screen.getByText('Add to Network'))
+    expect(await screen.findByText(/Not a bus of Campus/)).toBeTruthy()
+    expect(networkApi.createGenerator).not.toHaveBeenCalled()
+    expect(useSitesStore.getState().docFor('Demo').sites[0].placements).toEqual({})
+  })
+
+  it('the option list offers only the site\'s buses', async () => {
+    renderForm({ id: 'thermal', label: 'Thermal', dropSite: drop })
+    const input = fieldInput(/^Attach to Bus/)
+    fireEvent.change(input, { target: { value: '' } })
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    const options = Array.from(document.querySelectorAll('li')).map(li => li.textContent)
+    expect(options.some(o => o?.includes('Elec B'))).toBe(true)
+    expect(options.some(o => o?.includes('Outsider'))).toBe(false)
+  })
+
+  it('an H₂ load dropped on a site with no H₂ member says so, in site terms', () => {
+    useSitesStore.getState().setSiteBuses('Demo', 'site_a', ['Elec B', 'Elec A'])
+    renderForm({ id: 'load_h2', label: 'H₂ load', dropSite: drop })
+    expect(fieldInput(/^H₂ bus/).value).toBe('')
+    expect(screen.getByText(/bus in site Campus/)).toBeTruthy()
+  })
+
+  it('a failed create writes no placement', async () => {
+    const { networkApi } = await import('../api/network')
+    vi.mocked(networkApi.createStorageUnit).mockRejectedValueOnce(new Error('boom'))
+    renderForm({ id: 'battery', label: 'Battery', dropSite: drop })
+    fireEvent.change(fieldInput(/^Name/), { target: { value: 'BESS fail' } })
+    await userEvent.click(screen.getByText('Add to Network'))
+    await waitFor(() => expect(networkApi.createStorageUnit).toHaveBeenCalled())
+    expect(useSitesStore.getState().docFor('Demo').sites[0].placements).toEqual({})
+  })
+
   it('a drop naming a site that no longer exists behaves like a plain palette click', () => {
     renderForm({ id: 'thermal', label: 'Thermal', dropSite: { siteId: 'gone', ground: { x: 0, y: 0 } } })
     expect(fieldInput(/^Attach to Bus/).value).toBe('')

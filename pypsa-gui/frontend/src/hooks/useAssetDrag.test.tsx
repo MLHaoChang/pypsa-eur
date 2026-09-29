@@ -241,6 +241,23 @@ describe('resolveDrop — the 3D site view (WP4, D16)', () => {
     expect(resolveDrop(10, -5).canvas).toBeNull()
   })
 
+  it('a site drop while read-only is cancelled with the reason, and nothing is created', () => {
+    const canvas = mount('site3d-canvas')
+    stubElementFromPoint(canvas)
+    registerSiteDropTarget(target)
+    useUIStore.setState({ readOnly: true, readOnlyReason: 'locked-by-user' })
+    function Harness() {
+      const { beginDrag } = useAssetDrag()
+      return <button onPointerDown={e => beginDrag(e, { id: 'battery', label: 'Battery' })}>drag</button>
+    }
+    const { getByText } = render(<Harness />)
+    act(() => { fireEvent.pointerDown(getByText('drag'), { button: 0, clientX: 0, clientY: 0 }) })
+    act(() => { fireEvent.pointerMove(window, { clientX: 30, clientY: 40 }) })
+    act(() => { fireEvent.pointerUp(window, { clientX: 30, clientY: 40 }) })
+    expect(useUIStore.getState().creationItem).toBeNull()
+    useUIStore.setState({ readOnly: false, readOnlyReason: 'writable' })
+  })
+
   it('the gesture forwards dropSite into the creation request', () => {
     const canvas = mount('site3d-canvas')
     stubElementFromPoint(canvas)

@@ -12,6 +12,7 @@ import BusAutocomplete from '../components/BusAutocomplete'
 import { useSitesStore } from '../site3d/sitesStore'
 import { primaryBus } from '../site3d/siteModel'
 import { fromLocal } from '../site3d/geo'
+import { PLACEABLE_CLASSES } from '../site3d/types'
 import toast from 'react-hot-toast'
 import type { Bus, Line, Link, Generator, Load, StorageUnit, Store, Transformer } from '../api/types'
 
@@ -382,13 +383,14 @@ const DEPENDENT_DEFAULTS: Record<string, (key: string, value: string) => Partial
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function CreationForm({ item }: { item: CreationRequest }) {
-  // A drop onto the 3D site view (D16): the site restricts the terminal
-  // bus to its members, prefills the primary one, seeds a dropped bus's
-  // coordinates from the ground point, and the created asset is placed
-  // there. Resolved once; a site deleted mid-form degrades to a plain drop.
-  const dropSite = useSitesStore(s => (item.dropSite ? s.siteById(useUIStore.getState().currentProject, item.dropSite.siteId) : null))
-  const { setCreationItem, setSelectedComponent, setPendingNodePosition } = useUIStore()
   const currentProject = useUIStore(s => s.currentProject)
+  // A drop onto the 3D site view (D16): the site restricts the terminal
+  // bus to its members (offered AND validated), prefills the primary one,
+  // seeds a dropped bus's coordinates from the ground point, and the
+  // created asset is placed there. A live subscription: a site deleted
+  // mid-form degrades to a plain drop.
+  const dropSite = useSitesStore(s => (item.dropSite ? s.siteById(currentProject, item.dropSite.siteId) : null))
+  const { setCreationItem, setSelectedComponent, setPendingNodePosition } = useUIStore()
   const qc = useQueryClient()
   const solveMode = useSolveMode()
   // Attributes the user has added to THIS palette type (spec D23). The scope
@@ -481,6 +483,11 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
       if (f.required && f.type === 'bus' && !form[f.key]?.trim()) {
         // bus field not strictly required for line/link (can connect later)
       }
+      // A site drop may only attach to the site's own buses (D16): a typed
+      // outsider would create the asset off-site and leave an orphan placement.
+      if (dropSite && f.type === 'bus' && form[f.key]?.trim() && !dropSite.buses.includes(form[f.key].trim())) {
+        errs[f.key] = `Not a bus of ${dropSite.name}`
+      }
       if (f.type === 'number' && form[f.key] !== '' && isNaN(parseFloat(form[f.key] ?? ''))) {
         errs[f.key] = 'Must be a number'
       }
@@ -554,7 +561,9 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
         const { siteId, ground } = item.dropSite
         const cls = COMPONENT_TYPE[item.id] ?? item.id
         const store = useSitesStore.getState()
-        store.setPlacement(proj, siteId, `${cls}:${name}`, { x: ground.x, y: ground.y, heading: 0 })
+        // Only a placeable class gets a placement; the asset exists either
+        // way, so this must never throw after the create succeeded.
+        if (PLACEABLE_CLASSES.has(cls)) store.setPlacement(proj, siteId, `${cls}:${name}`, { x: ground.x, y: ground.y, heading: 0 })
         if (item.id === 'bus') {
           const site = store.siteById(proj, siteId)
           if (site && !site.buses.includes(name)) store.setSiteBuses(proj, siteId, [...site.buses, name])
@@ -617,10 +626,11 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
             if (f.type === 'bus') {
               const bf = f as BusFieldSpec
               // A site drop offers only the site's own buses (D16).
-              const availBuses = dropSite
-                ? filteredBusNames(bf.busCarrierFilter).filter(b => dropSite.buses.includes(b))
-                : filteredBusNames(bf.busCarrierFilter)
-              const noMatch = bf.busCarrierFilter !== undefined && availBuses.length === 0
+              const inNetwork = filteredBusNames(bf.busCarrierFilter)
+              const availBuses = dropSite ? inNetwork.filter(b => dropSite.buses.includes(b)) : inNetwork
+              const noMatch = bf.busCarrierFilter !== undefined && inNetwork.length === 0
+              // The network has one, the site does not: a different remedy.
+              const noMatchInSite = !!dropSite && bf.busCarrierFilter !== undefined && inNetwork.length > 0 && availBuses.length === 0
               const warnLabel = ({
                 'h2': 'H₂', 'non-h2': 'non-H₂', 'electricity': 'electricity',
                 'heat': 'heat', 'gas': 'gas/biomass',
@@ -632,12 +642,19 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
                     value={form[f.key] ?? ''}
                     onChange={v => set(f.key, v)}
                     buses={availBuses}
+                    allowUnknown={!dropSite}
                     placeholder="Select bus…"
                   />
                   {noMatch && (
                     <p className="flex items-center gap-1 text-[9px] text-warn mt-0.5">
                       <AlertTriangle size={10} />
                       No {warnLabel} bus in network — add one first
+                    </p>
+                  )}
+                  {noMatchInSite && (
+                    <p className="flex items-center gap-1 text-[9px] text-warn mt-0.5">
+                      <AlertTriangle size={10} />
+                      No {warnLabel} bus in site {dropSite!.name} — add one to the site first (Satellite view → Edit buses)
                     </p>
                   )}
                   {error && <p className={errCls}>{error}</p>}

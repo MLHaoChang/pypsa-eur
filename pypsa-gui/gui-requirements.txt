@@ -140,3 +140,11 @@ httpx==0.28.1        # OpenAICompatProvider's chat-completions SSE
 #                 crash but is NOT nothing: MIME sniffing is skipped and the
 #                 client's DECLARED content-type is trusted, which is the
 #                 check the Office-zip upgrade exists to backstop.
+# ── the 3D site view's site-context service (services/site_context.py) ─────
+# Both already ship transitively (shapely via pypsa/geopandas, pillow via
+# matplotlib); pinned here because that module imports them UNGUARDED and
+# test_packaging_requirements refuses to trust a transitive presence — the
+# same "works by luck" class the Jinja2 note above records. Versions are the
+# ones installed in the desktop environment on 2026-09-29.
+shapely==2.1.2       # boundary bbox / padding for the Overpass query
+pillow==12.3.0       # Terrarium PNG decode for the terrain grid
