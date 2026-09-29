@@ -2385,8 +2385,9 @@ async function p27bMidStudySwitch(browser, dc) {
     const p2Names = p2Modes.map(r => r.name)
     check(p2Modes.every(r => r.failure_class !== 'B' && r.failure_class !== 'C'),
       `project 2's fmea_modes carry no sweep rows (${p2Modes.length} rows)`)
-    check(p2Names.length === 0 || p2Names.some(n => !dcModes.has(n)) || dcModes.size !== p2Names.length,
-      `project 2's rows are not project 1's (${JSON.stringify(p2Names.slice(0, 6))})`)
+    check(dcModes.size > 0, `project 1 had ${dcModes.size} fmea_modes rows (so the next check means something)`)
+    check(!(p2Names.length === dcModes.size && p2Names.every(n => dcModes.has(n))),
+      `project 2's ${p2Names.length} rows are not project 1's ${dcModes.size} (${JSON.stringify(p2Names.slice(0, 6))})`)
     await shot(page, 'p27b-project-2')
   } catch (e) {
     try { await shot(page, 'FAILURE-p27b-switch') } catch { /* page gone */ }
