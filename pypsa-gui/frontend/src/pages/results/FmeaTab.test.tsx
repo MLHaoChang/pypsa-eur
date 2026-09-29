@@ -24,6 +24,8 @@ vi.mock('../../api/simulation', async (importOriginal) => {
       postFmeaSweep: vi.fn(),
       abortFmeaSweep: vi.fn(),
       getStressScenarios: vi.fn(),
+      putStressScenarios: vi.fn(),
+      getStressProfilePacks: vi.fn(),
     },
   }
 })
@@ -304,4 +306,34 @@ it('warns, with the solver\'s word, when the plan was not put back', async () =>
     expect(note).toContain(word)
     cleanup()
   }
+})
+
+it('hosts the class-C stress-scenario editor (P15)', async () => {
+  vi.mocked(resultsApi.getStressProfilePacks).mockResolvedValue({ packs: [] })
+  renderTab()
+  const editor = await screen.findByTestId('stress-editor')
+  await waitFor(() => expect(editor.textContent).toMatch(/cold_snap/))
+})
+
+
+it('refuses to sweep without a readable stress registry (E2E review m4)', async () => {
+  const toast = (await import('react-hot-toast')).default
+  vi.mocked(resultsApi.getStressScenarios).mockResolvedValue(
+    { scenarios: [], error: 'stress-scenario registry unreadable: bad JSON' })
+  vi.mocked(resultsApi.getStressProfilePacks).mockResolvedValue({ packs: [] })
+  renderTab()
+  const user = (await import('@testing-library/user-event')).default.setup()
+  await user.click(await screen.findByRole('button', { name: /Run B\/C sweep/ }))
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+    expect.stringMatching(/unreadable.*sweep not started/)))
+  expect(resultsApi.postFmeaSweep).not.toHaveBeenCalled()
+})
+
+it('offers the FMEA walkthrough and anchors its targets (P21)', async () => {
+  vi.mocked(resultsApi.getStressProfilePacks).mockResolvedValue({ packs: [] })
+  renderTab()
+  expect(await screen.findByTestId('fmea-guide-button')).toBeTruthy()
+  expect(screen.getByTestId('fmea-sweep')).toBeTruthy()
+  expect(screen.getByTestId('fmea-expert-form')).toBeTruthy()
+  expect(await screen.findByTestId('fmea-table')).toBeTruthy()
 })

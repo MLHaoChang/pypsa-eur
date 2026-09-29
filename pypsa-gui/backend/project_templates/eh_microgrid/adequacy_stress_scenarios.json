@@ -1,0 +1,21 @@
+{
+  "__schema__": 1,
+  "scenarios": [
+    {
+      "electrical_load_multiplier": 1.05,
+      "frequency_per_year": 0.4,
+      "id": "dunkelflaute",
+      "kind": "parametric",
+      "name": "Dunkelflaute",
+      "renewable_availability_multiplier": 0.1
+    },
+    {
+      "electrical_load_multiplier": 1.25,
+      "frequency_per_year": 0.2,
+      "id": "heatwave",
+      "kind": "parametric",
+      "name": "Heatwave (A/C peak)",
+      "renewable_availability_multiplier": 0.9
+    }
+  ]
+}

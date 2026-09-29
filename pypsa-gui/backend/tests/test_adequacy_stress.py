@@ -141,7 +141,7 @@ def test_renewable_multiplier_hits_profile_borne_availability(tmp_path):
 def test_registry_routes(tmp_path):
     import routers.adequacy_worksheet as R
     proj = _proj(tmp_path)
-    assert R.get_stress_scenarios(project=proj) == {"scenarios": []}
+    assert R.get_stress_scenarios(project=proj) == {"scenarios": [], "error": None}
     out = R.put_stress_scenarios(
         body=R.StressScenariosPut(scenarios=[_scenario()]), project=proj)
     assert out["scenarios"][0]["id"] == "cold_snap"

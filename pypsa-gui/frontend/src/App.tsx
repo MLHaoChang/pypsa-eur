@@ -26,9 +26,11 @@ import SolveQueuePanel from './pages/SolveQueuePanel'
 import GridspinePanel from './pages/GridspinePanel'
 import { recoveryFor } from './utils/autoRecovery'
 import LocalSettings from './pages/LocalSettings'
+import HubDesignPanel from './pages/hubDesign/HubDesignPanel'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
 import RescaleDialogHost from './components/RescaleDialogHost'
+import { GuidedTourHost } from './components/GuidedTour'
 import CrashRecoveryBanner from './components/CrashRecoveryBanner'
 import LockBanner from './components/LockBanner'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -112,12 +114,13 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   gridspine:  { eyebrow: 'SIMULATION', title: 'Planning → dynamics' },
   workspace:  { eyebrow: 'PROJECT',    title: 'Workspace' },
   settings:   { eyebrow: 'APPLICATION', title: 'Settings' },
+  hubDesign:  { eyebrow: 'GUIDED',     title: 'Hub design' },
 }
 
 // Tabs that take the whole main area (canvas hidden) rather than opening as a
 // half-width panel beside the canvas — their charts, tables, and two-column
 // layouts need the full width.
-const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine'])
+const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine', 'hubDesign'])
 
 function fullPageContent(panel: SlidePanel): React.ReactNode {
   switch (panel) {
@@ -138,6 +141,7 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'solveQueue': return <SolveQueuePanel />
     case 'gridspine':  return <GridspinePanel />
     case 'settings':   return <LocalSettings />
+    case 'hubDesign':  return <HubDesignPanel />
     default:           return null
   }
 }
@@ -174,12 +178,35 @@ export default function App() {
   const {
     activeSlidePanel, setSlidePanel, currentProject, canvasView,
     lastProjectId, lastSavedByProject, markProjectSaved, pruneRecents, recents, setLastProjectId,
-    theme, density, compareRailOpen, setCompareRailOpen,
+    theme, density, compareRailOpen, setCompareRailOpen, uiMode, guidedTourHolds,
   } = useUIStore()
 
   // Results + Time Series take the whole main area (see FULL_SCREEN_TABS);
   // every other sidebar tab opens as a half-width panel beside the canvas.
   const fullScreenTab = activeSlidePanel != null && FULL_SCREEN_TABS.has(activeSlidePanel)
+
+  // Guided default-open (guided-mode spec §3.6 + §10 addendum): with a
+  // project open and no panel showing, Guided opens the hub-design flow —
+  // once per project per session, so closing it is respected. A project
+  // counts as auto-opened as soon as ANY slide panel has been open for it in
+  // Guided (a panel reaching null afterwards is the user's or a tour's doing,
+  // not "nothing is open yet"), and while a guided tour is preparing or
+  // running the auto-open never fires — the tour always wins. A hold only
+  // SKIPS, it does not mark: a project switched to mid-tour still gets its
+  // once-per-project open when the hold is released (the tour's own project
+  // is already marked by its open panel). Expert never auto-opens anything.
+  const hubDesignAutoOpenedFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (uiMode !== 'guided' || !currentProject) return
+    if (hubDesignAutoOpenedFor.current === currentProject) return
+    if (guidedTourHolds > 0) return
+    if (activeSlidePanel != null) {
+      hubDesignAutoOpenedFor.current = currentProject
+      return
+    }
+    hubDesignAutoOpenedFor.current = currentProject
+    setSlidePanel('hubDesign')
+  }, [uiMode, currentProject, activeSlidePanel, guidedTourHolds, setSlidePanel])
 
   // Apply theme + density to <html> so CSS-var overrides in index.css kick in.
   // Done on <html> (not <body>) because the @theme block lives at :root scope —
@@ -668,6 +695,10 @@ export default function App() {
             asks about it. See store/rescaleStore.ts for why this moved out of
             MapCanvasInner. */}
         <RescaleDialogHost />
+        {/* Tours launched with a `prepare` step (the EH tagging tour closes
+            the Results panel its button lives in, so the button cannot host
+            it). Renders nothing until such a tour starts. */}
+        <GuidedTourHost />
       </div>
       </AppErrorBoundary>
     </AuthMismatchGate>

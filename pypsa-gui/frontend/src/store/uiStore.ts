@@ -5,6 +5,7 @@ import { effectiveLockState, type LockState, type ReadOnlyReason } from '../util
 // definition, shared with the rail's own width arithmetic: this store and
 // Results.tsx enforcing the same number independently is how they can drift.
 import { RAIL_MIN_W } from '../pages/results/railWidth'
+import { appLog } from './simulationStore'
 
 interface SelectedComponent { type: string; name: string }
 // CreationRequest is set when the user wants to add a new asset to the network.
@@ -39,7 +40,7 @@ export type CanvasMode = 'select' | 'connect'
 // deliberately NOT among them: `activeSlidePanel` holds ONE value, so while
 // `'chat'` was a member the assistant was mutually exclusive with every view
 // it exists to explain. It lives in `assistantDockOpen` below instead.
-export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings' | 'gridspine'
+export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings' | 'gridspine' | 'hubDesign'
 // Command-palette open mode. `null` = closed. `'all'` = full surface (⌘K).
 // `'projects'` = focused project switcher (⌘P).
 export type PaletteMode = 'all' | 'projects' | null
@@ -51,6 +52,11 @@ export type SidebarMode = 'expanded' | 'icon' | 'hidden'
 export type CanvasView = 'blank' | 'satellite' | 'hybrid'
 export type Theme = 'light' | 'dark'
 export type Density = 'comfortable' | 'compact'
+// Guided hides the navigation chrome the EH hub-design flow does not need;
+// Expert is every panel and tab. See the guided-mode spec §3.
+export type UiMode = 'guided' | 'expert'
+// What created a new project (informational — logged, never branched on).
+export type NewProjectKind = 'blank' | 'template' | 'file' | 'clone' | 'study'
 
 const SIDEBAR_MODE_KEY = 'network-diagram:sidebar-mode'
 const PROJECT_NAME_KEY = 'network-diagram:project-name'
@@ -78,8 +84,79 @@ const DENSITY_KEY = 'network-diagram:density'
 const COMPARE_RAIL_KEY = 'network-diagram:compare-rail'
 const COMPARE_RAIL_WIDTH_KEY = 'network-diagram:compare-rail-width'
 const ASSISTANT_DOCK_KEY = 'network-diagram:assistant-dock'
+const UI_MODE_KEY = 'network-diagram:ui-mode'
+// '1' when the user picked the mode themselves; absent otherwise. An explicit
+// choice is never overridden (G4), so nothing ever clears this key.
+const UI_MODE_EXPLICIT_KEY = 'network-diagram:ui-mode-explicit'
 
 const RECENTS_MAX = 5
+
+// ── First-run detection (guided-mode spec §3.2) ──────────────────────────────
+// Import-time call log for uiStore.firstRunOrder.test.ts: records that
+// detectFirstRun ran and every storage write made while this module loads, in
+// order. Written only at import; nothing reads it at runtime.
+export const __firstRunProbe: { events: string[] } = { events: [] }
+
+// A key that only an existing user can have. `theme-schema` is excluded
+// because storedTheme() writes it on every first load (see the race note
+// below); chat:* and pypsa-gui:map:* cannot exist without a network-diagram:*
+// key, so they are not counted.
+function isLegacyKey(k: string): boolean {
+  return k !== THEME_SCHEMA_KEY
+    && (k.startsWith('network-diagram:') || k.startsWith('pypsa-guide-seen:') || k === 'results:active-tab')
+}
+
+function detectFirstRun(): boolean {
+  __firstRunProbe.events.push('detectFirstRun')
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k != null && isLegacyKey(k)) return false
+    }
+    return true
+  } catch {
+    // Unreadable storage: not provably a first-time user → Expert (§3.2).
+    return false
+  }
+}
+
+// The race: storedTheme() WRITES theme-schema while create() evaluates the
+// initial state, so the first-time check must run before create(). This
+// constant is declared above create(...) for exactly that reason — do not
+// move it into the initialiser.
+const FIRST_RUN = detectFirstRun()
+
+function readUiMode(): UiMode | null {
+  try {
+    const v = localStorage.getItem(UI_MODE_KEY)
+    if (v === 'guided' || v === 'expert') return v
+  } catch { /* noop */ }
+  return null
+}
+
+function readUiModeExplicit(): boolean {
+  try { return localStorage.getItem(UI_MODE_EXPLICIT_KEY) === '1' } catch { return false }
+}
+
+// §3.2 truth table. A stored mode wins (explicit or not); otherwise a
+// first-time user gets Guided and an existing one Expert. The first-time
+// branch PERSISTS its answer (implicit): without it, the first legacy key
+// written later would turn this user into an "existing user" and flip them
+// to Expert on the next load.
+function initialUiMode(firstRun: boolean): { mode: UiMode; explicit: boolean } {
+  const stored = readUiMode()
+  if (stored) return { mode: stored, explicit: readUiModeExplicit() }
+  if (firstRun) {
+    try {
+      __firstRunProbe.events.push(`setItem:${UI_MODE_KEY}`)
+      localStorage.setItem(UI_MODE_KEY, 'guided')
+    } catch { /* noop */ }
+    return { mode: 'guided', explicit: false }
+  }
+  return { mode: 'expert', explicit: false }
+}
+
+const INITIAL_UI_MODE = initialUiMode(FIRST_RUN)
 
 function storedSidebarMode(): SidebarMode {
   try {
@@ -149,6 +226,7 @@ function storedTheme(): Theme {
   try {
     if (localStorage.getItem(THEME_SCHEMA_KEY) !== THEME_SCHEMA) {
       localStorage.removeItem(THEME_KEY)
+      __firstRunProbe.events.push(`setItem:${THEME_SCHEMA_KEY}`)
       localStorage.setItem(THEME_SCHEMA_KEY, THEME_SCHEMA)
     }
     const v = localStorage.getItem(THEME_KEY)
@@ -342,6 +420,14 @@ interface UIStore {
   // anchor has to live outside it — a set(SlidePanel) parameter cannot
   // survive that remount. Consumed then cleared by the section itself.
   settingsSectionRequest: string | null
+  // Ask the Properties panel's Bus / Link card to open its Edit form (the EH
+  // tagging tour's targets only render in Edit). Consumed then cleared by the
+  // card, like resultsTabRequest.
+  propertiesEditRequest: 'Bus' | 'Link' | null
+  // Ask the Energy Hub reference-design panel (Results → Adequacy) to open
+  // and bring its report into view — the hub-design Results card's "Open
+  // full report" (guided-mode P24). Consumed then cleared by the panel.
+  ehReportRequest: boolean
   // Deep-link into the Asset Detail tab (Task 13). Consumed then cleared by
   // AssetDetail.tsx's effect. Set only via `requestAssetDetail`.
   assetDetailRequest: AssetDetailRequest | null
@@ -388,6 +474,21 @@ interface UIStore {
   // attributes which the CSS-var overrides in index.css key off.
   theme: Theme
   density: Density
+  // Guided / Expert (spec §3.1). `uiModeExplicit` is true once the user chose
+  // a mode themselves; the new-project rule never overrides that choice.
+  uiMode: UiMode
+  uiModeExplicit: boolean
+  setUiMode: (mode: UiMode, opts?: { explicit?: boolean }) => void
+  // Called by every project-creation success handler (G4): an implicit mode
+  // becomes Guided; an explicit choice is left alone.
+  noteNewProjectCreated: (kind: NewProjectKind) => void
+  readStoredUiMode: () => UiMode | null
+  // Guided tours in flight (a prepare step running, or a tour on screen).
+  // While > 0, Guided never auto-opens hubDesign — the tour always wins
+  // (guided-mode spec §10 addendum, gate P23 B2). In-memory only.
+  guidedTourHolds: number
+  holdGuidedTour: () => void
+  releaseGuidedTour: () => void
   setTheme: (t: Theme) => void
   setDensity: (d: Density) => void
   toggleTheme: () => void
@@ -426,6 +527,10 @@ interface UIStore {
   clearResultsTabRequest: () => void
   requestSettingsSection: (section: string) => void
   clearSettingsSectionRequest: () => void
+  requestPropertiesEdit: (c: 'Bus' | 'Link') => void
+  clearPropertiesEditRequest: () => void
+  requestEhReport: () => void
+  clearEhReportRequest: () => void
   // ONE path for all four entry points (Properties, bottom table, map,
   // chatbot). Each of them only has to call this — the panel, the tab and
   // the selection all move together, so none of them can drift out of step.
@@ -487,6 +592,8 @@ export const useUIStore = create<UIStore>((set) => ({
   bottomTabRequest: null,
   resultsTabRequest: null,
   settingsSectionRequest: null,
+  propertiesEditRequest: null,
+  ehReportRequest: false,
   assetDetailRequest: null,
   compareNavRequest: null,
   ioModalRequest: null,
@@ -517,6 +624,45 @@ export const useUIStore = create<UIStore>((set) => ({
   paletteMode: null,
   theme: storedTheme(),
   density: storedDensity(),
+  uiMode: INITIAL_UI_MODE.mode,
+  uiModeExplicit: INITIAL_UI_MODE.explicit,
+  setUiMode: (mode, opts) => {
+    const explicit = opts?.explicit === true
+    try {
+      localStorage.setItem(UI_MODE_KEY, mode)
+      if (explicit) localStorage.setItem(UI_MODE_EXPLICIT_KEY, '1')
+    } catch { /* noop */ }
+    set(s => {
+      const patch: Partial<UIStore> = { uiMode: mode, uiModeExplicit: s.uiModeExplicit || explicit }
+      // §3.7: a slide panel Guided has no navigation for is swapped for the
+      // hub-design flow (or closed when there is no project). Results stays —
+      // Guided keeps two of its tabs. Switching to Expert closes nothing.
+      if (mode === 'guided' && s.activeSlidePanel != null
+          && s.activeSlidePanel !== 'hubDesign' && s.activeSlidePanel !== 'results') {
+        patch.activeSlidePanel = s.currentProject ? 'hubDesign' : null
+      }
+      return patch
+    })
+  },
+  noteNewProjectCreated: (kind) => {
+    const { uiMode, setUiMode } = useUIStore.getState()
+    // Re-read the flag from storage, not only memory: another browser tab may
+    // have made the explicit choice after this one loaded (spec §10 addendum).
+    // Adopt that choice here rather than override it.
+    if (!useUIStore.getState().uiModeExplicit && readUiModeExplicit()) {
+      setUiMode(readUiMode() ?? uiMode, { explicit: true })
+    }
+    if (useUIStore.getState().uiModeExplicit) {
+      appLog('INFO', `New ${kind} project — keeping the chosen ${useUIStore.getState().uiMode} mode`)
+      return
+    }
+    appLog('INFO', `New ${kind} project — starting in Guided mode`)
+    setUiMode('guided')
+  },
+  readStoredUiMode: () => readUiMode(),
+  guidedTourHolds: 0,
+  holdGuidedTour: () => set(s => ({ guidedTourHolds: s.guidedTourHolds + 1 })),
+  releaseGuidedTour: () => set(s => ({ guidedTourHolds: Math.max(0, s.guidedTourHolds - 1) })),
   setTheme: (t) => {
     try { localStorage.setItem(THEME_KEY, t) } catch { /* noop */ }
     set({ theme: t })
@@ -627,6 +773,10 @@ export const useUIStore = create<UIStore>((set) => ({
   clearResultsTabRequest: () => set({ resultsTabRequest: null }),
   requestSettingsSection: (section) => set({ settingsSectionRequest: section }),
   clearSettingsSectionRequest: () => set({ settingsSectionRequest: null }),
+  requestPropertiesEdit: (c) => set({ propertiesEditRequest: c }),
+  clearPropertiesEditRequest: () => set({ propertiesEditRequest: null }),
+  requestEhReport: () => set({ ehReportRequest: true }),
+  clearEhReportRequest: () => set({ ehReportRequest: false }),
   requestAssetDetail: (req) => set({
     assetDetailRequest: req,
     selectedComponent: { type: req.componentClass, name: req.name },
