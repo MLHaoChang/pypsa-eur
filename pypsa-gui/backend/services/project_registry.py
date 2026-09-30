@@ -209,6 +209,24 @@ def stores_absolute_path(project: Project) -> bool:
     return Path(project.storage_path).is_absolute()
 
 
+def first_free_root_name(db: DBSession, user: User, base: str) -> str:
+    """
+    `base`, or `base 2` / `base 3` / … — the first name no project in the
+    caller's org holds (names are org-unique, see `Project.__table_args__`).
+
+    For DEFAULT names only (a template created without one): a name the
+    caller typed keeps `create_root`'s 409. A concurrent create can still
+    take the name between this read and the insert; that one 409s as before.
+    """
+    org_id = _org_id_for(db, user)
+    taken = set(db.scalars(select(Project.name).where(Project.org_id == org_id)))
+    candidate, suffix = base, 2
+    while candidate in taken:
+        candidate = f"{base} {suffix}"
+        suffix += 1
+    return candidate
+
+
 def create_root(
     db: DBSession,
     user: User,

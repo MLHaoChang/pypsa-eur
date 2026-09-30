@@ -1375,11 +1375,14 @@ def create_from_template(
         )
 
     # `name` is optional — default to the template's friendly name, then
-    # uniquify so clicking the same template twice doesn't clobber the first.
-    requested = (name or "").strip() or _TEMPLATE_DEFAULT_NAMES[template_key]
+    # uniquify so clicking the same template twice doesn't 409 on the first.
+    # Only the default is numbered: a name the caller chose keeps its 409.
     from services import project_registry
 
     project_registry.require_user(user)
+    requested = (name or "").strip() or project_registry.first_free_root_name(
+        db, user, _TEMPLATE_DEFAULT_NAMES[template_key]
+    )
     _created_project = project_registry.create_root(db, user, requested)
     target_name = _created_project.name
     dest = project_registry.ensure_project_dir(_created_project)
