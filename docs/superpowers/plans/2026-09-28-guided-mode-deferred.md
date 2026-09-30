@@ -577,3 +577,124 @@ No processes are left running.
 - **Re-gate fixes:** all fixed test-first. Rows 1–5 pass (6674 passed + 31 skipped backend; row 2 1609 passed; tsc 0; vitest 2745; smoke P28 PASS). Mutations killed 9 of 12. The survivors are R3 (equivalent), R4 and R7 (narrow lock races with correct guards and no test; recorded in OPEN-ITEMS).
 - **O1 (owner):** softer done-sentence now; real edit-after-study tracking is P33b.
 - **R-1:** after a study, stale live dispatch falls through to "…the network changed since." (see the gate file).
+
+### P29 phase note (implementation, 2026-09-30, base `e7f139b84`)
+
+Deferred spec §4 (B1, B2, B3). Commits: `363942269` (the Expert snapshot, before any P29 edit), `e5af7aa4b` (B1), `401dec86e` (B2), `1fa3bbf65` (B3 backend), `d3f288074` (B3 frontend), `8ec11f7aa` (B1 follow-up), `7456d6c44` (smoke), `a994da65d` (B3 merge tests). Out-of-phase: `d95357335` (coordinator's cherry-pick: `services/dispatch_status.py` ignores a solve's transient `__voll_*` slack rows, so a live-network FMEA sweep no longer reports a false `stale` dispatch; `tests/test_dispatch_status_transient.py`). It is not P29 work. It is in the tree that rows 1, 2 and the second smoke ran on.
+
+**Anchor drift.** Re-checked on `e7f139b84`:
+
+| Spec anchor | On `e7f139b84` |
+|---|---|
+| `ChatPanel.tsx:2196-2216` `tool_preparing` / `tool_request`; `:2239-2260` `tool_result`; render `:3097-3138` | `:2211`, `:2254`; `chat-tool-label` `:3196` |
+| `guidedToolLine` `:468-472` | unchanged |
+| `FmeaTab.tsx:161-171`, `:237`, `:257`, `:258-259`, `:260`, `:274` | `:162` title, `:237` Class, `:257` class cell, `:260` severity cell, `:274` badge |
+| `copt.py:1145-1151`, merge `:1275-1280` | `:1148`, `:1279` |
+| `sweep.py:604-620` | `:628-640` (the `in_scope` branch); row dict ends `:655` |
+| `stress.py:644-655` | `:670` |
+| `api/simulation.ts` (type) | `getFmeaModes` is untyped (`per_mode: Array<Record<string, unknown>>` in `results/adequacy.tsx:161`). The row type lives in `fmea.ts` (`WorksheetRow`) and `EhReferenceDesignPanel.tsx` (`FmeaRow`), so the field was added there instead. `api/simulation.ts` is unchanged. |
+
+**What was built:**
+
+- **B1 (`ChatPanel.tsx`).**
+  - `GUIDED_TOOL_PHRASE` sits beside `GUIDED_CARD_SUMMARY` and holds the spec's eight entries. `guidedToolPhrase(X)` falls back to "use <tool words>".
+  - `guidedToolLine` hides `… preparing X`. It reads `→ X` as "Working: <phrase>…", `✓ X` as "Done: <phrase>" and `✗ X[ — kind[: message]]` as "Could not: <phrase>".
+  - A failed call's own message is shown as the next line (`chat-tool-message`). The raw line stays under the existing Details, collapsed.
+  - The P26 declined rules come first and are unchanged. The transcript and Expert are unchanged.
+- **B2.**
+  - `Results.tsx`: in Guided the header reads eyebrow `HUB DESIGN · RESULTS` and title `Reliability results`.
+  - `FmeaTab.tsx` gets a Guided branch; the Expert JSX is untouched:
+    - the spec's title and prose;
+    - a class cell `Term k="fmea_class_a|b|c|d"` reading Generator outage / Link outage / Stress scenario / Your own row;
+    - the occurrence basis `Term k="fmea_occurrence"` reading "outage rate";
+    - no badge: the row `title` is `useTerm('fmea_engine')` plus a plain fidelity sentence;
+    - `Term` hovers on the Severity and Yearly-risk headers (`fmea_severity`, `fmea_criticality`);
+    - `data-guided="1"`; every test id is kept.
+  - Eight keys were added to `eh_fmea_guide.json` and to `TERM_FALLBACK`, word for word the same. Each is at most 27 words, with no `_JARGON` or `_HUB_JARGON`.
+- **B3.**
+  - `worksheet.zero_reason(...)` holds the spec's rule and its order, with the docstring notes.
+  - It is set on `failure_mode["zero_reason"]` in these places:
+    - COPT class A (`attribute_criticality`);
+    - the COPT block merge (re-derived);
+    - the class-B sweep;
+    - the class-C sweep;
+    - the Energy Hub zonal screen merge (see decision 3).
+  - `per_mode` forwards the key through the existing spread, with no edit to `copt_endpoint.py`. No tool schema, description or prompt changed; `test_guided_mode_prompt.py` is green in row 2.
+  - `fmea.ts`: `ZeroReason`, `ZERO_REASON_TEXT` and `zeroReasonText`. `mergeWorksheet` forwards the key; manual rows get `null`.
+  - `FmeaTab`: in Guided, a €0 row with a reason shows the text. In Expert it shows `€0.0` with the text as `title`.
+  - `ResultsCard` reads the same text and falls back to "no measurable cost". `FmeaRow` gains the field, and `fmeaTopRows` forwards it unchanged.
+  - The CSV and JSON exports are unchanged.
+
+**The one justified snapshot update.** `FmeaTab.expertUnchanged.test.tsx.snap` was recorded on `e7f139b84` and committed first (`363942269`). B2 (`401dec86e`) passed it byte for byte. B3 (`d3f288074`) added exactly two attributes, `title="no shortfall — the site copes without it"` and `title="not counted (outside the electricity metric)"`, on the two €0 severity cells. *Justification:* the spec's accepted Expert deviation; the Expert `€0.0` gains its reason as a hover and nothing else changes. `Results.expertUnchanged`, `AppHeader.expertUnchanged` and `Sidebar.expertUnchanged` are unchanged.
+
+**Decisions and deviations:**
+
+1. **A finished or declined call's "Working" line gives way to its outcome** (`8ec11f7aa`, `guidedSettledToolIds`).
+   - The backend sends `tool_request` before the confirmation gate (`chat_service.py:4620`). As first built, a declined call therefore read "Working: run the reliability study…" above "You declined — nothing was changed."
+   - That is a claim that is no longer true. Guided now hides the `→ X` line once a `✓`, `✗` or `denied:` line with the same `tool_use_id` exists, so each call is one line.
+   - The spec's "Working… then Done" holds in time. The red test asserts both states. An extra case covers a declined call.
+2. **The rebound line reads in words in Guided.** `🔀 active project: A → B` becomes "The assistant is now working in the project B." (or "The assistant replaced the network; it is not saved to a project yet."), with the raw line under Details. The spec's table does not list it, but it is a Guided `chat-message` with a raw `→ `, which is what the smoke forbids.
+3. **The Energy Hub zonal screen merge (`eh_stages._screen`) also re-derives `zero_reason`.** It is a second block merge, beyond the spec's anchors, and it holds the common-mode row. Without it, its rows would carry a per-block reason, or none. The pin is `test_the_zonal_screen_merge_rederives_the_reason_too`: red without the change.
+4. **Guided wording beyond the contract table**, on the same tab:
+   - the sweep button reads "Check equipment failures and stress scenarios" / "Checking…";
+   - the aborted notice, the empty state, the form title ("Add your own row") and its footnote are plain;
+   - "(out of scope)" reads "(not counted)";
+   - Mode reads "What fails", and Mitigability reads "Notes", with the delete button inside that cell;
+   - Yearly risk is the last column, so the spec's prose ("the last column is the yearly risk") is true.
+   - The Guided fidelity sentence replaces the Expert tip, which says "COPT" / "LP proxy" (engine ids).
+5. **The smoke has no `page-header` test id to read.** `PageHeader` has none, and adding one would change every page's Expert markup. The smoke reads the Results `h1` ("Reliability results", and not "Optimization results").
+6. **The export check has no stored pre-phase fixture.** Its two parts:
+   - **API.** Every `GET /api/results/fmea_modes` row carries `zero_reason` from the allowed set, and no other key is new (checked against the pre-P29 key set). The payload is saved as `p29-fmea_modes.json`.
+   - **CSV.** The download is taken twice on the same page: with the live rows, and with the rows served without the key through a Playwright route (the pre-phase payload). The bytes are equal, and the header is the pre-phase header.
+   - The number side is pinned by the golden and range suites, which are green in row 2.
+7. **Class-C frequency 0 is unreachable.** `stress._validate` refuses `frequency_per_year` outside (0, 365]. The "freq 0 with a shortfall" note is kept in the helper's docstring; the test uses a positive frequency.
+
+**Changed assertions (one line each):**
+- `test_guides.py::test_hub_fields_present`: `len(set(HUB_FIELDS)) == 20` → `28`. The eight B2 keys join the list, as the spec requires.
+- `Term.test.tsx` "covers the twenty hub-design fields" → also the eight FMEA-tab fields. Same reason.
+- `smoke-guided.mjs`:
+  - P24 FMEA step: a class-B row is `B` **or** `Link outage` (B2's Guided label).
+  - P26 FMEA settle loop: `Sweeping…` **or** `Checking…` (B2's Guided button).
+  - P26 declined step: the declined label is **one of** the tool labels, not necessarily the first (B1 labels every tool line).
+
+**Red → green:**
+
+| Test | Before the fix |
+|---|---|
+| `ChatPanel.sendRequest.test.tsx` "P29: Guided tool lines" | 9 of 10 red (no labels; the preparing line shown). The Expert raw-lines snapshot was written against the unchanged code. Later additions: rebound (2 red), declined-not-working (red before `8ec11f7aa`). |
+| `FmeaTab.guided.test.tsx` + `Results.uiMode.test.tsx` P29 | 11 red; the two Expert controls were green |
+| `test_guides.py` | 17 red (the eight keys missing) |
+| `test_fmea_zero_reason.py` | ImportError, then 8 of 19 red with the helper in place (every engine and forwarding case; the helper cases pass with the helper). Added later: the zonal case (red without its change) and the block-merge override (kills M6). |
+| `FmeaTab.formatting` / `ResultsCard` / `fmea.test.ts` P29 | 4 red. "Leaves the CSV unchanged" was green on arrival (a guard); mutant B3b does not affect it, because `worksheetCsvRows` never read the field. |
+
+**Mutants** (`scratchpad/p29/mutate_fe.py`, `mutate_be.py`; logs `mutations-fe.log`, `mutations-be.log`):
+- **Frontend: 15 of 15 killed.**
+  - B1a–f: phrase entry dropped; preparing shown; error message dropped; settled rule off; labels in Expert; rebound raw.
+  - B2a–e: header not branched; class letter shown; basis raw; engine tip in the row title; Guided always on (kills the Expert snapshot).
+  - B3a–d: Expert title dropped; merge drops the field; hub ignores the field; Guided always `€0.0`.
+- **Backend: 7 of 7 killed.**
+  - M1 is the spec's mutation target (`no_shortfall` before `no_outage_data`), killed by the mttr-0 cases. M2 is the other (field dropped from `per_mode`).
+  - M3 `out_of_scope` after `no_outage_data`; M4/M5 class B/C not set; M6 the COPT merge not re-derived; M7 the `unpriced` check dropped.
+  - M6 first survived: both merge tests ran the single-block path. They now carry a constant `capacity_series`.
+
+**Gate rows** (cwd `pypsa-gui/frontend` unless stated; logs in `scratchpad/p29/`):
+
+| Row | Command | Result |
+|---|---|---|
+| 1 | `PYTHONPATH=/home/user/pypsa-eur:/home/user/pypsa-eur/pypsa-gui/backend /tmp/claude-0/venv/bin/python -m pytest tests/ -m "not slow" -p no:cacheprovider -W ignore -q -o addopts=""` (`pypsa-gui/backend`, HEAD `a994da65d`) | 6716 passed, 31 skipped, 11 deselected, 0 failed in 57 min (`row1.log`; P28: 6674, plus the 21 in `test_fmea_zero_reason.py` and the cherry-picked `test_dispatch_status_transient.py`) |
+| 2 | same interpreter, `-m pytest <the 14-file set> tests/test_fmea_zero_reason.py tests/test_energy_hub_frontier_fmea.py tests/test_energy_hub_class_c_authoring.py tests/test_energy_hub_class_c_profiles.py -p no:cacheprovider -W ignore -q -o addopts=""` (`pypsa-gui/backend`, HEAD `a994da65d`) | 771 passed, 17 skipped (`row2.log`) |
+| 2+ | same, `tests/test_adequacy_*.py tests/test_energy_hub_*.py tests/test_golden*.py tests/test_copt*.py tests/test_fmea*.py tests/test_results_range.py tests/test_guided_mode_prompt.py -m "not slow"` (`pypsa-gui/backend`, on `1fa3bbf65`) | 1440 passed, 17 skipped (`adequacy_pre.log`) |
+| 3 | `npx tsc --noEmit -p .` | 0 errors |
+| 4 | `npx vitest run` | 244 files / 2777 passed (P28: 2745) |
+| 4s | `for i in $(seq 10); do npx vitest run src/components/ChatPanel src/pages/results/FmeaTab src/pages/hubDesign; done` | 10 / 10 green (34 files / 573 tests each) |
+| 5 | `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs --phase P29 --out <scratchpad>/p29/smoke29b` (HEAD `a994da65d`; the first run on `7456d6c44` also passed) | PASS, 39 screenshots. The transcript after Improve and after the delete/export turns has no raw progress line (3 and 9 rows; labels are the three declines). h1 "Reliability results"; `data-guided="1"`; 48 cells, no letter or engine id; `genset_1` "…no shortfall — the site copes without it"; every `per_mode` row carries the key (`site_transformer`/`grid_import` null, four gensets and both scenarios `no_shortfall`); no other new key; CSV 1212 bytes equal with and without the key; header unchanged. |
+| 5 | same, `--phase P24` / `P28` | PASS 21 / PASS 43 (the changed P24 and P26 steps hold in both) |
+| 7 | `git diff e7f139b84 -- 'pypsa-gui/frontend/src/**' \| grep -c uiMode` | 16. Test-store setups, plus two product lines: the `Results.tsx` eyebrow and title, and the one `guided` read in `FmeaTab`. ChatPanel uses its existing `uiMode === 'guided'` gate. The `*.expertUnchanged.*` snapshots pass in row 4; the FmeaTab one carries the justified update above. |
+
+**Known limitations:**
+- Rows from a sweep record written before P29 carry no key. The tab then shows `€0.0` in both modes, and the hub shows "no measurable cost". Re-running the sweep adds the key.
+- `StressScenarioEditor` (under the FMEA tab) keeps its Expert wording in Guided. It is outside the B2 contract.
+- The model-fallback system line (`from → to`) is not a tool line and keeps its arrow in Guided. The stub never produces one.
+- On the data-center template every stress scenario and genset reads `no_shortfall`, so the smoke does not exercise `unpriced`, `no_outage_data` or `out_of_scope` in the browser. Those are covered in `test_fmea_zero_reason.py` and `FmeaTab.formatting.test.tsx`.
+
+No processes are left running.
