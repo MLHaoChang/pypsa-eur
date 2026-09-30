@@ -191,20 +191,23 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
             # Fail closed (WP4.4 review B1/B2): a carrier the pack does not
             # classify is not established; a non-qualifying one is ineligible;
             # storage takes the ITC, never the PTC.
+            # Carriers match case-insensitively (review r2 #4).
+            tech = {k: {c.lower() for c in v} for k, v in tech.items()}
             unknown = [a for a in assets if not any(
-                a.carrier in tech[k] for k in ("wind_solar", "other_zero_emission", "storage",
-                                               "not_qualifying"))]
+                a.carrier.lower() in tech[k] for k in ("wind_solar", "other_zero_emission",
+                                                       "storage", "not_qualifying"))]
             if unknown:
                 reasons.extend(f"incentive_technology_unclassified:{a.name}:{a.carrier}"
                                for a in unknown)
                 continue
             keep = []
             for a in assets:
-                if a.carrier in tech["not_qualifying"]:
+                cr = a.carrier.lower()
+                if cr in tech["not_qualifying"]:
                     line.flags.append(f"incentive_ineligible:{tag}:technology:{a.name}")
-                elif inc.kind == "ptc" and a.carrier in tech["storage"]:
+                elif inc.kind == "ptc" and cr in tech["storage"]:
                     line.flags.append(f"incentive_ineligible:{tag}:ptc_not_for_storage:{a.name}")
-                elif a.carrier in tech["wind_solar"] and \
+                elif cr in tech["wind_solar"] and \
                         cod > date.fromisoformat(term["placed_in_service_by"]) and \
                         cs > date.fromisoformat(term["unless_construction_begins_by"]):
                     line.flags.append(f"incentive_ineligible:{tag}:wind_solar_termination:{a.name}")
@@ -277,8 +280,10 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
             # A basis-reducing grant on these assets reduces the ITC base (SAM
             # `ibi/cbi_*_deprbas_fed`, review B3).
             base -= sum(grant_on.get(a.name, 0.0) for a in assets)
+            if base < 0:
+                reasons.append(f"grant_exceeds_itc_base:{tag}")        # review r2-1
+                continue
             amount = rate * base * share
-            flags.append("itc_base_excludes_idc")
             if inc.amount is not None and amount > inc.amount:
                 amount = inc.amount
                 line.flags.append(f"itc_capped:{tag}")
@@ -291,6 +296,9 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
         elif inc.kind == "ptc":
             if names & itc_assets:
                 reasons.append(f"itc_and_ptc_same_asset:{tag}")
+                continue
+            if names & ptc_assets:
+                reasons.append(f"ptc_twice_same_asset:{tag}")      # review r2-2
                 continue
             if not us:
                 reasons.append(f"ptc_needs_a_pack_rule:{tag}")
@@ -380,6 +388,9 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
                 flags.append("grant_reduces_basis_pro_rata")
                 bases = {a.name: (a.overnight_cost or 0.0) for a in assets}
                 tot = sum(bases.values())
+                if amount > tot * (1.0 + (fin.contingency_share or 0.0)) + 1e-9:
+                    reasons.append(f"grant_exceeds_cost:{tag}")   # never a negative basis
+                    continue
                 for a, b in bases.items():
                     grant_on[a] = grant_on.get(a, 0.0) + (amount * b / tot if tot else 0.0)
     flags.extend(f for ln in out.lines for f in ln.flags)

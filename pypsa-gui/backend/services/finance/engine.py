@@ -231,6 +231,8 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
                                 other_income=debt.reserve_interest + grant_inc,
                                 other_deductions=fee_deduction, **common)
         flags += tax.flags
+        if inc.itc_amount and debt.idc_total > 0:
+            flags.append("itc_base_excludes_idc")
         if inc.itc_amount and any(not ly.itc_basis_reduction for ly in layers) and \
                 any(ly.itc_basis_reduction for ly in layers):
             flags.append("state_itc_basis_unreduced")

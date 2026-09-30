@@ -80,7 +80,8 @@ def make_pack() -> JurisdictionPack:
             {"wind_solar": ["solar", "solar rooftop", "solar-hsat", "pv", "onwind", "offwind",
                             "offwind-ac", "offwind-dc", "offwind-float", "wind"],
              "other_zero_emission": ["ror", "hydro", "geothermal", "nuclear"],
-             "storage": ["battery", "battery storage", "home battery", "bess"],
+             "storage": ["battery", "battery storage", "home battery", "bess", "battery charger",
+                         "battery discharger"],
              "not_qualifying": ["gas", "OCGT", "CCGT", "diesel", "oil", "coal", "lignite",
                                 "gas CHP", "electrolysis",
                                 "heat pump", "resistive heater", "gas boiler"]},
@@ -106,8 +107,9 @@ def make_pack() -> JurisdictionPack:
             "26 U.S.C. §45Y(d)(2)–(3) and §48E(e)(2)–(3) as amended by Pub. L. 119-21 (2025)"),
         # Wind and solar: no credit for property placed in service after
         # 2027-12-31 unless construction began by 2026-07-04 (12 months after
-        # enactment); beginning of construction per Notice 2025-42 (physical
-        # work test). Storage at such a facility is not affected.
+        # enactment); beginning of construction per the notices in force (Notice
+        # 2025-42 was vacated on 2026-06-06). Storage at such a facility is not
+        # affected.
         # The wind / solar carriers are `clean_electricity_technology.wind_solar`.
         "wind_solar_termination": Rule(
             {"placed_in_service_by": "2027-12-31", "unless_construction_begins_by": "2026-07-04"},

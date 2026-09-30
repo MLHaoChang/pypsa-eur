@@ -794,7 +794,8 @@ and the `cca_declining` schedule.
   rule that requires it; `True` → refused; `False` → eligible); the US ITC **rate = base 6 % × 5 when
   `pwa_met`** (IRC §48E(a)(2)/(3); `None` → `not_established`, never an assumed 30 %).
 - `us_federal` incentive data (sourced): §48E / §45Y with the 2025 act's wind / solar termination (begin
-  construction by 2026-07-04, beginning-of-construction per **Notice 2025-42**, or placed in service by
+  construction by 2026-07-04, beginning of construction per the notices in force — Notice 2025-42 was vacated
+  on 2026-06-06 — or placed in service by
   2027-12-31), the storage ITC runway and phase-down (by `construction_start`, C11), the FEOC material-assistance rules for
   construction beginning after 2025-12-31. Unsourced values absent.
 - Tests: **S3 ITC** (credit, reduced federal basis, unreduced state basis, taxes); PTC by hand; eligibility on
@@ -828,7 +829,7 @@ Eligibility:
 
 The `us_federal` pack gains six cited rules: `clean_electricity_itc` (§48E(a)(2)), `clean_electricity_ptc`
 (§45Y(a)(2), (b)(1)(B), (c) plus the 2026 factor 2.0570 — 91 FR 56942, 0.6 / 3.1 ¢),
-`clean_electricity_phase_out`, `wind_solar_termination` (+ Notice 2025-42), `feoc_material_assistance` and
+`clean_electricity_phase_out`, `wind_solar_termination` (beginning-of-construction notices; 2025-42 vacated), `feoc_material_assistance` and
 `itc_basis_reduction` (§50(c)). The federal layer takes the reduction; the state slot does not. Re-pinned.
 
 **Verified at the source before encoding:** Cornell LII §48E / §45Y text, the Federal Register notice, and
@@ -893,6 +894,22 @@ The reviewer also verified every statutory fact against Cornell LII and the Fede
 **Not taken:**
 - a generic stated production incentive (SAM PTC/PBI with its own term and rounding) — a P5 item;
 - the 2025 factor (unreachable with a 2026+ close).
+
+**WP4.4 review round 2 (0cdc690): two minor findings; fixed.** B1–B5 were confirmed fixed. The engine run
+with a grant matches SAM's IBI: `reduces_basis` year by year, and `taxable` with the tax amounts equal to
+1e-9.
+1. **r2-1:** a basis grant above its assets' cost gave a negative ITC. Fixed: `grant_exceeds_cost` is
+   refused, and a base below 0 gives `grant_exceeds_itc_base`.
+2. **r2-2:** a second PTC on one asset was paid twice. Fixed: `ptc_twice_same_asset`.
+
+**Taken:**
+- carriers match case-insensitively;
+- a battery's charger and discharger links count as storage;
+- `itc_base_excludes_idc` is flagged only with IDC;
+- the stale Notice 2025-42 text is corrected.
+
+**Recorded deviation:** a taxable grant is taxed in the year received (index 0); SAM taxes it in year 1
+(−0.94 bp of IRR on S1 + $5M).
 
 ## WP4.5 Metrics, solve-for-PPA, the WACC gate
 
