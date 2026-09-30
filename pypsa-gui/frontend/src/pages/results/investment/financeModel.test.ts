@@ -148,9 +148,9 @@ describe('the study record', () => {
   })
 
   it('stale from the record or the report block', () => {
-    expect(studyStale({ status: 'done', stale: true })).toEqual({ stale: true, changed: [] })
+    expect(studyStale({ status: 'done', stale: true })).toEqual({ stale: true, changed: [], reason: null })
     expect(studyStale({ status: 'done', report: { stale: true, changed: ['finance'] } }))
-      .toEqual({ stale: true, changed: ['finance'] })
+      .toEqual({ stale: true, changed: ['finance'], reason: null })
     expect(studyStale({ status: 'done', report: { stale: false } }).stale).toBe(false)
     expect(studyStale(null).stale).toBe(false)
   })
@@ -161,5 +161,19 @@ describe('the study record', () => {
     expect(studyFailure({ status: 'failed', error: 'kaput' })).toBe('The run failed: kaput')
     expect(studyFailure({ status: 'refused', error_code: 'cod_mismatch' }))
       .toBe('The case was refused: cod_mismatch')
+  })
+})
+
+describe('WP4.7 review B3/B4', () => {
+  it('names why there is no counterfactual and why staleness is unconfirmed', async () => {
+    const m = await import('./financeModel')
+    const s = m.counterfactualStatement({ sections: { project: { status: 'ok',
+      payload: { has_counterfactual: false } } } } as never)
+    expect(s).toContain('not the site party that pays the bill')
+    const st = m.studyStale({ status: 'done', report: { present: true, stale: true, changed: [],
+      reason: 'solve_in_flight' } } as never)
+    expect(st.reason).toBe('solve_in_flight')
+    expect(m.uncheckableReason(st.reason)).toContain('a solve is running')
+    expect(m.uncheckableReason(null)).toBeNull()
   })
 })

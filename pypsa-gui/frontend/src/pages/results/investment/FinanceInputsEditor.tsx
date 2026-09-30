@@ -15,6 +15,7 @@ import type {
   DebtTranche, EscalationClass, FinanceInputs, Incentive, SolvePpa, TerminalValueRule,
 } from '../../../api/types'
 import { useUIStore } from '../../../store/uiStore'
+import { NumInput } from './NumInput'
 import { nk } from '../../../utils/queryKeys'
 import {
   errorsFor, financeErrors, NOT_STATED, numOrNull, numText, parseNumberList, parseRateOrList,
@@ -63,9 +64,8 @@ function NumField({ label, hint, value, onChange, errors, int }: {
 }) {
   return (
     <Row label={label} hint={hint} errors={errors}>
-      {a => <input type="number" step={int ? 1 : 'any'} placeholder={NOT_STATED} {...a}
-                   className={`${input} w-28`} value={numText(value)}
-                   onChange={e => onChange(numOrNull(e.target.value))} />}
+      {a => <NumInput step={int ? 1 : 'any'} placeholder={NOT_STATED} {...a}
+                      className={`${input} w-28`} value={value} onChange={onChange} />}
     </Row>
   )
 }

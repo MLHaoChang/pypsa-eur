@@ -263,8 +263,8 @@ export function counterfactualStatement(report: InvestmentCaseReportPayload): st
       + 'cost without the owner\'s assets (the counterfactual net is in the project detail).'
   }
   if (p.has_counterfactual === false) {
-    return 'This case has no counterfactual (no site load to supply): the incremental cash is the owner\'s '
-      + 'own cash.'
+    return 'This case has no counterfactual: the owner is not the site party that pays the bill, so the '
+      + 'returns are on the owner\'s own cash.'
   }
   return null
 }
@@ -434,9 +434,26 @@ export function studyProgress(s: InvestmentCaseStudy | null | undefined): unknow
 }
 
 /** Stale: the record's own flag or the stored report's staleness block. */
-export function studyStale(s: InvestmentCaseStudy | null | undefined): { stale: boolean; changed: string[] } {
+export function studyStale(s: InvestmentCaseStudy | null | undefined):
+    { stale: boolean; changed: string[]; reason: string | null } {
   const stale = s?.stale === true || s?.report?.stale === true
-  return { stale, changed: stale ? (s?.report?.changed ?? []).filter(x => typeof x === 'string') : [] }
+  const rep = s?.report as { reason?: unknown } | undefined
+  const reason = stale && typeof rep?.reason === 'string' ? rep.reason : null
+  return { stale, changed: stale ? (s?.report?.changed ?? []).filter(x => typeof x === 'string') : [],
+           reason }
+}
+
+/** Why the currency of a report cannot be checked right now (WP4.7 review B4):
+ *  the backend marks it stale with no changed input when it cannot compute
+ *  the current key. Null when the reason names changed inputs. */
+export function uncheckableReason(reason: string | null): string | null {
+  switch (reason) {
+    case 'solve_in_flight': return "can't check whether this report is current right now (a solve is running)"
+    case 'network_busy': return "can't check whether this report is current right now (the network is busy)"
+    case 'current_assumptions_not_established':
+      return "can't check whether this report is current: the current inputs are not established"
+    default: return null
+  }
 }
 
 /** The failure a finished run ended in (error / failed / refused), or null. */

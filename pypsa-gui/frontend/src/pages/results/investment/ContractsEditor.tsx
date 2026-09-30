@@ -5,6 +5,7 @@
 // builder's item editor, available_from, group). Library pins are shown. The
 // server judges every combination: its 422 is shown at the contract it names.
 import { useEffect, useId, useState } from 'react'
+import { NumInput } from './NumInput'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { commercialApi, libraryApi } from '../../../api/commercial'
 import type { CommercialConfig, CommercialContract, ConnectionAgreement, LibraryRef } from '../../../api/types'
@@ -67,13 +68,13 @@ function Field({ spec, contract, label, parties, series, set }: {
   const name = `${label} ${spec.label}`
   // An integer field sends what was typed: 2.5 is the server's to refuse,
   // never truncated to 2 (WP3.7c review #6).
-  const num = (text: string) => (text === '' ? null : Number(text))
   let control
   switch (spec.kind) {
     case 'number': case 'int':
-      control = <input type="number" step={spec.kind === 'int' ? 1 : 'any'} aria-label={name}
-                       className={`${input} w-28`} value={v == null ? '' : String(v)}
-                       onChange={e => set(num(e.target.value))} />
+      // NumInput keeps the typed text ("0.0" stays while typing 0.05 — WP4.7
+      // review B1, the same controlled-number reset).
+      control = <NumInput step={spec.kind === 'int' ? 1 : 'any'} aria-label={name}
+                          className={`${input} w-28`} value={v} onChange={set} />
       break
     case 'select':
       control = <select aria-label={name} className={input} value={String(v ?? '')}

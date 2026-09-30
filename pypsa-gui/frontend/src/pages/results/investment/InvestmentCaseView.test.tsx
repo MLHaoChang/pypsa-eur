@@ -207,6 +207,28 @@ describe('InvestmentCaseView', () => {
     expect(gate.textContent).toMatch(/differs/)
   })
 
+  it('a project section not established marks the cash table incomplete (review B2)', async () => {
+    const rep = structuredClone(REPORT)
+    rep.completeness = { ...COMPLETENESS, project: 'not_established' }
+    api.getReport.mockResolvedValue(rep)
+    renderView()
+    await screen.findByTestId('ic-report')
+    const cf = screen.getByTestId('ic-cashflows')
+    expect(within(cf).getByTestId('ic-cashflows-incomplete').textContent).toMatch(/incomplete/)
+    const row = within(cf).getByTestId('ic-cashflow-2031')
+    expect(row.lastElementChild?.textContent).toBe('not established')
+  })
+
+  it('an unconfirmable currency says why, not "changed" (review B4)', async () => {
+    api.getInvestmentCase.mockResolvedValue({ status: 'done',
+      report: { present: true, stale: true, changed: [], reason: 'solve_in_flight' } })
+    api.getReport.mockResolvedValue(structuredClone(REPORT))
+    renderView()
+    await screen.findByTestId('ic-report')
+    expect(screen.getByTestId('ic-stale').textContent).toMatch(/a solve is running/)
+    expect(screen.getByTestId('ic-stale').textContent).not.toMatch(/changed/)
+  })
+
   it('an export-only report (no sections) still says what is not established', async () => {
     api.getReport.mockResolvedValue({ case_id: 'c', assumptions_hash: 'abcdef012345',
       project_irr_pre_tax: null, project_irr_post_tax: 0.06, npv_at_wacc: null,
