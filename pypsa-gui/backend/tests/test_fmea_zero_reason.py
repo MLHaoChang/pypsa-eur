@@ -128,11 +128,12 @@ def test_copt_every_row_carries_the_key():
 def test_copt_block_merge_rederives_the_reason():
     # Two periods: the merge re-sums criticality and recomputes severity, and
     # re-derives the reason from the merged numbers.
-    units = [C.CoptUnit("g_zero_mttr", 100.0, 0.1, mttr_hours=0.0),
-             C.CoptUnit("g_ok", 100.0, 0.1, mttr_hours=24.0)]
     idx = pd.MultiIndex.from_product(
         [[2030, 2040], pd.date_range("2030-01-01", periods=4, freq="h")],
         names=["period", "timestep"])
+    ser = pd.Series(100.0, index=idx).to_numpy()
+    units = [C.CoptUnit("g_zero_mttr", 100.0, 0.1, mttr_hours=0.0, capacity_series=ser),
+             C.CoptUnit("g_ok", 100.0, 0.1, mttr_hours=24.0, capacity_series=ser)]
     res = pd.Series(150.0, index=idx)
     w = pd.Series(1.0, index=idx)
     an = C.screening_analysis(units, res, weights=w, voll=1000.0)
@@ -143,6 +144,27 @@ def test_copt_block_merge_rederives_the_reason():
     by0 = {r["name"]: r["failure_mode"] for r in an0["rows"]}
     assert by0["g_ok"]["zero_reason"] == "unpriced"
     assert by0["g_zero_mttr"]["zero_reason"] == "no_outage_data"
+
+
+def test_copt_block_merge_overrides_a_first_block_reason():
+    # 2030 has no residual demand (the first block's row says no_shortfall);
+    # 2040 does. The merged row is priced, so its reason must be re-derived
+    # to None rather than inherit the first block's.
+    idx = pd.MultiIndex.from_product(
+        [[2030, 2040], pd.date_range("2030-01-01", periods=4, freq="h")],
+        names=["period", "timestep"])
+    # A capacity series (constant) is what sends the screen down the
+    # per-period-block path and through the merge.
+    ser = pd.Series(100.0, index=idx).to_numpy()
+    units = [C.CoptUnit("g1", 100.0, 0.1, mttr_hours=24.0, capacity_series=ser),
+             C.CoptUnit("g2", 100.0, 0.1, mttr_hours=24.0, capacity_series=ser)]
+    res = pd.Series([0.0] * 4 + [150.0] * 4, index=idx)
+    w = pd.Series(1.0, index=idx)
+    an = C.screening_analysis(units, res, weights=w, voll=1000.0)
+    for r in an["rows"]:
+        fm = r["failure_mode"]
+        assert r["delta_eue_mwh"] > 0 and fm["severity_eur"] > 0, fm["name"]
+        assert fm["zero_reason"] is None, (fm["name"], fm["zero_reason"])
 
 
 # ── class B (link sweep) and class C (stress) — the driver stubbed ─────────
