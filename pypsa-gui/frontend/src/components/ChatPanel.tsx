@@ -465,9 +465,57 @@ export function guidedCardSummary(tool: string, args: Record<string, unknown>): 
 // Render-only: the transcript keeps the raw lines, and Expert shows them.
 const DENIED_LINE = /^denied: \S+$/
 const DENIED_ERROR_LINE = /^✗ \S+ — confirmation_denied\b/
-export function guidedToolLine(content: string): { hidden: true } | { hidden: false; label: string | null } {
+
+// P29 (B1, deferred spec §4.1): the progress lines in words. `phrase(X)` is
+// this table's entry, else "use <tool name in words>". Render-only, like
+// the declined line above: the transcript keeps `… preparing X`, `→ X`,
+// `✓ X` and `✗ X — kind: message`, and Expert shows them.
+const GUIDED_TOOL_PHRASE: Record<string, string> = {
+  run_eh_study: 'run the reliability study',
+  update_component: 'change a setting',
+  suggest_eh_setup: 'look at how the site is set up',
+  get_adequacy_results: 'read the study results',
+  list_components: 'list what is in the network',
+  run_fmea_sweep: 'check what happens when equipment fails',
+  update_solver_config: 'change a study setting',
+  put_stress_scenarios: 'save the stress scenarios',
+}
+export function guidedToolPhrase(tool: string): string {
+  return Object.prototype.hasOwnProperty.call(GUIDED_TOOL_PHRASE, tool)
+    ? GUIDED_TOOL_PHRASE[tool]
+    : `use ${tool.replace(/_/g, ' ')}`
+}
+const PREPARING_LINE = /^… preparing \S+$/
+const REQUEST_LINE = /^→ (\S+)$/
+const RESULT_LINE = /^✓ (\S+)$/
+// `✗ X`, `✗ X — kind` or `✗ X — kind: message` (ChatPanel's tool_error line).
+const REBOUND_LINE = /^🔀 active project: .* → (.+)$/
+const ERROR_LINE = /^✗ (\S+)(?: — [^:\s]+(?:: ([\s\S]*))?)?$/
+
+export type GuidedToolLine =
+  | { hidden: true }
+  | { hidden: false; label: string | null; message?: string | null }
+
+export function guidedToolLine(content: string): GuidedToolLine {
   if (DENIED_ERROR_LINE.test(content)) return { hidden: true }
   if (DENIED_LINE.test(content)) return { hidden: false, label: 'You declined — nothing was changed.' }
+  if (PREPARING_LINE.test(content)) return { hidden: true }
+  let m = REQUEST_LINE.exec(content)
+  if (m) return { hidden: false, label: `Working: ${guidedToolPhrase(m[1])}…` }
+  m = RESULT_LINE.exec(content)
+  if (m) return { hidden: false, label: `Done: ${guidedToolPhrase(m[1])}` }
+  // The rebound line (`project_rebound`) carries a raw arrow too.
+  m = REBOUND_LINE.exec(content)
+  if (m) {
+    return { hidden: false, label: m[1] === '(unbound)'
+      ? 'The assistant replaced the network; it is not saved to a project yet.'
+      : `The assistant is now working in the project ${m[1]}.` }
+  }
+  m = ERROR_LINE.exec(content)
+  if (m) {
+    const message = m[2]?.trim() || null
+    return { hidden: false, label: `Could not: ${guidedToolPhrase(m[1])}`, message }
+  }
   return { hidden: false, label: null }
 }
 
@@ -3158,6 +3206,7 @@ export default function ChatPanel() {
           const toolLine = m.role === 'tool' && uiMode === 'guided' ? guidedToolLine(m.content) : null
           if (toolLine?.hidden) return null
           const toolLabel = toolLine && !toolLine.hidden ? toolLine.label : null
+          const toolMessage = toolLine && !toolLine.hidden ? toolLine.message ?? null : null
           return (
           <div
             key={m.id}
@@ -3194,6 +3243,10 @@ export default function ChatPanel() {
               : toolLabel ? (
                 <>
                   <span className="font-sans text-[12px] text-text" data-testid="chat-tool-label">{toolLabel}</span>
+                  {toolMessage && (
+                    <span className="block font-sans text-[12px] text-text whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+                      data-testid="chat-tool-message">{toolMessage}</span>
+                  )}
                   <details className="mt-0.5" data-testid="chat-tool-details">
                     <summary className="cursor-pointer select-none font-sans">Details</summary>
                     <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>
