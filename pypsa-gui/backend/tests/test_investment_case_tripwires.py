@@ -191,7 +191,8 @@ def test_the_detector_resolves_relative_imports():
 def test_importing_the_finance_package_never_loads_the_solve_stack():
     """P0 gate finding 7 (IC P4 plan C1): the check above is direct-only; this
     one is transitive — a fresh interpreter imports every `services.finance`
-    module and `services.solver_service` must not be loaded."""
+    module and none of `services.solver_service`, `services.solver`,
+    `services.results` or `routers` may be loaded (WP4.0 review R2)."""
     import subprocess
     import sys
 
@@ -199,7 +200,9 @@ def test_importing_the_finance_package_never_loads_the_solve_stack():
                   for p in _package_files("finance"))
     code = ("import importlib, sys\n"
             f"for m in {mods!r}: importlib.import_module(m)\n"
-            "bad = [m for m in ('services.solver_service', 'routers') if m in sys.modules]\n"
+            "roots = ('services.solver_service', 'services.solver', 'services.results', 'routers')\n"
+            "bad = sorted(m for m in sys.modules if any(m == r or m.startswith(r + '.') "
+            "for r in roots))\n"
             "print(','.join(bad))\n")
     res = subprocess.run([sys.executable, "-c", code], cwd=_BACKEND, capture_output=True,
                          text=True, timeout=120)

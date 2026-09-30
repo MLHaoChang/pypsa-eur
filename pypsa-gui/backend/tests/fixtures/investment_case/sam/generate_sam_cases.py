@@ -68,13 +68,22 @@ ZEROED = {
            ("custom", "macrs_5", "macrs_15", "sl_5", "sl_15", "sl_20", "sl_39")},
         "depr_bonus_fed": 0.0, "depr_bonus_sta": 0.0,
     },
+    "PaymentIncentives": {
+        # CBI / IBI / PBI: not modelled in P4 — explicit, not left to SAM's defaults.
+        **{f"cbi_{o}_amount": 0.0 for o in ("fed", "sta", "uti", "oth")},
+        **{f"ibi_{o}_{k}": 0.0 for o in ("fed", "sta", "uti", "oth") for k in ("amount", "percent")},
+        **{f"pbi_{o}_amount": [0.0] for o in ("fed", "sta", "uti", "oth")},
+    },
+    "GridLimits": {"grid_curtailment_price": [0.0]},
     "CapacityPayments": {"cp_capacity_payment_amount": [0.0]},
     "LandLease": {"om_land_lease": [0.0]},
     "ElectricityRates": {"en_electricity_rates": 1.0},   # needed by ppa_soln_mode=0 standalone
     "Revenue": {"ppa_multiplier_model": 0.0, "dispatch_tod_factors": [1.0] * 9,
                 "ppa_soln_mode": 1.0, "ppa_price_input": [0.10], "ppa_escalation": 1.0},
     "SystemCosts": {"om_capacity": [19.0], "om_capacity_escal": 1.0, "om_fixed": [50_000.0],
-                    "om_fixed_escal": 1.0, "om_production": [0.0], "om_production_escal": 0.0},
+                    "om_fixed_escal": 1.0, "om_production": [0.0], "om_production_escal": 0.0,
+                    "om_fuel_cost": [0.0], "om_opt_fuel_1_cost": [0.0],
+                    "om_opt_fuel_2_cost": [0.0], "system_use_recapitalization": 0.0},
     "SystemOutput": {"degradation": [0.5], "system_capacity": CAPACITY_KW},
 }
 

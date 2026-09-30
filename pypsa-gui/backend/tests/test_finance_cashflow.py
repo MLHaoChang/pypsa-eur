@@ -6,6 +6,7 @@ replacement), plus the refusals and the not-established paths (plan C12).
 """
 from __future__ import annotations
 
+import dataclasses
 from datetime import date
 
 import numpy as np
@@ -276,3 +277,28 @@ def test_the_sam_mapping_refuses_what_it_cannot_express(monkeypatch):
     with pytest.raises(S.SamMappingError, match="schedule"):
         S.sam_params("s1")
 
+
+
+def test_review_round_2_edges():
+    """WP4.1 review round 2: no template / a tenor below one year refused;
+    one contract's lines of different tenors end with the longest (either
+    order); an asset of unknown lifetime flagged; `money_year` keyword-only."""
+    with pytest.raises(FinanceRefused) as ei:
+        build_timeline(dataclasses.replace(_case([]), templates=()))
+    assert ei.value.code == "template_missing"
+    zero = TemplateLine("ppa", "ppa_settlement", 1.0, CONTRACT_CLASS, indexation=0.0,
+                        tenor_years=0, contract_id="c")
+    with pytest.raises(FinanceRefused) as ei:
+        build_timeline(_case([zero]))
+    assert ei.value.code == "contract_tenor_below_one"
+    for tenors in ((3, 5), (5, 3)):
+        lines = [TemplateLine(f"l{t}", "ppa_settlement", 1.0, CONTRACT_CLASS, indexation=0.0,
+                              tenor_years=t, contract_id="c") for t in tenors]
+        case = _case(lines)
+        op = build_operating(case, build_timeline(case))
+        assert "contract_ends:c:2037" in op.flags and not any(
+            f.startswith("contract_ends:c:2035") for f in op.flags)
+    case = _case([], assets=(AssetFinance("pv", "Generator", 1.0, None),))
+    assert "asset_lifetime_unknown:pv" in build_operating(case, build_timeline(case)).flags
+    t = Template(2033, (), {"pv": 1.0})
+    assert t.energy_mwh == {"pv": 1.0} and t.money_year is None

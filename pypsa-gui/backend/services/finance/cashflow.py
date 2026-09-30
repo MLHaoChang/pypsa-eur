@@ -149,7 +149,9 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
                 if k[i] > ln.tenor_years:
                     continue
                 if ln.tenor_years < tl.analysis_years:
-                    ends[ln.contract_id or key] = tl.cod_year + ln.tenor_years - 1
+                    # One contract, several lines: it ends with its longest (review r2 #3).
+                    cid = ln.contract_id or key
+                    ends[cid] = max(ends.get(cid, 0), tl.cod_year + ln.tenor_years - 1)
             if ln.amount is None:
                 reasons["operating"].append(f"line_not_established:{key}")
                 ok = False
@@ -168,6 +170,8 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
         lines[key] = arr if ok else None
         meta[key] = first
     flags.extend(f"contract_ends:{cid}:{year}" for cid, year in sorted(ends.items()))
+    flags.extend(f"asset_lifetime_unknown:{a.name}" for a in case.assets
+                 if a.lifetime_years is None)
     # Generation per asset (degraded) — the PTC and LCOE read it. An asset
     # without a degradation entry is not established (plan C5, C12).
     assets_e = sorted({a for t in case.templates for a in t.energy_mwh})

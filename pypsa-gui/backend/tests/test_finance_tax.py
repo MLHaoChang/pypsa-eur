@@ -33,7 +33,7 @@ def _run(name):
     op = build_operating(case, tl)
     e = S.sam_expected(name)["arrays"]
     p = S.sam_params(name)
-    itc = p.itc_federal_percent * p.installed_cost
+    itc = p.itc_federal_percent * p.itc_base_share * p.installed_cost
     tax = compute_tax(tl, S.sam_tax_layers(name), ebitda=op.ebitda, basis=p.installed_cost,
                       interest=np.asarray(e["cf_debt_payment_interest"]),
                       other_income=np.asarray(e["cf_reserve_interest"]),

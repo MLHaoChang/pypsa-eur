@@ -67,11 +67,12 @@ class Template:
 
     first_year: int
     lines: tuple[TemplateLine, ...]
-    # The money year of the lines (None = the case's base year).
-    money_year: int | None = None
     # Generation per asset in this operating year (MWh), before degradation:
     # PTC and LCOE read it.
     energy_mwh: dict[str, float] = field(default_factory=dict)
+    # The money year of the lines (None = the case's base year). Keyword-only,
+    # so a positional `energy_mwh` never binds here (WP4.1 review round 2 #2).
+    money_year: int | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)

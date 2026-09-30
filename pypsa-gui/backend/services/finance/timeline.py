@@ -53,9 +53,17 @@ def build_timeline(case: FinanceCase) -> Timeline:
     """The case's axis (plan C2), or `FinanceRefused` with a stable code:
     `analysis_years_missing`, `financial_close_after_cod`, `cod_mismatch`,
     `capex_phasing_negative`, `capex_phasing_mismatch`,
-    `replacement_unknown_asset`, `asset_lifetime_short`. An asset of unknown
-    lifetime is not checked (the operating section flags it)."""
+    `replacement_unknown_asset`, `asset_lifetime_short`, `template_missing`,
+    `contract_tenor_below_one`. An asset of unknown lifetime is not checked
+    here; `build_operating` flags it (`asset_lifetime_unknown:<asset>`)."""
     fin = case.inputs
+    if not case.templates:
+        raise FinanceRefused("template_missing", "the case has no operating-year template")
+    for t in case.templates:
+        for ln in t.lines:
+            if ln.tenor_years is not None and ln.tenor_years < 1:
+                raise FinanceRefused("contract_tenor_below_one",
+                                     f"{ln.contract_id or ln.key}: tenor {ln.tenor_years}")
     if fin.analysis_years is None:
         raise FinanceRefused("analysis_years_missing",
                              "state the analysis period (years of operation)")

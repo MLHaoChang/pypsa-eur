@@ -6,7 +6,10 @@ The finance engine replicates one operating year, so its template must be a
 year (plan C3): the 7-day `edge_15min` represents 168 hours and is refused
 `template_not_annual`. This network has 8,760 hourly snapshots (2030, not a
 leap year), the same buses and components, a seasonal PV profile, the same
-load shape, an export Link with a grid that absorbs export, and the owner's
+load shape, an export Link into an UNCOSTED grid sink (so the grid-side supply
+generator's cost is exactly the site's import × its price — the P4 commodity
+cross-check, plan C13 / WP4.0 review B1 — and export is valued only by the
+commercial export price), and the owner's
 assets costed the way PyPSA 1.x derives an annuity: `overnight_cost` with a
 `discount_rate` and `lifetime` (review round 2 R7 — PyPSA needs both). Sizes
 are fixed (not extendable): the finance case values a given design.
@@ -48,11 +51,14 @@ def build_edge_hourly_year() -> pypsa.Network:
     for c in ("AC", "grid", "solar", "battery"):
         n.add("Carrier", c)
     n.add("Generator", "grid_supply", bus="grid", carrier="grid", p_nom=200.0,
-          marginal_cost=60.0, p_min_pu=-1.0)          # the grid absorbs export
+          marginal_cost=60.0)
+    # The grid absorbs export at no cost: a sink that cannot supply (p_max_pu 0).
+    n.add("Generator", "grid_sink", bus="grid", carrier="grid", p_nom=200.0, p_max_pu=0.0,
+          p_min_pu=-1.0, marginal_cost=0.0)
     n.add("Link", "import", bus0="grid", bus1="poc", p_nom=80.0, eh_role="grid_import",
           carrier="AC")
     n.add("Link", "export", bus0="poc", bus1="grid", p_nom=80.0, carrier="AC",
-          marginal_cost=0.01)
+          marginal_cost=0.0)
     n.add("Link", "poc_site", bus0="poc", bus1="site", p_nom=200.0, p_min_pu=-1.0, carrier="AC")
     pv, load = _profiles(idx)
     n.add("Generator", "pv", bus="site", carrier="solar", p_nom=40.0, p_max_pu=pv,

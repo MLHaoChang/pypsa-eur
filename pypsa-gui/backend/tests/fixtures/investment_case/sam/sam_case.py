@@ -33,8 +33,10 @@ CASES = ("s1", "s1b", "s2", "s3", "s3f")
 # SAM's depreciation classes (the `depr_alloc_*_percent` suffixes).
 DEPR_CLASSES = ("macrs_5", "macrs_15", "sl_5", "sl_15", "sl_20", "sl_39", "custom")
 
-# Money arrays compared as is ($); energy arrays kWh → MWh.
-_ENERGY_ARRAYS = ("cf_energy_net", "cf_energy_sales", "cf_energy_value")
+# Money arrays compared as is ($); every kWh array → MWh (`cf_energy_value` is
+# money — WP4.0 review B3).
+def _is_energy(key: str) -> bool:
+    return key.startswith("cf_energy_") and key != "cf_energy_value"
 _NO_DEBT_DSCR = 1e300          # SAM reports min_dscr as DBL_MAX without debt
 
 
@@ -65,7 +67,11 @@ class SamParams:
     bonus_state: dict[str, float]
     itc_federal_percent: float
     itc_basis_reduction: dict[str, bool]     # layer ("federal"/"state") → 50 % reduction applies
-    itc_reduction_classes: dict[str, list[str]]   # layer → classes whose basis the ITC reduces
+    # The classes that qualify for the federal ITC — SAM's `depr_itc_fed_<class>`
+    # flags decide BOTH the ITC base and the classes reduced on each layer
+    # (WP4.0 review B2, probed on all 8 flag combinations).
+    itc_qualifying_classes: list[str]
+    itc_base_share: float                    # Σ allocation of the qualifying classes
     salvage_share: float
     debt: dict = field(default_factory=dict)
 
@@ -87,6 +93,38 @@ def _one(v):
             raise SamMappingError(f"a SAM schedule input {v[:3]}… (len {len(v)}) is not mapped")
         return v[0]
     return v
+
+
+# SAM inputs P4 does not model: refused unless at their neutral value
+# (WP4.0 review B4). (group, key, neutral) — lists compare element-wise.
+_NEUTRAL = [
+    ("Revenue", "ppa_multiplier_model", 0.0),
+    ("SystemCosts", "om_fuel_cost", [0.0]), ("SystemCosts", "om_opt_fuel_1_cost", [0.0]),
+    ("SystemCosts", "om_opt_fuel_2_cost", [0.0]), ("SystemCosts", "system_use_recapitalization", 0.0),
+    ("LandLease", "om_land_lease", [0.0]), ("CapacityPayments", "cp_capacity_payment_amount", [0.0]),
+    ("GridLimits", "grid_curtailment_price", [0.0]), ("Lifetime", "system_use_lifetime_output", 0.0),
+    ("FinancialParameters", "dscr_limit_debt_fraction", 0.0),
+    ("Depreciation", "depr_alloc_custom_percent", 0.0),
+]
+
+
+def _refuse_unmapped(name: str, i: dict) -> None:
+    for grp, key, neutral in _NEUTRAL:
+        v = i.get(grp, {}).get(key, neutral)
+        if v != neutral:
+            raise SamMappingError(f"{name}: {grp}.{key}={v!r} is not modelled in P4")
+    tod = i["Revenue"]["dispatch_tod_factors"]
+    if any(x != 1.0 for x in tod):
+        raise SamMappingError(f"{name}: TOD revenue factors are not modelled in P4")
+    for grp in ("PaymentIncentives",):
+        for key, v in i[grp].items():
+            if key.endswith(("_amount", "_percent")) and any(
+                    x != 0.0 for x in (v if isinstance(v, list) else [v])):
+                raise SamMappingError(f"{name}: {grp}.{key}={v!r} (CBI/IBI/PBI) is not modelled")
+    if i["TaxCreditIncentives"]["itc_fed_percent_maxvalue"] != [1e38]:
+        raise SamMappingError(f"{name}: a finite ITC cap is not in the P4 oracle cases")
+    if i.get("BatterySystem", {}).get("en_batt", 0.0):
+        raise SamMappingError(f"{name}: a battery in SAM is not modelled")
 
 
 def sam_params(name: str) -> SamParams:
@@ -111,6 +149,7 @@ def sam_params(name: str) -> SamParams:
               "itc_fed_amount"):
         if _one(tc[k]):
             raise SamMappingError(f"{name}: {k}={tc[k]} is not in the P4 oracle cases")
+    _refuse_unmapped(name, i)
     cap_kw = float(fp["system_capacity"])
     profile = load_profile()
     alloc = {c: dep[f"depr_alloc_{c}_percent"] / 100.0 for c in DEPR_CLASSES
@@ -118,8 +157,10 @@ def sam_params(name: str) -> SamParams:
     bonus_fed = {c: dep["depr_bonus_fed"] / 100.0 * dep[f"depr_bonus_fed_{c}"] for c in alloc}
     bonus_sta = {c: dep["depr_bonus_sta"] / 100.0 * dep[f"depr_bonus_sta_{c}"] for c in alloc}
     itc = _one(tc["itc_fed_percent"]) / 100.0
+    qualifying = [c for c in alloc if dep.get(f"depr_itc_fed_{c}")]
     debt = {"option": "dscr" if fp["debt_option"] == 1 else "percent",
-            "percent": fp["debt_percent"] / 100.0, "dscr": fp["dscr"],
+            "percent": fp["debt_percent"] / 100.0 if fp["debt_option"] == 0 else None,
+            "dscr": fp["dscr"] if fp["debt_option"] == 1 else None,
             "tenor_years": int(fp["term_tenor"]), "rate": fp["term_int_rate"] / 100.0,
             "fee_share": fp["cost_debt_fee"] / 100.0, "dsra_months": fp["dscr_reserve_months"],
             "reserves_rate": fp["reserves_interest"] / 100.0,
@@ -147,8 +188,8 @@ def sam_params(name: str) -> SamParams:
         itc_federal_percent=itc,
         itc_basis_reduction={"federal": bool(tc["itc_fed_percent_deprbas_fed"]) and itc > 0,
                              "state": bool(tc["itc_fed_percent_deprbas_sta"]) and itc > 0},
-        itc_reduction_classes={"federal": [c for c in alloc if dep.get(f"depr_itc_fed_{c}")],
-                               "state": [c for c in alloc if dep.get(f"depr_itc_sta_{c}")]},
+        itc_qualifying_classes=qualifying,
+        itc_base_share=sum(alloc[c] for c in qualifying),
         salvage_share=fp["salvage_percentage"] / 100.0, debt=debt)
 
 
@@ -157,9 +198,12 @@ def sam_expected(name: str) -> dict:
     `scalars` keyed by P4's names (the plan's output mapping table)."""
     out = load_case(name)["outputs"]
     s, a = out["scalars"], out["arrays"]
-    arrays = {k: ([x / 1000.0 for x in v] if k in _ENERGY_ARRAYS else list(v))
+    arrays = {k: ([x / 1000.0 for x in v] if _is_energy(k) else list(v))
               for k, v in a.items()}
     arrays["cf_ppa_price"] = [x * 10.0 for x in a["cf_ppa_price"]]      # ¢/kWh → $/MWh
+    # DSCR is 0.0 in years without debt service, not a ratio (review R9).
+    arrays["cf_pretax_dscr"] = [None if ds == 0 else d for d, ds in
+                                zip(a["cf_pretax_dscr"], a["cf_debt_payment_total"])]
     min_dscr = s["min_dscr"]
     return {
         "arrays": arrays,
@@ -174,6 +218,10 @@ def sam_expected(name: str) -> dict:
             "lcoe_nominal_per_mwh": s["lcoe_nom"] * 10.0,
             "lcoe_real_per_mwh": s["lcoe_real"] * 10.0,
             "itc_total": s["itc_total"],
+            # The after-tax IRR at SAM's target year (S1b solves the price for it).
+            "equity_irr_at_target_year": (s["flip_actual_irr"] / 100.0
+                                          if s.get("flip_actual_irr") is not None else None),
+            "target_year": s.get("flip_actual_year"),
         },
         "deviations": load_case(name)["deviations"],
     }
@@ -248,7 +296,7 @@ def sam_tax_layers(name: str):
 
     def classes(bonus: dict, layer: str):
         return tuple(DepreciationClass(name=c, share=s, schedule=schedule(c), bonus=bonus[c],
-                                       itc_reduces=c in p.itc_reduction_classes[layer])
+                                       itc_reduces=c in p.itc_qualifying_classes)
                      for c, s in p.depreciation_alloc.items())
 
     state = TaxLayer(name="state", rate=p.state_rate, depreciation=classes(p.bonus_state, "state"),

@@ -206,7 +206,9 @@ investable assets**:
   the meter basis, Σ_t w_obj,t · import_t · mc_t (`generators_t.marginal_cost` where present). The
   actual-side term must equal the ledger's commodity line within a cent — otherwise (grid-side loads or
   costed grid-side assets beside the supply generator, a quadratic cost, several differently priced grid-side
-  generators) → `counterfactual_commodity_not_established`, never a number. A counterfactual import above the
+  generators) → `counterfactual_commodity_not_established`, never a number. An uncosted export sink (a
+  generator with `p_max_pu = 0`, `p_min_pu < 0`, zero marginal cost — it never supplies) is not a
+  "differently priced supply generator" and does not trip the check (WP4.0 review B1). A counterfactual import above the
   supply generator's `p_nom × p_max_pu` is flagged `counterfactual_exceeds_supply`.
 - **The connection fee lines** are identical on both sides (by construction) and cancel.
 - **Contracts** that exist only because of the assets (PPAs on them, EaaS / lease on them) are absent.
@@ -258,8 +260,9 @@ except S3, the default depreciation mix (reset to the case's allocation).
 | `cf_cash_for_ds`, `cf_ebitda`, `cf_debt_*`, `cf_pretax_dscr`, `cf_reserve_debtservice`, `cf_feddepr_*`, `cf_stadepr_*`, `cf_fedtax`, `cf_statax`, `cf_ptc_fed`, `itc_total`, `size_of_debt`, `min_dscr`, `ppa_price` (S1b), `lcoe_nom` | the same-named P4 arrays / scalars |
 | — | the **unlevered project IRR** has no SAM counterpart except in S1 (all equity: it equals the equity IRR) |
 
-**Units:** SAM's `ppa_price_input`, `ppa_price` and `lcoe_nom` are ¢/kWh and its energy is kWh;
-`sam_case.py` converts to currency/MWh (× 10) and MWh, and the tests compare in P4 units (round 2 R2).
+**Units:** SAM's `ppa_price_input` is $/kWh (× 1000); `ppa_price`, `lcoe_nom` and `cf_ppa_price` are ¢/kWh
+(× 10); its energy is kWh (every `cf_energy_*` except `cf_energy_value`, which is money — WP4.0 review
+B3, R5); `sam_case.py` converts to currency/MWh and MWh, and the tests compare in P4 units (round 2 R2).
 
 | Id | SAM set-up (beyond the zeroed defaults) | What it checks (to T) |
 |---|---|---|
@@ -392,6 +395,29 @@ mirrored in `frontend/src/api/types.ts` and covered by the new `types.ts` parity
   the axis and dates, incremental returns). P0 findings 5 and 7 annotated (placed / deferred to P5 /
   closed).
 
+**WP4.0 review round 1: PASS WITH CONDITIONS — 4 binding; fixed.**
+1. B1 — the fixture's `grid_supply` absorbed export at 60/MWh (the ledger commodity nets export; the C13
+   meter basis does not) and the export Link was costed → `grid_supply` `p_min_pu` 0, an uncosted
+   `grid_sink` (`p_max_pu 0, p_min_pu −1`), export Link marginal cost 0; the test pins supply opex = 60 ×
+   import and the PV capex annuity (R6); C13 states the sink is not a priced supply generator.
+2. B2 — the ITC classes come from SAM's `depr_itc_fed_<class>` for both the ITC base and each layer's
+   reduction (the reviewer probed all 8 flag combinations) → `itc_qualifying_classes` / `itc_base_share`;
+   tested on a 70/30 split.
+3. B3 — `cf_energy_value` is money, not kWh → never converted; every other `cf_energy_*` → MWh; tested.
+4. B4 — `sam_params` did not refuse every unmodelled input → refuses schedule lists, per-MWh O&M, TOD
+   factors, CBI/IBI/PBI, fuel, land lease, capacity payments, curtailment price, recapitalisation, lifetime
+   output, the `dscr_limit_debt_fraction` cap, custom depreciation, a finite ITC cap, a battery;
+   `debt.percent` / `debt.dscr` only for their option; 11 monkeypatched refusal tests.
+Recommendations taken: R1 (`types.ts` parity: reverse nullability; the `ValueStreamKind`, `CashflowStream`,
+`EscalationClass` literal sets), R2 (the subprocess tripwire also forbids `services.solver` and
+`services.results`), R3 (S1b's year-20 IRR and target year in `sam_expected`), R4 (the generator zeroes
+CBI/IBI/PBI, fuel, curtailment, recapitalisation explicitly; regenerated — every input and output identical,
+only `script_sha` moved), R5 (units above), R6 (WP4.6a), R7 (the committed profile = the generator's, and
+every case's `gen` sha = the profile's), R9 (`cf_pretax_dscr` → `None` in years without debt service).
+R8 (noted): the relative-import detector test writes a probe into `services/finance` while the subprocess
+test imports every finance module — a race only under `pytest-xdist`, which the suite does not use; a
+parallel run must put the two in one xdist group.
+
 ## WP4.1 Timeline, operating cashflows, tenor, terminal value
 
 - `timeline.py`: `Timeline` (C2) with the refusals (`cod_mismatch`, `analysis_years_missing`,
@@ -464,6 +490,13 @@ value, so WP4.5's unlevered cash must not add it again and WP4.2b sculpting must
 tenor reaching the last year excludes the terminal from CFADS); the adapter converts P2's
 `indexation_pct_per_year` (a percent, default 0.0) to a fraction and passes 0 as 0 — the `ppa` fallback
 applies only to contract lines without an indexation field (DR availability / activation).
+
+**WP4.1 review round 2 (6a07029): PASS.** Every binding fix confirmed; the PySAM variants re-run on the new
+code match every year (largest EBITDA difference 5.8e-8); v3 (per-MWh O&M) and v4 (a degradation schedule)
+are refused. Low findings, taken: `template_missing` and `contract_tenor_below_one` refused in
+`build_timeline`; one contract's lines of different tenors end with the longest; `asset_lifetime_unknown:<a>`
+flagged (the docstring claimed it); `Template.money_year` keyword-only. For WP4.6a: every asset in
+`energy_mwh` needs a degradation entry — list generators only (storage absent, or a typed 0).
 
 ## WP4.2a Debt: amount / gearing, annuity / level, fees, IDC
 
@@ -607,7 +640,9 @@ applies only to contract lines without an indexation field (DR availability / ac
   sides; several grid-side generators → `counterfactual_commodity_not_established`; a counterfactual peak
   above the PoC → `counterfactual_exceeds_connection`; **a grid-side load beside the supply generator →
   `counterfactual_commodity_not_established`** (the ledger cross-check fails; round 3 M1); a lossy PoC chain
-  → not established.
+  → not established; **the fixture's BESS cycles under the demand-charge commercial solve** (discharge > 0
+  — in the plain solve it does not; WP4.0 review R6), and its uncosted `grid_sink` passes the commodity
+  check.
 
 ## WP4.6b Finance inputs route, runner, study routes, persistence
 
