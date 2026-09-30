@@ -511,6 +511,49 @@ flagged (the docstring claimed it); `Template.money_year` keyword-only. For WP4.
   converges on a normal case and reports the residual on a forced one; **S3 debt schedule parity**; **S3f
   deviation size**.
 
+**WP4.2a/b implementation (one module, `services/finance/debt.py`; reviewed together).**
+- **Amendments:**
+  - **Sizing is to the debt AT COD** (IDC inside) for every tranche. `gearing` × capex, `gearing` × total
+    uses, `amount`, and the sculpted PV all size that one quantity.
+  - **IDC timing** replaces the "mid-year drawdown" above. Construction year j's capex is paid, and its debt
+    drawn, at the axis point j, the same end-of-year points the returns discount. Interest compounds to the
+    COD point, the last construction point. SAM's one construction year therefore gets 0 IDC, as SAM has
+    none. F1 = two points, 60/40: the year-0 draw carries one year of interest.
+  - **A sculpted tranche is sized by its DSCR.** The model refuses `amount` / `gearing` on it and refuses
+    `max_gearing` on the others. The P0 contract test is updated.
+  - **CFADS** = EBITDA − the terminal value − replacement capex. Replacement is the major-equipment spend,
+    taken as it occurs; P4 has no equipment reserve.
+  - **The DSRA release at maturity** sits in `dsra_funding` (−). SAM books it as `cf_disbursement_debtservice`.
+  - **A new oracle case, S2c:** S2 with SAM's maximum-debt-fraction cap at 60 %. SAM caps the debt at
+    0.6·TIC·(1+fee) and scales the sculpted service pro rata (flat DSCR 1.6245), which is what we do.
+    Generated with the others: S1–S3f are unchanged.
+- **Behaviour:**
+  - Draws follow capex phasing, or the timing of every cash use under `total_uses`.
+  - The commitment fee accrues on the undrawn commitment between construction points.
+  - The upfront fee is paid at close on the debt.
+  - Repayment: grace years inside the tenor; the annuity is re-amortised each year at that year's rate; or
+    level principal.
+  - Sculpting runs senior first, on the CFADS left over. Negative-CFADS years pay 0 (flagged), and the last
+    year closes the loan.
+  - DSCR is computed on the total and on the senior tranche.
+  - Sources and uses at COD; `debt_exceeds_uses` is refused.
+  - The fixed point runs over total uses (tolerance 1e-6, ≤ 50 iterations). Non-convergence →
+    `debt_fixed_point_not_converged:residual=…`.
+  - Every missing input is a named reason (C12): `upfront_fee`, `dsra_months`, `grace_years`,
+    `commitment_fee` (only with an undrawn period) and `reserves_rate` (only with a DSRA). So are
+    `grace_with_sculpting`, `grace_not_inside_tenor`, `rate_list_length` and
+    `debt_tenor_beyond_analysis`.
+- **Tests (`test_finance_debt.py`, 23):**
+  - **SAM parity on S2, S2c and S3:** debt size; interest; principal; balance; DSRA balance and movements;
+    reserve interest; CFADS over the tenor; DSCR per year and min; total uses = SAM's year-0 investing
+    activities. All within 1e-6 relative.
+  - **The S3f deviation = 0.36·f·TIC exactly.**
+  - F1 by hand (IDC, commitment and upfront fees).
+  - Level with grace; an annuity with a per-year rate list.
+  - Two tranches (junior sculpted on the rest; the senior DSCR).
+  - The fixed point converging, and the forced non-convergence.
+  - DSRA and reserve interest; a negative-CFADS year; COD in the close year; every not-established path.
+
 ## WP4.2b DSCR sculpting, the `max_gearing` cap, DSRA, reserve interest
 
 - Sculpting in closed form on pre-tax CFADS (C8); the `max_gearing` cap (SAM base TIC × (1+fee)) with the
@@ -640,9 +683,10 @@ flagged (the docstring claimed it); `Template.money_year` keyword-only. For WP4.
   sides; several grid-side generators → `counterfactual_commodity_not_established`; a counterfactual peak
   above the PoC → `counterfactual_exceeds_connection`; **a grid-side load beside the supply generator →
   `counterfactual_commodity_not_established`** (the ledger cross-check fails; round 3 M1); a lossy PoC chain
-  → not established; **the fixture's BESS cycles under the demand-charge commercial solve** (discharge > 0
-  — in the plain solve it does not; WP4.0 review R6), and its uncosted `grid_sink` passes the commodity
-  check.
+  → not established; **the fixture's BESS cycles and it exports under the demand-charge commercial solve**
+  (discharge > 0 and export > 0 — the incremental-EBITDA identity has an export term; in the plain solve
+  export is valued at 0, so its amount is arbitrary; WP4.0 review R6 and round 2), and its uncosted
+  `grid_sink` passes the commodity check.
 
 ## WP4.6b Finance inputs route, runner, study routes, persistence
 

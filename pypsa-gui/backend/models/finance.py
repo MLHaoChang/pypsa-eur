@@ -87,12 +87,21 @@ class DebtTranche(BaseModel):
 
     @model_validator(mode="after")
     def _sizing(self) -> "DebtTranche":
-        if self.amount is None and self.gearing is None:
-            raise ValueError("DebtTranche needs amount or gearing")
-        if self.amount is not None and self.gearing is not None:
-            raise ValueError("DebtTranche takes amount OR gearing, not both")
-        if self.sculpting == "dscr_target" and self.dscr_target is None:
-            raise ValueError("dscr_target sculpting needs dscr_target")
+        # A sculpted tranche is sized by its DSCR (plan C8) — `max_gearing` is
+        # its cap; `amount` / `gearing` size the others (IC P4 WP4.2).
+        if self.sculpting == "dscr_target":
+            if self.dscr_target is None:
+                raise ValueError("dscr_target sculpting needs dscr_target")
+            if self.amount is not None or self.gearing is not None:
+                raise ValueError("a sculpted tranche is sized by dscr_target; cap it with "
+                                 "max_gearing, not amount / gearing")
+        else:
+            if self.amount is None and self.gearing is None:
+                raise ValueError("DebtTranche needs amount or gearing")
+            if self.amount is not None and self.gearing is not None:
+                raise ValueError("DebtTranche takes amount OR gearing, not both")
+            if self.max_gearing is not None:
+                raise ValueError("max_gearing caps a sculpted (dscr_target) tranche only")
         if isinstance(self.rate, list) and not self.rate:
             raise ValueError("a per-year rate list needs at least one rate")
         return self

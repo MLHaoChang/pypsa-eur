@@ -119,6 +119,20 @@ CASES: dict[str, dict] = {
                                  "depr_bonus_sta": 0.0}},
         "deviations": [],
     },
+    "s2c": {
+        "doc": "S2 with the maximum-debt-fraction cap on (60 % of TIC × (1 + fee)): the sculpted "
+               "debt is capped and its service scaled pro rata (WP4.2b).",
+        "set": {"FinancialParameters": {"debt_option": 1.0, "dscr": 1.3, "term_tenor": 18.0,
+                                        "term_int_rate": 7.0, "cost_debt_fee": 2.75,
+                                        "dscr_reserve_months": 6.0, "reserves_interest": 1.75,
+                                        "payment_option": 0.0, "dscr_limit_debt_fraction": 1.0,
+                                        "dscr_maximum_debt_fraction": 60.0},
+                "Depreciation": {"depr_alloc_macrs_5_percent": 90.0,
+                                 "depr_alloc_sl_20_percent": 10.0,
+                                 "depr_bonus_fed": 100.0, "depr_bonus_fed_macrs_5": 1.0,
+                                 "depr_bonus_sta": 0.0}},
+        "deviations": [],
+    },
     "s3": {
         "doc": "Gearing 60 % of TIC (fee 0, DSRA 0), standard amortisation, 15 yrs, 6 %, a one-year "
                "moratorium inside the tenor; federal ITC 30 % with the federal basis-reduction flag "

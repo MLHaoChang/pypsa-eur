@@ -28,7 +28,7 @@ import pathlib
 from dataclasses import dataclass, field
 
 HERE = pathlib.Path(__file__).resolve().parent
-CASES = ("s1", "s1b", "s2", "s3", "s3f")
+CASES = ("s1", "s1b", "s2", "s2c", "s3", "s3f")
 
 # SAM's depreciation classes (the `depr_alloc_*_percent` suffixes).
 DEPR_CLASSES = ("macrs_5", "macrs_15", "sl_5", "sl_15", "sl_20", "sl_39", "custom")
@@ -103,7 +103,6 @@ _NEUTRAL = [
     ("SystemCosts", "om_opt_fuel_2_cost", [0.0]), ("SystemCosts", "system_use_recapitalization", 0.0),
     ("LandLease", "om_land_lease", [0.0]), ("CapacityPayments", "cp_capacity_payment_amount", [0.0]),
     ("GridLimits", "grid_curtailment_price", [0.0]), ("Lifetime", "system_use_lifetime_output", 0.0),
-    ("FinancialParameters", "dscr_limit_debt_fraction", 0.0),
     ("Depreciation", "depr_alloc_custom_percent", 0.0),
 ]
 
@@ -166,6 +165,10 @@ def sam_params(name: str) -> SamParams:
             "reserves_rate": fp["reserves_interest"] / 100.0,
             "payment": "annuity" if fp["payment_option"] == 0 else "level",
             "grace_years": int(fp["loan_moratorium"])}
+    if fp.get("dscr_limit_debt_fraction", 0.0):
+        if debt["option"] != "dscr":
+            raise SamMappingError(f"{name}: the debt-fraction cap applies to DSCR sizing only")
+        debt["max_fraction"] = fp["dscr_maximum_debt_fraction"] / 100.0
     if debt["option"] == "percent" and debt["percent"] == 0.0:
         debt = {}
     solve = None
@@ -232,6 +235,28 @@ def sam_expected(name: str) -> dict:
 SAM_Y0 = 2030          # SAM's year 0 (the investment year) — a calendar anchor for P4's axis
 
 
+def _debt(p: SamParams, DebtTranche) -> list:
+    """SAM's one term loan (plan C8): `debt_option` 0 → gearing on TIC
+    (`gearing_base="capex"`), 1 → DSCR sculpting capped by
+    `dscr_maximum_debt_fraction` when `dscr_limit_debt_fraction` is on; the
+    closing fee, DSRA months and moratorium as typed; no commitment fee (SAM
+    has none — one construction point, nothing undrawn)."""
+    d = p.debt
+    if not d:
+        return []
+    common = dict(kind="term_loan", rate=d["rate"], tenor_years=d["tenor_years"],
+                  upfront_fee=d["fee_share"], dsra_months=int(d["dsra_months"]),
+                  grace_years=d["grace_years"], commitment_fee=0.0)
+    if d["dsra_months"] != int(d["dsra_months"]):
+        raise SamMappingError(f"{p.name}: fractional DSRA months")
+    if d["payment"] != "annuity" and d["option"] == "percent":
+        common["sculpting"] = "level"
+    if d["option"] == "dscr":
+        return [DebtTranche(**common, sculpting="dscr_target", dscr_target=d["dscr"],
+                            max_gearing=d.get("max_fraction"))]
+    return [DebtTranche(**common, gearing=d["percent"], gearing_base="capex")]
+
+
 def to_finance_case(name: str):
     """A `FinanceCase` for the SAM case: one construction year (SAM's year 0),
     COD on 1 January of the next year = the base year (plan C4), one asset
@@ -240,7 +265,7 @@ def to_finance_case(name: str):
     (class `opex`, nominal rate inflation + escal)."""
     from datetime import date
 
-    from models.finance import FinanceInputs, TerminalValueRule
+    from models.finance import DebtTranche, FinanceInputs, TerminalValueRule
     from services.finance.case import (
         CONTRACT_CLASS, AssetFinance, FinanceCase, Template, TemplateLine,
     )
@@ -257,7 +282,8 @@ def to_finance_case(name: str):
         if p.salvage_share else TerminalValueRule(),
         wacc_nominal=p.nominal_discount_rate, cost_of_equity=p.nominal_discount_rate,
         inflation=p.inflation, tax_losses="offset_other_income",
-        financing_fee_tax="not_deducted")
+        financing_fee_tax="not_deducted", debt=_debt(p, DebtTranche),
+        reserves_rate=p.debt.get("reserves_rate") if p.debt else None)
     lines = (
         TemplateLine(key="ppa", stream="ppa_settlement", amount=p.energy_year1_mwh * price,
                      esc_class=CONTRACT_CLASS, indexation=p.ppa_escalation, contract_id="ppa",
