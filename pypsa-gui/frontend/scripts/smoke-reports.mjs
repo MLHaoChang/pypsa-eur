@@ -299,6 +299,17 @@ async function browserCheck(reportId) {
       const u = new URL(BASE)
       await context.addCookies(cookieJar.map(k => ({ name: k.name, value: k.value, domain: u.hostname, path: '/' })))
     }
+    // A fresh browser profile is a FIRST RUN, which the guided-mode spec
+    // (§3.2, G4) starts in Guided mode — and Guided hides the Reports row
+    // (Expert-only sidebar, §3.5). This journey is the Expert one, so choose
+    // Expert explicitly before the SPA boots, the way a user who picked it
+    // in the mode switcher is remembered (`uiStore` UI_MODE_KEY / _EXPLICIT_KEY).
+    await context.addInitScript(() => {
+      try {
+        localStorage.setItem('network-diagram:ui-mode', 'expert')
+        localStorage.setItem('network-diagram:ui-mode-explicit', '1')
+      } catch { /* storage unavailable: the journey then reports the missing row */ }
+    })
     const page = await context.newPage()
     const errors = []
     page.on('pageerror', e => errors.push(String(e)))
