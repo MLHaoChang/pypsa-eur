@@ -175,3 +175,19 @@ def test_s1b_target_year_irr_and_the_dscr_array_without_debt():
     assert all(x is None for x in S.sam_expected("s1")["arrays"]["cf_pretax_dscr"])
     d2 = S.sam_expected("s2")["arrays"]["cf_pretax_dscr"]
     assert d2[0] is None and d2[1] == pytest.approx(1.3)
+
+
+def test_sams_sl15_table_is_refused_not_mapped_to_half_year(monkeypatch):
+    """SAM's SL-15 is IRS Table A-8 rounded, not 1/15 with the half-year
+    convention (WP4.3a review B6)."""
+    real = S.load_case
+
+    def patched(name):
+        d = real(name)
+        d["sam_inputs"]["Depreciation"].update(depr_alloc_sl_20_percent=70.0,
+                                               depr_alloc_sl_15_percent=30.0)
+        return d
+
+    monkeypatch.setattr(S, "load_case", patched)
+    with pytest.raises(S.SamMappingError, match="SL-15"):
+        S.sam_tax_layers("s1")

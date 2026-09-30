@@ -16,7 +16,7 @@ from services.finance.tax import (
     DepreciationClass, LossRule, TaxLayer, compute_tax, declining_balance, depreciation,
     normalised, sl_half_year, sl_pro_rata,
 )
-from services.finance.timeline import build_timeline
+from services.finance.timeline import Timeline, build_timeline
 from tests.fixtures.investment_case.sam import sam_case as S
 
 
@@ -134,3 +134,25 @@ def test_a_rate_schedule_and_an_itc_basis_reduction():
     assert t.liability["kst"][1] == pytest.approx(0.14 * 575.0)
     d = depreciation(tl, 100.0, (DepreciationClass("b", 1.0, (1.0,), bonus=0.6),))
     assert list(d) == pytest.approx([100.0, 0.0, 0.0])                 # 60 bonus + 40 on schedule
+
+
+def test_remaining_basis_and_guards():
+    """The undepreciated basis at the axis end is reported per layer (WP4.5's
+    book value); shares above 1 and an ITC reduction above a class's basis
+    raise (WP4.3a review)."""
+    tl = Timeline(y0=2031, cod_year=2031, base_year=2031, analysis_years=3)
+    layer = TaxLayer(name="x", rate=0.2, depreciation=(
+        DepreciationClass("a", 1.0, (0.25, 0.25, 0.25, 0.25), itc_reduces=True),),
+        itc_basis_reduction=True)
+    t = compute_tax(tl, (layer,), ebitda=np.zeros(3), basis=100.0, itc_amount=20.0,
+                    losses="offset_other_income")
+    assert t.remaining_basis["x"] == pytest.approx((100.0 - 10.0) * 0.25)
+    with pytest.raises(ValueError):
+        depreciation(tl, 1.0, (DepreciationClass("a", 0.7, (1.0,)),
+                               DepreciationClass("b", 0.7, (1.0,))))
+    with pytest.raises(ValueError):
+        depreciation(tl, 1.0, (DepreciationClass("a", 1.0, (1.0,)),), itc_reduction=2.0)
+    assert declining_balance(0.15, 20, months_first_year=1)[0] == pytest.approx(0.15 / 12)
+    for bad in [(0.0, 5), (1.5, 5), (0.2, 0)]:
+        with pytest.raises(ValueError):
+            declining_balance(*bad)

@@ -48,22 +48,39 @@ def sl_pro_rata(years: int, months_first_year: int = 12) -> tuple[float, ...]:
     return tuple(out)
 
 
-def declining_balance(rate: float, years: int) -> tuple[float, ...]:
+def declining_balance(rate: float, years: int, months_first_year: int = 12) -> tuple[float, ...]:
     """Declining balance at `rate` per year with the switch to straight-line on
     the remaining life when that is larger (the German degressive AfA's
-    `Wechsel`, §7 Abs. 3 EStG) — full years."""
+    `Wechsel`, §7 Abs. 3 EStG). The year of acquisition is pro rata by month
+    (§7 Abs. 2 Satz 3 → Abs. 1 Satz 4 EStG — WP4.3a review B1): year 1 takes
+    `months_first_year`/12 of a year; the life of `years` × 12 months then
+    ends in year n + 1 when the first year is short."""
+    if years < 1 or not 0.0 < rate <= 1.0 or not 1 <= months_first_year <= 12:
+        raise ValueError(f"declining balance needs years ≥ 1, 0 < rate ≤ 1, 1..12 months "
+                         f"(got {rate!r}, {years!r}, {months_first_year!r})")
     remaining, out = 1.0, []
-    for k in range(years):
-        sl = remaining / (years - k)
-        d = max(remaining * rate, sl)
+    life_left = years * 12.0                     # months
+    months = float(months_first_year)
+    while remaining > 1e-12 and life_left > 1e-9:
+        frac = months / 12.0
+        sl = remaining * min(1.0, months / life_left)
+        d = min(remaining, max(remaining * rate * frac, sl))
         out.append(d)
         remaining -= d
+        life_left -= months
+        months = min(12.0, life_left)
+    if remaining > 1e-12:
+        out[-1] += remaining
     return tuple(out)
 
 
-def normalised(schedule) -> tuple[float, ...]:
+def normalised(schedule, tol: float = 1e-9) -> tuple[float, ...]:
+    """A schedule checked: non-empty, every entry ≥ 0, summing to 1 within
+    `tol` (WP4.3a review B7)."""
     s = tuple(float(x) for x in schedule)
-    if abs(sum(s) - 1.0) > 1e-9:
+    if not s or any(x < 0 for x in s):
+        raise ValueError(f"a depreciation schedule needs entries ≥ 0 (got {s[:4]!r}…)")
+    if abs(sum(s) - 1.0) > tol:
         raise ValueError(f"a depreciation schedule must sum to 1 (sums to {sum(s)!r})")
     return s
 
@@ -99,13 +116,17 @@ class InterestCap:
     (§163(j): ATI on an EBITDA basis; §4h EStG: steuerliches EBITDA). With a
     `freigrenze` the cap applies only when net interest exceeds it — and then
     to ALL net interest (a Freigrenze, not an allowance). Disallowed interest
-    carries forward when `carryforward` (§163(j)(2)); the German Zinsvortrag
-    and EBITDA-Vortrag are not modelled (the caller flags it). Applied only
-    in `carryforward` mode (plan C7)."""
+    carries forward when `carryforward` (§163(j)(2); the German Zinsvortrag,
+    §4h Abs. 1 Satz 5 EStG). The cap applies from the Freigrenze on (§4h Abs. 2
+    Satz 1 Buchst. a: "weniger als drei Millionen Euro" is exempt — review B4c).
+    `simplified_flag` is raised whenever the claim reaches the Freigrenze (the
+    German EBITDA-Vortrag and the escape / stand-alone clauses are not
+    modelled). Applied only in `carryforward` mode (plan C7)."""
 
     share: float
     freigrenze: float | None = None
     carryforward: bool = True
+    simplified_flag: str | None = None
 
 
 @dataclass(frozen=True)
@@ -132,6 +153,9 @@ class TaxResult:
     liability: dict[str, np.ndarray]                # tax owed (> 0) per layer
     loss_pool: dict[str, np.ndarray]                # carried loss at year end (carryforward)
     total_liability: np.ndarray
+    # The basis not yet depreciated at the end of the axis, per layer (after
+    # the ITC reduction and bonus) — WP4.5's `book_value` terminal reads it.
+    remaining_basis: dict[str, float] = field(default_factory=dict)
     flags: list[str] = field(default_factory=list)
 
 
@@ -151,11 +175,15 @@ def depreciation(tl: Timeline, basis: float, classes: tuple[DepreciationClass, .
     taken off the basis of the classes it applies to, pro rata to their shares."""
     out = np.zeros(tl.n)
     start = tl.index(tl.cod_year)
+    if sum(c.share for c in classes) > 1.0 + 1e-9:
+        raise ValueError("depreciation class shares sum above 1")
     reducible = sum(c.share for c in classes if c.itc_reduces)
     for c in classes:
         b = basis * c.share
         if itc_reduction and c.itc_reduces and reducible:
             b -= itc_reduction * c.share / reducible
+        if b < -1e-9:
+            raise ValueError(f"the ITC basis reduction exceeds class {c.name!r}'s basis")
         bonus = b * c.bonus
         rest = b - bonus
         if start < tl.n:
@@ -189,14 +217,19 @@ def compute_tax(tl: Timeline, layers: tuple[TaxLayer, ...], *, ebitda: np.ndarra
                          itc_reduction=0.5 * itc_amount if layer.itc_basis_reduction else 0.0)
         deductible_interest = interest
         if layer.interest_cap is not None and losses == "carryforward":
-            deductible_interest, capped = _capped_interest(layer.interest_cap, ebitda, interest)
+            deductible_interest, capped, reached = _capped_interest(layer.interest_cap, ebitda,
+                                                                    interest)
             if capped:
                 flags.append(f"interest_capped:{layer.name}")
+            if reached and layer.interest_cap.simplified_flag:
+                flags.append(layer.interest_cap.simplified_flag)
         base = (ebitda - d - deductible_interest + other_income - other_deductions
                 - deductible_before)
         if layer.interest_addback_share is not None:
+            # Only interest deducted in the profit is added back (§8 GewStG
+            # chapeau — WP4.3a review B5).
             base = base + layer.interest_addback_share * np.clip(
-                interest - layer.interest_addback_allowance, 0.0, None)
+                deductible_interest - layer.interest_addback_allowance, 0.0, None)
         pool = np.zeros(tl.n)
         if losses == "offset_other_income":
             use = base.copy()
@@ -232,25 +265,34 @@ def compute_tax(tl: Timeline, layers: tuple[TaxLayer, ...], *, ebitda: np.ndarra
         if layer.deductible_in_later_layers:
             deductible_before = deductible_before + lb
     total = np.sum(list(liab.values()), axis=0) if liab else np.zeros(tl.n)
+    remaining = {}
+    for layer in layers:
+        red = 0.5 * itc_amount if layer.itc_basis_reduction else 0.0
+        reducible = any(c.itc_reduces for c in layer.depreciation)
+        depreciable = basis * sum(c.share for c in layer.depreciation) - (red if reducible else 0.0)
+        remaining[layer.name] = float(depreciable - dep[layer.name].sum())
     return TaxResult(depreciation=dep, taxable=taxable, liability=liab, loss_pool=pools,
-                     total_liability=total, flags=sorted(set(flags)))
+                     total_liability=total, remaining_basis=remaining, flags=sorted(set(flags)))
 
 
 def _capped_interest(cap: InterestCap, ebitda: np.ndarray,
-                     interest: np.ndarray) -> tuple[np.ndarray, bool]:
+                     interest: np.ndarray) -> tuple[np.ndarray, bool, bool]:
     """Deductible interest per year under the cap, with the disallowed part
-    carried forward (FIFO into later years' headroom) when allowed."""
+    carried forward (FIFO into later years' headroom) when allowed. Returns
+    (deductible, capped in some year, the Freigrenze reached in some year)."""
     out = np.zeros(len(interest))
-    carried, capped = 0.0, False
+    carried, capped, reached = 0.0, False, False
     for i, (e, x) in enumerate(zip(ebitda, interest)):
         claim = x + carried
-        if cap.freigrenze is not None and claim <= cap.freigrenze:
-            out[i], carried = claim, 0.0
-            continue
+        if cap.freigrenze is not None:
+            if claim < cap.freigrenze:
+                out[i], carried = claim, 0.0
+                continue
+            reached = True
         limit = max(0.0, cap.share * e)
         allowed = min(claim, limit)
         if allowed < claim - 1e-9:
             capped = True
         out[i] = allowed
         carried = (claim - allowed) if cap.carryforward else 0.0
-    return out, capped
+    return out, capped, reached

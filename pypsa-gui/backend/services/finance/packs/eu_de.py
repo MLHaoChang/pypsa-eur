@@ -16,9 +16,10 @@ Version as of 2026-01-01. Corporate tax is three layers (plan C7):
 - KSt: 15 %, falling by one point a year from 2028 to 10 % in 2032 (schedule),
   with SolZ 5.5 % on top; loss carryforward €1m + 70 % (2024–2027), 60 % from
   2028 (§10d EStG).
-The Zinsschranke (§4h EStG) is a Freigrenze: above €3m net interest the 30 %
-cap applies to ALL net interest; the escape and stand-alone clauses and the
-EBITDA carryforward are not modelled — a case above the Freigrenze is flagged
+The Zinsschranke (§4h EStG) is a Freigrenze: from €3m net interest on the 30 %
+cap applies to ALL net interest, the disallowed interest carrying forward
+(Zinsvortrag); the escape and stand-alone clauses and the EBITDA carryforward
+are not modelled — a case reaching the Freigrenze is flagged
 `zinsschranke_simplified` (never a silent low tax).
 """
 from __future__ import annotations
@@ -48,8 +49,9 @@ def make_pack() -> JurisdictionPack:
         "kst_loss": Rule({"allowance": 1_000_000.0, "limit_share": {"2024": 0.7, "2028": 0.6},
                           "years": None},
                          f"§10d Abs. 2 EStG (via §8 Abs. 1 KStG) as amended by {_WACHSTUM}"),
-        "zinsschranke": Rule({"share": 0.3, "freigrenze": 3_000_000.0},
-                             "§4h Abs. 1 Satz 1, Abs. 2 Satz 1 Buchst. a EStG (via §8a KStG)"),
+        "zinsschranke": Rule({"share": 0.3, "freigrenze": 3_000_000.0, "carryforward": True},
+                             "§4h Abs. 1 Satz 2 (30 %), Satz 5 (Zinsvortrag), Abs. 2 Satz 1 "
+                             "Buchst. a (Freigrenze: weniger als 3 Mio. €) EStG (via §8a KStG)"),
         # Degressive AfA for movables acquired 2025-07-01 … 2027-12-31: up to 3×
         # the straight-line rate, at most 30 %, switch to straight-line allowed.
         "degressive_afa": Rule({"acquired_from": "2025-07-01", "acquired_to": "2027-12-31",
@@ -58,10 +60,11 @@ def make_pack() -> JurisdictionPack:
         # Useful lives (years) from the BMF AfA table for general assets
         # (BMF-Schreiben vom 15.12.2000, BStBl. I 2000 S. 1532): only classes
         # the table names.
-        "afa_useful_life_years": Rule({"solar": 20},
+        "afa_useful_life_years": Rule({"solar": 20, "onwind": 16},
                                       "AfA-Tabelle für die allgemein verwendbaren Anlagegüter "
-                                      "(BMF-Schreiben vom 15.12.2000): Photovoltaikanlagen 20 "
-                                      "Jahre"),
+                                      "(BMF-Schreiben vom 15.12.2000): Fundstelle 3.1.6 "
+                                      "Photovoltaikanlagen 20 Jahre; Fundstelle 3.1.5 "
+                                      "Windkraftanlagen 16 Jahre"),
         # Straight-line AfA is pro rata by month in the year of acquisition.
         "afa_first_year": Rule("pro_rata_months", "§7 Abs. 1 Satz 4 EStG"),
     }

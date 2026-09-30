@@ -10,7 +10,18 @@ Depreciation class strings (per asset, `FinanceInputs.depreciation_class_by_
 asset`, or the pack's default for the carrier): `macrs_<n>` (the pack's Table
 A-1), `sl_<n>` (straight-line, half-year convention), `afa_<n>` (straight-line
 pro rata by month from COD, §7 Abs. 1 EStG), `db_<rate>_<n>` (declining
-balance at `rate`, switching to straight-line).
+balance at `rate`, switching to straight-line, the first year pro rata by
+month from COD — §7 Abs. 2 EStG; WP4.3a review B1). Every schedule is checked
+(years ≥ 1, 0 < rate ≤ 1, entries ≥ 0, summing to 1 — review B7).
+
+Whenever anything is MISSING the resolver returns NO layers (review B3): a
+partial set (a missing asset's share undepreciated, a missing state layer,
+bonus taken as 0) would look usable and be wrong.
+
+Deviation from plan C7 (review B8, recorded): the layer STRUCTURE (which
+layers, their order and deductibility wiring, the US state slot) is code per
+jurisdiction here; the pack carries the rates, schedules and rules it cites
+and its hash covers those. A new jurisdiction (WP4.3b) adds a branch.
 """
 from __future__ import annotations
 
@@ -20,8 +31,8 @@ from datetime import date
 from models.finance import FinanceInputs
 from services.finance.packs.base import JurisdictionPack
 from services.finance.tax import (
-    DepreciationClass, InterestCap, LossRule, TaxLayer, declining_balance, sl_half_year,
-    sl_pro_rata,
+    DepreciationClass, InterestCap, LossRule, TaxLayer, declining_balance, normalised,
+    sl_half_year, sl_pro_rata,
 )
 
 
@@ -44,38 +55,57 @@ def _sched_dict(v) -> float | dict[int, float]:
     return {int(k): float(x) for k, x in v.items()} if isinstance(v, dict) else float(v)
 
 
+def _years(v: str, cls: str) -> int:
+    n = int(v)
+    if n < 1:
+        raise ValueError(f"depreciation class {cls!r}: years must be ≥ 1")
+    return n
+
+
 def schedule_for(cls: str, pack: JurisdictionPack, cod: date) -> tuple[float, ...]:
     kind, _, rest = cls.partition("_")
+    months = 13 - cod.month                     # months in the year of COD, COD's month included
     if kind == "macrs":
         table = pack.rule("macrs_half_year_percent")
         if table.status != "ok" or rest not in table.value:
             raise KeyError(f"depreciation class {cls!r}: no MACRS table in pack "
                            f"{pack.jurisdiction!r}")
-        return tuple(p / 100.0 for p in table.value[rest])
+        # Table A-1 is rounded to 2–3 decimals of a percent.
+        return normalised([p / 100.0 for p in table.value[rest]], tol=1e-4)
     if kind == "sl":
-        return sl_half_year(int(rest))
+        return normalised(sl_half_year(_years(rest, cls)))
     if kind == "afa":
-        return sl_pro_rata(int(rest), months_first_year=13 - cod.month)
+        return normalised(sl_pro_rata(_years(rest, cls), months_first_year=months))
     if kind == "db":
         rate, _, years = rest.partition("_")
-        return declining_balance(float(rate), int(years))
+        return normalised(declining_balance(float(rate), _years(years, cls),
+                                            months_first_year=months))
     raise KeyError(f"unknown depreciation class {cls!r}")
 
 
-def _default_class(pack: JurisdictionPack, fin: FinanceInputs, carrier: str) -> str | None:
+def _default_class(pack: JurisdictionPack, fin: FinanceInputs, carrier: str,
+                   res: ResolvedTax) -> str | None:
     if pack.jurisdiction != "eu_de":
         return None                 # US: the 2025 act changed energy classes — the case states it
     lives = pack.rule("afa_useful_life_years")
     if lives.status != "ok" or carrier not in lives.value:
         return None
+    res.sources["afa_useful_life_years"] = lives.source
     n = int(lives.value[carrier])
     deg = pack.rule("degressive_afa")
     acq = fin.acquisition_date
-    if deg.status == "ok" and acq is not None and \
-            date.fromisoformat(deg.value["acquired_from"]) <= acq <= date.fromisoformat(
+    if deg.status == "ok":
+        if acq is None:
+            # The date decides linear vs degressive — never assumed (review B2).
+            res.missing.append("acquisition_date")
+            return None
+        res.sources["degressive_afa"] = deg.source
+        if date.fromisoformat(deg.value["acquired_from"]) <= acq <= date.fromisoformat(
                 deg.value["acquired_to"]):
-        rate = min(deg.value["multiple_of_sl"] / n, deg.value["max_rate"])
-        return f"db_{rate:g}_{n}"
+            rate = min(deg.value["multiple_of_sl"] / n, deg.value["max_rate"])
+            # Degressive AfA is an election (§7 Abs. 2 "kann"): taken, stated.
+            res.flags.append("degressive_afa_elected")
+            return f"db_{rate:g}_{n}"
     return f"afa_{n}"
 
 
@@ -83,13 +113,16 @@ def _classes(pack, fin, assets, cod, res: ResolvedTax, *, bonus_macrs: float = 0
     total = sum(a.basis for a in assets)
     out = []
     for a in assets:
-        cls = fin.depreciation_class_by_asset.get(a.name) or _default_class(pack, fin, a.carrier)
+        cls = fin.depreciation_class_by_asset.get(a.name) or _default_class(pack, fin, a.carrier,
+                                                                             res)
         if cls is None:
             res.missing.append(f"depreciation_class:{a.name}")
             continue
         try:
             sched = schedule_for(cls, pack, cod)
-        except (KeyError, ValueError) as e:
+            if cls.startswith("macrs_"):
+                res.sources["macrs_half_year_percent"] = pack.rule("macrs_half_year_percent").source
+        except (KeyError, ValueError, ZeroDivisionError) as e:
             res.missing.append(f"depreciation_class:{a.name}:{e}")
             continue
         share = a.basis / total if total else 0.0
@@ -104,6 +137,7 @@ def _us_bonus(pack, fin, cod, res: ResolvedTax) -> float:
     if rule.status != "ok":
         res.missing.append("pack_rule:bonus_depreciation")
         return 0.0
+    res.sources["bonus_depreciation"] = rule.source
     if fin.acquisition_date is None:
         res.missing.append("acquisition_date")
         return 0.0
@@ -143,9 +177,12 @@ def resolve_tax_layers(pack: JurisdictionPack, fin: FinanceInputs, assets: list[
             res.missing.append("state_rate")
         elif fin.state_rate > 0:
             # State packs are slots: the state layer decouples from bonus (as
-            # most states do) and, in carryforward mode, carries losses without
-            # a limit — both stated.
-            res.flags.append("state_bonus_decoupled")
+            # most states do), follows the federal interest limit and, in
+            # carryforward mode, carries losses without a limit — all stated.
+            if bonus > 0:
+                res.flags.append("state_bonus_decoupled")
+            if cap_obj is not None:
+                res.flags.append("state_interest_limit_follows_federal")
             if carry:
                 res.flags.append("state_loss_rule_not_modelled")
             layers.append(TaxLayer(
@@ -168,8 +205,12 @@ def resolve_tax_layers(pack: JurisdictionPack, fin: FinanceInputs, assets: list[
         classes = _classes(pack, fin, assets, cod, res)
         if fin.hebesatz_pct is None:
             res.missing.append("hebesatz_pct")
+        elif fin.hebesatz_pct < 200.0:
+            res.missing.append("hebesatz_pct:below_statutory_minimum_200")   # §16 Abs. 4 GewStG
         cap_obj = (InterestCap(share=zins["share"], freigrenze=zins["freigrenze"],
-                               carryforward=False) if carry and zins is not None else None)
+                               carryforward=bool(zins["carryforward"]),
+                               simplified_flag="zinsschranke_simplified")
+                   if carry and zins is not None else None)
         if None not in (messzahl, gew_loss, addback, kst, solz, kst_loss, zins, deductible) \
                 and fin.hebesatz_pct is not None:
             res.layers = (
@@ -193,4 +234,7 @@ def resolve_tax_layers(pack: JurisdictionPack, fin: FinanceInputs, assets: list[
     else:
         res.missing.append(f"pack_not_resolvable:{pack.jurisdiction}")
     res.missing = sorted(set(res.missing))
+    res.flags = sorted(set(res.flags))
+    if res.missing:
+        res.layers = ()                      # never a partial, usable-looking set (review B3)
     return res

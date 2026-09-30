@@ -614,8 +614,8 @@ flagged (the docstring claimed it); `Template.money_year` keyword-only. For WP4.
   pro rata by COD month) or the degressive window by acquisition date (`db_min(3/n, 30 %)_n`).
 - Packs: `us_federal` (21 %, MACRS Table A-1, bonus, NOL, §163(j)) and `eu_de` (KSt path, SolZ, GewSt
   Messzahl / add-back / loss, KSt loss, Zinsschranke, degressive AfA, the AfA life for PV, the pro-rata
-  first year) with a cited source per rule; unsourced items absent (US energy MACRS classes, DE wind and
-  battery lives). `FinanceInputs.depreciation_class_by_asset` (+ `types.ts`). `pack_hashes.json` pinned **per
+  first year) with a cited source per rule; unsourced items absent (US energy MACRS classes, the DE battery life;
+  DE onshore wind 16 years added in review round 1 — AfA-Tabelle AV Fundstelle 3.1.5). `FinanceInputs.depreciation_class_by_asset` (+ `types.ts`). `pack_hashes.json` pinned **per
   version** and every registered version must be pinned.
 - Tests: `test_finance_tax.py` (12) — **SAM parity on state / federal depreciation, taxable income and tax
   per layer for all five cases** (S2/S3 fed SAM's interest and reserve interest until WP4.2), **S1 / S1b
@@ -625,6 +625,54 @@ flagged (the docstring claimed it); `Template.money_year` keyword-only. For WP4.
   (Germany) and **F3** (US) by hand, bonus by acquisition date, the degressive window and the state
   layer, the missing inputs named, the Zinsschranke Freigrenze, every rule cited. Book-value terminal
   value reads the remaining basis in WP4.5's assembly.
+
+**WP4.3a review round 1: PASS WITH CONDITIONS, 8 binding findings, all fixed.** The reviewer ran 10 new
+PySAM variants: state bonus, MACRS-15 + SL-39 over 30 years, state rate 0, 25 loss years under offset, the
+ITC reducing both layers, and all classes qualifying. Every one matched per layer, year by year, to ≤ 1.5e-8,
+except SL-15 (B6). The reviewer also web-checked the statutes: the KSt path, the degressive window, the OBBBA
+bonus rule, §172 NOL 80 %, §163(j) on an EBITDA basis, MACRS Table A-1 and the AfA-Tabelle.
+1. **B1:** degressive AfA ignored the month of COD. Fixed: `declining_balance(rate, n, months_first_year)`
+   gives year 1 pro rata by month (§7 Abs. 2 → Abs. 1 Satz 4 EStG), then declining balance or
+   straight-line on the remaining months. Tested: a December COD takes 12.5 k€ of 1 M€ at 15 %; a January
+   COD takes 150 k€.
+2. **B2:** a missing `acquisition_date` in Germany became linear AfA silently. Fixed: it is now `missing`.
+3. **B3:** the resolver returned usable-looking partial layers while `missing` was non-empty. Fixed: no
+   layers whenever anything is missing. Tested for each item, in both packs.
+4. **B4:** the Zinsschranke had three faults, all fixed and tested:
+   - the Freigrenze boundary was wrong; it is now `<` ("weniger als drei Millionen Euro");
+   - there was no Zinsvortrag; it is now in the pack rule (`carryforward`, §4h Abs. 1 Satz 5);
+   - `zinsschranke_simplified` was never raised; it is now raised whenever the Freigrenze is reached.
+5. **B5:** the GewSt add-back included interest the Zinsschranke disallowed. Fixed: it now adds back only
+   deducted interest (§8 GewStG chapeau). Tested: 7.70 m, not 7.825 m.
+6. **B6:** SAM's SL-15 is the rounded IRS Table A-8, not 1/15 with the half-year convention. Fixed:
+   `sam_case` refuses it.
+7. **B7:** class strings were not validated. Fixed: schedules are checked (years ≥ 1, 0 < rate ≤ 1,
+   entries ≥ 0, summing to 1, or 1e-4 for the rounded MACRS table) and `ZeroDivisionError` is caught. A
+   bad class is now `missing`, never a crash or negative depreciation. An ITC reduction above a class's
+   basis, or shares summing above 1, raise.
+8. **B8:** recorded deviation from C7. The layer STRUCTURE (which layers, their order and wiring, the US
+   state slot) is code per jurisdiction in `resolve_tax_layers`. The pack carries, and its hash covers,
+   the rates, schedules and rules it cites. WP4.3b adds a branch per pack.
+
+Recommendations taken:
+- `TaxResult.remaining_basis` per layer, so the book-value terminal can read it;
+- the state flags are `state_bonus_decoupled` (only with a federal bonus) and
+  `state_interest_limit_follows_federal`;
+- `sources` now also name the bonus, MACRS, degressive and AfA-life rules;
+- `degressive_afa_elected` is flagged;
+- a Hebesatz below 200 % is refused (§16 Abs. 4 GewStG);
+- DE onshore wind 16 years, cited;
+- sharper citations: §4h Abs. 1 Satz 2 and Satz 5, and Pub. L. 119-21 §70301.
+
+Both pack versions re-pinned (these packs have not been released).
+
+Noted, not taken:
+- the Wachstumschancengesetz 2024 degressive window (2× SL, 20 %). Property acquired 2024-04-01 …
+  2024-12-31 takes linear AfA; this is a WP4.3b pack addition;
+- the "longer production period" phase-down and Notice 2026-11 for self-constructed property, which go
+  into the `acquisition_date` help (WP4.7a);
+- loss vintages expire only in income years; the current packs are indefinite;
+- §163(j) interest still carried forward at the axis end is not reported; this is for WP4.5's report.
 
 ## WP4.3b `eu_nl` and `ca_federal` packs
 

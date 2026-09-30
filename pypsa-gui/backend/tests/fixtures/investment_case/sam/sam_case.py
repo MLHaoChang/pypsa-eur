@@ -317,6 +317,10 @@ def sam_tax_layers(name: str):
         if kind == "macrs":
             return macrs_fractions(pack, years)
         if kind == "sl":
+            if cls == "sl_15":
+                # SAM's SL-15 is IRS Table A-8 rounded (3.33, 6.67 …), not 1/15
+                # with the half-year convention (WP4.3a review B6).
+                raise SamMappingError(f"{name}: SAM's SL-15 table is not mapped")
             return sl_half_year(int(years))
         raise SamMappingError(f"{name}: depreciation class {cls!r} not mapped")
 

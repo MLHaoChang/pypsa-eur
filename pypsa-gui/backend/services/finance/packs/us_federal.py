@@ -48,7 +48,7 @@ def make_pack() -> JurisdictionPack:
              "earlier_by_placed_in_service_year": {"2023": 0.8, "2024": 0.6, "2025": 0.4,
                                                     "2026": 0.2, "2027": 0.0}},
             "26 U.S.C. §168(k)(1), (6)(A) as amended by Pub. L. 115-97 §13201 and Pub. L. 119-21 "
-            "(2025)"),
+            "§70301 (2025)"),
         # NOL: indefinite carryforward, deduction limited to 80 % of taxable
         # income (losses arising in tax years after 2017).
         "nol": Rule({"allowance": 0.0, "limit_share": 0.8, "years": None},

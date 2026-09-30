@@ -146,3 +146,108 @@ def test_the_zinsschranke_freigrenze_caps_all_interest_once_exceeded():
 def test_every_rule_cites_a_source(pack_id):
     pack = load_pack(pack_id, as_of=date(2026, 1, 1))
     assert pack.rules and all(len(r.source) > 10 for r in pack.rules.values())
+
+
+# ── WP4.3a review round 1 ────────────────────────────────────────────────────
+
+def _de(**kw):
+    base = dict(financial_close=COD, tax_losses="carryforward", hebesatz_pct=400.0,
+                acquisition_date=date(2026, 3, 1))
+    base.update(kw)
+    return FinanceInputs(**base)
+
+
+@pytest.mark.parametrize("cod,year1", [(date(2027, 12, 1), 12_500.0), (date(2027, 1, 1), 150_000.0)])
+def test_b1_degressive_afa_is_pro_rata_by_month_in_the_first_year(cod, year1):
+    """§7 Abs. 2 → Abs. 1 Satz 4 EStG: 1 M€ at 15 % acquired in the window, a
+    December COD takes 1/12 of the year's 150 k€."""
+    de = load_pack("eu_de", as_of=date(2026, 1, 1))
+    res = resolve_tax_layers(de, _de(), [OwnerAsset("pv", "solar", 1_000_000.0)], cod)
+    sched = res.layers[0].depreciation[0].schedule
+    assert 1_000_000.0 * sched[0] == pytest.approx(year1)
+    assert sum(sched) == pytest.approx(1.0) and min(sched) >= 0.0
+    assert len(sched) == (21 if cod.month == 12 else 20)
+    assert "degressive_afa_elected" in res.flags
+
+
+def test_b2_a_missing_acquisition_date_is_missing_in_germany():
+    de = load_pack("eu_de", as_of=date(2026, 1, 1))
+    res = resolve_tax_layers(de, _de(acquisition_date=None), [OwnerAsset("pv", "solar", 1.0)], COD)
+    assert "acquisition_date" in res.missing and res.layers == ()
+
+
+def test_b3_any_missing_input_yields_no_layers():
+    us = load_pack("us_federal", as_of=date(2026, 1, 1))
+    fin = FinanceInputs(financial_close=COD, tax_losses="carryforward", state_rate=0.07,
+                        small_business_163j=False, acquisition_date=date(2030, 1, 1),
+                        depreciation_class_by_asset={"pv": "macrs_5"})
+    two = [OwnerAsset("pv", "solar", 1.0), OwnerAsset("bess", "battery", 1.0)]
+    res = resolve_tax_layers(us, fin, two, COD)
+    assert res.missing == ["depreciation_class:bess"] and res.layers == ()
+    for drop in ("state_rate", "acquisition_date", "small_business_163j"):
+        r = resolve_tax_layers(us, fin.model_copy(update={drop: None}),
+                               [OwnerAsset("pv", "solar", 1.0)], COD)
+        assert drop in r.missing and r.layers == (), drop
+    de = load_pack("eu_de", as_of=date(2026, 1, 1))
+    r = resolve_tax_layers(de, _de(), [OwnerAsset("pv", "solar", 1.0),
+                                       OwnerAsset("bess", "battery", 1.0)], COD)
+    assert r.missing == ["depreciation_class:bess"] and r.layers == ()
+
+
+def test_b4_zinsschranke_boundary_zinsvortrag_and_flag():
+    de = load_pack("eu_de", as_of=date(2026, 1, 1))
+    res = resolve_tax_layers(de, _de(acquisition_date=date(2024, 1, 1)),
+                             [OwnerAsset("pv", "solar", 0.0)], COD)
+    # (c) exactly €3m is NOT below the Freigrenze: capped at 30 % × 5m.
+    t = compute_tax(_tl(1), res.layers, ebitda=np.array([5e6]), basis=0.0,
+                    interest=np.array([3.0e6]), losses="carryforward")
+    assert t.taxable["kst"][0] == pytest.approx(5e6 - 1.5e6)
+    # (a) the simplification is flagged whenever the Freigrenze is reached.
+    assert "zinsschranke_simplified" in t.flags
+    t = compute_tax(_tl(1), res.layers, ebitda=np.array([20e6]), basis=0.0,
+                    interest=np.array([3.5e6]), losses="carryforward")
+    assert "zinsschranke_simplified" in t.flags and "interest_capped:kst" not in t.flags
+    # (b) the Zinsvortrag: 3.5m then 3.1m interest on 10m EBITDA — year 1 caps
+    # at 3m (0.5m carried), year 2 claims 3.6m, capped at 3m (0.6m carried).
+    t = compute_tax(_tl(2), res.layers, ebitda=np.array([10e6, 20e6]), basis=0.0,
+                    interest=np.array([3.5e6, 3.1e6]), losses="carryforward")
+    assert t.taxable["kst"] == pytest.approx([7e6, 20e6 - 3.6e6])
+    t = compute_tax(_tl(1), res.layers, ebitda=np.array([10e6]), basis=0.0,
+                    interest=np.array([2.99e6]), losses="carryforward")
+    assert "zinsschranke_simplified" not in t.flags
+
+
+def test_b5_the_gewst_addback_uses_deductible_interest_only():
+    """EBITDA 10m, interest 3.5m: 3m deductible → GewSt base = 10 − 3 + 25 % ×
+    (3 − 0.2) = 7.7m (not 7.825m)."""
+    de = load_pack("eu_de", as_of=date(2026, 1, 1))
+    res = resolve_tax_layers(de, _de(acquisition_date=date(2024, 1, 1)),
+                             [OwnerAsset("pv", "solar", 0.0)], COD)
+    t = compute_tax(_tl(1), res.layers, ebitda=np.array([10e6]), basis=0.0,
+                    interest=np.array([3.5e6]), losses="carryforward")
+    assert t.taxable["gewst"][0] == pytest.approx(7.7e6)
+
+
+@pytest.mark.parametrize("cls", ["afa_0", "db_0.5_0", "db_1.5_5", "db_-0.1_5", "db_0_5", "sl_0"])
+def test_b7_bad_class_strings_are_missing_never_a_crash(cls):
+    de = load_pack("eu_de", as_of=date(2026, 1, 1))
+    res = resolve_tax_layers(de, _de(depreciation_class_by_asset={"pv": cls}),
+                             [OwnerAsset("pv", "solar", 1.0)], COD)
+    assert any(m.startswith("depreciation_class:pv:") for m in res.missing) and res.layers == ()
+
+
+def test_hebesatz_floor_state_flags_and_sources():
+    de = load_pack("eu_de", as_of=date(2026, 1, 1))
+    r = resolve_tax_layers(de, _de(hebesatz_pct=150.0), [OwnerAsset("pv", "solar", 1.0)], COD)
+    assert "hebesatz_pct:below_statutory_minimum_200" in r.missing
+    r = resolve_tax_layers(de, _de(), [OwnerAsset("w", "onwind", 1.0)], COD)
+    assert r.layers[0].depreciation[0].name == "w:db_0.1875_16"            # 3/16 < 30 %
+    assert {"afa_useful_life_years", "degressive_afa"} <= set(r.sources)
+    us = load_pack("us_federal", as_of=date(2026, 1, 1))
+    fin = FinanceInputs(financial_close=COD, tax_losses="carryforward", state_rate=0.07,
+                        small_business_163j=False, acquisition_date=date(2024, 1, 1),
+                        depreciation_class_by_asset={"pv": "macrs_5"})
+    r = resolve_tax_layers(us, fin, [OwnerAsset("pv", "solar", 1.0)], COD)   # bonus 0 (COD 2031)
+    assert "state_bonus_decoupled" not in r.flags
+    assert "state_interest_limit_follows_federal" in r.flags
+    assert {"bonus_depreciation", "macrs_half_year_percent", "interest_limit"} <= set(r.sources)
