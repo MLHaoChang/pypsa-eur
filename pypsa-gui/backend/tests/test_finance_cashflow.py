@@ -6,7 +6,6 @@ replacement), plus the refusals and the not-established paths (plan C12).
 """
 from __future__ import annotations
 
-import dataclasses
 from datetime import date
 
 import numpy as np
@@ -16,7 +15,9 @@ from models.finance import FinanceInputs, TerminalValueRule
 from services.finance.case import (
     CONTRACT_CLASS, AssetFinance, FinanceCase, FinanceRefused, Template, TemplateLine,
 )
-from services.finance.cashflow import build_operating, degradation_factor, esc_class_for
+from services.finance.cashflow import (
+    STREAM_CLASS, build_operating, degradation_factor, esc_class_for,
+)
 from services.finance.metrics import irr, npv
 from services.finance.timeline import build_timeline
 from tests.fixtures.investment_case.sam import sam_case as S
@@ -176,3 +177,102 @@ def test_irr_and_npv_core():
     r2, f2 = irr([-100.0, 230.0, -132.0])            # roots 10 % and 20 %
     assert r2 == pytest.approx(0.1) and "irr_multiple_sign_changes" in f2
     assert npv(None, c) is None and npv(0.1, [1.0, float("nan")]) is None
+
+
+# ── WP4.1 review round 1 ─────────────────────────────────────────────────────
+
+
+def test_irr_is_never_zero_on_zero_cash_and_names_an_out_of_range_root():
+    assert irr([0.0] * 10) == (None, ["irr_not_established:no_sign_change"])     # #1
+    assert irr([-1.0, 20.0]) == (None, ["irr_not_established:no_root_in_scan"])   # #7: IRR 1900 %
+    assert npv(-1.0, [1.0, 1.0]) is None
+
+
+def test_energy_without_a_degradation_entry_is_not_established():
+    rev = TemplateLine("rev", "energy_export", 100.0, "export")
+    case = _case([rev], energy={"pv": 1000.0, "wind": 500.0})
+    op = build_operating(case, build_timeline(case))
+    assert op.energy_mwh["wind"] is None and "degradation_missing:wind" in op.reasons["operating"]
+    assert op.status["operating"] == "not_established"
+
+
+def test_a_later_template_in_its_own_money_year_is_not_escalated_twice():
+    """#4: a period-2037 template stated in 2037 money escalates from 2037."""
+    a = Template(2033, (TemplateLine("rev", "energy_export", 100.0, "export"),
+                        TemplateLine("ppa", "ppa_settlement", 50.0, CONTRACT_CLASS, indexation=0.03)))
+    b = Template(2037, (TemplateLine("rev", "energy_export", 200.0, "export"),
+                        TemplateLine("ppa", "ppa_settlement", 80.0, CONTRACT_CLASS, indexation=0.03)),
+                 money_year=2037)
+    case = _case([], templates=(a, b), fin_over={"escalation": {"export": 0.05, "capex": 0.0}})
+    op = build_operating(case, build_timeline(case))
+    tl = op.tl
+    assert op.lines["rev"][tl.index(2036)] == pytest.approx(100.0 * 1.05 ** (2036 - 2031))
+    assert op.lines["rev"][tl.index(2037)] == pytest.approx(200.0)
+    assert op.lines["rev"][tl.index(2039)] == pytest.approx(200.0 * 1.05 ** 2)
+    assert op.lines["ppa"][tl.index(2038)] == pytest.approx(80.0 * 1.03)
+
+
+def test_more_axis_refusals():
+    rev = TemplateLine("rev", "energy_export", 1.0, "export")
+    for over, code in (({"replacement_capex": [(2037, "ghost", 1.0)]}, "replacement_unknown_asset"),
+                       ({"cod_by_asset": {"pv": date(2040, 1, 1)}}, "cod_mismatch"),
+                       ({"capex_phasing": [1.5, -0.5]}, "capex_phasing_negative")):
+        with pytest.raises(FinanceRefused) as e:
+            build_timeline(_case([rev], fin_over=over))
+        assert e.value.code == code
+
+
+def test_every_ledger_kind_has_an_escalation_class():
+    """#6: the class of each `ValueStreamKind` (plan WP4.1 table); the two
+    finance-side kinds have none."""
+    import typing
+
+    from models.commercial import ValueStreamKind
+    kinds = set(typing.get_args(ValueStreamKind))
+    assert set(STREAM_CLASS) == kinds - {"incentive", "debt_service"}
+    want = {"energy_import": "tariff", "network_capacity": "tariff", "network_energy": "tariff",
+            "demand_charge": "tariff", "retail_fixed": "tariff", "certificates": "tariff",
+            "tax": "tariff", "energy_export": "export", "ancillary": "export",
+            "ppa_settlement": CONTRACT_CLASS, "cfd_settlement": CONTRACT_CLASS,
+            "lease": CONTRACT_CLASS, "eaas_fee": CONTRACT_CLASS, "dr_availability": CONTRACT_CLASS,
+            "dr_activation": CONTRACT_CLASS, "fom": "opex", "vom": "opex", "other": "opex",
+            "fuel": "fuel", "capex": "capex"}
+    assert {kk: esc_class_for(kk) for kk in want} == want
+    for kk in ("incentive", "debt_service"):
+        with pytest.raises(ValueError):
+            esc_class_for(kk)
+
+
+def test_reason_names_the_ppa_rate_and_an_ended_contract_is_not_read():
+    """#10: a contract with no indexation and no `ppa` rate names `ppa`; a
+    `None` amount after the tenor ended is never read."""
+    no_idx = TemplateLine("dr", "dr_availability", 10.0, CONTRACT_CLASS)
+    op = build_operating(c := _case([no_idx], fin_over={"escalation": {"capex": 0.0}}),
+                         build_timeline(c))
+    assert "escalation_missing:ppa:dr" in op.reasons["operating"]
+    a = Template(2033, (TemplateLine("ppa", "ppa_settlement", 10.0, CONTRACT_CLASS,
+                                     indexation=0.0, tenor_years=2, contract_id="p"),))
+    b = Template(2036, (TemplateLine("ppa", "ppa_settlement", None, CONTRACT_CLASS,
+                                     indexation=0.0, tenor_years=2, contract_id="p"),))
+    op2 = build_operating(c2 := _case([], templates=(a, b)), build_timeline(c2))
+    assert op2.status["operating"] == "ok" and op2.flags == ["contract_ends:p:2034"]
+
+
+def test_the_sam_mapping_refuses_what_it_cannot_express(monkeypatch):
+    """#3: per-MWh O&M and schedule (list) inputs are refused, never dropped."""
+    real = S.load_case
+
+    def with_(group, key, value):
+        def patched(name):
+            d = real(name)
+            d["sam_inputs"][group][key] = value
+            return d
+        return patched
+
+    monkeypatch.setattr(S, "load_case", with_("SystemCosts", "om_production", [3.0]))
+    with pytest.raises(S.SamMappingError, match="om_production"):
+        S.sam_params("s1")
+    monkeypatch.setattr(S, "load_case", with_("SystemOutput", "degradation", [0.5, 0.6, 0.7]))
+    with pytest.raises(S.SamMappingError, match="schedule"):
+        S.sam_params("s1")
+

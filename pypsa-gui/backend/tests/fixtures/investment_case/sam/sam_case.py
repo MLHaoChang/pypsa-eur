@@ -80,7 +80,13 @@ def load_profile() -> list[float]:
 
 
 def _one(v):
-    return v[0] if isinstance(v, list) else v
+    """A SAM scalar-or-list input as one value; a list with more than one entry
+    (a schedule) is not expressible here (WP4.1 review #3)."""
+    if isinstance(v, list):
+        if len(v) != 1:
+            raise SamMappingError(f"a SAM schedule input {v[:3]}… (len {len(v)}) is not mapped")
+        return v[0]
+    return v
 
 
 def sam_params(name: str) -> SamParams:
@@ -92,7 +98,7 @@ def sam_params(name: str) -> SamParams:
     real = fp["real_discount_rate"] / 100.0
     escal = {sc["om_capacity_escal"], sc["om_fixed_escal"]}
     if _one(sc["om_production"]) != 0.0:
-        escal.add(sc["om_production_escal"])
+        raise SamMappingError(f"{name}: om_production (per MWh O&M) is not mapped")
     if len(escal) != 1:
         raise SamMappingError(f"{name}: unequal O&M escalations {sorted(escal)} (one opex class)")
     for k in ("property_tax_rate", "insurance_rate", "months_working_reserve",

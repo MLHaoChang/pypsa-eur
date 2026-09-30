@@ -438,6 +438,33 @@ mirrored in `frontend/src/api/types.ts` and covered by the new `types.ts` parity
   degradation; the IRR / NPV core (a two-root series picks 10 %). `sam_case.to_finance_case` builds the SAM
   cases (S1b at SAM's solved price).
 
+**WP4.1 review round 1 (f851907): PASS WITH CONDITIONS — 6 binding; fixed.** The reviewer re-ran PySAM
+with two variants (other escalations, degradation, 30 years; salvage at 15 %) and our engine matched every
+year — the parity is not an artefact of the committed cases.
+1. `irr` returned 0.0 on all-zero cash → no sign change → `None` + `irr_not_established:no_sign_change`
+   before the scan.
+2. energy of an asset with no degradation entry was NaN with status ok → `None` + `degradation_missing:<a>`;
+   an asset absent from a later template does not generate there (documented).
+3. `sam_params` silently dropped per-MWh O&M and schedule (list) inputs → refused (`SamMappingError`).
+4. a multi-period template in its own period's money was escalated twice → `Template.money_year` (default the
+   base year); escalation and contract indexation run from it; tested with non-zero rates. **The adapter
+   (WP4.6a) sets each period template's `money_year` to the period year.**
+5. a replacement for an unknown asset was accepted → `replacement_unknown_asset`.
+6. the class map per kind → a test over every `ValueStreamKind` (`incentive` / `debt_service` have none).
+Non-binding, taken: 7 (`no_root_in_scan` when the cash changes sign but no root lies in the scan; the scan
+vectorised to 10; `npv` None at a rate ≤ −100 %); 8 (list degradation = annual steps, not SAM's cumulative
+schedule — documented in `FinanceInputs`); 9 (`cod_by_asset` must equal the case COD; negative phasing
+refused); 10 (the missing-rate reason names `ppa`; a `None` amount after the tenor is never read;
+`contract_ends` per contract, once; capex reasons de-duplicated; the unused `index_base_year` dropped); 11
+(degradation per asset and the template per year computed once); 13 (docstrings, the unused import).
+**Conventions recorded for later WPs (review #12):** COD in the financial-close year puts capex and operating
+year 1 both at index 0 (undiscounted — a year earlier than SAM's layout; the report states it); initial
+capex is not escalated by `capex` (overnight money of the construction years); EBITDA includes the terminal
+value, so WP4.5's unlevered cash must not add it again and WP4.2b sculpting must not size debt on it (a
+tenor reaching the last year excludes the terminal from CFADS); the adapter converts P2's
+`indexation_pct_per_year` (a percent, default 0.0) to a fraction and passes 0 as 0 — the `ppa` fallback
+applies only to contract lines without an indexation field (DR availability / activation).
+
 ## WP4.2a Debt: amount / gearing, annuity / level, fees, IDC
 
 - `debt.py`: draws pro rata with capex phasing; IDC capitalised (C6); upfront fee (share of commitment, at

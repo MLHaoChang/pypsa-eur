@@ -34,6 +34,8 @@ STREAM_CLASS: dict[str, str] = {
 
 
 def esc_class_for(stream: str) -> str:
+    """The escalation class of a ledger stream (`STREAM_CLASS`); `incentive`
+    and `debt_service` are finance-side and have none (ValueError)."""
     try:
         return STREAM_CLASS[stream]
     except KeyError:
@@ -51,7 +53,7 @@ class Operating:
     capex: np.ndarray | None                   # initial capex (construction years; or y0)
     replacement: np.ndarray                    # replacement capex (escalated)
     terminal: np.ndarray | None
-    energy_mwh: dict[str, np.ndarray]          # per asset, degraded
+    energy_mwh: dict[str, np.ndarray | None]   # per asset, degraded (None = not established)
     status: dict[str, str] = field(default_factory=dict)
     reasons: dict[str, list[str]] = field(default_factory=dict)
     flags: list[str] = field(default_factory=list)
@@ -60,35 +62,47 @@ class Operating:
         return self.status.get(section) == "ok"
 
 
-def _template_for(case: FinanceCase, year: int) -> Template:
+def _templates_by_year(case: FinanceCase, tl: Timeline) -> list[Template | None]:
+    """The template in force per axis year (plan C3): the latest whose first
+    year is ≤ y; years before the first template use the first."""
     ts = sorted(case.templates, key=lambda t: t.first_year)
-    cur = ts[0]
-    for t in ts:
-        if t.first_year <= year:
-            cur = t
-    return cur
+    out: list[Template | None] = []
+    for y in tl.years:
+        cur = ts[0]
+        for t in ts:
+            if t.first_year <= y:
+                cur = t
+        out.append(cur)
+    return out
 
 
 def degradation_factor(spec, k: np.ndarray) -> np.ndarray:
-    """(1 − d)^(k − 1) for a constant rate; for a list, the product of the
-    rates of the years before k (entry j = the step from year j+1 to j+2; the
-    last entry repeats). k = 0 (not operating) → 0."""
+    """The generation factor per operating year k (k = 0: not operating → 0).
+    A constant rate d: (1 − d)^(k − 1) (SAM, verified). A list: annual STEPS —
+    entry j is the loss from operating year j+1 to j+2, compounded, the last
+    entry repeating (so year 1 is 1.0). This is not SAM's schedule semantics
+    (SAM's list is a cumulative loss vs nameplate incl. year 1); stated in the
+    `FinanceInputs.degradation_by_asset` docs (WP4.1 review #8)."""
     k = np.asarray(k, dtype=int)
     out = np.zeros(len(k))
     if isinstance(spec, list):
         steps = np.array(spec, dtype=float)
+        kmax = int(k.max()) if len(k) else 0
+        cum = [1.0]
+        for m in range(1, max(kmax, 1)):
+            cum.append(cum[-1] * (1.0 - steps[min(m - 1, len(steps) - 1)]))
         for i, kk in enumerate(k):
-            if kk <= 0:
-                continue
-            m = kk - 1
-            rates = np.concatenate([steps[:m], np.repeat(steps[-1:], max(0, m - len(steps)))])
-            out[i] = float(np.prod(1.0 - rates))
+            if kk > 0:
+                out[i] = cum[kk - 1]
         return out
     d = float(spec)
     return np.where(k > 0, (1.0 - d) ** np.maximum(k - 1, 0), 0.0)
 
 
 def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
+    """Operating cash, capex, replacement, terminal value and EBITDA over the
+    axis (plan WP4.1). Unknown inputs make their section not established with
+    the reason (plan C12); flags carry disclosures (`contract_ends:<id>:<year>`)."""
     fin = case.inputs
     years, k = tl.years, tl.operating_k()
     op = tl.operating_mask()
@@ -96,48 +110,53 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
     flags: list[str] = []
     lines: dict[str, np.ndarray | None] = {}
     meta: dict[str, TemplateLine] = {}
-    energy: dict[str, np.ndarray] = {}
-
-    def rate_of(line: TemplateLine) -> float | None:
-        if line.esc_class == CONTRACT_CLASS:
-            if line.indexation is not None:
-                return line.indexation
-            return fin.escalation.get("ppa")
-        if line.esc_class not in ESCALATION_CLASSES:
-            raise ValueError(f"unknown escalation class {line.esc_class!r}")
-        return fin.escalation.get(line.esc_class)
+    energy: dict[str, np.ndarray | None] = {}
+    by_year = _templates_by_year(case, tl)
+    line_by_year = [({ln.key: ln for ln in t.lines} if t is not None else {}) for t in by_year]
+    money_year = [(t.money_year if t.money_year is not None else case.base_year) for t in by_year]
+    deg_cache: dict[str | None, np.ndarray | None] = {None: np.where(op, 1.0, 0.0)}
 
     def degr(asset: str | None) -> np.ndarray | None:
-        if asset is None:
-            return np.where(op, 1.0, 0.0)
-        spec = fin.degradation_by_asset.get(asset)
-        if spec is None:
-            return None
-        return degradation_factor(spec, k)
+        if asset not in deg_cache:
+            spec = fin.degradation_by_asset.get(asset)
+            deg_cache[asset] = None if spec is None else degradation_factor(spec, k)
+        return deg_cache[asset]
 
-    # Every key over every operating year, from the template in force.
+    def rate_of(line: TemplateLine) -> tuple[float | None, str]:
+        if line.esc_class == CONTRACT_CLASS:
+            if line.indexation is not None:
+                return line.indexation, "contract"
+            return fin.escalation.get("ppa"), "ppa"
+        if line.esc_class not in ESCALATION_CLASSES:
+            raise ValueError(f"unknown escalation class {line.esc_class!r}")
+        return fin.escalation.get(line.esc_class), line.esc_class
+
     keys: dict[str, TemplateLine] = {}
     for t in case.templates:
         for ln in t.lines:
             keys.setdefault(ln.key, ln)
+    ends: dict[str, int] = {}
     for key, first in keys.items():
         arr = np.zeros(tl.n)
         ok = True
         for i, y in enumerate(years):
             if not op[i]:
                 continue
-            ln = next((x for x in _template_for(case, int(y)).lines if x.key == key), None)
+            ln = line_by_year[i].get(key)
             if ln is None or ln.amount == 0.0:
                 continue
+            if ln.tenor_years is not None:
+                if k[i] > ln.tenor_years:
+                    continue
+                if ln.tenor_years < tl.analysis_years:
+                    ends[ln.contract_id or key] = tl.cod_year + ln.tenor_years - 1
             if ln.amount is None:
                 reasons["operating"].append(f"line_not_established:{key}")
                 ok = False
                 break
-            if ln.tenor_years is not None and k[i] > ln.tenor_years:
-                continue
-            r = rate_of(ln)
+            r, rclass = rate_of(ln)
             if r is None:
-                reasons["operating"].append(f"escalation_missing:{ln.esc_class}:{key}")
+                reasons["operating"].append(f"escalation_missing:{rclass}:{key}")
                 ok = False
                 break
             f_deg = degr(ln.degrades_with)
@@ -145,23 +164,26 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
                 reasons["operating"].append(f"degradation_missing:{ln.degrades_with}")
                 ok = False
                 break
-            arr[i] = ln.amount * (1.0 + r) ** (int(y) - tl.base_year) * f_deg[i]
+            arr[i] = ln.amount * (1.0 + r) ** (int(y) - money_year[i]) * f_deg[i]
         lines[key] = arr if ok else None
         meta[key] = first
-        if first.tenor_years is not None and first.tenor_years < tl.analysis_years:
-            flags.append(f"contract_ends:{first.contract_id or key}:"
-                         f"{tl.cod_year + first.tenor_years - 1}")
-    reasons["operating"] = sorted(set(reasons["operating"]))
-    # Generation per asset (degraded) — the PTC and LCOE read it.
-    for t in case.templates:
-        for a in t.energy_mwh:
-            energy.setdefault(a, np.zeros(tl.n))
-    for a in energy:
+    flags.extend(f"contract_ends:{cid}:{year}" for cid, year in sorted(ends.items()))
+    # Generation per asset (degraded) — the PTC and LCOE read it. An asset
+    # without a degradation entry is not established (plan C5, C12).
+    assets_e = sorted({a for t in case.templates for a in t.energy_mwh})
+    for a in assets_e:
         f = degr(a)
-        for i, y in enumerate(years):
-            if op[i]:
-                e = _template_for(case, int(y)).energy_mwh.get(a, 0.0)
-                energy[a][i] = e * (f[i] if f is not None else np.nan)
+        if f is None:
+            energy[a] = None
+            reasons["operating"].append(f"degradation_missing:{a}")
+            continue
+        arr = np.zeros(tl.n)
+        for i in range(tl.n):
+            t = by_year[i]
+            if op[i] and t is not None:
+                arr[i] = t.energy_mwh.get(a, 0.0) * f[i]
+        energy[a] = arr
+    reasons["operating"] = sorted(set(reasons["operating"]))
 
     if reasons["operating"]:
         revenue = costs = None
@@ -199,6 +221,7 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
         replacement[tl.index(year)] += amount * (1.0 + r_capex) ** (year - tl.base_year)
     if any(r.startswith(("replacement_outside_axis", "escalation_missing")) for r in reasons["capex"]):
         capex = None
+    reasons["capex"] = sorted(set(reasons["capex"]))
 
     # Terminal value at the last operating year (plan WP4.1; SAM salvage =
     # `fixed`, not escalated, inside EBITDA and taxed).

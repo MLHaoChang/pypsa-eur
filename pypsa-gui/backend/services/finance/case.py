@@ -7,9 +7,15 @@ The engine never reads a solved network. The results-layer adapter
 `FinanceInputs`, and hands plain numbers over. Everything here is frozen;
 money is in the case currency, energy in MWh.
 
-Operating-year template (plan C3): one year of operating cash in BASE-YEAR
-money, each line signed from the owner's side (+ = cash in). Several templates
-apply to a multi-period network, each from its first operating year on.
+Operating-year template (plan C3): one year of operating cash in the
+template's MONEY YEAR (`Template.money_year`, default the case's base year —
+a multi-period network's templates are each in their own period year, as P2
+indexes contract prices to it), each line signed from the owner's side (+ =
+cash in). Escalation runs from the template's money year, so no line is
+escalated twice (WP4.1 review #4). Several templates apply to a multi-period
+network, each from its first operating year on; an asset absent from a later
+template's `energy_mwh` does not generate in those years (retired or not built
+in that period).
 """
 from __future__ import annotations
 
@@ -34,15 +40,17 @@ class FinanceRefused(ValueError):
 
 @dataclass(frozen=True)
 class TemplateLine:
-    """One operating-year cash line, in base-year money, signed from the owner
-    (+ = inflow). `amount` None = not established (plan C12)."""
+    """One operating-year cash line, in its template's money year, signed from
+    the owner (+ = inflow). `amount` None = not established (plan C12).
+    `indexation` is a contract's own rate as a FRACTION per year (the adapter
+    converts P2's percent; P2 prices are already indexed to the money year, so
+    the rate continues from there — plan C4)."""
 
     key: str
     stream: str
     amount: float | None
     esc_class: str                              # an escalation class or CONTRACT_CLASS
     indexation: float | None = None             # a contract's own rate per year (plan C4)
-    index_base_year: int | None = None          # the contract's indexation base
     tenor_years: int | None = None              # operating years from COD (plan C14)
     contract_id: str | None = None
     degrades_with: str | None = None            # the asset whose degradation scales it (plan C5)
@@ -59,6 +67,8 @@ class Template:
 
     first_year: int
     lines: tuple[TemplateLine, ...]
+    # The money year of the lines (None = the case's base year).
+    money_year: int | None = None
     # Generation per asset in this operating year (MWh), before degradation:
     # PTC and LCOE read it.
     energy_mwh: dict[str, float] = field(default_factory=dict)

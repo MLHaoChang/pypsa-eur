@@ -198,7 +198,9 @@ class FinanceInputs(BaseModel):
     # not_established rather than fabricating a 0.
     contingency_share: float | None = Field(default=None, ge=0)
     escalation: dict[str, float] = Field(default_factory=dict)
-    # A constant annual rate or one rate per operating year (plan C5).
+    # A constant annual rate d (factor (1 − d)^(k − 1), SAM's), or a list of annual
+    # STEPS: entry j = the loss from operating year j+1 to j+2, compounded, the last
+    # entry repeating (NOT SAM's cumulative-vs-nameplate schedule) — plan C5.
     degradation_by_asset: dict[str, float | list[float]] = Field(default_factory=dict)
     # The case's dates and length (plan C2): the axis, eligibility and the
     # pack's dated rules. `analysis_years` None → the run is refused.

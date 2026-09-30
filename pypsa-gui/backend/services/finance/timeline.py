@@ -50,6 +50,11 @@ class Timeline:
 
 
 def build_timeline(case: FinanceCase) -> Timeline:
+    """The case's axis (plan C2), or `FinanceRefused` with a stable code:
+    `analysis_years_missing`, `financial_close_after_cod`, `cod_mismatch`,
+    `capex_phasing_negative`, `capex_phasing_mismatch`,
+    `replacement_unknown_asset`, `asset_lifetime_short`. An asset of unknown
+    lifetime is not checked (the operating section flags it)."""
     fin = case.inputs
     if fin.analysis_years is None:
         raise FinanceRefused("analysis_years_missing",
@@ -61,6 +66,11 @@ def build_timeline(case: FinanceCase) -> Timeline:
     if len(cods) > 1:
         raise FinanceRefused("cod_mismatch",
                              f"the owner's assets have different CODs {sorted(cods)} (P5)")
+    if cods and cods != {case.cod}:
+        raise FinanceRefused("cod_mismatch",
+                             f"cod_by_asset {sorted(cods)} differs from the case COD {case.cod}")
+    if any(x < 0 for x in fin.capex_phasing):
+        raise FinanceRefused("capex_phasing_negative", f"{fin.capex_phasing}")
     y0, cod_year = fin.financial_close.year, case.cod.year
     phases = len(fin.capex_phasing)
     construction = cod_year - y0
@@ -72,6 +82,10 @@ def build_timeline(case: FinanceCase) -> Timeline:
                              "no construction year: capex_phasing must be [1.0]")
     tl = Timeline(y0=y0, cod_year=cod_year, base_year=case.base_year,
                   analysis_years=int(fin.analysis_years))
+    names = {a.name for a in case.assets}
+    for _, asset, _ in fin.replacement_capex:
+        if asset not in names:
+            raise FinanceRefused("replacement_unknown_asset", asset)
     for a in case.assets:
         if a.lifetime_years is not None and a.lifetime_years < tl.analysis_years:
             replaced = any(r[1] == a.name for r in fin.replacement_capex)
