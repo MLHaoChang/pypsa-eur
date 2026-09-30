@@ -64,15 +64,15 @@ function solveLine(status: SimulationStatus | undefined, guided = false,
   if (guided && (hubStudy === 'failed' || hubStudy === 'aborted')) {
     return 'The last hub study did not finish — see Hub design.'
   }
-  if (guided && hubStudy === 'done') {
+  if (guided && hubStudy === 'done' && status.dispatch !== 'stale') {
     // Stale when a later solve cleared the stored report (the review's
-    // `stale`) or when the live dispatch is marked stale — the network
-    // changed since its last solve (O1, owner 2026-09-30: the pre-P28
-    // precedence for that case). Otherwise the sentence says where the last
-    // study's results are and claims nothing about the current network: an
-    // edit after a study is not tracked yet (the planned `network_changed`
-    // marker on the study record).
-    return reviewStale || status.dispatch === 'stale'
+    // `stale`). Otherwise the sentence says where the last study's results
+    // are and claims nothing about the current network: an edit after a
+    // study is not tracked yet (the planned `network_changed` marker on the
+    // study record). Live dispatch the backend marks stale means the network
+    // was edited since its last solve, so it falls through to the pre-P28
+    // stale-dispatch sentence below (O1 precedence; gate R-1 wording).
+    return reviewStale
       ? 'A study has run, but the network was solved since — run it again in Hub design.'
       : 'The last study’s results are in Hub design.'
   }

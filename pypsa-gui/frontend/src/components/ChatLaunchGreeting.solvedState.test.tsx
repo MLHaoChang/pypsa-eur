@@ -235,8 +235,9 @@ describe('greeting: stale review, the fresh fallback and C6 (P28)', () => {
 
   // O1 (owner, 2026-09-30) / gate probe Q16: live dispatch the backend marks
   // stale says the network changed since its last solve — the finished
-  // study's results no longer describe it either (pre-P28 precedence).
-  it('hub done, review not stale, live dispatch stale → the stale sentence', async () => {
+  // study's results no longer describe it either (pre-P28 precedence and
+  // sentence: the network was edited, not re-solved — gate R-1).
+  it('hub done, review not stale, live dispatch stale → the changed-since sentence', async () => {
     useUIStore.setState({ uiMode: 'guided' })
     vi.mocked(simulationApi.getStatus).mockResolvedValue({
       running: false, status: 'completed', condition: 'optimal',
@@ -246,7 +247,8 @@ describe('greeting: stale review, the fresh fallback and C6 (P28)', () => {
     vi.mocked(resultsApi.getEhReview).mockResolvedValue(review(false) as never)
     renderGreeting()
     await vi.waitFor(() => expect(resultsApi.getEhReview).toHaveBeenCalled())
-    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent).toBe(STALE))
+    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent).toBe(
+      'Solved earlier, but the results are stale — the network changed since.'))
   })
 
   it('the done sentence claims nothing about the current network', async () => {

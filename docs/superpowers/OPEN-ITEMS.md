@@ -182,6 +182,14 @@ the current network. The fix is a backend network-revision marker on the
 study record (e.g. `network_changed`), read by both surfaces. It is scheduled
 as P33b in `plans/2026-09-28-guided-mode-deferred.md` §3.
 
+### 10c. Two narrow project-lock races have correct guards but no test
+
+Added 2026-09-30 (P28 re-gate, mutants R4 and R7). In `moveProjectLock`, a
+stale 409 re-acquire that fails after a fresh acquire of the same project
+(R4), and a stale failed acquire in an X→Y→Z switch (R7), are both ignored
+by the generation guard. Removing either check leaves every test green. Add
+one test for each so the guard stays pinned.
+
 ### 10a. Re-activating a project does not restore its hub study record
 
 Added 2026-09-30, from the P28 smoke. A project whose Energy Hub study

@@ -124,3 +124,67 @@ My own set, independent of the implementer's. **18 of 20 killed.**
 
 ## Evidence index (`qa28/`)
 `collect.log`, `row2.log`, `tsc.log`, `vitest.log`, `stress.log` + `stress-1..10.log`, `smoke-P28.log`, `smoke-P32.log`, `smoke-P27b.log`, `smoke-P26.log`, `smokes.log`, `p28/` (screenshots), `mutate.py`, `mutations.log`, `QA28.race.test.tsx` (N-a, N-b), `wt/pypsa-gui/backend/tests/test_qa28_repro.py` (N-c).
+
+---
+
+## Re-gate (2026-09-30, `git diff d54c813da..HEAD`, HEAD `ac6960ebd`)
+
+**Scope:** the six fix commits: `51b56c522` (B1), `3f313484d` (N-a/N-b), `a9d891b61` (N-c), `2ef59c474` (OPEN-ITEMS), `443db8c27` (O1, option 2), `ac6960ebd` (P33b in the plan). Scratch: `qa28/re/`, with a fresh `git archive` of HEAD at `qa28/wt2/`. No repo source or test was edited.
+
+### Verdict: **GO**
+
+All the original findings are closed, every gate row is green, and 9 of my 12 re-gate mutants are killed. The three survivors are guard-coverage gaps, not defects. One new wording point (R-1) is below; it is non-blocking, and I recommend fixing it before P29.
+
+### Repros against HEAD
+| Item | Result |
+|---|---|
+| B1 | Smoke P28 part (C): the greeting now reads "A study has run, but the network was solved since — run it again in Hub design." Screenshot `qa28/re/p28/41-p28-c-guided-stale.png`: the greeting and the Hub design card ("the network was solved since") now agree. After the bus edit the greeting reads "The last study’s results are in Hub design.", which makes no claim about the current network. **Closed.** |
+| N-a, N-b | My original probes (`QA28.race.test.tsx`, unchanged, run in `wt2`): **12/12 pass.** The stale heartbeat no longer flips the tab writable, and the two-rebind turn ends heart-beating Z. **Closed.** |
+| N-c | `test_qa28_repro.py` (its old `is None` line changed to `== sess.profile_id`): `bound_profile_id: anthropic-sonnet \| session.profile_id: anthropic-sonnet \| active: ollama-like` — the report now matches the binding `/stream` will use. **Closed.** |
+| Q16 | Now pinned: mutant R9 (drop the `dispatch === 'stale'` arm) is killed by the new test. |
+
+### Gate rows
+| Row | Command (cwd) | Result |
+|---|---|---|
+| 1 | Implementer's `scratchpad/p28r/be-full.log`: **6674 passed, 31 skipped, 11 deselected**, exit 0, run 01:55–02:40, after the only backend fix commit (`a9d891b61`, 01:54). HEAD `--collect-only`: **6705/6716 (11 deselected)** = 6674 + 31. | accepted |
+| 2 | 14-file set + `tests/test_chat*.py` + `tests/test_llm_settings_api.py` (`pypsa-gui/backend`) | **1609 passed, 19 skipped**, exit 0 (`qa28/re/row2.log`) |
+| 3 | `npx tsc --noEmit -p .` | exit 0 |
+| 4 | `npx vitest run` | **242 files / 2745 passed**, exit 0 |
+| 5 | `smoke-guided.mjs --phase P28 --out qa28/re/p28` | **PASS**, 43 screenshots. No processes left running afterwards. |
+
+### Mutations (`qa28/mutate2.py`, `qa28/re/mutations.log`) — 9 of 12 killed
+| # | Mutation | Result |
+|---|---|---|
+| R1 | heartbeat success: generation guard removed | killed |
+| R2 | heartbeat failure: generation guard removed | killed |
+| R3 | 409 re-acquire success: `gen` check removed (the `_heartbeatProject` check kept) | survived |
+| R4 | 409 re-acquire failure: `gen` check removed | survived |
+| R5 | stale acquire success applied | killed |
+| R6 | stale acquire keeps the lock it no longer wants | killed |
+| R7 | stale acquire failure applied | survived |
+| R8 | release does not bump the generation | killed |
+| R9 | Q16 precedence dropped | killed |
+| R10 | probe: hub done + `dispatch === 'stale'` falls through to the pre-P28 sentence | killed (the new test pins "was solved since"; see R-1) |
+| RB1 | N-c fallback reported as null again | killed |
+| RB2 | N-c fallback reports the active id | killed |
+
+**The survivors (non-blocking):**
+- **R3:** effectively equivalent. A move stops the heartbeat, so the kept `_heartbeatProject` check already rejects the stale reply. The only case left is a same-project re-acquire, where applying "ok" is harmless.
+- **R4 and R7:** real but narrow, and the guards themselves are correct.
+  - R4 covers a stale 409 re-acquire failure landing after a fresh acquire of the same project.
+  - R7 covers a stale failed acquire in an X→Y→Z turn, which would otherwise mark the tab read-only and stop Z's heartbeat.
+  - A test for each would pin the guard.
+
+### Session ownership after N-c
+The N-c commit changes only how `bound_profile_id` is assigned on the fresh-mint path (`routers/chat.py:840-847`). `git diff d54c813da..HEAD -- pypsa-gui/backend` contains no `owner`/`session_owner` line. The owner is still recorded on creation, and `/confirm`, `/rewind` and `/abort` still check it. `test_chat_session_ownership.py` is in row 2 (green). The value reported on the C-4 path is the binding the session already holds, not new information. **Intact.**
+
+### R-1 (new, non-blocking; recommend fixing before P29): the dispatch-stale arm says "solved since" when the fact is "changed since"
+- **Where:** `ChatLaunchGreeting.tsx:75-77`: `reviewStale || status.dispatch === 'stale' ? '…but the network was solved since…' : …`.
+- **Why it is wrong:** live `dispatch === 'stale'` means the network was **edited** after its last foreground solve (`services/dispatch_status.py`). It does not mean the network was solved since the study. The new test's own comment says "the network changed since its last solve", while the sentence it asserts says "solved".
+- **Ordering:** dispatch staleness is not ordered against the study (the hub solves a copy). So "changed since [the study]" would not be reliably true either.
+- **Origin:** this comes from combining B1's rewording with my option-2 advice. That advice was written against the old "changed since" wording and did not say which sentence to use. The owner approved the precedence, not the mismatch.
+- **Fix:** for `!reviewStale && dispatch === 'stale'`, fall through to the existing dispatch-stale sentence, "Solved earlier, but the results are stale — the network changed since." That is literally the pre-P28 precedence the phase note cites, and it is true. Mutant R10 is exactly this change; only the new test's expected string moves.
+- **Reach:** narrow — it needs a foreground solve, then a hub study, then an edit, in Guided. P33b replaces it with a real signal. Because the owner signed off on the precedence, I am not blocking on it. It is the same class as B1, so the owner should confirm the fall-through.
+
+### R-1 resolution (2026-09-30)
+Fixed as recommended. When a Guided hub study is done and live dispatch is `stale`, the greeting falls through to the pre-P28 dispatch-stale sentence: "Solved earlier, but the results are stale — the network changed since." The review-stale case keeps "…the network was solved since…". The test that pins it moved to the changed-since sentence. Mutation check: HEAD's code against the new test gives 1 failure, so the test is killed. tsc is clean. Precedence is unchanged from the owner's O1 decision; only the sentence moved back to the true one.
