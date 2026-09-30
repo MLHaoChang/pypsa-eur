@@ -2545,22 +2545,54 @@ def test_history_bound_profile_is_null_with_no_turns(
     assert body["bound_profile_id"] is None
 
 
-def test_history_bound_profile_is_null_when_the_recorded_profile_was_deleted(
-    appdata, tmp_projects_dir, install_network, client, monkeypatch,
+def test_history_reports_the_fallback_binding_when_the_recorded_profile_was_deleted(
+    appdata, openai_profile, tmp_projects_dir, install_network, client, monkeypatch,
 ):
-    """C-4: the profile that turn ran under no longer exists → null (the
-    spec §3.6 row), and the FE falls back to the active profile."""
+    """C-4 (P28 gate N-c, adopted from the reviewer's repro): the profile the
+    last turn ran under was deleted. `/history` still binds the freshly
+    minted session — to the legacy translation of the turn's `model` — and a
+    `/stream` naming no profile keeps that binding. So `bound_profile_id`
+    reports THAT profile (configured by construction), not null: null made
+    the panel follow the ACTIVE profile while the next turn ran on another."""
+    from services import llm_config
     from routers import projects as projects_router
     monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
     import pypsa
     n = pypsa.Network()
     n.add("Bus", "B1")
     install_network(n, name="GoneProfProj")
+    # Active: the local openai profile. The transcript's profile is gone and
+    # its model is the Sonnet literal, so the legacy translation is Sonnet.
+    llm_config.set_active(openai_profile.id)
     _write_chat_jsonl(tmp_projects_dir, "GoneProfProj",
-                      [_one_turn("sess-gone", "deleted-profile", "qwen3:8b")])
+                      [_one_turn("sess-gone", "deleted-profile", chat_service.DEFAULT_MODEL)])
     body = client.get("/api/chat/history").json()
+    sess = chat_service.get_session("sess-gone")
     assert body["last_session_id"] == "sess-gone"
+    assert sess.profile_id == llm_config.BUILTIN_SONNET_ID
+    assert sess.profile_id != llm_config.resolve_active().id
+    assert body["bound_profile_id"] == sess.profile_id
+
+
+def test_history_bound_profile_is_null_when_a_live_binding_names_a_deleted_profile(
+    appdata, openai_profile, tmp_projects_dir, install_network, client, monkeypatch,
+):
+    """A LIVE session still bound to a profile deleted since: `/stream` refuses
+    it (`unknown_profile_id`), so there is no usable binding to report."""
+    from routers import projects as projects_router
+    monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
+    import pypsa
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name="LiveGoneProj")
+    _write_chat_jsonl(tmp_projects_dir, "LiveGoneProj",
+                      [_one_turn("sess-live-gone", openai_profile.id, openai_profile.model)])
+    live = chat_service.get_or_create_session("sess-live-gone")
+    live.profile_id = "deleted-since"
+    live.bound_wire = "openai"
+    body = client.get("/api/chat/history").json()
     assert body["bound_profile_id"] is None
+    assert chat_service.get_session("sess-live-gone").profile_id == "deleted-since"
 
 
 def test_history_reports_a_live_sessions_own_binding(

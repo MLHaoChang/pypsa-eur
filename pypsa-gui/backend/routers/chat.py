@@ -744,10 +744,11 @@ def chat_history(limit: int = 200,
       * `bound_profile_id` (P28 A3, D-3): the profile the resumed session is
         bound to — the one its next turn runs on when the request names none
         (`/stream` keeps a bound session's binding). A freshly minted session
-        reports the profile it adopted here; an already-live one reports the
-        binding `/stream` gave it. None with no turns, and None when the
-        recorded (or live) profile is no longer configured (C-4) — the panel
-        then follows the active profile. Reading it changes no binding.
+        reports the profile it adopted here — on the C-4 path (recorded
+        profile deleted) that is the legacy translation it was bound to; an
+        already-live one reports the binding `/stream` gave it, or None when
+        that names a profile no longer configured (`/stream` refuses it).
+        None with no turns. Reading it changes no binding.
     """
     from services.pypsa_service import PyPSAService
     ctx = PyPSAService.get_active_context()
@@ -781,7 +782,6 @@ def chat_history(limit: int = 200,
             # adopts, matching the pre-existing single `model=` rehydration
             # this replaces.
             recorded_profile_id = last_rec.get("profile_id")
-            recorded_profile_gone = False
             if recorded_profile_id:
                 try:
                     resolved_profile = llm_config.resolve_profile(
@@ -798,7 +798,6 @@ def chat_history(limit: int = 200,
                         "chat history: recorded profile is no longer "
                         "configured; falling back to the legacy translation"
                     )
-                    recorded_profile_gone = True
                     resolved_profile = llm_config.resolve_legacy_model(
                         last_rec.get("model") or chat_service.DEFAULT_MODEL
                     )
@@ -841,11 +840,11 @@ def chat_history(limit: int = 200,
                 sess.profile_id = resolved_profile.id
                 sess.bound_wire = resolved_profile.wire
                 sess.model = resolved_profile.model
-                # C-4: the recorded profile is gone — report no binding (the
-                # panel follows the active profile), spec §3.6.
-                bound_profile_id = (
-                    None if recorded_profile_gone else resolved_profile.id
-                )
+                # The binding this read just gave the session — also on the
+                # C-4 path, where it is the legacy translation (configured by
+                # construction): `/stream` with no profile keeps it, so the
+                # panel must gate on it, not on the active one (P28 gate N-c).
+                bound_profile_id = resolved_profile.id
             else:
                 # An already-live session keeps what `/stream` bound; report
                 # THAT, and only while it still names a configured profile.
