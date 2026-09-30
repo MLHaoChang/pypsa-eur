@@ -1,8 +1,8 @@
 """
 Operating cashflows over the finance axis (IC P4 plan WP4.1; C3–C6, C12, C14).
 
-From a `FinanceCase`: each template line escalated from the base year by its
-class (or its contract's own indexation), scaled by its asset's degradation,
+From a `FinanceCase`: each template line escalated from its money year (the
+line's own, else its template's, else the base year) by its class (or its contract's own indexation), scaled by its asset's degradation,
 stopped after its contract's tenor; capex over the construction years with
 contingency and phasing; replacement capex; the terminal value; EBITDA.
 Every array is indexed by `Timeline.years` (index 0 = the financial-close
@@ -166,7 +166,8 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
                 reasons["operating"].append(f"degradation_missing:{ln.degrades_with}")
                 ok = False
                 break
-            arr[i] = ln.amount * (1.0 + r) ** (int(y) - money_year[i]) * f_deg[i]
+            my = ln.money_year if ln.money_year is not None else money_year[i]
+            arr[i] = ln.amount * (1.0 + r) ** (int(y) - my) * f_deg[i]
         lines[key] = arr if ok else None
         meta[key] = first
     flags.extend(f"contract_ends:{cid}:{year}" for cid, year in sorted(ends.items()))

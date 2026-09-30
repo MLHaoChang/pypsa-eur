@@ -302,3 +302,26 @@ def test_review_round_2_edges():
     assert "asset_lifetime_unknown:pv" in build_operating(case, build_timeline(case)).flags
     t = Template(2033, (), {"pv": 1.0})
     assert t.energy_mwh == {"pv": 1.0} and t.money_year is None
+
+
+def test_a_line_in_its_own_money_year_escalates_from_it():
+    """WP4.6a review B4: a tariff line in a 2037 template stated in BASE-year
+    money (P2 does not escalate tariffs between periods) escalates from the
+    base year — no nominal step at the period switch; a contract line of the
+    same template stays in the template's (period) money year."""
+    a = Template(2033, (TemplateLine("bill", "energy_import", -100.0, "tariff", money_year=2031),
+                        TemplateLine("ppa", "ppa_settlement", 50.0, CONTRACT_CLASS,
+                                     indexation=0.03)))
+    b = Template(2037, (TemplateLine("bill", "energy_import", -100.0, "tariff", money_year=2031),
+                        TemplateLine("ppa", "ppa_settlement", 80.0, CONTRACT_CLASS,
+                                     indexation=0.03)),
+                 money_year=2037)
+    case = _case([], templates=(a, b), fin_over={"escalation": {"tariff": 0.05, "capex": 0.0}})
+    op = build_operating(case, build_timeline(case))
+    tl = op.tl
+    bill = op.lines["bill"]
+    assert bill[tl.index(2036)] == pytest.approx(-100.0 * 1.05 ** 5)
+    assert bill[tl.index(2037)] == pytest.approx(-100.0 * 1.05 ** 6)      # no step
+    assert bill[tl.index(2037)] / bill[tl.index(2036)] == pytest.approx(1.05)
+    assert op.lines["ppa"][tl.index(2037)] == pytest.approx(80.0)
+    assert TemplateLine("x", "fom", 1.0, "opex").money_year is None

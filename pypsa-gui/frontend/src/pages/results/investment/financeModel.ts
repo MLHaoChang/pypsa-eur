@@ -294,10 +294,22 @@ export interface CashflowPivot {
   totals: Record<number, number>
 }
 
+/** A counterfactual line (source `counterfactual:*`): the supply cost the
+ *  site would pay without the investment, NEGATED — returns are on the
+ *  incremental cash (C13). It is an avoided cost, not money received. */
+export const isCounterfactualLine = (l: CashflowLine) =>
+  typeof l.provenance?.source === 'string' && l.provenance.source.startsWith('counterfactual:')
+
+export const AVOIDED_PREFIX = 'avoided vs counterfactual'
+
 export function cashflowPivot(lines: CashflowLine[] | null | undefined): CashflowPivot {
   const list = (lines ?? []).filter(l => l && typeof l.year === 'number')
   const parties = new Set(list.map(l => l.participant))
-  const col = (l: CashflowLine) => (parties.size > 1 ? `${l.participant} · ${l.value_stream}` : l.value_stream)
+  // The counterfactual's lines get their own columns (WP4.7 review round 2,
+  // R2-2): merged into the actual stream they would read as money received.
+  const stream = (l: CashflowLine) =>
+    (isCounterfactualLine(l) ? `${AVOIDED_PREFIX} · ${l.value_stream}` : l.value_stream)
+  const col = (l: CashflowLine) => (parties.size > 1 ? `${l.participant} · ${stream(l)}` : stream(l))
   const columns: string[] = []
   const cells: Record<number, Record<string, number>> = {}
   const totals: Record<number, number> = {}
@@ -310,6 +322,39 @@ export function cashflowPivot(lines: CashflowLine[] | null | undefined): Cashflo
   }
   const years = Object.keys(cells).map(Number).sort((a, b) => a - b)
   return { years, columns, cells, totals }
+}
+
+/** The per-year Total of the cashflow table (WP4.7 review round 2, R2-1): the
+ *  engine's post-tax equity cash — the backend guarantees each year's lines
+ *  sum to it — or null where it is not established, with the reason. A year
+ *  whose lines do not sum to it is listed in `mismatch` (never hidden). */
+export function cashTotals(report: InvestmentCaseReportPayload | null | undefined,
+                           pivot: CashflowPivot):
+    { totals: Record<number, number | null>; reason: string | null; mismatch: number[] } {
+  const project = sectionOf(report, 'project')
+  const years = reportYears(report)
+  const cash = payloadOf(report, 'project').cash
+  const eq = isObj(cash) ? (cash as Obj).equity_post_tax : undefined
+  const totals: Record<number, number | null> = {}
+  const mismatch: number[] = []
+  const series = Array.isArray(eq) && years && eq.length === years.length ? eq as unknown[] : null
+  for (const y of pivot.years) {
+    const i = years ? years.indexOf(y) : -1
+    const v = series && i >= 0 ? series[i] : null
+    totals[y] = typeof v === 'number' && Number.isFinite(v) ? v : null
+    const t = totals[y]
+    if (t !== null && Math.abs((pivot.totals[y] ?? 0) - t) > 0.01 + 1e-9 * Math.abs(t)) mismatch.push(y)
+  }
+  let reason: string | null = null
+  if (Object.values(totals).some(v => v === null)) {
+    const status = (report?.completeness as Record<string, string> | undefined)?.project ?? project?.status
+    const tax = sectionOf(report, 'tax')
+    const taxStatus = (report?.completeness as Record<string, string> | undefined)?.tax ?? tax?.status
+    if (status !== undefined && status !== 'ok') reason = project?.note ?? `the project section is ${status}`
+    else if (taxStatus !== undefined && taxStatus !== 'ok') reason = `tax ${tax?.note ?? taxStatus}`
+    else reason = 'the post-tax equity cash is not established'
+  }
+  return { totals, reason, mismatch }
 }
 
 // ── generic payload tables ───────────────────────────────────────────────

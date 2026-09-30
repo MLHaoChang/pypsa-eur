@@ -42,7 +42,9 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy.optimize import brentq
 
-from services.finance.case import CONTRACT_CLASS, FinanceCase, FinanceRefused, TemplateLine
+from services.finance.case import (
+    CONTRACT_CLASS, DEGRADATION_SOURCE, FinanceCase, FinanceRefused, TemplateLine,
+)
 from services.finance.cashflow import Operating, build_operating
 from services.finance.debt import Debt, build_debt
 from services.finance.incentives import Incentives, build_incentives
@@ -386,10 +388,15 @@ def _asset_costs(op: Operating, case: FinanceCase) -> np.ndarray:
     """The investment's own costs per year (> 0): the cost part of every
     actual line with no counterpart in the counterfactual (the shared bill,
     commodity and connection keys stay netted as savings) — WP4.5 review r2.
-    Without a counterfactual, net + these = the operating revenue exactly."""
+    The adapter's C5 bill-effect pair (`DEGRADATION_SOURCE`) is avoided-bill
+    value, not a cost of the investment: skipped (WP4.6a review B1). Without a
+    counterfactual, net + these = the operating revenue exactly."""
     shared = {ln.key for t in case.counterfactual for ln in t.lines}
     out = np.zeros(op.tl.n)
     for key, arr in op.lines.items():
+        meta = op.line_meta.get(key)
+        if meta is not None and meta.source == DEGRADATION_SOURCE:
+            continue
         if arr is not None and key not in shared:
             out += np.clip(-arr, 0.0, None)
     return out

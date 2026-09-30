@@ -14,7 +14,7 @@ import { nk } from '../../../utils/queryKeys'
 import { blockerMessage } from '../../../utils/blockerMessage'
 import { downloadCSV } from '../shared'
 import {
-  cashflowPivot, completenessRows, counterfactualStatement, fmtCell, fmtHeadline, gateLegs,
+  AVOIDED_PREFIX, cashflowPivot, cashTotals, completenessRows, counterfactualStatement, fmtCell, fmtHeadline, gateLegs,
   HEADLINE_KEYS, headlines, label, NOT_ESTABLISHED, perYearLists, progressFraction, progressText,
   reportFlags, reportYears, sectionOf, studyFailure, studyProgress, studyStale, toTable,
   uncheckableReason, waccGate,
@@ -184,24 +184,11 @@ function Counterfactual({ report }: { report: InvestmentCaseReportPayload }) {
   )
 }
 
-/** Whether the cash the table sums is complete (WP4.7 review B2): the project
- *  section must be ok and every operating sub-status ok — the backend drops a
- *  None line, so a total over the rest would read as established. */
-function cashIncomplete(report: InvestmentCaseReportPayload): string | null {
-  const project = (report.sections as Record<string, { status?: string; note?: string | null;
-    payload?: Record<string, unknown> | null }> | undefined)?.project
-  const status = (report.completeness as Record<string, string> | undefined)?.project ?? project?.status
-  const op = project?.payload?.operating_status as Record<string, string> | undefined
-  const bad = op ? Object.entries(op).filter(([, v]) => v !== 'ok').map(([k]) => k) : []
-  if (status !== undefined && status !== 'ok') return project?.note ?? `the project section is ${status}`
-  if (bad.length) return `${bad.join(', ')} not established`
-  return null
-}
-
 function Cashflows({ report }: { report: InvestmentCaseReportPayload }) {
   const lines = report.cashflow_lines
   const pivot = cashflowPivot(lines)
-  const incomplete = cashIncomplete(report)
+  const { totals, reason: incomplete, mismatch } = cashTotals(report, pivot)
+  const hasAvoided = pivot.columns.some(c => c.includes(AVOIDED_PREFIX))
   if (!pivot.years.length) {
     return (
       <section data-testid="ic-cashflows-unavailable" className="space-y-1">
@@ -211,9 +198,11 @@ function Cashflows({ report }: { report: InvestmentCaseReportPayload }) {
     )
   }
   const csv = () => downloadCSV('investment_case_cashflows.csv',
-    ['year', 'participant', 'counterparty', 'value_stream', 'asset', 'tariff_item', 'amount'],
+    ['year', 'participant', 'counterparty', 'value_stream', 'asset', 'tariff_item', 'amount', 'source',
+     'source_id', 'contract_id'],
     (lines ?? []).map(l => [l.year, l.participant, l.counterparty, l.value_stream, l.asset ?? '',
-                            l.tariff_item ?? '', l.amount]))
+                            l.tariff_item ?? '', l.amount, l.provenance?.source ?? '',
+                            l.provenance?.source_id ?? '', l.provenance?.contract_id ?? '']))
   return (
     <section className="space-y-1">
       <div className="flex justify-between items-center">
@@ -223,9 +212,14 @@ function Cashflows({ report }: { report: InvestmentCaseReportPayload }) {
       <div className="overflow-x-auto">
         <table className="text-[11px] w-full" data-testid="ic-cashflows">
           <caption className="text-left text-muted">
-            + received, − paid; a dash is a stream with no line{incomplete ? ', or not established,' : ''} that year
+            + cash in, − cash out; a dash is a stream with no line that year; Total = the post-tax equity cash
+            {hasAvoided && <span data-testid="ic-cashflows-avoided">; “{AVOIDED_PREFIX}” columns are the
+              supply cost the site would pay without the investment, negated (returns are on the incremental
+              cash) — avoided cost, not money received</span>}
             {incomplete && <span className="text-warn" data-testid="ic-cashflows-incomplete">
-              {' '}— incomplete: {incomplete}; the totals are {NOT_ESTABLISHED}</span>}</caption>
+              {' '}— incomplete: {incomplete}; those totals are {NOT_ESTABLISHED}</span>}
+            {mismatch.length > 0 && <span className="text-warn" data-testid="ic-cashflows-mismatch">
+              {' '}— the lines do not sum to the equity cash in {mismatch.join(', ')}</span>}</caption>
           <thead><tr>
             <th scope="col" className="text-left">Year</th>
             {pivot.columns.map(c => <th key={c} scope="col" className="text-right">{label(c)}</th>)}
@@ -239,7 +233,8 @@ function Cashflows({ report }: { report: InvestmentCaseReportPayload }) {
                 return <td key={c} className="text-right" title={v === undefined ? 'no line' : undefined}>
                   {v === undefined ? '–' : fmtAmount(v)}</td>
               })}
-              <td className="text-right">{incomplete ? NOT_ESTABLISHED : fmtAmount(pivot.totals[y])}</td>
+              <td className="text-right" data-established={totals[y] !== null}>
+                {totals[y] === null ? NOT_ESTABLISHED : fmtAmount(totals[y] as number)}</td>
             </tr>
           ))}</tbody>
         </table>
@@ -359,7 +354,7 @@ export default function InvestmentCaseView() {
             ? <>Unconfirmed: {uncheckableReason(staleness.reason)}.</>
             : <>Stale: {staleness.changed.length
                 ? `${staleness.changed.map(label).join(', ')} changed`
-                : 'the finance inputs, the value flows, the commercial config, the dispatch or a pack changed'}
+                : 'the finance inputs, the value flows, the commercial config, the solver config, the dispatch or a pack changed'}
               {' '}since this report was computed. Run the investment case again for current figures.</>}</p>
       )}
       {report.isError && !running && (

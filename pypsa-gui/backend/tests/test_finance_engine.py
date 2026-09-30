@@ -330,3 +330,26 @@ def test_lcoe_counts_every_owner_cost_and_a_cost_never_lowers_it(stream, cls):
         np.sum(list(b.op.energy_mwh.values()), axis=0) / d)
     assert b.metrics["lcoe_nominal_per_mwh"] == pytest.approx(sam, rel=1e-12)
     assert b.metrics["lcoe_nominal_per_mwh"] > a.metrics["lcoe_nominal_per_mwh"]
+
+
+def test_the_c5_degradation_pair_is_value_never_the_investments_own_cost():
+    """WP4.6a review B1: the adapter's C5 pair (`source="degradation"`: +S·g
+    degrading, −S·g not) has no counterfactual counterpart, but it is part of
+    the avoided-bill value, not a cost of the investment: LCOE ignores it (with
+    no degradation it nets 0 and the LCOE is unchanged); a line keyed like a
+    counterfactual line stays netted too."""
+    from services.finance.engine import _asset_costs
+
+    ppa = TemplateLine("ppa", "ppa_settlement", 200.0, CONTRACT_CLASS, indexation=0.0)
+    bill = TemplateLine("bill", "energy_import", -60.0, "tariff")
+    pair = (TemplateLine("bill_degradation:pv", "energy_import", 30.0, "tariff",
+                         degrades_with="pv", source="degradation", source_id="pv"),
+            TemplateLine("bill_degradation_base:pv", "energy_import", -30.0, "tariff",
+                         source="degradation", source_id="pv"))
+    cf = (Template(first_year=2031, lines=(TemplateLine("bill", "energy_import", -100.0,
+                                                        "tariff"),)),)
+    a = run_case(_case(lines=(ppa, bill), cf=cf), layers=LAYER)
+    b = run_case(_case(lines=(ppa, bill) + pair, cf=cf), layers=LAYER)
+    assert np.allclose(_asset_costs(b.op, b.case), 0.0)
+    assert b.metrics["lcoe_nominal_per_mwh"] == pytest.approx(a.metrics["lcoe_nominal_per_mwh"],
+                                                             rel=1e-12)

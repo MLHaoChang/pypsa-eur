@@ -11,8 +11,10 @@ Operating-year template (plan C3): one year of operating cash in the
 template's MONEY YEAR (`Template.money_year`, default the case's base year —
 a multi-period network's templates are each in their own period year, as P2
 indexes contract prices to it), each line signed from the owner's side (+ =
-cash in). Escalation runs from the template's money year, so no line is
-escalated twice (WP4.1 review #4). Several templates apply to a multi-period
+cash in). A line may state its own money year (`TemplateLine.money_year`: the
+adapter puts every non-contract line in the base year, since P2 escalates only
+contracts between periods — WP4.6a review B4). Escalation runs from the
+line's money year, so no line is escalated twice (WP4.1 review #4). Several templates apply to a multi-period
 network, each from its first operating year on; an asset absent from a later
 template's `energy_mwh` does not generate in those years (retired or not built
 in that period).
@@ -27,6 +29,10 @@ from models.finance import FinanceInputs
 # Escalation classes of a template line (plan C4): the six nominal classes, or
 # the line's own contract indexation.
 CONTRACT_CLASS = "contract"
+# The source of the adapter's C5 first-order bill-effect pair (+S·g degrading
+# with the asset, −S·g not): part of the avoided-bill VALUE, never a cost of
+# the investment itself — the LCOE's asset costs skip it (WP4.6a review B1).
+DEGRADATION_SOURCE = "degradation"
 
 
 class FinanceRefused(ValueError):
@@ -64,6 +70,11 @@ class TemplateLine:
     # dispatch (then a finance-only solve is refused).
     price: float | None = None
     changes_dispatch: bool = False
+    # The line's own money year (None = its template's): P2 indexes contract
+    # prices to the period year but not tariffs, connection fees, export
+    # prices or costs, so a multi-period adapter states those in the base year
+    # (WP4.6a review B4). Escalation runs from it.
+    money_year: int | None = None
 
 
 @dataclass(frozen=True)
@@ -119,3 +130,7 @@ class FinanceCase:
     # are on the owner's cash minus these; the lifecycle NPV on the total.
     counterfactual: tuple[Template, ...] = ()
     lp_basis: LpBasis | None = None
+    # sha256[:16] of what the counterfactual was built from — the tariff, the
+    # served load, the connection and the commodity (plan C13; the report's
+    # provenance). None when there is no counterfactual.
+    counterfactual_hash: str | None = None
