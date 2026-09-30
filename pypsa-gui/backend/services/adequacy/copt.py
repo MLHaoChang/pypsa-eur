@@ -67,6 +67,7 @@ from services.adequacy.occurrence import (
     _as_float,
     rate_is_usable,
 )
+from services.adequacy.worksheet import zero_reason
 
 
 @dataclass(frozen=True)
@@ -1164,6 +1165,10 @@ def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
         }
         if u.source == "carrier_default" and u.library_citation:
             fm["library_citation"] = u.library_citation
+        # P29 (B3): why a €0 row is €0 — additive, no number changes.
+        fm["zero_reason"] = zero_reason(
+            severity_eur=severity, delta_eue_mwh=delta_eue,
+            occurrence_per_year=occ, in_metric_scope=True, voll=voll)
         row = {
             "name": u.name,
             "delta_eue_mwh": delta_eue,
@@ -1277,6 +1282,11 @@ def screening_analysis(units, residual_load: pd.Series, *, weights: pd.Series,
         occ = float(fm.get("occurrence_per_year") or 0.0)
         fm["criticality_eur_per_year"] = crit
         fm["severity_eur"] = crit / occ if occ > 0 else 0.0
+        # P29 (B3): re-derived from the merged numbers.
+        fm["zero_reason"] = zero_reason(
+            severity_eur=fm["severity_eur"], delta_eue_mwh=m["delta_eue_mwh"],
+            occurrence_per_year=occ,
+            in_metric_scope=bool(fm.get("in_metric_scope", True)), voll=voll)
     rows = sorted(merged.values(), key=lambda r: (-r["delta_eue_mwh"], r["name"]))
 
     # The merged split describes the fleet that was actually EVALUATED: a

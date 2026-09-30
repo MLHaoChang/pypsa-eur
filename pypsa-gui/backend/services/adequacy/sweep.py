@@ -41,6 +41,8 @@ import queue
 import threading
 from typing import Callable
 
+from services.adequacy.worksheet import zero_reason
+
 logger = logging.getLogger(__name__)
 
 MAX_CONTINGENCIES = 20
@@ -653,6 +655,11 @@ def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
                 "in_metric_scope": in_scope,
                 "engine": "lp_proxy",
                 "fidelity": "deterministic_scenario",
+                # P29 (B3): why a €0 row is €0 — additive.
+                "zero_reason": zero_reason(
+                    severity_eur=severity, delta_eue_mwh=delta,
+                    occurrence_per_year=occ, in_metric_scope=in_scope,
+                    voll=voll),
             },
             "meta": meta,
         })
