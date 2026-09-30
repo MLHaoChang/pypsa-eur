@@ -90,7 +90,12 @@ def test_a_file_backed_sandbox_hands_each_thread_its_own_connection():
         try:
             assert isinstance(engine.pool, NullPool)
 
-            seen: list[int] = []
+            # Hold the connection OBJECTS, not their ids: NullPool closes and
+            # frees each one when its session ends, so under load (threads
+            # running one after another) a later connection can reuse a freed
+            # one's address and two distinct connections read as "the same".
+            # StaticPool would still show up as one object held four times.
+            seen: list[object] = []
             lock = threading.Lock()
 
             def probe():
@@ -98,7 +103,7 @@ def test_a_file_backed_sandbox_hands_each_thread_its_own_connection():
                     db.scalars(select(Organization)).all()
                     raw = db.connection().connection.dbapi_connection
                     with lock:
-                        seen.append(id(raw))
+                        seen.append(raw)
 
             threads = [threading.Thread(target=probe) for _ in range(4)]
             for t in threads:
@@ -107,7 +112,7 @@ def test_a_file_backed_sandbox_hands_each_thread_its_own_connection():
                 t.join()
 
             assert len(seen) == 4
-            assert len(set(seen)) == 4, (
+            assert len({id(c) for c in seen}) == 4, (
                 "two threads were handed the same sqlite3 connection — that is "
                 "the StaticPool arrangement again, and under Python 3.12 it "
                 "corrupts results rather than raising cleanly"
