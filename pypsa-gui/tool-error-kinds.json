@@ -175,6 +175,10 @@
       "surface": "inline",
       "why": "The local per-session turn limiter, raised by the chat route before a turn starts — so it never arrives on a tool_error frame in practice."
     },
+    "session_not_yours": {
+      "surface": "inline",
+      "why": "Raised by the chat STREAM route when the caller-supplied session_id belongs to another user \u2014 sibling of unknown_session, and route-only for the same reason: the refusal happens before a turn starts, so it cannot arrive on a tool_error frame. Not a banner because the client already recovers from it without asking the user to do anything: api/chat.ts carries the error_kind onto the Error and ChatPanel calls startNewChat(), because the id comes from the project's shared transcript and a co-member's GET /history can mint it under their name first \u2014 so a legitimate user can meet this through no fault of their own and must not be left retrying an id the server will refuse forever."
+    },
     "snapshot_count_mismatch": {
       "surface": "banner",
       "why": "Supplied rows do not match the network's snapshots. The data must be corrected."
