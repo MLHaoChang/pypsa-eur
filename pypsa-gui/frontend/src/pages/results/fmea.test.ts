@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows } from './fmea'
+import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows, ZERO_REASON_TEXT } from './fmea'
 import type { CoptPayload } from './adequacy'
 
 const copt: CoptPayload = {
@@ -128,5 +128,43 @@ describe('unpricedRankingWarning', () => {
   it('stays silent when the payload omits VoLL, rather than guessing', () => {
     expect(unpricedRankingWarning({ per_mode: rows })).toBeNull()
     expect(unpricedRankingWarning(null)).toBeNull()
+  })
+})
+
+// P29 (B3): `zero_reason` rides from per_mode onto the row; manual rows carry
+// null; an unknown value is dropped. The CSV is byte-stable: same header,
+// same columns, no reason column.
+describe('zero_reason', () => {
+  const withReasons: CoptPayload = { ...copt, per_mode: [
+    { ...copt.per_mode[0], severity_eur: 0, criticality_eur_per_year: 0, zero_reason: 'no_shortfall' },
+    { ...copt.per_mode[1], zero_reason: 'bogus' },
+  ] }
+  it('is forwarded for computed rows and null for manual rows', () => {
+    const rows = mergeWorksheet(withReasons, sidecar)
+    expect(rows.find(r => r.name === 'g1')?.zero_reason).toBe('no_shortfall')
+    expect(rows.find(r => r.name === 'g2')?.zero_reason ?? null).toBeNull()
+    expect(rows.find(r => r.name === 'cyber')?.zero_reason).toBeNull()
+  })
+  it('has one text per reason', () => {
+    expect(ZERO_REASON_TEXT).toEqual({
+      no_shortfall: 'no shortfall — the site copes without it',
+      no_outage_data: 'no outage data',
+      unpriced: 'no price set for undelivered energy',
+      out_of_scope: 'not counted (outside the electricity metric)',
+    })
+  })
+  it('leaves the CSV unchanged', () => {
+    expect(WORKSHEET_CSV_HEADER).toEqual([
+      'mode_id', 'failure_class', 'component', 'name',
+      'occurrence_per_year', 'occurrence_basis',
+      'severity_eur', 'criticality_eur_per_year', 'delta_eue_mwh',
+      'in_metric_scope', 'mitigability', 'engine', 'fidelity',
+    ])
+    const strip = (p: CoptPayload): CoptPayload => ({ ...p, per_mode: p.per_mode.map(m => {
+      const { zero_reason: _z, ...rest } = m as Record<string, unknown>
+      return rest as typeof m
+    }) })
+    expect(worksheetCsvRows(mergeWorksheet(withReasons, sidecar)))
+      .toEqual(worksheetCsvRows(mergeWorksheet(strip(withReasons), sidecar)))
   })
 })

@@ -33,6 +33,7 @@ import { downloadCSV, downloadJSON, fmtCurrency, fmtEnergy, fmtPower } from './s
 import { GuideButton, useGuide } from '../../components/GuidedTour'
 import { prepareTaggingTour } from './prepareTaggingTour'
 import { InfoTip } from '../../layout/properties/cardKit'
+import type { ZeroReason } from './fmea'
 
 const ARCHETYPES: { id: EhArchetype; label: string; blurb: string }[] = [
   {
@@ -629,6 +630,8 @@ type FmeaRow = {
   occurrence_per_year?: number
   severity_eur?: number
   delta_eue_mwh?: number | null
+  /** P29 (B3): why a €0 row is €0 — forwarded as the backend sent it. */
+  zero_reason?: ZeroReason | null
 }
 
 /** Ranked FMEA rows from the report's `fmea_top` section (P12). */

@@ -59,3 +59,46 @@ it('renders severity and criticality with fmtCurrency(v, 1)', async () => {
     .map(tr => tr.querySelector('td')?.textContent)
   expect(names[0]).toMatch(/^genset_1/)
 })
+
+// P29 (B3): a €0 row says why — in Guided as the cell's text, in Expert as
+// the `title` of the unchanged `€0.0`. A row without the field (a sweep
+// record from before P29) keeps `€0.0` with no title.
+it('a €0 row shows its reason in Guided and as a title in Expert', async () => {
+  vi.mocked(resultsApi.getFmeaModes).mockResolvedValue({
+    per_mode: [
+      { ...ROW('genset_1', 0, 0), zero_reason: 'no_shortfall' },
+      { ...ROW('hp', 0, 0), zero_reason: 'out_of_scope', in_metric_scope: false },
+      { ...ROW('boiler', 0, 0), zero_reason: 'no_outage_data' },
+      { ...ROW('chp', 0, 0), zero_reason: 'unpriced' },
+      ROW('old_row', 0, 0),
+      { ...ROW('pv', 0.4, 42), zero_reason: null },
+    ],
+    sweep_status: null, sweep_error: null,
+  })
+  const severityCell = (name: string) =>
+    screen.getByText(name).closest('tr')!.querySelectorAll('td')[3] as HTMLElement
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+  useUIStore.setState({ uiMode: 'expert' })
+  const { unmount } = render(<QueryClientProvider client={client}><FmeaTab /></QueryClientProvider>)
+  await screen.findByText('genset_1')
+  expect(severityCell('genset_1').textContent).toBe('€0.0')
+  expect(severityCell('genset_1').getAttribute('title')).toBe('no shortfall — the site copes without it')
+  expect(severityCell('hp').getAttribute('title')).toBe('not counted (outside the electricity metric)')
+  expect(severityCell('boiler').getAttribute('title')).toBe('no outage data')
+  expect(severityCell('chp').getAttribute('title')).toBe('no price set for undelivered energy')
+  expect(severityCell('old_row').textContent).toBe('€0.0')
+  expect(severityCell('old_row').hasAttribute('title')).toBe(false)
+  expect(severityCell('pv').hasAttribute('title')).toBe(false)
+  unmount()
+
+  useUIStore.setState({ uiMode: 'guided' })
+  render(<QueryClientProvider client={client}><FmeaTab /></QueryClientProvider>)
+  await screen.findByText('genset_1')
+  expect(severityCell('genset_1').textContent).toBe('no shortfall — the site copes without it')
+  expect(severityCell('boiler').textContent).toBe('no outage data')
+  expect(severityCell('chp').textContent).toBe('no price set for undelivered energy')
+  expect(severityCell('hp').textContent).toBe('not counted (outside the electricity metric)')
+  expect(severityCell('old_row').textContent).toBe('€0.0')
+  expect(severityCell('pv').textContent).toBe('€0.4')
+})

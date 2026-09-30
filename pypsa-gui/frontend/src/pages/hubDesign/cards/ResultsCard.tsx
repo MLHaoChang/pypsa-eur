@@ -5,6 +5,7 @@
 import { FileText } from 'lucide-react'
 import { useUIStore } from '../../../store/uiStore'
 import { fmeaTopRows, notEstablishedNotes } from '../../results/EhReferenceDesignPanel'
+import { zeroReasonText } from '../../results/fmea'
 import { fmtCurrency } from '../../results/shared'
 import { studyHasResults } from '../flow'
 import { headline } from '../headline'
@@ -87,7 +88,8 @@ export function ResultsCard() {
                   <span className="text-muted">
                     {' — '}{r.criticality_eur_per_year > 0
                       ? `about ${fmtCurrency(r.criticality_eur_per_year)} per year`
-                      : 'no measurable cost'}
+                      // P29 (B3): the same reason text as the FMEA tab.
+                      : (zeroReasonText(r.zero_reason) ?? 'no measurable cost')}
                   </span>
                 )}
               </li>

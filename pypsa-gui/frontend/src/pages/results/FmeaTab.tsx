@@ -23,6 +23,7 @@ import {
   buildManualRow,
   mergeWorksheet,
   WORKSHEET_CSV_HEADER,
+  zeroReasonText,
   worksheetCsvRows,
   type ModesPayload,
   unpricedRankingWarning,
@@ -305,7 +306,11 @@ export default function FmeaTab() {
                   </td>
                   <td className="py-1 pr-2 font-mono">{r.occurrence_per_year.toFixed(2)}
                     <span className="text-muted font-sans"> <Term k="fmea_occurrence">{guidedBasis(r.occurrence_basis)}</Term></span></td>
-                  <td className="py-1 pr-2 font-mono">{fmtCurrency(r.severity_eur, 1)}</td>
+                  {r.severity_eur === 0 && zeroReasonText(r.zero_reason) ? (
+                    <td className="py-1 pr-2 text-muted">{zeroReasonText(r.zero_reason)}</td>
+                  ) : (
+                    <td className="py-1 pr-2 font-mono">{fmtCurrency(r.severity_eur, 1)}</td>
+                  )}
                   <td className="py-1 pr-2">
                     <span className="inline-flex items-center gap-1">
                       <input
@@ -362,7 +367,9 @@ export default function FmeaTab() {
                   <td className="py-1 pr-2">{r.failure_class}</td>
                   <td className="py-1 pr-2 font-mono">{r.occurrence_per_year.toFixed(2)}
                     <span className="text-muted"> {r.occurrence_basis}</span></td>
-                  <td className="py-1 pr-2 font-mono">{fmtCurrency(r.severity_eur, 1)}</td>
+                  <td className="py-1 pr-2 font-mono"
+                    title={r.severity_eur === 0 ? zeroReasonText(r.zero_reason) ?? undefined : undefined}>
+                    {fmtCurrency(r.severity_eur, 1)}</td>
                   <td className="py-1 pr-2 font-mono font-semibold">{fmtCurrency(r.criticality_eur_per_year, 1)}</td>
                   <td className="py-1 pr-2">
                     <input
