@@ -546,3 +546,22 @@ def test_tariff_sentences_are_labelled_as_the_tariffs_own_in_read_this_first():
     assert "From the tariff" in block
     doc = docx.Document(io.BytesIO(render_docx(_report(), charts={})))
     assert any(p.text.startswith("From the tariff") for p in doc.paragraphs)
+
+
+def test_an_unchanged_intake_resaved_by_a_browser_keeps_its_hash():
+    """
+    Gate S7 re-verification [S-R1]: JSON from a browser turns `4000.0` into
+    `4000`, so an unchanged intake re-saved from the UI must hash the same,
+    or the report reads stale and findings refuse a run nothing changed.
+    Integral floats and ints are one number; a real change still differs,
+    and a boolean is not a number.
+    """
+    from services.study import run_hashes as H
+
+    stored = {"site": {"connection_mw": 2.0}, "load": {"annual_mwh": 4000.0},
+              "pv": {"enabled": True}, "tariff_id": "de_seed", "extra": [1.0, 2.5]}
+    resaved = {"site": {"connection_mw": 2}, "load": {"annual_mwh": 4000},
+               "pv": {"enabled": True}, "tariff_id": "de_seed", "extra": [1, 2.5]}
+    assert H.intake_hash(stored) == H.intake_hash(resaved)
+    assert H.intake_hash(stored) != H.intake_hash({**resaved, "load": {"annual_mwh": 4000.5}})
+    assert H.intake_hash({"pv": {"enabled": True}}) != H.intake_hash({"pv": {"enabled": 1}})

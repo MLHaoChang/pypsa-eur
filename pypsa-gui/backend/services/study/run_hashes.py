@@ -52,12 +52,28 @@ def recorded_ledger_hash(hashes: Mapping[str, Any] | Any) -> str | None:
     return getattr(hashes, "ledger_hash", None)
 
 
+def _canonical(value: Any) -> Any:
+    """
+    One spelling per number: an integral float is its int, because a browser's
+    JSON drops the `.0` and an unchanged intake re-saved from the UI must hash
+    the same (gate S7 re-verification [S-R1]). Booleans stay booleans.
+    """
+    if isinstance(value, Mapping):
+        return {str(k): _canonical(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_canonical(v) for v in value]
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
 def intake_hash(intake: Mapping[str, Any] | None) -> str:
     """A stable hash of the study's intake (its canonical JSON)."""
     import hashlib
     import json
 
-    text = json.dumps(dict(intake or {}), sort_keys=True, default=str, separators=(",", ":"))
+    text = json.dumps(_canonical(dict(intake or {})), sort_keys=True, default=str,
+                      separators=(",", ":"))
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
