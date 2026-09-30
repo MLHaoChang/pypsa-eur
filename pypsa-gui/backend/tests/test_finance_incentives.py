@@ -258,7 +258,7 @@ def test_review_round_2_guards():
     carriers case-insensitive; a pypsa-eur battery's charger is storage."""
     inc, _ = _run(_case([Incentive(kind="itc"), Incentive(kind="grant", amount=2e6,
                                                           grant_tax_treatment="reduces_basis")]))
-    assert "grant_exceeds_cost:1:grant" in inc.reasons and inc.itc_amount == 0
+    assert not inc.established() and "grant_exceeds_cost:1:grant" in inc.reasons
     inc, _ = _run(_case([Incentive(kind="ptc"), Incentive(kind="ptc")]))
     assert "ptc_twice_same_asset:1:ptc" in inc.reasons
     solar = AssetFinance("x", "Generator", 1e6, 40.0, carrier="Solar")

@@ -279,3 +279,18 @@ def test_cfads_ignores_the_terminal_value_and_an_unknown_cfads_only_flags_the_ds
     d, _ = _run(case)
     assert d.established() and d.service.sum() > 0
     assert "dscr_not_established:operating_not_established" in d.flags and d.min_dscr() is None
+
+
+
+@pytest.mark.parametrize("tranches", [
+    [dict(gearing=1.0)], [dict(gearing=0.6), dict(gearing=0.4)],
+    [dict(gearing=1.0, upfront_fee=0.005)], [dict(gearing=1.0, upfront_fee=0.03, dsra_months=6)],
+])
+def test_total_uses_at_100pct_is_not_refused(tranches):
+    """WP4.2 review r2-1: debt = 100 % of total uses is within the fixed
+    point's tolerance, never `debt_exceeds_uses`; r2-2: the draw weights have
+    settled (debt = g × uses to the tolerance)."""
+    ts = [_t(gearing_base="total_uses", commitment_fee=0.005, **t) for t in tranches]
+    d, _ = _run(_case(ts))
+    assert d.established(), d.reasons
+    assert d.amount == pytest.approx(d.uses["total"], rel=2e-6)

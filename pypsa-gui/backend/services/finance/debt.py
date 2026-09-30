@@ -333,11 +333,14 @@ def build_debt(fin: FinanceInputs, op: Operating, tl: Timeline) -> Debt:
         for iterations in range(1, MAX_ITER + 1):
             total, w_new = uses_of(results)
             residual = abs(total - uses_est) / max(abs(total), 1.0)
-            if residual <= TOL:
+            # Converged only when the draw weights have settled too (review r2-2).
+            if residual <= TOL and float(np.max(np.abs(w_new - weights))) <= TOL:
                 break
             history.append(total)
             nxt = total
-            if len(history) >= 3:
+            # Aitken from the third plain step on: the first triple still
+            # carries the initial weights (review r2 non-binding).
+            if len(history) >= 4 or (jumped and len(history) >= 3):
                 x0, x1, x2 = history[-3:]
                 d1, d2 = x1 - x0, x2 - x1
                 if d1 != 0.0:
@@ -388,7 +391,7 @@ def build_debt(fin: FinanceInputs, op: Operating, tl: Timeline) -> Debt:
     total_uses = float(capex_total + idc.sum() + fees.sum() + dsra_bal[p])
     debt_total = float(sum(r.amount for r in results))
     reasons = []
-    if debt_total > total_uses * (1.0 + 1e-9):
+    if debt_total > total_uses * (1.0 + TOL):          # the fixed point's tolerance (review r2-1)
         reasons.append(f"debt_exceeds_uses:{debt_total:.2f}>{total_uses:.2f}")
     out = Debt(tl=tl, tranches=results, cfads=cfads, interest=interest, principal=principal,
                service=service, draws=draws, idc=idc, fees=fees, dsra_balance=dsra_bal,

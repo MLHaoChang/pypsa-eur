@@ -601,6 +601,18 @@ matched to ≤ 1.7e-14:
 
 **Not taken:** pinning the 13 variants as committed oracles (S2t and S3d cover the deviations).
 
+**WP4.2 review round 2 (8717ac0): two findings; fixed.** Every round-1 fix was confirmed: S3d
+`total_uses` now matches SAM to 1e-14. A 2,400-case random sweep against plain iteration converged on
+every case in ≤ 19 steps.
+1. **r2-1:** Aitken can land about 1e-6 above the fixed point, and the `debt_exceeds_uses` check allowed
+   only 1e-9, so 100 % gearing was falsely refused (11 of 36 probes). Fixed: the check uses the fixed
+   point's tolerance.
+2. **r2-2:** the exit ignored the draw weights (a 3.4e-4 error at a 56 % fee). Fixed: stop only when the
+   weights have settled too.
+
+Aitken now starts after two plain steps, so the first estimate no longer carries the initial weights.
+Tested: 100 % in one tranche, 60 % + 40 %, and with fees and a DSRA.
+
 ## WP4.2b DSCR sculpting, the `max_gearing` cap, DSRA, reserve interest
 
 - Sculpting in closed form on pre-tax CFADS (C8); the `max_gearing` cap (SAM base TIC × (1+fee)) with the
