@@ -29,8 +29,10 @@ Each round's findings, and what was done about them, are in the plan under the W
 | `tests/qa_value_flows.py` | **235/235** (33 s) after the assessor's hardening (222/222 at bfb5bef). See "The driver" below. |
 | All QA drivers (`tests/run_qa_drivers.py`) | **25/25 passed** (includes `qa_value_flows`, `qa_billing_contracts`, `qa_commercial_lp`) |
 | Full backend suite (`-m "not slow"`, Python 3.12 venv), first run at bfb5bef (edits landed mid-run) | 7,887 passed, 31 skipped, **2 failed**, both triaged: `test_hourly_assumption_audit` (the energy-hub adequacy sites from the master merge e364837, unlisted — gate condition 1, listed with reasons) and `test_openpyxl_parses_uploads_with_defusedxml_in_this_environment` (the local venv lacked the pinned `defusedxml==0.7.1` — an environment gap, installed; no code change). |
-| Full backend suite at e27fe5d / 024d21b (after the condition fixes), run in 14 chunks (the container restarts and background tasks are time-limited) | **7,891 passed, 31 skipped, 0 failed** (11 deselected `slow`) |
-| Frontend `vitest run` at 024d21b | **248 files, 2,754 tests passed** |
+| Full backend suite at e27fe5d / 024d21b (after the round-1 fixes), run in 14 chunks (the container restarts and background tasks are time-limited) | 7,891 passed, 31 skipped, 0 failed (11 deselected `slow`) |
+| **Full backend suite at e731683 — the final backend code** (after the round 2–5 fixes; later commits are docs only), 14 chunks | **7,904 passed, 31 skipped, 0 failed** (11 deselected `slow`) |
+| **All QA drivers at the final code** | **25/25 passed** (`qa_value_flows` 235/235, `qa_billing_contracts` 49/49, `qa_commercial_lp` 30/30) |
+| Frontend `vitest run` at 024d21b (no frontend change since) | **248 files, 2,754 tests passed** |
 | Frontend `tsc --noEmit` | clean |
 
 ### The driver
@@ -190,4 +192,21 @@ periods; assessor note).
 
 ## Gate assessor verdict
 
-_pending_
+Six rounds, each PASS WITH CONDITIONS until the last; the record of each round, the probes and what was
+done is in the plan's "Phase 3 e2e QA gate".
+
+1. **Round 1 (bfb5bef):** the hourly audit red (the master-merge adequacy sites, listed with reasons);
+   the export split weighted a gas supply behind a CHP by its MW of gas (MEDIUM, silent); the note's
+   accuracy (the WP3.2 verdict, scenario E's scope, V1b, the bridge's independence, the residues); the
+   ADR-0002 procedure extended. All fixed (e27fe5d).
+2. **Rounds 2–5:** the same silent-misattribution class under ever narrower topologies — non-electric
+   Generators and a CHP's bus2 power (round 2), a Store battery's discharger (round 3), origins read at
+   bus0 only (round 4), one-way Links (round 5). Each fixed with a test that fails on the code before it
+   (06374d7, b0cbbfe, cb478a9, e731683); the rule is stated under "The export split's generation rule".
+3. **Round 6 (e731683): the generation condition CLOSED** — 21 probes right (the 16 earlier and 5 new);
+   the assessor accepted the netting of a converter's own electric input port. Remaining: the full suite
+   at the final code — now **7,904 passed, 0 failed**, all 25 QA drivers green.
+
+**Phase 3 is closed for participants and value flows; P4 may start.** The chat surface (P2's Library
+tools and #63's rename path, P3's `get_results` value flows and `define_participants`) stays **not done**
+until the ADR-0002 probe above is run and recorded.

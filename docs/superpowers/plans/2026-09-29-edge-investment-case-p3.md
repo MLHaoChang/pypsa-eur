@@ -1017,17 +1017,17 @@ backend follow-up). **WP3.7c closed.**
 
 ## Phase 3 e2e QA gate
 
-- [ ] `backend/tests/qa_value_flows.py` (auto-discovered): V1–V4 through the routes (template → drafts
+- [x] `backend/tests/qa_value_flows.py` (auto-discovered): V1–V4 through the routes (template → drafts
   confirmed → value-flows route → solve → `/results/value_flows`): all four checks on every template,
   reconciliation to `cost_breakdown` to the cent; V5 hand splits to the cent under all four keys; V6
   group net-import gap 0 and LP row = billed; a swapped-direction and a dropped-source corruption detected;
   a bundle round trip keeps `value_flows` and the ledger identical; the P1 and P2 drivers still pass.
-- [ ] Frontend: vitest (including the Sankey two-way case and the a11y checks) and `tsc` green.
-- [ ] Full backend `not slow`, all QA drivers green; findings note
+- [x] Frontend: vitest (including the Sankey two-way case and the a11y checks) and `tsc` green.
+- [x] Full backend `not slow`, all QA drivers green; findings note
   `docs/superpowers/findings/<date>-ic-p3-participants.md`; assessor verdict recorded here.
-- [ ] ADR-0002: the live probe for P2's and P3's chat changes run and recorded, or stated as owed in the
+- [x] ADR-0002: the live probe for P2's and P3's chat changes run and recorded, or stated as owed in the
   verdict (the chat surface is then not done).
-- [ ] `notYetDeployed` (frontend `api/commercial.ts`) removed once `/results/value_flows` and
+- [x] `notYetDeployed` (frontend `api/commercial.ts`) removed once `/results/value_flows` and
   `/results/billing/preview` ship (WP3.5 review round 2 B).
 
 **Gate assessor round 1 (bfb5bef): PASS WITH CONDITIONS.** It re-ran the driver (222/222), all QA
@@ -1087,6 +1087,13 @@ the code before its fix):
   ORC, `p_min_pu` negative only sometimes, twice). Remaining: the full-suite totals at this head
   (round-3 condition 2). Non-binding: the note's Σ −p_k wording aligned; a mixed Link delivering
   anywhere in a period blocks that period's split (conservative, recorded).
+
+**Gate closed.** The full backend suite at e731683 (the final backend code; later commits docs only):
+**7,904 passed, 31 skipped, 0 failed**; all 25 QA drivers green (`qa_value_flows` 235/235); vitest
+2,754 passed and `tsc` clean at 024d21b (no frontend change since). Findings note
+`docs/superpowers/findings/2026-09-29-ic-p3-participants.md` carries the evidence, the rule and the
+verdict. **Phase 3 is closed; P4 may start.** ADR-0002 is stated as OWED (the checkbox is ticked for
+"stated as owed"): the chat surface stays not done until the live probe is run and recorded.
 
 ## Scope boundaries (not P3)
 
