@@ -490,6 +490,39 @@ mirrored in `frontend/src/api/types.ts` and covered by the new `types.ts` parity
   Zinsschranke flag; a missing rule → `not_established` naming it; `pack_hashes.json` regenerated per
   version and the diff reviewed.
 
+**WP4.3a implementation.**
+- `tax.py`: schedules — `sl_half_year` (SAM's SL-n, n + 1 years), `sl_pro_rata` (§7 Abs. 1 EStG by month),
+  `declining_balance` (switch to straight-line), `normalised`; `DepreciationClass` (share, schedule, bonus,
+  `itc_reduces`), `LossRule` (allowance + limit share, a per-year schedule allowed, years), `InterestCap`
+  (share of tax EBITDA, an optional Freigrenze that caps ALL interest once exceeded, carryforward of the
+  disallowed part), `TaxLayer` (rate or `{from_year: rate}`, own depreciation, deductibility in later layers,
+  own loss pool, the interest add-back above an allowance, a surcharge, the ITC basis-reduction flag, the
+  interest cap); `depreciation(...)` (bonus in year 1, the rest on the schedule, the ½-ITC reduction pro rata
+  to the reducible classes); `compute_tax(...)` (per layer: EBITDA − depreciation − (capped) interest +
+  other income − other deductions − earlier deductible liabilities; `offset_other_income` or FIFO
+  `carryforward`; flags `interest_capped:<layer>`).
+- `tax_layers.py`: `resolve_tax_layers(pack, fin, assets, cod)` → layers, flags, **missing** (never assumed):
+  US — federal 21 % with the NOL rule, MACRS classes from `depreciation_class_by_asset` (the pack assigns
+  none: the 2025 act changed energy classes), bonus by `acquisition_date` (100 % after 2025-01-19, else the
+  TCJA phase-down by placed-in-service year), §163(j) unless `small_business_163j`, a state layer from
+  `state_rate` (`None` = missing, 0 = no layer; bonus decoupled and the loss rule stated); DE — GewSt (Messzahl
+  × Hebesatz, the §8 Nr. 1 add-back, own €1m + 60 % pool, not deductible) and KSt (the rate path, SolZ, €1m
+  + 70 %/60 % schedule), the Zinsschranke as a Freigrenze (carryforward mode), AfA by carrier (PV 20 years,
+  pro rata by COD month) or the degressive window by acquisition date (`db_min(3/n, 30 %)_n`).
+- Packs: `us_federal` (21 %, MACRS Table A-1, bonus, NOL, §163(j)) and `eu_de` (KSt path, SolZ, GewSt
+  Messzahl / add-back / loss, KSt loss, Zinsschranke, degressive AfA, the AfA life for PV, the pro-rata
+  first year) with a cited source per rule; unsourced items absent (US energy MACRS classes, DE wind and
+  battery lives). `FinanceInputs.depreciation_class_by_asset` (+ `types.ts`). `pack_hashes.json` pinned **per
+  version** and every registered version must be pinned.
+- Tests: `test_finance_tax.py` (12) — **SAM parity on state / federal depreciation, taxable income and tax
+  per layer for all five cases** (S2/S3 fed SAM's interest and reserve interest until WP4.2), **S1 / S1b
+  after-tax equity cash, IRR (≤ 1e-5) and NPV (1e-6)**, the pack's MACRS tables (Table A-1 sums, n + 1
+  years), schedules, carryforward with an allowance and a limit, a non-deductible layer with an add-back
+  and a surcharge, a rate schedule and an ITC basis reduction; `test_finance_tax_packs.py` (8) — **F2**
+  (Germany) and **F3** (US) by hand, bonus by acquisition date, the degressive window and the state
+  layer, the missing inputs named, the Zinsschranke Freigrenze, every rule cited. Book-value terminal
+  value reads the remaining basis in WP4.5's assembly.
+
 ## WP4.3b `eu_nl` and `ca_federal` packs
 
 - `eu_nl` (sourced): VPB brackets 19 % / 25.8 % at €200k (art. 22 Wet Vpb 1969, dated); depreciation with the

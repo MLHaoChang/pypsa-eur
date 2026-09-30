@@ -218,6 +218,11 @@ class FinanceInputs(BaseModel):
     small_business_163j: bool | None = None
     reserves_rate: float | None = Field(default=None, ge=0)
     solve_ppa: SolvePpa | None = None
+    # A depreciation class per owner asset where the pack assigns none (plan
+    # WP4.3a, C11): "macrs_<n>", "sl_<n>" (US half-year), "afa_<n>" (DE
+    # straight-line pro rata), "db_<rate>_<n>" (declining balance, rate as a
+    # fraction, switching to straight-line). Stated by the user (source: user).
+    depreciation_class_by_asset: dict[str, str] = Field(default_factory=dict)
     replacement_capex: list[tuple[int, str, float]] = Field(default_factory=list)
     terminal_value: TerminalValueRule = Field(default_factory=TerminalValueRule)
     wacc_nominal: float | None = Field(default=None, ge=0)

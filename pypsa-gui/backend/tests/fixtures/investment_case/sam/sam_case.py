@@ -217,3 +217,38 @@ def to_finance_case(name: str):
                             energy_mwh={"pv": p.energy_year1_mwh}),),
         assets=(AssetFinance(name="pv", component="Generator", overnight_cost=p.installed_cost,
                              lifetime_years=float(p.analysis_years)),))
+
+
+def sam_tax_layers(name: str):
+    """SAM's two tax layers (plan C7): state first, deductible from federal;
+    each with its own depreciation profile (SAM's `depr_alloc_*` shares, the
+    layer's bonus per class, the ITC basis-reduction flag per layer). MACRS
+    schedules come from the `us_federal` pack's Table A-1 (a cross-check of the
+    pack's data against SAM); SL-n is the half-year convention."""
+    from services.finance.packs.base import load_pack
+    from services.finance.packs.us_federal import macrs_fractions
+    from services.finance.tax import DepreciationClass, TaxLayer, sl_half_year
+
+    p = sam_params(name)
+    pack = load_pack("us_federal", as_of=__import__("datetime").date(2026, 1, 1))
+
+    def schedule(cls: str):
+        kind, years = cls.split("_")
+        if kind == "macrs":
+            return macrs_fractions(pack, years)
+        if kind == "sl":
+            return sl_half_year(int(years))
+        raise SamMappingError(f"{name}: depreciation class {cls!r} not mapped")
+
+    def classes(bonus: dict, layer: str):
+        return tuple(DepreciationClass(name=c, share=s, schedule=schedule(c), bonus=bonus[c],
+                                       itc_reduces=c in p.itc_reduction_classes[layer])
+                     for c, s in p.depreciation_alloc.items())
+
+    state = TaxLayer(name="state", rate=p.state_rate, depreciation=classes(p.bonus_state, "state"),
+                     deductible_in_later_layers=True,
+                     itc_basis_reduction=p.itc_basis_reduction["state"])
+    federal = TaxLayer(name="federal", rate=p.federal_rate,
+                       depreciation=classes(p.bonus_federal, "federal"),
+                       itc_basis_reduction=p.itc_basis_reduction["federal"])
+    return (state, federal)

@@ -1060,6 +1060,7 @@ export interface FinanceInputs {
   small_business_163j?: boolean | null
   reserves_rate?: number | null
   solve_ppa?: SolvePpa | null
+  depreciation_class_by_asset?: Record<string, string>
   replacement_capex?: Array<[number, string, number]>
   terminal_value?: TerminalValueRule
   wacc_nominal?: number | null

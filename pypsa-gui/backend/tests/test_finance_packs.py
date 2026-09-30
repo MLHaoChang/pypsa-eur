@@ -135,9 +135,19 @@ def test_packs_carry_the_country_join_key_tariffs_use():
 
 
 def test_hash_is_stable_across_processes_fixture_pin():
+    """Pinned per VERSION (IC P4 plan C11): {jurisdiction: {valid_from: hash}}.
+    Every registered version is pinned, so a new version cannot slip in; a
+    changed rule changes its version's hash and the diff is reviewed."""
     pinned = json.loads((FIXTURES / "pack_hashes.json").read_text())
-    for jur, h in pinned.items():
-        assert P.load_pack(jur, as_of=date(2026, 6, 1)).pack_hash == h, jur
+    for jur in P.available_jurisdictions():
+        P.load_pack(jur, as_of=date(2026, 6, 1))           # registers the built-in module
+    registered = {jur: {f().valid_from.isoformat() for f in facs}
+                  for jur, facs in P._REGISTRY.items()}
+    assert {j: set(v) for j, v in pinned.items()} == registered
+    for jur, versions in pinned.items():
+        for valid_from, h in versions.items():
+            assert P.load_pack(jur, as_of=date.fromisoformat(valid_from)).pack_hash == h, (jur,
+                                                                                          valid_from)
 
 
 def test_packs_import_nothing_from_routers_or_solver_service():
