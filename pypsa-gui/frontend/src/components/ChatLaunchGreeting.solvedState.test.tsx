@@ -124,7 +124,7 @@ describe('greeting solve line in Guided after the hub study (P26)', () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done' } as never)
     renderGreeting()
     await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent)
-      .toBe('A study has run on this network — its results are in Hub design.'))
+      .toBe('The last study’s results are in Hub design.'))
   })
 
   it('a running hub study → says so and where to follow it', async () => {
@@ -175,7 +175,7 @@ describe('greeting follows the hub study with the hub closed (P26 gate B1)', () 
     await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent)
       .toBe('The hub study is running — follow it in Hub design.'))
     await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent)
-      .toBe('A study has run on this network — its results are in Hub design.'), { timeout: 5000 })
+      .toBe('The last study’s results are in Hub design.'), { timeout: 5000 })
   })
 
   it.each(['failed', 'aborted'])('a %s hub study → "did not finish", not "Not solved yet."', async (st) => {
@@ -198,7 +198,7 @@ describe('greeting: stale review, the fresh fallback and C6 (P28)', () => {
   const NONE = { running: false, status: 'idle', condition: null,
     objective: null, solve_time: null, dispatch: 'none' } as const
   const STALE = 'A study has run, but the network was solved since — run it again in Hub design.'
-  const DONE = 'A study has run on this network — its results are in Hub design.'
+  const DONE = 'The last study’s results are in Hub design.'
   const review = (stale: boolean) => ({ status: 'ok', source: 's', stale, summary: {},
     findings: [], next_steps: [] })
 
@@ -231,6 +231,32 @@ describe('greeting: stale review, the fresh fallback and C6 (P28)', () => {
     vi.mocked(resultsApi.getEhReview).mockResolvedValue(review(true) as never)
     renderGreeting()
     await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent).toBe(STALE))
+  })
+
+  // O1 (owner, 2026-09-30) / gate probe Q16: live dispatch the backend marks
+  // stale says the network changed since its last solve — the finished
+  // study's results no longer describe it either (pre-P28 precedence).
+  it('hub done, review not stale, live dispatch stale → the stale sentence', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({
+      running: false, status: 'completed', condition: 'optimal',
+      objective: 1, solve_time: 3, dispatch: 'stale',
+    })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done' } as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review(false) as never)
+    renderGreeting()
+    await vi.waitFor(() => expect(resultsApi.getEhReview).toHaveBeenCalled())
+    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent).toBe(STALE))
+  })
+
+  it('the done sentence claims nothing about the current network', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done' } as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review(false) as never)
+    renderGreeting()
+    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent).toBe(DONE))
+    expect(DONE).not.toMatch(/this network|match/)
   })
 
   it('fresh dispatch, no foreground solve, no hub study (204) → "see Results", not Hub design', async () => {

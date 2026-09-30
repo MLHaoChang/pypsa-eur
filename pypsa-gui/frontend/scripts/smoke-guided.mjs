@@ -1725,7 +1725,7 @@ async function p26Template(browser, tpl) {
       check((await byId('hub-results-set-goal').count()) === 0, 'goal set: no "Set a goal" button')
     }
     // P26 item 7: the greeting points to Hub design, never "Not solved yet."
-    const HUB_LINE = 'A study has run on this network — its results are in Hub design.'
+    const HUB_LINE = 'The last study’s results are in Hub design.'
     await page.waitForFunction(w => document.querySelector('[data-testid="chat-launch-solve"]')?.textContent === w,
       HUB_LINE, { timeout: 15_000 })
     ok(`greeting after the study: "${HUB_LINE}"`)
@@ -2538,7 +2538,7 @@ async function phaseP32(browser) {
 const STUB_PROFILE_2 = 'smoke-stub-2'
 const ANTHROPIC_PROFILE = 'anthropic-sonnet'
 const P28_STALE = 'A study has run, but the network was solved since — run it again in Hub design.'
-const P28_DONE = 'A study has run on this network — its results are in Hub design.'
+const P28_DONE = 'The last study’s results are in Hub design.'
 const P28_C6 = 'No study has run yet — start in Hub design.'
 
 async function p28Context(browser, project, mode) {
