@@ -64,6 +64,16 @@ if not FRONTEND_DIST.is_dir():
 datas = [
     (str(BACKEND / "project_templates"), "project_templates"),
     (str(BACKEND / "templates" / "matpower.jinja2"), "templates"),
+    # The decision study (guided investment study MVP-1, S9). Both are read
+    # `__file__`-relative, like `presets.json` below: `services/study/
+    # render_html.py` resolves `parents[2] / "templates"` and `services/study/
+    # library.py` resolves `parents[2] / "study_library"`, i.e. _MEIPASS root
+    # under `pathex=[str(BACKEND)]`. The library is vendored data (two CSVs,
+    # the finance YAML, `load_profiles/`); the runtime never downloads it.
+    # `tests/test_packaging_requirements.py` rebuilds this layout and loads
+    # both modules from it.
+    (str(BACKEND / "templates" / "decision_report.html.j2"), "templates"),
+    (str(BACKEND / "study_library"), "study_library"),
     # `local_bootstrap` runs `alembic upgrade head` on every launch and points
     # `script_location` at `<backend>/alembic`, so both must ship.
     (str(BACKEND / "alembic"), "alembic"),
@@ -167,6 +177,12 @@ hiddenimports = [
     # spelled out so a future change to that guard cannot drop the package
     # from the bundle without a build error.
     "cloudpickle",
+    # The decision report's charts (`services/study/report_charts.py`) pick
+    # Agg by NAME (`matplotlib.use("Agg")`) and `Figure.savefig(format="png")`
+    # finds its canvas through a string table, so no import of the backend is
+    # visible to static analysis. PyInstaller's matplotlib hook detects the
+    # `use()` call today; declared here so the report does not depend on it.
+    "matplotlib.backends.backend_agg",
     "gridspine.drivers.study", "gridspine.drivers.status",
     "gridspine.schema.contracts", "gridspine.templates.unit_params",
 ]

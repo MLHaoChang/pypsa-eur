@@ -76,14 +76,46 @@ from services.study import tariff as study_tariff
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["RunRefused", "STUDY_KEY", "abort_study_run", "get_study_run",
-           "start_study_run"]
+__all__ = ["RunRefused", "STUDY_KEY", "SolveDeadlineExceeded", "abort_study_run",
+           "get_study_run", "start_study_run"]
 
 STUDY_KEY = "decision_study"
 _POLL_S = 0.05
+#: How long the runner (and the tornado, which shares `_wait`) waits for ONE
+#: queued solve, queue time included, before it aborts the job and fails with
+#: `SolveDeadlineExceeded` (gate S4 nit: the wait had no deadline, so a hung
+#: solver thread pinned the worker for ever). Generous on purpose: an MVP-1
+#: option is one 8760 h LP that solves in seconds to minutes; the deadline
+#: exists for a solver that never returns, not to cap a slow one.
+SOLVE_WAIT_DEADLINE_S = 4 * 3600.0
+#: After the deadline's abort, how long the job may take to reach a terminal
+#: state before the wait gives up on it (`stuck`).
+_ABORT_GRACE_S = 60.0
 _TERMINAL = ("completed", "failed", "aborted", "interrupted")
 _PUBLIC_DROP = ("thread", "stop_event")
 _ECON_CLASSES = ("generators", "storage_units", "stores", "links")
+
+
+class SolveDeadlineExceeded(RuntimeError):
+    """
+    A queued solve did not finish within `SOLVE_WAIT_DEADLINE_S`. The job was
+    asked to abort; ``stuck`` is True when it had still not stopped after the
+    grace period (its fork then cannot be deleted while the queue holds it).
+    ``code`` is stable, for the run record and the failure taxonomy.
+    """
+
+    code = "solve_deadline_exceeded"
+
+    def __init__(self, job, seconds: float, *, stuck: bool):
+        self.job_id = getattr(job, "id", None)
+        self.project = getattr(job, "project_id", None)
+        self.seconds = float(seconds)
+        self.stuck = bool(stuck)
+        self.message = (
+            f"the solve of {self.project!r} did not finish within {self.seconds:.0f} s; "
+            "its queue job was aborted"
+            + (" but had not stopped when the wait gave up" if self.stuck else ""))
+        super().__init__(self.message)
 
 
 class RunRefused(RuntimeError):
@@ -509,15 +541,34 @@ def _set(ctx, record: dict, **kw) -> None:
         record.update(kw)
 
 
-def _wait(job, stop_event: threading.Event) -> None:
+def _wait(job, stop_event: threading.Event, *, deadline_s: float | None = None) -> None:
+    """
+    Wait for ``job`` to reach a terminal state, aborting it in the queue when
+    ``stop_event`` is set. Past the deadline (``SOLVE_WAIT_DEADLINE_S`` unless
+    given) the job is aborted and `SolveDeadlineExceeded` raised once it has
+    stopped, or after `_ABORT_GRACE_S` if it will not (``stuck``).
+    """
     from services.solve_queue import solve_queue
 
+    limit = SOLVE_WAIT_DEADLINE_S if deadline_s is None else float(deadline_s)
+    deadline = time.monotonic() + limit
     aborted = False
+    expired_at = None
     while job.status not in _TERMINAL:
+        now = time.monotonic()
+        if expired_at is None and now >= deadline:
+            expired_at = now
+            if not aborted:
+                solve_queue.abort(job.id)
+                aborted = True
+        if expired_at is not None and now - expired_at >= _ABORT_GRACE_S:
+            raise SolveDeadlineExceeded(job, limit, stuck=True)
         if stop_event.is_set() and not aborted:
             solve_queue.abort(job.id)
             aborted = True
         time.sleep(_POLL_S)
+    if expired_at is not None:
+        raise SolveDeadlineExceeded(job, limit, stuck=False)
 
 
 def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
@@ -589,14 +640,24 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
                 storage_dir=str(project_registry.project_dir(row)),
                 solver_config_json=json.dumps(asdict(cfg)),
                 enqueued_by_user_id=user_id)
-            _wait(job, stop_event)
-            if job.status == "completed":
+            timed_out = None
+            try:
+                _wait(job, stop_event)
+            except SolveDeadlineExceeded as exc:
+                timed_out = exc
+            if job.status == "completed" and timed_out is None:
                 n = _solved_network(row)
                 outcome = _read_option(n, cfg, tariff, opt, fidelity, currency_year)
                 outcome["result"] = outcome["result"].model_copy(
                     update={"project_ref": str(row.id)})
                 outcome["network_hash"] = _network_hash(
                     project_registry.project_dir(row) / "network.nc")
+            elif timed_out is not None:
+                # A typed failure of THIS option (gate S4 nit); the run stops
+                # below, because a solver that hangs pins the queue for the rest.
+                outcome = {"option_id": opt.option_id, "result": _not_run(
+                    opt, "failed", fidelity, currency_year, str(row.id)),
+                    "error": f"{timed_out.code}: {timed_out.message}"}
             else:
                 outcome = {"option_id": opt.option_id, "result": _not_run(
                     opt, "aborted" if job.status == "aborted" else "failed",
@@ -612,7 +673,11 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
                     record["solved"].append(opt.option_id)
                 record["pending"] = [o.option_id for o in options
                                      if o.option_id not in outcomes]
-        status = "aborted" if stop_event.is_set() else "done"
+            if timed_out is not None:
+                error = f"{timed_out.code}: {timed_out.message} (option {opt.option_id})"
+                break
+        status = ("aborted" if stop_event.is_set()
+                  else "failed" if error is not None else "done")
     except Exception as exc:  # noqa: BLE001 — recorded on the run
         logger.exception("decision study %s run failed", study_id)
         error = f"{type(exc).__name__}: {exc}"

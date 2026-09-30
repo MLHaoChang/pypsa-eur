@@ -30,6 +30,9 @@ child project of the study's own base project (M0), named deterministically
 * **Deletion** (abort, study delete, M2 throw-away forks) refuses while the
   solve queue holds an active job for the fork, and refuses a fork a user
   has branched a scenario from, rather than cascading into the user's copy.
+* **The startup sweep** (:func:`sweep_leftover_forks`, called by
+  ``main.lifespan``; plan S9, gate S6 [N7]) removes what a crash left behind:
+  throw-away variant forks, and option forks whose study record is gone.
 """
 from __future__ import annotations
 
@@ -47,7 +50,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "FORK_SEPARATOR", "ForkError", "OWNER_KEYS", "VARIANT_SEPARATOR",
     "create_option_fork", "create_variant_fork", "delete_fork", "fork_name",
-    "is_study_owned", "owned_forks", "variant_fork_name",
+    "is_study_owned", "owned_forks", "sweep_leftover_forks", "variant_fork_name",
 ]
 
 FORK_SEPARATOR = "-opt-"
@@ -265,3 +268,75 @@ def _create_fork(db, user_id, *, base_row, study_id: str, name: str, description
             pass
         raise
     return child
+
+
+def sweep_leftover_forks(db) -> list[str]:
+    """
+    Delete the study forks a crash left behind; return their names.
+
+    Run once at startup (``main.lifespan``), before the solve queue is
+    reconciled, when no run or tornado can be live. Two kinds, and only
+    what is PROVABLY study-owned by the ownership rule (M2,
+    :func:`is_study_owned`: the fork's metadata names the study and the base
+    AND its database row is a direct child of that base):
+
+    * a THROW-AWAY variant fork (``throwaway`` and ``owner_variant_id`` in
+      its metadata, ``-var-`` in its name): a tornado deletes each one after
+      reading it, on every path, so one that exists at startup was left by a
+      crash (gate S6 [N7]);
+    * an OPTION fork whose study record (``studies/<study_id>.json`` in the
+      base's directory) no longer exists. A record that exists but cannot be
+      read is not absent: nothing is provable, nothing is deleted. A base
+      whose directory is gone is left to ``storage_reconcile``.
+
+    Every deletion goes through :func:`delete_fork`, which verifies ownership
+    again and refuses a fork with an active queue job or a child project; a
+    refusal is logged and the fork kept. Never raises for one fork.
+    """
+    from sqlalchemy import select
+
+    from db.models import Project
+    from services import project_registry
+    from services.study import store
+
+    swept: list[str] = []
+    children = list(db.scalars(
+        select(Project).where(Project.parent_project_id.is_not(None))).all())
+    for row in children:
+        try:
+            meta = _meta(project_registry.project_dir(row))
+            study_id = meta.get("owner_study_id")
+            base_uuid = meta.get("owner_base_project")
+            if not isinstance(study_id, str) or not isinstance(base_uuid, str):
+                continue
+            if not is_study_owned(row, study_id=study_id, base_uuid=base_uuid):
+                continue
+            if meta.get("throwaway") is True:
+                if not meta.get("owner_variant_id") or VARIANT_SEPARATOR not in row.name:
+                    continue
+            elif meta.get("owner_option_id"):
+                base = db.get(Project, row.parent_project_id)
+                if base is None:
+                    continue
+                base_dir = project_registry.project_dir(base)
+                if not base_dir.is_dir():
+                    continue
+                try:
+                    record = store._path(base_dir, study_id)
+                except ValueError:
+                    continue
+                if record.exists():
+                    continue
+            else:
+                continue
+            name = row.name
+            if delete_fork(db, row, study_id=study_id, base_uuid=base_uuid):
+                swept.append(name)
+                logger.info("forks: swept leftover study fork %s (study %s)",
+                            name, study_id)
+        except ForkError as exc:
+            logger.warning("forks: leftover study fork %s kept (%s)",
+                           getattr(row, "name", "?"), exc.code)
+        except Exception:  # noqa: BLE001 — one fork never stops the sweep
+            logger.exception("forks: could not sweep %s", getattr(row, "name", "?"))
+    return swept

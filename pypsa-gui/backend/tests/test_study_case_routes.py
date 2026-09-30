@@ -212,3 +212,32 @@ def test_the_run_records_the_bills_fidelity(client, api_project, studies_on, fak
     rec = _run(client, "case-fid", sid)
     assert rec["details"]["bess_2h"]["bill"]["fidelity"] == "quick_screen"
     assert rec["details"]["none"]["bill"]["fidelity"] == "quick_screen"
+
+
+def test_a_run_record_without_the_forks_hash_is_refused_not_trusted(
+        client, api_project, studies_on, fake, project_storage_dir):
+    """
+    Gate S5 carry G11: `run_hashes.fork_matches(None, current)` is False, so
+    a run record that never recorded the option fork's hash (an older record,
+    a hand-edited one, a write that failed) answers 409, exactly as an edited
+    fork does — a missing hash is not a match. Mutation G11 (accept a
+    missing hash) left the suite green before this test. The recorded
+    hashes of the OTHER options stay, so only this option is refused.
+    """
+    from services.study import store
+
+    sid = _setup(client, api_project, "case-nohash")
+    _run(client, "case-nohash", sid)
+    base = project_storage_dir("case-nohash")
+    findings = store.load_aux(base, sid, "findings")
+    ref = next(o["project_ref"] for o in findings["options"] if o["option_id"] == "bess_2h")
+    hashes = findings["hashes"]["option_network_hashes"]
+    assert ref in hashes and len(hashes) == 5
+    del hashes[ref]
+    store.save_aux(base, sid, "findings", findings)
+    for suffix in ("case", "case.xlsx"):
+        r = client.get(f"/api/projects/case-nohash/studies/{sid}/options/bess_2h/{suffix}")
+        assert r.status_code == 409, (suffix, r.status_code, r.text[:300])
+        assert r.json()["detail"]["error_kind"] == "fork_changed_since_run"
+    other = client.get(f"/api/projects/case-nohash/studies/{sid}/options/bess_1h/case")
+    assert other.status_code == 200, other.text

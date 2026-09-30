@@ -1638,6 +1638,23 @@ def _carry_sidecars_on_move(
 
 
 
+def _saves_its_own_directory(bound_dir, loaded: str | None, name: str,
+                             dest: pathlib.Path) -> bool:
+    """
+    True when a save writes a network back into the directory it was bound
+    to before the save: the context's storage directory is ``dest``, or (a
+    legacy name-only binding with no directory) its project name is
+    ``name``. A first save of an unbound network and a save of another
+    project's network over ``dest`` are not.
+    """
+    if bound_dir:
+        try:
+            return pathlib.Path(bound_dir).resolve() == pathlib.Path(dest).resolve()
+        except OSError:
+            return False
+    return loaded is not None and loaded == name
+
+
 def _check_save_allowed(
     ctx,
     name: str,
@@ -1876,6 +1893,11 @@ def _save_context(
         # None` (fresh / unbound network) falls through — the claim at the end
         # of this block establishes the binding.
         loaded = ctx.loaded_project
+        # Which DIRECTORY the network belongs to, read with `loaded` and
+        # before the claim below can rebind it: decides whether this save
+        # writes a project's own network back (its study-fork ownership
+        # round-trips) or another network over it (it does not).
+        bound_dir = getattr(ctx, "storage_dir", None)
         n = _check_save_allowed(
             ctx, name,
             loaded=loaded, expect=expect, force=force, rebind=rebind,
@@ -2077,11 +2099,17 @@ def _save_context(
             "scenario_description": new_desc,
             "scenario_type": new_type,
             # Decision-study fork ownership (S4, `services/study/forks.py`):
-            # round-tripped from THIS directory's metadata only, so a fork's
-            # own saves (the queue's post-solve save above all) keep it, and
-            # a save into another directory (Save-As, a copy) never gains it.
-            **{k: existing_meta[k] for k in _STUDY_FORK_META_KEYS
-               if k in existing_meta},
+            # round-tripped from THIS directory's metadata, and only when the
+            # network being written is this directory's own — a fork's own
+            # saves (the queue's post-solve save, the Expert view's Ctrl+S)
+            # keep it. A save into another directory never gains it, and a
+            # forced Save-As / Save-a-Copy of ANOTHER network over a fork's
+            # directory drops it (gate S4 [N], S9): the directory now holds
+            # the user's work, which a re-run or the study's delete would
+            # otherwise remove as the study's.
+            **({k: existing_meta[k] for k in _STUDY_FORK_META_KEYS
+                if k in existing_meta}
+               if _saves_its_own_directory(bound_dir, loaded, name, dest) else {}),
         })
     ts_columns_saved = len(user_ts_data) if isinstance(user_ts_data, dict) else 0
     # Flat-count the leaves of the nested {comp: {attr: {col: ...}}} structure.

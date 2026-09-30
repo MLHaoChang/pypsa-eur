@@ -688,3 +688,39 @@ def test_each_seed_tariffs_notes_are_digit_free_codes_with_their_prose_kept(
     # The sentence a reader sees stays, keyed by its code.
     assert set(tariff.honesty_help) == set(tariff.honesty_notes)
     assert all(len(text) > 25 for text in tariff.honesty_help.values())
+
+
+# ── gate S5 carry G10: the loader refuses a prose honesty-note label ──────
+
+@pytest.mark.parametrize("label", [
+    "Illustrative figures, not a published tariff",   # prose in the code column
+    "tariff_2026_seed",                                # a digit in a code
+    "TariffIllustrative",                              # not snake_case
+])
+def test_the_loader_refuses_a_honesty_note_label_that_is_not_a_digit_free_code(
+        tmp_path, label):
+    """
+    The label column of a `honesty_note` row is a CODE: it travels into the
+    case, the XLSX Provenance sheet and the report, whose prose guard rejects
+    digits, and the sentence belongs in the `note` column (gate S5 BC-S5-3).
+    A prose label must be refused at load, never carried as a note. Mutation
+    G10 (the loader's guard removed) left the suite green before this test.
+    """
+    src = lib.LIBRARY_DIR / "tariffs.csv"
+    rows = list(csv.DictReader(io.StringIO(src.read_text(encoding="utf-8"))))
+    note = next(r for r in rows if r["component"] == "honesty_note")
+    note["label"] = label
+    out = tmp_path / "tariffs.csv"
+    with out.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        w.writeheader()
+        w.writerows(rows)
+    with pytest.raises(lib.LibraryError, match="snake_case code without digits"):
+        lib._parse_tariffs(out)
+
+
+def test_the_shipped_tariffs_parse_with_their_codes(library):
+    """The positive control for the refusal above: the shipped file loads."""
+    for tariff in library.tariffs.values():
+        assert tariff.honesty_notes
+        assert all(lib._NOTE_CODE_RE.fullmatch(c) for c in tariff.honesty_notes)

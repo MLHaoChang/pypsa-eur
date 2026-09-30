@@ -121,6 +121,12 @@ EXPECTED = (
     # data the code reads at run time, so a bundle without them launches fine
     # and 500s on the first study.
     "case39_units.yaml", "case39.json",
+    # The decision study (guided investment study MVP-1, S9): the report's
+    # template and the vendored assumptions library, both read
+    # `__file__`-relative. Without them the app launches and the first report
+    # or study answers 500.
+    "decision_report.html.j2", "study_library", "technology_costs.csv",
+    "tariffs.csv", "finance_defaults.yaml", "load_profiles",
 )
 
 # Info.plist usage-description keys macOS TCC requires before the app may

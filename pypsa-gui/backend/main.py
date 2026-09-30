@@ -535,6 +535,22 @@ async def lifespan(app: FastAPI):
         # desktop splash reasonably read it as the first.
         run_first_run_import()
     PyPSAService.initialize()
+    # Decision-study forks a crash left behind (plan 2026-09-28 guided
+    # investment study MVP-1, S9; gate S6 [N7]): throw-away tornado variants
+    # and option forks whose study record is gone, and only what is provably
+    # study-owned (`services/study/forks.py::sweep_leftover_forks`). BEFORE the
+    # queue is reconciled: a job it re-enqueues on such a fork would make the
+    # fork undeletable (`fork_solving`). Never fails boot.
+    try:
+        from services.study import forks as study_forks
+
+        with db_session_module.SessionLocal() as db:
+            swept = study_forks.sweep_leftover_forks(db)
+        if swept:
+            logger.info("startup: swept %d leftover decision-study fork(s): %s",
+                        len(swept), ", ".join(swept))
+    except Exception:  # noqa: BLE001 — a sweep that fails leaves forks, not a dead app
+        logger.exception("decision-study fork sweep failed; continuing without it")
     # Solve-queue boot reconciliation. Placed AFTER `ensure_schema` (which runs
     # in the local branch above) so the table exists on the desktop path, and
     # after `PyPSAService.initialize()` so a resumed job has a service to build

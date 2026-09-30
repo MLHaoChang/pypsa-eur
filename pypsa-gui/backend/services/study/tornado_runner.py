@@ -69,6 +69,19 @@ def _refused(exc: F.FindingsRefused) -> R.RunRefused:
     return R.RunRefused(exc.status, exc.code, exc.message)
 
 
+def _wait_variant(job, stop_event: threading.Event) -> None:
+    """
+    `runner._wait` for one variant solve. Past the runner's deadline the
+    variant is a typed `findings.VariantFailed` (`solve_deadline_exceeded`):
+    the row it served is not established, the tornado carries on and its
+    fork is still deleted (gate S4 nit, the wait had no deadline).
+    """
+    try:
+        R._wait(job, stop_event)
+    except R.SolveDeadlineExceeded as exc:
+        raise F.VariantFailed(exc.code, exc.message) from None
+
+
 class ForkSolver:
     """
     ``solve(network, cfg, variant_id)`` for ``findings.run_tornado``: one
@@ -130,7 +143,7 @@ class ForkSolver:
                 storage_dir=str(project_registry.project_dir(row)),
                 solver_config_json=json.dumps(asdict(cfg)),
                 enqueued_by_user_id=self.user_id)
-            R._wait(job, self.stop_event)
+            _wait_variant(job, self.stop_event)
             if job.status != "completed":
                 if job.status == "aborted" or self.stop_event.is_set():
                     return None

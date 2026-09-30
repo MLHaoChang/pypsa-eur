@@ -350,3 +350,114 @@ def test_the_bundle_check_expects_the_pipelines_data_files():
     finally:
         sys.path.pop(0)
     assert {"case39_units.yaml", "case39.json"} <= set(check_bundle.EXPECTED)
+
+
+# --------------------------------------------------------------------------
+# the decision study ships its report template and its assumptions library
+# (plan 2026-09-28 guided investment study MVP-1, S9; gates S2, S4, S7, S8)
+# --------------------------------------------------------------------------
+
+_BACKEND_DATAS = re.compile(r'\(str\(BACKEND((?:\s*/\s*"[^"]+")+)\),\s*"([^"]*)"\)')
+
+
+def _spec_backend_datas() -> dict[str, str]:
+    """
+    ``{source relative to backend: destination}`` for every ``datas`` entry
+    the spec takes from ``BACKEND``. The spec cannot be imported (PyInstaller
+    injects its globals), so its text is read.
+    """
+    out: dict[str, str] = {}
+    for m in _BACKEND_DATAS.finditer(SPEC.read_text(encoding="utf-8")):
+        out["/".join(re.findall(r'"([^"]+)"', m.group(1)))] = m.group(2)
+    return out
+
+
+def _check_bundle():
+    sys.path.insert(0, str(BACKEND / "smoke"))
+    try:
+        import check_bundle
+    finally:
+        sys.path.pop(0)
+    return check_bundle
+
+
+def test_the_decision_studys_template_and_library_are_in_the_spec_and_the_bundle_check():
+    """
+    `services/study/render_html.py` reads `templates/decision_report.html.j2`
+    and `services/study/library.py` reads `study_library/` (its CSVs, the
+    finance YAML and `load_profiles/`), both `__file__`-relative. A bundle
+    without them launches fine and 500s on the first report or the first
+    study.
+    """
+    datas = _spec_backend_datas()
+    assert datas.get("templates/decision_report.html.j2") == "templates", datas
+    assert datas.get("study_library") == "study_library", datas
+    expected = set(_check_bundle().EXPECTED)
+    assert {"decision_report.html.j2", "study_library", "technology_costs.csv",
+            "tariffs.csv", "finance_defaults.yaml", "load_profiles"} <= expected
+
+
+def test_the_report_charts_agg_backend_is_a_declared_hidden_import():
+    """
+    `report_charts._figure` selects `Agg` by NAME (`matplotlib.use("Agg")`)
+    and `Figure.savefig(format="png")` resolves the canvas through a string
+    table, so static analysis sees no import of the Agg backend. PyInstaller's
+    matplotlib hook happens to pick it up from the `use()` call today; the
+    spec says so itself rather than relying on the hook's detection.
+    """
+    text = SPEC.read_text(encoding="utf-8")
+    assert '"matplotlib.backends.backend_agg"' in text
+    assert "matplotlib" in _pinned_distributions()
+
+
+def test_the_decision_studys_data_resolves_in_a_frozen_layout(tmp_path):
+    """
+    The frozen layout, rebuilt from the spec: `pathex=[BACKEND, ...]` puts
+    `services/study/*.py` at `_MEIPASS/services/study/`, and each `datas`
+    entry lands at its destination (a file under the destination directory,
+    a directory's contents AS the destination). The two modules are loaded
+    from that tree, so their `__file__`-relative paths are the frozen ones —
+    the `presets.json` and `matpower.jinja2` precedent — and must find the
+    template and every library file there.
+    """
+    import importlib.util
+    import shutil
+
+    meipass = tmp_path / "_MEIPASS"
+    for src, dest in _spec_backend_datas().items():
+        source = BACKEND / src
+        if not src.startswith(("templates", "study_library")):
+            continue
+        if source.is_dir():
+            shutil.copytree(source, meipass / dest)
+        else:
+            (meipass / dest).mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, meipass / dest / source.name)
+    frozen = meipass / "services" / "study"
+    frozen.mkdir(parents=True)
+    modules = {}
+    for name in ("render_html", "library"):
+        shutil.copy2(BACKEND / "services" / "study" / f"{name}.py", frozen / f"{name}.py")
+        spec = importlib.util.spec_from_file_location(
+            f"_frozen_probe_{name}", frozen / f"{name}.py")
+        module = importlib.util.module_from_spec(spec)
+        # dataclasses resolve their annotations through `sys.modules`
+        sys.modules[spec.name] = module
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop(spec.name, None)
+        modules[name] = module
+
+    render_html, library = modules["render_html"], modules["library"]
+    assert render_html.TEMPLATES_DIR == meipass / "templates"
+    template = render_html.environment().get_template("decision_report.html.j2")
+    assert template.filename == str(meipass / "templates" / "decision_report.html.j2")
+
+    assert library.LIBRARY_DIR == meipass / "study_library"
+    loaded = library.load_library()
+    assert loaded.tariffs and loaded.finance["library_version"] == library.LIBRARY_VERSION
+    profiles = library.LIBRARY_DIR / "load_profiles"
+    shipped = {p.name for p in (BACKEND / "study_library" / "load_profiles").iterdir()
+               if p.is_file()}
+    assert shipped and shipped <= {p.name for p in profiles.iterdir()}
