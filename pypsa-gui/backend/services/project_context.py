@@ -17,11 +17,15 @@ contexts make them earn their keep); per-project locking without concurrent
 contexts would be premature.
 
 What is per-context vs global:
-  * Per-context (here): the network, its on-disk identity, and its transient-row
-    registry — all meaningless across projects.
+  * Per-context (here): the network, its on-disk identity, its transient-row
+    registry, and its user-uploaded time-series store — all meaningless across
+    projects, and the last of them unsafe to share across them (see `user_ts`).
   * Global (stays on PyPSAService): the mutation lock and the netCDF I/O lock.
     The latter guards process-global, thread-unsafe HDF5 library state and MUST
     remain a single shared instance even once multiple contexts are resident.
+    `services/user_timeseries._user_ts_lock` is global for the first reason and
+    not the second: it guards whichever context's dict the caller resolved, which
+    is coarser than necessary and never wrong.
 """
 from __future__ import annotations
 
@@ -187,6 +191,33 @@ class ProjectContext:
     # before the context is dropped. See ChatState above for field details.
     chat_state: ChatState = field(default_factory=ChatState)
 
+    # ── User-uploaded time series ───────────────────────────────────────────
+    # Every GUI-uploaded profile for THIS project, keyed
+    # `(component, attribute, column_name)` — the store `services/
+    # user_timeseries.py` owns the semantics of, and whose module-level
+    # `_user_ts` name is a per-context VIEW of this dict.
+    #
+    # ★ Per-context because the store is AUTHORITATIVE, not a cache.
+    # `GET /api/network/timeseries/{component}/{attribute}` prefers it over the
+    # network's own `_t` tables, every foreground save serialises it into that
+    # project's `user_ts.json`, and `_reapply_user_ts_to_network` writes it back
+    # onto the network immediately before the netCDF export — so whatever is in
+    # it at save time is what lands in `network.nc` and in the solve results.
+    # While it was a module-level dict, one process serving many signed-in
+    # sessions shared all of that: org A's uploaded demand profile was readable
+    # from org B's own project and was persisted into B's storage, and A opening
+    # a project wiped B's in-flight uploads. Reproduced cross-org; the write-up is
+    # the 2026-09-12 `user-ts-is-a-process-global-shared-across-tenants` finding
+    # under `docs/superpowers/findings/`, and `tests/test_user_ts_tenancy.py` pins
+    # all four properties it requires.
+    #
+    # The `Any` value type is `pd.Series`, spelled loosely to keep this module's
+    # imports to `pypsa` alone (the same reason `ChatState.session` is `Any`).
+    #
+    # LIFECYCLE — carried forward (as a COPY) by `reset_network` / `set_network`,
+    # NOT carried by `build_context`. See those methods for why each way round.
+    user_ts: dict[tuple[str, str, str], Any] = field(default_factory=dict)
+
     @property
     def registry_key(self) -> str | None:
         """
@@ -287,6 +318,53 @@ STUDY_LABELS = {
 # drift the day someone REMOVES an abort.
 ABORTABLE_STUDIES = ("coupling_loop", "margin_loop", "mc", "frontier",
                      "fmea_sweep", "eh_study")
+
+
+def holds_user_series(ctx: Any) -> bool:
+    """
+    True when `ctx` holds user-uploaded time series that a save must persist.
+
+    THE ONE DEFINITION, because the two callers are the two places a project is
+    written to disk WITHOUT the user asking — the desktop shutdown flush and the
+    resident-cap eviction — and a guard that differs between them is not a guard.
+
+    It replaces `ctx is PyPSAService._active`, which both call sites used to ask.
+    That predicate meant "is this the open project" only before Step 0b; `_active`
+    is a BOOTSTRAP slot now, handed to the first session that asks and set to None
+    (`adopt_process_foreground`), so it answered False for every real project and
+    both paths silently stopped writing `user_ts.json`. See
+    `docs/superpowers/findings/2026-09-28-every-shutdown-flush-saves-with-persist-user-ts-false.md`.
+
+    ★ NOT simply `True`, though the reason is narrower than it was. A save with
+    `persist_user_ts=True` serialises this context's store, and `_save_context`
+    UNLINKS `user_ts.json` when that store is empty. That used to be sharp: a
+    context hydrated from disk had an EMPTY store, so `True` would delete a good
+    sidecar for any project the user merely opened, and after representative-week
+    sampling would replace a full-year series on disk with the 168-row `_t` view.
+    `_hydrate_context_from_disk` restores the sidecar now, so a hydrated context's
+    store is faithful and `True` would agree with this predicate in the ordinary
+    case.
+
+    What survives is the case where the sidecar cannot be READ. A corrupt or
+    unreadable `user_ts.json` is TOLERATED by the hydrate (it must be — that path
+    runs twice per authenticated request, and raising would 500 every route), and
+    it leaves the store empty. `True` would then reconstruct a narrower sidecar
+    from the `_t` tables and write it over the file, destroying the only copy of
+    whatever was in it; asking what the context holds leaves the bytes on disk for
+    a human to recover. It also keeps an unattended save from CREATING a sidecar
+    for a project that never had one.
+
+    KNOWN RESIDUAL: a user who deletes every uploaded series and then quits
+    without saving keeps a stale `user_ts.json`, because an empty store is
+    indistinguishable here from a never-populated one. Fixing that needs a
+    per-context "user series were touched" flag, which is not worth a bool on
+    every context until someone reports it.
+
+    `getattr` rather than attribute access because `shutdown.flush_all` is
+    deliberately driven with stub contexts in its tests and types its contexts
+    `Any`, the same reason `_context_label` and `_holds_work` are defensive.
+    """
+    return bool(getattr(ctx, "user_ts", None))
 
 
 def record_is_running(record) -> bool:
