@@ -2290,7 +2290,13 @@ def _ic_label(ln: dict) -> str:
     src = (ln.get("provenance") or {}).get("source")
     if not _ic_is_finance_source(src) or src in ("debt", stream):
         return _cut(stream, 80)
-    return _cut(f"{stream}:{src}", 80)
+    src = str(src)
+    return _cut(f"{stream}:{src[4:] if src.startswith('tax:') else src}", 80)
+
+
+def _money(v):
+    """Money rounded to the cent, -0.0 written as 0.0."""
+    return None if v is None else round(float(v), 2) + 0.0
 
 
 def _ic_rate(report: dict, sim_state) -> tuple[float, str]:
@@ -2343,17 +2349,18 @@ def _ic_equity_attribution(report: dict, rate: float, top: int) -> dict:
     return {
         "status": "ok",
         "equity_post_tax_irr": _ne(p.get("equity_post_tax_irr"), 6),
-        "equity_post_tax_npv_at_rate": _eur(sum(float(c) * d for c, d in zip(eq, disc))),
-        "sum_of_stream_pvs": _eur(sum(pv.values())),
+        "equity_post_tax_npv_at_rate": _money(sum(float(c) * d for c, d in zip(eq, disc))),
+        "sum_of_stream_pvs": _money(sum(pv.values())),
         "reconciles": residual <= 0.01 + 1e-9 * max(1.0, max(abs(float(v)) for v in eq)),
-        "max_yearly_residual": _eur(residual),
+        "max_yearly_residual": _money(residual),
         "streams_total": len(streams),
-        "by_stream": [{"stream": k, "pv": _eur(pv[k]),
-                       "undiscounted": _eur(sum(by_label[k])),
-                       "effect_on_irr": "raises" if pv[k] > 0 else "lowers"}
+        "by_stream": [{"stream": k, "pv": _money(pv[k]),
+                       "undiscounted": _money(sum(by_label[k])),
+                       "effect_on_irr": ("raises" if pv[k] > 0 else
+                                         "lowers" if pv[k] < 0 else "none")}
                       for k in streams[:top]],
-        "largest_cells": [{"stream": k, "year": years[i], "pv": _eur(v),
-                           "amount": _eur(by_label[k][i])} for k, i, v in cells[:top]],
+        "largest_cells": [{"stream": k, "year": years[i], "pv": _money(v),
+                           "amount": _money(by_label[k][i])} for k, i, v in cells[:top]],
     }
 
 
@@ -2367,8 +2374,9 @@ def _ic_min_dscr_year(report: dict, top: int) -> dict:
     if d.get("status") != "ok" or not cands or not years:
         return {"status": "not_established",
                 "reason": str(d.get("note") or "no debt service, so no DSCR")[:300]}
-    v, i = min(cands)
+    v, i = min(cands)                    # a tie: the earliest year
     year = years[i]
+    tied = sum(1 for w, _ in cands if abs(w - v) <= 1e-9 * max(1.0, abs(v)))
 
     def at(key):
         s = dp.get(key) or []
@@ -2388,9 +2396,10 @@ def _ic_min_dscr_year(report: dict, top: int) -> dict:
         parts[_IC_AVOIDED] = -float(cf[i])
     cfads = at("cfads")
     comp = sorted(parts.items(), key=lambda kv: -abs(kv[1]))
-    out = {"status": "ok", "year": year, "dscr": _ne(v, 4), "cfads": cfads,
+    out = {"status": "ok", "year": year, "dscr": _ne(v, 4), "years_at_min": tied,
+           "cfads": cfads,
            "cfads_parts_total": len(comp),
-           "cfads_by_stream": [{"stream": k, "amount": _eur(a)} for k, a in comp[:top]],
+           "cfads_by_stream": [{"stream": k, "amount": _money(a)} for k, a in comp[:top]],
            "cfads_reconciles": (cfads != _NE and
                                 abs(sum(parts.values()) - cfads) <= 0.01 + 1e-9 * abs(cfads)),
            "service": {"interest": at("interest"), "principal": at("principal"),
@@ -2411,7 +2420,8 @@ _IC_EXPLAIN_METHOD = (
     "undiscounted); the operating lines are the owner's TOTAL cash, so the avoided supply "
     "cost (the counterfactual, returns are on the incremental cash) is its own stream; the "
     "stream PVs sum to the post-tax equity NPV at that rate. A stream with a positive PV "
-    "raises the IRR, a negative one lowers it. Min-DSCR year: CFADS = incremental operating "
+    "raises the IRR, a negative one lowers it. Min-DSCR year (the earliest on a tie; "
+    "`years_at_min` counts the tied years): CFADS = incremental operating "
     "cash - replacement capex (terminal value excluded), split by stream; debt service = "
     "interest + principal, per tranche.")
 
