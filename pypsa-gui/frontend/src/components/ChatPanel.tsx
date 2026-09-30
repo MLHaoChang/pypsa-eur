@@ -25,19 +25,17 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 
 import {
   createChatStream,
-  getChatHealth,
   getChatHistory,
   postChatAbort,
   postChatConfirm,
   type ChatFrame,
-  type ChatHealth,
   type InterruptedTurn,
 } from '../api/chat'
-import { useChatProfiles, CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
+import { useChatProfiles, useChatReadiness, CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
 import { nk } from '../utils/queryKeys'
 import { mismatchSentence } from '../utils/projectMismatch'
 import { invalidateAssetQueries, isMutatingTier } from '../utils/assetWrite'
@@ -1498,28 +1496,21 @@ export default function ChatPanel() {
   const closeStream = useChatStore((s) => s.closeStream)
   const chatError = useChatStore((s) => s.error)
 
-  // Send gate (click-through obstacle 9): without a key for the ACTIVE
-  // profile every send came back as "API key missing". Same key ApiKeySetup
-  // and AssistantModelSettings use, so a key save or a profile switch
-  // re-reads it. Only an explicit `chat_ready: false` gates; unknown (probe
+  // Send gate (click-through obstacle 9): without a key every send came back
+  // as "API key missing". Only an explicit `false` gates; unknown (probe
   // failed, older backend without the field) stays open — a probe outage
   // must not lock the assistant.
   //
-  // `chat_ready` describes the instance's ACTIVE profile only. A turn runs on
-  // the session's pick when it names one (`profile_id` in the request, which
-  // routers/chat.py binds); a `null` pick follows the active profile — the
-  // same rule the model dropdown displays (`profileId ?? active`). So the
-  // gate applies only while the pick IS the active profile (QA gate B1: a
-  // user with no Anthropic key who picked a working local profile was
-  // locked out).
-  const { data: chatHealth } = useQuery<ChatHealth>({
-    queryKey: ['chat', 'health'],
-    queryFn: getChatHealth,
-    staleTime: 30_000,
-    retry: false,
-  })
-  const notReady = chatHealth?.chat_ready === false
-    && (profileId == null || profileId === chatHealth.active_profile?.id)
+  // P28 A3 (deferred spec §3.1): the gate reads the readiness of the profile
+  // the turn RUNS on — the pick (sent as `profile_id`), else the session's
+  // bound profile (`/history.bound_profile_id`; `/stream` keeps a bound
+  // session's binding when the request names none), else the active one —
+  // from the per-profile `chat_ready` on GET /chat/profiles, with `/health`
+  // as the active profile's fallback (QA gate B1 of P22.9-FE: a user with no
+  // Anthropic key on a working local profile is never locked out; after a
+  // reload that profile is the bound one).
+  const { ready: effectiveReady } = useChatReadiness()
+  const notReady = effectiveReady === false
   // A2 (deferred spec §2.1): while this tab and the backend disagree about the
   // open project, the assistant's tools would write into the BACKEND's project
   // (the stream is a raw fetch — the axios mismatch block never sees it). Send
@@ -1688,6 +1679,9 @@ export default function ChatPanel() {
       if (h.last_session_id) {
         setSessionId(h.last_session_id)
       }
+      // P28 A3 — the resumed session's binding; the Send gate, the dropdown
+      // and the key offer follow it while nothing is picked.
+      useChatStore.getState().setBoundProfileId(h.bound_profile_id ?? null)
       // #20 — the backend detects both of these and reports them exactly
       // once. Dropping them here would make that whole recovery path
       // invisible: the user would see a shorter conversation than they had,
@@ -2175,6 +2169,10 @@ export default function ChatPanel() {
       case 'session_init': {
         const d = _frame_data<SessionInitFrame>(frame)
         setSessionId(d.session_id)
+        // P28 A3 — the frame names the profile the session is bound to. Kept
+        // as the session's binding (the gate and the dropdown follow it), and
+        // still never copied into `profileId` (see below).
+        if (d.profile_id) useChatStore.getState().setBoundProfileId(d.profile_id)
         // The dropdown's fallback display (`profileId ?? active_profile_id`)
         // is only as fresh as its last fetch — refetch on every new session
         // so an admin's `set_active_profile` elsewhere, or a prior turn's A8
@@ -2802,7 +2800,11 @@ export default function ChatPanel() {
   // the SAME fetch, so this never lands on an id absent from `chatProfiles`
   // except in the brief window before the fetch resolves — handled by the
   // disabled placeholder below rather than by this fallback.
-  const selectedProfileId = profileId ?? activeProfileId
+  // P28 A3: a null pick shows the session's bound profile when it has one —
+  // the one its next turn runs on — so the dropdown, the Send gate and the
+  // cross-wire check below agree.
+  const boundProfileId = useChatStore((s) => s.boundProfileId)
+  const selectedProfileId = profileId ?? boundProfileId ?? activeProfileId
   const selectedProfileMeta = chatProfiles.find((p) => p.id === selectedProfileId) ?? null
 
   const [pendingProfilePick, setPendingProfilePick] = useState<{ id: string; label: string } | null>(null)

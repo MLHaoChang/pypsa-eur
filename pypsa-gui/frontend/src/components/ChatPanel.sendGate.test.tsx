@@ -11,7 +11,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
-import { createChatStream, getChatHealth, putApiKeySettings } from '../api/chat'
+import { createChatStream, getChatHealth, getChatHistory, putApiKeySettings } from '../api/chat'
 import { getChatProfiles } from '../api/llmSettings'
 import ChatPanel from './ChatPanel'
 
@@ -226,5 +226,145 @@ describe('Send gate while the tab and the backend disagree (A2)', () => {
     act(() => { useUIStore.setState({ projectMismatch: null }) })
     await waitFor(() => expect(send.disabled).toBe(false))
     expect(screen.queryByTestId('chat-send-gate')).toBeNull()
+  })
+})
+
+// P28 A3 (deferred spec 2026-09-28 §3.1, D-3): the gate reads the readiness
+// of the profile the next turn runs on — `profileId ?? boundProfileId ??
+// active` — from `GET /chat/profiles` (per-profile `chat_ready`), falling
+// back to `/health`'s `chat_ready` for the active profile when the list does
+// not say (not loaded, refused, older backend). `boundProfileId` comes from
+// `/history.bound_profile_id` on hydrate: after a reload the store's pick is
+// null, but the resumed session stays bound to the profile it ran on.
+describe('Send gate follows the bound profile and per-profile readiness (P28 A3)', () => {
+  const PROFILES = {
+    active_profile_id: 'anthropic-sonnet',
+    profiles: [
+      { id: 'anthropic-sonnet', label: 'Default', wire: 'anthropic', chat_ready: false },
+      { id: 'local-llm', label: 'Local LLM (auth none)', wire: 'openai', chat_ready: true },
+      { id: 'keyless-openai', label: 'Keyless', wire: 'openai', chat_ready: false },
+    ],
+  }
+  const TURN = {
+    ts: 1, session_id: 's-bound', model: 'm', user: 'earlier', usage: {},
+    assistant: [{ type: 'text', text: 'earlier answer' }],
+  }
+  function historyBoundTo(id: string | null) {
+    vi.mocked(getChatHistory).mockResolvedValueOnce({
+      turns: [TURN], last_session_id: 's-bound', bound_project: 'Demo',
+      history_gap: 0, pending_turn: null, bound_profile_id: id,
+    } as never)
+  }
+  afterEach(() => { useChatStore.setState({ boundProfileId: null } as never) })
+
+  it('after a reload with profileId null, /history bound to a ready non-active profile while the active profile is not ready → Send enabled', async () => {
+    vi.mocked(getChatProfiles).mockResolvedValue(PROFILES as never)
+    vi.mocked(getChatHealth).mockResolvedValue(health(false))
+    historyBoundTo('local-llm')
+    renderPanel()
+    await waitFor(() => expect(useChatStore.getState().boundProfileId).toBe('local-llm'))
+    await waitFor(() => expect(
+      (screen.getByTestId('chat-model-select') as HTMLSelectElement).value).toBe('local-llm'))
+    const user = await typeHello()
+    await new Promise(r => setTimeout(r, 50))
+    const send = screen.getByTestId('chat-send') as HTMLButtonElement
+    expect(send.disabled).toBe(false)
+    expect(screen.queryByTestId('chat-send-gate')).toBeNull()
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(createChatStream).toHaveBeenCalledTimes(1))
+    // The bound profile is never asserted over the session's own binding.
+    expect(vi.mocked(createChatStream).mock.calls[0][0]).not.toHaveProperty('profile_id')
+  })
+
+  it('bound to a keyless profile, active ready → gated', async () => {
+    vi.mocked(getChatProfiles).mockResolvedValue({
+      ...PROFILES,
+      profiles: PROFILES.profiles.map(p => p.id === 'anthropic-sonnet' ? { ...p, chat_ready: true } : p),
+    } as never)
+    vi.mocked(getChatHealth).mockResolvedValue(health(true))
+    historyBoundTo('keyless-openai')
+    renderPanel()
+    await waitFor(() => expect(useChatStore.getState().boundProfileId).toBe('keyless-openai'))
+    await typeHello()
+    await waitFor(() => expect((screen.getByTestId('chat-send') as HTMLButtonElement).disabled).toBe(true))
+    expect(screen.getByTestId('chat-send-gate')).toBeTruthy()
+  })
+
+  it("a picked non-active profile is gated on ITS readiness from the list", async () => {
+    vi.mocked(getChatProfiles).mockResolvedValue({
+      ...PROFILES,
+      profiles: PROFILES.profiles.map(p => p.id === 'anthropic-sonnet' ? { ...p, chat_ready: true } : p),
+    } as never)
+    vi.mocked(getChatHealth).mockResolvedValue(health(true))
+    useChatStore.setState({ profileId: 'keyless-openai' })
+    renderPanel()
+    await typeHello()
+    await waitFor(() => expect((screen.getByTestId('chat-send') as HTMLButtonElement).disabled).toBe(true))
+  })
+
+  it('the pick wins over the bound profile', async () => {
+    vi.mocked(getChatProfiles).mockResolvedValue(PROFILES as never)
+    vi.mocked(getChatHealth).mockResolvedValue(health(false))
+    historyBoundTo('keyless-openai')
+    useChatStore.setState({ profileId: 'local-llm' })
+    renderPanel()
+    await waitFor(() => expect(useChatStore.getState().boundProfileId).toBe('keyless-openai'))
+    await typeHello()
+    await new Promise(r => setTimeout(r, 50))
+    expect((screen.getByTestId('chat-send') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('/chat/profiles refused (401): the active profile falls back to /health, a bound non-active one fails open', async () => {
+    vi.mocked(getChatProfiles).mockRejectedValue(Object.assign(new Error('401'), { response: { status: 401 } }))
+    vi.mocked(getChatHealth).mockResolvedValue(health(false))
+    renderPanel()
+    await typeHello()
+    const send = screen.getByTestId('chat-send') as HTMLButtonElement
+    await waitFor(() => expect(send.disabled).toBe(true))
+    cleanup()
+    historyBoundTo('local-llm')
+    renderPanel()
+    await waitFor(() => expect(useChatStore.getState().boundProfileId).toBe('local-llm'))
+    await typeHello()
+    await new Promise(r => setTimeout(r, 50))
+    expect((screen.getByTestId('chat-send') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it("a turn's session_init names the bound profile → the gate follows it", async () => {
+    vi.mocked(getChatProfiles).mockResolvedValue({
+      ...PROFILES,
+      profiles: PROFILES.profiles.map(p => p.id === 'anthropic-sonnet' ? { ...p, chat_ready: true } : p),
+    } as never)
+    vi.mocked(getChatHealth).mockResolvedValue(health(true))
+    vi.mocked(createChatStream).mockImplementationOnce((_req, onFrame) => {
+      onFrame({ event: 'session_init', data: { session_id: 's9', profile_id: 'keyless-openai' } } as never)
+      onFrame({ event: 'turn_done', data: {} } as never)
+      onFrame({ event: 'session_done', data: { reason: 'complete' } } as never)
+      return () => {}
+    })
+    renderPanel()
+    const user = await typeHello()
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(useChatStore.getState().boundProfileId).toBe('keyless-openai'))
+    await user.type(screen.getByTestId('chat-input'), 'again')
+    await waitFor(() => expect((screen.getByTestId('chat-send') as HTMLButtonElement).disabled).toBe(true))
+  })
+
+  it('a key saved in the inline form re-reads the profile list too', async () => {
+    vi.mocked(getChatProfiles).mockResolvedValue(PROFILES as never)
+    vi.mocked(getChatHealth).mockResolvedValue(health(false))
+    renderPanel()
+    const user = await typeHello()
+    const send = screen.getByTestId('chat-send') as HTMLButtonElement
+    await waitFor(() => expect(send.disabled).toBe(true))
+    vi.mocked(getChatHealth).mockResolvedValue(health(true))
+    vi.mocked(getChatProfiles).mockResolvedValue({
+      ...PROFILES,
+      profiles: PROFILES.profiles.map(p => p.id === 'anthropic-sonnet' ? { ...p, chat_ready: true } : p),
+    } as never)
+    await user.type(await screen.findByTestId('chat-api-key-input'), 'sk-test-key')
+    await user.click(screen.getByTestId('chat-api-key-save'))
+    await waitFor(() => expect(putApiKeySettings).toHaveBeenCalled())
+    await waitFor(() => expect(send.disabled).toBe(false))
   })
 })

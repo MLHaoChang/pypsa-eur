@@ -39,9 +39,9 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { networkApi } from '../api/network'
 import { resultsApi, simulationApi } from '../api/simulation'
-import { getApiKeySettings, getChatHealth, type ApiKeySettings, type ChatHealth } from '../api/chat'
+import { getApiKeySettings, type ApiKeySettings } from '../api/chat'
 import { useUIStore } from '../store/uiStore'
-import { useChatStore } from '../store/chatStore'
+import { useChatReadiness } from '../hooks/useChatProfiles'
 import { nk } from '../utils/queryKeys'
 import { ehStudyRefetchInterval } from '../pages/results/ehStudyPoll'
 import ApiKeySetup, { API_KEY_SETTINGS_KEY } from './ApiKeySetup'
@@ -135,19 +135,12 @@ export default function ChatLaunchGreeting() {
     refetchInterval: ehStudyRefetchInterval,
     enabled: guided && !!currentProject,
   })
-  // The key offer follows the Send gate's profile rule (ChatPanel): the turn
-  // runs on `profileId ?? active`, and `chat_ready` describes the active
-  // profile. While that effective profile is known to be ready the assistant
-  // works, so offering an Anthropic key is noise (P26).
-  const profileId = useChatStore((s) => s.profileId)
-  const { data: chatHealth } = useQuery<ChatHealth>({
-    queryKey: ['chat', 'health'],
-    queryFn: getChatHealth,
-    staleTime: 30_000,
-    retry: false,
-  })
-  const effectiveReady = chatHealth?.chat_ready === true
-    && (profileId == null || profileId === chatHealth.active_profile?.id)
+  // The key offer follows the Send gate's profile rule (ChatPanel,
+  // `useChatReadiness`): the turn runs on `profileId ?? boundProfileId ??
+  // active`, and that profile's own readiness decides. While it is known to
+  // be ready the assistant works, so offering an Anthropic key is noise
+  // (P26; P28 A3 closes P26 note 5 — a picked or bound ready profile).
+  const effectiveReady = useChatReadiness().ready === true
 
   const solve = solveLine(status, guided,
     (hubStudy as { status?: string } | null | undefined)?.status ?? null)
