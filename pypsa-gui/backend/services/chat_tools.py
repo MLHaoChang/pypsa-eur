@@ -2148,9 +2148,11 @@ def _ic_cashflow_page(status: dict | None, report: dict, page: int) -> dict:
            "pages": len(pages), "total_count": len(rows), "returned": len(items),
            "has_more": before + len(items) < len(rows), "items": items,
            "currency": p.get("currency"), "stale": _NE if stale is None else stale,
-           "basis": ("one line per (year, stream line), + = cash in to the owner; the "
-                     "operating lines are the owner's TOTAL cash (returns are on it minus "
-                     "the counterfactual supply cost, which is not a line)")}
+           "basis": ("one line per (year, stream line), + = cash in to the owner: the "
+                     "owner's total operating lines plus the counterfactual supply cost's "
+                     "lines NEGATED (source counterfactual:*), so each year's lines already "
+                     "sum to the post-tax equity cash on the incremental basis — do not "
+                     "subtract the counterfactual again")}
     if page > len(pages):
         out["note"] = f"past the last page ({len(pages)})"
     return out

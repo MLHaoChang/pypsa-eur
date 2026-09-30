@@ -212,6 +212,9 @@ def test_cashflow_pages_cover_every_line_once_and_cut_ids(solved, store):
     store(rep)
     first = _tool("get_investment_case", detail="cashflows")
     assert first["kind"] == "investment_case_cashflows" and first["page"] == 1
+    # The lines carry the counterfactual negated (WP4.6b B2): the basis says so,
+    # so the model never subtracts it twice (WP4.6b review round 2).
+    assert "NEGATED" in first["basis"] and "not a line" not in first["basis"]
     total, pages = first["total_count"], first["pages"]
     assert total == len(rep["cashflow_lines"]) and pages > 1
     seen = []

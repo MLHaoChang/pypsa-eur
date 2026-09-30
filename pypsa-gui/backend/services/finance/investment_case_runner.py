@@ -71,6 +71,19 @@ def json_digest(obj: Any) -> str:
     return hashlib.sha256(_canonical(obj).encode("utf-8")).hexdigest()[:32]
 
 
+def _numbers_by_value(obj: Any) -> Any:
+    """An integral float as its int (`0.0` → `0`), recursively: a settings save
+    that round-trips `0` through a float schema field must not read as a change
+    (WP4.6b review round 2)."""
+    if isinstance(obj, float) and obj.is_integer():
+        return int(obj)
+    if isinstance(obj, dict):
+        return {k: _numbers_by_value(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_numbers_by_value(v) for v in obj]
+    return obj
+
+
 def finance_digest(raw: dict | None) -> str:
     """The `If-Match` digest of the stored finance inputs (None has one too)."""
     return json_digest({"finance": raw})
@@ -105,8 +118,8 @@ def assumptions_digest(*, finance: dict | None, commercial: dict | None, dispatc
     commercial = commercial if isinstance(commercial, dict) else None
     parts = {
         "solver_config": json_digest(None if solver is None else
-                                     {k: v for k, v in solver.items()
-                                      if k not in ("finance", "commercial")}),
+                                     _numbers_by_value({k: v for k, v in solver.items()
+                                                        if k not in ("finance", "commercial")})),
         "finance": finance_digest(finance),
         "value_flows": json_digest((commercial or {}).get("value_flows")),
         "commercial": json_digest(None if commercial is None else

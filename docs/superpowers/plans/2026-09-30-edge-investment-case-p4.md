@@ -1225,6 +1225,15 @@ headline mappings, the export's filename and injection guard and the C1 import b
   and `cost_of_equity` / `wacc_nominal`; one `CFADS_DEFINITION` (in `debt.py`, what `build_debt`
   computes: incremental revenue − incremental costs − replacement capex) used by the report and the xlsx.
 
+**WP4.6b review round 2 (367be7e): PASS WITH CONDITIONS; closed.** B1–B6 re-probed and confirmed fixed
+(Σ lines − equity cash ≤ 4e-9 on every terminal method; control characters and injections written as text).
+- **R2-1 (binding):** `get_investment_case(detail="cashflows")`'s `basis` still said the counterfactual "is
+  not a line". Reworded (the lines carry it negated; do not subtract it again) and asserted.
+- **Non-binding, taken:** a settings save that round-trips `0` through a float field (`mip_time_limit_s`)
+  no longer reads as a change — the `solver_config` part compares numbers by value.
+- **Non-binding, noted for the UI:** `changed=["solver_config"]` can mean a solve-only setting (the
+  intended safe trade-off).
+
 ## WP4.6c Chat tools
 
 - `run_investment_case` (Safety tier `execution_long_running`, campaign-gated like `run_eh_study`),

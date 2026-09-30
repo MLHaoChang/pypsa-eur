@@ -348,6 +348,10 @@ def test_b1_the_solver_config_is_part_of_the_staleness_key():
                        ("dsr_buses", ["b1"]), ("investment_periods", [2030, 2040])):
         h, p = assumptions_digest(**{**base, "solver": {**base["solver"], field: val}})
         assert h != h0 and p["solver_config"] != parts["solver_config"], field
+    # A save that round-trips an int through a float field is not a change.
+    same = assumptions_digest(**{**base, "solver": {**base["solver"], "mip_time_limit_s": 0}})
+    assert assumptions_digest(**{**base, "solver": {**base["solver"],
+                                                     "mip_time_limit_s": 0.0}})[0] == same[0]
     # finance / commercial have their own parts: not double-counted here.
     h, p = assumptions_digest(**{**base, "solver": {**base["solver"], "finance": {"a": 9}}})
     assert p["solver_config"] == parts["solver_config"]
