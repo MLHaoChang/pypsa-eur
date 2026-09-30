@@ -28,7 +28,7 @@ import pathlib
 from dataclasses import dataclass, field
 
 HERE = pathlib.Path(__file__).resolve().parent
-CASES = ("s1", "s1b", "s2", "s2c", "s2t", "s3", "s3d", "s3f")
+CASES = ("s1", "s1b", "s1l", "s2", "s2c", "s2t", "s3", "s3d", "s3f")
 
 # SAM's depreciation classes (the `depr_alloc_*_percent` suffixes).
 DEPR_CLASSES = ("macrs_5", "macrs_15", "sl_5", "sl_15", "sl_20", "sl_39", "custom")

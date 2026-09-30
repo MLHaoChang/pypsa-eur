@@ -16,7 +16,7 @@ from models.finance import DebtTranche, FinanceInputs, SolvePpa, TerminalValueRu
 from services.finance.case import (
     CONTRACT_CLASS, AssetFinance, FinanceCase, LpBasis, Template, TemplateLine,
 )
-from services.finance.engine import payback, run_case, solve_ppa, wacc_gate
+from services.finance.engine import payback, payback_sustained, run_case, solve_ppa, wacc_gate
 from services.finance.metrics import irr
 from services.finance.tax import DepreciationClass, TaxLayer, sl_half_year
 from tests.fixtures.investment_case.sam import sam_case as S
@@ -85,6 +85,9 @@ def test_s1_all_equity_project_return_is_the_equity_return_and_s2_llcr_is_the_ds
 def test_payback_and_irr_edges():
     assert payback(np.array([-100.0, 30.0, 30.0, 60.0])) == pytest.approx(2 + 40 / 60)
     assert payback(np.array([-100.0, 10.0])) is None and payback(np.array([5.0, -1.0])) == 0.0
+    # A zero start is not a payback (WP4.5 review B6); an unsustained one is flagged.
+    assert payback(np.array([0.0, -1000.0, 600.0, 600.0])) == pytest.approx(2 + 400 / 600)
+    assert payback_sustained(np.array([-100.0, 60.0, 60.0, -50.0, 40.0])) is False
     assert irr([-1.0, -1.0, -1.0]) == (None, ["irr_not_established:no_sign_change"])
     # Two roots (10 % and 20 %): the one closest to 0, flagged.
     v, f = irr([-1.0, 2.3, -1.32])
@@ -200,3 +203,92 @@ def test_not_established_paths_leave_the_headlines_none():
     assert "equity_post_tax_npv_not_established:cost_of_equity_missing" in r.flags
     r = run_case(_case())
     assert r.reasons["tax"] == ["tax_pack_missing"]
+
+
+
+# ── WP4.5 review round 1 ────────────────────────────────────────────────────
+
+def test_s1l_the_remaining_basis_write_off_deviation_is_exactly_its_tax_shield():
+    """SL-39 over 25 years leaves (1 − 24.5/39) of the basis; SAM drops it, we
+    deduct it in the last year: post-tax cash differs only there, by the
+    state and federal shield (state deductible from federal)."""
+    r = run_case(S.to_finance_case("s1l"), layers=S.sam_tax_layers("s1l"))
+    e = S.sam_expected("s1l")
+    assert e["deviations"][0]["name"] == "remaining_basis_written_off"
+    post, sam = r.cash["equity_post_tax"], np.array(e["arrays"]["cf_project_return_aftertax"])
+    _close(post[:-1], sam[:-1], 1e-12)
+    p = S.sam_params("s1l")
+    w = (1 - 24.5 / 39) * p.installed_cost
+    shield = w * (p.state_rate + p.federal_rate - p.federal_rate * p.state_rate)
+    assert post[-1] - sam[-1] == pytest.approx(shield, rel=1e-9)
+    assert "remaining_basis_written_off:federal" in r.flags
+
+
+def test_b1_the_ebitda_multiple_uses_the_incremental_ebitda():
+    cf = (Template(first_year=2031, lines=(TemplateLine("bill", "energy_import", -100.0, "tariff"),)),)
+    tv = TerminalValueRule(method="multiple_of_ebitda", value=5.0)
+    r = run_case(_case(cf=cf, fin_over={"terminal_value": tv}), layers=LAYER)
+    net = r.op_incremental["net"][-1]
+    assert net == pytest.approx(240.0) and r.cash["ebitda"][-1] == pytest.approx(net + 5.0 * net)
+
+
+def test_b2_lcoe_does_not_depend_on_how_the_value_is_earned():
+    """The same incremental cash through a PPA of 240, or a PPA of 200 plus 40
+    of bill savings, is the same energy cost."""
+    ppa240 = (TemplateLine("ppa", "ppa_settlement", 240.0, CONTRACT_CLASS, indexation=0.0),
+              TemplateLine("om", "fom", -20.0, "opex"))
+    a = run_case(_case(lines=ppa240), layers=LAYER)
+    ppa200 = (TemplateLine("ppa", "ppa_settlement", 200.0, CONTRACT_CLASS, indexation=0.0),
+              TemplateLine("om", "fom", -20.0, "opex"),
+              TemplateLine("bill", "energy_import", -60.0, "tariff"))
+    cf = (Template(first_year=2031, lines=(TemplateLine("bill", "energy_import", -100.0, "tariff"),)),)
+    b = run_case(_case(lines=ppa200, cf=cf), layers=LAYER)
+    assert b.metrics["equity_post_tax_irr"] == pytest.approx(a.metrics["equity_post_tax_irr"])
+    assert b.metrics["lcoe_nominal_per_mwh"] == pytest.approx(a.metrics["lcoe_nominal_per_mwh"])
+    assert b.metrics["lcoe_nominal_per_mwh"] > 0 and "lcoe_on_incremental_value" in b.flags
+
+
+def test_b3_the_solve_survives_sculpted_debt_above_the_uses():
+    """S2 (sculpted, DSCR 1.3) solving for 12 % in year 15 from SAM's input
+    price: at twice the price the sculpted debt exceeds the uses; the bracket
+    shrinks back instead of refusing."""
+    case = S.to_finance_case("s2")
+    case = dataclasses.replace(case, inputs=case.inputs.model_copy(
+        update={"solve_ppa": SolvePpa(target_irr=0.12, target_year=15)}))
+    r = run_case(case, layers=S.sam_tax_layers("s2"))
+    assert r.metrics["solve_ppa_status"] == "ok", r.metrics
+    assert r.metrics["solved_equity_irr_at_target_year"] == pytest.approx(0.12, abs=1e-9)
+
+
+def test_b4_an_unresolved_grant_leaves_the_pre_tax_headlines_none():
+    from models.finance import Incentive
+    r = run_case(_case(fin_over={"incentives": [Incentive(kind="grant")]}), layers=LAYER)
+    assert r.sections["incentives"] == "not_established"
+    assert r.cash["equity_pre_tax"] is None and r.metrics["project_pre_tax_irr"] is None
+
+
+def test_b5_a_replacement_depreciates_on_its_own_assets_classes():
+    layer = (TaxLayer(name="corp", rate=0.25, depreciation=(
+        DepreciationClass("pv:sl_20", 0.5, sl_half_year(20)),
+        DepreciationClass("bess:sl_5", 0.5, sl_half_year(5)))),)
+    fin = {"replacement_capex": [(2034, "pv", 100.0)],
+           "escalation": {"opex": 0.0, "tariff": 0.0, "capex": 0.0}}
+    base = run_case(_case(), layers=layer).tax.depreciation["corp"]
+    rep = run_case(_case(fin_over=fin), layers=layer).tax.depreciation["corp"]
+    extra = rep - base
+    assert extra[4:10] == pytest.approx([100 * f for f in sl_half_year(20)[:6]])
+
+
+def test_the_pack_path_and_the_plcr_closed_form():
+    from services.finance.packs.base import load_pack
+    us = load_pack("us_federal", as_of=date(2026, 1, 1))
+    fin = {"state_rate": 0.0, "acquisition_date": date(2029, 6, 1),
+           "depreciation_class_by_asset": {"pv": "macrs_5"}, "small_business_163j": True}
+    r = run_case(_case(fin_over=fin), us)
+    assert r.sections["tax"] == "ok" and r.tax.liability["federal"][1] < 0      # 100 % bonus
+    loan = DebtTranche(kind="term_loan", amount=500.0, rate=0.05, tenor_years=5, upfront_fee=0.0,
+                       dsra_months=0, grace_years=0, commitment_fee=0.0)
+    r = run_case(_case(debt=[loan]), layers=LAYER)
+    c = 140.0                                                   # CFADS 200 − 60, flat
+    assert r.metrics["plcr"] == pytest.approx(c * (1 - 1.05 ** -10) / 0.05 / 500.0)
+    assert r.metrics["llcr"] == pytest.approx(c * (1 - 1.05 ** -5) / 0.05 / 500.0)

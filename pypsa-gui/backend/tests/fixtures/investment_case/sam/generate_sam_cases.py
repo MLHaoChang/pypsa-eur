@@ -97,6 +97,17 @@ CASES: dict[str, dict] = {
                 "Depreciation": {"depr_alloc_sl_20_percent": 100.0}},
         "deviations": [],
     },
+    "s1l": {
+        "doc": "S1 on SL-39 (federal and state): the basis is not fully depreciated in 25 years; "
+               "SAM drops the remainder, P4 writes it off in the last year (a recorded "
+               "deviation, sized by the test).",
+        "set": {"FinancialParameters": {"debt_option": 0.0, "debt_percent": 0.0},
+                "Depreciation": {"depr_alloc_sl_39_percent": 100.0}},
+        "deviations": [{"name": "remaining_basis_written_off",
+                        "what": "SAM drops the undepreciated basis at the end; P4 deducts it in the "
+                                "last year (disposal / abandonment)",
+                        "size": "the last year's tax shield on (1 - 24.5/39) x TIC, per layer"}],
+    },
     "s1b": {
         "doc": "S1 solving the PPA price for an 11 % after-tax IRR in year 20 (ppa_soln_mode=0).",
         "set": {"FinancialParameters": {"debt_option": 0.0, "debt_percent": 0.0},

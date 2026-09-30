@@ -14,6 +14,7 @@ changed generator without regenerated fixtures fails.
 |---|---|
 | `gen_profile.csv` | the one synthetic 8,760-hour generation profile (kW): a clear-sky PV shape × a seasonal factor × a seeded daily cloud factor (`gen_profile()`, seed 1, 100 MW) |
 | `s1.json` | all-equity, SL-20 federal and state, 21 % + 7 %, PPA 10 ¢/kWh +1 %/yr, O&M per kW-yr and fixed at inflation 2.5 % + escalation 1 %, degradation 0.5 %/yr, 25 years |
+| `s1l.json` | S1 on SL-39 — sizes the recorded remaining-basis write-off deviation (SAM drops the basis left after 25 years) |
 | `s1b.json` | S1 solving the PPA price for an 11 % after-tax IRR in year 20 (`ppa_soln_mode=0`) |
 | `s2.json` | DSCR-sculpted debt (1.3, 18 yrs, 7 %, fee 2.75 %, DSRA 6 months, reserve interest 1.75 %), MACRS-5 90 % + SL-20 10 %, federal bonus 100 % on MACRS-5, state bonus 0 |
 | `s2c.json` | S2 with `dscr_limit_debt_fraction` on, `dscr_maximum_debt_fraction` 60 % — the sculpted debt capped at 0.6 · TIC · (1 + fee), its service scaled pro rata (WP4.2b) |

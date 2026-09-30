@@ -986,6 +986,58 @@ on a plain `FinanceCase`.
 - the gate's 8 states;
 - the not-established paths.
 
+**WP4.5 review round 1 (059eb18): FAIL; fixed.**
+
+The reviewer compared the full engine with 11 new PySAM variants: sculpting with a DSRA at other rates;
+bonus + ITC + debt; 30 years; salvage with gearing or sculpting; negative income; level principal with a
+moratorium. The results:
+- equity cash to 2.3e-7 dollars;
+- tax exact;
+- IRR within SAM's solver tolerance (≤ 1.04e-6);
+- NPV ≤ 2e-13; LCOE ≤ 1.1e-15;
+- solve-for-PPA equal to SAM's price to 9e-16 on six targets.
+
+**Binding findings:**
+1. **B1:** the `multiple_of_ebitda` terminal used the owner's total EBITDA (with the supply bill). Fixed:
+   with a counterfactual it uses the incremental EBITDA.
+2. **B2:** LCOE mixed total revenue with incremental equity cash (a behind-the-meter PV gave −8.30 $/MWh).
+   Fixed: LCOE = (PV of the investment's value gross of its own fom/vom/fuel − PV of the post-tax equity
+   cash) / PV of its generation. Without a counterfactual this is exactly SAM's. Tested: the same
+   incremental cash via a PPA or via bill savings gives the same LCOE.
+3. **B3:** the solve bracket failed under sculpting, because at 2× the price the debt exceeds the uses.
+   Fixed:
+   - it grows by 1.5×;
+   - it treats a not-established point as an upper limit and bisects back to an established one;
+   - it refuses only when no established point reaches the target.
+   Tested on S2 at 12 % in year 15.
+4. **B4:** the pre-tax headlines were numbers with an unresolved grant. Fixed: the cash series need the
+   incentives established.
+5. **B5:** replacement vintages lost their asset. Fixed: a vintage (index, amount, asset) depreciates on
+   the asset's `asset:class` classes, renormalised, falling back to every class.
+6. **B6:** payback returned 0 on a zero start. Fixed: it counts only a crossing from negative;
+   `payback_not_sustained` is flagged.
+7. **B7:** the write-off deviation had no oracle. Fixed with a new oracle **S1l** (S1 on SL-39). The test
+   asserts the last-year post-tax difference equals the state + federal shield on (1 − 24.5/39) × TIC
+   exactly; every other year matches to 1e-12. Size on S1l: IRR +0.23 pp vs SAM.
+
+**Taken:**
+- the solved price is the earliest template's, with its money year;
+- zero-amount lines are skipped;
+- `solve_ppa_target_year_clamped`;
+- `lcoe_real_not_established:inflation_missing`;
+- the gate reports the asset rates;
+- tests for the pack path, PLCR / LLCR closed forms and payback.
+
+**Noted, not taken:**
+- the unlevered book-value terminal carries the levered basis (IDC residual);
+- the book value follows the last layer (with 100 % federal bonus the state layer books a loss);
+- the lifecycle tax in carryforward mode never offsets the supply-cost losses.
+
+**Stated:**
+- commitment fees are amortised with the upfront fee;
+- payback is counted from financial close;
+- WP4.6a passes generation only in `energy_mwh`.
+
 ## WP4.6a Adapter: `FinanceCase`, counterfactual, template checks
 
 - `services/results/finance_case.py::build_finance_case` (C1): the owner's operating-year template per

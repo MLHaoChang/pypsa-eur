@@ -76,17 +76,28 @@ class FinanceResult:
 # ── metrics ──────────────────────────────────────────────────────────────────
 
 def payback(cash: np.ndarray | None) -> float | None:
-    """Years from index 0 until the cumulative cash first reaches 0, linearly
-    interpolated inside the year (stated); None if it never does."""
+    """Years from index 0 (the financial close) until the cumulative cash
+    first crosses from negative to ≥ 0, linearly interpolated inside the year
+    (stated); 0.0 when it is never negative; None when it never recovers
+    (WP4.5 review B6: a zero start is not a payback)."""
     if cash is None:
         return None
     cum = np.cumsum(cash)
-    for i, v in enumerate(cum):
-        if v >= 0.0 and (i == 0 or cum[i - 1] < 0.0):
-            if i == 0:
-                return 0.0
+    if (cum >= 0.0).all():
+        return 0.0
+    for i in range(1, len(cum)):
+        if cum[i - 1] < 0.0 <= cum[i]:
             return float(i - 1 + (-cum[i - 1]) / cash[i])
     return None
+
+
+def payback_sustained(cash: np.ndarray | None) -> bool | None:
+    """Whether the cumulative cash stays ≥ 0 after the payback year."""
+    pb = payback(cash)
+    if pb is None:
+        return None
+    cum = np.cumsum(cash)
+    return bool((cum[int(np.ceil(pb)):] >= -1e-9).all())
 
 
 def _cover_ratio(cfads: np.ndarray | None, rates: list[float], start: int, years: int,
@@ -203,13 +214,19 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
     if not inc.established():
         tax_reasons.append("incentives_not_established")
     terminal = op.terminal
+    if case.counterfactual and fin.terminal_value.method == "multiple_of_ebitda" and \
+            inc_net is not None and fin.terminal_value.value is not None:
+        # The investment's own EBITDA, not the owner's total with the supply
+        # bill (WP4.5 review B1).
+        terminal = np.zeros(n)
+        terminal[last] = fin.terminal_value.value * float(inc_net[last])
     if not tax_reasons and layers:
         layers = _with_itc_classes(tuple(layers), inc.itc_assets)
         basis = capex_total + debt.idc_total - inc.grant_basis_reduction
         basis_u = capex_total - inc.grant_basis_reduction
         if inc.grant_basis_reduction:
             flags.append("grant_reduces_basis_pro_rata")
-        vintages = tuple((i, float(v)) for i, v in enumerate(op.replacement) if v)
+        vintages = _replacement_vintages(fin, tl)
         if fin.terminal_value.method == "book_value":
             probe = compute_tax(tl, layers, ebitda=np.zeros(n), basis=basis, itc_amount=inc.itc_amount,
                                 losses="offset_other_income", vintages=vintages)
@@ -245,7 +262,8 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
     cash: dict[str, np.ndarray | None] = dict.fromkeys(
         ("ebitda", "equity_pre_tax", "equity_post_tax", "project_pre_tax", "project_post_tax",
          "lifecycle_post_tax", "cfads", "tax", "credits"))
-    if inc_net is not None and terminal is not None and op.capex is not None:
+    if inc_net is not None and terminal is not None and op.capex is not None and \
+            inc.established():                   # a grant unresolved → no headline (review B4)
         ebitda = inc_net + terminal
         cash["ebitda"] = ebitda
         base = ebitda - op.capex - op.replacement + inc.grant
@@ -287,6 +305,8 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
     m["lifecycle_npv"] = (npv(fin.cost_of_equity, cash["lifecycle_post_tax"])
                           if cash["lifecycle_post_tax"] is not None else None)
     m["payback_years"] = payback(cash["equity_post_tax"])
+    if payback_sustained(cash["equity_post_tax"]) is False:
+        flags_m.append("payback_not_sustained")
     m["min_dscr"], m["avg_dscr"] = _nan_stats(debt.dscr)
     m["min_dscr_senior"], m["avg_dscr_senior"] = _nan_stats(debt.dscr_senior)
     m["debt_size"] = debt.amount if debt.established() else None
@@ -300,23 +320,31 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
         llcr = _cover_ratio(debt.cfads, rates, c, tenor, debt.amount)
         plcr = _cover_ratio(debt.cfads, rates, c, tl.analysis_years, debt.amount)
     m["llcr"], m["plcr"] = llcr, plcr
-    # LCOE on the total operating cash and generation (SAM's definition).
+    # LCOE (SAM's definition, generalised — WP4.5 review B2): (PV of the
+    # investment's value gross of its own operating costs − PV of the post-tax
+    # equity cash) / PV of its generation, i.e. PV of everything the energy
+    # costs. The value = incremental operating cash + the asset costs (fom,
+    # vom, fuel); without a counterfactual it is SAM's revenue exactly.
     energy = [e for e in op.energy_mwh.values()]
     lcoe = lcoe_r = None
-    if energy and all(e is not None for e in energy) and op.revenue is not None and \
+    if energy and all(e is not None for e in energy) and inc_net is not None and \
             cash["equity_post_tax"] is not None and fin.cost_of_equity is not None:
         e_tot = np.sum(energy, axis=0)
+        value = inc_net + _asset_costs(op)
         r = fin.cost_of_equity
         k = np.arange(n)
         d = (1.0 + r) ** k
-        num = float(np.sum(op.revenue / d) - np.sum(cash["equity_post_tax"] / d))
+        num = float(np.sum(value / d) - np.sum(cash["equity_post_tax"] / d))
         de = float(np.sum(e_tot / d))
         lcoe = num / de if de > 0 else None
-        if fin.inflation is not None and de > 0:
-            rr = (1.0 + r) / (1.0 + fin.inflation) - 1.0
-            lcoe_r = num / float(np.sum(e_tot / (1.0 + rr) ** k))
+        if de > 0:
+            if fin.inflation is None:
+                flags_m.append("lcoe_real_not_established:inflation_missing")
+            else:
+                rr = (1.0 + r) / (1.0 + fin.inflation) - 1.0
+                lcoe_r = num / float(np.sum(e_tot / (1.0 + rr) ** k))
         if case.counterfactual:
-            flags_m.append("lcoe_on_the_owner_total_cash")
+            flags_m.append("lcoe_on_incremental_value")
     m["lcoe_nominal_per_mwh"], m["lcoe_real_per_mwh"] = lcoe, lcoe_r
     flags += flags_m
 
@@ -330,8 +358,30 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
                 "tax": "ok" if tax is not None else "not_established"}
     result.sections = sections
     if _solve and fin.solve_ppa is not None:
-        m.update(solve_ppa(case, pack, layers=layers))
+        sol = solve_ppa(case, pack, layers=layers)
+        result.flags = sorted(set(result.flags) | set(sol.pop("solve_ppa_flags", [])))
+        m.update(sol)
     return result
+
+
+ASSET_COST_STREAMS = ("fom", "vom", "fuel")
+
+
+def _asset_costs(op: Operating) -> np.ndarray:
+    """The asset's own operating costs per year (> 0), from its template lines."""
+    out = np.zeros(op.tl.n)
+    for key, arr in op.lines.items():
+        if arr is not None and op.line_meta[key].stream in ASSET_COST_STREAMS:
+            out -= arr
+    return out
+
+
+def _replacement_vintages(fin, tl: Timeline) -> tuple:
+    """(axis index, escalated amount, asset) per replacement (plan C6)."""
+    r = fin.escalation.get("capex") or 0.0
+    return tuple((tl.index(year), amount * (1.0 + r) ** (year - tl.base_year), asset)
+                 for year, asset, amount in fin.replacement_capex
+                 if tl.cod_year <= year < tl.cod_year + tl.analysis_years)
 
 
 def _tranche_rates(debt: Debt) -> list[float]:
@@ -387,7 +437,8 @@ def wacc_gate(case: FinanceCase) -> dict:
         "values": {"wacc_nominal": fin.wacc_nominal,
                    "lp_discount_rate": None if lp is None else lp.discount_rate,
                    "inflation": fin.inflation,
-                   "lp_inflation_rate": None if lp is None else lp.inflation_rate},
+                   "lp_inflation_rate": None if lp is None else lp.inflation_rate,
+                   "asset_discount_rates": {} if lp is None else dict(lp.asset_discount_rates)},
         "annuity_basis": "the LP annualised capex at its nominal discount rate on real costs",
         "pv_basis": ("real (Fisher), auto_discount_periods on" if lp is not None and
                      lp.auto_discount_periods else "not used (auto_discount_periods off)"),
@@ -426,6 +477,10 @@ def solve_ppa(case: FinanceCase, pack: JurisdictionPack | None = None, *,
     if not lines:
         out["solve_ppa_status"] = "solve_ppa_contract_not_found"
         return out
+    lines = [ln for ln in lines if ln.amount != 0.0]           # a zero line is inert
+    if not lines:
+        out["solve_ppa_status"] = "solve_ppa_contract_not_found"
+        return out
     for ln in lines:
         if ln.stream != "ppa_settlement" or ln.esc_class != CONTRACT_CLASS:
             out["solve_ppa_status"] = "solve_ppa_not_linear"
@@ -440,34 +495,62 @@ def solve_ppa(case: FinanceCase, pack: JurisdictionPack | None = None, *,
             out["solve_ppa_status"] = "solve_ppa_price_unknown"
             return out
     keys = {ln.key for ln in lines}
-    price0 = lines[0].price
+    # The reported price is the earliest template's (its money year stated).
+    first_t = min(case.templates, key=lambda t: t.first_year)
+    ref = [ln for ln in first_t.lines if ln.key in keys and ln.price is not None]
+    price0 = (ref or lines)[0].price
+    out["solved_ppa_price_money_year"] = first_t.money_year or case.base_year
     tl = build_timeline(case)
     end = tl.index(tl.cod_year) + sp.target_year      # exclusive: operating years 1 … target
+    if sp.target_year > tl.analysis_years:
+        out["solve_ppa_flags"] = ["solve_ppa_target_year_clamped"]
+        end = tl.n
 
-    def f(s: float) -> float:
-        r = run_case(_scaled(case, keys, s), pack, layers=layers, _solve=False)
+    def g(s: float) -> float | None:
+        """NPV at the target of the truncated equity cash, or None when the
+        case is not established at that price (e.g. sculpted debt above the
+        uses — WP4.5 review B3)."""
+        try:
+            r = run_case(_scaled(case, keys, s), pack, layers=layers, _solve=False)
+        except FinanceRefused:
+            return None
         eq = r.cash["equity_post_tax"]
-        if eq is None:
-            raise FinanceRefused("solve_ppa_cash_not_established")
-        return npv(sp.target_irr, eq[:end])
+        return None if eq is None else npv(sp.target_irr, eq[:end])
 
-    try:
-        lo, hi = 0.0, 2.0
-        f_lo = f(lo)
-        if f_lo > 0:
-            out["solve_ppa_status"] = "solve_ppa_no_root:target_met_at_zero_price"
-            return out
-        f_hi = f(hi)
-        while f_hi < 0 and hi < 1e4:
-            hi *= 2.0
-            f_hi = f(hi)
-        if f_hi < 0:
-            out["solve_ppa_status"] = "solve_ppa_no_root"
-            return out
-        s = brentq(f, lo, hi, xtol=1e-12, rtol=1e-12, maxiter=200)
-    except FinanceRefused as e:
-        out["solve_ppa_status"] = e.code
+    lo, f_lo = 0.0, g(0.0)
+    if f_lo is None:
+        out["solve_ppa_status"] = "solve_ppa_cash_not_established"
         return out
+    if f_lo > 0:
+        out["solve_ppa_status"] = "solve_ppa_no_root:target_met_at_zero_price"
+        return out
+    hi, f_hi = 1.0, g(1.0)
+    while f_hi is not None and f_hi < 0 and hi < 1e4:
+        lo, f_lo = hi, f_hi
+        hi *= 1.5
+        f_hi = g(hi)
+    if f_hi is None:
+        # Shrink back towards the last established point until established.
+        top = hi
+        for _ in range(60):
+            mid = 0.5 * (lo + top)
+            v = g(mid)
+            if v is None:
+                top = mid
+            elif v < 0:
+                lo, f_lo = mid, v
+            else:
+                hi, f_hi = mid, v
+                break
+            if top - lo < 1e-9 * max(1.0, top):
+                break
+        if f_hi is None:
+            out["solve_ppa_status"] = "solve_ppa_no_root:cash_not_established_above"
+            return out
+    if f_hi < 0:
+        out["solve_ppa_status"] = "solve_ppa_no_root"
+        return out
+    s = brentq(lambda x: g(x), lo, hi, xtol=1e-12, rtol=1e-12, maxiter=200)
     out["solved_ppa_price"] = price0 * s
     out["solve_ppa_status"] = "ok"
     solved = run_case(_scaled(case, keys, s), pack, layers=layers, _solve=False)
@@ -476,5 +559,5 @@ def solve_ppa(case: FinanceCase, pack: JurisdictionPack | None = None, *,
     return out
 
 
-__all__ = ["FinanceResult", "run_case", "solve_ppa", "wacc_gate", "payback",
+__all__ = ["FinanceResult", "run_case", "solve_ppa", "wacc_gate", "payback", "payback_sustained",
            "DepreciationClass"]
