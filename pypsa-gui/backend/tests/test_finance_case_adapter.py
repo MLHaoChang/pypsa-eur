@@ -274,10 +274,13 @@ def test_f6_the_counterfactual_on_a_toy_site_by_hand(reset_backend):
     assert cfl["counterfactual:commodity"].amount == pytest.approx(-50.0 * 26 * 365, abs=0.01)
     incremental = (3_960 - 2_880) * 365 + 500 * 9.0 * 12 + 50.0 * 6 * 365      # 557,700
     assert _net(t) - _net(cf) == pytest.approx(incremental, abs=0.01)
-    # C5 first order: S = the avoided import value, g = 1 (the only generator).
-    assert act["bill_degradation:pv"].amount == pytest.approx(incremental, abs=0.01)
+    # C5 first order: S = the avoided ENERGY-volume value (energy items +
+    # commodity; the demand charge saving is not degraded — plan C5 review),
+    # g = 1 (the only generator): 557,700 − 500 × 9 × 12 = 503,700.
+    s_energy = incremental - 500 * 9.0 * 12
+    assert act["bill_degradation:pv"].amount == pytest.approx(s_energy, abs=0.01)
     assert act["bill_degradation:pv"].degrades_with == "pv"
-    assert act["bill_degradation_base:pv"].amount == pytest.approx(-incremental, abs=0.01)
+    assert act["bill_degradation_base:pv"].amount == pytest.approx(-s_energy, abs=0.01)
     assert act["bill_degradation_base:pv"].degrades_with is None
     assert t.energy_mwh == pytest.approx({"pv": 1.5 * 4 * 365})
     assert "degradation_bill_first_order" in case.flags
@@ -287,9 +290,10 @@ def test_f6_the_counterfactual_on_a_toy_site_by_hand(reset_backend):
                       depreciation=(DepreciationClass("all", 1.0, sl_half_year(10)),)),)
     r = run_case(case, layers=layer)
     assert r.op_incremental["net"][1] == pytest.approx(incremental, abs=0.01)      # COD year
-    # Year 2: the PV's bill value degraded by 0.5 %, everything escalated 2 %.
+    # Year 2: the PV's energy-volume bill value degraded by 0.5 %, everything
+    # escalated 2 % (the demand saving does not degrade).
     assert r.op_incremental["net"][2] == pytest.approx(
-        incremental * 1.02 - incremental * 0.005 * 1.02, abs=0.01)
+        incremental * 1.02 - s_energy * 0.005 * 1.02, abs=0.01)
 
 
 # ── the integration fixture ─────────────────────────────────────────────────
@@ -312,8 +316,9 @@ def _hourly_year(**vf_over):
 
 # Pinned (HiGHS 1.x): 15 operating years, all equity, one 25 % layer on SL-10,
 # every class escalating 2 %, PV degrading 0.5 %/yr. The LP's optimum is
-# unique in money but not in dispatch, hence 1e-5.
-EQUITY_IRR_POST_TAX = 0.36177769
+# degenerate in dispatch (money can move between lines that degrade
+# differently), hence 1e-5.
+EQUITY_IRR_POST_TAX = 0.36207517      # energy-item S (plan C5 review)
 
 
 @pytest.mark.live_solve
@@ -340,6 +345,7 @@ def test_the_integration_fixture_end_to_end(reset_backend):
     assert lines["export_price:export_price:pv"].degrades_with == "pv"
     assert lines["bill_degradation:pv"].degrades_with == "pv"
     assert set(t.energy_mwh) == {"pv"}                     # generators only, never storage
+    assert _lines(cf)["connection:fee"] == lines["connection:fee"]       # identical: they cancel
     assert t.energy_mwh["pv"] == pytest.approx(float((w * n.generators_t.p["pv"]).sum()))
     # The uncosted grid_sink passes the commodity check; the BESS shaved the peak.
     assert not any("commodity_not_established" in f for f in case.flags)

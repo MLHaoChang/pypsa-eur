@@ -345,6 +345,7 @@ def test_204_before_a_run(client, install_network):
     install_network(build_network())
     assert client.get(STUDY_URL).status_code == 204
     assert client.get(REPORT_URL).status_code == 204
+    assert client.get("/api/results/investment_case/export.xlsx").status_code == 204
     r = client.post(ABORT_URL)
     assert r.status_code == 404
 
@@ -417,6 +418,20 @@ def test_a_run_stores_the_report_and_it_is_current(client, install_network, sess
     assert prov["finance_case_hash"] == "case-hash-for-test"
     assert set(prov["inputs"]) == {"finance", "value_flows", "commercial", "dispatch", "packs"}
     assert stored["cashflow_lines"], "cashflow lines missing"
+    # detail=full: the sections with payloads and the cashflow lines (WP4.7b).
+    full = client.get(REPORT_URL, params={"detail": "full"}).json()
+    assert full["sections"]["debt"]["status"] == "ok" and full["cashflow_lines"]
+    assert full["project_irr_pre_tax"] == out["project_irr_pre_tax"]
+    # IC P4 WP4.6d: the stored report as a workbook.
+    import io
+
+    import openpyxl
+    x = client.get("/api/results/investment_case/export.xlsx")
+    assert x.status_code == 200 and "spreadsheetml" in x.headers["content-type"]
+    wb = openpyxl.load_workbook(io.BytesIO(x.content))
+    about = {r[0].value: r[1].value for r in wb["About"].iter_rows() if r[0].value}
+    assert about["Assumptions hash"] == stored["assumptions_hash"]
+    assert "CashflowLines" in wb.sheetnames
 
 
 def test_staleness_follows_each_input(client, install_network, session_ctx, monkeypatch):
@@ -518,3 +533,4 @@ def test_abort_mid_run_stores_nothing_and_holds_the_mesh_meanwhile(client, insta
     # Idempotent after the end.
     r = client.post(ABORT_URL)
     assert r.status_code == 200 and r.json()["aborting"] is False
+

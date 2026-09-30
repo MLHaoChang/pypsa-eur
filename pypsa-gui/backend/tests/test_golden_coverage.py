@@ -183,6 +183,7 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "post_investment_case"):            frozenset(),
     ("routers/results.py", "post_investment_case_abort"):      frozenset(),
     ("routers/results.py", "get_investment_case_report"):      frozenset(),
+    ("routers/results.py", "get_investment_case_export"):      frozenset(),
     # ── routers/simulation.py ───────────────────────────────────────────
     ("routers/simulation.py", "get_solver_config"):    frozenset(),
     ("routers/simulation.py", "update_solver_config"):  frozenset(),

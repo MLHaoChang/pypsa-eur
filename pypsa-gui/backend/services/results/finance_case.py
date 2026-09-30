@@ -10,7 +10,7 @@ engine imports nothing from `services.results`; the router injects a
   value_flows_not_configured, value_flows_invalid, owner_has_no_assets,
   owner_ambiguous, staged_build_not_supported, template_not_annual:<hours>,
   cod_missing, cod_mismatch, counterfactual_not_established:lossy_poc,
-  stream_unmapped:<stream>.
+  owner_asset_missing, stream_unmapped:<stream>.
 
 What it builds:
 
@@ -53,7 +53,7 @@ What it builds:
   investment; flagged `counterfactual_keeps_contract:<id>`). Contracts on the
   owner's assets are absent.
 * **The first-order bill effect of degradation (C5)** — per owner generator
-  with a degradation entry: S = (counterfactual − actual) import bill +
+  with a degradation entry: S = (counterfactual − actual) energy-volume bill items +
   commodity, g = its share of on-site generation; `bill_degradation:<a>` =
   +S·g degrading with it and `bill_degradation_base:<a>` = −S·g: in operating
   year k they net −S·g·(1 − f_k).
@@ -616,7 +616,11 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
                     key=f"bill:{item_id}", stream=stream, amount=None if v is None else -v,
                     esc_class=_esc(stream), tariff_item=item_id, counterparty=payees[item_id],
                     source="bill", source_id=item_id, period=k))
-                if stream != "energy_export":
+                # S counts the energy-volume items only (plan C5 review): demand,
+                # capacity and fixed charges are shaved by storage / the peak,
+                # not in proportion to the PV's energy, so they do not degrade
+                # with it.
+                if stream in ("energy_import", "network_energy"):
                     a = (inputs.bill.get(k) or {}).get(item_id)
                     cf_import_bill = None if (cf_import_bill is None or v is None) \
                         else cf_import_bill + v
@@ -802,7 +806,7 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                                           degrades_with=g, **common))
                 lines.append(TemplateLine(key=f"bill_degradation_base:{g}",
                                           amount=None if v is None else -v, **common))
-                flags.append("degradation_bill_first_order")
+                flags += ["degradation_bill_first_order", "degradation_bill_energy_items_only"]
         f = factors[k]
         templates.append(Template(first_year=year, lines=_scale(lines, f),
                                   energy_mwh={g: e * f for g, e in gen.items()},

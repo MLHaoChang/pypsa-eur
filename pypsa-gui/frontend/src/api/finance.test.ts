@@ -56,7 +56,8 @@ describe('financeApi', () => {
     get.mockResolvedValue({ status: 204, data: '' })
     await expect(financeApi.getInvestmentCase()).resolves.toBeNull()
     await expect(financeApi.getReport()).resolves.toBeNull()
-    expect(get).toHaveBeenLastCalledWith('/results/investment_case/report', { skipErrorToast: true })
+    expect(get).toHaveBeenLastCalledWith('/results/investment_case/report',
+      { skipErrorToast: true, params: { detail: 'full' } })
     expect(financeApi.exportXlsxUrl()).toBe('/api/results/investment_case/export.xlsx')
   })
 })

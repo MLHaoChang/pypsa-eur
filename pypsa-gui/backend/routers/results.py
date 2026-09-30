@@ -17,7 +17,8 @@ header.
 from __future__ import annotations
 
 import logging
-from typing import Any
+import re
+from typing import Any, Literal
 
 import threading as _threading
 
@@ -1567,13 +1568,37 @@ def post_investment_case(body: InvestmentCaseRequest | None = None):
 
 
 @results_router.get("/investment_case/report")
-def get_investment_case_report():
-    """The stored `InvestmentCaseReport`'s export view (`ic_report_http_payload`);
-    204 before a run. Staleness is on `GET /results/investment_case`."""
-    from services.finance.report import ic_report_http_payload
+def get_investment_case_report(detail: Literal["export", "full"] = "export"):
+    """The stored `InvestmentCaseReport`: the stable export view
+    (`ic_report_http_payload`, default) or, with `detail=full`, the whole
+    report — sections with their payloads and the cashflow lines (the
+    results view, IC P4 WP4.7b). 204 before a run. Staleness is on
+    `GET /results/investment_case`."""
+    from services.finance.report import ic_report_http_payload, load_ic_report
 
+    if detail == "full":
+        report = load_ic_report(_state)
+        return Response(status_code=204) if report is None else report.model_dump(mode="json")
     payload, status = ic_report_http_payload(_state)
     return Response(status_code=204) if payload is None else payload
+
+
+@results_router.get("/investment_case/export.xlsx")
+def get_investment_case_export():
+    """The stored report as a workbook (IC P4 WP4.6d): About, Summary, one sheet
+    per section, CashflowLines; None as `not_established`; formula-looking
+    names stored as text. 204 before a run."""
+    from services.finance.export_xlsx import build_workbook
+    from services.finance.report import load_ic_report
+
+    report = load_ic_report(_state)
+    if report is None:
+        return Response(status_code=204)
+    return Response(
+        content=build_workbook(report),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition":
+                 f'attachment; filename="investment_case_{re.sub(r"[^A-Za-z0-9_-]", "_", report.case_id)[:40]}.xlsx"'})
 
 
 @results_router.get("/eh_readiness")

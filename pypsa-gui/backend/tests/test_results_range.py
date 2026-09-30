@@ -337,6 +337,8 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         # cashflows by year and stream, no snapshot axis.
         "/investment_case",
         "/investment_case/report",
+        # IC P4 WP4.6d — the report as a workbook (annual rows, no snapshot axis).
+        "/investment_case/export.xlsx",
         # The ELCC candidate list for the panel's asset picker (Phase 6) — one
         # row per eligible asset with its nameplate, no snapshot axis at all.
         "/mc/elcc_candidates",

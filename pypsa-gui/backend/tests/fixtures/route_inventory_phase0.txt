@@ -244,6 +244,7 @@ GET     /api/results/generators                                  -> get_generato
 GET     /api/results/investment_case                             -> get_investment_case_api_results_investment_case_get
 POST    /api/results/investment_case                             -> post_investment_case_api_results_investment_case_post
 POST    /api/results/investment_case/abort                       -> post_investment_case_abort_api_results_investment_case_abort_post
+GET     /api/results/investment_case/export.xlsx                 -> get_investment_case_export_api_results_investment_case_export_xlsx_get
 GET     /api/results/investment_case/report                      -> get_investment_case_report_api_results_investment_case_report_get
 GET     /api/results/lcoh                                        -> get_lcoh_api_results_lcoh_get
 GET     /api/results/line_duals                                  -> get_line_duals_api_results_line_duals_get

@@ -57,9 +57,11 @@ export const financeApi = {
   abortInvestmentCase: () =>
     client.post<{ status?: string; aborting?: boolean }>('/results/investment_case/abort', {}, QUIET)
       .then(r => r.data),
-  /** The stored report (the export view); 204 before a run → null. */
+  /** The stored report with its sections and cashflow lines (`detail=full`);
+   *  204 before a run → null. */
   getReport: () =>
-    client.get<InvestmentCaseReportPayload>('/results/investment_case/report', QUIET).then(orNull),
+    client.get<InvestmentCaseReportPayload>('/results/investment_case/report',
+      { ...QUIET, params: { detail: 'full' } }).then(orNull),
   /** Absolute URL of the workbook — an <a download> href, streamed by the browser. */
   exportXlsxUrl: () => `${client.defaults.baseURL ?? ''}/results/investment_case/export.xlsx`,
 }
