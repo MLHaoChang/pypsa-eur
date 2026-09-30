@@ -425,3 +425,24 @@ D-8 = (a), deferred spec §7.1. FE only; no backend, prompt, `TOOLS` or packagin
 | 7 | `git diff 6135c7601 -- 'pypsa-gui/frontend/src/**' \| grep -c uiMode` | 13, all in `ChatPanel.rebound.test.tsx`; no product `uiMode` branch changed; the `*.expertUnchanged.*` snapshots pass in row 4 |
 
 No processes are left running.
+
+## P32 result: GO on `266c14a92`, 2026-09-30
+
+- **No blockers.** The implementer's evidence:
+
+  | Check | Result |
+  |---|---|
+  | vitest | 241 files / 2701 passed |
+  | Stress run | ×10, all green |
+  | Smokes | P32, P27b, P26 and P25 PASS |
+  | Mutations | 7/7 killed |
+  | Backend | unchanged since P27a |
+
+- **Reviewer's mutations:** 7 of 9 killed. The two survivors: `rename_project` and `restore_project_snapshot` are not listed in the "not a new project" cases, so they are untested (N1). That goes into P28.
+- **Chat project switch in auth mode (N6).** Switching project from chat does not acquire the new project's edit lock in auth mode. This predates P32; it is investigated test-first in P28.
+- **Recorded, not changed:**
+  - N2: the unit mismatch test is weak; the smoke is the real guard.
+  - N3: open Results stays open, and Hub design does not auto-open over it.
+  - N4: an optional "Switched to Guided" toast is left to the owner.
+  - N5: the transcript follows the dock to the new project's chat, which is P27a behaviour.
+- **Gate file:** `docs/superpowers/qa/2026-09-29-guided-mode-deferred-gate-P32.md`.
