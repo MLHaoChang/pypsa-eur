@@ -698,3 +698,31 @@ Deferred spec §4 (B1, B2, B3). Commits: `363942269` (the Expert snapshot, befor
 - On the data-center template every stress scenario and genset reads `no_shortfall`, so the smoke does not exercise `unpriced`, `no_outage_data` or `out_of_scope` in the browser. Those are covered in `test_fmea_zero_reason.py` and `FmeaTab.formatting.test.tsx`.
 
 No processes are left running.
+
+**P29 gate fixes** (gate record `docs/superpowers/qa/2026-09-30-guided-mode-deferred-gate-P29.md`: NO-GO on B1-1, plus S-1 and S-2; fixed test-first on `235c15fdd`):
+
+- **B1-1** (`4b2f17c60`). A tool that only *starts* background work answers at once, so its `✓` line means "started". Its Guided phrase now begins "start …":
+  - `run_eh_study` → "start the reliability study", and `run_fmea_sweep` → "start the equipment-failure check";
+  - explicit entries for `run_simulation`, `run_ac_pf_stage`, `run_frontier_study`, `run_mc_study`, `run_coupling_loop`, `run_margin_loop` and `gridspine_run_pipeline`;
+  - `solve_queue_enqueue` → "add the project to the solve queue", and `abort_adequacy_study` → "ask the running study to stop".
+
+  The other six phrases were audited and describe work the call completes. *Deviation from spec §4.1:* the spec's example phrases `run the reliability study` and `check what happens when equipment fails` were the source of the false "Done: …". The tool descriptions (`chat_tools_schema.py`: "Start the …", "returns {status:'running'} immediately") decide.
+
+  The red tests read the start-only set from the schema's own "Start …" descriptions, plus the worker and queue tools. They check that each has an explicit "start …" phrase (no "use …" fallback), and that a Guided `✓ run_fmea_sweep` reads "Done: start the equipment-failure check". 14 were red. The existing P29 strings were updated to the new phrases.
+- **S-1** (`5fcd1fd6a`). The Guided FMEA tab's stress editor heading reads "Stress scenarios · n/10", with no "(class C)". The Guided add-row placeholders read "cost per event (€)" and "notes (optional)". Expert is unchanged, and `FmeaTab.expertUnchanged` did not change. 2 were red.
+- **S-2** (`5fcd1fd6a`). `ZERO_REASON_TEXT.no_outage_data` now reads "no outage rate set (or it is zero)". The rule also fires for an explicit rate of 0, so the text must be true in both cases. The backend rule is the spec's and is unchanged. 2 were red.
+- **Mutants:** 11 of 11 killed (`scratchpad/p29/mutations-gate.log`).
+  - G1 and G2: the spec phrases restored.
+  - G3–G6: start-tool, queue and abort entries dropped.
+  - S1a–d: heading not branched, heading always Guided, placeholder not branched, Guided placeholder in Expert.
+  - S2: the old text.
+- **Rows** (frontend only; the backend is unchanged since `a994da65d`, so rows 1–2 stand):
+
+  | Row | Result |
+  |---|---|
+  | 3 `tsc` | 0 errors |
+  | 4 `vitest` | 244 files / 2793 passed |
+  | 4s | 10 / 10 green, 34 files / 587 tests each |
+  | 5 `--phase P29` on `5fcd1fd6a` | PASS, 39 screenshots (`smoke29c`) |
+
+  The smoke asserted none of the changed strings.
