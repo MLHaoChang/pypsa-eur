@@ -134,7 +134,7 @@ describe('FMEA tab in Guided', () => {
     await renderTab()
     const form = screen.getByTestId('fmea-expert-form')
     const ph = Array.from(form.querySelectorAll('input')).map(i => i.placeholder)
-    expect(ph).toEqual(['Name (e.g. fuel supply loss)', 'events/yr', 'cost per event (€)', 'notes (optional)'])
+    expect(ph).toEqual(['Name (e.g. fuel supply loss)', 'events/yr', '€ per event', 'notes (optional)'])
     expect(ph.join(' ')).not.toMatch(/mitigability|severity/)
   })
 

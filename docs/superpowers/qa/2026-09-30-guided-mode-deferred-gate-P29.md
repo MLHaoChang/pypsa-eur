@@ -178,3 +178,98 @@ Scripts: `qa29/mutate.py` (one mutation at a time in `qa29/wt`, restored after e
 - `qa29/smoke29/15-p26-dc-12-guided-reloaded.png`: Guided after a reload; the Hub design page is loading and the chat shows the greeting.
 - `qa29/probe/14-qa29-dc-c-card-pending.png`: "Done: list what is in the network", "Could not: read the study results" with the raw message (N-2), and the confirmation card with no "Working" row.
 - `qa29/probe/15-qa29-dc-d-sweep-done-label.png`: "Done: check what happens when equipment fails" while the sweep is running (**B1-1**).
+
+---
+
+## Re-gate (2026-09-30, HEAD `c066bb7fa`)
+
+**Scope:** `git diff 235c15fdd..c066bb7fa`. There are three commits:
+- `4b2f17c60` fixes B1-1;
+- `5fcd1fd6a` fixes S-1 and S-2;
+- `c066bb7fa` is the phase note.
+
+All three are frontend and docs only. `git diff a994da65d..c066bb7fa -- pypsa-gui/backend` is empty, so rows 1 and 2 above still stand. The scratch area is `qa29/rg/`. Mutations ran in a scratch worktree at `c066bb7fa`. The live probe ran in a second worktree, using a scratch-only copy of the smoke. Both worktrees are removed.
+
+### Verdict: **GO**
+
+B1-1 is fixed and I checked the fix live. S-1 is fixed, and Expert is still byte-identical. S-2 is fixed for the two cases it was about: the rate is missing, or the rate is 0. One residual case of the S-2 text is still false (R-1 below). It is a should-fix and does not block.
+
+### B1-1: fixed
+- **Live check.** I re-ran the probe (`qa29/rg/probe.log` lines 93-103, screenshot `qa29/rg/probe/12-qa29-dc-sweep-started-label.png`). I approved `run_fmea_sweep`. The line then read **"Done: start the equipment-failure check"** while `GET /api/results/fmea_sweep` returned `running`. The line is now true. The probe smoke passed, with 40 screenshots.
+- **Which tools start work in the background.** I worked this out from `chat_tools_schema.TOOLS` itself, not from the implementer's test. I scanned all 155 descriptions for "Start…", "returns {status:'running'}", "worker thread", "Long-running" and "queue". The tools that start work and return are:
+
+  | Tool | Why it counts |
+  |---|---|
+  | `run_simulation` | description says "Start" |
+  | `run_fmea_sweep` | description says "Start" |
+  | `run_frontier_study` | description says "Start" |
+  | `run_mc_study` | description says "Start" |
+  | `run_coupling_loop` | description says "Start" |
+  | `run_margin_loop` | description says "Start" |
+  | `run_eh_study` | description says "Start" |
+  | `run_ac_pf_stage` | description says "Long-running" |
+  | `solve_queue_enqueue` | background queue |
+  | `gridspine_run_pipeline` | runs "through the solve queue" |
+
+  Every one of them now has its own phrase. The eight "start" tools read "start …", `solve_queue_enqueue` reads "add the project to the solve queue", and `abort_adequacy_study` reads "ask the running study to stop". None falls back to "use <tool words>".
+- **Tools I checked and left alone.** `start_campaign` ("Open a reliability CAMPAIGN") only opens a budget and computes nothing, so its fallback "use start campaign" is not a false claim. `solve_queue_abort` and `solve_queue_list` are not start tools.
+- **Wording audit of all 19 entries.** Every entry is true and in plain words.
+  - `run_coupling_loop`, "start the planning loop that tightens the shortfall limit": the loop adjusts the ENS cap until LOLE meets the target. In practice that means tightening, so this is acceptable. "…that adjusts the shortfall limit" would be exact. This is a note only.
+  - `run_margin_loop`, "start the planning loop that adds backup capacity": the loop raises the reserve margin, and the plan builds more firm capacity. True.
+  - `solve_queue_enqueue` keeps "solve queue". That is a GUI term, not an engine id. Acceptable.
+
+### S-1: fixed
+- **Guided.** The stress editor heading reads "Stress scenarios · 2/10". The add-row placeholders read "cost per event (€)" and "notes (optional)". See the probe screenshot above.
+- **Note.** The placeholder "cost per event (€)" is cut to "cost per ever" in the `w-28` input. This is cosmetic.
+- **Expert.**
+  - `FmeaTab.expertUnchanged.test.tsx.snap` is unchanged since `f66fc1165`: `git diff --stat f66fc1165..HEAD` over snapshots and `*expertUnchanged*` is empty.
+  - The Expert heading "Stress scenarios (class C)" is pinned by the new `StressScenarioEditor.test.tsx` case.
+  - The Expert placeholders are pinned by that snapshot too. My mutant G10 also broke `renders the base header and worksheet`.
+
+### S-2: fixed for the two cases asked about
+The text is now "no outage rate set (or it is zero)". It is true when the rate is missing, and true when the rate is 0 (the `grid` case in my S-2 repro).
+
+### R-1 (should-fix, new residual of S-2): the text is false when a rate is set but the repair time is missing or 0
+- **Where:** `fmea.ts:49` text, for `no_outage_data`. The helper at `worksheet.py:161-167` returns that reason for any `occurrence_per_year <= 0`. `copt.py:1147-1148` sets `occ = 0` whenever `mttr_hours` is NaN or ≤ 0, even when the rate is set.
+- **Repro (inline, printed by the probe):**
+  - Setup: carrier `mystery`, which has no library default; `g1` has `outage_rate_value=0.05`, `outage_rate_basis="FOR"` and no `mttr_hours`.
+  - Result: `g1 occ=0.0 severity=0.0 criticality=24000.0 zero_reason=no_outage_data rate_source=asset`.
+  - The Guided cell would say "no outage rate set (or it is zero)" next to the user's 5 % rate. It would also show a €24.0 k yearly risk.
+- **Reach:** the spec's own mutation-target case, `mttr_hours = 0` in `test_fmea_zero_reason.py::test_copt_a_unit_with_mttr_zero_has_no_outage_data`, is this case too. `validate_outage_params` warns about it, so it is an unusual input. That is why this does not block.
+- **Fix (one string plus its three test constants):** e.g. "no outage frequency (outage rate or repair time missing or zero)". Alternatively, split the reason on `rate_source` and the MTTR in a later phase.
+
+### Rows
+
+| Row | Command (cwd) | Result |
+|---|---|---|
+| 1, 2 | unchanged: no backend diff since `a994da65d` | stand (6716 + 31 at HEAD; 776 passed, 17 skipped) |
+| 3 | `npx tsc --noEmit -p .` (`pypsa-gui/frontend`) | exit 0, 0 errors (`qa29/rg/tsc.log`) |
+| 4 | `npx vitest run` (`pypsa-gui/frontend`) | **244 files / 2793 tests passed** (`qa29/rg/vitest.log`) |
+| 4s | 3× `npx vitest run src/components/ChatPanel src/pages/results/FmeaTab src/pages/results/StressScenarioEditor src/pages/hubDesign` | **3/3 green**, 615 tests each (`qa29/rg/stress-{1,2,3}.log`) |
+| 5 | `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs --phase P29 --out qa29/rg/smoke29` (`pypsa-gui/frontend`, run alone) | **PASS**, 39 screenshots (`qa29/rg/smoke29.log`) |
+| 5+ | live B1-1 probe (`qa29/rg/probe.log`) | PASS, 40 screenshots; see above |
+| 7 | the new product `uiMode` read is the `guided` flag in `StressScenarioEditor`, and the `FmeaTab` placeholders use the existing flag | Expert arms equal to base; signed |
+
+After the runs no uvicorn, vite, stub or chromium process is running, and the working tree is clean apart from this file.
+
+### Mutations (`qa29/rg/mutate.py`, log `qa29/rg/mut.log`)
+
+| # | Mutation | Result |
+|---|---|---|
+| G1 | old `run_fmea_sweep` phrase restored | killed (3 tests) |
+| G2 | old `run_eh_study` phrase restored | killed |
+| G3 | `run_margin_loop` entry dropped | killed |
+| G4 | `run_ac_pf_stage` entry dropped (not caught by the schema "Start" scan) | killed (the test's explicit list) |
+| G5 | `gridspine_run_pipeline` entry dropped | killed |
+| G6 | `solve_queue_enqueue` entry dropped | killed |
+| G7 | `run_simulation` reads "run a solve" | killed |
+| G8 | S-1 heading: Guided and Expert branches swapped | killed |
+| G9 | S-1 heading: always plain (Expert changes) | killed |
+| G10 | S-1 severity placeholder: branches swapped | killed (the Guided test and the Expert snapshot) |
+| G11 | S-1 old "mitigability" placeholder in Guided | killed |
+| G12 | S-2 old text "no outage data" | killed |
+
+**12 of 12 killed.**
+
+### R-1 resolution (coordinator, 2026-09-30)
+The `no_outage_data` text now reads "no outage frequency (outage rate or repair time missing or zero)", which is true for a missing rate, a zero rate, and a missing or zero MTTR. Also addressed from the notes: the Guided severity placeholder is shortened to "€ per event" (the old text was cut off), and `run_coupling_loop` reads "…adjusts the shortfall limit". tsc is clean; the results and ChatPanel suites pass (1109 tests).

@@ -411,7 +411,7 @@ export default function FmeaTab() {
             type="number" step="any" placeholder="events/yr" value={form.occ}
             onChange={e => setForm(p => ({ ...p, occ: e.target.value }))} />
           <input className="bg-bg border border-border rounded px-2 py-1 text-[10.5px] w-28 font-mono focus:outline-none focus:border-accent"
-            type="number" step="any" placeholder={guided ? 'cost per event (€)' : 'severity €'} value={form.sev}
+            type="number" step="any" placeholder={guided ? '€ per event' : 'severity €'} value={form.sev}
             onChange={e => setForm(p => ({ ...p, sev: e.target.value }))} />
           <input className="bg-bg border border-border rounded px-2 py-1 text-[10.5px] w-44 focus:outline-none focus:border-accent"
             placeholder={guided ? 'notes (optional)' : 'mitigability (optional)'} value={form.mit}

@@ -490,7 +490,7 @@ const GUIDED_TOOL_PHRASE: Record<string, string> = {
   run_ac_pf_stage: 'start the power-flow check',
   run_frontier_study: 'start the cost-versus-reliability study',
   run_mc_study: 'start the random-outage reliability study',
-  run_coupling_loop: 'start the planning loop that tightens the shortfall limit',
+  run_coupling_loop: 'start the planning loop that adjusts the shortfall limit',
   run_margin_loop: 'start the planning loop that adds backup capacity',
   gridspine_run_pipeline: 'start the planning and dynamics study',
   solve_queue_enqueue: 'add the project to the solve queue',

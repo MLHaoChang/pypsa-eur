@@ -726,3 +726,10 @@ No processes are left running.
   | 5 `--phase P29` on `5fcd1fd6a` | PASS, 39 screenshots (`smoke29c`) |
 
   The smoke asserted none of the changed strings.
+
+## P29 result: GO at re-gate on `c066bb7fa` + R-1 wording, 2026-09-30
+- **First gate:** NO-GO on B1-1 — "Done: run the reliability study" showed while the study was still running, because the spec's example phrases named the work rather than the start of it. Fixed: every start-only tool (10, derived from the schema descriptions) says "start …".
+- **Should-fixes:** S-1 (Guided stress heading and placeholders) and S-2 (zero-rate text) fixed.
+- **Re-gate:** rows 3–5 pass (tsc 0; vitest 2793; smoke P29 PASS). Rows 1–2 stand (no backend change since `a994da65d`: 6716 passed + 31 skipped; row 2 776 passed). Mutations: 24 of 26 killed at the first gate (2 equivalent), 12 of 12 at the re-gate.
+- **R-1 (re-gate should-fix):** the zero-frequency text now also covers a missing or zero repair time.
+- **Out of phase:** `d95357335` (dispatch_status ignores a running solve's transient rows) was reviewed in this gate and holds.
