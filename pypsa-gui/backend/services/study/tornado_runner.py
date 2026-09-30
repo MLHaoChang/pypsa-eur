@@ -69,12 +69,16 @@ def _refused(exc: F.FindingsRefused) -> R.RunRefused:
     return R.RunRefused(exc.status, exc.code, exc.message)
 
 
+DEADLINE_NOTE = "tornado_stopped_at_solve_deadline"
+
+
 def _wait_variant(job, stop_event: threading.Event) -> None:
     """
     `runner._wait` for one variant solve. Past the runner's deadline the
     variant is a typed `findings.VariantFailed` (`solve_deadline_exceeded`):
-    the row it served is not established, the tornado carries on and its
-    fork is still deleted (gate S4 nit, the wait had no deadline).
+    the row it served says so, and its fork is still deleted (gate S4 nit,
+    the wait had no deadline). `ForkSolver` then stops the tornado, as the
+    runner stops a run (gate S9 [N2]).
     """
     try:
         R._wait(job, stop_event)
@@ -113,7 +117,11 @@ class ForkSolver:
         from services.solve_queue import solve_queue
         from services.validation_service import validate_for_run
 
-        if self.stop_event.is_set():
+        if self.stop_event.is_set() or self.record.get("deadline_exceeded"):
+            # Gate S9 [N2]: after a solve outlived the deadline the solver is
+            # presumed hung and holds the queue; every later re-dispatch would
+            # wait out the deadline too. Stop, as the runner does: the rows not
+            # reached are named `pending`.
             return None
         try:
             campaign.check(R.STUDY_KEY, 1)
@@ -143,7 +151,12 @@ class ForkSolver:
                 storage_dir=str(project_registry.project_dir(row)),
                 solver_config_json=json.dumps(asdict(cfg)),
                 enqueued_by_user_id=self.user_id)
-            _wait_variant(job, self.stop_event)
+            try:
+                _wait_variant(job, self.stop_event)
+            except F.VariantFailed as exc:
+                if exc.code == R.SolveDeadlineExceeded.code:
+                    R._set(self.ctx, self.record, deadline_exceeded=str(exc))
+                raise
             if job.status != "completed":
                 if job.status == "aborted" or self.stop_event.is_set():
                     return None
@@ -301,7 +314,9 @@ def _worker(*, study_id, base_dir, base_row_id, user_id, inp, record, stop_event
         outcome = F.run_tornado(tctx, solver, stop=stop_event.is_set,
                                 progress=lambda **kw: R._set(ctx, record, **kw))
         status = ("aborted" if stop_event.is_set() or record.get("budget_exhausted")
-                  else "done")
+                  or record.get("deadline_exceeded") else "done")
+        if record.get("deadline_exceeded"):
+            error = record["deadline_exceeded"]
     except Exception as exc:  # noqa: BLE001 — recorded
         logger.exception("decision study %s tornado failed", study_id)
         error = f"{type(exc).__name__}: {exc}"
@@ -349,6 +364,9 @@ def _save(base_dir, study_id, inp, record, outcome, status, error, left) -> None
                                          "note": "tornado_aborted"})
         if record.get("budget_exhausted") and rob.status == "not_established":
             rob = rob.model_copy(update={"note": "tornado_budget_exhausted"})
+        if record.get("deadline_exceeded"):
+            rob = rob.model_copy(update={"status": "not_established",
+                                         "note": DEADLINE_NOTE})
         data["robustness"] = rob.model_dump(mode="json")
         data["attributions"] = [a.model_dump(mode="json") for a in outcome.attributions]
         data["reference_bills"] = {k: b.model_dump(mode="json")

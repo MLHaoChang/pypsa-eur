@@ -199,6 +199,10 @@ HELP: dict[str, str] = {
     "tornado_stale": "The tornado was run on an earlier run or ledger and is not used.",
     "tornado_not_run": "The tornado has not been run, so the verdict is not established.",
     "tornado_aborted": "The tornado was stopped before it reached every driver.",
+    "tornado_stopped_at_solve_deadline": (
+        "A re-dispatch did not finish within the solve deadline, so the tornado stopped "
+        "there, as a run does: the bars already computed are kept and the drivers not "
+        "reached are named."),
     "tornado_row_failed": "A tornado bound could not be evaluated.",
     "tornado_not_established": "The tornado is not complete, so the verdict is not established.",
     "tornado_on_another_option": (
@@ -668,6 +672,41 @@ _DUALS_PROSE = {
 }
 
 
+_DRIVERS_FLIP = "The drivers listed (a bound on each turns the battery NPV negative):"
+_DRIVERS_TOP = "The largest drivers in the tornado:"
+
+
+def _driver_labels(keys, ledger: AssumptionsLedger, robustness) -> list[dict[str, str]]:
+    """
+    ``[{key, label}]`` for the verdict's drivers: the ledger row's label
+    (what the Assumptions and tornado tables show), else the tornado row's.
+    """
+    rows = {r.key: r.label for r in ledger.rows}
+    tornado = {r.key: r.label for r in (robustness.tornado if robustness else [])}
+    return [{"key": k, "label": rows.get(k) or tornado.get(k) or k} for k in keys]
+
+
+def _tighten_advice(reasons, synthetic_load: bool) -> str:
+    """
+    What would raise the maturity, from what actually holds it
+    (`StudyMaturity.reasons`, `ledger.maturity_from_ledger`): never an input
+    the user already supplied (gate S9 [N5]). A single weather year always
+    limits MVP-1, so it is always named. No numbers: the prose guard.
+    """
+    heads = [str(r).split(":", 1)[0].strip() for r in reasons or []]
+    asks = []
+    if synthetic_load or "load" in heads:
+        asks.append("the site's metered load instead of a sector profile")
+    if any(h not in ("load", "tariff", "no key driver rows") for h in heads):
+        asks.append("quoted values for the key assumptions still at their library defaults")
+    if "tariff" in heads:
+        asks.append("the site's own tariff instead of an illustrative or library one")
+    asks.append("more than one weather year")
+    if len(asks) == 1:
+        return f"What would tighten it: {asks[0]}."
+    return f"What would tighten it: {', '.join(asks[:-1])}, and {asks[-1]}."
+
+
 def _pack_codes(case: InvestmentCase | None) -> set[str]:
     return set(case.honesty_notes) if case is not None else set()
 
@@ -760,6 +799,12 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
                  "verdict_status": v.status, "option_id": named, "headline_kpis": kpis,
                  "main_caveat": v.main_caveat, "reasons": list(v.reasons),
                  "drivers": list(v.drivers),
+                 # Gate S9 BC-S9-1: the sentence of a `marginal` verdict ends
+                 # "on the drivers listed" — the renderers list them, by the
+                 # label the tornado table uses (the ledger row's).
+                 "driver_labels": _driver_labels(v.drivers, inp.ledger, f.robustness),
+                 "drivers_heading": (_DRIVERS_FLIP if v.class_ is not None
+                                     and v.class_.value == "marginal" else _DRIVERS_TOP),
                  "maturity_class": inp.study.maturity.class_,
                  "maturity_status": inp.study.maturity.status})
 
@@ -951,6 +996,9 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
     # ── 8. assumptions: the ledger, the edited rows marked ───────────────
     rows = []
     for r in inp.ledger.rows:
+        # Gate S9 [S4]: the range the tornado tests (`findings.bounds_for`),
+        # re-centred on an edited value outside the library band, and marked.
+        tested = F.bounds_for(r) if r.sensitivity_flag else None
         rows.append({
             "key": r.key, "label": r.label, "value": r.value, "unit": r.unit,
             "currency_year": r.currency_year, "provenance": r.provenance, "status": r.status,
@@ -958,7 +1006,10 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
             "range_high": r.range.high if r.range else None,
             "source": r.source, "source_year": r.source_year,
             "edited": r.status == "customised" or r.provenance in ("user", "measured"),
-            "sensitivity_flag": bool(r.sensitivity_flag)})
+            "sensitivity_flag": bool(r.sensitivity_flag),
+            "tested_low": tested[0] if tested else None,
+            "tested_high": tested[1] if tested else None,
+            "range_note": (tested[2][0] if tested and tested[2] else None)})
     sections["assumptions"] = ReportSection(
         status="ok",
         prose=_para("Every assumption the figures rest on is listed below with its source. "
@@ -996,9 +1047,7 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
         prose=_para(
             "The maturity badge says how far these figures can be trusted; the indicative "
             "accuracy band runs from {{accuracy_low_pct}} to {{accuracy_high_pct}}.",
-            "What would tighten it: the site's metered load instead of a sector profile, "
-            "quoted equipment costs instead of library defaults, and more than one weather "
-            "year."),
+            _tighten_advice(inp.study.maturity.reasons, synthetic)),
         payload={"maturity": inp.study.maturity.model_dump(mode="json", by_alias=True),
                  "synthetic_load": synthetic})
 

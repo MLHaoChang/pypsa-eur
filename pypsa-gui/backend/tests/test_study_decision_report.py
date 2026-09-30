@@ -36,8 +36,8 @@ LIB = L.load_library()
 def _study(name="Site battery", **kw) -> DecisionStudy:
     now = datetime(2026, 9, 29, tzinfo=UTC)
     return DecisionStudy(study_id="a" * 32, name=name, question_id="bess_at_site",
-                         base_project="b" * 32, intake=INTAKE, created_at=now,
-                         updated_at=now, **kw)
+                         base_project="b" * 32, intake=kw.pop("intake", INTAKE),
+                         created_at=now, updated_at=now, **kw)
 
 
 def _findings(atts, rob, *, streams=None, options=("bess_1h", "bess_2h", "bess_4h"),
@@ -63,12 +63,12 @@ def _findings(atts, rob, *, streams=None, options=("bess_1h", "bess_2h", "bess_4
                     honesty_notes=("perfect_foresight_dispatch", *F.BY_CONSTRUCTION))
 
 
-def _report(name="Site battery", atts=None, rob="default", study=None, **kw):
+def _report(name="Site battery", atts=None, rob="default", study=None, ledger=None, **kw):
     atts = atts if atts is not None else [_att("bess_1h", 1e5), _att("bess_2h", 3e5),
                                           _att("bess_4h", 2e5)]
     rob = _rob("bess_2h", (4e5, 2e5), (3.5e5, 2.5e5)) if rob == "default" else rob
     study = study or _study(name)
-    ledger = L.seed_ledger(Q.BESS_AT_SITE, INTAKE, LIB)
+    ledger = ledger or L.seed_ledger(Q.BESS_AT_SITE, INTAKE, LIB)
     tariff = LIB.tariffs["de_industrial_illustrative"]
     return R.build_decision_report(R.ReportInputs(
         study=study, question=Q.BESS_AT_SITE, findings=_findings(atts, rob, **kw),
@@ -565,3 +565,168 @@ def test_an_unchanged_intake_resaved_by_a_browser_keeps_its_hash():
     assert H.intake_hash(stored) == H.intake_hash(resaved)
     assert H.intake_hash(stored) != H.intake_hash({**resaved, "load": {"annual_mwh": 4000.5}})
     assert H.intake_hash({"pv": {"enabled": True}}) != H.intake_hash({"pv": {"enabled": 1}})
+
+
+# ── gate S9 BC-S9-1: a verdict that cites "the drivers listed" lists them ──
+
+def _marginal_on_the_demand_charge():
+    from models.study import Robustness, TornadoRow
+
+    rows = [TornadoRow(key="demand_charge_price", label="Demand charge on peak import",
+                       unit="EUR/MW/month", centre_value=9000.0, low_value=6300.0,
+                       high_value=11700.0, npv_low=-2.2e4, npv_high=5.6e5, swing=5.8e5,
+                       evaluation="redispatch"),
+            TornadoRow(key="discount_rate", label="Real discount rate", unit="per unit",
+                       centre_value=0.07, low_value=0.049, high_value=0.091,
+                       npv_low=4.4e5, npv_high=1.4e5, swing=3.0e5, evaluation="rate_only")]
+    rob = Robustness(status="ok", tornado=rows, option_id="bess_1h", npv_centre=2.7e5)
+    report = _report(atts=[_att("bess_1h", 2.7e5), _att("bess_2h", 0.0, p=0.0, status="skipped"),
+                           _att("bess_4h", 0.0, p=0.0, status="skipped")], rob=rob)
+    es = report.sections["executive_summary"]
+    assert es.payload["verdict_class"] == "marginal", es.payload
+    assert es.payload["drivers"] == ["demand_charge_price"]
+    return report
+
+
+def _section_text(html: str, sid: str) -> str:
+    start = html.index(f'id="{sid}"')
+    return html[start:html.index("</section>", start)]
+
+
+def test_a_marginal_verdict_lists_its_drivers_by_label_in_html_docx_and_xlsx():
+    """
+    The marginal sentence ends "... on the drivers listed." (gate S9 [S1]): the
+    executive summary must then list them, by the label the tornado table
+    uses, in all three formats — not only in the section payload.
+    """
+    import docx
+    import openpyxl
+
+    from services.study.render_docx import render_docx
+    from services.study.render_html import render_html
+    from services.study.report_xlsx import write_report_xlsx
+
+    report = _marginal_on_the_demand_charge()
+    label = "Demand charge on peak import"
+    summary = _section_text(render_html(report, charts={}), "executive_summary")
+    assert "on the drivers listed" in summary
+    assert label in summary and "Real discount rate" not in summary
+
+    doc = docx.Document(io.BytesIO(render_docx(report, charts={})))
+    texts = [p.text for p in doc.paragraphs]
+    first = next(i for i, t in enumerate(texts) if t.startswith("1. Executive summary"))
+    second = next(i for i, t in enumerate(texts) if t.startswith("2. "))
+    assert any(label in t for t in texts[first:second]), texts[first:second]
+
+    wb = openpyxl.load_workbook(io.BytesIO(write_report_xlsx(report, {}, _ledger())))
+    cells = [c.value for row in wb["Verdict"].iter_rows() for c in row if c.value]
+    assert "verdict_driver" in cells and label in cells
+
+
+
+# ── gate S9 non-binding fixes: -0, the tested range, the maturity advice ──
+
+def test_a_negative_zero_size_renders_as_zero():
+    """An LP's -0.0 MW reads as a negative size to a novice (gate S9 [N4])."""
+    from services.study.render_html import num
+
+    assert num(-0.0, 3) == num(0.0, 3) == "0"
+    assert num(-0.0) == "0"
+    assert num(-4e-7, 3) == "0" and num(-4e-7) == "0"   # solver noise below display
+    assert num(-0.25, 3) == "-0.25"                     # a real negative stays
+
+
+def _edited_storage_ledger():
+    from services.study import ledger as LG
+
+    return LG.apply_user_row(_ledger(), "battery_storage_eur_per_kwh", 450.0,
+                             unit="EUR/kWh", changed_by="test")
+
+
+def test_the_assumptions_show_the_range_the_tornado_tested_and_mark_it_recentred():
+    """
+    An edited value outside the library band is tested on a range re-centred
+    on it (`findings.bounds_for`); the Assumptions table must show THAT range,
+    marked, not the library's (gate S9 [S4]) — in the payload, the HTML, the
+    DOCX and the report and case workbooks.
+    """
+    import docx
+    import openpyxl
+
+    from services.study import findings as F
+    from services.study.proforma_xlsx import _assumptions
+    from services.study.render_docx import render_docx
+    from services.study.render_html import num, render_html
+    from services.study.report_xlsx import write_report_xlsx
+
+    ledger = _edited_storage_ledger()
+    row = next(r for r in ledger.rows if r.key == "battery_storage_eur_per_kwh")
+    low, high, notes = F.bounds_for(row)
+    assert notes == ("range_recentred_on_user_value",) and low < 450.0 < high
+    report = _report(ledger=ledger)
+    rows = {r["key"]: r for r in report.sections["assumptions"].payload["rows"]}
+    got = rows["battery_storage_eur_per_kwh"]
+    assert (got["tested_low"], got["tested_high"]) == (low, high)
+    assert got["range_note"] == "range_recentred_on_user_value"
+    inside = rows["battery_inverter_eur_per_kw"]          # a default: its own band
+    assert (inside["tested_low"], inside["range_note"]) == (inside["range_low"], None)
+
+    shown = f"{num(low, 4)} to {num(high, 4)}"
+    html = render_html(report, charts={})
+    line = next(tr for tr in html.split("<tr") if "battery_storage_eur_per_kwh" in tr
+                and 'class="num"' in tr)
+    assert shown in line and "re-centred" in line, line
+    doc = docx.Document(io.BytesIO(render_docx(report, charts={})))
+    table = next(t for t in doc.tables if t.rows[0].cells[0].text == "Assumption")
+    cells = next(r.cells for r in table.rows if r.cells[1].text == "battery_storage_eur_per_kwh")
+    assert shown in cells[4].text and "re-centred" in cells[4].text
+
+    for wb in (openpyxl.load_workbook(io.BytesIO(write_report_xlsx(report, {}, ledger))),
+               _assumptions_book(_assumptions, ledger)):
+        ws = wb["Assumptions"]
+        head = [c.value for c in ws[1]]
+        line = next([c.value for c in r] for r in ws.iter_rows(min_row=2)
+                    if r[0].value == "battery_storage_eur_per_kwh")
+        assert line[head.index("tested_low")] == pytest.approx(low, rel=1e-12)
+        assert line[head.index("tested_high")] == pytest.approx(high, rel=1e-12)
+        assert line[head.index("tested_range_note")] == "range_recentred_on_user_value"
+
+
+def _assumptions_book(writer, ledger):
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    writer(wb.active, ledger)
+    return wb
+
+
+def _maturity(*reasons):
+    from models.study import StudyMaturity
+
+    return StudyMaturity.model_validate({"status": "ok", "class": "screening",
+                                         "reasons": list(reasons)})
+
+
+def _advice(report) -> str:
+    return " ".join(p.text for p in report.sections["limitations"].prose)
+
+
+def test_the_maturity_advice_names_only_what_still_holds_the_badge():
+    """
+    Gate S9 [N5]: with a metered load and the equipment quotes supplied, the
+    advice must not ask for them; it names what holds the badge (here the
+    illustrative tariff and the defaults still in use).
+    """
+    upload = {**INTAKE, "load": {"source": "upload", "upload_id": "u1"}}
+    held = _study(intake=upload, maturity=_maturity(
+        "discount_rate: default (library)",
+        "tariff: tariff (illustrative, library)"))
+    text = _advice(_report(study=held))
+    assert "metered load" not in text and "equipment costs" not in text, text
+    assert "tariff" in text and "defaults" in text and "weather" in text
+
+    synthetic = _study(maturity=_maturity(
+        "battery_storage_eur_per_kwh: default (library)",
+        "load: sector_profile (upload metered load to raise maturity)"))
+    text = _advice(_report(study=synthetic))
+    assert "metered load" in text and "defaults" in text and "tariff" not in text, text

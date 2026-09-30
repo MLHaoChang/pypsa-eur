@@ -127,6 +127,9 @@ EXPECTED = (
     # or study answers 500.
     "decision_report.html.j2", "study_library", "technology_costs.csv",
     "tariffs.csv", "finance_defaults.yaml", "load_profiles",
+    # python-docx's own template, read by `docx.Document()` for the report's
+    # DOCX (gate S9 [S3]).
+    "default.docx",
 )
 
 # Info.plist usage-description keys macOS TCC requires before the app may

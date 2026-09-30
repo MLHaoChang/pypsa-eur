@@ -113,6 +113,12 @@ for dist in ("pypsa", "linopy", "xarray", "fastapi", "uvicorn", "starlette",
 # xarray and pypsa both resolve backends through entry points at first use.
 datas += collect_data_files("xarray", includes=["**/*.yaml", "**/*.yml"])
 datas += collect_data_files("pypsa", includes=["**/*.csv", "**/*.yaml"])
+# The decision report's DOCX (`services/study/render_docx.py`): python-docx's
+# `Document()` opens `docx/templates/default.docx` `__file__`-relative, and
+# `docx/parts/*.py` read `parts/../templates/*.xml` — the same
+# `optimization/../data` shape as pypsa, hence `pyz+py` below as well
+# (gate S9 [S3]). Without them `report.docx` 500s in the frozen app only.
+datas += collect_data_files("docx")
 
 # ── the planning → dynamics pipeline (gridspine; increment 6) ───────────────
 #
@@ -247,6 +253,8 @@ a = Analysis(                              # noqa: F821 - injected
         # pandapower's `networks` opens `pp_dir/networks/...json`.
         "gridspine": "pyz+py",
         "pandapower": "pyz+py",
+        # `docx/parts/*.py` open `parts/../templates/…` (see `datas`).
+        "docx": "pyz+py",
     },
 )
 

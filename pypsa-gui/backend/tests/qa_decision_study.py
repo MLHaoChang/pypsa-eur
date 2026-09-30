@@ -15,7 +15,7 @@ a verdict, a pro forma and a report out.
   check vacuous.
 * **The seed tariff** (``de_industrial_illustrative``); PV off, so four
   options (``none``, ``bess_1h``, ``bess_2h``, ``bess_4h``).
-* **Two ledger rows edited**: a storage quote of 450 EUR/kWh and an inverter
+* **Two ledger rows edited**: a storage quote of 500 EUR/kWh and an inverter
   quote of 230 EUR/kW. On this load that sizes the 1-hour battery (about
   0.8 MW) and leaves the 2- and 4-hour ones at zero, and the demand-charge
   row's low bound turns the 1-hour battery's NPV negative with its size held
@@ -75,7 +75,15 @@ BASE = "qa-ds-base"
 ABORT_BASE = "qa-ds-abort"
 USERS = [f"qa-ds-user{i}" for i in range(5)]
 YEAR = 2025
-STORAGE_QUOTE = 450.0      # EUR/kWh
+# 500, not the 450 of the first S9 driver: at 450 the demand-charge low bound
+# was only -21.6k EUR, and at 420 the verdict was `recommended` (gate S9 [S2]).
+# At 500 the flip and the centre both clear the stated margins below.
+STORAGE_QUOTE = 500.0      # EUR/kWh
+#: `marginal` must hold with margin on both sides (gate S9 [S2]): the centre
+#: battery NPV positive by at least this much, the flipping bound negative by at
+#: least FLIP_MARGIN_EUR, and every other bound positive by at least that.
+CENTRE_MARGIN_EUR = 100_000.0
+FLIP_MARGIN_EUR = 25_000.0
 INVERTER_QUOTE = 230.0     # EUR/kW
 OPTIONS = ["none", "bess_1h", "bess_2h", "bess_4h"]
 EVIDENCE: dict = {}
@@ -319,6 +327,20 @@ def _tornado(sid: str) -> dict | None:
     _step("marginal is reached through the API: the demand-charge low bound flips the sign",
           v.get("class") == "marginal" and v.get("drivers") == ["demand_charge_price"],
           f"class={v.get('class')} drivers={v.get('drivers')}")
+    centre = rob.get("npv_centre")
+    dc = next((r for r in bars if r["key"] == "demand_charge_price"), {})
+    others = [min(r["npv_low"], r["npv_high"]) for r in bars if r["key"] != "demand_charge_price"]
+    EVIDENCE["marginal_margins"] = {"npv_centre": round(centre or 0),
+                                    "demand_charge_low_bound": round(dc.get("npv_low") or 0),
+                                    "lowest_other_bound": round(min(others)) if others else None}
+    _step(f"marginal with margin: centre NPV > {CENTRE_MARGIN_EUR:,.0f} EUR",
+          centre is not None and centre > CENTRE_MARGIN_EUR, f"centre={centre}")
+    _step(f"the demand-charge low bound is below -{FLIP_MARGIN_EUR:,.0f} EUR and every "
+          f"other bound above +{FLIP_MARGIN_EUR:,.0f} EUR",
+          dc.get("npv_low") is not None and dc["npv_low"] < -FLIP_MARGIN_EUR
+          and dc.get("npv_high", 0) > FLIP_MARGIN_EUR
+          and bool(others) and min(others) > FLIP_MARGIN_EUR,
+          str(EVIDENCE["marginal_margins"]))
     atts = {a["option_id"]: a for a in f.get("battery_attribution") or []}
     _step("the zero-size options are judged by size (skipped), the best by its NPV",
           atts.get("bess_2h", {}).get("status") == "skipped"
@@ -429,6 +451,16 @@ def _report(sid: str) -> None:
         doc = docx.Document(io.BytesIO(d.content))
         ok = any(t.rows[0].cells[0].text == "Assumption" for t in doc.tables)
     _step("the report renders to DOCX with the Assumptions table", ok, f"HTTP {d.status_code}")
+    if ok:
+        texts = [p.text for p in doc.paragraphs]
+        first = next(i for i, t in enumerate(texts) if t.startswith("1. Executive summary"))
+        second = next(i for i, t in enumerate(texts) if t.startswith("2. "))
+        summary = texts[first:second]
+        hs = h.text.index('id="executive_summary"')
+        _step("the marginal verdict's drivers are listed by label in the HTML and DOCX summary",
+              any("Demand charge on peak import" in t for t in summary)
+              and "Demand charge on peak import" in h.text[hs:h.text.index("</section>", hs)],
+              " | ".join(summary)[:300])
     x = c.get(_study_url(BASE, sid, "/report.xlsx"))
     ok = x.status_code == 200
     sheets: list[str] = []

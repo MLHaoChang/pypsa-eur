@@ -52,8 +52,11 @@ def _verdict(ws, report: DecisionReport, prose: dict[str, list[str]], stale: boo
         ["verdict_status", es.get("verdict_status"), "", "", "", "", "", ""],
         ["verdict_class", es.get("verdict_class"), "", "", "", "", "", ""],
         ["verdict", " ".join(prose.get("executive_summary") or []), "", "", "", "", "", ""],
-        ["stale", "yes" if stale else "no", "", "", "", "", "", ""],
     ]
+    # Gate S9 BC-S9-1: the drivers the verdict sentence refers to, by label.
+    rows += [["verdict_driver", d["label"], d["key"], es.get("drivers_heading") or "",
+              "", "", "", ""] for d in es.get("driver_labels") or []]
+    rows.append(["stale", "yes" if stale else "no", "", "", "", "", "", ""])
     rows += [["stale_reason", r, R.help_for(r)[0], "", "", "", "", ""] for r in stale_reasons]
     rows.append(["", "", "", "", "", "", "", ""])
     rows.append(["fact", "value", "unit", "basis", "currency_year", "engine", "fidelity",

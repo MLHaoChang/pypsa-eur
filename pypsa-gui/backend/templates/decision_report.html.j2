@@ -72,6 +72,8 @@
       <tr><td>{{ f.label }}</td><td class="fact">{{ fmt(f) }}</td><td class="note">{{ prov(f) }}</td></tr>
     {% endfor %}</tbody></table>
     {% endif %}
+    {% if s.payload.driver_labels %}<p><strong>{{ s.payload.drivers_heading }}</strong></p>
+    <ul class="drivers">{% for d in s.payload.driver_labels %}<li>{{ d.label }} <span class="code">{{ d.key }}</span></li>{% endfor %}</ul>{% endif %}
     {% if s.payload.main_caveat %}<p><strong>Main caveat:</strong> {{ help(s.payload.main_caveat) }} <span class="code">{{ s.payload.main_caveat }}</span></p>{% endif %}
     <p><strong>Maturity:</strong> {{ s.payload.maturity_class or "not established" }}</p>
     {% if s.payload.reasons %}<ul>{% for r in s.payload.reasons %}<li>{{ help(r) }} <span class="code">{{ r }}</span></li>{% endfor %}</ul>{% endif %}
@@ -127,7 +129,7 @@
 
   {% if sid == "assumptions" and s.payload %}
   <div class="wrap"><table class="assumptions"><thead><tr><th>Assumption</th><th>Value</th><th>Unit</th><th>Range</th><th>Source</th><th>Edited</th></tr></thead><tbody>
-  {% for r in s.payload.rows %}<tr class="{{ 'edited' if r.edited else '' }}"><td>{{ r.label }} <span class="code">{{ r.key }}</span></td><td class="num">{{ num(r.value, 4) }}</td><td>{{ r.unit }}</td><td class="num">{{ num(r.range_low, 4) }} to {{ num(r.range_high, 4) }}</td><td>{{ r.source }}</td><td>{{ "edited" if r.edited else "" }}</td></tr>{% endfor %}
+  {% for r in s.payload.rows %}<tr class="{{ 'edited' if r.edited else '' }}"><td>{{ r.label }} <span class="code">{{ r.key }}</span></td><td class="num">{{ num(r.value, 4) }}</td><td>{{ r.unit }}</td><td class="num">{% if r.range_note %}{{ num(r.tested_low, 4) }} to {{ num(r.tested_high, 4) }} (re-centred on the edited value; library range {{ num(r.range_low, 4) }} to {{ num(r.range_high, 4) }}) <span class="code">{{ r.range_note }}</span>{% else %}{{ num(r.range_low, 4) }} to {{ num(r.range_high, 4) }}{% endif %}</td><td>{{ r.source }}</td><td>{{ "edited" if r.edited else "" }}</td></tr>{% endfor %}
   </tbody></table></div>
   {% endif %}
 

@@ -461,3 +461,52 @@ def test_the_decision_studys_data_resolves_in_a_frozen_layout(tmp_path):
     shipped = {p.name for p in (BACKEND / "study_library" / "load_profiles").iterdir()
                if p.is_file()}
     assert shipped and shipped <= {p.name for p in profiles.iterdir()}
+
+
+def test_python_docx_ships_its_templates_and_renders_in_a_frozen_layout(tmp_path):
+    """
+    Gate S9 [S3]: `docx.Document()` opens `docx/templates/default.docx`
+    `__file__`-relative, and `docx/parts/*.py` read `parts/../templates/*.xml`
+    — the `pypsa/optimization/../data` shape, which needs the package written
+    out as a real directory (`pyz+py`) as well as its data collected. The
+    spec must say both, `check_bundle.EXPECTED` must name the template, and a
+    report must render with `docx` imported from the rebuilt layout (the
+    package copied the way `pyz+py` + `collect_data_files` lay it out).
+    """
+    import importlib.util
+    import shutil
+    import subprocess
+
+    text = SPEC.read_text(encoding="utf-8")
+    assert 'collect_data_files("docx")' in text
+    assert '"docx": "pyz+py"' in text
+    assert "default.docx" in set(_check_bundle().EXPECTED)
+
+    meipass = tmp_path / "_MEIPASS"
+    source = Path(importlib.util.find_spec("docx").origin).parent
+    shutil.copytree(source, meipass / "docx",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    from tests.test_study_decision_report import _report
+
+    report_json = tmp_path / "report.json"
+    report_json.write_text(_report().model_dump_json(by_alias=True), encoding="utf-8")
+    out = tmp_path / "report.docx"
+    probe = (
+        "import sys, pathlib\n"
+        f"sys.path[:0] = [{str(meipass)!r}, {str(BACKEND)!r}]\n"
+        "import docx\n"
+        f"assert pathlib.Path(docx.__file__).is_relative_to({str(meipass)!r}), docx.__file__\n"
+        "from models.study import DecisionReport\n"
+        "from services.study.render_docx import render_docx\n"
+        f"r = DecisionReport.model_validate_json(pathlib.Path({str(report_json)!r}).read_text())\n"
+        "doc = docx.Document()\n"
+        "doc.sections[0].header.paragraphs[0].text = 'header'   # parts/../templates\n"
+        f"pathlib.Path({str(out)!r}).write_bytes(render_docx(r, charts={{}}))\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
+                          cwd=str(tmp_path), timeout=300)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    import docx
+
+    doc = docx.Document(str(out))
+    assert any(t.rows[0].cells[0].text == "Assumption" for t in doc.tables)

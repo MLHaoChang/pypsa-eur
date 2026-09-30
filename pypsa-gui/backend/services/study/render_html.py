@@ -40,6 +40,10 @@ def num(value, digits: int = 0) -> str:
     if value is None:
         return ""
     v = float(value)
+    # Gate S9 [N4]: an LP's -0.0 (or solver noise below what is displayed)
+    # is zero, never a negative size.
+    if v == 0.0 or abs(v) < (0.5 * 10.0 ** -(digits + 3) if digits else 0.5):
+        v = 0.0
     if digits:
         return f"{v:,.{digits}g}" if abs(v) < 1e4 else f"{v:,.0f}"
     return f"{v:,.0f}"

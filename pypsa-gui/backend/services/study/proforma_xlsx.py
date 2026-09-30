@@ -207,10 +207,16 @@ _KPI_UNITS = {"npv": "EUR", "irr": "per unit", "payback_simple": "years",
 
 _LEDGER_COLUMNS = ("key", "label", "value", "unit", "currency_year", "basis",
                    "provenance", "status", "sensitivity_flag", "range_low",
-                   "range_high", "source", "source_year", "source_url")
+                   "range_high", "source", "source_year", "source_url",
+                   # Gate S9 [S4]: the range the tornado tests a key driver on
+                   # (`findings.bounds_for`), re-centred on an edited value
+                   # outside the library band.
+                   "tested_low", "tested_high", "tested_range_note")
 
 
 def _assumptions(ws, ledger: AssumptionsLedger) -> None:
+    from services.study.findings import bounds_for
+
     ws.title = "Assumptions"
     for j, h in enumerate(_LEDGER_COLUMNS, start=1):
         _text(ws, 1, j, h)
@@ -226,6 +232,10 @@ def _assumptions(ws, ledger: AssumptionsLedger) -> None:
             "source": row.source, "source_year": row.source_year,
             "source_url": row.source_url,
         }
+        tested = bounds_for(row) if row.sensitivity_flag else None
+        values["tested_low"] = tested[0] if tested else None
+        values["tested_high"] = tested[1] if tested else None
+        values["tested_range_note"] = tested[2][0] if tested and tested[2] else None
         for j, col in enumerate(_LEDGER_COLUMNS, start=1):
             _text(ws, i, j, values[col])
 

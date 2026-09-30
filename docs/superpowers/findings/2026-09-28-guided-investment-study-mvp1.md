@@ -1,6 +1,7 @@
 # MVP-1: a guided decision study answers "Do I need a battery at my site, and what is it worth?"
 
-**Status:** IMPLEMENTED on `claude/edge-tool-ux-research-n0n2l6`. S0–S8 are committed and each gate reads GO, or GO after its binding conditions were closed. S9 (this note, the QA driver, packaging and the integration carries) is in the working tree, **uncommitted**, and waits for its gate, which is the plan-level definition of done.
+**Status:** IMPLEMENTED on `claude/edge-tool-ux-research-n0n2l6`. S0–S8 are committed and each gate reads GO, or GO after its binding conditions were closed. S9 (this note, the QA driver, packaging and the integration carries) is committed as `b02b117`. Its gate, the plan-level definition of done, read **GO WITH BINDING CONDITIONS** (BC-S9-1 to BC-S9-3, `scratchpad/gate-s9.md`). The gate fixes follow in the next commit: BC-S9-1 and BC-S9-2 closed, BC-S9-3 pending the coordinator's full-suite run.
+**Owner-closed gates, re-checked:** S4, S6 and S8 ended "GO WITH BINDING CONDITIONS, closed by the owner" with no assessor re-check at the time. The S9 assessor re-verified every one of those closures by mutation (BC-S4-v2-1/2, BC-S6-v2-1, BC-S6-v2-2, BC-S8-v2-1, BC-S8-v2-2): each fix's test goes red without the fix.
 **Date:** 2026-09-30
 **Plan:** `docs/superpowers/plans/2026-09-28-guided-investment-study-mvp1-v2.md`
 **Spec:** `docs/superpowers/specs/2026-09-28-guided-investment-study-design.md`
@@ -36,9 +37,9 @@ The merge-base with master is `67c4c77`.
 | S7 report | `b73b573`, `55e1917`, `3a18f4a`, `5791dce` | `assemble_decision_report`; the prose guard; the stale rule shared with the case's 409; HTML (autoescape, CSP sandbox), DOCX and XLSX; `python-docx` pinned |
 | S8 frontend | `b6566fa`, `e65679e`, `59b444d` | The `decision` panel and wizard tab: intake, options, tariff, finance, ledger, run, verdict, why/how, robust, report |
 | Harness | `3094055` | The per-thread sandbox check holds connections, not their ids (a flaky suite test; not an MVP-1 change) |
-| **S9 (uncommitted)** | — | See below |
+| **S9** | `b02b117`, plus the gate-fix commit that follows it | See below |
 
-### S9 in the working tree
+### S9 (`b02b117`) and its gate fixes
 
 | Where | Change |
 |---|---|
@@ -90,7 +91,7 @@ The merge-base with master is `67c4c77`.
 | M12 | the report drops the `battery_only_zero` tag | two live-LP report tests and two existing S7 tests |
 | M13 | the runner drops the `size_at_upper_bound` caveat | the four live-LP tests and the existing runner size-bound test |
 
-**The QA driver (`qa_decision_study.py`): 57 passed, 0 failed, in 94.8 s.** Wall time was 1 min 42 s with imports. It makes 7 real HiGHS solves:
+**The QA driver (`qa_decision_study.py`), as committed in `b02b117`: 57 passed, 0 failed, in 94.8 s.** Wall time was 1 min 42 s with imports. (The gate fixes move the storage quote to 500 EUR/kWh and add the margin checks; see "Gate fixes" below for that run's numbers.) It makes 7 real HiGHS solves:
 
 - 4 in the run (54.5 s);
 - 2 in the tornado (18.0 s);
@@ -129,6 +130,24 @@ The rendered report carries, from a real solve:
 
 The report goes to HTML, DOCX and XLSX.
 
+### Gate fixes (after `b02b117`; red first, verbatim reds in `scratchpad/s9-implementation.md`)
+
+| Item | Change | Red before |
+|---|---|---|
+| BC-S9-1 | The executive summary lists the verdict's drivers by their ledger label (`payload.driver_labels`, `drivers_heading`), in the HTML, the DOCX and the XLSX Verdict sheet (`verdict_driver` rows) | `'Demand charge on peak import' in <executive_summary section>` false |
+| [S2] | The driver's storage quote is 500 EUR/kWh; it asserts the centre battery NPV > 100,000 EUR, the demand-charge low bound < −25,000 EUR, and every other bound > +25,000 EUR; and that the summary lists the driver | — (driver) |
+| [S3] | `pypsa-gui.spec`: `collect_data_files("docx")` and `"docx": "pyz+py"` (`docx/parts/*.py` read `parts/../templates`); `EXPECTED` gains `default.docx`; a test renders a report DOCX in a subprocess with `docx` imported from the rebuilt layout | `assert 'collect_data_files("docx")' in <spec>` |
+| [N4] | `render_html.num` clamps −0.0 and noise below the displayed precision to 0 | `assert '-0' == '0'` |
+| [S4] | The Assumptions table shows the range the tornado tests (`findings.bounds_for`); a re-centred one is marked, with the library range beside it (report HTML and DOCX; `tested_low`, `tested_high`, `tested_range_note` in both workbooks) | `KeyError: 'tested_low'` |
+| [N5] | The maturity advice names only what holds the badge (`report._tighten_advice` from `StudyMaturity.reasons`) | the advice asked for a metered load already uploaded |
+| [N2] | The tornado stops at the first solve past the deadline: status `aborted`, typed `solve_deadline_exceeded` error, note `tornado_stopped_at_solve_deadline`, the timed-out row flagged, the rest pending | `assert 'done' == 'aborted'` |
+
+The driver after the fixes: **60 passed, 0 failed, 110.2 s** (1 min 58 s wall).
+- `bess_1h` sizes 0.7958 MW.
+- The centre battery NPV is 227,029 EUR.
+- The demand-charge bounds give −61,423 EUR (low) and 515,482 EUR (high). The lowest other bound is the discount-rate high bound, at +99,405 EUR.
+- CAPEX is 580,926.98 EUR, which is 730,000 EUR/MW × 0.79579 MW. `upfront_cost_series` reads 20.8 % high.
+
 ## The golden reconciliation numbers
 
 These come from the S5 gate's independent recomputation on the site golden fixture (DE seed, library ledger). Every figure matches the payload to a relative error of 3e-15 or better (IRR 9e-13).
@@ -152,7 +171,7 @@ These come from the S5 gate's independent recomputation on the site golden fixtu
 
 ## Counts, before and after
 
-| | master merge-base `67c4c77` | branch HEAD `3094055` | HEAD + S9 working tree |
+| | master merge-base `67c4c77` | `3094055` (before S9) | `b02b117` (S9) |
 |---|---|---|---|
 | Backend tests, `pytest --collect-only` | 6,050 in 311 files | 6,527 | 6,550 in 340 files |
 | Frontend tests, `vitest list` | 1,964 in 177 files | 2,114 in 192 files | 2,114 (S9 changes no frontend file) |
@@ -162,7 +181,9 @@ These come from the S5 gate's independent recomputation on the site golden fixtu
 - **Final S9 runs.**
   - Every `test_study_*`, `test_studies_routes`, the packaging, sidecar, error-kind manifest, save-guard, swap-guard, QA-driver-coverage, proforma-golden, golden-coverage and FOM-reconciliation tests (37 files): 591 passed, exit 0.
   - `run_qa_drivers.py`: all 23 drivers passed in 8 min 14 s, while the mutation batch ran alongside. That includes `qa_asset_economics`, `qa_cost_decomp_overnight` and `qa_eh_reference_design`, which are unchanged, and `qa_decision_study` (109 s under that load).
-  - The full backend suite was not re-run for S9.
+  - The full backend suite was not re-run by the S9 implementer; the coordinator runs it (BC-S9-3).
+- Full backend suite on <commit>: <result>
+- The gate fixes add 6 backend tests (the BC-S9-1 test, three report tests for [N4], [S4] and [N5], the tornado-deadline stop test and the python-docx frozen-layout test), so the gate-fix commit collects 6,556.
 
 ## A real-profile finding the report now states
 
@@ -207,11 +228,22 @@ This is also why the QA driver and the golden fixture use an uploaded evening-sp
 - **Reopening a study after a reload** (S8 [S5]). It is reachable only through the Sidebar row; the hub is not restored on reload.
 - **Marking study-owned forks in project lists** (review [S11], S8 [S9-c]). Option forks appear as ordinary `<base>-opt-…` children. A user who deletes one gets `option_not_solved` on the next read.
   - Not done in S9. It is a list-payload flag plus a frontend change in the project lists, and S9's scope was backend integration.
-  - The S9 Save-As fix and the startup sweep limit the damage in the other direction: a user's own save is never swept as the study's.
+  - The S9 Save-As fix limits the damage in the other direction: a user's network saved OVER a fork (Save-As, Save-a-Copy) loses the owner keys and is never swept or cascaded as the study's. A user's Expert-view edit saved onto the fork's OWN directory keeps the keys by design, so it is deleted with the study, or swept once the study record is gone (gate S9 [N3]).
 - **A size limit on the JSON body before parsing** (S8 [S-v2-1]). The 25 MB `csv_text` cap is checked after FastAPI has parsed the body; an 80 MB body costs about 200 MB of RSS before the refusal.
 - **Debouncing the draft preview.** Each load or site change posts `/preview`.
 - **Spelled-out numbers in the prose guard.** `validate_prose` rejects digits outside `{{fact_id}}`, but "four million" passes (documented at S7).
-- **The remaining report nits** (S7, carried by S8 to S9 or later): rounding in the formatted facts, and the evidence-gap labels. (`Engine` gained `method_constant`, and the XLSX labels IRR and payback as static values, in S7 and S8.)
+- **The remaining report nits** (S7, carried by S8 to S9 or later): rounding in the formatted facts, and the evidence-gap labels. (`Engine` gained `method_constant`, and the XLSX labels IRR and payback as static values, in S7 and S8.) The case workbook's Assumptions sheet now carries the tested range too; the verdict-drivers list, the negative zero, the re-centred range and the maturity advice are fixed (gate fixes below).
+- **S0 follow-up, the `/yr` labels.** `pages/GenerationStack.tsx` still heads the annual capital cost `CC (€/MW)` (Generator and StorageUnit) and `CC (€/MWh)` (Store), without `/yr`. The S0 gate named `CapacityExpansion` and `propertyDocs` in the same follow-up, and the quick-add label and edit-mode badges are correct but untested. This is a live instance of the mislabel S0 exists to remove.
+- **S3 [N4].** `objective_decomposition._bridge` recomputes `demand_charge_eur` against the CURRENT solver config, not the one the solve used. The study's runner passes the fork's own config, but the Expert view's bridge on a re-configured project does not.
+- **S3, cross-hour export cycling.** The export-price preflight pairs the Links hour by hour; it does not see import-to-export cycling ACROSS hours through the battery (charge on a cheap import hour, export at a dearer export hour). The seed tariffs are safe (their export price is below every import band, S4), but a custom tariff is not checked.
+- **S2, untested ledger branches.** Reset clearing the attention note; a user tariff whose source says illustrative; the re-seed filter re-deriving a supplied tariff's prices.
+- **S6 [N2], the energy-price skip code.** On a single-band tariff the tornado records `energy_price_level` as skipped with `not_applicable` (the ledger's `energy_price_level` row has no value on one band, `unavailable: not_applicable`, and the skip rule returns that before its single-band check), not the documented `energy_price_level_no_effect_single_band`. The bar is correctly absent; the code the report explains is the generic one.
+- **This gate's residuals (gate S9).**
+  - [S2] The first S9 driver's `marginal` was thin: at 450 EUR/kWh the demand-charge low bound was −21,634 EUR, and at 420 the verdict turned `recommended`, failing the driver. Fixed below (500 EUR/kWh, asserted margins).
+  - [N2] The tornado carried on after a solve outlived the deadline. Fixed below (it stops, as the run does).
+  - [N1] The driver leaves the harness's temporary projects root behind, as every QA driver does (pre-existing).
+  - [N6] A queued job that boot reconciliation restores on a swept fork fails as an untyped `FileNotFoundError` (`queue_error`); `reconcile_on_boot` could drop queued rows whose `storage_dir` is gone. Not fixed.
+  - The case workbook (`case.xlsx`) and the report both show the tested range; the report's HTML and DOCX mark a re-centred one. The UI's ledger step does not show it (frontend, not in scope).
 - **Residuals of the S9 carries themselves:**
   - The startup sweep assumes no run or tornado is live, which is true at boot of a single instance. Two overlapping local-mode launches (the single-instance guard D11/H1 has not landed) could sweep a live tornado's variant fork. The tornado would then record that row as failed. No user project is at risk.
   - A solve that is stuck past the deadline and the grace period leaves its fork, because `delete_fork` refuses while the queue holds the job. The run records it in `fork_removal_refused`, and the next startup sweeps it only if it is a variant or its study is gone.

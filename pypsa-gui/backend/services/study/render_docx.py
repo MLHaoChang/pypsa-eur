@@ -36,6 +36,15 @@ def _table(doc, header: list[str], rows: list[list[str]], style: str = "Light Gr
     return t
 
 
+def _range_cell(r: dict) -> str:
+    """The range the tornado tested; a re-centred one says so (gate S9 [S4])."""
+    library = f"{num(r['range_low'], 4)} to {num(r['range_high'], 4)}"
+    if not r.get("range_note"):
+        return library
+    return (f"{num(r['tested_low'], 4)} to {num(r['tested_high'], 4)} (re-centred on the "
+            f"edited value; library range {library}) ({r['range_note']})")
+
+
 def render_docx(report: DecisionReport, charts: dict[str, bytes] | None = None, *,
                 stale: bool | None = None, stale_reasons: list[str] | None = None) -> bytes:
     from docx import Document
@@ -99,6 +108,10 @@ def render_docx(report: DecisionReport, charts: dict[str, bytes] | None = None, 
                 _table(doc, ["Key figure", "Value", "Basis and provenance"],
                        [[report.facts[k].label, R.format_fact(report.facts[k]),
                          provenance(report.facts[k])] for k in keys])
+            if p.get("driver_labels"):
+                doc.add_paragraph(p.get("drivers_heading") or "Drivers:")
+                for d in p["driver_labels"]:
+                    doc.add_paragraph(f"{d['label']} ({d['key']})", style="List Bullet")
             if p.get("main_caveat"):
                 doc.add_paragraph(f"Main caveat: {help_text(p['main_caveat'])} "
                                   f"({p['main_caveat']})")
@@ -152,7 +165,7 @@ def render_docx(report: DecisionReport, charts: dict[str, bytes] | None = None, 
             doc.add_heading("Assumptions table", level=2)
             _table(doc, ["Assumption", "Key", "Value", "Unit", "Range", "Source", "Edited"],
                    [[r["label"], r["key"], num(r["value"], 4), r["unit"],
-                     f"{num(r['range_low'], 4)} to {num(r['range_high'], 4)}", r["source"],
+                     _range_cell(r), r["source"],
                      "edited" if r["edited"] else ""] for r in p.get("rows") or []])
         if sid == "appendix" and p:
             doc.add_paragraph(p.get("model") or "")

@@ -342,3 +342,50 @@ def test_the_sweep_uses_the_same_ownership_rule_as_delete():
     src = inspect.getsource(study_forks.sweep_leftover_forks)
     assert "delete_fork(" in src and "is_study_owned(" in src
     assert store.SIDECAR_DIR == "studies"
+
+
+class _HangsOnFirstVariant(FakeSolver):
+    """The tornado's first re-dispatch never returns until aborted."""
+
+    def __call__(self, config, n, lock, stop_event, log_queue, state_update=None):
+        if "-var-" in str(n.name) and not getattr(self, "hung", False):
+            self.hung = True
+            self.calls.append((n.name, config, len(n.storage_units)))
+            if stop_event.wait(timeout=20.0):
+                return "aborted", None
+        return super().__call__(config, n, lock, stop_event, log_queue, state_update)
+
+
+def test_a_tornado_stops_at_the_first_solve_past_the_deadline(
+        client, api_project, studies_on, monkeypatch, _auth_db):
+    """
+    Gate S9 [N2]: like the run, the tornado stops at the first solve that
+    outlives the deadline (a hung solver pins the queue, so every later
+    re-dispatch would wait out the deadline too). The bars already computed
+    are kept, the timed-out row says why, the rest are named as pending, and
+    the record carries the typed error.
+    """
+    from services import solver_service
+    from tests.test_study_tornado_routes import _run, _variant_rows, wait_tornado
+
+    solver = _HangsOnFirstVariant()
+    monkeypatch.setattr(solver_service, "run_simulation", solver)
+    _e, session_local = _auth_db
+    sid = _run(client, api_project, "tdl")
+    run_calls = len(solver.calls)
+    monkeypatch.setattr(R, "SOLVE_WAIT_DEADLINE_S", 1.0)
+    r = client.post(f"/api/projects/tdl/studies/{sid}/findings/tornado", json={})
+    assert r.status_code == 202, r.text
+    assert r.json()["solves_estimated"] == 4
+    rec = wait_tornado(client, "tdl", sid, timeout=60.0)
+    assert rec["status"] == "aborted", rec
+    assert rec["error"].startswith("solve_deadline_exceeded:"), rec["error"]
+    assert len(solver.calls) - run_calls == 1, solver.calls[run_calls:]
+    rob = rec["robustness"]
+    assert rob["note"] == "tornado_stopped_at_solve_deadline", rob
+    assert rob["pending"], rob
+    failed = [row for row in rob["tornado"] if "solve_deadline_exceeded" in
+              (row.get("unavailable") or {}).values()]
+    assert len(failed) == 1, rob["tornado"]
+    assert _variant_rows(session_local, "tdl") == []
+    assert PyPSAService._study_owned == set()
