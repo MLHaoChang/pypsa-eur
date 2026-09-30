@@ -2607,6 +2607,14 @@ def _save_agent_export(data: bytes, filename: str, mime: str) -> dict:
             400, "No project is loaded — save or load a project before exporting "
                  "(the export is attached to the project as a downloadable file)."
         )
+    # Writing into the project's uploads directory is a write edge, and
+    # `routers/uploads.py::post_upload` refuses it under a foreign lock for
+    # that reason. This helper is the single chokepoint every `export_*` tool
+    # reaches, so the check lives here rather than on ten wrappers — the
+    # export tools are tiered `read` and `write` inconsistently, so the
+    # derived gate cannot cover them as a family, and re-tiering them would
+    # change their confirmation behaviour for unrelated reasons.
+    _check_foreign_lock("export")
     meta = upload_service.add_upload(name, data, filename, mime, kind="agent_export")
     return {
         "file_id": meta.file_id,
@@ -4797,6 +4805,24 @@ _LOCK_GATE_SERVICE_CALL_MUTATORS = frozenset({
     "generate_exemplary_timeseries",
     "apply_demand_from_excel",
     "reconstruct_network_from_image",
+    # Write edges into the PROJECT DIRECTORY that call their service layer
+    # directly, so they never reach the REST handler that checks the lock.
+    # `routers/uploads.py` decided this question the other way and said so:
+    # the upload POST is "a write edge into `project.directory` same as
+    # save/rename/delete", and the DELETE is "the sharp end of the gap this
+    # router had: a non-holder deleting a file another session is actively
+    # referencing (e.g. mid multimodal turn)". Both REST routes check the
+    # lock; these tools did the same work without it.
+    "delete_upload",
+    "clear_uploads",
+    # Unlinks the project's chat.jsonl and its rotation. No REST equivalent
+    # exists, so there was no handler-level check to inherit either.
+    "clear_chat_history",
+    # Mutate the campaign record in the SHARED resident context's
+    # solver_state, so a non-holder could set a solve budget on the holder's
+    # context or close the campaign they are running.
+    "start_campaign",
+    "end_campaign",
 })
 
 
@@ -4823,8 +4849,22 @@ def _lock_gated_tool_names() -> frozenset[str]:
       * `load_project` / `activate_project` are how a user gets AWAY from a
         locked project; gating them would trap them there. The middleware
         likewise gates neither (one is a GET, the other is an exempt suffix).
-      * Upload / export / chat-history tools write artifacts, not network
-        state, on surfaces the middleware does not gate either.
+      * Export tools are tiered `read` or `write` inconsistently, so the
+        derivation above cannot cover them as a family. They are gated at
+        their single chokepoint instead — `_save_agent_export` calls
+        `_check_foreign_lock` itself, which covers all ten regardless of tier
+        and without re-tiering any of them (re-tiering would change their
+        confirmation behaviour, which is a product decision and not this
+        seam's to make).
+
+        This bullet used to read "Upload / export / chat-history tools write
+        artifacts, not network state, on surfaces the middleware does not gate
+        either", and listed them as deliberately ungated. `routers/uploads.py`
+        had already decided the same question the other way, in writing: the
+        upload POST is "a write edge into `project.directory` same as
+        save/rename/delete", and the DELETE is "the sharp end of the gap".
+        Both REST routes check; the tools bypassed the handler and did the
+        work anyway, so the two paths disagreed about the same bytes.
     """
     from services.chat_tools_schema import TOOL_ROUTES, safety_tier_for
 

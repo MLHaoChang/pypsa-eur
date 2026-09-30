@@ -860,3 +860,139 @@ def test_solve_queue_abort_tool_is_not_lock_gated(
             chat_tools.DISPATCHERS["solve_queue_abort"](job_id=str(_uuid.uuid4()))
     assert exc.value.status_code == 404
     assert exc.value.status_code != 409
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# CH-4 — write edges that bypass the REST handler must still meet the lock
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _lock_refusal(ctx, tool_name, *args, **kwargs):
+    """Run the tool as the seam runs it, and report whether it was refused.
+
+    Two things this has to get right, both of which the first cut got wrong
+    and both of which made a CORRECT fix look broken:
+
+      * THROUGH `DISPATCHERS`, because the gate works by replacing entries in
+        that dict (`DISPATCHERS.update({name: _lock_gated(...)})`) — which is
+        what `chat_service` dispatches. The module-level function is ungated
+        by construction.
+      * INSIDE `_bound_to(ctx)`, because `_check_foreign_lock` resolves the
+        ACTIVE project from the request context. Unbound, it finds no project,
+        passes through, and the tool runs.
+    """
+    from fastapi import HTTPException
+
+    call = chat_tools.DISPATCHERS[tool_name]
+    try:
+        with _bound_to(ctx):
+            call(*args, **kwargs)
+    except HTTPException as exc:
+        detail = exc.detail
+        return isinstance(detail, dict) and detail.get("error_kind") == "project_locked"
+    return False
+
+
+def test_upload_tools_are_refused_under_a_foreign_lock(
+    foreign_locked_active_project, second_identity
+):
+    """
+    `delete_upload` and `clear_uploads` call `upload_service` directly, so they
+    never reach `routers/uploads.py`, whose DELETE route refuses a non-holder
+    and calls that case "the sharp end of the gap this router had: a non-holder
+    deleting a file another session is actively referencing (e.g. mid
+    multimodal turn)". The chat gate had them listed as deliberately ungated on
+    the grounds that they "write artifacts, not network state" — the two paths
+    disagreed about the same bytes.
+    """
+    _name, project_id, ctx, session_local = foreign_locked_active_project
+    _hold_foreign_lock(session_local, project_id, second_identity["user_id"])
+
+    assert _lock_refusal(ctx, "delete_upload", "some-file-id"), (
+        "a non-holder deleted an upload from a foreign-locked project"
+    )
+    assert _lock_refusal(ctx, "clear_uploads"), (
+        "a non-holder purged EVERY upload from a foreign-locked project"
+    )
+
+
+def test_clear_chat_history_is_refused_under_a_foreign_lock(
+    foreign_locked_active_project, second_identity
+):
+    """It unlinks the project's chat.jsonl and its rotation. There is no REST
+    equivalent, so there was no handler-level check to inherit either."""
+    _name, project_id, ctx, session_local = foreign_locked_active_project
+    _hold_foreign_lock(session_local, project_id, second_identity["user_id"])
+
+    assert _lock_refusal(ctx, "clear_chat_history"), (
+        "a non-holder wiped the holder's conversation"
+    )
+
+
+def test_campaign_tools_are_refused_under_a_foreign_lock(
+    foreign_locked_active_project, second_identity
+):
+    """Both mutate the campaign record in the SHARED resident context's
+    solver_state — a non-holder could set a solve budget on the holder's
+    context, or close the campaign they are running."""
+    _name, project_id, ctx, session_local = foreign_locked_active_project
+    _hold_foreign_lock(session_local, project_id, second_identity["user_id"])
+
+    assert _lock_refusal(ctx, "start_campaign", "steal the budget", 1), (
+        "a non-holder opened a campaign on a foreign-locked project"
+    )
+    assert _lock_refusal(ctx, "end_campaign", None), (
+        "a non-holder closed the holder's campaign"
+    )
+
+
+def test_an_agent_export_is_refused_under_a_foreign_lock(
+    foreign_locked_active_project, second_identity
+):
+    """
+    The discriminating case for the chokepoint. `export_network_nc` is tiered
+    `read`, so the DERIVED gate skips it no matter what the mutator set says —
+    yet it writes a file into the project's uploads directory, which
+    `post_upload` refuses under a foreign lock because it is "a write edge into
+    `project.directory` same as save/rename/delete". The check therefore lives
+    in `_save_agent_export`, the one helper every `export_*` tool reaches.
+    """
+    _name, project_id, ctx, session_local = foreign_locked_active_project
+    _hold_foreign_lock(session_local, project_id, second_identity["user_id"])
+
+    from services.chat_tools_schema import safety_tier_for
+
+    assert safety_tier_for("export_network_nc") == "read", (
+        "export_network_nc is no longer `read`; this test's premise (that the "
+        "derived gate cannot cover it) needs rechecking"
+    )
+    assert _lock_refusal(ctx, "export_network_nc"), (
+        "a non-holder wrote an export into a foreign-locked project"
+    )
+
+
+def test_none_of_them_is_refused_without_a_foreign_lock(
+    foreign_locked_active_project
+):
+    """
+    The control, and it is load-bearing: the gate is CHECK-ONLY, so the
+    acting user's own lock (which `_save_and_bind_project`'s save acquires)
+    must pass straight through. A gate that refused here would break every
+    ordinary chat export and upload delete.
+    """
+    _name, _project_id, ctx, _session_local = foreign_locked_active_project
+
+    assert not _lock_refusal(ctx, "clear_uploads")
+    assert not _lock_refusal(ctx, "delete_upload", "no-such-id")
+    assert not _lock_refusal(ctx, "export_network_nc")
+    assert not _lock_refusal(ctx, "start_campaign", "mine", 1)
+    assert not _lock_refusal(ctx, "end_campaign", None)
+
+
+def test_the_gate_lists_every_one_of_them(foreign_locked_active_project):
+    """Pins the mutator-set membership so a future edit that drops one is a
+    failure here and not a silent reopening."""
+    gated = chat_tools._lock_gated_tool_names()
+    for name in ("delete_upload", "clear_uploads", "clear_chat_history",
+                 "start_campaign", "end_campaign"):
+        assert name in gated, f"{name} is no longer lock-gated"

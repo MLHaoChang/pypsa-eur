@@ -277,7 +277,7 @@ undo snapshot"), and the module docstring.
 
 ### CH-4 — write tools that skip the holder check the REST route enforces
 
-**Serious. `put_asset_health` VERIFIED and FIXED; the rest REPORTED.**
+**Serious. VERIFIED AND FIXED, all of it.**
 
 `put_asset_health` had no check while its two sidecar siblings do — it did not even
 accept `db`/`user`, so it could not have checked. It is the third handler missed by
@@ -286,9 +286,32 @@ the same sweep (`routers/uploads.py` carries a comment about being the second), 
 two tests added to `tests/test_worksheet_foreign_lock.py`, the module written for the
 first two.
 
-Still open and unverified: `delete_upload`, `clear_uploads`, `_save_agent_export`
-(reached by every `export_*` tool), `clear_chat_history`, `start_campaign` /
-`end_campaign`.
+The remaining five plus the export chokepoint are now fixed too, and verifying them
+sharpened the finding. The reviewer called the gate's header comment "false
+assurance"; it is not, quite — it says upload / export / chat-history tools are
+DELIBERATELY ungated because they "write artifacts, not network state", which is a
+decision somebody made. What makes it a defect is that `routers/uploads.py` had
+already decided the same question the other way, in writing: the upload POST is "a
+write edge into `project.directory` same as save/rename/delete", and the DELETE is
+"the sharp end of the gap this router had: a non-holder deleting a file another
+session is actively referencing (e.g. mid multimodal turn)". Both REST routes check
+the lock; the chat tools bypassed the handler and did the work anyway. Two paths, the
+same bytes, opposite rules — and the REST side's reasoning is the more specific.
+
+`delete_upload`, `clear_uploads`, `clear_chat_history`, `start_campaign` and
+`end_campaign` join `_LOCK_GATE_SERVICE_CALL_MUTATORS`. The ten `export_*` tools
+cannot: they are tiered `read` and `write` inconsistently, so the derivation skips
+some of them whatever the mutator set says. They are gated at `_save_agent_export`
+instead — the single helper all ten reach — which avoids re-tiering ten tools, since
+that would change their confirmation-card behaviour for reasons unrelated to this
+bug. `export_network_nc`, tiered `read`, is the test that discriminates.
+
+Guard: six tests in `tests/test_chat_tools_dispatch.py`. Worth recording that the
+first two cuts of them FAILED against a correct fix — they called the module-level
+functions (the gate replaces `DISPATCHERS` entries) and omitted `_bound_to(ctx)`
+(`_check_foreign_lock` resolves the active project from the request context). Both
+read as "the fix does not work". The bite test is what settled it: reverting the
+product change turns five of them red.
 
 `_lock_gated_tool_names` derives its set from route prefixes plus five hand-listed
 mutators, so tools that call services directly are outside it. Named:
