@@ -813,6 +813,48 @@ The `sam_case` mapping gives S3/S3f their ITC as an `Incentive`.
 - set each class's `itc_reduces` from `itc_assets`;
 - reduce the basis by the grant.
 
+**WP4.4 review round 1 (ea3ea21): FAIL, fixable in one round; fixed.** The arithmetic was verified:
+- ITC and ITC cap = SAM exactly;
+- grant cash = SAM;
+- PTC at the alternative amount = SAM exactly when SAM is fed the unrounded factor.
+
+The reviewer also verified every statutory fact against Cornell LII and the Federal Register.
+
+**Binding findings:**
+1. **B1:** technology eligibility failed open (a diesel or gas asset got the 30 % ITC; a battery got the
+   PTC). Fixed with a cited `clean_electricity_technology` rule: wind/solar, other zero-emission and
+   storage (ITC only) qualify; a named list does not qualify; any other carrier is **not established**,
+   never eligible.
+2. **B2:** the termination's carrier list failed open for `wind`, `pv`, `offwind`, `solar rooftop` and
+   `solar-hsat`. Fixed: it reads the classification's wind/solar list.
+3. **B3:** grants. Fixed:
+   - `Incentive.grant_tax_treatment` (`reduces_basis` | `taxable`, no default) is new, in the model and in
+     `types.ts`;
+   - a basis-reducing grant also reduces the ITC base of its assets (SAM `deprbas` = 1: 32.12 M, not
+     33.62 M);
+   - a taxable grant is income in the year received (the engine adds it to every tax run).
+4. **B4:** citations:
+   - §48E(a)(2)(B), (c)(3) and (e)(4)(C) added;
+   - Pub. L. 119-21 §§70512(l), 70513(g) cited;
+   - **Notice 2025-42 was vacated on 2026-06-06** (D.D.C.), so the earlier beginning-of-construction
+     notices apply, subject to appeal.
+   Re-pinned.
+5. **B5:** a second ITC on the same asset is refused.
+
+**Non-binding, taken:**
+- FEOC reaches only construction after its date (`feoc_flag=True` earlier is no longer ineligible);
+- the flags `itc_base_excludes_idc`, `ptc_term_in_operating_years` and `ptc_on_all_generation` (the
+  §45Y sale requirement at the edge);
+- `Incentive.rate` units and `pwa_met`'s exceptions documented;
+- tests pin the 0.05 ¢ base step (2027: 0.6294 → 0.65 ¢) and the PTC phase-out.
+
+**Recorded deviation:** SAM rounds the PTC to $0.001/kWh; the statute rounds the base amount to 0.05 ¢
+(±$65k a year, +0.036 % over the term on the probe).
+
+**Not taken:**
+- a generic stated production incentive (SAM PTC/PBI with its own term and rounding) — a P5 item;
+- the 2025 factor (unreachable with a 2026+ close).
+
 ## WP4.5 Metrics, solve-for-PPA, the WACC gate
 
 - `metrics.py` (C9): unlevered project IRR / NPV, equity IRR / NPV pre and post tax, payback, DSCR min / avg

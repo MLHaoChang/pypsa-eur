@@ -145,12 +145,21 @@ class EligibilityRule(BaseModel):
 
 
 class Incentive(BaseModel):
+    """An incentive (spec §6.5; IC P4 plan WP4.4). `rate` is a SHARE of the
+    eligible basis for `itc` / `grant`, and a price in currency/MWh (COD-year
+    money) for a stated `ptc`; `amount` is the ITC cap or the grant's sum.
+    `feoc_flag`: material assistance from a prohibited foreign entity (applies
+    where the pack's rule does). A grant states its tax treatment
+    (`grant_tax_treatment`, no default): it reduces the depreciable basis (and
+    the ITC base of its assets), or it is taxable income when received."""
+
     kind: Literal["itc", "ptc", "grant", "accelerated_depreciation", "cfd", "capacity_payment"]
     rate: float | None = Field(default=None, ge=0)
     amount: float | None = Field(default=None, ge=0)
     eligibility: EligibilityRule = Field(default_factory=EligibilityRule)
     phase_out: list[tuple[date, float]] = Field(default_factory=list)
     feoc_flag: bool | None = None
+    grant_tax_treatment: Literal["reduces_basis", "taxable"] | None = None
 
 
 class TaxEquityStructure(BaseModel):

@@ -69,7 +69,24 @@ def make_pack() -> JurisdictionPack:
         # the case states `pwa_met`). Energy-community and domestic-content
         # bonuses are not modelled (flagged).
         "clean_electricity_itc": Rule({"base": 0.06, "alternative": 0.30},
-                                      "26 U.S.C. §48E(a)(2)(A), (d)(3)–(4)"),
+                                      "26 U.S.C. §48E(a)(2)(A) (qualified facilities), (a)(2)(B) "
+                                      "(energy storage technology), (d)(3)–(4)"),
+        # Which technologies qualify (WP4.4 review B1 — fail closed): the
+        # statute's categories — zero-GHG electricity production (§45Y(b)(1),
+        # §48E(b)(3)), energy storage technology (§48E(c)(2), ITC only) — mapped
+        # to the network's carrier names (the mapping is this pack's, stated);
+        # a carrier in neither list is `not_established`, never eligible.
+        "clean_electricity_technology": Rule(
+            {"wind_solar": ["solar", "solar rooftop", "solar-hsat", "pv", "onwind", "offwind",
+                            "offwind-ac", "offwind-dc", "offwind-float", "wind"],
+             "other_zero_emission": ["ror", "hydro", "geothermal", "nuclear"],
+             "storage": ["battery", "battery storage", "home battery", "bess"],
+             "not_qualifying": ["gas", "OCGT", "CCGT", "diesel", "oil", "coal", "lignite",
+                                "gas CHP", "electrolysis",
+                                "heat pump", "resistive heater", "gas boiler"]},
+            "26 U.S.C. §45Y(b)(1)(A) (greenhouse gas emissions rate not greater than zero), "
+            "§48E(b)(3), §48E(c)(2) (energy storage technology, §48(c)(6)); carrier mapping: "
+            "this pack"),
         # Clean electricity PTC: 0.3 ¢/kWh (1.5 ¢ with PWA) × the inflation
         # adjustment factor of the calendar year of sale, rounded to 0.05 ¢
         # (0.1 ¢); for the 10 years from placed in service. Published factors
@@ -91,19 +108,23 @@ def make_pack() -> JurisdictionPack:
         # 2027-12-31 unless construction began by 2026-07-04 (12 months after
         # enactment); beginning of construction per Notice 2025-42 (physical
         # work test). Storage at such a facility is not affected.
+        # The wind / solar carriers are `clean_electricity_technology.wind_solar`.
         "wind_solar_termination": Rule(
-            {"carriers": ["solar", "onwind", "offwind-ac", "offwind-dc", "offwind-float"],
-             "placed_in_service_by": "2027-12-31", "unless_construction_begins_by": "2026-07-04"},
-            "26 U.S.C. §45Y(d)(4) and §48E(e)(4) as added by Pub. L. 119-21 (2025), effective for "
-            "facilities the construction of which begins after the date which is 12 months after "
-            "2025-07-04; IRS Notice 2025-42 (beginning of construction)"),
+            {"placed_in_service_by": "2027-12-31", "unless_construction_begins_by": "2026-07-04"},
+            "26 U.S.C. §45Y(d)(4) and §48E(e)(4) (storage excepted, (e)(4)(C)) as added by Pub. "
+            "L. 119-21 §§70512(l), 70513(g) (2025): facilities the construction of which begins "
+            "after the date which is 12 months after 2025-07-04. Beginning of construction: IRS "
+            "Notice 2025-42 was vacated on 2026-06-06 (D.D.C., Oregon Environmental Council v. IRS, "
+            "No. 25-4400) — the earlier notices (physical work, 5 % safe harbor) apply, subject "
+            "to appeal; the case's `construction_start` states the date"),
         # Prohibited foreign entities: no credit with material assistance
         # from a prohibited foreign entity for construction beginning after
         # 2025-12-31 (the case states `feoc_flag` per incentive).
         "feoc_material_assistance": Rule(
             {"construction_begins_after": "2025-12-31"},
-            "26 U.S.C. §45Y(b)(1)(E) and §48E(b)(6) (material assistance from a prohibited "
-            "foreign entity) as amended by Pub. L. 119-21 (2025)"),
+            "26 U.S.C. §45Y(b)(1)(E) (the second (E)), §48E(b)(6) (facilities) and §48E(c)(3) "
+            "(storage) (material assistance from a prohibited foreign entity) as amended by Pub. "
+            "L. 119-21 (2025)"),
         # The ITC reduces the depreciable basis by 50 % of the credit.
         "itc_basis_reduction": Rule(0.5, "26 U.S.C. §50(c)(1), (3)"),
     }

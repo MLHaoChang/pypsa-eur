@@ -1026,6 +1026,8 @@ export interface Incentive {
   eligibility?: EligibilityRule
   phase_out?: Array<[string, number]>
   feoc_flag?: boolean | null
+  // A grant's tax treatment (no default): reduces the basis, or taxable when received.
+  grant_tax_treatment?: 'reduces_basis' | 'taxable' | null
 }
 
 export interface SolvePpa {

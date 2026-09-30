@@ -52,7 +52,7 @@ def _case(incentives, *, carrier="solar", cod=date(2026, 6, 1), close=date(2025,
                         capex_phasing=[1.0 / max(cod.year - close.year, 1)] * max(
                             cod.year - close.year, 1),
                         contingency_share=0.1, analysis_years=years,
-                        escalation={"ppa": 0.0}, degradation_by_asset={"pv": 0.0, "bess": 0.0},
+                        escalation={"ppa": 0.0}, degradation_by_asset={"pv": 0.0, "bess": 0.0, "x": 0.0},
                         construction_start=start, pwa_met=pwa, inflation=inflation,
                         incentives=incentives)
     assets = assets or (AssetFinance("pv", "Generator", 1_000_000.0, 40.0, carrier=carrier),)
@@ -144,10 +144,12 @@ def test_the_pwa_multiplier_is_never_assumed(pwa, rate):
 
 def test_a_stated_rate_cap_grant_and_user_rules():
     inc, tl = _run(_case([Incentive(kind="itc", rate=0.4, amount=100_000.0),
-                          Incentive(kind="grant", amount=50_000.0)]), pack=None)
+                          Incentive(kind="grant", amount=50_000.0,
+                                    grant_tax_treatment="reduces_basis")]), pack=None)
     assert inc.itc_amount == 100_000.0 and "itc_capped:0:itc" in inc.flags
     assert inc.grant[tl.index(2025)] == 50_000.0 and inc.grant_basis_reduction == 50_000.0
-    inc, _ = _run(_case([Incentive(kind="grant", rate=0.2)]), pack=None)
+    inc, _ = _run(_case([Incentive(kind="grant", rate=0.2, grant_tax_treatment="reduces_basis")]),
+                  pack=None)
     assert inc.grant_basis_reduction == pytest.approx(0.2 * 1.1e6)
     # The incentive's own dated rules: a begin-construction date and a phase-out.
     rule = EligibilityRule(begin_construction_by=date(2025, 1, 1))
@@ -184,3 +186,68 @@ def test_no_incentives_and_every_us_rule_cites_its_source():
     assert {"clean_electricity_itc", "clean_electricity_phase_out", "wind_solar_termination",
             "feoc_material_assistance"} <= set(inc.sources)
     assert "48E" in inc.sources["clean_electricity_itc"]
+
+
+
+# ── WP4.4 review round 1 ────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("carrier,kind,outcome", [
+    ("diesel", "itc", "ineligible"), ("gas", "ptc", "ineligible"),
+    ("fuel cell", "itc", "unclassified"), ("mystery", "itc", "unclassified"),
+    ("battery", "ptc", "ineligible"), ("battery", "itc", "ok"), ("ror", "ptc", "ok"),
+])
+def test_b1_technology_eligibility_fails_closed(carrier, kind, outcome):
+    asset = AssetFinance("x", "Generator", 1_000_000.0, 40.0, carrier=carrier)
+    inc, _ = _run(_case([Incentive(kind=kind)], carrier=carrier, assets=(asset,),
+                        energy={"x": 1000.0}))
+    total = inc.itc_amount + inc.ptc.sum()
+    if outcome == "unclassified":
+        assert not inc.established() and f"incentive_technology_unclassified:x:{carrier}" in inc.reasons
+    elif outcome == "ineligible":
+        assert inc.established() and total == 0 and any("ineligible" in f for f in inc.flags)
+    else:
+        assert inc.established() and total > 0
+
+
+@pytest.mark.parametrize("carrier", ["wind", "pv", "offwind", "solar rooftop", "solar-hsat"])
+def test_b2_every_wind_solar_name_meets_the_termination(carrier):
+    asset = AssetFinance("x", "Generator", 1_000_000.0, 40.0, carrier=carrier)
+    inc, _ = _run(_case([Incentive(kind="itc", feoc_flag=False)], carrier=carrier, assets=(asset,),
+                        start=date(2026, 7, 5), close=date(2026, 7, 5), cod=date(2028, 1, 1),
+                        energy={"x": 0.0}))
+    assert inc.itc_amount == 0 and any("wind_solar_termination" in f for f in inc.flags)
+
+
+def test_b3_the_grant_states_its_treatment_and_a_basis_grant_reduces_the_itc_base():
+    grant = Incentive(kind="grant", amount=100_000.0)
+    inc, _ = _run(_case([Incentive(kind="itc"), grant]))
+    assert "input_missing:grant_tax_treatment:1:grant" in inc.reasons
+    inc, tl = _run(_case([Incentive(kind="itc"),
+                          grant.model_copy(update={"grant_tax_treatment": "reduces_basis"})]))
+    assert inc.itc_amount == pytest.approx(0.30 * (1.1e6 - 100_000.0))     # SAM deprbas = 1
+    assert inc.grant_basis_reduction == 100_000.0 and inc.grant_taxable.sum() == 0
+    inc, tl = _run(_case([Incentive(kind="itc"),
+                          grant.model_copy(update={"grant_tax_treatment": "taxable"})]))
+    assert inc.itc_amount == pytest.approx(0.30 * 1.1e6) and inc.grant_basis_reduction == 0
+    assert inc.grant_taxable[tl.index(2025)] == 100_000.0
+
+
+def test_b5_a_second_itc_on_the_same_asset_is_refused():
+    inc, _ = _run(_case([Incentive(kind="itc"), Incentive(kind="itc", rate=0.1)]))
+    assert "itc_twice_same_asset:1:itc" in inc.reasons
+
+
+def test_feoc_true_before_the_rule_date_and_the_base_step_and_ptc_phase_out():
+    inc, _ = _run(_case([Incentive(kind="itc", feoc_flag=True)]))       # construction 2025
+    assert inc.itc_amount == pytest.approx(0.30 * 1.1e6)
+    # Base amount projected in 2027: 0.3 × 2.0570 × 1.02 = 0.6294 → 0.65 ¢ (0.05 ¢ step).
+    inc, tl = _run(_case([Incentive(kind="ptc")], pwa=False))
+    assert inc.ptc[tl.index(2027)] == pytest.approx(6.5 * 1000.0)
+    # The phase-out applies to the PTC too (construction 2034: 75 %).
+    battery_free = AssetFinance("pv", "Generator", 1e6, 40.0, carrier="ror")
+    inc, tl = _run(_case([Incentive(kind="ptc", feoc_flag=False)], carrier="ror",
+                         assets=(battery_free,), start=date(2034, 2, 1), close=date(2034, 2, 1),
+                         cod=date(2035, 1, 1)))
+    f = 2.0570 * 1.02 ** (2035 - 2026)
+    cents = math.floor(1.5 * f / 0.1 + 0.5) * 0.1
+    assert inc.ptc[tl.index(2035)] == pytest.approx(cents * 10 * 1000 * 0.75)

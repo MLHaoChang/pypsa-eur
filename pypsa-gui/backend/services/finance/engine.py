@@ -220,12 +220,15 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
         ebitda_inc = inc_net + terminal
         common = dict(itc_amount=inc.itc_amount, losses=fin.tax_losses, vintages=vintages,
                       write_off_remaining=True)
+        grant_inc = inc.grant_taxable if inc.grant_taxable is not None else np.zeros(n)
         tax = compute_tax(tl, layers, ebitda=ebitda_inc, basis=basis, interest=debt.interest,
-                          other_income=debt.reserve_interest, other_deductions=fee_deduction,
-                          **common)
-        tax_u = compute_tax(tl, layers, ebitda=ebitda_inc, basis=basis_u, **common)
+                          other_income=debt.reserve_interest + grant_inc,
+                          other_deductions=fee_deduction, **common)
+        tax_u = compute_tax(tl, layers, ebitda=ebitda_inc, basis=basis_u, other_income=grant_inc,
+                            **common)
         tax_total = compute_tax(tl, layers, ebitda=ebitda_inc + cf_net, basis=basis,
-                                interest=debt.interest, other_income=debt.reserve_interest,
+                                interest=debt.interest,
+                                other_income=debt.reserve_interest + grant_inc,
                                 other_deductions=fee_deduction, **common)
         flags += tax.flags
         if inc.itc_amount and any(not ly.itc_basis_reduction for ly in layers) and \

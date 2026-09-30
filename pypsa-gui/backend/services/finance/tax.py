@@ -74,6 +74,27 @@ def declining_balance(rate: float, years: int, months_first_year: int = 12) -> t
     return tuple(out)
 
 
+def cca_declining(rate: float, first_year_share: float | None = None,
+                  years: int = 100) -> tuple[float, ...]:
+    """Canadian capital cost allowance: declining balance at `rate` on the
+    undepreciated capital cost, the first year at ½ × rate (the half-year
+    rule, Reg. 1100(2)) or at `first_year_share` of the cost (an enhanced
+    first-year allowance); the tail after `years` in the last entry (the
+    engine writes off what remains at the axis end)."""
+    if not 0.0 < rate <= 1.0:
+        raise ValueError(f"CCA rate must be in (0, 1] (got {rate!r})")
+    first = 0.5 * rate if first_year_share is None else float(first_year_share)
+    if not 0.0 <= first <= 1.0:
+        raise ValueError(f"first-year share must be in [0, 1] (got {first!r})")
+    out, ucc = [first], 1.0 - first
+    for _ in range(years - 1):
+        d = ucc * rate
+        out.append(d)
+        ucc -= d
+    out[-1] += ucc
+    return tuple(out)
+
+
 def normalised(schedule, tol: float = 1e-9) -> tuple[float, ...]:
     """A schedule checked: non-empty, every entry ≥ 0, summing to 1 within
     `tol` (WP4.3a review B7)."""
@@ -127,6 +148,9 @@ class InterestCap:
     freigrenze: float | None = None
     carryforward: bool = True
     simplified_flag: str | None = None
+    # A threshold that is always deductible: cap = max(share × EBITDA,
+    # allowance) (the Dutch art. 15b Wet Vpb drempel — not a Freigrenze).
+    allowance: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -142,8 +166,13 @@ class TaxLayer:
     interest_addback_allowance: float = 0.0
     # A surcharge on this layer's liability folded into it (SolZ: 5.5 % of KSt).
     surcharge_share: float = 0.0
-    itc_basis_reduction: bool = False               # this layer's basis is reduced by ½ ITC
+    itc_basis_reduction: bool = False               # this layer's basis is reduced by the ITC …
+    itc_basis_reduction_share: float = 0.5          # … × this share (US §50(c): ½; CA s.13(7.1): 1)
     interest_cap: InterestCap | None = None
+    # Progressive brackets on the year's taxable amount: ((threshold, rate), …)
+    # from 0 upward — the rate applies above its threshold (NL VPB). A
+    # negative amount (offset mode) is valued at the top rate (flagged).
+    brackets: tuple[tuple[float, float], ...] | None = None
 
 
 @dataclass
@@ -221,7 +250,8 @@ def compute_tax(tl: Timeline, layers: tuple[TaxLayer, ...], *, ebitda: np.ndarra
     deductible_before = np.zeros(tl.n)
     for layer in layers:
         d = depreciation(tl, basis, layer.depreciation,
-                         itc_reduction=0.5 * itc_amount if layer.itc_basis_reduction else 0.0)
+                         itc_reduction=layer.itc_basis_reduction_share * itc_amount
+                         if layer.itc_basis_reduction else 0.0)
         for start, vb in vintages:
             d = d + depreciation(tl, vb, layer.depreciation, start=start)
         if write_off_remaining:
@@ -272,8 +302,13 @@ def compute_tax(tl: Timeline, layers: tuple[TaxLayer, ...], *, ebitda: np.ndarra
                     carried = [v for v in carried if v[0] > 1e-9]
                     use[i] = income - offset
                 pool[i] = sum(v[0] for v in carried)
-        rate = np.array([rate_in(layer.rate, int(y)) for y in tl.years])
-        lb = use * rate * (1.0 + layer.surcharge_share)
+        if layer.brackets:
+            lb = np.array([_bracketed(layer.brackets, x) for x in use]) * (1.0 + layer.surcharge_share)
+            if (use < 0).any():
+                flags.append(f"negative_base_at_top_bracket:{layer.name}")
+        else:
+            rate = np.array([rate_in(layer.rate, int(y)) for y in tl.years])
+            lb = use * rate * (1.0 + layer.surcharge_share)
         dep[layer.name], taxable[layer.name], liab[layer.name] = d, base, lb
         pools[layer.name] = pool
         if layer.deductible_in_later_layers:
@@ -289,10 +324,21 @@ def _depreciable(layer: TaxLayer, basis: float, itc_amount: float,
                  vintages: tuple[tuple[int, float], ...] = ()) -> float:
     """The layer's depreciable basis: its classes' share of the basis (and the
     vintages), less ½ the ITC where the layer and a class take the reduction."""
-    red = 0.5 * itc_amount if layer.itc_basis_reduction else 0.0
+    red = layer.itc_basis_reduction_share * itc_amount if layer.itc_basis_reduction else 0.0
     reducible = any(c.itc_reduces for c in layer.depreciation)
     shares = sum(c.share for c in layer.depreciation)
     return (basis + sum(v for _, v in vintages)) * shares - (red if reducible else 0.0)
+
+
+def _bracketed(brackets: tuple[tuple[float, float], ...], x: float) -> float:
+    if x <= 0:
+        return x * brackets[-1][1]
+    tax = 0.0
+    for j, (lo, r) in enumerate(brackets):
+        hi = brackets[j + 1][0] if j + 1 < len(brackets) else float("inf")
+        if x > lo:
+            tax += (min(x, hi) - lo) * r
+    return tax
 
 
 def _capped_interest(cap: InterestCap, ebitda: np.ndarray,
@@ -309,7 +355,7 @@ def _capped_interest(cap: InterestCap, ebitda: np.ndarray,
                 out[i], carried = claim, 0.0
                 continue
             reached = True
-        limit = max(0.0, cap.share * e)
+        limit = max(0.0, cap.share * e, cap.allowance)
         allowed = min(claim, limit)
         if allowed < claim - 1e-9:
             capped = True

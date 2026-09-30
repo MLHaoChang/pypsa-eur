@@ -68,6 +68,8 @@ class Incentives:
     itc_amount: float                    # Σ ITC — the basis reduction's base
     itc_assets: tuple[str, ...]          # the assets whose basis the ITC reduces
     grant_basis_reduction: float
+    # Grants taxed as income when received (grant_tax_treatment="taxable").
+    grant_taxable: np.ndarray | None = None
     lines: list[IncentiveLine] = field(default_factory=list)
     status: str = "ok"
     reasons: list[str] = field(default_factory=list)
@@ -104,7 +106,7 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
     c = tl.index(tl.cod_year)
     p = max(c - 1, 0)
     out = Incentives(itc=np.zeros(n), ptc=np.zeros(n), grant=np.zeros(n), itc_amount=0.0,
-                     itc_assets=(), grant_basis_reduction=0.0)
+                     itc_assets=(), grant_basis_reduction=0.0, grant_taxable=np.zeros(n))
     if not fin.incentives:
         return out
     reasons, flags = out.reasons, out.flags
@@ -122,7 +124,11 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
 
     itc_assets: set[str] = set()
     ptc_assets: set[str] = set()
-    for i, inc in enumerate(fin.incentives):
+    grant_on: dict[str, float] = {}       # basis-reducing grant per asset (reduces the ITC base)
+    # Grants first: a basis-reducing grant lowers the ITC base of its assets.
+    order = sorted(range(len(fin.incentives)), key=lambda j: fin.incentives[j].kind != "grant")
+    for i in order:
+        inc = fin.incentives[i]
         tag = f"{i}:{inc.kind}"
         if inc.kind in ELSEWHERE:
             reasons.append(f"incentive_expressed_elsewhere:{tag}:{ELSEWHERE[inc.kind]}")
@@ -168,22 +174,43 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
             share *= po["shares_after"][k - 1] if 1 <= k <= len(po["shares_after"]) else (
                 1.0 if k < 1 else po["later"])
             if cs > date.fromisoformat(feoc["construction_begins_after"]):
+                # The FEOC rule reaches only construction after its date.
                 if inc.feoc_flag is None:
                     reasons.append(f"feoc_flag_missing:{tag}")
                     continue
-            if inc.feoc_flag:
-                line.flags.append(f"incentive_ineligible:{tag}:feoc")
-                continue
+                if inc.feoc_flag:
+                    line.flags.append(f"incentive_ineligible:{tag}:feoc")
+                    continue
             if any(a.carrier is None for a in assets):
                 reasons.extend(f"asset_carrier_missing:{a.name}" for a in assets if a.carrier is None)
                 continue
-            if cod > date.fromisoformat(term["placed_in_service_by"]) and \
-                    cs > date.fromisoformat(term["unless_construction_begins_by"]):
-                ended = [a for a in assets if a.carrier in term["carriers"]]
-                for a in ended:
+            tech = rule("clean_electricity_technology")
+            if tech is None:
+                continue
+            # Fail closed (WP4.4 review B1/B2): a carrier the pack does not
+            # classify is not established; a non-qualifying one is ineligible;
+            # storage takes the ITC, never the PTC.
+            unknown = [a for a in assets if not any(
+                a.carrier in tech[k] for k in ("wind_solar", "other_zero_emission", "storage",
+                                               "not_qualifying"))]
+            if unknown:
+                reasons.extend(f"incentive_technology_unclassified:{a.name}:{a.carrier}"
+                               for a in unknown)
+                continue
+            keep = []
+            for a in assets:
+                if a.carrier in tech["not_qualifying"]:
+                    line.flags.append(f"incentive_ineligible:{tag}:technology:{a.name}")
+                elif inc.kind == "ptc" and a.carrier in tech["storage"]:
+                    line.flags.append(f"incentive_ineligible:{tag}:ptc_not_for_storage:{a.name}")
+                elif a.carrier in tech["wind_solar"] and \
+                        cod > date.fromisoformat(term["placed_in_service_by"]) and \
+                        cs > date.fromisoformat(term["unless_construction_begins_by"]):
                     line.flags.append(f"incentive_ineligible:{tag}:wind_solar_termination:{a.name}")
-                assets = [a for a in assets if a not in ended]
-                line.assets = tuple(a.name for a in assets)
+                else:
+                    keep.append(a)
+            assets = keep
+            line.assets = tuple(a.name for a in assets)
         elif inc.feoc_flag:
             line.flags.append(f"incentive_ineligible:{tag}:feoc")
             continue
@@ -195,6 +222,9 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
         if inc.kind == "itc":
             if names & ptc_assets:
                 reasons.append(f"itc_and_ptc_same_asset:{tag}")
+                continue
+            if names & itc_assets:
+                reasons.append(f"itc_twice_same_asset:{tag}")      # review B5
                 continue
             rate = inc.rate
             if rate is None and statutory:
@@ -216,7 +246,11 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
             if base is None:
                 reasons.append(f"overnight_cost_missing:{tag}")
                 continue
+            # A basis-reducing grant on these assets reduces the ITC base (SAM
+            # `ibi/cbi_*_deprbas_fed`, review B3).
+            base -= sum(grant_on.get(a.name, 0.0) for a in assets)
             amount = rate * base * share
+            flags.append("itc_base_excludes_idc")
             if inc.amount is not None and amount > inc.amount:
                 amount = inc.amount
                 line.flags.append(f"itc_capped:{tag}")
@@ -290,7 +324,11 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
                 continue
             out.ptc += line.cash
             ptc_assets |= names
+            flags.extend(["ptc_term_in_operating_years", "ptc_on_all_generation"])
         elif inc.kind == "grant":
+            if inc.grant_tax_treatment is None:
+                reasons.append(f"input_missing:grant_tax_treatment:{tag}")
+                continue
             if inc.amount is not None:
                 amount = inc.amount * share
             elif inc.rate is not None:
@@ -307,8 +345,15 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
                 continue
             line.cash[p] = amount
             out.grant += line.cash
-            out.grant_basis_reduction += amount
-            flags.append("grant_reduces_basis_pro_rata")
+            if inc.grant_tax_treatment == "taxable":
+                out.grant_taxable += line.cash
+            else:
+                out.grant_basis_reduction += amount
+                flags.append("grant_reduces_basis_pro_rata")
+                bases = {a.name: (a.overnight_cost or 0.0) for a in assets}
+                tot = sum(bases.values())
+                for a, b in bases.items():
+                    grant_on[a] = grant_on.get(a, 0.0) + (amount * b / tot if tot else 0.0)
     flags.extend(f for ln in out.lines for f in ln.flags)
     out.itc_assets = tuple(sorted(itc_assets))
     out.reasons = sorted(set(reasons))
