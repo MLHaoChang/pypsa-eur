@@ -1197,6 +1197,32 @@ The `GET …/export.xlsx` route lands with WP4.6b.
 - Tests: the routes (409 during a solve or another study, 204 before a run, abort mid-run), persistence and
   bundle round trip, staleness, the P3 hygiene items.
 
+**WP4.6b review round 1 (1d6ebfe): six findings; fixed.** Concurrency, the mesh, persistence, the
+headline mappings, the export's filename and injection guard and the C1 import boundary were confirmed.
+- **B1 (High) — the staleness key missed build-time solver config.** The adapter reads
+  `discount_rate`, `inflation_rate`, `auto_discount_periods` (for `LpBasis`), `voll` and the `dsr_*`
+  settings from the solver config at IC time, not only at the solve. `assumptions_digest` gains a
+  `solver_config` part: the whole solver config minus `finance` / `commercial` (their own parts). A
+  field that only matters to a solve also marks the report stale — that errs safe. Tested per field and
+  through the route (`changed == ["solver_config"]`).
+- **B2 (Medium) — the cashflow lines did not reconcile with the cash.** The lines emitted the unresolved
+  terminal and left the counterfactual out. `FinanceResult` now carries the resolved `terminal` and the
+  counterfactual's `Operating`; the lines emit that terminal and the counterfactual's lines NEGATED
+  (source `counterfactual:*`). Tested: each year's Σ lines = `cash["equity_post_tax"]` with a
+  counterfactual, a tranche and each terminal method (none, book value, EBITDA multiple). The WP4.6c
+  `explain_cashflow` reads the avoided supply cost from those lines (it added `counterfactual_net` itself
+  before, which would now double-count) and discounts at the payload's `cost_of_equity`.
+- **B3 — unknown finance keys were dropped.** `extra="forbid"` on `FinanceInputs`, `DebtTranche`,
+  `Incentive`, `TaxEquityStructure`, `SolvePpa`, `TerminalValueRule` (the TS types carry no extra key).
+- **B4 — control characters 500'd the export.** `case_id` pattern `^[\w .-]+$`; `_put` strips
+  openpyxl's `ILLEGAL_CHARACTERS_RE`.
+- **B5 — an abort during a refusing build stored the refusal.** Both refused branches check `aborted()`
+  before storing; the prior report is kept (tested for the adapter and the engine refusal).
+- **B6 — the About sheet's disclosures.** The project payload carries a `counterfactual` provenance block
+  (`present`, `basis`, `first_years`, `n_lines`, `sources`, `lines_not_established`, `reasons`, `flags`)
+  and `cost_of_equity` / `wacc_nominal`; one `CFADS_DEFINITION` (in `debt.py`, what `build_debt`
+  computes: incremental revenue − incremental costs − replacement capex) used by the report and the xlsx.
+
 ## WP4.6c Chat tools
 
 - `run_investment_case` (Safety tier `execution_long_running`, campaign-gated like `run_eh_study`),

@@ -234,7 +234,8 @@ def test_assumptions_digest_moves_with_each_part():
     base = dict(finance={"a": 1}, commercial={"poc_link": "x", "value_flows": {"p": 1}},
                 dispatch="d0", packs={"us_federal": "h1"})
     h0, parts = assumptions_digest(**base)
-    assert set(parts) == {"finance", "value_flows", "commercial", "dispatch", "packs"}
+    assert set(parts) == {"finance", "value_flows", "commercial", "solver_config",
+                          "dispatch", "packs"}
     assert assumptions_digest(**base)[0] == h0                       # deterministic
     for key, val in (("finance", {"a": 2}), ("dispatch", "d1"), ("packs", {"us_federal": "h2"}),
                      ("commercial", {"poc_link": "y", "value_flows": {"p": 1}}),
@@ -267,3 +268,154 @@ def test_the_runner_record_is_published_under_the_state_lock():
     start_investment_case(None, build_case=lambda: S.to_finance_case("s2"), solver_state=state,
                           state_update=state.update, publish_study=publish, state_lock=lock)
     assert state["investment_case"]["status"] == "done"
+
+
+# ── WP4.6b review round 1 ────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("terminal", ["none", "book_value", "multiple_of_ebitda"])
+def test_b2_each_years_lines_sum_to_the_post_tax_equity_cash(terminal):
+    """With a counterfactual (its lines negated), a resolved terminal value
+    and a levered tranche, Σ lines per year = the engine's post-tax equity
+    cash — the report's drill-down reconciles to its headline cash."""
+    from models.finance import DebtTranche, TerminalValueRule
+    from services.finance.case import Template, TemplateLine
+    from tests.test_finance_engine import LAYER, _case
+
+    cf = (Template(first_year=2031, lines=(TemplateLine("bill", "energy_import", -100.0, "tariff",
+                                                        source="counterfactual",
+                                                        source_id="bill"),)),)
+    tv = {"none": TerminalValueRule(), "book_value": TerminalValueRule(method="book_value"),
+          "multiple_of_ebitda": TerminalValueRule(method="multiple_of_ebitda", value=5.0)}[terminal]
+    loan = DebtTranche(kind="term_loan", amount=400.0, rate=0.05, tenor_years=5,
+                       upfront_fee=0.01, dsra_months=0, grace_years=0, commitment_fee=0.0)
+    case = _case(cf=cf, debt=[loan], fin_over={"terminal_value": tv, "analysis_years": 8})
+    result = run_case(case, layers=LAYER)
+    assert result.cash["equity_post_tax"] is not None, result.reasons
+    rep = assemble_finance_sections(result, case, assumptions_hash="a" * 16, packs={})
+    years = [int(y) for y in result.tl.years]
+    for i, y in enumerate(years):
+        total = sum(ln.amount for ln in rep.cashflow_lines if ln.year == y)
+        assert total == pytest.approx(float(result.cash["equity_post_tax"][i]), abs=1e-6), y
+    cf_lines = [ln for ln in rep.cashflow_lines
+                if ln.provenance.source.startswith("counterfactual:")]
+    assert cf_lines and all(ln.amount == pytest.approx(100.0) for ln in cf_lines)
+    if terminal != "none":
+        tv_lines = [ln for ln in rep.cashflow_lines if ln.value_stream == "terminal_value"]
+        assert tv_lines and tv_lines[-1].year == years[-1]
+
+
+def test_b6_the_counterfactual_block_and_one_cfads_definition():
+    from services.finance.case import Template, TemplateLine
+    from services.finance.debt import CFADS_DEFINITION
+    from services.finance.export_xlsx import CFADS_DEFINITION as XLSX_CFADS
+    from services.finance.export_xlsx import _counterfactual_summary
+    from tests.test_finance_engine import LAYER, _case
+
+    assert XLSX_CFADS is CFADS_DEFINITION and "replacement capex" in CFADS_DEFINITION
+    cf = (Template(first_year=2031, lines=(TemplateLine("bill", "energy_import", -100.0, "tariff",
+                                                        source="counterfactual",
+                                                        source_id="bill"),)),)
+    case = _case(cf=cf)
+    rep = assemble_finance_sections(run_case(case, layers=LAYER), case,
+                                    assumptions_hash="a" * 16, packs={})
+    payload = rep.sections["project"].payload
+    assert payload["cfads_definition"] == CFADS_DEFINITION
+    assert payload["cost_of_equity"] == 0.09 and payload["wacc_nominal"] == 0.07
+    block = payload["counterfactual"]
+    assert block["present"] is True and block["n_lines"] == 1
+    assert block["sources"] == ["counterfactual:bill"] and block["reasons"] == []
+    assert "1 lines from counterfactual:bill; established" in _counterfactual_summary(block)
+    # Without one: present False with its basis — never read as not established.
+    plain = _case()
+    block = assemble_finance_sections(run_case(plain, layers=LAYER), plain,
+                                      assumptions_hash="a" * 16,
+                                      packs={}).sections["project"].payload["counterfactual"]
+    assert block["present"] is False and "incremental = total" in block["basis"]
+    assert _counterfactual_summary(block).startswith("none — ")
+    assert _counterfactual_summary(None) is None
+
+
+def test_b1_the_solver_config_is_part_of_the_staleness_key():
+    base = dict(finance={"a": 1}, commercial=None, dispatch="d0", packs={},
+                solver={"discount_rate": 0.07, "finance": {"a": 1}, "commercial": None})
+    h0, parts = assumptions_digest(**base)
+    assert set(parts) == {"finance", "value_flows", "commercial", "solver_config", "dispatch",
+                          "packs"}
+    for field, val in (("discount_rate", 0.05), ("inflation_rate", 0.02),
+                       ("auto_discount_periods", True), ("voll", 5000.0),
+                       ("dsr_price_eur_per_mwh", 300.0), ("dsr_share_of_load", 0.1),
+                       ("dsr_buses", ["b1"]), ("investment_periods", [2030, 2040])):
+        h, p = assumptions_digest(**{**base, "solver": {**base["solver"], field: val}})
+        assert h != h0 and p["solver_config"] != parts["solver_config"], field
+    # finance / commercial have their own parts: not double-counted here.
+    h, p = assumptions_digest(**{**base, "solver": {**base["solver"], "finance": {"a": 9}}})
+    assert p["solver_config"] == parts["solver_config"]
+
+
+def test_b5_an_abort_during_a_refusing_build_stores_nothing():
+    state_box: dict = {}
+
+    def adapter():
+        state_box["record"]["stop_event"].set()          # the user aborts mid-build
+        raise FinanceRefused("template_not_annual", "168 h")
+
+    finance = S.to_finance_case("s2").inputs.model_dump(mode="json")
+    state: dict = {"solver_config": _Cfg(finance), "investment_case_report": {"prior": True}}
+
+    def publish(key, record, thread):
+        state[key] = record
+        state_box["record"] = record
+        thread.start()
+        thread.join(timeout=60)
+
+    start_investment_case(None, build_case=adapter, solver_state=state,
+                          state_update=state.update, publish_study=publish)
+    assert state["investment_case"]["status"] == "aborted"
+    assert state["investment_case_report"] == {"prior": True}     # the prior report kept
+
+    def engine_refuses():
+        c = S.to_finance_case("s2")
+        state_box["record"]["stop_event"].set()
+        return dataclasses.replace(c, inputs=c.inputs.model_copy(update={"analysis_years": None}))
+    start_investment_case(None, build_case=engine_refuses, solver_state=state,
+                          state_update=state.update, publish_study=publish)
+    assert state["investment_case"]["status"] == "aborted"
+    assert state["investment_case_report"] == {"prior": True}
+
+
+def test_b3_b4_unknown_finance_keys_and_bad_case_ids_are_refused():
+    from pydantic import ValidationError
+
+    from models.finance import FinanceInputs
+    from services.finance.investment_case_runner import InvestmentCaseRequest
+
+    fin = S.to_finance_case("s2").inputs.model_dump(mode="json")
+    with pytest.raises(ValidationError):
+        FinanceInputs.model_validate({**fin, "terminalvalue": {"method": "fixed", "value": 5}})
+    with pytest.raises(ValidationError):
+        FinanceInputs.model_validate({**fin, "terminal_value": {"method": "none", "valu": 1}})
+    with pytest.raises(ValidationError):
+        FinanceInputs.model_validate({**fin, "debt": [{**fin["debt"][0], "tenor": 5}]})
+    state = {"solver_config": _Cfg(fin)}
+    with pytest.raises(HTTPException) as e:
+        start_investment_case({"case_id": "bad\x07id"}, build_case=lambda: None,
+                              solver_state=state, state_update=state.update,
+                              publish_study=lambda *a: None)
+    assert e.value.status_code == 422
+    assert InvestmentCaseRequest(case_id="Base case v2.1-final").case_id
+
+
+def test_b4_the_workbook_strips_control_characters():
+    import io
+
+    from openpyxl import load_workbook
+
+    from services.finance.export_xlsx import build_workbook
+
+    rep = refused_finance_report("x\x07y", "detail\x01", case_id="case",
+                                 assumptions_hash="a" * 16)
+    rep = rep.model_copy(update={"case_id": "c\x07ase"})
+    wb = load_workbook(io.BytesIO(build_workbook(rep, project="p\x0bq")))
+    about = {r[0].value: r[1].value for r in wb["About"].iter_rows(max_col=2)}
+    assert about["Case"] == "case" and about["Project"] == "pq"

@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from models.commercial import Participant, ValueStreamKind
 
@@ -66,6 +66,8 @@ class DebtTranche(BaseModel):
     grace years have NO default (P0 gate finding 5, plan C12): `None` = not
     stated, refused at run time — 0 must be typed. `rate` is one rate or one
     per operating year of the tenor."""
+    model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
+
 
     kind: Literal["term_loan", "mini_perm", "construction", "mezzanine"]
     amount: float | None = Field(default=None, ge=0)
@@ -152,6 +154,8 @@ class Incentive(BaseModel):
     where the pack's rule does). A grant states its tax treatment
     (`grant_tax_treatment`, no default): it reduces the depreciable basis (and
     the ITC base of its assets), or it is taxable income when received."""
+    model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
+
 
     kind: Literal["itc", "ptc", "grant", "accelerated_depreciation", "cfd", "capacity_payment"]
     rate: float | None = Field(default=None, ge=0)
@@ -164,6 +168,8 @@ class Incentive(BaseModel):
 
 class TaxEquityStructure(BaseModel):
     """Spec §6.7 (fields beyond shares added after review F13)."""
+    model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
+
 
     kind: Literal["partnership_flip", "sale_leaseback", "inverted_lease"]
     te_share_pre_flip: float = Field(ge=0, le=1)
@@ -185,6 +191,8 @@ class SolvePpa(BaseModel):
     """Solve a contract's price for a target after-tax equity IRR in a target
     year (spec §6.6; SAM `ppa_soln_mode=0`; IC P4 plan C9). `contract_id`
     None = the case's single owner-sold PPA."""
+    model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
+
 
     contract_id: str | None = None
     target_irr: float = Field(gt=-1, lt=10)
@@ -192,6 +200,8 @@ class SolvePpa(BaseModel):
 
 
 class TerminalValueRule(BaseModel):
+    model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
+
     method: Literal["none", "book_value", "multiple_of_ebitda", "fixed"] = "none"
     value: float | None = None
 
@@ -206,6 +216,8 @@ class FinanceInputs(BaseModel):
     `ESCALATION_CLASSES` (plan C4); a class with cashflows and no rate is
     not established, never 0. `participants` is derived from the value-flow
     config (P3) — a stored list that differs is refused at run time."""
+    model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
+
 
     currency: str = Field(default="EUR", min_length=3, max_length=3)
     financial_close: date

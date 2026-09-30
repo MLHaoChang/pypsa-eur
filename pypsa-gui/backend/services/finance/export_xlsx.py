@@ -23,14 +23,14 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+
 from models.finance import IC_EXPORT_KEYS, IC_REPORT_SECTIONS, InvestmentCaseReport
+from services.finance.debt import CFADS_DEFINITION
 
 NOT_ESTABLISHED = "not_established"
 _FORMULA_LEADS = ("=", "+", "-", "@", "\t", "\r")
 
-CFADS_DEFINITION = ("CFADS = operating revenue − operating costs − replacement capex (the "
-                    "terminal value excluded); DSRA movements and reserve interest below it "
-                    "(IC P4 plan C8)")
 
 
 def _put(ws, row: int, col: int, value: Any) -> None:
@@ -47,6 +47,9 @@ def _put(ws, row: int, col: int, value: Any) -> None:
         return
     if not isinstance(value, str):
         value = json.dumps(value, default=str, sort_keys=True)
+    # C0 control characters are illegal in xlsx cells (openpyxl raises): strip
+    # them rather than fail the export (WP4.6b review B4).
+    value = ILLEGAL_CHARACTERS_RE.sub("", value)
     cell.value = value
     if value.startswith(_FORMULA_LEADS):
         cell.data_type = "s"                 # never a formula
@@ -88,6 +91,19 @@ def _flags(report: InvestmentCaseReport) -> list[str]:
     return sorted(found)
 
 
+def _counterfactual_summary(block: Any) -> str | None:
+    """The About row: the counterfactual's provenance in one line (the full
+    block is on the Project sheet). None → `not_established`."""
+    if not isinstance(block, dict):
+        return None
+    if not block.get("present"):
+        return f"none — {block.get('basis')}"
+    sources = ", ".join(block.get("sources") or []) or "(no lines)"
+    reasons = block.get("reasons") or []
+    state = "not established: " + ", ".join(reasons) if reasons else "established"
+    return (f"{block.get('basis')}; {block.get('n_lines')} lines from {sources}; {state}")
+
+
 def build_workbook(report: InvestmentCaseReport, *, project: str | None = None) -> bytes:
     from openpyxl import Workbook
 
@@ -107,7 +123,7 @@ def build_workbook(report: InvestmentCaseReport, *, project: str | None = None) 
          if report.excludes_shed_cost else "included"],
         ["WACC vs discount rate consistent", report.gates.wacc_vs_discount_rate_consistent],
         ["Value-flow conservation", report.gates.conservation_ok],
-        ["Counterfactual", project_payload.get("counterfactual")],
+        ["Counterfactual", _counterfactual_summary(project_payload.get("counterfactual"))],
     ]
     for jur, h in sorted(report.packs.items()):
         rows.append([f"Pack {jur}", h])

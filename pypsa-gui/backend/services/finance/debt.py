@@ -58,6 +58,12 @@ from services.finance.timeline import Timeline
 
 TOL = 1e-6              # the fixed point's relative tolerance (plan C8)
 MAX_ITER = 50
+# The one CFADS definition the report and the workbook disclose (WP4.6b review
+# B6) — it is what `build_debt` computes from the incremental operating cash.
+CFADS_DEFINITION = ("CFADS = incremental operating revenue − incremental operating costs − "
+                    "replacement capex, where incremental = the owner's total operating cash "
+                    "− the counterfactual's (plan C13); the terminal value excluded; DSRA "
+                    "movements and reserve interest sit below it (plan C8)")
 
 
 @dataclass

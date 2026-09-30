@@ -71,6 +71,11 @@ class FinanceResult:
     sections: dict[str, str] = field(default_factory=dict)
     reasons: dict[str, list[str]] = field(default_factory=dict)
     flags: list[str] = field(default_factory=list)
+    # The terminal value the cash series used (book value / incremental EBITDA
+    # multiple resolved) and the counterfactual's operating cash — the report's
+    # cashflow lines reconcile to the cash series through them (WP4.6b review B2).
+    terminal: np.ndarray | None = None
+    op_counterfactual: Operating | None = None
 
 
 # ── metrics ──────────────────────────────────────────────────────────────────
@@ -152,6 +157,7 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
 
     # Counterfactual (C13): incremental operating cash = total − counterfactual.
     cf_net = np.zeros(n)
+    cf_op = None
     if case.counterfactual:
         cf_case = dataclasses.replace(case, templates=case.counterfactual, counterfactual=())
         cf_op = build_operating(cf_case, tl)
@@ -362,7 +368,8 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
     gate = wacc_gate(case)
     result = FinanceResult(case=case, tl=tl, op=op, op_incremental={"net": inc_net, "counterfactual": cf_net},
                            debt=debt, incentives=inc, tax=tax, tax_unlevered=tax_u, cash=cash,
-                           metrics=m, gate=gate, reasons=reasons, flags=sorted(set(flags)))
+                           metrics=m, gate=gate, reasons=reasons, flags=sorted(set(flags)),
+                           terminal=terminal, op_counterfactual=cf_op)
     sections = {"operating": "ok" if inc_net is not None and terminal is not None else "not_established",
                 "debt": "ok" if debt.established() else "not_established",
                 "incentives": "ok" if inc.established() else "not_established",

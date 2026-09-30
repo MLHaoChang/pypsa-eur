@@ -409,12 +409,41 @@ def test_explain_cashflow_attributes_the_equity_npv_and_the_min_dscr_year(solved
 
 
 def test_explain_cashflow_falls_back_to_the_irr_when_the_inputs_moved_on(solved, store):
-    store(_report(finance_digest="no-longer-stored"))
+    def older_report(rep):          # before the payload recorded the cost of equity
+        rep["sections"]["project"]["payload"].pop("cost_of_equity", None)
+    store(_report(finance_digest="no-longer-stored", mutate=older_report))
     out = _tool("explain_cashflow", detail="full")
     assert out["rate"]["basis"].startswith("equity_post_tax_irr")
     # At the IRR the stream PVs sum to zero.
     assert out["equity_irr"]["sum_of_stream_pvs"] == pytest.approx(0.0, abs=0.05)
     assert _size(out) < _CAP
+
+
+def test_explain_cashflow_reads_the_reports_own_cost_of_equity(solved, store):
+    store(_report(finance_digest="no-longer-stored"))
+    out = _tool("explain_cashflow")
+    assert out["rate"]["basis"] == "cost_of_equity"
+
+
+def test_explain_cashflow_takes_the_counterfactual_from_its_lines_once():
+    """The report's lines carry the counterfactual negated (WP4.6b review B2):
+    the attribution must not add `counterfactual_net` a second time."""
+    from services.chat_tools import _IC_AVOIDED, _ic_equity_attribution
+    from services.finance.case import Template, TemplateLine
+    from services.finance.engine import run_case
+    from services.finance.report import assemble_finance_sections
+    from tests.test_finance_engine import LAYER, _case
+
+    cf = (Template(first_year=2031, lines=(TemplateLine("bill", "energy_import", -100.0, "tariff",
+                                                        source="counterfactual",
+                                                        source_id="bill"),)),)
+    case = _case(cf=cf)
+    rep = assemble_finance_sections(run_case(case, layers=LAYER), case, assumptions_hash="a" * 16,
+                                    packs={}).model_dump(mode="json")
+    out = _ic_equity_attribution(rep, 0.09, 50)
+    assert out["reconciles"] is True, out["max_yearly_residual"]
+    avoided = [x for x in out["by_stream"] if x["stream"] == _IC_AVOIDED]
+    assert len(avoided) == 1 and avoided[0]["undiscounted"] > 0
 
 
 def test_explain_cashflow_without_equity_cash_says_not_established(solved, store):

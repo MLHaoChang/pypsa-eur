@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from models.finance import InvestmentCaseReport, export_investment_case
+from services.finance.debt import CFADS_DEFINITION
 
 IC_REPORT_STORE_KEY = "investment_case_report"
 
@@ -177,9 +178,11 @@ def _cashflow_stream(stream: str) -> str:
 def _cashflow_lines(result, case, packs: dict[str, str]) -> list:
     """One `CashflowLine` per (year, stream line) with a non-zero amount: the
     owner's operating lines (their ledger drill-down in the provenance), the
-    capex, replacement, terminal value, incentives, financing flows and the
-    corporate tax. The counterfactual is not a cash line (C13: returns are on
-    the owner's cash minus it — the project payload carries it per year)."""
+    capex, replacement, the terminal value the engine used, incentives,
+    financing flows and the corporate tax — and the counterfactual's lines
+    NEGATED (source `counterfactual:*`, C13: returns are on the owner's cash
+    minus it), so each year's lines sum to the post-tax equity cash
+    (WP4.6b review B2)."""
     from models.finance import CashflowLine, Provenance
 
     tl, op, owner = result.tl, result.op, case.owner
@@ -213,7 +216,17 @@ def _cashflow_lines(result, case, packs: dict[str, str]) -> list:
              contract_id=ln.contract_id, period=ln.period)
     emit("capex", op.capex, sign=-1.0, source="capex")
     emit("capex", op.replacement, sign=-1.0, source="replacement_capex")
-    emit("terminal_value", op.terminal, source="terminal_value")
+    emit("terminal_value", getattr(result, "terminal", None) if getattr(result, "terminal", None)
+         is not None else op.terminal, source="terminal_value")
+    cf_op = getattr(result, "op_counterfactual", None)
+    if cf_op is not None:
+        for key, arr in (cf_op.lines or {}).items():
+            ln = cf_op.line_meta.get(key)
+            if ln is None:
+                continue
+            emit(ln.stream, arr, counterparty=ln.counterparty, tariff_item=ln.tariff_item,
+                 source=f"counterfactual:{ln.source}", source_id=ln.source_id or key,
+                 contract_id=ln.contract_id, period=ln.period, sign=-1.0)
     inc = result.incentives
     emit("incentive", getattr(inc, "itc", None), counterparty="government", source="itc")
     emit("incentive", getattr(inc, "ptc", None), counterparty="government", source="ptc")
@@ -270,9 +283,36 @@ def _project_payload(result, case) -> dict[str, Any]:
         "incentives": [{"kind": ln.kind, "assets": list(ln.assets), "share": _num(ln.share),
                         "rate": _num(ln.rate), "cash": _series(ln.cash)}
                        for ln in getattr(result.incentives, "lines", []) or []],
-        "cfads_definition": "CFADS = EBITDA − major-equipment reserve funding (off in P4: "
-                            "CFADS = EBITDA); DSRA movements and reserve interest sit below it",
+        "counterfactual": _counterfactual_block(result, case),
+        # The discount rates the returns above use (the chat's cash attribution
+        # discounts at the report's own cost of equity).
+        "cost_of_equity": _num(fin.cost_of_equity),
+        "wacc_nominal": _num(fin.wacc_nominal),
+        "cfads_definition": CFADS_DEFINITION,
         "flags": list(result.flags),
+    }
+
+
+def _counterfactual_block(result, case) -> dict[str, Any]:
+    """The counterfactual's provenance (plan C13; WP4.6b review B6): what it is,
+    its lines' sources, and whether it was established. Its per-year cash is
+    `counterfactual_net`; its lines are the `counterfactual:*` cashflow lines."""
+    if not case.counterfactual:
+        return {"present": False,
+                "basis": "no counterfactual in the case (the adapter builds one only when "
+                         "the owner is the site party): incremental = total"}
+    lines = [ln for t in case.counterfactual for ln in t.lines]
+    return {
+        "present": True,
+        "basis": "the same site's bill, commodity and connection lines without the owner's "
+                 "investable assets",
+        "first_years": sorted({int(t.first_year) for t in case.counterfactual}),
+        "n_lines": len(lines),
+        "sources": sorted({f"{ln.source}:{ln.source_id}" if ln.source_id else ln.source
+                           for ln in lines}),
+        "lines_not_established": sorted({ln.key for ln in lines if ln.amount is None}),
+        "reasons": list(result.reasons.get("counterfactual", [])),
+        "flags": sorted(f for f in result.flags if f.startswith("counterfactual")),
     }
 
 

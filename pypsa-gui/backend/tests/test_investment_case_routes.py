@@ -151,6 +151,10 @@ def test_put_refuses_invalid_inputs_with_field_paths(client, install_network, se
     assert r.status_code == 422
     assert ["analysis_years"] in [e["loc"] for e in r.json()["detail"]["errors"]]
     assert session_state(client)["solver_config"].finance is None
+    # An unknown (mistyped) key is refused, not silently dropped (review B3).
+    r = _put_fin(client, {**_s2_inputs(), "terminalvalue": {"method": "fixed", "value": 5}})
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "finance_inputs_invalid"
+    assert session_state(client)["solver_config"].finance is None
 
 
 def test_put_body_is_closed_and_required(client, install_network):
@@ -416,7 +420,8 @@ def test_a_run_stores_the_report_and_it_is_current(client, install_network, sess
     assert isinstance(stored, dict) and stored["excludes_shed_cost"] is True
     prov = stored["sections"]["project"]["payload"]["provenance"]
     assert prov["finance_case_hash"] == "case-hash-for-test"
-    assert set(prov["inputs"]) == {"finance", "value_flows", "commercial", "dispatch", "packs"}
+    assert set(prov["inputs"]) == {"finance", "value_flows", "commercial", "solver_config",
+                                   "dispatch", "packs"}
     assert stored["cashflow_lines"], "cashflow lines missing"
     # detail=full: the sections with payloads and the cashflow lines (WP4.7b).
     full = client.get(REPORT_URL, params={"detail": "full"}).json()
@@ -461,6 +466,14 @@ def test_staleness_follows_each_input(client, install_network, session_ctx, monk
     st["solver_config"] = dataclasses.replace(
         cfg0, commercial={"poc_link": "x", "value_flows": None})
     assert set(client.get(STUDY_URL).json()["report"]["changed"]) == {"commercial"}
+    st["solver_config"] = cfg0
+    assert client.get(STUDY_URL).json()["report"]["stale"] is False
+
+    # 3b. the solver config the case reads at build time (WP4.6b review B1)
+    for field, val in (("discount_rate", 0.03), ("voll", 9000.0), ("dsr_share_of_load", 0.2)):
+        st["solver_config"] = dataclasses.replace(cfg0, **{field: val})
+        rep = client.get(STUDY_URL).json()["report"]
+        assert rep["stale"] is True and rep["changed"] == ["solver_config"], field
     st["solver_config"] = cfg0
     assert client.get(STUDY_URL).json()["report"]["stale"] is False
 

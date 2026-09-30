@@ -54,7 +54,10 @@ class InvestmentCaseRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     owner: str | None = Field(default=None, min_length=1)
-    case_id: str | None = Field(default=None, min_length=1, max_length=120)
+    # Word characters, spaces, dots and dashes: the id lands in the xlsx and
+    # its filename (WP4.6b review B4).
+    case_id: str | None = Field(default=None, min_length=1, max_length=120,
+                                pattern=r"^[\w .-]+$")
 
 
 # ── digests (the If-Match tag and the staleness key) ─────────────────────────
@@ -89,11 +92,21 @@ def pack_versions(fin: FinanceInputs | None, *, load_pack=None) -> dict[str, str
 
 
 def assumptions_digest(*, finance: dict | None, commercial: dict | None, dispatch: str | None,
-                       packs: dict[str, str]) -> tuple[str, dict[str, Any]]:
+                       packs: dict[str, str], solver: dict | None = None
+                       ) -> tuple[str, dict[str, Any]]:
     """(hash, parts): the report's staleness key and the per-input digests
-    (so `GET /results/investment_case` can say WHICH input changed)."""
+    (so `GET /results/investment_case` can say WHICH input changed).
+
+    `solver` is the solver config without `finance` / `commercial` (they have
+    their own parts): the case reads its discount / inflation rates, the VOLL
+    and DSR settings and the investment periods at build time, not only at the
+    solve (WP4.6b review B1). The whole config is digested — a field that
+    only matters to a solve marks the report stale too, which errs safe."""
     commercial = commercial if isinstance(commercial, dict) else None
     parts = {
+        "solver_config": json_digest(None if solver is None else
+                                     {k: v for k, v in solver.items()
+                                      if k not in ("finance", "commercial")}),
         "finance": finance_digest(finance),
         "value_flows": json_digest((commercial or {}).get("value_flows")),
         "commercial": json_digest(None if commercial is None else
@@ -251,6 +264,8 @@ def start_investment_case(
                 report = refused_finance_report(exc.code, exc.detail, case_id=case_id,
                                                 assumptions_hash=a_hash, packs=packs,
                                                 owner=body.owner)
+                if aborted():           # an aborted run stores nothing (review B5)
+                    return
                 state_update(**{"investment_case_report": report.model_dump(mode="json")})
                 finish("refused", error=str(exc), error_code=exc.code)
                 return
@@ -270,6 +285,8 @@ def start_investment_case(
                 report = refused_finance_report(exc.code, exc.detail, case_id=case_id,
                                                 assumptions_hash=a_hash, packs=packs,
                                                 owner=case.owner)
+                if aborted():           # an aborted run stores nothing (review B5)
+                    return
                 state_update(**{"investment_case_report": report.model_dump(mode="json")})
                 finish("refused", error=str(exc), error_code=exc.code)
                 return

@@ -16,6 +16,7 @@ header.
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 import re
 from typing import Any, Literal
@@ -1467,8 +1468,9 @@ def _ic_case_hash(case) -> str | None:
 
 def _ic_assumptions(cfg, n) -> tuple[str, dict]:
     """(hash, parts) of the inputs a finance case is built from: the finance
-    inputs, the value flows, the rest of the commercial config, the dispatch
-    digest of the solve and the pack versions (WP4.6b staleness key)."""
+    inputs, the value flows, the rest of the commercial config, the rest of
+    the solver config (review B1), the dispatch digest of the solve and the
+    pack versions (WP4.6b staleness key)."""
     from pydantic import ValidationError as _VE
 
     from models.finance import FinanceInputs
@@ -1480,8 +1482,10 @@ def _ic_assumptions(cfg, n) -> tuple[str, dict]:
         fin = FinanceInputs.model_validate(raw) if raw is not None else None
     except _VE:
         fin = None
+    solver = dataclasses.asdict(cfg) if dataclasses.is_dataclass(cfg) else None
     return assumptions_digest(finance=raw, commercial=getattr(cfg, "commercial", None),
-                              dispatch=dispatch_digest(n, _result_df), packs=pack_versions(fin))
+                              dispatch=dispatch_digest(n, _result_df), packs=pack_versions(fin),
+                              solver=solver)
 
 
 def _ic_current_assumptions() -> tuple[tuple[str, dict] | None, str | None]:

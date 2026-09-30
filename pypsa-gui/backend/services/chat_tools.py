@@ -2285,7 +2285,19 @@ def _ic_is_finance_source(src) -> bool:
     return src in _IC_FINANCE_SOURCES or str(src or "").startswith("tax:")
 
 
+def _ic_is_counterfactual(ln: dict) -> bool:
+    return str((ln.get("provenance") or {}).get("source") or "").startswith("counterfactual:")
+
+
+def _ic_cf_lines_present(report: dict) -> bool:
+    """The report's lines carry the counterfactual (negated) themselves
+    (WP4.6b review B2) — then `counterfactual_net` must not be added again."""
+    return any(_ic_is_counterfactual(ln) for ln in report.get("cashflow_lines") or [])
+
+
 def _ic_label(ln: dict) -> str:
+    if _ic_is_counterfactual(ln):
+        return _IC_AVOIDED
     stream = str(ln.get("value_stream"))
     src = (ln.get("provenance") or {}).get("source")
     if not _ic_is_finance_source(src) or src in ("debt", stream):
@@ -2306,6 +2318,9 @@ def _ic_rate(report: dict, sim_state) -> tuple[float, str]:
     from services.finance.investment_case_runner import finance_digest
 
     p = _section(report, "project").get("payload") or {}
+    coe = _ne(p.get("cost_of_equity"))              # recorded in the report itself
+    if coe != _NE and coe > -1.0:
+        return coe, "cost_of_equity"
     stored = ((p.get("provenance") or {}).get("inputs") or {}).get("finance")
     raw = getattr(sim_state.get("solver_config"), "finance", None)
     if stored and isinstance(raw, dict) and finance_digest(raw) == stored:
@@ -2337,7 +2352,8 @@ def _ic_equity_attribution(report: dict, rate: float, top: int) -> dict:
             continue
         by_label.setdefault(_ic_label(ln), [0.0] * len(years))[i] += float(amt)
     cf = p.get("counterfactual_net")
-    if p.get("has_counterfactual") and cf and all(v is not None for v in cf):
+    if p.get("has_counterfactual") and cf and all(v is not None for v in cf) and \
+            not _ic_cf_lines_present(report):
         by_label[_IC_AVOIDED] = [-float(v) for v in cf]
     total = [sum(v[i] for v in by_label.values()) for i in range(len(years))]
     residual = max((abs(total[i] - float(eq[i])) for i in range(len(years))), default=0.0)
@@ -2392,7 +2408,8 @@ def _ic_min_dscr_year(report: dict, top: int) -> dict:
         label = _ic_label(ln)
         parts[label] = parts.get(label, 0.0) + float(ln["amount"])
     cf = p.get("counterfactual_net") or []
-    if p.get("has_counterfactual") and i < len(cf) and cf[i] is not None:
+    if p.get("has_counterfactual") and i < len(cf) and cf[i] is not None and \
+            not _ic_cf_lines_present(report):
         parts[_IC_AVOIDED] = -float(cf[i])
     cfads = at("cfads")
     comp = sorted(parts.items(), key=lambda kv: -abs(kv[1]))
