@@ -271,16 +271,25 @@ def fill_periodized_cost_defaults(
                 undo.append((comp_attr, "lifetime", idx, original))
 
     def revert() -> None:
-        for comp_attr, col, idx, original in reversed(undo):
-            df = getattr(n, comp_attr, None)
-            if df is None:
-                continue
-            valid = [i for i in idx if i in df.index]
-            if valid:
-                df.loc[valid, col] = original.loc[valid]
-        if fom_scaled_here:
-            with _FOM_SCALED_LOCK:
-                _FOM_SCALED_IDS.discard(id(n))
+        try:
+            for comp_attr, col, idx, original in reversed(undo):
+                df = getattr(n, comp_attr, None)
+                if df is None:
+                    continue
+                valid = [i for i in idx if i in df.index]
+                if valid:
+                    df.loc[valid, col] = original.loc[valid]
+        finally:
+            # In a `finally` because the registry is keyed by `id(n)`, and
+            # CPython REUSES addresses. A leaked entry is therefore not merely
+            # stale: an unrelated network later allocated at the same address
+            # reads as already-scaled, so `fom_per_horizon` leaves its
+            # `fom_cost` on the wrong basis and nothing anywhere says so. The
+            # column restores above can raise (a misaligned `original`), and
+            # before this the discard sat after them.
+            if fom_scaled_here:
+                with _FOM_SCALED_LOCK:
+                    _FOM_SCALED_IDS.discard(id(n))
 
     return revert
 

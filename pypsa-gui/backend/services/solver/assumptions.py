@@ -458,6 +458,110 @@ def _sanitise_transformer_types(n, phase) -> None:
     )
 
 
+def _run_undo_actions(n, undo_actions: list, phase) -> None:
+    """Walk `undo_actions` in reverse, reverting every transform.
+
+    Module-level, and called from TWO places: the `restore` closure the
+    caller invokes after a solve, and the failure path inside
+    `_apply_modelling_assumptions` itself.
+
+    That second caller is why this is not a closure any more. `restore()`
+    was defined only after every apply step had run, and
+    `run_simulation` binds its `restore_modelling` handle only once the
+    apply RETURNS — so an exception partway through left the live network
+    carrying the LP transforms (scaled fom/capital cost, CO2-inflated
+    marginal costs, scaled loads, possibly added VOLL/DSR slacks) with
+    nothing able to revert them, and a later autosave or eviction wrote
+    that corruption into the project. The comment at `run_simulation` is
+    accurate about the window it covers — between the apply returning and
+    the solve try/finally — and this is the window inside the apply.
+
+    Idempotent in practice: every entry is individually guarded, and the
+    tail clears the transient-row registry and the frozen-vintage store,
+    both of which are safe to clear twice. So the failure path running it
+    and a later `restore()` running it again is harmless.
+    """
+    # Walk in reverse order. "col" actions write back original column
+    # values; "call" actions run arbitrary cleanup (slack-gen removal,
+    # period restoration, vintage drop). DataFrame is re-resolved at
+    # restore time because PyPSA's n.add() may have rebuilt it during
+    # apply.
+    #
+    # Each action is wrapped in try/except so one bad row doesn't strand
+    # subsequent ones — without this, a failure in (say) the vintage
+    # capture-and-drop callback would leave the parent's extendable
+    # flip un-reverted and orphan rows in the network. We log to phase
+    # but swallow per-entry so the rest of the restore proceeds.
+    for action in reversed(undo_actions):
+        kind = action[0]
+        try:
+            if kind == "col":
+                _, attr_name, col, idx, original = action
+                df = getattr(n, attr_name, None)
+                if df is None:
+                    continue
+                # Filter index to rows that still exist — a previous undo
+                # action (e.g. slack removal) might have shrunk the frame.
+                valid = [i for i in idx if i in df.index]
+                if valid:
+                    df.loc[valid, col] = original.loc[valid]
+            elif kind == "call":
+                action[1]()
+            elif kind == "t_marginal_cost":
+                # Restore generators_t.marginal_cost — drop columns we
+                # newly added, restore originals for columns we overwrote.
+                _, saved_t_mc, new_cols = action
+                mc_t = n.generators_t.marginal_cost
+                if new_cols:
+                    keep_cols = [c for c in mc_t.columns if c not in new_cols]
+                    n.generators_t.marginal_cost = mc_t[keep_cols]
+                    mc_t = n.generators_t.marginal_cost
+                if saved_t_mc is not None and not saved_t_mc.empty:
+                    for g in saved_t_mc.columns:
+                        n.generators_t.marginal_cost[g] = saved_t_mc[g]
+        except Exception as exc:
+            # Surface via the phase callback so the log captures it, then
+            # keep restoring. Don't re-raise.
+            try:
+                phase(f"Restore: skipped one entry ({type(exc).__name__}: {exc})")
+            except Exception:
+                pass
+    # Safety net: drop any remaining transient-row marks. The per-row
+    # unmark calls inside _capture_and_remove_slacks and
+    # _capture_and_drop_vintages cover the happy path, but if a
+    # restore step errored out before reaching them the registry
+    # would keep filtering rows that no longer exist (or worse, real
+    # rows that reuse a name later). Clearing here guarantees the
+    # GET filter is a no-op on the post-restore network.
+    try:
+        PyPSAService.clear_transient()
+    except Exception:
+        pass
+    # Drop the freeze-time vintage-capacity side-store after all
+    # capture closures have read from it. Thread-local, so the explicit
+    # clear() at end-of-restore prevents any chance of leakage into the
+    # next solve cycle on this same worker thread.
+    try:
+        _frozen_vintage_store().clear()
+    except Exception:
+        pass
+    # Phase 12h: the slack rows above were added on a frame that may
+    # have lacked the `p_max_pu_includes_outages` column and then
+    # removed, which leaves an OBJECT column of pure bools — the one
+    # shape netCDF refuses. The next project save or undo snapshot
+    # would be a 500, so put the dtype back here, at the end of the one
+    # walk every exit path runs. Four of those paths (success,
+    # SolveAborted, ValidationRefused, the generic exception path) reach
+    # it through `_guarded_restore`; the fifth is the revert-on-raise
+    # handler inside `_apply_modelling_assumptions`, which calls this
+    # directly because no restore handle exists yet at that point.
+    try:
+        from services.adequacy.occurrence import normalise_flag_column
+        normalise_flag_column(n)
+    except Exception:
+        pass
+
+
 def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
     """
     Apply the five transient modelling knobs and return a `(restore, captured)`
@@ -505,677 +609,622 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
     revert_periodized = fill_periodized_cost_defaults(n, cfg)
     undo_actions.append(("call", revert_periodized))
 
-    # 2) CO2 price. Adds emissions × price / efficiency to fossil generators.
-    #    We index by carrier so any generator on a non-zero-CO2 carrier gets
-    #    the bump; efficiency=0 is a model error elsewhere — skip silently.
-    #
-    #    Two flavours:
-    #      • Uniform `co2_price` (single float) — bump every emitter's scalar
-    #        marginal_cost by emissions × price / efficiency.
-    #      • Per-period `co2_price_per_period` (dict period→€/tCO2) — applies
-    #        ONLY on multi-period networks. Sets generators_t.marginal_cost
-    #        (time-varying) so each snapshot uses the period's price.
-    #        Periods missing from the dict fall back to the scalar co2_price.
-    has_per_period_price = (
-        bool(getattr(cfg, "co2_price_per_period", None))
-        and isinstance(n.snapshots, pd.MultiIndex)
-    )
-    if (cfg.co2_price > 0 or has_per_period_price) and not n.generators.empty and not n.carriers.empty:
-        co2 = n.carriers["co2_emissions"] if "co2_emissions" in n.carriers.columns else pd.Series(dtype=float)
-        co2 = co2[co2 > 0]
-        if not co2.empty:
-            gens = n.generators
-            mask = gens["carrier"].isin(co2.index) & (gens["efficiency"] > 0)
-            if mask.any():
-                idx = gens.index[mask]
-                if has_per_period_price:
-                    # Build per-snapshot price series keyed by period.
-                    raw_dict = cfg.co2_price_per_period or {}
-                    period_price: dict[int, float] = {}
-                    for k, v in raw_dict.items():
-                        try:
-                            period_price[int(k)] = float(v)
-                        except (TypeError, ValueError):
-                            continue
-                    period_lvl = n.snapshots.get_level_values(0)
-                    price_series = pd.Series(
-                        [period_price.get(int(p), cfg.co2_price) for p in period_lvl],
-                        index=n.snapshots, dtype=float,
-                    )
-                    # Build the time-varying surcharge per emitting generator:
-                    # surcharge[g, t] = price_series[t] × co2[carrier(g)] / efficiency[g]
-                    intensity_per_gen = gens.loc[idx, "carrier"].map(co2)
-                    eff_per_gen = gens.loc[idx, "efficiency"]
-                    base_mc = gens.loc[idx, "marginal_cost"].copy()
-                    # outer = snapshot × generator; broadcast price (T,) × intensity (G,)
-                    surcharge = pd.DataFrame(
-                        {g: price_series * float(intensity_per_gen.loc[g]) / float(eff_per_gen.loc[g])
-                         for g in idx},
-                        index=n.snapshots,
-                    )
-                    # Time-varying marginal_cost = scalar base + per-snapshot surcharge.
-                    # PyPSA picks up generators_t.marginal_cost when set.
-                    mc_t = n.generators_t.marginal_cost
-                    # Capture the pre-existing time-varying columns we're
-                    # about to overwrite so restore() can put them back.
-                    existing_cols = [g for g in idx if g in mc_t.columns]
-                    saved_t_mc = mc_t[existing_cols].copy() if existing_cols else None
-                    new_cols = [g for g in idx if g not in mc_t.columns]
-                    for g in idx:
-                        n.generators_t.marginal_cost[g] = float(base_mc.loc[g]) + surcharge[g]
-                    undo_actions.append(("t_marginal_cost", saved_t_mc, list(new_cols)))
-                    by_period_msg = ", ".join(
-                        f"{p}: {period_price.get(p, cfg.co2_price):.1f}"
-                        for p in sorted(set(int(x) for x in period_lvl))
-                    )
-                    phase(
-                        f"Applied per-period CO2 price ({by_period_msg} EUR/tCO2) to "
-                        f"{len(idx)} fossil generator(s) via time-varying marginal_cost."
-                    )
-                else:
-                    # Single-period network OR no per-period dict: uniform price path.
-                    add_per_mwh = gens.loc[idx, "carrier"].map(co2) * cfg.co2_price / gens.loc[idx, "efficiency"]
-                    original_mc = gens.loc[idx, "marginal_cost"].copy()
-                    gens.loc[idx, "marginal_cost"] = original_mc + add_per_mwh
-                    undo_actions.append(("col", "generators", "marginal_cost", idx, original_mc))
-                    phase(
-                        f"Applied CO2 price {cfg.co2_price:.1f} EUR/tCO2 to {len(idx)} "
-                        f"fossil generator(s) (sum surcharge {add_per_mwh.sum():.2f} EUR/MWh)."
-                    )
-    elif getattr(cfg, "co2_price_per_period", None) and not isinstance(n.snapshots, pd.MultiIndex):
-        # User set per-period prices but the network is flat — log so the
-        # silent no-op doesn't go unnoticed.
-        phase(
-            "co2_price_per_period is set but the network is single-period; "
-            "ignoring the per-period dict. Enable multi-period planning to apply per-year prices."
+    # Everything past step 1 runs under a revert-on-raise guard. Step 1 has
+    # already mutated the network (and registered its undo), so from here on
+    # an exception that escapes would strand those transforms: the caller
+    # binds its restore handle only when this function RETURNS, so there is
+    # nothing for its own except-handlers to call. Revert what we managed to
+    # do, then let the original exception travel — the caller still needs to
+    # fail the solve, it just must not fail it with a corrupted network.
+    try:
+
+        # 2) CO2 price. Adds emissions × price / efficiency to fossil generators.
+        #    We index by carrier so any generator on a non-zero-CO2 carrier gets
+        #    the bump; efficiency=0 is a model error elsewhere — skip silently.
+        #
+        #    Two flavours:
+        #      • Uniform `co2_price` (single float) — bump every emitter's scalar
+        #        marginal_cost by emissions × price / efficiency.
+        #      • Per-period `co2_price_per_period` (dict period→€/tCO2) — applies
+        #        ONLY on multi-period networks. Sets generators_t.marginal_cost
+        #        (time-varying) so each snapshot uses the period's price.
+        #        Periods missing from the dict fall back to the scalar co2_price.
+        has_per_period_price = (
+            bool(getattr(cfg, "co2_price_per_period", None))
+            and isinstance(n.snapshots, pd.MultiIndex)
         )
-
-    # 3) VOLL — RELOCATED to after step 5 (load scaling) so the slack
-    #    p_nom sizing sees the SCALED p_set max, not the pre-scaling
-    #    value. Previously sized here, a load-growth scaler of 2× could
-    #    leave slack p_nom undersized for the high-growth period, and the
-    #    LP would silently shed less load than VOLL was supposed to allow.
-    #    See block "5b) VOLL (post-scaling sizing)" below.
-
-    # 4) Investment periods. Only meaningful when multi_investment_periods is
-    #    also true — otherwise the flag is ignored by PyPSA. Snapshot the
-    #    original periods (could be empty) and restore on exit.
-    if cfg.multi_investment_periods and cfg.investment_periods:
-        try:
-            original_periods = list(n.investment_periods)
-            # Capture the pre-promotion snapshot shape so the restore can
-            # actually demote multi→flat when the user started with flat
-            # snapshots + cfg-only periods. Without this, every cfg-only
-            # run silently leaves the network MultiIndexed on disk.
-            was_flat = not isinstance(n.snapshots, pd.MultiIndex)
-            periods = sorted(int(p) for p in cfg.investment_periods)
-            n.set_investment_periods(periods=periods)
-            phase(f"Configured {len(periods)} investment period(s): {periods}.")
-            def _restore_periods(orig=original_periods, started_flat=was_flat):
-                if orig:
-                    n.set_investment_periods(periods=orig)
-                elif started_flat:
-                    # User had flat snapshots; cfg-only set the periods.
-                    # Demote back to flat so the on-disk save doesn't
-                    # carry transient cfg-only periods the user never
-                    # set on the network surface. Lazy import avoids
-                    # a circular dependency between solver_service and
-                    # routers.network.
-                    try:
-                        from routers.network import _flatten_snapshot_state
-                        _flatten_snapshot_state(n)
-                        phase(
-                            "Reverted snapshots to flat — cfg.investment_periods "
-                            "promoted them transiently for the solve only."
+        if (cfg.co2_price > 0 or has_per_period_price) and not n.generators.empty and not n.carriers.empty:
+            co2 = n.carriers["co2_emissions"] if "co2_emissions" in n.carriers.columns else pd.Series(dtype=float)
+            co2 = co2[co2 > 0]
+            if not co2.empty:
+                gens = n.generators
+                mask = gens["carrier"].isin(co2.index) & (gens["efficiency"] > 0)
+                if mask.any():
+                    idx = gens.index[mask]
+                    if has_per_period_price:
+                        # Build per-snapshot price series keyed by period.
+                        raw_dict = cfg.co2_price_per_period or {}
+                        period_price: dict[int, float] = {}
+                        for k, v in raw_dict.items():
+                            try:
+                                period_price[int(k)] = float(v)
+                            except (TypeError, ValueError):
+                                continue
+                        period_lvl = n.snapshots.get_level_values(0)
+                        price_series = pd.Series(
+                            [period_price.get(int(p), cfg.co2_price) for p in period_lvl],
+                            index=n.snapshots, dtype=float,
                         )
-                    except Exception as exc:
-                        phase(
-                            f"Couldn't auto-revert snapshots to flat ({exc}). "
-                            "Reload the project to fully reset, or accept the "
-                            "MultiIndex shape on disk."
+                        # Build the time-varying surcharge per emitting generator:
+                        # surcharge[g, t] = price_series[t] × co2[carrier(g)] / efficiency[g]
+                        intensity_per_gen = gens.loc[idx, "carrier"].map(co2)
+                        eff_per_gen = gens.loc[idx, "efficiency"]
+                        base_mc = gens.loc[idx, "marginal_cost"].copy()
+                        # outer = snapshot × generator; broadcast price (T,) × intensity (G,)
+                        surcharge = pd.DataFrame(
+                            {g: price_series * float(intensity_per_gen.loc[g]) / float(eff_per_gen.loc[g])
+                             for g in idx},
+                            index=n.snapshots,
                         )
-            undo_actions.append(("call", _restore_periods))
-        except Exception as exc:
-            phase(f"Investment periods setup failed: {exc}. Continuing with single-period.")
-
-    # 4b) Auto period discount via investment_period_weightings.objective.
-    #     Computes PV factors (1+r)^-(P-ref_year) per period and writes them
-    #     into ipw.objective so PyPSA's LP discounts BOTH capex and opex by
-    #     a uniform social rate. Without this, a 3-period model treats every
-    #     period as equally weighted — so the LP front-loads all CAPEX into
-    #     the first period (cheaper amortisation, identical OPEX savings).
-    #     Reference year = first period in the active list. Multi-period only.
-    if (
-        cfg.auto_discount_periods
-        and cfg.multi_investment_periods
-        and isinstance(n.snapshots, pd.MultiIndex)
-        and len(n.investment_periods) > 0
-    ):
-        try:
-            periods_active = sorted(int(p) for p in n.investment_periods)
-            ref_year = periods_active[0]
-            r_nom = float(cfg.discount_rate or 0.0)
-            infl = float(getattr(cfg, "inflation_rate", 0.0) or 0.0)
-            # Real discount rate used in the cross-period PV factor. When the
-            # user enters a NOMINAL discount (e.g. WACC = 7 %) and a separate
-            # inflation rate (e.g. 2 %), the real discount that matters for
-            # discounting REAL-€ LP costs is roughly nominal − inflation.
-            # Use the exact Fisher relation so the formula is right even at
-            # higher inflations: real_r = (1 + nominal) / (1 + inflation) − 1.
-            # Guard against pathological inflation > nominal (real_r would
-            # go negative — mathematically valid but rarely intended): clamp
-            # at -0.999 so (1 + r) stays positive in the PV exponentiation.
-            if 1.0 + infl > 0:
-                r = (1.0 + r_nom) / (1.0 + infl) - 1.0
-            else:
-                r = r_nom
-            if r <= -0.999:
-                r = -0.999
-            ipw = n.investment_period_weightings
-            original_obj = ipw["objective"].copy()
-            new_factors: dict[int, float] = {}
-            for p in periods_active:
-                # Per-period span (years_in_period). PyPSA defaults to gap-to-next
-                # so multi-year periods get correctly weighted. PV applied at
-                # period start; the within-period sum is approximated by
-                # PV(start) × years (sufficient for r ≪ 1 and short periods —
-                # exact would compute the geometric series).
-                yrs = float(ipw.at[p, "years"]) if "years" in ipw.columns else 1.0
-                pv = (1.0 + r) ** -(p - ref_year)
-                new_factors[p] = pv * yrs
-                ipw.at[p, "objective"] = new_factors[p]
-            infl_note = f", inflation_rate={infl:.3f}, real={r:.3f}" if infl != 0.0 else ""
-            phase(
-                f"Auto-discount: ipw.objective set to PV × years for {len(periods_active)} "
-                f"period(s) at discount_rate={r_nom:.3f}{infl_note}: " +
-                ", ".join(f"{p}:{new_factors[p]:.3f}" for p in periods_active)
-            )
-            def _restore_ipw_objective(orig=original_obj):
-                for p in orig.index:
-                    n.investment_period_weightings.at[p, "objective"] = float(orig.at[p])
-            undo_actions.append(("call", _restore_ipw_objective))
-        except Exception as exc:
-            phase(f"Auto-discount setup failed: {exc}. Periods stay at original weights.")
-
-    # 5) Per-period × per-carrier load scaling. For each load column, look up
-    #    its (canonical carrier, period) and multiply by the resolved factor.
-    #    Resolution priority:
-    #      1. cfg.load_scalers_by_carrier[carrier][period_str] — per-carrier
-    #         (e.g. electrical 2027 × 1.10, hydrogen 2027 × 1.50)
-    #      2. cfg.load_scalers[period_str] — legacy global fallback
-    #      3. 1.0 — identity
-    #    Multi-period only; ignored for flat networks. The whole p_set frame
-    #    is snapshotted and restored wholesale.
-    # Phase 12c-0: the resolution lives in services/adequacy/demand.py and is
-    # SHARED with every adequacy engine and the Results/Compare tabs, so the
-    # demand the LP is built on and the demand the engines evaluate cannot
-    # drift (the fifteenth finding). The gate and the per-(period, carrier,
-    # column) rule are that module's, applied here in place with the same
-    # snapshot-and-restore as before.
-    from services.adequacy.demand import load_scale_factors
-    _factors = load_scale_factors(n, cfg)
-    if _factors:
-        p_set = n.loads_t.p_set
-        period_level = p_set.index.get_level_values(0)
-        applied: list[str] = []
-        original_p_set = p_set.copy(deep=True)
-        _masks = {period: period_level == period for period, *_ in _factors}
-        for period, col, carrier_key, factor in _factors:
-            p_set.loc[_masks[period], col] = p_set.loc[_masks[period], col] * factor
-            applied.append(f"{period}/{carrier_key}/{col}×{factor:g}")
-        if original_p_set is not None:
-            def _restore_p_set(orig=original_p_set):
-                n.loads_t["p_set"] = orig
-            undo_actions.append(("call", _restore_p_set))
-            # Summarise — listing every (period, carrier, col) explosion in the
-            # log would be noisy on networks with many loads; collapse to
-            # unique (period, carrier) factor combos.
-            unique_combos = sorted(set(
-                f"{a.split('/')[0]}/{a.split('/')[1]}×{a.split('×')[-1]}"
-                for a in applied
-            ))
-            phase(f"Applied per-carrier load scaling: {', '.join(unique_combos)}.")
-
-    # 5b) VOLL (post-scaling sizing). Relocated from step 3 so the slack
-    #    `p_nom` sees the loads AFTER step 5's per-period × per-carrier
-    #    scaling has been applied. Previously sized at step 3 against
-    #    the pre-scaling p_set, a 2× load-growth scaler in period N could
-    #    leave the slack undersized and the LP would silently shed less
-    #    load than the configured VOLL was supposed to permit (slack hits
-    #    its p_nom cap before the demand is matched, producing a
-    #    primal-infeasible window that PyPSA simply reports as zero VOLL
-    #    dispatch). Sized at 10× the observed max so the slack always has
-    #    headroom — bumping further would slow the solver without benefit.
-    if cfg.voll > 0 and not n.buses.empty and not n.loads.empty:
-        added = []
-        # P6(b): one involuntary VOLL slack per Load (not per bus), so shared-
-        # bus industrial/residential (or AC+H₂) shed is attributable. Size
-        # each slack from THAT Load's peak so a tiny Load does not inherit a
-        # system-wide 10× max headroom (and a large Load is never undersized).
-        p_set_t = getattr(getattr(n, "loads_t", None), "p_set", None)
-        skipped_orphan = 0
-        for load_id in n.loads.index:
-            bus = str(n.loads.at[load_id, "bus"]) if "bus" in n.loads.columns else ""
-            if not bus or bus not in n.buses.index:
-                skipped_orphan += 1
-                continue
-            peak = 0.0
-            try:
-                if p_set_t is not None and load_id in getattr(p_set_t, "columns", []):
-                    peak = float(p_set_t[load_id].max())
-                elif "p_set" in n.loads.columns:
-                    peak = float(n.loads.at[load_id, "p_set"] or 0.0)
-            except (TypeError, ValueError):
-                peak = 0.0
-            slack_pnom = max(peak, 1.0) * 10.0
-            name = voll_slack_name(load_id)
-            if name in n.generators.index:
-                continue  # don't double-add if a previous run leaked
-            # Mark BEFORE n.add so a GET landing during the add window
-            # still hides the row (filtering an absent name is a no-op).
-            # On n.add failure we unmark to keep the registry consistent.
-            PyPSAService.mark_transient("Generator", name)
-            try:
-                n.add(
-                    "Generator", name,
-                    bus=bus,
-                    p_nom=slack_pnom,
-                    marginal_cost=cfg.voll,
-                    # The convention's owner is services/adequacy/slack.py.
-                    carrier=INVOLUNTARY_SLACK_CARRIER,
-                )
-            except Exception:
-                PyPSAService.unmark_transient("Generator", name)
-                raise
-            added.append(name)
-        if added:
-            phase(
-                f"Added {len(added)} VOLL slack generator(s) at {cfg.voll:.0f} EUR/MWh "
-                f"(one per Load; each sized to 10× that Load's peak)."
-                + (f" Skipped {skipped_orphan} Load(s) with missing bus." if skipped_orphan else "")
-            )
-            # Restore = remove the slacks.
-            def _capture_and_remove_slacks(names=added, voll=cfg.voll):
-                # Capture lost-load dispatch BEFORE removing the slack
-                # generators — once they're removed, n.generators_t.p
-                # forgets them and the user can never see their dispatch.
-                try:
-                    df = n.generators_t.p
-                    if df is not None and not df.empty:
-                        live = [nm for nm in names if nm in df.columns]
-                        if live:
-                            sub = df[live].copy()
-                            # Strip prefix → Load id (P6b). Legacy bus-scoped
-                            # names strip to the bus id the same way.
-                            sub.columns = [strip_slack_prefix(c) for c in sub.columns]
-                            # Aggregate stats for the KPI tiles. SNAPSHOT-
-                            # WEIGHTED (canonical, spec §6.3): the frame stays
-                            # unweighted MW, but the totals integrate over the
-                            # snapshot weights — "generators" for energy,
-                            # "objective" for cost, matching the solve-log
-                            # decomposition and the LP objective. The previous
-                            # unweighted sum ("assumes hourly snapshots")
-                            # under-reported by the weight factor on
-                            # representative-snapshot (tsam) runs.
-                            from services.adequacy.metrics import (
-                                lost_load_totals,
-                            )
-                            w_energy = _period_utils.snapshot_weights(
-                                n, "generators", sns=sub.index)
-                            totals = lost_load_totals(
-                                sub,
-                                energy_weights=w_energy,
-                                cost_weights=_period_utils.snapshot_weights(
-                                    n, "objective", sns=sub.index),
-                                voll=float(voll),
-                            )
-                            captured["lost_load_t"] = sub
-                            captured["lost_load_total_mwh"] = totals["total_mwh"]
-                            captured["lost_load_cost_eur"] = totals["cost_eur"]
-                            # Solve-time achieved values for the adequacy
-                            # report: per-Load and per-bus per-period weighted
-                            # MWh, and electrical shed-hours (spec §5.1).
-                            from services.adequacy.metrics import (
-                                electrical_columns,
-                                shed_hours,
-                            )
-                            load_e = sub.clip(lower=0).mul(
-                                w_energy.reindex(sub.index).fillna(0.0), axis=0)
-                            if isinstance(sub.index, pd.MultiIndex):
-                                lp = load_e.groupby(
-                                    sub.index.get_level_values(0)).sum()
-                            else:
-                                lp = pd.DataFrame(
-                                    [load_e.sum()], index=["ALL"])
-                            captured["lost_load_load_period_mwh"] = lp
-                            # Bus roll-up for DtC / electrical consumers that
-                            # still key on buses (P4b honesty pin unchanged).
-                            bus_snap = load_e.copy()
-                            rename = {}
-                            for col in list(bus_snap.columns):
-                                if (
-                                    n.loads is not None
-                                    and not n.loads.empty
-                                    and col in n.loads.index
-                                    and "bus" in n.loads.columns
-                                ):
-                                    rename[col] = str(n.loads.at[col, "bus"])
-                            if rename:
-                                bus_snap = bus_snap.rename(columns=rename)
-                                bus_snap = bus_snap.T.groupby(level=0).sum().T
-                            if isinstance(sub.index, pd.MultiIndex):
-                                bp = bus_snap.groupby(
-                                    sub.index.get_level_values(0)).sum()
-                            else:
-                                bp = pd.DataFrame(
-                                    [bus_snap.sum()], index=["ALL"])
-                            captured["lost_load_bus_period_mwh"] = bp
-                            captured["shed_hours_electrical"] = shed_hours(
-                                sub[electrical_columns(n, list(sub.columns))],
-                                weights=w_energy,
-                            )
-                            # Explicit — consumers must not re-derive VoLL
-                            # from cost/energy, which skews whenever the two
-                            # weight columns differ.
-                            captured["voll_eur_per_mwh"] = float(voll)
-                except Exception:
-                    pass
-                # Now remove the slack generators so they don't pollute
-                # the post-solve network state. Pair every remove with an
-                # unmark_transient so the registry doesn't keep filtering
-                # the name once the row is gone — important if the user
-                # later creates a real generator that happens to reuse
-                # the bus name.
-                for nm in names:
-                    if nm in n.generators.index:
-                        n.remove("Generator", nm)
-                    PyPSAService.unmark_transient("Generator", nm)
-            undo_actions.append(("call", _capture_and_remove_slacks))
-
-    # 5c) Demand-response tier (spec §4.4): voluntary, volume-capped, OPT-IN
-    #    per bus. Independent of VOLL (a resource, not a failure valve).
-    #    Never silently global — an empty opt-in list keeps the tier off
-    #    (preflight warns). Same transient lifecycle as the VOLL slacks:
-    #    mark → add → capture (into its OWN keys) → remove.
-    dsr_price = float(getattr(cfg, "dsr_price_eur_per_mwh", 0.0) or 0.0)
-    dsr_share = float(getattr(cfg, "dsr_share_of_load", 0.0) or 0.0)
-    dsr_buses = [str(b) for b in (getattr(cfg, "dsr_buses", None) or [])]
-    if dsr_price > 0 and dsr_share > 0 and dsr_buses and not n.loads.empty:
-        dsr_added = []
-        loads_by_bus = n.loads.groupby("bus") if "bus" in n.loads.columns else None
-        p_set_t = getattr(n.loads_t, "p_set", None)
-        for bus in dsr_buses:
-            if bus not in n.buses.index or loads_by_bus is None:
-                continue
-            try:
-                bus_loads = list(loads_by_bus.get_group(bus).index)
-            except KeyError:
-                continue  # opt-in bus without a load — nothing to respond with
-            # Peak load at the bus: time-varying columns override statics.
-            peak = 0.0
-            per_snap = None
-            for l in bus_loads:
-                if p_set_t is not None and l in getattr(p_set_t, "columns", []):
-                    series = p_set_t[l]
-                else:
-                    try:
-                        series = float(n.loads.at[l, "p_set"] or 0.0)
-                    except (TypeError, ValueError):
-                        series = 0.0
-                per_snap = series if per_snap is None else per_snap + series
-            try:
-                peak = float(per_snap.max()) if hasattr(per_snap, "max") else float(per_snap or 0.0)
-            except (TypeError, ValueError):
-                peak = 0.0
-            if peak <= 0:
-                continue
-            name = f"{DSR_SLACK_PREFIX}{bus}"
-            if name in n.generators.index:
-                continue
-            PyPSAService.mark_transient("Generator", name)
-            try:
-                n.add(
-                    "Generator", name,
-                    bus=bus,
-                    p_nom=dsr_share * peak,
-                    marginal_cost=dsr_price,
-                    carrier=DSR_SLACK_CARRIER,
-                )
-            except Exception:
-                PyPSAService.unmark_transient("Generator", name)
-                raise
-            dsr_added.append(name)
-        if dsr_added:
-            phase(
-                f"Added {len(dsr_added)} demand-response slack(s) at "
-                f"{dsr_price:.0f} EUR/MWh, volume {dsr_share:.0%} of each "
-                f"bus's peak load (opt-in tier — NOT counted as unserved "
-                f"energy)."
-            )
-
-            def _capture_and_remove_dsr(names=dsr_added):
-                try:
-                    df = n.generators_t.p
-                    if df is not None and not df.empty:
-                        live = [nm for nm in names if nm in df.columns]
-                        if live:
-                            sub = df[live].copy()
-                            sub.columns = [
-                                c.removeprefix(DSR_SLACK_PREFIX) for c in sub.columns
-                            ]
-                            w_energy = _period_utils.snapshot_weights(
-                                n, "generators", sns=sub.index)
-                            captured["dsr_t"] = sub
-                            captured["dsr_total_mwh"] = float(
-                                sub.clip(lower=0)
-                                .mul(w_energy.reindex(sub.index).fillna(0.0), axis=0)
-                                .to_numpy().sum()
-                            )
-                except Exception:
-                    pass
-                for nm in names:
-                    if nm in n.generators.index:
-                        n.remove("Generator", nm)
-                    PyPSAService.unmark_transient("Generator", nm)
-
-            undo_actions.append(("call", _capture_and_remove_dsr))
-    elif dsr_price > 0 and not dsr_buses:
-        phase(
-            "Demand-response price is set but no buses are opted in — the "
-            "tier stays OFF (it is never applied globally; see preflight)."
-        )
-
-    # 6) Multi-period activity guard. In a multi-period run PyPSA only lets an
-    #    asset dispatch in period p when build_year <= p < build_year + lifetime.
-    #    The GUI leaves build_year at its 0 default, and step 1 above may have
-    #    filled lifetime to cfg.default_lifetime (e.g. 25) for overnight_cost
-    #    assets — so an asset's active window can be [0, 25), which excludes
-    #    investment periods like 2026 / 2027 entirely. PyPSA then can't dispatch
-    #    it: the LP sheds load and "curtails" renewables that simply can't run.
-    #    Rebase build_year to the first investment period for any asset that
-    #    would otherwise be inactive in EVERY period, and stretch a too-short
-    #    lifetime to cover the horizon. Transient — reverted in restore().
-    if cfg.multi_investment_periods and isinstance(n.snapshots, pd.MultiIndex):
-        try:
-            mp_periods = sorted(int(p) for p in n.investment_periods)
-        except (TypeError, ValueError):
-            mp_periods = []
-        if mp_periods:
-            first_p, last_p = mp_periods[0], mp_periods[-1]
-            rebased: list[str] = []
-            for comp_attr in ("generators", "storage_units", "stores",
-                              "links", "lines", "transformers"):
-                df = getattr(n, comp_attr, None)
-                if df is None or df.empty or "build_year" not in df.columns:
-                    continue
-                lifetimes = df["lifetime"] if "lifetime" in df.columns else None
-                # COLLECT-THEN-APPLY: walk df.index once into a local snapshot
-                # list, then mutate the frame in a second pass. Pandas tolerates
-                # `df.at[name, col] = …` during iteration on `df.index`, but a
-                # collected snapshot is more defensive (e.g. against any future
-                # refactor that ends up calling n.add() / n.remove() inside the
-                # loop, which would invalidate the index iterator).
-                #
-                # `_safe_isfinite` defends against object-dtype columns that
-                # hold non-numeric tokens. Bare `np.isfinite(None)` raises
-                # TypeError; with mixed-dtype columns (rare but possible after
-                # CSV import of e.g. "auto") `np.isfinite("auto")` also raises.
-                # Wrapping in try/except + coercing to float first reduces the
-                # surface to the failure modes we care about (None / strings →
-                # treated as PyPSA defaults).
-                def _safe_isfinite(v) -> tuple[bool, float]:
-                    """
-                    Return (is_finite, float_value). Falls back to (False, 0)
-                    for None / non-numeric / NaN / Inf.
-                    """
-                    if v is None:
-                        return False, 0.0
-                    try:
-                        f = float(v)
-                    except (TypeError, ValueError):
-                        return False, 0.0
-                    if not np.isfinite(f):
-                        return False, 0.0
-                    return True, f
-
-                pending: list[tuple[str, float, object, float | None, object]] = []
-                # tuple shape: (name, by, raw_by_for_undo, lt_for_resize_or_None, raw_lt_for_undo)
-                for name in df.index:
-                    raw_by = df.at[name, "build_year"]
-                    finite_by, by = _safe_isfinite(raw_by)
-                    if not finite_by:
-                        by = 0.0
-                    if lifetimes is not None:
-                        raw_lt = lifetimes.at[name]
-                        finite_lt, lt = _safe_isfinite(raw_lt)
-                        if not finite_lt:
-                            lt = float("inf")
+                        # Time-varying marginal_cost = scalar base + per-snapshot surcharge.
+                        # PyPSA picks up generators_t.marginal_cost when set.
+                        mc_t = n.generators_t.marginal_cost
+                        # Capture the pre-existing time-varying columns we're
+                        # about to overwrite so restore() can put them back.
+                        existing_cols = [g for g in idx if g in mc_t.columns]
+                        saved_t_mc = mc_t[existing_cols].copy() if existing_cols else None
+                        new_cols = [g for g in idx if g not in mc_t.columns]
+                        for g in idx:
+                            n.generators_t.marginal_cost[g] = float(base_mc.loc[g]) + surcharge[g]
+                        undo_actions.append(("t_marginal_cost", saved_t_mc, list(new_cols)))
+                        by_period_msg = ", ".join(
+                            f"{p}: {period_price.get(p, cfg.co2_price):.1f}"
+                            for p in sorted(set(int(x) for x in period_lvl))
+                        )
+                        phase(
+                            f"Applied per-period CO2 price ({by_period_msg} EUR/tCO2) to "
+                            f"{len(idx)} fossil generator(s) via time-varying marginal_cost."
+                        )
                     else:
-                        raw_lt = None
-                        lt = float("inf")
-                    if any(by <= p < by + lt for p in mp_periods):
-                        continue  # already active in at least one period
-                    # Stretch lifetime only when finite AND too short to cover
-                    # the horizon from the new build_year.
-                    resize_lt: float | None = None
-                    if lifetimes is not None and np.isfinite(lt) and first_p + lt <= last_p:
-                        resize_lt = float(last_p - first_p + 1)
-                    pending.append((name, by, raw_by, resize_lt, raw_lt))
+                        # Single-period network OR no per-period dict: uniform price path.
+                        add_per_mwh = gens.loc[idx, "carrier"].map(co2) * cfg.co2_price / gens.loc[idx, "efficiency"]
+                        original_mc = gens.loc[idx, "marginal_cost"].copy()
+                        gens.loc[idx, "marginal_cost"] = original_mc + add_per_mwh
+                        undo_actions.append(("col", "generators", "marginal_cost", idx, original_mc))
+                        phase(
+                            f"Applied CO2 price {cfg.co2_price:.1f} EUR/tCO2 to {len(idx)} "
+                            f"fossil generator(s) (sum surcharge {add_per_mwh.sum():.2f} EUR/MWh)."
+                        )
+        elif getattr(cfg, "co2_price_per_period", None) and not isinstance(n.snapshots, pd.MultiIndex):
+            # User set per-period prices but the network is flat — log so the
+            # silent no-op doesn't go unnoticed.
+            phase(
+                "co2_price_per_period is set but the network is single-period; "
+                "ignoring the per-period dict. Enable multi-period planning to apply per-year prices."
+            )
 
-                # APPLY pass — now safe even if the loop body needed to read
-                # un-rebased neighbours (none do today, but future-proof).
-                for name, _by, raw_by, resize_lt, raw_lt in pending:
-                    df.at[name, "build_year"] = first_p
-                    undo_actions.append((
-                        "col", comp_attr, "build_year",
-                        pd.Index([name]), pd.Series({name: raw_by}),
-                    ))
-                    if resize_lt is not None:
-                        df.at[name, "lifetime"] = resize_lt
-                        undo_actions.append((
-                            "col", comp_attr, "lifetime",
-                            pd.Index([name]), pd.Series({name: raw_lt}),
-                        ))
-                    rebased.append(f"{comp_attr[:-1]} '{name}'")
-            if rebased:
-                preview = ", ".join(rebased[:4]) + ("…" if len(rebased) > 4 else "")
+        # 3) VOLL — RELOCATED to after step 5 (load scaling) so the slack
+        #    p_nom sizing sees the SCALED p_set max, not the pre-scaling
+        #    value. Previously sized here, a load-growth scaler of 2× could
+        #    leave slack p_nom undersized for the high-growth period, and the
+        #    LP would silently shed less load than VOLL was supposed to allow.
+        #    See block "5b) VOLL (post-scaling sizing)" below.
+
+        # 4) Investment periods. Only meaningful when multi_investment_periods is
+        #    also true — otherwise the flag is ignored by PyPSA. Snapshot the
+        #    original periods (could be empty) and restore on exit.
+        if cfg.multi_investment_periods and cfg.investment_periods:
+            try:
+                original_periods = list(n.investment_periods)
+                # Capture the pre-promotion snapshot shape so the restore can
+                # actually demote multi→flat when the user started with flat
+                # snapshots + cfg-only periods. Without this, every cfg-only
+                # run silently leaves the network MultiIndexed on disk.
+                was_flat = not isinstance(n.snapshots, pd.MultiIndex)
+                periods = sorted(int(p) for p in cfg.investment_periods)
+                n.set_investment_periods(periods=periods)
+                phase(f"Configured {len(periods)} investment period(s): {periods}.")
+                def _restore_periods(orig=original_periods, started_flat=was_flat):
+                    if orig:
+                        n.set_investment_periods(periods=orig)
+                    elif started_flat:
+                        # User had flat snapshots; cfg-only set the periods.
+                        # Demote back to flat so the on-disk save doesn't
+                        # carry transient cfg-only periods the user never
+                        # set on the network surface. Lazy import avoids
+                        # a circular dependency between solver_service and
+                        # routers.network.
+                        try:
+                            from routers.network import _flatten_snapshot_state
+                            _flatten_snapshot_state(n)
+                            phase(
+                                "Reverted snapshots to flat — cfg.investment_periods "
+                                "promoted them transiently for the solve only."
+                            )
+                        except Exception as exc:
+                            phase(
+                                f"Couldn't auto-revert snapshots to flat ({exc}). "
+                                "Reload the project to fully reset, or accept the "
+                                "MultiIndex shape on disk."
+                            )
+                undo_actions.append(("call", _restore_periods))
+            except Exception as exc:
+                phase(f"Investment periods setup failed: {exc}. Continuing with single-period.")
+
+        # 4b) Auto period discount via investment_period_weightings.objective.
+        #     Computes PV factors (1+r)^-(P-ref_year) per period and writes them
+        #     into ipw.objective so PyPSA's LP discounts BOTH capex and opex by
+        #     a uniform social rate. Without this, a 3-period model treats every
+        #     period as equally weighted — so the LP front-loads all CAPEX into
+        #     the first period (cheaper amortisation, identical OPEX savings).
+        #     Reference year = first period in the active list. Multi-period only.
+        if (
+            cfg.auto_discount_periods
+            and cfg.multi_investment_periods
+            and isinstance(n.snapshots, pd.MultiIndex)
+            and len(n.investment_periods) > 0
+        ):
+            try:
+                periods_active = sorted(int(p) for p in n.investment_periods)
+                ref_year = periods_active[0]
+                r_nom = float(cfg.discount_rate or 0.0)
+                infl = float(getattr(cfg, "inflation_rate", 0.0) or 0.0)
+                # Real discount rate used in the cross-period PV factor. When the
+                # user enters a NOMINAL discount (e.g. WACC = 7 %) and a separate
+                # inflation rate (e.g. 2 %), the real discount that matters for
+                # discounting REAL-€ LP costs is roughly nominal − inflation.
+                # Use the exact Fisher relation so the formula is right even at
+                # higher inflations: real_r = (1 + nominal) / (1 + inflation) − 1.
+                # Guard against pathological inflation > nominal (real_r would
+                # go negative — mathematically valid but rarely intended): clamp
+                # at -0.999 so (1 + r) stays positive in the PV exponentiation.
+                if 1.0 + infl > 0:
+                    r = (1.0 + r_nom) / (1.0 + infl) - 1.0
+                else:
+                    r = r_nom
+                if r <= -0.999:
+                    r = -0.999
+                ipw = n.investment_period_weightings
+                original_obj = ipw["objective"].copy()
+                new_factors: dict[int, float] = {}
+                for p in periods_active:
+                    # Per-period span (years_in_period). PyPSA defaults to gap-to-next
+                    # so multi-year periods get correctly weighted. PV applied at
+                    # period start; the within-period sum is approximated by
+                    # PV(start) × years (sufficient for r ≪ 1 and short periods —
+                    # exact would compute the geometric series).
+                    yrs = float(ipw.at[p, "years"]) if "years" in ipw.columns else 1.0
+                    pv = (1.0 + r) ** -(p - ref_year)
+                    new_factors[p] = pv * yrs
+                    ipw.at[p, "objective"] = new_factors[p]
+                infl_note = f", inflation_rate={infl:.3f}, real={r:.3f}" if infl != 0.0 else ""
                 phase(
-                    f"Multi-period activity guard: rebased build_year -> {first_p} "
-                    f"for {len(rebased)} asset(s) inactive in every investment "
-                    f"period ({preview}). Set a build_year on these assets to "
-                    f"control which period they're built in."
+                    f"Auto-discount: ipw.objective set to PV × years for {len(periods_active)} "
+                    f"period(s) at discount_rate={r_nom:.3f}{infl_note}: " +
+                    ", ".join(f"{p}:{new_factors[p]:.3f}" for p in periods_active)
+                )
+                def _restore_ipw_objective(orig=original_obj):
+                    for p in orig.index:
+                        n.investment_period_weightings.at[p, "objective"] = float(orig.at[p])
+                undo_actions.append(("call", _restore_ipw_objective))
+            except Exception as exc:
+                phase(f"Auto-discount setup failed: {exc}. Periods stay at original weights.")
+
+        # 5) Per-period × per-carrier load scaling. For each load column, look up
+        #    its (canonical carrier, period) and multiply by the resolved factor.
+        #    Resolution priority:
+        #      1. cfg.load_scalers_by_carrier[carrier][period_str] — per-carrier
+        #         (e.g. electrical 2027 × 1.10, hydrogen 2027 × 1.50)
+        #      2. cfg.load_scalers[period_str] — legacy global fallback
+        #      3. 1.0 — identity
+        #    Multi-period only; ignored for flat networks. The whole p_set frame
+        #    is snapshotted and restored wholesale.
+        # Phase 12c-0: the resolution lives in services/adequacy/demand.py and is
+        # SHARED with every adequacy engine and the Results/Compare tabs, so the
+        # demand the LP is built on and the demand the engines evaluate cannot
+        # drift (the fifteenth finding). The gate and the per-(period, carrier,
+        # column) rule are that module's, applied here in place with the same
+        # snapshot-and-restore as before.
+        from services.adequacy.demand import load_scale_factors
+        _factors = load_scale_factors(n, cfg)
+        if _factors:
+            p_set = n.loads_t.p_set
+            period_level = p_set.index.get_level_values(0)
+            applied: list[str] = []
+            original_p_set = p_set.copy(deep=True)
+            _masks = {period: period_level == period for period, *_ in _factors}
+            for period, col, carrier_key, factor in _factors:
+                p_set.loc[_masks[period], col] = p_set.loc[_masks[period], col] * factor
+                applied.append(f"{period}/{carrier_key}/{col}×{factor:g}")
+            if original_p_set is not None:
+                def _restore_p_set(orig=original_p_set):
+                    n.loads_t["p_set"] = orig
+                undo_actions.append(("call", _restore_p_set))
+                # Summarise — listing every (period, carrier, col) explosion in the
+                # log would be noisy on networks with many loads; collapse to
+                # unique (period, carrier) factor combos.
+                unique_combos = sorted(set(
+                    f"{a.split('/')[0]}/{a.split('/')[1]}×{a.split('×')[-1]}"
+                    for a in applied
+                ))
+                phase(f"Applied per-carrier load scaling: {', '.join(unique_combos)}.")
+
+        # 5b) VOLL (post-scaling sizing). Relocated from step 3 so the slack
+        #    `p_nom` sees the loads AFTER step 5's per-period × per-carrier
+        #    scaling has been applied. Previously sized at step 3 against
+        #    the pre-scaling p_set, a 2× load-growth scaler in period N could
+        #    leave the slack undersized and the LP would silently shed less
+        #    load than the configured VOLL was supposed to permit (slack hits
+        #    its p_nom cap before the demand is matched, producing a
+        #    primal-infeasible window that PyPSA simply reports as zero VOLL
+        #    dispatch). Sized at 10× the observed max so the slack always has
+        #    headroom — bumping further would slow the solver without benefit.
+        if cfg.voll > 0 and not n.buses.empty and not n.loads.empty:
+            added = []
+            # P6(b): one involuntary VOLL slack per Load (not per bus), so shared-
+            # bus industrial/residential (or AC+H₂) shed is attributable. Size
+            # each slack from THAT Load's peak so a tiny Load does not inherit a
+            # system-wide 10× max headroom (and a large Load is never undersized).
+            p_set_t = getattr(getattr(n, "loads_t", None), "p_set", None)
+            skipped_orphan = 0
+            for load_id in n.loads.index:
+                bus = str(n.loads.at[load_id, "bus"]) if "bus" in n.loads.columns else ""
+                if not bus or bus not in n.buses.index:
+                    skipped_orphan += 1
+                    continue
+                peak = 0.0
+                try:
+                    if p_set_t is not None and load_id in getattr(p_set_t, "columns", []):
+                        peak = float(p_set_t[load_id].max())
+                    elif "p_set" in n.loads.columns:
+                        peak = float(n.loads.at[load_id, "p_set"] or 0.0)
+                except (TypeError, ValueError):
+                    peak = 0.0
+                slack_pnom = max(peak, 1.0) * 10.0
+                name = voll_slack_name(load_id)
+                if name in n.generators.index:
+                    continue  # don't double-add if a previous run leaked
+                # Mark BEFORE n.add so a GET landing during the add window
+                # still hides the row (filtering an absent name is a no-op).
+                # On n.add failure we unmark to keep the registry consistent.
+                PyPSAService.mark_transient("Generator", name)
+                try:
+                    n.add(
+                        "Generator", name,
+                        bus=bus,
+                        p_nom=slack_pnom,
+                        marginal_cost=cfg.voll,
+                        # The convention's owner is services/adequacy/slack.py.
+                        carrier=INVOLUNTARY_SLACK_CARRIER,
+                    )
+                except Exception:
+                    PyPSAService.unmark_transient("Generator", name)
+                    raise
+                added.append(name)
+            if added:
+                phase(
+                    f"Added {len(added)} VOLL slack generator(s) at {cfg.voll:.0f} EUR/MWh "
+                    f"(one per Load; each sized to 10× that Load's peak)."
+                    + (f" Skipped {skipped_orphan} Load(s) with missing bus." if skipped_orphan else "")
+                )
+                # Restore = remove the slacks.
+                def _capture_and_remove_slacks(names=added, voll=cfg.voll):
+                    # Capture lost-load dispatch BEFORE removing the slack
+                    # generators — once they're removed, n.generators_t.p
+                    # forgets them and the user can never see their dispatch.
+                    try:
+                        df = n.generators_t.p
+                        if df is not None and not df.empty:
+                            live = [nm for nm in names if nm in df.columns]
+                            if live:
+                                sub = df[live].copy()
+                                # Strip prefix → Load id (P6b). Legacy bus-scoped
+                                # names strip to the bus id the same way.
+                                sub.columns = [strip_slack_prefix(c) for c in sub.columns]
+                                # Aggregate stats for the KPI tiles. SNAPSHOT-
+                                # WEIGHTED (canonical, spec §6.3): the frame stays
+                                # unweighted MW, but the totals integrate over the
+                                # snapshot weights — "generators" for energy,
+                                # "objective" for cost, matching the solve-log
+                                # decomposition and the LP objective. The previous
+                                # unweighted sum ("assumes hourly snapshots")
+                                # under-reported by the weight factor on
+                                # representative-snapshot (tsam) runs.
+                                from services.adequacy.metrics import (
+                                    lost_load_totals,
+                                )
+                                w_energy = _period_utils.snapshot_weights(
+                                    n, "generators", sns=sub.index)
+                                totals = lost_load_totals(
+                                    sub,
+                                    energy_weights=w_energy,
+                                    cost_weights=_period_utils.snapshot_weights(
+                                        n, "objective", sns=sub.index),
+                                    voll=float(voll),
+                                )
+                                captured["lost_load_t"] = sub
+                                captured["lost_load_total_mwh"] = totals["total_mwh"]
+                                captured["lost_load_cost_eur"] = totals["cost_eur"]
+                                # Solve-time achieved values for the adequacy
+                                # report: per-Load and per-bus per-period weighted
+                                # MWh, and electrical shed-hours (spec §5.1).
+                                from services.adequacy.metrics import (
+                                    electrical_columns,
+                                    shed_hours,
+                                )
+                                load_e = sub.clip(lower=0).mul(
+                                    w_energy.reindex(sub.index).fillna(0.0), axis=0)
+                                if isinstance(sub.index, pd.MultiIndex):
+                                    lp = load_e.groupby(
+                                        sub.index.get_level_values(0)).sum()
+                                else:
+                                    lp = pd.DataFrame(
+                                        [load_e.sum()], index=["ALL"])
+                                captured["lost_load_load_period_mwh"] = lp
+                                # Bus roll-up for DtC / electrical consumers that
+                                # still key on buses (P4b honesty pin unchanged).
+                                bus_snap = load_e.copy()
+                                rename = {}
+                                for col in list(bus_snap.columns):
+                                    if (
+                                        n.loads is not None
+                                        and not n.loads.empty
+                                        and col in n.loads.index
+                                        and "bus" in n.loads.columns
+                                    ):
+                                        rename[col] = str(n.loads.at[col, "bus"])
+                                if rename:
+                                    bus_snap = bus_snap.rename(columns=rename)
+                                    bus_snap = bus_snap.T.groupby(level=0).sum().T
+                                if isinstance(sub.index, pd.MultiIndex):
+                                    bp = bus_snap.groupby(
+                                        sub.index.get_level_values(0)).sum()
+                                else:
+                                    bp = pd.DataFrame(
+                                        [bus_snap.sum()], index=["ALL"])
+                                captured["lost_load_bus_period_mwh"] = bp
+                                captured["shed_hours_electrical"] = shed_hours(
+                                    sub[electrical_columns(n, list(sub.columns))],
+                                    weights=w_energy,
+                                )
+                                # Explicit — consumers must not re-derive VoLL
+                                # from cost/energy, which skews whenever the two
+                                # weight columns differ.
+                                captured["voll_eur_per_mwh"] = float(voll)
+                    except Exception:
+                        pass
+                    # Now remove the slack generators so they don't pollute
+                    # the post-solve network state. Pair every remove with an
+                    # unmark_transient so the registry doesn't keep filtering
+                    # the name once the row is gone — important if the user
+                    # later creates a real generator that happens to reuse
+                    # the bus name.
+                    for nm in names:
+                        if nm in n.generators.index:
+                            n.remove("Generator", nm)
+                        PyPSAService.unmark_transient("Generator", nm)
+                undo_actions.append(("call", _capture_and_remove_slacks))
+
+        # 5c) Demand-response tier (spec §4.4): voluntary, volume-capped, OPT-IN
+        #    per bus. Independent of VOLL (a resource, not a failure valve).
+        #    Never silently global — an empty opt-in list keeps the tier off
+        #    (preflight warns). Same transient lifecycle as the VOLL slacks:
+        #    mark → add → capture (into its OWN keys) → remove.
+        dsr_price = float(getattr(cfg, "dsr_price_eur_per_mwh", 0.0) or 0.0)
+        dsr_share = float(getattr(cfg, "dsr_share_of_load", 0.0) or 0.0)
+        dsr_buses = [str(b) for b in (getattr(cfg, "dsr_buses", None) or [])]
+        if dsr_price > 0 and dsr_share > 0 and dsr_buses and not n.loads.empty:
+            dsr_added = []
+            loads_by_bus = n.loads.groupby("bus") if "bus" in n.loads.columns else None
+            p_set_t = getattr(n.loads_t, "p_set", None)
+            for bus in dsr_buses:
+                if bus not in n.buses.index or loads_by_bus is None:
+                    continue
+                try:
+                    bus_loads = list(loads_by_bus.get_group(bus).index)
+                except KeyError:
+                    continue  # opt-in bus without a load — nothing to respond with
+                # Peak load at the bus: time-varying columns override statics.
+                peak = 0.0
+                per_snap = None
+                for l in bus_loads:
+                    if p_set_t is not None and l in getattr(p_set_t, "columns", []):
+                        series = p_set_t[l]
+                    else:
+                        try:
+                            series = float(n.loads.at[l, "p_set"] or 0.0)
+                        except (TypeError, ValueError):
+                            series = 0.0
+                    per_snap = series if per_snap is None else per_snap + series
+                try:
+                    peak = float(per_snap.max()) if hasattr(per_snap, "max") else float(per_snap or 0.0)
+                except (TypeError, ValueError):
+                    peak = 0.0
+                if peak <= 0:
+                    continue
+                name = f"{DSR_SLACK_PREFIX}{bus}"
+                if name in n.generators.index:
+                    continue
+                PyPSAService.mark_transient("Generator", name)
+                try:
+                    n.add(
+                        "Generator", name,
+                        bus=bus,
+                        p_nom=dsr_share * peak,
+                        marginal_cost=dsr_price,
+                        carrier=DSR_SLACK_CARRIER,
+                    )
+                except Exception:
+                    PyPSAService.unmark_transient("Generator", name)
+                    raise
+                dsr_added.append(name)
+            if dsr_added:
+                phase(
+                    f"Added {len(dsr_added)} demand-response slack(s) at "
+                    f"{dsr_price:.0f} EUR/MWh, volume {dsr_share:.0%} of each "
+                    f"bus's peak load (opt-in tier — NOT counted as unserved "
+                    f"energy)."
                 )
 
-    # 7) Per-period capacity bounds (vintage expansion). For each asset that
-    #    the user assigned `p_nom_min` / `p_nom_max` per investment period via
-    #    `n.meta["vintage_bounds"]`, replace the single extendable parent row
-    #    with one vintage row per period — each carrying its own build_year
-    #    and the bounds for that period. The parent's `*_extendable` flag is
-    #    flipped off so the optimiser sizes ONLY the vintages. All transforms
-    #    revert in restore(). No-op when not multi-period.
-    if cfg.multi_investment_periods and isinstance(n.snapshots, pd.MultiIndex):
+                def _capture_and_remove_dsr(names=dsr_added):
+                    try:
+                        df = n.generators_t.p
+                        if df is not None and not df.empty:
+                            live = [nm for nm in names if nm in df.columns]
+                            if live:
+                                sub = df[live].copy()
+                                sub.columns = [
+                                    c.removeprefix(DSR_SLACK_PREFIX) for c in sub.columns
+                                ]
+                                w_energy = _period_utils.snapshot_weights(
+                                    n, "generators", sns=sub.index)
+                                captured["dsr_t"] = sub
+                                captured["dsr_total_mwh"] = float(
+                                    sub.clip(lower=0)
+                                    .mul(w_energy.reindex(sub.index).fillna(0.0), axis=0)
+                                    .to_numpy().sum()
+                                )
+                    except Exception:
+                        pass
+                    for nm in names:
+                        if nm in n.generators.index:
+                            n.remove("Generator", nm)
+                        PyPSAService.unmark_transient("Generator", nm)
+
+                undo_actions.append(("call", _capture_and_remove_dsr))
+        elif dsr_price > 0 and not dsr_buses:
+            phase(
+                "Demand-response price is set but no buses are opted in — the "
+                "tier stays OFF (it is never applied globally; see preflight)."
+            )
+
+        # 6) Multi-period activity guard. In a multi-period run PyPSA only lets an
+        #    asset dispatch in period p when build_year <= p < build_year + lifetime.
+        #    The GUI leaves build_year at its 0 default, and step 1 above may have
+        #    filled lifetime to cfg.default_lifetime (e.g. 25) for overnight_cost
+        #    assets — so an asset's active window can be [0, 25), which excludes
+        #    investment periods like 2026 / 2027 entirely. PyPSA then can't dispatch
+        #    it: the LP sheds load and "curtails" renewables that simply can't run.
+        #    Rebase build_year to the first investment period for any asset that
+        #    would otherwise be inactive in EVERY period, and stretch a too-short
+        #    lifetime to cover the horizon. Transient — reverted in restore().
+        if cfg.multi_investment_periods and isinstance(n.snapshots, pd.MultiIndex):
+            try:
+                mp_periods = sorted(int(p) for p in n.investment_periods)
+            except (TypeError, ValueError):
+                mp_periods = []
+            if mp_periods:
+                first_p, last_p = mp_periods[0], mp_periods[-1]
+                rebased: list[str] = []
+                for comp_attr in ("generators", "storage_units", "stores",
+                                  "links", "lines", "transformers"):
+                    df = getattr(n, comp_attr, None)
+                    if df is None or df.empty or "build_year" not in df.columns:
+                        continue
+                    lifetimes = df["lifetime"] if "lifetime" in df.columns else None
+                    # COLLECT-THEN-APPLY: walk df.index once into a local snapshot
+                    # list, then mutate the frame in a second pass. Pandas tolerates
+                    # `df.at[name, col] = …` during iteration on `df.index`, but a
+                    # collected snapshot is more defensive (e.g. against any future
+                    # refactor that ends up calling n.add() / n.remove() inside the
+                    # loop, which would invalidate the index iterator).
+                    #
+                    # `_safe_isfinite` defends against object-dtype columns that
+                    # hold non-numeric tokens. Bare `np.isfinite(None)` raises
+                    # TypeError; with mixed-dtype columns (rare but possible after
+                    # CSV import of e.g. "auto") `np.isfinite("auto")` also raises.
+                    # Wrapping in try/except + coercing to float first reduces the
+                    # surface to the failure modes we care about (None / strings →
+                    # treated as PyPSA defaults).
+                    def _safe_isfinite(v) -> tuple[bool, float]:
+                        """
+                        Return (is_finite, float_value). Falls back to (False, 0)
+                        for None / non-numeric / NaN / Inf.
+                        """
+                        if v is None:
+                            return False, 0.0
+                        try:
+                            f = float(v)
+                        except (TypeError, ValueError):
+                            return False, 0.0
+                        if not np.isfinite(f):
+                            return False, 0.0
+                        return True, f
+
+                    pending: list[tuple[str, float, object, float | None, object]] = []
+                    # tuple shape: (name, by, raw_by_for_undo, lt_for_resize_or_None, raw_lt_for_undo)
+                    for name in df.index:
+                        raw_by = df.at[name, "build_year"]
+                        finite_by, by = _safe_isfinite(raw_by)
+                        if not finite_by:
+                            by = 0.0
+                        if lifetimes is not None:
+                            raw_lt = lifetimes.at[name]
+                            finite_lt, lt = _safe_isfinite(raw_lt)
+                            if not finite_lt:
+                                lt = float("inf")
+                        else:
+                            raw_lt = None
+                            lt = float("inf")
+                        if any(by <= p < by + lt for p in mp_periods):
+                            continue  # already active in at least one period
+                        # Stretch lifetime only when finite AND too short to cover
+                        # the horizon from the new build_year.
+                        resize_lt: float | None = None
+                        if lifetimes is not None and np.isfinite(lt) and first_p + lt <= last_p:
+                            resize_lt = float(last_p - first_p + 1)
+                        pending.append((name, by, raw_by, resize_lt, raw_lt))
+
+                    # APPLY pass — now safe even if the loop body needed to read
+                    # un-rebased neighbours (none do today, but future-proof).
+                    for name, _by, raw_by, resize_lt, raw_lt in pending:
+                        df.at[name, "build_year"] = first_p
+                        undo_actions.append((
+                            "col", comp_attr, "build_year",
+                            pd.Index([name]), pd.Series({name: raw_by}),
+                        ))
+                        if resize_lt is not None:
+                            df.at[name, "lifetime"] = resize_lt
+                            undo_actions.append((
+                                "col", comp_attr, "lifetime",
+                                pd.Index([name]), pd.Series({name: raw_lt}),
+                            ))
+                        rebased.append(f"{comp_attr[:-1]} '{name}'")
+                if rebased:
+                    preview = ", ".join(rebased[:4]) + ("…" if len(rebased) > 4 else "")
+                    phase(
+                        f"Multi-period activity guard: rebased build_year -> {first_p} "
+                        f"for {len(rebased)} asset(s) inactive in every investment "
+                        f"period ({preview}). Set a build_year on these assets to "
+                        f"control which period they're built in."
+                    )
+
+        # 7) Per-period capacity bounds (vintage expansion). For each asset that
+        #    the user assigned `p_nom_min` / `p_nom_max` per investment period via
+        #    `n.meta["vintage_bounds"]`, replace the single extendable parent row
+        #    with one vintage row per period — each carrying its own build_year
+        #    and the bounds for that period. The parent's `*_extendable` flag is
+        #    flipped off so the optimiser sizes ONLY the vintages. All transforms
+        #    revert in restore(). No-op when not multi-period.
+        if cfg.multi_investment_periods and isinstance(n.snapshots, pd.MultiIndex):
+            try:
+                apply_vintage_bounds(n, undo_actions, phase)
+            except Exception as exc:
+                phase(f"Vintage expansion failed: {exc}. Continuing without per-period bounds.")
+
+    except BaseException:
+        # BaseException, not Exception: the abort path raises a
+        # `KeyboardInterrupt` into this thread (see `_AbortWatcher`), and an
+        # aborted solve must leave the network as clean as a failed one.
         try:
-            apply_vintage_bounds(n, undo_actions, phase)
-        except Exception as exc:
-            phase(f"Vintage expansion failed: {exc}. Continuing without per-period bounds.")
+            _run_undo_actions(n, undo_actions, phase)
+        except Exception:
+            # Never mask the original failure with a cleanup failure.
+            pass
+        raise
 
     def restore():
-        # Walk in reverse order. "col" actions write back original column
-        # values; "call" actions run arbitrary cleanup (slack-gen removal,
-        # period restoration, vintage drop). DataFrame is re-resolved at
-        # restore time because PyPSA's n.add() may have rebuilt it during
-        # apply.
-        #
-        # Each action is wrapped in try/except so one bad row doesn't strand
-        # subsequent ones — without this, a failure in (say) the vintage
-        # capture-and-drop callback would leave the parent's extendable
-        # flip un-reverted and orphan rows in the network. We log to phase
-        # but swallow per-entry so the rest of the restore proceeds.
-        for action in reversed(undo_actions):
-            kind = action[0]
-            try:
-                if kind == "col":
-                    _, attr_name, col, idx, original = action
-                    df = getattr(n, attr_name, None)
-                    if df is None:
-                        continue
-                    # Filter index to rows that still exist — a previous undo
-                    # action (e.g. slack removal) might have shrunk the frame.
-                    valid = [i for i in idx if i in df.index]
-                    if valid:
-                        df.loc[valid, col] = original.loc[valid]
-                elif kind == "call":
-                    action[1]()
-                elif kind == "t_marginal_cost":
-                    # Restore generators_t.marginal_cost — drop columns we
-                    # newly added, restore originals for columns we overwrote.
-                    _, saved_t_mc, new_cols = action
-                    mc_t = n.generators_t.marginal_cost
-                    if new_cols:
-                        keep_cols = [c for c in mc_t.columns if c not in new_cols]
-                        n.generators_t.marginal_cost = mc_t[keep_cols]
-                        mc_t = n.generators_t.marginal_cost
-                    if saved_t_mc is not None and not saved_t_mc.empty:
-                        for g in saved_t_mc.columns:
-                            n.generators_t.marginal_cost[g] = saved_t_mc[g]
-            except Exception as exc:
-                # Surface via the phase callback so the log captures it, then
-                # keep restoring. Don't re-raise.
-                try:
-                    phase(f"Restore: skipped one entry ({type(exc).__name__}: {exc})")
-                except Exception:
-                    pass
-        # Safety net: drop any remaining transient-row marks. The per-row
-        # unmark calls inside _capture_and_remove_slacks and
-        # _capture_and_drop_vintages cover the happy path, but if a
-        # restore step errored out before reaching them the registry
-        # would keep filtering rows that no longer exist (or worse, real
-        # rows that reuse a name later). Clearing here guarantees the
-        # GET filter is a no-op on the post-restore network.
-        try:
-            PyPSAService.clear_transient()
-        except Exception:
-            pass
-        # Drop the freeze-time vintage-capacity side-store after all
-        # capture closures have read from it. Thread-local, so the explicit
-        # clear() at end-of-restore prevents any chance of leakage into the
-        # next solve cycle on this same worker thread.
-        try:
-            _frozen_vintage_store().clear()
-        except Exception:
-            pass
-        # Phase 12h: the slack rows above were added on a frame that may
-        # have lacked the `p_max_pu_includes_outages` column and then
-        # removed, which leaves an OBJECT column of pure bools — the one
-        # shape netCDF refuses. The next project save or undo snapshot
-        # would be a 500, so put the dtype back here, at the end of the one
-        # callback every exit path runs (success, SolveAborted,
-        # ValidationRefused and the generic exception path all reach it
-        # through `_guarded_restore`).
-        try:
-            from services.adequacy.occurrence import normalise_flag_column
-            normalise_flag_column(n)
-        except Exception:
-            pass
-
+        # The walk itself is `_run_undo_actions`, shared with the failure
+        # path below — see its docstring.
+        _run_undo_actions(n, undo_actions, phase)
     return restore, captured

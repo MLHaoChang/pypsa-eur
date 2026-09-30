@@ -25,8 +25,35 @@ mechanism backwards. Both survived only because they were re-checked.
 
 ### SL-1 — a raise inside `_apply_modelling_assumptions` leaves the network mutated, unrevertable
 
-**Serious. VERIFIED, not yet fixed** — the largest diff of the set, deferred behind
-the small verified ones.
+**Serious. VERIFIED. FIXED.**
+
+The undo walk moved out of the `restore()` closure to a module-level
+`_run_undo_actions(n, undo_actions, phase)`, called from two places: the `restore`
+closure the caller invokes after a solve, and a new revert-on-raise handler inside the
+apply itself. One implementation, two callers — a second copy of a revert is the drift
+that produced three other findings in this register.
+
+The handler catches `BaseException`, not `Exception`: the abort path injects a
+`KeyboardInterrupt` into the solving thread (`_AbortWatcher`), and an aborted solve
+must leave the network as clean as a failed one. A failure inside the cleanup is
+swallowed so it can never mask the original exception.
+
+Also fixed, the `id(n)` half: `periodized_costs.revert` discarded its
+`_FOM_SCALED_IDS` entry AFTER the column restores, so a raise in that loop leaked it.
+Moved into a `finally`. The leak matters because the registry is keyed by address and
+CPython reuses addresses — a leaked entry makes an unrelated later network read as
+already-scaled, so `fom_per_horizon` leaves its `fom_cost` on the wrong basis with
+nothing anywhere saying so.
+
+Guard: `tests/test_assumptions_revert_on_raise.py`. A raising `phase` (an ordinary
+parameter, so no monkeypatching) simulates a mid-apply failure; the injection point is
+SWEPT rather than guessed, and a separate test asserts at least one index actually
+raises — a parametrised test where every case skips reports green while testing
+nothing. Two of the swept indices fail against the previous code.
+
+Reviewing it: `git diff -w` is the useful view. Guarding a ~700-line body in place
+re-indents all of it, so the raw diff is ~1300 lines; whitespace-ignored it is 122
+insertions and 75 deletions, most of that the relocated restore body.
 
 - `services/solver/assumptions.py::_apply_modelling_assumptions` builds `undo_actions`
   from its first step onward but defines and returns `restore()` only at the very end.
