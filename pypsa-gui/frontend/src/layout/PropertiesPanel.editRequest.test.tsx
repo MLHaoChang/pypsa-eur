@@ -105,6 +105,16 @@ describe('propertiesEditRequest', () => {
     expect(screen.queryByTestId('eh-bus-fields')).toBeNull()          // nothing left to replay
   })
 
+  it('a request for Link A is not consumed by Link B', async () => {
+    useUIStore.setState({ currentProject: 'Demo', selectedComponent: { type: 'Link', name: 'imp' },
+      propertiesEditRequest: { type: 'Link', name: 'other' } })
+    renderPanel()
+    expect(await screen.findByTestId('props-edit-link')).toBeTruthy()
+    await new Promise(r => setTimeout(r, 50))
+    expect(screen.queryByTestId('eh-link-role')).toBeNull()
+    expect(useUIStore.getState().propertiesEditRequest).toEqual({ type: 'Link', name: 'other' })
+  })
+
   it('selecting the requested component keeps the request (prepare selects, then asks)', () => {
     useUIStore.setState({ selectedComponent: null, propertiesEditRequest: null })
     useUIStore.getState().requestPropertiesEdit({ type: 'Bus', name: 'hub' })

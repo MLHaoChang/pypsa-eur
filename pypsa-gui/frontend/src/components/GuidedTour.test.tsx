@@ -266,6 +266,28 @@ describe('GuidedTour placement (P30 B4)', () => {
     assertInside(b, 1024, 768)
     assertApart(b, t)
   })
+
+  it('follows the target: a resize that moves it down re-places the popover above', async () => {
+    // No DOM change comes with a real resize: silence the tour's mutation
+    // observer so only the resize listener can re-read the target.
+    const RealMO = globalThis.MutationObserver
+    class QuietMO { observe() {} disconnect() {} takeRecords() { return [] } }
+    const pop = { width: 320, height: 200 }
+    globalThis.MutationObserver = QuietMO as unknown as typeof MutationObserver
+    try {
+      layout(1024, 768, { top: 100, left: 100, width: 200, height: 30 }, pop)
+      const tour = await open()
+      await waitFor(() => expect(tour.getAttribute('data-placement')).toBe('below'))
+      const moved = { top: 650, left: 100, width: 200, height: 30 }
+      layout(1024, 768, moved, pop)
+      act(() => { window.dispatchEvent(new Event('resize')) })
+      await waitFor(() => expect(tour.getAttribute('data-placement')).toBe('above'))
+      assertApart(box(tour, pop, 1024, 768), moved)
+      expect(screen.getByTestId('guide-highlight').style.top).toBe(`${650 - 4}px`)
+    } finally {
+      globalThis.MutationObserver = RealMO
+    }
+  })
 })
 
 // ── P30 (B7): optional steps are judged when they are reached ───────────────
