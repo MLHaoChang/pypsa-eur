@@ -38,6 +38,7 @@ import {
 import { useChatProfiles, useChatReadiness, CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
 import { nk } from '../utils/queryKeys'
 import { mismatchSentence } from '../utils/projectMismatch'
+import { moveProjectLock } from '../utils/projectActions'
 import { invalidateAssetQueries, isMutatingTier } from '../utils/assetWrite'
 import {
   deleteUpload,
@@ -2348,6 +2349,7 @@ export default function ChatPanel() {
         const d = _frame_data<{ from: string | null; to: string | null; via_tool: string }>(frame)
         if (d.to && d.to !== useUIStore.getState().currentProject) {
           const ui = useUIStore.getState()
+          const leaving = ui.currentProject
           ui.setCurrentProject(d.to)
           ui.setProjectName(d.to)
           ui.touchTab(d.to)
@@ -2362,6 +2364,12 @@ export default function ChatPanel() {
           qc.invalidateQueries({ queryKey: nk(d.to, 'meta') })
           qc.invalidateQueries({ queryKey: nk(d.to, 'simulationStatus') })
           qc.invalidateQueries({ queryKey: nk(d.to, 'snapshots') })
+          // P28 (P32 gate N6): in auth mode the edit lock moves with the
+          // rebind, as in `switchToProject` — release the old project's lock,
+          // claim the new one's, read-only if another user holds it. Without
+          // this the tab kept heart-beating the old lock and edited the new
+          // project holding none. A no-op without auth.
+          void moveProjectLock(leaving, d.to)
           toast(`Active project: ${d.to}`, { icon: '🔀' })
         } else if (d.to == null && useUIStore.getState().currentProject != null) {
           // A network import (`import_network_nc`, `import_csv_bundle`,
@@ -2374,6 +2382,8 @@ export default function ChatPanel() {
           // instead — Save asks for a name, as for any new network.
           const was = useUIStore.getState().currentProject
           useUIStore.getState().setCurrentProject(null)
+          // P28 (N6): the tab no longer edits `was` — give its lock back.
+          void moveProjectLock(was, null)
           qc.invalidateQueries({ queryKey: nk(null, 'meta') })
           qc.invalidateQueries({ queryKey: nk(null, 'simulationStatus') })
           qc.invalidateQueries({ queryKey: nk(null, 'snapshots') })

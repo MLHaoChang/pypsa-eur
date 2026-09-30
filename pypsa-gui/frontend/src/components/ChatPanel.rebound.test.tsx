@@ -207,7 +207,10 @@ describe('P32 — a project the assistant creates or imports starts Guided', () 
     expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
   })
 
-  it.each(['save_project_as', 'save_project', 'activate_project', 'load_project'])(
+  // P28 (P32 gate N1): `rename_project` and `restore_project_snapshot` are in
+  // PROJECT_REBINDING_TOOLS too, and neither creates a project.
+  it.each(['save_project_as', 'save_project', 'activate_project', 'load_project',
+    'rename_project', 'restore_project_snapshot'])(
     '%s is not a new project → not called, mode and panel unchanged', async (tool) => {
       await rebound(tool)
       expect(useUIStore.getState().currentProject).toBe('Created')

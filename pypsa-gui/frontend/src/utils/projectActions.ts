@@ -515,15 +515,30 @@ export async function switchToProject(target: string, qc: QueryClient): Promise<
   //    switch itself still succeeds (the project is activated for viewing).
   //    A no-op when auth is disabled (legacy workbench stays writable).
   if (authEnabled) {
-    if (currentProject && currentProject !== activated) {
-      void releaseProjectLock(currentProject)
-    }
-    await acquireProjectLock(activated)
+    await moveProjectLock(currentProject, activated)
   } else {
     useUIStore.getState().setLockState(WRITABLE)
   }
 
   return { status: 'switched' }
+}
+
+/**
+ * Move this tab's edit lock from `from` to `to` (auth mode; a no-op without
+ * auth). Releases the outgoing project's lock so a teammate can take it now,
+ * then claims the target's; if another user holds it, `acquireProjectLock`
+ * drops the workbench to read-only ("locked-by-user") and the project stays
+ * open for viewing. `to === null` (the tab became unbound) only releases.
+ *
+ * Shared by `switchToProject` (step 7) and the assistant's `project_rebound`
+ * handler in ChatPanel (P28, P32 gate N6): a rebind the backend already made
+ * must move the lock exactly as a switch does, or the tab edits the new
+ * project holding no lock while still heart-beating the old one.
+ */
+export async function moveProjectLock(from: string | null, to: string | null): Promise<void> {
+  if (!authEnabled) return
+  if (from && from !== to) void releaseProjectLock(from)
+  if (to) await acquireProjectLock(to)
 }
 
 // Best-effort save of the current project. Returns true on success, false on
