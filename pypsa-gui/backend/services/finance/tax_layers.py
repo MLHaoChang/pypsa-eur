@@ -105,7 +105,7 @@ def _default_class(pack: JurisdictionPack, fin: FinanceInputs, carrier: str,
             rate = min(deg.value["multiple_of_sl"] / n, deg.value["max_rate"])
             # Degressive AfA is an election (§7 Abs. 2 "kann"): taken, stated.
             res.flags.append("degressive_afa_elected")
-            return f"db_{rate:g}_{n}"
+            return f"db_{rate!r}_{n}"
     return f"afa_{n}"
 
 
@@ -164,6 +164,10 @@ def resolve_tax_layers(pack: JurisdictionPack, fin: FinanceInputs, assets: list[
 
     if pack.jurisdiction == "us_federal":
         rate, nol, cap = need("corporate_rate"), need("nol"), need("interest_limit")
+        itc_red = need("itc_basis_reduction")
+        if itc_red is not None and itc_red != 0.5:
+            # The tax engine reduces by exactly ½ the credit (SAM, §50(c)(3)).
+            res.missing.append(f"pack_rule:itc_basis_reduction:unsupported_share:{itc_red}")
         bonus = _us_bonus(pack, fin, cod, res)
         fed_classes = _classes(pack, fin, assets, cod, res, bonus_macrs=bonus)
         cap_obj = None
@@ -190,8 +194,12 @@ def resolve_tax_layers(pack: JurisdictionPack, fin: FinanceInputs, assets: list[
                 depreciation=_classes(pack, fin, assets, cod, ResolvedTax(), bonus_macrs=0.0),
                 deductible_in_later_layers=True, loss=LossRule(), interest_cap=cap_obj))
         if rate is not None and nol is not None:
+            # The federal basis is reduced by 50 % of an ITC (§50(c)); the
+            # state slot is not (a state that conforms is not modelled — WP4.5
+            # flags it when an ITC is claimed).
             layers.append(TaxLayer(
                 name="federal", rate=rate, depreciation=fed_classes,
+                itc_basis_reduction=True,
                 loss=LossRule(allowance=nol["allowance"], limit_share=nol["limit_share"],
                               years=nol["years"]),
                 interest_cap=cap_obj))

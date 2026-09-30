@@ -251,3 +251,11 @@ def test_hebesatz_floor_state_flags_and_sources():
     assert "state_bonus_decoupled" not in r.flags
     assert "state_interest_limit_follows_federal" in r.flags
     assert {"bonus_depreciation", "macrs_half_year_percent", "interest_limit"} <= set(r.sources)
+
+
+def test_the_us_federal_layer_takes_the_itc_basis_reduction_the_state_slot_does_not():
+    us = load_pack("us_federal", as_of=date(2026, 1, 1))
+    fin = FinanceInputs(financial_close=COD, tax_losses="offset_other_income", state_rate=0.07,
+                        acquisition_date=date(2030, 1, 1), depreciation_class_by_asset={"pv": "macrs_5"})
+    state, fed = resolve_tax_layers(us, fin, [OwnerAsset("pv", "solar", 1.0)], COD).layers
+    assert fed.itc_basis_reduction and not state.itc_basis_reduction

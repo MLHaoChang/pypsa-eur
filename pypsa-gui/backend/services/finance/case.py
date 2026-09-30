@@ -84,6 +84,7 @@ class AssetFinance:
     component: str
     overnight_cost: float | None
     lifetime_years: float | None = None
+    carrier: str | None = None                  # incentive eligibility (WP4.4)
 
 
 @dataclass(frozen=True)

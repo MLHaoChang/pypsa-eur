@@ -265,7 +265,7 @@ def to_finance_case(name: str):
     (class `opex`, nominal rate inflation + escal)."""
     from datetime import date
 
-    from models.finance import DebtTranche, FinanceInputs, TerminalValueRule
+    from models.finance import DebtTranche, FinanceInputs, Incentive, TerminalValueRule
     from services.finance.case import (
         CONTRACT_CLASS, AssetFinance, FinanceCase, Template, TemplateLine,
     )
@@ -283,6 +283,10 @@ def to_finance_case(name: str):
         wacc_nominal=p.nominal_discount_rate, cost_of_equity=p.nominal_discount_rate,
         inflation=p.inflation, tax_losses="offset_other_income",
         financing_fee_tax="not_deducted", debt=_debt(p, DebtTranche),
+        # SAM's federal ITC on the qualifying classes' share of TIC (review B2):
+        # one asset, so rate × share on the whole basis is the same amount.
+        incentives=[Incentive(kind="itc", rate=p.itc_federal_percent * p.itc_base_share)]
+        if p.itc_federal_percent else [],
         reserves_rate=p.debt.get("reserves_rate") if p.debt else None)
     lines = (
         TemplateLine(key="ppa", stream="ppa_settlement", amount=p.energy_year1_mwh * price,

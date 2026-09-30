@@ -171,7 +171,8 @@ the law state; rates that change **per tax year** during the case (the KSt path 
 are **schedules inside that version** (`{"schedule": [[from_year, value], …]}`), read per tax year; values
 fixed **once by a case date** are rules tested against the case dates (C2): bonus by acquisition date,
 OBBBA's begin-construction / placed-in-service tests, the degressive AfA window, **the §48E storage
-applicable percentage (100 / 75 / 50 / 0 % by the year construction begins, credit taken once at placed in
+applicable percentage (100 / 75 / 50 / 0 % by the year construction begins — 2033 / 2034 / 2035 / 2036+,
+the applicable year being 2032, §45Y(d)(3) as amended; verified in WP4.4 — credit taken once at placed in
 service)** and **the Canadian Clean Technology ITC rate (by the year the property becomes available for
 use)** — round 2 N4. Values listed in WP4.3/4.4 are the **expected content**; each lands only with its cited
 source, and the implementation reviewer checks each against the source text; a rule that cannot be sourced
@@ -674,6 +675,14 @@ Noted, not taken:
 - loss vintages expire only in income years; the current packs are indefinite;
 - §163(j) interest still carried forward at the axis end is not reported; this is for WP4.5's report.
 
+**WP4.3a review round 2 (eaf3951): PASS.**
+- **SAM variants:** the eight non-SL-15 variants still match to ≤ 1.5e-8. The SL-15 variant is refused.
+- **B1:** checked against an independent exact-fraction hand calculation for 7 rate/life pairs × 12 COD
+  months (≤ 1e-12).
+- **B2–B8:** each re-probed.
+
+Nit taken: the degressive rate keeps full precision (`repr`, not `:g`).
+
 ## WP4.3b `eu_nl` and `ca_federal` packs
 
 - `eu_nl` (sourced): VPB brackets 19 % / 25.8 % at €200k (art. 22 Wet Vpb 1969, dated); depreciation with the
@@ -705,6 +714,58 @@ Noted, not taken:
   construction beginning after 2025-12-31. Unsourced values absent.
 - Tests: **S3 ITC** (credit, reduced federal basis, unreduced state basis, taxes); PTC by hand; eligibility on
   both sides of each cliff; phase-out; FEOC's three states; the PWA multiplier; a grant reducing basis.
+
+**WP4.4 implementation.**
+
+`services/finance/incentives.py::build_incentives(case, tl, op, pack)` returns per-year cash, the ITC total
+and its assets (for the basis reduction), the grant basis reduction, one line per incentive, and the
+reasons, flags and sources. Each incentive kind:
+- **ITC:** rate × eligible basis (capex incl. contingency), capped by `amount` and scaled by the phase-out
+  share. It is credited to after-tax cash in the first operating year.
+- **PTC:** only with a pack rule. The US §45Y amount is 0.3 ¢ / 1.5 ¢ × the calendar year's published
+  inflation-adjustment factor, rounded each year to 0.05 ¢ / 0.1 ¢ (halves up). A later year projects the
+  factor at `inflation` and is flagged `ptc_factor_projected`. The credit runs for 10 operating years
+  from COD.
+- **Grant:** cash at the COD point; it reduces the basis (flagged: pro rata over the classes).
+- **Refused here:** `accelerated_depreciation`, `cfd` and `capacity_payment`, each with the place it
+  belongs. ITC and PTC on the same asset are refused.
+
+Eligibility:
+- **The incentive's own rules:** `begin_construction_by` (needs `construction_start`),
+  `placed_in_service_by`, `asset_classes` (needs a carrier on `AssetFinance`, new), and the `phase_out`
+  dates.
+- **US statute, applied to ITC and PTC under the `us_federal` pack:**
+  - the PWA multiplier (`pwa_met` None → not established);
+  - the phase-out after 2032;
+  - the wind/solar termination: placed in service after 2027-12-31 with construction begun after
+    2026-07-04 → ineligible; storage is exempt;
+  - FEOC (`feoc_flag` None → not established for construction after 2025-12-31; True → ineligible).
+
+The `us_federal` pack gains six cited rules: `clean_electricity_itc` (§48E(a)(2)), `clean_electricity_ptc`
+(§45Y(a)(2), (b)(1)(B), (c) plus the 2026 factor 2.0570 — 91 FR 56942, 0.6 / 3.1 ¢),
+`clean_electricity_phase_out`, `wind_solar_termination` (+ Notice 2025-42), `feoc_material_assistance` and
+`itc_basis_reduction` (§50(c)). The federal layer takes the reduction; the state slot does not. Re-pinned.
+
+**Verified at the source before encoding:** Cornell LII §48E / §45Y text, the Federal Register notice, and
+law-firm summaries of Pub. L. 119-21.
+
+**Tests: `test_finance_incentives.py` (26):**
+- **the S3 ITC = SAM's `itc_total` in year 1, and the federal and state taxes with it match SAM;**
+- the PTC by hand (the published 0.6 / 3.1 ¢ amounts, the rounding, the projection, the 10-year term);
+- both sides of the wind/solar cliff, and storage exempt;
+- the phase-out 2032 … 2036;
+- FEOC's three states;
+- the PWA multiplier;
+- a stated rate with a cap, grants, and user dates / phase-out / classes;
+- the refusals;
+- the sources.
+
+The `sam_case` mapping gives S3/S3f their ITC as an `Incentive`.
+
+**For WP4.5:**
+- flag `state_itc_basis_unreduced` when an ITC is claimed with a state layer;
+- set each class's `itc_reduces` from `itc_assets`;
+- reduce the basis by the grant.
 
 ## WP4.5 Metrics, solve-for-PPA, the WACC gate
 
