@@ -98,7 +98,7 @@ Each work package had a review agent that had not written the code. It read the 
 
 Date: 2026-09-30. A UI-driven run across the whole product, beyond the 3D view, on the same stack (auth mode, fresh SQLite database, seeded users, Overpass stub, Vite, Chromium on SwiftShader). Each step is driven through the page as a user would: clicks, typing, file inputs and keyboard shortcuts. It fails on a thrown error, a page error, a console error, an HTTP status ≥ 400 outside a short allowlist (the chat-settings 403, the local-settings 404 and the first 404 for a site context that has not been fetched yet), or an error-boundary fallback. The API is read only to check what the UI claims. The bundled templates were built first with `backend/project_templates/_build.py`: `3bus`, `ieee14` and `ieee39` built. `belgium` needs `resources/test-elec/networks/base_s_5_elec_.nc`, which this checkout lacks.
 
-**43/47 steps pass. The four failures are product defects (below), not the harness.** On the same fresh stack afterwards, the Phase 1 E2E ran PHASE1_RESULT and the Phase 2 QA driver ran PHASE2_RESULT.
+**43/47 steps pass. The four failures are product defects (below), not the harness.** On the same fresh stack afterwards, the Phase 1 E2E passed **19/19** and the Phase 2 QA driver (§3) passed **21/21**.
 
 | Area | Steps | Result |
 |---|---|---|
