@@ -1079,6 +1079,24 @@ connection fee lowered it). Fixed: the value adds back the cost part of every ac
 counterfactual counterpart. Without a counterfactual this is exactly SAM's revenue. Tested across fom,
 `network_capacity`, `other` and `lease`: the LCOE equals SAM's formula, and a cost never lowers it.
 
+**WP4.5 review round 3 (52e38af): PASS.**
+- **Hand table:** matches SAM's formula for every cost stream.
+- **Counterfactual cases:**
+  - the behind-the-meter probe gives 51.6961, equal to the PPA route;
+  - a shared connection key stays netted;
+  - a lease counts as a cost.
+- **SAM parity:** LCOE and the sculpted solve unchanged, ≤ 8.9e-16.
+
+**WP4.6d implementation (93f840e).** `services/finance/export_xlsx.py::build_workbook(report)`:
+- sheets: About (case, assumptions hash, packs, CFADS definition, WACC gate, counterfactual, completeness,
+  every flag and reason), Summary, one sheet per report section (scalars as rows, record lists as tables)
+  and CashflowLines;
+- `None` becomes an explicit `not_established` cell;
+- a string starting with = + - @, a tab or a CR is stored as text (the injection guard);
+- tests: an Excel round trip (numbers equal, None explicit) and injection names staying text.
+
+The `GET …/export.xlsx` route lands with WP4.6b.
+
 ## WP4.6a Adapter: `FinanceCase`, counterfactual, template checks
 
 - `services/results/finance_case.py::build_finance_case` (C1): the owner's operating-year template per
