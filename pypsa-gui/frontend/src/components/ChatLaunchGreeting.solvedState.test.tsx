@@ -197,7 +197,7 @@ describe('greeting follows the hub study with the hub closed (P26 gate B1)', () 
 describe('greeting: stale review, the fresh fallback and C6 (P28)', () => {
   const NONE = { running: false, status: 'idle', condition: null,
     objective: null, solve_time: null, dispatch: 'none' } as const
-  const STALE = 'A study has run, but the network changed since — run it again in Hub design.'
+  const STALE = 'A study has run, but the network was solved since — run it again in Hub design.'
   const DONE = 'A study has run on this network — its results are in Hub design.'
   const review = (stale: boolean) => ({ status: 'ok', source: 's', stale, summary: {},
     findings: [], next_steps: [] })

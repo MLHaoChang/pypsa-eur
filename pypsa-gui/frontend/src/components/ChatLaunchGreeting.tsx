@@ -66,7 +66,7 @@ function solveLine(status: SimulationStatus | undefined, guided = false,
   }
   if (guided && hubStudy === 'done') {
     return reviewStale
-      ? 'A study has run, but the network changed since — run it again in Hub design.'
+      ? 'A study has run, but the network was solved since — run it again in Hub design.'
       : 'A study has run on this network — its results are in Hub design.'
   }
   switch (status.dispatch) {

@@ -2537,7 +2537,7 @@ async function phaseP32(browser) {
 // ── the P28 extension (deferred spec 2026-09-28 §3.5) ──────────────────────
 const STUB_PROFILE_2 = 'smoke-stub-2'
 const ANTHROPIC_PROFILE = 'anthropic-sonnet'
-const P28_STALE = 'A study has run, but the network changed since — run it again in Hub design.'
+const P28_STALE = 'A study has run, but the network was solved since — run it again in Hub design.'
 const P28_DONE = 'A study has run on this network — its results are in Hub design.'
 const P28_C6 = 'No study has run yet — start in Hub design.'
 
