@@ -141,12 +141,12 @@ The backend tests miss it because the `install_network` fixture (`tests/conftest
 - after re-binding in undo, snapshot restore, template create and bundle import, call `PyPSAService.rekey_context(PyPSAService.get_active_context())` so the context lives under the project's key;
 - the chat tools' import wrappers pass the acting session through.
 
-Five regression tests exercise each route with a project active. They fail before the fix and pass after it, and 1830 related backend tests pass with it. Two further points are worth considering with the fix:
+The patch and its tests are kept beside this note, in `2026-09-30-full-e2e/`. `fix-active-project-swap.diff` applies with `git apply --directory=pypsa-gui/backend` to this branch; `test_swap_with_project_active.py` goes in `backend/tests/`. Master has moved on (`routers/io.py` no longer matches), so the patch needs porting before it lands there. On master, raw imports and undo still behave as described. Five regression tests exercise each route with a project active. They fail before the fix and pass after it, and 1830 related backend tests pass with it. Two further points are worth considering with the fix:
 
 - undo and snapshot restore should refuse while that project is in the solve queue;
 - `reset_network` carries `mutation_lock`, `undo` and `chat_state` forward into the new context.
 
-**D. A second project from the same template fails with 409.** The templates tab calls `projectsApi.createFromTemplate(templateId)` with no name. The backend then uses the template's default name ("IEEE 14-Bus"), which already exists: `409 {"detail":"Project 'IEEE 14-Bus' already exists"}`, and a toast "Template import failed: Request failed with status code 409". The route already accepts `name`. The "From file" tab avoids the clash with `_uniqueProjectName`, and the templates tab could do the same. This is a small frontend fix.
+**D. A second project from the same template fails with 409.** The templates tab calls `projectsApi.createFromTemplate(templateId)` with no name. The backend then uses the template's default name ("IEEE 14-Bus"), which already exists: `409 {"detail":"Project 'IEEE 14-Bus' already exists"}`, and a toast "Template import failed: Request failed with status code 409". It is still present on master. The route's own comment promises to make the default name unique, but it never does. The fix is on its own branch, `claude/template-unique-name`, based on master. When no name is given, the route now takes the first free name in the org (`IEEE 14-Bus`, then `IEEE 14-Bus 2`, …). A name the caller chose still returns 409.
 
 ### Other findings
 

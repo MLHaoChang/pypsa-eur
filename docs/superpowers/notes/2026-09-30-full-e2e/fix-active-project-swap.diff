@@ -1,0 +1,235 @@
+diff --git a/routers/io.py b/routers/io.py
+index 28cc7e6..24c9b89 100644
+--- a/routers/io.py
++++ b/routers/io.py
+@@ -5,7 +5,12 @@ import pathlib
+ import tempfile
+ import zipfile
+ 
+-from fastapi import APIRouter, File, UploadFile
++from fastapi import APIRouter, Depends, File, UploadFile
++from sqlalchemy.orm import Session as DBSession
++
++from db.models import Session as SessionRow
++from db.session import get_db
++from deps import current_session
+ from models.schemas import ImportSummary
+ from services import change_log_service
+ from services.pypsa_service import PyPSAService
+@@ -192,8 +197,28 @@ def _reset_with_ts_clear() -> None:
+     _restore_user_ts({})
+ 
+ 
++def _unbind_session(db, session) -> None:
++    """
++    A raw import produces an UNBOUND network, published by `reset_network()`
++    into the session's `scratch:<sid>` slot. Clear the session's pointer so the
++    next request resolves that slot -- exactly what `POST /api/network/reset`
++    does. Left set, `resolve_for_session` re-resolves the previously open
++    project's registry slot and the import is invisible (and a Save-As saves
++    the OLD network under the new name). Called only after a successful
++    import, so a failed one leaves the user on their project.
++    """
++    if session is None or db is None:
++        return
++    from services import active_project
++    active_project.set_active_project(db, session, None)
++
++
+ @router.post("/import/netcdf")
+-async def import_netcdf(file: UploadFile = File(...)):
++async def import_netcdf(
++    file: UploadFile = File(...),
++    db: DBSession = Depends(get_db),
++    session: SessionRow | None = Depends(current_session),
++):
+     data = await read_capped(file)
+     with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as f:
+         f.write(data)
+@@ -206,6 +231,7 @@ async def import_netcdf(file: UploadFile = File(...)):
+                 PyPSAService.import_network_from_netcdf(n, tmp)
+     finally:
+         tmp.unlink(missing_ok=True)
++    _unbind_session(db, session)
+     summary = _build_summary(n)
+     change_log_service.log(
+         "import", "Network", file.filename or "network.nc",
+@@ -215,7 +241,11 @@ async def import_netcdf(file: UploadFile = File(...)):
+ 
+ 
+ @router.post("/import/csv")
+-async def import_csv(file: UploadFile = File(...)):
++async def import_csv(
++    file: UploadFile = File(...),
++    db: DBSession = Depends(get_db),
++    session: SessionRow | None = Depends(current_session),
++):
+     import zipfile as _zip
+     data = await read_capped(file)
+     with tempfile.TemporaryDirectory() as tmpdir:
+@@ -225,6 +255,7 @@ async def import_csv(file: UploadFile = File(...)):
+             _reset_with_ts_clear()
+             n = PyPSAService.get_network()
+             n.import_from_csv_folder(tmpdir)
++    _unbind_session(db, session)
+     summary = _build_summary(n)
+     change_log_service.log(
+         "import", "Network", file.filename or "network_csv.zip",
+@@ -234,7 +265,11 @@ async def import_csv(file: UploadFile = File(...)):
+ 
+ 
+ @router.post("/import/excel")
+-async def import_excel(file: UploadFile = File(...)):
++async def import_excel(
++    file: UploadFile = File(...),
++    db: DBSession = Depends(get_db),
++    session: SessionRow | None = Depends(current_session),
++):
+     import openpyxl
+     data = await read_capped(file)
+     wb = openpyxl.load_workbook(io.BytesIO(data))
+@@ -260,6 +295,7 @@ async def import_excel(file: UploadFile = File(...)):
+                         n.add(comp_class, str(name), **{k: v for k, v in row_dict.items() if v is not None})
+                     except Exception:
+                         pass
++    _unbind_session(db, session)
+     summary = _build_summary(n)
+     change_log_service.log(
+         "import", "Network", file.filename or "network.xlsx",
+@@ -269,12 +305,17 @@ async def import_excel(file: UploadFile = File(...)):
+ 
+ 
+ @router.post("/import/matpower")
+-async def import_matpower(file: UploadFile = File(...)):
++async def import_matpower(
++    file: UploadFile = File(...),
++    db: DBSession = Depends(get_db),
++    session: SessionRow | None = Depends(current_session),
++):
+     data = (await read_capped(file)).decode("utf-8")
+     with PyPSAService.get_lock():
+         _reset_with_ts_clear()
+         n = PyPSAService.get_network()
+         _parse_matpower(n, data)
++    _unbind_session(db, session)
+     summary = _build_summary(n)
+     change_log_service.log(
+         "import", "Network", file.filename or "network.m",
+diff --git a/routers/projects.py b/routers/projects.py
+index afc03ce..ffd914b 100644
+--- a/routers/projects.py
++++ b/routers/projects.py
+@@ -1081,6 +1081,11 @@ async def import_bundle(
+         project_registry.bind_context(
+             PyPSAService.get_active_context(), _imported_project
+         )
++        # `reset_network()` published this ctx into the session's `scratch:`
++        # slot; bound, it belongs under the new project's key. Without this
++        # the next request hydrates a SECOND copy from disk and the bound
++        # scratch copy is later written back over the project by eviction.
++        PyPSAService.rekey_context(PyPSAService.get_active_context())
+ 
+     # Persist the pointer, mirroring activate_project. Written AFTER the swap
+     # succeeds so a failed import does not leave the session pointing at a
+@@ -1344,6 +1349,11 @@ def create_from_template(
+         project_registry.bind_context(
+             PyPSAService.get_active_context(), _created_project
+         )
++        # `reset_network()` published this ctx into the session's `scratch:`
++        # slot; bound, it belongs under the new project's key. Without this
++        # the next request hydrates a SECOND copy from disk and the bound
++        # scratch copy is later written back over the project by eviction.
++        PyPSAService.rekey_context(PyPSAService.get_active_context())
+ 
+     # Persist the pointer, mirroring activate_project. Written AFTER the swap
+     # succeeds so a failed create does not leave the session pointing at a
+diff --git a/routers/snapshots.py b/routers/snapshots.py
+index f129279..e0efc3c 100644
+--- a/routers/snapshots.py
++++ b/routers/snapshots.py
+@@ -687,6 +687,12 @@ def restore_snapshot(
+             project_uuid=project.uuid,
+             storage_dir=str(project_dir),
+         )
++        # Same as undo: the reset published this ctx into `scratch:<sid>`;
++        # re-bound, it belongs in the project's registry slot. The displaced
++        # resident copy is the PRE-restore network and must not be written
++        # back over the files just restored, so this is a rekey (no save),
++        # not `register` (which saves the prior).
++        PyPSAService.rekey_context(PyPSAService.get_active_context())
+ 
+     cfg_path = project_dir / "solver_config.json"
+     if cfg_path.exists():
+diff --git a/services/chat_tools.py b/services/chat_tools.py
+index 61f0299..12c7c54 100644
+--- a/services/chat_tools.py
++++ b/services/chat_tools.py
+@@ -2495,6 +2495,14 @@ def delete_project_snapshot(name: str, snapshot_id: str) -> None:
+ # ── Import / Export (8) ─────────────────────────────────────────────────────
+ 
+ 
++def _import_via(handler, upload):
++    """Run a raw-import handler with the acting session so it can unbind it."""
++    if _ACTING_SESSION_ID.get() is None:
++        return _sync(handler(upload, db=None, session=None))
++    with _acting() as (db, _user):
++        return _sync(handler(upload, db=db, session=_acting_session(db)))
++
++
+ def import_network_nc(bytes_b64: str, filename: str = "network.nc") -> dict:
+     import base64
+     import io
+@@ -2502,7 +2510,7 @@ def import_network_nc(bytes_b64: str, filename: str = "network.nc") -> dict:
+     from routers.io import import_netcdf as _h
+     data = base64.b64decode(bytes_b64)
+     upload = UploadFile(filename=filename, file=io.BytesIO(data))
+-    return _sync(_h(upload))
++    return _import_via(_h, upload)
+ 
+ 
+ def import_csv_bundle(bytes_b64: str, filename: str = "csv.zip") -> dict:
+@@ -2512,7 +2520,7 @@ def import_csv_bundle(bytes_b64: str, filename: str = "csv.zip") -> dict:
+     from routers.io import import_csv as _h
+     data = base64.b64decode(bytes_b64)
+     upload = UploadFile(filename=filename, file=io.BytesIO(data))
+-    return _sync(_h(upload))
++    return _import_via(_h, upload)
+ 
+ 
+ def import_excel(bytes_b64: str, filename: str = "network.xlsx") -> dict:
+@@ -2522,7 +2530,7 @@ def import_excel(bytes_b64: str, filename: str = "network.xlsx") -> dict:
+     from routers.io import import_excel as _h
+     data = base64.b64decode(bytes_b64)
+     upload = UploadFile(filename=filename, file=io.BytesIO(data))
+-    return _sync(_h(upload))
++    return _import_via(_h, upload)
+ 
+ 
+ def import_matpower(bytes_b64: str, filename: str = "case.m") -> dict:
+@@ -2532,7 +2540,7 @@ def import_matpower(bytes_b64: str, filename: str = "case.m") -> dict:
+     from routers.io import import_matpower as _h
+     data = base64.b64decode(bytes_b64)
+     upload = UploadFile(filename=filename, file=io.BytesIO(data))
+-    return _sync(_h(upload))
++    return _import_via(_h, upload)
+ 
+ 
+ def _save_agent_export(data: bytes, filename: str, mime: str) -> dict:
+diff --git a/services/network_undo.py b/services/network_undo.py
+index 14afd04..43de4c4 100644
+--- a/services/network_undo.py
++++ b/services/network_undo.py
+@@ -131,6 +131,13 @@ def apply_undo():
+             with PyPSAService.get_netcdf_io_lock():
+                 PyPSAService.import_network_from_netcdf(n, tmp)
+             PyPSAService.set_binding(prev_binding)
++            # `reset_network()` published the restored ctx UNBOUND, i.e. into
++            # the session's `scratch:<sid>` slot. Now that it carries the
++            # project's identity again, move it into the project's registry
++            # slot (replacing the pre-undo copy, which must NOT be written
++            # back) or the next request -- which resolves by the session's
++            # pointer -- keeps reading the pre-undo network. No-op when unbound.
++            PyPSAService.rekey_context(PyPSAService.get_active_context())
+             if prev_loaded:
+                 try:
+                     n.name = prev_loaded
