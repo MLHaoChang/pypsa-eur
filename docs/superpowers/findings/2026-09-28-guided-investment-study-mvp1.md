@@ -1,6 +1,6 @@
 # MVP-1: a guided decision study answers "Do I need a battery at my site, and what is it worth?"
 
-**Status:** IMPLEMENTED on `claude/edge-tool-ux-research-n0n2l6`. S0–S8 are committed and each gate reads GO, or GO after its binding conditions were closed. S9 (this note, the QA driver, packaging and the integration carries) is committed as `b02b117`. Its gate, the plan-level definition of done, read **GO WITH BINDING CONDITIONS** (BC-S9-1 to BC-S9-3, `scratchpad/gate-s9.md`). The gate fixes follow in the next commit: BC-S9-1 and BC-S9-2 closed, BC-S9-3 pending the coordinator's full-suite run.
+**Status:** DONE on `claude/edge-tool-ux-research-n0n2l6`. Every phase gate S0–S9 reads GO, or GO after its binding conditions were closed and re-verified; the last commits are `aa4198d` (S9 gate fixes) and `c474f2e` (the vocabulary mirror the full suite caught). The plan-level definition of done holds (`docs/superpowers/notes/2026-09-30-mvp1-s9-gate.md`). Not yet done: a macOS `.app` build with the new files, and the feature is off by default and refused in auth mode (OPEN-ITEMS 1).
 **Owner-closed gates, re-checked:** S4, S6 and S8 ended "GO WITH BINDING CONDITIONS, closed by the owner" with no assessor re-check at the time. The S9 assessor re-verified every one of those closures by mutation (BC-S4-v2-1/2, BC-S6-v2-1, BC-S6-v2-2, BC-S8-v2-1, BC-S8-v2-2): each fix's test goes red without the fix.
 **Date:** 2026-09-30
 **Plan:** `docs/superpowers/plans/2026-09-28-guided-investment-study-mvp1-v2.md`
@@ -182,7 +182,9 @@ These come from the S5 gate's independent recomputation on the site golden fixtu
   - Every `test_study_*`, `test_studies_routes`, the packaging, sidecar, error-kind manifest, save-guard, swap-guard, QA-driver-coverage, proforma-golden, golden-coverage and FOM-reconciliation tests (37 files): 591 passed, exit 0.
   - `run_qa_drivers.py`: all 23 drivers passed in 8 min 14 s, while the mutation batch ran alongside. That includes `qa_asset_economics`, `qa_cost_decomp_overnight` and `qa_eh_reference_design`, which are unchanged, and `qa_decision_study` (109 s under that load).
   - The full backend suite was not re-run by the S9 implementer; the coordinator runs it (BC-S9-3).
-- Full backend suite on <commit>: <result>
+- **Full backend suite on `c474f2e`:** 0 failed — at least 6,523 passed and 31 skipped by progress-line tally, 6,556 collected; run in four chunks in an isolated worktree (the first on `aa4198d`, whose backend is identical). On `aa4198d` it caught one real failure: the gate fixes added `tornado_stopped_at_solve_deadline` to the backend HELP table without its frontend mirror (`test_decision_vocabulary_parity`), fixed in `c474f2e`.
+- **Full frontend suite on `c474f2e`:** 192 files, 2,114 tests passed.
+- **What only the full suite caught, across the branch:** python-docx unpinned for the frozen build (`5791dce`), an id-reuse flake in `test_qa_support_sandbox` (`3094055`), a race that published "done" before release (S6), and the vocabulary mirror above. Targeted runs are not a substitute.
 - The gate fixes add 6 backend tests (the BC-S9-1 test, three report tests for [N4], [S4] and [N5], the tornado-deadline stop test and the python-docx frozen-layout test), so the gate-fix commit collects 6,556.
 
 ## A real-profile finding the report now states

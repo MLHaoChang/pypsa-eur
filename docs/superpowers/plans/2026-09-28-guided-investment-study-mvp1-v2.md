@@ -283,7 +283,7 @@ Also at the S8 gate: a draft's load file travels in the intake as `load.csv_text
 
 **Acceptance.** Driver passes on the pinned PyPSA 1.1.2 and on the container's; failing set of the full suite unchanged versus master; `qa_asset_economics.py`, `qa_cost_decomp_overnight.py`, `qa_eh_reference_design.py` unchanged.
 
-- [x] Gate S9 (plan-level definition of done) — **GO WITH BINDING CONDITIONS** on `b02b117` (2026-09-30, `scratchpad/gate-s9.md`): BC-S9-1 the marginal verdict's drivers listed in the report, BC-S9-2 the findings note brought up to date, BC-S9-3 the full backend suite recorded. Findings: `docs/superpowers/findings/2026-09-28-guided-investment-study-mvp1.md`.
+- [x] Gate S9 (plan-level definition of done) — **GO WITH BINDING CONDITIONS** on `b02b117`, all three closed (2026-09-30, `docs/superpowers/notes/2026-09-30-mvp1-s9-gate.md`): BC-S9-1 the marginal verdict's drivers listed in the report (`aa4198d`); BC-S9-2 the findings note brought up to date; BC-S9-3 the full backend suite on `c474f2e` 0 failed (it caught the frontend mirror of a new HELP code, fixed in `c474f2e`), and the full frontend suite 2,114 passed. The S9 assessor also re-verified by mutation the owner-closed conditions of S4, S6 and S8. Findings: `docs/superpowers/findings/2026-09-28-guided-investment-study-mvp1.md`.
 
 ---
 
