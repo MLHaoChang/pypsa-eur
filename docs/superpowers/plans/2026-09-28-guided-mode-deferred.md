@@ -446,3 +446,125 @@ No processes are left running.
   - N4: an optional "Switched to Guided" toast is left to the owner.
   - N5: the transcript follows the dock to the new project's chat, which is P27a behaviour.
 - **Gate file:** `docs/superpowers/qa/2026-09-29-guided-mode-deferred-gate-P32.md`.
+
+### P28 phase note (implementation, 2026-09-30, base `531ffe1da`)
+
+Deferred spec §3 (A3, A4, C6, C10), plus the items carried in: P32 N1, P32 N6 and the P27b auth-harness recommendation.
+
+**Anchor drift.** The spec §3 anchors predate the master merge and P27a–P32. They were re-verified on `531ffe1da`.
+
+| Spec anchor | On `531ffe1da` |
+|---|---|
+| `chat.py:122-176` `/health`, docstring `:150-153`, readiness rule `:158-165` | unchanged (`:122`, `:153`, `:160`) |
+| `chat.py:648-667` `/profiles`, 401 at `:658` | `:648-667`, 401 at `:660` |
+| `chat.py:703-800` `/history`, C-4 `:757-773`, read-only rule `:792-800` | `:703-851`; C-4 `except` at `:762`; the freshly-minted binding at `:811` |
+| `useChatProfiles.ts:18` key | unchanged |
+| `ChatPanel.tsx:1505-1512` gate, `:1672` hydrate, `:2748-2751` dropdown | `:1501-1522`; `setMessages(seeded)` `:1687`; `selectedProfileId` `:2805`, `<select value>` `:2906` |
+| `ChatLaunchGreeting.tsx:142-153` key offer; `:56-88` `solveLine`, `:78` fallback, `:88` "Not solved yet." | `:138-150`; `:56-90`, `:78`, `:86` |
+| `api/chat.ts:193-215` `ChatHealth` | unchanged. The profiles type (`ChatProfilesPayload`) lives in `api/llmSettings.ts:129-132`, not in `api/chat.ts`. |
+| `useHubData.ts:50-61`; `simulation.ts:787` `EhReview.stale` | `:50-61`; `:982` |
+| `uiStore.ts:647-660` (C10) | `setUiMode` `:644`, `noteNewProjectCreated` `:662-676`; the listener is new, at the end of the file |
+| rebound handler (N6) | `ChatPanel.tsx:2338`; `switchToProject` step 7 at `projectActions.ts:512-524` |
+
+**Contract drift found while implementing:**
+
+1. **`/chat/profiles` answers 200 in local mode, not 401** (spec §3.1 "Local mode", review condition 11).
+   - `main.lifespan` runs `local_mode.ensure_local_identity`, and the middleware injects that user on every request. This holds even when the database's identity was removed beforehand.
+   - The 401 path is the anonymous hosted caller.
+   - Both are pinned in `test_chat_profiles_readiness.py`: `test_profiles_refuse_a_caller_with_no_user` and `test_local_mode_seeds_its_identity_at_startup_so_profiles_answer`.
+   - The FE fallback is kept for any error on the list: `/health` decides for the active profile, and a non-active profile fails open.
+   - The smoke reads `/chat/profiles` in local mode directly.
+2. **The review's `stale` does not flag an edit** (spec §3.5 smoke: "edit one bus → the stale sentence").
+   - `eh_review.review_latest` sets `stale: true` only when the stored report was cleared, and only a foreground `/simulation/run` clears it (`routers/simulation.py:834`). A bus edit leaves `stale: false`.
+   - The smoke logs this (after the edit: `stale=false`, greeting unchanged), then runs a foreground solve and asserts the stale sentence. On reload it appears in 0.0 s.
+   - A greeting that also notices edits would need a backend signal, such as a network revision on the study record. That is not in the P28 contract; it is recorded for the owner.
+3. **Re-activating a project does not bring back its hub study record.** The P26 H2 project re-opened at Site, with no study. The smoke's part (C) therefore runs its own study from the Goal card.
+
+**What was built** (the file list is spec §3.4, plus `ApiKeySetup.tsx`, `api/llmSettings.ts` and `utils/projectActions.ts`):
+
+- **A3 backend.**
+  - `_profile_chat_ready(profile)` is shared by `/health` and `/profiles`. `/health`'s body is unchanged and its key set is now pinned.
+  - Each profile on `/profiles` carries `chat_ready`.
+  - `/history` carries `bound_profile_id`:
+    - a freshly minted session reports the profile it adopted, or null on the C-4 path;
+    - an already-live session reports the binding `/stream` gave it, while that binding is still configured;
+    - it is null with no turns.
+- **A3 frontend.**
+  - `chatStore.boundProfileId` is set from `/history` on hydrate and from `session_init.profile_id`. It is cleared by `resetForProjectSwitch` and `startNewChat`, and it is never sent with a turn.
+  - `hooks/useChatProfiles.ts` gains `chatProfileReadiness` and `useChatReadiness`. The effective profile is `profileId ?? boundProfileId ?? active`. Its readiness comes from the list, then `/health` for the active profile, then unknown.
+  - The Send gate and the key offer read it.
+  - `ApiKeySetup` also invalidates the profile list.
+- **A4 + C6.**
+  - Guided with the hub study done: the record decides the sentence, dispatch does not. `eh_review.stale` gives the stale sentence. The review is read on the hub's key, only while the study is done, with no poll.
+  - The fresh-dispatch fallback with no hub study says "see Results".
+  - Guided never-solved says the C6 sentence. Expert is unchanged and never reads the review.
+- **C10.** A `storage` listener adopts another tab's explicit choice through `setUiMode(stored, {explicit: true})`, only while this tab has no explicit choice. An implicit change is ignored. There is one listener per window.
+- **N6.**
+  - `projectActions.moveProjectLock(from, to)`, used by `switchToProject` step 7 (same behaviour) and by the rebound handler.
+  - A named rebind to another project releases the old lock and acquires the new one. If another user holds it, the tab goes read-only (`locked-by-user`) and the project stays open for viewing.
+  - `to: null` releases the old lock. The call is a no-op without auth.
+- **N1.** `rename_project` and `restore_project_snapshot` join the "is not a new project" `it.each`.
+
+**Decisions and deviations:**
+
+1. **The dropdown shows the bound profile** (`profileId ?? boundProfileId ?? active`).
+   - The spec names the dropdown's anchor but gives it no rule.
+   - Showing the active profile while Send follows the bound one would be dishonest.
+   - It would also make the cross-wire check compare against the wrong wire: the backend refuses a cross-wire rebind of a bound session.
+2. **`session_init.profile_id` updates `boundProfileId`.** This goes beyond the spec, which names only `/history`. Without it, a session that bound to the active profile keeps following later active-profile changes in the gate until the next reload. `profileId` is still never pinned from the frame.
+3. **When the list does not say, the active profile falls back to `/health`.**
+   - Examples: a list entry without `chat_ready` (an older backend, or every existing test mock), or a list that failed to load.
+   - The spec's rule falls back only "when the list is not loaded".
+   - This keeps the three existing `getChatHealth` mocks and their cases untouched, as §3.1 requires.
+4. **The smoke's part (A) keeps the spec's order.** The turn is sent while the stub is active, then the Anthropic profile is made active, then the page reloads. The key offer is checked in a separate part (B), on a project with an empty transcript: after (A)'s turn the greeting is hidden, so a key-offer check there would be vacuous.
+5. **The two-user, two-tab auth harness is deferred.**
+   - It is not cheap. The harness would need a hosted-mode uvicorn: non-local, with an SQLite `DATABASE_URL` and `SECRET_KEY`.
+   - It would also need a super-admin via `tools/bootstrap_super_admin.py`, and a second user created through the admin API whose password is set from the outbox token.
+   - Each context would need a scripted login with CSRF cookies, and the stub turn would need to run in auth mode. That is a new harness mode, not a step (the same finding as P27b).
+   - N6 is covered at the adapter level by `ChatPanel.reboundLock.test.tsx`, with the real client, the real rebound handler and the real lock code. The backend's side (foreign holder refused, TTL steal) is covered by `test_project_locks.py`.
+   - C10 is covered by `uiStore.uiMode.test.ts`.
+
+**Changed assertions (one line each):**
+- `test_llm_settings_api.py::test_profiles_route_allows_any_authenticated_member`: the profile key set gains `chat_ready` (a boolean), per D-3.
+- `ChatLaunchGreeting.solvedState.test.tsx`, Guided re-solve case: → "A calculation has updated this network — see Results." (spec §3.2 replaces the `:78` fallback).
+- The same file, Guided "no hub study yet": → the C6 sentence.
+- `smoke-guided.mjs` P27b (b), project 2's greeting: → the C6 sentence. The step's own comment anticipated this.
+
+**Red → green.** Every test below was seen failing for the stated reason before its fix.
+
+| Test | Before the fix |
+|---|---|
+| `test_chat_profiles_readiness.py` | 7 of 9 red: 6 with `KeyError: 'chat_ready'`, and the spec's "local mode → 401" case (it answered 200: the spec's claim is wrong, so that case became the drift pin above). The `/health` key-set pin and the anonymous 401 were green on arrival; mutant B1 kills the pin. |
+| `test_chat_profile_binding.py` P28 | 4 of 4 red (no `bound_profile_id`) |
+| `ChatPanel.sendGate.test.tsx` P28 | 6 of 7 red. "A key saved re-reads the list" was green on arrival; it guards the `ApiKeySetup` invalidation, and mutant F8 kills it. |
+| `ChatLaunchGreeting.test.tsx` P28 | 2 of 3 red (the list was never read); the control was green |
+| `chatStore.test.ts` P28 | 3 of 3 red |
+| `ChatLaunchGreeting.solvedState.test.tsx` P28 | 7 red (the two changed cases plus 5 new ones); the Expert and "not until done" guards were green |
+| `uiStore.uiMode.test.ts` C10 | 3 of 5 red; the two "never overridden / unrelated keys" guards were green |
+| `ChatPanel.reboundLock.test.tsx` (N6 reproduction) | 8 of 10 red: no `DELETE /projects/X/lock`, no `POST /projects/Y/lock`, and no read-only when Bob holds Y. The same-project and auth-off guards were green. |
+| N1 cases | coverage, green on arrival; mutants N1a and N1b are killed |
+
+**Mutants** (`scratchpad/p28/mutate.py`; logs `mutations-fe.log`, `mutations-be.log`):
+- **Frontend: 28 of 29 killed.**
+  - F1–F10: bound ignored; list ignored; `/health` fallback dropped; hydrate, reset, New chat and `session_init` not wired; `ApiKeySetup` not invalidating the list; dropdown ignores the bound profile; greeting health-only.
+  - A1–A7: stale ignored; the fallback sentence back to Hub design; C6 reverted; C6 applied to Expert; review read in Expert; review read before the study is done; dispatch overrides a done study.
+  - C1–C5: implicit change adopted; own explicit choice overridden; adopted implicitly; listener not registered; `setUiMode` bypassed (no §3.7 pruning).
+  - N6a–e: no lock move; no release; `to: null` keeps the lock; auth ignored; release of the new project instead of the old.
+  - N1a–b: `rename_project` or `restore_project_snapshot` flips.
+  - **Survivor N6d** ("`moveProjectLock` ignores `authEnabled`") is equivalent: `releaseProjectLock` and `acquireProjectLock` each check `authEnabled` themselves, so no lock request leaves either way.
+- **Backend: 5 of 5 killed.** B1 `/health` gains a key; B2 `chat_ready` always true; B3 a deleted (C-4) profile still reported; B4 a live session reports the transcript's profile; B5 `bound_profile_id` always null.
+
+**Gate rows** (cwd `pypsa-gui/frontend` unless stated):
+
+| Row | Command | Result |
+|---|---|---|
+| 1 | `PYTHONPATH=/home/user/pypsa-eur:/home/user/pypsa-eur/pypsa-gui/backend /tmp/claude-0/venv/bin/python -m pytest tests/ -m "not slow" -p no:cacheprovider -W ignore -q -o addopts=""` (`pypsa-gui/backend`) | 6673 passed, 31 skipped, 11 deselected, 0 failed (P27a: 6660 + 13 new) |
+| 2 | same interpreter, `-m pytest <the 14-file set> tests/test_chat*.py tests/test_llm_settings_api.py -p no:cacheprovider -W ignore -q -o addopts=""` (`pypsa-gui/backend`; 56 chat files including the new readiness file) | 1608 passed, 19 skipped (`scratchpad/p28/row2.log`) |
+| 3 | `npx tsc --noEmit -p .` | 0 errors |
+| 4 | `npx vitest run` | 242 files / 2738 passed (P32: 241 / 2701) |
+| 4s | `for i in $(seq 10); do npx vitest run src/components/ChatPanel src/components/ChatLaunchGreeting src/store/chatStore src/store/uiStore src/App. src/hooks/useChatProfiles src/components/ApiKeySetup src/components/ProjectMismatchBanner src/utils/projectActions; done` | 10 / 10 green (34 files / 594 tests each) |
+| 5 | `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs --phase P28 --out <scratchpad>/smoke28` | PASS, 43 screenshots. (A) bound profile after reload: Send enabled, dropdown `smoke-stub-2`, `bound_profile_id=smoke-stub-2`, `chat_ready` anthropic false / stubs true. (B) offer shown, then hidden on pick. (C) stale sentence 0.0 s after reload. (D) C6 in Guided, "Not solved yet." in Expert. |
+| 5 | same, `--phase P32` / `P27b` / `P26` / `P25` / `P22.9` | PASS 14 / PASS 54 (after the C6 assertion update; banner 6.4 s; FMEA 8 / 4 / 6 settled) / PASS 38 / PASS 12 / PASS 10 |
+| 7 | `git diff 531ffe1da -- 'pypsa-gui/frontend/src/**' \| grep -c uiMode` | 28: test-store setups and assertions, plus the C10 listener. No new product `uiMode` branch; the greeting's Guided arms use its existing `guided` flag. The `*.expertUnchanged.*` snapshots pass in row 4. |
+
+No processes are left running.
