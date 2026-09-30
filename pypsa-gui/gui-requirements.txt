@@ -122,6 +122,10 @@ httpx==0.28.1        # OpenAICompatProvider's chat-completions SSE
                      # silently dead in the shipped app — the worst failure
                      # shape available. A missing httpx must fail the build,
                      # not the user's chat.
+python-docx==1.2.0   # decision-study report DOCX (`services/study/
+                     # render_docx.py`), unguarded: without it the report
+                     # download 500s in the frozen app. Version from the
+                     # installed environment (plan S9 carry, pinned at S7).
 #
 # DELIBERATELY NOT PINNED — both are guarded AND their fallback is correct:
 #
