@@ -59,6 +59,11 @@ class TemplateLine:
     source: str = "template"
     source_id: str | None = None
     period: str | None = None
+    # Solve-for-PPA (plan C9): the contract price (currency/MWh, the line's
+    # money year) the amount is linear in, and whether the contract changes the
+    # dispatch (then a finance-only solve is refused).
+    price: float | None = None
+    changes_dispatch: bool = False
 
 
 @dataclass(frozen=True)
@@ -88,6 +93,18 @@ class AssetFinance:
 
 
 @dataclass(frozen=True)
+class LpBasis:
+    """What the dispatch LP's annuities used (plan C10): the config's discount
+    rate, its inflation and whether `auto_discount_periods` was on, and each
+    owner asset's own `discount_rate` (None = none set)."""
+
+    discount_rate: float | None
+    inflation_rate: float | None = None
+    auto_discount_periods: bool = False
+    asset_discount_rates: dict[str, float | None] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class FinanceCase:
     inputs: FinanceInputs
     owner: str
@@ -96,3 +113,9 @@ class FinanceCase:
     templates: tuple[Template, ...]
     assets: tuple[AssetFinance, ...]
     flags: tuple[str, ...] = ()
+    # The counterfactual supply cost (plan C13): the same site's bill,
+    # commodity and connection lines WITHOUT the owner's investable assets, as
+    # templates in the same shape (signed from the owner: costs < 0). Returns
+    # are on the owner's cash minus these; the lifecycle NPV on the total.
+    counterfactual: tuple[Template, ...] = ()
+    lp_basis: LpBasis | None = None

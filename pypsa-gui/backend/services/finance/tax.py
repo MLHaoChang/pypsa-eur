@@ -169,12 +169,13 @@ def rate_in(rate: float | dict[int, float], year: int) -> float:
 
 
 def depreciation(tl: Timeline, basis: float, classes: tuple[DepreciationClass, ...], *,
-                 itc_reduction: float = 0.0) -> np.ndarray:
+                 itc_reduction: float = 0.0, start: int | None = None) -> np.ndarray:
     """Depreciation per year of `basis` (the depreciable capex) across the
-    classes, from the first operating year; `itc_reduction` (an amount) is
-    taken off the basis of the classes it applies to, pro rata to their shares."""
+    classes, from the first operating year (or axis index `start` — a
+    replacement vintage); `itc_reduction` (an amount) is taken off the basis of
+    the classes it applies to, pro rata to their shares."""
     out = np.zeros(tl.n)
-    start = tl.index(tl.cod_year)
+    start = tl.index(tl.cod_year) if start is None else start
     if sum(c.share for c in classes) > 1.0 + 1e-9:
         raise ValueError("depreciation class shares sum above 1")
     reducible = sum(c.share for c in classes if c.itc_reduces)
@@ -199,11 +200,17 @@ def compute_tax(tl: Timeline, layers: tuple[TaxLayer, ...], *, ebitda: np.ndarra
                 basis: float, interest: np.ndarray | None = None,
                 other_income: np.ndarray | None = None,
                 other_deductions: np.ndarray | None = None,
-                itc_amount: float = 0.0, losses: str) -> TaxResult:
+                itc_amount: float = 0.0, losses: str,
+                vintages: tuple[tuple[int, float], ...] = (),
+                write_off_remaining: bool = False) -> TaxResult:
     """Tax per layer (plan C7). The base of every layer is
     EBITDA − its depreciation − interest + `other_income` (reserve interest) −
     `other_deductions` (amortised fees) − the liabilities of earlier layers
-    marked deductible; `losses` is `offset_other_income` or `carryforward`."""
+    marked deductible; `losses` is `offset_other_income` or `carryforward`.
+    `vintages` (axis index, basis) depreciate on the same classes from their
+    year (replacement capex, plan C6). `write_off_remaining` deducts each
+    layer's undepreciated basis in the last year (disposal or abandonment —
+    SAM drops it; a recorded deviation, zero on every oracle case)."""
     if losses not in ("offset_other_income", "carryforward"):
         raise ValueError("losses must be offset_other_income or carryforward")
     interest = np.zeros(tl.n) if interest is None else interest
@@ -215,6 +222,13 @@ def compute_tax(tl: Timeline, layers: tuple[TaxLayer, ...], *, ebitda: np.ndarra
     for layer in layers:
         d = depreciation(tl, basis, layer.depreciation,
                          itc_reduction=0.5 * itc_amount if layer.itc_basis_reduction else 0.0)
+        for start, vb in vintages:
+            d = d + depreciation(tl, vb, layer.depreciation, start=start)
+        if write_off_remaining:
+            left = _depreciable(layer, basis, itc_amount, vintages) - d.sum()
+            if left > 1e-6:
+                d[-1] += left
+                flags.append(f"remaining_basis_written_off:{layer.name}")
         deductible_interest = interest
         if layer.interest_cap is not None and losses == "carryforward":
             deductible_interest, capped, reached = _capped_interest(layer.interest_cap, ebitda,
@@ -265,14 +279,20 @@ def compute_tax(tl: Timeline, layers: tuple[TaxLayer, ...], *, ebitda: np.ndarra
         if layer.deductible_in_later_layers:
             deductible_before = deductible_before + lb
     total = np.sum(list(liab.values()), axis=0) if liab else np.zeros(tl.n)
-    remaining = {}
-    for layer in layers:
-        red = 0.5 * itc_amount if layer.itc_basis_reduction else 0.0
-        reducible = any(c.itc_reduces for c in layer.depreciation)
-        depreciable = basis * sum(c.share for c in layer.depreciation) - (red if reducible else 0.0)
-        remaining[layer.name] = float(depreciable - dep[layer.name].sum())
+    remaining = {layer.name: float(_depreciable(layer, basis, itc_amount, vintages)
+                                   - dep[layer.name].sum()) for layer in layers}
     return TaxResult(depreciation=dep, taxable=taxable, liability=liab, loss_pool=pools,
                      total_liability=total, remaining_basis=remaining, flags=sorted(set(flags)))
+
+
+def _depreciable(layer: TaxLayer, basis: float, itc_amount: float,
+                 vintages: tuple[tuple[int, float], ...] = ()) -> float:
+    """The layer's depreciable basis: its classes' share of the basis (and the
+    vintages), less ½ the ITC where the layer and a class take the reduction."""
+    red = 0.5 * itc_amount if layer.itc_basis_reduction else 0.0
+    reducible = any(c.itc_reduces for c in layer.depreciation)
+    shares = sum(c.share for c in layer.depreciation)
+    return (basis + sum(v for _, v in vintages)) * shares - (red if reducible else 0.0)
 
 
 def _capped_interest(cap: InterestCap, ebitda: np.ndarray,

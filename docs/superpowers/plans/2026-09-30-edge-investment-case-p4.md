@@ -824,6 +824,58 @@ The `sam_case` mapping gives S3/S3f their ITC as an `Incentive`.
   `changes_dispatch`), no root; the gate's states (consistent; wacc differs; an asset rate differs;
   inflation differs with and without `auto_discount_periods`; `None`).
 
+**WP4.5 implementation.** `services/finance/engine.py::run_case(case, pack, *, layers)` assembles the WPs
+on a plain `FinanceCase`.
+
+**Pipeline:**
+1. The timeline, then the total operating cash and the **counterfactual's** (new
+   `FinanceCase.counterfactual` templates), giving the incremental cash.
+2. Debt on the incremental CFADS.
+3. Incentives.
+4. Tax, run three times: levered; unlevered (no interest, no IDC); and on the total.
+   - The basis is capex + IDC − grants.
+   - The ITC reduces only its own assets' `asset:class` classes.
+   - Replacement capex depreciates as vintages (new `compute_tax(vintages=…)`).
+   - The remaining basis is written off in the last year (new `write_off_remaining`). **Recorded
+     deviation:** SAM drops the remaining basis. It is 0 on every oracle case.
+   - A `book_value` terminal sells at the last layer's remaining basis, so there is no gain.
+   - Financing fees are `amortised` over the first tranche's tenor, or `not_deducted`; with fees and
+     neither stated → not established.
+5. The cash series:
+   - equity pre-tax = EBITDA − capex − replacement − fees − service + draws + reserve interest − DSRA
+     funding + grants (SAM `cf_project_return_pretax`, verified);
+   - post-tax = pre-tax − tax + ITC + PTC;
+   - the project (unlevered) series;
+   - the lifecycle series on the total.
+6. **Metrics:**
+   - equity and project IRR / NPV, pre and post tax;
+   - payback (linear interpolation, years from index 0);
+   - DSCR min / avg, total and senior;
+   - LLCR / PLCR at the tranche rates (debt-weighted with several tranches, flagged);
+   - LCOE nominal / real = (NPV revenue − NPV post-tax equity) / NPV energy. This is **SAM's definition,
+     found and verified on all 8 oracle cases to 1e-12**; the salvage is outside revenue;
+   - the lifecycle-cost NPV.
+7. The WACC gate (C10), with each leg's state and the LP's bases. `FinanceCase.lp_basis` is new.
+8. Solve-for-PPA: brentq on the price scale of an owner-sold `ppa_settlement` contract. `TemplateLine`
+   gains `price` and `changes_dispatch`. The target is the post-tax equity IRR over operating years 1 …
+   target. The refusals are: not found / ambiguous / not linear / not owner-sold / needs redispatch /
+   price unknown / no root. The stored inputs are never mutated.
+
+**Tests: `test_finance_engine.py` (22):**
+- **all-case SAM parity:**
+  - covers S1, S1b, S2, S2c, S3, S3d and S3f; S3d/S3f run at SAM's debt, since their sizing deviations are
+    sized in the debt tests;
+  - checks equity pre / post cash (1e-12), federal / state tax, IRR (1e-6 absolute — SAM's solver),
+    NPV (1e-9), LCOE nominal and real (1e-10), min DSCR and debt size;
+- **S1b solve-for-PPA = SAM's 144.6559168 $/MWh to 1e-10;**
+- S1 project = equity (all equity); S2's LLCR = its DSCR 1.3;
+- payback; IRR edges;
+- the counterfactual (incremental returns, lifecycle on the total);
+- the book-value terminal and a replacement vintage;
+- the solve refusals;
+- the gate's 8 states;
+- the not-established paths.
+
 ## WP4.6a Adapter: `FinanceCase`, counterfactual, template checks
 
 - `services/results/finance_case.py::build_finance_case` (C1): the owner's operating-year template per

@@ -257,22 +257,25 @@ def _debt(p: SamParams, DebtTranche) -> list:
     return [DebtTranche(**common, gearing=d["percent"], gearing_base="capex")]
 
 
-def to_finance_case(name: str):
+def to_finance_case(name: str, *, solve: bool = False):
     """A `FinanceCase` for the SAM case: one construction year (SAM's year 0),
     COD on 1 January of the next year = the base year (plan C4), one asset
     `pv` carrying the installed cost, a PPA line (the contract's own
     indexation = `ppa_escalation`, degrading with `pv`) and an O&M line
-    (class `opex`, nominal rate inflation + escal)."""
+    (class `opex`, nominal rate inflation + escal). `solve=True` (S1b): the
+    input price and `solve_ppa` set — the engine solves the price; otherwise
+    S1b's cashflows are SAM's at its solved price."""
     from datetime import date
 
-    from models.finance import DebtTranche, FinanceInputs, Incentive, TerminalValueRule
+    from models.finance import DebtTranche, FinanceInputs, Incentive, SolvePpa, TerminalValueRule
     from services.finance.case import (
         CONTRACT_CLASS, AssetFinance, FinanceCase, Template, TemplateLine,
     )
 
     p = sam_params(name)
     # S1b solves the price: its cashflows are SAM's at the solved price.
-    price = sam_expected(name)["scalars"]["ppa_price_per_mwh"] if p.ppa_solve else p.ppa_price_per_mwh
+    price = (sam_expected(name)["scalars"]["ppa_price_per_mwh"] if p.ppa_solve and not solve
+             else p.ppa_price_per_mwh)
     fin = FinanceInputs(
         currency="USD", financial_close=date(SAM_Y0, 1, 1), cod_by_asset={"pv": date(SAM_Y0 + 1, 1, 1)},
         capex_phasing=[1.0], contingency_share=0.0, analysis_years=p.analysis_years,
@@ -287,11 +290,13 @@ def to_finance_case(name: str):
         # one asset, so rate × share on the whole basis is the same amount.
         incentives=[Incentive(kind="itc", rate=p.itc_federal_percent * p.itc_base_share)]
         if p.itc_federal_percent else [],
+        solve_ppa=SolvePpa(target_irr=p.ppa_solve["target_irr"],
+                           target_year=p.ppa_solve["target_year"]) if solve and p.ppa_solve else None,
         reserves_rate=p.debt.get("reserves_rate") if p.debt else None)
     lines = (
         TemplateLine(key="ppa", stream="ppa_settlement", amount=p.energy_year1_mwh * price,
                      esc_class=CONTRACT_CLASS, indexation=p.ppa_escalation, contract_id="ppa",
-                     degrades_with="pv", counterparty="offtaker", source="contract"),
+                     degrades_with="pv", counterparty="offtaker", source="contract", price=price),
         TemplateLine(key="om", stream="fom", amount=-p.opex_year1, esc_class="opex",
                      counterparty="om_contractor", source="asset"),
     )
