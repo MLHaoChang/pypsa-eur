@@ -278,6 +278,14 @@
     "stress_scenario": "A hard condition to test the site against, such as a heatwave or a dark, windless week, with how often it happens.",
     "fmea_check": "A check that switches off each piece of equipment in turn and in stress conditions, to find the failures that hurt the site most.",
     "template_provenance": "Where the example site's numbers come from. Example sites use made-up but realistic data, so replace them with your own before deciding.",
-    "voll_plain": "What each unit of energy that cannot be delivered is worth to you, in euros. The study needs a price above zero to weigh shortfall against the cost of backup."
+    "voll_plain": "What each unit of energy that cannot be delivered is worth to you, in euros. The study needs a price above zero to weigh shortfall against the cost of backup.",
+    "fmea_class_a": "A generator breaks down at random. The row estimates how often that happens and what the missing energy would cost, without re-running the whole plan.",
+    "fmea_class_b": "A connection, such as the grid supply or a converter, is switched off and the plan is re-run to measure the energy the site cannot get.",
+    "fmea_class_c": "A hard condition you described, such as a heatwave or a dark, windless week, is applied and the plan is re-run to measure the shortfall.",
+    "fmea_class_d": "A failure you added yourself, with your own estimate of how often it happens and what one event costs. It is kept with the project.",
+    "fmea_engine": "How this row was worked out: a quick estimate for a generator, a full re-run of the plan for connections and stress scenarios, or your own figures.",
+    "fmea_severity": "What one event costs: the energy that cannot be delivered, priced at what undelivered energy is worth to you.",
+    "fmea_occurrence": "How often the failure happens, in events per year. For equipment it comes from how often it breaks down and how long a repair takes.",
+    "fmea_criticality": "The yearly risk: how often the failure happens times what one event costs. The table is ranked by it, largest first."
   }
 }

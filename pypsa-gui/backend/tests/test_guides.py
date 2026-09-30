@@ -104,12 +104,15 @@ HUB_FIELDS = (
     "outage_data", "shortfall_hours", "energy_strictness", "verdict",
     "cost_at_target", "top_risks", "not_established", "stress_scenario",
     "fmea_check", "template_provenance", "voll_plain",
+    # P29 (B2): the Guided FMEA tab's hovers.
+    "fmea_class_a", "fmea_class_b", "fmea_class_c", "fmea_class_d",
+    "fmea_engine", "fmea_severity", "fmea_occurrence", "fmea_criticality",
 )
 
 
 def test_hub_fields_present():
     fields = G.load_guide("eh_fmea")["fields"]
-    assert len(set(HUB_FIELDS)) == 20
+    assert len(set(HUB_FIELDS)) == 28
     missing = [k for k in HUB_FIELDS if not (fields.get(k) or "").strip()]
     assert not missing, missing
 

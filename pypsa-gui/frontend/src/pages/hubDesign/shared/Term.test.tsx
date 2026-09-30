@@ -27,13 +27,15 @@ describe('TERM_FALLBACK', () => {
     }
   })
 
-  it('covers the twenty hub-design fields', () => {
+  it('covers the twenty hub-design fields and the eight FMEA-tab fields (P29)', () => {
     expect(Object.keys(TERM_FALLBACK).sort()).toEqual([
       'hub_start', 'hub_site', 'hub_goal', 'hub_results', 'hub_improve',
       'site_type', 'grid_connection', 'critical_load', 'grid_strength',
       'outage_data', 'shortfall_hours', 'energy_strictness', 'verdict',
       'cost_at_target', 'top_risks', 'not_established', 'stress_scenario',
       'fmea_check', 'template_provenance', 'voll_plain',
+      'fmea_class_a', 'fmea_class_b', 'fmea_class_c', 'fmea_class_d',
+      'fmea_engine', 'fmea_severity', 'fmea_occurrence', 'fmea_criticality',
     ].sort())
   })
 })
