@@ -5,7 +5,7 @@
  *
  *   cd pypsa-gui/frontend
  *   PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs \
- *     --phase P22.9|P23|P24-BE|P24|P25|P26|P27a|P27b|P28|P32 [--template eh_datacenter] [--out <dir>] [--keep]
+ *     --phase P22.9|P23|P24-BE|P24|P25|P26|P27a|P27b|P28|P29|P30|P32 [--template eh_datacenter] [--out <dir>] [--keep]
  *
  * P24 walks the Guided hub design (spec §5) as a first-time user: the
  * template from /projects opens hubDesign at Site; Site rows match the
@@ -111,6 +111,17 @@
  * Expert (`ui-mode-explicit = 1`) → the switch stays Expert, no
  * `hub-card-site`.
  *
+ * P30 (deferred spec 2026-09-28 §5.9) — P22.9 (every step; its project is
+ * then renamed out of the way, as P27b does) and P24 (every step), with a
+ * check on every tour step: a screenshot, the `guide-tour` box inside the
+ * viewport and apart from the `guide-highlight` box (hub tour before, during
+ * and after a study; the tagging tour). In the P22.9 tagging tour, started
+ * from a bus, a Link is picked from the header search and its Edit form
+ * opened → the counter reads 2/2 and the Link step shows. Then
+ * `POST /api/simulation/preflight` on each template project → no
+ * `gen_zero_costs` issue; and the New-project dialog's Blank tab shows
+ * "Saved to" with the smoke's scratch PYPSAGUI_PROJECTS_ROOT.
+ *
  * It starts its own uvicorn (local mode, ANTHROPIC_API_KEY unset, app data
  * and projects under a scratch dir), Vite on 5173 and — after the send-gate
  * check — the OpenAI-wire stub model, then walks the phase path in a fresh
@@ -151,7 +162,7 @@ const TEMPLATE_NAMES = {
   eh_h2_hub: 'Industrial Hydrogen Hub',
   eh_microgrid: 'Island Microgrid',
 }
-const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25', 'P26', 'P27a', 'P27b', 'P28', 'P29', 'P32'])
+const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25', 'P26', 'P27a', 'P27b', 'P28', 'P29', 'P30', 'P32'])
 
 // ── args ────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
@@ -198,6 +209,37 @@ async function shot(page, name) {
   await page.screenshot({ path: file, fullPage: false })
   shots.push(file)
   info(`screenshot ${file}`)
+}
+
+/** P30 (B4): the tour popover inside the viewport and apart from the
+ *  highlight box; a screenshot of every step checked. */
+async function tourBoxCheck(page, label) {
+  const g = await page.evaluate(() => {
+    const box = el => {
+      if (!el) return null
+      const r = el.getBoundingClientRect()
+      return { top: r.top, left: r.left, bottom: r.bottom, right: r.right }
+    }
+    const tour = document.querySelector('[data-testid="guide-tour"]')
+    return {
+      tour: box(tour),
+      hl: box(document.querySelector('[data-testid="guide-highlight"]')),
+      placement: tour?.getAttribute('data-placement') ?? null,
+      counter: (tour?.querySelector('div')?.textContent ?? '').trim(),
+      vw: window.innerWidth, vh: window.innerHeight,
+    }
+  })
+  const t = g.tour
+  check(!!t && t.top >= 0 && t.left >= 0 && t.bottom <= g.vh && t.right <= g.vw,
+    `${label}: guide-tour inside the viewport (${t ? `${Math.round(t.left)},${Math.round(t.top)}–${Math.round(t.right)},${Math.round(t.bottom)}` : 'none'} of ${g.vw}×${g.vh}, ${g.placement})`)
+  if (g.hl) {
+    const apart = t.right <= g.hl.left || t.left >= g.hl.right || t.bottom <= g.hl.top || t.top >= g.hl.bottom
+    check(apart, `${label}: guide-tour ∩ guide-highlight = ∅`)
+  } else {
+    info(`${label}: no highlight (target not on screen)`)
+  }
+  await shot(page, `p30-tour-${label}`)
+  return g
 }
 
 // ── processes ───────────────────────────────────────────────────────────────
@@ -600,6 +642,7 @@ async function phaseP229(browser, { reviewChecks = false } = {}) {
       'no "not on screen" note')
     info(`tour title: ${(await byId('guide-step-title').innerText()).trim()}`)
     await shot(page, 'tagging-tour-bus-fields')
+    if (args.phase === 'P30') await p30TaggingLinkStep(page)
     return { project }
   } catch (e) {
     try { await shot(page, 'FAILURE') } catch { /* page gone */ }
@@ -1037,6 +1080,7 @@ async function phaseP24(browser) {
       await sleep(250)   // a reveal renders on the next commit (GuidedTour retries after 60 ms)
       const missing = await byId('guide-step-missing').isVisible().catch(() => false)
       check(!missing, `tour step ${seen.length + 1}: ${target} on screen`)
+      if (args.phase === 'P30') await tourBoxCheck(page, `hub-${++tourShots}-${target}`)
       seen.push(target)
       const next = byId('guide-next')
       const last = ((await next.textContent()) ?? '').trim() === 'Done'
@@ -1050,6 +1094,7 @@ async function phaseP24(browser) {
     return seen
   }
 
+  let tourShots = 0
   const PRE_STUDY_TOUR = ['hub-rail', 'hub-start-templates', 'hub-site-readiness', 'hub-site-type',
     'hub-goal-lole', 'hub-goal-run']
 
@@ -2687,6 +2732,85 @@ async function p29FmeaStep(page, L) {
   return res
 }
 
+// ── P30 (deferred spec 2026-09-28 §5.9) ─────────────────────────────────────
+async function p30TaggingLinkStep(page) {
+  const byId = id => page.locator(`[data-testid="${id}"]`)
+  step('P30 (B4, B7) tagging tour: the box on the Bus step; a Link opened later is step 2/2')
+  await tourBoxCheck(page, 'tagging-bus')
+  const counter = async () => ((await byId('guide-tour').locator('div').first().textContent()) ?? '').trim()
+  const c0 = await counter()
+  check(/·\s*1\/1$/.test(c0), `counter before any Link is open: "${c0}" (the Link step is not counted yet)`)
+  const links = await api('GET', '/api/network/links')
+  const link = links.find(l => l.eh_role === 'grid_import') ?? links[0]
+  check(Boolean(link), `a Link to open: ${link?.name}`)
+  const search = page.getByPlaceholder('Search components…')
+  await search.fill(link.name)
+  const hit = page.locator('button', { hasText: link.name }).filter({ hasText: /\bLink\b/ }).first()
+  await hit.waitFor({ state: 'visible', timeout: 15_000 })
+  await hit.click()
+  await byId('props-edit-link').waitFor({ state: 'visible', timeout: 15_000 })
+  await byId('props-edit-link').click()
+  await byId('eh-link-role').waitFor({ state: 'visible', timeout: 15_000 })
+  ok(`Link ${link.name} in Edit on the Properties panel`)
+  await page.waitForFunction(() => /·\s*1\/2$/.test(
+    (document.querySelector('[data-testid="guide-tour"] div')?.textContent ?? '').trim()),
+  null, { timeout: 10_000 })
+  check((await byId('guide-next').textContent()).trim() === 'Next',
+    `counter now "${await counter()}" and the button reads Next`)
+  await byId('guide-next').click()
+  await page.locator('[data-testid="guide-tour"][data-step-target="eh-link-role"]')
+    .waitFor({ state: 'visible', timeout: 10_000 })
+  const c2 = await counter()
+  check(/·\s*2\/2$/.test(c2), `the Link step shows with counter "${c2}"`)
+  check(!(await byId('guide-step-missing').isVisible().catch(() => false)), 'no "not on screen" note on the Link step')
+  await tourBoxCheck(page, 'tagging-link')
+  await byId('guide-next').click()
+  await byId('guide-tour').waitFor({ state: 'detached', timeout: 10_000 })
+  ok('Done closes the tour')
+}
+
+async function phaseP30(browser) {
+  const { project: p229 } = await phaseP229(browser)
+  // P24 creates the data center under its default name again, so the P22.9
+  // project moves out of the way first (as P27b does).
+  const moved = 'P30 Data Center'
+  await api('POST', `/api/projects/${encodeURIComponent(p229)}/rename`, { new_name: moved })
+  ok(`P22.9 project renamed: ${p229} → ${moved}`)
+  await phaseP24(browser)
+
+  step('P30 (B5) POST /api/simulation/preflight on each template → no gen_zero_costs')
+  for (const [id, name] of Object.entries(TEMPLATE_NAMES)) {
+    await api('POST', `/api/projects/${encodeURIComponent(name)}/activate`)
+    const meta = await api('GET', '/api/network/meta')
+    const pf = await api('POST', '/api/simulation/preflight')
+    const codes = (pf.issues ?? []).map(i => i.code)
+    fs.writeFileSync(path.join(args.out, `p30-preflight-${id}.json`), JSON.stringify(pf, null, 2))
+    check(!pf.deferred && meta.loaded_project === name && !codes.includes('gen_zero_costs'),
+      `${name}: preflight ok=${pf.ok}, ${pf.warnings} warning(s) [${codes.join(', ') || 'none'}], no gen_zero_costs`)
+  }
+
+  step('P30 (B6) the New-project dialog shows the real projects root')
+  const root = path.join(RUN, 'projects')
+  const settings = await api('GET', '/api/local-settings')
+  check(settings.projects_root === root, `GET /api/local-settings projects_root = ${settings.projects_root}`)
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  try {
+    const page = await ctx.newPage()
+    const byId = id => page.locator(`[data-testid="${id}"]`)
+    await page.goto(`${WEB}/projects`, { waitUntil: 'domcontentloaded' })
+    // "New project" opens the wizard on its Blank tab (ProjectsHomePage).
+    await page.getByRole('button', { name: 'New project', exact: true }).first().click()
+    await byId('new-project-wizard').waitFor({ state: 'visible', timeout: 15_000 })
+    await byId('new-project-saved-to').waitFor({ state: 'visible', timeout: 15_000 })
+    const line = ((await byId('new-project-saved-to').textContent()) ?? '').trim()
+    check(line.startsWith('Saved to ') && line.includes(root) && !line.includes('pypsa-gui/backend/projects'),
+      `"${line}"`)
+    await shot(page, 'p30-new-project-saved-to')
+  } finally {
+    await ctx.close()
+  }
+}
+
 async function phaseP29(browser) {
   const p26 = await phaseP26(browser)
   const dc = p26.find(r => r.id === 'eh_datacenter')
@@ -2916,6 +3040,7 @@ try {
   else if (args.phase === 'P27b') await phaseP27b(browser)
   else if (args.phase === 'P28') await phaseP28(browser)
   else if (args.phase === 'P29') await phaseP29(browser)
+  else if (args.phase === 'P30') await phaseP30(browser)
   else if (args.phase === 'P32') await phaseP32(browser)
   console.log(`\nPASS — ${shots.length} screenshots in ${args.out}`)
 } catch (e) {
