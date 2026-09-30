@@ -28,8 +28,9 @@ Each round's findings, and what was done about them, are in the plan under the W
 |---|---|
 | `tests/qa_value_flows.py` | **235/235** (33 s) after the assessor's hardening (222/222 at bfb5bef). See "The driver" below. |
 | All QA drivers (`tests/run_qa_drivers.py`) | **25/25 passed** (includes `qa_value_flows`, `qa_billing_contracts`, `qa_commercial_lp`) |
-| Full backend suite (`-m "not slow"`, Python 3.12 venv) | _pending_ |
-| Frontend `vitest run` (on 2b908e3) | **248 files, 2,753 tests passed** |
+| Full backend suite (`-m "not slow"`, Python 3.12 venv), first run at bfb5bef (edits landed mid-run) | 7,887 passed, 31 skipped, **2 failed**, both triaged: `test_hourly_assumption_audit` (the energy-hub adequacy sites from the master merge e364837, unlisted — gate condition 1, listed with reasons) and `test_openpyxl_parses_uploads_with_defusedxml_in_this_environment` (the local venv lacked the pinned `defusedxml==0.7.1` — an environment gap, installed; no code change). |
+| Full backend suite at e27fe5d / 024d21b (after the condition fixes), run in 14 chunks (the container restarts and background tasks are time-limited) | **7,891 passed, 31 skipped, 0 failed** (11 deselected `slow`) |
+| Frontend `vitest run` at 024d21b | **248 files, 2,754 tests passed** |
 | Frontend `tsc --noEmit` | clean |
 
 ### The driver
