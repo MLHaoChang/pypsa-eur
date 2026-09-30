@@ -163,6 +163,26 @@ export interface StudyJob {
   position: number | null
 }
 
+/** Increment 9: one row of the connection-capacity table. `capacity_mw` is the
+ *  AC answer (null where only the DC screen ran); `dc_estimate_mw` travels with
+ *  it so the gap stays visible. `none_up_to_cap` means "at least the cap". */
+export type CapacityKind = 'load' | 'generation'
+export interface CapacityRow {
+  bus: string
+  hour: number
+  kind: CapacityKind
+  capacity_mw: number | null
+  dc_estimate_mw: number | null
+  binding_kind: string
+  binding_element: string | null
+  binding_contingency: string | null
+  /** The binding constraint was already violated before anything connected:
+   *  the figure is then the worsening tolerance, not room on the network. */
+  binding_preexisting: boolean
+  method: 'ac' | 'dc'
+}
+export interface CapacityTable { rows: CapacityRow[]; hours: number[]; buses: string[] }
+
 const quiet = { skipErrorToast: true } as const
 
 export const gridspineApi = {
@@ -234,6 +254,17 @@ export const gridspineApi = {
 
   figure: (project: string, hour: number, name: FigureName) =>
     client.get<ReadbackFigure>(`/gridspine/${encodeURIComponent(project)}/figures/${hour}/${name}`, quiet).then(r => r.data),
+
+  /** The run's connection-capacity table: DC for every bus, plus AC answers
+   *  computed since. 404 before a screened run. */
+  capacity: (project: string) =>
+    client.get<CapacityTable>(`/gridspine/${encodeURIComponent(project)}/capacity`, quiet).then(r => r.data),
+
+  /** The AC capacity at one bus, every selected hour (seconds of CPU). */
+  computeCapacity: (project: string, bus: string, kind: CapacityKind) =>
+    client.post<{ rows: CapacityRow[] }>(
+      `/gridspine/${encodeURIComponent(project)}/capacity`, { bus, kind }, quiet,
+    ).then(r => r.data),
 
   /** The handoff bundle for one selected hour, as a zip blob. */
   bundle: (project: string, hour: number) =>

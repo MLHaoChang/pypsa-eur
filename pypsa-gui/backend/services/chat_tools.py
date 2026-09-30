@@ -2293,6 +2293,19 @@ def gridspine_fetch_result_figure(project_id: str, hour: int, name: str) -> dict
         return _h(_gridspine_project(db, user, project_id), name, hour)
 
 
+def gridspine_get_capacity(project_id: str, bus: str | None = None, kind: str | None = None,
+                           hour: int | None = None) -> dict:
+    from services.gridspine_service import get_capacity as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), bus=bus, kind=kind, hour=hour)
+
+
+def gridspine_compute_capacity(project_id: str, bus: str, kind: str) -> dict:
+    from services.gridspine_service import compute_capacity as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), bus, kind)
+
+
 def gridspine_export_handoff_bundle(project_id: str, hour: int) -> dict:
     from services.gridspine_service import export_handoff_bundle as _h
     with _acting() as (db, user):
@@ -5582,7 +5595,7 @@ DISPATCHERS: dict[str, Any] = {
     "solve_queue_list": solve_queue_list,
     "solve_queue_abort": solve_queue_abort,
     "solve_queue_clear_finished": solve_queue_clear_finished,
-    # gridspine (12)
+    # gridspine (14)
     "gridspine_create_study": gridspine_create_study,
     "gridspine_set_dispatch_source": gridspine_set_dispatch_source,
     "gridspine_get_config": gridspine_get_config,
@@ -5595,6 +5608,9 @@ DISPATCHERS: dict[str, Any] = {
     "gridspine_export_handoff_bundle": gridspine_export_handoff_bundle,
     "gridspine_get_readback": gridspine_get_readback,
     "gridspine_fetch_result_figure": gridspine_fetch_result_figure,
+    "gridspine_get_capacity": gridspine_get_capacity,
+    "gridspine_compute_capacity": gridspine_compute_capacity,
+    # library (4)
     "list_library_items": list_library_items,
     "get_library_item": get_library_item,
     "import_urdb_tariff": import_urdb_tariff,

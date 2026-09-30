@@ -178,8 +178,12 @@ def _row(cid, hour, *, converged, islanded, loading=None, vm=None):
     }
 
 
-def _screen_branches(work, gm, v0, branch_rows, hour, nl) -> dict:
-    """One batched lightsim2grid solve on the shared GridModel; rows keyed by contingency_id."""
+def _branch_outcomes(work, gm, v0, branch_rows, nl) -> dict:
+    """One batched lightsim2grid solve on the shared GridModel. Returns, per
+    contingency_id, ``(converged, islanded, loading_pct, vm_pu)`` — the raw
+    per-branch loading and per-bus voltage, before any summary. The screen
+    reduces these to a severity; the connection-capacity search compares them
+    element by element against the base case (``static/capacity.py``)."""
     keys = branch_keys(work)
     # branch_keys is lines then trafos in table order — exactly lightsim2grid's ids.
     ls2g_id = {(k.from_bus, k.to_bus, k.ckt): pos for pos, k in enumerate(keys.itertuples(index=False))}
@@ -205,7 +209,7 @@ def _screen_branches(work, gm, v0, branch_rows, hour, nl) -> dict:
     out = {}
     for cid, k in wanted.items():
         if not connected[k]:
-            out[cid] = _row(cid, hour, converged=False, islanded=True)
+            out[cid] = (False, True, None, None)
             continue
         if abs(amps[k, k]) > 1e-6:
             raise ContractError(
@@ -214,25 +218,26 @@ def _screen_branches(work, gm, v0, branch_rows, hour, nl) -> dict:
             )
         vm = np.abs(volts[k])
         if vm.size == 0 or np.nanmin(vm) <= 0.0:
-            out[cid] = _row(cid, hour, converged=False, islanded=False)
+            out[cid] = (False, False, None, None)
             continue
-        loading = branch_loading_pct(work, amps[k, :nl], amps[k, nl:])
-        out[cid] = _row(cid, hour, converged=True, islanded=False, loading=loading, vm=vm)
+        out[cid] = (True, False, branch_loading_pct(work, amps[k, :nl], amps[k, nl:]), vm)
     return out
 
 
-def _screen_units(work, gm, v0, unit_rows, hour, nl) -> dict:
-    """Unit outages on the shared GridModel: deactivate, solve from the base-case
-    voltages, read the from/HV-side currents, reactivate. lightsim2grid ids are
-    the pandapower table positions (gens in table order, then the slack it adds
-    from ext_grid; sgens in table order), so the mapping is positional and
-    `gridmodel_for` has already checked the status vectors against the net. A
-    unit that is off in the hour is deactivated again (a no-op) and left off.
+def _as_rows(outcomes: dict, hour) -> dict:
+    return {
+        cid: _row(cid, hour, converged=conv, islanded=isl, loading=ld, vm=vm)
+        for cid, (conv, isl, ld, vm) in outcomes.items()
+    }
 
-    pandapower used to solve these on a deep copy per unit (~0.4 s of the 0.5 s
-    the screen cost); it remains the oracle in the tests. An empty solve is a
-    recorded collapse: converged=False, islanded=False (G_BUS_39, ruling 16).
-    """
+
+def _screen_branches(work, gm, v0, branch_rows, hour, nl) -> dict:
+    """One batched lightsim2grid solve on the shared GridModel; rows keyed by contingency_id."""
+    return _as_rows(_branch_outcomes(work, gm, v0, branch_rows, nl), hour)
+
+
+def _unit_outcomes(work, gm, v0, unit_rows, nl) -> dict:
+    """Unit outages, as ``_branch_outcomes`` returns them; see ``_screen_units``."""
     gen_pos = {work.gen.at[i, "name"]: pos for pos, i in enumerate(work.gen.index)}
     sgen = getattr(work, "sgen", None)
     sgen_pos = {sgen.at[i, "name"]: pos for pos, i in enumerate(sgen.index)} if sgen is not None else {}
@@ -253,18 +258,30 @@ def _screen_units(work, gm, v0, unit_rows, hour, nl) -> dict:
         try:
             v = np.asarray(gm.ac_pf(v0, _LS2G_MAX_ITER, _LS2G_TOL))
             if v.size == 0:
-                out[r.contingency_id] = _row(r.contingency_id, hour, converged=False, islanded=False)
+                out[r.contingency_id] = (False, False, None, None)
                 continue
             i_line = np.asarray(gm.get_lineor_res()[3])
             i_trafo = np.asarray(gm.get_trafohv_res()[3])
         finally:
             if was_on:
                 on(pos)
-        loading = branch_loading_pct(work, i_line, i_trafo)
-        out[r.contingency_id] = _row(
-            r.contingency_id, hour, converged=True, islanded=False, loading=loading, vm=np.abs(v),
-        )
+        out[r.contingency_id] = (True, False, branch_loading_pct(work, i_line, i_trafo), np.abs(v))
     return out
+
+
+def _screen_units(work, gm, v0, unit_rows, hour, nl) -> dict:
+    """Unit outages on the shared GridModel: deactivate, solve from the base-case
+    voltages, read the from/HV-side currents, reactivate. lightsim2grid ids are
+    the pandapower table positions (gens in table order, then the slack it adds
+    from ext_grid; sgens in table order), so the mapping is positional and
+    `gridmodel_for` has already checked the status vectors against the net. A
+    unit that is off in the hour is deactivated again (a no-op) and left off.
+
+    pandapower used to solve these on a deep copy per unit (~0.4 s of the 0.5 s
+    the screen cost); it remains the oracle in the tests. An empty solve is a
+    recorded collapse: converged=False, islanded=False (G_BUS_39, ruling 16).
+    """
+    return _as_rows(_unit_outcomes(work, gm, v0, unit_rows, nl), hour)
 
 
 def n1_severity_ac(net, contingencies, dispatch, loads, registry, hours=None, on_hour=None) -> pd.Series:

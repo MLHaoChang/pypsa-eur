@@ -2480,6 +2480,50 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id"],
     ),
     _t(
+        "gridspine_get_capacity",
+        "Connection capacity for a planning → dynamics project: how many MW of "
+        "new load or generation can connect at each bus, per selected hour, "
+        "and what stops it. Capacity is the most MW that creates no new "
+        "violation and worsens no existing one, intact and under every N-1 "
+        "outage (100 % loading, 0.9-1.1 pu), with the added MW balanced "
+        "pro-rata over the committed synchronous units and new load at pf "
+        "0.98. Returns {rows, hours, buses}: each row has bus, hour, kind "
+        "(load|generation), method (dc = estimate for every bus, written by "
+        "the study; ac = exact to 1 MW, computed on request), capacity_mw "
+        "(AC; null on dc rows), dc_estimate_mw, binding_kind "
+        "(thermal_intact, thermal_n1, v_low_*/v_high_*, n1_divergence, "
+        "ac_divergence, none_up_to_cap = at least the cap, never infinity), "
+        "binding_element, binding_contingency and binding_preexisting. When "
+        "binding_preexisting is true the limit was ALREADY violated before "
+        "connection: say the bus is blocked by an existing overload and do "
+        "not present the MW figure as headroom. Filter with bus, kind and "
+        "hour; unfiltered is 78 rows per hour on case39. 404 before a "
+        "screened run. Safety: read.",
+        {
+            "project_id": {"type": "string"},
+            "bus": {"type": "string"},
+            "kind": {"type": "string", "enum": ["load", "generation"]},
+            "hour": {"type": "integer"},
+        },
+        ["project_id"],
+    ),
+    _t(
+        "gridspine_compute_capacity",
+        "Compute the exact AC connection capacity at one bus for load or "
+        "generation, at every selected hour of the project's latest run, and "
+        "keep it in the run and its handoff bundles (replacing that bus's DC "
+        "rows). A few seconds per call. Returns {rows} in the "
+        "gridspine_get_capacity row shape. 409 while a study for the project "
+        "is queued or running; 422 for a bus the grid does not have. "
+        "Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "bus": {"type": "string"},
+            "kind": {"type": "string", "enum": ["load", "generation"]},
+        },
+        ["project_id", "bus", "kind"],
+    ),
+    _t(
         "gridspine_fetch_result_figure",
         "One read-back comparison as data for a bundle hour: name is vm, va, "
         "branch_p or branch_q; returns {available, hour, tolerance, rows: "
@@ -2904,6 +2948,8 @@ TOOL_ROUTES: dict[str, list] = {
     "gridspine_export_handoff_bundle": _SERVICE_CALL,
     "gridspine_get_readback": _SERVICE_CALL,
     "gridspine_fetch_result_figure": _SERVICE_CALL,
+    "gridspine_get_capacity": _SERVICE_CALL,
+    "gridspine_compute_capacity": _SERVICE_CALL,
     # Library (4) — P2 WP2.4c: router handlers, called in process with the
     # acting user (the Library ACL is the org's).
     "list_library_items": [("GET", "/api/library/items/{kind}")],

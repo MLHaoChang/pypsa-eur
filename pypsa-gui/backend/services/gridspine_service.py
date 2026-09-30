@@ -28,10 +28,12 @@ Nothing here is derived from a stored path: the run directory is always
 bundle or moved by a rename keeps working.
 """
 import json
+import math
 import os
 import re
 import shutil
 import tempfile
+import threading
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,6 +51,8 @@ from services import project_registry
 # the repo root is gone, and `tests/test_gridspine_service.py` fails if it
 # comes back.
 try:
+    from gridspine.drivers.capacity import capacity_table as _capacity_table
+    from gridspine.drivers.capacity import compute_capacity_ac as _compute_capacity_ac
     from gridspine.drivers.readback import ingest_powerfactory_results as _ingest_readback
     from gridspine.drivers.readback import readback_status as _readback_status
     from gridspine.drivers.readback import result_figure as _result_figure
@@ -860,6 +864,76 @@ def upload_external_dispatch(project, dispatch_bytes: bytes, dispatch_name=None,
     }
     _write_config(project, StudyConfig.from_json(base))
     return summary
+
+
+#: One AC capacity search at a time per study: each rewrites the run's
+#: capacity.csv and its bundles' copies, and two interleaved upserts would lose
+#: one of them. Keyed by the run directory, which is what they share.
+_CAPACITY_LOCKS: dict = {}
+_CAPACITY_LOCKS_GUARD = threading.Lock()
+
+
+def _capacity_lock(path) -> threading.Lock:
+    with _CAPACITY_LOCKS_GUARD:
+        return _CAPACITY_LOCKS.setdefault(str(path), threading.Lock())
+
+
+def _capacity_records(table) -> list:
+    """Rows as JSON-ready dicts: NaN (the DC rows' empty AC figure) leaves as null."""
+    return [
+        {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in r.items()}
+        for r in table.to_dict(orient="records")
+    ]
+
+
+def get_capacity(project, bus: str | None = None, kind: str | None = None,
+                 hour: int | None = None) -> dict:
+    """Increment 9: the run's connection-capacity table. It holds the DC screen
+    the study writes for every bus and kind at each selected hour, plus any AC
+    answers computed since. 404 with the reason before a screened run exists.
+
+    ``bus``, ``kind`` and ``hour`` narrow ``rows``. The full table is 78 rows
+    per hour on case39, which is fine for the panel but too much to hand a
+    model. ``hours`` and ``buses`` always describe the whole table, so a
+    filtered answer still says what else exists. A filter matching nothing
+    returns no rows rather than an error: "no row for that bus" is an answer."""
+    require_planning(project)
+    try:
+        table = _capacity_table(run_dir(project))
+    except ContractError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    rows = table
+    if bus is not None:
+        rows = rows[rows["bus"] == bus]
+    if kind is not None:
+        rows = rows[rows["kind"] == kind]
+    if hour is not None:
+        rows = rows[rows["hour"] == _hour(hour)]
+    return {
+        "rows": _capacity_records(rows),
+        "hours": sorted(int(h) for h in table["hour"].unique()),
+        "buses": sorted(table["bus"].unique().tolist()),
+    }
+
+
+def compute_capacity(project, bus: str, kind: str) -> dict:
+    """The AC connection capacity at ``bus`` for ``kind`` at every selected hour,
+    kept in the run and in the bundles. 404 before a screened run, 409 while a
+    study is queued or running (it is about to rewrite the run), 422 for a bus
+    the grid does not have."""
+    require_planning(project)
+    _refuse_while_active(project, "computing connection capacity")
+    rdir = run_dir(project)
+    try:
+        _capacity_table(rdir)
+    except ContractError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    with _capacity_lock(rdir):
+        try:
+            rows = _compute_capacity_ac(rdir, bus, kind)
+        except ContractError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"rows": _capacity_records(rows)}
 
 
 def get_readback(project) -> dict:
