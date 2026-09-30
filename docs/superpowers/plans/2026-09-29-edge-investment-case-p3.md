@@ -1052,6 +1052,21 @@ Notes taken: the driver asserts non-empty ledgers and replaces the vacuous pv2 c
 value-flow line rows cut (ids 80, flags 160 characters) so one always fits a page. Not taken: the
 Sankey test's loose link count; the unlocked in-flight checks (accepted in WP3.2).
 
+**Gate assessor round 2 (7075919): PASS WITH CONDITIONS.** Conditions 1, 3, 4 closed (the chunked full
+suite re-summed: 7,891 passed, 0 failed; `qa_billing_contracts` 49/49 and `qa_commercial_lp` 30/30 with
+the new definition; multi-period split per period to the hand value). Condition 2 only partly closed —
+the definition still counted non-electric Generators whenever `is_fuel_supply` was False and read only
+a Link's bus1: a gas supply with a boiler beside it (19,161.48 vs 31,877.02), a solar-thermal collector
+(18,059.84 vs 19,824.27), a multi-output CHP's bus2 power ignored (42,825.27 vs 31,877.02), NaN
+generation given to the site (19,184.77 vs 19,824.27), all with `conservation_ok` True. Fixed (06374d7):
+`site_generators` = Generators on an ELECTRIC bus (`_electric_bus_test`: `_ELECTRIC` or the PoC site
+carrier); `site_generating_ports` / `site_link_generation` = a site-side Link with a non-electric bus0,
+counting −p_k on every port 1–4 that lands on a site-side electric bus (the split keys it by the Link;
+the PPA path receives the same frame, `SettlementInputs.site_link_generation`); NaN generation in a
+period → `export_split_not_established:<source>:<period>` and the source's amount None (never the whole
+amount to the site). Tests: the four topologies (split and PPA to the cent) and NaN; 632 targeted tests
+and the three drivers green.
+
 ## Scope boundaries (not P3)
 
 - Annual cashflows, escalation, degradation, debt, tax, incentives, returns — P4 (mapping pinned in WP3.1).
