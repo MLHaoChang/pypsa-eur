@@ -1006,7 +1006,9 @@ with a grant matches SAM's IBI: `reduces_basis` year by year, and `taxable` with
 **Taken:** a refused grant no longer adds to the totals.
 
 **Deferred to the P4 gate:** a `≤ 1` validator on `Incentive.rate` for ITC and grants (for now it is caught
-downstream as `tax_basis_invalid`).
+downstream as `tax_basis_invalid`). **Done:** `Incentive` refuses an ITC / grant rate above 1
+(`incentive_rate_above_one`) at the input; the engine's `tax_basis_invalid` path stays as defence in depth
+(tested past the input check).
 
 ## WP4.5 Metrics, solve-for-PPA, the WACC gate
 

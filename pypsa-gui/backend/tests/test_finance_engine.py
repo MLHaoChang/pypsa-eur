@@ -303,7 +303,12 @@ def test_an_impossible_basis_is_a_reason_never_an_exception():
     from models.finance import Incentive
     r = run_case(_case(fin_over={"incentives": [Incentive(kind="itc", rate=1.0)]}), layers=layer)
     assert r.sections["tax"] == "ok"                      # ITC = basis: reduced to 0, fine
-    r = run_case(_case(fin_over={"incentives": [Incentive(kind="itc", rate=1.5)]}), layers=layer)
+    # Past the input check (the model refuses a share above 1): the engine still
+    # reports it as a reason, never an exception.
+    case = _case()
+    bad = case.inputs.model_copy(update={"incentives": [Incentive.model_construct(kind="itc",
+                                                                                 rate=1.5)]})
+    r = run_case(dataclasses.replace(case, inputs=bad), layers=layer)
     assert r.sections["tax"] == "not_established"
     assert any(x.startswith("tax_basis_invalid:") for x in r.reasons["tax"])
 

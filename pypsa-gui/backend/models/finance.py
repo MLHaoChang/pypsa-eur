@@ -68,7 +68,6 @@ class DebtTranche(BaseModel):
     per operating year of the tenor."""
     model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
 
-
     kind: Literal["term_loan", "mini_perm", "construction", "mezzanine"]
     amount: float | None = Field(default=None, ge=0)
     gearing: float | None = Field(default=None, ge=0, le=1)
@@ -156,7 +155,6 @@ class Incentive(BaseModel):
     the ITC base of its assets), or it is taxable income when received."""
     model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
 
-
     kind: Literal["itc", "ptc", "grant", "accelerated_depreciation", "cfd", "capacity_payment"]
     rate: float | None = Field(default=None, ge=0)
     amount: float | None = Field(default=None, ge=0)
@@ -165,11 +163,20 @@ class Incentive(BaseModel):
     feoc_flag: bool | None = None
     grant_tax_treatment: Literal["reduces_basis", "taxable"] | None = None
 
+    @model_validator(mode="after")
+    def _share_at_most_one(self) -> "Incentive":
+        # An ITC / grant rate is a share of the eligible basis (WP4.4 round 4,
+        # deferred to the P4 gate): above 1 it is refused here, not later as
+        # `tax_basis_invalid`.
+        if self.kind in ("itc", "grant") and self.rate is not None and self.rate > 1.0:
+            raise ValueError(f"incentive_rate_above_one: a {self.kind} rate is a share of the "
+                             f"eligible basis (≤ 1), got {self.rate}")
+        return self
+
 
 class TaxEquityStructure(BaseModel):
     """Spec §6.7 (fields beyond shares added after review F13)."""
     model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
-
 
     kind: Literal["partnership_flip", "sale_leaseback", "inverted_lease"]
     te_share_pre_flip: float = Field(ge=0, le=1)
@@ -192,7 +199,6 @@ class SolvePpa(BaseModel):
     year (spec §6.6; SAM `ppa_soln_mode=0`; IC P4 plan C9). `contract_id`
     None = the case's single owner-sold PPA."""
     model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
-
 
     contract_id: str | None = None
     target_irr: float = Field(gt=-1, lt=10)
@@ -217,7 +223,6 @@ class FinanceInputs(BaseModel):
     not established, never 0. `participants` is derived from the value-flow
     config (P3) — a stored list that differs is refused at run time."""
     model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
-
 
     currency: str = Field(default="EUR", min_length=3, max_length=3)
     financial_close: date

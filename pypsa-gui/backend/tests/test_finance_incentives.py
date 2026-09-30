@@ -284,3 +284,17 @@ def test_review_round_3_grants_accumulate_per_asset_and_classes_ignore_case():
     inc, _ = _run(_case([Incentive(kind="grant", amount=1.0, grant_tax_treatment="reduces_basis")],
                         assets=(nocost,), energy={"x": 0.0}), pack=None)
     assert "overnight_cost_missing:0:grant" in inc.reasons
+
+
+def test_an_itc_or_grant_rate_above_one_is_refused_at_the_input():
+    """Deferred from WP4.4 round 4 to the P4 gate: a share above 1 is an input
+    error, refused where it is typed (a PTC rate is a price, not a share)."""
+    from pydantic import ValidationError
+
+    from models.finance import Incentive
+
+    for kind in ("itc", "grant"):
+        with pytest.raises(ValidationError, match="incentive_rate_above_one"):
+            Incentive(kind=kind, rate=1.5, grant_tax_treatment="taxable")
+        assert Incentive(kind=kind, rate=1.0, grant_tax_treatment="taxable").rate == 1.0
+    assert Incentive(kind="ptc", rate=27.5).rate == 27.5
