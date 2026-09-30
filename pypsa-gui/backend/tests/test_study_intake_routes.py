@@ -196,3 +196,20 @@ def test_a_draft_load_larger_than_an_upload_is_refused(client, api_project, stud
     intake = {**INTAKE, "load": {"source": "upload", "csv_text": "x" * (upload_service.MAX_FILE_BYTES + 1)}}
     r = client.post(f"/api/projects/{src}/studies/preview", json={"intake": intake})
     assert r.json()["load"]["error_kind"] == "load_upload_invalid"
+
+
+# ── gate S8 re-verification BC-S8-v2-2: csv_text is a draft-only field ────
+
+def test_a_patch_cannot_store_draft_load_text(client, api_project, studies_on):
+    src = api_project("s8-patch-csv")
+    r = create_pack_study(client, src, "s8-patch-csv-base", intake=INTAKE)
+    assert r.status_code == 201, r.text
+    sid = r.json()["study_id"]
+    text = _csv(_kw()).decode()
+    for body in ({"intake": {"load": {"source": "upload", "csv_text": text}}},
+                 {"step": "load", "intake": {"load": {"source": "upload", "csv_text": text}}}):
+        r = client.patch(f"/api/projects/s8-patch-csv-base/studies/{sid}", json=body)
+        assert r.status_code == 422, r.text
+        assert "csv_text" in r.text
+    got = client.get(f"/api/projects/s8-patch-csv-base/studies/{sid}").json()
+    assert "csv_text" not in got["intake"].get("load", {})

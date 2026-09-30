@@ -433,6 +433,14 @@ def patch_study(study_id: str, body: StudyPatch,
     _refuse_unless_enabled()
     _check_lock(db, project, user)
     _refuse_outside_mvp1(body.settings)
+    load = (body.intake or {}).get("load")
+    if isinstance(load, dict) and "csv_text" in load:
+        # Gate S8 re-verification BC-S8-v2-2: `csv_text` carries a DRAFT's
+        # file until creation writes it as an upload; a stored study reads
+        # its load from an upload, never from text in its record.
+        raise HTTPException(422, (
+            "load.csv_text is only accepted while creating a study; upload the "
+            "file and set load.upload_id instead"))
     if body.step is not None:
         if body.intake is None or set(body.intake) - {body.step}:
             raise HTTPException(422, (

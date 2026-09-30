@@ -452,3 +452,19 @@ def test_a_load_given_as_csv_text_is_read_like_an_upload(library):
     led = lib.seed_ledger(Q.BESS_AT_SITE, intake, library)
     n = P.build_site_network(intake, led, "none")
     assert n.loads_t.p_set["site_load"].tolist() == pytest.approx(_shape())
+
+
+# ── gate S8 re-verification BC-S8-v2-1: Excel for Mac's "CSV (Macintosh)"
+# ends lines with a bare CR; it must read, not 500 on csv.Error ──────────
+
+@pytest.mark.parametrize("eol", ["\r", "\r\n", "\n"])
+def test_a_csv_with_any_line_ending_reads_the_same(eol):
+    blob = _csv(_shape()).decode().replace("\r\n", "\n").replace("\n", eol).encode()
+    got = P.parse_load_upload(blob, unit=None, year=2025)
+    assert got.unit == "MW" and list(got.values) == pytest.approx(_shape())
+
+
+def test_a_csv_the_reader_cannot_parse_is_a_typed_refusal():
+    with pytest.raises(P.PackError) as exc:
+        P.parse_load_upload(b'timestamp,load (MW)\n"2025-01-01 00:00,1\x00\n', unit=None, year=2025)
+    assert exc.value.code in ("load_upload_invalid", "load_upload_timestamps_invalid")

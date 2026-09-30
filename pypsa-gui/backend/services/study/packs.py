@@ -414,8 +414,16 @@ def parse_load_upload(blob: bytes, *, unit: str | None, year: int) -> LoadUpload
     if unit is not None and unit not in LOAD_UNITS:
         raise PackError("load_upload_invalid", f"load.unit is kW or MW, not {unit!r}")
     text = blob.decode("utf-8-sig", errors="replace")
-    rows = [[c.strip() for c in r] for r in csv.reader(io.StringIO(text))
-            if r and any(c.strip() for c in r)]
+    # Gate S8 re-verification BC-S8-v2-1: Excel for Mac's "CSV (Macintosh)"
+    # ends lines with a bare CR, which `csv.reader` rejects mid-field; one
+    # line ending for all three spellings, and a reader error is a refusal.
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    try:
+        rows = [[c.strip() for c in r] for r in csv.reader(io.StringIO(text))
+                if r and any(c.strip() for c in r)]
+    except csv.Error as exc:
+        raise PackError("load_upload_invalid",
+                        f"the file is not a readable CSV ({exc})") from None
     if not rows:
         raise PackError("load_upload_invalid", "the uploaded file is empty")
     header = None
