@@ -1056,6 +1056,10 @@ def load_inputs(study, base_dir, db, base_uuid: str) -> StudyInputs:
         raise FindingsRefused(409, "ledger_changed_since_run", (
             "the assumptions ledger changed after the run; re-run the study (the "
             "LP sized the options on the old one)"))
+    if not run_hashes.intake_matches(study.intake, hashes):
+        raise FindingsRefused(409, "intake_changed_since_run", (
+            "the study's answers (site, load, tariff or PV) changed after the run; "
+            "re-run the study (the options were built from the old ones)"))
     library = study_library.load_library()
     try:
         tariff = packs.effective_tariff(study.intake, ledger, library)
@@ -1237,6 +1241,7 @@ def assemble_findings(study, base_dir, db, base_uuid: str, *,
         options=options, options_status=faux.get("options_status", "not_established"),
         pending_options=faux.get("pending_options") or [],
         hashes=FindingsHashes(ledger_hash=hashes.get("ledger_hash"),
+                              intake_hash=hashes.get("intake_hash"),
                               base_network_hash=base_hash,
                               option_network_hashes=hashes.get("option_network_hashes") or {}),
         baseline=BaselineResult.model_validate(faux["baseline"]),

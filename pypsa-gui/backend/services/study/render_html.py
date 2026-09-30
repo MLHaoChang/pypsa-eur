@@ -83,4 +83,5 @@ def render_html(report: DecisionReport, charts: dict[str, bytes] | None = None, 
         report=report, sections=R.SECTIONS, prose=prose, charts=encoded,
         stale=report.stale if stale is None else stale,
         stale_reasons=report.stale_reasons if stale_reasons is None else stale_reasons,
-        fmt=R.format_fact, prov=provenance, num=num, pct=pct, help=help_text)
+        fmt=R.format_fact, prov=provenance, num=num, pct=pct, help=help_text,
+        money=R.money_unit(report), money_yr=R.money_unit(report, per_year=True))

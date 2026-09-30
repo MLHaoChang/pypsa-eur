@@ -274,3 +274,93 @@ def test_every_report_handler_declares_access_and_refuses_when_disabled():
         assert "_refuse_unless_enabled()" in inspect.getsource(fn), fn.__name__
     src = inspect.getsource(S.assemble_report)
     assert "_check_lock(" in src and "_refuse_while_a_run_runs(" in src
+
+
+# ── gate S7 (BC-S7-1, BC-S7-3, S4 intake) ────────────────────────────────
+
+class BoundSolver(FakeSolver):
+    """The fake, sizing every battery AT its upper bound (a size limit binds)."""
+
+    def __call__(self, config, n, *a, **k):
+        out = super().__call__(config, n, *a, **k)
+        if len(n.storage_units):
+            n.storage_units["p_nom_opt"] = n.storage_units["p_nom_max"]
+        return out
+
+
+def _econ_text(body) -> str:
+    return " ".join(p["text"] for p in body["sections"]["economics"]["prose"])
+
+
+def test_zero_profit_is_stated_only_at_an_interior_optimum(
+        client, api_project, studies_on, monkeypatch):
+    """BC-S7-1: at a size limit the revenue at duals exceeds the annualised cost."""
+    from services import solver_service
+
+    monkeypatch.setattr(solver_service, "run_simulation", FakeSolver())
+    sid = _full(client, api_project, "rep-int")
+    body = _post(client, "rep-int", sid)
+    codes = {d["code"] for d in body["required_disclosures"]}
+    assert "market_revenue_at_duals_zero_profit_at_optimum" in codes
+    assert "market_revenue_at_duals_exceeds_cost_at_size_limit" not in codes
+    assert "zero profit by construction" in _econ_text(body)
+
+    monkeypatch.setattr(solver_service, "run_simulation", BoundSolver())
+    sid = _full(client, api_project, "rep-bound")
+    body = _post(client, "rep-bound", sid)
+    assert body["sections"]["economics"]["status"] == "ok"
+    codes = {d["code"] for d in body["required_disclosures"]}
+    assert "size_at_upper_bound" in codes
+    assert "market_revenue_at_duals_zero_profit_at_optimum" not in codes
+    assert "market_revenue_at_duals_exceeds_cost_at_size_limit" in codes
+    text = _econ_text(body)
+    assert "zero profit" not in text and "exceeds" in text
+    html = client.get(f"/api/projects/rep-bound/studies/{sid}/report.html").text
+    assert "zero profit by construction" not in html
+
+
+def test_every_money_table_states_currency_and_year_in_html_and_docx(
+        client, api_project, studies_on, fake):
+    """BC-S7-3: options, cash flow, value streams and tornado, both formats."""
+    import re
+
+    import docx
+
+    name = "rep-units"
+    sid = _full(client, api_project, name)
+    _post(client, name, sid)
+    year = str(client.get(f"/api/projects/{name}/studies/{sid}/report").json()["currency_year"])
+    html = client.get(f"/api/projects/{name}/studies/{sid}/report.html").text
+    money = re.compile(r"NPV|CAPEX|Savings|Salvage|cash flow|Swing|Annual value|Replacements|"
+                       r"O&amp;M|discounted")
+    heads = [h for h in re.findall(r"<th>([^<]*)</th>", html) if money.search(h)]
+    for label in ("Battery NPV", "Net cash flow", "Annual value", "Swing"):
+        assert any(h.startswith(label) for h in heads), label
+    for h in heads:
+        assert "EUR" in h and year in h, h
+    doc = docx.Document(io.BytesIO(
+        client.get(f"/api/projects/{name}/studies/{sid}/report.docx").content))
+    dheads = [c.text for t in doc.tables for c in t.rows[0].cells
+              if money.search(c.text.replace("&", "&amp;"))]
+    for label in ("Battery NPV", "Net cash flow", "Annual value", "Swing"):
+        assert any(h.startswith(label) for h in dheads), label
+    for h in dheads:
+        assert "EUR" in h and year in h, h
+
+
+def test_an_intake_edit_after_the_run_is_seen_by_every_reader(
+        client, api_project, studies_on, fake):
+    """Gate [S4]: one rule — findings and case 409, the report stale."""
+    name = "rep-intake"
+    sid = _run(client, api_project, name)
+    assert _post(client, name, sid)["stale"] is False
+    new = {**NO_PV_TOU, "load": {**NO_PV_TOU["load"], "annual_mwh": 9000.0}}
+    assert client.patch(f"/api/projects/{name}/studies/{sid}",
+                        json={"intake": new}).status_code == 200
+    body = client.get(f"/api/projects/{name}/studies/{sid}/report").json()
+    assert body["stale"] is True and "intake_changed_since_findings" in body["stale_reasons"]
+    for method, url in (("get", "findings"), ("get", "options/bess_2h/case"),
+                        ("get", "options/bess_2h/case.xlsx"), ("post", "report")):
+        r = getattr(client, method)(f"/api/projects/{name}/studies/{sid}/{url}")
+        assert r.status_code == 409, (url, r.status_code)
+        assert r.json()["detail"]["error_kind"] == "intake_changed_since_run", url

@@ -41,13 +41,18 @@ def render_docx(report: DecisionReport, charts: dict[str, bytes] | None = None, 
     from docx import Document
     from docx.shared import Inches
 
+    # Gate S7 [N9]: a control character in user text would make python-docx
+    # raise (an untyped 500); it is replaced, never passed through.
+    report = R.xml_safe_report(report)
     prose = R.validate_prose(report)
+    money, money_yr = R.money_unit(report), R.money_unit(report, per_year=True)
     if charts is None:
         from services.study import report_charts
 
         charts = report_charts.render_all(report)
     stale = report.stale if stale is None else stale
-    stale_reasons = report.stale_reasons if stale_reasons is None else stale_reasons
+    stale_reasons = [R.xml_safe(r) for r in (
+        report.stale_reasons if stale_reasons is None else stale_reasons)]
 
     def help_text(code: str) -> str:
         return report.honesty_help.get(code) or R.help_for(code)[0]
@@ -67,7 +72,10 @@ def render_docx(report: DecisionReport, charts: dict[str, bytes] | None = None, 
 
     doc.add_heading("Read this first", level=1)
     for d in report.required_disclosures:
-        doc.add_paragraph(f"{d.text} ({d.code})", style="List Bullet")
+        # Gate S7 [N2]: a tariff's sentence is its author's text, labelled so.
+        label = ("From the tariff (its author's wording, not checked by the study): "
+                 if d.source == "tariff" else "")
+        doc.add_paragraph(f"{label}{d.text} ({d.code})", style="List Bullet")
     if report.evidence_gaps:
         doc.add_heading("Evidence gaps", level=2)
         for g in report.evidence_gaps:
@@ -105,8 +113,8 @@ def render_docx(report: DecisionReport, charts: dict[str, bytes] | None = None, 
                 doc.add_picture(io.BytesIO(charts[fig]), width=Inches(6.0))
         if sid == "question" and p:
             doc.add_paragraph(f"Baseline: {p.get('baseline')}")
-            _table(doc, ["Option", "Solved", "Battery MW", "PV MW", "Battery NPV", "Option NPV",
-                         "Judged"],
+            _table(doc, ["Option", "Solved", "Battery MW", "PV MW", f"Battery NPV ({money})",
+                         f"Option NPV ({money})", "Judged"],
                    [[f"{o['label']} ({o['option_id']})", o["solve_status"],
                      num(o["battery_mw"], 3), num(o["pv_mw"], 3), num(o["battery_npv"]),
                      num(o["option_npv"]), " ".join([o["attribution"] or "", *o["notes"]])]
@@ -116,20 +124,22 @@ def render_docx(report: DecisionReport, charts: dict[str, bytes] | None = None, 
                    [[e["name"], e["binding_constraint"] or "", " ".join(e["reading_notes"])]
                     for e in p["explain"]])
         if sid == "economics" and p:
-            _table(doc, ["Year", "CAPEX", "Replacements", "Fixed O&M", "Savings", "Salvage",
-                         "Net cash flow", "Cumulative discounted"],
+            _table(doc, ["Year"] + [f"{h} ({money})" for h in (
+                "CAPEX", "Replacements", "Fixed O&M", "Savings", "Salvage", "Net cash flow",
+                "Cumulative discounted")],
                    [[y["year"], num(y["capex"]), num(y["replacements"]), num(y["opex_fixed"]),
                      num(y["savings"]), num(y.get("salvage")), num(y["net_cash_flow"]),
                      num(y["cumulative_discounted"])] for y in p.get("cash_flow") or []])
         if sid == "drivers" and p:
             doc.add_heading(p.get("value_streams_label") or "Value streams", level=2)
-            _table(doc, ["Stream", "Annual value", "Share"],
+            _table(doc, ["Stream", f"Annual value ({money_yr})", "Share"],
                    [[v["label"], num(v["annual_value"]), pct(v["share"])]
                     for v in p.get("value_streams") or []])
             doc.add_heading("Tornado (battery NPV, sizes fixed)", level=2)
-            _table(doc, ["Driver", "Low value", "High value", "NPV at low", "NPV at high",
-                         "Swing"],
-                   [[r["label"], num(r["low_value"], 4), num(r["high_value"], 4),
+            _table(doc, ["Driver", "Low value", "High value", f"Battery NPV at low ({money})",
+                         f"Battery NPV at high ({money})", f"Swing ({money})"],
+                   [[r["label"], f"{num(r['low_value'], 4)} {r.get('unit') or ''}".strip(),
+                     f"{num(r['high_value'], 4)} {r.get('unit') or ''}".strip(),
                      num(r["npv_low"]), num(r["npv_high"]), num(r["swing"])]
                     for r in p.get("tornado") or []])
         if sid == "robustness" and p:

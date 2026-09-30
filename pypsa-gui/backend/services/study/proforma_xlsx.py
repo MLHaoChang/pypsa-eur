@@ -58,7 +58,15 @@ _COL = {label: j for j, (label, _f) in enumerate(_CF_COLUMNS, start=1)}
 
 
 def _text(ws, row: int, col: int, value: Any):
-    """A value that is never a formula (labels, ledger text, provenance)."""
+    """
+    A value that is never a formula (labels, ledger text, provenance). A
+    control character openpyxl refuses (a study name, a ledger source) is
+    replaced, never an untyped 500 (gate S7 [N9]).
+    """
+    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+
+    if isinstance(value, str):
+        value = ILLEGAL_CHARACTERS_RE.sub("\ufffd", value)
     cell = ws.cell(row=row, column=col)
     cell.value = value
     if isinstance(value, str) and value.startswith("="):

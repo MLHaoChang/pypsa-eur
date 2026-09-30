@@ -50,7 +50,7 @@
 <section class="disclosures" aria-label="Read this first">
   <h2>Read this first</h2>
   <ul>
-  {% for d in report.required_disclosures %}<li>{{ d.text }} <span class="code">{{ d.code }}</span></li>
+  {% for d in report.required_disclosures %}<li>{% if d.source == "tariff" %}<strong>From the tariff (its author's wording, not checked by the study):</strong> {% endif %}{{ d.text }} <span class="code">{{ d.code }}</span></li>
   {% endfor %}
   </ul>
   {% if report.evidence_gaps %}<h3>Evidence gaps</h3>
@@ -81,7 +81,7 @@
 
   {% if sid == "question" and s.payload %}
   <p class="note">Baseline: {{ s.payload.baseline }}</p>
-  <div class="wrap"><table><thead><tr><th>Option</th><th>Solved</th><th>Battery MW</th><th>PV MW</th><th>Battery NPV</th><th>Option NPV</th><th>Judged</th></tr></thead><tbody>
+  <div class="wrap"><table><thead><tr><th>Option</th><th>Solved</th><th>Battery MW</th><th>PV MW</th><th>Battery NPV ({{ money }})</th><th>Option NPV ({{ money }})</th><th>Judged</th></tr></thead><tbody>
   {% for o in s.payload.options %}<tr><td>{{ o.label }} <span class="code">{{ o.option_id }}</span></td><td>{{ o.solve_status }}</td>
     <td class="num">{{ num(o.battery_mw, 3) }}</td><td class="num">{{ num(o.pv_mw, 3) }}</td>
     <td class="num">{{ num(o.battery_npv) }}</td><td class="num">{{ num(o.option_npv) }}</td>
@@ -102,19 +102,19 @@
   {% endif %}
 
   {% if sid == "economics" and s.payload %}
-  <div class="wrap"><table><thead><tr><th>Year</th><th>CAPEX</th><th>Replacements</th><th>Fixed O&amp;M</th><th>Savings</th><th>Salvage</th><th>Net cash flow</th><th>Cumulative discounted</th></tr></thead><tbody>
+  <div class="wrap"><table><thead><tr><th>Year</th><th>CAPEX ({{ money }})</th><th>Replacements ({{ money }})</th><th>Fixed O&amp;M ({{ money }})</th><th>Savings ({{ money }})</th><th>Salvage ({{ money }})</th><th>Net cash flow ({{ money }})</th><th>Cumulative discounted ({{ money }})</th></tr></thead><tbody>
   {% for y in s.payload.cash_flow %}<tr><td>{{ y.year }}</td><td class="num">{{ num(y.capex) }}</td><td class="num">{{ num(y.replacements) }}</td><td class="num">{{ num(y.opex_fixed) }}</td><td class="num">{{ num(y.savings) }}</td><td class="num">{{ num(y.salvage) }}</td><td class="num">{{ num(y.net_cash_flow) }}</td><td class="num">{{ num(y.cumulative_discounted) }}</td></tr>{% endfor %}
   </tbody></table></div>
   {% endif %}
 
   {% if sid == "drivers" and s.payload %}
   <h3>{{ s.payload.value_streams_label }}</h3>
-  <table><thead><tr><th>Stream</th><th>Annual value</th><th>Share</th></tr></thead><tbody>
+  <table><thead><tr><th>Stream</th><th>Annual value ({{ money_yr }})</th><th>Share</th></tr></thead><tbody>
   {% for v in s.payload.value_streams %}<tr><td>{{ v.label }}</td><td class="num">{{ num(v.annual_value) }}</td><td class="num">{{ pct(v.share) }}</td></tr>{% endfor %}
   </tbody></table>
   <h3>Tornado (battery NPV, sizes fixed)</h3>
-  <table><thead><tr><th>Driver</th><th>Low value</th><th>High value</th><th>NPV at low</th><th>NPV at high</th><th>Swing</th></tr></thead><tbody>
-  {% for r in s.payload.tornado %}<tr><td>{{ r.label }}</td><td class="num">{{ num(r.low_value, 4) }}</td><td class="num">{{ num(r.high_value, 4) }}</td><td class="num">{{ num(r.npv_low) }}</td><td class="num">{{ num(r.npv_high) }}</td><td class="num">{{ num(r.swing) }}</td></tr>{% endfor %}
+  <table><thead><tr><th>Driver</th><th>Low value</th><th>High value</th><th>Battery NPV at low ({{ money }})</th><th>Battery NPV at high ({{ money }})</th><th>Swing ({{ money }})</th></tr></thead><tbody>
+  {% for r in s.payload.tornado %}<tr><td>{{ r.label }}</td><td class="num">{{ num(r.low_value, 4) }} {{ r.unit or "" }}</td><td class="num">{{ num(r.high_value, 4) }} {{ r.unit or "" }}</td><td class="num">{{ num(r.npv_low) }}</td><td class="num">{{ num(r.npv_high) }}</td><td class="num">{{ num(r.swing) }}</td></tr>{% endfor %}
   </tbody></table>
   {% endif %}
 

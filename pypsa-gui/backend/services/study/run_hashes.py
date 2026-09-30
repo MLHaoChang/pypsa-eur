@@ -5,16 +5,18 @@ A reader of a finished run may only attribute its results to the ledger and
 the option networks the run was built from. Three readers apply the rule:
 
 * the case route (``routers/studies.py::_option_case``) answers 409
-  ``ledger_changed_since_run`` / ``fork_changed_since_run``;
+  ``ledger_changed_since_run`` / ``intake_changed_since_run`` /
+  ``fork_changed_since_run``;
 * the findings (``services/study/findings.py::load_inputs``) refuse a changed
-  ledger and leave a changed fork out;
+  ledger or intake and leave a changed fork out;
 * the report (``services/study/report.py::stale_reasons``) marks itself
   ``stale`` and names why.
 
 They call these functions, so a report is never fresh where a case would be
 refused (gate S5 carry: "the stale flag and the case's 409 share one hash
 rule"). Hashes are recorded at findings time (``Findings.hashes``): the
-ledger's (``packs.ledger_hash``) and each OPTION fork's ``network.nc``
+ledger's (``packs.ledger_hash``), the intake's (:func:`intake_hash`, gate S7)
+and each OPTION fork's ``network.nc``
 (sha256[:16], keyed by fork uuid). Tornado forks are not in that map — they
 are deleted after the read — so they never make anything stale.
 """
@@ -24,8 +26,8 @@ import pathlib
 from collections.abc import Mapping
 from typing import Any
 
-__all__ = ["file_hash", "fork_file_hash", "fork_matches", "ledger_matches",
-           "recorded_ledger_hash"]
+__all__ = ["file_hash", "fork_file_hash", "fork_matches", "intake_hash", "intake_matches",
+           "ledger_matches", "recorded_ledger_hash"]
 
 
 def file_hash(path: pathlib.Path) -> str | None:
@@ -48,6 +50,26 @@ def recorded_ledger_hash(hashes: Mapping[str, Any] | Any) -> str | None:
     if isinstance(hashes, Mapping):
         return hashes.get("ledger_hash")
     return getattr(hashes, "ledger_hash", None)
+
+
+def intake_hash(intake: Mapping[str, Any] | None) -> str:
+    """A stable hash of the study's intake (its canonical JSON)."""
+    import hashlib
+    import json
+
+    text = json.dumps(dict(intake or {}), sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def intake_matches(intake: Mapping[str, Any] | None, hashes: Mapping[str, Any] | Any) -> bool:
+    """
+    True when ``intake`` is the one the run's forks were built from (gate S7
+    [S4]: a load or site edited after the run changes what the options
+    mean). A run record without an intake hash never matches.
+    """
+    recorded = (hashes.get("intake_hash") if isinstance(hashes, Mapping)
+                else getattr(hashes, "intake_hash", None))
+    return recorded is not None and intake_hash(intake) == recorded
 
 
 def ledger_matches(ledger, hashes: Mapping[str, Any] | Any) -> bool:

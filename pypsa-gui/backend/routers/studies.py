@@ -885,6 +885,10 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
         raise HTTPException(409, detail={"error_kind": "ledger_changed_since_run", "message": (
             "the assumptions ledger changed after the run; re-run the study "
             "before reading its cases (the LP sized the options on the old one)")})
+    if not run_hashes.intake_matches(study.intake, hashes):
+        raise HTTPException(409, detail={"error_kind": "intake_changed_since_run", "message": (
+            "the study's answers (site, load, tariff or PV) changed after the run; "
+            "re-run the study before reading its cases")})
     library = _library_or_500()
     # Gate S5 BC-S5-1: the fork's file, never its resident context, and only
     # when it is the network the run solved — the run record's bills and

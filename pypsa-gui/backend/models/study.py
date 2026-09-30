@@ -92,6 +92,9 @@ class Fidelity(StrEnum):
 Engine = Literal[
     "lp", "lp_duals", "bill_calculator", "contract", "mc_resilience",
     "cash_flow_expander", "ledger",
+    # S7 (gate S7 [N6]): a constant of the method itself (the verdict's
+    # break-even tolerance), neither a ledger row nor a run's output.
+    "method_constant",
 ]
 SolveStatus = Literal[
     "not_run", "queued", "running", "ok", "infeasible", "failed", "aborted",
@@ -1016,6 +1019,10 @@ class FindingsHashes(_Model):
     ledger_hash: str | None = None
     base_network_hash: str | None = None
     option_network_hashes: dict[str, str] = Field(default_factory=dict)
+    # Gate S7 [S4]: the intake the forks were built from
+    # (`services/study/run_hashes.py::intake_hash`); an edit after the run
+    # makes every reader refuse or mark stale.
+    intake_hash: str | None = None
 
 
 class BatteryAttribution(_FigureBlock):

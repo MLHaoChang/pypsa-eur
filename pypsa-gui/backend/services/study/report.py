@@ -69,7 +69,8 @@ from services.study import questions as Q
 __all__ = [
     "DISCLOSURE_RULES", "HELP", "ProseError", "ReportInputs", "SECTIONS",
     "assemble_decision_report", "build_decision_report", "format_fact", "help_for",
-    "report_available", "stale_reasons", "validate_prose",
+    "money_unit", "report_available", "stale_reasons", "validate_prose", "xml_safe",
+    "xml_safe_report",
 ]
 
 # Spec §7, in order: (section id, heading).
@@ -221,13 +222,30 @@ HELP: dict[str, str] = {
         "The revenue at the model's prices equals the battery's annualised cost at the "
         "optimum: zero profit by construction. It is not a second revenue line and is "
         "excluded from the cash flow."),
+    # Gate BC-S7-1: zero profit holds only at an interior optimum.
+    "market_revenue_at_duals_exceeds_cost_at_size_limit": (
+        "A size limit binds, so the revenue at the model's prices exceeds the annualised "
+        "cost by the limit's shadow value: this is not zero profit. It is still excluded "
+        "from the cash flow, because the bill already prices the same energy."),
+    "market_revenue_at_duals_relation_not_established": (
+        "How the revenue at the model's prices compares with the annualised cost is not "
+        "established, because the run did not record how each size was limited. It is "
+        "excluded from the cash flow."),
+    "sector_profiles_have_broad_peaks": (
+        "The shipped sector profiles have broad peak plateaus, which a battery cannot "
+        "shave cheaply."),
+    "intake_changed_since_findings": (
+        "The study's answers (site, load, tariff or PV) changed after the findings were "
+        "computed; re-run the study."),
+    "intake_changed_since_run": (
+        "The study's answers changed after the run; re-run the study."),
     "lcos_two_definitions": (
         "Two levelised costs of storage are shown and they answer different questions: "
         "the pro forma's excludes the energy bought to charge the battery, asset "
         "economics' includes it."),
     "battery_only_options_sized_to_zero": (
-        "Every battery-only option was sized to zero. The shipped sector profiles have "
-        "broad peak plateaus, which a battery cannot shave cheaply."),
+        "Every battery-only option was sized to zero: at this load and on this tariff no "
+        "battery pays for itself on its own."),
     "synthetic_load_understates_peak_shaving": (
         "A smooth synthetic load lacks the short spikes a real meter records, so the "
         "peak-shaving value is likely understated; upload the site's metered load."),
@@ -307,7 +325,9 @@ DISCLOSURE_ALWAYS = ("basis_real_pre_tax_no_subsidy", "single_year_extrapolated"
 DISCLOSURE_RULES: tuple[tuple[str, str], ...] = (
     ("economics", "npv_nonnegative_at_optimum_by_construction"),
     ("economics", "irr_and_discounted_payback_bounded_at_optimum_by_construction"),
-    ("economics", "market_revenue_at_duals_zero_profit_at_optimum"),
+    ("duals_interior", "market_revenue_at_duals_zero_profit_at_optimum"),
+    ("duals_at_limit", "market_revenue_at_duals_exceeds_cost_at_size_limit"),
+    ("duals_unknown", "market_revenue_at_duals_relation_not_established"),
     ("lcos_both", "lcos_two_definitions"),
     ("dc_foresight", "demand_charge_perfect_foresight"),
     ("unjudged", "options_not_all_judged"),
@@ -316,6 +336,7 @@ DISCLOSURE_RULES: tuple[tuple[str, str], ...] = (
     ("break_even", "break_even_at_a_tornado_bound"),
     ("size_at_upper_bound", "size_at_upper_bound"),
     ("battery_only_zero", "battery_only_options_sized_to_zero"),
+    ("battery_only_zero_synthetic", "sector_profiles_have_broad_peaks"),
     ("synthetic_load", "synthetic_load_understates_peak_shaving"),
     ("synthetic_pv", "synthetic_pv_profile"),
     ("tariff_default", "tariff_not_chosen_library_default"),
@@ -411,6 +432,12 @@ def format_fact(fig: Figure | None) -> str:
 
 _REF = re.compile(r"\{\{([a-z_]+)\}\}")
 _DIGIT = re.compile(r"(?<![A-Za-z])\d")
+# Gate S7 [N1]: a digit glued to a currency or unit prefix ("EUR4M", "MW3")
+# is a number too; the letter lookbehind above lets it through. Spelled-out
+# numbers ("four point one million") are a documented limitation: the
+# templates are the product's own code, and a test pins them.
+_GLUED = re.compile(
+    r"(?<![A-Za-z])(?:EUR|USD|GBP|CHF|TWh|GWh|MWh|kWh|Wh|GW|MW|kW|bn|k|M|m|h)\d")
 # A unit token stands alone: not inside a word or a number (`CO22`, `N-12`,
 # `24/7.5`), a sentence's full stop after it allowed.
 _UNITS = re.compile(r"(?<![\w./-])(?:CO2|H2|N-1|24/7)(?![\w/]|\.\d)")
@@ -438,7 +465,7 @@ def _check(text: str, facts: Mapping[str, Figure], section: str, i: int) -> str:
     bare = _UNITS.sub("", _REF.sub("", text))
     if "{{" in bare or "}}" in bare:
         raise ProseError(section, i, "a malformed fact reference")
-    m = _DIGIT.search(bare)
+    m = _DIGIT.search(bare) or _GLUED.search(bare)
     if m:
         snippet = bare[max(0, m.start() - 12): m.start() + 12]
         raise ProseError(section, i, f"a number outside a fact reference: {snippet!r}")
@@ -478,12 +505,50 @@ def stale_reasons(report: DecisionReport, study: DecisionStudy, ledger: Assumpti
         return list(dict.fromkeys(reasons))
     if not run_hashes.ledger_matches(ledger, hashes):
         reasons.append("ledger_changed_since_findings")
+    if not run_hashes.intake_matches(study.intake, hashes):
+        reasons.append("intake_changed_since_findings")
     forks = ((report.sections.get("appendix") or ReportSection(status="ok")).payload or {}).get(
         "option_forks") or {}
     for fork_uuid, recorded in sorted(hashes.option_network_hashes.items()):
         if not run_hashes.fork_matches(recorded, fork_hash_now(fork_uuid)):
             reasons.append(f"fork_changed_since_findings:{forks.get(fork_uuid, fork_uuid)}")
     return list(dict.fromkeys(reasons))
+
+
+def money_unit(report: DecisionReport, *, per_year: bool = False) -> str:
+    """
+    The unit a money column or axis states beside its numbers (gate BC-S7-3):
+    the report's currency and currency year, e.g. ``EUR 2020`` or
+    ``EUR/yr 2020``; the year is named as unknown rather than left out.
+    """
+    currency = next((f.unit.split("/")[0].strip() for f in report.facts.values()
+                     if _is_money(f.unit)), "EUR")
+    unit = f"{currency}/yr" if per_year else currency
+    year = report.currency_year
+    return f"{unit} {year}" if year is not None else f"{unit}, currency year unknown"
+
+
+# XML 1.0 forbids these; python-docx and openpyxl refuse them (gate S7 [N9]).
+_XML_ILLEGAL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
+
+
+def xml_safe(text: str) -> str:
+    """User text with the control characters a document cannot hold replaced."""
+    return _XML_ILLEGAL.sub("\ufffd", text)
+
+
+def xml_safe_report(report: DecisionReport) -> DecisionReport:
+    """A copy of the report whose every string a DOCX or XLSX writer accepts."""
+    def clean(x):
+        if isinstance(x, str):
+            return xml_safe(x)
+        if isinstance(x, list):
+            return [clean(v) for v in x]
+        if isinstance(x, dict):
+            return {clean(k) if isinstance(k, str) else k: clean(v) for k, v in x.items()}
+        return x
+
+    return DecisionReport.model_validate(clean(report.model_dump(mode="json", by_alias=True)))
 
 
 def report_available(report: DecisionReport) -> bool:
@@ -505,6 +570,7 @@ class ReportInputs:
     details: Mapping[str, Any] = field(default_factory=dict)  # run details per option
     option_forks: dict[str, str] = field(default_factory=dict)  # fork uuid -> option id
     generated_at: datetime | None = None
+    run_intake: dict | None = None     # the intake the run's forks were built from
 
 
 def _para(*texts: str) -> list[ProseParagraph]:
@@ -545,6 +611,55 @@ def _lcos_including_charging(details: Mapping[str, Any], option_id: str) -> floa
     return None if v is None else float(v)
 
 
+_UPLOADED = ("upload", "uploaded", "measured")
+
+
+def _load_is_synthetic(intake: Mapping[str, Any] | None, codes: set[str]) -> bool:
+    """The pack's own marker, else the intake: anything but an upload is synthetic."""
+    if "synthetic_load_profile" in codes:
+        return True
+    load = (intake or {}).get("load") if isinstance(intake, Mapping) else None
+    return isinstance(load, Mapping) and str(load.get("source")) not in _UPLOADED
+
+
+def _duals_relation(details: Mapping[str, Any], option_id: str, verdict_at_limit: bool) -> str:
+    """
+    ``interior`` | ``at_limit`` | ``unknown`` for the option's sized assets,
+    from the run's own classification (``details[oid]["sizing"]``, written
+    by ``services/results/sizing.py::classify_sizing``) or the verdict's
+    ``size_at_upper_bound`` disclosure — no second classifier (gate BC-S7-1).
+    Zero profit at the duals holds only when every built asset is interior.
+    """
+    sizing = (details.get(option_id) or {}).get("sizing") or {}
+    bindings = [c.get("binding_constraint") for c in sizing.values() if isinstance(c, Mapping)]
+    caveats = (details.get(option_id) or {}).get("caveats") or []
+    if verdict_at_limit or "at_upper_bound" in bindings or any(
+            str(c).startswith("size_at_upper_bound") for c in caveats):
+        return "at_limit"
+    built = [b for b in bindings if b != "not_built"]
+    if built and all(b == "interior" for b in built):
+        return "interior"
+    return "unknown"
+
+
+_DUALS_PROSE = {
+    "interior": (
+        "The market revenue at the model's prices, {{market_revenue_at_duals}}, is not a "
+        "second revenue line: at this interior optimum it equals the annualised cost of the "
+        "assets that earn it, zero profit by construction, and it is excluded from the cash "
+        "flow because the bill already prices the same energy."),
+    "at_limit": (
+        "The market revenue at the model's prices, {{market_revenue_at_duals}}, is not a "
+        "second revenue line. A size limit binds, so it exceeds the annualised cost of the "
+        "assets that earn it by the limit's shadow value; it is excluded from the cash flow "
+        "because the bill already prices the same energy."),
+    "unknown": (
+        "The market revenue at the model's prices, {{market_revenue_at_duals}}, is not a "
+        "second revenue line; how it compares with the annualised cost is not established. "
+        "It is excluded from the cash flow because the bill already prices the same energy."),
+}
+
+
 def _pack_codes(case: InvestmentCase | None) -> set[str]:
     return set(case.honesty_notes) if case is not None else set()
 
@@ -581,7 +696,7 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
         if near:
             tags.add("break_even")
             facts["npv_tolerance_eur"] = _fact("npv_tolerance_eur", "Break-even tolerance",
-                                               F.NPV_TOL_EUR, "EUR", "ledger",
+                                               F.NPV_TOL_EUR, "EUR", "method_constant",
                                                currency_year=currency_year)
             exec_prose.append(_BREAK_EVEN)
     named_att = atts.get(named) if named else None
@@ -615,7 +730,14 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
         tags.add("unjudged")
     if "size_at_upper_bound" in v.disclosures:
         tags.add("size_at_upper_bound")
-    if v.main_caveat == "demand_charge_perfect_foresight":
+    # Gate S7 [N4]: whenever demand-charge reduction is a non-zero stream,
+    # not only when it is the main caveat.
+    dc_streams = [s.annual_value for s in f.value_streams
+                  if s.key == "demand_charge_reduction"] + [
+        s.annual_value for c in inp.cases.values() for s in c.value_streams
+        if s.key in ("demand", "capacity")]
+    if v.main_caveat == "demand_charge_perfect_foresight" or any(
+            x is not None and abs(x) > 0.0 for x in dc_streams):
         tags.add("dc_foresight")
     kpis = [k.key for k in v.headline_kpis]
     sections["executive_summary"] = ReportSection(
@@ -715,7 +837,7 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
             cf("lcos_excl_charging", "LCOS excluding charging energy (pro forma)", k.lcos,
                "EUR/MWh", flag=k.unavailable.get("lcos")),
             cf("lcos_incl_charging", "LCOS including charging energy (asset economics)",
-               _lcos_including_charging(inp.details, econ_oid), "EUR/MWh",
+               _lcos_including_charging(inp.details, econ_oid), "EUR/MWh", "lp",
                flag="asset_economics_row_missing"),
             cf("market_revenue_at_duals", "Market revenue at the model's prices (annual)",
                case.market_revenue_at_duals.annual_value
@@ -728,6 +850,9 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
                 facts["lcos_incl_charging"].value is not None:
             tags.add("lcos_both")
         tags.add("economics")
+        duals = _duals_relation(inp.details, econ_oid,
+                                "size_at_upper_bound" in v.disclosures and named == econ_oid)
+        tags.add(f"duals_{duals}")
         prose = [
             "On a real, pre-tax basis without subsidy, in the currency year stated beside each "
             "figure, the option's NPV is {{case_npv}}, its IRR {{case_irr}}, its simple payback "
@@ -741,10 +866,7 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
             "Two levelised costs of storage answer different questions: "
             "{{lcos_excl_charging}} leaves out the energy bought to charge the battery (the "
             "pro forma's figure) and {{lcos_incl_charging}} includes it (asset economics).",
-            "The market revenue at the model's prices, {{market_revenue_at_duals}}, is not a "
-            "second revenue line: at the optimum it equals the annualised cost of the assets "
-            "that earn it, zero profit by construction, and it is excluded from the cash flow "
-            "because the bill already prices the same energy.",
+            _DUALS_PROSE[duals],
         ]
         if _has_pv(q, econ_oid):
             prose.append("These figures are the whole option's, PV included; the battery's "
@@ -847,9 +969,7 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
                                        flag="maturity_not_established")
     all_codes = set(f.honesty_notes) | set(v.disclosures) | set().union(
         *(_pack_codes(c) for c in inp.cases.values()))
-    load = (inp.study.intake.get("load") or {}) if isinstance(inp.study.intake, dict) else {}
-    synthetic = "synthetic_load_profile" in all_codes or (
-        isinstance(load, dict) and load.get("source") == "sector_profile")
+    synthetic = _load_is_synthetic(inp.study.intake, all_codes)
     if synthetic:
         tags.add("synthetic_load")
     if "synthetic_pv_profile" in all_codes:
@@ -859,6 +979,8 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
     battery_only = [a for a in f.battery_attribution if a.method == "battery_only"]
     if battery_only and all(a.status == "skipped" for a in battery_only):
         tags.add("battery_only_zero")
+        if synthetic:
+            tags.add("battery_only_zero_synthetic")
     sections["limitations"] = ReportSection(
         status=inp.study.maturity.status,
         note=None if inp.study.maturity.status == "ok" else "maturity_not_established",
@@ -880,7 +1002,7 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
             "model": ("One representative year, hourly, one site bus behind a grid "
                       "connection, a battery with enumerated duration and optional PV, "
                       "sized by a linear optimisation on the tariff."),
-            "intake": inp.study.intake,
+            "intake": inp.run_intake if inp.run_intake is not None else inp.study.intake,
             "tariff_id": inp.tariff.tariff_id, "tariff_name": inp.tariff.name,
             "library_version": inp.ledger.ledger_version,
             "ledger_hash": f.hashes.ledger_hash,
@@ -895,7 +1017,11 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
     # ── disclosures, gaps, what is not established ───────────────────────
     view = [{"id": sid, "status": s.status, "note": s.note} for sid, s in sections.items()]
     tags |= report_sections.present_ids(view)
-    codes = report_sections.disclosures(tags, DISCLOSURE_RULES, always=DISCLOSURE_ALWAYS)
+    # Gate BC-S7-2: the verdict's own disclosures, verbatim, before the rules;
+    # a battery NPV never appears without the by-construction pair.
+    codes = list(dict.fromkeys([
+        *v.disclosures,
+        *report_sections.disclosures(tags, DISCLOSURE_RULES, always=DISCLOSURE_ALWAYS)]))
     tariff_codes = [c for c in inp.tariff.honesty_notes if c not in codes]
     disclosures = []
     for code in list(dict.fromkeys([*codes, *tariff_codes])):
@@ -953,5 +1079,6 @@ def assemble_decision_report(study: DecisionStudy, base_dir, db, base_uuid: str
     forks = {str(row.id): oid for oid, row in inp.rows.items()}
     rinp = ReportInputs(study=study, question=inp.question, findings=findings, cases=cases,
                         ledger=inp.ledger, tariff=inp.tariff,
-                        details=inp.run.get("details") or {}, option_forks=forks)
+                        details=inp.run.get("details") or {}, option_forks=forks,
+                        run_intake=inp.run.get("intake"))
     return build_decision_report(rinp), rinp

@@ -70,6 +70,7 @@ from services.study import forks as study_forks
 from services.study import library as study_library
 from services.study import packs
 from services.study import questions as Q
+from services.study import run_hashes
 from services.study import store
 from services.study import tariff as study_tariff
 
@@ -716,6 +717,8 @@ def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcom
             pending_options=pending,
             hashes=FindingsHashes(
                 ledger_hash=run_hash,
+                # Gate S7 [S4]: the intake the forks were built from.
+                intake_hash=run_hashes.intake_hash(run_intake),
                 option_network_hashes={
                     str(solved_rows[k].id): v["network_hash"]
                     for k, v in details.items()
@@ -729,6 +732,8 @@ def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcom
             **_public(record), "status": status, "error": error,
             "finished_at": time.time(), "current": None, "pending": pending,
             "solved": sorted(solved_rows), "details": details,
+            # The intake the forks were built from (the report's appendix).
+            "intake": dict(run_intake),
             "fork_removal_refused": removal_errors,
         }
         store.save_aux(base_dir, study_id, "run", run_record)

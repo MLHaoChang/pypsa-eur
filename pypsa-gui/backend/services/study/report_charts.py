@@ -167,17 +167,24 @@ def render_all(report) -> dict[str, bytes]:
     drivers = sections.get("drivers")
     if drivers is not None and drivers.payload:
         p = drivers.payload
-        png = waterfall(p.get("value_streams") or [], title=p.get("value_streams_label") or "")
+        from services.study.report import money_unit
+
+        png = waterfall(p.get("value_streams") or [], title=p.get("value_streams_label") or "",
+                        unit=money_unit(report, per_year=True))
         if png is not None:
             out["value_stream_waterfall"] = png
         png = tornado(p.get("tornado") or [], p.get("tornado_centre"),
-                      title="Battery NPV at each driver's low and high value, sizes fixed")
+                      title="Battery NPV at each driver's low and high value, sizes fixed",
+                      unit=money_unit(report))
         if png is not None:
             out["tornado"] = png
     econ = sections.get("economics")
     if econ is not None and econ.payload:
+        from services.study.report import money_unit
+
         png = cash_flow(econ.payload.get("cash_flow") or [],
-                        title="Net cash flow per year and cumulative discounted cash flow")
+                        title="Net cash flow per year and cumulative discounted cash flow",
+                        unit=money_unit(report))
         if png is not None:
             out["cash_flow"] = png
     return out

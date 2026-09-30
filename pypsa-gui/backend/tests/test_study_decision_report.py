@@ -228,10 +228,11 @@ def _ledger():
 
 
 def _hashed_report():
-    from services.study import packs
+    from services.study import packs, run_hashes
 
     ledger = _ledger()
     hashes = FindingsHashes(ledger_hash=packs.ledger_hash(ledger),
+                            intake_hash=run_hashes.intake_hash(INTAKE),
                             option_network_hashes={"f1": "h" * 16})
     return _report(hashes=hashes), ledger
 
@@ -256,6 +257,15 @@ def test_an_option_fork_edit_after_assembly_is_stale():
         "fork_changed_since_findings:bess_2h"]
     assert R.stale_reasons(report, _study(), ledger, lambda u: None) == [
         "fork_changed_since_findings:bess_2h"]
+
+
+def test_an_intake_edit_after_assembly_is_stale():
+    """Gate S7 [S4]: the intake is in the one rule."""
+    report, ledger = _hashed_report()
+    edited = _study().model_copy(update={"intake": {**INTAKE, "load": {
+        **INTAKE["load"], "annual_mwh": 9000.0}}})
+    assert R.stale_reasons(report, edited, ledger, lambda u: "h" * 16) == [
+        "intake_changed_since_findings"]
 
 
 def test_a_study_marked_stale_carries_its_reasons():
@@ -390,3 +400,149 @@ def test_size_bound_default_tariff_and_pending_drivers_are_disclosed():
     assert report.sections["economics"].status == "not_established"
     assert any("discount_rate" in g for g in report.evidence_gaps)
     assert report.honesty_help["energy_price_level_no_effect_single_band"]
+
+
+# ── gate S7 (BC-S7-2, BC-S7-3, N1, N2, N3, N4, N6, N9) ───────────────────
+
+def test_the_verdicts_disclosures_are_carried_verbatim():
+    """BC-S7-2: a battery NPV is never shown without the by-construction pair."""
+    report = _report()                      # recommended, no case: economics skipped
+    assert report.sections["economics"].status != "ok"
+    codes = [d.code for d in report.required_disclosures]
+    v = _findings([_att("bess_1h", 1e5), _att("bess_2h", 3e5), _att("bess_4h", 2e5)],
+                  _rob("bess_2h", (4e5, 2e5), (3.5e5, 2.5e5))).verdict
+    assert set(v.disclosures) <= set(codes)
+    assert set(F.BY_CONSTRUCTION) <= set(codes)
+
+
+def _money_headers(html: str) -> list[str]:
+    return re.findall(r"<th>([^<]*(?:NPV|CAPEX|Savings|Salvage|cash flow|Swing|Annual value|"
+                      r"Replacements|O&amp;M|discounted)[^<]*)</th>", html)
+
+
+def test_money_table_headers_state_currency_and_year_in_html_and_docx():
+    """BC-S7-3 (unit): the options and tornado tables of a constructed report."""
+    import docx
+
+    from services.study.render_docx import render_docx
+    from services.study.render_html import render_html
+
+    report = _report()
+    html = render_html(report, charts={})
+    heads = _money_headers(html)
+    assert heads, "no money header found"
+    for h in heads:
+        assert "EUR" in h and "2020" in h, h
+    doc = docx.Document(io.BytesIO(render_docx(report, charts={})))
+    dheads = [c.text for t in doc.tables for c in t.rows[0].cells
+              if re.search(r"NPV|Swing|Annual value|cash flow|CAPEX", c.text)]
+    assert dheads
+    for h in dheads:
+        assert "EUR" in h and "2020" in h, h
+
+
+def test_tornado_bounds_carry_the_drivers_unit():
+    """BC-S7-3: "149.7" alone is not a value; the row's unit goes beside it."""
+    from services.study.render_html import render_html
+
+    rob = _rob("bess_2h", (4e5, 2e5))
+    rob = rob.model_copy(update={"tornado": [rob.tornado[0].model_copy(
+        update={"unit": "EUR/kWh", "low_value": 149.7, "high_value": 278.1})]})
+    html = render_html(_report(rob=rob), charts={})
+    assert "149.7 EUR/kWh" in html and "278.1 EUR/kWh" in html
+
+
+def test_chart_money_axes_carry_the_currency_year(monkeypatch):
+    """BC-S7-3: the axes' unit labels come with the year."""
+    from services.study import report_charts
+
+    seen = {}
+    monkeypatch.setattr(report_charts, "tornado",
+                        lambda rows, centre, **kw: seen.setdefault("tornado", kw) and None)
+    report_charts.render_all(_report())
+    assert "2020" in seen["tornado"]["unit"] and "EUR" in seen["tornado"]["unit"]
+
+
+def test_a_control_character_in_the_name_does_not_break_docx_or_xlsx():
+    """Gate [N9]: an untyped 500 on the user's own download."""
+    import docx
+    import openpyxl
+
+    from services.study.render_docx import render_docx
+    from services.study.report_xlsx import write_report_xlsx
+
+    report = _report(name="Site\x0bA\x01B")
+    doc = docx.Document(io.BytesIO(render_docx(report, charts={})))
+    assert doc.paragraphs[0].text.startswith("Site")
+    wb = openpyxl.load_workbook(io.BytesIO(write_report_xlsx(report, {}, _ledger())))
+    assert wb["Verdict"]["B2"].value.startswith("Site")
+
+
+def test_the_zero_size_sentence_blames_sector_profiles_only_on_a_synthetic_load():
+    """Gate [N3]."""
+    zero = [a.model_copy(update={"status": "skipped", "battery_npv": None,
+                                 "battery_p_nom_mw": 0.0, "battery_payback_simple": None,
+                                 "notes": ("size_zero_no_investment",),
+                                 "unavailable": {k: "size_zero_no_investment" for k in (
+                                     "battery_npv", "reference_npv",
+                                     "battery_payback_simple")}})
+            for a in (_att("bess_1h", 0.0), _att("bess_2h", 0.0), _att("bess_4h", 0.0))]
+    uploaded = {**INTAKE, "load": {"source": "upload", "upload_id": "u1"}}
+    now = datetime(2026, 9, 29, tzinfo=UTC)
+    study = DecisionStudy(study_id="a" * 32, name="Metered", question_id="bess_at_site",
+                          base_project="b" * 32, intake=uploaded, created_at=now,
+                          updated_at=now)
+    report = _report(atts=zero, rob=None, study=study)
+    texts = " ".join(d.text for d in report.required_disclosures)
+    codes = {d.code for d in report.required_disclosures}
+    assert "battery_only_options_sized_to_zero" in codes
+    assert "sector profile" not in texts and "synthetic_load_understates_peak_shaving" not in codes
+    synthetic = " ".join(d.text for d in _report(atts=zero, rob=None).required_disclosures)
+    assert "sector profiles" in synthetic
+
+
+def test_the_demand_charge_foresight_note_shows_whenever_that_stream_is_not_zero():
+    """Gate [N4]: not only when it is the main caveat."""
+    from models.study import ValueStream
+
+    streams = [ValueStream(key=k, label=k, annual_value=v, share=None, engine="bill_calculator",
+                           unavailable={"share": "zero_savings"})
+               for k, v in (("demand_charge_reduction", 1e3), ("energy_shift", 5e4))]
+    report = _report(streams=streams)
+    assert report.sections["executive_summary"].payload["main_caveat"] != \
+        "demand_charge_perfect_foresight"
+    assert "demand_charge_perfect_foresight" in {d.code for d in report.required_disclosures}
+    none = [s.model_copy(update={"annual_value": 0.0}) if s.key == "demand_charge_reduction"
+            else s for s in streams]
+    assert "demand_charge_perfect_foresight" not in {
+        d.code for d in _report(streams=none).required_disclosures}
+
+
+def test_engine_labels_name_the_engine_that_made_the_figure():
+    """Gate [N6]: the tolerance is a method constant, not a ledger row."""
+    report = _report(atts=[_att("bess_2h", 3e5)], rob=_rob("bess_2h", (4e5, -0.5)),
+                     options=("bess_2h",))
+    assert report.facts["npv_tolerance_eur"].engine == "method_constant"
+
+
+def test_validate_prose_rejects_a_digit_glued_to_a_unit_or_currency():
+    """Gate [N1]: "EUR4M" slipped past the letter lookbehind."""
+    for bad in ("It is worth EUR4M.", "A k5 bonus.", "About MW3 of power.", "USD2bn."):
+        with pytest.raises(R.ProseError):
+            R.validate_prose(_with_prose(_report(), bad))
+    ok = "It avoids CO2 and H2, keeps N-1 security and runs 24/7."
+    assert R.validate_prose(_with_prose(_report(), ok))["executive_summary"] == [ok]
+
+
+def test_tariff_sentences_are_labelled_as_the_tariffs_own_in_read_this_first():
+    """Gate [N2]: a supplied tariff's sentence is its author's text."""
+    import docx
+
+    from services.study.render_docx import render_docx
+    from services.study.render_html import render_html
+
+    html = render_html(_report(), charts={})
+    block = html[html.index('class="disclosures"'):html.index("</section>")]
+    assert "From the tariff" in block
+    doc = docx.Document(io.BytesIO(render_docx(_report(), charts={})))
+    assert any(p.text.startswith("From the tariff") for p in doc.paragraphs)

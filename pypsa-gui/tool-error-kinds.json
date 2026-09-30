@@ -111,6 +111,10 @@
       "surface": "banner",
       "why": "The account stopped being active mid-turn. Nothing will work until it is fixed, and a gray tool line truncates that away — this is the correction the whole manifest generalises."
     },
+    "intake_changed_since_run": {
+      "surface": "inline",
+      "why": "Decision study (S7 gate): the study's answers (site, load, tariff, PV) changed after the run, so its findings, cases and report would describe options built from other answers. Route-only today; the message tells the user to re-run the study."
+    },
     "internal_error": {
       "surface": "inline",
       "why": "An unhandled server failure. It reaches the client on a turn-terminal `error` frame, which the banner renders directly from KIND_COPY — it is not yielded at any `tool_error` site."
