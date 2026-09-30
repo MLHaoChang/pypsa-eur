@@ -5,7 +5,7 @@
  *
  *   cd pypsa-gui/frontend
  *   PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs \
- *     --phase P22.9|P23|P24-BE|P24|P25|P26|P27a|P27b|P32 [--template eh_datacenter] [--out <dir>] [--keep]
+ *     --phase P22.9|P23|P24-BE|P24|P25|P26|P27a|P27b|P28|P32 [--template eh_datacenter] [--out <dir>] [--keep]
  *
  * P24 walks the Guided hub design (spec §5) as a first-time user: the
  * template from /projects opens hubDesign at Site; Site rows match the
@@ -81,6 +81,27 @@
  * counts: the P26 settle loop stays the gate (spec §2.2: replaced only once
  * ten runs are stable); a one-shot read after the extra tick is logged.
  *
+ * P28 (deferred spec 2026-09-28 §3.5) — P26 (every step), then the P22.9
+ * send-gate step extended to the bound profile. (A) Expert, on the P26
+ * microgrid project (no chat yet): a second `auth: none` profile
+ * `smoke-stub-2` on the same stub port; pick it in the dropdown and send one
+ * turn (the body carries `profile_id: smoke-stub-2`); make the built-in
+ * Anthropic profile active (no key, not ready); reload → Send enabled with
+ * text typed, no `chat-send-gate`, the dropdown shows `smoke-stub-2`,
+ * `/chat/history.bound_profile_id === 'smoke-stub-2'`, `/chat/profiles` says
+ * `chat_ready:false` for the Anthropic profile and `true` for both stubs
+ * (local mode answers this route: the seeded local user). (B) the key offer,
+ * on the P26 H2 project (empty transcript): with the Anthropic profile active
+ * the offer and the Send gate show; picking `smoke-stub-2` (cross-wire
+ * confirm) hides the offer and enables Send. (C) Guided, the H2 project after
+ * its finished study: the greeting says the results are in Hub design; one
+ * bus is edited (the review's `stale` flags a LATER SOLVE that cleared the
+ * stored report, not an edit — the line is logged); a foreground solve
+ * (`POST /api/simulation/run`) then clears the report and, on reload, the
+ * greeting shows the stale sentence within 5 s. (D) a fresh template project
+ * in Guided shows the C6 sentence; Expert on the same project keeps
+ * "Not solved yet.".
+ *
  * P32 (deferred spec 2026-09-28 §7.1, D-8 = (a)) — P25 (every step), then
  * stub branch 7 from the dock in two fresh contexts seeded with the P25
  * project as `network-diagram:current-project` and `ui-mode = expert`:
@@ -130,7 +151,7 @@ const TEMPLATE_NAMES = {
   eh_h2_hub: 'Industrial Hydrogen Hub',
   eh_microgrid: 'Island Microgrid',
 }
-const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25', 'P26', 'P27a', 'P27b', 'P32'])
+const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25', 'P26', 'P27a', 'P27b', 'P28', 'P32'])
 
 // ── args ────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
@@ -2512,6 +2533,219 @@ async function phaseP32(browser) {
   await p32Branch7(browser, { project, explicit: true })
 }
 
+
+// ── the P28 extension (deferred spec 2026-09-28 §3.5) ──────────────────────
+const STUB_PROFILE_2 = 'smoke-stub-2'
+const ANTHROPIC_PROFILE = 'anthropic-sonnet'
+const P28_STALE = 'A study has run, but the network changed since — run it again in Hub design.'
+const P28_DONE = 'A study has run on this network — its results are in Hub design.'
+const P28_C6 = 'No study has run yet — start in Hub design.'
+
+async function p28Context(browser, project, mode) {
+  const consoleLines = []
+  const streamBodies = []
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  await seedStorageOnce(context, {
+    'network-diagram:current-project': project,
+    [MODE_KEY]: mode,
+    [EXPLICIT_KEY]: '1',
+  })
+  const page = await context.newPage()
+  page.on('console', m => consoleLines.push(`[${m.type()}] ${m.text()}`))
+  page.on('pageerror', e => consoleLines.push(`[pageerror] ${e.message}`))
+  page.on('request', r => {
+    if (r.url().includes('/api/chat/stream') && r.method() === 'POST') streamBodies.push(r.postData() ?? '')
+  })
+  const byId = id => page.locator(`[data-testid="${id}"]`)
+  await api('POST', `/api/projects/${encodeURIComponent(project)}/activate`)
+  await page.goto(`${WEB}/app?project=${encodeURIComponent(project)}`, { waitUntil: 'domcontentloaded' })
+  await byId('ui-mode-switch').waitFor({ state: 'visible', timeout: 60_000 })
+  async function openDock() {
+    await page.waitForSelector(
+      '[data-testid="chat-input"]:visible, [data-testid="assistant-dock-launcher"]:visible',
+      { timeout: 30_000 })
+    if (!(await byId('chat-input').isVisible().catch(() => false))) await byId('assistant-dock-launcher').click()
+    await byId('chat-input').waitFor({ state: 'visible', timeout: 15_000 })
+    await page.waitForSelector('[data-testid="chat-model-select"][data-profiles-state="ready"]', { timeout: 30_000 })
+  }
+  const sendDisabled = () => page.evaluate(() => document.querySelector('[data-testid="chat-send"]')?.disabled)
+  async function fail(label, e) {
+    try { await shot(page, `FAILURE-p28-${label}`) } catch { /* page gone */ }
+    const logFile = path.join(args.out, `FAILURE-p28-${label}-console.log`)
+    fs.writeFileSync(logFile, consoleLines.join('\n'))
+    info(`console log ${logFile}`)
+    throw e
+  }
+  return { context, page, byId, openDock, sendDisabled, streamBodies, fail }
+}
+
+async function phaseP28(browser) {
+  const p26 = await phaseP26(browser)
+  const mg = p26.find(r => r.id === 'eh_microgrid')?.project
+  const h2 = p26.find(r => r.id === 'eh_h2_hub')?.project
+  check(!!mg && !!h2, `P26 projects: microgrid=${mg}, h2=${h2}`)
+
+  // (A) the P22.9 send-gate step, bound to a second ready profile
+  step('P28 (A) a second auth:none profile; one turn binds the session to it (Expert, microgrid project)')
+  await api('PUT', `/api/chat/settings/llm/profiles/${STUB_PROFILE_2}`, {
+    label: 'Smoke stub 2', preset: 'custom', wire: 'openai',
+    base_url: `http://127.0.0.1:${STUB_PORT}/v1`, model: 'stub-model',
+    tools: true, vision: false, auth: 'none', fallback_model: null, max_output_tokens: null,
+  })
+  check((await api('GET', '/api/chat/health')).active_profile?.id === STUB_PROFILE,
+    `the stub profile ${STUB_PROFILE} is active`)
+  {
+    const t = await p28Context(browser, mg, 'expert')
+    const { page, byId } = t
+    try {
+      await t.openDock()
+      await page.selectOption('[data-testid="chat-model-select"]', STUB_PROFILE_2)
+      // same wire as the active stub: no cross-wire confirm
+      check((await byId('chat-profile-switch-confirm').count()) === 0, 'same-wire pick: no confirm')
+      await byId('chat-input').fill('hello from P28')
+      await byId('chat-send').click()
+      await page.waitForFunction(() => !document.querySelector('[data-testid="chat-abort"]'), null, { timeout: 60_000 })
+      await page.getByText('Saved.').first().waitFor({ timeout: 30_000 })
+      const body = JSON.parse(t.streamBodies.at(-1) ?? '{}')
+      check(body.profile_id === STUB_PROFILE_2, `the turn was sent with profile_id=${body.profile_id}`)
+
+      step(`P28 (A) the active profile → ${ANTHROPIC_PROFILE} (no key); reload → Send follows the bound profile`)
+      await api('POST', '/api/chat/settings/llm/active', { profile_id: ANTHROPIC_PROFILE })
+      const h = await api('GET', '/api/chat/health')
+      check(h.active_profile?.id === ANTHROPIC_PROFILE && h.chat_ready === false,
+        `health: active=${h.active_profile?.id}, chat_ready=${h.chat_ready}`)
+      await page.reload({ waitUntil: 'domcontentloaded' })
+      await t.openDock()
+      await page.getByText('hello from P28').first().waitFor({ timeout: 30_000 })
+      const hist = await api('GET', '/api/chat/history')
+      check(hist.bound_profile_id === STUB_PROFILE_2, `GET /api/chat/history.bound_profile_id=${hist.bound_profile_id}`)
+      const profs = await api('GET', '/api/chat/profiles')
+      const ready = Object.fromEntries(profs.profiles.map(p => [p.id, p.chat_ready]))
+      check(ready[ANTHROPIC_PROFILE] === false && ready[STUB_PROFILE] === true && ready[STUB_PROFILE_2] === true,
+        `GET /api/chat/profiles (local mode answers): ${ANTHROPIC_PROFILE}=${ready[ANTHROPIC_PROFILE]}, ${STUB_PROFILE}=${ready[STUB_PROFILE]}, ${STUB_PROFILE_2}=${ready[STUB_PROFILE_2]}`)
+      await byId('chat-input').fill('typed after reload')
+      await page.waitForFunction(() => document.querySelector('[data-testid="chat-send"]')?.disabled === false,
+        null, { timeout: 15_000 })
+      await sleep(1500)
+      check((await t.sendDisabled()) === false, 'chat-send enabled with text typed (bound to a ready profile)')
+      check((await byId('chat-send-gate').count()) === 0, 'no chat-send-gate')
+      check(await byId('chat-model-select').inputValue() === STUB_PROFILE_2, `the dropdown shows ${STUB_PROFILE_2}`)
+      check((await byId('chat-launch-greeting').count()) === 0,
+        'the greeting is not shown (the transcript has the turn) — its key offer is checked in (B)')
+      await shot(page, 'p28-a-bound-send-enabled')
+      await byId('chat-input').fill('')
+    } catch (e) { await t.fail('a', e) } finally { await t.context.close() }
+  }
+
+  // (B) the key offer follows a picked ready non-active profile
+  step('P28 (B) the key offer: shown for the keyless active profile, hidden once a ready profile is picked (H2 project)')
+  {
+    const t = await p28Context(browser, h2, 'expert')
+    const { page, byId } = t
+    try {
+      await t.openDock()
+      await byId('chat-launch-greeting').waitFor({ state: 'visible', timeout: 30_000 })
+      await byId('chat-launch-key-offer').waitFor({ state: 'visible', timeout: 15_000 })
+      ok('control: the key offer shows while the effective profile is the keyless Anthropic one')
+      await byId('chat-input').fill('hello')
+      await page.waitForFunction(() => document.querySelector('[data-testid="chat-send"]')?.disabled === true,
+        null, { timeout: 15_000 })
+      check(await byId('chat-send-gate').isVisible(), 'control: Send gated, key form inline')
+      await page.selectOption('[data-testid="chat-model-select"]', STUB_PROFILE_2)
+      await byId('chat-profile-switch-confirm-btn').click()
+      await page.waitForFunction(() => !document.querySelector('[data-testid="chat-launch-key-offer"]'),
+        null, { timeout: 15_000 })
+      check((await byId('chat-launch-key-offer').count()) === 0, `picked ${STUB_PROFILE_2}: no key offer`)
+      await byId('chat-input').fill('hello')
+      await page.waitForFunction(() => document.querySelector('[data-testid="chat-send"]')?.disabled === false,
+        null, { timeout: 15_000 })
+      check((await byId('chat-send-gate').count()) === 0, `picked ${STUB_PROFILE_2}: Send enabled, no chat-send-gate`)
+      await shot(page, 'p28-b-picked-no-key-offer')
+    } catch (e) { await t.fail('b', e) } finally { await t.context.close() }
+  }
+
+  // (C) Guided: the finished study, then staleness
+  step('P28 (C) Guided on the H2 project after its study: results in Hub design; a later solve → the stale sentence')
+  {
+    const t = await p28Context(browser, h2, 'guided')
+    const { page, byId } = t
+    const solveText = () => page.evaluate(() => document.querySelector('[data-testid="chat-launch-solve"]')?.textContent ?? '')
+    try {
+      await byId('hub-design-panel').waitFor({ state: 'visible', timeout: 60_000 })
+      await t.openDock()
+      // Re-activating the project does not bring P26's study record back (the
+      // hub rail is at Site again): run the study here, from the Goal card.
+      if ((await rawApi('GET', '/api/results/eh_study')).json?.status !== 'done') {
+        await byId('hub-card-site').waitFor({ state: 'visible', timeout: 60_000 })
+        await byId('hub-next-site').click()
+        await page.waitForFunction(() => !document.querySelector('[data-testid="hub-goal-run"]')?.disabled,
+          null, { timeout: 30_000 })
+        await byId('hub-goal-run').click()
+        await byId('hub-card-results').waitFor({ state: 'visible', timeout: 10 * 60_000 })
+        check((await api('GET', '/api/results/eh_study'))?.status === 'done', 'the hub study ran from the Goal card: done')
+      }
+      await page.waitForFunction(w => document.querySelector('[data-testid="chat-launch-solve"]')?.textContent === w,
+        P28_DONE, { timeout: 30_000 })
+      ok(`greeting: "${P28_DONE}"`)
+      const review0 = await api('GET', '/api/results/eh_review')
+      check(review0?.stale === false, `eh_review.stale=${review0?.stale} before`)
+      const bus = (await api('GET', '/api/network/buses'))[0]
+      const r = await rawApi('PUT', `/api/network/buses/${encodeURIComponent(bus.name)}`,
+        { name: bus.name, x: Number(bus.x ?? 0) + 0.001 })
+      check(r.status === 200, `edited bus ${bus.name} (PUT ${r.status})`)
+      await page.reload({ waitUntil: 'domcontentloaded' })
+      await t.openDock()
+      await sleep(3000)
+      const review1 = await api('GET', '/api/results/eh_review')
+      info(`after the bus edit: eh_review.stale=${review1?.stale}; greeting "${await solveText()}" (the review flags a later solve, not an edit)`)
+      await rawApi('PUT', `/api/network/buses/${encodeURIComponent(bus.name)}`, { name: bus.name, x: bus.x })
+      const run = await rawApi('POST', '/api/simulation/run')
+      check(run.status < 300, `POST /api/simulation/run → ${run.status}`)
+      const until = Date.now() + 5 * 60_000
+      let st = null
+      await sleep(1000)
+      while (Date.now() < until) {
+        st = await api('GET', '/api/simulation/status')
+        if (!st.running) break
+        await sleep(1000)
+      }
+      check(st && !st.running && st.dispatch === 'fresh', `foreground solve finished: status=${st?.status}, dispatch=${st?.dispatch}`)
+      const review2 = await api('GET', '/api/results/eh_review')
+      check(review2?.stale === true, `eh_review.stale=${review2?.stale} after the solve`)
+      await page.reload({ waitUntil: 'domcontentloaded' })
+      await t.openDock()
+      const t0 = Date.now()
+      await page.waitForFunction(w => document.querySelector('[data-testid="chat-launch-solve"]')?.textContent === w,
+        P28_STALE, { timeout: 5_000 })
+      ok(`greeting after the solve (${((Date.now() - t0) / 1000).toFixed(1)} s): "${P28_STALE}"`)
+      await shot(page, 'p28-c-guided-stale')
+    } catch (e) { await t.fail('c', e) } finally { await t.context.close() }
+  }
+
+  // (D) C6 on a fresh project; Expert keeps its sentence
+  step('P28 (D) a fresh template project: Guided → the C6 sentence; Expert → "Not solved yet."')
+  {
+    const created = await api('POST', `/api/projects/from_template/eh_h2_hub?name=${encodeURIComponent(`p28-fresh-${Date.now().toString(36)}`)}`)
+    const fresh = created?.imported
+    check(!!fresh, `fresh project ${fresh}`)
+    const t = await p28Context(browser, fresh, 'guided')
+    const { page, byId } = t
+    try {
+      await byId('hub-design-panel').waitFor({ state: 'visible', timeout: 60_000 })
+      await t.openDock()
+      await page.waitForFunction(w => document.querySelector('[data-testid="chat-launch-solve"]')?.textContent === w,
+        P28_C6, { timeout: 30_000 })
+      ok(`Guided greeting: "${P28_C6}"`)
+      await shot(page, 'p28-d-guided-c6')
+      await byId('ui-mode-expert').click()
+      await page.waitForFunction(() => document.querySelector('[data-testid="chat-launch-solve"]')?.textContent === 'Not solved yet.',
+        null, { timeout: 15_000 })
+      ok('Expert greeting: "Not solved yet."')
+      await shot(page, 'p28-d-expert-not-solved')
+    } catch (e) { await t.fail('d', e) } finally { await t.context.close() }
+  }
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 let startBackend = () => { throw new ToolingError('backend not configured yet') }
 let code = 0
@@ -2564,6 +2798,7 @@ try {
   else if (args.phase === 'P26') await phaseP26(browser)
   else if (args.phase === 'P27a') await phaseP27a(browser)
   else if (args.phase === 'P27b') await phaseP27b(browser)
+  else if (args.phase === 'P28') await phaseP28(browser)
   else if (args.phase === 'P32') await phaseP32(browser)
   console.log(`\nPASS — ${shots.length} screenshots in ${args.out}`)
 } catch (e) {
