@@ -171,6 +171,18 @@ own cookie policy through configuration. The CSRF double-submit check
 (`main.py:645`) currently carries the load for those sessions. Source: gap 5 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
 
+### 10a. Re-activating a project does not restore its hub study record
+
+Added 2026-09-30, from the P28 smoke. A project whose Energy Hub study
+finished, and which is then left and re-activated
+(`POST /api/projects/<p>/activate`), answers `GET /api/results/eh_study`
+with no study. The Guided hub rail opens at Site again, and the greeting says
+"No study has run yet". The Guided "study done" state is lost for a user who
+re-opens a project. Where the record is stored was not traced. The P28 smoke
+part (C) works around it by re-running the study. Sources: the plan's "P28
+phase note" (contract drift 3) and
+`qa/2026-09-30-guided-mode-deferred-gate-P28.md`.
+
 ---
 
 ## Verification / CI
