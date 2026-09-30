@@ -104,10 +104,13 @@ const sameRect = (a: Rect | null, b: Rect | null) => a === b || (!!a && !!b
   && a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height)
 
 /** A step is shown when it is required, or optional with its target on
- *  screen right now (P30 B7: judged when reached, not once at the start). */
-function available(s: GuideStep): boolean {
-  return !s.optional || findTarget(s.target) !== null
+ *  screen right now (P30 B7: judged when reached), or optional and on screen
+ *  when the tour started (the pre-P30 rule: its `reveal` brings it back
+ *  after an earlier step's reveal hid it). */
+function available(s: GuideStep, k: number, atStart: ReadonlySet<number>): boolean {
+  return !s.optional || atStart.has(k) || findTarget(s.target) !== null
 }
+const NONE: ReadonlySet<number> = new Set()
 
 export type Placement = 'below' | 'above' | 'right' | 'left' | 'free'
 
@@ -174,10 +177,14 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
   const [avail, setAvail] = useState<string>('')
   const [size, setSize] = useState<{ w: number; h: number } | null>(null)
   const boxRef = useRef<HTMLDivElement>(null)
+  const [atStart, setAtStart] = useState<ReadonlySet<number>>(NONE)
 
   useEffect(() => {
     if (!tour) return
-    const first = tour.steps.findIndex(available)
+    const start = new Set(tour.steps.flatMap((s, k) =>
+      (s.optional && findTarget(s.target) !== null ? [k] : [])))
+    setAtStart(start)
+    const first = tour.steps.findIndex((s, k) => available(s, k, start))
     setIdx(first >= 0 ? first : null)
   }, [tour])
 
@@ -187,18 +194,18 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
   // per frame; state changes only when something actually moved (spec §5.10).
   const frame = useRef<number | null>(null)
   // Read at frame time: a frame queued before a move must use the new step.
-  const live = useRef({ step, steps })
-  live.current = { step, steps }
+  const live = useRef({ step, steps, atStart })
+  live.current = { step, steps, atStart }
   const refresh = useCallback(() => {
     if (frame.current !== null) return
     const run = () => {
       frame.current = null
-      const { step: cur, steps: all } = live.current
+      const { step: cur, steps: all, atStart: st } = live.current
       if (cur) {
         const r = rectOf(findTarget(cur.target))
         setRect(prev => (sameRect(prev, r) ? prev : r))
       }
-      const a = all.map(s => (available(s) ? '1' : '0')).join('')
+      const a = all.map((s, k) => (available(s, k, st) ? '1' : '0')).join('')
       setAvail(prev => (prev === a ? prev : a))
       const el = boxRef.current
       if (el) {
@@ -228,12 +235,12 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
         const later = findTarget(step.target)
         later?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
         setRect(rectOf(later))
-        setAvail(steps.map(s => (available(s) ? '1' : '0')).join(''))
+        setAvail(steps.map((s, k) => (available(s, k, atStart) ? '1' : '0')).join(''))
       }, 60)
     }
     el?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
     setRect(rectOf(el))
-    setAvail(steps.map(s => (available(s) ? '1' : '0')).join(''))
+    setAvail(steps.map((s, k) => (available(s, k, atStart) ? '1' : '0')).join(''))
     return () => { if (retry) clearTimeout(retry) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step])
@@ -272,16 +279,16 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
   const next = useCallback(() => {
     if (idx === null) return
     // Judged now: an optional step whose target appeared since is shown.
-    const j = steps.findIndex((s, k) => k > idx && available(s))
+    const j = steps.findIndex((s, k) => k > idx && available(s, k, atStart))
     if (j < 0) close(true)
     else setIdx(j)
-  }, [idx, steps, close])
+  }, [idx, steps, close, atStart])
   const back = useCallback(() => {
     if (idx === null) return
     for (let k = idx - 1; k >= 0; k--) {
-      if (available(steps[k])) { setIdx(k); return }
+      if (available(steps[k], k, atStart)) { setIdx(k); return }
     }
-  }, [idx, steps])
+  }, [idx, steps, atStart])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

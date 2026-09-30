@@ -311,6 +311,41 @@ describe('GuidedTour optional steps (P30 B7)', () => {
     expect(screen.getByTestId('guide-step-title').textContent).toBe('First')   // `gone` skipped
   })
 
+  // The P24 after-study hub tour: an optional step on screen when the tour
+  // starts keeps its place even if a later step's reveal hid it — its own
+  // reveal brings it back (the pre-P30 rule, kept alongside "when reached").
+  it('an optional step on screen at the start is kept; its reveal brings it back', async () => {
+    vi.mocked(guidesApi.getGuide).mockResolvedValue({
+      version: 1, fields: {},
+      tours: { keep: { title: 'Keep', steps: [
+        { target: 'first', title: 'First', body: 'one', reveal: 'hide-panel' },
+        { target: 'panel', title: 'Panel', body: 'two', optional: true, reveal: 'show-panel' },
+      ] } },
+    })
+    function KeepHarness() {
+      const [shown, setShown] = useState(true)
+      return (
+        <div>
+          {!shown && <div data-testid="first">F</div>}
+          <button data-testid="hide-panel" onClick={() => setShown(false)}>hide</button>
+          <button data-testid="show-panel" onClick={() => setShown(true)}>show</button>
+          {shown && <div data-testid="panel">P</div>}
+          <GuideButton tourId="keep" testId="start" />
+        </div>
+      )
+    }
+    const user = userEvent.setup()
+    renderWith(<KeepHarness />)
+    await user.click(screen.getByTestId('start'))
+    await screen.findByTestId('guide-tour')
+    await waitFor(() => expect(screen.getByTestId('first')).toBeTruthy())   // step 1 revealed, panel hidden
+    expect(screen.queryByTestId('panel')).toBeNull()
+    expect(screen.getByTestId('guide-tour').textContent).toMatch(/Keep · 1\/2/)
+    await user.click(screen.getByTestId('guide-next'))
+    expect(screen.getByTestId('guide-step-title').textContent).toBe('Panel')
+    await waitFor(() => expect(screen.getByTestId('panel')).toBeTruthy())   // its reveal
+  })
+
   it('the counter counts only visible steps', async () => {
     vi.mocked(guidesApi.getGuide).mockResolvedValue(LATE)
     const user = userEvent.setup()
