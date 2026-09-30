@@ -1,4 +1,4 @@
-# Edge Investment Case — Phase 4: finance engine, single owner (plan v0.3)
+# Edge Investment Case — Phase 4: finance engine, single owner (plan v1.0)
 
 **Spec:** `docs/superpowers/specs/2026-09-26-edge-investment-case-design.md` §4.2 / §4.2a (finance contracts),
 §4.3 (report), §6.1–6.6 (finance engine), §11 (packs), §12 (API, chat, UI), §13 (P4 row), §15 (oracles,
@@ -187,21 +187,27 @@ typed.
 owner's ledger net is mostly the supply cost, so returns on it are meaningless. The adapter builds a
 **counterfactual supply cost**: the same site, tariff and connection agreement **without the owner's
 investable assets**:
-- **The meter:** import = the site-side **electric** loads' **served** demand (`loads_t.p_set`, or the static
-  `p_set` without a series; grid-side and non-electric loads excluded) **minus the load shed in the actual
-  dispatch** (DSR activation and VoLL slack — the same shed in both, because P4 does not re-dispatch); export
-  0. Shed volume is disclosed (`load_shed_excluded:<mwh>`), never valued (**DSR slack, P2 carry-in: an
+- **The meter:** import = the site-side **electric** loads' demand (`loads_t.p_set`, or the static `p_set`
+  without a series; grid-side and non-electric loads excluded) minus the actual dispatch's shed (DSR
+  activation and VoLL slack) — i.e. **the served load**, the same shed on both sides because P4 does not
+  re-dispatch; export 0. A PoC import chain with efficiency ≠ 1 → `counterfactual_not_established:lossy_poc`
+  (round 3 M1). Shed volume is disclosed (`load_shed_excluded:<mwh>`), never valued (**DSR slack, P2 carry-in: an
   opportunity cost, excluded from cash on both sides and disclosed**).
 - **The tariff bill:** rated by a new **`billing.rate_meter(n, cfg, import_mw, export_mw, *, meter_history)`**
   factored out of `bill_site` — it calls `tariff_engine.rate(...)` with exactly `bill_site`'s arguments
   (`_represented` → `billing_period` / `represents_hours`, `capacity_kw` = the PoC `p_nom_opt`, `timezone`,
-  `power_factor`, `meter_history`); `bill_site` then calls it, and a test pins every P2 bill unchanged. A
+  `power_factor`, `meter_history` defaulting to `cfg.meter_history_peaks_kw` exactly as `bill_site` does);
+  `bill_site` then calls it, and a test pins every P2 bill unchanged. With no import tariff the bill term is
+  0 on both sides (commodity only), not `None`. A
   counterfactual peak above the PoC capacity is flagged `counterfactual_exceeds_connection` (a BESS that
   shaved the peak makes it real) and rated as metered.
-- **The commodity:** when the site's energy is a grid-side supply generator (the P3 ledger's
-  `commodity_from_grid_side_generator` line, `participants.py:559`), the counterfactual commodity =
-  Σ import·w·mc for a single grid-side supply generator; several differently priced grid-side generators →
-  `counterfactual_commodity_not_established`.
+- **The commodity (round 3 M1):** when the site's energy is a grid-side supply generator (the P3 ledger's
+  `commodity_from_grid_side_generator` line, `participants.py:559`), **both** commodity terms are computed on
+  the meter basis, Σ_t w_obj,t · import_t · mc_t (`generators_t.marginal_cost` where present). The
+  actual-side term must equal the ledger's commodity line within a cent — otherwise (grid-side loads or
+  costed grid-side assets beside the supply generator, a quadratic cost, several differently priced grid-side
+  generators) → `counterfactual_commodity_not_established`, never a number. A counterfactual import above the
+  supply generator's `p_nom × p_max_pu` is flagged `counterfactual_exceeds_supply`.
 - **The connection fee lines** are identical on both sides (by construction) and cancel.
 - **Contracts** that exist only because of the assets (PPAs on them, EaaS / lease on them) are absent.
 
@@ -344,7 +350,8 @@ mirrored in `frontend/src/api/types.ts` and covered by the new `types.ts` parity
     construction period); `TaxEquityStructure.itc_recapture_years` → `None` (P7's).
   - `Provenance`: `source_id`, `contract_id`, `period` (P3 pin).
   - A finance-side **`CashflowStream = ValueStreamKind | Literal["corporate_tax", "terminal_value",
-    "financing_fee", "reserve", "interest", "principal", "incentive_credit"]`** for `CashflowLine`
+    "financing_fee", "reserve", "interest", "principal"]` (incentives use the existing `incentive`
+    kind)** for `CashflowLine`
     (round 2 R4): corporate tax never collides with the P3 levy stream `tax`, and the ledger's
     `ValueStreamKind` (the P3 FE unions, the Sankey, committed hashes) is unchanged — a test pins that no
     committed P3 hash moved.
@@ -478,7 +485,9 @@ mirrored in `frontend/src/api/types.ts` and covered by the new `types.ts` parity
   EBITDA identity; a finite equity IRR, pinned); `template_not_annual` on the 7-day fixture and the
   `annualise` path; a load-free generator site (incremental = total); the shed-load exclusion disclosed and equal on both
   sides; several grid-side generators → `counterfactual_commodity_not_established`; a counterfactual peak
-  above the PoC → `counterfactual_exceeds_connection`.
+  above the PoC → `counterfactual_exceeds_connection`; **a grid-side load beside the supply generator →
+  `counterfactual_commodity_not_established`** (the ledger cross-check fails; round 3 M1); a lossy PoC chain
+  → not established.
 
 ## WP4.6b Finance inputs route, runner, study routes, persistence
 
@@ -649,3 +658,13 @@ the basis-reduction flags, S3f's one-step term, S2's state bonus 0 and the C9 no
   (¢/kWh units), R3 (PTC rounding), R4 (a finance-side `CashflowStream`, the ledger enum unchanged), R5 (fee
   funding wording), R6 (the annualise expectation and the 7-day bill check), R7 (overnight cost and asset
   rate on the fixture), R8 (electric site loads only).
+
+**Round 3 (v0.3, 03fa319): PASS WITH CONDITIONS — one binding (M1, LOW), closed in text (v1.0).** N1–N5
+verified closed (PySAM: S3 with the moratorium D = 0.6·TIC, year 1 interest-only then a 14-year annuity; S3f's
+difference = 0.36·f·TIC unaffected). The commodity term's sign and weights match the ledger; M1: its basis
+matched only in the fixture → both commodity terms on the meter basis with the ledger cross-check, a lossy
+PoC chain not established, a WP4.6a test with a grid-side load. `rate_meter` feasible (the `meter_history`
+default and the no-tariff case stated). Recommended, taken: the served-load wording, `incentive` reused
+(no `incentive_credit`), `counterfactual_exceeds_supply`, the annualise precondition kept.
+
+**Plan status: PASSED (v1.0).** Implementation starts with WP4.0.
