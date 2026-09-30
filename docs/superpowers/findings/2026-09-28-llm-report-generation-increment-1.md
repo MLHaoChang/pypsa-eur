@@ -295,10 +295,123 @@ Reports at all (today only through the Energy Hub panel's report request).
 pane (phase 4) and the round-trip upload / version diff (phase 5): those
 are exercised by the backend QA drivers and the component tests only.
 
+## §7 — Live probe, browser legs for phases 4 and 5, Guided-mode reach, 2026-09-30
+
+Branch `claude/reports-live-probe-and-browser-e2e` on PR #69's head
+(`3584133`, `master` + the Expert-mode smoke fix). Backend: uvicorn in local
+desktop mode on :8765 serving the built SPA; the venv from the session hook.
+
+### 7.1 Live LLM probe — still UNPROBED, and why
+
+The probe was to run on the anthropic profile with the environment's key.
+**This container has no key**: `GET /api/chat/health` on the local backend
+answered `anthropic_api_key_present: false` (`active_profile: anthropic-sonnet`,
+`default_model: claude-sonnet-5`, `chat_ready: false`), and the smoke's
+generate leg was refused 400 `missing_api_key` as in §3 and §6c. The backend
+reads `ANTHROPIC_API_KEY` from the launching shell (`services/app_secrets`
+precedence: shell > `user.env` > `backend/.env`); the variable is not set in
+this session's shell. So **no report was written by a model here, and no
+model can be named.** The probe is not skipped silently:
+
+* `tests/qa_reports_live_anthropic.py` (new) is the probe as a driver. It
+  runs the real study, then `generate_report` → `get_report_status` →
+  `get_report` → `export_report_docx` → `regenerate_report_section`
+  **through the chat tools** on the active profile (no fake at the seam;
+  `PYPSA_GUI_TEST_LIVE_PROFILE` picks another configured profile), and
+  inspects the audit on the real prose: every numeric token the audit's own
+  tokeniser finds in each model-written section is either in
+  `audit.verified` or in `audit.unverified` (none silently accepted), the
+  audit lists nothing that is not in the prose, and the exported
+  "Numbers to check" appendix carries every unverified number under its
+  section's heading and nothing else; then one regenerate under an
+  instruction leaves every other section byte-identical. Without the key it
+  prints `UNPROBED` and exits 0 (so `run_qa_drivers.py` stays green in CI,
+  where no key exists); `--require-key` exits 2 instead.
+* Its legs 2–5 were exercised on the scripted fake provider through an
+  ad-hoc harness (a planted `99.9 h/yr` and a copied cost figure): 23/23
+  PASS, the planted number flagged and listed in the appendix, the copied
+  one verified. One driver bug found by that run and fixed: the appendix
+  parser took the writer's introductory Disclosure sentence for a row (it
+  contains `: `); rows are now recognised by their bold heading run.
+
+**To run the probe** (a workstation, or a session whose environment sets the
+variable): `cd pypsa-gui/backend && ANTHROPIC_API_KEY=… python
+tests/qa_reports_live_anthropic.py --require-key`, and
+`node scripts/smoke-reports.mjs --base … --browser` against a backend
+started from a shell that has it — the smoke's sections 3 and 6 then run
+the generate, regenerate and "Propose with the assistant" legs instead of
+reporting them skipped. Record the `model` the job record names.
+
+### 7.2 Phase 4 and phase 5 in the browser
+
+`scripts/smoke-reports.mjs --browser` now continues after the viewer leg
+(the sections are numbered 6 and 7; cleanup is 8):
+
+| Leg | What it does | Result |
+|---|---|---|
+| 6 templates | builds both fixtures with `tests/fixtures/report_templates/_build.py` (SMOKE_PYTHON) → uploads the TAGGED one through the picker's file input → outline says `tagged`, the export button names it → Export .docx → the export is of the latest version → docx-preview renders it: the report title where `{{ meta.title }}` was, the looped table header, no tag left → uploads the CORPORATE one → `untagged`, the mapping-plan editor lists its 7 headings → review by hand (heading 1 ← executive summary; heading 4 renamed + ← fmea_top; heading 5 dropped) → unsaved tag → Save plan → `GET …/template` carries it → Export with this template → preview: renamed heading present, "Lorem ipsum" gone, cover and "Confidential" footer intact → "Built-in default" unbinds | 25/25 |
+| 7 round trip | API export of the open report → `scripts/smoke_reports_edit_docx.py` (python-docx: a new paragraph after the `fmea_top` heading, a Word comment on a `certification` run) → uploaded through the round-trip file input → result panel "Merged as v5", the edited section listed as edited by you, the comment as a pending instruction → the section card shows the `section-edited` tag, the commented card the pending instruction → API: `source user_edit`, `pending_instruction` set, version base + 1 → Compare… → diff view: "1 changed · 0 added · 0 removed · 15 unchanged", the edited row `changed`, the commented row carries the instruction | 14/14 |
+| whole run | sections 0–8, `GENERATION PATH: skipped` | **62/62 PASS** |
+
+"Propose with the assistant" runs in leg 6 only when the generation path
+ran (it needs the LLM); without a key the plan is reviewed by hand and the
+script says so.
+
+**Found by leg 6, fixed on this branch.** The first run exported
+`report_…_v1.docx` under a button reading "· tagged_minimal.docx", and
+the preview showed the built-in writer's document (no looped table). A
+bind writes a NEW version (v2) carrying `template_file_id`; the viewer's
+document query still held v1 and `exportReport` sends `version:
+shownVersion`, so the export route rendered v1 — which has no template —
+with the default writer. The picker's bind mutation now invalidates the
+document (`REPORT_DOC_PREFIX`) and the list (`REPORTS_LIST_KEY`) as the
+round trip's `onMerged` already did; `TemplatePicker.test.tsx` +1 pins it,
+and the smoke asserts the exported filename's version equals the latest.
+The backend driver could not see this: it re-fetches the document after
+every bind. Second run: 62/62.
+
+### 7.3 Can a Guided-mode user reach Reports today?
+
+**Yes, but only through Expert surfaces, and nothing in Guided points there.**
+Guided hides the SIMULATION section (spec §3.5), which is where the Reports
+row lives (`Sidebar.tsx`, "Reports" `SItem`), and the command palette has no
+Reports action. The reachable path: hub-design **Results** card → "Open full
+report" (`hub-results-open-report` → `openFullReport()`: `setSlidePanel('results')`
++ adequacy tab + `requestEhReport()`) → the Energy Hub reference-design panel
+→ its "Reports" button (`eh-open-reports` → `setSlidePanel('reports')`); the
+Adequacy tab's "Write report" button (`adequacy-open-reports`) does the same.
+`App.fullPageContent` renders `ReportsPanel` for `'reports'` in either mode,
+so once opened it works. The Assistant path (`generate_report`,
+`export_report_docx`) writes and exports a report from chat in Guided too,
+but hands back a chip, not the viewer. So the Word report — the deliverable
+of the guided flow — is three hops away on pages Guided otherwise hides.
+
+**Smallest change, if wanted (not made here):** a second button on the
+hub-design Results card, "Reports" (`hub-results-open-reports` →
+`setSlidePanel('reports')`), next to "Open full report" — one card file,
+one test, no sidebar or spec §3.5 table change, and the Reports panel's own
+"Generate report…" then does the rest. The alternative — a Guided sidebar
+row like `sidebar-hub-design` — adds a second Guided-only nav entry and
+touches the §3.5 table and the Guided sidebar tests. Whether Reports should
+be a first-class Guided step at all is the product question to decide.
+
+### 7.4 Gate on this branch
+
+| Tier | Command | Result |
+|---|---|---|
+| Frontend | `npx vitest run --testTimeout=20000` | 251 files, 2843 tests passed (TemplatePicker +1) |
+| Frontend | `npx tsc -b` | clean |
+| End-to-end QA | drivers 0, 1, 2, 4, 5 | 18/18, 38/38, 47/47, 47/47, 37/37 |
+| End-to-end QA | `qa_reports_live_anthropic.py` | UNPROBED (no key), exit 0; `--require-key` exit 2 |
+| End-to-end QA | `smoke-reports.mjs --browser` | 62/62 after the picker fix |
+
 ## Increment 1 — status
 
 Phases 0–5 delivered on `claude/fmea-llm-reporting-feasibility-jtm6w1`
-(increments 1, 2 and 3), gated twice against `master` (§6, §6b). Not done:
-the workstation checks listed per phase and the live LLM probe (no key or
-local model in the container). `export_eh_report_docx` (WP0) remains alongside
-`export_report_docx`; keep as the no-LLM shortcut or remove in review.
+(increments 1, 2 and 3), gated twice against `master` (§6, §6b); phases 4
+and 5 have a browser leg since §7. Not done: the workstation checks listed
+per phase and the live LLM probe — still no key in the container (§7.1; the
+driver `qa_reports_live_anthropic.py` is ready for a session that has one).
+Open product question: Reports in Guided mode (§7.3). `export_eh_report_docx`
+(WP0) remains alongside `export_report_docx`; keep as the no-LLM shortcut or
+remove in review.
