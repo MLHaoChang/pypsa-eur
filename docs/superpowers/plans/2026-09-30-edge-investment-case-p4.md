@@ -408,6 +408,36 @@ mirrored in `frontend/src/api/types.ts` and covered by the new `types.ts` parity
   → `not_established`; tenor stop and disclosure; the C3 multi-period mapping on a two-period toy; a `None`
   template line → `not_established`; **S1 parity: revenue, O&M (additive escalation), EBITDA.**
 
+**WP4.1 implementation.**
+- `services/finance/case.py`: the engine's input contract — `FinanceCase` (inputs, owner, base year, COD,
+  templates, assets, flags), `Template` (first operating year, lines, generation per asset),
+  `TemplateLine` (base-year money signed from the owner; `amount` None = not established; escalation class or
+  `contract` with its own indexation; tenor; the degrading asset; ledger drill-down fields), `AssetFinance`,
+  `FinanceRefused(code)`.
+- `timeline.py`: `Timeline` (y0, COD year, base year, analysis years; construction / operating years, index,
+  operating k) and `build_timeline` with the C2 refusals (`analysis_years_missing`,
+  `financial_close_after_cod`, `cod_mismatch`, `capex_phasing_mismatch` — one phasing entry per construction
+  year, `[1.0]` without one — and `asset_lifetime_short` unless a replacement names the asset). Staged builds
+  are the adapter's to refuse (WP4.6a: it reads the network).
+- `cashflow.py`: `STREAM_CLASS` / `esc_class_for`; `build_operating` — per line and year: the template in
+  force (C3), `(1+r)^(y − base_year)` (class rate, or the contract's own indexation, else `ppa`), the
+  degradation factor (C5: `(1−d)^(k−1)`, or the product of a per-year list with the last entry repeating),
+  the tenor stop and `contract_ends:<id>:<year>` (C14); a `None` amount, a missing class rate or a missing
+  degradation entry → `operating` not established with the reason; capex = Σ overnight × (1 + contingency) ×
+  phasing over the construction years (or y0), a `None` overnight cost or contingency → `capex` not
+  established; replacement capex (calendar year, escalated by `capex`, inside the operating axis); terminal
+  value `none` / `fixed` (not escalated) / `multiple_of_ebitda`; `book_value` → not established until the tax
+  basis (WP4.3a); EBITDA = revenue − costs + terminal (SAM's salvage is inside EBITDA); generation per asset
+  degraded.
+- `metrics.py` core: `npv` (index 0 undiscounted) and `irr` (C9: scan + `brentq`, the root closest to 0, the
+  two flags).
+- Tests `test_finance_cashflow.py` (12): **SAM parity on energy, revenue (+ salvage = SAM's total revenue),
+  O&M and EBITDA for S1, S1b, S2, S3, S3f**; F4 (base year two years before COD, a contract's own indexation
+  and tenor, class rates, degradation); F5 (fixed, multiple-of-EBITDA and book-value terminal values;
+  replacement escalated); the not-established paths; the axis refusals; a two-template axis; list
+  degradation; the IRR / NPV core (a two-root series picks 10 %). `sam_case.to_finance_case` builds the SAM
+  cases (S1b at SAM's solved price).
+
 ## WP4.2a Debt: amount / gearing, annuity / level, fees, IDC
 
 - `debt.py`: draws pro rata with capex phasing; IDC capitalised (C6); upfront fee (share of commitment, at

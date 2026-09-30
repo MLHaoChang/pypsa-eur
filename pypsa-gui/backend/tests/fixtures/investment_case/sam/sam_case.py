@@ -171,3 +171,49 @@ def sam_expected(name: str) -> dict:
         },
         "deviations": load_case(name)["deviations"],
     }
+
+
+# ── SAM → FinanceCase (grows with the WPs that can reach each quantity) ─────
+
+SAM_Y0 = 2030          # SAM's year 0 (the investment year) — a calendar anchor for P4's axis
+
+
+def to_finance_case(name: str):
+    """A `FinanceCase` for the SAM case: one construction year (SAM's year 0),
+    COD on 1 January of the next year = the base year (plan C4), one asset
+    `pv` carrying the installed cost, a PPA line (the contract's own
+    indexation = `ppa_escalation`, degrading with `pv`) and an O&M line
+    (class `opex`, nominal rate inflation + escal)."""
+    from datetime import date
+
+    from models.finance import FinanceInputs, TerminalValueRule
+    from services.finance.case import (
+        CONTRACT_CLASS, AssetFinance, FinanceCase, Template, TemplateLine,
+    )
+
+    p = sam_params(name)
+    # S1b solves the price: its cashflows are SAM's at the solved price.
+    price = sam_expected(name)["scalars"]["ppa_price_per_mwh"] if p.ppa_solve else p.ppa_price_per_mwh
+    fin = FinanceInputs(
+        currency="USD", financial_close=date(SAM_Y0, 1, 1), cod_by_asset={"pv": date(SAM_Y0 + 1, 1, 1)},
+        capex_phasing=[1.0], contingency_share=0.0, analysis_years=p.analysis_years,
+        escalation={"opex": p.opex_escalation, "ppa": p.ppa_escalation, "capex": 0.0},
+        degradation_by_asset={"pv": p.degradation},
+        terminal_value=TerminalValueRule(method="fixed", value=p.salvage_share * p.installed_cost)
+        if p.salvage_share else TerminalValueRule(),
+        wacc_nominal=p.nominal_discount_rate, cost_of_equity=p.nominal_discount_rate,
+        inflation=p.inflation, tax_losses="offset_other_income",
+        financing_fee_tax="not_deducted")
+    lines = (
+        TemplateLine(key="ppa", stream="ppa_settlement", amount=p.energy_year1_mwh * price,
+                     esc_class=CONTRACT_CLASS, indexation=p.ppa_escalation, contract_id="ppa",
+                     degrades_with="pv", counterparty="offtaker", source="contract"),
+        TemplateLine(key="om", stream="fom", amount=-p.opex_year1, esc_class="opex",
+                     counterparty="om_contractor", source="asset"),
+    )
+    return FinanceCase(
+        inputs=fin, owner="owner", base_year=SAM_Y0 + 1, cod=date(SAM_Y0 + 1, 1, 1),
+        templates=(Template(first_year=SAM_Y0 + 1, lines=lines,
+                            energy_mwh={"pv": p.energy_year1_mwh}),),
+        assets=(AssetFinance(name="pv", component="Generator", overnight_cost=p.installed_cost,
+                             lifetime_years=float(p.analysis_years)),))
