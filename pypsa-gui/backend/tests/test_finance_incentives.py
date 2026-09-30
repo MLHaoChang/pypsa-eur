@@ -267,3 +267,20 @@ def test_review_round_2_guards():
     charger = AssetFinance("x", "Link", 1e6, 40.0, carrier="battery charger")
     inc, _ = _run(_case([Incentive(kind="itc")], assets=(charger,), energy={"x": 0.0}))
     assert inc.itc_amount == pytest.approx(0.30 * 1.1e6)
+
+
+
+def test_review_round_3_grants_accumulate_per_asset_and_classes_ignore_case():
+    two = [Incentive(kind="grant", amount=800_000.0, grant_tax_treatment="reduces_basis"),
+           Incentive(kind="grant", amount=800_000.0, grant_tax_treatment="reduces_basis")]
+    inc, _ = _run(_case(two))
+    assert "grant_exceeds_cost:1:grant" in inc.reasons
+    only = EligibilityRule(asset_classes=["solar"])
+    solar = AssetFinance("x", "Generator", 1e6, 40.0, carrier="Solar")
+    inc, _ = _run(_case([Incentive(kind="itc", rate=0.3, eligibility=only)], assets=(solar,),
+                        energy={"x": 0.0}), pack=None)
+    assert inc.itc_amount == pytest.approx(0.3 * 1.1e6)
+    nocost = AssetFinance("x", "Generator", None, 40.0, carrier="solar")
+    inc, _ = _run(_case([Incentive(kind="grant", amount=1.0, grant_tax_treatment="reduces_basis")],
+                        assets=(nocost,), energy={"x": 0.0}), pack=None)
+    assert "overnight_cost_missing:0:grant" in inc.reasons

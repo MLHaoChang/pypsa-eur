@@ -141,7 +141,8 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
             if unknown:
                 reasons.extend(f"asset_carrier_missing:{a}" for a in unknown)
                 continue
-            assets = [a for a in assets if a.carrier in el.asset_classes]
+            want = {c.lower() for c in el.asset_classes}
+            assets = [a for a in assets if a.carrier.lower() in want]
         line = IncentiveLine(index=i, kind=inc.kind, assets=tuple(a.name for a in assets),
                              cash=np.zeros(n))
         out.lines.append(line)
@@ -386,13 +387,19 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
             else:
                 out.grant_basis_reduction += amount
                 flags.append("grant_reduces_basis_pro_rata")
-                bases = {a.name: (a.overnight_cost or 0.0) for a in assets}
+                if any(a.overnight_cost is None for a in assets):
+                    reasons.append(f"overnight_cost_missing:{tag}")
+                    continue
+                bases = {a.name: a.overnight_cost for a in assets}
                 tot = sum(bases.values())
-                if amount > tot * (1.0 + (fin.contingency_share or 0.0)) + 1e-9:
+                cont = 1.0 + (fin.contingency_share or 0.0)
+                # The running total per asset never exceeds its cost (review r3-2).
+                new = {a: grant_on.get(a, 0.0) + (amount * b / tot if tot else amount)
+                       for a, b in bases.items()}
+                if any(new[a] > bases[a] * cont + 1e-9 for a in bases):
                     reasons.append(f"grant_exceeds_cost:{tag}")   # never a negative basis
                     continue
-                for a, b in bases.items():
-                    grant_on[a] = grant_on.get(a, 0.0) + (amount * b / tot if tot else 0.0)
+                grant_on.update(new)
     flags.extend(f for ln in out.lines for f in ln.flags)
     out.itc_assets = tuple(sorted(itc_assets))
     out.reasons = sorted(set(reasons))

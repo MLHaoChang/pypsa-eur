@@ -292,3 +292,17 @@ def test_the_pack_path_and_the_plcr_closed_form():
     c = 140.0                                                   # CFADS 200 − 60, flat
     assert r.metrics["plcr"] == pytest.approx(c * (1 - 1.05 ** -10) / 0.05 / 500.0)
     assert r.metrics["llcr"] == pytest.approx(c * (1 - 1.05 ** -5) / 0.05 / 500.0)
+
+
+
+def test_an_impossible_basis_is_a_reason_never_an_exception():
+    """Reductions above a class's basis (WP4.4 review r3-2) → tax not
+    established with the reason."""
+    layer = (TaxLayer(name="corp", rate=0.25, itc_basis_reduction=True, itc_basis_reduction_share=1.0,
+                      depreciation=(DepreciationClass("pv:sl_10", 1.0, sl_half_year(10)),)),)
+    from models.finance import Incentive
+    r = run_case(_case(fin_over={"incentives": [Incentive(kind="itc", rate=1.0)]}), layers=layer)
+    assert r.sections["tax"] == "ok"                      # ITC = basis: reduced to 0, fine
+    r = run_case(_case(fin_over={"incentives": [Incentive(kind="itc", rate=1.5)]}), layers=layer)
+    assert r.sections["tax"] == "not_established"
+    assert any(x.startswith("tax_basis_invalid:") for x in r.reasons["tax"])

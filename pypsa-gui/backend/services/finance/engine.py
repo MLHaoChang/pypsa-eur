@@ -228,9 +228,13 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
             flags.append("grant_reduces_basis_pro_rata")
         vintages = _replacement_vintages(fin, tl)
         if fin.terminal_value.method == "book_value":
-            probe = compute_tax(tl, layers, ebitda=np.zeros(n), basis=basis, itc_amount=inc.itc_amount,
-                                losses="offset_other_income", vintages=vintages)
-            book = probe.remaining_basis[layers[-1].name]
+            try:
+                probe = compute_tax(tl, layers, ebitda=np.zeros(n), basis=basis,
+                                    itc_amount=inc.itc_amount, losses="offset_other_income",
+                                    vintages=vintages)
+                book = probe.remaining_basis[layers[-1].name]
+            except ValueError:
+                book = 0.0                    # the tax runs below report the invalid basis
             terminal = np.zeros(n)
             terminal[last] = book
             flags.append(f"terminal_book_value:{layers[-1].name}")
@@ -238,21 +242,27 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
         common = dict(itc_amount=inc.itc_amount, losses=fin.tax_losses, vintages=vintages,
                       write_off_remaining=True)
         grant_inc = inc.grant_taxable if inc.grant_taxable is not None else np.zeros(n)
-        tax = compute_tax(tl, layers, ebitda=ebitda_inc, basis=basis, interest=debt.interest,
-                          other_income=debt.reserve_interest + grant_inc,
-                          other_deductions=fee_deduction, **common)
-        tax_u = compute_tax(tl, layers, ebitda=ebitda_inc, basis=basis_u, other_income=grant_inc,
-                            **common)
-        tax_total = compute_tax(tl, layers, ebitda=ebitda_inc + cf_net, basis=basis,
-                                interest=debt.interest,
-                                other_income=debt.reserve_interest + grant_inc,
-                                other_deductions=fee_deduction, **common)
-        flags += tax.flags
-        if inc.itc_amount and debt.idc_total > 0:
-            flags.append("itc_base_excludes_idc")
-        if inc.itc_amount and any(not ly.itc_basis_reduction for ly in layers) and \
-                any(ly.itc_basis_reduction for ly in layers):
-            flags.append("state_itc_basis_unreduced")
+        try:
+            tax = compute_tax(tl, layers, ebitda=ebitda_inc, basis=basis, interest=debt.interest,
+                              other_income=debt.reserve_interest + grant_inc,
+                              other_deductions=fee_deduction, **common)
+            tax_u = compute_tax(tl, layers, ebitda=ebitda_inc, basis=basis_u, other_income=grant_inc,
+                                **common)
+            tax_total = compute_tax(tl, layers, ebitda=ebitda_inc + cf_net, basis=basis,
+                                    interest=debt.interest,
+                                    other_income=debt.reserve_interest + grant_inc,
+                                    other_deductions=fee_deduction, **common)
+            flags += tax.flags
+            if inc.itc_amount and debt.idc_total > 0:
+                flags.append("itc_base_excludes_idc")
+            if inc.itc_amount and any(not ly.itc_basis_reduction for ly in layers) and \
+                    any(ly.itc_basis_reduction for ly in layers):
+                flags.append("state_itc_basis_unreduced")
+        except ValueError as e:
+            # An impossible basis (e.g. reductions above a class's basis) is a
+            # reason, never an exception (WP4.4 review r3-2).
+            tax = tax_u = tax_total = None
+            tax_reasons.append(f"tax_basis_invalid:{e}")
     elif not tax_reasons:
         tax_reasons.append("tax_layers_missing")
     if tax_reasons:

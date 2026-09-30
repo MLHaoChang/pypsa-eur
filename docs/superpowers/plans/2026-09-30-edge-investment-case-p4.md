@@ -613,6 +613,15 @@ every case in ≤ 19 steps.
 Aitken now starts after two plain steps, so the first estimate no longer carries the initial weights.
 Tested: 100 % in one tranche, 60 % + 40 %, and with fees and a DSRA.
 
+**WP4.2 review round 3 (1a883f7): PASS.**
+- A g = 1 grid of 144 cases: none refused, ≤ 1.09e-6 from a tight reference.
+- A 4,000-case random sweep against plain iteration: 0 false divergences, 0 non-convergences, 0
+  established/refused disagreements, ≤ 17 iterations.
+
+**Noted:**
+- a slow contraction leaves the debt up to 1/(1 − q) × TOL off (worst 6e-5);
+- equity may be −1e-6 × uses at 100 % gearing.
+
 ## WP4.2b DSCR sculpting, the `max_gearing` cap, DSRA, reserve interest
 
 - Sculpting in closed form on pre-tax CFADS (C8); the `max_gearing` cap (SAM base TIC × (1+fee)) with the
@@ -922,6 +931,17 @@ with a grant matches SAM's IBI: `reduces_basis` year by year, and `taxable` with
 
 **Recorded deviation:** a taxable grant is taxed in the year received (index 0); SAM taxes it in year 1
 (−0.94 bp of IRR on S1 + $5M).
+
+**WP4.4 review round 3: two findings; fixed.**
+1. **r3-1:** the storage-list change was not re-pinned, so the pack-hash test failed on three commits. That
+   was a process slip: a commit went in without the full P4 run. Re-pinned; the full set now runs before
+   every commit.
+2. **r3-2:** grants were checked one at a time, so two could together exceed an asset's cost and the engine
+   raised a `ValueError`. Fixed:
+   - the running total per asset is checked;
+   - the engine turns any impossible basis into `tax_basis_invalid:…`, never an exception.
+
+**Taken:** `asset_classes` match case-insensitively; a missing overnight cost is named as such.
 
 ## WP4.5 Metrics, solve-for-PPA, the WACC gate
 
