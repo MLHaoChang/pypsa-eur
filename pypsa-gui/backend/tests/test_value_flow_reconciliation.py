@@ -347,8 +347,20 @@ def test_a_representative_week_keeps_its_ledger(reset_backend):
 
 
 def _add_topology(n, topology):
-    """The gate's generation topologies (assessor rounds 1–2): returns a
+    """The gate's generation topologies (assessor rounds 1–3): returns a
     function of the solved network giving the site's NON-pv electric output."""
+    if topology == "store_battery":
+        # PyPSA's Store battery: charger and discharger Links around a Store.
+        # Its discharge is stored site electricity, never generation (round 3).
+        n.add("Bus", "batt", carrier="battery")
+        n.add("Store", "batt_store", bus="batt", e_nom=200.0, e_cyclic=True)
+        n.add("Link", "charger", bus0="site", bus1="batt", p_nom=40.0, efficiency=0.95)
+        n.add("Link", "discharger", bus0="batt", bus1="site", p_nom=40.0, efficiency=0.95)
+        hours = np.asarray(n.snapshots.hour)
+        px = n.links_t["ic_export_price"]["export"].to_numpy(float).copy()
+        px[(hours >= 11) & (hours < 13)] = 400.0            # discharges while PV exports
+        n.links_t["ic_export_price"]["export"] = px
+        return lambda n: np.zeros(len(n.snapshots))
     n.add("Bus", "gas", carrier="gas")
     n.add("Generator", "gas_supply", bus="gas", carrier="gas", p_nom=100.0, marginal_cost=2.0)
     if topology in ("chp", "gas_load"):
@@ -381,7 +393,8 @@ _VF_DEV = {**copy.deepcopy(VF), "export_revenue_to": "asset_owner",
 
 
 @pytest.mark.live_solve
-@pytest.mark.parametrize("topology", ["chp", "gas_load", "multi_output", "solar_thermal"])
+@pytest.mark.parametrize("topology", ["chp", "gas_load", "multi_output", "solar_thermal",
+                                      "store_battery"])
 def test_the_export_split_counts_electric_generation_only(reset_backend, topology):
     """IC P3 gate condition 2 (rounds 1–2): the export split and the
     `as_consumed_btm` PPA's share count ELECTRIC generation behind the meter —
@@ -397,7 +410,8 @@ def test_the_export_split_counts_electric_generation_only(reset_backend, topolog
     n, cfg = _solve(n, _commercial(copy.deepcopy(_VF_DEV), contracts=[LEASE, _BTM]))
     parsed = CommercialConfig.model_validate(cfg.commercial)
     assert _lp.site_generators(n, parsed) == ["pv"]
-    assert _lp.site_generating_links(n, parsed) == ([] if topology == "solar_thermal" else ["chp"])
+    assert _lp.site_generating_links(n, parsed) == (
+        [] if topology in ("solar_thermal", "store_battery") else ["chp"])
     inputs, _vf, ledger, res = _ledger(n, cfg)
     assert res.periods["_"].ok is True, _checks(res, "_")
 
@@ -408,7 +422,10 @@ def test_the_export_split_counts_electric_generation_only(reset_backend, topolog
     el = other(n)
     tot = pv + el
     share = np.where(tot > 0, pv / np.where(tot > 0, tot, 1.0), 0.0)
-    if topology != "solar_thermal":
+    if topology == "store_battery":
+        dis = np.clip(-n.links_t.p1["discharger"].to_numpy(float), 0, None)
+        assert ((exp_mw > 1e-6) & (pv > 1e-6) & (dis > 1e-6)).sum() > 10  # the case arises
+    elif topology != "solar_thermal":
         assert ((exp_mw > 1e-6) & (pv > 1e-6) & (el > 1e-6)).sum() > 10   # the case arises
     hand = float((w * exp_mw * price * share).sum())
     lines = ledger.periods["_"]
@@ -420,6 +437,34 @@ def test_the_export_split_counts_electric_generation_only(reset_backend, topolog
     hand_ppa = 20.0 * float((w * (pv - np.minimum(pv, np.clip(exp_mw, 0, None) * share))).sum())
     ppa = [ln for ln in lines if ln.contract_id == "btm"]
     assert ppa and sum(ln.amount for ln in ppa) == pytest.approx(hand_ppa, abs=0.005)
+
+
+@pytest.mark.live_solve
+def test_a_converter_fed_by_fuel_and_storage_is_not_established(reset_backend):
+    """Round 3: an H2 bus with both a bought-H2 supply and an electrolyser
+    charging it feeds a fuel cell — which part of its output is generation is
+    not known, so whenever it delivers the split (and the PPA share) say not
+    established, never a guess."""
+    from services.commercial import lp_bindings as _lp
+    from models.commercial import CommercialConfig
+
+    n = _network()
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Generator", "h2_supply", bus="h2", carrier="H2", p_nom=20.0, marginal_cost=1.0)
+    n.add("Link", "electrolyser", bus0="site", bus1="h2", p_nom=10.0, efficiency=0.7)
+    n.add("Link", "fuel_cell", bus0="h2", bus1="site", p_nom=20.0, efficiency=0.5)
+    n, cfg = _solve(n, _commercial(copy.deepcopy(_VF_DEV), contracts=[LEASE, _BTM]))
+    parsed = CommercialConfig.model_validate(cfg.commercial)
+    assert _lp.site_generating_links(n, parsed) == ["fuel_cell"]
+    gen = _lp.site_link_generation(n, parsed, lambda k: getattr(n.links_t, f"p{k}", None))
+    fc = -n.links_t.p1["fuel_cell"].to_numpy(float)
+    assert (fc > 1e-6).any()                                   # it delivers
+    assert np.isnan(gen["fuel_cell"].to_numpy(float)[fc > 1e-6]).all()
+    inputs, _vf, ledger, res = _ledger(n, cfg)
+    assert any(f.startswith("export_split_not_established:export_price:") for f in inputs.input_flags)
+    assert res.periods["_"].ok is not True
+    ppa = [ln for ln in ledger.periods["_"] if ln.contract_id == "btm"]
+    assert ppa and all(ln.amount is None for ln in ppa)
 
 
 @pytest.mark.live_solve

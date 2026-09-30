@@ -98,31 +98,40 @@ periods; assessor note).
      `replace=true`.
   5. **Lines turn:** ask for the value-flow lines. Expected: `get_results("value_flows", detail="lines")`,
      then a second page with the returned `next_offset`.
-- **The export split's generation rule (gate condition 2, fixed over two assessor rounds).** Under
+- **The export split's generation rule (gate condition 2, fixed over three assessor rounds).** Under
   `export_revenue_to="asset_owner"` the export revenue is split per interval pro rata to the ELECTRIC
   generation behind the meter, one definition with the `as_consumed_btm` PPA's share (P2):
   - **Generators on an electric bus** (`lp_bindings.site_generators`): a carrier in `_ELECTRIC` or the
     PoC site bus's carrier. A Generator on a gas, heat or other bus — a fuel supply (with or without a
     gas load beside it), a solar-thermal collector, a heat dump — is not electric generation.
-  - **Converting Links** (`site_generating_ports` / `site_link_generation`): a site-side Link whose bus0
-    is not electric counts what it delivers to site-side electric buses from ANY port (−p1…−p4), keyed by
+  - **Converting Links** (`_converting_links` → `site_generating_ports` / `site_link_generation`): a
+    site-side Link whose bus0 is not electric counts what it delivers to site-side electric buses from ANY
+    port, NET (Σ −p1…−p4: an auxiliary draw on a port with a negative efficiency is subtracted), keyed by
     the Link — a CHP's power on bus2 counts, its heat on bus1 never. An electric-input Link (a feeder,
-    the PoC, a heat pump) is not generation.
-  - **Storage is not generation:** its discharge's export share stays the site's (an EaaS BESS's export
-    goes to the site).
+    the PoC, a heat pump, a charger, an electrolyser) is not generation.
+  - **Storage is not generation**, in either PyPSA form: a StorageUnit, and a Link fed by storage — its
+    input bus holds a Store or StorageUnit, or is charged from site electricity (a Store battery's
+    discharger, a fuel cell after an electrolyser) — is excluded; its export share stays the site's (an
+    EaaS BESS's export goes to the site). A Link whose input bus holds BOTH a primary source (a Generator
+    that can produce) and storage is **mixed**: its output is NaN whenever it delivers, so the split and
+    the PPA share say not established — never a guess.
   - **Unknown generation** (a NaN) in a period makes that period's split not established
     (`export_split_not_established:<source>:<period>`, blocking) and the source's amount None — never a
     silent share for the site. The PPA path already said `generation_not_established`.
   - An empty bus carrier counts as electric (PyPSA's default is "AC"; only a hand-cleared carrier is
     empty).
+  - Blocking input flags apply to the whole ledger: a not-established split in one period of a
+    multi-period run makes every period's `ok` None (the other periods' numbers stay right). Safe, not
+    per-period precise — recorded, not changed.
 
   Before the fix the assessor's probes gave silent misattributions with `conservation_ok` True (internal
   payees; checks 3–4 cannot see them): a gas supply behind a CHP (21,825.92 vs 26,368.16), a gas supply
   with a boiler beside it (19,161.48 vs 31,877.02), a solar-thermal collector (18,059.84 vs 19,824.27), a
   multi-output CHP's bus2 power ignored (42,825.27 vs 31,877.02), NaN generation given to the site
-  (19,184.77 vs 19,824.27). Tests: `test_value_flow_reconciliation.py::test_the_export_split_counts_
-  electric_generation_only` (four topologies, split and PPA to the cent) and `test_unknown_generation_
-  makes_the_export_split_not_established`. The same `site_generators` feeds the preflight, the CFE score
+  (19,184.77 vs 19,824.27), a Store battery's discharger counted as generation (310,452.72 vs 448,000.00). Tests: `test_value_flow_reconciliation.py::test_the_export_split_counts_
+  electric_generation_only` (five topologies incl. the Store battery, split and PPA to the cent),
+  `test_a_converter_fed_by_fuel_and_storage_is_not_established` and `test_unknown_generation_makes_
+  the_export_split_not_established` (each new case fails on the code before its fix). The same `site_generators` feeds the preflight, the CFE score
   and the dispatch-PPA check: a non-electric Generator is no longer "on-site generation" there either.
 - **Accepted residues and deviations (from the WP records):**
   - WP3.1 R4: with a meter bypass every asset carries `meter_bypass` (placement right, preflight warns;

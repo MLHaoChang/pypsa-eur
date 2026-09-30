@@ -590,34 +590,86 @@ def site_generators(n, cfg: CommercialConfig) -> list[str]:
 _LINK_PORTS = (1, 2, 3, 4)
 
 
-def site_generating_ports(n, cfg: CommercialConfig) -> dict[str, list[int]]:
-    """Links behind the meter that CONVERT a non-electric input into site
-    electricity (a CHP, a fuel cell: bus0 on the site side and not electric),
-    with the output ports (1–4) that land on a site-side ELECTRIC bus. The
-    output of those ports (−p_k) is site generation beside `site_generators`
-    — a CHP's heat on bus1 and power on bus2 counts the power only. An
-    electric-input Link (a feeder, the PoC, a heat pump) is not generation.
-    Storage is never generation here: a StorageUnit or Store discharging moves
-    energy the site already had (IC P3 gate, condition 2)."""
+def _converting_links(n, cfg: CommercialConfig) -> dict[str, tuple[list[int], bool]]:
+    """{link: (electric output ports, mixed)} for the site's converting Links.
+
+    A site-side Link whose bus0 is NOT electric converts that input into the
+    site electricity it delivers on its ports 1–4 that land on a site-side
+    ELECTRIC bus. What its input bus holds decides what that output is:
+    - a PRIMARY source only (a Generator that can produce: gas, biogas) — the
+      output is generation (a CHP, a fuel cell on bought fuel);
+    - STORAGE only (a Store or StorageUnit on it, or a site-side Link from an
+      electric bus charging it: a battery's charger, an electrolyser) — the
+      output is stored site electricity coming back: NOT generation (a Store
+      battery's discharger, an H2 fuel cell) — excluded (IC P3 gate round 3);
+    - both — `mixed`: which part of the output is generation is not known
+      (`site_link_generation` makes it NaN whenever it delivers, so the
+      readers say not established; never a guess).
+    An input bus with neither (fed only by another fuel conversion) counts as
+    primary."""
     seen, _ = _meter_sides(n, cfg)
     meter = set(import_links(cfg)) | ({cfg.export_link} if cfg.export_link else set())
     electric = _electric_bus_test(n, cfg)
-    out: dict[str, list[int]] = {}
+
+    def ports_of(name) -> list[tuple[int, str]]:
+        out = []
+        for k in _LINK_PORTS:
+            col = f"bus{k}"
+            b = str(n.links.at[name, col]).strip() if col in n.links.columns else ""
+            if b and b != "nan":
+                out.append((k, b))
+        return out
+
+    # Buses charged from site electricity (a charger, an electrolyser).
+    charged: set[str] = set()
+    for name in n.links.index:
+        b0 = str(n.links.at[name, "bus0"])
+        if name in meter or b0 not in seen or not electric(b0):
+            continue
+        charged |= {b for _, b in ports_of(name) if b in seen and not electric(b)}
+    stores = set()
+    for comp in ("stores", "storage_units"):
+        df = getattr(n, comp)
+        if not df.empty:
+            stores |= set(df["bus"].astype(str))
+    pmax_t = getattr(n.generators_t, "p_max_pu", None)
+
+    def can_produce(g) -> bool:
+        if pmax_t is not None and g in getattr(pmax_t, "columns", []):
+            return bool((pmax_t[g] > 0).any())
+        v = n.generators.at[g, "p_max_pu"] if "p_max_pu" in n.generators.columns else 1.0
+        return bool(float(v) > 0)
+
+    primary = {str(n.generators.at[g, "bus"]) for g in n.generators.index if can_produce(g)}
+    out: dict[str, tuple[list[int], bool]] = {}
     for name in n.links.index:
         if name in meter:
             continue
         b0 = str(n.links.at[name, "bus0"])
         if b0 not in seen or electric(b0):
             continue
-        ports = []
-        for k in _LINK_PORTS:
-            col = f"bus{k}"
-            b = str(n.links.at[name, col]).strip() if col in n.links.columns else ""
-            if b and b != "nan" and b in seen and electric(b):
-                ports.append(k)
-        if ports:
-            out[str(name)] = ports
+        ports = [k for k, b in ports_of(name) if b in seen and electric(b)]
+        if not ports:
+            continue
+        storage = b0 in stores or b0 in charged
+        if storage and b0 not in primary:
+            continue                                   # stored electricity coming back
+        out[str(name)] = (ports, storage)
     return out
+
+
+def site_generating_ports(n, cfg: CommercialConfig) -> dict[str, list[int]]:
+    """Links behind the meter that CONVERT a primary non-electric input into
+    site electricity (a CHP, a fuel cell on bought fuel), with the output ports
+    (1–4) that land on a site-side ELECTRIC bus (`_converting_links`). The
+    output of those ports (−p_k, net: an auxiliary draw on a port with a
+    negative efficiency is subtracted) is site generation beside
+    `site_generators` — a CHP's heat on bus1 and power on bus2 counts the power
+    only. An electric-input Link (a feeder, the PoC, a heat pump, a charger) is
+    not generation, nor is a Link fed by storage (a Store battery's discharger,
+    an H2 fuel cell after an electrolyser): storage discharging moves energy the
+    site already had (IC P3 gate, condition 2 and round 3)."""
+    return {k: ports for k, (ports, _mixed) in _converting_links(n, cfg).items()}
 
 
 def site_generating_links(n, cfg: CommercialConfig) -> list[str]:
@@ -629,9 +681,11 @@ def site_link_generation(n, cfg: CommercialConfig, port_frame) -> pd.DataFrame:
     """Per converting Link, the MW it delivers to site-side electric buses:
     Σ over its electric ports of −p_k (`port_frame(k)` gives the solved
     `links_t.p<k>` frame, or None). A port with no solved value is NaN — kept
-    (ADR-0001: the reader says not established, never a silent 0)."""
+    (ADR-0001: the reader says not established, never a silent 0). A MIXED
+    Link (its input bus holds both a primary source and storage) is NaN
+    whenever it delivers: how much of it is generation is not known."""
     cols = {}
-    for link, ports in site_generating_ports(n, cfg).items():
+    for link, (ports, mixed) in _converting_links(n, cfg).items():
         total = pd.Series(0.0, index=n.snapshots)
         for k in ports:
             df = port_frame(k)
@@ -639,6 +693,8 @@ def site_link_generation(n, cfg: CommercialConfig, port_frame) -> pd.DataFrame:
                 total = total + np.nan
             else:
                 total = total - df[link].reindex(n.snapshots).astype(float)
+        if mixed:
+            total = total.where(~(total.abs() > 1e-9), np.nan)
         cols[link] = total
     return pd.DataFrame(cols, index=n.snapshots)
 
