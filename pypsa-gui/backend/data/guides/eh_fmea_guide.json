@@ -146,7 +146,7 @@
           "reveal": "props-edit-bus",
           "title": "1 · Bus tags",
           "body": "Point of connection = the GRID-side bus of the import; Critical bus = its demand must be served when islanded; Short-circuit level and IBR capacity feed the SCR (grid-strength) gate at the PoC.",
-          "enter": "Select a bus, open Edit, then tick/enter the Energy Hub fields. Then select the import Link, open Edit and set its Energy Hub role — the tour includes that step only when it is started with a Link's Edit form open."
+          "enter": "Select a bus, open Edit, then tick/enter the Energy Hub fields. Then select the import Link, open Edit and set its Energy Hub role — the tour adds that step as soon as a Link's Edit form is open."
         },
         {
           "target": "eh-link-role",

@@ -185,3 +185,14 @@ def test_hub_design_tour_matches_the_spec():
         text = f"{s['title']} {s['body']} {s.get('enter', '')}"
         bad = [w for w in _JARGON + _HUB_JARGON if w.lower() in text.lower()]
         assert not bad, (s["target"], bad)
+
+
+def test_tagging_tour_says_when_the_link_step_appears():
+    """P30 (B7): an optional step is judged when it is reached, so the Link
+    step shows as soon as a Link's Edit form is open — not only when the tour
+    was started with one open (the pre-P30 sentence, no longer true)."""
+    steps = G.load_guide("eh_fmea")["tours"]["eh_tagging"]["steps"]
+    enter = steps[0]["enter"]
+    assert "only when it is started" not in enter
+    assert "as soon as a Link's Edit form is open" in enter
+    assert steps[1]["target"] == "eh-link-role" and steps[1].get("optional") is True
