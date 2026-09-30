@@ -98,7 +98,7 @@ periods; assessor note).
      `replace=true`.
   5. **Lines turn:** ask for the value-flow lines. Expected: `get_results("value_flows", detail="lines")`,
      then a second page with the returned `next_offset`.
-- **The export split's generation rule (gate condition 2, fixed over four assessor rounds).** Under
+- **The export split's generation rule (gate condition 2, fixed over five assessor rounds).** Under
   `export_revenue_to="asset_owner"` the export revenue is split per interval pro rata to the ELECTRIC
   generation behind the meter, one definition with the `as_consumed_btm` PPA's share (P2):
   - **Generators on an electric bus** (`lp_bindings.site_generators`): a carrier in `_ELECTRIC` or the
@@ -119,6 +119,14 @@ periods; assessor note).
     export share stays the site's (an EaaS BESS's export goes to the site; a StorageUnit is never
     generation); both → **mixed**: its output is NaN whenever it delivers, so the split and the PPA share
     say not established — never a guess.
+  - **PyPSA Link semantics** (round 5): a Link's inputs are bus0 and every port with a negative
+    `efficiency{k}` (at any snapshot); its outputs are the other ports. A Link with a negative `p_min_pu`
+    is reversible — every port is both — so a reversible Link touching an electric site bus also
+    charges its own non-electric side: a reversible fuel cell (either way round) is never plain
+    generation (excluded, or mixed when fuel reaches it too). An engine co-firing electrolytic H2 on an
+    input port is mixed. One deliberate exception: an ELECTRIC input port on the converter itself (an
+    engine's auxiliary draw on the site bus) is netted from its output (Σ −p_k over its electric
+    site-side ports), not an origin — that draw is consumption, not stored electricity coming back.
   - **Unknown generation** (a NaN) in a period makes that period's split not established
     (`export_split_not_established:<source>:<period>`, blocking) and the source's amount None — never a
     silent share for the site. The PPA path already said `generation_not_established`.
@@ -136,11 +144,13 @@ periods; assessor note).
   then (round 4, a bus0-only rule) a gas-heated heat Store's ORC excluded (449,122.27 vs 434,202.31), a
   reformer-plus-electrolyser H2 loop taken as storage only (454,854.60, should be not established), a
   two-hop H2 loop (416,590.60 vs 448,018.80) and a two-hop battery (310,193.58 vs 448,000.00) counted as
-  generation. Tests: `test_value_flow_reconciliation.py::test_the_export_split_counts_
+  generation; then (round 5, one-way Links) a reversible SOFC counted in full (367,405.79, should be not
+  established), an H2 co-firing engine counted in full (407,389.96, not established), and a reversible
+  Link with an electric bus0 dropped (441,340.69, not established). Tests: `test_value_flow_reconciliation.py::test_the_export_split_counts_
   electric_generation_only` (eight topologies: CHP, gas supply with a load, multi-output CHP,
   solar-thermal, Store battery, two-hop battery, two-hop H2, heat Store with ORC — split and PPA to the
-  cent), `test_a_converter_fed_by_fuel_and_storage_is_not_established` (bought H2, and gas through a
-  reformer) and `test_unknown_generation_makes_
+  cent), `test_a_converter_fed_by_fuel_and_storage_is_not_established` (bought H2; gas through a
+  reformer; a reversible SOFC; an H2 co-firing engine; a reversible Link with an electric bus0) and `test_unknown_generation_makes_
   the_export_split_not_established` (each new case fails on the code before its fix). The same `site_generators` feeds the preflight, the CFE score
   and the dispatch-PPA check: a non-electric Generator is no longer "on-site generation" there either.
 - **Accepted residues and deviations (from the WP records):**

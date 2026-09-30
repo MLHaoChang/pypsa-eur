@@ -591,35 +591,58 @@ _LINK_PORTS = (1, 2, 3, 4)
 
 
 def _converting_links(n, cfg: CommercialConfig) -> dict[str, tuple[list[int], bool]]:
-    """{link: (electric output ports, mixed)} for the site's converting Links.
+    """{link: (electric ports to sum, mixed)} for the site's converting Links.
 
-    A site-side Link whose bus0 is NOT electric converts that input into the
-    site electricity it delivers on its ports 1–4 that land on a site-side
-    ELECTRIC bus. Whether that output is generation depends on where its
-    input's energy COMES FROM, followed upstream through non-electric Links
-    (IC P3 gate round 4) — never on what merely sits on bus0:
+    PyPSA Link semantics (IC P3 gate round 5): a Link's INPUTS are bus0 and
+    every port k with a negative `efficiency{k}` (at any snapshot); its
+    OUTPUTS are the other ports; a Link with a negative `p_min_pu` is
+    REVERSIBLE — every port is both an input and an output.
+
+    A site-side Link CONVERTS when a non-electric input feeds an electric
+    site-side output (a CHP, a fuel cell). Whether that output is generation
+    depends on where its non-electric inputs' energy COMES FROM, followed
+    upstream through the non-electric side (round 4), never on what merely
+    sits on the bus:
     - PRIMARY origin: a Generator that can produce, on the bus or upstream
       (gas → CHP; gas → reformer → H2 → fuel cell; gas boiler → heat Store →
       ORC);
-    - CHARGED origin: site electricity entering the non-electric side, on the
-      bus or upstream (a battery's charger, an electrolyser — however many
-      hops: charger → Store → BMS → inverter).
-    Stores and StorageUnits only buffer: never an origin. Then: primary only →
-    generation; charged only, or no origin (a Store emptying its initial
-    energy) → not generation (stored site electricity coming back); both →
-    `mixed`: which part is generation is not known (`site_link_generation`
-    makes it NaN whenever it delivers — never a guess)."""
+    - CHARGED origin: site electricity entering the non-electric side — any
+      Link with an electric input delivering there (a charger, an
+      electrolyser, however many hops), and every REVERSIBLE Link touching an
+      electric site bus (a reversible fuel cell electrolyses too).
+    Stores and StorageUnits only buffer: never an origin. Primary only →
+    generation; charged only, or no origin → not generation (stored site
+    electricity); both → `mixed` (`site_link_generation` makes it NaN
+    whenever it delivers — never a guess). A reversible converter always
+    charges its own side, so it is never plain generation.
+
+    The ports summed are ALL its electric site-side ports: the output is net
+    of an electric input on the converter itself (an engine's auxiliary
+    draw, `efficiency2 < 0` on the site bus) — that draw is consumption, not
+    an origin."""
     seen, _ = _meter_sides(n, cfg)
     meter = set(import_links(cfg)) | ({cfg.export_link} if cfg.export_link else set())
     electric = _electric_bus_test(n, cfg)
 
-    def ports_of(name) -> list[tuple[int, str]]:
-        out = []
+    def negative(attr: str, name) -> bool:
+        tv = getattr(n.links_t, attr, None)
+        if tv is not None and name in getattr(tv, "columns", []):
+            if bool((tv[name] < 0).any()):
+                return True
+        v = n.links.at[name, attr] if attr in n.links.columns else None
+        try:
+            return v is not None and float(v) < 0
+        except (TypeError, ValueError):
+            return False
+
+    def ports_of(name) -> list[tuple[int, str, bool]]:
+        """(k, bus, is_input) for ports 0–4 (port 0 = bus0, always an input)."""
+        out = [(0, str(n.links.at[name, "bus0"]), True)]
         for k in _LINK_PORTS:
             col = f"bus{k}"
             b = str(n.links.at[name, col]).strip() if col in n.links.columns else ""
             if b and b != "nan":
-                out.append((k, b))
+                out.append((k, b, negative("efficiency" if k == 1 else f"efficiency{k}", name)))
         return out
 
     pmax_t = getattr(n.generators_t, "p_max_pu", None)
@@ -630,19 +653,26 @@ def _converting_links(n, cfg: CommercialConfig) -> dict[str, tuple[list[int], bo
         v = n.generators.at[g, "p_max_pu"] if "p_max_pu" in n.generators.columns else 1.0
         return bool(float(v) > 0)
 
-    # The non-electric side's flow graph (site-side, non-meter Links) and the
-    # two kinds of origin entering it.
     edges: dict[str, set[str]] = {}
     charged_seed: set[str] = set()
+    candidates: list[tuple[str, list[int], set[str]]] = []
     for name in n.links.index:
-        b0 = str(n.links.at[name, "bus0"])
-        if name in meter or b0 not in seen:
+        if name in meter or str(n.links.at[name, "bus0"]) not in seen:
             continue
-        outs = {b for _, b in ports_of(name) if b in seen and not electric(b)}
-        if electric(b0):
-            charged_seed |= outs
-        else:
-            edges.setdefault(b0, set()).update(outs)
+        ports = [(k, b, inp) for k, b, inp in ports_of(name) if b in seen]
+        reversible = negative("p_min_pu", name)
+        ins = {b for _, b, inp in ports if inp or reversible}
+        outs = {b for _, b, inp in ports if not inp or reversible}
+        ne_in = {b for b in ins if not electric(b)}
+        ne_out = {b for b in outs if not electric(b)}
+        e_in = {b for b in ins if electric(b)}
+        e_out = {b for b in outs if electric(b)}
+        for b in ne_in:
+            edges.setdefault(b, set()).update(ne_out - {b})
+        if e_in:
+            charged_seed |= ne_out           # site electricity enters the non-electric side
+        if e_out and ne_in:
+            candidates.append((str(name), [k for k, b, _ in ports if electric(b)], ne_in))
     primary_seed = {str(n.generators.at[g, "bus"]) for g in n.generators.index
                     if can_produce(g) and str(n.generators.at[g, "bus"]) in seen
                     and not electric(str(n.generators.at[g, "bus"]))}
@@ -658,16 +688,10 @@ def _converting_links(n, cfg: CommercialConfig) -> dict[str, tuple[list[int], bo
 
     charged, primary = reach(charged_seed), reach(primary_seed)
     out: dict[str, tuple[list[int], bool]] = {}
-    for name in n.links.index:
-        if name in meter:
-            continue
-        b0 = str(n.links.at[name, "bus0"])
-        if b0 not in seen or electric(b0):
-            continue
-        ports = [k for k, b in ports_of(name) if b in seen and electric(b)]
-        if not ports or b0 not in primary:
+    for name, sum_ports, ne_in in candidates:
+        if not ne_in & primary:
             continue                    # stored site electricity, or no origin
-        out[str(name)] = (ports, b0 in charged)
+        out[name] = (sum_ports, bool(ne_in & charged))
     return out
 
 
@@ -707,7 +731,7 @@ def site_link_generation(n, cfg: CommercialConfig, port_frame) -> pd.DataFrame:
             else:
                 total = total - df[link].reindex(n.snapshots).astype(float)
         if mixed:
-            total = total.where(~(total.abs() > 1e-9), np.nan)
+            total = total.where(~(total > 1e-9), np.nan)     # unknown only when it delivers
         cols[link] = total
     return pd.DataFrame(cols, index=n.snapshots)
 

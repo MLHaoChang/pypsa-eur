@@ -470,34 +470,61 @@ def test_the_export_split_counts_electric_generation_only(reset_backend, topolog
 
 
 @pytest.mark.live_solve
-@pytest.mark.parametrize("fuel", ["h2_supply", "reformer"])
+@pytest.mark.parametrize("fuel", ["h2_supply", "reformer", "reversible_sofc", "cofiring", "rsoc"])
 def test_a_converter_fed_by_fuel_and_storage_is_not_established(reset_backend, fuel):
-    """Rounds 3–4: an H2 bus fed both by fuel (a bought-H2 supply, or gas
-    through a reformer — an origin upstream) and by an electrolyser charging
-    it feeds a fuel cell — which part of its output is generation is not
-    known, so whenever it delivers the split (and the PPA share) say not
-    established, never a guess."""
+    """Rounds 3–5: a converter whose input's energy comes both from fuel and
+    from site electricity — an H2 bus with a bought-H2 supply or a reformer
+    upstream AND an electrolyser; a REVERSIBLE fuel cell (it electrolyses
+    too, `p_min_pu < 0`, whichever side is its bus0); an engine co-firing H2
+    taken on an INPUT port (`efficiency2 < 0`) from electrolytic H2 — is mixed:
+    which part of its output is generation is not known, so whenever it
+    delivers the split (and the PPA share) say not established, never a
+    guess."""
     from services.commercial import lp_bindings as _lp
     from models.commercial import CommercialConfig
 
     n = _network()
+    hours = np.asarray(n.snapshots.hour)
+    px = n.links_t["ic_export_price"]["export"].to_numpy(float).copy()
+    px[(hours >= 11) & (hours < 13)] = 400.0
+    n.links_t["ic_export_price"]["export"] = px
     n.add("Bus", "h2", carrier="H2")
+    conv, port = "fuel_cell", 1
     if fuel == "h2_supply":
         n.add("Generator", "h2_supply", bus="h2", carrier="H2", p_nom=20.0, marginal_cost=1.0)
-    else:
+    elif fuel == "reformer":
         n.add("Bus", "gas", carrier="gas")
         n.add("Generator", "gas_supply", bus="gas", carrier="gas", p_nom=60.0, marginal_cost=1.0)
         n.add("Link", "reformer", bus0="gas", bus1="h2", p_nom=40.0, efficiency=0.7)
         n.add("Store", "h2_store", bus="h2", e_nom=200.0, e_cyclic=True)
-    n.add("Link", "electrolyser", bus0="site", bus1="h2", p_nom=10.0, efficiency=0.7)
-    n.add("Link", "fuel_cell", bus0="h2", bus1="site", p_nom=20.0, efficiency=0.5)
+    elif fuel in ("reversible_sofc", "rsoc"):
+        n.add("Generator", "h2_supply", bus="h2", carrier="H2", p_nom=5.0, marginal_cost=60.0)
+        n.add("Store", "h2_store", bus="h2", e_nom=200.0, e_cyclic=True)
+    else:   # cofiring: gas engine taking H2 on bus2; the H2 is electrolytic
+        n.add("Bus", "gas", carrier="gas")
+        n.add("Generator", "gas_supply", bus="gas", carrier="gas", p_nom=60.0, marginal_cost=1.0)
+        n.add("Store", "h2_store", bus="h2", e_nom=400.0, e_cyclic=True)
+        n.add("Link", "electrolyser", bus0="site", bus1="h2", p_nom=10.0, efficiency=0.7)
+        n.add("Link", "engine", bus0="gas", bus1="site", bus2="h2", p_nom=40.0, efficiency=0.4,
+              efficiency2=-0.5)
+        conv = "engine"
+    if fuel in ("h2_supply", "reformer"):
+        n.add("Link", "electrolyser", bus0="site", bus1="h2", p_nom=10.0, efficiency=0.7)
+        n.add("Link", "fuel_cell", bus0="h2", bus1="site", p_nom=20.0, efficiency=0.5)
+    elif fuel == "reversible_sofc":
+        n.add("Link", "fuel_cell", bus0="h2", bus1="site", p_nom=20.0, efficiency=0.6,
+              p_min_pu=-1.0)
+    elif fuel == "rsoc":
+        n.add("Link", "fuel_cell", bus0="site", bus1="h2", p_nom=20.0, efficiency=1.0,
+              p_min_pu=-1.0)
+        port = 0
     n, cfg = _solve(n, _commercial(copy.deepcopy(_VF_DEV), contracts=[LEASE, _BTM]))
     parsed = CommercialConfig.model_validate(cfg.commercial)
-    assert _lp.site_generating_links(n, parsed) == ["fuel_cell"]
+    assert _lp.site_generating_links(n, parsed) == [conv]
     gen = _lp.site_link_generation(n, parsed, lambda k: getattr(n.links_t, f"p{k}", None))
-    fc = -n.links_t.p1["fuel_cell"].to_numpy(float)
-    assert (fc > 1e-6).any()                                   # it delivers
-    assert np.isnan(gen["fuel_cell"].to_numpy(float)[fc > 1e-6]).all()
+    delivered = -getattr(n.links_t, f"p{port}")[conv].to_numpy(float)
+    assert (delivered > 1e-6).any()                            # it delivers
+    assert np.isnan(gen[conv].to_numpy(float)[delivered > 1e-6]).all()
     inputs, _vf, ledger, res = _ledger(n, cfg)
     assert any(f.startswith("export_split_not_established:export_price:") for f in inputs.input_flags)
     assert res.periods["_"].ok is not True
