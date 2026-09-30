@@ -20,7 +20,8 @@ import { useAuthMode } from '../../auth/AuthModeProvider'
 import { useUIStore } from '../../store/uiStore'
 import { switchToProject } from '../../utils/projectActions'
 import {
-  EXPERT_WARNING, OPTION_LABELS, VIEW_LABELS, errorCopy, type DecisionView,
+  EXPERT_REFUSAL, EXPERT_REFUSAL_FALLBACK, EXPERT_WARNING, OPTION_LABELS, UI_LABELS, VIEW_LABELS, errorCopy,
+  type DecisionView,
 } from '../../utils/decisionVocabulary'
 import { dq, invalidateDerived, studyKey } from './decisionQueries'
 import { entryState, expertTarget, maturityLabel, pollInterval, runsPack, sectionStatuses } from './decisionModel'
@@ -108,8 +109,9 @@ function DraftView({ draft }: { draft: Draft }) {
   return (
     <div className="p-5 overflow-y-auto h-full">
       <h2 className="text-[14px] font-semibold mb-3">New decision study: Do I need a battery at my site?</h2>
-      <Intake mode="draft" project={draft.pathProject} initial={{}} library={library.data ?? null}
+      <Intake mode="draft" project={draft.pathProject} initial={draft.intake ?? {}} library={library.data ?? null}
         names={{ name: draft.name, baseName: draft.baseName }}
+        onDraftChange={intake => useDecisionStore.getState().updateDraft(intake)}
         saving={create.isPending} error={error}
         onCreate={(intake, names) => { setError(null); create.mutate({ intake, names }) }} />
     </div>
@@ -224,7 +226,7 @@ function StudyView({ at, pollMs }: { at: StudyRef; pollMs: number }) {
     if (!target) return
     const res = await switchToProject(target.projectRef, qc)
     if (res.status === 'switched' || res.status === 'noop') useUIStore.getState().setSlidePanel(null)
-    else setExpertMsg(`The option could not be opened (${res.status}).`)
+    else setExpertMsg(EXPERT_REFUSAL[res.status] ?? EXPERT_REFUSAL_FALLBACK)
   }
 
   if (study.error) {
@@ -262,7 +264,7 @@ function StudyView({ at, pollMs }: { at: StudyRef; pollMs: number }) {
         <Button onClick={() => defaultTarget && setExpertFor(defaultTarget.optionId)} disabled={!defaultTarget}
           title={defaultTarget ? `Open ${OPTION_LABELS[defaultTarget.optionId] ?? defaultTarget.optionId} in the workbench` : 'Available once the verdict names an option'}
           testId="expert-view">
-          Expert view
+          {UI_LABELS.expertView}
         </Button>
       </div>
       <nav aria-label="Decision study sections" className="flex flex-wrap gap-1 px-5 py-1.5 border-b border-border">

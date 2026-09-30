@@ -184,6 +184,90 @@ export const STREAMS_BASIS_LABELS: Record<ValueStreamsBasis, { title: string; se
 
 export const BASIS_SENTENCE = 'Real terms, before tax, without subsidy'
 
+/** Headline KPIs: plain words first, the technical term as a subtitle (gate S8 BC-S8-3). */
+export const KPI_LABELS: Record<string, { label: string; technical: string }> = {
+  battery_npv: { label: 'Value of the battery today', technical: 'Battery NPV (net present value)' },
+  battery_p_nom_mw: { label: 'Battery power', technical: 'p_nom (StorageUnit)' },
+  battery_payback_simple: { label: 'Years to pay back the battery', technical: 'simple payback' },
+}
+
+/** One-line explanations of the finance and robustness terms (gate S8 BC-S8-3). */
+export const GLOSSARY = {
+  npv: {
+    term: 'Value today (NPV)',
+    text: 'Everything the battery saves over its life minus everything it costs, with future money counted at '
+      + 'today’s value using the discount rate. Above zero, it pays for itself.',
+  },
+  irr: {
+    term: 'Yearly return (IRR)',
+    text: 'The discount rate at which the value today would be exactly zero: the yearly return the investment earns.',
+  },
+  payback: {
+    term: 'Years to pay back',
+    text: 'How many years of bill savings it takes to earn back what the battery cost.',
+  },
+  tornado: {
+    term: 'The centre and the tornado bounds',
+    text: 'The centre is the result with every assumption at its central value. The robustness check (the '
+      + '“tornado”) moves each key assumption, one at a time, to the low and the high end of its plausible range, '
+      + 'with the battery size held fixed; “at every tornado bound” means the result held at all of them.',
+  },
+  pv_only: {
+    term: 'Battery value against PV-only',
+    text: 'When an option also builds solar PV, the battery’s value is what it adds on top of the same PV built '
+      + 'alone, so it assumes the site builds that PV.',
+  },
+} as const
+
+/** A `bess_pv` verdict (gate S8 BC-S8-2; the report's S7 `_BESS_PV` / `_BATTERY_ONLY_*` rule). */
+export const PV_VERDICT = {
+  title: 'If the site will not build PV',
+  total: (npv: string) => `This option also builds PV. Its total value today, PV included, is ${npv}; `
+    + 'the battery value above assumes the site builds that PV.',
+  best: (power: string, hours: string, npv: string) => `Without PV, the best battery-only option is a battery of `
+    + `${power} with ${hours} of storage, with a battery value today of ${npv}: the figure to read if the site `
+    + 'will not build PV.',
+  none: 'Without PV, no battery-only option sized a battery above zero with an established value, so the study '
+    + 'does not show that a battery pays on its own.',
+}
+
+/** The bill's components (the bill calculator's six). */
+export const BILL_COMPONENT_LABELS = {
+  energy: 'Energy',
+  network: 'Network charges',
+  demand: 'Demand charge',
+  capacity: 'Capacity charge',
+  fixed: 'Fixed charges',
+  export_credit: 'Export credit',
+} as const
+
+/** Field, column and card labels used by the pages (gate S8 [S7]: this file is the only source). */
+export const UI_LABELS = {
+  sectorProfile: 'Sector profile',
+  fileUnit: 'The file’s unit',
+  unitFromHeader: 'As its header says',
+  loadFile: 'Load file',
+  pvType: 'PV type',
+  pvRooftop: 'Rooftop',
+  pvGround: 'Ground-mounted',
+  studyName: 'Study name',
+  baseProjectName: 'Name of the study’s own project',
+  colOption: 'Option',
+  colSolved: 'Solved',
+  colBattery: 'Battery',
+  colBill: 'Yearly bill',
+  colBatteryNpv: 'Battery value today (NPV)',
+  colOptionNpv: 'Option value today, PV included (NPV)',
+  readBefore: 'Read these before the numbers',
+  caseAssumes: 'What this case assumes',
+  expertView: 'Expert view',
+  openInExpert: 'Open in the Expert view',
+  unsaved: 'Not saved yet',
+  saveChanges: 'Save these changes',
+  cashFlow: 'Cumulative cash flow',
+  valueStreams: 'Where the value comes from',
+} as const
+
 export const OPTION_LABELS: Record<string, string> = {
   none: 'Grid only (baseline)',
   bess_1h: 'Battery, 1 hour',
@@ -277,6 +361,12 @@ export const ERROR_COPY: Record<string, ErrorCopy> = {
   study_library_unreadable: { title: 'The assumptions library cannot be read.', action: 'Reinstall the app or report the defect.' },
   currency_mixed: { title: 'Two currency years are mixed.', action: 'Enter every money value in the study’s currency year.' },
   currency_year_unstated: { title: 'A money value has no currency year.', action: 'State the currency year of the value.' },
+  load_upload_unit_unsupported: {
+    title: 'The load file’s header names a unit other than kW or MW.',
+    action: 'Convert the column to kW or MW (kWh or MWh per hour) and upload it again.',
+  },
+  load_profile_invalid: { title: 'That sector profile is damaged in the library.', action: 'Choose another profile, or report the defect.' },
+  import_link_inactive: { title: 'The study’s grid connection is switched off in its network.', action: 'Run the study again; it rebuilds the network.' },
 }
 
 export const ERROR_FALLBACK: ErrorCopy = { title: 'The request was refused.', action: 'The message below says why.' }
@@ -464,12 +554,31 @@ export function budgetSentence(solves: number, options: number): string {
     + 'so stopping the run early still counts the full estimate as used.'
 }
 
+/** Where one option stands in a run (the Run page's stage list). */
+export const STAGE_LABELS = {
+  not_run: 'Not run',
+  solved: 'Solved',
+  solving: 'Solving',
+  waiting: 'Waiting',
+  not_reached: 'Not reached',
+  not_solved: 'Not solved',
+} as const
+
 export const RUN_STATUS_LABELS = {
   running: 'Running',
   done: 'Finished',
   aborted: 'Stopped',
   failed: 'Failed',
 } as const
+
+/** Why the Expert view could not open an option (the project switch's outcome). */
+export const EXPERT_REFUSAL: Record<string, string> = {
+  'busy-study': 'The option could not be opened: a study is running on the project you are in. Wait for it to finish.',
+  'busy-solve': 'The option could not be opened: a solve is running. Wait for it to finish.',
+  'not-found': 'The option’s network no longer exists. Run the study again.',
+  'abort-failed': 'The option could not be opened: the running solve could not be stopped.',
+}
+export const EXPERT_REFUSAL_FALLBACK = 'The option could not be opened. Try again.'
 
 export const EXPERT_WARNING =
   'The Expert view opens this option’s own network in the workbench. If you edit, re-solve or save it '

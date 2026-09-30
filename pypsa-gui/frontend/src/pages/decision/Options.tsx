@@ -4,7 +4,7 @@
 // are shown, not applied: a value the user did not quote must not count as
 // "customised" (it would raise the maturity badge). A quote goes in Assumptions.
 import type { LedgerRow, StudyError, StudyIntake } from '../../api/decisionStudies'
-import { OPTION_LABELS } from '../../utils/decisionVocabulary'
+import { OPTION_LABELS, UI_LABELS } from '../../utils/decisionVocabulary'
 import { ledgerCurrencyYearLabel, optionsFor, valueText } from './decisionModel'
 import { Card, Refusal } from './DecisionUi'
 
@@ -37,11 +37,11 @@ export default function Options({ intake, ledgerRows, onPv, saving, error, hasRu
           Also compare a battery with new solar PV
         </label>
         {pv.enabled && (
-          <label className="flex items-center gap-2">PV type
+          <label className="flex items-center gap-2">{UI_LABELS.pvType}
             <select value={pv.kind} disabled={saving} onChange={e => onPv({ ...pv, kind: e.target.value as 'rooftop' | 'utility' })}
               className="border border-border rounded px-2 py-1">
-              <option value="rooftop">Rooftop</option>
-              <option value="utility">Ground-mounted</option>
+              <option value="rooftop">{UI_LABELS.pvRooftop}</option>
+              <option value="utility">{UI_LABELS.pvGround}</option>
             </select>
             {pvCost?.value != null && <span className="text-muted">{valueText(pvCost.value, pvCost.unit)} ({ledgerCurrencyYearLabel(pvCost)})</span>}
           </label>

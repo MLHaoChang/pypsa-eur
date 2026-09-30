@@ -424,3 +424,31 @@ def test_a_pack_built_from_an_upload_id_reads_the_parsed_mw_series(library):
     n = P.build_site_network(intake, led, "none", resolve_upload=blobs.__getitem__)
     assert n.loads_t.p_set["site_load"].tolist() == pytest.approx(_shape())
     assert "load_upload_converted_from_kw" in n.meta[P.PACK_META_KEY]["honesty_notes"]
+
+
+# ── gate S8 BC-S8-6: a header naming any unit other than kW/MW (or kWh/MWh
+# per hour) is refused, never overridden by the intake's answer ──────────
+
+@pytest.mark.parametrize("header", ["timestamp,load (GW)", "timestamp,load (W)", "timestamp,load kVA",
+                                   "timestamp,load [MVA]", "timestamp,energy (Wh)", "timestamp,load (GWh)"])
+def test_a_header_naming_another_unit_is_refused_whatever_the_intake_says(header):
+    for unit in ("MW", "kW", None):
+        with pytest.raises(P.PackError) as exc:
+            P.parse_load_upload(_csv(_shape(), header=header), unit=unit, year=2025)
+        assert exc.value.code == "load_upload_unit_unsupported", (header, unit)
+
+
+def test_kwh_and_mwh_per_hour_headers_still_read_as_kw_and_mw():
+    assert P.parse_load_upload(_csv(_shape(), header="t,energy (MWh)"), unit=None, year=2025).unit == "MW"
+    assert P.parse_load_upload(_csv(_shape(), header="t,kWh"), unit=None, year=2025).unit == "kW"
+
+
+# ── gate S8 BC-S8-5: a draft's load is carried in the intake as CSV text
+# (`load.csv_text`), never written into a user project before creation ───
+
+def test_a_load_given_as_csv_text_is_read_like_an_upload(library):
+    kw = [v * 1000 for v in _shape()]
+    intake = _intake(load={"source": "upload", "csv_text": _csv(kw, header="t,load (kW)").decode()})
+    led = lib.seed_ledger(Q.BESS_AT_SITE, intake, library)
+    n = P.build_site_network(intake, led, "none")
+    assert n.loads_t.p_set["site_load"].tolist() == pytest.approx(_shape())

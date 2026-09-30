@@ -185,7 +185,8 @@ describe('a new study in draft', () => {
     fireEvent.click(screen.getByLabelText(/Upload your metered load/))
     fireEvent.change(screen.getByLabelText('Load file'), { target: { files: [new File(['x'], 'meter.csv')] } })
     const check = await screen.findByTestId('load-check')
-    expect(uploadFile).toHaveBeenCalledWith('workbench-project', expect.any(File))
+    // Gate S8 BC-S8-5: a draft's file stays in the browser until creation.
+    expect(uploadFile).not.toHaveBeenCalled()
     expect(check.textContent).toContain('in kW')
     expect(screen.getByTestId('load-peak').textContent).toContain('above your grid connection')
     expect(screen.getByTestId('load-warning-timeseries_spike').textContent).toContain('misplaced decimal point')
@@ -195,7 +196,7 @@ describe('a new study in draft', () => {
     const [path, body] = api.create.mock.calls[0]
     expect(path).toBe('workbench-project')
     expect(body).toMatchObject({ question_id: 'bess_at_site', name: 'My battery', project_name: 'My battery',
-      intake: { site: { zone: 'DE', connection_mw: 2 }, load: { source: 'upload', upload_id: 'f1' } } })
+      intake: { site: { zone: 'DE', connection_mw: 2 }, load: { source: 'upload', csv_text: 'x', filename: 'meter.csv' } } })
     await waitFor(() => expect(useDecisionStore.getState().active).toEqual({ project: 'My battery', studyId: study.study_id }))
   })
 })

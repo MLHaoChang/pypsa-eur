@@ -68,6 +68,9 @@ export default function Robust({ findings, tornado, error, onStart, onAbort, bus
                     <span className="absolute inset-y-0 bg-accent/70 rounded-sm" style={{ left: `${left}%`, width: `${width}%` }} />
                     {lo < 0 && <span className="absolute inset-y-0 w-px bg-text" style={{ left: `${pos(0)}%` }} />}
                   </span>
+                  <span data-testid="tornado-values" className="col-span-2 text-[11px] font-mono">
+                    NPV at the low value: {valueText(a, 'EUR')} · at the high value: {valueText(b, 'EUR')}
+                  </span>
                   {r.notes.length > 0 && <span className="col-span-2 text-[10.5px] text-muted">{r.notes.map(n => helpFor(n).text).join(' ')}</span>}
                 </li>
               )

@@ -17,9 +17,9 @@ import { decisionStudiesApi, studyError } from '../../api/decisionStudies'
 import { uploadFile, UploadError } from '../../api/uploads'
 import { StepShell } from '../modelHorizon/StepShell'
 import {
-  BASIS_SENTENCE, INTAKE_NAV_LABEL, INTAKE_STEP_LABELS, VOCAB, errorCopy, helpFor, type IntakeStepId,
+  BASIS_SENTENCE, INTAKE_NAV_LABEL, INTAKE_STEP_LABELS, UI_LABELS, VOCAB, errorCopy, helpFor, type IntakeStepId,
 } from '../../utils/decisionVocabulary'
-import { isLeapYear, missingInputs, valueText } from './decisionModel'
+import { isLeapYear, missingInputs, sameAnswer, valueText } from './decisionModel'
 import { Banner, Button, Card, Refusal } from './DecisionUi'
 
 const STEPS: IntakeStepId[] = ['site', 'existing', 'load', 'goal', 'horizon', 'check']
@@ -77,7 +77,7 @@ export function LoadCheck({ preview, error }: { preview: IntakePreview | null; e
 }
 
 export default function Intake({
-  mode, project, initial, library, onSaveStep, onCreate, saving, error, hasRun,
+  mode, project, initial, library, onSaveStep, onCreate, onDraftChange, saving, error, hasRun,
   initialStep = 'site', names,
 }: {
   mode: 'draft' | 'edit'
@@ -87,6 +87,8 @@ export default function Intake({
   library: StudyLibrary | null
   onSaveStep?: (key: 'site' | 'load', value: unknown) => void
   onCreate?: (intake: StudyIntake, names: { name: string; baseName: string }) => void
+  /** Draft mode: every answer change, so the draft survives the panel closing. */
+  onDraftChange?: (intake: StudyIntake) => void
   saving: boolean
   error: StudyError | null
   hasRun?: boolean
@@ -107,13 +109,26 @@ export default function Intake({
 
   const intake: StudyIntake = { ...initial, site, load }
   const missing = missingInputs(intake)
+  // Gate S8 [S4]: a draft's answers live in the decision store.
+  useEffect(() => {
+    if (mode === 'draft') onDraftChange?.({ ...initial, site, load })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, site, load])
+  // Gate S8 BC-S8-4: in edit mode, what differs from the STORED answers is unsaved.
+  const siteDirty = mode === 'edit' && !sameAnswer(site, initial.site)
+  const loadDirty = mode === 'edit' && !sameAnswer(load, initial.load)
+  const stepKey = (st: IntakeStepId): 'site' | 'load' | null =>
+    st === 'site' || st === 'existing' ? 'site' : st === 'load' ? 'load' : null
+  const dirty = (key: 'site' | 'load' | null) => (key === 'site' ? siteDirty : key === 'load' ? loadDirty : false)
+  const saveKey = (key: 'site' | 'load') => onSaveStep?.(key, key === 'site' ? site : load)
   const year = Number(site.year ?? DEFAULT_YEAR)
   const leap = Number.isFinite(year) && isLeapYear(year)
 
   // The load as the pack will read it — re-checked whenever what it depends on changes.
-  const loadKey = JSON.stringify([load.source, load.upload_id, load.unit, load.profile, load.annual_mwh, site.year, site.connection_mw])
+  const loadKey = JSON.stringify([load.source, load.upload_id, load.csv_text?.length, load.filename, load.unit,
+    load.profile, load.annual_mwh, site.year, site.connection_mw])
   useEffect(() => {
-    const ready = load.source === 'upload' ? !!load.upload_id
+    const ready = load.source === 'upload' ? !!(load.upload_id || load.csv_text)
       : load.source === 'sector_profile' ? Number(load.annual_mwh) > 0 : false
     if (!ready || leap) { setPreview(null); return }
     let live = true
@@ -128,6 +143,13 @@ export default function Intake({
     if (!file) return
     setUploading(true); setUploadErr(null)
     try {
+      if (mode === 'draft') {
+        // Gate S8 BC-S8-5: before the study exists its load file stays in the
+        // browser; creation writes it into the study's OWN new project.
+        const text = await file.text()
+        setLoad({ source: 'upload', csv_text: text, filename: file.name, unit: load.unit })
+        return
+      }
       const meta = await uploadFile(project, file)
       setLoad({ source: 'upload', upload_id: meta.file_id, filename: meta.filename, unit: load.unit })
     } catch (e) {
@@ -140,21 +162,51 @@ export default function Intake({
   }
 
   const i = STEPS.indexOf(step)
-  const next = () => setStep(STEPS[Math.min(i + 1, STEPS.length - 1)])
+  // Gate S8 BC-S8-4: leaving a step in edit mode (Next or the rail) saves it
+  // when it changed; a leap year blocks the move with its reason on screen.
+  const go = (to: IntakeStepId) => {
+    const key = stepKey(step)
+    if (mode === 'edit' && key && dirty(key)) {
+      if (key === 'site' && leap) return
+      saveKey(key)
+    }
+    setStep(to)
+  }
+  const next = () => go(STEPS[Math.min(i + 1, STEPS.length - 1)])
   const saveBar = (key: 'site' | 'load' | null) => (
     <div className="flex gap-2 pt-2">
       {mode === 'edit' && key && (
         <Button kind="primary" disabled={saving || (key === 'site' && leap)}
-          onClick={() => onSaveStep?.(key, key === 'site' ? site : load)}>Save this step</Button>
+          onClick={() => saveKey(key)}>Save this step</Button>
       )}
       {step !== 'check' && <Button onClick={next}>Next</Button>}
     </div>
   )
+  // The summary shows what is STORED in edit mode (what a run would use), and
+  // lists any edit not saved yet; in draft mode nothing is stored yet.
+  const shownSite: Site = mode === 'edit' ? (initial.site ?? {}) : site
+  const shownLoad: Load = mode === 'edit' ? (initial.load ?? {}) : load
+  const siteFields: Array<[keyof Site, string, (v: unknown) => string]> = [
+    ['zone', VOCAB.zone.label, v => String(v ?? '—')],
+    ['year', VOCAB.year.label, v => String(v ?? DEFAULT_YEAR)],
+    ['connection_mw', VOCAB.connection_limit.label, v => valueText((v as number | undefined) ?? null, 'MW')],
+    ['latitude', VOCAB.latitude.label, v => (v == null ? '—' : `${v}°`)],
+  ]
+  const unsaved = [
+    ...(siteDirty ? siteFields.filter(([k]) => !sameAnswer({ v: site[k] }, { v: initial.site?.[k] }))
+      .map(([k, label, fmt]) => `${label}: ${fmt(site[k])}`) : []),
+    ...(loadDirty ? [`Consumption: ${loadText(load)}`] : []),
+  ]
+  function loadText(l: Load): string {
+    return l.source === 'upload' ? `Uploaded: ${l.filename ?? l.upload_id ?? '—'}`
+      : l.source === 'sector_profile' ? `${profiles.find(p => p.profile_id === l.profile)?.label ?? l.profile}, ${valueText(l.annual_mwh ?? null, 'MWh')} a year`
+      : '—'
+  }
 
   const profiles = library?.load_profiles ?? []
   return (
     <StepShell<IntakeStepId>
-      steps={STEPS} current={step} onSelect={setStep} labels={INTAKE_STEP_LABELS} navLabel={INTAKE_NAV_LABEL}
+      steps={STEPS} current={step} onSelect={go} labels={INTAKE_STEP_LABELS} navLabel={INTAKE_NAV_LABEL}
       title={`Step ${i + 1} of ${STEPS.length} — ${INTAKE_STEP_LABELS[step]}`}>
       <div className="flex flex-col gap-3 text-[12px]">
         {mode === 'edit' && hasRun && (
@@ -214,28 +266,30 @@ export default function Intake({
             </fieldset>
             {load.source === 'upload' && (
               <div className="flex flex-col gap-2">
-                <input type="file" accept=".csv,text/csv,text/plain" aria-label="Load file"
+                <input type="file" accept=".csv,text/csv,text/plain" aria-label={UI_LABELS.loadFile}
                   onChange={e => void onFile(e.target.files?.[0])} disabled={uploading} />
-                {load.filename && <span className="text-muted">File: {load.filename}</span>}
-                <Field label="The file’s unit">
-                  <select className={INPUT} aria-label="The file’s unit" value={load.unit ?? ''}
+                {load.filename && <span className="text-muted">File: {load.filename}{mode === 'draft' ? ' (kept in this browser until the study is created)' : ''}</span>}
+                <Field label={UI_LABELS.fileUnit}>
+                  <select className={INPUT} aria-label={UI_LABELS.fileUnit} value={load.unit ?? ''}
                     onChange={e => setLoad({ ...load, unit: (e.target.value || undefined) as Load['unit'] })}>
-                    <option value="">As its header says</option>
+                    <option value="">{UI_LABELS.unitFromHeader}</option>
                     <option value="kW">kW</option>
                     <option value="MW">MW</option>
                   </select>
                 </Field>
                 <p className="text-[11px] text-muted">
                   One column of 8760 hourly values, optionally after a timestamp column. The timestamps, the unit and
-                  the shape are checked before the study uses the file.
+                  the shape are checked before the study uses the file. If your meter’s local-time timestamps are
+                  refused (daylight saving time adds and drops an hour), remove the timestamp column: the values are
+                  then read in order from 1 January.
                 </p>
                 {uploadErr && <Refusal error={uploadErr} testId="upload-error" />}
               </div>
             )}
             {load.source === 'sector_profile' && (
               <div className="flex flex-col gap-2">
-                <Field label="Sector profile">
-                  <select className={INPUT} aria-label="Sector profile" value={load.profile ?? ''}
+                <Field label={UI_LABELS.sectorProfile}>
+                  <select className={INPUT} aria-label={UI_LABELS.sectorProfile} value={load.profile ?? ''}
                     onChange={e => setLoad({ ...load, profile: e.target.value })}>
                     {profiles.map(p => <option key={p.profile_id} value={p.profile_id}>{p.label}</option>)}
                   </select>
@@ -264,7 +318,7 @@ export default function Intake({
         )}
 
         {step === 'horizon' && (
-          <Card title="Horizon and perspective">
+          <Card title={INTAKE_STEP_LABELS.horizon}>
             <p>Horizon: the battery storage’s lifetime from the assumptions library, with the inverter replaced at the end of its own lifetime.</p>
             <p>Perspective: the site owner — the savings on your own bill.</p>
             <p>Money: {BASIS_SENTENCE}{library ? `, in EUR of ${library.currency_year}` : ''}.</p>
@@ -277,18 +331,27 @@ export default function Intake({
         )}
 
         {step === 'check' && (
-          <Card title="Check your answers">
+          <Card title={INTAKE_STEP_LABELS.check}>
             <dl data-testid="intake-summary" className="grid grid-cols-[12rem_1fr_auto] gap-x-3 gap-y-1.5">
-              <dt className="text-muted">Site</dt><dd>{site.zone || '—'}, {site.year ?? DEFAULT_YEAR}</dd>
+              <dt className="text-muted">Site</dt><dd>{shownSite.zone || '—'}, {shownSite.year ?? DEFAULT_YEAR}</dd>
               <dd><button type="button" className="text-accent" onClick={() => setStep('site')}>Change</button></dd>
-              <dt className="text-muted">{VOCAB.connection_limit.label}</dt><dd>{valueText(site.connection_mw ?? null, 'MW')}</dd>
+              <dt className="text-muted">{VOCAB.connection_limit.label}</dt><dd>{valueText(shownSite.connection_mw ?? null, 'MW')}</dd>
               <dd><button type="button" className="text-accent" onClick={() => setStep('existing')}>Change</button></dd>
               <dt className="text-muted">Consumption</dt>
-              <dd>{load.source === 'upload' ? `Uploaded: ${load.filename ?? load.upload_id ?? '—'}`
-                : load.source === 'sector_profile' ? `${profiles.find(p => p.profile_id === load.profile)?.label ?? load.profile}, ${valueText(load.annual_mwh ?? null, 'MWh')} a year`
-                : '—'}</dd>
+              <dd>{loadText(shownLoad)}</dd>
               <dd><button type="button" className="text-accent" onClick={() => setStep('load')}>Change</button></dd>
             </dl>
+            {mode === 'edit' && unsaved.length > 0 && (
+              <Banner tone="warn" testId="intake-unsaved" title={`${UI_LABELS.unsaved}: the study still uses the answers above.`}>
+                <ul className="list-disc pl-5">{unsaved.map(u => <li key={u}>{u}</li>)}</ul>
+                <span className="pt-1">
+                  <Button kind="primary" disabled={saving || leap}
+                    onClick={() => { if (siteDirty) saveKey('site'); if (loadDirty) saveKey('load') }}>
+                    {UI_LABELS.saveChanges}
+                  </Button>
+                </span>
+              </Banner>
+            )}
             {missing.length > 0 && (
               <Banner tone="warn" testId="intake-missing" title="Some answers are missing.">
                 <span>{missing.map(m => m === 'site' ? 'the site' : m === 'connection_limit' ? 'the grid connection limit' : 'the consumption').join(', ')}</span>
@@ -296,11 +359,11 @@ export default function Intake({
             )}
             {mode === 'draft' && (
               <div className="flex flex-col gap-2">
-                <Field label="Study name">
-                  <input className={INPUT} aria-label="Study name" value={name} onChange={e => setName(e.target.value)} />
+                <Field label={UI_LABELS.studyName}>
+                  <input className={INPUT} aria-label={UI_LABELS.studyName} value={name} onChange={e => setName(e.target.value)} />
                 </Field>
-                <Field label="Name of the study’s own project">
-                  <input className={INPUT} aria-label="Name of the study’s own project" value={baseName} placeholder={name}
+                <Field label={UI_LABELS.baseProjectName}>
+                  <input className={INPUT} aria-label={UI_LABELS.baseProjectName} value={baseName} placeholder={name}
                     onChange={e => setBaseName(e.target.value)} />
                 </Field>
                 <p className="text-[11px] text-muted">

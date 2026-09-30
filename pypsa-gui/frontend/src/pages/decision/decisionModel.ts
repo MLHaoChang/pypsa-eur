@@ -147,10 +147,44 @@ export function figureBasisParts(fig: Figure): string[] {
   return parts
 }
 
-/** The verdict sentence is a fixed template whose numbers are `{{fact_id}}`
- * references; a null or unknown fact reads "not established" (gate S6 carry). */
+/** A number as the guided flow writes it, without its unit. */
+export function numberText(value: number, unit: string): string {
+  return trim(value, unit === 'years' ? 1 : unit === 'MW' || unit === 'MWh' || unit === 'h' ? 2 : 3)
+}
+
+/** "1 hour", "2 hours" (a duration read aloud, not a unit symbol). */
+export function hoursText(h: number): string {
+  return `${trim(h, 2)} ${h === 1 ? 'hour' : 'hours'}`
+}
+
+// The unit words a template may write after a reference, per figure unit.
+const UNIT_WORDS: Record<string, RegExp> = {
+  MW: /^MW$/, MWh: /^MWh$/, h: /^(h|hours?)$/, years: /^years?$/,
+}
+
+/**
+ * The verdict sentence is a fixed template whose numbers are `{{fact_id}}`
+ * references; a null or unknown fact reads "not established" (gate S6 carry).
+ * Where the template already writes the unit after the reference
+ * (`{{battery_p_nom_mw}} MW`, `{{battery_max_hours}} hours`), only the number
+ * is substituted and the unit word agrees with it (gate S8 BC-S8-1); a money
+ * figure carries its currency.
+ */
 export function renderSentence(template: string, facts: Record<string, Figure>): string {
-  return template.replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (_m, id: string) => figureText(facts[id]))
+  return template.replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}( ([A-Za-z]+))?/g, (_m, id: string, tail?: string, word?: string) => {
+    const fig = facts[id]
+    const after = tail ?? ''
+    if (!fig || fig.value == null || !Number.isFinite(fig.value)) {
+      return word && Object.values(UNIT_WORDS).some(re => re.test(word)) ? NOT_ESTABLISHED : NOT_ESTABLISHED + after
+    }
+    const re = UNIT_WORDS[fig.unit]
+    if (word && re?.test(word)) {
+      if (fig.unit === 'h' && word !== 'h') return hoursText(fig.value)
+      if (fig.unit === 'years') return `${numberText(fig.value, 'years')} ${fig.value === 1 ? 'year' : 'years'}`
+      return `${numberText(fig.value, fig.unit)} ${word}`
+    }
+    return figureText(fig) + after
+  })
 }
 
 // ── the verdict and the findings ──────────────────────────────────────────
@@ -287,4 +321,55 @@ export function sectionStatuses(x: HubInputs): Record<HubSectionId, ChipState> {
 export function optionsFor(intake: StudyIntake | null | undefined): string[] {
   const base = ['none', 'bess_1h', 'bess_2h', 'bess_4h']
   return intake?.pv?.enabled ? [...base, 'bess_pv_2h'] : base
+}
+
+// ── a bess_pv verdict (gate S8 BC-S8-2; the report's S7 rule) ────────────
+
+/** Hours of storage of a battery option, read from its id (`bess_2h`, `bess_pv_2h`). */
+export function optionHours(optionId: string): number | null {
+  const m = /_(\d+(?:\.\d+)?)h$/.exec(optionId)
+  return m ? Number(m[1]) : null
+}
+
+export interface PvVerdictContext {
+  optionNpv: number | null
+  currencyYear: number | null
+  best: { optionId: string; powerMw: number; hours: number | null; npv: number; currencyYear: number | null } | null
+}
+
+/**
+ * When the verdict names an option that also builds PV, the numbers a site
+ * that will not build PV needs: the option's total NPV (PV included) and the
+ * best battery-only option (a battery above zero with an established battery
+ * NPV), or none. Null for a battery-only verdict.
+ */
+export function pvVerdictContext(f: Findings): PvVerdictContext | null {
+  const id = f.verdict.option_id
+  if (!id) return null
+  const named = f.battery_attribution.find(a => a.option_id === id)
+  const withPv = named?.method === 'battery_removed_same_pv'
+    || !!f.options.find(o => o.option_id === id)?.sizes.some(s => s.asset === 'pv')
+  if (!withPv) return null
+  const only = f.battery_attribution.filter(a => a.method === 'battery_only' && a.status === 'ok'
+    && a.battery_npv != null && a.battery_p_nom_mw != null && a.battery_p_nom_mw > 1e-3)
+  const best = only.reduce<typeof only[number] | null>((b, a) => (!b || a.battery_npv! > b.battery_npv! ? a : b), null)
+  return {
+    optionNpv: named?.option_npv ?? null,
+    currencyYear: named?.currency_year ?? null,
+    best: best ? { optionId: best.option_id, powerMw: best.battery_p_nom_mw!, hours: optionHours(best.option_id),
+      npv: best.battery_npv!, currencyYear: best.currency_year } : null,
+  }
+}
+
+/** Two answers are the same when their defined fields are equal (key order and undefined ignored). */
+export function sameAnswer(a: unknown, b: unknown): boolean {
+  const norm = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(norm)
+    if (v && typeof v === 'object') {
+      return Object.fromEntries(Object.entries(v as Record<string, unknown>)
+        .filter(([, x]) => x !== undefined).sort(([p], [q]) => p.localeCompare(q)).map(([k, x]) => [k, norm(x)]))
+    }
+    return v
+  }
+  return JSON.stringify(norm(a ?? {})) === JSON.stringify(norm(b ?? {}))
 }

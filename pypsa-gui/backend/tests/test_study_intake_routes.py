@@ -155,3 +155,44 @@ def test_an_unreadable_upload_refuses_the_study_before_a_project_exists(
     assert r.status_code == 422, r.text
     assert r.json()["detail"]["error_kind"] == "load_upload_timestamps_invalid"
     assert project_row("s8-up-bad-base") is None
+
+
+# ── gate S8 BC-S8-5: a draft's upload touches no user project ────────────
+
+def test_a_draft_load_touches_no_existing_project_and_lands_in_the_new_base(
+        client, api_project, studies_on, _auth_db, project_storage_dir):
+    from tests.study_s4_support import all_project_dirs, dir_hash
+
+    _engine, session_local = _auth_db
+    src = api_project("s8-draft-src")
+    api_project("s8-draft-other")
+    before = {k: dir_hash(d) for k, d in all_project_dirs(session_local).items()}
+    text = _csv(_kw()).decode()
+    intake = {**INTAKE, "load": {"source": "upload", "csv_text": text, "filename": "meter.csv"}}
+    r = client.post(f"/api/projects/{src}/studies/preview", json={"intake": intake})
+    assert r.status_code == 200 and r.json()["load"]["status"] == "ok", r.text
+    assert r.json()["load"]["peak_mw"] == pytest.approx(1.5)
+    r = create_pack_study(client, src, "s8-draft-base", intake=intake)
+    assert r.status_code == 201, r.text
+    after = all_project_dirs(session_local)
+    for key, digest in before.items():
+        assert dir_hash(after[key]) == digest, f"project {key} changed on disk"
+    stored = r.json()["intake"]["load"]
+    assert "csv_text" not in stored and stored["upload_id"] and stored["filename"] == "meter.csv"
+    base_dir = project_storage_dir("s8-draft-base")
+    assert (base_dir / "uploads" / stored["upload_id"]).is_dir()
+    n = pypsa.Network(str(base_dir / "network.nc"))
+    assert n.loads_t.p_set[P.LOAD_NAME].max() == pytest.approx(1.5)
+    # The stored intake runs: the run reads the upload from the base project.
+    sid = r.json()["study_id"]
+    got = client.get(f"/api/projects/s8-draft-base/studies/{sid}").json()
+    assert got["intake"]["load"]["upload_id"] == stored["upload_id"]
+
+
+def test_a_draft_load_larger_than_an_upload_is_refused(client, api_project, studies_on):
+    from services import upload_service
+
+    src = api_project("s8-draft-big")
+    intake = {**INTAKE, "load": {"source": "upload", "csv_text": "x" * (upload_service.MAX_FILE_BYTES + 1)}}
+    r = client.post(f"/api/projects/{src}/studies/preview", json={"intake": intake})
+    assert r.json()["load"]["error_kind"] == "load_upload_invalid"

@@ -341,7 +341,11 @@ def _synthetic_load(idx: pd.DatetimeIndex, profile_id: str, annual_mwh: float) -
 # findings blocks: by the QA module's own policy the user is told and decides.
 
 LOAD_UNITS = ("kW", "MW")
-_HEADER_UNIT_RE = re.compile(r"(?<![a-z])([km])wh?(?![a-z])", re.IGNORECASE)
+MAX_LOAD_BYTES = 25 * 1024 * 1024   # the upload route's per-file cap
+# Any power or energy unit token in the value column's header (gate S8
+# BC-S8-6): W/Wh/VA/var with an optional k/M/G/T prefix. Only kW(h) and MW(h)
+# are read; any other named unit is refused, never overridden by the answer.
+_HEADER_UNIT_RE = re.compile(r"(?<![a-z])([kmgt]?)(w|va|var)(h?)(?![a-z])", re.IGNORECASE)
 
 
 @dataclasses.dataclass
@@ -366,7 +370,14 @@ def _header_unit(header: list[str] | None) -> str | None:
     if not header:
         return None
     m = _HEADER_UNIT_RE.search(str(header[-1]))
-    return None if m is None else ("kW" if m.group(1).lower() == "k" else "MW")
+    if m is None:
+        return None
+    prefix, base = m.group(1).lower(), m.group(2).lower()
+    if base == "w" and prefix in ("k", "m"):
+        return "kW" if prefix == "k" else "MW"
+    raise PackError("load_upload_unit_unsupported", (
+        f"the file's header names the unit {m.group(0)!r}; give the load in kW or MW "
+        "(kWh or MWh per hour)"))
 
 
 def _check_timestamps(cells: list[str], year: int) -> None:
@@ -471,6 +482,15 @@ def read_intake_load(intake: Mapping[str, Any], idx: pd.DatetimeIndex,
     source = str(load.get("source"))
     if source in ("upload", "uploaded", "measured"):
         series = load.get("series_mw")
+        text = load.get("csv_text")
+        if series is None and isinstance(text, str):
+            # Gate S8 BC-S8-5: a draft's file travels in the intake until the
+            # study is created, so no user project holds it before then.
+            blob = text.encode("utf-8")
+            if len(blob) > MAX_LOAD_BYTES:
+                raise PackError("load_upload_invalid", (
+                    f"the load file is larger than {MAX_LOAD_BYTES // (1024 * 1024)} MB"))
+            return parse_load_upload(blob, unit=load.get("unit"), year=int(idx[0].year))
         if series is None and load.get("upload_id"):
             if resolve_upload is None:
                 raise PackError("load_upload_unresolved",

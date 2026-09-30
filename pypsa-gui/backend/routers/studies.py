@@ -664,17 +664,29 @@ def _create_pack_study(body: StudyCreate, project: AuthorizedProject,
             # (`rekey_context`); it is a throw-away here, and a resident base
             # would count against the user's resident cap (gate S4 BC-S4-1).
             PyPSAService.drop(key)
-        load = body.intake.get("load") if isinstance(body.intake, dict) else None
-        if isinstance(load, dict) and load.get("upload_id"):
+        intake = dict(body.intake) if isinstance(body.intake, dict) else {}
+        load = intake.get("load")
+        if isinstance(load, dict) and isinstance(load.get("csv_text"), str):
+            # Gate S8 BC-S8-5: a draft's load file lands in the NEW base
+            # project only, as an ordinary upload; the stored intake names it.
+            from services import upload_service
+            meta = upload_service.add_upload(
+                name=row.name, project_dir=base_dir,
+                file_bytes=load["csv_text"].encode("utf-8"),
+                filename=str(load.get("filename") or "load.csv"), sniffed_mime="text/csv")
+            load = {k: v for k, v in load.items() if k != "csv_text"}
+            load["upload_id"] = meta.file_id
+            intake["load"] = load
+        elif isinstance(load, dict) and load.get("upload_id"):
             _copy_upload(project, base_dir, str(load["upload_id"]))
         now = _now()
         study = DecisionStudy(
             study_id=store.new_study_id(), name=body.name,
             question_id=body.question_id, base_project=str(row.id),
-            pack_project=str(row.id), intake=body.intake,
+            pack_project=str(row.id), intake=intake,
             ledger=ledger, ledger_version=ledger.ledger_version,
             maturity=study_ledger.maturity_from_ledger(
-                ledger, study_ledger.load_provenance(body.intake)),
+                ledger, study_ledger.load_provenance(intake)),
             budget=StudyBudget(solves_max=solves),
             currency_year=int(library.finance["currency_year"]),
             created_by=str(user.id), created_at=now, updated_at=now,

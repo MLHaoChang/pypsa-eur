@@ -34,6 +34,9 @@ export default function DecisionRunWatcher({ pollMs = 2000 }: { pollMs?: number 
       const cls = out.data?.available && v?.status === 'ok' && v.class ? VERDICT_LABELS[v.class] : VERDICT_NOT_ESTABLISHED
       if (rec.status === 'done') toast.success(`Decision study finished: ${cls}`)
       else toast(`Decision study ${RUN_STATUS_LABELS[rec.status].toLowerCase()}: ${cls}`)
+      // Gate S8 [S4]: a draft being answered is never wiped or left; the
+      // toast names the verdict, and the study stays one click away.
+      if (useDecisionStore.getState().draft) return
       useDecisionStore.getState().openStudy({ project, studyId }, 'verdict')
       useUIStore.getState().setSlidePanel('decision')
     })

@@ -4,14 +4,11 @@
 // tariff's name appears). The baseline bill preview is the bill calculator on
 // the load alone (grid only: the import IS the load), before any option.
 import type { IntakePreview, StudyError, StudyIntake, StudyLibrary, Tariff } from '../../api/decisionStudies'
-import { BASIS_SENTENCE, NOT_ESTABLISHED, errorCopy } from '../../utils/decisionVocabulary'
+import { BASIS_SENTENCE, BILL_COMPONENT_LABELS, NOT_ESTABLISHED, errorCopy } from '../../utils/decisionVocabulary'
 import { valueText } from './decisionModel'
 import { Banner, Card, CodeList, Refusal } from './DecisionUi'
 
-const COMPONENTS: Array<[Exclude<keyof IntakePreviewBillComponents, 'unavailable'>, string]> = [
-  ['energy', 'Energy'], ['network', 'Network charges'], ['demand', 'Demand charge'],
-  ['capacity', 'Capacity charge'], ['fixed', 'Fixed charges'], ['export_credit', 'Export credit'],
-]
+const COMPONENTS = Object.entries(BILL_COMPONENT_LABELS) as Array<[Exclude<keyof IntakePreviewBillComponents, 'unavailable'>, string]>
 type IntakePreviewBillComponents = Extract<IntakePreview['bill'], { status: 'ok' }>['bill']['by_component']
 
 function summary(t: Tariff): string {

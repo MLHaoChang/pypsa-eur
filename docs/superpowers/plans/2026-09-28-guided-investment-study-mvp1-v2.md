@@ -266,6 +266,12 @@ Every phase follows this loop. **Do not start phase N+1 until phase N's gate is 
 
 **TDD evidence.** Red: `StepShell` rejects a non-horizon id; red: the verdict page renders `0` for a null KPI.
 
+**Amended at S8 (2026-09-30, gate S8).** Three deviations from the file list above, recorded here:
+- *Sidebar row.* `frontend/src/layout/Sidebar.tsx` gains a "Decision study" row that opens the `decision` panel. Without it a closed study could not be reopened (the panel is otherwise reached only from the wizard and from the run watcher).
+- *Typical week.* `WhyHow.tsx` does not embed the Dispatch chart: that component reads the ACTIVE project's results, and an option fork is not the active project. The page says the chart is not in MVP-1 (`typical_week_not_in_mvp1`, as the report does) and points to Expert view → Results → Dispatch on the option's fork.
+- *"Open a blank model" instead of "custom question".* The wizard's `decision` tab offers the BESS question and "Open a blank model". A custom-question record attached to an existing project runs no question pack (S4), so a card for it would lead a novice to a study that cannot run.
+Also at the S8 gate: a draft's load file travels in the intake as `load.csv_text` and is written as an upload into the study's own base project at creation (BC-S8-5), so no user project holds it; a value-column header naming a unit other than kW/MW (kWh/MWh per hour) is refused with `load_upload_unit_unsupported` (BC-S8-6).
+
 - [ ] Gate S8
 
 ## S9. QA driver, packaging, integration, findings note

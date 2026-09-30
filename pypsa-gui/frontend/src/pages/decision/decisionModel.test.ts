@@ -91,10 +91,11 @@ describe('figures: null is "not established", never 0', () => {
 
   it('substitutes fact references in the verdict sentence, a null fact as not established', () => {
     const v = findings.verdict
-    const text = renderSentence(v.sentence!, v.facts)
-    expect(text).toContain('0.3 MW')
-    expect(text).toContain('EUR 3.53 M')
-    expect(text).not.toMatch(/\{\{/)
+    expect(renderSentence(v.sentence!, v.facts)).toBe('Recommended: a battery of 0.3 MW with 1 hour of storage has a '
+      + 'positive battery NPV of EUR 3.53 M at the centre and at every tornado bound.')
+    expect(renderSentence('{{p}} MW for {{h}} hours', {
+      p: { ...nullKpi, unit: 'MW', value: null }, h: { ...nullKpi, unit: 'h', value: 4, unavailable: null } }))
+      .toBe('not established for 4 hours')
     expect(renderSentence('NPV {{battery_npv}} and {{missing}}', { battery_npv: nullKpi }))
       .toBe('NPV not established and not established')
   })

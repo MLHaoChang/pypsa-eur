@@ -157,6 +157,8 @@ export interface StudyIntake {
   load?: {
     source?: 'upload' | 'sector_profile'
     upload_id?: string
+    /** A draft's load file, carried as text until the study is created (gate S8 BC-S8-5). */
+    csv_text?: string
     unit?: 'kW' | 'MW'
     filename?: string
     profile?: string
