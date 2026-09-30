@@ -92,6 +92,69 @@ Each work package had a review agent that had not written the code. It read the 
 - The shared period-effective capacity ignores vintage `lifetime`; the vintage breakdown is not invalidated by a finished solve for the schematic.
 - A component whose name contains "/" cannot be updated (405).
 - `test_chat_sse.py::test_invalid_decision_returns_400_and_preserves_token` fails only in the full backend run (order-dependent 409; §1).
+- Full-project E2E (§7): defects A–C (a network reset while a project is open lands in the scratch slot: undo, raw imports, snapshot restore, stale copies after template create and bundle import), with a proposed fix and regression tests. Defect D (a second project from a template → 409). The export dialog ignores Escape. `login.html` prefills a review credential. `CreationForm` labels are unassociated. Unbuilt templates look available.
+
+## 7. Full-project browser E2E
+
+Date: 2026-09-30. A UI-driven run across the whole product, beyond the 3D view, on the same stack (auth mode, fresh SQLite database, seeded users, Overpass stub, Vite, Chromium on SwiftShader). Each step is driven through the page as a user would: clicks, typing, file inputs and keyboard shortcuts. It fails on a thrown error, a page error, a console error, an HTTP status ≥ 400 outside a short allowlist (the chat-settings 403, the local-settings 404 and the first 404 for a site context that has not been fetched yet), or an error-boundary fallback. The API is read only to check what the UI claims. The bundled templates were built first with `backend/project_templates/_build.py`: `3bus`, `ieee14` and `ieee39` built. `belgium` needs `resources/test-elec/networks/base_s_5_elec_.nc`, which this checkout lacks.
+
+**43/47 steps pass. The four failures are product defects (below), not the harness.** On the same fresh stack afterwards, the Phase 1 E2E ran PHASE1_RESULT and the Phase 2 QA driver ran PHASE2_RESULT.
+
+| Area | Steps | Result |
+|---|---|---|
+| Auth | an unauthenticated `/app` shows the sign-in form; a wrong password is refused (401 "Invalid credentials"); sign in lands on the projects home | pass |
+| Build by hand | blank project; two buses from the canvas toolbar; voltage edited in the properties panel; generator, line and load added through "Add to this bus" | pass |
+| Undo | undo (toolbar) removes the last addition | **fail: defect A** |
+| Save and solve | Ctrl+S; Run LOPF from the header → Optimal (objective 800); all 12 result tabs render (Capacity Expansion … Asset Detail) | pass |
+| Import | a `.nc` imported from the projects home while another project is open | **fail: defect B** |
+| Import | the same file after sign-out and sign-in (a fresh session): 4 buses, 24 snapshots; opens in the workspace | pass |
+| Data | every component table lists its rows (Buses 4, Lines 1, Transformers 2, Generators 4, Storage 1, Stores 1, Loads 3, Links 1) | pass |
+| Map and 3D | satellite and hybrid views place every bus; a site boundary drawn on the map → Open in 3D (9 objects, 6 heroes, context with 5 buildings, 4 lines, 3 areas and terrain, no missing tile) | pass |
+| Panels | Project info, Workspace, Time series, Solver settings, Model horizon, Capacity bounds, Issues, Solve queue, Planning → dynamics, Snapshots, Scenarios: each opens without an error and closes | pass |
+| Results | solve plus the solve queue; all result tabs for the campus; the results overlay on the schematic stepped with the timeline (1 of 24 → 2 of 24); the 3D site shows the results (8 objects with a state) | pass |
+| Project life cycle | a snapshot saved; a scenario branched; the export bundle downloads (`.pypsaproj.zip`, 26.7 kB); a project cloned from the projects home (4 buses) | pass |
+| Shell | command palette (Ctrl+K → Solver settings); light theme and compact density toggled and restored; a reload restores the project, its network and its results (fresh); the admin users page; sign-out gates the app again | pass |
+| Templates | a project from the IEEE 14-bus template (14 buses, 20 lines) solves (objective 53 297) | pass |
+| Templates | a second project from the same template | **fail: defect D** |
+| Import | a `.nc` imported into the open project (Project data → Import) | **fail: defect C** |
+
+### Defects found
+
+**A. Undo reports success but changes nothing in auth mode.** After adding a generator, a line and a load, the toolbar shows "Undo last action (Ctrl+Z) · 7 steps available". Undo answers `200 {"undone":true,"remaining":6}`, yet the network still holds all three components. This reproduces through the API alone: activate a project, add a load, `POST /api/network/undo`, and the load is still there.
+
+**B. A `.nc` imported from the projects home while a project is open is lost.** The wizard's "From file" tab imports the file (`POST /io/import/netcdf` → `200 {"buses":4}`) and then saves under the new name. The next request still sees the open project's network, so the new project is saved holding the **old** network (2 buses, 1 snapshot instead of 4 and 24). The file's contents are silently discarded. In a fresh session (no open project) the same flow works. Reproduced through the API alone.
+
+**C. A `.nc` imported into the open project leaves its network unchanged.** From the workspace's Project data dialog, Import → a `.nc` answers 200 with the file's summary, but the project keeps its 14 buses and the header still says "14 buses".
+
+**Root cause of A, B and C (one cause).** `PyPSAService.reset_network()` publishes the new, unbound network context into the session's `scratch:<sid>` slot (`services/pypsa_service.py`, `reset_network`). The next request resolves its context through the session's database pointer `sessions.active_project_id` (`services/active_project.py`, `resolve_for_session`). While that pointer is set, the request re-resolves the **project's** registry slot and never sees the scratch slot. `project_registry.bind_context` and `set_binding` do not move a context between slots; only save and rename call `PyPSAService.rekey_context`. The routes that reset the network while a project is open are therefore affected:
+
+- raw imports: `.nc`, CSV, Excel and MATPOWER (`routers/io.py`);
+- undo (`services/network_undo.py`, `apply_undo`);
+- snapshot restore (`routers/snapshots.py`);
+- template create and bundle import (`routers/projects.py`). These re-bind, but leave a stale bound copy in scratch, and when that copy is evicted it is written back over the project's saved edits. An agent confirmed this in a repro.
+
+The backend tests miss it because the `install_network` fixture (`tests/conftest.py`) clears `active_project_id`, so every test runs with the pointer unset.
+
+**Proposed fix (not applied).** The fix is 5 files, about +86/−14. It needs a decision because it changes backend routes, which Phase 2's rules exclude:
+
+- after a successful raw import, clear the session's pointer, as `POST /api/network/reset` already does;
+- after re-binding in undo, snapshot restore, template create and bundle import, call `PyPSAService.rekey_context(PyPSAService.get_active_context())` so the context lives under the project's key;
+- the chat tools' import wrappers pass the acting session through.
+
+Five regression tests exercise each route with a project active. They fail before the fix and pass after it, and 1830 related backend tests pass with it. Two further points are worth considering with the fix:
+
+- undo and snapshot restore should refuse while that project is in the solve queue;
+- `reset_network` carries `mutation_lock`, `undo` and `chat_state` forward into the new context.
+
+**D. A second project from the same template fails with 409.** The templates tab calls `projectsApi.createFromTemplate(templateId)` with no name. The backend then uses the template's default name ("IEEE 14-Bus"), which already exists: `409 {"detail":"Project 'IEEE 14-Bus' already exists"}`, and a toast "Template import failed: Request failed with status code 409". The route already accepts `name`. The "From file" tab avoids the clash with `_uniqueProjectName`, and the templates tab could do the same. This is a small frontend fix.
+
+### Other findings
+
+- **The export dialog stays open after the download, and Escape does not close it.** Only Cancel does. Minor.
+- **`frontend/public/login.html` prefills and prints a review account** (`admin@example.com` / `admin-pass-123`), and auth mode serves that page (`/login.html` passes the static gate). This predates Phase 2. If the page ships beyond review builds, the credential should go.
+- **`CreationForm` labels are siblings of their inputs, not associated with them**, so they have no accessible name. The properties panel's add form wraps its inputs in their labels and is fine.
+- **The template cards show as available even when a template's `network.nc` is not built.** The `.nc` files are gitignored and built by `build-macos.sh`, so a dev checkout offers templates that fail until `_build.py` runs.
+- **The Scenarios panel lists every project in the org as a scenario forest.** This is by design, but it reads oddly when the projects are unrelated.
 
 ## Appendix — the QA fixture
 
