@@ -45,7 +45,7 @@ import logging
 import math
 import uuid
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, NoReturn
 
 from fastapi import HTTPException, params as fastapi_params
 
@@ -1826,6 +1826,631 @@ def _compact_draft(d: dict) -> dict:
         if isinstance(ids, list) and len(ids) > 10:
             out[key] = ids[:10]
             out[f"{key}_total"] = len(ids)
+    return out
+
+
+# ── Investment case (IC P4 WP4.6c) ─────────────────────────────────────────
+# The single-owner finance run for the model: start it (campaign-gated like
+# the studies; it solves no LP, so it is charged 0 solves), read its status and
+# report (a summary under the result cap, or the cashflow lines paged), solve
+# an owner-sold PPA price for a target post-tax equity IRR WITHOUT touching the
+# stored inputs, and explain the equity IRR and the min-DSCR year by stream and
+# year. The routes' refusals carry `{"code": …}`; each is re-raised under a
+# fixed kind (written as literals for the manifest guard). An unknown number is
+# never written as 0: it reads "not established" (plan C12, ADR-0001).
+
+_IC_ERROR_KINDS = (
+    {"error_kind": "investment_case_busy"}, {"error_kind": "investment_case_not_solved"},
+    {"error_kind": "finance_inputs_missing"}, {"error_kind": "finance_inputs_invalid"},
+    {"error_kind": "tax_pack_not_found"}, {"error_kind": "investment_case_request_invalid"},
+)
+# Route code → kind (the `start_investment_case` 422 set and the POST's 409).
+_IC_CODES = {
+    "not_solved": "investment_case_not_solved",
+    "finance_inputs_missing": "finance_inputs_missing",
+    "finance_inputs_invalid": "finance_inputs_invalid",
+    "tax_pack_not_found": "tax_pack_not_found",
+    "request_invalid": "investment_case_request_invalid",
+}
+assert set(_IC_CODES.values()) <= {d["error_kind"] for d in _IC_ERROR_KINDS}
+
+# The C9 solve-for-PPA refusals (`engine.solve_ppa`'s `solve_ppa_status`), and
+# an adapter refusal (`FinanceRefused`) while building the case to solve on.
+_SOLVE_PPA_ERROR_KINDS = (
+    {"error_kind": "solve_ppa_contract_not_found"}, {"error_kind": "solve_ppa_ambiguous_contract"},
+    {"error_kind": "solve_ppa_not_owner_sold"}, {"error_kind": "solve_ppa_not_linear"},
+    {"error_kind": "solve_ppa_needs_redispatch"}, {"error_kind": "solve_ppa_price_unknown"},
+    {"error_kind": "solve_ppa_cash_not_established"}, {"error_kind": "solve_ppa_no_root"},
+    {"error_kind": "investment_case_refused"},
+)
+_SOLVE_PPA_MESSAGES = {
+    "solve_ppa_contract_not_found": "no owner-sold PPA settlement line matches: name the "
+                                    "contract with contract_id, or add a PPA the owner sells",
+    "solve_ppa_ambiguous_contract": "several PPA contracts: name one with contract_id",
+    "solve_ppa_not_owner_sold": "the contract is not sold by the owner (its settlement is not "
+                                "cash in): only an owner-sold PPA can be solved",
+    "solve_ppa_not_linear": "the contract's settlement is not linear in its price (not a PPA "
+                            "settlement at its own indexation), so a price cannot be solved",
+    "solve_ppa_needs_redispatch": "the contract changes the dispatch: a finance-only solve cannot "
+                                  "re-dispatch, so its price cannot be solved here",
+    "solve_ppa_price_unknown": "the contract's price is not established in the case",
+    "solve_ppa_cash_not_established": "the post-tax equity cash is not established at a zero "
+                                      "price (see get_investment_case for the reasons)",
+    "solve_ppa_no_root": "no price in the search range reaches the target IRR in the target "
+                         "year (see `code` for why)",
+}
+
+_NE = "not established"
+_IC_SUMMARY_CHARS = 3500
+_IC_PAGE_CHARS = 3000
+_IC_P4_SECTIONS = ("project", "debt", "tax", "participants", "gates")
+
+
+def _cut(v, n: int = 80):
+    """User text (party ids, contract / asset names, flags) cut so one row or
+    entry can never outgrow the cap (the P3 rule: ids 80, flags 160)."""
+    return None if v is None else str(v)[:n]
+
+
+def _ne(v, nd: int | None = None):
+    """A number as the model reads it: None / NaN / inf → "not established",
+    never 0 (plan C12)."""
+    if v is None or isinstance(v, bool):
+        return _NE if v is None else v
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return _NE
+    if not math.isfinite(f):
+        return _NE
+    return round(f, nd) if nd is not None else f
+
+
+def _json_len(obj) -> int:
+    return len(json.dumps(obj, default=str))
+
+
+def _ic_raise(status: int, kind: str, message: str, **extra) -> NoReturn:
+    raise HTTPException(status_code=status,
+                        detail={"error_kind": kind, "message": str(message)[:500], **extra})
+
+
+@contextlib.contextmanager
+def _ic_errors():
+    """Re-raise the investment-case routes' refusals under a fixed kind. A 409
+    without a code is the study mesh (a solve or another study running)."""
+    try:
+        yield
+    except HTTPException as exc:
+        d = exc.detail
+        if isinstance(d, dict) and "error_kind" in d:
+            raise
+        code = str(d.get("code") or "") if isinstance(d, dict) else ""
+        message = str(d.get("message", "") if isinstance(d, dict) else d)[:500]
+        if code in _IC_CODES:
+            kind = _IC_CODES[code]
+        elif exc.status_code == 409:
+            kind = "investment_case_busy"
+        else:
+            raise
+        detail = {"error_kind": kind, "message": message}
+        if code:
+            detail["code"] = code
+        if isinstance(d, dict) and isinstance(d.get("errors"), list):
+            detail["errors_total"] = len(d["errors"])
+            detail["errors"] = _fit([str(e)[:200] for e in d["errors"]])
+        raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+
+
+def run_investment_case(owner: str | None = None) -> dict:
+    """Start the single-owner investment-case run (IC P4): build the finance
+    case from the solved network and the stored finance inputs, run the
+    finance engine and store the report. Campaign-gated like the studies (0
+    solves: it solves no LP). Poll `get_investment_case`."""
+    from pydantic import ValidationError
+
+    from routers.results import post_investment_case as _h
+    from services.finance.investment_case_runner import InvestmentCaseRequest
+
+    try:
+        body = InvestmentCaseRequest(owner=owner)
+    except ValidationError as exc:
+        _ic_raise(422, "investment_case_request_invalid",
+                  str(exc.errors()[0].get("msg")) if exc.errors() else str(exc))
+
+    def start():
+        with _ic_errors():
+            return _h(body)
+
+    out = _campaign_gated("investment_case", start)
+    out = {k: (_cut(v) if k in ("owner", "case_id") else v) for k, v in out.items()}
+    out["hint"] = ("poll get_investment_case() until status is done / refused / failed; "
+                   "then get_investment_case(detail='cashflows') pages the cash lines and "
+                   "explain_cashflow() explains the equity IRR and the min-DSCR year")
+    return out
+
+
+def _ic_read() -> tuple[dict | None, dict | None]:
+    """(status body, full report) — each None when the route answers 204."""
+    from routers.results import get_investment_case as _status, \
+        get_investment_case_report as _report
+
+    status = _status()
+    report = _report(detail="full")
+    status = None if getattr(status, "status_code", None) == 204 else status
+    report = None if getattr(report, "status_code", None) == 204 else report
+    return status, report
+
+
+_IC_NO_DATA = ("no investment-case run and no stored report: the finance inputs are set "
+               "with PUT /api/simulation/finance (the Investment tab), then call "
+               "run_investment_case — do NOT report this as a zero")
+
+
+def _section(report: dict, name: str) -> dict:
+    return ((report.get("sections") or {}).get(name) or {})
+
+
+def _ic_headlines(report: dict) -> dict:
+    p = _section(report, "project").get("payload") or {}
+    d = _section(report, "debt").get("payload") or {}
+
+    def pick(key, fallback=None, nd=6):
+        v = p.get(key)
+        if v is None and fallback is not None:
+            v = report.get(fallback)
+        return _ne(v, nd)
+
+    return {
+        "equity_post_tax_irr": pick("equity_post_tax_irr"),
+        "equity_pre_tax_irr": pick("equity_pre_tax_irr"),
+        "equity_post_tax_npv_at_cost_of_equity": pick("equity_post_tax_npv", nd=2),
+        "project_post_tax_irr": pick("project_post_tax_irr", "project_irr_post_tax"),
+        "project_pre_tax_irr": pick("project_pre_tax_irr", "project_irr_pre_tax"),
+        "project_post_tax_npv_at_wacc": pick("project_post_tax_npv", "npv_at_wacc", nd=2),
+        "lifecycle_npv": pick("lifecycle_npv", nd=2),
+        "payback_years": pick("payback_years", nd=2),
+        "lcoe_nominal_per_mwh": pick("lcoe_nominal_per_mwh",
+                                     "lcoe_finance_consistent_eur_per_mwh", nd=4),
+        "lcoe_real_per_mwh": pick("lcoe_real_per_mwh", nd=4),
+        "min_dscr": _ne(d.get("min_dscr", report.get("min_dscr")), 4),
+        "avg_dscr": _ne(d.get("avg_dscr", report.get("avg_dscr")), 4),
+        "llcr": _ne(d.get("llcr", report.get("llcr")), 4),
+        "plcr": _ne(d.get("plcr", report.get("plcr")), 4),
+        "debt_amount": _ne(d.get("amount"), 2),
+    }
+
+
+def _ic_summary(status: dict | None, report: dict | None) -> dict:
+    st = status or {}
+    rep_state = st.get("report") or {}
+    out: dict[str, Any] = {
+        "status": "ok",
+        "run": {"status": st.get("status", "idle"), "stage": st.get("stage"),
+                "stages_done": list(st.get("stages_done") or []),
+                "error_code": _cut(st.get("error_code"), 120),
+                "error": _cut(st.get("error"), 300)},
+    }
+    if report is None:
+        out["report"] = {"present": False}
+        out["flags"] = _fit([str(f)[:160] for f in st.get("flags") or []])
+        out["hint"] = "no stored report yet: poll get_investment_case() while the run is running"
+        return out
+    stale = rep_state.get("stale")
+    out["report"] = {"present": True, "stale": _NE if stale is None else stale,
+                     "changed": list(rep_state.get("changed") or [])[:8],
+                     "reason": _cut(rep_state.get("reason"), 120)}
+    p = _section(report, "project").get("payload") or {}
+    out.update(case_id=_cut(report.get("case_id")), owner=_cut(p.get("owner")),
+               currency=p.get("currency"), cod_year=p.get("cod_year"),
+               analysis_years=p.get("analysis_years"))
+    refusal = p.get("refusal")
+    if isinstance(refusal, dict):
+        out["refusal"] = {"code": _cut(refusal.get("code"), 120),
+                          "detail": _cut(refusal.get("detail"), 300)}
+    out["headlines"] = _ic_headlines(report)
+    if p.get("solve_ppa_status") is not None:
+        out["solve_ppa"] = {"status": _cut(p.get("solve_ppa_status"), 120),
+                            "price_per_mwh": _ne(p.get("solved_ppa_price"), 4),
+                            "money_year": p.get("solved_ppa_price_money_year")}
+    gate = _section(report, "gates").get("payload") or {}
+    consistent = gate.get("wacc_vs_discount_rate_consistent",
+                          (report.get("gates") or {}).get("wacc_vs_discount_rate_consistent"))
+    out["wacc_gate"] = {
+        "wacc_vs_discount_rate_consistent": _NE if consistent is None else consistent,
+        "legs": {k: (_NE if v is None else v) for k, v in (gate.get("legs") or {}).items()},
+        "assets_with_other_rates": [_cut(a) for a in (gate.get("assets_with_other_rates")
+                                                      or [])[:5]],
+        "values": {k: _ne(v, 6) for k, v in (gate.get("values") or {}).items()
+                   if not isinstance(v, dict)},
+    }
+    completeness = report.get("completeness") or {}
+    out["completeness"] = {k: completeness.get(k) for k in _IC_P4_SECTIONS if k in completeness}
+    out["skipped"] = sorted(k for k, v in completeness.items()
+                            if v == "skipped" and k not in _IC_P4_SECTIONS)
+    out["reasons"] = {k: str(_section(report, k).get("note") or "")[:300]
+                      for k in _IC_P4_SECTIONS if completeness.get(k) == "not_established"}
+    flags = [str(f)[:160] for f in p.get("flags") or []]
+    out["flags_total"] = len(flags)
+    out["flags"] = _fit(flags)
+    out["cashflow_lines"] = len(report.get("cashflow_lines") or [])
+    out["basis"] = ("IRRs as fractions; money in the case currency (NPVs at financial "
+                    "close); returns and DSCR on the incremental cash against the "
+                    "counterfactual supply cost; the lifecycle NPV on the owner's total cash")
+    out["hint"] = ("get_investment_case(detail='cashflows', page) pages the cash lines; "
+                   "explain_cashflow() attributes the equity IRR and the min-DSCR year")
+
+    # Fit the cap: the gate's values first, then shorter reasons, fewer flags.
+    if _json_len(out) > _IC_SUMMARY_CHARS:
+        out["wacc_gate"].pop("values", None)
+        out["omitted"] = ["wacc_gate.values"]
+    if _json_len(out) > _IC_SUMMARY_CHARS:
+        out["reasons"] = {k: v[:120] for k, v in out["reasons"].items()}
+        out["omitted"].append("reasons_long")
+    if _json_len(out) > _IC_SUMMARY_CHARS:
+        out["flags"] = flags[:3]
+        out["omitted"].append("flags")
+    if _json_len(out) > _IC_SUMMARY_CHARS:
+        out.pop("basis", None)
+        out["run"]["error"] = _cut(out["run"]["error"], 100)
+        out["reasons"] = {k: v[:60] for k, v in out["reasons"].items()}
+        out["flags"] = []
+        out["omitted"].append("flags_all")
+    return out
+
+
+def _ic_cashflow_rows(report: dict) -> list[dict]:
+    rows = []
+    for ln in sorted(report.get("cashflow_lines") or [], key=lambda x: x.get("year") or 0):
+        prov = ln.get("provenance") or {}
+        src = prov.get("source")
+        sid = prov.get("source_id")
+        row = {"year": ln.get("year"), "stream": _cut(ln.get("value_stream"), 40),
+               "counterparty": _cut(ln.get("counterparty")), "amount": _eur(ln.get("amount")),
+               "source": _cut(f"{src}:{sid}" if sid else src, 120)}
+        if prov.get("contract_id"):
+            row["contract"] = _cut(prov["contract_id"])
+        for key in ("asset", "tariff_item"):
+            if ln.get(key):
+                row[key] = _cut(ln[key])
+        if prov.get("period"):
+            row["period"] = _cut(prov["period"], 40)
+        rows.append(row)
+    return rows
+
+
+def _pack_pages(rows: list[dict], budget: int) -> list[list[dict]]:
+    """Deterministic pages packed by serialised size (the `_paginate` rule: a
+    page always takes its first row), so page N is the same page every call."""
+    pages: list[list[dict]] = []
+    cur: list[dict] = []
+    used = 0
+    for row in rows:
+        cost = _json_len(row) + 2
+        if cur and used + cost > budget:
+            pages.append(cur)
+            cur, used = [], 0
+        cur.append(row)
+        used += cost
+    if cur:
+        pages.append(cur)
+    return pages
+
+
+def _ic_cashflow_page(status: dict | None, report: dict, page: int) -> dict:
+    rows = _ic_cashflow_rows(report)
+    pages = _pack_pages(rows, _IC_PAGE_CHARS)
+    items = pages[page - 1] if page <= len(pages) else []
+    before = sum(len(pg) for pg in pages[:page - 1])
+    p = _section(report, "project").get("payload") or {}
+    stale = ((status or {}).get("report") or {}).get("stale")
+    out = {"status": "ok", "kind": "investment_case_cashflows", "page": page,
+           "pages": len(pages), "total_count": len(rows), "returned": len(items),
+           "has_more": before + len(items) < len(rows), "items": items,
+           "currency": p.get("currency"), "stale": _NE if stale is None else stale,
+           "basis": ("one line per (year, stream line), + = cash in to the owner; the "
+                     "operating lines are the owner's TOTAL cash (returns are on it minus "
+                     "the counterfactual supply cost, which is not a line)")}
+    if page > len(pages):
+        out["note"] = f"past the last page ({len(pages)})"
+    return out
+
+
+def get_investment_case(detail: str = "summary", page: int = 1) -> dict:
+    """The investment-case run and its stored report (IC P4). `summary`: the
+    run status, staleness, headlines, the WACC gate, completeness, the top
+    flags and reasons, under the result cap. `cashflows`: the cashflow lines,
+    paged (1-based)."""
+    if detail not in ("summary", "cashflows"):
+        _ic_raise(422, "investment_case_request_invalid",
+                  f"detail must be 'summary' or 'cashflows', got {_cut(detail, 40)!r}")
+    if not isinstance(page, int) or isinstance(page, bool) or page < 1:
+        _ic_raise(422, "investment_case_request_invalid", "page must be an integer >= 1")
+    status, report = _ic_read()
+    if status is None and report is None:
+        return _no_data("investment_case", _IC_NO_DATA)
+    if detail == "cashflows":
+        if report is None:
+            return _no_data("investment_case_cashflows",
+                            "no stored report yet: the run has not finished")
+        return _ic_cashflow_page(status, report, page)
+    return _ic_summary(status, report)
+
+
+def _ic_solve_layers(case):
+    """Tests only (the runner's `layers` hook): the tax layers `solve_ppa`
+    uses instead of the pack's. None in production — the pack decides."""
+    return None
+
+
+def solve_ppa_price(target_irr: float, target_year: int,
+                    contract_id: str | None = None) -> dict:
+    """The price of an owner-sold PPA for a target post-tax equity IRR in a
+    target operating year (IC P4 C9), from the stored finance inputs and the
+    current solved network. Builds the case through the router's adapter seam
+    and solves on a COPY whose `inputs.solve_ppa` is set: the stored inputs and
+    the stored report are never touched."""
+    import dataclasses
+
+    from pydantic import ValidationError
+
+    from models.finance import SolvePpa
+    from routers.results import _dispatch_ready, _ic_build_case, _study_mesh_blocker
+    from routers.simulation import _state as sim_state
+    from services.finance.case import FinanceRefused
+    from services.finance.engine import solve_ppa
+    from services.finance.investment_case_runner import finance_inputs_or_422
+    from services.finance.packs.base import PackNotFound, load_pack
+
+    try:
+        sp = SolvePpa(contract_id=contract_id, target_irr=target_irr, target_year=target_year)
+    except ValidationError as exc:
+        _ic_raise(422, "investment_case_request_invalid",
+                  "; ".join(f"{'.'.join(map(str, e.get('loc', ())))}: {e.get('msg')}"
+                            for e in exc.errors()[:3]))
+    blocked = _study_mesh_blocker("solve_ppa_price")
+    if blocked:
+        _ic_raise(409, "investment_case_busy", blocked)
+    n = PyPSAService.get_network()
+    if not _dispatch_ready(n):
+        _ic_raise(409, "investment_case_not_solved",
+                  "solve the network first: the PPA price is solved on the solved dispatch")
+    cfg = sim_state["solver_config"]
+    raw = getattr(cfg, "finance", None)
+    if raw is None:
+        _ic_raise(422, "finance_inputs_missing",
+                  "set the finance inputs first (PUT /api/simulation/finance)")
+    with _ic_errors():
+        finance_inputs_or_422(raw)
+    build = _ic_build_case(n, cfg, owner=None, lost_load=sim_state.get("last_lost_load"))
+    try:
+        case = build()
+    except FinanceRefused as exc:
+        _ic_raise(422, "investment_case_refused", exc.detail or exc.code,
+                  code=_cut(exc.code, 120))
+    pack = None
+    if case.inputs.tax_pack_id:
+        try:
+            pack = load_pack(case.inputs.tax_pack_id, as_of=case.inputs.financial_close)
+        except PackNotFound as exc:
+            _ic_raise(422, "tax_pack_not_found", str(exc))
+    trial = dataclasses.replace(case, inputs=case.inputs.model_copy(update={"solve_ppa": sp}))
+    try:
+        out = solve_ppa(trial, pack, layers=_ic_solve_layers(trial))
+    except FinanceRefused as exc:
+        _ic_raise(422, "investment_case_refused", exc.detail or exc.code,
+                  code=_cut(exc.code, 120))
+    code = str(out.get("solve_ppa_status") or "")
+    if code != "ok":
+        kind = code.split(":", 1)[0]
+        if kind not in _SOLVE_PPA_MESSAGES:
+            kind = "solve_ppa_no_root"
+        _ic_raise(422, kind, _SOLVE_PPA_MESSAGES[kind], code=_cut(code, 120),
+                  contract_id=_cut(contract_id))
+    # The contract the engine priced and its price in the stored inputs (the
+    # earliest template's, in its money year — the engine's reference).
+    first = min(case.templates, key=lambda t: t.first_year)
+    ref = next((ln for ln in first.lines if ln.price is not None and (
+        ln.contract_id == contract_id if contract_id is not None
+        else ln.stream == "ppa_settlement")), None)
+    result = {
+        "status": "ok",
+        "solved_ppa_price_per_mwh": _ne(out.get("solved_ppa_price"), 4),
+        "currency": case.inputs.currency,
+        "money_year": out.get("solved_ppa_price_money_year"),
+        "contract_id": _cut(ref.contract_id if ref is not None else contract_id),
+        "price_in_stored_inputs_per_mwh": _ne(None if ref is None else ref.price, 4),
+        "target_irr": target_irr, "target_year": target_year,
+        "equity_post_tax_irr_at_target_year": _ne(out.get("solved_equity_irr_at_target_year"), 6),
+        "owner": _cut(case.owner),
+        "flags": [_cut(f, 160) for f in out.get("solve_ppa_flags") or []],
+        "basis": ("post-tax equity IRR on the incremental cash against the counterfactual "
+                  "supply cost, over operating years 1..target_year (SAM ppa_soln_mode=0)"),
+        "stored_inputs_changed": False,
+        "note": ("nothing was saved: the stored finance inputs and report are unchanged. To "
+                 "use this price, change the contract price and re-run the solve and "
+                 "run_investment_case"),
+    }
+    return result
+
+
+# The engine's own sources in the report's cashflow lines (report.py
+# `_cashflow_lines`); every other source is an operating line.
+_IC_FINANCE_SOURCES = frozenset({"capex", "replacement_capex", "terminal_value", "itc", "ptc",
+                                 "grant", "debt", "debt_draws", "dsra", "reserve_interest"})
+_IC_AVOIDED = "avoided_supply_cost (counterfactual)"
+
+
+def _ic_is_finance_source(src) -> bool:
+    return src in _IC_FINANCE_SOURCES or str(src or "").startswith("tax:")
+
+
+def _ic_label(ln: dict) -> str:
+    stream = str(ln.get("value_stream"))
+    src = (ln.get("provenance") or {}).get("source")
+    if not _ic_is_finance_source(src) or src in ("debt", stream):
+        return _cut(stream, 80)
+    return _cut(f"{stream}:{src}", 80)
+
+
+def _ic_rate(report: dict, sim_state) -> tuple[float, str]:
+    """The discount rate of the attribution: the cost of equity of the finance
+    inputs the report was built from (their digest matches the report's
+    provenance), else the equity post-tax IRR, else 0 (undiscounted)."""
+    from services.finance.investment_case_runner import finance_digest
+
+    p = _section(report, "project").get("payload") or {}
+    stored = ((p.get("provenance") or {}).get("inputs") or {}).get("finance")
+    raw = getattr(sim_state.get("solver_config"), "finance", None)
+    if stored and isinstance(raw, dict) and finance_digest(raw) == stored:
+        coe = _ne(raw.get("cost_of_equity"))
+        if coe != _NE and coe > -1.0:
+            return coe, "cost_of_equity"
+    irr = _ne(p.get("equity_post_tax_irr"))
+    if irr != _NE and irr > -1.0:
+        return irr, "equity_post_tax_irr (the report's finance inputs are no longer stored, " \
+                    "so the cost of equity is not established; at the IRR the streams sum to 0)"
+    return 0.0, "undiscounted (neither the cost of equity nor the IRR is established)"
+
+
+def _ic_equity_attribution(report: dict, rate: float, top: int) -> dict:
+    p = _section(report, "project").get("payload") or {}
+    years = [int(y) for y in p.get("years") or []]
+    eq = ((p.get("cash") or {}).get("equity_post_tax"))
+    if not years or eq is None or any(v is None for v in eq):
+        note = _section(report, "project").get("note") or \
+            "the post-tax equity cash is not established"
+        return {"status": "not_established", "reason": str(note)[:300]}
+    idx = {y: i for i, y in enumerate(years)}
+    disc = [(1.0 + rate) ** -i for i in range(len(years))]
+    by_label: dict[str, list[float]] = {}
+    for ln in report.get("cashflow_lines") or []:
+        i = idx.get(ln.get("year"))
+        amt = ln.get("amount")
+        if i is None or amt is None:
+            continue
+        by_label.setdefault(_ic_label(ln), [0.0] * len(years))[i] += float(amt)
+    cf = p.get("counterfactual_net")
+    if p.get("has_counterfactual") and cf and all(v is not None for v in cf):
+        by_label[_IC_AVOIDED] = [-float(v) for v in cf]
+    total = [sum(v[i] for v in by_label.values()) for i in range(len(years))]
+    residual = max((abs(total[i] - float(eq[i])) for i in range(len(years))), default=0.0)
+    pv = {k: sum(a * d for a, d in zip(v, disc)) for k, v in by_label.items()}
+    streams = sorted(pv, key=lambda k: -abs(pv[k]))
+    cells = sorted(((k, i, by_label[k][i] * disc[i]) for k in by_label
+                    for i in range(len(years)) if by_label[k][i] != 0.0),
+                   key=lambda c: -abs(c[2]))
+    return {
+        "status": "ok",
+        "equity_post_tax_irr": _ne(p.get("equity_post_tax_irr"), 6),
+        "equity_post_tax_npv_at_rate": _eur(sum(float(c) * d for c, d in zip(eq, disc))),
+        "sum_of_stream_pvs": _eur(sum(pv.values())),
+        "reconciles": residual <= 0.01 + 1e-9 * max(1.0, max(abs(float(v)) for v in eq)),
+        "max_yearly_residual": _eur(residual),
+        "streams_total": len(streams),
+        "by_stream": [{"stream": k, "pv": _eur(pv[k]),
+                       "undiscounted": _eur(sum(by_label[k])),
+                       "effect_on_irr": "raises" if pv[k] > 0 else "lowers"}
+                      for k in streams[:top]],
+        "largest_cells": [{"stream": k, "year": years[i], "pv": _eur(v),
+                           "amount": _eur(by_label[k][i])} for k, i, v in cells[:top]],
+    }
+
+
+def _ic_min_dscr_year(report: dict, top: int) -> dict:
+    d = _section(report, "debt")
+    dp = d.get("payload") or {}
+    p = _section(report, "project").get("payload") or {}
+    years = [int(y) for y in p.get("years") or []]
+    dscr = dp.get("dscr") or []
+    cands = [(v, i) for i, v in enumerate(dscr) if v is not None]
+    if d.get("status") != "ok" or not cands or not years:
+        return {"status": "not_established",
+                "reason": str(d.get("note") or "no debt service, so no DSCR")[:300]}
+    v, i = min(cands)
+    year = years[i]
+
+    def at(key):
+        s = dp.get(key) or []
+        return _ne(s[i] if i < len(s) else None, 2)
+
+    parts: dict[str, float] = {}
+    for ln in report.get("cashflow_lines") or []:
+        if ln.get("year") != year or ln.get("amount") is None:
+            continue
+        src = (ln.get("provenance") or {}).get("source")
+        if _ic_is_finance_source(src) and src != "replacement_capex":
+            continue
+        label = _ic_label(ln)
+        parts[label] = parts.get(label, 0.0) + float(ln["amount"])
+    cf = p.get("counterfactual_net") or []
+    if p.get("has_counterfactual") and i < len(cf) and cf[i] is not None:
+        parts[_IC_AVOIDED] = -float(cf[i])
+    cfads = at("cfads")
+    comp = sorted(parts.items(), key=lambda kv: -abs(kv[1]))
+    out = {"status": "ok", "year": year, "dscr": _ne(v, 4), "cfads": cfads,
+           "cfads_parts_total": len(comp),
+           "cfads_by_stream": [{"stream": k, "amount": _eur(a)} for k, a in comp[:top]],
+           "cfads_reconciles": (cfads != _NE and
+                                abs(sum(parts.values()) - cfads) <= 0.01 + 1e-9 * abs(cfads)),
+           "service": {"interest": at("interest"), "principal": at("principal"),
+                       "total": at("service")},
+           "by_tranche": []}
+    for t in (dp.get("tranches") or [])[:4]:
+        def ts(key, t=t):
+            s = t.get(key) or []
+            return _ne(s[i] if i < len(s) else None, 2)
+        out["by_tranche"].append({"index": t.get("index"), "kind": _cut(t.get("kind"), 40),
+                                  "interest": ts("interest"), "principal": ts("principal")})
+    return out
+
+
+_IC_EXPLAIN_METHOD = (
+    "Equity IRR: each stream's post-tax equity cash lines (the report's cashflow lines, "
+    "per year) discounted at `rate` to the financial close (end-of-year, year 0 "
+    "undiscounted); the operating lines are the owner's TOTAL cash, so the avoided supply "
+    "cost (the counterfactual, returns are on the incremental cash) is its own stream; the "
+    "stream PVs sum to the post-tax equity NPV at that rate. A stream with a positive PV "
+    "raises the IRR, a negative one lowers it. Min-DSCR year: CFADS = incremental operating "
+    "cash - replacement capex (terminal value excluded), split by stream; debt service = "
+    "interest + principal, per tranche.")
+
+
+def explain_cashflow(detail: str = "summary") -> dict:
+    """Explain the stored investment-case report (IC P4): the largest
+    contributions to the post-tax equity IRR by stream and by (stream, year),
+    and the min-DSCR year's CFADS and debt-service composition. Not
+    `explain_investment` (which explains one asset's LP sizing)."""
+    from routers.simulation import _state as sim_state
+
+    if detail not in ("summary", "full"):
+        _ic_raise(422, "investment_case_request_invalid",
+                  f"detail must be 'summary' or 'full', got {_cut(detail, 40)!r}")
+    status, report = _ic_read()
+    if report is None:
+        return _no_data("investment_case", _IC_NO_DATA if status is None else
+                        "no stored report yet: the run has not finished")
+    top = 8 if detail == "summary" else 20
+    rate, basis = _ic_rate(report, sim_state)
+    stale = ((status or {}).get("report") or {}).get("stale")
+    p = _section(report, "project").get("payload") or {}
+    out: dict[str, Any] = {
+        "status": "ok", "method": _IC_EXPLAIN_METHOD,
+        "rate": {"value": round(rate, 6), "basis": basis},
+        "currency": p.get("currency"), "stale": _NE if stale is None else stale,
+        "equity_irr": _ic_equity_attribution(report, rate, top),
+        "min_dscr_year": _ic_min_dscr_year(report, top),
+    }
+    # Fit the cap: fewer rows, then the method's long form.
+    while _json_len(out) > _IC_SUMMARY_CHARS and top > 2:
+        top = max(2, top // 2)
+        out["equity_irr"] = _ic_equity_attribution(report, rate, top)
+        out["min_dscr_year"] = _ic_min_dscr_year(report, top)
+        out["rows_limited_to"] = top
+    if _json_len(out) > _IC_SUMMARY_CHARS:
+        out["method"] = ("stream PVs of the post-tax equity cash at `rate` (sum = equity NPV; "
+                         "positive raises the IRR); min-DSCR year: CFADS by stream, service "
+                         "by tranche")
     return out
 
 
@@ -5254,6 +5879,11 @@ DISPATCHERS: dict[str, Any] = {
     "import_urdb_tariff": import_urdb_tariff,
     "attach_tariff": attach_tariff,
     "define_participants": define_participants,
+    # investment case (4) — IC P4 WP4.6c
+    "run_investment_case": run_investment_case,
+    "get_investment_case": get_investment_case,
+    "solve_ppa_price": solve_ppa_price,
+    "explain_cashflow": explain_cashflow,
     # project_mgmt (21)
     "list_projects": list_projects,
     "load_project": load_project,

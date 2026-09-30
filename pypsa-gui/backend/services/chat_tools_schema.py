@@ -2294,6 +2294,68 @@ TOOLS: list[dict[str, Any]] = [
          "replace": {"type": "boolean"}},
         [],
     ),
+    # ── Investment case (4) — Edge Investment Case P4 WP4.6c ──────────────
+    _t(
+        "run_investment_case",
+        "Start the single-owner investment-case run: builds the finance case from the "
+        "SOLVED network and the stored finance inputs (set in the Investment tab), runs "
+        "the finance engine (cash, debt, tax, returns, DSCR, the WACC gate) and stores "
+        "the report. Runs no LP (a campaign logs it at 0 solves). `owner` = the "
+        "participant whose case it is (omit: the value-flow config's single owner). "
+        "Returns {status: 'running', study, case_id, owner, tax_pack_id, hint}; poll "
+        "get_investment_case. Refusals: investment_case_not_solved (solve first), "
+        "investment_case_busy (a solve or a study is running), finance_inputs_missing, "
+        "finance_inputs_invalid, tax_pack_not_found, investment_case_request_invalid. "
+        "Safety: execution_long_running.",
+        {"owner": {"type": "string"}},
+        [],
+    ),
+    _t(
+        "get_investment_case",
+        "Read the investment-case run and its stored report. detail='summary' (default): "
+        "{run: {status, stage, error_code}, report: {present, stale, changed}, headlines "
+        "(equity and project IRRs as fractions, NPVs, lifecycle NPV, payback, LCOE, "
+        "min/avg DSCR, LLCR, PLCR), solve_ppa, wacc_gate, completeness, reasons, flags} — "
+        "an unknown number reads 'not established': NEVER report it as 0. A stale report "
+        "(an input changed since the run) must be called stale. detail='cashflows': the "
+        "cashflow lines (year, stream, counterparty, amount, source, contract), one "
+        "`page` (1-based) at a time: {items, page, pages, total_count, has_more}. "
+        "Safety: read.",
+        {"detail": {"type": "string", "enum": ["summary", "cashflows"]},
+         "page": {"type": "integer", "minimum": 1}},
+        [],
+    ),
+    _t(
+        "solve_ppa_price",
+        "Solve the price of an owner-sold PPA (currency/MWh, in the contract's money "
+        "year) that gives the target post-tax equity IRR (`target_irr`, a fraction, e.g. "
+        "0.1) at operating year `target_year` (1 = the first year after COD), on the "
+        "stored finance inputs and the current solve. `contract_id` picks the contract "
+        "(omit when the case has one PPA). A what-if: NOTHING is saved — the stored "
+        "inputs and report are unchanged. Returns {solved_ppa_price_per_mwh, currency, "
+        "money_year, contract_id, price_in_stored_inputs_per_mwh, "
+        "equity_post_tax_irr_at_target_year, flags}. Refusals: solve_ppa_contract_not_found, "
+        "solve_ppa_ambiguous_contract, solve_ppa_not_owner_sold, solve_ppa_not_linear, "
+        "solve_ppa_needs_redispatch (the contract changes the dispatch), "
+        "solve_ppa_price_unknown, solve_ppa_cash_not_established, solve_ppa_no_root (its "
+        "`code` says why), investment_case_refused, investment_case_not_solved, "
+        "finance_inputs_missing. Safety: read.",
+        {"target_irr": {"type": "number"},
+         "target_year": {"type": "integer", "minimum": 1},
+         "contract_id": {"type": "string"}},
+        ["target_irr", "target_year"],
+    ),
+    _t(
+        "explain_cashflow",
+        "Explain the stored investment-case report: the largest contributions to the "
+        "post-tax equity IRR by stream and by (stream, year) — each stream's equity cash "
+        "discounted at the cost of equity (the stream PVs sum to the equity NPV; `rate` "
+        "states the basis used) — and the min-DSCR year's CFADS by stream and its debt "
+        "service by tranche. The output states its method; quote it. detail='full' "
+        "lists more rows. Not explain_investment (one asset's LP sizing). Safety: read.",
+        {"detail": {"type": "string", "enum": ["summary", "full"]}},
+        [],
+    ),
 ]
 
 
@@ -2604,6 +2666,15 @@ TOOL_ROUTES: dict[str, list] = {
     "define_participants": [("POST", "/api/simulation/value_flows/template"),
                             ("GET", "/api/simulation/commercial/value_flows"),
                             ("PUT", "/api/simulation/commercial/value_flows")],
+    # investment case (4) — IC P4 WP4.6c. solve_ppa_price reads the stored
+    # finance inputs and builds the case through the router's adapter seam
+    # (`routers.results._ic_build_case`, no route); the engine runs in process.
+    "run_investment_case": [("POST", "/api/results/investment_case")],
+    "get_investment_case": [("GET", "/api/results/investment_case"),
+                            ("GET", "/api/results/investment_case/report")],
+    "solve_ppa_price": [("GET", "/api/simulation/finance")],
+    "explain_cashflow": [("GET", "/api/results/investment_case"),
+                         ("GET", "/api/results/investment_case/report")],
 }
 
 
