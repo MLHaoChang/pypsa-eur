@@ -2,10 +2,13 @@
 
 **Date:** 2026-09-30
 **Severity:** HIGH — cross-user destructive write to a bundled project sidecar.
-**Status: OPEN, NOT FIXED.** Found while verifying OPEN-ITEMS items 2-4 against
-the tree on 2026-09-30; recorded rather than fixed because it is a defect outside
-those three items, and the brief for that work was explicit that anything found
-along the way is recorded, not folded into someone else's commit.
+**Status: FIXED** in `4eca8d2`, 2026-09-30. Found while verifying OPEN-ITEMS
+items 2-4 against the tree that same day. Recorded first and fixed second, on a
+separate instruction: it is a defect outside those three items, and the brief
+for that work was explicit that anything found along the way is recorded, not
+folded into someone else's commit. The reproduction below is the pre-fix
+behaviour and is kept verbatim — it is the evidence, and
+`tests/test_asset_health_foreign_lock.py` is the tripwire that now holds it.
 **Scope:** the multi-tenant server only. `_check_project_lock` early-returns in
 local mode, so the desktop build is unaffected.
 
@@ -128,7 +131,7 @@ So the lock is live, the mechanism works, and `worksheet` honours it. Only
 a mis-set-up test: if the 409 had not come back, the 200 above would have proved
 nothing about `asset_health`.
 
-## The fix
+## The fix — applied in `4eca8d2`
 
 Three lines, character-identical to what `put_worksheet` and
 `put_stress_scenarios` already do immediately above it in the same file:
@@ -151,7 +154,13 @@ Check-only, not acquire, for the reason `_check_project_lock`'s docstring gives:
 writing a sidecar is not claiming the project, and an acquire here would leave a
 120-second claim behind that outlives the request.
 
-## Fix criteria
+## Fix criteria — all met by `4eca8d2`
+
+`tests/test_asset_health_foreign_lock.py`, written before the fix and proved red
+on the property (`entries [...] -> []`, intruder got 200) while its three
+sibling tests passed. Mutation-verified afterwards: removing just this guard,
+leaving the two sibling guards intact so the control stays meaningful, turns the
+subject red again on the same assertion.
 
 * A non-holder's `PUT .../asset_health` is refused 409 `project_locked` while
   another user holds the lock.

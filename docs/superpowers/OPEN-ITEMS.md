@@ -52,28 +52,7 @@ one dict. Full analysis, reproduction and fix criteria:
 
 ## High
 
-### 12. `PUT /{name}/asset_health` ignores a foreign edit lock
-
-`routers/adequacy_worksheet.py:192` — the **fourth** instance of the defect item
-2 was opened about, in the same file as the two that item 2 closed. Carries
-`ProjectAccessDep` (the ACL) and takes no `db`/`user` at all, so it has nothing to
-check a lock with; `/api/projects` is deliberately outside the middleware's
-prefixes, so there is no gate behind it either.
-
-`save_asset_health` "replace[s] the ledger whole" (its own docstring) and bumps
-`version`, so a non-holder does not merge into the holder's provenance ledger, it
-replaces it and hands the holder's client a higher version to trust.
-`asset_health.json` is in `projects._BUNDLE_FILES:99`, so the write propagates
-into bundles and snapshots, and `study_report._evidence_gaps` reads the file —
-a wiped ledger makes the holder's study report call every asset-level outage rate
-`unsourced`.
-
-Missed by ordering, not by misreading: the PUT landed in `a130636` (2026-09-10),
-two days before the fix commit `68e5f62`, and was never in the audit's route list.
-Nothing failed. `_lock_target()` already exists a few lines above the handler, so
-the fix is the same three lines the two siblings carry. Reproduced 2026-09-30.
-Full analysis, reproduction and fix criteria:
-`findings/2026-09-30-asset-health-put-ignores-a-foreign-edit-lock.md`. Server only.
+*(Nothing open at this severity.)*
 
 ## Medium
 
@@ -101,6 +80,12 @@ aim at, because enumerating write routes in the five routers under
 `/api/projects` and flagging those matched by no lock mechanism is exactly how
 item 12 was found — by hand, in one pass. Two of the four misses would have been
 red the day they landed.
+
+Item 12 being CLOSED does not weaken this. The class is closed in that one
+router family — all three sidecar PUTs now carry the check — but the mechanism
+that let a route ship ungated for 20 days with nothing failing is untouched, and
+it is the same mechanism for every other prefix. Four hand-caught misses is the
+argument for the test, not against it.
 
 ### 7. Node positions revert on the blank canvas
 
@@ -180,6 +165,16 @@ NOT reused or compacted — other findings and assessments cite these numbers.
   super-admin still reads across tenants, and nobody clears across them through
   this route. Tripwire: `tests/test_changelog_scoping.py`, six tests including
   both halves of the super-admin distinction.
+* **12** — `PUT /{name}/asset_health` ignores a foreign edit lock. Opened and
+  closed on 2026-09-30: recorded first as a defect outside items 2-4, then fixed
+  by `4eca8d2` on a separate instruction. The fourth instance of item 2's defect
+  and the second in that file; ungated for 20 days because it landed two days
+  before the commit that fixed its two siblings, so it was never in the audit's
+  route list. Tripwire: `tests/test_asset_health_foreign_lock.py`, written
+  before the fix, red on the property rather than a status code, and
+  mutation-verified after. **This closes the class in this router family — all
+  three sidecar PUTs now carry the check** — but not the shape that produced it,
+  which is item 6.
 * **5** — chat sessions have no owner, so the confirmation gate rests on id
   secrecy. Closed by the same commit as item 3: `owner_user_id` plus one
   comparison is exactly the fix this item asked for, so `/confirm` no longer
