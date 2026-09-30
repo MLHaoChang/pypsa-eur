@@ -5019,8 +5019,15 @@ def record_asset_health(name: str, entries: list) -> dict:
     the network, which it cannot be if it writes the network.
     """
     from routers.adequacy_worksheet import AssetHealthPut, put_asset_health as _h
-    return _h(AssetHealthPut(entries=list(entries or [])),
-              project=_authorized_project(name))
+    # Through `_route`, for the same reason `put_stress_scenarios` above says:
+    # the sidecar lock gate declares `db` and `user`, and called bare they
+    # arrive as `Depends` sentinels so every real (uuid-bearing) project
+    # crashes in server mode. That happened once already when `68e5f62` gated
+    # the other two sidecar PUTs; this is the third route to reach the same
+    # seam, and `test_chat_tools_handler_dependencies` is what caught it both
+    # times.
+    return _route(_h, body=AssetHealthPut(entries=list(entries or [])),
+                  project=_authorized_project(name))
 
 
 # ── Explanation / synthesis (1) ─────────────────────────────────────────────
