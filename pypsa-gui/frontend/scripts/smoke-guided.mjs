@@ -2403,11 +2403,11 @@ async function p27bMidStudySwitch(browser, dc) {
     await page.waitForSelector(
       '[data-testid="chat-launch-solve"]:visible, [data-testid="assistant-dock-launcher"]:visible', { timeout: 30_000 })
     if (!(await byId('chat-launch-solve').isVisible().catch(() => false))) await byId('assistant-dock-launcher').click()
-    // P28 changes this to "No study has run yet — …"; until then the P26 greeting.
-    await page.waitForFunction(() =>
-      document.querySelector('[data-testid="chat-launch-solve"]')?.textContent === 'Not solved yet.',
-    null, { timeout: 30_000 })
-    ok('greeting on project 2: "Not solved yet." (the P26 greeting; P28 rewords it)')
+    // P28 C6: a never-solved project's Guided greeting says where to start.
+    await page.waitForFunction(w =>
+      document.querySelector('[data-testid="chat-launch-solve"]')?.textContent === w,
+    P28_C6, { timeout: 30_000 })
+    ok(`greeting on project 2: "${P28_C6}" (P28 C6)`)
     check((await byId('hub-improve-list').count()) === 0, 'no hub-improve-list on project 2')
     const p2Modes = ((await api('GET', '/api/results/fmea_modes'))?.per_mode ?? [])
     const p2Names = p2Modes.map(r => r.name)
