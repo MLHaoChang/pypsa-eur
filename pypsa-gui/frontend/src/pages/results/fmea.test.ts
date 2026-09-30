@@ -148,7 +148,7 @@ describe('zero_reason', () => {
   it('has one text per reason', () => {
     expect(ZERO_REASON_TEXT).toEqual({
       no_shortfall: 'no shortfall — the site copes without it',
-      no_outage_data: 'no outage data',
+      no_outage_data: 'no outage rate set (or it is zero)',
       unpriced: 'no price set for undelivered energy',
       out_of_scope: 'not counted (outside the electricity metric)',
     })

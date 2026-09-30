@@ -44,7 +44,9 @@ export function unpricedRankingWarning(
 export type ZeroReason = 'no_shortfall' | 'no_outage_data' | 'unpriced' | 'out_of_scope'
 export const ZERO_REASON_TEXT: Record<ZeroReason, string> = {
   no_shortfall: 'no shortfall — the site copes without it',
-  no_outage_data: 'no outage data',
+  // P29 gate S-2: also fires for an explicit rate of 0 (the unit never
+  // fails), so the text must be true in both cases.
+  no_outage_data: 'no outage rate set (or it is zero)',
   unpriced: 'no price set for undelivered energy',
   out_of_scope: 'not counted (outside the electricity metric)',
 }

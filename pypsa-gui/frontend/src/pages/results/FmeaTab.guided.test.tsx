@@ -129,6 +129,15 @@ describe('FMEA tab in Guided', () => {
     expect(ths[ths.length - 1].contains(crit)).toBe(true)
   })
 
+  // P29 gate S-1: the add-row form's placeholders are plain in Guided.
+  it('the add-row placeholders are plain', async () => {
+    await renderTab()
+    const form = screen.getByTestId('fmea-expert-form')
+    const ph = Array.from(form.querySelectorAll('input')).map(i => i.placeholder)
+    expect(ph).toEqual(['Name (e.g. fuel supply loss)', 'events/yr', 'cost per event (€)', 'notes (optional)'])
+    expect(ph.join(' ')).not.toMatch(/mitigability|severity/)
+  })
+
   it('Expert still shows the letters and badges', async () => {
     useUIStore.setState({ uiMode: 'expert' })
     await renderTab()
