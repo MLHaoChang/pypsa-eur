@@ -492,6 +492,23 @@ const RESULT_LINE = /^✓ (\S+)$/
 const REBOUND_LINE = /^🔀 active project: .* → (.+)$/
 const ERROR_LINE = /^✗ (\S+)(?: — [^:\s]+(?:: ([\s\S]*))?)?$/
 
+// A tool call whose outcome line has arrived (✓, ✗ or "denied:"): in Guided
+// its "Working: …" line gives way to that outcome, so a finished or declined
+// call never keeps saying it is working. Cached per messages array.
+const _settledCache = new WeakMap<readonly unknown[], Set<string>>()
+export function guidedSettledToolIds(
+  messages: ReadonlyArray<{ role: string; content: string; tool_use_id?: string }>,
+): Set<string> {
+  const hit = _settledCache.get(messages)
+  if (hit) return hit
+  const out = new Set<string>()
+  for (const m of messages) {
+    if (m.role === 'tool' && m.tool_use_id && /^(✓ |✗ |denied: )/.test(m.content)) out.add(m.tool_use_id)
+  }
+  _settledCache.set(messages, out)
+  return out
+}
+
 export type GuidedToolLine =
   | { hidden: true }
   | { hidden: false; label: string | null; message?: string | null }
@@ -3205,6 +3222,8 @@ export default function ChatPanel() {
           // P26 item 6: Guided renders a declined card as one plain line.
           const toolLine = m.role === 'tool' && uiMode === 'guided' ? guidedToolLine(m.content) : null
           if (toolLine?.hidden) return null
+          if (toolLine && m.tool_use_id && REQUEST_LINE.test(m.content)
+            && guidedSettledToolIds(messages).has(m.tool_use_id)) return null
           const toolLabel = toolLine && !toolLine.hidden ? toolLine.label : null
           const toolMessage = toolLine && !toolLine.hidden ? toolLine.message ?? null : null
           return (

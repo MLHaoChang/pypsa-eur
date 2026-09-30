@@ -731,13 +731,13 @@ describe('P29: Guided tool lines', () => {
     await emit(REQ)
     await waitFor(() => expect(labels()).toEqual(['Working: run the reliability study…']))
     await emit(RES)
-    await waitFor(() => expect(labels()).toEqual([
-      'Working: run the reliability study…', 'Done: run the reliability study']))
+    // The outcome replaces the "Working" line: one line per call.
+    await waitFor(() => expect(labels()).toEqual(['Done: run the reliability study']))
     for (const m of screen.queryAllByTestId('chat-message')) {
       expect(outsideDetails(m)).not.toMatch(/→ |preparing/)
     }
     // The raw line is kept under Details, collapsed.
-    const details = toolRows()[1].querySelector('details') as HTMLDetailsElement
+    const details = toolRows()[0].querySelector('details') as HTMLDetailsElement
     expect(details.open).toBe(false)
     expect(details.textContent).toContain('✓ run_eh_study')
     // The transcript keeps the raw lines.
@@ -751,8 +751,8 @@ describe('P29: Guided tool lines', () => {
     await emit({ event: 'tool_error', data: {
       tool_name: 'update_component', tool_use_id: 'tu8', error_kind: 'validation_error',
       message: 'bus Field required' } })
-    await waitFor(() => expect(labels()).toEqual(['Working: change a setting…', 'Could not: change a setting']))
-    const row = toolRows()[1]
+    await waitFor(() => expect(labels()).toEqual(['Could not: change a setting']))
+    const row = toolRows()[0]
     expect(row.querySelector('[data-testid="chat-tool-message"]')!.textContent).toBe('bus Field required')
     expect(outsideDetails(row)).not.toMatch(/validation_error|✗/)
     expect(row.querySelector('details')!.textContent).toContain('✗ update_component — validation_error: bus Field required')
@@ -772,6 +772,18 @@ describe('P29: Guided tool lines', () => {
     ] })
     renderPanel()
     await waitFor(() => expect(labels()).toEqual([`Done: ${phrase}`]))
+  })
+
+  it('Guided: a declined call does not keep saying "Working"', async () => {
+    useChatStore.setState({ messages: [
+      { id: 't0', role: 'tool', content: '→ run_eh_study', tool_use_id: 'tu1', tool_name: 'run_eh_study', ts: 0 },
+      { id: 't1', role: 'tool', content: "✗ run_eh_study — confirmation_denied: deny on confirmation for 'run_eh_study'", tool_use_id: 'tu1', tool_name: 'run_eh_study', ts: 1 },
+      { id: 't2', role: 'tool', content: 'denied: run_eh_study', tool_use_id: 'tu1', tool_name: 'run_eh_study', ts: 2 },
+      { id: 't3', role: 'tool', content: '→ list_components', tool_use_id: 'tu2', tool_name: 'list_components', ts: 3 },
+    ] })
+    renderPanel()
+    await waitFor(() => expect(labels()).toEqual([
+      'You declined — nothing was changed.', 'Working: list what is in the network…']))
   })
 
   it.each<[string, string]>([
