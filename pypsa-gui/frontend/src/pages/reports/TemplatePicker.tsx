@@ -26,7 +26,7 @@ import {
 } from '../../api/reports'
 import { listUploads, uploadFile, type UploadMeta } from '../../api/uploads'
 import { Btn, Tag } from '../../components/PageKit'
-import { REPORT_TEMPLATE_KEY } from './useReportJob'
+import { REPORT_DOC_PREFIX, REPORT_TEMPLATE_KEY, REPORTS_LIST_KEY } from './useReportJob'
 
 /** The Project's `report_template` uploads, newest first. */
 export const REPORT_TEMPLATES_KEY = (project: string) => ['uploads', project, 'report_template'] as const
@@ -77,6 +77,13 @@ export function TemplatePicker({
         plan: prev && prev.template_file_id === resp.template_file_id ? prev.plan : null,
       }))
       void qc.invalidateQueries({ queryKey: REPORT_TEMPLATE_KEY(project, reportId) })
+      // A bind (or unbind) writes a NEW VERSION of the document (a version
+      // file is never rewritten): the viewer's open document and the list's
+      // `latest_version` must follow, or the next export renders the version
+      // from before the binding — with the built-in writer, under a button
+      // that names the template. Found by the browser smoke (findings §7).
+      void qc.invalidateQueries({ queryKey: REPORT_DOC_PREFIX(project, reportId) })
+      void qc.invalidateQueries({ queryKey: REPORTS_LIST_KEY(project) })
       const name = templates.data?.find(t => t.file_id === fileId)?.filename
       toast.success(fileId
         ? `Template bound${name ? `: ${name}` : ''} — ${resp.mode ?? 'unknown'} mode${resp.language ? `, language ${resp.language}` : ''}`
