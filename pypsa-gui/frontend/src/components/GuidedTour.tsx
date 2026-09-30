@@ -5,10 +5,10 @@
 // same text the chat assistant reads through get_feature_guide — so the tour
 // and the assistant cannot describe a field differently. Each step anchors to
 // a `data-testid`; a step whose target is not on screen tries its `reveal`
-// control once, then is shown centred with a note (optional steps are
-// skipped) — a renamed test id never crashes the tour, and a test pins every
-// target to a real component.
-import { useCallback, useEffect, useLayoutEffect, useState } from 'react'
+// control once, then is shown centred with a note (an optional step whose
+// target is absent when it is reached is skipped) — a renamed test id never
+// crashes the tour, and a test pins every target to a real component.
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { HelpCircle } from 'lucide-react'
 import { create } from 'zustand'
@@ -100,9 +100,56 @@ function rectOf(el: HTMLElement | null): Rect | null {
   return { top: r.top, left: r.left, width: r.width, height: r.height }
 }
 
-/** Resolve the steps to show: optional steps whose target is absent drop. */
-function visibleSteps(steps: GuideStep[]): GuideStep[] {
-  return steps.filter(s => !s.optional || findTarget(s.target) !== null)
+const sameRect = (a: Rect | null, b: Rect | null) => a === b || (!!a && !!b
+  && a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height)
+
+/** A step is shown when it is required, or optional with its target on
+ *  screen right now (P30 B7: judged when reached, not once at the start). */
+function available(s: GuideStep): boolean {
+  return !s.optional || findTarget(s.target) !== null
+}
+
+export type Placement = 'below' | 'above' | 'right' | 'left' | 'free'
+
+const GAP = 12      // popover ↔ target
+const MARGIN = 8    // popover ↔ viewport edge
+const RING = 4      // the highlight box grows the target by this on each side
+export const POPOVER_W = 320
+
+/** Where the popover goes (P30 B4): the first of below, above, right, left
+ *  that fits inside the viewport and does not touch the highlight box; else
+ *  `free` — the side with the most room, clamped into the viewport. `size`
+ *  is the measured popover (CSS caps it at the viewport minus the margins). */
+export function placePopover(t: Rect, size: { w: number; h: number }, vw: number, vh: number):
+  { top: number; left: number; placement: Placement } {
+  const w = Math.min(size.w, vw - 2 * MARGIN)
+  const h = Math.min(size.h, vh - 2 * MARGIN)
+  const bottom = t.top + t.height
+  const right = t.left + t.width
+  const hl = { top: t.top - RING, left: t.left - RING, bottom: bottom + RING, right: right + RING }
+  const clampX = (x: number) => Math.min(Math.max(MARGIN, x), vw - MARGIN - w)
+  const clampY = (y: number) => Math.min(Math.max(MARGIN, y), vh - MARGIN - h)
+  const candidates: [Placement, number, number][] = [
+    ['below', bottom + GAP, clampX(t.left)],
+    ['above', t.top - GAP - h, clampX(t.left)],
+    ['right', clampY(t.top), right + GAP],
+    ['left', clampY(t.top), t.left - GAP - w],
+  ]
+  for (const [placement, top, left] of candidates) {
+    const inside = top >= MARGIN && top + h <= vh - MARGIN
+      && left >= MARGIN && left + w <= vw - MARGIN
+    const apart = left + w <= hl.left || left >= hl.right || top + h <= hl.top || top >= hl.bottom
+    if (inside && apart) return { top, left, placement }
+  }
+  // Nothing fits: the side with the most room for the popover's own size.
+  const room: [number, number, number][] = [
+    [(vh - MARGIN - (bottom + GAP)) / h, bottom + GAP, clampX(t.left)],
+    [(t.top - GAP - MARGIN) / h, t.top - GAP - h, clampX(t.left)],
+    [(vw - MARGIN - (right + GAP)) / w, clampY(t.top), right + GAP],
+    [(t.left - GAP - MARGIN) / w, clampY(t.top), t.left - GAP - w],
+  ]
+  const [, top, left] = room.reduce((a, b) => (b[0] > a[0] ? b : a))
+  return { top: clampY(top), left: clampX(left), placement: 'free' }
 }
 
 export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
@@ -118,22 +165,62 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
     useUIStore.getState().holdGuidedTour()
     return () => useUIStore.getState().releaseGuidedTour()
   }, [])
-  const [steps, setSteps] = useState<GuideStep[]>([])
-  const [idx, setIdx] = useState(0)
+  // Every step is kept; an optional one is judged when it is reached (B7).
+  const steps = tour?.steps ?? []
+  const [idx, setIdx] = useState<number | null>(null)
   const [rect, setRect] = useState<Rect | null>(null)
+  // Which optional targets are on screen now (for the counter and the
+  // Next / Done label); refreshed on each move and when the page changes.
+  const [avail, setAvail] = useState<string>('')
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null)
+  const boxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (tour) setSteps(visibleSteps(tour.steps))
+    if (!tour) return
+    const first = tour.steps.findIndex(available)
+    setIdx(first >= 0 ? first : null)
   }, [tour])
 
-  const step = steps[idx]
+  const step = idx === null ? undefined : steps[idx]
+
+  // Re-read the target's box and which optional steps are available. Batched
+  // per frame; state changes only when something actually moved (spec §5.10).
+  const frame = useRef<number | null>(null)
+  // Read at frame time: a frame queued before a move must use the new step.
+  const live = useRef({ step, steps })
+  live.current = { step, steps }
+  const refresh = useCallback(() => {
+    if (frame.current !== null) return
+    const run = () => {
+      frame.current = null
+      const { step: cur, steps: all } = live.current
+      if (cur) {
+        const r = rectOf(findTarget(cur.target))
+        setRect(prev => (sameRect(prev, r) ? prev : r))
+      }
+      const a = all.map(s => (available(s) ? '1' : '0')).join('')
+      setAvail(prev => (prev === a ? prev : a))
+      const el = boxRef.current
+      if (el) {
+        const b = el.getBoundingClientRect()
+        const next = { w: Math.round(b.width), h: Math.round(b.height) }
+        setSize(prev => (prev && prev.w === next.w && prev.h === next.h ? prev : next))
+      }
+    }
+    frame.current = typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame(run) : (setTimeout(run, 16) as unknown as number)
+  }, [])
+  useEffect(() => () => {
+    if (frame.current !== null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(frame.current)
+    }
+  }, [])
 
   // Locate (and if needed reveal) the step's target.
   useLayoutEffect(() => {
     if (!step) return
     let el = findTarget(step.target)
     let retry: ReturnType<typeof setTimeout> | undefined
-    const onMove = () => setRect(rectOf(findTarget(step.target)))
     if (!el && step.reveal) {
       findTarget(step.reveal)?.click()
       // The revealed control renders on React's next commit: look again.
@@ -141,28 +228,60 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
         const later = findTarget(step.target)
         later?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
         setRect(rectOf(later))
+        setAvail(steps.map(s => (available(s) ? '1' : '0')).join(''))
       }, 60)
     }
     el?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
     setRect(rectOf(el))
-    window.addEventListener('resize', onMove)
-    window.addEventListener('scroll', onMove, true)
-    return () => {
-      if (retry) clearTimeout(retry)
-      window.removeEventListener('resize', onMove)
-      window.removeEventListener('scroll', onMove, true)
-    }
+    setAvail(steps.map(s => (available(s) ? '1' : '0')).join(''))
+    return () => { if (retry) clearTimeout(retry) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step])
+
+  // Follow the page: scroll, resize, the popover's own size, and DOM changes
+  // (an optional target appearing, the target moving or going away).
+  useEffect(() => {
+    if (!step) return
+    window.addEventListener('resize', refresh)
+    window.addEventListener('scroll', refresh, true)
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(refresh) : null
+    if (ro && boxRef.current) ro.observe(boxRef.current)
+    const mo = typeof MutationObserver !== 'undefined' ? new MutationObserver(refresh) : null
+    mo?.observe(document.body, { childList: true, subtree: true })
+    return () => {
+      window.removeEventListener('resize', refresh)
+      window.removeEventListener('scroll', refresh, true)
+      ro?.disconnect()
+      mo?.disconnect()
+    }
+  }, [step, refresh])
+
+  // The popover's measured size (after each commit; state only on change).
+  useLayoutEffect(() => {
+    const el = boxRef.current
+    if (!el) return
+    const b = el.getBoundingClientRect()
+    const next = { w: Math.round(b.width), h: Math.round(b.height) }
+    if (!size || size.w !== next.w || size.h !== next.h) setSize(next)
+  })
 
   const close = useCallback((done: boolean) => {
     if (done) markSeen(tourId)
     onClose()
   }, [onClose, tourId])
   const next = useCallback(() => {
-    if (idx >= steps.length - 1) close(true)
-    else setIdx(i => i + 1)
-  }, [idx, steps.length, close])
-  const back = useCallback(() => setIdx(i => Math.max(0, i - 1)), [])
+    if (idx === null) return
+    // Judged now: an optional step whose target appeared since is shown.
+    const j = steps.findIndex((s, k) => k > idx && available(s))
+    if (j < 0) close(true)
+    else setIdx(j)
+  }, [idx, steps, close])
+  const back = useCallback(() => {
+    if (idx === null) return
+    for (let k = idx - 1; k >= 0; k--) {
+      if (available(steps[k])) { setIdx(k); return }
+    }
+  }, [idx, steps])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -179,6 +298,21 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
     return () => window.removeEventListener('keydown', onKey)
   }, [close, next, back])
 
+  // Placed by fit around the measured popover (B4); centred when the target
+  // is not on screen. When nothing fits (`free`), the target is scrolled into
+  // view once per step so the reader can still see it.
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1024
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 768
+  const measured = size && size.w > 0 && size.h > 0 ? size : { w: POPOVER_W, h: 180 }
+  const placed = rect ? placePopover(rect, measured, vw, vh) : null
+  const placement: Placement = placed?.placement ?? 'free'
+  const scrolledFor = useRef<GuideStep | null>(null)
+  useEffect(() => {
+    if (!step || !placed || placement !== 'free' || scrolledFor.current === step) return
+    scrolledFor.current = step
+    findTarget(step.target)?.scrollIntoView?.({ block: 'center', inline: 'nearest' })
+  }, [step, placed, placement])
+
   if (isError) {
     return (
       <div role="dialog" aria-label="Guide" data-testid="guide-tour"
@@ -188,21 +322,23 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
       </div>
     )
   }
-  if (!tour || !step) return null
+  if (!tour || !step || idx === null) return null
 
-  // Popover below the target when there is room, else above; centred when
-  // the target is not on screen.
-  const W = 320
-  const vw = typeof window !== 'undefined' ? window.innerWidth : 1024
-  const vh = typeof window !== 'undefined' ? window.innerHeight : 768
-  let style: React.CSSProperties
-  if (rect) {
-    const below = rect.top + rect.height + 12
-    const top = below + 180 < vh ? below : Math.max(8, rect.top - 192)
-    const left = Math.min(Math.max(8, rect.left), vw - W - 8)
-    style = { top, left, width: W }
-  } else {
-    style = { top: vh / 2 - 90, left: vw / 2 - W / 2, width: W }
+  // "n/m" among the steps shown now: required ones, optional ones whose
+  // target is on screen, and the current one.
+  const shown = steps.map((s, k) => k === idx || !s.optional || avail[k] === '1')
+  const position = shown.slice(0, idx + 1).filter(Boolean).length
+  const total = shown.filter(Boolean).length
+  const isLast = !shown.some((v, k) => v && k > idx)
+  const isFirst = !shown.some((v, k) => v && k < idx)
+
+  const style: React.CSSProperties = {
+    ...(placed ? { top: placed.top, left: placed.left } : {
+      top: Math.max(8, vh / 2 - Math.min(measured.h, vh - 16) / 2),
+      left: Math.max(8, vw / 2 - POPOVER_W / 2),
+    }),
+    width: POPOVER_W, maxWidth: 'calc(100vw - 16px)',
+    maxHeight: 'calc(100vh - 16px)', overflowY: 'auto',
   }
 
   return (
@@ -213,14 +349,14 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
              style={{ top: rect.top - 4, left: rect.left - 4,
                       width: rect.width + 8, height: rect.height + 8 }} />
       )}
-      <div role="dialog" aria-label={tour.title} data-testid="guide-tour"
-           data-step-target={step.target}
+      <div role="dialog" aria-label={tour.title} data-testid="guide-tour" ref={boxRef}
+           data-step-target={step.target} data-placement={placement}
            className="fixed z-[1000] rounded border border-border bg-panel p-3 text-[11px] text-text shadow-lg"
            style={style}>
         <div className="mb-1 text-[10px] uppercase tracking-wide text-muted">
-          {tour.title} · {idx + 1}/{steps.length}
+          {tour.title} · {position}/{total}
         </div>
-        {idx === 0 && tour.intro && (
+        {isFirst && tour.intro && (
           <p className="mb-2 text-muted" data-testid="guide-intro">{tour.intro}</p>
         )}
         <h4 className="font-semibold" data-testid="guide-step-title">{step.title}</h4>
@@ -243,14 +379,14 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
             Skip tour
           </button>
           <span className="flex-1" />
-          <button type="button" onClick={back} disabled={idx === 0}
+          <button type="button" onClick={back} disabled={isFirst}
                   data-testid="guide-back"
                   className="rounded border border-border px-2 py-0.5 disabled:opacity-40">
             Back
           </button>
           <button type="button" onClick={next} data-testid="guide-next" autoFocus
                   className="rounded bg-accent px-2 py-0.5 font-semibold text-white">
-            {idx >= steps.length - 1 ? 'Done' : 'Next'}
+            {isLast ? 'Done' : 'Next'}
           </button>
         </div>
       </div>
