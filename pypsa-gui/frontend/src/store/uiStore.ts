@@ -978,3 +978,26 @@ export const useUIStore = create<UIStore>((set) => ({
   }),
   setPaletteMode: (m) => set({ paletteMode: m }),
 }))
+
+// ── P28 C10 (deferred spec 2026-09-28 §3.3): multi-tab mode choice ──────────
+// A `storage` event carries another tab's write (never this tab's own). When
+// the other tab's user CHOSE a mode (the explicit flag is set in storage) and
+// this tab has made no choice of its own, adopt it — explicitly, through
+// setUiMode, so §3.7 pruning applies as for any switch. An implicit change
+// elsewhere (a G4 flip, a first-run default) is ignored: it is that tab's
+// default, not the user's choice. An explicit choice made here is kept.
+function onUiModeStorage(e: StorageEvent): void {
+  if (e.key !== UI_MODE_KEY && e.key !== UI_MODE_EXPLICIT_KEY) return
+  const s = useUIStore.getState()
+  if (s.uiModeExplicit || !readUiModeExplicit()) return
+  const stored = readUiMode()
+  if (stored) s.setUiMode(stored, { explicit: true })
+}
+if (typeof window !== 'undefined') {
+  // One listener per window: a module re-evaluated by HMR (or a test's
+  // `vi.resetModules()`) replaces the previous one instead of stacking.
+  const w = window as unknown as { __uiModeStorageListener?: (e: StorageEvent) => void }
+  if (w.__uiModeStorageListener) window.removeEventListener('storage', w.__uiModeStorageListener)
+  w.__uiModeStorageListener = onUiModeStorage
+  window.addEventListener('storage', onUiModeStorage)
+}
