@@ -17,6 +17,8 @@ changed generator without regenerated fixtures fails.
 | `s1b.json` | S1 solving the PPA price for an 11 % after-tax IRR in year 20 (`ppa_soln_mode=0`) |
 | `s2.json` | DSCR-sculpted debt (1.3, 18 yrs, 7 %, fee 2.75 %, DSRA 6 months, reserve interest 1.75 %), MACRS-5 90 % + SL-20 10 %, federal bonus 100 % on MACRS-5, state bonus 0 |
 | `s2c.json` | S2 with `dscr_limit_debt_fraction` on, `dscr_maximum_debt_fraction` 60 % — the sculpted debt capped at 0.6 · TIC · (1 + fee), its service scaled pro rata (WP4.2b) |
+| `s2t.json` | S2 with the tenor = 25 years and salvage 10 % — sizes the recorded salvage-in-CFADS deviation (SAM sculpts on salvage) |
+| `s3d.json` | S3 with a 6-month DSRA — sizes the recorded DSRA-in-gearing-base deviation (SAM D = g·(TIC + DSRA(D))) |
 | `s3.json` | gearing 60 % of TIC (fee 0, DSRA 0), 15 yrs, 6 %, a one-year moratorium inside the tenor; federal ITC 30 % (federal basis reduced, state not); MACRS-5 100 %; salvage 10 % |
 | `s3f.json` | S3 with a 2.75 % closing fee — sizes the recorded gearing-with-fee deviation |
 

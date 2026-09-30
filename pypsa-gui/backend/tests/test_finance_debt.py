@@ -12,7 +12,7 @@ from datetime import date
 import numpy as np
 import pytest
 
-from models.finance import DebtTranche, FinanceInputs
+from models.finance import DebtTranche, FinanceInputs, TerminalValueRule
 from services.finance.case import AssetFinance, FinanceCase, Template, TemplateLine
 from services.finance.cashflow import build_operating
 from services.finance.debt import MAX_ITER, build_debt
@@ -123,6 +123,7 @@ def test_f1_idc_two_construction_years():
     pay = D * 0.08 / (1 - 1.08 ** -10)
     assert d.service[2:12] == pytest.approx([pay] * 10, rel=1e-12)
     assert d.tranches[0].balance[11] == pytest.approx(0.0, abs=1e-6)
+    assert "idc_axis_point_draws" in d.flags and "idc_at_first_rate" not in d.flags
 
 
 def test_level_principal_and_an_annuity_with_a_rate_per_year():
@@ -161,10 +162,16 @@ def test_total_uses_fixed_point_converges_and_reports_the_residual_when_forced()
     assert d.uses["dsra"] > 0 and d.uses["fees"] > 0 and d.uses["idc"] > 0
     # Debt funds every use pro rata: the fee and DSRA points draw too.
     assert d.draws.sum() == pytest.approx(d.tranches[0].principal_drawn)
-    bad = _t(gearing=1.0, gearing_base="total_uses", upfront_fee=0.9)
+    assert d.iterations <= 8                                    # Aitken: a few steps, not ~15
+    # A slow contraction (fee 0.9, g = 1) still has a fixed point (review B6) …
+    slow = _t(gearing=1.0, gearing_base="total_uses", upfront_fee=0.9)
+    d, _ = _run(_case([slow]))
+    assert d.established() and d.amount == pytest.approx(d.uses["total"], rel=1e-6)
+    # … a contraction ratio ≥ 1 has none: refused, never iterated to MAX_ITER.
+    bad = _t(gearing=1.0, gearing_base="total_uses", upfront_fee=1.0)
     d, _ = _run(_case([bad]))
-    assert not d.established() and d.iterations == MAX_ITER
-    assert d.reasons[0].startswith("debt_fixed_point_not_converged:residual=") and d.residual > 1e-6
+    assert not d.established() and d.iterations < MAX_ITER
+    assert d.reasons[0].startswith("debt_fixed_point_diverges:contraction=")
 
 
 def test_dsra_and_reserve_interest():
@@ -185,7 +192,8 @@ def test_a_negative_cfads_year_pays_nothing_under_sculpting():
     d, tl = _run(case)
     assert d.established()
     assert d.tranches[0].service[5:8] == pytest.approx([0.0, 0.0, 0.0], abs=1e-6)
-    assert "negative_cfads_no_service:2036" in d.flags
+    assert "sculpt_basis_negative_no_service:2036" in d.flags
+    assert not any(f.startswith("sculpted_interest_capitalised") for f in d.flags)
 
 
 def test_cod_in_the_close_year_draws_at_point_zero_without_idc():
@@ -193,7 +201,7 @@ def test_cod_in_the_close_year_draws_at_point_zero_without_idc():
                        phasing=(1.0,)))
     assert d.idc_total == 0.0 and d.draws[0] == pytest.approx(500_000.0)
     assert d.interest[0] == pytest.approx(40_000.0)                        # year-1 service at point 0
-    assert "dsra_first_service_unreserved:0" in d.flags
+    assert "dsra_first_service_unreserved:0" in d.flags and "first_service_at_draw_point" in d.flags
 
 
 @pytest.mark.parametrize("tranche,reason", [
@@ -228,3 +236,46 @@ def test_no_debt_is_all_equity():
     d, _ = _run(_case([]))
     assert d.established() and d.amount == 0.0 and d.sources == {"debt": 0.0, "equity": 1e6}
     assert d.min_dscr() is None
+
+
+def test_s2t_the_salvage_in_cfads_deviation_is_exactly_its_pv_over_the_dscr():
+    """SAM sculpts on CFADS incl. salvage when the tenor reaches the last year
+    (review B2a); ours excludes the terminal: SAM D − ours = salvage / 1.3 /
+    1.07^25 exactly."""
+    d, e, _ = _sam("s2t")
+    assert d.established() and e["deviations"][0]["name"] == "salvage_in_cfads"
+    salvage = 0.1 * 112_068_000.0
+    assert e["scalars"]["debt_size"] - d.amount == pytest.approx(salvage / 1.3 / 1.07 ** 25,
+                                                                  rel=1e-9)
+
+
+def test_s3d_sams_gearing_base_holds_the_dsra_total_uses_reproduces_it():
+    """SAM D = g·(TIC + DSRA(D)) (review B2b): `gearing_base="capex"` gives
+    g·TIC (the recorded deviation); `"total_uses"` matches SAM's schedule."""
+    d, e, _ = _sam("s3d")
+    assert e["deviations"][0]["name"] == "dsra_in_gearing_base"
+    assert d.amount == pytest.approx(0.6 * 112_068_000.0, rel=1e-12)
+    case = S.to_finance_case("s3d")
+    t = case.inputs.debt[0].model_copy(update={"gearing_base": "total_uses"})
+    case = dataclasses.replace(case, inputs=case.inputs.model_copy(update={"debt": [t]}))
+    tl = build_timeline(case)
+    d = build_debt(case.inputs, build_operating(case, tl), tl)
+    a = e["arrays"]
+    assert d.amount == pytest.approx(e["scalars"]["debt_size"], rel=1e-7)
+    _close(d.interest, a["cf_debt_payment_interest"], 1e-7)
+    _close(d.dsra_balance, a["cf_reserve_debtservice"], 1e-7)
+
+
+def test_cfads_ignores_the_terminal_value_and_an_unknown_cfads_only_flags_the_dscr():
+    """Review B1: a book-value terminal (unknown until the tax basis) never
+    blocks sculpting; an unknown operating line keeps an amount schedule and
+    flags the DSCR."""
+    case = _case([_t(sculpting="dscr_target", dscr_target=1.3)])
+    case = dataclasses.replace(case, inputs=case.inputs.model_copy(
+        update={"terminal_value": TerminalValueRule(method="book_value")}))
+    d, _ = _run(case)
+    assert d.established() and d.amount > 0
+    case = _case([_t(amount=500_000.0)], lines=(TemplateLine("rev", "ppa_settlement", None, "ppa"),))
+    d, _ = _run(case)
+    assert d.established() and d.service.sum() > 0
+    assert "dscr_not_established:operating_not_established" in d.flags and d.min_dscr() is None

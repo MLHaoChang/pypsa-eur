@@ -599,3 +599,7 @@ above is unchanged; where it and these lines differ, these lines hold.
    investment against a counterfactual — the same site's supply cost (bill, grid commodity, connection)
    without the owner's investable assets, on the served load — and a lifecycle-cost NPV is reported
    alongside (P4 plan C13). SAM's "project" return is the levered equity return (P4 plan, output mapping).
+7. **§4.2 `DebtTranche` sizing (P4 WP4.2).** `amount | gearing` sizes an `annuity` / `level` tranche. A
+   `dscr_target` tranche is sized by its DSCR alone: `amount` / `gearing` are refused on it, and
+   `max_gearing` (new) caps it. Every sizing is the debt **at COD**, IDC inside. `gearing_base` (new) is
+   `capex` or `total_uses`. `rate` may be a list with one entry per tenor year. Fees are shares ≤ 1.

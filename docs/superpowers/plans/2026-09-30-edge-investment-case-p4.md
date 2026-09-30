@@ -555,6 +555,52 @@ flagged (the docstring claimed it); `Template.money_year` keyword-only. For WP4.
   - The fixed point converging, and the forced non-convergence.
   - DSRA and reserve interest; a negative-CFADS year; COD in the close year; every not-established path.
 
+**WP4.2 review round 1 (79db4c9): PASS WITH CONDITIONS; fixed.**
+
+The reviewer compared build_debt with 13 PySAM variants in which SAM follows its own conventions. All
+matched to ≤ 1.7e-14:
+- level principal and annuity with moratoria;
+- DSCR 1.20 / 1.45 at other tenors and rates;
+- DSRA 3 and 12 months with reserve interest;
+- the cap not binding and binding;
+- a tenor of 1;
+- grace = tenor − 1.
+
+**Binding findings:**
+1. **B1:** CFADS depended on the terminal value, so a book-value terminal blocked sculpting. Fixed: CFADS
+   = revenue − costs − replacement. With CFADS unknown, an amount/gearing schedule stays established and
+   `dscr_not_established:…` is flagged.
+2. **B2:** three SAM deviations are now recorded:
+   - **(a) salvage in CFADS.** SAM sculpts on the salvage when the tenor reaches the last year. New oracle
+     **S2t**: the test asserts SAM D − ours = salvage / 1.3 / 1.07^25 exactly.
+   - **(b) the DSRA in SAM's gearing base**, D = g·(TIC + DSRA(D))·(1 + g·f). New oracle **S3d**:
+     `gearing_base="capex"` gives g·TIC; `"total_uses"` reproduces SAM's debt and schedule to 1e-7. C8's
+     one-step fee term (S3f) is the other half.
+   - **(c) negative sculpting basis.** SAM books a negative service (with all-negative CFADS, a negative
+     debt); ours pays 0 and flags `sculpt_basis_negative_no_service`. No oracle case pins it: the mapping
+     cannot express a one-year CFADS drop. It is tested by hand.
+3. **B3:** IDC used the first tenor rate silently. Fixed: it is stated, and flagged `idc_at_first_rate`
+   when the rate is a list.
+4. **B4:** the capitalised-interest flag used an absolute threshold. Fixed: the threshold is relative and
+   the closing year is skipped.
+5. **B5:** plan text, now amended:
+   - the DSRA is funded at the COD point (not "at close");
+   - the upfront fee is a share of the debt at COD (not "of commitment").
+6. **B6:** the "forced non-convergence" case had a fixed point. Fixed:
+   - the iteration is accelerated by Aitken (≤ 8 steps);
+   - a contraction ratio ≥ 1 before the first jump → `debt_fixed_point_diverges`;
+   - fees are capped at 1 in the model;
+   - tested with fee 0.9 (converges) and 1.0 (diverges).
+
+**Recommendations taken:**
+- `idc_axis_point_draws` flags that axis-point draws accrue less IDC than the mid-year approximation (F1
+  27.5 k vs 49.1 k);
+- `first_service_at_draw_point` is flagged for COD in the close year;
+- the spec §4.2 note on sculpted sizing;
+- a junior `max_gearing` caps against TIC × (1 + its own fee), as documented.
+
+**Not taken:** pinning the 13 variants as committed oracles (S2t and S3d cover the deviations).
+
 ## WP4.2b DSCR sculpting, the `max_gearing` cap, DSRA, reserve interest
 
 - Sculpting in closed form on pre-tax CFADS (C8); the `max_gearing` cap (SAM base TIC × (1+fee)) with the

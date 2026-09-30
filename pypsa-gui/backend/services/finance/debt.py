@@ -12,10 +12,14 @@ Timing on the finance axis (end-of-year cash points, index 0 undiscounted —
 the same points the returns discount; a stated amendment to the plan's
 "mid-year drawdown"): construction year j's capex is paid, and the debt drawn,
 at point j; interest compounds on each draw to the COD point p (the last
-construction point; SAM's year 0 → no IDC, as SAM has none). Operating year k's
+construction point; SAM's year 0 → no IDC, as SAM has none) at the tranche's
+FIRST rate (a per-year rate list is the tenor's; flagged `idc_at_first_rate`
+when a list accrues IDC — review B3). Flagged `idc_axis_point_draws`: the usual
+mid-year approximation would accrue more. Operating year k's
 service falls at the operating point of year k; balance before the first
 service = the debt at COD. With COD in the financial-close year (no
-construction year) point 0 is both the draw and the first service.
+construction year) point 0 is both the draw and the first service (flagged
+`first_service_at_draw_point`: the lender's year is compressed, as on the axis).
 
 Debt-funded draws follow capex phasing (`amount`, `gearing` on capex, a
 sculpted tranche — their fees and DSRA are equity-funded, SAM) or the timing of
@@ -26,9 +30,14 @@ years first (SAM `loan_moratorium`; refused under sculpting — SAM ignores it,
 plan C8), then `annuity` (re-amortised each year at that year's rate),
 `level` principal, or the sculpted service.
 
-CFADS (plan C8) = EBITDA − terminal value − replacement capex (the major-
-equipment spend, taken as it occurs; P4 has no equipment reserve); DSRA
-movements and reserve interest sit below it. DSRA balance at point t =
+CFADS (plan C8) = operating revenue − operating costs − replacement capex
+(the major-equipment spend, taken as it occurs; P4 has no equipment
+reserve) — never the terminal value, so an unknown terminal (e.g. a book value
+awaiting the tax basis) never blocks the debt (WP4.2 review B1). SAM sculpts on
+CFADS INCLUDING salvage when the tenor reaches the last year — a recorded
+deviation (oracle S2t). DSRA movements and reserve interest sit below it. When
+CFADS is unknown an amount / gearing schedule stays established and the DSCR is
+flagged `dscr_not_established:<reason>`. DSRA balance at point t =
 Σ_tranches dsra_months/12 × the tranche's service at t + 1, funded at the COD
 point, adjusted yearly, released at maturity; reserve interest at t =
 `reserves_rate` × the balance at t − 1 (taxable).
@@ -174,7 +183,7 @@ def _schedule(t: DebtTranche, amount: float, tl: Timeline, sculpt_service: np.nd
             pr = (bal * r / (1.0 - (1.0 + r) ** -left) if r > 0 else bal / left) - it
         if m == t.tenor_years - 1:
             pr = bal                              # close the loan exactly
-        if pr < -1e-9 and t.sculpting == "dscr_target":
+        if t.sculpting == "dscr_target" and m < t.tenor_years - 1 and pr < -1e-9 * max(amount, 1.0):
             flags.append(f"sculpted_interest_capitalised:{tl.years[i]}")
         interest[i], principal[i] = it, pr
         bal -= pr
@@ -195,7 +204,9 @@ def _sculpt(t: DebtTranche, avail: np.ndarray, tl: Timeline) -> tuple[float, np.
         disc /= 1.0 + rates[m]
         a = avail[i]
         if a < 0:
-            flags.append(f"negative_cfads_no_service:{tl.years[i]}")
+            # CFADS left for this tranche (after the senior ones) is negative:
+            # no service (SAM books a negative one — a recorded deviation).
+            flags.append(f"sculpt_basis_negative_no_service:{tl.years[i]}")
         service[i] = max(a, 0.0) / t.dscr_target
         amount += service[i] * disc
     return amount, service, flags
@@ -208,8 +219,8 @@ def build_debt(fin: FinanceInputs, op: Operating, tl: Timeline) -> Debt:
     cons, p, c = _points(tl)
     zeros = np.zeros(n)
     cfads = None
-    if op.ebitda is not None:
-        cfads = op.ebitda - (op.terminal if op.terminal is not None else 0.0) - op.replacement
+    if op.revenue is not None and op.costs is not None:
+        cfads = op.revenue - op.costs - op.replacement
 
     def empty(reasons, flags=(), iterations=0, residual=None) -> Debt:
         nan = np.full(n, np.nan)
@@ -314,12 +325,33 @@ def build_debt(fin: FinanceInputs, op: Operating, tl: Timeline) -> Debt:
     iterations, residual = 0, 0.0
     results = one_pass(uses_est, weights)
     if circular:
+        # Fixed-point iteration on total uses, accelerated by Aitken's Δ²
+        # (the map is affine in the debt, so the jump lands on the fixed point);
+        # a contraction ratio ≥ 1 has no fixed point (review B6).
+        history = [uses_est]
+        jumped = False
         for iterations in range(1, MAX_ITER + 1):
             total, w_new = uses_of(results)
             residual = abs(total - uses_est) / max(abs(total), 1.0)
             if residual <= TOL:
                 break
-            uses_est, weights = total, w_new
+            history.append(total)
+            nxt = total
+            if len(history) >= 3:
+                x0, x1, x2 = history[-3:]
+                d1, d2 = x1 - x0, x2 - x1
+                if d1 != 0.0:
+                    q = d2 / d1
+                    if q >= 1.0 - 1e-12:
+                        if not jumped:
+                            # The plain map does not contract: no fixed point.
+                            return empty([f"debt_fixed_point_diverges:contraction={q:.3g}"],
+                                         iterations=iterations, residual=residual)
+                        history = [total]          # near the root: plain steps
+                    else:
+                        nxt = x2 + d2 * q / (1.0 - q)
+                        history, jumped = [nxt], True
+            uses_est, weights = nxt, w_new
             results = one_pass(uses_est, weights)
         else:
             return empty([f"debt_fixed_point_not_converged:residual={residual:.3g}"],
@@ -336,6 +368,14 @@ def build_debt(fin: FinanceInputs, op: Operating, tl: Timeline) -> Debt:
     res_int = np.zeros(n)
     res_int[1:] = rr * dsra_bal[:-1]
     flags = [f for r in results for f in r.flags]
+    if cfads is None:
+        flags.append("dscr_not_established:operating_not_established")
+    if c and float(sum(r.idc.sum() for r in results)) > 0:
+        flags.append("idc_axis_point_draws")
+        if any(isinstance(r.tranche.rate, list) for r in results if r.idc.sum() > 0):
+            flags.append("idc_at_first_rate")
+    if not c and float(draws.sum()) > 0:
+        flags.append("first_service_at_draw_point")
 
     def ratio(num, den):
         out = np.full(n, np.nan)

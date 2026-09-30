@@ -81,8 +81,8 @@ class DebtTranche(BaseModel):
     # A cap on a sculpted tranche (SAM `dscr_maximum_debt_fraction`).
     max_gearing: float | None = Field(default=None, gt=0, le=1)
     dsra_months: int | None = Field(default=None, ge=0)
-    upfront_fee: float | None = Field(default=None, ge=0)
-    commitment_fee: float | None = Field(default=None, ge=0)
+    upfront_fee: float | None = Field(default=None, ge=0, le=1)       # a share (IC P4 WP4.2 review B6)
+    commitment_fee: float | None = Field(default=None, ge=0, le=1)
     grace_years: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")

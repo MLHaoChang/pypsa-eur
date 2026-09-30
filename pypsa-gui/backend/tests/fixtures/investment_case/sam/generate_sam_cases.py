@@ -133,6 +133,40 @@ CASES: dict[str, dict] = {
                                  "depr_bonus_sta": 0.0}},
         "deviations": [],
     },
+    "s2t": {
+        "doc": "S2 with the tenor = the analysis period (25 yrs) and salvage 10 %: SAM sculpts on "
+               "CFADS INCLUDING the salvage; P4's CFADS excludes the terminal value (a recorded "
+               "deviation, sized by the test).",
+        "set": {"FinancialParameters": {"debt_option": 1.0, "dscr": 1.3, "term_tenor": 25.0,
+                                        "term_int_rate": 7.0, "cost_debt_fee": 2.75,
+                                        "dscr_reserve_months": 6.0, "reserves_interest": 1.75,
+                                        "payment_option": 0.0, "salvage_percentage": 10.0},
+                "Depreciation": {"depr_alloc_macrs_5_percent": 90.0,
+                                 "depr_alloc_sl_20_percent": 10.0,
+                                 "depr_bonus_fed": 100.0, "depr_bonus_fed_macrs_5": 1.0,
+                                 "depr_bonus_sta": 0.0}},
+        "deviations": [{"name": "salvage_in_cfads",
+                        "what": "SAM sculpts on CFADS incl. salvage in the last year; P4 CFADS "
+                                "excludes the terminal value",
+                        "size": "SAM D - P4 D = salvage / DSCR / (1 + r)^25"}],
+    },
+    "s3d": {
+        "doc": "S3 with a 6-month DSRA (fee 0): SAM's debt_percent base includes the DSRA, a fixed "
+               "point D = g (TIC + DSRA(D)); P4 gearing_base='capex' sizes g TIC, "
+               "gearing_base='total_uses' reproduces SAM (a recorded deviation).",
+        "set": {"FinancialParameters": {"debt_option": 0.0, "debt_percent": 60.0,
+                                        "payment_option": 0.0, "term_tenor": 15.0,
+                                        "term_int_rate": 6.0, "loan_moratorium": 1.0,
+                                        "salvage_percentage": 10.0, "dscr_reserve_months": 6.0},
+                "TaxCreditIncentives": {"itc_fed_percent": [30.0],
+                                        "itc_fed_percent_deprbas_fed": 1.0,
+                                        "itc_fed_percent_deprbas_sta": 0.0},
+                "Depreciation": {"depr_alloc_macrs_5_percent": 100.0}},
+        "deviations": [{"name": "dsra_in_gearing_base",
+                        "what": "SAM debt = g (TIC + DSRA(D)) (1 + g f); P4 gearing_base='capex' "
+                                "debt = g TIC; gearing_base='total_uses' matches SAM at fee 0",
+                        "size": "the DSRA term, sized by the test"}],
+    },
     "s3": {
         "doc": "Gearing 60 % of TIC (fee 0, DSRA 0), standard amortisation, 15 yrs, 6 %, a one-year "
                "moratorium inside the tenor; federal ITC 30 % with the federal basis-reduction flag "
