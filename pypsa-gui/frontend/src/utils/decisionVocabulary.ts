@@ -423,6 +423,7 @@ export const HELP: Record<string, string> = {
   "tornado_stale": "The tornado was run on an earlier run or ledger and is not used.",
   "tornado_not_run": "The tornado has not been run, so the verdict is not established.",
   "tornado_aborted": "The tornado was stopped before it reached every driver.",
+  "tornado_stopped_at_solve_deadline": "A re-dispatch did not finish within the solve deadline, so the tornado stopped there, as a run does: the bars already computed are kept and the drivers not reached are named.",
   "tornado_row_failed": "A tornado bound could not be evaluated.",
   "tornado_not_established": "The tornado is not complete, so the verdict is not established.",
   "tornado_on_another_option": "The tornado ran on a different option than the best one; run it again.",
