@@ -191,7 +191,25 @@ def get_asset_health(project: AuthorizedProject = ProjectAccessDep) -> dict:
 
 @router.put("/{name}/asset_health")
 def put_asset_health(body: AssetHealthPut,
-                     project: AuthorizedProject = ProjectAccessDep) -> dict:
+                     project: AuthorizedProject = ProjectAccessDep,
+                     db: DBSession = Depends(get_db),
+                     user: User | None = Depends(optional_user)) -> dict:
+    # Same reasoning as `put_worksheet` and `put_stress_scenarios` above, and
+    # the FOURTH site to need it: `save_asset_health` replaces the ledger whole
+    # and bumps `version`, `asset_health.json` is in `projects._BUNDLE_FILES`,
+    # and `study_report._evidence_gaps` reads it — so a non-holder's write did
+    # not just overwrite the holder's provenance, it made the holder's own study
+    # report call every asset-level rate `unsourced`.
+    #
+    # This handler took no `db`/`user` at all, so it had nothing to check a lock
+    # with; it landed two days before the commit that fixed its two siblings and
+    # was never in that fix's scope. Check-only, not acquire: recording
+    # provenance is not claiming the project.
+    from routers.projects import _check_project_lock
+
+    _lock = _lock_target(project)
+    if _lock is not None:
+        _check_project_lock(db, _lock, user)
     try:
         return save_asset_health(project.directory, body.entries)
     except AssetHealthValidationError as exc:
