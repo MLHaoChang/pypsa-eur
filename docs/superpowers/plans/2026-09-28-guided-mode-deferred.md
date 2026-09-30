@@ -175,6 +175,7 @@ Every phase runs the parent spec §8 gate unchanged: row 1 full backend suite (`
 | **P31 — Cosmetics** | C2, C3, C4, C5 | Lowest value, zero risk | `P31` = P26 (toast ∩ Send = ∅) + `--self-test` | S |
 | **P32 (scheduled after P27a)** | D1 | D-8 = (a); needs the deferred spec's P32 section in full and a §10 addendum | `P32` = P25 | S |
 | **P33 (optional)** | D2 | Needs D-9 and a spec | new | L |
+| **P33b — study honesty after an edit (owner-approved, to schedule)** | O1 follow-up (P28 gate): a backend network-revision marker on the EH study record — e.g. `network_changed: bool` computed from a revision counter bumped on every live-network write after the study finished — read by both the Guided greeting and the Hub design Results card, so "the network changed since the study" is said only when it is true | O1 (owner, 2026-09-30): P28 softens the wording now ("The last study’s results are in Hub design."; live `dispatch === 'stale'` → the stale sentence); real tracking is this phase. Additive backend field; one source for both surfaces | `P33b` = P26 + edit one bus after a study → the greeting and the Results card both say the network changed | M |
 | **P34 (optional)** | D3 | Needs D-10 | `P34` = P23 | M |
 
 Test-first in every phase: each item's red test is written and seen failing before the fix; changed assertions carry a one-line justification here.
@@ -568,3 +569,5 @@ Deferred spec §3 (A3, A4, C6, C10), plus the items carried in: P32 N1, P32 N6 a
 | 7 | `git diff 531ffe1da -- 'pypsa-gui/frontend/src/**' \| grep -c uiMode` | 28: test-store setups and assertions, plus the C10 listener. No new product `uiMode` branch; the greeting's Guided arms use its existing `guided` flag. The `*.expertUnchanged.*` snapshots pass in row 4. |
 
 No processes are left running.
+
+**P28 gate follow-up, O1 (owner, 2026-09-30): soften now, track later.** The Guided "done" greeting no longer claims the results describe the current network. It now reads "The last study’s results are in Hub design.". With the hub study done and live `dispatch === 'stale'`, the stale sentence shows again; this is the pre-P28 precedence and gate probe Q16, now pinned. The Hub design Results card makes no such claim ("These results are from an earlier study; the network was solved since…" appears only when `stale` is set), so it is unchanged. Real edit tracking is **P33b** in §3 (owner-approved, to schedule) and OPEN-ITEMS 10b.

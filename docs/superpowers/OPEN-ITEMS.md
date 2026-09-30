@@ -171,6 +171,17 @@ own cookie policy through configuration. The CSRF double-submit check
 (`main.py:645`) currently carries the load for those sessions. Source: gap 5 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
 
+### 10b. An edit after a hub study is not tracked (owner-approved: P33b)
+
+Added 2026-09-30 (P28 gate, owner decision O1). The EH review's `stale`
+flag is true only when a later foreground solve cleared the stored report
+(`services/adequacy/eh_review.py:455-460`). An edit to the network after a
+finished study leaves the Guided greeting and the Hub design Results card
+unaware. P28 softened the greeting's wording so that it claims nothing about
+the current network. The fix is a backend network-revision marker on the
+study record (e.g. `network_changed`), read by both surfaces. It is scheduled
+as P33b in `plans/2026-09-28-guided-mode-deferred.md` §3.
+
 ### 10a. Re-activating a project does not restore its hub study record
 
 Added 2026-09-30, from the P28 smoke. A project whose Energy Hub study
