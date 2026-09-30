@@ -65,15 +65,17 @@ def _common() -> dict:
         # a carrier in neither list is not established (WP4.3b review B4).
         "clean_technology_property": Rule(
             {"eligible": ["solar", "solar rooftop", "solar-hsat", "pv", "onwind", "offwind",
-                          "offwind-ac", "offwind-dc", "offwind-float", "wind", "ror", "hydro",
+                          "offwind-ac", "offwind-dc", "offwind-float", "wind", "ror",
                           "geothermal", "battery", "battery storage", "home battery", "bess",
                           "battery charger", "battery discharger"],
              "not_eligible": ["gas", "ocgt", "ccgt", "gas chp", "gas_chp", "chp", "diesel", "oil",
                               "coal", "lignite"]},
-            "ITA s. 127.45(1) \"clean technology property\" (a) (solar, wind and water energy "
-            "equipment, Class 43.1 (d)(i), (ii), (iii.1), (v), (vi), (xiv)), (b) (electrical "
-            "energy storage), (c) (geothermal, (d)(vii)); cogeneration and fossil-assisted "
-            "property excluded; carrier mapping: this pack"),
+            "ITA s. 127.45(1) \"clean technology property\" para. (d): (d)(i) Class 43.1 "
+            "(d)(ii), (iii.1), (v), (vi), (xiv) (solar, wind, small hydro ≤ 50 MW — large "
+            "reservoir `hydro` is left unclassified), (d)(ii) Class 43.1 (d)(xviii), (xix) "
+            "(electrical energy storage, no fossil fuel), (d)(iii) Class 43.1 (d)(i), (d)(v) "
+            "geothermal (Class 43.1 (d)(vii)); cogeneration and fossil-assisted property "
+            "excluded; carrier mapping: this pack"),
         "itc_capital_cost_reduction": Rule(
             {"share": 1.0, "lag_years": 1},
             "ITA s. 13(7.1)(e) (assistance deducted for a taxation year ending before — the "

@@ -316,6 +316,10 @@ def resolve_tax_layers(pack: JurisdictionPack, fin: FinanceInputs, assets: list[
             res.layers = tuple(layers)
             if carry:
                 res.flags += ["ca_eifel_not_modelled", "ca_loss_carryback_not_modelled"]
+            if pack.valid_from < date(2026, 3, 26) and fin.acquisition_date is not None and \
+                    fin.acquisition_date >= date(2025, 1, 1):
+                # S.C. 2026, c. 3 later changed this retroactively (from 2025).
+                res.flags.append("ca_first_year_superseded_retroactively")
     else:
         res.missing.append(f"pack_not_resolvable:{pack.jurisdiction}")
     res.missing = sorted(set(res.missing))

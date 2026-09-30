@@ -221,3 +221,18 @@ def test_nl_flags_and_citations():
     res = resolve_tax_layers(CA2, _ca(tax_losses="carryforward"), [OwnerAsset("pv", "solar", 1.0)],
                              date(2026, 6, 1))
     assert "ca_loss_carryback_not_modelled" in res.flags
+
+
+def test_round_2_end_recapture_hydro_and_retroactivity_flag():
+    from services.finance.tax import DepreciationClass, TaxLayer, cca_declining
+    layer = (TaxLayer(name="federal", rate=0.15, itc_basis_reduction=True,
+                      itc_basis_reduction_share=1.0, itc_basis_reduction_lag=1,
+                      depreciation=(DepreciationClass("pv:cca_43.1", 1.0, cca_declining(0.3, 1.0)),)),)
+    t = compute_tax(_tl(1), layer, ebitda=np.zeros(1), basis=1.0, itc_amount=0.3,
+                    losses="offset_other_income", write_off_remaining=True)
+    assert t.depreciation["federal"] == pytest.approx([0.7])        # 1.0, then −0.3 recaptured
+    assert "negative_basis_recaptured_at_end:federal" in t.flags
+    assert "hydro" not in CA2.rule("clean_technology_property").value["eligible"]
+    res = resolve_tax_layers(CA, _ca(acquisition_date=date(2025, 6, 1)),
+                             [OwnerAsset("pv", "solar", 1.0)], date(2026, 6, 1))
+    assert "ca_first_year_superseded_retroactively" in res.flags

@@ -771,7 +771,7 @@ Nit taken: the degressive rate keeps full precision (`repr`, not `:g`).
 - losses €1m + 50 %, with no time limit (art. 20 lid 2);
 - earnings stripping: the cap is the higher of 24.5 % of fiscal EBITDA and €1m, with carryforward
   (art. 15b). This is a new `InterestCap.allowance`, not a Freigrenze;
-- depreciation at most 20 % a year (art. 3.30 lid 3), enforced on every class;
+- depreciation at most 20 % a year (art. 3.30 lid 2), enforced on every class;
 - the class `slm_<n>` (straight line, pro rata by month);
 - residual value and carryback flagged as not modelled;
 - useful lives and the EIA absent.
@@ -833,6 +833,23 @@ arithmetic probe was exact.
   `provincial_layer_follows_federal_cca_and_losses` and `ca_itc_rate_stated_statutory_checks_skipped`;
 - citations for Reg. 1104(4) and s. 123.4(1);
 - tests for 43.2 inside its window, post-2024 acquisitions, the recapture and the NL flag.
+
+**WP4.3b review round 2 (44b8324): PASS.**
+- **B1–B5:** verified against the statute text.
+- **Version selection by financial close:** checked across the boundary.
+- **First year:** 11 acquisition / available-for-use combinations match the law.
+- **The `run_case` lagged reduction:** CCA [1.0 M, −300 k, 0]; the half-year and 55 % cases match by hand.
+
+**Two citation fixes (no re-review):**
+- the `clean_technology_property` rule cites s. 127.45(1) para. (d)'s sub-items;
+- the plan text says art. 3.30 lid 2.
+
+**Taken:**
+- a reduction still pending at the axis end is recaptured in the last year
+  (`negative_basis_recaptured_at_end`);
+- large `hydro` is left unclassified (only small hydro qualifies);
+- `ca_first_year_superseded_retroactively` flags the 2026-01-01 version when the acquisition is on or
+  after 2025.
 
 **Noted, not taken:**
 - art. 15b / §4h / §163(j) cap the debt interest, not the net interest balance with fees (an EBITDA proxy

@@ -280,6 +280,11 @@ def compute_tax(tl: Timeline, layers: tuple[TaxLayer, ...], *, ebitda: np.ndarra
             if left > 1e-6:
                 d[-1] += left
                 flags.append(f"remaining_basis_written_off:{layer.name}")
+            elif left < -1e-6:
+                # A reduction still pending at the axis end (CA lag): recaptured
+                # in the last year, never a silent negative basis.
+                d[-1] += left
+                flags.append(f"negative_basis_recaptured_at_end:{layer.name}")
         deductible_interest = interest
         if layer.interest_cap is not None and losses == "carryforward":
             deductible_interest, capped, reached = _capped_interest(layer.interest_cap, ebitda,
