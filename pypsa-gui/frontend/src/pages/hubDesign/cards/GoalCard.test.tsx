@@ -182,6 +182,11 @@ describe('GoalCard run', () => {
     expect(screen.getByTestId('term-voll_plain').parentElement!.textContent)
       .toBe('Price of undelivered energy:')
     expect(screen.queryByTestId('hub-goal-voll-fix')).toBeNull()
+    // P30 (C12): the unit has its own hover.
+    const unit = screen.getByTestId('term-mwh')
+    expect(unit.textContent).toContain('MWh')
+    expect(unit.getAttribute('data-tip')).toMatch(/megawatt-hour/)
+    expect(screen.getByTestId('hub-goal-voll').textContent).toContain('€5,000 per MWh')
   })
 })
 
@@ -246,6 +251,9 @@ describe('GoalCard when the template read failed', () => {
     expect(reason.textContent).toMatch(/recommended settings could not be read/)
     expect(reason.textContent).not.toMatch(/eh_template|500/)
     expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(true)
+    // P30 (B8): the disabled Run says why.
+    expect(screen.getByTestId('hub-goal-run').getAttribute('title'))
+      .toBe('The template could not be read — retry above.')
     await user.click(screen.getByTestId('hub-goal-run'))
     expect(resultsApi.startEhStudy).not.toHaveBeenCalled()
 
@@ -253,6 +261,7 @@ describe('GoalCard when the template read failed', () => {
     await waitFor(() => expect(screen.queryByTestId('hub-goal-template-error')).toBeNull())
     await waitFor(() => expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement)
       .disabled).toBe(false))
+    expect(screen.getByTestId('hub-goal-run').getAttribute('title')).toBeNull()
     await user.click(screen.getByTestId('hub-goal-run'))
     await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledTimes(1))
     const form = { ...formFromTemplate(DC_TEMPLATE),

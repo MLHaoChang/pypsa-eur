@@ -20,6 +20,7 @@ import { nk } from '../utils/queryKeys'
 import { appLog } from '../store/simulationStore'
 import { Dialog } from '../components/Dialog'
 import { gridspineApi } from '../api/gridspine'
+import { useLocalSettings } from '../hooks/useLocalSettings'
 
 // NewProjectWizard — replaces the single-input NewProjectModal with a 4-tab
 // flow per the design spec. Tabs:
@@ -162,6 +163,11 @@ function BlankTab({ existingProjects, onConfirm, onClose, isPending }: NewProjec
   const existing = existingProjects.find(p => p.name === trimmed)
   const willOverwrite = existing !== undefined && existing.bus_count > 0
   const commit = () => { if (trimmed) onConfirm(trimmed) }
+  // P30 (B6): the backend's own projects root (local mode). Hosted mode
+  // (404 → null) and a failed read show no line rather than a wrong path.
+  const { data: localSettings } = useLocalSettings()
+  const root = localSettings?.projects_root?.replace(/[\\/]+$/, '') || null
+  const sep = root && root.includes('\\') && !root.includes('/') ? '\\' : '/'
 
   const handleBrowse = async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -206,9 +212,11 @@ function BlankTab({ existingProjects, onConfirm, onClose, isPending }: NewProjec
             <FolderOpen size={13} /> Browse…
           </button>
         </div>
-        <span className="text-[10px] text-muted">
-          Saved to <span className="font-mono">pypsa-gui/backend/projects/{trimmed || '…'}/</span>
-        </span>
+        {root && (
+          <span className="text-[10px] text-muted" data-testid="new-project-saved-to">
+            Saved to <span className="font-mono">{root}{sep}{trimmed || '…'}{sep}</span>
+          </span>
+        )}
       </label>
 
       {willOverwrite && (

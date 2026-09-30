@@ -1197,11 +1197,11 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
   // it (card mode stacks several Links in one asset group).
   const editRequest = useUIStore(s => s.propertiesEditRequest)
   useEffect(() => {
-    if (editRequest !== 'Link' || mode !== 'detail') return
+    if (editRequest?.type !== 'Link' || editRequest.name !== link.name || mode !== 'detail') return
     if (!open) startEdit()
     useUIStore.getState().clearPropertiesEditRequest()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editRequest, mode])
+  }, [editRequest, mode, link.name])
 
   const isExt = form.p_nom_extendable === 'true'
 
@@ -1646,7 +1646,7 @@ function BusPanel({ name }: { name: string }) {
   // consume the request.
   const editRequest = useUIStore(s => s.propertiesEditRequest)
   useEffect(() => {
-    if (editRequest !== 'Bus' || !bus) return
+    if (editRequest?.type !== 'Bus' || !bus || editRequest.name !== bus.name) return
     if (!editing) startEdit()
     useUIStore.getState().clearPropertiesEditRequest()
   // eslint-disable-next-line react-hooks/exhaustive-deps

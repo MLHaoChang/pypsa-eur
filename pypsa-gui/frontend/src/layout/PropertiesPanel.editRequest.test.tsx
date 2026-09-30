@@ -2,7 +2,9 @@
 // (`eh-bus-fields`, `eh-link-role`) render only in the Bus / Link card's Edit
 // form. `uiStore.propertiesEditRequest` lets the tour's `prepare` (and the
 // tour's `reveal` ids) put the card into Edit; the card consumes the request
-// and clears it.
+// and clears it. P30 (B10): the request names the component
+// (`{type, name}`); only the card showing that component takes it, and a
+// selection change clears it.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -54,7 +56,7 @@ afterEach(() => {
 describe('propertiesEditRequest', () => {
   it('puts the Bus card into Edit (EH fields rendered) and clears the request', async () => {
     useUIStore.setState({ currentProject: 'Demo', selectedComponent: { type: 'Bus', name: 'hub' },
-      propertiesEditRequest: 'Bus' })
+      propertiesEditRequest: { type: 'Bus', name: 'hub' } })
     renderPanel()
     expect(await screen.findByTestId('eh-bus-fields')).toBeTruthy()
     expect(useUIStore.getState().propertiesEditRequest).toBeNull()
@@ -65,20 +67,48 @@ describe('propertiesEditRequest', () => {
     renderPanel()
     expect(await screen.findByTestId('props-edit-bus')).toBeTruthy()
     expect(screen.queryByTestId('eh-bus-fields')).toBeNull()
-    act(() => useUIStore.getState().requestPropertiesEdit('Bus'))
+    act(() => useUIStore.getState().requestPropertiesEdit({ type: 'Bus', name: 'hub' }))
     expect(await screen.findByTestId('eh-bus-fields')).toBeTruthy()
     expect(useUIStore.getState().propertiesEditRequest).toBeNull()
   })
 
+  // P30 (B10) rewrite of the P22 test: the request now names a component, so
+  // "a Bus request" is a request for a named bus, and it is cleared (not left
+  // pending) when the selection moves to the Link.
   it('a Bus request leaves a Link card alone, a Link request opens it', async () => {
     useUIStore.setState({ currentProject: 'Demo', selectedComponent: { type: 'Link', name: 'imp' },
-      propertiesEditRequest: 'Bus' })
+      propertiesEditRequest: { type: 'Bus', name: 'hub' } })
     renderPanel()
     expect(await screen.findByTestId('props-edit-link')).toBeTruthy()
     expect(screen.queryByTestId('eh-link-role')).toBeNull()
-    expect(useUIStore.getState().propertiesEditRequest).toBe('Bus')
-    act(() => useUIStore.getState().requestPropertiesEdit('Link'))
+    expect(useUIStore.getState().propertiesEditRequest).toEqual({ type: 'Bus', name: 'hub' })
+    act(() => useUIStore.getState().requestPropertiesEdit({ type: 'Link', name: 'imp' }))
     expect(await screen.findByTestId('eh-link-role')).toBeTruthy()
     expect(useUIStore.getState().propertiesEditRequest).toBeNull()
+  })
+
+  it('a request for bus A is not consumed by bus B and is cleared when the selection changes', async () => {
+    const B = { ...BUS, name: 'other' } as Bus
+    vi.mocked(networkApi.getBuses).mockResolvedValue([BUS, B])
+    useUIStore.setState({ currentProject: 'Demo', selectedComponent: { type: 'Bus', name: 'other' },
+      propertiesEditRequest: { type: 'Bus', name: 'hub' } })
+    renderPanel()
+    expect(await screen.findByTestId('props-edit-bus')).toBeTruthy()
+    await new Promise(r => setTimeout(r, 50))
+    expect(screen.queryByTestId('eh-bus-fields')).toBeNull()          // bus B stays in view mode
+    expect(useUIStore.getState().propertiesEditRequest).toEqual({ type: 'Bus', name: 'hub' })
+    act(() => useUIStore.getState().setSelectedComponent({ type: 'Link', name: 'imp' }))
+    expect(useUIStore.getState().propertiesEditRequest).toBeNull()     // cleared by the move
+    act(() => useUIStore.getState().setSelectedComponent({ type: 'Bus', name: 'hub' }))
+    expect(await screen.findByTestId('props-edit-bus')).toBeTruthy()
+    await new Promise(r => setTimeout(r, 50))
+    expect(screen.queryByTestId('eh-bus-fields')).toBeNull()          // nothing left to replay
+  })
+
+  it('selecting the requested component keeps the request (prepare selects, then asks)', () => {
+    useUIStore.setState({ selectedComponent: null, propertiesEditRequest: null })
+    useUIStore.getState().requestPropertiesEdit({ type: 'Bus', name: 'hub' })
+    useUIStore.getState().setSelectedComponent({ type: 'Bus', name: 'hub' })
+    expect(useUIStore.getState().propertiesEditRequest).toEqual({ type: 'Bus', name: 'hub' })
   })
 })

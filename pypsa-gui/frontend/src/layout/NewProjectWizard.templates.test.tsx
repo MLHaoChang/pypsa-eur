@@ -13,11 +13,16 @@ import NewProjectWizard, { type NewProjectTab } from './NewProjectWizard'
 import { projectsApi } from '../api/projects'
 import { ioApi } from '../api/io'
 import { useUIStore } from '../store/uiStore'
+import { fetchLocalSettings, type LocalSettingsState } from '../api/localSettings'
 
 vi.mock('../api/projects')
 vi.mock('../api/network', () => ({ networkApi: { undoInfo: vi.fn() } }))
 vi.mock('../api/gridspine', () => ({ gridspineApi: { createStudy: vi.fn() } }))
 vi.mock('../api/io', () => ({ ioApi: { importNetcdf: vi.fn() } }))
+vi.mock('../api/localSettings', async (orig) => ({
+  ...(await orig<typeof import('../api/localSettings')>()),
+  fetchLocalSettings: vi.fn().mockResolvedValue(null),
+}))
 
 function renderWizard() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -122,5 +127,50 @@ describe('NewProjectWizard — a created project opens the workbench', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Clone project' }))
     await waitFor(() => expect(where).toBe('/app?project=src_copy'))
     expect(addTab).toHaveBeenCalledWith('src_copy')
+  })
+})
+
+// P30 (B6): the Blank tab's "Saved to" line shows the directory the backend
+// actually saves into (`GET /local-settings` → `projects_root`, local mode
+// only). A hosted deployment answers 404 (mapped to null by
+// `fetchLocalSettings`) and a failed read shows nothing: no line, rather
+// than a path that is not true.
+describe('NewProjectWizard — where a blank project is saved (P30 B6)', () => {
+  function renderBlank() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <NewProjectWizard existingProjects={[]} onConfirm={() => {}} onClose={() => {}}
+          isPending={false} initialTab="blank" />
+      </QueryClientProvider>,
+    )
+  }
+  const STATE: LocalSettingsState = { key_set: false, key_hint: null, key_redactable: null,
+    log_path: '/data/pypsa-gui.log', projects_root: '/home/me/Documents/PyPSA Studio/Projects' }
+
+  it("shows the backend's root", async () => {
+    vi.mocked(fetchLocalSettings).mockResolvedValue(STATE)
+    renderBlank()
+    const line = await screen.findByTestId('new-project-saved-to')
+    expect(line.textContent).toBe('Saved to /home/me/Documents/PyPSA Studio/Projects/new_project/')
+    expect(screen.queryByText(/pypsa-gui\/backend\/projects/)).toBeNull()
+  })
+
+  it('no line in hosted mode (the route 404s → null)', async () => {
+    vi.mocked(fetchLocalSettings).mockResolvedValue(null)
+    renderBlank()
+    await waitFor(() => expect(fetchLocalSettings).toHaveBeenCalled())
+    await new Promise(r => setTimeout(r, 20))
+    expect(screen.queryByTestId('new-project-saved-to')).toBeNull()
+    expect(screen.queryByText(/Saved to/)).toBeNull()
+  })
+
+  it('no line when the query fails', async () => {
+    vi.mocked(fetchLocalSettings).mockRejectedValue(new Error('Network Error'))
+    renderBlank()
+    await waitFor(() => expect(fetchLocalSettings).toHaveBeenCalled())
+    await new Promise(r => setTimeout(r, 20))
+    expect(screen.queryByTestId('new-project-saved-to')).toBeNull()
+    expect(screen.queryByText(/Saved to/)).toBeNull()
   })
 })

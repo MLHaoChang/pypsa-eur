@@ -239,6 +239,10 @@ client.interceptors.response.use(
       if (!quietKey || !QUIET_TOAST_CODES.has(quietKey)) {
         toast.error(msg)
       }
+    } else if (!isQuietPoll(url, method)) {
+      // P30 (B8): the caller shows this failure itself (`skipErrorToast`),
+      // but it still leaves a line in the app log — at INFO, never ERROR.
+      appLog('INFO', `${method} ${url} — ${msg} [no toast]`)
     }
     return Promise.reject(err)
   },

@@ -9,6 +9,7 @@ import { appLog } from './simulationStore'
 import type { ProjectMismatch } from '../utils/projectMismatch'
 
 interface SelectedComponent { type: string; name: string }
+export interface PropertiesEditRequest { type: 'Bus' | 'Link'; name: string }
 // CreationRequest is set when the user wants to add a new asset to the network.
 // Two entry points:
 //   • Click in AssetPalette → setCreationItem({id, label}) → renders as
@@ -434,8 +435,9 @@ interface UIStore {
   settingsSectionRequest: string | null
   // Ask the Properties panel's Bus / Link card to open its Edit form (the EH
   // tagging tour's targets only render in Edit). Consumed then cleared by the
-  // card, like resultsTabRequest.
-  propertiesEditRequest: 'Bus' | 'Link' | null
+  // card showing exactly that component (P30 B10); a selection change to any
+  // other component clears it, so a request never replays on a later card.
+  propertiesEditRequest: PropertiesEditRequest | null
   // Ask the Energy Hub reference-design panel (Results → Adequacy) to open
   // and bring its report into view — the hub-design Results card's "Open
   // full report" (guided-mode P24). Consumed then cleared by the panel.
@@ -540,7 +542,7 @@ interface UIStore {
   clearResultsTabRequest: () => void
   requestSettingsSection: (section: string) => void
   clearSettingsSectionRequest: () => void
-  requestPropertiesEdit: (c: 'Bus' | 'Link') => void
+  requestPropertiesEdit: (c: PropertiesEditRequest) => void
   clearPropertiesEditRequest: () => void
   requestEhReport: () => void
   clearEhReportRequest: () => void
@@ -708,7 +710,14 @@ export const useUIStore = create<UIStore>((set) => ({
   },
   toggleRightPanel: () => set(s => ({ rightPanelOpen: !s.rightPanelOpen })),
   openRightPanel: () => set({ rightPanelOpen: true }),
-  setSelectedComponent: (c) => set({ selectedComponent: c }),
+  setSelectedComponent: (c) => set(s => ({
+    selectedComponent: c,
+    // P30 (B10): an edit request belongs to one component; moving the
+    // selection anywhere else drops it.
+    propertiesEditRequest: s.propertiesEditRequest && c
+      && c.type === s.propertiesEditRequest.type && c.name === s.propertiesEditRequest.name
+      ? s.propertiesEditRequest : null,
+  })),
   setHighlightedComponent: (c) => set({ highlightedComponent: c }),
   setProjectName: (name) => {
     try { localStorage.setItem(PROJECT_NAME_KEY, name) } catch { /* noop */ }

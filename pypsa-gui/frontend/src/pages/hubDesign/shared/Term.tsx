@@ -64,6 +64,9 @@ export const TERM_FALLBACK = {
     "How often the failure happens, in events per year. For equipment it comes from how often it breaks down and how long a repair takes.",
   fmea_criticality:
     "The yearly risk: how often the failure happens times what one event costs. The table is ranked by it, largest first.",
+  // P30 (C12): the unit on the Goal card's price line.
+  mwh:
+    "A megawatt-hour: the energy of one megawatt of power delivered for one hour, the same as 1 000 kilowatt-hours.",
 } as const
 
 export type TermKey = keyof typeof TERM_FALLBACK

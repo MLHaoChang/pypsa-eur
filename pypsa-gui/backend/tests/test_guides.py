@@ -107,12 +107,14 @@ HUB_FIELDS = (
     # P29 (B2): the Guided FMEA tab's hovers.
     "fmea_class_a", "fmea_class_b", "fmea_class_c", "fmea_class_d",
     "fmea_engine", "fmea_severity", "fmea_occurrence", "fmea_criticality",
+    # P30 (C12): the unit on the Goal card's price line.
+    "mwh",
 )
 
 
 def test_hub_fields_present():
     fields = G.load_guide("eh_fmea")["fields"]
-    assert len(set(HUB_FIELDS)) == 28
+    assert len(set(HUB_FIELDS)) == 29
     missing = [k for k in HUB_FIELDS if not (fields.get(k) or "").strip()]
     assert not missing, missing
 

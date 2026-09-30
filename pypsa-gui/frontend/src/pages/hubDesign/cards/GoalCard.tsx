@@ -133,7 +133,9 @@ export function GoalCard() {
                 label="Let the assistant set it"
                 disabled={liveStudy} disabledTitle={LIVE_STUDY_EDIT} />
             </>
-          ) : <span className="text-text">€{voll.toLocaleString('en-US')} per MWh</span>}
+          ) : <span className="text-text">
+            €{voll.toLocaleString('en-US')} per <Term k="mwh">MWh</Term>
+          </span>}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -141,6 +143,7 @@ export function GoalCard() {
           onClick={() => run.mutate()}
           disabled={running || run.isPending || built.error !== null || vollMissing || !project
             || templateUnknown}
+          title={templateUnknown ? 'The template could not be read — retry above.' : undefined}
           className="inline-flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
           {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
           {running ? 'Studying…' : again ? 'Run again' : 'Run study'}

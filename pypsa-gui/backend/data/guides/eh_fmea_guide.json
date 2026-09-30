@@ -286,6 +286,7 @@
     "fmea_engine": "How this row was worked out: a quick estimate for a generator, a full re-run of the plan for connections and stress scenarios, or your own figures.",
     "fmea_severity": "What one event costs: the energy that cannot be delivered, priced at what undelivered energy is worth to you.",
     "fmea_occurrence": "How often the failure happens, in events per year. For equipment it comes from how often it breaks down and how long a repair takes.",
-    "fmea_criticality": "The yearly risk: how often the failure happens times what one event costs. The table is ranked by it, largest first."
+    "fmea_criticality": "The yearly risk: how often the failure happens times what one event costs. The table is ranked by it, largest first.",
+    "mwh": "A megawatt-hour: the energy of one megawatt of power delivered for one hour, the same as 1 000 kilowatt-hours."
   }
 }

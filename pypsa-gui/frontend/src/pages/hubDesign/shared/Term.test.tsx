@@ -27,7 +27,7 @@ describe('TERM_FALLBACK', () => {
     }
   })
 
-  it('covers the twenty hub-design fields and the eight FMEA-tab fields (P29)', () => {
+  it('covers the twenty hub-design fields, the eight FMEA-tab fields (P29) and the unit (P30)', () => {
     expect(Object.keys(TERM_FALLBACK).sort()).toEqual([
       'hub_start', 'hub_site', 'hub_goal', 'hub_results', 'hub_improve',
       'site_type', 'grid_connection', 'critical_load', 'grid_strength',
@@ -36,6 +36,7 @@ describe('TERM_FALLBACK', () => {
       'fmea_check', 'template_provenance', 'voll_plain',
       'fmea_class_a', 'fmea_class_b', 'fmea_class_c', 'fmea_class_d',
       'fmea_engine', 'fmea_severity', 'fmea_occurrence', 'fmea_criticality',
+      'mwh',
     ].sort())
   })
 })
