@@ -1,0 +1,147 @@
+{#- Decision report (plan S7). Rendered by services/study/render_html.py with
+    Environment(autoescape=True): every value below is escaped; no |safe. -#}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ report.study_name or "Decision study" }} - decision report</title>
+<style>
+  :root { --ink: #0b0b0b; --muted: #52514e; --rule: #e4e3df; --surface: #fcfcfb;
+          --warn-bg: #fff4e5; --warn-ink: #7a4100; --bad-bg: #fdecec; --bad-ink: #8a1c1c; }
+  body { background: var(--surface); color: var(--ink); margin: 0 auto; max-width: 60rem;
+         padding: 1.5rem 1rem; font: 11pt/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.2rem; margin: 2rem 0 .5rem; border-bottom: 1px solid var(--rule); padding-bottom: .25rem; }
+  h3 { font-size: 1rem; margin: 1.25rem 0 .4rem; }
+  .subtitle, .status, .note, .code { color: var(--muted); }
+  .status { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; margin-left: .5rem; }
+  .stale { background: var(--bad-bg); color: var(--bad-ink); padding: .75rem 1rem; border-radius: 4px; margin: 1rem 0; }
+  .disclosures { background: var(--warn-bg); color: var(--warn-ink); padding: .75rem 1rem; border-radius: 4px; margin: 1rem 0; }
+  .disclosures li { margin: .25rem 0; }
+  .code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .8rem; }
+  table { border-collapse: collapse; width: 100%; margin: .5rem 0 1rem; font-size: .9rem; }
+  th, td { text-align: left; padding: .3rem .5rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  td.num, td.fact { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr.edited td { background: #eef4fc; }
+  img.chart { max-width: 100%; height: auto; display: block; margin: .5rem 0 1rem; }
+  .wrap { overflow-x: auto; }
+  @media print {
+    body { max-width: none; padding: 0; font-size: 10pt; }
+    h2 { break-after: avoid; }
+    table, img.chart { break-inside: avoid; }
+    .wrap { overflow: visible; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>{{ report.study_name or "Decision study" }}</h1>
+  <div class="subtitle">{{ report.question_title or report.question_id }}</div>
+</header>
+
+{% if stale %}
+<div class="stale" role="alert">
+  <strong>This report is stale.</strong> What it was computed from has changed since; re-run the study and assemble the report again.
+  <ul>{% for r in stale_reasons %}<li><span class="code">{{ r }}</span> {{ help(r) }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<section class="disclosures" aria-label="Read this first">
+  <h2>Read this first</h2>
+  <ul>
+  {% for d in report.required_disclosures %}<li>{{ d.text }} <span class="code">{{ d.code }}</span></li>
+  {% endfor %}
+  </ul>
+  {% if report.evidence_gaps %}<h3>Evidence gaps</h3>
+  <ul>{% for g in report.evidence_gaps %}<li>{{ g }}</li>{% endfor %}</ul>{% endif %}
+  {% if report.not_established %}<h3>Not established</h3>
+  <ul>{% for g in report.not_established %}<li>{{ g }}</li>{% endfor %}</ul>{% endif %}
+</section>
+
+{% for sid, title in sections %}{% set s = report.sections[sid] %}
+<section class="report-section" id="{{ sid }}">
+  <h2>{{ loop.index }}. {{ title }}<span class="status">{{ s.status }}</span></h2>
+  {% if s.status != "ok" and s.note %}<p class="note">{{ help(s.note) }} <span class="code">{{ s.note }}</span></p>{% endif %}
+  {% for p in prose[sid] %}<p>{{ p }}</p>{% endfor %}
+
+  {% if sid == "executive_summary" and s.payload %}
+    {% if s.payload.headline_kpis %}
+    <table><thead><tr><th>Key figure</th><th>Value</th><th>Basis and provenance</th></tr></thead><tbody>
+    {% for k in s.payload.headline_kpis %}{% set f = report.facts[k] %}
+      <tr><td>{{ f.label }}</td><td class="fact">{{ fmt(f) }}</td><td class="note">{{ prov(f) }}</td></tr>
+    {% endfor %}</tbody></table>
+    {% endif %}
+    {% if s.payload.main_caveat %}<p><strong>Main caveat:</strong> {{ help(s.payload.main_caveat) }} <span class="code">{{ s.payload.main_caveat }}</span></p>{% endif %}
+    <p><strong>Maturity:</strong> {{ s.payload.maturity_class or "not established" }}</p>
+    {% if s.payload.reasons %}<ul>{% for r in s.payload.reasons %}<li>{{ help(r) }} <span class="code">{{ r }}</span></li>{% endfor %}</ul>{% endif %}
+  {% endif %}
+
+  {% for fig in s.figures %}{% if charts.get(fig) %}<img class="chart" alt="{{ fig }}" src="data:image/png;base64,{{ charts[fig] }}">{% endif %}{% endfor %}
+
+  {% if sid == "question" and s.payload %}
+  <p class="note">Baseline: {{ s.payload.baseline }}</p>
+  <div class="wrap"><table><thead><tr><th>Option</th><th>Solved</th><th>Battery MW</th><th>PV MW</th><th>Battery NPV</th><th>Option NPV</th><th>Judged</th></tr></thead><tbody>
+  {% for o in s.payload.options %}<tr><td>{{ o.label }} <span class="code">{{ o.option_id }}</span></td><td>{{ o.solve_status }}</td>
+    <td class="num">{{ num(o.battery_mw, 3) }}</td><td class="num">{{ num(o.pv_mw, 3) }}</td>
+    <td class="num">{{ num(o.battery_npv) }}</td><td class="num">{{ num(o.option_npv) }}</td>
+    <td>{{ o.attribution or "" }}{% for c in o.notes %} <span class="code">{{ c }}</span>{% endfor %}</td></tr>
+  {% endfor %}</tbody></table></div>
+  {% endif %}
+
+  {% if sid == "recommended_system" and s.payload and s.payload.explain %}
+  <table><thead><tr><th>Asset</th><th>What limited its size</th><th>Reading notes</th></tr></thead><tbody>
+  {% for e in s.payload.explain %}<tr><td>{{ e.name }}</td><td>{{ e.binding_constraint or "" }}</td><td>{% for n in e.reading_notes %}{{ n }} {% endfor %}</td></tr>{% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  {% if s.facts and sid not in ("executive_summary",) %}
+  <table><thead><tr><th>Figure</th><th>Value</th><th>Basis and provenance</th></tr></thead><tbody>
+  {% for k, f in s.facts.items() %}<tr><td>{{ f.label }}</td><td class="fact">{{ fmt(f) }}</td><td class="note">{{ prov(f) }}</td></tr>{% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  {% if sid == "economics" and s.payload %}
+  <div class="wrap"><table><thead><tr><th>Year</th><th>CAPEX</th><th>Replacements</th><th>Fixed O&amp;M</th><th>Savings</th><th>Salvage</th><th>Net cash flow</th><th>Cumulative discounted</th></tr></thead><tbody>
+  {% for y in s.payload.cash_flow %}<tr><td>{{ y.year }}</td><td class="num">{{ num(y.capex) }}</td><td class="num">{{ num(y.replacements) }}</td><td class="num">{{ num(y.opex_fixed) }}</td><td class="num">{{ num(y.savings) }}</td><td class="num">{{ num(y.salvage) }}</td><td class="num">{{ num(y.net_cash_flow) }}</td><td class="num">{{ num(y.cumulative_discounted) }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% endif %}
+
+  {% if sid == "drivers" and s.payload %}
+  <h3>{{ s.payload.value_streams_label }}</h3>
+  <table><thead><tr><th>Stream</th><th>Annual value</th><th>Share</th></tr></thead><tbody>
+  {% for v in s.payload.value_streams %}<tr><td>{{ v.label }}</td><td class="num">{{ num(v.annual_value) }}</td><td class="num">{{ pct(v.share) }}</td></tr>{% endfor %}
+  </tbody></table>
+  <h3>Tornado (battery NPV, sizes fixed)</h3>
+  <table><thead><tr><th>Driver</th><th>Low value</th><th>High value</th><th>NPV at low</th><th>NPV at high</th><th>Swing</th></tr></thead><tbody>
+  {% for r in s.payload.tornado %}<tr><td>{{ r.label }}</td><td class="num">{{ num(r.low_value, 4) }}</td><td class="num">{{ num(r.high_value, 4) }}</td><td class="num">{{ num(r.npv_low) }}</td><td class="num">{{ num(r.npv_high) }}</td><td class="num">{{ num(r.swing) }}</td></tr>{% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  {% if sid == "robustness" and s.payload %}
+  {% if s.payload.pending %}<p>Not reached: {% for k in s.payload.pending %}<span class="code">{{ k }}</span> {% endfor %}</p>{% endif %}
+  {% if s.payload.skipped %}<table><thead><tr><th>Driver skipped</th><th>Why</th></tr></thead><tbody>
+  {% for k, c in s.payload.skipped.items() %}<tr><td class="code">{{ k }}</td><td>{{ help(c) }} <span class="code">{{ c }}</span></td></tr>{% endfor %}
+  </tbody></table>{% endif %}
+  {% endif %}
+
+  {% if sid == "assumptions" and s.payload %}
+  <div class="wrap"><table class="assumptions"><thead><tr><th>Assumption</th><th>Value</th><th>Unit</th><th>Range</th><th>Source</th><th>Edited</th></tr></thead><tbody>
+  {% for r in s.payload.rows %}<tr class="{{ 'edited' if r.edited else '' }}"><td>{{ r.label }} <span class="code">{{ r.key }}</span></td><td class="num">{{ num(r.value, 4) }}</td><td>{{ r.unit }}</td><td class="num">{{ num(r.range_low, 4) }} to {{ num(r.range_high, 4) }}</td><td>{{ r.source }}</td><td>{{ "edited" if r.edited else "" }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% endif %}
+
+  {% if sid == "appendix" and s.payload %}
+  <p>{{ s.payload.model }}</p>
+  <table><tbody>
+  {% for k in ("tariff_id", "tariff_name", "library_version", "fidelity", "ledger_hash", "base_network_hash") %}<tr><th>{{ k }}</th><td class="code">{{ s.payload[k] }}</td></tr>{% endfor %}
+  {% for fork, h in s.payload.option_network_hashes.items() %}<tr><th>network hash, {{ s.payload.option_forks.get(fork, fork) }}</th><td class="code">{{ h }}</td></tr>{% endfor %}
+  <tr><th>generated_at</th><td class="code">{{ report.generated_at }}</td></tr>
+  </tbody></table>
+  <h3>Honesty codes</h3>
+  <table><tbody>{% for c, t in report.honesty_help.items() %}<tr><td class="code">{{ c }}</td><td>{{ t }}</td></tr>{% endfor %}</tbody></table>
+  {% endif %}
+</section>
+{% endfor %}
+</body>
+</html>

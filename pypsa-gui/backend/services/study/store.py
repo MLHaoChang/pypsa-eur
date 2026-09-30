@@ -41,10 +41,11 @@ WRITE_LOCK = threading.RLock()
 
 # S4: auxiliary records beside the study, `studies/<study_id>.<kind>.json` —
 # the option results (`findings`, a `models.study.Findings`) and the last
-# run's record (`run`); S6 adds the last fixed-size tornado (`tornado`). Their
+# run's record (`run`); S6 adds the last fixed-size tornado (`tornado`), S7
+# the last assembled decision report (`report`). Their
 # stems are not bare ids, so `list_studies` skips them; they are deleted with
 # the study.
-AUX_KINDS = ("findings", "run", "tornado")
+AUX_KINDS = ("findings", "run", "tornado", "report")
 
 
 class StudyNotFound(LookupError):

@@ -15,7 +15,10 @@ Four sheets:
   factor 1 + r). Market revenue at duals is a column of its own, labelled
   excluded, and no formula reads it.
 * ``KPIs`` — the case's KPIs; the NPV cell refers to the cash-flow sheet's.
-  A null KPI is an empty cell with its reason beside it, never a zero.
+  A null KPI is an empty cell with its reason beside it, never a zero. The
+  ``cell`` column labels each KPI live (the NPV) or STATIC (the IRR, the
+  paybacks, the LCOS: the model's values at the case's rate, which do not
+  move with the rate cell; gate S5 [N5], S7).
 * ``Assumptions`` — the ledger, one row per key.
 * ``Provenance`` — engines, basis, currency year, fidelity, library version,
   ledger and model hashes, the honesty notes and the upfront-cost gap.
@@ -77,9 +80,9 @@ def _basis_label(case: InvestmentCase) -> str:
     return f"{terms}, {tax}, {subsidy}"
 
 
-def _cash_flows(ws, case: InvestmentCase) -> int | None:
+def _cash_flows(ws, case: InvestmentCase, title: str = "Cash flows") -> int | None:
     """The cash-flow sheet; returns the NPV row (None when there is no cash flow)."""
-    ws.title = "Cash flows"
+    ws.title = title
     _text(ws, 1, 1, "Discount rate (real)")
     ws.cell(1, 2).value = case.discount_rate
     _text(ws, 1, 3, "Currency year")
@@ -130,9 +133,19 @@ def _cash_flows(ws, case: InvestmentCase) -> int | None:
     return npv_row
 
 
-def _kpis(ws, case: InvestmentCase, npv_row: int | None) -> None:
-    ws.title = "KPIs"
-    for j, h in enumerate(("kpi", "value", "unit", "not available because"), start=1):
+# Gate S5 [N5] (carried to S7): the IRR, the paybacks and the LCOS are the
+# model's values at the case's rate; they are written as STATIC cells and
+# labelled so. Only the NPV cell is a live formula (it reads the cash-flow
+# sheet, which reads the rate cell).
+LIVE = "live formula: follows the rate cell and the cash flows"
+STATIC = ("static value from the model at the case's rate: it does not move when "
+          "the rate cell or a cash flow is edited")
+
+
+def _kpis(ws, case: InvestmentCase, npv_row: int | None, title: str = "KPIs",
+          cash_flows_title: str = "Cash flows") -> None:
+    ws.title = title
+    for j, h in enumerate(("kpi", "value", "unit", "not available because", "cell"), start=1):
         _text(ws, 1, j, h)
     rows: list[tuple[str, Any, str, str | None]] = [
         ("status", case.status, "", None),
@@ -142,23 +155,22 @@ def _kpis(ws, case: InvestmentCase, npv_row: int | None) -> None:
     ]
     k = case.kpis
     if k is not None:
-        units = {"npv": "EUR", "irr": "per unit", "payback_simple": "years",
-                 "payback_discounted": "years", "lcoe": "EUR/MWh", "lcos": "EUR/MWh",
-                 "lcoh": "EUR/MWh", "dscr_min": "ratio", "capex_total": "EUR",
-                 "salvage_eur": "EUR"}
-        for key, unit in units.items():
+        for key, unit in _KPI_UNITS.items():
             rows.append((key, getattr(k, key), unit, k.unavailable.get(key)))
     r = 2
     for key, value, unit, why in rows:
         _text(ws, r, 1, key)
-        if key == "npv" and npv_row is not None:
-            _formula(ws, r, 2, f"='Cash flows'!B{npv_row}")
+        live = key == "npv" and npv_row is not None
+        if live:
+            _formula(ws, r, 2, f"='{cash_flows_title}'!B{npv_row}")
         elif isinstance(value, str):
             _text(ws, r, 2, value)
         elif value is not None:
             ws.cell(r, 2).value = value
         _text(ws, r, 3, unit)
         _text(ws, r, 4, why)
+        if k is not None and key in _KPI_UNITS:
+            _text(ws, r, 5, LIVE if live else STATIC)
         r += 1
     if case.value_streams:
         r += 1
@@ -179,6 +191,11 @@ def _kpis(ws, case: InvestmentCase, npv_row: int | None) -> None:
         _text(ws, r, 3, "EUR")
         _text(ws, r, 4, mr.engine)
 
+
+_KPI_UNITS = {"npv": "EUR", "irr": "per unit", "payback_simple": "years",
+              "payback_discounted": "years", "lcoe": "EUR/MWh", "lcos": "EUR/MWh",
+              "lcoh": "EUR/MWh", "dscr_min": "ratio", "capex_total": "EUR",
+              "salvage_eur": "EUR"}
 
 _LEDGER_COLUMNS = ("key", "label", "value", "unit", "currency_year", "basis",
                    "provenance", "status", "sensitivity_flag", "range_low",

@@ -39,7 +39,8 @@ __all__ = [
     "Findings", "InvestmentCase", "LedgerRow", "OptionResult", "OptionSpec",
     "Bill", "BillComponents", "CaseKpis", "CaseProvenance", "CashFlowYear", "MarketRevenueAtDuals",
     "UpfrontGap", "ValueStream",
-    "Perspective", "SectionState", "SectionStatus", "StudyMaturity", "Tariff",
+    "Perspective", "ReportDisclosure", "ReportSection", "SectionState", "SectionStatus",
+    "StudyMaturity", "Tariff",
     "VerdictClass",
 ]
 
@@ -1104,10 +1105,42 @@ class ReportSection(SectionState):
     prose: list[ProseParagraph] = Field(default_factory=list)
 
 
+class ReportDisclosure(_Model):
+    """
+    One honesty code and the human sentence behind it (S7): ``source`` says
+    whose sentence it is — the study's own code table
+    (``services/study/report.py::HELP``), the tariff's ``honesty_help``, or
+    the fallback for a code nothing explains (named, never dropped).
+    Disclosures are DATA, rendered before the first number and outside
+    ``validate_prose``'s scope (a supplied tariff's sentence is its author's
+    text, like a ledger source).
+    """
+
+    code: str
+    text: str
+    source: Literal["study", "tariff", "fallback"] = "study"
+
+
 class DecisionReport(_Model):
     study_id: str
     question_id: str
     generated_at: datetime
+    # S7 additions (all optional; an S1 payload validates unchanged).
+    study_name: str | None = None
+    question_title: str | None = None
+    # Every fact any section's prose may cite: `{{fact_id}}` -> its Figure
+    # (value, unit, basis, currency year, engine, fidelity; null + flag).
+    facts: dict[str, Figure] = Field(default_factory=dict)
+    # Spec §4.7: AI paragraphs carry `ai: true, reviewed: bool`. MVP-1 writes
+    # none; the field is present and empty (plan S7).
+    ai_paragraphs: list[ProseParagraph] = Field(default_factory=list, max_length=0)
+    # Rendered BEFORE the first number (spec §7 rules).
+    required_disclosures: list[ReportDisclosure] = Field(default_factory=list)
+    evidence_gaps: list[str] = Field(default_factory=list)
+    not_established: list[str] = Field(default_factory=list)
+    # Code -> sentence for every code the report shows (honesty notes,
+    # reasons, skip codes, stale reasons).
+    honesty_help: dict[str, str] = Field(default_factory=dict)
     basis: FinancialBasis = Field(default_factory=FinancialBasis)
     currency_year: int | None = None
     fidelity: Fidelity | None = None

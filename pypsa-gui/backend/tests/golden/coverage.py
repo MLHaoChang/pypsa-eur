@@ -58,6 +58,10 @@ SURFACES = (
     # the value streams, the fixed-size tornado). Built on investment_case;
     # checked on the site fixture by tests/test_study_tornado_lp.py.
     "decision_findings",
+    # ── Plan S7: the decision report (JSON, HTML, DOCX, XLSX). Its figures are
+    # the findings' verdict facts and the named option's investment_case KPIs,
+    # copied, never recomputed; checked by tests/test_study_report_routes.py.
+    "decision_report",
 )
 
 FIXTURE_CLASSES = frozenset({"Generator", "Line", "Link", "StorageUnit"})
@@ -175,6 +179,11 @@ COVERAGE: dict[str, set[str]] = {
     # PV-only reference) and the PV Generator (whose rows cancel in that
     # attribution) of each option's case.
     "decision_findings":       {"Generator", "StorageUnit"},
+    # routers/studies.py::assemble_report / get_report / get_report_{html,
+    # docx,xlsx} -> services/study/report.py::assemble_decision_report over
+    # decision_findings and each option's investment_case: the battery
+    # StorageUnit and the PV Generator of the named option.
+    "decision_report":         {"Generator", "StorageUnit"},
 }
 
 EXCLUSIONS: dict[tuple[str, str], str] = {
@@ -396,5 +405,15 @@ EXCLUSIONS: dict[tuple[str, str], str] = {
         "The grid links are the tariff's connection: their energy reaches the "
         "findings only through the bill calculator's bills (value streams and "
         "savings), never as an asset of an option."
+    ),
+    ("decision_report", "Line"): (
+        "The report copies the findings and the named option's investment_case "
+        "(services/study/report.py::build_decision_report), asset-scoped to the "
+        "option's battery and PV; the site pack has no Line."
+    ),
+    ("decision_report", "Link"): (
+        "The grid links are the tariff's connection: the report shows their energy "
+        "only as the bill calculator's savings and value streams, never as an "
+        "asset of an option."
     ),
 }

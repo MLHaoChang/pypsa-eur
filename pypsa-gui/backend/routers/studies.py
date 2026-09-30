@@ -60,6 +60,7 @@ from services.study import library as study_library
 from services.study import forks as study_forks
 from services.study import packs
 from services.study import questions as study_questions
+from services.study import run_hashes
 from services.study import runner as study_runner
 
 OPEN_ITEMS_1 = (
@@ -880,7 +881,7 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
             f"option {option_id!r} has no fork this study owns")})
     hashes = findings.get("hashes") or {}
     ledger, _stored = _current_ledger(study)
-    if packs.ledger_hash(ledger) != hashes.get("ledger_hash"):
+    if not run_hashes.ledger_matches(ledger, hashes):
         raise HTTPException(409, detail={"error_kind": "ledger_changed_since_run", "message": (
             "the assumptions ledger changed after the run; re-run the study "
             "before reading its cases (the LP sized the options on the old one)")})
@@ -891,7 +892,7 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
     # attests it.
     network, disk_hash = study_runner.fork_network_from_disk(fork)
     recorded = (hashes.get("option_network_hashes") or {}).get(str(fork.id))
-    if recorded is None or disk_hash != recorded:
+    if not run_hashes.fork_matches(recorded, disk_hash):
         raise HTTPException(409, detail={"error_kind": "fork_changed_since_run", "message": (
             f"option {option_id!r}'s network changed after the run (opened, "
             "edited or re-solved outside the study); its case would price one "
@@ -1093,3 +1094,203 @@ def abort_findings_tornado(study_id: str,
                                             base_dir=_project_dir(project))
     except study_runner.RunRefused as exc:
         raise _run_error(exc) from None
+
+
+# ── S7: the decision report — JSON, HTML, DOCX, XLSX ─────────────────────
+#
+# POST assembles the report from the last run's findings and cases (no
+# solve) and stores it beside the study (`studies/<id>.report.json`, with the
+# cases and the ledger it was built on, so every render is of the SAME
+# report); the reads render that record. `stale` is recomputed on every read
+# with the ONE hash rule the case route's 409 uses
+# (`services/study/run_hashes.py`).
+#
+# Refusal rule for POST: nothing to report on is refused, typed — never run
+# (404 `study_never_run`), the ledger edited since the run (409
+# `ledger_changed_since_run`), the baseline's network missing or changed
+# (409 `fork_changed_since_run`), a run replacing the forks (409
+# `study_running`). A verdict, a tornado or a section that is not
+# established is REPORTED as such, never refused: the omission is the
+# finding. Only POST reads networks, so only POST takes the in-flight check;
+# the reads hash fork files for `stale` and load nothing.
+
+REPORT_AUX = "report"
+
+
+def _report_record(project: AuthorizedProject, study_id: str):
+    """(study, report, cases, ledger) of the stored report; 404 when never assembled."""
+    from models.study import AssumptionsLedger, DecisionReport, InvestmentCase
+
+    study = _load(project, study_id)
+    try:
+        raw = store.load_aux(_project_dir(project), study_id, REPORT_AUX)
+    except store.StudyUnreadable:
+        raise HTTPException(500, detail={"code": "study_unreadable",
+                                         "message": "The report record cannot be read."}) from None
+    if raw is None:
+        raise HTTPException(404, detail={"error_kind": "report_never_assembled", "message": (
+            "the report has not been assembled; POST the report first")})
+    try:
+        report = DecisionReport.model_validate(raw["report"])
+        cases = {k: InvestmentCase.model_validate(v) for k, v in (raw.get("cases") or {}).items()}
+        ledger = AssumptionsLedger.model_validate(raw["ledger"])
+    except (KeyError, TypeError, ValidationError):
+        raise HTTPException(500, detail={"code": "study_unreadable",
+                                         "message": "The report record cannot be read."}) from None
+    return study, report, cases, ledger
+
+
+def _report_stale(report, study: DecisionStudy, project: AuthorizedProject,
+                  db: DBSession) -> list[str]:
+    """Live stale reasons: the study's own, the ledger, each option fork (one hash rule)."""
+    from db.models import Project
+    from services.study import findings as study_findings
+    from services.study import report as study_report
+
+    def fork_hash_now(fork_uuid: str) -> str | None:
+        try:
+            row = db.get(Project, uuid.UUID(str(fork_uuid)))
+        except (TypeError, ValueError):
+            return None
+        if row is None or not study_forks.is_study_owned(
+                row, study_id=study.study_id, base_uuid=project.uuid):
+            return None
+        return run_hashes.fork_file_hash(row)
+
+    return study_report.stale_reasons(report, study, study_findings.study_ledger(study),
+                                      fork_hash_now)
+
+
+def _report_out(report, reasons: list[str]) -> dict:
+    from services.study import report as study_report
+
+    return {"available": study_report.report_available(report),
+            **report.model_dump(mode="json", by_alias=True),
+            "stale": bool(reasons), "stale_reasons": reasons}
+
+
+@router.post("/{study_id}/report")
+def assemble_report(study_id: str,
+                    project: AuthorizedProject = ProjectAccessDep,
+                    db: DBSession = Depends(get_db),
+                    user: User | None = Depends(optional_user)) -> dict:
+    """
+    Assemble the decision report (plan S7) from the last run's findings and
+    option cases, read from the option forks' files (no solve), and store
+    it. The refusal rule is stated above. Reads the fork networks, so it
+    takes its own context-parameterised in-flight check: 409 while a run of
+    this study replaces them (the path project's context, not the active
+    one).
+    """
+    from services.study import findings as study_findings
+    from services.study import report as study_report
+
+    _refuse_unless_enabled()
+    _check_lock(db, project, user)
+    study = _load(project, study_id)
+    if _base_row(project, db, user) is None:
+        raise HTTPException(404, f"Project '{project.name}' not found")
+    _refuse_while_a_run_runs(project, study_id)
+    try:
+        report, inputs = study_report.assemble_decision_report(
+            study, _project_dir(project), db, project.uuid)
+        study_report.validate_prose(report)
+    except study_findings.FindingsRefused as exc:
+        raise HTTPException(exc.status, detail=exc.detail) from None
+    except study_report.ProseError as exc:
+        raise HTTPException(422, detail=exc.detail) from None
+    record = {"report": report.model_dump(mode="json", by_alias=True),
+              "cases": {k: c.model_dump(mode="json", by_alias=True)
+                        for k, c in inputs.cases.items()},
+              "ledger": inputs.ledger.model_dump(mode="json", by_alias=True)}
+    with _WRITE_LOCK:
+        try:
+            store.save_aux(_project_dir(project), study_id, REPORT_AUX, record)
+        except store.StudyTooLarge as exc:
+            raise HTTPException(413, str(exc)) from None
+        current = _load(project, study_id)
+        _save(project, current.model_copy(update={
+            "report_ref": store.aux_ref(study_id, REPORT_AUX), "updated_at": _now()}))
+    return _report_out(report, _report_stale(report, current, project, db))
+
+
+@router.get("/{study_id}/report")
+def get_report(study_id: str,
+               project: AuthorizedProject = ProjectAccessDep,
+               db: DBSession = Depends(get_db)) -> dict:
+    """
+    The stored report with ``stale`` recomputed now. ``available``
+    (ADR-0003) is true when its verdict is established; 404
+    ``report_never_assembled`` before the first POST.
+    """
+    _refuse_unless_enabled()
+    study, report, _cases, _ledger = _report_record(project, study_id)
+    return _report_out(report, _report_stale(report, study, project, db))
+
+
+def _render_headers(filename: str) -> dict[str, str]:
+    return {"Content-Disposition": content_disposition(filename),
+            "Content-Security-Policy": "sandbox",
+            "X-Content-Type-Options": "nosniff"}
+
+
+@router.get("/{study_id}/report.html")
+def get_report_html(study_id: str,
+                    project: AuthorizedProject = ProjectAccessDep,
+                    db: DBSession = Depends(get_db)) -> Response:
+    """The report as printable HTML (escaped, CSP sandbox, charts inline as PNG)."""
+    from services.study import report as study_report
+    from services.study.render_html import render_html
+
+    _refuse_unless_enabled()
+    study, report, _cases, _ledger = _report_record(project, study_id)
+    reasons = _report_stale(report, study, project, db)
+    try:
+        html = render_html(report, stale=bool(reasons), stale_reasons=reasons)
+    except study_report.ProseError as exc:
+        raise HTTPException(422, detail=exc.detail) from None
+    return Response(content=html, media_type="text/html; charset=utf-8",
+                    headers=_render_headers(f"{study.name} - decision report.html"))
+
+
+@router.get("/{study_id}/report.docx")
+def get_report_docx(study_id: str,
+                    project: AuthorizedProject = ProjectAccessDep,
+                    db: DBSession = Depends(get_db)) -> Response:
+    """The report as a Word document (python-docx)."""
+    from services.study import report as study_report
+    from services.study.render_docx import render_docx
+
+    _refuse_unless_enabled()
+    study, report, _cases, _ledger = _report_record(project, study_id)
+    reasons = _report_stale(report, study, project, db)
+    try:
+        content = render_docx(report, stale=bool(reasons), stale_reasons=reasons)
+    except study_report.ProseError as exc:
+        raise HTTPException(422, detail=exc.detail) from None
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers=_render_headers(f"{study.name} - decision report.docx"))
+
+
+@router.get("/{study_id}/report.xlsx")
+def get_report_xlsx(study_id: str,
+                    project: AuthorizedProject = ProjectAccessDep,
+                    db: DBSession = Depends(get_db)) -> Response:
+    """The report workbook: verdict, streams, tornado, ledger, provenance and each case."""
+    from services.study import report as study_report
+    from services.study.report_xlsx import write_report_xlsx
+
+    _refuse_unless_enabled()
+    study, report, cases, ledger = _report_record(project, study_id)
+    reasons = _report_stale(report, study, project, db)
+    try:
+        content = write_report_xlsx(report, cases, ledger, stale=bool(reasons),
+                                    stale_reasons=reasons)
+    except study_report.ProseError as exc:
+        raise HTTPException(422, detail=exc.detail) from None
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=_render_headers(f"{study.name} - decision report.xlsx"))

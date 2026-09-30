@@ -655,6 +655,14 @@ NO_ADAPTER_REASONS: dict[str, str] = {
         "exactly against the reference, a centre bound reproduces the centre "
         "NPV, and a price bound matches its closed form."
     ),
+    # ── Plan S7: the decision report ────────────────────────────────────
+    "decision_report": (
+        "Copies, never recomputes: the verdict's facts from decision_findings "
+        "and the named option's KPIs from investment_case, on the SITE-shaped "
+        "study the fake solver runs. tests/test_study_report_routes.py checks "
+        "that every verdict KPI equals the findings payload and every economics "
+        "fact equals the case route's KPI for the same option."
+    ),
 }
 
 

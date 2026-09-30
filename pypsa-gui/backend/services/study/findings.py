@@ -82,6 +82,7 @@ from models.study import (
 from services.study import packs
 from services.study import proforma
 from services.study import questions as Q
+from services.study import run_hashes
 from services.study import tariff as study_tariff
 from services.study.proforma import BILL_COMPONENTS
 
@@ -999,7 +1000,10 @@ class StudyInputs:
 
     @property
     def changed(self) -> list[str]:
-        return sorted(o for o, h in self.recorded.items() if self.current.get(o) != h)
+        # The ONE hash rule (`run_hashes.fork_matches`), shared with the case
+        # route's 409 and the report's `stale`.
+        return sorted(o for o, h in self.recorded.items()
+                      if not run_hashes.fork_matches(h, self.current.get(o)))
 
     def sizes(self) -> dict[str, tuple[float | None, float | None]]:
         out = {}
@@ -1034,10 +1038,8 @@ def load_inputs(study, base_dir, db, base_uuid: str) -> StudyInputs:
     import uuid as uuid_mod
 
     from db.models import Project
-    from services import project_registry
     from services.study import forks as study_forks
     from services.study import library as study_library
-    from services.study import runner as study_runner
     from services.study import store
 
     question = Q.get_question(study.question_id)
@@ -1050,7 +1052,7 @@ def load_inputs(study, base_dir, db, base_uuid: str) -> StudyInputs:
         raise FindingsRefused(404, "study_never_run", "this study has not been run")
     ledger = study_ledger(study)
     hashes = faux.get("hashes") or {}
-    if packs.ledger_hash(ledger) != hashes.get("ledger_hash"):
+    if not run_hashes.ledger_matches(ledger, hashes):
         raise FindingsRefused(409, "ledger_changed_since_run", (
             "the assumptions ledger changed after the run; re-run the study (the "
             "LP sized the options on the old one)"))
@@ -1077,8 +1079,7 @@ def load_inputs(study, base_dir, db, base_uuid: str) -> StudyInputs:
         oid = res["option_id"]
         rows[oid] = row
         recorded[oid] = by_fork.get(str(row.id))
-        current[oid] = study_runner._network_hash(
-            project_registry.project_dir(row) / "network.nc")
+        current[oid] = run_hashes.fork_file_hash(row)
     return StudyInputs(study, question, run, faux, ledger, library, tariff, rows,
                        recorded, current)
 
@@ -1100,7 +1101,7 @@ def context_from_disk(inp: StudyInputs) -> TornadoContext:
         if inp.recorded.get(oid) is None:
             continue
         n, h = study_runner.fork_network_from_disk(row)
-        if h != inp.recorded[oid]:
+        if not run_hashes.fork_matches(inp.recorded[oid], h):
             continue
         nets[oid] = n
     if "none" not in nets:
@@ -1136,7 +1137,8 @@ def _digit_free(codes) -> tuple[str, ...]:
     return tuple(dict.fromkeys(out))
 
 
-def assemble_findings(study, base_dir, db, base_uuid: str) -> Findings:
+def assemble_findings(study, base_dir, db, base_uuid: str, *,
+                      loaded: tuple[StudyInputs, TornadoContext] | None = None) -> Findings:
     """
     The findings of the last run (plan S6): the options as the run recorded
     them; the battery's value per option; the tornado when one ran on THIS
@@ -1144,18 +1146,25 @@ def assemble_findings(study, base_dir, db, base_uuid: str) -> Findings:
     names why); the verdict; the named option's value streams; the sizing
     explanation of every solved option's battery and PV; completeness per
     section; the hashes it was computed from; and honesty notes as codes.
+
+    ``loaded`` is ``(load_inputs(...), context_from_disk(...))`` already
+    computed by the caller (the S7 report, which reads the same networks for
+    the cases), so no network is read twice.
     """
     from models.study import BaselineResult, FindingsHashes, OptionResult
     from services.study import runner as study_runner
     from services.study import store
 
-    inp = load_inputs(study, base_dir, db, base_uuid)
+    if loaded is None:
+        inp = load_inputs(study, base_dir, db, base_uuid)
+        ctx = context_from_disk(inp)
+    else:
+        inp, ctx = loaded
     faux = inp.findings
     notes: list[str] = list(faux.get("honesty_notes") or ())
     changed = inp.changed
     if changed:
         notes.append("fork_changed_since_run")
-    ctx = context_from_disk(inp)
     tornado = store.load_aux(base_dir, study.study_id, TORNADO_AUX)
     hashes = faux.get("hashes") or {}
     fresh = (tornado is not None and tornado.get("status") in ("done", "aborted")

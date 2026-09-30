@@ -229,6 +229,13 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/studies.py", "start_findings_tornado"): frozenset(),
     ("routers/studies.py", "get_findings_tornado"):   frozenset(),
     ("routers/studies.py", "abort_findings_tornado"): frozenset(),
+    # S7: the decision report — assembled once, then rendered; every
+    # rendering shows the same verdict facts and case KPIs.
+    ("routers/studies.py", "assemble_report"):        frozenset({"decision_report"}),
+    ("routers/studies.py", "get_report"):             frozenset({"decision_report"}),
+    ("routers/studies.py", "get_report_html"):        frozenset({"decision_report"}),
+    ("routers/studies.py", "get_report_docx"):        frozenset({"decision_report"}),
+    ("routers/studies.py", "get_report_xlsx"):        frozenset({"decision_report"}),
 }
 
 

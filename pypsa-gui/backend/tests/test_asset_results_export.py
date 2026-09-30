@@ -153,3 +153,33 @@ def test_bad_mode_is_422(client, install_network):
     resp = client.get(URL, params={"scope": "view", "category": "dispatch",
                                    "metrics": "p", "mode": "nope"})
     assert resp.status_code == 422
+
+
+# ── S0 carry (plan S7): the zero-profit caveat travels with the export ────
+
+def _export(n):
+    from services.asset_results.export import build_workbook
+
+    raw = build_workbook(n, "Generator", "G", scope="view", category="summary",
+                         metric_ids=[], source="lopf", from_iso=None, to_iso=None,
+                         period=None, mode="chronological", project=None)
+    return openpyxl.load_workbook(io.BytesIO(raw))
+
+
+def test_an_interior_optimum_exports_the_zero_profit_caveat_beside_the_headline():
+    from services.results.economics_caveats import ZERO_PROFIT_BY_CONSTRUCTION
+    from tests.test_economics_reading_notes import _network
+
+    wb = _export(_network())
+    key = [[c.value for c in row] for row in wb["Key results"].iter_rows()]
+    assert ["Reading note", None, None, "Summary", ZERO_PROFIT_BY_CONSTRUCTION, None] in key
+    about = {r[0].value: r[1].value for r in wb["About"].iter_rows()}
+    assert about["Reading note"] == ZERO_PROFIT_BY_CONSTRUCTION
+
+
+def test_an_asset_on_its_bound_exports_no_zero_profit_caveat():
+    from tests.test_economics_reading_notes import _network
+
+    wb = _export(_network(p_nom_max=100.0))
+    assert not any(row[0].value == "Reading note" for row in wb["Key results"].iter_rows())
+    assert not any(row[0].value == "Reading note" for row in wb["About"].iter_rows())

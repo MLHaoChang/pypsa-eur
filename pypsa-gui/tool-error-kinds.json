@@ -203,6 +203,14 @@
       "surface": "inline",
       "why": "The local per-session turn limiter, raised by the chat route before a turn starts — so it never arrives on a tool_error frame in practice."
     },
+    "report_never_assembled": {
+      "surface": "inline",
+      "why": "Decision study (S7): reading or rendering the decision report (JSON, HTML, DOCX, XLSX) before it was ever assembled. A client-side sequencing slip on a route-only surface; the message says to POST the report first."
+    },
+    "report_prose_invalid": {
+      "surface": "inline",
+      "why": "Decision study (S7): the report's prose guard refused a paragraph (a number outside a fact reference, or an unresolved reference), naming the section and paragraph. The templates are the product's own, so this is a defect to fix, not a condition the user acts on; route-only today."
+    },
     "snapshot_count_mismatch": {
       "surface": "banner",
       "why": "Supplied rows do not match the network's snapshots. The data must be corrected."
