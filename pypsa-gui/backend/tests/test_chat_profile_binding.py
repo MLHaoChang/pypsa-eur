@@ -2490,3 +2490,99 @@ def test_others_that_sort_but_cannot_be_joined_still_leave_the_block_intact(
     block = chat_service._profile_awareness_block()  # must not raise
     assert "The Active One" in block
     assert "set_active_profile" in block
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# P28 A3 (deferred spec 2026-09-28 §3.1, D-3) — `/history` carries
+# `bound_profile_id`: the profile the session a reload resumes is bound to,
+# so the panel gates Send on the profile the next turn actually runs on
+# (`/stream` keeps a bound session's binding when the request names none).
+# Null with no turns, and null when the recorded profile has been deleted
+# (the C-4 path: the FE falls back to the active profile).
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _one_turn(session_id: str, profile_id: str | None, model: str) -> dict:
+    rec = {
+        "ts": 1.0, "session_id": session_id, "model": model,
+        "user": "hi", "assistant": [{"type": "text", "text": "hello"}],
+        "usage": {},
+    }
+    if profile_id is not None:
+        rec["profile_id"] = profile_id
+    return rec
+
+
+def test_history_reports_bound_profile(
+    appdata, openai_profile, tmp_projects_dir, install_network, client, monkeypatch,
+):
+    from routers import projects as projects_router
+    monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
+    import pypsa
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name="BoundProfProj")
+    _write_chat_jsonl(tmp_projects_dir, "BoundProfProj",
+                      [_one_turn("sess-bound", openai_profile.id, openai_profile.model)])
+
+    body = client.get("/api/chat/history").json()
+    assert body["bound_profile_id"] == openai_profile.id
+    # Read-only w.r.t. the binding: the freshly minted session adopted it.
+    assert chat_service.get_session("sess-bound").profile_id == openai_profile.id
+
+
+def test_history_bound_profile_is_null_with_no_turns(
+    appdata, tmp_projects_dir, install_network, client, monkeypatch,
+):
+    from routers import projects as projects_router
+    monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
+    import pypsa
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name="NoTurnsProj")
+    body = client.get("/api/chat/history").json()
+    assert body["turns"] == []
+    assert body["bound_profile_id"] is None
+
+
+def test_history_bound_profile_is_null_when_the_recorded_profile_was_deleted(
+    appdata, tmp_projects_dir, install_network, client, monkeypatch,
+):
+    """C-4: the profile that turn ran under no longer exists → null (the
+    spec §3.6 row), and the FE falls back to the active profile."""
+    from routers import projects as projects_router
+    monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
+    import pypsa
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name="GoneProfProj")
+    _write_chat_jsonl(tmp_projects_dir, "GoneProfProj",
+                      [_one_turn("sess-gone", "deleted-profile", "qwen3:8b")])
+    body = client.get("/api/chat/history").json()
+    assert body["last_session_id"] == "sess-gone"
+    assert body["bound_profile_id"] is None
+
+
+def test_history_reports_a_live_sessions_own_binding(
+    appdata, openai_profile, tmp_projects_dir, install_network, client, monkeypatch,
+):
+    """An already-live session keeps the binding `/stream` gave it (the
+    round-1 rule); `bound_profile_id` reports THAT binding, not the older
+    profile the transcript names."""
+    from services import llm_config
+    from routers import projects as projects_router
+    monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
+    import pypsa
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name="LiveBoundProj")
+    _write_chat_jsonl(tmp_projects_dir, "LiveBoundProj", [_one_turn(
+        "sess-live-bound", llm_config.BUILTIN_SONNET_ID, chat_service.DEFAULT_MODEL)])
+    live = chat_service.get_or_create_session("sess-live-bound")
+    live.profile_id = llm_config.BUILTIN_OPUS_ID
+    live.bound_wire = "anthropic"
+    live.model = chat_service.OPUS_MODEL
+
+    body = client.get("/api/chat/history").json()
+    assert body["bound_profile_id"] == llm_config.BUILTIN_OPUS_ID
+    assert chat_service.get_session("sess-live-bound").profile_id == llm_config.BUILTIN_OPUS_ID

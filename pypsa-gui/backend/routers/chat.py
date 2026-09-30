@@ -119,6 +119,19 @@ class ImportRequest(BaseModel):
     mode: Literal["append"] = "append"
 
 
+def _profile_chat_ready(profile: llm_config.LLMProfile) -> bool:
+    """
+    Whether `profile` could answer right now: a bearer profile needs its key
+    env var set; any other profile is ready. `os.environ` membership only —
+    never a network call — so `/health` and `/profiles` (P28 A3, D-3) stay
+    cheap and give the same answer for the active profile.
+    """
+    import os
+    if profile.auth == "bearer":
+        return bool(profile.key_env and os.environ.get(profile.key_env))
+    return True
+
+
 @router.get("/health")
 def chat_health() -> dict[str, Any]:
     """
@@ -157,12 +170,7 @@ def chat_health() -> dict[str, Any]:
     import os
     api_key_present = bool(os.environ.get("ANTHROPIC_API_KEY"))
     active_profile = llm_config.resolve_active()
-    if active_profile.auth == "bearer":
-        chat_ready = bool(
-            active_profile.key_env and os.environ.get(active_profile.key_env)
-        )
-    else:
-        chat_ready = True
+    chat_ready = _profile_chat_ready(active_profile)
     return {
         "ok": True,
         "anthropic_api_key_present": api_key_present,
@@ -651,17 +659,26 @@ def get_chat_profiles(
 ) -> dict[str, Any]:
     """
     The profile MENU every chat-using member can choose from — id/label/wire
-    only, never `base_url`, never key status. Gated on "authenticated", not
-    super-admin: this is what `StreamRequest.profile_id` (routers/chat.py's
-    own `/stream`) expects a caller to pick from, and every org member sends
-    chat turns.
+    plus `chat_ready`, never `base_url`, never a key hint or key-env NAME.
+    Gated on "authenticated", not super-admin: this is what
+    `StreamRequest.profile_id` (routers/chat.py's own `/stream`) expects a
+    caller to pick from, and every org member sends chat turns.
+
+    `chat_ready` (P28 A3, D-3) is `/health`'s rule applied to each profile
+    (`_profile_chat_ready`: env membership only), so the panel can gate Send
+    on the profile a turn will actually run on — the user's pick, else the
+    session's bound profile (`/history.bound_profile_id`), else the active
+    one — rather than on the active profile alone. A boolean per profile;
+    `/health` itself stays byte-stable.
     """
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required")
     profiles, active_id = llm_config.load_profiles()
     return {
         "profiles": [
-            {"id": p.id, "label": p.label, "wire": p.wire} for p in profiles
+            {"id": p.id, "label": p.label, "wire": p.wire,
+             "chat_ready": _profile_chat_ready(p)}
+            for p in profiles
         ],
         "active_profile_id": active_id,
     }
@@ -724,6 +741,13 @@ def chat_history(limit: int = 200,
         conversation.
       * `pending_turn`: a turn that started and never finished — recovered
         from the WAL (#20), reported ONCE, then cleared. None normally.
+      * `bound_profile_id` (P28 A3, D-3): the profile the resumed session is
+        bound to — the one its next turn runs on when the request names none
+        (`/stream` keeps a bound session's binding). A freshly minted session
+        reports the profile it adopted here; an already-live one reports the
+        binding `/stream` gave it. None with no turns, and None when the
+        recorded (or live) profile is no longer configured (C-4) — the panel
+        then follows the active profile. Reading it changes no binding.
     """
     from services.pypsa_service import PyPSAService
     ctx = PyPSAService.get_active_context()
@@ -736,7 +760,8 @@ def chat_history(limit: int = 200,
         return {"turns": [], "last_session_id": None,
                 "bound_project": ctx.loaded_project,
                 "history_gap": history_gap,
-                "pending_turn": pending_turn}
+                "pending_turn": pending_turn,
+                "bound_profile_id": None}
     if limit > 0:
         turns = turns[-limit:]
 
@@ -744,6 +769,8 @@ def chat_history(limit: int = 200,
     # is process-lifetime; after a backend restart the session is gone in
     # memory but the chat.jsonl is the durable record.
     last_session_id = None
+    # P28 A3 — the profile the resumed session is bound to (see the docstring).
+    bound_profile_id: str | None = None
     if turns:
         last_rec = turns[-1]
         last_session_id = last_rec.get("session_id")
@@ -754,6 +781,7 @@ def chat_history(limit: int = 200,
             # adopts, matching the pre-existing single `model=` rehydration
             # this replaces.
             recorded_profile_id = last_rec.get("profile_id")
+            recorded_profile_gone = False
             if recorded_profile_id:
                 try:
                     resolved_profile = llm_config.resolve_profile(
@@ -770,6 +798,7 @@ def chat_history(limit: int = 200,
                         "chat history: recorded profile is no longer "
                         "configured; falling back to the legacy translation"
                     )
+                    recorded_profile_gone = True
                     resolved_profile = llm_config.resolve_legacy_model(
                         last_rec.get("model") or chat_service.DEFAULT_MODEL
                     )
@@ -812,6 +841,17 @@ def chat_history(limit: int = 200,
                 sess.profile_id = resolved_profile.id
                 sess.bound_wire = resolved_profile.wire
                 sess.model = resolved_profile.model
+                # C-4: the recorded profile is gone — report no binding (the
+                # panel follows the active profile), spec §3.6.
+                bound_profile_id = (
+                    None if recorded_profile_gone else resolved_profile.id
+                )
+            else:
+                # An already-live session keeps what `/stream` bound; report
+                # THAT, and only while it still names a configured profile.
+                live_id = sess.profile_id
+                configured = {p.id for p in llm_config.load_profiles()[0]}
+                bound_profile_id = live_id if live_id in configured else None
             # Rebuild the in-memory message history so the next turn can
             # thread the prior conversation into the Anthropic SDK (INT-001
             # threading fix). Best-effort: skip turns missing required keys.
@@ -847,6 +887,7 @@ def chat_history(limit: int = 200,
         "bound_project": ctx.loaded_project,
         "history_gap": history_gap,
         "pending_turn": pending_turn,
+        "bound_profile_id": bound_profile_id,
     }
 
 
