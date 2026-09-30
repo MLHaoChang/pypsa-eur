@@ -1079,6 +1079,11 @@ class Findings(_Model):
     value_streams: list[ValueStream] = Field(default_factory=list)
     value_streams_option: str | None = None
     value_streams_status: SectionStatus = "not_established"
+    # S8 (gate S6 carry): what the streams are measured against — the
+    # grid-only `baseline` (the option's full saving) or, for a `bess_pv`
+    # option, its `pv_only_reference` (the battery's increment). None when
+    # the streams are not established. The waterfall is labelled by it.
+    value_streams_basis: Literal["baseline", "pv_only_reference"] | None = None
 
     @model_validator(mode="after")
     def _completeness_matches_sections(self):

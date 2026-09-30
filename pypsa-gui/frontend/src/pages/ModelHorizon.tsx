@@ -804,6 +804,7 @@ export default function ModelHorizon() {
             steps={steps}
             current={view}
             onSelect={setView}
+            labels={STEP_LABELS}
             // `steps.indexOf(view)` can be -1 for one render: turning the
             // multi-period toggle off while parked on 'years'/'economics'
             // removes those ids from `steps`, and the guard effect above

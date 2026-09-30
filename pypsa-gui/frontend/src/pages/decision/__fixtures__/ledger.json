@@ -1,0 +1,619 @@
+{
+ "ledger": {
+  "honesty_notes": [
+   "technology_costs_are_2030_projections_in_2020_eur"
+  ],
+  "ledger_version": "technology-data v0.14.0",
+  "rows": [
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": 2020,
+    "domain": {
+     "high": null,
+     "high_open": true,
+     "low": 0.0,
+     "low_open": false
+    },
+    "help": null,
+    "key": "battery_inverter_eur_per_kw",
+    "label": "Battery inverter cost (2030 projection)",
+    "provenance": "library",
+    "range": {
+     "high": 278.1063,
+     "low": 149.7495,
+     "source": "assumed"
+    },
+    "sensitivity_flag": true,
+    "source": "Danish Energy Agency, inputs/technology_data_catalogue_for_energy_storage.xlsx",
+    "source_url": "https://raw.githubusercontent.com/PyPSA/technology-data/refs/tags/v0.14.0/outputs/costs_2030.csv",
+    "source_year": 2026,
+    "status": "default",
+    "technical_name": "StorageUnit capital_cost, power part (derived_from_two_annuities)",
+    "unavailable": {},
+    "unit": "EUR/kW",
+    "value": 213.9279
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": 2020,
+    "domain": {
+     "high": 100.0,
+     "high_open": false,
+     "low": 0.0,
+     "low_open": false
+    },
+    "help": null,
+    "key": "battery_inverter_fom_pct_per_year",
+    "label": "Battery inverter fixed O&M (2030 projection)",
+    "provenance": "library",
+    "range": {
+     "high": 0.4388,
+     "low": 0.2362,
+     "source": "assumed"
+    },
+    "sensitivity_flag": false,
+    "source": "Danish Energy Agency, inputs/technology_data_catalogue_for_energy_storage.xlsx",
+    "source_url": "https://raw.githubusercontent.com/PyPSA/technology-data/refs/tags/v0.14.0/outputs/costs_2030.csv",
+    "source_year": 2026,
+    "status": "default",
+    "technical_name": "fom_cost (share of investment per year)",
+    "unavailable": {},
+    "unit": "%/year",
+    "value": 0.3375
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": 2020,
+    "domain": {
+     "high": 1.0,
+     "high_open": false,
+     "low": 0.0,
+     "low_open": true
+    },
+    "help": null,
+    "key": "battery_inverter_efficiency",
+    "label": "Battery inverter efficiency (one way) (2030 projection)",
+    "provenance": "library",
+    "range": {
+     "high": 1.0,
+     "low": 0.672,
+     "source": "assumed"
+    },
+    "sensitivity_flag": false,
+    "source": "Danish Energy Agency, inputs/technology_data_catalogue_for_energy_storage.xlsx",
+    "source_url": "https://raw.githubusercontent.com/PyPSA/technology-data/refs/tags/v0.14.0/outputs/costs_2030.csv",
+    "source_year": 2026,
+    "status": "default",
+    "technical_name": "input to battery_round_trip_efficiency (the pack reads that row)",
+    "unavailable": {},
+    "unit": "per unit",
+    "value": 0.96
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": 2020,
+    "domain": {
+     "high": null,
+     "high_open": true,
+     "low": 1.0,
+     "low_open": false
+    },
+    "help": null,
+    "key": "battery_inverter_lifetime_years",
+    "label": "Battery inverter lifetime (2030 projection)",
+    "provenance": "library",
+    "range": {
+     "high": 13.0,
+     "low": 7.0,
+     "source": "assumed"
+    },
+    "sensitivity_flag": false,
+    "source": "Danish Energy Agency, inputs/technology_data_catalogue_for_energy_storage.xlsx, Note K.",
+    "source_url": "https://raw.githubusercontent.com/PyPSA/technology-data/refs/tags/v0.14.0/outputs/costs_2030.csv",
+    "source_year": 2026,
+    "status": "default",
+    "technical_name": "lifetime (inverter annuity; replacement interval)",
+    "unavailable": {},
+    "unit": "years",
+    "value": 10.0
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": 2020,
+    "domain": {
+     "high": null,
+     "high_open": true,
+     "low": 0.0,
+     "low_open": false
+    },
+    "help": null,
+    "key": "battery_storage_eur_per_kwh",
+    "label": "Battery storage (energy) cost (2030 projection)",
+    "provenance": "library",
+    "range": {
+     "high": 246.8193,
+     "low": 132.9027,
+     "source": "assumed"
+    },
+    "sensitivity_flag": true,
+    "source": "Danish Energy Agency, inputs/technology_data_catalogue_for_energy_storage.xlsx",
+    "source_url": "https://raw.githubusercontent.com/PyPSA/technology-data/refs/tags/v0.14.0/outputs/costs_2030.csv",
+    "source_year": 2026,
+    "status": "default",
+    "technical_name": "StorageUnit capital_cost, energy part x max_hours (derived_from_two_annuities)",
+    "unavailable": {},
+    "unit": "EUR/kWh",
+    "value": 189.861
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": 2020,
+    "domain": {
+     "high": null,
+     "high_open": true,
+     "low": 1.0,
+     "low_open": false
+    },
+    "help": null,
+    "key": "battery_storage_lifetime_years",
+    "label": "Battery storage lifetime (2030 projection)",
+    "provenance": "library",
+    "range": {
+     "high": 32.5,
+     "low": 17.5,
+     "source": "assumed"
+    },
+    "sensitivity_flag": false,
+    "source": "Danish Energy Agency, inputs/technology_data_catalogue_for_energy_storage.xlsx",
+    "source_url": "https://raw.githubusercontent.com/PyPSA/technology-data/refs/tags/v0.14.0/outputs/costs_2030.csv",
+    "source_year": 2026,
+    "status": "default",
+    "technical_name": "lifetime (storage annuity; pro forma horizon)",
+    "unavailable": {},
+    "unit": "years",
+    "value": 25.0
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": 2020,
+    "domain": {
+     "high": null,
+     "high_open": true,
+     "low": 0.0,
+     "low_open": false
+    },
+    "help": null,
+    "key": "pv_utility_eur_per_kw",
+    "label": "Solar PV (ground-mounted) cost (2030 projection)",
+    "provenance": "library",
+    "range": {
+     "high": 627.222,
+     "low": 337.7349,
+     "source": "assumed"
+    },
+    "sensitivity_flag": false,
+    "source": "Danish Energy Agency, inputs/technology_data_for_el_and_dh.xlsx",
+    "source_url": "https://raw.githubusercontent.com/PyPSA/technology-data/refs/tags/v0.14.0/outputs/costs_2030.csv",
+    "source_year": 2026,
+    "status": "default",
+    "technical_name": "overnight_cost",
+    "unavailable": {},
+    "unit": "EUR/kW_e",
+    "value": 482.4785
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": 2020,
+    "domain": {
+     "high": 100.0,
+     "high_open": false,
+     "low": 0.0,
+     "low_open": false
+    },
+    "help": null,
+    "key": "pv_utility_fom_pct_per_year",
+    "label": "Solar PV (ground-mounted) fixed O&M (2030 projection)",
+    "provenance": "library",
+    "range": {
+     "high": 3.2184,
+     "low": 1.733,
+     "source": "assumed"
+    },
+    "sensitivity_flag": false,
+    "source": "Danish Energy Agency, inputs/technology_data_for_el_and_dh.xlsx",
+    "source_url": "https://raw.githubusercontent.com/PyPSA/technology-data/refs/tags/v0.14.0/outputs/costs_2030.csv",
+    "source_year": 2026,
+    "status": "default",
+    "technical_name": "fom_cost (share of investment per year)",
+    "unavailable": {},
+    "unit": "%/year",
+    "value": 2.4757
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": 2020,
+    "domain": {
+     "high": null,
+     "high_open": true,
+     "low": 1.0,
+     "low_open": false
+    },
+    "help": null,
+    "key": "pv_utility_lifetime_years",
+    "label": "Solar PV (ground-mounted) lifetime (2030 projection)",
+    "provenance": "library",
+    "range": {
+     "high": 52.0,
+     "low": 28.0,
+     "source": "assumed"
+    },
+    "sensitivity_flag": false,
+    "source": "Danish Energy Agency, inputs/technology_data_for_el_and_dh.xlsx",
+    "source_url": "https://raw.githubusercontent.com/PyPSA/technology-data/refs/tags/v0.14.0/outputs/costs_2030.csv",
+    "source_year": 2026,
+    "status": "default",
+    "technical_name": "lifetime",
+    "unavailable": {},
+    "unit": "years",
+    "value": 40.0
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": 2020,
+    "domain": {
+     "high": null,
+     "high_open": true,
+     "low": 0.0,
+     "low_open": false
+    },
+    "help": null,
+    "key": "pv_rooftop_eur_per_kw",
+    "label": "Solar PV (rooftop) cost (2030 projection)",
+    "provenance": "library",
+    "range": {
+     "high": 1148.9579,
+     "low": 618.6697,
+     "source": "assumed"
+    },
+    "sensitivity_flag": false,
+    "source": "Calculated. See 'further description'.",
+    "source_url": "https://raw.githubusercontent.com/PyPSA/technology-data/refs/tags/v0.14.0/outputs/costs_2030.csv",
+    "source_year": 2026,
+    "status": "default",
+    "technical_name": "overnight_cost",
+    "unavailable": {},
+    "unit": "EUR/kW_e",
+    "value": 883.8138
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": 2020,
+    "domain": {
+     "high": 100.0,
+     "high_open": false,
+     "low": 0.0,
+     "low_open": false
+    },
+    "help": null,
+    "key": "pv_rooftop_fom_pct_per_year",
+    "label": "Solar PV (rooftop) fixed O&M (2030 projection)",
+    "provenance": "library",
+    "range": {
+     "high": 1.8504,
+     "low": 0.9964,
+     "source": "assumed"
+    },
+    "sensitivity_flag": false,
+    "source": "Calculated. See 'further description'.",
+    "source_url": "https://raw.githubusercontent.com/PyPSA/technology-data/refs/tags/v0.14.0/outputs/costs_2030.csv",
+    "source_year": 2026,
+    "status": "default",
+    "technical_name": "fom_cost (share of investment per year)",
+    "unavailable": {},
+    "unit": "%/year",
+    "value": 1.4234
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": 2020,
+    "domain": {
+     "high": null,
+     "high_open": true,
+     "low": 1.0,
+     "low_open": false
+    },
+    "help": null,
+    "key": "pv_rooftop_lifetime_years",
+    "label": "Solar PV (rooftop) lifetime (2030 projection)",
+    "provenance": "library",
+    "range": {
+     "high": 52.0,
+     "low": 28.0,
+     "source": "assumed"
+    },
+    "sensitivity_flag": false,
+    "source": "Calculated. See 'further description'.",
+    "source_url": "https://raw.githubusercontent.com/PyPSA/technology-data/refs/tags/v0.14.0/outputs/costs_2030.csv",
+    "source_year": 2026,
+    "status": "default",
+    "technical_name": "lifetime",
+    "unavailable": {},
+    "unit": "years",
+    "value": 40.0
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": 2020,
+    "domain": {
+     "high": 1.0,
+     "high_open": false,
+     "low": 0.0,
+     "low_open": true
+    },
+    "help": null,
+    "key": "battery_round_trip_efficiency",
+    "label": "Battery round-trip efficiency (2030 projection)",
+    "provenance": "library",
+    "range": {
+     "high": 1.0,
+     "low": 0.6451,
+     "source": "assumed"
+    },
+    "sensitivity_flag": false,
+    "source": "derived",
+    "source_url": null,
+    "source_year": 2026,
+    "status": "default",
+    "technical_name": "efficiency_store = efficiency_dispatch = sqrt(value)",
+    "unavailable": {},
+    "unit": "per unit",
+    "value": 0.9216
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": null,
+    "domain": {
+     "high": 100.0,
+     "high_open": false,
+     "low": 0.0,
+     "low_open": false
+    },
+    "help": null,
+    "key": "battery_storage_degradation_calendar_pct_per_year",
+    "label": "Battery capacity fade per year (not modelled in MVP-1)",
+    "provenance": "library",
+    "range": null,
+    "sensitivity_flag": false,
+    "source": "placeholder: technology-data v0.14.0 carries no battery degradation; MVP-1 models none (plan, honest scope)",
+    "source_url": null,
+    "source_year": null,
+    "status": "default",
+    "technical_name": "-",
+    "unavailable": {
+     "value": "not_used_in_mvp1"
+    },
+    "unit": "%/year",
+    "value": null
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": null,
+    "domain": {
+     "high": 100.0,
+     "high_open": false,
+     "low": 0.0,
+     "low_open": false
+    },
+    "help": null,
+    "key": "battery_storage_degradation_cycling_pct_per_cycle",
+    "label": "Battery capacity fade per full cycle (not modelled in MVP-1)",
+    "provenance": "library",
+    "range": null,
+    "sensitivity_flag": false,
+    "source": "placeholder: technology-data v0.14.0 carries no battery degradation; MVP-1 models none (plan, honest scope)",
+    "source_url": null,
+    "source_year": null,
+    "status": "default",
+    "technical_name": "-",
+    "unavailable": {
+     "value": "not_used_in_mvp1"
+    },
+    "unit": "%/full cycle",
+    "value": null
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": 2020,
+    "domain": null,
+    "help": null,
+    "key": "tariff",
+    "label": "Tariff: Two bands and a demand charge",
+    "provenance": "user",
+    "range": null,
+    "sensitivity_flag": false,
+    "source": "test",
+    "source_url": null,
+    "source_year": 2026,
+    "status": "customised",
+    "technical_name": "tou_dc_test",
+    "unavailable": {
+     "value": "tariff_descriptor"
+    },
+    "unit": "tariff",
+    "value": null
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": 2020,
+    "domain": {
+     "high": null,
+     "high_open": true,
+     "low": 0.0,
+     "low_open": false
+    },
+    "help": null,
+    "key": "demand_charge_price",
+    "label": "Demand charge on peak import",
+    "provenance": "user",
+    "range": {
+     "high": 11700.0,
+     "low": 6300.0,
+     "source": "assumed"
+    },
+    "sensitivity_flag": true,
+    "source": "Tariff 'Two bands and a demand charge' (test)",
+    "source_url": null,
+    "source_year": 2026,
+    "status": "customised",
+    "technical_name": "SolverConfig.demand_charge.price_per_mw_per_period",
+    "unavailable": {},
+    "unit": "EUR/MW/month",
+    "value": 9000.0
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": 2020,
+    "domain": {
+     "high": null,
+     "high_open": true,
+     "low": 0.0,
+     "low_open": true
+    },
+    "help": "Dimensionless, default 1.0 (the tariff as written). Scales each energy band's distance from the bands' time-weighted mean, so it widens (above 1) or narrows (below 1) the time-of-use spread without moving the average energy price; on a single-band tariff it changes nothing. Network charges, the demand charge and the export price are not scaled.",
+    "key": "energy_price_level",
+    "label": "Energy price level (multiplier on the tariff's energy bands around their time-weighted mean)",
+    "provenance": "user",
+    "range": {
+     "high": 1.3,
+     "low": 0.7,
+     "source": "assumed"
+    },
+    "sensitivity_flag": true,
+    "source": "Tariff 'Two bands and a demand charge' (test)",
+    "source_url": null,
+    "source_year": 2026,
+    "status": "customised",
+    "technical_name": "links_t.marginal_cost on grid_import: band = mean + value x (band - mean); network charges, demand charge and export credit unscaled",
+    "unavailable": {},
+    "unit": "multiplier",
+    "value": 1.0
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": null,
+    "domain": {
+     "high": null,
+     "high_open": true,
+     "low": 0.0,
+     "low_open": true
+    },
+    "help": "Upper bound on the battery's MW and the PV's MW, as a multiple of the site's connection limit. A size at this bound is not an optimum: the verdict names it (size_at_upper_bound).",
+    "key": "sizing_limit_connection_multiple",
+    "label": "Sizing limit for every extendable asset (multiple of the connection limit)",
+    "provenance": "library",
+    "range": {
+     "high": 4.0,
+     "low": 1.0,
+     "source": "assumed"
+    },
+    "sensitivity_flag": false,
+    "source": "Assumed (guided investment study plan v2, S4 / review v2 BC-2): two connection limits bound what import plus export can carry through the site connection",
+    "source_url": null,
+    "source_year": 2026,
+    "status": "default",
+    "technical_name": "p_nom_max = connection_mw x value (battery StorageUnit, PV Generator)",
+    "unavailable": {},
+    "unit": "multiple of connection limit",
+    "value": 2.0
+   },
+   {
+    "basis": "real",
+    "changed_at": null,
+    "changed_by": null,
+    "currency_year": 2020,
+    "domain": {
+     "high": 1.0,
+     "high_open": true,
+     "low": 0.0,
+     "low_open": false
+    },
+    "help": null,
+    "key": "discount_rate",
+    "label": "Discount rate (real, pre-tax)",
+    "provenance": "library",
+    "range": {
+     "high": 0.091,
+     "low": 0.049,
+     "source": "assumed"
+    },
+    "sensitivity_flag": true,
+    "source": "PyPSA-Eur v2026.02.0 config/config.default.yaml, costs.fill_values 'discount rate' (the fill-in rate for technologies whose technology-data row carries no discount rate of its own)",
+    "source_url": "https://github.com/PyPSA/pypsa-eur/blob/v2026.02.0/config/config.default.yaml",
+    "source_year": 2026,
+    "status": "default",
+    "technical_name": "discount_rate",
+    "unavailable": {},
+    "unit": "per unit",
+    "value": 0.07
+   }
+  ]
+ },
+ "maturity": {
+  "accuracy_band": {
+   "high_pct": 100.0,
+   "high_pct_narrow": 30.0,
+   "low_pct": -50.0,
+   "low_pct_narrow": -20.0,
+   "reference": "AACE International RP 18R-97 (indicative analogy, Class 5)"
+  },
+  "class": "screening",
+  "reasons": [
+   "battery_inverter_eur_per_kw: default (library)",
+   "battery_storage_eur_per_kwh: default (library)",
+   "discount_rate: default (library)",
+   "load: synthetic (upload metered load to raise maturity)"
+  ],
+  "status": "ok",
+  "unavailable": {}
+ },
+ "stored": true,
+ "study_id": "5cb04667fcc64915acbb6e9704d204d1"
+}

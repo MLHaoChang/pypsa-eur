@@ -1,0 +1,172 @@
+{
+ "currency_year": 2020,
+ "default_tariff_id": "de_industrial_illustrative",
+ "library_version": "technology-data v0.14.0",
+ "load_profiles": [
+  {
+   "label": "Commercial office (synthetic shape)",
+   "note": "Scaled to the intake's annual MWh; replace with a metered load to leave screening maturity.",
+   "profile_id": "commercial_office",
+   "source": "synthetic: guided investment study S4, a stated shape (weekday 08-18 plateau, night and weekend base, summer cooling uplift), not a measurement",
+   "synthetic": true
+  },
+  {
+   "label": "Industrial, two shifts (synthetic shape)",
+   "note": "Scaled to the intake's annual MWh; replace with a metered load to leave screening maturity.",
+   "profile_id": "industrial_two_shift",
+   "source": "synthetic: guided investment study S4, a stated shape (weekday 06-22 two shifts, night and weekend base, August and December shutdown dips), not a measurement",
+   "synthetic": true
+  }
+ ],
+ "load_units": [
+  "kW",
+  "MW"
+ ],
+ "tariffs": [
+  {
+   "billing_period": "month",
+   "capacity_charge": null,
+   "connection_limit_mw": null,
+   "currency": "EUR",
+   "currency_year": 2020,
+   "demand_charge": {
+    "basis": "billing_period_peak",
+    "price_per_mw_per_period": 9000.0,
+    "ratchet": null
+   },
+   "energy_bands": [
+    {
+     "applies": {
+      "hours": [],
+      "months": [],
+      "weekdays": []
+     },
+     "label": "Energy (all hours)",
+     "price_per_mwh": 110.0
+    }
+   ],
+   "export": {
+    "cap_mw": null,
+    "price_per_mwh": 40.0,
+    "series_ref": null
+   },
+   "fixed_charge_per_period": 400.0,
+   "honesty_help": {
+    "tariff_demand_charge_monthly_peak_not_annual": "German network operators bill the capacity charge on the ANNUAL peak (Jahresleistungspreis); this seed bills each month's peak because MVP-1 models one monthly demand charge.",
+    "tariff_illustrative": "Illustrative figures of a plausible order of magnitude, not a published tariff: replace them with the site's own bill."
+   },
+   "honesty_notes": [
+    "tariff_illustrative",
+    "tariff_demand_charge_monthly_peak_not_annual"
+   ],
+   "name": "German-style industrial tariff (illustrative)",
+   "network_charges": [
+    {
+     "basis": "per_mwh",
+     "label": "Network energy charge (Arbeitspreis)",
+     "price": 20.0
+    }
+   ],
+   "source": "illustrative",
+   "source_year": 2026,
+   "tariff_id": "de_industrial_illustrative"
+  },
+  {
+   "billing_period": "month",
+   "capacity_charge": null,
+   "connection_limit_mw": null,
+   "currency": "EUR",
+   "currency_year": 2020,
+   "demand_charge": null,
+   "energy_bands": [
+    {
+     "applies": {
+      "hours": [
+       8,
+       9,
+       10,
+       11,
+       12,
+       13,
+       14,
+       15,
+       16,
+       17,
+       18,
+       19
+      ],
+      "months": [],
+      "weekdays": [
+       0,
+       1,
+       2,
+       3,
+       4
+      ]
+     },
+     "label": "Peak (weekdays 08:00-20:00)",
+     "price_per_mwh": 160.0
+    },
+    {
+     "applies": {
+      "hours": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       20,
+       21,
+       22,
+       23
+      ],
+      "months": [],
+      "weekdays": [
+       0,
+       1,
+       2,
+       3,
+       4
+      ]
+     },
+     "label": "Off-peak (weekday nights)",
+     "price_per_mwh": 90.0
+    },
+    {
+     "applies": {
+      "hours": [],
+      "months": [],
+      "weekdays": [
+       5,
+       6
+      ]
+     },
+     "label": "Off-peak (weekends)",
+     "price_per_mwh": 90.0
+    }
+   ],
+   "export": {
+    "cap_mw": null,
+    "price_per_mwh": 30.0,
+    "series_ref": null
+   },
+   "fixed_charge_per_period": 50.0,
+   "honesty_help": {
+    "tariff_illustrative": "Illustrative figures, not a published tariff.",
+    "tariff_isolates_energy_time_shift": "No demand charge: the reference isolates energy time-shift value; the bands partition every hour of the week."
+   },
+   "honesty_notes": [
+    "tariff_illustrative",
+    "tariff_isolates_energy_time_shift"
+   ],
+   "name": "Time-of-use reference tariff (illustrative)",
+   "network_charges": [],
+   "source": "illustrative",
+   "source_year": 2026,
+   "tariff_id": "tou_reference_illustrative"
+  }
+ ]
+}

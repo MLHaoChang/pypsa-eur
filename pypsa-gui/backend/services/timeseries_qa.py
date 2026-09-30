@@ -203,3 +203,22 @@ def check_timeseries_quality(n) -> list:
 
     out += _check_load_scale(n)
     return out
+
+
+def check_series(component_class: str, name: str, attribute: str, values) -> list:
+    """
+    The shape checks of ONE series that is not (yet) in a network — the
+    decision study's uploaded load is checked before its pack is built
+    (plan S8, gate S4 [S6] carry). Same checks and sentences as
+    :func:`check_timeseries_quality` for the profile kinds it covers; an
+    unknown kind gets no check rather than a sentence that is not true of it.
+    """
+    target = next((t for t in _PROFILE_TARGETS
+                   if t[0] == component_class and t[2] == attribute), None)
+    if target is None:
+        return []
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if not arr.size:
+        return []
+    return _check_column(component_class, name, attribute, arr, target[3])

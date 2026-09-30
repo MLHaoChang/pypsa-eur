@@ -132,6 +132,8 @@ def test_two_dispatch_drivers_charge_four_solves_on_forks_that_are_gone_afterwar
     assert body["verdict"]["status"] == "ok"
     assert body["verdict"]["class"] in ("recommended", "marginal")
     assert body["value_streams_status"] == "ok"
+    # S8 (gate S6 carry): the waterfall's label is typed, not read from a note.
+    assert body["value_streams_basis"] == "baseline"
     assert {s["key"] for s in body["value_streams"]} == {
         "demand_charge_reduction", "energy_shift", "export_credit", "fixed"}
     assert body["hashes"]["ledger_hash"] and body["hashes"]["base_network_hash"]
@@ -177,6 +179,7 @@ def test_a_bess_pv_option_is_attributed_only_after_its_reference_solves(
     pv = next(a for a in pre["battery_attribution"] if a["option_id"] == "bess_pv_2h")
     assert pv["status"] == "not_established"
     assert pv["unavailable"]["battery_npv"] == "bess_pv_value_not_attributable_to_battery"
+    assert (pre["value_streams_basis"] is None) == (pre["value_streams_status"] != "ok")
     run_solves = len(fake.calls)
     r = client.post(f"/api/projects/tor-pv/studies/{sid}/findings/tornado", json={})
     assert r.status_code == 202, r.text
@@ -200,6 +203,9 @@ def test_a_bess_pv_option_is_attributed_only_after_its_reference_solves(
     assert pv["battery_npv"] == pytest.approx(pv["option_npv"] - pv["reference_npv"])
     assert rec["solves_charged"] == len(fake.calls) - run_solves == 9
     assert post["verdict"]["option_id"] == "bess_pv_2h"
+    # S8: the streams of a bess_pv verdict are the battery's increment.
+    assert post["value_streams_status"] == "ok"
+    assert post["value_streams_basis"] == "pv_only_reference"
 
 
 # ── abort mid-tornado ─────────────────────────────────────────────────────

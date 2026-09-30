@@ -64,11 +64,13 @@ from __future__ import annotations
 
 import calendar
 import csv
+import dataclasses
 import functools
 import hashlib
 import io
 import json
 import math
+import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -83,10 +85,10 @@ from services.study import questions as Q
 from services.study import tariff as study_tariff
 
 __all__ = [
-    "HOURS", "PackError", "PACK_META_KEY", "battery_capital_cost_eur_per_mw",
+    "HOURS", "LOAD_UNITS", "LoadUpload", "PackError", "PACK_META_KEY", "battery_capital_cost_eur_per_mw",
     "battery_fom_eur_per_mw", "battery_upfront_eur_per_mw", "build_site_network",
     "effective_tariff", "intake_tariff", "ledger_hash", "ledger_values",
-    "load_profile_ids", "needs_attention_rows", "option_solver_config",
+    "load_profile_ids", "load_profiles", "needs_attention_rows", "read_intake_load", "snapshots_for", "option_solver_config", "parse_load_upload",
     "refuse_unrunnable_ledger", "round_trip_efficiency",
 ]
 
@@ -242,6 +244,11 @@ def intake_tariff(intake: Mapping[str, Any] | None,
     return tariff, notes
 
 
+def snapshots_for(intake: Mapping[str, Any] | None) -> pd.DatetimeIndex:
+    """The study year's hourly snapshots (refuses a leap year); S8's preview."""
+    return _snapshots(intake or {})
+
+
 def _snapshots(intake: Mapping[str, Any]) -> pd.DatetimeIndex:
     year = _site(intake).get("year", 2025)
     try:
@@ -290,6 +297,15 @@ def load_profile_ids() -> list[str]:
     return sorted(_profile_index())
 
 
+def load_profiles() -> list[dict[str, Any]]:
+    """The sector profiles as the guided flow lists them (S8), in id order."""
+    idx = _profile_index()
+    return [{"profile_id": pid, "label": idx[pid]["label"], "source": idx[pid]["source"],
+             "synthetic": str(idx[pid].get("synthetic", "")).strip().lower() == "true",
+             "note": idx[pid].get("note") or ""}
+            for pid in sorted(idx)]
+
+
 @functools.lru_cache(maxsize=8)
 def _profile_factors(profile_id: str) -> dict[tuple[int, str, int], float]:
     if profile_id not in _profile_index():
@@ -312,25 +328,146 @@ def _synthetic_load(idx: pd.DatetimeIndex, profile_id: str, annual_mwh: float) -
     return shape / shape.sum() * float(annual_mwh)
 
 
-def _parse_series_bytes(blob: bytes) -> list[float]:
-    """The last numeric column of a CSV, header rows skipped."""
+# ── an uploaded load (S8; gate S4 [S6] carry) ─────────────────────────────
+#
+# A meter export is read with checks, never as "the last numeric column" on
+# trust: one value column, optionally after one timestamp column; timestamps,
+# when present, must be exactly the study year's 8760 hours in order; the
+# unit comes from the value column's header (kW/MW, or kWh/MWh per hour) or
+# from the intake's `load.unit`, and the two must agree; the series then goes
+# through the same shape checks as every uploaded profile
+# (`services/timeseries_qa.py::check_series`), whose findings ride along as
+# codes (`load_upload_qa_<code>`) and as their sentences. None of the QA
+# findings blocks: by the QA module's own policy the user is told and decides.
+
+LOAD_UNITS = ("kW", "MW")
+_HEADER_UNIT_RE = re.compile(r"(?<![a-z])([km])wh?(?![a-z])", re.IGNORECASE)
+
+
+@dataclasses.dataclass
+class LoadUpload:
+    """A parsed load upload: MW values, what was read and what was found."""
+
+    values: np.ndarray
+    unit: str
+    has_timestamps: bool
+    notes: list[str]
+    warnings: list[dict[str, str]]
+
+
+def _number(text: str) -> float | None:
+    try:
+        return float(str(text).strip())
+    except ValueError:
+        return None
+
+
+def _header_unit(header: list[str] | None) -> str | None:
+    if not header:
+        return None
+    m = _HEADER_UNIT_RE.search(str(header[-1]))
+    return None if m is None else ("kW" if m.group(1).lower() == "k" else "MW")
+
+
+def _check_timestamps(cells: list[str], year: int) -> None:
+    expected = pd.date_range(f"{year}-01-01", periods=HOURS, freq="h")
+    rule = (f"timestamps must be the {HOURS} hours of {year} in order, one per "
+            f"hour from 1 January {year} 00:00, without gaps or repeats")
+    try:
+        idx = pd.DatetimeIndex(pd.to_datetime(cells, format="mixed"))
+    except (ValueError, TypeError) as exc:
+        raise PackError("load_upload_timestamps_invalid",
+                        f"a timestamp could not be read ({exc}); {rule}") from None
+    if idx.tz is not None:
+        idx = idx.tz_localize(None)
+    if len(idx) != HOURS:
+        raise PackError("load_upload_timestamps_invalid",
+                        f"the file has {len(idx)} rows; {rule}")
+    bad = np.flatnonzero(idx.values != expected.values)
+    if bad.size:
+        i = int(bad[0])
+        raise PackError("load_upload_timestamps_invalid", (
+            f"row {i + 1} reads {idx[i]:%Y-%m-%d %H:%M} where {expected[i]:%Y-%m-%d %H:%M} "
+            f"was expected; {rule}"))
+
+
+def parse_load_upload(blob: bytes, *, unit: str | None, year: int) -> LoadUpload:
+    """
+    Read an uploaded load CSV into ``HOURS`` MW values (see the block
+    comment above for the rules). Refusals are typed ``PackError`` codes:
+    ``load_upload_invalid``, ``load_upload_timestamps_invalid``,
+    ``load_upload_unit_unknown``, ``load_upload_unit_mismatch``.
+    """
+    from services.timeseries_qa import check_series
+
+    if unit is not None and unit not in LOAD_UNITS:
+        raise PackError("load_upload_invalid", f"load.unit is kW or MW, not {unit!r}")
     text = blob.decode("utf-8-sig", errors="replace")
-    out: list[float] = []
-    for row in csv.reader(io.StringIO(text)):
-        if not row:
-            continue
-        try:
-            out.append(float(row[-1]))
-        except ValueError:
-            if out:
-                raise PackError("load_upload_invalid",
-                                f"non-numeric value {row[-1]!r} after data started") from None
-    return out
+    rows = [[c.strip() for c in r] for r in csv.reader(io.StringIO(text))
+            if r and any(c.strip() for c in r)]
+    if not rows:
+        raise PackError("load_upload_invalid", "the uploaded file is empty")
+    header = None
+    if _number(rows[0][-1]) is None:
+        header, rows = rows[0], rows[1:]
+    widths = {len(r) for r in rows}
+    if not rows or not widths <= {1, 2} or len(widths) != 1:
+        raise PackError("load_upload_invalid", (
+            "the file must have one load column, optionally after one timestamp "
+            f"column; found rows of {sorted(widths) or [0]} column(s)"))
+    has_timestamps = widths == {2}
+    values: list[float] = []
+    for i, r in enumerate(rows):
+        v = _number(r[-1])
+        if v is None:
+            raise PackError("load_upload_invalid",
+                            f"row {i + 1}: {r[-1]!r} is not a number")
+        values.append(v)
+    if has_timestamps:
+        _check_timestamps([r[0] for r in rows], year)
+    elif len(values) != HOURS:
+        raise PackError("load_upload_invalid",
+                        f"an uploaded load needs {HOURS} hourly values; got {len(values)}")
+    named = _header_unit(header)
+    if named is not None and unit is not None and named != unit:
+        raise PackError("load_upload_unit_mismatch", (
+            f"the file's header says {named} but the answer says {unit}; "
+            "correct one of them"))
+    used = named or unit
+    if used is None:
+        raise PackError("load_upload_unit_unknown", (
+            "the file's header names no unit; say whether the values are kW or MW"))
+    arr = np.asarray(values, dtype=float)
+    notes: list[str] = []
+    if used == "kW":
+        arr = arr / 1000.0
+        notes.append("load_upload_converted_from_kw")
+    if not has_timestamps:
+        notes.append("load_upload_without_timestamps")
+    if not np.isfinite(arr).all() or (arr < 0).any():
+        raise PackError("load_upload_invalid",
+                        "the uploaded load has a negative or non-finite value")
+    issues = check_series("Load", LOAD_NAME, "p_set", arr)
+    notes += [f"load_upload_qa_{i.code}" for i in issues]
+    return LoadUpload(values=arr, unit=used, has_timestamps=has_timestamps, notes=notes,
+                      warnings=[{"code": i.code, "message": i.message} for i in issues])
 
 
 def _load_series(intake: Mapping[str, Any], idx: pd.DatetimeIndex,
                  resolve_upload: Callable[[str], bytes] | None) -> tuple[np.ndarray, list[str]]:
+    read = read_intake_load(intake, idx, resolve_upload)
+    return read.values, list(read.notes)
+
+
+def read_intake_load(intake: Mapping[str, Any], idx: pd.DatetimeIndex,
+                     resolve_upload: Callable[[str], bytes] | None) -> LoadUpload:
+    """
+    The intake's load as the pack reads it (S8: the preview route shows the
+    user exactly this, QA findings included). Needs an answered load step.
+    """
     load = intake.get("load")
+    if not isinstance(load, Mapping) or not load.get("source"):
+        raise PackError("intake_incomplete", "the load step has not been answered")
     source = str(load.get("source"))
     if source in ("upload", "uploaded", "measured"):
         series = load.get("series_mw")
@@ -338,7 +475,8 @@ def _load_series(intake: Mapping[str, Any], idx: pd.DatetimeIndex,
             if resolve_upload is None:
                 raise PackError("load_upload_unresolved",
                                 "the load names an upload but no upload store was given")
-            series = _parse_series_bytes(resolve_upload(str(load["upload_id"])))
+            return parse_load_upload(resolve_upload(str(load["upload_id"])),
+                                     unit=load.get("unit"), year=int(idx[0].year))
         if not isinstance(series, (list, tuple)) or len(series) != HOURS:
             n = len(series) if isinstance(series, (list, tuple)) else 0
             raise PackError("load_upload_invalid",
@@ -347,7 +485,7 @@ def _load_series(intake: Mapping[str, Any], idx: pd.DatetimeIndex,
         if not np.isfinite(arr).all() or (arr < 0).any():
             raise PackError("load_upload_invalid",
                             "the uploaded load has a negative or non-finite value")
-        return arr, []
+        return LoadUpload(values=arr, unit="MW", has_timestamps=False, notes=[], warnings=[])
     profile = str(load.get("profile") or "commercial_office")
     try:
         annual = float(load.get("annual_mwh"))
@@ -356,7 +494,9 @@ def _load_series(intake: Mapping[str, Any], idx: pd.DatetimeIndex,
                         "a sector-profile load needs annual_mwh") from None
     if not math.isfinite(annual) or annual <= 0:
         raise PackError("intake_invalid", "annual_mwh must be > 0")
-    return _synthetic_load(idx, profile, annual), [f"synthetic_load_profile:{profile}"]
+    return LoadUpload(values=_synthetic_load(idx, profile, annual), unit="MW",
+                      has_timestamps=True, notes=[f"synthetic_load_profile:{profile}"],
+                      warnings=[])
 
 
 def _synthetic_pv(idx: pd.DatetimeIndex, latitude: float) -> np.ndarray:

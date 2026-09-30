@@ -1205,6 +1205,7 @@ def assemble_findings(study, base_dir, db, base_uuid: str, *,
         None)
     streams: list[ValueStream] = []
     streams_status = "not_established"
+    streams_basis = None
     if streams_option is not None and streams_option in ctx.options:
         opt = ctx.options[streams_option]
         against = ref_bills.get(streams_option)
@@ -1214,6 +1215,7 @@ def assemble_findings(study, base_dir, db, base_uuid: str, *,
         elif opt.bill is not None and (against or ctx.baseline_bill) is not None:
             streams = value_streams(against or ctx.baseline_bill, opt.bill)
             streams_status = "ok"
+            streams_basis = "baseline" if against is None else "pv_only_reference"
             if against is not None:
                 notes.append("value_streams_battery_increment_over_pv_only_reference")
     v = verdict(attributions, judged_rob, streams=streams, option_networks=nets,
@@ -1249,6 +1251,7 @@ def assemble_findings(study, base_dir, db, base_uuid: str, *,
         battery_attribution=attributions, value_streams=streams,
         value_streams_option=streams_option if streams else None,
         value_streams_status=streams_status,
+        value_streams_basis=streams_basis,
         completeness={"options": faux.get("options_status", "not_established"),
                       "verdict": v.status, "robustness": robustness.status,
                       "value_streams": streams_status,

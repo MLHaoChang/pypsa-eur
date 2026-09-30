@@ -328,3 +328,99 @@ def test_a_leap_year_is_refused(ledger, year):
     with pytest.raises(P.PackError) as exc:
         P.build_site_network(intake, ledger, "none")
     assert exc.value.code == "leap_year_unsupported"
+
+
+# ── S8 (gate S4 [S6] carry): an uploaded load goes through a parser with
+# timestamp and unit checks and the time-series QA, never "the last numeric
+# column" taken on trust ──────────────────────────────────────────────────
+
+def _csv(values, *, header="timestamp,load (MW)", year=2025, freq="h", timestamps=True):
+    import pandas as pd
+
+    idx = pd.date_range(f"{year}-01-01", periods=len(values), freq=freq)
+    lines = [header] if header else []
+    for t, v in zip(idx, values):
+        lines.append(f"{t:%Y-%m-%d %H:%M},{v}" if timestamps else f"{v}")
+    return ("\n".join(lines) + "\n").encode()
+
+
+def _shape():
+    return [1.0 + (i % 24) / 24 for i in range(8760)]
+
+
+def test_an_hourly_csv_in_mw_is_parsed_as_given():
+    up = P.parse_load_upload(_csv(_shape()), unit=None, year=2025)
+    assert up.values.tolist() == pytest.approx(_shape())
+    assert up.unit == "MW" and up.has_timestamps is True
+    assert up.notes == [] and up.warnings == []
+
+
+def test_a_kw_header_is_converted_to_mw_and_says_so():
+    kw = [v * 1000 for v in _shape()]
+    up = P.parse_load_upload(_csv(kw, header="time,Site load [kW]"), unit=None, year=2025)
+    assert up.values.tolist() == pytest.approx(_shape())
+    assert up.unit == "kW" and "load_upload_converted_from_kw" in up.notes
+
+
+def test_a_file_that_names_no_unit_needs_one_from_the_intake():
+    blob = _csv(_shape(), header="timestamp,load")
+    with pytest.raises(P.PackError) as exc:
+        P.parse_load_upload(blob, unit=None, year=2025)
+    assert exc.value.code == "load_upload_unit_unknown"
+    up = P.parse_load_upload(blob, unit="kW", year=2025)
+    assert up.values.tolist() == pytest.approx([v / 1000 for v in _shape()])
+
+
+def test_a_header_unit_that_contradicts_the_intake_is_refused():
+    with pytest.raises(P.PackError) as exc:
+        P.parse_load_upload(_csv(_shape()), unit="kW", year=2025)
+    assert exc.value.code == "load_upload_unit_mismatch"
+
+
+@pytest.mark.parametrize("blob_kw", [
+    {"year": 2023},                   # another year than the study's
+    {"freq": "15min"},                # not hourly
+])
+def test_timestamps_that_are_not_the_studys_hourly_year_are_refused(blob_kw):
+    values = _shape() if blob_kw.get("freq") is None else [1.0] * 8760
+    with pytest.raises(P.PackError) as exc:
+        P.parse_load_upload(_csv(values, **blob_kw), unit=None, year=2025)
+    assert exc.value.code == "load_upload_timestamps_invalid"
+
+
+def test_a_duplicated_hour_is_refused():
+    import pandas as pd
+
+    idx = list(pd.date_range("2025-01-01", periods=8760, freq="h"))
+    idx[5] = idx[4]
+    blob = ("timestamp,load (MW)\n" + "\n".join(
+        f"{t:%Y-%m-%d %H:%M},1.0" for t in idx) + "\n").encode()
+    with pytest.raises(P.PackError) as exc:
+        P.parse_load_upload(blob, unit=None, year=2025)
+    assert exc.value.code == "load_upload_timestamps_invalid"
+
+
+def test_a_single_column_without_timestamps_is_read_in_order_and_says_so():
+    up = P.parse_load_upload(_csv(_shape(), header="MW", timestamps=False), unit=None, year=2025)
+    assert up.has_timestamps is False
+    assert up.values.tolist() == pytest.approx(_shape())
+    assert "load_upload_without_timestamps" in up.notes
+
+
+def test_the_timeseries_qa_findings_ride_along_as_codes_and_sentences():
+    spiky = _shape()
+    spiky[100] = 5000.0          # a misplaced decimal point
+    up = P.parse_load_upload(_csv(spiky), unit=None, year=2025)
+    assert "load_upload_qa_timeseries_spike" in up.notes
+    (w,) = [w for w in up.warnings if w["code"] == "timeseries_spike"]
+    assert "median" in w["message"]
+
+
+def test_a_pack_built_from_an_upload_id_reads_the_parsed_mw_series(library):
+    kw = [v * 1000 for v in _shape()]
+    blobs = {"u1": _csv(kw, header="timestamp,load")}
+    intake = _intake(load={"source": "upload", "upload_id": "u1", "unit": "kW"})
+    led = lib.seed_ledger(Q.BESS_AT_SITE, intake, library)
+    n = P.build_site_network(intake, led, "none", resolve_upload=blobs.__getitem__)
+    assert n.loads_t.p_set["site_load"].tolist() == pytest.approx(_shape())
+    assert "load_upload_converted_from_kw" in n.meta[P.PACK_META_KEY]["honesty_notes"]

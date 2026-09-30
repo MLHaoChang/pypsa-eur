@@ -236,6 +236,11 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/studies.py", "get_report_html"):        frozenset({"decision_report"}),
     ("routers/studies.py", "get_report_docx"):        frozenset({"decision_report"}),
     ("routers/studies.py", "get_report_xlsx"):        frozenset({"decision_report"}),
+    # S8: the intake's reads. The library lists inputs; the preview shows the
+    # load as the pack reads it and the grid-only bill from the S3 bill
+    # calculator (pinned by its own tests) — no investment economics.
+    ("routers/studies.py", "get_study_library"):      frozenset(),
+    ("routers/studies.py", "preview_intake"):         frozenset(),
 }
 
 

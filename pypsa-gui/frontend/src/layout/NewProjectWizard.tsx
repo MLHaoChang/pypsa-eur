@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   FolderInput,
   FilePlus, FolderOpen, BookOpen, Upload, Copy as CopyIcon, X, AlertTriangle,
-  Sparkles, FlaskConical,
+  Sparkles, FlaskConical, Scale,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { ProjectInfo } from '../api/types'
@@ -19,6 +19,9 @@ import { nk } from '../utils/queryKeys'
 import { appLog } from '../store/simulationStore'
 import { Dialog } from '../components/Dialog'
 import { gridspineApi } from '../api/gridspine'
+import { decisionStudiesApi } from '../api/decisionStudies'
+import { useDecisionStore } from '../pages/decision/decisionStore'
+import { errorCopy } from '../utils/decisionVocabulary'
 
 // NewProjectWizard — replaces the single-input NewProjectModal with a 4-tab
 // flow per the design spec. Tabs:
@@ -42,9 +45,13 @@ export interface NewProjectWizardProps {
   // separate action cards, so it needs to open the wizard already on the one
   // the user clicked; the workbench omits it and gets 'blank'.
   initialTab?: NewProjectTab
+  // Called after a decision study's intake was opened (the `decision` tab).
+  // The projects home passes a navigation into the workbench, where the
+  // decision panel lives; the workbench omits it.
+  onDecisionStart?: () => void
 }
 
-export type NewProjectTab = 'blank' | 'template' | 'file' | 'clone' | 'folder' | 'study'
+export type NewProjectTab = 'blank' | 'template' | 'file' | 'clone' | 'folder' | 'study' | 'decision'
 type Tab = NewProjectTab
 
 // Curated example networks. `available: true` templates are backed by a real
@@ -63,7 +70,7 @@ const TEMPLATES = [
 ] as const
 
 export default function NewProjectWizard({
-  existingProjects, onConfirm, onClose, isPending, initialTab = 'blank',
+  existingProjects, onConfirm, onClose, isPending, initialTab = 'blank', onDecisionStart,
 }: NewProjectWizardProps) {
   const [tab, setTab] = useState<Tab>(initialTab)
   const { authEnabled } = useAuthMode()
@@ -99,6 +106,7 @@ export default function NewProjectWizard({
         <TabBtn id="file"     active={tab === 'file'}     onClick={() => setTab('file')}     icon={<Upload size={12} />}     label="From file" />
         <TabBtn id="clone"    active={tab === 'clone'}    onClick={() => setTab('clone')}    icon={<CopyIcon size={12} />}   label="Clone" />
         <TabBtn id="study"    active={tab === 'study'}    onClick={() => setTab('study')}    icon={<FlaskConical size={12} />} label="Study" />
+        <TabBtn id="decision" active={tab === 'decision'} onClick={() => setTab('decision')} icon={<Scale size={12} />}        label="Decision study" />
         {/* DESKTOP ONLY. The route it calls takes a server-side path, so it
             404s when auth is on — offering the tab there would be a dead end
             of exactly the kind the "Open admin" button turned out to be. */}
@@ -114,6 +122,7 @@ export default function NewProjectWizard({
         {tab === 'file'     && <FromFileTab onClose={onClose} />}
         {tab === 'clone'    && <CloneTab    existingProjects={existingProjects} onClose={onClose} />}
         {tab === 'study'    && <StudyTab    existingProjects={existingProjects} onClose={onClose} />}
+        {tab === 'decision' && <DecisionTab existingProjects={existingProjects} onClose={onClose} onStarted={onDecisionStart} onBlank={() => setTab('blank')} />}
         {tab === 'folder' && !authEnabled && <FromFolderTab onClose={onClose} />}
       </div>
     </Dialog>
@@ -724,5 +733,84 @@ function StudyTab({ existingProjects, onClose }: { existingProjects: ProjectInfo
         </button>
       </div>
     </form>
+  )
+}
+
+
+// ── Tab: Decision study — question cards (guided investment study, plan S8) ──
+// A question-first study creates its OWN base project (plan S4 M0) and changes
+// none of the user's. Its intake is answered in the `decision` panel before
+// the study exists (creation needs the mandatory answers); the project the
+// POST names is only the authorisation and the place the load upload goes.
+// Where the backend refuses the study routes — multi-user mode until
+// OPEN-ITEMS 1 is closed, or `PYPSAGUI_DECISION_STUDIES` unset — the card is
+// disabled with the reason; it never offers a dead end.
+function DecisionTab({ existingProjects, onClose, onStarted, onBlank }: {
+  existingProjects: ProjectInfo[]
+  onClose: () => void
+  onStarted?: () => void
+  onBlank: () => void
+}) {
+  const { authEnabled } = useAuthMode()
+  const currentProject = useUIStore(s => s.currentProject)
+  const setSlidePanel = useUIStore(s => s.setSlidePanel)
+  const startDraft = useDecisionStore(s => s.startDraft)
+  const path = existingProjects.find(p => p.name === currentProject)?.name ?? existingProjects[0]?.name ?? null
+  const avail = useQuery({
+    queryKey: ['decision', path ?? '', 'availability'],
+    queryFn: () => decisionStudiesApi.availability(path!),
+    enabled: !authEnabled && !!path,
+    retry: false,
+  })
+  let reason: string | null = null
+  if (authEnabled) {
+    const c = errorCopy('decision_studies_unavailable'); reason = `${c.title} ${c.action}`
+  } else if (!path) {
+    reason = 'Create or open a project first: the study needs one to authorise it (nothing in it is changed).'
+  } else if (avail.data && !avail.data.available) {
+    const c = errorCopy(avail.data.code); reason = `${c.title} ${c.action}`
+  } else if (avail.isError) {
+    reason = 'Could not check whether decision studies are available. Try again.'
+  }
+  const ready = !reason && avail.data?.available === true
+
+  const start = () => {
+    if (!path || !ready) return
+    startDraft({ pathProject: path, name: 'Battery at my site', baseName: '' })
+    setSlidePanel('decision')
+    onClose()
+    onStarted?.()
+  }
+
+  return (
+    <div className="p-5 flex flex-col gap-3">
+      <p className="text-[12px] text-muted">
+        Start from the question you want answered. The study builds its own project, runs the options for you and
+        writes a report; the Expert view (the canvas) stays one click away.
+      </p>
+      {reason && <p data-testid="decision-reason" className="text-[11px] text-warn">{reason}</p>}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="border border-border rounded-lg p-3.5 flex flex-col gap-2">
+          <span className="text-sm font-semibold text-text">Do I need a battery at my site?</span>
+          <span className="text-[11px] text-muted leading-relaxed">
+            From your load and your tariff: whether a battery pays for itself, what size to build, what it is worth,
+            and how sure that is. You get a yes/no, a size, a value and a report.
+          </span>
+          <button type="button" onClick={start} disabled={!ready} aria-label="Start: Do I need a battery at my site?"
+            className="self-start px-3 py-1.5 text-[12px] rounded bg-accent text-white disabled:opacity-40">
+            Start
+          </button>
+        </div>
+        <div className="border border-border rounded-lg p-3.5 flex flex-col gap-2">
+          <span className="text-sm font-semibold text-text">Open a blank model</span>
+          <span className="text-[11px] text-muted leading-relaxed">
+            Your own question: build the network yourself on the canvas. Other guided questions are not in this version.
+          </span>
+          <button type="button" onClick={onBlank} className="self-start px-3 py-1.5 text-[12px] rounded border border-border">
+            Blank project
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }

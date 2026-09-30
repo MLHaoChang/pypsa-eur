@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
-import { BookOpen, Copy as CopyIcon, FilePlus, FolderInput, Upload } from 'lucide-react'
+import { BookOpen, Copy as CopyIcon, FilePlus, FolderInput, Scale, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { projectsApi, type UnclaimedProject } from '../api/projects'
 import { networkApi } from '../api/network'
@@ -79,6 +79,9 @@ const START_ACTIONS: ReadonlyArray<{
   { tab: 'template', label: 'From template', hint: 'Bundled starter networks', Icon: BookOpen },
   { tab: 'file', label: 'Import from disk', hint: '.pypsaproj.zip or .nc', Icon: Upload },
   { tab: 'clone', label: 'Duplicate a project', hint: 'Fork one you can access', Icon: CopyIcon },
+  // S8: a question-first decision study (its own project; the intake opens in
+  // the workbench's decision panel).
+  { tab: 'decision', label: 'Decision study', hint: 'Do I need a battery? Get a yes/no and a report', Icon: Scale },
 ]
 
 // DESKTOP ONLY, appended to the grid in local mode. The route behind it
@@ -767,6 +770,7 @@ export default function ProjectsHomePage() {
           isPending={createBlank.isPending}
           onClose={closeWizard}
           onConfirm={name => createBlank.mutate(name)}
+          onDecisionStart={() => navigate('/app')}
         />
       )}
     </div>

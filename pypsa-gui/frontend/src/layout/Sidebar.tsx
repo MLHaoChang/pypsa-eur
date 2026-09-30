@@ -8,7 +8,7 @@ import {
   MousePointer, ZoomIn, ZoomOut, AlertTriangle,
   Thermometer, Zap, Camera, LayoutDashboard,
   Sun, Moon, Rows2, Rows3,
-  GitBranch as GitBranchIcon, ListChecks, FlaskConical,
+  GitBranch as GitBranchIcon, ListChecks, FlaskConical, Scale,
   MessageSquare, LayoutGrid, Users, SlidersHorizontal,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -1352,6 +1352,13 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
         title="Rank a year's extreme hours, screen N-1/N-2 and fault levels, and export PowerFactory handoff bundles (gridspine)."
         active={activeSlidePanel === 'gridspine'}
         onClick={() => { setSlidePanel(activeSlidePanel === 'gridspine' ? null : 'gridspine'); onCloseModal?.() }}
+      />
+      {/* S8: the decision panel (guided investment study). It lists this
+          project's decision studies, or the one last opened. */}
+      <SItem icon={<Scale size={15} />} label="Decision study"
+        title="Answer an investment question (do I need a battery?) with a verdict, a size, a value and a report."
+        active={activeSlidePanel === 'decision'}
+        onClick={() => { setSlidePanel(activeSlidePanel === 'decision' ? null : 'decision'); onCloseModal?.() }}
       />
       {/* The Assistant row used to live here, as the last of seven. It is not
           a simulation feature — it answers questions about the network and

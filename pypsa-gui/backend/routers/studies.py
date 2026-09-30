@@ -309,6 +309,115 @@ def create_study(body: StudyCreate,
         return _save(project, study)
 
 
+# ── S8: what the guided flow's intake reads (no study needed) ────────────
+#
+# Declared before `/{study_id}` so `library` is never read as a study id.
+
+class PreviewRequest(BaseModel):
+    """An intake, answered or not; nothing is stored."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    intake: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.get("/library")
+def get_study_library(project: AuthorizedProject = ProjectAccessDep) -> dict:
+    """
+    The seed tariffs with their honesty notes AND the sentence behind each
+    code (gate S2: the notes are shown wherever the tariff's name appears),
+    the sector load profiles, the units an upload may be in, and the
+    library's currency year. Read-only; the path project is the
+    authorisation only.
+    """
+    _refuse_unless_enabled()
+    library = _library_or_500()
+    return {
+        "library_version": library.finance.get("library_version"),
+        "currency_year": int(library.finance["currency_year"]),
+        "default_tariff_id": library.default_tariff_id,
+        "tariffs": [t.model_dump(mode="json") for t in library.tariffs.values()],
+        "load_profiles": packs.load_profiles(),
+        "load_units": list(packs.LOAD_UNITS),
+    }
+
+
+def _not_established(code: str, message: str) -> dict:
+    return {"status": "not_established", "error_kind": code, "message": message}
+
+
+@router.post("/preview")
+def preview_intake(body: PreviewRequest,
+                   project: AuthorizedProject = ProjectAccessDep) -> dict:
+    """
+    The intake's load read EXACTLY as the pack will read it (an upload
+    through `packs.parse_load_upload`: timestamps, unit, time-series QA; a
+    sector profile scaled to its annual MWh) and the baseline bill on that
+    load from the bill calculator. The baseline is grid supply only, so its
+    import IS the load and no solve is needed; the tariff is the intake's,
+    with the library's seed values for the ledger rows it prices with (a
+    study's own edits to those rows are not applied here). Nothing is
+    written. An upload id resolves in the PATH project's uploads, the
+    project a new study's upload is copied from and an existing study's
+    runner reads.
+    """
+    import pandas as pd
+
+    from services.study import tariff as study_tariff
+
+    _refuse_unless_enabled()
+    library = _library_or_500()
+    intake = body.intake
+
+    def resolve_upload(file_id: str) -> bytes:
+        from services import upload_service
+        try:
+            return upload_service.get_upload_bytes(project.name, file_id,
+                                                   project_dir=project.directory)
+        except HTTPException:
+            raise packs.PackError("load_upload_unresolved",
+                                  f"no upload {file_id!r} in project {project.name!r}") from None
+
+    load_out: dict[str, Any]
+    series = None
+    try:
+        idx = packs.snapshots_for(intake)
+        read = packs.read_intake_load(intake, idx, resolve_upload)
+        series = pd.Series(read.values, index=idx)
+        conn = packs._connection_mw(intake)
+        load_out = {
+            "status": "ok", "hours": int(len(read.values)), "unit": read.unit,
+            "has_timestamps": read.has_timestamps,
+            "annual_mwh": float(read.values.sum()), "peak_mw": float(read.values.max()),
+            "connection_mw": conn,
+            "peak_exceeds_connection": (conn is not None
+                                        and float(read.values.max()) > conn + 1e-9),
+            "notes": list(read.notes), "warnings": list(read.warnings),
+        }
+    except packs.PackError as exc:
+        load_out = _not_established(exc.code, exc.message)
+
+    if series is None:
+        bill_out = _not_established(
+            "load_not_established", "the bill needs the load; see the load's reason")
+    else:
+        try:
+            question = study_questions.get_question("bess_at_site") or study_questions.BESS_AT_SITE
+            ledger = study_library.seed_ledger(question, intake, library)
+            tariff = packs.effective_tariff(intake, ledger, library, series.index)
+            _t, tariff_notes = packs.intake_tariff(intake, library)
+            bill = study_tariff.BillCalculator().bill(
+                series, pd.Series(0.0, index=series.index), tariff,
+                pd.Series(1.0, index=series.index))
+            bill_out = {"status": "ok", "bill": bill.model_dump(mode="json"),
+                        "tariff": tariff.model_dump(mode="json"),
+                        "notes": list(tariff_notes)}
+        except (packs.PackError, study_library.LibraryError,
+                study_tariff.TariffError) as exc:
+            bill_out = _not_established(getattr(exc, "code", "tariff_invalid"), str(exc))
+    return {"load": load_out, "bill": bill_out}
+
+
 @router.get("/{study_id}")
 def get_study(study_id: str,
               project: AuthorizedProject = ProjectAccessDep) -> dict:

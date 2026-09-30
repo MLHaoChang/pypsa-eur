@@ -55,11 +55,20 @@ export const STEP_LABELS: Record<HorizonStepId, string> = {
   weights: 'Snapshot weightings',
 }
 
-export interface StepShellProps {
+/** `Id` is the step id union of the consumer (S8): Model Horizon passes
+ * `HorizonStepId` with `STEP_LABELS`; the decision study's intake passes its
+ * own ids with its own labels. The ids and the labels are ONE parameter, so a
+ * step without a label, or a `current` that is not a step, does not type. */
+export interface StepShellProps<Id extends string = HorizonStepId> {
   /** Steps visible in rail order — already filtered by visibleSteps(isMultiPeriod). */
-  steps: HorizonStepId[]
-  current: HorizonStepId
-  onSelect: (step: HorizonStepId) => void
+  steps: Id[]
+  current: Id
+  onSelect: (step: Id) => void
+  /** Rail label per step id (Model Horizon: `STEP_LABELS`). */
+  labels: Record<Id, string>
+  /** Accessible name of the step rail. Default "Model horizon steps" (the
+   * name Model Horizon's tests and users already rely on). */
+  navLabel?: string
   /** Chrome heading shown above the step body. Deliberately NOT just
    * STEP_LABELS[current] — several existing sections carry their own <h3>
    * with that exact text (e.g. "Snapshot weightings"), and giving this
@@ -79,10 +88,10 @@ export interface StepShellProps {
   unmountAdvancedWhenCollapsed?: boolean
 }
 
-export function StepShell({
-  steps, current, onSelect, title, children, advanced,
+export function StepShell<Id extends string = HorizonStepId>({
+  steps, current, onSelect, labels, navLabel = 'Model horizon steps', title, children, advanced,
   unmountAdvancedWhenCollapsed = false,
-}: StepShellProps) {
+}: StepShellProps<Id>) {
   const [advancedOpen, setAdvancedOpen] = useState(false)
   // A step switch (e.g. clicking a rail entry) reuses this same StepShell
   // instance — it never unmounts between steps — so without this, opening
@@ -95,7 +104,7 @@ export function StepShell({
   return (
     <div className="flex flex-col gap-3.5">
       <nav
-        aria-label="Model horizon steps"
+        aria-label={navLabel}
         className="flex flex-wrap items-center gap-1 rounded-[7px] bg-panel border border-border p-0.5 self-start"
       >
         {steps.map((step, i) => {
@@ -110,7 +119,7 @@ export function StepShell({
                 ${active ? 'bg-bg text-text shadow-[0_1px_0_rgba(10,14,20,0.04)]' : 'text-muted hover:text-text'}`}
             >
               <span className={`font-mono text-[10px] ${active ? 'text-accent' : 'text-muted'}`}>{i + 1}</span>
-              {STEP_LABELS[step]}
+              {labels[step]}
             </button>
           )
         })}

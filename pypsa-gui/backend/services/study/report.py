@@ -151,6 +151,11 @@ HELP: dict[str, str] = {
     "synthetic_load_profile": (
         "The load is a synthetic sector profile, not the site's metered load."),
     "synthetic_pv_profile": "The PV output is a synthetic clear-sky profile, not measured output.",
+    # S8: an uploaded load (`packs.parse_load_upload`)
+    "load_upload_converted_from_kw": "The uploaded load was in kW and was converted to MW.",
+    "load_upload_without_timestamps": (
+        "The uploaded load has no timestamps; its values were read as the study year's "
+        "hours in order, from the first hour of January."),
     "tariff_not_chosen_library_default": (
         "No tariff was chosen, so the library's default tariff was used; replace it with "
         "the site's own."),
@@ -293,6 +298,9 @@ _PREFIX_HELP: tuple[tuple[str, str], ...] = (
     ("user_row_not_in_library", "A user row has no library counterpart."),
     ("key_drivers_without_a_row", "A key driver of the question has no ledger row."),
     ("bill_unavailable_", "A bill could not be computed, so the case is not established."),
+    ("load_upload_qa_", (
+        "A data-quality check flagged the uploaded load (all zero, flat, negative or with a "
+        "spike far above its median); check the file.")),
     ("reference_", "The option's PV-only reference was not computed."),
     ("fork_changed_since_findings", HELP["fork_changed_since_findings"]),
     ("size_at_upper_bound", HELP["size_at_upper_bound"]),
