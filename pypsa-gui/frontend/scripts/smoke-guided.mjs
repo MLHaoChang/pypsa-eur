@@ -151,7 +151,7 @@ const TEMPLATE_NAMES = {
   eh_h2_hub: 'Industrial Hydrogen Hub',
   eh_microgrid: 'Island Microgrid',
 }
-const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25', 'P26', 'P27a', 'P27b', 'P28', 'P32'])
+const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25', 'P26', 'P27a', 'P27b', 'P28', 'P29', 'P32'])
 
 // ── args ────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
@@ -1163,9 +1163,11 @@ async function phaseP24(browser) {
     check(sweep?.status === 'done', `sweep done (base_restored=${sweep?.base_restored})`)
     await byId('hub-improve-open-fmea').click()
     await byId('results-tab-fmea').waitFor({ state: 'visible', timeout: 30_000 })
+    // P29 (B2): Guided shows the class as "Link outage" (the letter is the
+    // Expert word); either marks a class-B row.
     await page.waitForFunction(() =>
       [...document.querySelectorAll('[data-testid="fmea-table"] tbody tr')]
-        .some(tr => tr.querySelectorAll('td')[1]?.textContent?.trim() === 'B'),
+        .some(tr => ['B', 'Link outage'].includes(tr.querySelectorAll('td')[1]?.textContent?.trim())),
     null, { timeout: 30_000 })
     check((await byId('results-tab-fmea').getAttribute('class')).includes('border-accent'), 'FMEA tab active with class-B rows')
     const sweepDiffs = tableDiffs(beforeSweep, await snapshotTables())
@@ -1771,7 +1773,9 @@ async function p26Template(browser, tpl) {
       await byId('chat-confirmation-card').waitFor({ state: 'detached', timeout: 30_000 })
       await page.waitForFunction(() => !document.querySelector('[data-testid="chat-abort"]'), null, { timeout: 60_000 })
       // P26 item 6: one plain line; the technical ones are under Details / hidden.
-      check((await byId('chat-tool-label').first().textContent()) === 'You declined — nothing was changed.',
+      // P29 (B1): every tool line now has a Guided label, so the declined
+      // line is one of the labels, not necessarily the first.
+      check((await byId('chat-tool-label').allTextContents()).includes('You declined — nothing was changed.'),
         'transcript: "You declined — nothing was changed."')
       const visible = await byId('chat-messages').innerText()
       check(!visible.includes('confirmation_denied') && !/^denied: /m.test(visible),
@@ -1779,6 +1783,7 @@ async function p26Template(browser, tpl) {
       await shot(page, `p26-${L}-07b-declined`)
       const declined = tableDiffs(beforeDo, await snapshotTables())
       check(declined.diffs.length === 0 && declined.nomOpt === 0, 'declined: nothing changed')
+      if (args.phase === 'P29') await p29Transcript(page, 'after the Improve "Let the assistant do this" step')
 
       // P26 gate B2: a destructive card names its target and opens its Details.
       step(`[${tpl.id}] a destructive card names what it deletes → decline`)
@@ -1806,6 +1811,7 @@ async function p26Template(browser, tpl) {
       await byId('chat-confirm-deny').click()
       await byId('chat-confirmation-card').waitFor({ state: 'detached', timeout: 30_000 })
       await page.waitForFunction(() => !document.querySelector('[data-testid="chat-abort"]'), null, { timeout: 60_000 })
+      if (args.phase === 'P29') await p29Transcript(page, 'after the delete and export turns')
     } else {
       info(`findings: ${hm.map(f => `${f.id}(${f.severity})`).join(', ') || 'none'}`)
       await shot(page, `p26-${L}-07-improve`)
@@ -1846,7 +1852,8 @@ async function p26Template(browser, tpl) {
     let last = -1, since = Date.now()
     const settleUntil = Date.now() + 60_000
     while (Date.now() < settleUntil) {
-      const sweeping = await page.getByText('Sweeping…').count()
+      // P29 (B2): the Guided button reads "Checking…" while the sweep runs.
+      const sweeping = await page.getByText(/(Sweeping|Checking)…/).count()
       const n = await rowCount()
       if (n !== last || sweeping) { last = n; since = Date.now() }
       else if (n > 0 && Date.now() - since >= 3000) break
@@ -1855,6 +1862,7 @@ async function p26Template(browser, tpl) {
     out.fmeaRows = await rowCount()
     check(out.fmeaRows === tpl.fmeaRows, `FMEA rows settled at ${out.fmeaRows} (expected ${tpl.fmeaRows})`)
     check((await byId('results-tab-fmea').getAttribute('class')).includes('border-accent'), 'FMEA tab active')
+    if (args.phase === 'P29' && tpl.id === 'eh_datacenter') out.p29 = await p29FmeaStep(page, L)
     const afterSweep = tableDiffs(beforeSweep, await snapshotTables())
     check(afterSweep.diffs.length === 0,
       `buses/links/generators equal after the sweep (*_nom_opt changes: ${afterSweep.nomOpt})`)
@@ -2579,6 +2587,114 @@ async function p28Context(browser, project, mode) {
   return { context, page, byId, openDock, sendDisabled, streamBodies, fail }
 }
 
+// ── the P29 extension (deferred spec 2026-09-28 §4.5) ──────────────────────
+// Base: P26. On the data-center run, after the Improve step the Guided
+// transcript shows no raw progress line, and on the FMEA step the Guided tab
+// reads in words, genset_1 says why it costs €0, and the exports are stable.
+
+/** The text of every chat row outside its collapsed Details. */
+async function p29Transcript(page, when) {
+  step(`P29 (B1) the Guided transcript ${when}: no "→ " / "preparing" outside Details`)
+  const rows = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-testid="chat-message"]')].map(r => {
+      const c = r.cloneNode(true)
+      c.querySelectorAll('details').forEach(d => d.remove())
+      return { role: r.getAttribute('data-role'), text: (c.textContent ?? '').trim() }
+    }))
+  const labels = await page.locator('[data-testid="chat-tool-label"]').allTextContents()
+  info(`transcript: ${rows.length} rows; tool labels: ${labels.map(l => `"${l}"`).join(', ') || 'none'}`)
+  check(rows.some(r => r.role === 'tool'), 'the transcript has tool rows (the check is not vacuous)')
+  const bad = rows.filter(r => /→ |preparing/.test(r.text))
+  check(bad.length === 0, `no raw progress line visible${bad.length ? `: ${bad.map(b => JSON.stringify(b.text.slice(0, 80))).join('; ')}` : ''}`)
+}
+
+// The per_mode keys before P29 (copt_endpoint + the sweep rows); `zero_reason`
+// is the one key P29 adds.
+const P29_BASE_MODE_KEYS = new Set(['mode_id', 'component_class', 'name', 'failure_class',
+  'occurrence_per_year', 'occurrence_basis', 'severity_eur', 'criticality_eur_per_year',
+  'in_metric_scope', 'engine', 'fidelity', 'rate_source', 'library_citation', 'delta_eue_mwh', 'note'])
+const P29_REASONS = new Set(['no_shortfall', 'no_outage_data', 'unpriced', 'out_of_scope', null])
+const P29_CSV_HEADER = 'mode_id,failure_class,component,name,occurrence_per_year,occurrence_basis,' +
+  'severity_eur,criticality_eur_per_year,delta_eue_mwh,in_metric_scope,mitigability,engine,fidelity'
+
+async function p29FmeaStep(page, L) {
+  const byId = id => page.locator(`[data-testid="${id}"]`)
+  const res = {}
+  step('P29 (B2) the Guided Results header and FMEA table')
+  const h1 = (await page.locator('h1').allTextContents()).map(t => t.trim())
+  check(h1.includes('Reliability results') && !h1.includes('Optimization results'),
+    `page header title "Reliability results" (h1: ${h1.join(' | ')})`)
+  check(await byId('fmea-table').getAttribute('data-guided') === '1', 'fmea-table data-guided="1"')
+  const cells = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-testid="fmea-table"] td')].map(td => (td.textContent ?? '').trim()))
+  const bad = cells.filter(t => /^(copt|lp_proxy|A|B|C|D)$/.test(t))
+  check(cells.length > 0 && bad.length === 0, `no class letter / engine id in ${cells.length} cells${bad.length ? `: ${bad.join(', ')}` : ''}`)
+
+  step('P29 (B3) genset_1 says why it costs €0')
+  const genset = page.locator('[data-testid="fmea-table"] tbody tr', { hasText: 'genset_1' }).first()
+  const gText = ((await genset.textContent()) ?? '').trim()
+  res.genset_1 = gText
+  check(gText.includes('no shortfall'), `genset_1 row: "${gText.slice(0, 160)}"`)
+  await shot(page, `p29-${L}-fmea-guided`)
+
+  step('P29 (B3) exports: GET /api/results/fmea_modes adds only zero_reason; the CSV bytes are unchanged')
+  const modes = await api('GET', '/api/results/fmea_modes')
+  const rows = modes?.per_mode ?? []
+  check(rows.length > 0 && rows.every(r => 'zero_reason' in r && P29_REASONS.has(r.zero_reason)),
+    `every per_mode row carries zero_reason (${rows.map(r => `${r.name}=${r.zero_reason}`).join(', ')})`)
+  const extra = [...new Set(rows.flatMap(r => Object.keys(r)).filter(k => k !== 'zero_reason' && !P29_BASE_MODE_KEYS.has(k)))]
+  check(extra.length === 0, `no other new key on per_mode${extra.length ? `: ${extra.join(', ')}` : ''}`)
+  fs.writeFileSync(path.join(args.out, 'p29-fmea_modes.json'), JSON.stringify(modes, null, 2))
+  const csvButton = page.getByRole('button', { name: 'CSV', exact: true })
+  const download = async () => {
+    const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 30_000 }), csvButton.click()])
+    return fs.readFileSync(await dl.path())
+  }
+  const withKey = await download()
+  // The pre-phase payload: the same rows without the key, served to the tab
+  // by a route; the tab re-reads on remount once its 5 s staleTime passed.
+  await page.route('**/api/results/fmea_modes', async route => {
+    const r = await route.fetch()
+    const body = await r.json()
+    for (const m of body?.per_mode ?? []) delete m.zero_reason
+    await route.fulfill({ response: r, json: body })
+  })
+  try {
+    await byId('results-tab-adequacy').click()
+    await sleep(5500)
+    const reread = page.waitForResponse(r => r.url().includes('/api/results/fmea_modes'), { timeout: 30_000 })
+    await byId('results-tab-fmea').click()
+    await reread
+    await page.waitForFunction(() =>
+      ![...document.querySelectorAll('[data-testid="fmea-table"] tbody td')]
+        .some(td => (td.textContent ?? '').includes('no shortfall')), null, { timeout: 30_000 })
+    const withoutKey = await download()
+    check(withKey.equals(withoutKey), `CSV bytes equal with and without zero_reason (${withKey.length} bytes)`)
+    const header = withKey.toString('utf8').split('\r\n')[0]
+    check(header === P29_CSV_HEADER, `CSV header unchanged: ${header}`)
+    fs.writeFileSync(path.join(args.out, 'p29-fmea_worksheet.csv'), withKey)
+  } finally {
+    await page.unroute('**/api/results/fmea_modes')
+  }
+  // Back to the live rows (the reason text returns) before P26 goes on.
+  await byId('results-tab-adequacy').click()
+  await sleep(5500)
+  await byId('results-tab-fmea').click()
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll('[data-testid="fmea-table"] tbody td')]
+      .some(td => (td.textContent ?? '').includes('no shortfall')), null, { timeout: 30_000 })
+  ok('live rows back: genset_1 says "no shortfall" again')
+  return res
+}
+
+async function phaseP29(browser) {
+  const p26 = await phaseP26(browser)
+  const dc = p26.find(r => r.id === 'eh_datacenter')
+  check(!!dc?.p29, 'P29 checks ran on the data-center FMEA step')
+  info(`P29: genset_1 row "${dc.p29.genset_1.slice(0, 120)}"`)
+  return p26
+}
+
 async function phaseP28(browser) {
   const p26 = await phaseP26(browser)
   const mg = p26.find(r => r.id === 'eh_microgrid')?.project
@@ -2799,6 +2915,7 @@ try {
   else if (args.phase === 'P27a') await phaseP27a(browser)
   else if (args.phase === 'P27b') await phaseP27b(browser)
   else if (args.phase === 'P28') await phaseP28(browser)
+  else if (args.phase === 'P29') await phaseP29(browser)
   else if (args.phase === 'P32') await phaseP32(browser)
   console.log(`\nPASS — ${shots.length} screenshots in ${args.out}`)
 } catch (e) {
