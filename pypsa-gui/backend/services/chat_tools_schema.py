@@ -2524,6 +2524,48 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id", "bus", "kind"],
     ),
     _t(
+        "gridspine_assess_connection",
+        "Connection-point assessment of one facility (a load plus an optional "
+        "on-site unit such as a BESS, at one bus) at every selected hour of the "
+        "project's latest run, against a grid-code profile (default "
+        "eu_rfg_dcc_ce: EU RfG 2016/631 and DCC 2016/1388, Continental Europe). "
+        "Checks: connection (no new or worsened violation, intact and N-1), "
+        "energisation (voltage step, no re-dispatch), load_trip (the load drops, "
+        "the on-site unit stays), facility_trip, q_lead / q_lag (the DCC Art. "
+        "15(1)(a) reactive range, +/-0.48 x max(import, export)), and scr_onsite "
+        "/ scr_load (reported, not gated). Each row has status pass|fail|"
+        "reported, value, unit, limit, detail, the clause applied and its source "
+        "(code = stated by the regulation; assumed = an engineering choice, e.g. "
+        "the 3 % rapid-voltage-change limit, which RfG/DCC do not set). This is a "
+        "steady-state screen, not a compliance certificate: fault ride-through "
+        "needs RMS/EMT studies. Stored per facility (assessment_id); assessing "
+        "the same facility again replaces it. Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "bus": {"type": "string"},
+            "load_mw": {"type": "number"},
+            "load_pf": {"type": "number"},
+            "onsite_mw": {"type": "number"},
+            "onsite_converter": {"type": "boolean"},
+            "profile": {"type": "string"},
+        },
+        ["project_id", "bus", "load_mw"],
+    ),
+    _t(
+        "gridspine_get_connection_assessments",
+        "The stored connection-point assessments of a planning → dynamics "
+        "project's latest run, in gridspine_assess_connection's row shape plus "
+        "the facility (assessment_id, hour, bus, load_mw, load_pf, onsite_mw, "
+        "onsite_converter, profile). Filter by assessment_id and hour. Empty "
+        "before the first assessment. Safety: read.",
+        {
+            "project_id": {"type": "string"},
+            "assessment_id": {"type": "string"},
+            "hour": {"type": "integer"},
+        },
+        ["project_id"],
+    ),
+    _t(
         "gridspine_fetch_result_figure",
         "One read-back comparison as data for a bundle hour: name is vm, va, "
         "branch_p or branch_q; returns {available, hour, tolerance, rows: "
@@ -2950,6 +2992,8 @@ TOOL_ROUTES: dict[str, list] = {
     "gridspine_fetch_result_figure": _SERVICE_CALL,
     "gridspine_get_capacity": _SERVICE_CALL,
     "gridspine_compute_capacity": _SERVICE_CALL,
+    "gridspine_get_connection_assessments": _SERVICE_CALL,
+    "gridspine_assess_connection": _SERVICE_CALL,
     # Library (4) — P2 WP2.4c: router handlers, called in process with the
     # acting user (the Library ACL is the org's).
     "list_library_items": [("GET", "/api/library/items/{kind}")],

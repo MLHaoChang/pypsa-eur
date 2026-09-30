@@ -294,6 +294,39 @@ async def compute_capacity(
     return await run_in_threadpool(gs.compute_capacity, _row(proj, db), body.bus, body.kind)
 
 
+class FacilityRequest(BaseModel):
+    """One facility for the connection-point assessment: a load plus an on-site
+    unit (BESS or generator) at one bus."""
+    bus: str = Field(min_length=1, max_length=64)
+    load_mw: float = Field(ge=0, le=100_000)
+    load_pf: float = Field(0.98, gt=0, le=1)
+    onsite_mw: float = Field(0.0, ge=0, le=100_000)
+    onsite_converter: bool = True
+    profile: str = Field("eu_rfg_dcc_ce", min_length=1, max_length=64)
+
+
+@router.get("/{name}/connection")
+def get_connection(
+    assessment_id: str | None = Query(None, max_length=64),
+    hour: int | None = Query(None, ge=0),
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+):
+    """Increment 10: the stored connection-point assessments."""
+    return gs.get_connection(_row(proj, db), assessment_id=assessment_id, hour=hour)
+
+
+@router.post("/{name}/connection")
+async def assess_connection(
+    body: FacilityRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+):
+    """Assess one facility at every selected hour: several AC solves and an N-1
+    batch per hour, so off the event loop."""
+    return await run_in_threadpool(gs.assess_facility, _row(proj, db), body.model_dump())
+
+
 @router.get("/{name}/readback")
 def get_readback(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     return gs.get_readback(_row(proj, db))
