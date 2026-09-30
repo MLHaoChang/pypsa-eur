@@ -177,6 +177,12 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "get_cfe_score"):                   frozenset(),
     ("routers/results.py", "get_value_flows"):                 frozenset(),   # P3 WP3.4
     ("routers/results.py", "preview_billing"):                 frozenset(),   # P3 WP3.7b
+    # IC P4 WP4.6b — the finance run and its report: its own oracle gate
+    # (tests/qa_investment_case.py, the SAM parity cases), not a coverage SURFACE.
+    ("routers/results.py", "get_investment_case"):             frozenset(),
+    ("routers/results.py", "post_investment_case"):            frozenset(),
+    ("routers/results.py", "post_investment_case_abort"):      frozenset(),
+    ("routers/results.py", "get_investment_case_report"):      frozenset(),
     # ── routers/simulation.py ───────────────────────────────────────────
     ("routers/simulation.py", "get_solver_config"):    frozenset(),
     ("routers/simulation.py", "update_solver_config"):  frozenset(),
@@ -185,6 +191,9 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/simulation.py", "get_value_flow_designer"): frozenset(),   # P3 WP3.6
     ("routers/simulation.py", "put_value_flows"):       frozenset(),
     ("routers/simulation.py", "build_value_flow_template"): frozenset(),
+    # IC P4 WP4.6b: the finance inputs; config, reports no figures.
+    ("routers/simulation.py", "get_finance"):           frozenset(),
+    ("routers/simulation.py", "put_finance"):           frozenset(),
     ("routers/simulation.py", "check_solvers"):         frozenset(),
     ("routers/simulation.py", "capabilities"):          frozenset(),
     ("routers/simulation.py", "asset_costs"):           frozenset({"asset_costs"}),

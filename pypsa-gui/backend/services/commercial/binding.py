@@ -35,6 +35,43 @@ class BindingRefusal(Exception):
         self.status, self.code, self.message = status, code, message
 
 
+CAPACITY_FEE_SHAPE_CODE = "connection_capacity_fee_unsupported"
+TARIFF_REF_CONFLICT_ON_LOAD = "import_tariff_ref_conflict_on_load"
+
+
+def tariff_ref_load_issue(commercial) -> dict | None:
+    """The project-LOAD re-check of a Library tariff ref (IC P4 WP4.6b, P3
+    hygiene): the frontend's `replacesInline` trusts `PUT /solver_config` to
+    have resolved the ref into an inline copy with the ref's hash, but a
+    project or bundle on disk is a second writer. `None` when there is no ref,
+    no inline copy, or the copy hashes to the ref; otherwise an issue in the
+    `bundle_pins` shape (`code` = `import_tariff_ref_conflict_on_load`).
+    Flagged, never repaired: the solve's own check still refuses the copy."""
+    from models.commercial import CommercialConfig
+    from services.commercial import hashing as _H
+
+    if not isinstance(commercial, dict):
+        return None
+    ref, inline = commercial.get("import_tariff_ref"), commercial.get("import_tariff")
+    if not isinstance(ref, dict) or inline is None:
+        return None
+    base = {"code": TARIFF_REF_CONFLICT_ON_LOAD, "kind": ref.get("kind"), "id": ref.get("id"),
+            "version": ref.get("version"), "hash": ref.get("hash")}
+    try:
+        cfg = CommercialConfig.model_validate(commercial)
+    except ValueError as exc:
+        return {**base, "reason": "inline_unreadable",
+                "message": f"the stored commercial config does not validate, so its inline "
+                           f"tariff cannot be checked against Library tariff {ref.get('id')!r} "
+                           f"({str(exc)[:200]})"}
+    if _H.library_item_digest(cfg.import_tariff) == cfg.import_tariff_ref.hash:
+        return None
+    return {**base, "reason": "inline_differs_from_ref",
+            "message": f"the saved import_tariff is not Library tariff {ref.get('id')!r} "
+                       f"v{ref.get('version')} (its content does not hash to the ref); re-apply "
+                       "the Library tariff, or drop import_tariff_ref to keep the edited copy"}
+
+
 def resolve_tariff_ref(commercial, resolve_item: Callable[[object], dict] | None):
     """`commercial` with its `import_tariff_ref` resolved into the inline
     `import_tariff` (P2 WP2.4a); unchanged without a ref."""
@@ -105,6 +142,14 @@ def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
         lp_bindings.validate_for_network(n, commercial, refuse_settlement_contracts=True)
     except lp_bindings.CommercialBindingError as exc:
         raise BindingRefusal(422, exc.code, str(exc)) from exc
+    fee = commercial.connection.capacity_fee if commercial.connection is not None else None
+    if fee is not None:
+        # The fee's shape (unit, one un-windowed period) is refused at SAVE, not
+        # first at the solve's `connection._validate` (IC P4 WP4.6b, P3 hygiene).
+        try:
+            conn.fee_eur_per_mw_year(fee)
+        except lp_bindings.CommercialBindingError as exc:
+            raise BindingRefusal(422, CAPACITY_FEE_SHAPE_CODE, str(exc)) from exc
 
     def aligned(ref, code):
         try:

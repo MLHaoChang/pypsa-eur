@@ -2260,6 +2260,20 @@ def _queue_solve_conflict(name: str) -> HTTPException:
     )
 
 
+def _tariff_ref_load_issues(cfg, project_name: str | None) -> list[dict]:
+    """`[issue]` when the loaded config's inline import tariff no longer hashes
+    to its `import_tariff_ref` (`import_tariff_ref_conflict_on_load`), logged;
+    `[]` otherwise. Flagged, never repaired (the solve refuses the copy)."""
+    from services.commercial.binding import tariff_ref_load_issue
+
+    issue = tariff_ref_load_issue(getattr(cfg, "commercial", None)) if cfg is not None else None
+    if issue is None:
+        return []
+    change_log_service.log("warn", "Project", project_name or "(unsaved)",
+                           f"{issue['code']} ({issue['reason']}): {issue['message']}")
+    return [issue]
+
+
 def _library_pin_issues(db, project, src: pathlib.Path, cfg) -> list[dict]:
     """
     Re-check the project's Library pins (WP1.1c) against ITS org's Library and
@@ -2268,11 +2282,14 @@ def _library_pin_issues(db, project, src: pathlib.Path, cfg) -> list[dict]:
     """
     from services.library import bundle_pins
 
+    # The Library tariff ref's inline copy is re-hashed on EVERY load (IC P4
+    # WP4.6b): no database needed, so single-user mode checks it too.
+    local = _tariff_ref_load_issues(cfg, getattr(project, "name", None))
     if db is None or project is None:
-        return []
-    issues = bundle_pins.check_pins(
+        return local
+    issues = local + bundle_pins.check_pins(
         db, project.org_id, src, config=asdict(cfg) if cfg is not None else {})
-    for issue in issues:
+    for issue in issues[len(local):]:
         change_log_service.log(
             "warn", "Project", project.name,
             f"Library pin {issue['code']} ({issue['reason']}): {issue['message']}",
@@ -2511,6 +2528,7 @@ def activate_project(
             change_log_service.log(
                 "warn", "Project", project.name,
                 f"Library pin {issue['code']} ({issue['reason']}): {issue['message']}")
+        library_issues = _tariff_ref_load_issues(cfg, project.name) + library_issues
     return {"activated": project.name, "evicted": evicted, "lock": lock_info,
             "library_issues": library_issues}
 

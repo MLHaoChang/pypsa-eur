@@ -1099,3 +1099,113 @@ export interface CashflowLine {
   amount: number
   provenance: CashflowProvenance
 }
+
+// ── Investment case report (IC P4 WP4.6b/4.7b; models/finance.py) ─────────
+// `InvestmentCaseReport` mirrors the pydantic model field for field (same
+// optionality and nullability as the finance parity test checks). The HTTP
+// report route serves `export_investment_case(report)` — the IC_EXPORT_KEYS
+// with the gate flattened — possibly with `gates` / `sections` /
+// `cashflow_lines` beside it: `InvestmentCaseReportPayload` is that view, every
+// field optional and read defensively. A `null` headline is "not established"
+// (ADR-0001), never 0.
+
+export const IC_REPORT_SECTIONS = [
+  'design', 'commercial', 'dispatch_modes', 'participants', 'project',
+  'debt', 'tax', 'tax_equity', 'uncertainty', 'gates',
+] as const
+export type IcReportSection = typeof IC_REPORT_SECTIONS[number]
+
+export type IcSectionStatus = 'ok' | 'not_established' | 'skipped'
+
+export interface IcSectionState {
+  status: IcSectionStatus
+  payload?: Record<string, unknown> | null
+  note?: string | null
+}
+
+export interface GatesBlock {
+  wacc_vs_discount_rate_consistent?: boolean | null
+  billing_vs_lp_gap_pct?: Record<string, number> | null
+  conservation_ok?: boolean | null
+}
+
+export interface IcPipelineStageRecord {
+  stage: string
+  status?: 'run' | 'skipped' | 'aborted' | 'pending'
+  solves_charged?: number
+  note?: string | null
+}
+
+export interface IcStudyPipeline {
+  stages?: IcPipelineStageRecord[]
+  budget_solves?: number
+  solves_consumed?: number
+  aborted?: boolean
+}
+
+export interface InvestmentCaseReport {
+  case_id: string
+  reference_design_id?: string | null
+  assumptions_hash: string
+  packs?: Record<string, string>
+  cost_at_target_eur?: number | null
+  excludes_shed_cost?: true
+  haircut_pct?: number | null
+  project_irr_pre_tax?: number | null
+  project_irr_post_tax?: number | null
+  npv_at_wacc?: number | null
+  lcoe_finance_consistent_eur_per_mwh?: number | null
+  ppa_price_for_target_irr_eur_per_mwh?: number | null
+  min_dscr?: number | null
+  avg_dscr?: number | null
+  llcr?: number | null
+  plcr?: number | null
+  flip_year?: number | null
+  gates?: GatesBlock
+  sections?: Partial<Record<IcReportSection, IcSectionState>>
+  completeness: Record<IcReportSection, IcSectionStatus>
+  pipeline?: IcStudyPipeline
+  cashflow_lines?: CashflowLine[]
+}
+
+/** GET /results/investment_case/report: `export_investment_case(report)` and
+ *  whatever of the full report rides beside it. */
+export type InvestmentCaseReportPayload =
+  Partial<Omit<InvestmentCaseReport, 'completeness' | 'sections'>> & {
+    completeness?: Partial<Record<string, IcSectionStatus | (string & {})>>
+    sections?: Partial<Record<string, IcSectionState>>
+    /** The export view's flattened gate (`gates.*` in the model). */
+    wacc_vs_discount_rate_consistent?: boolean | null
+    conservation_ok?: boolean | null
+    stale?: boolean
+  }
+
+/** GET /simulation/finance (IC P4 WP4.6b). */
+export interface FinanceState {
+  finance: FinanceInputs | null
+  digest: string
+  status: string
+  message?: string
+}
+
+/** GET /results/investment_case: the study record (IC P4 WP4.6b); 204 when
+ *  neither a run nor a report exists. Read defensively: the progress is a
+ *  fraction / record (`progress`) or the runner's stages; the staleness is
+ *  top-level (`stale`) or the stored report's block (`report.stale`). */
+export interface InvestmentCaseStudy {
+  status: 'idle' | 'running' | 'done' | 'aborted' | 'error' | 'refused' | 'failed' | (string & {})
+  study?: string
+  /** A fraction in [0, 1], or a stage record. */
+  progress?: number | Record<string, unknown> | null
+  stage?: string | null
+  stages?: string[]
+  stages_done?: string[]
+  /** The stored report's assumptions changed since it was computed. */
+  stale?: boolean | null
+  report?: { present?: boolean; stale?: boolean | null; changed?: string[]; reason?: string | null } | null
+  code?: string | null
+  message?: string | null
+  error?: string | null
+  error_code?: string | null
+  flags?: string[]
+}

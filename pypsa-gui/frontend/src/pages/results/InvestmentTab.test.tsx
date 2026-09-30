@@ -14,6 +14,13 @@ vi.mock('../../api/commercial', async (importOriginal) => {
   return { ...actual, commercialApi: { ...actual.commercialApi,
     getBilling: vi.fn(), getValueFlowsResult: vi.fn() } }
 })
+// The P4 sections (WP4.7) read the finance routes; the tab tests only switch to them.
+vi.mock('../../api/finance', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/finance')>()
+  return { ...actual, financeApi: { ...actual.financeApi,
+    getFinance: vi.fn().mockResolvedValue({ finance: null, digest: 'd', status: 'not_set' }),
+    getInvestmentCase: vi.fn().mockResolvedValue(null), getReport: vi.fn().mockResolvedValue(null) } }
+})
 
 const BILLING = {
   summary: { _: { total: 1234.5, total_supported: 1234.5,
@@ -117,8 +124,8 @@ describe('InvestmentTab', () => {
     fireEvent.keyDown(first, { key: 'ArrowRight' })
     expect(screen.getByRole('tab', { name: 'Bill' }).getAttribute('aria-selected')).toBe('true')
     fireEvent.keyDown(screen.getByRole('tab', { name: 'Bill' }), { key: 'End' })
-    expect(screen.getByRole('tab', { name: 'Contracts' }).getAttribute('aria-selected')).toBe('true')
-    fireEvent.keyDown(screen.getByRole('tab', { name: 'Contracts' }), { key: 'Home' })
+    expect(screen.getByRole('tab', { name: 'Investment case' }).getAttribute('aria-selected')).toBe('true')
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Investment case' }), { key: 'Home' })
     expect(first.getAttribute('aria-selected')).toBe('true')
     // aria-controls only on the selected tab: it must point at a panel in the DOM.
     for (const tab of screen.getAllByRole('tab')) {

@@ -54,6 +54,9 @@ from services.adequacy.eh_study_runner import (  # noqa: F401
     EhStudyRequest,
 
 )
+from services.finance.investment_case_runner import (  # noqa: F401
+    InvestmentCaseRequest,
+)
 from services.results.prices import _apply_merit_order_correction  # noqa: F401
 from services.results.cost_breakdown import (  # noqa: F401
     _class_lifetime,
@@ -1430,6 +1433,147 @@ def post_eh_study(body: EhStudyRequest | None = None):
         state_update=_state_update,
         publish_study=_publish_study,
     )
+
+
+# ── Edge Investment Case P4: the single-owner finance run (WP4.6b) ──────────
+#
+# The runner (`services/finance/investment_case_runner.py`) never imports the
+# results layer (plan C1): this router injects `build_case`, a closure over
+# `services.results.finance_case.build_finance_case`, and the staleness inputs.
+
+_IC_LOCK_WAIT_S = 2.0
+
+
+def _ic_build_case(n, cfg, *, owner: str | None, lost_load):
+    """The adapter closure the runner calls in its worker (plan C1). A seam:
+    tests replace this factory with one returning a fake `build_case`."""
+    def build():
+        from models.finance import FinanceInputs
+        from services.results.finance_case import build_finance_case
+
+        fin = FinanceInputs.model_validate(cfg.finance)
+        with PyPSAService.get_lock():
+            return build_finance_case(n, cfg, fin, result_df=_result_df, lost_load=lost_load,
+                                      owner=owner)
+    return build
+
+
+def _ic_case_hash(case) -> str | None:
+    from services.results.finance_case import finance_case_hash
+
+    return finance_case_hash(case)
+
+
+def _ic_assumptions(cfg, n) -> tuple[str, dict]:
+    """(hash, parts) of the inputs a finance case is built from: the finance
+    inputs, the value flows, the rest of the commercial config, the dispatch
+    digest of the solve and the pack versions (WP4.6b staleness key)."""
+    from pydantic import ValidationError as _VE
+
+    from models.finance import FinanceInputs
+    from services.dispatch_status import dispatch_digest
+    from services.finance.investment_case_runner import assumptions_digest, pack_versions
+
+    raw = getattr(cfg, "finance", None)
+    try:
+        fin = FinanceInputs.model_validate(raw) if raw is not None else None
+    except _VE:
+        fin = None
+    return assumptions_digest(finance=raw, commercial=getattr(cfg, "commercial", None),
+                              dispatch=dispatch_digest(n, _result_df), packs=pack_versions(fin))
+
+
+def _ic_current_assumptions() -> tuple[tuple[str, dict] | None, str | None]:
+    """The current staleness key, or (None, why) when it cannot be read now
+    (a solve running, the network busy) — the report is then reported stale,
+    never silently current."""
+    if _solver_in_flight():
+        return None, "solve_in_flight"
+    lock = PyPSAService.get_lock()
+    if not lock.acquire(timeout=_IC_LOCK_WAIT_S):
+        return None, "network_busy"
+    try:
+        return _ic_assumptions(_state["solver_config"], PyPSAService.get_network()), None
+    except Exception as exc:  # noqa: BLE001 — a read must not 500 on a bad input
+        logger.warning("investment_case staleness key not computable: %s", exc)
+        return None, "current_assumptions_not_established"
+    finally:
+        lock.release()
+
+
+@results_router.get("/investment_case")
+def get_investment_case():
+    """
+    The investment-case run: its status (stage, refusal code) and whether the
+    stored report is still current (IC P4 WP4.6b). `report.stale` is true when
+    any input changed since the run — the finance inputs, the value flows, the
+    commercial config, the solve (dispatch digest) or a pack — with `changed`
+    naming them; a report whose current key cannot be read is stale too.
+    204 when neither a run nor a report exists.
+    """
+    from services.finance.investment_case_runner import public_record, staleness
+
+    record = public_record(_state.get("investment_case"))
+    stored = _state.get("investment_case_report")
+    if not record and not stored:
+        return Response(status_code=204)
+    if stored is not None and hasattr(stored, "model_dump"):
+        stored = stored.model_dump(mode="json")
+    current, why = _ic_current_assumptions() if stored else (None, None)
+    body = record or {"status": "idle", "study": "investment_case"}
+    body["report"] = staleness(stored, current, reason=why)
+    return body
+
+
+@results_router.post("/investment_case/abort")
+def post_investment_case_abort():
+    """Ask a running investment-case run to stop (stops at its next stage;
+    stores nothing). Same contract as the other study aborts."""
+    return _abort_study(
+        "investment_case",
+        "no investment-case run has been recorded in this session",
+    )
+
+
+@results_router.post("/investment_case")
+def post_investment_case(body: InvestmentCaseRequest | None = None):
+    """
+    Start the single-owner investment-case run in a worker thread (IC P4
+    WP4.6b): build the `FinanceCase` from the solved network and the stored
+    finance inputs, run the finance engine, store the report for
+    `GET /results/investment_case/report`. 409 while a solve or another study
+    runs, or before a solve; 422 without (valid) finance inputs.
+    """
+    from routers.simulation import _state_update
+    from services.finance.investment_case_runner import start_investment_case
+    _refuse_if_mesh_busy("investment_case")
+    n = PyPSAService.get_network()
+    if not _dispatch_ready(n):
+        raise HTTPException(409, {"code": "not_solved",
+                                  "message": "solve the network first: the investment case "
+                                             "values the solved dispatch"})
+    cfg = _state["solver_config"]
+    owner = body.owner if body is not None else None
+    return start_investment_case(
+        body,
+        build_case=_ic_build_case(n, cfg, owner=owner, lost_load=_state.get("last_lost_load")),
+        solver_state=_state,
+        state_update=_state_update,
+        publish_study=_publish_study,
+        assumptions=lambda: _ic_assumptions(cfg, n),
+        case_hash=_ic_case_hash,
+        state_lock=PyPSAService.get_solver_state_lock(),
+    )
+
+
+@results_router.get("/investment_case/report")
+def get_investment_case_report():
+    """The stored `InvestmentCaseReport`'s export view (`ic_report_http_payload`);
+    204 before a run. Staleness is on `GET /results/investment_case`."""
+    from services.finance.report import ic_report_http_payload
+
+    payload, status = ic_report_http_payload(_state)
+    return Response(status_code=204) if payload is None else payload
 
 
 @results_router.get("/eh_readiness")

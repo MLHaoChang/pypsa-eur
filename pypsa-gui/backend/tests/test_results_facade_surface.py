@@ -65,6 +65,8 @@ _HANDLER_PARAMS: dict[str, list[str]] = {
     "get_billing": [],          # P2 WP2.5
     "get_cfe_score": [],        # P2 WP2.5
     "get_value_flows": [],      # P3 WP3.4
+    "get_investment_case": [],          # IC P4 WP4.6b
+    "get_investment_case_report": [],   # IC P4 WP4.6b
 }
 
 # Non-route names other modules import from `routers.results`.

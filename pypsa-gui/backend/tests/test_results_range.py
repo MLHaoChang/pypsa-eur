@@ -333,6 +333,10 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         "/billing", "/cfe_score",
         # P3 WP3.4 — ledger lines and totals per period, no snapshot axis.
         "/value_flows",
+        # IC P4 WP4.6b — the finance run's status and its report: annual
+        # cashflows by year and stream, no snapshot axis.
+        "/investment_case",
+        "/investment_case/report",
         # The ELCC candidate list for the panel's asset picker (Phase 6) — one
         # row per eligible asset with its nameplate, no snapshot axis at all.
         "/mc/elcc_candidates",

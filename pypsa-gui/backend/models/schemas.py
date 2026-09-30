@@ -685,6 +685,11 @@ class SolverConfigSchema(BaseModel):
     # dict on the `SolverConfig` dataclass (`update_solver_config` dumps it).
     # Explicit null clears it.
     commercial: CommercialConfig | None = None
+    # IC P4 WP4.6b: the finance inputs are owned by `PUT /api/simulation/finance`.
+    # Here only so a client echoing the whole config is accepted: an unchanged
+    # echo is ignored, a change is refused (422 `finance_via_dedicated_route`).
+    # A plain dict, compared as stored (the dedicated route validates it).
+    finance: dict[str, Any] | None = None
 
 
 class ImportSummary(BaseModel):

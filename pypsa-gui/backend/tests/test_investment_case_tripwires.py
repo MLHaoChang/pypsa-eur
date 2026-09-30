@@ -31,8 +31,8 @@ import pytest
 _SERVICES = pathlib.Path(__file__).resolve().parent.parent / "services"
 IC_PACKAGES = ("commercial", "finance", "library")
 # Results-side modules this programme adds (P0: the physical-quantity seam).
-IC_RESULTS_MODULES = ("physical_quantities", "value_flows")
-# (IC P4 WP4.6a adds `finance_case`, the one adapter that reads a solved network
+IC_RESULTS_MODULES = ("physical_quantities", "value_flows", "finance_case")
+# (IC P4 WP4.6a added `finance_case`, the one adapter that reads a solved network
 # for the finance engine.)
 # Leaf packages must not reach the solve stack. `services.solver` (the carved
 # modules) is equally off-limits: finance never runs a solve.

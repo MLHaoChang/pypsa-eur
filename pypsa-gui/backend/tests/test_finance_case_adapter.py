@@ -1,0 +1,619 @@
+"""
+The finance adapter: a solved network and its P3 ledger → a `FinanceCase`
+(Edge Investment Case P4, plan C1, C3, C5, C6, C13, C14; WP4.6a).
+
+- `rate_meter` factored out of `bill_site`: every P2 bill unchanged (a copy
+  of the pre-refactor body is the oracle).
+- F6: the counterfactual on a toy site by hand (1 MW load, 2 MW PV, TOU +
+  demand charge, a grid-side supply generator at 50/MWh).
+- The integration fixture (`build_edge_hourly_year`): the template is the
+  ledger's owner net to the cent, the year-1 incremental EBITDA identity, a
+  finite equity IRR (pinned); the BESS cycles and the site exports.
+- C3 on the 7-day fixture (`template_not_annual:168`, `annualise`), a load-free
+  site (incremental = total), the shed exclusion, the commodity cross-check
+  refusals, the connection / supply flags, a lossy PoC, staged builds, owner
+  resolution, contract lines and overnight costs.
+"""
+from __future__ import annotations
+
+import copy
+import dataclasses
+from datetime import date
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from models.finance import ESCALATION_CLASSES, FinanceInputs
+from services.commercial.lp_bindings import same_party
+from services.finance.case import CONTRACT_CLASS, FinanceRefused
+from tests.test_value_flow_reconciliation import (
+    DEMAND, FEE, FEED_IN, FIXED, LEASE, PPA, REF, TOU, VF, _commercial, _ledger, _network, _solve,
+)
+
+OWNED = {**copy.deepcopy(VF),
+         "asset_owners": [{"asset_id": "pv", "component": "Generator", "owner": "site"},
+                          {"asset_id": "bess", "component": "StorageUnit", "owner": "site"}]}
+COD = date(2030, 1, 1)
+
+
+def _fin(**over) -> FinanceInputs:
+    kw = dict(financial_close=date(2029, 1, 1), cod_by_asset={"pv": COD, "bess": COD},
+              analysis_years=15, contingency_share=0.0,
+              escalation={c: 0.02 for c in ESCALATION_CLASSES},
+              degradation_by_asset={"pv": 0.005}, tax_losses="offset_other_income",
+              financing_fee_tax="not_deducted", wacc_nominal=0.07, cost_of_equity=0.10,
+              inflation=0.02)
+    kw.update(over)
+    return FinanceInputs(**kw)
+
+
+def _case(n, cfg, fin=None, **kw):
+    import routers.results as R
+    from services.results.finance_case import build_finance_case
+
+    return build_finance_case(n, cfg, fin or _fin(), result_df=R._result_df, **kw)
+
+
+def _refused(n, cfg, fin=None, **kw) -> FinanceRefused:
+    with pytest.raises(FinanceRefused) as exc:
+        _case(n, cfg, fin, **kw)
+    return exc.value
+
+
+def _edge7(**_):
+    """The 7-day P1 edge site of the P3 fixtures, its grid supply made
+    supply-only and export absorbed by an uncosted sink (WP4.0 review B1)."""
+    n = _network()
+    n.generators.loc["grid_supply", "p_min_pu"] = 0.0
+    n.add("Generator", "grid_sink", bus="grid", carrier="grid", p_nom=200.0, p_max_pu=0.0,
+          p_min_pu=-1.0, marginal_cost=0.0)
+    n.links.loc["export", "marginal_cost"] = 0.0
+    return n
+
+
+def _owner_net(ledger, p, owner="site") -> float:
+    total = 0.0
+    for ln in ledger.periods[p]:
+        if ln.basis != "cash":
+            continue
+        if same_party(ln.payee, owner):
+            total += ln.amount
+        elif same_party(ln.payer, owner):
+            total -= ln.amount
+    return total
+
+
+def _lines(t) -> dict:
+    return {ln.key: ln for ln in t.lines}
+
+
+def _net(t) -> float:
+    return sum(ln.amount for ln in t.lines)
+
+
+def _flag_num(flags, prefix) -> float:
+    got = [f for f in flags if f.startswith(prefix)]
+    assert len(got) == 1, flags
+    return float(got[0][len(prefix):])
+
+
+# ── the rate_meter refactor pins every P2 bill ──────────────────────────────
+
+
+def _legacy_bill_site(n, commercial, *, meter_history=None):
+    """`bill_site` as it was before `rate_meter` was factored out (50cd1b5^),
+    verbatim but for the module prefix: the oracle of the refactor."""
+    from services.commercial import billing as B
+    from services.commercial import hashing as _H
+    from services.commercial import lp_bindings as _lp
+    from services.commercial.tariff_engine import rate
+
+    cfg = _lp._parse(commercial)
+    tariff = cfg.import_tariff
+    links = _lp.import_links(cfg)
+    needed = links + ([cfg.export_link] if cfg.export_link else [])
+    if tariff is None or not B._solved(n, needed):
+        return B.SiteBill(per_period={}, flags=["not_solved"] if tariff is not None
+                          else ["no_import_tariff"])
+    flags: list[str] = []
+    history = meter_history if meter_history is not None else (cfg.meter_history_peaks_kw or None)
+    p0 = n.links_t.p0
+    imp_all = np.sum([B._flow(p0, link, flags) for link in links], axis=0)
+    exp_all = (B._flow(p0, cfg.export_link, flags) if cfg.export_link
+               else np.zeros(len(n.snapshots)))
+    w_all = n.snapshot_weightings.objective.to_numpy(dtype=float)
+    multi = isinstance(n.snapshots, pd.MultiIndex)
+    periods = list(n.snapshots.get_level_values(0).unique()) if multi else [None]
+    poc = cfg.poc_link
+    pn = n.links.at[poc, "p_nom_opt"] if "p_nom_opt" in n.links.columns else np.nan
+    p_nom_mw = float(pn) if np.isfinite(pn) else float(n.links.at[poc, "p_nom"])
+    years_w = (n.investment_period_weightings["years"] if multi else None)
+    cap_rec = n.meta.get(_lp.META_CAPACITY) or {}
+    cap_periods = None
+    if cap_rec.get("contracted") or cap_rec.get("fixed"):
+        cap_periods = set()
+        for c in (cap_rec.get("contracted") or {}).values():
+            cap_periods |= set(c.get("eur_per_mw_by_period") or {})
+        for c in (cap_rec.get("fixed") or {}).values():
+            cap_periods |= set(c.get("eur_by_period") or {})
+    per_period, calendar, errors = {}, {}, {}
+    for i, p in enumerate(periods):
+        key = None if p is None else int(p)
+        sel = (n.snapshots.get_level_values(0) == p) if multi else np.ones(len(n.snapshots), bool)
+        ts = pd.DatetimeIndex(n.snapshots[sel].get_level_values(-1) if multi
+                              else n.snapshots[sel])
+        idx = ts.tz_localize("UTC") if cfg.timezone and ts.tz is None else ts
+        step = B._step_hours(ts)
+        represents, billing_period = B._represented(ts, w_all[sel], step)
+        calendar[key] = billing_period
+        active = True
+        if multi:
+            active = bool(n.get_active_assets("Link", p).reindex([poc]).fillna(False).iloc[0])
+            if cap_periods is not None:
+                active = str(key) in cap_periods
+        dispatch = pd.DataFrame({"import_mw": imp_all[sel], "export_mw": exp_all[sel]},
+                                index=idx)
+        try:
+            per_period[key] = rate(
+                dispatch, tariff, step_hours=step, timezone=cfg.timezone,
+                billing_period=billing_period, represents_hours=represents,
+                meter_history=history if i == 0 else None,
+                capacity_kw=p_nom_mw * B._KW_PER_MW if active else 0.0,
+                power_factor=cfg.power_factor)
+        except ValueError as exc:
+            per_period[key] = None
+            flags.append(f"period_not_billed:{'_' if key is None else key}:"
+                         f"{'billing_period_unknown' if 'billing_period' in str(exc) else 'invalid_dispatch'}")
+            errors[key] = str(exc)[:300]
+    for res in per_period.values():
+        for f in (res.flags.get("_tariff") if res is not None else None) or []:
+            if f not in flags:
+                flags.append(f)
+    drift, solve = B._drift_flags(n, cfg)
+    flags += drift
+    provenance = {
+        "tariff_hash": _H.digest(tariff), "tariff_hash_version": _H.HASH_VERSION, **solve,
+        "period_years": ({int(p): float(years_w.loc[p]) for p in periods} if multi else None),
+        "billing_calendar": calendar, "capacity_basis": {"link": poc, "p_nom_mw": p_nom_mw},
+        "timezone": cfg.timezone, "period_errors": errors,
+    }
+    return B.SiteBill(per_period=per_period, flags=flags, provenance=provenance)
+
+
+def _same_bill(a, b):
+    assert a.flags == b.flags
+    assert a.provenance == b.provenance
+    assert set(a.per_period) == set(b.per_period)
+    for k, ra in a.per_period.items():
+        rb = b.per_period[k]
+        assert (ra is None) == (rb is None)
+        if ra is None:
+            continue
+        assert ra.per_item == rb.per_item and ra.per_item_sampled == rb.per_item_sampled
+        assert ra.total == rb.total and ra.flags == rb.flags
+        pd.testing.assert_frame_equal(ra.lines, rb.lines)
+        pd.testing.assert_frame_equal(ra.monthly, rb.monthly)
+        pd.testing.assert_frame_equal(ra.demand_lines, rb.demand_lines)
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("multi", [False, True], ids=["flat", "multi"])
+def test_rate_meter_leaves_every_p2_bill_unchanged(reset_backend, multi):
+    from services.commercial import billing as B
+    from services.commercial import lp_bindings as _lp
+
+    n, cfg = _solve(_network(multi=multi), _commercial(), multi=multi)
+    _same_bill(B.bill_site(n, cfg.commercial), _legacy_bill_site(n, cfg.commercial))
+    hist = {"2029-12": 30_000.0}
+    _same_bill(B.bill_site(n, cfg.commercial, meter_history=hist),
+               _legacy_bill_site(n, cfg.commercial, meter_history=hist))
+    # rate_meter on the solved meter IS the site bill.
+    parsed = _lp._parse(cfg.commercial)
+    imp = n.links_t.p0["import"].clip(lower=0.0).to_numpy(float)
+    exp = n.links_t.p0["export"].clip(lower=0.0).to_numpy(float)
+    metered = B.rate_meter(n, parsed, imp, exp)
+    site = B.bill_site(n, cfg.commercial)
+    for k, res in site.per_period.items():
+        assert metered.per_period[k].per_item_sampled == pytest.approx(res.per_item_sampled,
+                                                                       abs=1e-6)
+    no_tariff = {**cfg.commercial, "import_tariff": None}
+    assert B.rate_meter(n, no_tariff, imp, exp).flags == ["no_import_tariff"]
+
+
+# ── F6: the counterfactual on a toy site, by hand ───────────────────────────
+
+
+def _f6_network():
+    import pypsa
+
+    n = pypsa.Network()
+    idx = pd.date_range("2030-01-01", periods=8760, freq="h")
+    n.set_snapshots(idx)
+    for b in ("grid", "poc", "site"):
+        n.add("Bus", b, carrier="AC")
+    hour = np.asarray(idx.hour)
+    midday = (hour >= 10) & (hour < 14)
+    n.add("Generator", "grid_supply", bus="grid", p_nom=10.0, marginal_cost=50.0)
+    n.add("Link", "import", bus0="grid", bus1="poc", p_nom=5.0, eh_role="grid_import")
+    n.add("Link", "poc_site", bus0="poc", bus1="site", p_nom=10.0, p_min_pu=-1.0)
+    n.add("Generator", "pv", bus="site", carrier="solar", p_nom=2.0,
+          p_max_pu=midday.astype(float), marginal_cost=0.0, overnight_cost=1_000_000.0,
+          discount_rate=0.07, lifetime=25.0)
+    n.add("Load", "load", bus="site", p_set=1.0 + 0.5 * midday)
+    return n
+
+
+F6_VF = {**copy.deepcopy(VF),
+         "asset_owners": [{"asset_id": "pv", "component": "Generator", "owner": "site"}]}
+
+
+@pytest.mark.live_solve
+def test_f6_the_counterfactual_on_a_toy_site_by_hand(reset_backend):
+    """1 MW load (+0.5 MW 10–14 h), 2 MW PV (10–14 h, curtailed to the load:
+    no export), TOU 60 / 180 $/MWh (night 0–6 h), 9 $/kW-month demand, supply
+    at 50 $/MWh. Per day: counterfactual energy 6·60 + 14·180 + 4·1.5·180 =
+    3,960, actual 6·60 + 14·180 = 2,880; demand 1,500 vs 1,000 kW a month;
+    commodity 50 × 26 vs 50 × 20 MWh a day."""
+    from services.finance.engine import run_case
+    from services.finance.tax import DepreciationClass, TaxLayer, sl_half_year
+
+    com = {"poc_link": "import", "value_flows": F6_VF,
+           "import_tariff": {"id": "t", "name": "t", "jurisdiction": "US",
+                             "valid_from": "2029-01-01", "items": [TOU, DEMAND]}}
+    n, cfg = _solve(_f6_network(), com)
+    case = _case(n, cfg, _fin(cod_by_asset={"pv": COD}))
+    (t,), (cf,) = case.templates, case.counterfactual
+    act, cfl = _lines(t), _lines(cf)
+    assert act["bill:energy"].amount == pytest.approx(-2_880.0 * 365, abs=0.01)
+    assert cfl["bill:energy"].amount == pytest.approx(-3_960.0 * 365, abs=0.01)
+    assert act["bill:demand"].amount == pytest.approx(-1_000 * 9.0 * 12, abs=0.01)
+    assert cfl["bill:demand"].amount == pytest.approx(-1_500 * 9.0 * 12, abs=0.01)
+    assert act["asset:opex:Generator:grid_supply"].amount == pytest.approx(-50.0 * 20 * 365,
+                                                                           abs=0.01)
+    assert cfl["counterfactual:commodity"].amount == pytest.approx(-50.0 * 26 * 365, abs=0.01)
+    incremental = (3_960 - 2_880) * 365 + 500 * 9.0 * 12 + 50.0 * 6 * 365      # 557,700
+    assert _net(t) - _net(cf) == pytest.approx(incremental, abs=0.01)
+    # C5 first order: S = the avoided import value, g = 1 (the only generator).
+    assert act["bill_degradation:pv"].amount == pytest.approx(incremental, abs=0.01)
+    assert act["bill_degradation:pv"].degrades_with == "pv"
+    assert act["bill_degradation_base:pv"].amount == pytest.approx(-incremental, abs=0.01)
+    assert act["bill_degradation_base:pv"].degrades_with is None
+    assert t.energy_mwh == pytest.approx({"pv": 1.5 * 4 * 365})
+    assert "degradation_bill_first_order" in case.flags
+    assert not any(f.startswith("counterfactual_exceeds") for f in case.flags)
+    assert case.assets[0].overnight_cost == pytest.approx(2_000_000.0)
+    layer = (TaxLayer(name="corp", rate=0.25,
+                      depreciation=(DepreciationClass("all", 1.0, sl_half_year(10)),)),)
+    r = run_case(case, layers=layer)
+    assert r.op_incremental["net"][1] == pytest.approx(incremental, abs=0.01)      # COD year
+    # Year 2: the PV's bill value degraded by 0.5 %, everything escalated 2 %.
+    assert r.op_incremental["net"][2] == pytest.approx(
+        incremental * 1.02 - incremental * 0.005 * 1.02, abs=0.01)
+
+
+# ── the integration fixture ─────────────────────────────────────────────────
+
+
+def _hourly_year(**vf_over):
+    from tests.fixtures.investment_case.edge_hourly_year import build_edge_hourly_year
+
+    n = build_edge_hourly_year()
+    h = np.arange(len(n.snapshots))
+    n.links_t["ic_export_price"] = pd.DataFrame(
+        {"export": 30.0 + 20.0 * np.sin(h / 24 * 2 * np.pi)}, index=n.snapshots)
+    vf = {**copy.deepcopy(OWNED), "export_revenue_to": "asset_owner", **vf_over}
+    com = {"poc_link": "import", "export_link": "export", "export_price_ref": REF,
+           "import_tariff": {"id": "t", "name": "t", "jurisdiction": "US",
+                             "valid_from": "2029-01-01", "items": [TOU, DEMAND, FIXED]},
+           "connection": FEE, "value_flows": vf}
+    return n, com
+
+
+# Pinned (HiGHS 1.x): 15 operating years, all equity, one 25 % layer on SL-10,
+# every class escalating 2 %, PV degrading 0.5 %/yr. The LP's optimum is
+# unique in money but not in dispatch, hence 1e-5.
+EQUITY_IRR_POST_TAX = 0.36177769
+
+
+@pytest.mark.live_solve
+def test_the_integration_fixture_end_to_end(reset_backend):
+    from services.commercial import billing as B
+    from services.finance.engine import run_case
+    from services.finance.tax import DepreciationClass, TaxLayer, sl_half_year
+    from services.results.finance_case import finance_case_hash
+
+    n, com = _hourly_year()
+    n, cfg = _solve(n, com)
+    # The demand-charge commercial solve cycles the BESS and exports.
+    w = n.snapshot_weightings.objective.to_numpy(float)
+    assert float((w * n.storage_units_t.p_dispatch["bess"]).sum()) > 0
+    export = n.links_t.p0["export"].to_numpy(float)
+    assert float((w * export).sum()) > 0
+    inputs, vf, ledger, _res = _ledger(n, cfg)
+    case = _case(n, cfg)
+    (t,), (cf,) = case.templates, case.counterfactual
+    assert (t.first_year, t.money_year, case.base_year, case.cod) == (2030, 2030, 2030, COD)
+    # The template is the ledger's owner net to the cent (the C5 pair nets 0).
+    assert _net(t) == pytest.approx(_owner_net(ledger, "_"), abs=0.005)
+    lines = _lines(t)
+    assert lines["export_price:export_price:pv"].degrades_with == "pv"
+    assert lines["bill_degradation:pv"].degrades_with == "pv"
+    assert set(t.energy_mwh) == {"pv"}                     # generators only, never storage
+    assert t.energy_mwh["pv"] == pytest.approx(float((w * n.generators_t.p["pv"]).sum()))
+    # The uncosted grid_sink passes the commodity check; the BESS shaved the peak.
+    assert not any("commodity_not_established" in f for f in case.flags)
+    assert "counterfactual_exceeds_connection" in case.flags
+    assert "counterfactual_exceeds_supply" not in case.flags
+
+    # Year-1 incremental EBITDA identity, each term from its own source.
+    bill = B.bill_site(n, cfg.commercial).per_period[None].per_item_sampled
+    load = n.loads_t.p_set["site_load"].to_numpy(float)
+    imp = n.links_t.p0["import"].clip(lower=0.0).to_numpy(float)
+    cf_bill = B.rate_meter(n, cfg.commercial, load, np.zeros(len(load))).per_period[None]
+    price = n.links_t["ic_export_price"]["export"].to_numpy(float)
+    export_value = float((w * export * price).sum())
+    asset_opex = float((w * n.storage_units_t.p_dispatch["bess"]).sum()) * 0.5
+    identity = ((sum(cf_bill.per_item_sampled.values()) + 60.0 * float((w * load).sum()))
+                - (sum(bill.values()) + 60.0 * float((w * imp).sum()))
+                + export_value - asset_opex)
+    layer = (TaxLayer(name="corp", rate=0.25,
+                      depreciation=(DepreciationClass("all", 1.0, sl_half_year(10)),)),)
+    r = run_case(case, layers=layer)
+    assert r.op_incremental["net"][1] == pytest.approx(identity, abs=0.01)
+    assert r.op_incremental["net"][1] > 0
+    irr = r.metrics["equity_post_tax_irr"]
+    assert irr is not None and np.isfinite(irr)
+    assert irr == pytest.approx(EQUITY_IRR_POST_TAX, abs=1e-5)
+
+    # C6 / C10 inputs and the hash.
+    assets = {a.name: a for a in case.assets}
+    assert assets["pv"].overnight_cost == pytest.approx(700_000.0 * 40)
+    assert assets["bess"].overnight_cost == pytest.approx(1_000_000.0 * 10)
+    assert (assets["pv"].carrier, assets["bess"].lifetime_years) == ("solar", 15.0)
+    assert case.lp_basis.discount_rate == pytest.approx(0.07)
+    assert case.lp_basis.asset_discount_rates == {"pv": 0.07, "bess": 0.07}
+    assert _refused(n, cfg, _fin(cod_by_asset={"pv": COD, "bess": date(2031, 1, 1)})).code == \
+        "cod_mismatch"
+    h = finance_case_hash(case)
+    assert len(h) == 16 and h == finance_case_hash(_case(n, cfg))
+    assert h != finance_case_hash(_case(n, cfg, _fin(wacc_nominal=0.08)))
+
+
+# ── C3: the template must be a year ─────────────────────────────────────────
+
+
+@pytest.mark.live_solve
+def test_a_seven_day_template_is_refused_or_annualised(reset_backend):
+    from services.commercial import billing as B
+
+    n, cfg = _solve(_edge7(), _commercial(OWNED, contracts=[]))
+    assert _refused(n, cfg).code == "template_not_annual:168"
+    # The bill is established on the partial year (demand items with no
+    # billing period, not `period_not_billed`; plan round 2 R6).
+    bill = B.bill_site(n, cfg.commercial)
+    assert bill.per_period[None] is not None and bill.provenance["billing_calendar"][None] is None
+    assert not any(f.startswith("period_not_billed") for f in bill.flags)
+    inputs, _vf, ledger, _ = _ledger(n, cfg)
+    case = _case(n, cfg, _fin(annualise=True))
+    assert "template_annualised:52.14" in case.flags
+    (t,), (cf,) = case.templates, case.counterfactual
+    f = 8760.0 / 168.0
+    assert _net(t) == pytest.approx(_owner_net(ledger, "_") * f, abs=0.01)
+    assert _lines(t)["bill:demand"].amount == pytest.approx(
+        -inputs.bill["_"]["demand"] * f, abs=1e-6)
+    w = n.snapshot_weightings.objective.to_numpy(float)
+    assert t.energy_mwh["pv"] == pytest.approx(float((w * n.generators_t.p["pv"]).sum()) * f)
+    # The commodity is established on the meter basis, annualised too.
+    served = n.loads_t.p_set["site_load"].to_numpy(float)
+    assert _lines(cf)["counterfactual:commodity"].amount == pytest.approx(
+        -50.0 * float((w * served).sum()) * f, abs=0.01)
+
+
+def test_the_period_year_and_the_leap_year_hours():
+    import pypsa
+
+    from services.results.finance_case import _period_year_and_hours
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2032-01-01", periods=8784, freq="h"))
+    assert _period_year_and_hours(n, None) == (2032, 8784.0, 2032)
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-12-31 12:00", periods=48, freq="h"))
+    n.snapshot_weightings["objective"] = [1.0] * 12 + [3.0] * 36
+    assert _period_year_and_hours(n, None) == (2031, 120.0, 2031)       # the weight majority
+
+
+# ── C13: the counterfactual's edges ─────────────────────────────────────────
+
+
+@pytest.mark.live_solve
+def test_a_load_free_generator_site_is_incremental_equals_total(reset_backend):
+    from services.finance.engine import run_case
+    from services.finance.tax import DepreciationClass, TaxLayer, sl_half_year
+
+    n = _edge7()
+    n.remove("Load", "site_load")
+    n.remove("StorageUnit", "bess")
+    n.generators.loc["pv", "p_nom_extendable"] = False
+    n.generators.loc["pv", "p_nom"] = 30.0
+    vf = {**copy.deepcopy(VF), "asset_owners": [{"asset_id": "pv", "component": "Generator",
+                                                 "owner": "site"}]}
+    com = _commercial(vf, contracts=[])
+    com.pop("connection")
+    com["import_tariff"]["items"] = [TOU, DEMAND, FEED_IN]
+    n, cfg = _solve(n, com)
+    case = _case(n, cfg, _fin(annualise=True, cod_by_asset={"pv": COD}))
+    (cf,) = case.counterfactual
+    assert cf.lines and all(ln.amount == pytest.approx(0.0, abs=1e-9) for ln in cf.lines)
+    assert not any(f.startswith("load_shed_excluded") for f in case.flags)
+    layer = (TaxLayer(name="corp", rate=0.25,
+                      depreciation=(DepreciationClass("all", 1.0, sl_half_year(10)),)),)
+    r = run_case(case, layers=layer)
+    total = r.op.revenue - r.op.costs
+    assert np.allclose(r.op_incremental["counterfactual"], 0.0)
+    assert np.allclose(r.op_incremental["net"], total)
+    assert total[1] > 0                                     # it earns the export
+
+
+@pytest.mark.live_solve
+def test_shed_load_is_excluded_on_both_sides_and_disclosed(reset_backend):
+    """The served load = demand − the DSR shed (per bus) − the VoLL shed (per
+    load): the counterfactual is rated on it, and the actual meter carries the
+    same shed (it never served it). Never valued (the P2 carry-in)."""
+    from services.commercial import billing as B
+
+    n = _edge7()
+    n.links.loc["import", "p_nom_extendable"] = False
+    n.links.loc["import", "p_nom"] = 1.0                   # scarce enough to shed
+    n.generators.loc["pv", "p_nom_extendable"] = False
+    n.generators.loc["pv", "p_nom"] = 5.0
+    com = _commercial(OWNED, contracts=[])
+    com.pop("connection")
+    state: dict = {}
+    n, cfg = _solve(n, com, state=state, dsr_price_eur_per_mwh=40.0, dsr_share_of_load=0.1,
+                    dsr_buses=["site"], voll=1000.0)
+    ll = state["last_lost_load"]
+    w = n.snapshot_weightings.objective.to_numpy(float)
+    dsr = n.buses_t["ic_dsr_p"]["site"].to_numpy(float)
+    voll = ll["lost_load_t"]["site_load"].reindex(n.snapshots).fillna(0.0).to_numpy(float)
+    assert (w * dsr).sum() > 0 and (w * voll).sum() > 0
+    demand = n.loads_t.p_set["site_load"].to_numpy(float)
+    served = demand - dsr - voll
+    # The actual side carries the same shed: its supply balances the served load.
+    supply = (n.links_t.p0["import"] - n.links_t.p0["export"] + n.generators_t.p["pv"]
+              + n.storage_units_t.p["bess"]).to_numpy(float)
+    assert float((w * supply).sum()) == pytest.approx(float((w * served).sum()), rel=1e-6)
+    case = _case(n, cfg, _fin(annualise=True), lost_load=ll)
+    assert _flag_num(case.flags, "load_shed_excluded:") == pytest.approx(
+        float((w * (dsr + voll)).sum()), abs=0.01)
+    (cf,) = case.counterfactual
+    f = 8760.0 / 168.0
+    want = B.rate_meter(n, cfg.commercial, served, np.zeros(len(served))).per_period[None]
+    assert _lines(cf)["bill:energy"].amount == pytest.approx(
+        -want.per_item_sampled["energy"] * f, abs=1e-6)
+    (t,) = case.templates
+    assert not any("dsr" in k or "voll" in k for k in _lines(t))      # disclosed, never cash
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("extra, reason", [
+    ("peaker", "several_priced_generators"),
+    ("grid_load", "ledger_cross_check"),
+], ids=["several_grid_side_generators", "grid_side_load"])
+def test_the_commodity_is_not_established_off_the_meter_basis(reset_backend, extra, reason):
+    n = _edge7()
+    if extra == "peaker":
+        n.add("Generator", "grid_peaker", bus="grid", carrier="grid", p_nom=10.0,
+              marginal_cost=90.0)
+    else:
+        n.add("Load", "grid_load", bus="grid", p_set=5.0)
+    n, cfg = _solve(n, _commercial(OWNED, contracts=[]))
+    case = _case(n, cfg, _fin(annualise=True))
+    assert "counterfactual_commodity_not_established" in case.flags
+    assert f"counterfactual_commodity_not_established:{reason}" in case.flags
+    (cf,) = case.counterfactual
+    assert _lines(cf)["counterfactual:commodity"].amount is None
+    (t,) = case.templates
+    assert all(ln.amount is not None for ln in t.lines if ln.source == "asset")
+
+
+@pytest.mark.live_solve
+def test_a_counterfactual_above_the_poc_and_the_supply_is_flagged(reset_backend):
+    n = _edge7()
+    n.links.loc["import", "p_nom_extendable"] = False
+    n.links.loc["import", "p_nom"] = 42.0          # the BESS shaves the 45 MW evening peak
+    n.generators.loc["grid_supply", "p_nom"] = 43.0
+    com = _commercial(OWNED, contracts=[])
+    com.pop("connection")
+    n, cfg = _solve(n, com)
+    case = _case(n, cfg, _fin(annualise=True))
+    assert {"counterfactual_exceeds_connection", "counterfactual_exceeds_supply"} <= \
+        set(case.flags)
+    (cf,) = case.counterfactual
+    assert all(ln.amount is not None for ln in cf.lines)       # flagged, rated as metered
+
+
+@pytest.mark.live_solve
+def test_a_lossy_poc_chain_refuses_the_case(reset_backend):
+    n, cfg = _solve(_edge7(), _commercial(OWNED, contracts=[]))
+    n.links.loc["poc_site", "efficiency"] = 0.98       # the structure check reads the network
+    assert _refused(n, cfg, _fin(annualise=True)).code == \
+        "counterfactual_not_established:lossy_poc"
+
+
+# ── multi-period, staged builds ─────────────────────────────────────────────
+
+
+@pytest.mark.live_solve
+def test_multi_period_templates_and_a_staged_build(reset_backend):
+    n, cfg = _solve(_network(multi=True), _commercial(OWNED), multi=True)
+    case = _case(n, cfg, _fin(annualise=True))
+    assert [(t.first_year, t.money_year) for t in case.templates] == [(2030, 2030), (2040, 2040)]
+    assert case.base_year == 2030
+    keys = [set(_lines(t)) for t in case.templates]
+    assert "contract:ppa1:ppa_energy" in keys[0] and keys[0] == keys[1]     # stable keys
+    f = 8760.0 / 168.0
+    for t in case.templates:
+        p = n.generators_t.p.loc[t.first_year, "pv"].to_numpy(float)
+        assert t.energy_mwh["pv"] == pytest.approx(0.25 * p.sum() * f)      # one year, not ×10
+    n.generators.loc["pv", "build_year"] = 2040
+    assert _refused(n, cfg, _fin(annualise=True)).code == "staged_build_not_supported"
+
+
+# ── owners, contracts, overnight costs, dates ───────────────────────────────
+
+
+@pytest.mark.live_solve
+def test_owners_contract_lines_and_overnight_costs(reset_backend):
+    vf = {**copy.deepcopy(VF), "export_revenue_to": "asset_owner",
+          "participants": [{"id": "site", "name": "Site", "role": "offtaker"},
+                           {"id": "developer", "name": "Dev", "role": "developer"}],
+          "asset_owners": [{"asset_id": "pv", "component": "Generator", "owner": "developer"},
+                           {"asset_id": "bess", "component": "StorageUnit", "owner": "site"}]}
+    ppa = {**PPA, "seller": "developer", "changes_dispatch": False, "indexation_pct_per_year": 2.0,
+           "base_year": 2028}
+    n, cfg = _solve(_edge7(), _commercial(vf, contracts=[ppa, LEASE]))
+    fin = _fin(annualise=True)
+    assert _refused(n, cfg, fin).code == "owner_ambiguous"
+    assert _refused(n, cfg, fin, owner="nobody").code == "owner_has_no_assets"
+
+    # The developer: its PPA and export parts degrade with its PV; no bill, so
+    # no counterfactual (incremental = its total).
+    dev = _case(n, cfg, _fin(annualise=True, cod_by_asset={"pv": COD}), owner=" Developer")
+    assert dev.owner == "developer" and dev.counterfactual == ()
+    (t,) = dev.templates
+    lines = _lines(t)
+    ln = lines["contract:ppa1:ppa_energy"]
+    assert (ln.esc_class, ln.indexation, ln.tenor_years, ln.contract_id) == \
+        (CONTRACT_CLASS, 0.02, 10, "ppa1")
+    assert ln.price == pytest.approx(20.0 * 1.02 ** 2) and ln.changes_dispatch is False
+    assert ln.degrades_with == "pv" and ln.amount > 0
+    assert lines["export_price:export_price:pv"].degrades_with == "pv"
+    assert [a.name for a in dev.assets] == ["pv"]
+    assert dev.assets[0].overnight_cost is None           # capital_cost only: never back-calculated
+
+    # The site: its lease (no indexation field → None, the engine's `ppa`);
+    # the developer's PV is site generation it does not own → the
+    # counterfactual is not established (a None line, flagged).
+    n.storage_units.loc["bess", "overnight_cost"] = 900_000.0       # typed
+    site = _case(n, cfg, _fin(annualise=True, cod_by_asset={"bess": COD}), owner="site")
+    (t,), (cf,) = site.templates, site.counterfactual
+    lease = _lines(t)["contract:lease1:lease_payment"]
+    assert (lease.indexation, lease.tenor_years, lease.amount < 0) == (None, 10, True)
+    assert "contract:lease1:lease_payment" not in _lines(cf)       # on the owner's asset
+    assert _lines(cf)["contract:ppa1:ppa_energy"].amount == _lines(t)["contract:ppa1:ppa_energy"].amount
+    assert "counterfactual_keeps_contract:ppa1" in site.flags
+    assert "counterfactual_not_established:non_owner_site_assets" in site.flags
+    assert _lines(cf)["counterfactual:non_owner_site_assets"].amount is None
+    assert site.assets[0].overnight_cost == pytest.approx(900_000.0 * 10.0)
+    assert set(t.energy_mwh) == set()                          # storage never generates here
+
+    # Dates and configuration refusals.
+    assert _refused(n, cfg, _fin(annualise=True, cod_by_asset={}), owner="site").code == \
+        "cod_missing"
+    bare = dataclasses.replace(cfg, commercial={**cfg.commercial, "value_flows": None})
+    assert _refused(n, bare, fin).code == "value_flows_not_configured"
+    unowned = dataclasses.replace(cfg, commercial={
+        **cfg.commercial, "value_flows": {**vf, "asset_owners": []}})
+    assert _refused(n, unowned, fin).code == "owner_has_no_assets"

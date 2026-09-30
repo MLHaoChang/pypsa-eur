@@ -241,6 +241,10 @@ GET     /api/results/frontier                                    -> get_frontier
 POST    /api/results/frontier                                    -> post_frontier_api_results_frontier_post
 POST    /api/results/frontier/abort                              -> post_frontier_abort_api_results_frontier_abort_post
 GET     /api/results/generators                                  -> get_generator_results_api_results_generators_get
+GET     /api/results/investment_case                             -> get_investment_case_api_results_investment_case_get
+POST    /api/results/investment_case                             -> post_investment_case_api_results_investment_case_post
+POST    /api/results/investment_case/abort                       -> post_investment_case_abort_api_results_investment_case_abort_post
+GET     /api/results/investment_case/report                      -> get_investment_case_report_api_results_investment_case_report_get
 GET     /api/results/lcoh                                        -> get_lcoh_api_results_lcoh_get
 GET     /api/results/line_duals                                  -> get_line_duals_api_results_line_duals_get
 GET     /api/results/line_reactive                               -> get_line_reactive_api_results_line_reactive_get
@@ -276,6 +280,8 @@ GET     /api/simulation/capabilities                             -> capabilities
 GET     /api/simulation/check_solvers                            -> check_solvers_api_simulation_check_solvers_get
 GET     /api/simulation/commercial/value_flows                   -> get_value_flows_api_simulation_commercial_value_flows_get
 PUT     /api/simulation/commercial/value_flows                   -> put_value_flows_api_simulation_commercial_value_flows_put
+GET     /api/simulation/finance                                  -> get_finance_api_simulation_finance_get
+PUT     /api/simulation/finance                                  -> put_finance_api_simulation_finance_put
 POST    /api/simulation/force_reset                              -> force_reset_api_simulation_force_reset_post
 GET     /api/simulation/lock_status                              -> lock_status_api_simulation_lock_status_get
 GET     /api/simulation/log_history                              -> get_log_history_api_simulation_log_history_get

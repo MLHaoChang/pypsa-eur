@@ -1,7 +1,8 @@
 // Results → Investment (IC P3 WP3.5; spec §12). The shell of the investment
 // case: completeness chips from the commercial results, and the sections the
 // P3 editors fill (Participants WP3.6, Library WP3.7a, Tariff WP3.7b, Contracts
-// WP3.7c). A result the server does not establish is shown as such — never as
+// WP3.7c), and the P4 finance case (Finance inputs WP4.7a, Investment case
+// WP4.7b). A result the server does not establish is shown as such — never as
 // a zero (ADR-0001).
 import { useRef, useState, type KeyboardEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -17,6 +18,8 @@ import ParticipantsDesigner from './investment/ParticipantsDesigner'
 import TariffBuilder from './investment/TariffBuilder'
 import LibraryBrowser from './investment/LibraryBrowser'
 import ContractsEditor from './investment/ContractsEditor'
+import FinanceInputsEditor from './investment/FinanceInputsEditor'
+import InvestmentCaseView from './investment/InvestmentCaseView'
 import { blankTariff } from './investment/tariffModel'
 
 const SECTIONS = [
@@ -25,6 +28,8 @@ const SECTIONS = [
   { id: 'library', label: 'Library' },
   { id: 'tariff', label: 'Tariff' },
   { id: 'contracts', label: 'Contracts' },
+  { id: 'finance', label: 'Finance inputs' },
+  { id: 'case', label: 'Investment case' },
 ] as const
 type SectionId = typeof SECTIONS[number]['id']
 
@@ -200,6 +205,8 @@ export default function InvestmentTab() {
         {section === 'tariff' && <TariffSection />}
         {section === 'library' && <LibraryBrowser />}
         {section === 'contracts' && <ContractsEditor />}
+        {section === 'finance' && <FinanceInputsEditor />}
+        {section === 'case' && <InvestmentCaseView />}
       </div>
     </div>
   )

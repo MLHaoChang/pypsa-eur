@@ -516,6 +516,17 @@ def update_solver_config(
     # silently overwrite live state (e.g. "PUT run_ac_pf_after_lopf=true"
     # used to reset voll/discount_rate/sclopf back to defaults).
     submitted = cfg.model_dump(exclude_unset=True)
+    if "finance" in submitted:
+        # The finance inputs are owned by `PUT /finance` (validation, If-Match;
+        # IC P4 WP4.6b — the value-flows guard). An unchanged echo is dropped;
+        # a change is refused. Either way the merge below keeps what is stored
+        # NOW (read under the lock), so a concurrent finance edit is never lost.
+        if submitted["finance"] != getattr(_state["solver_config"], "finance", None):
+            raise HTTPException(422, {
+                "code": "finance_via_dedicated_route",
+                "message": "change the finance inputs through PUT /api/simulation/finance (it "
+                           "validates them and checks If-Match); omit the key here"})
+        submitted.pop("finance")
     stored_commercial = getattr(_state["solver_config"], "commercial", None)
     rebound = False
     if "commercial" in submitted and (cfg.commercial is not None
@@ -653,6 +664,67 @@ def put_value_flows(body: ValueFlowsIn, if_match: str | None = Header(default=No
         merged["commercial"] = {**commercial, "value_flows": new}
         _state["solver_config"] = SolverConfig(**merged)
         return _value_flows_state(merged["commercial"])
+
+
+class FinanceIn(BaseModel):
+    # Required and closed, like `ValueFlowsIn`: an unwrapped body or an empty
+    # one is a 422, never a default null that clears the stored inputs.
+    model_config = ConfigDict(extra="forbid")
+    finance: dict[str, Any] | None = Field(...)
+
+
+def _finance_state(raw) -> dict:
+    from services.finance.investment_case_runner import finance_digest
+
+    out = {"finance": raw, "digest": finance_digest(raw),
+           "status": "not_set" if raw is None else "ok"}
+    if raw is not None:
+        from models.finance import FinanceInputs
+
+        try:
+            FinanceInputs.model_validate(raw)
+        except ValidationError as exc:
+            # A stored value the current model refuses (it tightened since the
+            # save): shown, never silently dropped; the run refuses it (422).
+            out.update(status="finance_inputs_invalid", message=str(exc.errors()[0]["msg"]))
+    return out
+
+
+@router.get("/finance")
+def get_finance():
+    """The stored finance inputs (`FinanceInputs` JSON) and their `If-Match`
+    digest (IC P4 WP4.6b). `status`: `not_set`, `ok` or
+    `finance_inputs_invalid`."""
+    return _finance_state(getattr(_state["solver_config"], "finance", None))
+
+
+@router.put("/finance")
+def put_finance(body: FinanceIn, if_match: str | None = Header(default=None)):
+    """Set (or clear, with null) the finance inputs (IC P4 WP4.6b). Validated
+    through `FinanceInputs` (422 with the field paths); `If-Match` (the GET's
+    digest) refuses a stale edit (412); 409 while a solve runs. Not part of any
+    solve fingerprint: a finance edit never marks the dispatch stale, only a
+    stored investment-case report (its assumptions hash)."""
+    from services.finance.investment_case_runner import finance_digest, finance_inputs_or_422
+
+    if _solver_in_flight_ctx(PyPSAService.get_active_context()):
+        raise HTTPException(409, {"code": "solver_in_flight",
+                                  "message": "a solve is running on this project; change the "
+                                             "finance inputs after it finishes"})
+    new = None
+    if body.finance is not None:
+        new = finance_inputs_or_422(body.finance).model_dump(mode="json")
+    with PyPSAService.get_solver_state_lock():
+        current = getattr(_state["solver_config"], "finance", None)
+        tag = _entity_tag(if_match)
+        if tag is not None and tag != "*" and tag != finance_digest(current):
+            raise HTTPException(412, {"code": "finance_changed",
+                                      "message": "the finance inputs changed since they were "
+                                                 "read; reload and re-apply the edit"})
+        merged = asdict(_state["solver_config"])
+        merged["finance"] = new
+        _state["solver_config"] = SolverConfig(**merged)
+        return _finance_state(new)
 
 
 @router.get("/value_flows/designer")
