@@ -334,13 +334,14 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
     # investment's value gross of its own operating costs − PV of the post-tax
     # equity cash) / PV of its generation, i.e. PV of everything the energy
     # costs. The value = incremental operating cash + the asset costs (fom,
-    # vom, fuel); without a counterfactual it is SAM's revenue exactly.
+    # costs — every actual line with no counterfactual counterpart); without
+    # a counterfactual it is SAM's revenue exactly.
     energy = [e for e in op.energy_mwh.values()]
     lcoe = lcoe_r = None
     if energy and all(e is not None for e in energy) and inc_net is not None and \
             cash["equity_post_tax"] is not None and fin.cost_of_equity is not None:
         e_tot = np.sum(energy, axis=0)
-        value = inc_net + _asset_costs(op)
+        value = inc_net + _asset_costs(op, case)
         r = fin.cost_of_equity
         k = np.arange(n)
         d = (1.0 + r) ** k
@@ -374,15 +375,16 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
     return result
 
 
-ASSET_COST_STREAMS = ("fom", "vom", "fuel")
-
-
-def _asset_costs(op: Operating) -> np.ndarray:
-    """The asset's own operating costs per year (> 0), from its template lines."""
+def _asset_costs(op: Operating, case: FinanceCase) -> np.ndarray:
+    """The investment's own costs per year (> 0): the cost part of every
+    actual line with no counterpart in the counterfactual (the shared bill,
+    commodity and connection keys stay netted as savings) — WP4.5 review r2.
+    Without a counterfactual, net + these = the operating revenue exactly."""
+    shared = {ln.key for t in case.counterfactual for ln in t.lines}
     out = np.zeros(op.tl.n)
     for key, arr in op.lines.items():
-        if arr is not None and op.line_meta[key].stream in ASSET_COST_STREAMS:
-            out -= arr
+        if arr is not None and key not in shared:
+            out += np.clip(-arr, 0.0, None)
     return out
 
 

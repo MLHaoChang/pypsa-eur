@@ -306,3 +306,22 @@ def test_an_impossible_basis_is_a_reason_never_an_exception():
     r = run_case(_case(fin_over={"incentives": [Incentive(kind="itc", rate=1.5)]}), layers=layer)
     assert r.sections["tax"] == "not_established"
     assert any(x.startswith("tax_basis_invalid:") for x in r.reasons["tax"])
+
+
+
+@pytest.mark.parametrize("stream,cls", [("fom", "opex"), ("network_capacity", "tariff"),
+                                        ("other", "opex"), ("lease", CONTRACT_CLASS)])
+def test_lcoe_counts_every_owner_cost_and_a_cost_never_lowers_it(stream, cls):
+    """WP4.5 review r2: without a counterfactual LCOE = (PV revenue − PV
+    equity) / PV energy (SAM) whatever the cost line's stream."""
+    base = (TemplateLine("ppa", "ppa_settlement", 240.0, CONTRACT_CLASS, indexation=0.0),)
+    cost = TemplateLine("c", stream, -30.0, cls, indexation=0.0 if cls == CONTRACT_CLASS else None)
+    a = run_case(_case(lines=base), layers=LAYER)
+    b = run_case(_case(lines=base + (cost,), fin_over={"escalation": {
+        "opex": 0.0, "tariff": 0.0, "export": 0.0, "ppa": 0.0}}), layers=LAYER)
+    k = np.arange(b.tl.n)
+    d = 1.09 ** k
+    sam = (np.sum(b.op.revenue / d) - np.sum(b.cash["equity_post_tax"] / d)) / np.sum(
+        np.sum(list(b.op.energy_mwh.values()), axis=0) / d)
+    assert b.metrics["lcoe_nominal_per_mwh"] == pytest.approx(sam, rel=1e-12)
+    assert b.metrics["lcoe_nominal_per_mwh"] > a.metrics["lcoe_nominal_per_mwh"]

@@ -380,13 +380,8 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
             else:
                 reasons.append(f"incentive_rate_missing:{tag}")
                 continue
-            line.cash[p] = amount
-            out.grant += line.cash
-            if inc.grant_tax_treatment == "taxable":
-                out.grant_taxable += line.cash
-            else:
-                out.grant_basis_reduction += amount
-                flags.append("grant_reduces_basis_pro_rata")
+            if inc.grant_tax_treatment != "taxable":
+                # Checks first, totals after (WP4.4 review r4 #1).
                 if any(a.overnight_cost is None for a in assets):
                     reasons.append(f"overnight_cost_missing:{tag}")
                     continue
@@ -400,6 +395,12 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
                     reasons.append(f"grant_exceeds_cost:{tag}")   # never a negative basis
                     continue
                 grant_on.update(new)
+                out.grant_basis_reduction += amount
+                flags.append("grant_reduces_basis_pro_rata")
+            line.cash[p] = amount
+            out.grant += line.cash
+            if inc.grant_tax_treatment == "taxable":
+                out.grant_taxable += line.cash
     flags.extend(f for ln in out.lines for f in ln.flags)
     out.itc_assets = tuple(sorted(itc_assets))
     out.reasons = sorted(set(reasons))

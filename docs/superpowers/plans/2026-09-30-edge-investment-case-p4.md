@@ -943,6 +943,16 @@ with a grant matches SAM's IBI: `reduces_basis` year by year, and `taxable` with
 
 **Taken:** `asset_classes` match case-insensitively; a missing overnight cost is named as such.
 
+**WP4.4 review round 4 (0742677): PASS.**
+- **Grants:** checked per asset (the table of cases in the review).
+- **Impossible bases:** reported as reasons.
+- **Earlier results:** the round-2 SAM results still hold.
+
+**Taken:** a refused grant no longer adds to the totals.
+
+**Deferred to the P4 gate:** a `≤ 1` validator on `Incentive.rate` for ITC and grants (for now it is caught
+downstream as `tax_basis_invalid`).
+
 ## WP4.5 Metrics, solve-for-PPA, the WACC gate
 
 - `metrics.py` (C9): unlevered project IRR / NPV, equity IRR / NPV pre and post tax, payback, DSCR min / avg
@@ -1057,6 +1067,17 @@ moratorium. The results:
 - commitment fees are amortised with the upfront fee;
 - payback is counted from financial close;
 - WP4.6a passes generation only in `energy_mwh`.
+
+**WP4.5 review round 2: one finding; fixed.**
+
+B1 and B3–B7 were confirmed fixed:
+- the sculpted solve equals SAM's 101.78863114 $/MWh from any start (0.01×–50×);
+- every earlier variant still matches.
+
+B2 still had a gap without a counterfactual: LCOE left out cost lines other than fom, vom and fuel (a
+connection fee lowered it). Fixed: the value adds back the cost part of every actual line with no
+counterfactual counterpart. Without a counterfactual this is exactly SAM's revenue. Tested across fom,
+`network_capacity`, `other` and `lease`: the LCOE equals SAM's formula, and a cost never lowers it.
 
 ## WP4.6a Adapter: `FinanceCase`, counterfactual, template checks
 
