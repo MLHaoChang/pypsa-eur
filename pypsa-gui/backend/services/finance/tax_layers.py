@@ -11,7 +11,11 @@ asset`, or the pack's default for the carrier): `macrs_<n>` (the pack's Table
 A-1), `sl_<n>` (straight-line, half-year convention), `afa_<n>` (straight-line
 pro rata by month from COD, §7 Abs. 1 EStG), `db_<rate>_<n>` (declining
 balance at `rate`, switching to straight-line, the first year pro rata by
-month from COD — §7 Abs. 2 EStG; WP4.3a review B1). Every schedule is checked
+month from COD — §7 Abs. 2 EStG; WP4.3a review B1), `slm_<n>` (straight-line
+pro rata by month from COD — the Dutch time-proportional convention),
+`cca_<class>` (Canadian CCA: the pack's class rate, declining balance, the
+half-year rule or the enhanced first-year allowance by acquisition and
+available-for-use dates — WP4.3b). Every schedule is checked
 (years ≥ 1, 0 < rate ≤ 1, entries ≥ 0, summing to 1 — review B7).
 
 Whenever anything is MISSING the resolver returns NO layers (review B3): a
@@ -31,8 +35,8 @@ from datetime import date
 from models.finance import FinanceInputs
 from services.finance.packs.base import JurisdictionPack
 from services.finance.tax import (
-    DepreciationClass, InterestCap, LossRule, TaxLayer, declining_balance, normalised,
-    sl_half_year, sl_pro_rata,
+    DepreciationClass, InterestCap, LossRule, TaxLayer, cca_declining, declining_balance,
+    normalised, sl_half_year, sl_pro_rata,
 )
 
 
@@ -62,7 +66,29 @@ def _years(v: str, cls: str) -> int:
     return n
 
 
-def schedule_for(cls: str, pack: JurisdictionPack, cod: date) -> tuple[float, ...]:
+def _cca(rest: str, pack: JurisdictionPack, cod: date, acquired: date | None) -> tuple[float, ...]:
+    classes = pack.rule("cca_classes")
+    if classes.status != "ok" or rest not in classes.value:
+        raise KeyError(f"CCA class {rest!r} is not in pack {pack.jurisdiction!r}")
+    c = classes.value[rest]
+    if acquired is None:
+        raise ValueError("CCA needs acquisition_date")
+    if "acquired_before" in c and not (
+            date.fromisoformat(c["acquired_after"]) < acquired < date.fromisoformat(c["acquired_before"])):
+        raise ValueError(f"CCA class {rest} applies to property acquired after {c['acquired_after']} "
+                         f"and before {c['acquired_before']}")
+    first = None
+    enh = pack.rule("enhanced_first_year_43")
+    if rest.startswith("43") and enh.status == "ok" and \
+            acquired > date.fromisoformat(enh.value["acquired_after"]):
+        by = {int(k): v for k, v in enh.value["by_available_for_use_year"].items()}
+        if cod.year <= max(by):
+            first = by.get(cod.year, by[min(by)] if cod.year < min(by) else None)
+    return cca_declining(float(c["rate"]), first)
+
+
+def schedule_for(cls: str, pack: JurisdictionPack, cod: date,
+                 acquired: date | None = None) -> tuple[float, ...]:
     kind, _, rest = cls.partition("_")
     months = 13 - cod.month                     # months in the year of COD, COD's month included
     if kind == "macrs":
@@ -74,8 +100,10 @@ def schedule_for(cls: str, pack: JurisdictionPack, cod: date) -> tuple[float, ..
         return normalised([p / 100.0 for p in table.value[rest]], tol=1e-4)
     if kind == "sl":
         return normalised(sl_half_year(_years(rest, cls)))
-    if kind == "afa":
+    if kind in ("afa", "slm"):
         return normalised(sl_pro_rata(_years(rest, cls), months_first_year=months))
+    if kind == "cca":
+        return normalised(_cca(rest, pack, cod, acquired))
     if kind == "db":
         rate, _, years = rest.partition("_")
         return normalised(declining_balance(float(rate), _years(years, cls),
@@ -119,7 +147,10 @@ def _classes(pack, fin, assets, cod, res: ResolvedTax, *, bonus_macrs: float = 0
             res.missing.append(f"depreciation_class:{a.name}")
             continue
         try:
-            sched = schedule_for(cls, pack, cod)
+            sched = schedule_for(cls, pack, cod, fin.acquisition_date)
+            cap = pack.rule("depreciation_max_rate")
+            if cap.status == "ok" and max(sched) > cap.value + 1e-12:
+                raise ValueError(f"exceeds the {cap.value:.0%} a year cap ({cap.source})")
             if cls.startswith("macrs_"):
                 res.sources["macrs_half_year_percent"] = pack.rule("macrs_half_year_percent").source
         except (KeyError, ValueError, ZeroDivisionError) as e:
@@ -239,6 +270,44 @@ def resolve_tax_layers(pack: JurisdictionPack, fin: FinanceInputs, assets: list[
             )
             if carry:
                 res.flags.append("gewst_addback_interest_only")
+    elif pack.jurisdiction == "eu_nl":
+        brackets, loss, strip = need("vpb_brackets"), need("vpb_loss"), need("earnings_stripping")
+        need("depreciation_max_rate")
+        classes = _classes(pack, fin, assets, cod, res)
+        if None not in (brackets, loss, strip):
+            cap_obj = (InterestCap(share=strip["share"], allowance=strip["allowance"],
+                                   carryforward=bool(strip["carryforward"])) if carry else None)
+            res.layers = (TaxLayer(
+                name="vpb", rate=float(brackets[-1][1]), depreciation=classes,
+                brackets=tuple((float(t), float(r)) for t, r in brackets),
+                loss=LossRule(allowance=loss["allowance"], limit_share=loss["limit_share"],
+                              years=loss["years"]),
+                interest_cap=cap_obj),)
+            res.flags.append("nl_residual_value_not_modelled")
+            if carry:
+                res.flags.append("nl_loss_carryback_not_modelled")
+    elif pack.jurisdiction == "ca_federal":
+        rate, loss, red = need("federal_rate"), need("non_capital_loss"), \
+            need("itc_capital_cost_reduction")
+        need("cca_classes")
+        classes = _classes(pack, fin, assets, cod, res)
+        if fin.state_rate is None:
+            res.missing.append("state_rate")          # the provincial rate (0 = none)
+        if None not in (rate, loss, red):
+            lr = LossRule(allowance=loss["allowance"], limit_share=loss["limit_share"],
+                          years=loss["years"])
+            layers = [TaxLayer(name="federal", rate=rate, depreciation=classes,
+                               deductible_in_later_layers=False, loss=lr,
+                               itc_basis_reduction=True, itc_basis_reduction_share=float(red))]
+            if fin.state_rate:
+                layers.append(TaxLayer(name="provincial", rate=fin.state_rate,
+                                       depreciation=classes, deductible_in_later_layers=False,
+                                       loss=lr, itc_basis_reduction=True,
+                                       itc_basis_reduction_share=float(red)))
+                res.flags.append("provincial_layer_follows_federal_cca")
+            res.layers = tuple(layers)
+            if carry:
+                res.flags.append("ca_eifel_not_modelled")
     else:
         res.missing.append(f"pack_not_resolvable:{pack.jurisdiction}")
     res.missing = sorted(set(res.missing))

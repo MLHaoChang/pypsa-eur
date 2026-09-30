@@ -743,6 +743,45 @@ Nit taken: the degressive rate keeps full precision (`repr`, not `:g`).
   version.
 - Tests: a hand case per pack (tax per layer, depreciation per class for 5 years).
 
+**WP4.3b implementation.**
+
+**`eu_nl`** (Wet Vpb 1969 / Wet IB 2001, and the Belastingdienst 2026 pages, verified at the source):
+- the VPB brackets 19 % to €200k, 25.8 % above (art. 22);
+- losses €1m + 50 %, with no time limit (art. 20 lid 2);
+- earnings stripping: the cap is the higher of 24.5 % of fiscal EBITDA and €1m, with carryforward
+  (art. 15b). This is a new `InterestCap.allowance`, not a Freigrenze;
+- depreciation at most 20 % a year (art. 3.30 lid 3), enforced on every class;
+- the class `slm_<n>` (straight line, pro rata by month);
+- residual value and carryback flagged as not modelled;
+- useful lives and the EIA absent.
+
+**`ca_federal`** (ITA, the Regulations, NRCan and CRA; enacted law):
+- the federal rate is 15 % (38 − 10 − 13);
+- a provincial slot (`state_rate`), not deductible from each other;
+- CCA classes 43.1 (30 %) and 43.2 (50 %, acquired 2005-02-23 … 2024-12-31) on declining balance
+  (`cca_declining`):
+  - the half-year rule, or the enhanced first year for property acquired after 2018-11-20: 100 % before
+    2024, 75 % in 2024–25, 55 % in 2026–27, by available-for-use (COD) year;
+- non-capital losses carry 20 years;
+- the Clean Technology ITC: 30 %, 15 % in 2034, 0 % after; −10 points when the labour requirements
+  (`pwa_met`) are not met; only on class 43.1 / 43.2 assets; it reduces the capital cost by **100 %** (new
+  `TaxLayer.itc_basis_reduction_share`);
+- EIFEL absent and flagged;
+- the 2025 budget proposals are not included (not enacted).
+
+**Tax engine additions:** progressive `brackets` (a negative base is valued at the top bracket, flagged)
+and the `cca_declining` schedule.
+
+**Registry:** {ca_federal, eu_de, eu_nl, us_federal}, pinned per version.
+
+**Tests (`test_finance_tax_packs_nl_ca.py`, 13):**
+- NL brackets, losses and straight line by hand;
+- earnings stripping with the threshold and the carryforward;
+- the 20 % cap;
+- CA CCA 43.1, four first-year cases (100 / 75 / 55 % and half-year), then declining balance;
+- CA layers; the 43.2 window; the EIFEL flag;
+- the Clean Tech ITC at 30 / 20 / 15 / 0 % and a non-43 class.
+
 ## WP4.4 Incentives with dated rules
 
 - `incentives.py`: **ITC** (share of eligible basis, cap, basis reduction as a **0/1 flag per layer with a

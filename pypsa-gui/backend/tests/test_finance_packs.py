@@ -20,15 +20,16 @@ from services.finance.packs import base as P
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "investment_case"
 
 
-def test_v1_pack_registry_is_exactly_eu_de_and_us_federal():
-    assert set(P.available_jurisdictions()) == {"eu_de", "us_federal"}
+def test_the_p4_pack_registry():
+    # IC P4 WP4.3b: {eu_de, eu_nl, us_federal, ca_federal}.
+    assert set(P.available_jurisdictions()) == {"ca_federal", "eu_de", "eu_nl", "us_federal"}
 
 
 def test_unknown_jurisdiction_raises_pack_not_found():
     with pytest.raises(P.PackNotFound):
-        P.load_pack("eu_nl", as_of=date(2026, 1, 1))
+        P.load_pack("eu_fr", as_of=date(2026, 1, 1))
     with pytest.raises(P.PackNotFound):
-        P.load_pack("ca_federal", as_of=date(2026, 1, 1))
+        P.load_pack("eu_de", as_of=date(2025, 1, 1))         # before the first version
 
 
 def test_loaded_pack_carries_provenance_fields():

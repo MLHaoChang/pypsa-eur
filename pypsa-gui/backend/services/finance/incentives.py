@@ -111,6 +111,7 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
         return out
     reasons, flags = out.reasons, out.flags
     us = pack is not None and pack.jurisdiction == "us_federal"
+    ca = pack is not None and pack.jurisdiction == "ca_federal"
     cs = fin.construction_start
     cod = case.cod
 
@@ -236,6 +237,33 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
                     continue
                 rate = r["alternative"] if fin.pwa_met else r["base"]
                 flags.append("itc_bonus_adders_not_modelled")
+            if rate is None and ca:
+                # The Clean Technology ITC (s. 127.45) on Class 43.1 / 43.2
+                # property, by the year it becomes available for use (COD).
+                r = rule("clean_technology_itc")
+                if r is None:
+                    continue
+                classes = {a.name: (fin.depreciation_class_by_asset.get(a.name) or "")
+                           for a in assets}
+                off = [a for a in assets if not classes[a.name].startswith(("cca_43.1", "cca_43.2"))]
+                for a in off:
+                    line.flags.append(f"incentive_ineligible:{tag}:not_class_43:{a.name}")
+                assets = [a for a in assets if a not in off]
+                line.assets = tuple(a.name for a in assets)
+                if not assets:
+                    continue
+                if cod < date.fromisoformat(r["available_from"]):
+                    line.flags.append(f"incentive_ineligible:{tag}:before_available_from")
+                    continue
+                by = {int(k): v for k, v in r["rate_by_available_for_use_year"].items()}
+                rate = by[max(y for y in by if y <= cod.year)] if cod.year >= min(by) else 0.0
+                if rate > 0:
+                    if fin.pwa_met is None:
+                        reasons.append(f"input_missing:pwa_met:{tag}")   # the labour requirements
+                        continue
+                    if not fin.pwa_met:
+                        rate = max(0.0, rate - r["labour_requirements_reduction"])
+                names = {a.name for a in assets}
             if rate is None:
                 reasons.append(f"incentive_rate_missing:{tag}")
                 continue
