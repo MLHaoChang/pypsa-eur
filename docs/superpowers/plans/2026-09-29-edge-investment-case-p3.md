@@ -1067,6 +1067,27 @@ period → `export_split_not_established:<source>:<period>` and the source's amo
 amount to the site). Tests: the four topologies (split and PPA to the cent) and NaN; 632 targeted tests
 and the three drivers green.
 
+**Gate assessor rounds 3–6: PASS WITH CONDITIONS each, on the same condition-2 class** (a silent
+misattribution of the export split with `conservation_ok` True; each probe became a test that fails on
+the code before its fix):
+- **Round 3 (38d6e20):** a Store battery's discharger counted as generation (310,452.72 vs 448,000.00)
+  → b0cbbfe: a Link fed by storage is not generation; fuel and storage together → mixed (NaN whenever it
+  delivers, not established).
+- **Round 4 (b0cbbfe):** the rule read only bus0 — a gas-heated heat Store's ORC excluded, a two-hop
+  battery and a two-hop H2 loop counted, a reformer-plus-electrolyser bus taken as storage → cb478a9:
+  origins followed upstream through non-electric Links (primary: a producing Generator; charged: site
+  electricity entering the non-electric side); Stores buffer only.
+- **Round 5 (cb478a9):** Links read one-way — a reversible SOFC, an H2 co-firing engine (an input port
+  with `efficiency2 < 0`) and a reversible Link with an electric bus0 → e731683: PyPSA Link semantics
+  (inputs = bus0 + negative-efficiency ports; a negative `p_min_pu` makes every port both; a reversible
+  Link touching the site charges its own side); an electric input port on the converter itself stays
+  netted (accepted by the assessor); a mixed Link is unknown only when it delivers.
+- **Round 6 (e731683): condition 1 CLOSED** — all 21 probes right (16 earlier + 5 new: a sign-changing
+  time-varying `efficiency2`, a reversible battery inverter, a reversible heat Link with a boiler and
+  ORC, `p_min_pu` negative only sometimes, twice). Remaining: the full-suite totals at this head
+  (round-3 condition 2). Non-binding: the note's Σ −p_k wording aligned; a mixed Link delivering
+  anywhere in a period blocks that period's split (conservative, recorded).
+
 ## Scope boundaries (not P3)
 
 - Annual cashflows, escalation, degradation, debt, tax, incentives, returns — P4 (mapping pinned in WP3.1).

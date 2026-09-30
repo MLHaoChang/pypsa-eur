@@ -106,7 +106,8 @@ periods; assessor note).
     gas load beside it), a solar-thermal collector, a heat dump — is not electric generation.
   - **Converting Links** (`_converting_links` → `site_generating_ports` / `site_link_generation`): a
     site-side Link whose bus0 is not electric counts what it delivers to site-side electric buses from ANY
-    port, NET (Σ −p1…−p4: an auxiliary draw on a port with a negative efficiency is subtracted), keyed by
+    port, NET (Σ −p_k over its electric site-side ports — port 0 too when it is the electric side of a
+    reversible Link; an auxiliary draw on a port with a negative efficiency is subtracted), keyed by
     the Link — a CHP's power on bus2 counts, its heat on bus1 never. An electric-input Link (a feeder,
     the PoC, a heat pump, a charger, an electrolyser) is not generation.
   - **Where the input's energy comes from decides** (`_converting_links`), followed upstream through
