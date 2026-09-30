@@ -349,6 +349,11 @@ def test_a_representative_week_keeps_its_ledger(reset_backend):
 def _add_topology(n, topology):
     """The gate's generation topologies (assessor rounds 1–3): returns a
     function of the solved network giving the site's NON-pv electric output."""
+    if topology in ("store_battery", "battery_two_hop", "h2_two_hop", "heat_store_orc"):
+        hours = np.asarray(n.snapshots.hour)
+        px = n.links_t["ic_export_price"]["export"].to_numpy(float).copy()
+        px[(hours >= 11) & (hours < 13)] = 400.0            # discharges while PV exports
+        n.links_t["ic_export_price"]["export"] = px
     if topology == "store_battery":
         # PyPSA's Store battery: charger and discharger Links around a Store.
         # Its discharge is stored site electricity, never generation (round 3).
@@ -356,10 +361,24 @@ def _add_topology(n, topology):
         n.add("Store", "batt_store", bus="batt", e_nom=200.0, e_cyclic=True)
         n.add("Link", "charger", bus0="site", bus1="batt", p_nom=40.0, efficiency=0.95)
         n.add("Link", "discharger", bus0="batt", bus1="site", p_nom=40.0, efficiency=0.95)
-        hours = np.asarray(n.snapshots.hour)
-        px = n.links_t["ic_export_price"]["export"].to_numpy(float).copy()
-        px[(hours >= 11) & (hours < 13)] = 400.0            # discharges while PV exports
-        n.links_t["ic_export_price"]["export"] = px
+        return lambda n: np.zeros(len(n.snapshots))
+    if topology == "battery_two_hop":
+        # Round 4: charger → Store → BMS → inverter — still stored electricity.
+        n.add("Bus", "batt", carrier="battery")
+        n.add("Bus", "batt_dc", carrier="battery_dc")
+        n.add("Store", "batt_store", bus="batt", e_nom=200.0, e_cyclic=True)
+        n.add("Link", "charger", bus0="site", bus1="batt", p_nom=40.0, efficiency=0.95)
+        n.add("Link", "bms", bus0="batt", bus1="batt_dc", p_nom=40.0, efficiency=0.99)
+        n.add("Link", "discharger", bus0="batt_dc", bus1="site", p_nom=40.0, efficiency=0.96)
+        return lambda n: np.zeros(len(n.snapshots))
+    if topology == "h2_two_hop":
+        # Round 4: electrolyser → H2 Store → pipe → fuel cell — stored electricity.
+        n.add("Bus", "h2", carrier="H2")
+        n.add("Bus", "h2b", carrier="H2")
+        n.add("Store", "h2_store", bus="h2", e_nom=400.0, e_cyclic=True)
+        n.add("Link", "electrolyser", bus0="site", bus1="h2", p_nom=20.0, efficiency=0.7)
+        n.add("Link", "pipe", bus0="h2", bus1="h2b", p_nom=40.0, efficiency=1.0)
+        n.add("Link", "discharger", bus0="h2b", bus1="site", p_nom=20.0, efficiency=0.5)
         return lambda n: np.zeros(len(n.snapshots))
     n.add("Bus", "gas", carrier="gas")
     n.add("Generator", "gas_supply", bus="gas", carrier="gas", p_nom=100.0, marginal_cost=2.0)
@@ -368,6 +387,14 @@ def _add_topology(n, topology):
         if topology == "gas_load":
             n.add("Load", "boiler", bus="gas", p_set=3.0)        # is_fuel_supply is then False
         return lambda n: np.clip(-n.links_t.p1["chp"].to_numpy(float), 0, None)
+    if topology == "heat_store_orc":
+        # Round 4: a gas boiler charges a heat Store; an ORC turns the heat into
+        # power — generation (its origin is fuel), however the Store buffers it.
+        n.add("Bus", "heat", carrier="heat")
+        n.add("Store", "heat_store", bus="heat", e_nom=200.0, e_cyclic=True)
+        n.add("Link", "boiler", bus0="gas", bus1="heat", p_nom=60.0, efficiency=0.9)
+        n.add("Link", "orc", bus0="heat", bus1="site", p_nom=20.0, efficiency=0.2)
+        return lambda n: np.clip(-n.links_t.p1["orc"].to_numpy(float), 0, None)
     n.add("Bus", "heat", carrier="heat")
     n.add("Load", "heat_load", bus="heat", p_set=4.0)
     n.add("Generator", "heat_dump", bus="heat", carrier="heat", p_nom=100.0, p_max_pu=0.0,
@@ -394,7 +421,8 @@ _VF_DEV = {**copy.deepcopy(VF), "export_revenue_to": "asset_owner",
 
 @pytest.mark.live_solve
 @pytest.mark.parametrize("topology", ["chp", "gas_load", "multi_output", "solar_thermal",
-                                      "store_battery"])
+                                      "store_battery", "battery_two_hop", "h2_two_hop",
+                                      "heat_store_orc"])
 def test_the_export_split_counts_electric_generation_only(reset_backend, topology):
     """IC P3 gate condition 2 (rounds 1–2): the export split and the
     `as_consumed_btm` PPA's share count ELECTRIC generation behind the meter —
@@ -410,8 +438,10 @@ def test_the_export_split_counts_electric_generation_only(reset_backend, topolog
     n, cfg = _solve(n, _commercial(copy.deepcopy(_VF_DEV), contracts=[LEASE, _BTM]))
     parsed = CommercialConfig.model_validate(cfg.commercial)
     assert _lp.site_generators(n, parsed) == ["pv"]
+    stored = ("store_battery", "battery_two_hop", "h2_two_hop")
     assert _lp.site_generating_links(n, parsed) == (
-        [] if topology in ("solar_thermal", "store_battery") else ["chp"])
+        [] if topology in ("solar_thermal", *stored)
+        else ["orc"] if topology == "heat_store_orc" else ["chp"])
     inputs, _vf, ledger, res = _ledger(n, cfg)
     assert res.periods["_"].ok is True, _checks(res, "_")
 
@@ -422,7 +452,7 @@ def test_the_export_split_counts_electric_generation_only(reset_backend, topolog
     el = other(n)
     tot = pv + el
     share = np.where(tot > 0, pv / np.where(tot > 0, tot, 1.0), 0.0)
-    if topology == "store_battery":
+    if topology in stored:
         dis = np.clip(-n.links_t.p1["discharger"].to_numpy(float), 0, None)
         assert ((exp_mw > 1e-6) & (pv > 1e-6) & (dis > 1e-6)).sum() > 10  # the case arises
     elif topology != "solar_thermal":
@@ -440,17 +470,25 @@ def test_the_export_split_counts_electric_generation_only(reset_backend, topolog
 
 
 @pytest.mark.live_solve
-def test_a_converter_fed_by_fuel_and_storage_is_not_established(reset_backend):
-    """Round 3: an H2 bus with both a bought-H2 supply and an electrolyser
-    charging it feeds a fuel cell — which part of its output is generation is
-    not known, so whenever it delivers the split (and the PPA share) say not
+@pytest.mark.parametrize("fuel", ["h2_supply", "reformer"])
+def test_a_converter_fed_by_fuel_and_storage_is_not_established(reset_backend, fuel):
+    """Rounds 3–4: an H2 bus fed both by fuel (a bought-H2 supply, or gas
+    through a reformer — an origin upstream) and by an electrolyser charging
+    it feeds a fuel cell — which part of its output is generation is not
+    known, so whenever it delivers the split (and the PPA share) say not
     established, never a guess."""
     from services.commercial import lp_bindings as _lp
     from models.commercial import CommercialConfig
 
     n = _network()
     n.add("Bus", "h2", carrier="H2")
-    n.add("Generator", "h2_supply", bus="h2", carrier="H2", p_nom=20.0, marginal_cost=1.0)
+    if fuel == "h2_supply":
+        n.add("Generator", "h2_supply", bus="h2", carrier="H2", p_nom=20.0, marginal_cost=1.0)
+    else:
+        n.add("Bus", "gas", carrier="gas")
+        n.add("Generator", "gas_supply", bus="gas", carrier="gas", p_nom=60.0, marginal_cost=1.0)
+        n.add("Link", "reformer", bus0="gas", bus1="h2", p_nom=40.0, efficiency=0.7)
+        n.add("Store", "h2_store", bus="h2", e_nom=200.0, e_cyclic=True)
     n.add("Link", "electrolyser", bus0="site", bus1="h2", p_nom=10.0, efficiency=0.7)
     n.add("Link", "fuel_cell", bus0="h2", bus1="site", p_nom=20.0, efficiency=0.5)
     n, cfg = _solve(n, _commercial(copy.deepcopy(_VF_DEV), contracts=[LEASE, _BTM]))

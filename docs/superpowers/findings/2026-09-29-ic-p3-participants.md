@@ -98,7 +98,7 @@ periods; assessor note).
      `replace=true`.
   5. **Lines turn:** ask for the value-flow lines. Expected: `get_results("value_flows", detail="lines")`,
      then a second page with the returned `next_offset`.
-- **The export split's generation rule (gate condition 2, fixed over three assessor rounds).** Under
+- **The export split's generation rule (gate condition 2, fixed over four assessor rounds).** Under
   `export_revenue_to="asset_owner"` the export revenue is split per interval pro rata to the ELECTRIC
   generation behind the meter, one definition with the `as_consumed_btm` PPA's share (P2):
   - **Generators on an electric bus** (`lp_bindings.site_generators`): a carrier in `_ELECTRIC` or the
@@ -109,12 +109,16 @@ periods; assessor note).
     port, NET (Σ −p1…−p4: an auxiliary draw on a port with a negative efficiency is subtracted), keyed by
     the Link — a CHP's power on bus2 counts, its heat on bus1 never. An electric-input Link (a feeder,
     the PoC, a heat pump, a charger, an electrolyser) is not generation.
-  - **Storage is not generation**, in either PyPSA form: a StorageUnit, and a Link fed by storage — its
-    input bus holds a Store or StorageUnit, or is charged from site electricity (a Store battery's
-    discharger, a fuel cell after an electrolyser) — is excluded; its export share stays the site's (an
-    EaaS BESS's export goes to the site). A Link whose input bus holds BOTH a primary source (a Generator
-    that can produce) and storage is **mixed**: its output is NaN whenever it delivers, so the split and
-    the PPA share say not established — never a guess.
+  - **Where the input's energy comes from decides** (`_converting_links`), followed upstream through
+    non-electric Links, never what merely sits on the converter's bus0: a **primary** origin is a
+    Generator that can produce (gas → CHP; gas → reformer → H2 → fuel cell; gas boiler → heat Store →
+    ORC); a **charged** origin is site electricity entering the non-electric side (a charger, an
+    electrolyser — however many hops: charger → Store → BMS → inverter; electrolyser → H2 Store → pipe →
+    fuel cell). Stores and StorageUnits only buffer and are never an origin. Primary only → generation;
+    charged only, or no origin (a Store emptying its initial energy) → **storage, not generation**: its
+    export share stays the site's (an EaaS BESS's export goes to the site; a StorageUnit is never
+    generation); both → **mixed**: its output is NaN whenever it delivers, so the split and the PPA share
+    say not established — never a guess.
   - **Unknown generation** (a NaN) in a period makes that period's split not established
     (`export_split_not_established:<source>:<period>`, blocking) and the source's amount None — never a
     silent share for the site. The PPA path already said `generation_not_established`.
@@ -128,9 +132,15 @@ periods; assessor note).
   payees; checks 3–4 cannot see them): a gas supply behind a CHP (21,825.92 vs 26,368.16), a gas supply
   with a boiler beside it (19,161.48 vs 31,877.02), a solar-thermal collector (18,059.84 vs 19,824.27), a
   multi-output CHP's bus2 power ignored (42,825.27 vs 31,877.02), NaN generation given to the site
-  (19,184.77 vs 19,824.27), a Store battery's discharger counted as generation (310,452.72 vs 448,000.00). Tests: `test_value_flow_reconciliation.py::test_the_export_split_counts_
-  electric_generation_only` (five topologies incl. the Store battery, split and PPA to the cent),
-  `test_a_converter_fed_by_fuel_and_storage_is_not_established` and `test_unknown_generation_makes_
+  (19,184.77 vs 19,824.27), a Store battery's discharger counted as generation (310,452.72 vs 448,000.00),
+  then (round 4, a bus0-only rule) a gas-heated heat Store's ORC excluded (449,122.27 vs 434,202.31), a
+  reformer-plus-electrolyser H2 loop taken as storage only (454,854.60, should be not established), a
+  two-hop H2 loop (416,590.60 vs 448,018.80) and a two-hop battery (310,193.58 vs 448,000.00) counted as
+  generation. Tests: `test_value_flow_reconciliation.py::test_the_export_split_counts_
+  electric_generation_only` (eight topologies: CHP, gas supply with a load, multi-output CHP,
+  solar-thermal, Store battery, two-hop battery, two-hop H2, heat Store with ORC — split and PPA to the
+  cent), `test_a_converter_fed_by_fuel_and_storage_is_not_established` (bought H2, and gas through a
+  reformer) and `test_unknown_generation_makes_
   the_export_split_not_established` (each new case fails on the code before its fix). The same `site_generators` feeds the preflight, the CFE score
   and the dispatch-PPA check: a non-electric Generator is no longer "on-site generation" there either.
 - **Accepted residues and deviations (from the WP records):**
