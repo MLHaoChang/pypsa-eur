@@ -51,16 +51,21 @@ const client = (await import('../api/client')).default
 const { useUIStore } = await import('../store/uiStore')
 const { useChatStore } = await import('../store/chatStore')
 const { WRITABLE } = await import('../utils/lockState')
-const { acquireProjectLock, stopLockHeartbeat, releaseProjectLock, lastHeldLockProject, LOCK_HEARTBEAT_MS } =
-  await import('../utils/projectActions')
+const { acquireProjectLock, stopLockHeartbeat, releaseProjectLock, lastHeldLockProject, LOCK_HEARTBEAT_MS,
+  switchToProject } = await import('../utils/projectActions')
 const { createChatStream } = await import('../api/chat')
 const ChatPanel = (await import('./ChatPanel')).default
 
 const seen: string[] = []
 const lockedByOther = new Set<string>()
+// P28 gate N-a / N-b: hold one reply so it lands out of order.
+let holdHeartbeat: Promise<void> | null = null
+let holdY: Promise<void> | null = null
 const adapter = vi.fn<AxiosAdapter>(async (config: InternalAxiosRequestConfig) => {
   const url = config.url ?? ''
   seen.push(`${config.method} ${url}`)
+  if (holdHeartbeat && url.endsWith('/X/lock/heartbeat')) await holdHeartbeat
+  if (holdY && url === '/projects/Y/lock' && config.method === 'post') await holdY
   const m = /^\/projects\/([^/]+)\/lock(\/heartbeat)?$/.exec(url)
   if (m && config.method === 'post' && lockedByOther.has(decodeURIComponent(m[1]))) {
     return Promise.reject(Object.assign(new Error('Request failed with status code 409'), {
@@ -68,7 +73,10 @@ const adapter = vi.fn<AxiosAdapter>(async (config: InternalAxiosRequestConfig) =
     }))
   }
   let data: unknown = { ok: true }
-  if (m) data = { lock: { holder_email: 'me@x', yours: true } }
+  const act = /^\/projects\/([^/]+)\/activate$/.exec(url)
+  if (act) data = { activated: decodeURIComponent(act[1]), evicted: [] }
+  else if (url.includes('lock_status')) data = { lock_held: false, worker_alive: false }
+  else if (m) data = { lock: { holder_email: 'me@x', yours: true } }
   else if (url === '/projects' || url === '/projects/') data = []
   return { data, status: 200, statusText: 'OK', headers: {}, config }
 })
@@ -78,6 +86,8 @@ type Frame = { event: string; data: Record<string, unknown> }
 
 beforeEach(async () => {
   lockedByOther.clear()
+  holdHeartbeat = null
+  holdY = null
   setAuthEnabled(true)
   client.defaults.adapter = adapter
   useUIStore.setState({ currentProject: 'X', projectMismatch: null, assistantDockOpen: false,
@@ -91,7 +101,7 @@ afterEach(async () => {
   cleanup()
   vi.useRealTimers()
   stopLockHeartbeat()
-  for (const p of ['X', 'Y']) await releaseProjectLock(p).catch(() => {})
+  for (const p of ['X', 'Y', 'Z']) await releaseProjectLock(p).catch(() => {})
   setAuthEnabled(false)
   client.defaults.adapter = original
 })
@@ -166,5 +176,103 @@ describe('a chat-driven project rebind moves the edit lock (auth mode, P32 N6)',
     await waitFor(() => expect(useUIStore.getState().currentProject).toBe('Y'))
     await new Promise(r => setTimeout(r, 50))
     expect(seen.some(s => s.includes('/lock'))).toBe(false)
+  })
+})
+
+// P28 gate N-a / N-b (adopted from the reviewer's `QA28.race.test.tsx`):
+// lock replies that land out of order. A move bumps a lock generation; a
+// heartbeat, re-acquire or acquire reply from an older generation is ignored
+// (an acquire that won a lock nobody wants any more gives it back).
+describe('lock replies that arrive after a later move are ignored (P28 gate N-a, N-b)', () => {
+  it('N-a: a heartbeat for X answered AFTER the rebind to a foreign-locked Y leaves the tab read-only', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    stopLockHeartbeat(); await acquireProjectLock('X'); seen.length = 0
+    let release!: () => void
+    holdHeartbeat = new Promise<void>(r => { release = r })
+    await vi.advanceTimersByTimeAsync(LOCK_HEARTBEAT_MS + 10)
+    expect(seen).toContain('post /projects/X/lock/heartbeat')
+    lockedByOther.add('Y')
+    await rebound('X', 'Y', 'activate_project')
+    await waitFor(() => expect(useUIStore.getState().readOnly).toBe(true))
+    release(); holdHeartbeat = null
+    await new Promise(r => setTimeout(r, 50))
+    expect(useUIStore.getState().readOnly).toBe(true)
+    expect(useUIStore.getState().readOnlyReason).toBe('locked-by-user')
+  })
+
+  it('N-a: a heartbeat 409 for X answered after the move re-claims nothing', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    stopLockHeartbeat(); await acquireProjectLock('X'); seen.length = 0
+    let release!: () => void
+    holdHeartbeat = new Promise<void>(r => { release = r })
+    await vi.advanceTimersByTimeAsync(LOCK_HEARTBEAT_MS + 10)
+    lockedByOther.add('X')   // X's heartbeat will come back 409
+    await rebound('X', 'Y', 'activate_project')
+    await waitFor(() => expect(seen).toContain('post /projects/Y/lock'))
+    const n = seen.length
+    release(); holdHeartbeat = null
+    await new Promise(r => setTimeout(r, 50))
+    expect(seen.slice(n)).not.toContain('post /projects/X/lock')
+    expect(useUIStore.getState().readOnly).toBe(false)
+    expect(lastHeldLockProject()).toBe('Y')
+  })
+
+  it('N-a via switchToProject: a stale heartbeat success does not make a foreign-locked target writable', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    stopLockHeartbeat(); await acquireProjectLock('X'); seen.length = 0
+    let release!: () => void
+    holdHeartbeat = new Promise<void>(r => { release = r })
+    await vi.advanceTimersByTimeAsync(LOCK_HEARTBEAT_MS + 10)
+    lockedByOther.add('Y')
+    const qc = new QueryClient()
+    await switchToProject('Y', qc)
+    await waitFor(() => expect(useUIStore.getState().readOnly).toBe(true))
+    release(); holdHeartbeat = null
+    await new Promise(r => setTimeout(r, 50))
+    expect(useUIStore.getState().readOnly).toBe(true)
+  })
+
+  it("N-b: X → Y → Z in one turn with Y's acquire answered last: the heartbeat follows Z, Y is given back", async () => {
+    let release!: () => void
+    holdY = new Promise<void>(r => { release = r })
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={qc}><ChatPanel /></QueryClientProvider>)
+    vi.mocked(createChatStream).mockImplementation((_req, onFrame) => {
+      for (const f of [
+        { event: 'session_init', data: { session_id: 's1' } },
+        { event: 'project_rebound', data: { from: 'X', to: 'Y', via_tool: 'create_project_from_template' } },
+        { event: 'project_rebound', data: { from: 'Y', to: 'Z', via_tool: 'save_project_as' } },
+        { event: 'turn_done', data: {} },
+      ] as Frame[]) onFrame(f as never)
+      return () => {}
+    })
+    const user = userEvent.setup()
+    await user.type(screen.getByTestId('chat-input'), 'go')
+    await user.click(screen.getByTestId('chat-send'))
+    await waitFor(() => expect(seen).toContain('post /projects/Z/lock'))
+    await new Promise(r => setTimeout(r, 30))
+    const n = seen.length
+    release(); holdY = null
+    await new Promise(r => setTimeout(r, 50))
+    expect(useUIStore.getState().currentProject).toBe('Z')
+    expect(lastHeldLockProject()).toBe('Z')
+    expect(useUIStore.getState().readOnly).toBe(false)
+    // The late acquire won Y after the move had released it: give it back.
+    expect(seen.slice(n)).toContain('delete /projects/Y/lock')
+  })
+
+  it('an unbind (release only) with a heartbeat 409 for X in flight re-claims nothing', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    stopLockHeartbeat(); await acquireProjectLock('X'); seen.length = 0
+    let release!: () => void
+    holdHeartbeat = new Promise<void>(r => { release = r })
+    await vi.advanceTimersByTimeAsync(LOCK_HEARTBEAT_MS + 10)
+    lockedByOther.add('X')
+    await rebound('X', null, 'import_network_nc')
+    await waitFor(() => expect(seen).toContain('delete /projects/X/lock'))
+    const n = seen.length
+    release(); holdHeartbeat = null
+    await new Promise(r => setTimeout(r, 50))
+    expect(seen.slice(n)).not.toContain('post /projects/X/lock')
   })
 })
