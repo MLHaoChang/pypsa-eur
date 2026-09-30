@@ -32,9 +32,15 @@ _SERVICES = pathlib.Path(__file__).resolve().parent.parent / "services"
 IC_PACKAGES = ("commercial", "finance", "library")
 # Results-side modules this programme adds (P0: the physical-quantity seam).
 IC_RESULTS_MODULES = ("physical_quantities", "value_flows")
+# (IC P4 WP4.6a adds `finance_case`, the one adapter that reads a solved network
+# for the finance engine.)
 # Leaf packages must not reach the solve stack. `services.solver` (the carved
 # modules) is equally off-limits: finance never runs a solve.
 FORBIDDEN_PREFIXES = ("routers", "services.solver_service", "services.solver.")
+# The finance engine takes a plain `FinanceCase`: it never reads a solved
+# network, so the results layer (which imports the solve stack, P0 gate finding
+# 7) is off-limits too (IC P4 plan C1).
+EXTRA_FORBIDDEN = {"finance": ("services.results",)}
 
 
 _BACKEND = _SERVICES.parent
@@ -76,9 +82,9 @@ def _imports(path: pathlib.Path) -> list[tuple[int, str]]:
     return out
 
 
-def _forbidden(mod: str) -> bool:
+def _forbidden(mod: str, extra: tuple[str, ...] = ()) -> bool:
     return any(mod == p.rstrip(".") or mod.startswith(p if p.endswith(".") else p + ".")
-               or mod == p for p in FORBIDDEN_PREFIXES)
+               or mod == p for p in (*FORBIDDEN_PREFIXES, *extra))
 
 
 def _package_files(name: str) -> list[pathlib.Path]:
@@ -100,7 +106,7 @@ def test_ic_packages_never_import_routers_or_the_solver(name):
         pytest.skip(f"services/{name}/ does not exist yet")
     offenders = [
         f"{p.relative_to(_SERVICES.parent)}:{ln}: {mod}"
-        for p in files for ln, mod in _imports(p) if _forbidden(mod)
+        for p in files for ln, mod in _imports(p) if _forbidden(mod, EXTRA_FORBIDDEN.get(name, ()))
     ]
     assert not offenders, "forbidden imports:\n  " + "\n  ".join(offenders)
 
@@ -180,3 +186,23 @@ def test_the_detector_resolves_relative_imports():
         assert "services.finance.report" in mods and not _forbidden("services.finance.report")
     finally:
         probe.unlink()
+
+
+def test_importing_the_finance_package_never_loads_the_solve_stack():
+    """P0 gate finding 7 (IC P4 plan C1): the check above is direct-only; this
+    one is transitive — a fresh interpreter imports every `services.finance`
+    module and `services.solver_service` must not be loaded."""
+    import subprocess
+    import sys
+
+    mods = sorted(".".join(p.relative_to(_BACKEND).with_suffix("").parts).removesuffix(".__init__")
+                  for p in _package_files("finance"))
+    code = ("import importlib, sys\n"
+            f"for m in {mods!r}: importlib.import_module(m)\n"
+            "bad = [m for m in ('services.solver_service', 'routers') if m in sys.modules]\n"
+            "print(','.join(bad))\n")
+    res = subprocess.run([sys.executable, "-c", code], cwd=_BACKEND, capture_output=True,
+                         text=True, timeout=120)
+    assert res.returncode == 0, res.stderr[-2000:]
+    assert res.stdout.strip() == "", f"loaded transitively: {res.stdout.strip()}"
+

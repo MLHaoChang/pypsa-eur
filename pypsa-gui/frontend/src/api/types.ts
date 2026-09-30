@@ -990,3 +990,109 @@ export interface CatalogPayload {
   component: string
   attributes: CatalogAttribute[]
 }
+
+// ── Edge Investment Case finance (IC P4 WP4.0; models/finance.py) ──────────
+// Mirrors the pydantic contracts field for field; `tests/test_finance_types_ts_parity.py`
+// (backend) checks names and optionality. `null` = not stated (ADR-0001), never 0.
+
+export type EscalationClass = 'opex' | 'fuel' | 'tariff' | 'ppa' | 'export' | 'capex'
+
+export interface DebtTranche {
+  kind: 'term_loan' | 'mini_perm' | 'construction' | 'mezzanine'
+  amount?: number | null
+  gearing?: number | null
+  gearing_base?: 'capex' | 'total_uses'
+  rate: number | number[]
+  tenor_years: number
+  sculpting?: 'annuity' | 'dscr_target' | 'level'
+  dscr_target?: number | null
+  max_gearing?: number | null
+  dsra_months?: number | null
+  upfront_fee?: number | null
+  commitment_fee?: number | null
+  grace_years?: number | null
+}
+
+export interface EligibilityRule {
+  begin_construction_by?: string | null
+  placed_in_service_by?: string | null
+  asset_classes?: string[]
+}
+
+export interface Incentive {
+  kind: 'itc' | 'ptc' | 'grant' | 'accelerated_depreciation' | 'cfd' | 'capacity_payment'
+  rate?: number | null
+  amount?: number | null
+  eligibility?: EligibilityRule
+  phase_out?: Array<[string, number]>
+  feoc_flag?: boolean | null
+}
+
+export interface SolvePpa {
+  contract_id?: string | null
+  target_irr: number
+  target_year: number
+}
+
+export interface TerminalValueRule {
+  method?: 'none' | 'book_value' | 'multiple_of_ebitda' | 'fixed'
+  value?: number | null
+}
+
+export interface FinanceInputs {
+  currency?: string
+  financial_close: string
+  cod_by_asset?: Record<string, string>
+  construction_months_by_asset?: Record<string, number>
+  capex_phasing?: number[]
+  contingency_share?: number | null
+  escalation?: Partial<Record<EscalationClass, number>>
+  degradation_by_asset?: Record<string, number | number[]>
+  analysis_years?: number | null
+  acquisition_date?: string | null
+  construction_start?: string | null
+  annualise?: boolean
+  tax_losses?: 'offset_other_income' | 'carryforward' | null
+  financing_fee_tax?: 'amortised' | 'not_deducted' | null
+  hebesatz_pct?: number | null
+  state_rate?: number | null
+  pwa_met?: boolean | null
+  small_business_163j?: boolean | null
+  reserves_rate?: number | null
+  solve_ppa?: SolvePpa | null
+  replacement_capex?: Array<[number, string, number]>
+  terminal_value?: TerminalValueRule
+  wacc_nominal?: number | null
+  cost_of_equity?: number | null
+  inflation?: number | null
+  debt?: DebtTranche[]
+  tax_pack_id?: string | null
+  incentives?: Incentive[]
+  /** P7 (tax equity) — kept opaque here. */
+  tax_equity?: Record<string, unknown> | null
+  participants?: Participant[]
+}
+
+export type CashflowStream = ValueStreamKind
+  | 'corporate_tax' | 'terminal_value' | 'financing_fee' | 'reserve' | 'interest' | 'principal'
+
+export interface CashflowProvenance {
+  source: string
+  mode: 'pf' | 'realistic'
+  pack_hash?: string | null
+  seed?: number | null
+  source_id?: string | null
+  contract_id?: string | null
+  period?: string | null
+}
+
+export interface CashflowLine {
+  year: number
+  participant: string
+  counterparty: string
+  value_stream: CashflowStream
+  tariff_item?: string | null
+  asset?: string | null
+  amount: number
+  provenance: CashflowProvenance
+}

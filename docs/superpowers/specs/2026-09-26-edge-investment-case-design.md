@@ -573,3 +573,29 @@ hand-built; `eu_nl`/`ca_federal` follow in WP4.3b). **MVP-B** = + P5 + P6. **v1*
 7. Review conditions carried into plans: F10 (gap attribution) → P2; F13 (flip fields, oracle) → P7;
    F16 (billing core before LP bindings) → P1 order above; F17 (migration, series store,
    `RESULT_STATE_KEYS`, cost-breakdown rows, weightings, tab/route, chat + facade tests) → P0/P1/P2.
+
+---
+
+## Errata
+
+**2026-09-30 (IC P4 plan v1.0, `docs/superpowers/plans/2026-09-30-edge-investment-case-p4.md`).** The text
+above is unchanged; where it and these lines differ, these lines hold.
+
+1. **§6.3 CFADS.** "CFADS is defined post-tax, pre-financing (SAM's convention)" is wrong about SAM: SAM
+   Single Owner's `cf_cash_for_ds` = EBITDA − major-equipment reserve funding, **pre-tax**, with DSRA funding
+   / releases and reserve interest below it (checked with PySAM 7.1.1.post1). The finance engine follows SAM
+   and prints the definition in the report (P4 plan C8).
+2. **§6.6 line reference.** "`services/solver/assumptions.py` L641–698" has drifted: the Fisher real rate
+   for cross-period PV is block 4b (`# 4b) Auto period discount …`, about L676–732 at P4).
+3. **§6.6 WACC gate.** The gate also fails when an owner asset's own `discount_rate` (the overnight-cost
+   annuity override) differs from `wacc_nominal`; the inflation leg applies only under
+   `auto_discount_periods` (otherwise `n/a` — the LP never used it) (P4 plan C10).
+4. **§4.2 `escalation`.** Six nominal classes: `opex`, `fuel`, `tariff`, `ppa`, **`export`**, **`capex`**; a
+   class with cashflows and no rate is `not_established` (P4 plan C4).
+5. **§6.1 time axis.** The axis runs `financial_close` … COD + **`analysis_years`** (a required input; the
+   default proposed from the assets' lifetimes, never an implicit truncation); the case dates
+   `acquisition_date` and `construction_start` drive eligibility and dated pack rules (P4 plan C2, C11).
+6. **§6.6 returns.** Returns (IRR, NPV, payback, solve-for-PPA) are on the **incremental** cash of the
+   investment against a counterfactual — the same site's supply cost (bill, grid commodity, connection)
+   without the owner's investable assets, on the served load — and a lifecycle-cost NPV is reported
+   alongside (P4 plan C13). SAM's "project" return is the levered equity return (P4 plan, output mapping).

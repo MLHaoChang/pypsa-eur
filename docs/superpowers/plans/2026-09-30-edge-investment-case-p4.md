@@ -362,6 +362,36 @@ mirrored in `frontend/src/api/types.ts` and covered by the new `types.ts` parity
 - **Carry-in placements recorded** (see the register) and the P0 finding-5 archetype defaults (`GensetSpec`
   heat rate, `DataCentreLoadSpec` UPS loss, `BessSpec` DoD) **deferred to P5** in the P0 findings note.
 
+**WP4.0 implementation.**
+- **SAM oracle** (`tests/fixtures/investment_case/sam/`): `generate_sam_cases.py` (PySAM 7.1.1.post1, SSC 306;
+  the zeroed defaults and the five cases as tabled; PPA 10 ¢/kWh so the cases are economically sensible —
+  equity IRRs S1 6.81 %, S1b 11.71 % at the solved 14.4656 ¢/kWh, S2 14.52 % with a 86.34 M$ sculpted
+  debt at min DSCR 1.3, S3 36.09 %, S3f 34.31 % with D − 0.6·TIC = 0.36·f·TIC), `gen_profile.csv`,
+  `s1/s1b/s2/s3/s3f.json` (full input export with the 8,760-long arrays as sha256; every `cf_*` array),
+  `PROVENANCE.md`, `SAM_LICENSE` (PySAM's BSD-3 text); **`sam_case.py`** — `sam_params` (P4 units; refuses
+  unequal O&M escalations and any unmodelled SAM input) and `sam_expected` (the output mapping, ¢/kWh →
+  $/MWh, kWh → MWh, % → fractions, the no-debt DSCR sentinel → None). `test_sam_fixtures.py` (18): sha
+  pins, array lengths, the profile, and the mapping cross-checked on SAM's own arrays (year-1 revenue =
+  energy × price; year-1 O&M; the additive year-2 escalation).
+- **Contracts** (`models/finance.py`): `DebtTranche` gains `gearing_base`, `max_gearing`, a per-year `rate`
+  list (each ≥ 0, not empty); `upfront_fee` / `commitment_fee` / `dsra_months` / `grace_years` → `None`;
+  `TaxEquityStructure.itc_recapture_years` → `None`; `SolvePpa`; `FinanceInputs` gains `analysis_years`,
+  `acquisition_date`, `construction_start`, `annualise`, `tax_losses`, `financing_fee_tax`, `hebesatz_pct`,
+  `state_rate`, `pwa_met`, `small_business_163j`, `reserves_rate`, `solve_ppa`, list-valued degradation
+  (rates in [0, 1)), and `ESCALATION_CLASSES` validation; `Provenance` gains `source_id` / `contract_id` /
+  `period`; `CashflowStream` = the ledger's `ValueStreamKind` + the finance-only kinds (the ledger enum
+  unchanged). `types.ts` mirrors all of them; **`test_finance_types_ts_parity.py`** (new, 8) checks names,
+  optionality and nullability; `test_finance_contracts_p4.py` (8).
+- **Tripwire:** `services.results` forbidden in `services/finance/**`; a subprocess test imports every
+  finance module and asserts `services.solver_service` / `routers` are not loaded (both checks fail on a
+  probe module importing `physical_quantities`, then removed).
+- **Integration fixture** `edge_hourly_year.py` (8,760 h, 2030; PV 40 MW and BESS 10 MW / 4 h with
+  `overnight_cost` + `discount_rate` 0.07 + lifetime; an export Link) — solves in about 3 s;
+  `test_edge_hourly_year_fixture.py` (2).
+- **Errata** block appended to the spec (CFADS, the §6.6 line reference, the gate's legs, escalation classes,
+  the axis and dates, incremental returns). P0 findings 5 and 7 annotated (placed / deferred to P5 /
+  closed).
+
 ## WP4.1 Timeline, operating cashflows, tenor, terminal value
 
 - `timeline.py`: `Timeline` (C2) with the refusals (`cod_mismatch`, `analysis_years_missing`,
