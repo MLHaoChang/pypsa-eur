@@ -76,10 +76,11 @@ class SettlementInputs:
     # export is taken among these; a grid-side or other member's generator is
     # not on-site). None ⇒ that PPA is not established.
     site_generators: list[str] | None = None
-    # Links behind the meter converting fuel into site electricity (a CHP;
-    # `lp_bindings.site_generating_links`): their bus1 output is site
-    # generation too (IC P3 gate, condition 2).
-    site_links: list[str] = field(default_factory=list)
+    # MW each converting Link behind the meter (a CHP, a fuel cell) delivers
+    # to site-side electric buses, from every port
+    # (`lp_bindings.site_link_generation`): site generation too (IC P3 gate,
+    # condition 2). None ⇒ no such Link.
+    site_link_generation: pd.DataFrame | None = None
 
 
 @dataclass
@@ -191,16 +192,12 @@ def _ppa(contract, inputs: SettlementInputs) -> list[Line]:
         site = inputs.site_generators
         if not site or any(g not in inputs.generators.columns for g in site):
             return [line("ppa_energy", None, None, ["site_generators_not_established"])]
-        links = list(inputs.site_links)
-        if links and (inputs.link_output is None
-                      or any(k not in inputs.link_output.columns for k in links)):
-            return [line("ppa_energy", None, None, ["site_generators_not_established"])]
         # Export is attributed among the ELECTRIC generation BEHIND the meter
-        # only: its Generators (no fuel supply) and its converting Links.
+        # only: its Generators on electric buses and its converting Links.
         total = inputs.generators[list(site)].sum(axis=1, skipna=False).to_numpy(dtype=float)
-        if links:
-            total = total + inputs.link_output[links].clip(lower=0.0) \
-                .sum(axis=1, skipna=False).to_numpy(dtype=float)
+        links = inputs.site_link_generation
+        if links is not None and not links.empty:
+            total = total + links.clip(lower=0.0).sum(axis=1, skipna=False).to_numpy(dtype=float)
         if np.isnan(total).any():
             return [line("ppa_energy", None, None, ["generation_not_established"])]
         share = np.divide(gen, total, out=np.zeros_like(gen), where=total > 0)

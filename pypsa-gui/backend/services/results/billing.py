@@ -145,7 +145,8 @@ def settlement_lines(n, cfg, pq: dict) -> tuple[list[_K.Line], list[str]]:
     dsr = _SI.dsr_activation(n)
     refs = {c.id: _SI.reference_price(n, c) for c in cfg.contracts}
     site = _lp.site_generators(n, cfg)
-    site_links = _lp.site_generating_links(n, cfg)
+    site_links = _lp.site_link_generation(
+        n, cfg, lambda k: pq["result_df"](n, "links_t", f"p{k}", "lopf"))
     load_bus = n.loads["bus"].astype(str).to_dict() if not n.loads.empty else {}
     ppa_rec = n.meta.get(_lp.META_PPA) or {}
     ppa_frame = n.generators_t.get(_lp.PPA_PRICE_ATTR) if hasattr(n.generators_t, "get") \
@@ -188,7 +189,7 @@ def settlement_lines(n, cfg, pq: dict) -> tuple[list[_K.Line], list[str]]:
             storage_discharge=cut_frame(raw["storage_discharge"]),
             link_output=cut_frame(raw["link_output"]),
             site_party=cfg.site_party, site_generators=site,
-            site_links=site_links)
+            site_link_generation=cut_frame(site_links) if not site_links.empty else None)
         for c in cfg.contracts:
             try:
                 got = _K.settle(c, inputs)

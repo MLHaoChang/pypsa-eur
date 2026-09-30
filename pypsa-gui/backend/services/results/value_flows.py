@@ -195,20 +195,23 @@ def _export_split(n, parsed, sides, bill, export_intervals, flags: list[str]) ->
     generator's ELECTRIC output per interval (key (component, name)); intervals
     with no site generation go to key None. Generation is one definition with
     the `as_consumed_btm` PPA's share (IC P3 gate, condition 2): the site's
-    Generators without fuel supplies (`lp_bindings.site_generators`) and the
-    bus1 output of its converting Links (`site_generating_links`, a CHP).
-    Storage discharge is not generation: its export stays the site's."""
+    Generators on electric buses (`lp_bindings.site_generators`) and what its
+    converting Links deliver to electric buses from every port
+    (`site_link_generation`, a CHP's power, not its heat). Storage discharge
+    is not generation: its export stays the site's. A generation value that is
+    not known (NaN) in a period makes that period's split not established —
+    never a silent share for the site (ADR-0001)."""
     from services.commercial import lp_bindings as _lp
 
     gens = _lp.site_generators(n, parsed)
-    links = _lp.site_generating_links(n, parsed)
-    keys = [("Generator", g) for g in gens] + [("Link", k) for k in links]
+    links = _lp.site_link_generation(n, parsed, lambda k: getattr(n.links_t, f"p{k}", None))
+    keys = [("Generator", g) for g in gens] + [("Link", str(k)) for k in links.columns]
     cols = []
     if gens:
-        cols.append(n.generators_t.p.reindex(columns=gens).to_numpy(dtype=float))
-    if links:
-        p1 = n.links_t.p1.reindex(columns=links).to_numpy(dtype=float)
-        cols.append(-p1)
+        cols.append(n.generators_t.p.reindex(index=n.snapshots, columns=gens)
+                    .to_numpy(dtype=float))
+    if not links.empty:
+        cols.append(links.to_numpy(dtype=float))
     gp = np.hstack(cols) if cols else None
     rev_items = [it.id for it in (parsed.import_tariff.items if parsed.import_tariff else [])
                  if it.kind == "energy" and (it.direction == "revenue"
@@ -232,8 +235,9 @@ def _export_split(n, parsed, sides, bill, export_intervals, flags: list[str]) ->
                     # different length cannot be aligned (never guessed).
                     flags.append(f"export_split_not_established:{item}:{k}")
         split = {}
+        gen_unknown = gp is not None and bool(np.isnan(gp[m]).any())
         for sid, vals in sources.items():
-            if np.isnan(vals).any():
+            if np.isnan(vals).any() or gen_unknown:
                 flags.append(f"export_split_not_established:{sid}:{k}")
                 continue
             parts: dict = {}

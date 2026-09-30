@@ -472,6 +472,10 @@ def _sources(inputs: LedgerInputs, vf: ValueFlowConfig, p: str) -> list[_Source]
     owners = {(o.component, o.asset_id): o.owner for o in vf.asset_owners}
     split = (inputs.export_split or {}).get(p, {}) \
         if vf.export_revenue_to == "asset_owner" else {}
+    # Under "asset_owner" a source the split could not establish (flagged
+    # `export_split_not_established:`) has no known owner: None, never the
+    # whole amount to the site (IC P3 gate condition 2, round 2).
+    split_needed = vf.export_revenue_to == "asset_owner" and inputs.export_split is not None
 
     def owner_of(key) -> str:
         return site if key is None else owners.get(tuple(key), site)
@@ -486,6 +490,11 @@ def _sources(inputs: LedgerInputs, vf: ValueFlowConfig, p: str) -> list[_Source]
         if parts:
             src.legs = _merge_legs([(owner_of(k), payee, a) for k, a in
                                     sorted(parts.items(), key=lambda kv: str(kv[0]))])
+        elif split_needed and _finite(v) and v and it.kind == "energy" \
+                and (it.direction == "revenue" or it.measured_on == "export") \
+                and item_id not in split:
+            src.legs = [(site, payee, None)]
+            src.flags.append("export_split_not_established")
         else:
             src.legs = [(site, payee, v if _finite(v) else None)]
             if not _finite(v):
@@ -511,6 +520,9 @@ def _sources(inputs: LedgerInputs, vf: ValueFlowConfig, p: str) -> list[_Source]
         if parts:
             src.legs = _merge_legs([("market", owner_of(k), a) for k, a in
                                     sorted(parts.items(), key=lambda kv: str(kv[0]))])
+        elif split_needed and _finite(v) and v and "export_price" not in split:
+            src.legs = [("market", site, None)]
+            src.flags.append("export_split_not_established")
         else:
             src.legs = [("market", site, v if _finite(v) else None)]
             if not _finite(v):

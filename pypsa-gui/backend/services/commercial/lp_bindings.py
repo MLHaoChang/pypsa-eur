@@ -556,30 +556,12 @@ def _meter_sides(n, cfg: CommercialConfig) -> tuple[set[str], set[str]]:
     return seen, bypass
 
 
-def site_generators(n, cfg: CommercialConfig) -> list[str]:
-    """The Generators BEHIND the commercial meter (`_meter_sides`) that make
-    ELECTRICITY. One definition for the preflight, the settlement inputs and
-    the ledger's export split (review 2.2c #3). A fuel supply (gas behind a CHP
-    Link, `participants.is_fuel_supply`) is not generation: its MW are fuel
-    (IC P3 gate, condition 2); the Link it feeds is (`site_generating_links`)."""
-    from services.commercial.participants import is_fuel_supply
-
-    seen, _ = _meter_sides(n, cfg)
-    return [str(g) for g in n.generators.index if str(n.generators.at[g, "bus"]) in seen
-            and not is_fuel_supply(n, cfg, str(g))]
-
-
-def site_generating_links(n, cfg: CommercialConfig) -> list[str]:
-    """Links behind the meter that CONVERT a non-electric input into site
-    electricity (a CHP or fuel cell: bus0 not electric, bus1 electric, both on
-    the site side). Their bus1 output counts as site generation beside
-    `site_generators`; an electric-to-electric Link (a feeder, the PoC) does not.
-    Storage is never generation here: a StorageUnit or Store discharging moves
-    energy the site already had (IC P3 gate, condition 2)."""
+def _electric_bus_test(n, cfg: CommercialConfig):
+    """`bus -> bool`: an electric bus — a carrier in `participants._ELECTRIC`
+    (an empty carrier counts: PyPSA's default is "AC", so only a hand-cleared
+    carrier is empty) or the PoC site bus's own carrier."""
     from services.commercial.participants import _ELECTRIC
 
-    seen, _ = _meter_sides(n, cfg)
-    meter = set(import_links(cfg)) | ({cfg.export_link} if cfg.export_link else set())
     carriers = n.buses["carrier"] if "carrier" in n.buses.columns else None
     poc_bus = str(n.links.at[cfg.poc_link, "bus1"]) if cfg.poc_link in n.links.index else None
     site_carrier = str(carriers.get(poc_bus, "")) if (carriers is not None and poc_bus) else ""
@@ -588,14 +570,77 @@ def site_generating_links(n, cfg: CommercialConfig) -> list[str]:
         c = str(carriers.get(bus, "")) if carriers is not None else ""
         return c.strip().casefold() in _ELECTRIC or c == site_carrier
 
-    out = []
+    return electric
+
+
+def site_generators(n, cfg: CommercialConfig) -> list[str]:
+    """The Generators BEHIND the commercial meter (`_meter_sides`) that make
+    ELECTRICITY: on an electric bus. One definition for the preflight, the
+    settlement inputs and the ledger's export split (review 2.2c #3). A
+    Generator on a gas, heat or other non-electric bus (a fuel supply, a
+    solar-thermal collector) is not electric generation, whatever else is on
+    its bus; a Link converting it is (`site_generating_ports`; IC P3 gate
+    condition 2, rounds 1–2)."""
+    seen, _ = _meter_sides(n, cfg)
+    electric = _electric_bus_test(n, cfg)
+    return [str(g) for g in n.generators.index
+            if str(n.generators.at[g, "bus"]) in seen and electric(str(n.generators.at[g, "bus"]))]
+
+
+_LINK_PORTS = (1, 2, 3, 4)
+
+
+def site_generating_ports(n, cfg: CommercialConfig) -> dict[str, list[int]]:
+    """Links behind the meter that CONVERT a non-electric input into site
+    electricity (a CHP, a fuel cell: bus0 on the site side and not electric),
+    with the output ports (1–4) that land on a site-side ELECTRIC bus. The
+    output of those ports (−p_k) is site generation beside `site_generators`
+    — a CHP's heat on bus1 and power on bus2 counts the power only. An
+    electric-input Link (a feeder, the PoC, a heat pump) is not generation.
+    Storage is never generation here: a StorageUnit or Store discharging moves
+    energy the site already had (IC P3 gate, condition 2)."""
+    seen, _ = _meter_sides(n, cfg)
+    meter = set(import_links(cfg)) | ({cfg.export_link} if cfg.export_link else set())
+    electric = _electric_bus_test(n, cfg)
+    out: dict[str, list[int]] = {}
     for name in n.links.index:
         if name in meter:
             continue
-        b0, b1 = str(n.links.at[name, "bus0"]), str(n.links.at[name, "bus1"])
-        if b0 in seen and b1 in seen and not electric(b0) and electric(b1):
-            out.append(str(name))
+        b0 = str(n.links.at[name, "bus0"])
+        if b0 not in seen or electric(b0):
+            continue
+        ports = []
+        for k in _LINK_PORTS:
+            col = f"bus{k}"
+            b = str(n.links.at[name, col]).strip() if col in n.links.columns else ""
+            if b and b != "nan" and b in seen and electric(b):
+                ports.append(k)
+        if ports:
+            out[str(name)] = ports
     return out
+
+
+def site_generating_links(n, cfg: CommercialConfig) -> list[str]:
+    """The converting Links of `site_generating_ports`."""
+    return list(site_generating_ports(n, cfg))
+
+
+def site_link_generation(n, cfg: CommercialConfig, port_frame) -> pd.DataFrame:
+    """Per converting Link, the MW it delivers to site-side electric buses:
+    Σ over its electric ports of −p_k (`port_frame(k)` gives the solved
+    `links_t.p<k>` frame, or None). A port with no solved value is NaN — kept
+    (ADR-0001: the reader says not established, never a silent 0)."""
+    cols = {}
+    for link, ports in site_generating_ports(n, cfg).items():
+        total = pd.Series(0.0, index=n.snapshots)
+        for k in ports:
+            df = port_frame(k)
+            if df is None or link not in getattr(df, "columns", []):
+                total = total + np.nan
+            else:
+                total = total - df[link].reindex(n.snapshots).astype(float)
+        cols[link] = total
+    return pd.DataFrame(cols, index=n.snapshots)
 
 
 def meter_bypass_buses(n, cfg: CommercialConfig) -> list[str]:

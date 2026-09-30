@@ -346,31 +346,58 @@ def test_a_representative_week_keeps_its_ledger(reset_backend):
     assert "demand_months_not_established" in ledger.flags
 
 
+def _add_topology(n, topology):
+    """The gate's generation topologies (assessor rounds 1–2): returns a
+    function of the solved network giving the site's NON-pv electric output."""
+    n.add("Bus", "gas", carrier="gas")
+    n.add("Generator", "gas_supply", bus="gas", carrier="gas", p_nom=100.0, marginal_cost=2.0)
+    if topology in ("chp", "gas_load"):
+        n.add("Link", "chp", bus0="gas", bus1="site", carrier="CHP", p_nom=40.0, efficiency=0.4)
+        if topology == "gas_load":
+            n.add("Load", "boiler", bus="gas", p_set=3.0)        # is_fuel_supply is then False
+        return lambda n: np.clip(-n.links_t.p1["chp"].to_numpy(float), 0, None)
+    n.add("Bus", "heat", carrier="heat")
+    n.add("Load", "heat_load", bus="heat", p_set=4.0)
+    n.add("Generator", "heat_dump", bus="heat", carrier="heat", p_nom=100.0, p_max_pu=0.0,
+          p_min_pu=-1.0)
+    if topology == "multi_output":
+        n.add("Link", "chp", bus0="gas", bus1="heat", bus2="site", carrier="CHP", p_nom=40.0,
+              efficiency=0.4, efficiency2=0.35)
+        return lambda n: np.clip(-n.links_t.p2["chp"].to_numpy(float), 0, None)
+    # solar_thermal: heat made from sun and a heat pump — no electric output.
+    n.add("Generator", "solar_thermal", bus="heat", carrier="solar thermal", p_nom=6.0,
+          marginal_cost=0.0)
+    n.add("Link", "heat_pump", bus0="site", bus1="heat", carrier="heat pump", p_nom=5.0,
+          efficiency=3.0)
+    return lambda n: np.zeros(len(n.snapshots))
+
+
+_BTM = {"type": "ppa", "id": "btm", "kind": "as_consumed_btm", "price": 20.0,
+        "tenor_years": 10, "seller": "developer", "buyer": "site", "asset_ids": ["pv"]}
+_VF_DEV = {**copy.deepcopy(VF), "export_revenue_to": "asset_owner",
+           "participants": [{"id": "site", "name": "Site", "role": "offtaker"},
+                            {"id": "developer", "name": "Dev", "role": "developer"}],
+           "asset_owners": [{"asset_id": "pv", "component": "Generator", "owner": "developer"}]}
+
+
 @pytest.mark.live_solve
-def test_the_export_split_counts_electric_generation_not_fuel(reset_backend):
-    """IC P3 gate condition 2: a gas supply behind a CHP Link is fuel, not
-    generation — its MW of gas never dilute the export split, and the CHP's
-    electric output (bus1) counts, keyed by the Link. The `as_consumed_btm`
-    PPA's share uses the same definition (`lp_bindings.site_generators` +
-    `site_generating_links`)."""
+@pytest.mark.parametrize("topology", ["chp", "gas_load", "multi_output", "solar_thermal"])
+def test_the_export_split_counts_electric_generation_only(reset_backend, topology):
+    """IC P3 gate condition 2 (rounds 1–2): the export split and the
+    `as_consumed_btm` PPA's share count ELECTRIC generation behind the meter —
+    Generators on electric buses and what converting Links deliver to electric
+    buses from ANY port. A gas supply (with or without a gas load beside it), a
+    solar-thermal collector or a heat dump never dilute the split; a CHP's power
+    counts on whichever port it leaves by (keyed by the Link), its heat never."""
     from services.commercial import lp_bindings as _lp
     from models.commercial import CommercialConfig
 
     n = _network()
-    n.add("Bus", "gas", carrier="gas")
-    n.add("Generator", "gas_supply", bus="gas", carrier="gas", p_nom=100.0, marginal_cost=2.0)
-    n.add("Link", "chp", bus0="gas", bus1="site", carrier="CHP", p_nom=40.0, efficiency=0.4)
-    btm = {"type": "ppa", "id": "btm", "kind": "as_consumed_btm", "price": 20.0,
-           "tenor_years": 10, "seller": "developer", "buyer": "site", "asset_ids": ["pv"]}
-    vf = {**copy.deepcopy(VF), "export_revenue_to": "asset_owner",
-          "participants": [{"id": "site", "name": "Site", "role": "offtaker"},
-                           {"id": "developer", "name": "Dev", "role": "developer"}],
-          "asset_owners": [{"asset_id": "pv", "component": "Generator",
-                            "owner": "developer"}]}
-    n, cfg = _solve(n, _commercial(vf, contracts=[LEASE, btm]))
+    other = _add_topology(n, topology)
+    n, cfg = _solve(n, _commercial(copy.deepcopy(_VF_DEV), contracts=[LEASE, _BTM]))
     parsed = CommercialConfig.model_validate(cfg.commercial)
-    assert "gas_supply" not in _lp.site_generators(n, parsed)
-    assert _lp.site_generating_links(n, parsed) == ["chp"]
+    assert _lp.site_generators(n, parsed) == ["pv"]
+    assert _lp.site_generating_links(n, parsed) == ([] if topology == "solar_thermal" else ["chp"])
     inputs, _vf, ledger, res = _ledger(n, cfg)
     assert res.periods["_"].ok is True, _checks(res, "_")
 
@@ -378,20 +405,36 @@ def test_the_export_split_counts_electric_generation_not_fuel(reset_backend):
     exp_mw = n.links_t.p0["export"].to_numpy(float)
     price = n.links_t["ic_export_price"]["export"].to_numpy(float)
     pv = np.clip(n.generators_t.p["pv"].to_numpy(float), 0, None)
-    chp = np.clip(-n.links_t.p1["chp"].to_numpy(float), 0, None)
-    tot = pv + chp
+    el = other(n)
+    tot = pv + el
     share = np.where(tot > 0, pv / np.where(tot > 0, tot, 1.0), 0.0)
-    both = (exp_mw > 1e-6) & (pv > 1e-6) & (chp > 1e-6)
-    assert both.sum() > 10                                  # the case really arises
+    if topology != "solar_thermal":
+        assert ((exp_mw > 1e-6) & (pv > 1e-6) & (el > 1e-6)).sum() > 10   # the case arises
     hand = float((w * exp_mw * price * share).sum())
     lines = ledger.periods["_"]
     got = sum(ln.amount for ln in lines if ln.source == "export_price" and ln.payee == "developer")
     assert got == pytest.approx(hand, abs=0.005)
-    # The CHP's part is the site's (it owns the Link), keyed by the Link.
     site_part = sum(ln.amount for ln in lines if ln.source == "export_price" and ln.payee == "site")
     assert site_part == pytest.approx(float((w * exp_mw * price).sum()) - hand, abs=0.005)
-
-    # The PPA: pv's consumed MWh = pv − its share of the export, × 20.
+    # The PPA: pv's consumed MWh = pv − its share of the export, × 20 (same share).
     hand_ppa = 20.0 * float((w * (pv - np.minimum(pv, np.clip(exp_mw, 0, None) * share))).sum())
     ppa = [ln for ln in lines if ln.contract_id == "btm"]
     assert ppa and sum(ln.amount for ln in ppa) == pytest.approx(hand_ppa, abs=0.005)
+
+
+@pytest.mark.live_solve
+def test_unknown_generation_makes_the_export_split_not_established(reset_backend):
+    """IC P3 gate condition 2 (round 2): a NaN in the site's generation in an
+    export interval is not a share for the site — the split is not established
+    (a blocking flag), as the PPA's share already says."""
+    n, cfg = _solve(_network(), _commercial(copy.deepcopy(_VF_DEV)))
+    exp_mw = n.links_t.p0["export"].to_numpy(float)
+    pv = n.generators_t.p["pv"].to_numpy(float)
+    at = np.flatnonzero((exp_mw > 1e-6) & (pv > 1e-6))[:5]
+    assert len(at)
+    n.generators_t.p.iloc[at, n.generators_t.p.columns.get_loc("pv")] = np.nan
+    inputs, _vf, ledger, res = _ledger(n, cfg)
+    assert any(f.startswith("export_split_not_established:export_price:") for f in inputs.input_flags)
+    assert res.periods["_"].ok is not True
+    dev = [ln for ln in ledger.periods["_"] if ln.source == "export_price"]
+    assert dev and all(ln.amount is None for ln in dev)
