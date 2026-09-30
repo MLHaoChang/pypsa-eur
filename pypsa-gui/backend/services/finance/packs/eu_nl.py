@@ -11,7 +11,7 @@ Version as of 2026-01-01. One layer, the vennootschapsbelasting (VPB), with
 two brackets; losses carry forward without a time limit, €1m in full plus 50 %
 of the excess (art. 20); the earnings-stripping rule caps net interest at the
 higher of 24.5 % of fiscal EBITDA and €1m, the excess carried forward (art.
-15b); depreciation at most 20 % of cost a year (art. 3.30 lid 3 Wet IB 2001,
+15b); depreciation at most 20 % of cost a year (art. 3.30 lid 2 Wet IB 2001,
 via art. 8 Wet Vpb). The residual value (restwaarde) and the one-year loss
 carryback are not modelled (flagged).
 """
@@ -28,7 +28,7 @@ _BD_2026 = ("Belastingdienst, Tarieven voor de vennootschapsbelasting / Verander
 def make_pack() -> JurisdictionPack:
     rules = {
         "vpb_brackets": Rule([[0.0, 0.19], [200_000.0, 0.258]],
-                             f"art. 22 lid 1 Wet Vpb 1969; {_BD_2026}: t/m € 200.000 19,0 %, "
+                             f"art. 22 Wet Vpb 1969; {_BD_2026}: t/m € 200.000 19,0 %, "
                              "meer dan € 200.000 25,8 %"),
         "vpb_loss": Rule({"allowance": 1_000_000.0, "limit_share": 0.5, "years": None},
                          "art. 20 lid 2 Wet Vpb 1969 (from 2022: €1 mln in full, 50 % of the "
@@ -38,7 +38,7 @@ def make_pack() -> JurisdictionPack:
                                    f"art. 15b Wet Vpb 1969 (24,5 % from 2025); {_BD_2026}: "
                                    "rente niet aftrekbaar voor zover het saldo meer is dan 24,5 % "
                                    "van de winst, en meer dan € 1.000.000"),
-        "depreciation_max_rate": Rule(0.20, "art. 3.30 lid 3 Wet IB 2001 (via art. 8 Wet Vpb "
+        "depreciation_max_rate": Rule(0.20, "art. 3.30 lid 2 Wet IB 2001 (via art. 8 Wet Vpb "
                                             "1969): ten hoogste 20 % van de aanschaffingskosten "
                                             "per jaar"),
     }

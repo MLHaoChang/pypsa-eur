@@ -168,6 +168,10 @@ class TaxLayer:
     surcharge_share: float = 0.0
     itc_basis_reduction: bool = False               # this layer's basis is reduced by the ITC …
     itc_basis_reduction_share: float = 0.5          # … × this share (US §50(c): ½; CA s.13(7.1): 1)
+    # Years after the first operating year the reduction takes effect (CA:
+    # 1 — the first year's CCA is on the unreduced cost, the UCC falls the next
+    # year, a negative UCC recaptured; WP4.3b review B2). 0 = from the start.
+    itc_basis_reduction_lag: int = 0
     interest_cap: InterestCap | None = None
     # Progressive brackets on the year's taxable amount: ((threshold, rate), …)
     # from 0 upward — the rate applies above its threshold (NL VPB). A
@@ -198,7 +202,8 @@ def rate_in(rate: float | dict[int, float], year: int) -> float:
 
 
 def depreciation(tl: Timeline, basis: float, classes: tuple[DepreciationClass, ...], *,
-                 itc_reduction: float = 0.0, start: int | None = None) -> np.ndarray:
+                 itc_reduction: float = 0.0, start: int | None = None,
+                 itc_lag: int = 0) -> np.ndarray:
     """Depreciation per year of `basis` (the depreciable capex) across the
     classes, from the first operating year (or axis index `start` — a
     replacement vintage); `itc_reduction` (an amount) is taken off the basis of
@@ -212,16 +217,28 @@ def depreciation(tl: Timeline, basis: float, classes: tuple[DepreciationClass, .
         b = basis * c.share
         if itc_reduction and c.itc_reduces and reducible:
             b -= itc_reduction * c.share / reducible
-        if b < -1e-9:
+        if b < -1e-9 and not itc_lag:
             raise ValueError(f"the ITC basis reduction exceeds class {c.name!r}'s basis")
-        bonus = b * c.bonus
-        rest = b - bonus
-        if start < tl.n:
-            out[start] += bonus
+        red_c = 0.0
+        if itc_lag and itc_reduction and c.itc_reduces and reducible:
+            red_c = basis * c.share - b              # applied later, not upfront
+            b = basis * c.share
+        full = np.zeros(max(len(c.schedule), 1) + itc_lag + 1)
+        full[0] += b * c.bonus
         for j, f in enumerate(c.schedule):
+            full[j] += (b - b * c.bonus) * f
+        if red_c:
+            rem = b - full[:itc_lag].sum()
+            left = rem - red_c
+            if left >= 0 and rem > 0:
+                full[itc_lag:] *= left / rem
+            else:                                     # a negative UCC: recaptured
+                full[itc_lag:] = 0.0
+                full[itc_lag] = left
+        for j, v in enumerate(full):
             i = start + j
             if i < tl.n:
-                out[i] += rest * f
+                out[i] += v
     return out
 
 
@@ -253,7 +270,8 @@ def compute_tax(tl: Timeline, layers: tuple[TaxLayer, ...], *, ebitda: np.ndarra
     for layer in layers:
         d = depreciation(tl, basis, layer.depreciation,
                          itc_reduction=layer.itc_basis_reduction_share * itc_amount
-                         if layer.itc_basis_reduction else 0.0)
+                         if layer.itc_basis_reduction else 0.0,
+                         itc_lag=layer.itc_basis_reduction_lag)
         for v in vintages:
             start, vb = v[0], v[1]
             d = d + depreciation(tl, vb, _vintage_classes(layer, v), start=start)

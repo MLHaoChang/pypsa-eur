@@ -753,7 +753,7 @@ Nit taken: the degressive rate keeps full precision (`repr`, not `:g`).
 ## WP4.3b `eu_nl` and `ca_federal` packs
 
 - `eu_nl` (sourced): VPB brackets 19 % / 25.8 % at €200k (art. 22 Wet Vpb 1969, dated); depreciation with the
-  20 %/yr cap (art. 3.30a Wet IB 2001) and useful lives; loss carryforward €1m + 50 % (dated); art. 15b
+  20 %/yr cap (art. 3.30 lid 2 Wet IB 2001) and useful lives; loss carryforward €1m + 50 % (dated); art. 15b
   earnings stripping (24.5 % of fiscal EBITDA, €1m threshold) in carryforward mode; EIA as an incentive slot
   (absent unless sourced).
 - `ca_federal` (sourced): 15 % general federal rate (38 % − 10 % abatement − 13 % rate reduction), a
@@ -788,7 +788,8 @@ Nit taken: the degressive rate keeps full precision (`repr`, not `:g`).
   (`pwa_met`) are not met; only on class 43.1 / 43.2 assets; it reduces the capital cost by **100 %** (new
   `TaxLayer.itc_basis_reduction_share`);
 - EIFEL absent and flagged;
-- the 2025 budget proposals are not included (not enacted).
+- ~~the 2025 budget proposals are not included (not enacted)~~ — wrong: enacted 2026-03-26 (S.C. 2026,
+  c. 3); a second pack version carries them (WP4.3b review round 1, B1).
 
 **Tax engine additions:** progressive `brackets` (a negative base is valued at the top bracket, flagged)
 and the `cca_declining` schedule.
@@ -802,6 +803,43 @@ and the `cca_declining` schedule.
 - CA CCA 43.1, four first-year cases (100 / 75 / 55 % and half-year), then declining balance;
 - CA layers; the 43.2 window; the EIFEL flag;
 - the Clean Tech ITC at 30 / 20 / 15 / 0 % and a non-43 class.
+
+**WP4.3b review round 1 (0742677): FAIL for `ca_federal`; `eu_nl` passes with one condition; fixed.**
+The reviewer verified against the statutes: the NL rates, losses, art. 15b (a threshold, with
+carryforward) and pro rata; the CA 15 % rate, the Class 43.2 window, the Reg. 1100(2) factor mechanics
+(`cca_declining` exact), the 20-year losses, the ITC rates, refundability and labour; the layers. Every
+arithmetic probe was exact.
+1. **B1 (high).** The Budget 2025 Implementation Act, No. 1 (S.C. 2026, c. 3, assented 2026-03-26, deemed
+   in force from 2025-01-01) closes the old incentive to property acquired before 2025 (Reg. 1104(4)). It
+   gives Class 43.1 property acquired after 2024 100 % before 2030, 75 % in 2030–31 and 55 % in 2032–33
+   (Reg. 1100(2) A.1(b), 1104(4.01)). The pack applied 55 % / the half-year rule instead. Fixed:
+   - **a second pack version valid from 2026-03-26** (C11: the law state at close), with
+     `first_year_programs` (aiip bounded to acquisitions before 2025; raiip for 43.1 after 2024);
+   - the 2026-01-01 version keeps the law as then enacted;
+   - both versions pinned.
+2. **B2.** The ITC capital-cost reduction applies from the FOLLOWING year (s. 13(7.1)(e), s. 127.45(6)),
+   so the first-year CCA is on the unreduced cost and a negative UCC is recaptured (s. 13(1)). Fixed with
+   `TaxLayer.itc_basis_reduction_lag` = 1 for CA. Tested: 100 % expensing gives [1.0, −0.3 recapture, 0];
+   the half-year rule gives [0.15, 0.55·0.3, …]. Citation corrected.
+3. **B3.** The ITC was gated on COD, not the acquisition date. Fixed: acquired before 2023-03-28 →
+   ineligible; `acquisition_date` None → missing.
+4. **B4.** ITC eligibility was assumed from the CCA class. Fixed with a cited `clean_technology_property`
+   rule (s. 127.45(1)) that fails closed: cogeneration / fossil not eligible, unclassified not
+   established.
+5. **B5.** The NL citations: art. 3.30 **lid 2** Wet IB 2001; art. 22 Wet Vpb has no lid. Re-pinned.
+
+**Taken:**
+- `nl_brackets_standalone_in_offset_mode`, `ca_loss_carryback_not_modelled`,
+  `provincial_layer_follows_federal_cca_and_losses` and `ca_itc_rate_stated_statutory_checks_skipped`;
+- citations for Reg. 1104(4) and s. 123.4(1);
+- tests for 43.2 inside its window, post-2024 acquisitions, the recapture and the NL flag.
+
+**Noted, not taken:**
+- art. 15b / §4h / §163(j) cap the debt interest, not the net interest balance with fees (an EBITDA proxy
+  — stated);
+- the credit is paid after year-end;
+- the rolling-start rule s. 13(27)(b);
+- Canadian construction interest (s. 20(1)(c) vs s. 21) against the C6 IDC-in-basis convention.
 
 ## WP4.4 Incentives with dated rules
 

@@ -247,17 +247,34 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
                 r = rule("clean_technology_itc")
                 if r is None:
                     continue
+                prop = rule("clean_technology_property")
+                if prop is None:
+                    continue
+                # The acquisition date gates the credit (s. 127.45(1) — review B3).
+                if fin.acquisition_date is None:
+                    reasons.append(f"input_missing:acquisition_date:{tag}")
+                    continue
+                if fin.acquisition_date < date.fromisoformat(r["acquired_from"]):
+                    line.flags.append(f"incentive_ineligible:{tag}:acquired_before_2023-03-28")
+                    continue
+                # Clean technology property, failing closed (review B4).
+                ok_c = {x.lower() for x in prop["eligible"]}
+                no_c = {x.lower() for x in prop["not_eligible"]}
+                unknown = [a for a in assets if a.carrier is None or
+                           a.carrier.lower() not in ok_c | no_c]
+                if unknown:
+                    reasons.extend(f"incentive_technology_unclassified:{a.name}:{a.carrier}"
+                                   for a in unknown)
+                    continue
                 classes = {a.name: (fin.depreciation_class_by_asset.get(a.name) or "")
                            for a in assets}
-                off = [a for a in assets if not classes[a.name].startswith(("cca_43.1", "cca_43.2"))]
+                off = [a for a in assets if a.carrier.lower() in no_c or
+                       not classes[a.name].startswith(("cca_43.1", "cca_43.2"))]
                 for a in off:
-                    line.flags.append(f"incentive_ineligible:{tag}:not_class_43:{a.name}")
+                    line.flags.append(f"incentive_ineligible:{tag}:not_clean_technology:{a.name}")
                 assets = [a for a in assets if a not in off]
                 line.assets = tuple(a.name for a in assets)
                 if not assets:
-                    continue
-                if cod < date.fromisoformat(r["available_from"]):
-                    line.flags.append(f"incentive_ineligible:{tag}:before_available_from")
                     continue
                 by = {int(k): v for k, v in r["rate_by_available_for_use_year"].items()}
                 rate = by[max(y for y in by if y <= cod.year)] if cod.year >= min(by) else 0.0
@@ -268,6 +285,10 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
                     if not fin.pwa_met:
                         rate = max(0.0, rate - r["labour_requirements_reduction"])
                 names = {a.name for a in assets}
+            elif ca and inc.rate is not None:
+                # A stated rate skips the statutory checks; the 100 % capital-cost
+                # reduction still applies (review non-binding #6).
+                flags.append("ca_itc_rate_stated_statutory_checks_skipped")
             if rate is None:
                 reasons.append(f"incentive_rate_missing:{tag}")
                 continue

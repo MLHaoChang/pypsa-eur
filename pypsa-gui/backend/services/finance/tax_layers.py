@@ -78,12 +78,16 @@ def _cca(rest: str, pack: JurisdictionPack, cod: date, acquired: date | None) ->
         raise ValueError(f"CCA class {rest} applies to property acquired after {c['acquired_after']} "
                          f"and before {c['acquired_before']}")
     first = None
-    enh = pack.rule("enhanced_first_year_43")
-    if rest.startswith("43") and enh.status == "ok" and \
-            acquired > date.fromisoformat(enh.value["acquired_after"]):
-        by = {int(k): v for k, v in enh.value["by_available_for_use_year"].items()}
+    progs = pack.rule("first_year_programs")
+    for prog in (progs.value if progs.status == "ok" else []):
+        if rest not in prog["classes"] or acquired <= date.fromisoformat(prog["acquired_after"]):
+            continue
+        if "acquired_before" in prog and acquired >= date.fromisoformat(prog["acquired_before"]):
+            continue
+        by = {int(k): v for k, v in prog["by_available_for_use_year"].items()}
         if cod.year <= max(by):
             first = by.get(cod.year, by[min(by)] if cod.year < min(by) else None)
+        break
     return cca_declining(float(c["rate"]), first)
 
 
@@ -284,6 +288,10 @@ def resolve_tax_layers(pack: JurisdictionPack, fin: FinanceInputs, assets: list[
                               years=loss["years"]),
                 interest_cap=cap_obj),)
             res.flags.append("nl_residual_value_not_modelled")
+            if not carry:
+                # Offset mode assumes other income, yet a positive year takes
+                # the stand-alone brackets (WP4.3b review, non-binding #1).
+                res.flags.append("nl_brackets_standalone_in_offset_mode")
             if carry:
                 res.flags.append("nl_loss_carryback_not_modelled")
     elif pack.jurisdiction == "ca_federal":
@@ -296,18 +304,18 @@ def resolve_tax_layers(pack: JurisdictionPack, fin: FinanceInputs, assets: list[
         if None not in (rate, loss, red):
             lr = LossRule(allowance=loss["allowance"], limit_share=loss["limit_share"],
                           years=loss["years"])
+            itc = dict(itc_basis_reduction=True, itc_basis_reduction_share=float(red["share"]),
+                       itc_basis_reduction_lag=int(red["lag_years"]))
             layers = [TaxLayer(name="federal", rate=rate, depreciation=classes,
-                               deductible_in_later_layers=False, loss=lr,
-                               itc_basis_reduction=True, itc_basis_reduction_share=float(red))]
+                               deductible_in_later_layers=False, loss=lr, **itc)]
             if fin.state_rate:
                 layers.append(TaxLayer(name="provincial", rate=fin.state_rate,
                                        depreciation=classes, deductible_in_later_layers=False,
-                                       loss=lr, itc_basis_reduction=True,
-                                       itc_basis_reduction_share=float(red)))
-                res.flags.append("provincial_layer_follows_federal_cca")
+                                       loss=lr, **itc))
+                res.flags.append("provincial_layer_follows_federal_cca_and_losses")
             res.layers = tuple(layers)
             if carry:
-                res.flags.append("ca_eifel_not_modelled")
+                res.flags += ["ca_eifel_not_modelled", "ca_loss_carryback_not_modelled"]
     else:
         res.missing.append(f"pack_not_resolvable:{pack.jurisdiction}")
     res.missing = sorted(set(res.missing))

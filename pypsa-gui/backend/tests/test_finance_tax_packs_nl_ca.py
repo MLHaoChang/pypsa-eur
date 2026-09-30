@@ -97,6 +97,7 @@ def test_ca_layers_class_43_2_window_and_eifel_flag():
     fed, prov = res.layers
     assert (fed.rate, prov.rate) == (0.15, 0.115)
     assert not fed.deductible_in_later_layers and fed.itc_basis_reduction_share == 1.0
+    assert fed.itc_basis_reduction_lag == 1
     t = compute_tax(_tl(1, 2026), res.layers, ebitda=np.array([1e6]), basis=0.0,
                     losses="offset_other_income")
     assert t.total_liability[0] == pytest.approx(1e6 * (0.15 + 0.115))
@@ -132,4 +133,91 @@ def test_ca_clean_technology_itc(cod, pwa, cls, rate):
     assert inc.established(), inc.reasons
     assert inc.itc_amount == pytest.approx(rate * 1e6)
     if cls != "cca_43.1":
-        assert any("not_class_43" in f for f in inc.flags)
+        assert any("not_clean_technology" in f for f in inc.flags)
+
+
+
+# ── WP4.3b review round 1 ────────────────────────────────────────────────────
+
+CA2 = load_pack("ca_federal", as_of=date(2026, 6, 1))
+
+
+@pytest.mark.parametrize("acq,cod,first", [
+    (date(2025, 6, 1), date(2026, 6, 1), 1.0), (date(2025, 6, 1), date(2028, 6, 1), 1.0),
+    (date(2026, 3, 1), date(2030, 6, 1), 0.75), (date(2026, 3, 1), date(2033, 6, 1), 0.55),
+    (date(2026, 3, 1), date(2034, 6, 1), 0.15),                    # after 2033: half-year rule
+    (date(2024, 6, 1), date(2026, 6, 1), 0.55),                    # the old incentive, acquired < 2025
+])
+def test_b1_the_reaccelerated_first_year_from_2026_03_26(acq, cod, first):
+    """S.C. 2026, c. 3: Class 43.1 acquired after 2024 — 100 % before 2030,
+    75 % 2030–31, 55 % 2032–33 (Reg. 1100(2) A.1(b), 1104(4.01))."""
+    assert CA2.valid_from == date(2026, 3, 26)
+    res = resolve_tax_layers(CA2, _ca(acquisition_date=acq), [OwnerAsset("pv", "solar", 1.0)], cod)
+    assert res.layers[0].depreciation[0].schedule[0] == pytest.approx(first)
+    # The 2026-01-01 version keeps the law then enacted.
+    old = resolve_tax_layers(CA, _ca(acquisition_date=date(2025, 6, 1)),
+                             [OwnerAsset("pv", "solar", 1.0)], date(2026, 6, 1))
+    assert old.layers[0].depreciation[0].schedule[0] == pytest.approx(0.55)
+
+
+def test_b1_class_43_2_keeps_the_old_incentive_inside_its_window():
+    res = resolve_tax_layers(CA2, _ca(acquisition_date=date(2024, 6, 1),
+                                      depreciation_class_by_asset={"pv": "cca_43.2"}),
+                             [OwnerAsset("pv", "solar", 1.0)], date(2025, 3, 1))
+    assert res.layers[0].depreciation[0].schedule[:2] == pytest.approx([0.75, 0.25 * 0.5])
+
+
+def test_b2_the_itc_reduces_the_ucc_the_following_year_with_recapture():
+    """100 % first-year CCA on the unreduced 1.0; the next year the UCC (0)
+    falls by the 0.3 ITC → 0.3 recaptured (negative depreciation)."""
+    from services.finance.tax import DepreciationClass, TaxLayer, cca_declining
+    layer = (TaxLayer(name="federal", rate=0.15, itc_basis_reduction=True,
+                      itc_basis_reduction_share=1.0, itc_basis_reduction_lag=1,
+                      depreciation=(DepreciationClass("pv:cca_43.1", 1.0, cca_declining(0.3, 1.0)),)),)
+    t = compute_tax(_tl(3), layer, ebitda=np.zeros(3), basis=1.0, itc_amount=0.3,
+                    losses="offset_other_income")
+    assert t.depreciation["federal"] == pytest.approx([1.0, -0.3, 0.0])
+    layer = (layer[0].__class__(**{**layer[0].__dict__, "depreciation": (
+        DepreciationClass("pv:cca_43.1", 1.0, cca_declining(0.3)),)}),)
+    t = compute_tax(_tl(3), layer, ebitda=np.zeros(3), basis=1.0, itc_amount=0.3,
+                    losses="offset_other_income")
+    assert t.depreciation["federal"] == pytest.approx([0.15, 0.55 * 0.3, 0.55 * 0.7 * 0.3])
+
+
+def _itc_case(acq, carrier="solar", cls="cca_43.1", cod=date(2030, 1, 1)):
+    case = _ca_case(cod, True, cls)
+    fin = case.inputs.model_copy(update={"acquisition_date": acq})
+    import dataclasses
+    return dataclasses.replace(case, inputs=fin, assets=(
+        AssetFinance("pv", "Generator", 1_000_000.0, 40.0, carrier=carrier),))
+
+
+@pytest.mark.parametrize("acq,carrier,outcome", [
+    (date(2022, 6, 1), "solar", "ineligible"),         # acquired before 2023-03-28 (B3)
+    (None, "solar", "missing"),
+    (date(2029, 1, 1), "gas_chp", "ineligible"),       # not clean technology (B4)
+    (date(2029, 1, 1), "mystery", "unclassified"),
+    (date(2029, 1, 1), "solar", "ok"),
+])
+def test_b3_b4_the_clean_technology_itc_needs_the_acquisition_date_and_the_property(acq, carrier, outcome):
+    case = _itc_case(acq, carrier)
+    tl = build_timeline(case)
+    inc = build_incentives(case, tl, build_operating(case, tl), CA2)
+    if outcome == "ok":
+        assert inc.itc_amount == pytest.approx(0.3e6)
+    elif outcome == "ineligible":
+        assert inc.established() and inc.itc_amount == 0
+    elif outcome == "missing":
+        assert "input_missing:acquisition_date:0:itc" in inc.reasons
+    else:
+        assert "incentive_technology_unclassified:pv:mystery" in inc.reasons
+
+
+def test_nl_flags_and_citations():
+    res = resolve_tax_layers(NL, _nl(tax_losses="offset_other_income"),
+                             [OwnerAsset("pv", "solar", 1.0)], date(2031, 1, 1))
+    assert "nl_brackets_standalone_in_offset_mode" in res.flags
+    assert "3.30 lid 2" in NL.rule("depreciation_max_rate").source
+    res = resolve_tax_layers(CA2, _ca(tax_losses="carryforward"), [OwnerAsset("pv", "solar", 1.0)],
+                             date(2026, 6, 1))
+    assert "ca_loss_carryback_not_modelled" in res.flags
