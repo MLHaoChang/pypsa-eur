@@ -55,9 +55,9 @@ const REPORT: InvestmentCaseReportPayload = {
   cashflow_lines: [
     { year: 2030, participant: 'owner', counterparty: 'external', value_stream: 'capex', amount: -1000,
       provenance: { source: 'capex', mode: 'pf' } },
-    { year: 2031, participant: 'owner', counterparty: 'grid', value_stream: 'energy', amount: 300,
+    { year: 2031, participant: 'owner', counterparty: 'grid', value_stream: 'energy_export', amount: 300,
       provenance: { source: 'ledger', mode: 'pf' } },
-    { year: 2031, participant: 'owner', counterparty: 'grid', value_stream: 'energy', amount: 20,
+    { year: 2031, participant: 'owner', counterparty: 'grid', value_stream: 'energy_export', amount: 20,
       provenance: { source: 'ledger', mode: 'pf' } },
     { year: 2031, participant: 'owner', counterparty: 'lender', value_stream: 'interest', amount: -50,
       provenance: { source: 'debt', mode: 'pf' } },

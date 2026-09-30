@@ -75,7 +75,7 @@ function renderEditor() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(<QueryClientProvider client={qc}><FinanceInputsEditor /></QueryClientProvider>)
 }
-const putBody = (n = 0) => api.putFinance.mock.calls[n][0] as Record<string, unknown>
+const putBody = (n = 0) => api.putFinance.mock.calls[n][0] as unknown as Record<string, unknown>
 const errorOf = (el: HTMLElement) => {
   const id = el.getAttribute('aria-describedby')
   return id ? document.getElementById(id)?.textContent ?? '' : ''
