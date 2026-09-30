@@ -470,15 +470,31 @@ const DENIED_ERROR_LINE = /^✗ \S+ — confirmation_denied\b/
 // this table's entry, else "use <tool name in words>". Render-only, like
 // the declined line above: the transcript keeps `… preparing X`, `→ X`,
 // `✓ X` and `✗ X — kind: message`, and Expert shows them.
+//
+// P29 gate B1-1: a tool that only STARTS background work returns at once
+// (e.g. run_fmea_sweep: "returns {status:'running'} immediately"), so its ✓
+// line means "started". Its phrase says "start …", so "Done: start the
+// reliability study" stays true while the study runs.
 const GUIDED_TOOL_PHRASE: Record<string, string> = {
-  run_eh_study: 'run the reliability study',
   update_component: 'change a setting',
   suggest_eh_setup: 'look at how the site is set up',
   get_adequacy_results: 'read the study results',
   list_components: 'list what is in the network',
-  run_fmea_sweep: 'check what happens when equipment fails',
   update_solver_config: 'change a study setting',
   put_stress_scenarios: 'save the stress scenarios',
+  // Start-only tools (their schema description begins "Start …", or they
+  // hand the work to a queue / a worker).
+  run_eh_study: 'start the reliability study',
+  run_fmea_sweep: 'start the equipment-failure check',
+  run_simulation: 'start a solve',
+  run_ac_pf_stage: 'start the power-flow check',
+  run_frontier_study: 'start the cost-versus-reliability study',
+  run_mc_study: 'start the random-outage reliability study',
+  run_coupling_loop: 'start the planning loop that tightens the shortfall limit',
+  run_margin_loop: 'start the planning loop that adds backup capacity',
+  gridspine_run_pipeline: 'start the planning and dynamics study',
+  solve_queue_enqueue: 'add the project to the solve queue',
+  abort_adequacy_study: 'ask the running study to stop',
 }
 export function guidedToolPhrase(tool: string): string {
   return Object.prototype.hasOwnProperty.call(GUIDED_TOOL_PHRASE, tool)

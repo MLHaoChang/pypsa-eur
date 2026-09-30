@@ -5,7 +5,9 @@ import { useUIStore } from '../store/uiStore'
 import { useChatStore, type PendingConfirmationCard } from '../store/chatStore'
 import { createChatStream, getChatHealth, postChatAbort, postChatConfirm } from '../api/chat'
 import { listUploads } from '../api/uploads'
-import ChatPanel, { guidedCardSummary } from './ChatPanel'
+import ChatPanel, { guidedCardSummary, guidedToolPhrase } from './ChatPanel'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import chatStoreSource from '../store/chatStore.ts?raw'
 
 // Guided-mode spec §6.1: a card's "Let the assistant do this" goes through
@@ -729,10 +731,10 @@ describe('P29: Guided tool lines', () => {
     await emit(PREP)
     expect(toolRows()).toHaveLength(0)
     await emit(REQ)
-    await waitFor(() => expect(labels()).toEqual(['Working: run the reliability study…']))
+    await waitFor(() => expect(labels()).toEqual(['Working: start the reliability study…']))
     await emit(RES)
     // The outcome replaces the "Working" line: one line per call.
-    await waitFor(() => expect(labels()).toEqual(['Done: run the reliability study']))
+    await waitFor(() => expect(labels()).toEqual(['Done: start the reliability study']))
     for (const m of screen.queryAllByTestId('chat-message')) {
       expect(outsideDetails(m)).not.toMatch(/→ |preparing/)
     }
@@ -762,7 +764,7 @@ describe('P29: Guided tool lines', () => {
     ['suggest_eh_setup', 'look at how the site is set up'],
     ['get_adequacy_results', 'read the study results'],
     ['list_components', 'list what is in the network'],
-    ['run_fmea_sweep', 'check what happens when equipment fails'],
+    ['run_fmea_sweep', 'start the equipment-failure check'],
     ['update_solver_config', 'change a study setting'],
     ['put_stress_scenarios', 'save the stress scenarios'],
     ['frob_widget', 'use frob widget'],
@@ -805,5 +807,47 @@ describe('P29: Guided tool lines', () => {
     await waitFor(() => expect(toolRows()).toHaveLength(3))
     expect(screen.queryByTestId('chat-tool-label')).toBeNull()
     expect(toolRows().map(r => r.outerHTML)).toMatchSnapshot()
+  })
+})
+
+// P29 gate B1-1: a tool that only STARTS background work answers at once, so
+// its ✓ line means "started", never "finished". Every such tool has its own
+// phrase beginning "start …" (or saying what it asked for) — none falls back
+// to "use <tool words>", and none reads as a finished study.
+describe('P29 gate B1-1: start-only tools never say they finished', () => {
+  // The backend schema's own word: descriptions that begin "Start …".
+  const schema = readFileSync(resolve(process.cwd(), '..', 'backend', 'services', 'chat_tools_schema.py'), 'utf8')
+  const fromSchema = [...schema.matchAll(/"([a-z_]+)",\s*\n\s*"Start /g)].map(m => m[1])
+  const START_ONLY = [...new Set([...fromSchema,
+    'run_simulation', 'run_ac_pf_stage', 'run_fmea_sweep', 'run_frontier_study', 'run_mc_study',
+    'run_coupling_loop', 'run_margin_loop', 'run_eh_study', 'gridspine_run_pipeline'])]
+
+  it('the schema scan finds the study starters', () => {
+    expect(fromSchema).toEqual(expect.arrayContaining([
+      'run_simulation', 'run_fmea_sweep', 'run_frontier_study', 'run_mc_study',
+      'run_coupling_loop', 'run_margin_loop', 'run_eh_study']))
+  })
+
+  it.each(START_ONLY)('%s has an explicit "start …" phrase', (tool) => {
+    const phrase = guidedToolPhrase(tool)
+    expect(phrase).not.toMatch(/^use /)
+    expect(phrase).toMatch(/^start /)
+    expect(phrase).not.toMatch(/_/)
+  })
+
+  it.each<[string, string]>([
+    ['solve_queue_enqueue', 'add the project to the solve queue'],
+    ['abort_adequacy_study', 'ask the running study to stop'],
+  ])('%s says what it asked for', (tool, phrase) => {
+    expect(guidedToolPhrase(tool)).toBe(phrase)
+  })
+
+  it('a Guided run_fmea_sweep ✓ line reads "Done: start the equipment-failure check"', async () => {
+    useChatStore.setState({ messages: [
+      { id: 't1', role: 'tool', content: '✓ run_fmea_sweep', tool_use_id: 'tu1', tool_name: 'run_fmea_sweep', ts: 1 },
+    ] })
+    renderPanel()
+    await waitFor(() => expect(screen.getByTestId('chat-tool-label').textContent)
+      .toBe('Done: start the equipment-failure check'))
   })
 })
