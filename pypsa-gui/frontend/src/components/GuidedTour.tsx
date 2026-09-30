@@ -5,7 +5,7 @@
 // same text the chat assistant reads through get_feature_guide — so the tour
 // and the assistant cannot describe a field differently. Each step anchors to
 // a `data-testid`; a step whose target is not on screen tries its `reveal`
-// control once, then is shown centred with a note (an optional step whose
+// control once, then is shown in the bottom-left corner with a note (an optional step whose
 // target is absent when it is reached is skipped) — a renamed test id never
 // crashes the tour, and a test pins every target to a real component.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -298,8 +298,8 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
     return () => window.removeEventListener('keydown', onKey)
   }, [close, next, back])
 
-  // Placed by fit around the measured popover (B4); centred when the target
-  // is not on screen. When nothing fits (`free`), the target is scrolled into
+  // Placed by fit around the measured popover (B4); docked bottom-left when
+  // the target is not on screen. When nothing fits (`free`), the target is scrolled into
   // view once per step so the reader can still see it.
   const vw = typeof window !== 'undefined' ? window.innerWidth : 1024
   const vh = typeof window !== 'undefined' ? window.innerHeight : 768
@@ -333,9 +333,11 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
   const isFirst = !shown.some((v, k) => v && k < idx)
 
   const style: React.CSSProperties = {
+    // No target on screen: docked in the bottom-left corner, not centred —
+    // centred, it covered the very control the step asks the user to open.
     ...(placed ? { top: placed.top, left: placed.left } : {
-      top: Math.max(8, vh / 2 - Math.min(measured.h, vh - 16) / 2),
-      left: Math.max(8, vw / 2 - POPOVER_W / 2),
+      top: Math.max(8, vh - 8 - Math.min(measured.h, vh - 16)),
+      left: 8,
     }),
     width: POPOVER_W, maxWidth: 'calc(100vw - 16px)',
     maxHeight: 'calc(100vh - 16px)', overflowY: 'auto',

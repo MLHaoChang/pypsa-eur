@@ -2745,7 +2745,7 @@ async function p30TaggingLinkStep(page) {
   check(Boolean(link), `a Link to open: ${link?.name}`)
   const search = page.getByPlaceholder('Search components…')
   await search.fill(link.name)
-  const hit = page.locator('button:visible', { hasText: link.name }).filter({ hasText: /\bLink\b/ }).first()
+  const hit = page.locator('button:visible', { hasText: link.name }).filter({ hasText: /Link ·/ }).first()
   await hit.waitFor({ state: 'visible', timeout: 15_000 })
   await hit.click()
   await byId('props-edit-link').waitFor({ state: 'visible', timeout: 15_000 })

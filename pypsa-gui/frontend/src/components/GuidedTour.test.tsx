@@ -238,6 +238,20 @@ describe('GuidedTour placement (P30 B4)', () => {
     expect(tour.style.overflowY).toBe('auto')
   })
 
+  // P30 smoke finding: centred, the popover of a step whose target left the
+  // screen covered the Properties panel's Edit button the step asks for. It
+  // docks in the bottom-left corner instead, inside the viewport.
+  it('a target not on screen → docked bottom-left, inside the viewport', async () => {
+    const pop = { width: 320, height: 300 }
+    layout(1440, 900, { top: 0, left: 0, width: 0, height: 0 }, pop)
+    const tour = await open()
+    await waitFor(() => expect(tour.style.top).toBe(`${900 - 8 - 300}px`))
+    expect(tour.getAttribute('data-placement')).toBe('free')
+    expect(tour.style.left).toBe('8px')
+    expect(screen.queryByTestId('guide-highlight')).toBeNull()
+    assertInside(box(tour, pop, 1440, 900), 1440, 900)
+  })
+
   it('re-measures: a popover that grows moves from below to above', async () => {
     const t = { top: 400, left: 100, width: 200, height: 30 }
     let pop = { width: 320, height: 150 }
