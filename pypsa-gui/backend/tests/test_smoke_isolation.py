@@ -139,3 +139,45 @@ def test_a_windows_relative_sqlite_path_is_still_refused(tmp_path):
     env["DATABASE_URL"] = r"sqlite+pysqlite:///appdata\acc.db"
     with pytest.raises(IsolationError, match="relative"):
         require_isolated_environment(env)
+
+
+# ── the one documented exemption ────────────────────────────────────────────
+#
+# `accept_coldstart.py` must run with DATABASE_URL UNSET: `build_environment`
+# leaves an exported one alone (launcher.py:129), so pre-setting it skips the
+# pin that harness exists to prove. Requiring it here and asserting its absence
+# there made the harness unrunnable in every environment — set: AssertionError,
+# unset: IsolationError — from 4ba89699, which introduced both halves in one
+# commit, until the opt-out below.
+
+def test_the_exemption_accepts_an_unset_database_url(tmp_path):
+    env = _ok(tmp_path)
+    del env["DATABASE_URL"]
+    require_isolated_environment(env, require_database_url=False)
+
+
+def test_the_exemption_does_not_weaken_the_path_checks(tmp_path):
+    """Opting out of ONE requirement must not opt out of the others — the
+    failure mode that would make this exemption a hole rather than a move."""
+    env = _ok(tmp_path)
+    del env["DATABASE_URL"]
+    del env["PYPSAGUI_APP_DATA_DIR"]
+    with pytest.raises(IsolationError, match="PYPSAGUI_APP_DATA_DIR"):
+        require_isolated_environment(env, require_database_url=False)
+
+
+def test_the_exemption_still_polices_a_database_url_that_IS_set(tmp_path):
+    """The opt-out says "may be absent", not "is not checked". A harness that
+    opts out and is then run with a bad URL anyway must still be refused."""
+    env = _ok(tmp_path)
+    env["DATABASE_URL"] = "sqlite+pysqlite:///./auth_dev.db"     # cwd-relative
+    with pytest.raises(IsolationError, match="DATABASE_URL"):
+        require_isolated_environment(env, require_database_url=False)
+
+
+def test_the_requirement_is_still_the_default(tmp_path):
+    """Nobody gets the exemption by accident: a new harness has to ask."""
+    env = _ok(tmp_path)
+    del env["DATABASE_URL"]
+    with pytest.raises(IsolationError, match="DATABASE_URL"):
+        require_isolated_environment(env)

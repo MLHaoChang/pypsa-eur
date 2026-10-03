@@ -113,13 +113,23 @@ the skip reasons printed.
 This is the only harness that runs from a working directory the app cannot
 write. It is what found the launch-blocking `DATABASE_URL` defect.
 
+**DO NOT set `DATABASE_URL` for these two commands — this step and no other.**
+That is not a typo and not consistency for its own sake: `build_environment`
+leaves an explicitly exported `DATABASE_URL` alone (`launcher.py:129`), so
+exporting it here routes the run down the operator branch and the pin this
+harness exists to prove is never executed. The step passes and tests nothing.
+Every other harness below still needs it.
+
+Isolation is not lost by omitting it: with the variable unset,
+`app_paths.default_database_url()` puts the database under
+`PYPSAGUI_APP_DATA_DIR`, which is already the throwaway root, and the harness
+asserts the file the engine actually opened is inside it.
+
 ```bash
 PYPSAGUI_APP_DATA_DIR="$ACC/appdata" PYPSAGUI_PROJECTS_ROOT="$ACC/projects" \
-  DATABASE_URL="sqlite+pysqlite:///$ACC/appdata/acceptance.db" \
   pixi run -e desktop bash -c 'cd / && python "$COLD" first'
 
 PYPSAGUI_APP_DATA_DIR="$ACC/appdata" PYPSAGUI_PROJECTS_ROOT="$ACC/projects" \
-  DATABASE_URL="sqlite+pysqlite:///$ACC/appdata/acceptance.db" \
   pixi run -e desktop bash -c 'cd / && python "$COLD" relaunch'
 ```
 
