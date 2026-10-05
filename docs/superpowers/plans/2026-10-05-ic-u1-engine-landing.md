@@ -126,14 +126,36 @@ imbalance (a year of energy against one month of demand in the objective).
 - **Round 3 (f9f0f1d): PASS.** Taken after it: a plain index that steps back is refused unless it repeats a
   year exactly (out-of-order weeks doubled the energy).
 
+**Part B — finance additions ((d), D6, D7, D11, D12, D14, (g)).**
+- **Round 1 (a5c1e09): PASS WITH CONDITIONS.** B1 a negative midday export price made PV-surplus charging
+  income (LCOS 66.75 instead of 97.91 €/MWh); decided D14, the forgone export revenue floored at 0 per
+  interval (`lcos_surplus_price_floored`). B2 an extendable, costed meter Link the LP sized was skipped as a
+  meter link; it is now an asset (D11 skips only uncosted ones). C1 the facade test did not pin the pack,
+  the export helper, `bind_commercial_on_context` or the `FinanceResult` fields. Also taken: the surplus
+  flag's MWh annualised; the real-LCOS reason in `lcos.reasons`. Fixed in 6bdaefc.
+- **Round 2 (6bdaefc): PASS.** 1,150 backend tests, `qa_investment_case.py` 245/245, investment vitest
+  142, tsc clean.
+
+**Part C — site connection (b), preflight port (f), D13.**
+- **Round 1 (02d2ede): PASS WITH CONDITIONS.** The raw cycling check matches GS's exactly (1,500 random
+  networks, every warning tuple identical; GS's cycling tests pass on the port). B1 the form's PUT skipped
+  the site-connection check the chat tool runs (a reversed meter saved); B2 storage behind a converting
+  Link (a heat tank, H2 with no fuel cell) counted as an arbitrage loop; B3 a grid-like bus name overruled
+  an explicit `eh_role` tag; B4 the raw check made every LOPF preflight ~10× slower (per-pair table
+  copies). Also taken: drop the efficiency-blind gate (an export fee with a negative import price hid a
+  loop), the import efficiency at the import snapshot, the D13 signature pin, one time-zone default
+  (None), the error-kind texts, clearing `export_link` / `timezone` in chat, refreshing preflight on save.
+- **U2 checklist:** once GS merges master both copies emit `tariff_export_exceeds_import`; GS removes its
+  copy in U2.
+
 ## 7. Status
 
 | Item | State |
 |---|---|
-| U1 PR | master merged (two additive conflicts), Q2 / Q7 added; verification running |
-| (a) defaults pack, (e) export helper | in progress |
-| (b) site connection, (f) preflight port, D13 | in progress |
-| (d), LCOS, D11, D12, Q12b / Q14 tests, Q4 facade test | in progress |
+| U1 PR | #81 open; CodeQL findings being fixed |
+| (a) defaults pack, (e) export helper | done (part A, PASS round 3) |
+| (b) site connection, (f) preflight port, D13 | round-1 fixes in progress |
+| (d), LCOS, D11, D12, Q12b / Q14 tests, Q4 facade test | done (part B, PASS round 2) |
 | (c) this facade section | done |
-| (g) | probed; rule in §5; the engine change with B |
+| (g) | done with part B (rule in §5) |
 | S0b, D9, D10 | waiting for PR #78 |
