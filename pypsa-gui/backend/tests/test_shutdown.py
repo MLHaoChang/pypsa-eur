@@ -313,10 +313,10 @@ def test_each_context_persists_its_own_time_series_or_none():
 
     The constraint the test defends is unchanged: a flush must not write one
     project's series into another's file. What satisfies it is now each context
-    being judged on its OWN store, which is what this asserts. The empty-store
-    context still answers False — deliberately, since serialising an empty store
-    UNLINKS the sidecar. `tests/test_shutdown_persists_user_ts.py` carries the
-    rest, including the on-disk case.
+    being judged on its OWN state, which is what this asserts: a context
+    rewrites its own sidecar (an empty store unlinks a stale one) unless that
+    sidecar could not be read. `tests/test_shutdown_persists_user_ts.py` carries
+    the rest, including the on-disk case.
     """
     saved: list[tuple[str, bool]] = []
 
@@ -331,20 +331,23 @@ def test_each_context_persists_its_own_time_series_or_none():
 
     import pandas as _pd
 
-    with_series, without = _Ctx("with_series"), _Ctx("without")
-    # A store with something in it is the whole difference now, so give one of
-    # them a series rather than blessing one of them as "the active one".
+    with_series, without, unreadable = (
+        _Ctx("with_series"), _Ctx("without"), _Ctx("unreadable"))
     with_series.user_ts = {("loads", "p_set", "L1"): _pd.Series([1.0])}
     without.user_ts = {}
+    unreadable.user_ts = {}
+    unreadable.user_ts_unreadable = True
 
     shutdown_service.flush_all(
-        contexts=[with_series, without],
+        contexts=[with_series, without, unreadable],
         save=lambda ctx, persist_user_ts: saved.append((ctx.loaded_project, persist_user_ts)),
         flush_chat=lambda: None,
         safe=True,
     )
 
-    assert saved == [("with_series", True), ("without", False)], saved
+    assert saved == [
+        ("with_series", True), ("without", True), ("unreadable", False),
+    ], saved
 
 
 def test_one_context_failing_does_not_strand_the_others():

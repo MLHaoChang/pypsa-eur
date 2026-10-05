@@ -217,6 +217,10 @@ class ProjectContext:
     # LIFECYCLE — carried forward (as a COPY) by `reset_network` / `set_network`,
     # NOT carried by `build_context`. See those methods for why each way round.
     user_ts: dict[tuple[str, str, str], Any] = field(default_factory=dict)
+    # Set by `_hydrate_context_from_disk` when `user_ts.json` exists but cannot
+    # be read, cleared by the next save that rewrites it. See
+    # `may_rewrite_user_ts`.
+    user_ts_unreadable: bool = False
 
     @property
     def registry_key(self) -> str | None:
@@ -320,51 +324,23 @@ ABORTABLE_STUDIES = ("coupling_loop", "margin_loop", "mc", "frontier",
                      "fmea_sweep", "eh_study")
 
 
-def holds_user_series(ctx: Any) -> bool:
+def may_rewrite_user_ts(ctx: Any) -> bool:
     """
-    True when `ctx` holds user-uploaded time series that a save must persist.
+    Whether a save the user did not ask for (shutdown flush, resident-cap
+    eviction, solve-queue save) may rewrite this context's `user_ts.json`.
 
-    THE ONE DEFINITION, because the two callers are the two places a project is
-    written to disk WITHOUT the user asking — the desktop shutdown flush and the
-    resident-cap eviction — and a guard that differs between them is not a guard.
+    Yes, unless the hydrate could not READ the sidecar. The store is faithful to
+    disk otherwise (`_hydrate_context_from_disk` and `load_project` both restore
+    it, and `_backup_network_ts_to_user_ts` only fills keys the store lacks), so
+    rewriting is what keeps the file current, including unlinking it when the
+    user has deleted every uploaded series. An unreadable sidecar leaves the
+    store empty; rewriting then would replace the only copy of its contents
+    with the `_t` view, so the bytes are left on disk for a human.
 
-    It replaces `ctx is PyPSAService._active`, which both call sites used to ask.
-    That predicate meant "is this the open project" only before Step 0b; `_active`
-    is a BOOTSTRAP slot now, handed to the first session that asks and set to None
-    (`adopt_process_foreground`), so it answered False for every real project and
-    both paths silently stopped writing `user_ts.json`. See
-    `docs/superpowers/findings/2026-09-28-every-shutdown-flush-saves-with-persist-user-ts-false.md`.
-
-    ★ NOT simply `True`, though the reason is narrower than it was. A save with
-    `persist_user_ts=True` serialises this context's store, and `_save_context`
-    UNLINKS `user_ts.json` when that store is empty. That used to be sharp: a
-    context hydrated from disk had an EMPTY store, so `True` would delete a good
-    sidecar for any project the user merely opened, and after representative-week
-    sampling would replace a full-year series on disk with the 168-row `_t` view.
-    `_hydrate_context_from_disk` restores the sidecar now, so a hydrated context's
-    store is faithful and `True` would agree with this predicate in the ordinary
-    case.
-
-    What survives is the case where the sidecar cannot be READ. A corrupt or
-    unreadable `user_ts.json` is TOLERATED by the hydrate (it must be — that path
-    runs twice per authenticated request, and raising would 500 every route), and
-    it leaves the store empty. `True` would then reconstruct a narrower sidecar
-    from the `_t` tables and write it over the file, destroying the only copy of
-    whatever was in it; asking what the context holds leaves the bytes on disk for
-    a human to recover. It also keeps an unattended save from CREATING a sidecar
-    for a project that never had one.
-
-    KNOWN RESIDUAL: a user who deletes every uploaded series and then quits
-    without saving keeps a stale `user_ts.json`, because an empty store is
-    indistinguishable here from a never-populated one. Fixing that needs a
-    per-context "user series were touched" flag, which is not worth a bool on
-    every context until someone reports it.
-
-    `getattr` rather than attribute access because `shutdown.flush_all` is
-    deliberately driven with stub contexts in its tests and types its contexts
-    `Any`, the same reason `_context_label` and `_holds_work` are defensive.
+    History: `docs/superpowers/findings/2026-09-28-every-shutdown-flush-saves-with-persist-user-ts-false.md`.
+    `getattr` because `shutdown.flush_all` is tested with stub contexts.
     """
-    return bool(getattr(ctx, "user_ts", None))
+    return not getattr(ctx, "user_ts_unreadable", False)
 
 
 def record_is_running(record) -> bool:

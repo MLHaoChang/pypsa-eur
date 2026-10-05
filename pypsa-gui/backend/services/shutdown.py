@@ -269,19 +269,10 @@ def flush_all(
     """
     Persist every resident context. Returns the ones that could NOT be saved.
 
-    `persist_user_ts` is `holds_user_series(ctx)` — each context judged on what
-    IT holds. It used to be `ctx is active`, and the `active` parameter went with
-    it: that predicate answered "is this the open project" only before Step 0b,
-    and `PyPSAService._active` is a bootstrap slot now, handed to the first
-    session that asks and set to None. `desktop/gui.py` read it directly, so at
-    quit time it was None, every context took the False branch, and the flush
-    rewrote `network.nc` while leaving `user_ts.json` stale — the next open then
-    restored the stale sidecar over the fresher `_t` tables and reverted any
-    profile uploaded since the last explicit save.
-
-    Taking the parameter away rather than passing a better value is the point:
-    there is no longer anything for a caller to get wrong, and the `_active`
-    read that made it wrong is gone from the desktop path entirely.
+    `persist_user_ts` is `may_rewrite_user_ts(ctx)`, judged per context. There
+    is deliberately no `active` parameter any more: it was read from
+    `PyPSAService._active`, a bootstrap slot that is None at quit time, and so
+    left every `user_ts.json` stale (see the 2026-09-28 shutdown-flush finding).
 
     `safe=False` means the abort did not finish, so a 409 is expected rather
     than surprising — it is still reported, because the point is to tell the
@@ -289,14 +280,14 @@ def flush_all(
     """
     from fastapi import HTTPException
 
-    from services.project_context import holds_user_series
+    from services.project_context import may_rewrite_user_ts
 
     problems: list[str] = []
 
     for ctx in contexts:
         name = _context_label(ctx)
         try:
-            save(ctx, holds_user_series(ctx))
+            save(ctx, may_rewrite_user_ts(ctx))
         except HTTPException as exc:
             # Caught SPECIFICALLY. A 409 means the write was REFUSED rather
             # than failed, which the user needs to hear about — but the cause

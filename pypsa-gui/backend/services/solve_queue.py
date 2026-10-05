@@ -1060,7 +1060,7 @@ class SolveQueue:
             _safe_project_dir,
             _save_context,
         )
-        from services.project_context import holds_user_series
+        from services.project_context import may_rewrite_user_ts
         from services.pypsa_service import PyPSAService
         from services.solver_service import run_simulation
 
@@ -1336,22 +1336,8 @@ class SolveQueue:
                 if final_status == "completed":
                     _save_context(
                         ctx, project_id, expect=project_id,
-                        # The solved project's OWN series, on the same predicate
-                        # the shutdown flush and the resident-cap eviction use.
-                        #
-                        # This was `ctx is PyPSAService._active` — a predicate
-                        # that meant "is this the foreground" only before Step 0b
-                        # and answered False for everything afterwards. Two things
-                        # had to land before it could be replaced rather than just
-                        # re-aimed: `_save_context` serialising `ctx.user_ts` (so
-                        # `True` cannot stamp one project's profiles onto
-                        # another's sidecar), and `_hydrate_context_from_disk`
-                        # restoring `user_ts.json` (so a context this dispatcher
-                        # hydrated has a FAITHFUL store rather than an empty one —
-                        # without that, persisting would have replaced a good
-                        # sidecar with the netcdf-derived backup, which is why
-                        # this call site was the last to move).
-                        persist_user_ts=holds_user_series(ctx),
+                        # The solved project's own series; see `may_rewrite_user_ts`.
+                        persist_user_ts=may_rewrite_user_ts(ctx),
                         storage_dir=(
                             pathlib.Path(job.storage_dir) if job.storage_dir else None
                         ),

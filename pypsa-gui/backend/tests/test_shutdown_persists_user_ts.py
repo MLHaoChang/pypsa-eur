@@ -14,13 +14,10 @@ the next open restores the STALE sidecar and `_reapply_user_ts_to_network`
 writes it back over the fresher `_t` tables. A profile uploaded after the last
 explicit save is reverted on reopen, with no error.
 
-The predicate that replaced it is "does this context hold user series", which is
-the question the save actually turns on. It is NOT unconditional `True`: a
-context hydrated from disk has an EMPTY store (`_hydrate_context_from_disk` does
-not restore `user_ts.json`), and persisting an empty store makes `_save_context`
-UNLINK the sidecar — so `True` for everything would delete a good file for any
-project that was merely opened. The second test below is that half, and it is
-the one a careless fix breaks.
+The predicate that replaced it, `may_rewrite_user_ts`, answers yes unless the
+context's sidecar could not be read when it was hydrated: the store is faithful
+to disk otherwise, so rewriting keeps the file current. The second test below is
+the unreadable half.
 
 Written before the fix and proven red against it. See
 `docs/superpowers/findings/2026-09-28-every-shutdown-flush-saves-with-persist-user-ts-false.md`.
@@ -87,21 +84,17 @@ def test_a_context_holding_uploads_is_flushed_with_its_series():
     )
 
 
-def test_a_context_with_no_uploads_does_not_rewrite_its_sidecar():
+def test_a_context_whose_sidecar_was_unreadable_does_not_rewrite_it():
     """
-    The other half, and the reason the fix is not `True` for everything.
-
-    A context hydrated from disk holds an EMPTY store, and a save with
-    `persist_user_ts=True` serialises that empty store — which makes
-    `_save_context` UNLINK `user_ts.json`. For a project the user merely opened,
-    that deletes a good sidecar; after representative-week sampling it would
-    also mean the full-year series on disk is replaced by the 168-row `_t`
-    view. Skipping leaves the file alone.
+    The one refusal. A hydrate that could not read `user_ts.json` leaves the
+    store empty; rewriting would replace the only copy of the file's contents
+    with the `_t` view, so the flush leaves it alone.
     """
-    untouched = _ctx("Untouched", with_series=False)
+    unreadable = _ctx("Unreadable", with_series=False)
+    unreadable.user_ts_unreadable = True
 
-    assert _flush([untouched]) == [("Untouched", False)], (
-        "a context with no user series rewrote its sidecar from the network"
+    assert _flush([unreadable]) == [("Unreadable", False)], (
+        "a context whose sidecar could not be read rewrote it"
     )
 
 
@@ -109,16 +102,18 @@ def test_every_context_is_judged_on_its_own_series_not_on_being_active():
     """
     The old predicate answered False for all three (nothing was ever `active`
     in production). The shape that matters is that the answer tracks each
-    context's OWN store, not one blessed context.
+    context's OWN state, not one blessed context.
     """
+    unreadable = _ctx("Unreadable", with_series=False)
+    unreadable.user_ts_unreadable = True
     saved = _flush([
         _ctx("HasUploads", with_series=True),
+        unreadable,
         _ctx("Empty", with_series=False),
-        _ctx("AlsoHasUploads", with_series=True),
     ])
 
     assert saved == [
-        ("HasUploads", True), ("Empty", False), ("AlsoHasUploads", True),
+        ("HasUploads", True), ("Unreadable", False), ("Empty", True),
     ], saved
 
 

@@ -158,7 +158,7 @@ def test_a_project_with_no_sidecar_leaves_the_store_empty(tmp_projects_dir):
 
 def test_an_unreadable_sidecar_is_tolerated_and_not_overwritten(tmp_projects_dir):
     """
-    The narrow case that still justifies `holds_user_series` over plain `True`.
+    The one case in which `may_rewrite_user_ts` refuses an unattended rewrite.
 
     Hydrating must TOLERATE a corrupt `user_ts.json` — it runs twice per
     authenticated request on every route, so raising would 500 the whole app for
@@ -171,7 +171,7 @@ def test_an_unreadable_sidecar_is_tolerated_and_not_overwritten(tmp_projects_dir
     hydrated context looked like this one; now it is only the unreadable case,
     which is why this test exists rather than the broader one it replaced.
     """
-    from services.project_context import holds_user_series
+    from services.project_context import may_rewrite_user_ts
 
     src = _project_on_disk(tmp_projects_dir, "Corrupt")
     sidecar = src / "user_ts.json"
@@ -182,9 +182,41 @@ def test_an_unreadable_sidecar_is_tolerated_and_not_overwritten(tmp_projects_dir
     assert ctx.user_ts == {}, "a corrupt sidecar was partially believed"
 
     _save_context(ctx, "Corrupt", expect="Corrupt",
-                  persist_user_ts=holds_user_series(ctx))
+                  persist_user_ts=may_rewrite_user_ts(ctx))
 
     assert sidecar.read_text() == "{ this is not json", (
         "an unattended save overwrote a sidecar it could not read, destroying "
         "the only copy of its contents"
+    )
+
+
+def test_series_deleted_before_an_unattended_save_stay_deleted(tmp_projects_dir):
+    """
+    Deleting every uploaded series and then letting an unattended save (eviction,
+    solve queue, shutdown flush) write the project must not bring them back.
+
+    With an "is the store non-empty" predicate the unattended save skipped the
+    sidecar, the stale `user_ts.json` stayed on disk, and the next hydrate
+    restored it: the deleted series reappeared in the timeseries GET and were
+    reapplied into `network.nc` on the next save.
+    """
+    from services.project_context import may_rewrite_user_ts
+
+    src = _project_on_disk(tmp_projects_dir, "Deleted")
+    ctx = ProjectContext(network=pypsa.Network())
+    _hydrate_context_from_disk(ctx, src, "Deleted")
+    assert KEY in ctx.user_ts
+
+    # What `DELETE /api/network/timeseries` does: drop the store entry and the
+    # matching `_t` column.
+    del ctx.user_ts[KEY]
+    ctx.network.loads_t.p_set.drop(columns=["L1"], inplace=True)
+
+    _save_context(ctx, "Deleted", expect="Deleted",
+                  persist_user_ts=may_rewrite_user_ts(ctx))
+
+    reopened = ProjectContext(network=pypsa.Network())
+    _hydrate_context_from_disk(reopened, src, "Deleted")
+    assert KEY not in reopened.user_ts, (
+        "a series the user deleted came back from a stale user_ts.json"
     )

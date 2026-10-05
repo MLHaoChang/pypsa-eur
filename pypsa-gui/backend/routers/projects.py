@@ -1967,11 +1967,9 @@ def _save_context(
         #
         # `persist_user_ts` is therefore no longer what PREVENTS a cross-project
         # clobber — it is now only a caller's choice about whether this save
-        # rewrites `user_ts.json` at all. The shutdown flush and the resident-cap
-        # eviction have since stopped answering it with `ctx is
-        # PyPSAService._active` and now ask `project_context.holds_user_series`;
-        # `solve_queue` is the last caller still on the old predicate, for a
-        # reason recorded beside `project_context.holds_user_series`.
+        # rewrites `user_ts.json` at all. The unattended callers (shutdown
+        # flush, resident-cap eviction, solve queue) answer it with
+        # `project_context.may_rewrite_user_ts`.
         if persist_user_ts:
             _backup_network_ts_to_user_ts(n, store=ctx.user_ts)
             _reapply_user_ts_to_network(n, store=ctx.user_ts)
@@ -2073,6 +2071,7 @@ def _save_context(
             _atomic_write_text(user_ts_path, json.dumps(user_ts_data, indent=2))
         elif user_ts_path.exists():
             user_ts_path.unlink()
+        ctx.user_ts_unreadable = False
 
     # Cache metadata. The netcdf export already captures every PyPSA `*_t`
     # result table (generators_t.p, lines_t.p0, buses_t.marginal_price, etc.) —
@@ -2361,10 +2360,12 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
 
     user_ts_path = src / "user_ts.json"
     user_ts_data: dict = {}
+    ctx.user_ts_unreadable = False
     if user_ts_path.exists():
         try:
             user_ts_data = json.loads(user_ts_path.read_text())
         except Exception as exc:  # noqa: BLE001 — a corrupt sidecar is not fatal
+            ctx.user_ts_unreadable = True
             change_log_service.log(
                 "warn", "Project", name,
                 f"Couldn't read user_ts.json ({type(exc).__name__}: {exc}). The "
