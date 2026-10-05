@@ -15,6 +15,7 @@ from services import chat_tools, project_registry
 from services.chat_tools_schema import TOOL_ROUTES, TOOLS, safety_tier_for
 
 CAMPUS_TOOLS = ("campus_get_study", "campus_draft_campus", "campus_run_study")
+LIBRARY_TOOLS = ("campus_get_library", "campus_set_library", "campus_get_investment")
 
 
 @pytest.fixture
@@ -51,6 +52,8 @@ def test_the_descriptions_say_what_the_model_must_not_do():
     ("campus_draft_campus", {"project_id": "Chat Hub", "overwrite": True}, "draft", (True,)),
     ("campus_run_study", {"project_id": "Chat Hub", "k": 2, "pf": 0.95}, "run", ({"k": 2, "pf": 0.95},)),
     ("campus_run_study", {"project_id": "Chat Hub"}, "run", ({"pf": None},)),
+    ("campus_run_study", {"project_id": "Chat Hub", "invest": False}, "run", ({"invest": False, "pf": None},)),
+    ("campus_run_study", {"project_id": "Chat Hub", "invest": True}, "run", ({"invest": True, "pf": None},)),
 ])
 def test_each_dispatcher_resolves_the_project_and_calls_its_service_function(hub, monkeypatch, tool, args,
                                                                            function, expected):
@@ -103,6 +106,58 @@ def test_each_grid_code_dispatcher_calls_its_service_function(hub, monkeypatch, 
     from services import campus_grid_code_service as gc
     calls = []
     monkeypatch.setattr(gc, function, lambda *a: calls.append(a) or {"ok": True})
+    assert chat_tools.DISPATCHERS[tool](**args) == {"ok": True}
+    (call,) = calls
+    project, *rest = call
+    assert isinstance(project, Project) and project.name == "Chat Hub"
+    assert tuple(rest) == expected
+
+
+# --------------------------------------------------------------------------
+# the asset library and the investment (plan C9)
+# --------------------------------------------------------------------------
+
+def test_the_library_tools_are_registered_routed_and_tiered():
+    names = {t["name"] for t in TOOLS}
+    for name in LIBRARY_TOOLS:
+        assert name in names, name
+        assert TOOL_ROUTES[name] == ["_service_call_"], name
+        assert callable(chat_tools.DISPATCHERS[name]), name
+    assert safety_tier_for("campus_get_library") == "read"
+    assert safety_tier_for("campus_get_investment") == "read"
+    assert safety_tier_for("campus_set_library") == "write"
+    schema = {t["name"]: t["input_schema"] for t in TOOLS}
+    assert schema["campus_get_library"]["required"] == ["project_id"]
+    assert schema["campus_get_investment"]["required"] == ["project_id"]
+    assert schema["campus_set_library"]["required"] == ["project_id", "yaml"]
+    assert schema["campus_run_study"]["properties"]["invest"] == {"type": "boolean"}
+    desc = {t["name"]: t["description"] for t in TOOLS}
+    for name in ("campus_get_library", "campus_get_investment"):
+        assert desc[name].rstrip().endswith("Safety: read."), name
+    assert desc["campus_set_library"].rstrip().endswith("Safety: write.")
+
+
+def test_the_library_descriptions_say_what_the_model_must_not_do():
+    desc = {t["name"]: t["description"] for t in TOOLS}
+    assert "ask before" in desc["campus_set_library"] and "replac" in desc["campus_set_library"]
+    assert "validated" in desc["campus_set_library"] and "422" in desc["campus_set_library"]
+    inv = desc["campus_get_investment"]
+    assert "placeholder" in inv and "assumed" in inv
+    assert "tap" in inv and "not optimised" in inv
+    assert "unresolved" in inv and "stale" in inv
+    assert "invest" in desc["campus_run_study"]
+
+
+@pytest.mark.parametrize("tool, args, function, expected", [
+    ("campus_get_library", {"project_id": "Chat Hub"}, "get_library", ()),
+    ("campus_set_library", {"project_id": "Chat Hub", "yaml": "discount_rate: {}"}, "save_library",
+     ("discount_rate: {}",)),
+    ("campus_get_investment", {"project_id": "Chat Hub"}, "get_investment", ()),
+])
+def test_each_library_dispatcher_resolves_the_project_and_calls_its_service_function(hub, monkeypatch, tool, args,
+                                                                                   function, expected):
+    calls = []
+    monkeypatch.setattr(ce, function, lambda *a: calls.append(a) or {"ok": True})
     assert chat_tools.DISPATCHERS[tool](**args) == {"ok": True}
     (call,) = calls
     project, *rest = call

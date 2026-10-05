@@ -2327,13 +2327,31 @@ def campus_draft_campus(project_id: str, overwrite: bool = False) -> dict:
 
 def campus_run_study(project_id: str, k: int | None = None, pf: float | None = None,
                      profile: str | None = None, margin: float | None = None,
-                     n_minus_1: bool | None = None) -> dict:
+                     n_minus_1: bool | None = None, invest: bool | None = None) -> dict:
     from services.campus_electrical_service import run as _h
     settings = {key: v for key, v in (("k", k), ("profile", profile), ("margin", margin),
-                                       ("n_minus_1", n_minus_1)) if v is not None}
+                                       ("n_minus_1", n_minus_1), ("invest", invest)) if v is not None}
     settings["pf"] = pf
     with _acting() as (db, user):
         return _h(_gridspine_project(db, user, project_id), settings)
+
+
+def campus_get_library(project_id: str) -> dict:
+    from services.campus_electrical_service import get_library as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def campus_set_library(project_id: str, yaml: str) -> dict:
+    from services.campus_electrical_service import save_library as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), yaml)
+
+
+def campus_get_investment(project_id: str) -> dict:
+    from services.campus_electrical_service import get_investment as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
 
 
 def campus_list_grid_codes(project_id: str) -> dict:
@@ -5671,6 +5689,10 @@ DISPATCHERS: dict[str, Any] = {
     "campus_get_study": campus_get_study,
     "campus_draft_campus": campus_draft_campus,
     "campus_run_study": campus_run_study,
+    # campus asset library and investment (3, plan C9)
+    "campus_get_library": campus_get_library,
+    "campus_set_library": campus_set_library,
+    "campus_get_investment": campus_get_investment,
     # campus grid codes (2): no publish tool, by design (plan C10)
     "campus_list_grid_codes": campus_list_grid_codes,
     "campus_extract_grid_code": campus_extract_grid_code,
