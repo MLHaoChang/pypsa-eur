@@ -253,3 +253,84 @@ bundles.
 - Its manifest records both inputs, so every later step rebuilds the same
   network.
 - The `storage` unit kind arrives with the campus dispatch tables in C2.
+
+## C2–C5 as built (2026-10-05)
+
+**C2. Hourly results** (`producers/campus.campus_hourly`, `schema/campus.py`,
+`drivers/campus_study.py`).
+- Units are found by their `pypsa_name`.
+- The hourly table carries signed injections per investment period: loads,
+  battery charging and electrolysers are negative. An asset not built in a
+  period has status 0.
+- The PCC table carries the model's own import, from the Links touching the
+  PCC.
+- Real-data bug: a saved network drops all-zero time series. A solved
+  project's idle asset now reads as 0 MW rather than "unsolved".
+- `prepare_campus` validates before it writes, and records both inputs by
+  sha256.
+
+**C3. Critical hours** (`ranking/campus.py`). The criteria are:
+- PCC import and export;
+- total consumption;
+- PV and wind output;
+- the flow through each transformer group, taken as |net injection
+  downstream| (lossless, radial; parallel units form one group; a meshed
+  group gets no estimate).
+
+The top-k union per criterion is taken within each period, reusing the
+case39 tie spreading. A criterion that never occurs selects nothing.
+
+**C4. Sizing.**
+- **(a) Transformers** (`static/campus_flow.py`). Every selected hour is
+  solved by AC load flow, intact and with each parallel unit out. The
+  required rating per unit is max(intact share, N-1 survivor) × (1 +
+  margin), rounded up to the next standard MVA.
+  - Margin: 20 %, assumed.
+  - N-1: on by default.
+- **(b) Reactive power** (`static/campus_reactive.py`). The PCC exchange is
+  held within ±q_frac × P_ref.
+  - q_frac is the DCC 0.48 by default, or tan(acos(pf)) from the study's
+    connection agreement.
+  - P_ref is `p_connection_mw`, else the peak import.
+  - The inverters cover the need first, up to √(S² − P²). Only a battery
+    offers Q at 0 MW; an idle genset or a dark PV does not.
+  - The rest becomes compensation at the low-voltage side of the PCC
+    transformer, in Mvar, capacitive or inductive, iterated onto the band
+    edge.
+- **(c) Short circuit** (`static/campus_sc.py`). IEC 60909 max and min,
+  per period, with the installed units energised. Each bus is judged
+  against its `ik_rated_ka`:
+  - Ik'' must not exceed the rating;
+  - the peak must not exceed 2.5× the rating at 50 Hz, or 2.6× at 60 Hz
+    (IEC 62271-1 ratio, assumed).
+
+**C5. Compliance** (`static/campus_compliance.py`). There is one row per
+check:
+- the PCC reactive band;
+- the PCC voltage (code band);
+- the campus voltages (design limit, assumed);
+- transformer loading;
+- switchgear.
+
+Each row gives the status as is and with the recommended measures. Voltages
+show "not re-checked" when a measure is recommended. `list_grid_codes()`
+lists the profiles a study can use.
+
+**On the solved Data Center Energy Hub template** (168 h, one period):
+- 14 critical hours were selected.
+- The import is capped at 40 MW every hour.
+- The 132/33 kV transformer carries 43 MVA. It needs 52 MVA with the
+  margin, so the recommendation is 63 MVA, against the 50 MVA drafted.
+- The PCC reactive power is 14.5–16.8 Mvar:
+  - inside the EU band (±19.2 Mvar), so no compensation is needed;
+  - outside a power-factor-0.95 agreement (±13.1 Mvar), which the units
+    cover (3.3 Mvar), so again no compensation is needed.
+- Fault levels are 2.7, 9.2 and 23 kA at 132, 33 and 11 kV. The template
+  has no switchgear ratings, so the switchgear check is "not rated".
+
+**Left: C6.**
+- The panel section.
+- The chat tools.
+- Backend routes: draft from the project; save and edit the campus file;
+  prepare, rank and size.
+- A browser run.
