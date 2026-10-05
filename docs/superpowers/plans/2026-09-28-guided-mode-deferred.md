@@ -942,3 +942,92 @@ No processes are left running.
 - **Should-fixes:** S-1 (three unpinned spec rows now tested) and S-2 (a pending edit request is cleared on a project switch and an asset-detail jump) fixed.
 - **Rows:** row 1 stands (6733 passed + 31 skipped on `5a9052599`; the only later backend change is one test); row 2 780 passed; tsc 0; vitest 2826; smoke P30 PASS (61 screenshots) and P29 PASS. Mutations: 29 of 34 killed at the first gate (survivors pinned since), 9 of 9 at the re-gate; implementer 40 of 42 + 7 of 7.
 - **Note:** a pre-migration project row with an absolute path can sit outside the root; the existing overwrite warning covers it.
+
+### P31 phase note (implementation, 2026-10-05, base `4d37e92c5`)
+
+Deferred spec §6 (C2, C3, C4, C5). All four items are done. Commits:
+- `8783395c9` C3: `fmtEnergy` below 1 MWh, the ΔEUE header;
+- `10d3958c6` C5: the `/eh_review` docstring, with four route tests;
+- `2611069ca` C2: `ToasterHost`;
+- `1a2fff1c2` smoke `--phase P31`, the real B4 counter and `--self-test` (C4);
+- `4fe51e08c` C2 follow-up: `/projects` mounts the dock too (found by the first P31 smoke);
+- `1a2b91c75` smoke: the toast check also needs frames with the whole toast on screen;
+- plus this note.
+
+**Anchor drift.** Re-checked on `4d37e92c5`:
+- `main.tsx` `<Toaster>` is at `:47-57`; the dock is `components/AssistantDock.tsx`, mounted by `App.tsx:703` **and** `pages/ProjectsHomePage.tsx:780`.
+- `shared.tsx` `fmtEnergy` is at `:743-750` (unchanged).
+- The only dropped ΔEUE header is the class-B "top outages" table in `EhReferenceDesignPanel.tsx:1887` (dropped in `9bd059033`, P22.9-FE). `FmeaTab.tsx` has no ΔEUE column.
+- `smoke-guided.mjs`'s vacuous check is at `:1292` (inside `phaseP24`).
+- `routers/results.py` `/eh_review` docstring is at `:1534-1544`.
+
+**What was built:**
+
+- **C2 (`components/ToasterHost.tsx`, new; `main.tsx`).** The app's one `<Toaster>` moved out of `main.tsx` into a small `ToasterHost` that reads `assistantDockOpen` and `assistantDockWidth`. While the dock is open on a page that mounts it (`/app`, `/projects`), `containerStyle.right` is the dock width + 16 px (`TOAST_GAP`); otherwise (dock collapsed; login, admin) 16 px. Position, toast style and every toast call are unchanged.
+- **C3 (`pages/results/shared.tsx`, `EhReferenceDesignPanel.tsx`).**
+  - `fmtEnergy`: below 1 MWh → `${mwh.toFixed(3)} MWh`; zero (and `-0`) → `0 MWh`. From 1 MWh up, and for a missing value, nothing changes. `digits` is not used below 1 MWh (always three decimals, as the spec says).
+  - The class-B ΔEUE header reads `ΔEUE (MWh)` again. Its cells are bare MWh numbers from a new `fmtMwhNumber` (grouped, two decimals from 1 MWh, three below, `0` for zero, `—` when missing). See deviation 2.
+  - Callers checked: every `fmtEnergy` import (`AggregatedOverview`, `Dispatch`, `CapacityExpansion`, `Economics`, `EhReferenceDesignPanel`). Only values below 1 MWh render differently (KPI cards, table cells, chart ticks and tooltips): `0.00 kWh` → `0 MWh`, `250.00 kWh` → `0.250 MWh`. The local `fmtEnergy` copies in `Curtailment.tsx`, `LostLoadTab.tsx` and `TimeSeriesManager.tsx` are separate functions and untouched. No CSV / JSON export goes through `fmtEnergy` (the export helpers format raw values), so exports are byte-identical.
+- **C4 (`scripts/smoke-guided.mjs`).**
+  - The re-gate B4 path moved from `phaseP24` into `b4StudyReadFailure(browser, project, consoleLines, { selfTest })`; `phaseP24` calls it unchanged, so P24 / P30 get the real counter too.
+  - After recovery is confirmed, `page.on('request')` counts `/api/results/eh_study` requests and `page.on('response')` records each such response with status ≥ 500. The check is "no failing eh_study response after recovery (N request(s) seen, M with status ≥ 500)". The old check compared a counter that only the already-removed route handler incremented, so it could never fail.
+  - `--self-test` (new; P31 only, otherwise usage exit 2): after recovery one 500 route is installed again and one read is driven through it with a page `fetch` (the app sends no `eh_study` read while no study runs: it polls only a running study). The run must print `FAIL` and exit 1.
+  - `--phase P31` = P26 (every step) + on each template the toast check + the B4 path on the P26 data-center project. The toast check: an init script samples, every animation frame, the "… from template" toast's bar and `chat-send` while both are rendered, and records their intersection. It asserts the toast was shown, that some shared frames had the whole toast on screen, and that the overlap was 0 in every shared frame.
+- **C5 (`routers/results.py`).** The docstring now reads: 200 `running` while the study runs; otherwise 200 `ok` (plus `stale`) when a report exists — the stored one, or the study record's copy (`stale: true`); 204 when there is no stored report and no study record with a report. So a study whose worker raised (record, no report) returns 204, since a study clears the stored report when it starts; an aborted or stage-failed study keeps its partial report and returns 200 `ok`, with `summary.verdict` null unless MC certification finished before the stop. Each sentence is pinned by a test in `tests/test_eh_review_route.py` (below).
+
+**Deviations (with reasons):**
+1. **C2: a right offset, not `bottom: DOCK_HEIGHT + 16`.** The dock is a right-hand column (`AssistantDock`, `border-l`, its width from the store), not a bottom drawer; its composer and Send are at the bottom of that column. Raising the toast by a "dock height" would not clear Send, so the toaster's right inset is the dock width + 16. No `DOCK_HEIGHT` exists or was added; the width is the store's `assistantDockWidth`, which is what the dock renders (`style={{ width }}`, `shrink-0`). The route condition includes `/projects`: the first P31 smoke failed with a 1121 px² overlap because the template toast is raised on `/projects`, which mounts the same dock (`smoke31a`); red test "on /projects … sit left of it", fixed in `4fe51e08c`.
+2. **C3: the ΔEUE cells are bare MWh numbers, not `fmtEnergy`.** A header `ΔEUE (MWh)` above a `fmtEnergy` cell would be false for any value from 1 000 MWh (`315.61 GWh`) and was the reason P22.9-FE dropped the unit. With the unit in the header, the cells must be in MWh. The P22.9 Bug 1 intent (no raw floats such as `315605.35`) holds: the cell is `315,605.35`. Only the ΔEUE header regains its unit (the spec's scope); the frontier / redundancy ENS and "Built" headers keep their unit-less headers with a unit in each cell, which is true as it is.
+3. **C4: the self-test drives its one failing read with a page `fetch`.** A 500 route alone produces no response while no study runs, so the self-test would PASS vacuously. The fetch goes through the same routing and response events as the app's reads.
+4. **C5: the spec's proposed text was not true as written.** "An aborted study returns 200 `ok` with `summary.verdict: null`" fails when the stop comes after `mc_certify` (it runs before `fmea_top`, `redundancy`, `levers`, `dtc_*`): the record's report keeps the verdict. A study whose pipeline marked a stage `failed` is also 200 `ok` (partial report). The docstring says both, and each case has a test.
+
+**Changed assertions (one line each):**
+- `EhReferenceDesignPanel.formatting.test.tsx` "class-B ΔEUE, frontier ENS, …": the ΔEUE value is no longer expected as `fmtEnergy(315605.35, 2)` (the cell is now the bare MWh number, asserted by the new header test); the `0.25` comment reads `0.250 MWh` and the panel must not contain `kWh` (C3).
+
+**Red → green:**
+
+| Test | Before the fix |
+|---|---|
+| `shared.test.ts` "fmtEnergy (P31 C3)" ×3, "fmtMwhNumber (P31 C3)" ×1 | 3 red (below 1 MWh, zero, `fmtMwhNumber` missing); "unchanged from 1 MWh up" green (a guard) |
+| `EhReferenceDesignPanel.formatting.test.tsx` header test + the changed case | 2 red |
+| `ToasterHost.test.tsx` (new, 5) | red (no module); the `/projects` case red again before `4fe51e08c` |
+| `test_eh_review_route.py` C5 ×4 (worker raised → 204; aborted → 200 `ok`, verdict null; aborted after MC → verdict kept; stage-failed → 200 `ok`) | green on arrival: docs item, the tests pin the docstring's sentences against the code (each kills a mutant below) |
+| smoke `--phase P31` toast check | FAIL before `4fe51e08c` (overlap 1121 px² on `/projects`), PASS after |
+
+**Mutants** (scripts and logs in `scratchpad/p31/`: `mutate_fe.py`, `mutate_be.py`, `mutations-fe.log`, `mutations-fe-c2f.log`, `mutations-be.log`):
+- **Frontend: 13 of 13 killed.** C3a zero not special; C3b back to kWh; C3c `digits` honoured below 1; C3d header unit dropped; C3e ΔEUE cell through `fmtEnergy`; C3f `fmtMwhNumber` scales to kWh; C3g `fmtMwhNumber` zero as `0.000`; C2a offset ignores the dock; C2b ignores the route; C2c ignores open / collapsed; C2d ignores the width (420 fixed); C2e bottom instead of right; C2f `/projects` dropped from the dock routes.
+- **Backend: 5 of 5 killed.** B1 no fallback to the record's report; B2 a raised worker keeps a report; B3 verdict always null; B4 a `failed` record is `no_data`; B5 an `aborted` record is `no_data`.
+- **Smoke: the vacuous counter.** A copy of the script with `watching = true` removed, run with `--phase P31 --self-test`: **PASS** (exit 0, "0 eh_study request(s) seen") — so the self-test tells a counting check from a vacuous one; the real script's self-test FAILs (below).
+
+**Gate rows** (logs in `scratchpad/p31/`):
+
+| Row | Command (cwd) | Result |
+|---|---|---|
+| 1 | `PYTHONPATH=/home/user/pypsa-eur:/home/user/pypsa-eur/pypsa-gui/backend /tmp/claude-0/venv/bin/python -m pytest tests/ -m "not slow" -p no:cacheprovider -W ignore -q -o addopts=""` (`pypsa-gui/backend`, HEAD `1a2b91c75`) | ROW1_RESULT |
+| 2 | same interpreter, `-m pytest <the 14-file set> tests/test_validation*.py tests/test_local_settings*.py tests/test_energy_hub_templates.py -p no:cacheprovider -W ignore -q -o addopts=""` (`pypsa-gui/backend`, HEAD `1a2fff1c2`; the backend is unchanged after `10d3958c6`) | 784 passed, 17 skipped (`row2.log`; P30: 780 + 17; +4 C5 tests) |
+| 3 | `npx tsc --noEmit -p .` (`pypsa-gui/frontend`, HEAD `1a2b91c75`) | 0 errors |
+| 4 | `npx vitest run` (`pypsa-gui/frontend`, HEAD `1a2b91c75`) | 245 files / 2836 passed (`row4.log`; P30: 244 / 2826). The four `*.expertUnchanged` snapshots pass unchanged |
+| 4s | not required: no store, polling or chat change (`ToasterHost` only reads the store) | — |
+| 5 | `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs --phase P31 --out <scratchpad>/p31/smoke-final-P31` (`pypsa-gui/frontend`, HEAD `1a2b91c75`) | PASS, 43 screenshots. Toast ∩ Send = ∅ on all three templates: 139 / 149 / 154 shared frames, 73 / 81 / 88 with the whole toast on screen (left of the dock, e.g. toast x 654–1004, Send x 1378–1432). B4: "no failing eh_study response after recovery (0 request(s) seen, 0 with status ≥ 500)" |
+| 5 | same, `--phase P31 --self-test --out <scratchpad>/p31/smoke31-selftest` | **expected FAIL**, exit 1: "--self-test: the driven eh_study read answered 500" → `FAIL — assertion failed: no failing eh_study response after recovery (1 eh_study request(s) seen, 1 with status ≥ 500: 500)` (every P26 and toast step before it passed) |
+| 5 | same, `--phase P30 --out <scratchpad>/p31/smoke-final-P30` (regression) | PASS, 61 screenshots (P24's B4 path now with the real counter: 0 failing responses) |
+| 5 | same, `--phase P29 --out <scratchpad>/p31/smoke-final-P29` (regression) | PASS, 39 screenshots |
+| 7 | `git diff 4d37e92c5 -- 'pypsa-gui/frontend/src/**' \| grep -c uiMode` | 0. No `uiMode` branch was added or changed |
+
+Row 7 also covers the behaviour changes that reach Expert, by design of the items (the spec scopes none of them to Guided):
+- the toast position (every mode, every toast) while the dock is open;
+- `fmtEnergy` below 1 MWh on every Expert results tab that uses it;
+- the ΔEUE column of the EH reference-design panel (an Expert surface).
+
+No `chat_tools_schema.TOOLS`, tool description or system-prompt change (row 2's `test_guided_mode_prompt.py` is green).
+
+**Known limitations / probe list:**
+- **A tiny non-zero energy reads as zero.** Below 0.0005 MWh (0.5 kWh), `fmtEnergy` shows `0.000 MWh` and `fmtMwhNumber` `0.000` (the spec's three decimals). Probe: is any results value in that range meaningful (e.g. a near-zero curtailment KPI)?
+- **Chart axis ticks below 1 MWh** (`fmtEnergy(v, 0)` in `AggregatedOverview`) now read `0.500 MWh` (three decimals) where they read `500 kWh`. Probe: a small network whose energy axis spans less than 1 MWh.
+- **The toast now sits over the main area.** On `/app` it lands at the bottom-right of the canvas / Properties panel / full-screen tab, beside the dock. Probe: a toast over the Properties panel's bottom buttons.
+- **Narrow windows.** With a 420 px dock the toaster has `viewport − 452 px` of width; at about 800 px or less, long toasts wrap into a narrow column. Probe: a 1024×768 window and a 360-px-wide one.
+- **Dock resizing** writes the store on every mouse move, so an open toast follows the dock edge during a drag (intended).
+- **C5 edge.** "A study clears the stored report when it starts" is true for `run_eh_study` (it pops the store before copying the network). An exception raised before that line (stage validation, already done at request time) would leave an earlier stored report, so `/eh_review` would then answer 200 with that earlier report. Probe: is any exception reachable there?
+- **The self-test's failing read is a page `fetch`, not an app read** (deviation 3). It proves the counter; it does not prove the app would re-read after recovery.
+
+No processes are left running.
