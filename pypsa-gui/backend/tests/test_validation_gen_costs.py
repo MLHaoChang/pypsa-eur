@@ -99,6 +99,17 @@ def test_a_static_p_max_pu_is_not_a_profile():
     assert "gen_zero_costs" in _codes(n)
 
 
+def test_a_p_min_pu_series_does_not_exempt():
+    """P30 gate S-1(c): only the two series the spec names exempt a unit;
+    a fixed all-zero unit with a `p_min_pu` series still warns."""
+    n = _net()
+    n.add("Generator", "must_run", bus="b", p_nom=10.0, marginal_cost=0.0,
+          p_min_pu=pd.Series([0.1, 0.2, 0.1, 0.2], n.snapshots))
+    assert "must_run" in n.generators_t.p_min_pu.columns
+    assert "gen_zero_costs" in _codes(n)
+    assert VS._zero_cost_generators(n) == ["must_run"]
+
+
 def test_only_the_exempt_units_are_dropped_from_the_count():
     n = _net()
     n.add("Generator", "pv", bus="b", p_nom=4.0,

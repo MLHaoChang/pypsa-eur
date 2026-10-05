@@ -115,6 +115,36 @@ describe('propertiesEditRequest', () => {
     expect(useUIStore.getState().propertiesEditRequest).toEqual({ type: 'Link', name: 'other' })
   })
 
+  // P30 gate S-1(b): moving to another component of the SAME type clears it
+  // too, so it cannot replay when bus A is selected again.
+  it('a request for bus A is cleared when the selection moves to bus B', () => {
+    useUIStore.setState({ selectedComponent: { type: 'Bus', name: 'hub' }, propertiesEditRequest: null })
+    useUIStore.getState().requestPropertiesEdit({ type: 'Bus', name: 'hub' })
+    useUIStore.getState().setSelectedComponent({ type: 'Bus', name: 'other' })
+    expect(useUIStore.getState().propertiesEditRequest).toBeNull()
+    useUIStore.getState().setSelectedComponent({ type: 'Bus', name: 'hub' })
+    expect(useUIStore.getState().propertiesEditRequest).toBeNull()
+  })
+
+  // P30 gate S-2: a pending request never survives a project switch or an
+  // asset-detail jump (a same-named bus in another project must not open in
+  // Edit).
+  it('a project switch clears a pending request', () => {
+    useUIStore.setState({ currentProject: 'Demo', selectedComponent: { type: 'Bus', name: 'grid' } })
+    useUIStore.getState().requestPropertiesEdit({ type: 'Bus', name: 'grid' })
+    useUIStore.getState().setCurrentProject('Other')
+    expect(useUIStore.getState().propertiesEditRequest).toBeNull()
+    useUIStore.getState().setSelectedComponent({ type: 'Bus', name: 'grid' })
+    expect(useUIStore.getState().propertiesEditRequest).toBeNull()
+  })
+
+  it('an asset-detail jump clears a pending request', () => {
+    useUIStore.setState({ selectedComponent: { type: 'Bus', name: 'grid' } })
+    useUIStore.getState().requestPropertiesEdit({ type: 'Bus', name: 'grid' })
+    useUIStore.getState().requestAssetDetail({ componentClass: 'Generator', name: 'g' } as never)
+    expect(useUIStore.getState().propertiesEditRequest).toBeNull()
+  })
+
   it('selecting the requested component keeps the request (prepare selects, then asks)', () => {
     useUIStore.setState({ selectedComponent: null, propertiesEditRequest: null })
     useUIStore.getState().requestPropertiesEdit({ type: 'Bus', name: 'hub' })

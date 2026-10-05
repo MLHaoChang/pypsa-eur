@@ -238,6 +238,42 @@ describe('GuidedTour placement (P30 B4)', () => {
     expect(tour.style.overflowY).toBe('auto')
   })
 
+  // P30 gate S-1(a): when nothing fits, the target is scrolled into view.
+  it('free placement scrolls the target into view (centred)', async () => {
+    const scroll = vi.fn()
+    const had = Object.prototype.hasOwnProperty.call(Element.prototype, 'scrollIntoView')
+    const prev = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = scroll
+    try {
+      layout(300, 200, { top: 80, left: 100, width: 100, height: 40 }, { width: 320, height: 300 })
+      const tour = await open()
+      await waitFor(() => expect(tour.getAttribute('data-placement')).toBe('free'))
+      await waitFor(() => expect(scroll).toHaveBeenCalledWith({ block: 'center', inline: 'nearest' }))
+      const target = screen.getByTestId('t')
+      expect(scroll.mock.contexts.some(c => c === target)).toBe(true)
+    } finally {
+      if (had) Element.prototype.scrollIntoView = prev
+      else delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+    }
+  })
+
+  it('a placement that fits does not centre-scroll the target', async () => {
+    const scroll = vi.fn()
+    const had = Object.prototype.hasOwnProperty.call(Element.prototype, 'scrollIntoView')
+    const prev = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = scroll
+    try {
+      layout(1024, 768, { top: 40, left: 40, width: 100, height: 20 }, { width: 320, height: 240 })
+      const tour = await open()
+      await waitFor(() => expect(tour.getAttribute('data-placement')).toBe('below'))
+      await new Promise(r => setTimeout(r, 50))
+      expect(scroll).not.toHaveBeenCalledWith({ block: 'center', inline: 'nearest' })
+    } finally {
+      if (had) Element.prototype.scrollIntoView = prev
+      else delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+    }
+  })
+
   // P30 smoke finding: centred, the popover of a step whose target left the
   // screen covered the Properties panel's Edit button the step asks for. It
   // docks in the bottom-left corner instead, inside the viewport.

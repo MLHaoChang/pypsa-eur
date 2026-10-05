@@ -810,6 +810,8 @@ export const useUIStore = create<UIStore>((set) => ({
   requestAssetDetail: (req) => set({
     assetDetailRequest: req,
     selectedComponent: { type: req.componentClass, name: req.name },
+    // P30 gate S-2: the selection moved, so a pending edit request goes.
+    propertiesEditRequest: null,
     activeSlidePanel: 'results',
     resultsTabRequest: 'asset',
   }),
@@ -858,6 +860,9 @@ export const useUIStore = create<UIStore>((set) => ({
         selectedComponent: null,
         highlightedComponent: null,
         assetDetailRequest: null,
+        // P30 gate S-2: the same hazard for a pending Edit request — it must
+        // not open project B's same-named bus in Edit.
+        propertiesEditRequest: null,
         // Per-project result-source (B8): restore the new project's choice so
         // an instant switch lands on the source the user last picked there.
         // Defaults to 'lopf' for a never-visited / fresh project.
