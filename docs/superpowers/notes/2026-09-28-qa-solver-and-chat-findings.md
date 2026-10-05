@@ -430,7 +430,31 @@ already created. The model is told the batch failed when part of it landed.
 
 ### CH-8 — the chat lock gate refuses a study abort the HTTP gate allows
 
-**Moderate. REPORTED.**
+**Moderate. VERIFIED and FIXED — and it was three drifts, not one.**
+
+1. As reported: chat's exempt set held only the three queue paths, so
+   `abort_adequacy_study` was refused under a foreign lock in chat while the same POST
+   succeeded over HTTP.
+2. Missed by the review: main.py's OWN list said "the five adequacy-study ABORTS"
+   and never gained the Energy Hub one, which calls the same `_abort_study` helper and
+   whose docstring says "Same contract as the other study abort POSTs". So an EH study
+   could be trapped by a foreign lock over plain HTTP too. The review called that
+   route "consistent" because both surfaces gated it — consistent, and wrong on both.
+3. Found by the new test: `/api/simulation/preflight` is exempt over HTTP and not in
+   chat. Latent — `validate_network` is tiered `read`, so the tier filter skips it
+   first — but re-tiering one tool would have made chat refuse a preflight HTTP
+   deliberately allows.
+
+Fixed by exempting all six study aborts on both surfaces and preflight in chat, and —
+the durable part — by extending `tests/test_chat_tools_lock_gate_parity.py` from
+prefixes to exemptions. It asks, for every route any tool can reach, whether
+main.py's real predicate (`_foreign_lock_gate_exempt`) and chat's set give the same
+answer. Per route rather than set-against-set, because the sets legitimately differ
+(main exempts routes no tool reaches) and because a pairwise comparison is exactly
+what could not see drift 2. Three new tests; all three fail against the previous
+code.
+
+Original report, for the record:
 
 `_LOCK_GATE_EXEMPT_PATHS` (3 entries) is narrower than
 `main.py::_FOREIGN_LOCK_GATE_EXEMPT_EXACT` (11, including the study aborts), so

@@ -4792,6 +4792,26 @@ _LOCK_GATE_EXEMPT_PATHS = frozenset({
     "/api/simulation/queue",
     "/api/simulation/queue/clear_finished",
     "/api/simulation/queue/{job_id}/abort",
+    # The study ABORTS, mirroring `main._FOREIGN_LOCK_GATE_EXEMPT_EXACT`. This
+    # set had only the three queue paths, so `abort_adequacy_study` — which
+    # routes to these — was refused under a foreign lock in chat while the
+    # same POST succeeded over HTTP. main.py's own comment says why that is
+    # the wrong way round: "Gating an abort would be actively harmful: a
+    # foreign lock acquired while a study runs would trap it with no way to
+    # stop it." The parity test now compares exemptions, not just prefixes.
+    "/api/results/frontier/abort",
+    "/api/results/mc/abort",
+    "/api/results/fmea_sweep/abort",
+    "/api/results/margin_loop/abort",
+    "/api/results/coupling_loop/abort",
+    "/api/results/eh_study/abort",
+    # Latent today — `validate_network` is tiered `read`, so the tier filter
+    # skips it before this set is consulted — but HTTP exempts preflight on
+    # purpose, and the per-route parity test found the two sets disagreeing
+    # here. Re-tiering that one tool would have made chat refuse a preflight
+    # the middleware deliberately allows: the latent-drift case the parity
+    # test's own docstring was written about.
+    "/api/simulation/preflight",
 })
 _LOCK_GATE_WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
