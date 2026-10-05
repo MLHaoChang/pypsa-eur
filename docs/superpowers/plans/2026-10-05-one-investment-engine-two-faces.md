@@ -1,6 +1,6 @@
 # Plan: one investment engine, two faces (expert workbench and guided study)
 
-**Date:** 2026-10-05. **Status:** v1, written at the owner's request; owner decisions in §8 pending.
+**Date:** 2026-10-05. **Status:** v1.1, written at the owner's request; owner decisions in §8 taken on 2026-10-05.
 **Replaces nothing yet.** It sequences two existing efforts so they converge instead of colliding:
 
 - **Edge Investment Case (IC)**: spec `docs/superpowers/specs/2026-09-26-edge-investment-case-design.md`.
@@ -156,18 +156,12 @@ Ownership is by files, so the sessions never edit the same module in parallel.
   drivers of both efforts (`qa_investment_case.py`, `qa_value_flows.py`, `qa_decision_study.py`).
 - No session merges to master; the owner does.
 
-## 8. Owner decisions needed
+## 8. Owner decisions (taken 2026-10-05)
 
-1. **Ship generic defaults in the Library.** IC decision 20 says "no external data curated in-tree".
-   The guided face needs illustrative tariffs, technology costs and finance defaults. Proposal: allow
-   them as a versioned, sourced, `illustrative`-flagged pack, always listed in the report.
-   *Recommended: yes* (it is what the owner described).
-2. **Guided financial basis.** MVP-1 is real, pre-tax, excluding subsidies. Proposal: keep that as the
-   guided default; offer "include German taxes" (`eu_de` pack) as one key parameter after U3.
-3. **Guided question order.** Proposal: battery at site (exists) first, data-centre power second (U4),
-   then waste heat, hydrogen, off-grid.
-4. **Key parameters per question.** Proposal for the battery question: site zone, connection MW, load
-   (upload or sector profile), tariff, PV on/off, battery storage cost, inverter cost, demand-charge
-   price, energy price level, discount rate. Everything else from the defaults pack.
-5. **Where the guided face starts.** Proposal: the Guided mode Start card offers both "Is my site
-   reliable?" (Energy Hub) and "Is this investment worth it?" (decision study).
+| # | Decision | Answer |
+|---|---|---|
+| 1 | Ship generic defaults in the Library | **Yes.** A versioned, sourced, `illustrative`-flagged generic defaults pack ships in-tree and is always listed in the report. This amends IC spec decision 20 for this pack only; tariffs and market data the user brings still go through the import schemas. U1 item (a) is unblocked. |
+| 2 | Guided financial basis | **Pre-tax, real, excluding subsidies** as the guided default. "Include German taxes" (`eu_de` pack) is added later as one optional key parameter. |
+| 3 | Guided question order | **Battery at site** first (exists), **data-centre power** before and after grid connection second (U4), then waste heat, hydrogen, off-grid. |
+| 4 | Key parameters, battery question | **All four groups:** site zone, connection MW, load (upload or sector profile); tariff and PV on/off; battery storage cost and inverter cost; demand-charge price, energy price level, discount rate. Everything else from the defaults pack. |
+| 5 | Guided start screen | **Both paths** side by side: "Is my site reliable?" (Energy Hub) and "Is this investment worth it?" (decision study). |
