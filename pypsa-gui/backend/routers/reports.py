@@ -606,10 +606,19 @@ def put_template_plan(report_id: str, body: dict[str, Any],
     the same rule the job applies: an entry the outline cannot place is
     dropped with a note. With `strict: true` in the body a plan that needed
     sanitising is refused instead (400 `invalid_mapping_plan` with the notes),
-    so an editor can show the user what would be lost.
+    so an editor can show the user what would be lost. 409
+    `report_job_in_flight` while a report job runs: a mapping job stores its
+    proposal when it finishes and would overwrite a plan saved meanwhile.
     """
     doc = _latest_or_404(project, report_id)
     _check_lock(project, db, user)
+    if _job_slot_busy():
+        raise HTTPException(409, {
+            "error_kind": "report_job_in_flight",
+            "message": "A report job is running — wait for it to finish (or abort "
+                       "it) before saving a mapping plan; a mapping job would "
+                       "overwrite it when it finishes.",
+        })
     _data, outline = _bound(project, doc)
     if outline.mode != "untagged":
         raise _template_not_untagged(outline.mode)

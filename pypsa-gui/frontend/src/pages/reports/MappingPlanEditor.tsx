@@ -217,8 +217,12 @@ export function MappingPlanEditor({
           </Btn>
           <Btn
             onClick={() => save.mutate()}
-            disabled={!dirty || save.isPending}
-            title={dirty ? 'Store this plan for the next export' : 'No unsaved changes'}
+            // A mapping job stores its proposal when it finishes and would
+            // overwrite a plan saved meanwhile (the PUT is 409 then, too).
+            disabled={!dirty || save.isPending || jobBusy}
+            title={jobBusy
+              ? 'A report job is running — save once it has finished'
+              : dirty ? 'Store this plan for the next export' : 'No unsaved changes'}
             data-testid="mapping-save"
           >
             <Save size={12} /> {save.isPending ? 'Saving…' : 'Save plan'}

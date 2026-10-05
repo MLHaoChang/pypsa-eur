@@ -437,8 +437,8 @@ generation path, which no earlier run reached):
   blob immediately, so the wait missed it (60 s timeout). The wait is now
   armed before the click and matched once the `file_id` is known.
 
-**Found by the first run, not fixed here: a mapping job can overwrite a
-plan saved by hand.** Because of the first race, the smoke edited and saved
+**Found by the first run, fixed in a follow-up commit: a mapping job could
+overwrite a plan saved by hand.** Because of the first race, the smoke edited and saved
 the plan while the mapping job was still waiting on the model; the job
 finished after the save and export. `run_mapping_job` stores its proposal
 unconditionally (`services/reports/report_job.py`,
@@ -448,8 +448,13 @@ unconditionally (`services/reports/report_job.py`,
 `report_job_in_flight`). In the editor only the Propose button is
 disabled while a job runs (`MappingPlanEditor.tsx`, `disabled={jobBusy}`);
 the rows and Save plan are not. So a user who edits during a proposal can
-lose their saved plan to the job. Smallest fix: the same 409 guard on
-`put_template_plan`, and Save plan disabled while `jobBusy`.
+lose their saved plan to the job. Fixed: `put_template_plan` is now 409
+`report_job_in_flight` while a report job runs (which also covers the chat
+tool `set_report_mapping`, a wrapper over the route;
+`test_put_plan_is_409_while_a_report_job_is_running`), and Save plan is
+disabled while `jobBusy` (`MappingPlanEditor.test.tsx` +1). Both tests fail
+on the previous code. Edits made during a proposal stay in the draft and can
+be saved once the job is done.
 
 ## Increment 1 — status
 
@@ -458,8 +463,8 @@ Phases 0–5 delivered on `claude/fmea-llm-reporting-feasibility-jtm6w1`
 and 5 have a browser leg since §7. The live LLM probe ran on
 2026-10-05 (§7.5): 23/23, report written by `claude-sonnet-5` on the
 `anthropic-sonnet` profile, browser smoke 73/73 on the generation path.
-Not done: the workstation checks listed per phase, and the mapping-job vs.
-hand-saved-plan overwrite found in §7.5.
+The mapping-job overwrite it found is fixed
+(§7.5). Not done: the workstation checks listed per phase.
 Open product question: Reports in Guided mode (§7.3). `export_eh_report_docx`
 (WP0) remains alongside `export_report_docx`; keep as the no-LLM shortcut or
 remove in review.
