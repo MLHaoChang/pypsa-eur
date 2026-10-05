@@ -115,10 +115,10 @@ def short_names(names, taken=()):
     used, out = set(taken), []
     for raw in names:
         base = re.sub(r"[^A-Za-z0-9_-]", "_", str(raw)).upper() or "X"
-        cand, i = base[:MAX_NAME_LEN], 2
+        cand, i = base[:MAX_NAME_LEN].rstrip("_-") or base[:MAX_NAME_LEN], 2
         while cand in used:
             suffix = f"_{i}"
-            cand = base[: MAX_NAME_LEN - len(suffix)] + suffix
+            cand = base[: MAX_NAME_LEN - len(suffix)].rstrip("_-") + suffix
             i += 1
         used.add(cand)
         out.append(cand)
