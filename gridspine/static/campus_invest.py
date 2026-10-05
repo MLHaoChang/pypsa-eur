@@ -679,6 +679,17 @@ def _investment(needs, added, spec, study, library, lib_by_id, periods):
     return inv, pd.DataFrame(cost)
 
 
+def with_measures(as_is, compliance) -> pd.DataFrame:
+    """The as-is compliance with the re-checked one as its "with measures"
+    columns."""
+    after = compliance.set_index("check")
+    final = as_is.copy()
+    final["status_with_measures"] = final["check"].map(after["status_as_is"])
+    final["value_with_measures"] = final["check"].map(after["value"])
+    final["detail_with_measures"] = final["check"].map(after["detail"])
+    return final
+
+
 def _pcc_table(study):
     return pd.DataFrame([{"period": p, "hour": h, "case": case, "converged": f.converged, "p_mw": f.pcc_p_mw,
                           "q_mvar": f.pcc_q_mvar, "losses_mw": f.losses_mw}
@@ -784,11 +795,7 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
             history.append({"iteration": it, "need": key, "from": before, "to": after, "check": check,
                             "detail": detail})
     investment, cost = _investment(needs, added, spec, study, library, lib_by_id, periods)
-    after = compliance.set_index("check")
-    final = as_is.copy()
-    final["status_with_measures"] = final["check"].map(after["status_as_is"])
-    final["value_with_measures"] = final["check"].map(after["value"])
-    final["detail_with_measures"] = final["check"].map(after["detail"])
+    final = with_measures(as_is, compliance)
     unresolved = [{"need": n.key, "reason": n.unresolved} for n in needs if n.unresolved]
     return {"investment": investment.drop(columns=["lifetime_a"]), "cost": cost, "compliance": final,
             "dispatch": _dispatch_table(study), "spec": spec,
