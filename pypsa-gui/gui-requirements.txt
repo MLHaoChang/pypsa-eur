@@ -119,6 +119,10 @@ pypdf==6.14.2        # PDF page-count probe. Guarded, but the fallback returns
                      # "unknown", which lets a >100-page PDF through to the
                      # Anthropic 100-page cap as a 415 instead of a clean
                      # local truncation banner.
+python-docx==1.2.0   # Report export (`services/reports/docx_writer.py`),
+                     # unguarded: `export_eh_report_docx` renders the EH
+                     # ReferenceDesignReport as a .docx. Pure Python; its
+                     # default template is package data (spec collects it).
 httpx==0.28.1        # OpenAICompatProvider's chat-completions SSE
                      # (`services/llm_openai_compat.py`), function-local
                      # import but deliberately UNGUARDED: the design spec

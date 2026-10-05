@@ -86,6 +86,8 @@ from routers import (
     network,
     project_network,
     projects,
+    report_jobs,
+    reports,
     results,
     simulation,
     snapshots,
@@ -1146,6 +1148,21 @@ app.include_router(compare.router, prefix="/api/projects", tags=["compare"])
 _projects_router_guard = [Depends(fs_permission.require_file_access)]
 app.include_router(
     adequacy_worksheet.router, prefix="/api/projects", tags=["adequacy"],
+    dependencies=_projects_router_guard,
+)
+# Study reports (WP1): `/{name}/reports…` — same posture as the worksheet
+# (ProjectAccessDep on every route, lock-checked delete, paths joined only from
+# `AuthorizedProject.directory` + a regex-validated id). Registered BEFORE
+# projects.router for the same reason. The `reports/` directory is in
+# `projects._BUNDLE_DIRS`, so it travels with save-as, copy and snapshots.
+app.include_router(
+    reports.router, prefix="/api/projects", tags=["reports"],
+    dependencies=_projects_router_guard,
+)
+# Report generation (WP3): `/{name}/reports/generate…` and the per-section
+# regenerate — the LLM job over the same evidence, same guard, same lock check.
+app.include_router(
+    report_jobs.router, prefix="/api/projects", tags=["reports"],
     dependencies=_projects_router_guard,
 )
 app.include_router(

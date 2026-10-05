@@ -1,0 +1,46 @@
+# Connection-point limits, one profile per grid-code family (increment 10).
+#
+# EVERY limit carries its clause and a provenance tag:
+#   code     -- a number the regulation itself states (quoted from the
+#               as-adopted EU text: DCC = Regulation (EU) 2016/1388,
+#               RfG = Regulation (EU) 2016/631);
+#   assumed  -- not set by the code; a stated engineering choice to revisit.
+# The code values below were read from legislation.gov.uk's "adopted" text
+# (the retained UK version has deleted the Continental Europe rows).
+profiles:
+  eu_rfg_dcc_ce:
+    title: "EU RfG (2016/631) and DCC (2016/1388), Continental Europe"
+    # Steady-state ("unlimited time") voltage bands at the connection point,
+    # by nominal voltage. kv_min inclusive, kv_max exclusive, except where
+    # kv_max_inclusive says otherwise (DCC: "from 300 kV to 400 kV (including)").
+    voltage_bands:
+      - kv_min: 0.0
+        kv_max: 110.0
+        v_min: 0.90
+        v_max: 1.10
+        clause: "not set by RfG/DCC below 110 kV; +/-10 % used"
+        source: assumed
+      - kv_min: 110.0
+        kv_max: 300.0
+        v_min: 0.90
+        v_max: 1.118
+        clause: "DCC Annex II (first table) and RfG Art. 16(2)(a) Table 6.1, Continental Europe: 0,90-1,118 pu unlimited"
+        source: code
+      - kv_min: 300.0
+        kv_max: 400.0
+        kv_max_inclusive: true
+        v_min: 0.90
+        v_max: 1.05
+        clause: "DCC Annex II (second table) and RfG Art. 16(2)(a) Table 6.2, Continental Europe: 0,90-1,05 pu unlimited"
+        source: code
+    # The widest reactive range a TSO may require of a transmission-connected
+    # demand facility, as a fraction of the larger of max import / export.
+    q_range_demand:
+      value: 0.48
+      clause: "DCC Art. 15(1)(a): not wider than 48 percent of the larger of the maximum import or export capacity (0,9 power factor); the relevant TSO specifies the actual range"
+      source: code
+    # Rapid voltage change at the connection point on connection or trip.
+    rvc_limit_pct:
+      value: 3.0
+      clause: "not set by RfG/DCC; IEC TR 61000-3-7 indicative planning levels for infrequent rapid voltage changes at HV/EHV are about 3-5 % (not verified against the text here); 3 % used"
+      source: assumed

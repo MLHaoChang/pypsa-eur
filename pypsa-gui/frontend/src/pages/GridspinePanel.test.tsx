@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { Ledger, RankedSnapshot, StageStatus, StudyConfig } from '../api/gridspine'
+import type { CapacityRow, CapacityTable, ConnectionRow, Ledger, RankedSnapshot, StageStatus, StudyConfig } from '../api/gridspine'
 import GridspinePanel from './GridspinePanel'
 import toast from 'react-hot-toast'
 
@@ -42,6 +42,10 @@ const api = vi.hoisted(() => ({
   uploadExternalDispatch: vi.fn(),
   readback: vi.fn(),
   figure: vi.fn(),
+  capacity: vi.fn(),
+  computeCapacity: vi.fn(),
+  connection: vi.fn(),
+  assessConnection: vi.fn(),
 }))
 const projectsList = vi.hoisted(() => vi.fn())
 vi.mock('../api/projects', async () => {
@@ -84,6 +88,27 @@ const config: StudyConfig = {
   from_network: null, from_project: null,
 }
 
+const capRow = (over: Partial<CapacityRow>): CapacityRow => ({
+  bus: 'BUS_16', hour: 19, kind: 'load', capacity_mw: null, dc_estimate_mw: 455.2,
+  binding_kind: 'thermal_n1', binding_element: 'BUS_16-BUS_17-1', binding_contingency: 'BUS_16-BUS_19-1',
+  binding_preexisting: false, method: 'dc', ...over,
+})
+
+const capacityTable = (rows?: CapacityRow[]): CapacityTable => {
+  const all = rows ?? [
+    capRow({}),
+    capRow({ bus: 'BUS_03', dc_estimate_mw: 12.5, binding_kind: 'thermal_intact',
+             binding_element: 'BUS_02-BUS_03-1', binding_contingency: null }),
+    capRow({ bus: 'BUS_16', kind: 'generation', dc_estimate_mw: 2000, binding_kind: 'none_up_to_cap',
+             binding_element: null, binding_contingency: null }),
+    capRow({ bus: 'BUS_03', kind: 'generation', dc_estimate_mw: 906.5 }),
+    capRow({ bus: 'BUS_16', hour: 7, dc_estimate_mw: 300 }),
+    capRow({ bus: 'BUS_03', hour: 7, dc_estimate_mw: 44 }),
+  ]
+  return { rows: all, hours: [...new Set(all.map(r => r.hour))].sort((a, b) => a - b),
+           buses: [...new Set(all.map(r => r.bus))].sort() }
+}
+
 const project = (name: string, extra: Record<string, unknown> = {}) => ({
   id: name, name, created_at: '2026-09-01T00:00:00Z', has_solver_config: false,
   bus_count: 39, snapshot_count: 24, objective: 1.0, parent_project: null, ...extra,
@@ -115,6 +140,8 @@ beforeEach(() => {
   api.status.mockResolvedValue(completed)
   api.snapshots.mockResolvedValue(snapshots)
   api.ledger.mockResolvedValue(ledger)
+  api.capacity.mockResolvedValue(capacityTable())
+  api.connection.mockResolvedValue({ rows: [] })
   api.run.mockResolvedValue({ id: 'job-1', project_id: 'Study A', kind: 'gridspine', status: 'queued', position: 1 })
 })
 afterEach(() => cleanup())
@@ -489,5 +516,174 @@ describe('GridspinePanel', () => {
     renderPanel()
     expect(screen.getByText(/open a planning → dynamics project/i)).toBeTruthy()
     expect(api.status).not.toHaveBeenCalled()
+  })
+})
+
+
+// ── Connection capacity (increment 9) ─────────────────────────────────────
+//
+// The study writes a DC estimate for every bus; the engineer asks for the AC
+// answer at the buses they care about. The section shows which figure is
+// which, and what binds, in words an engineer can act on.
+
+describe('connection capacity', () => {
+  it('lists every bus for the chosen hour and kind, DC figures marked as estimates', async () => {
+    renderPanel()
+    const section = await screen.findByTestId('capacity-section')
+    // earliest selected hour first; load by default
+    const row16 = await within(section).findByTestId('capacity-row-BUS_16')
+    expect(row16.textContent).toContain('≈ 300.0 MW')
+    await userEvent.selectOptions(await within(section).findByLabelText('Capacity hour'), '19')
+    expect(within(section).getByTestId('capacity-row-BUS_16').textContent).toContain('≈ 455.2 MW')
+    expect(within(section).getByTestId('capacity-row-BUS_16').textContent)
+      .toContain('overload of BUS_16-BUS_17-1 after losing BUS_16-BUS_19-1')
+    expect(within(section).getByTestId('capacity-row-BUS_03').textContent).toContain('overload of BUS_02-BUS_03-1')
+    expect(within(section).getByTestId('capacity-row-BUS_03').textContent).not.toContain('after losing')
+  })
+
+  it('switches to generation, and reports "nothing binds" as at least the cap, never infinity', async () => {
+    renderPanel()
+    const section = await screen.findByTestId('capacity-section')
+    await userEvent.selectOptions(await within(section).findByLabelText('Capacity hour'), '19')
+    await userEvent.selectOptions(within(section).getByLabelText('Connection kind'), 'generation')
+    const row = within(section).getByTestId('capacity-row-BUS_16')
+    expect(row.textContent).toContain('≥ 2000.0 MW')
+    expect(row.textContent).toContain('nothing binds up to the cap')
+  })
+
+  it('computes the AC answer for one bus and shows it as AC once the table refreshes', async () => {
+    api.computeCapacity.mockResolvedValue({ rows: [] })
+    renderPanel()
+    const section = await screen.findByTestId('capacity-section')
+    await userEvent.selectOptions(await within(section).findByLabelText('Capacity hour'), '19')
+    api.capacity.mockResolvedValue(capacityTable([
+      capRow({ method: 'ac', capacity_mw: 412.3 }),
+      capRow({ bus: 'BUS_03', dc_estimate_mw: 12.5 }),
+      capRow({ bus: 'BUS_16', hour: 7, method: 'ac', capacity_mw: 280.1, dc_estimate_mw: 300 }),
+    ]))
+    await userEvent.click(within(section).getByRole('button', { name: 'Compute AC capacity at BUS_16' }))
+    await waitFor(() => expect(api.computeCapacity).toHaveBeenCalledWith('Study A', 'BUS_16', 'load'))
+    const row = await within(section).findByText('412.3 MW')
+    expect(row.closest('[data-testid="capacity-row-BUS_16"]')?.textContent).toContain('AC')
+  })
+
+  it('marks a limit set by an existing overload so it is not read as headroom', async () => {
+    // Found in the browser run: 13.8 MW at BUS_16 was the worsening tolerance
+    // over an N-1 overload that existed before anything connected.
+    api.capacity.mockResolvedValue(capacityTable([
+      capRow({ method: 'ac', capacity_mw: 13.8, binding_element: 'BUS_02-BUS_03-1',
+               binding_contingency: 'BUS_25-BUS_26-1', binding_preexisting: true }),
+      capRow({ bus: 'BUS_03', dc_estimate_mw: 90.0 }),
+    ]))
+    renderPanel()
+    const section = await screen.findByTestId('capacity-section')
+    const row = await within(section).findByTestId('capacity-row-BUS_16')
+    expect(row.textContent).toContain('already overloaded before connection')
+    expect(within(section).getByTestId('capacity-row-BUS_03').textContent).not.toContain('already')
+  })
+
+  it('says why there is no table instead of failing silently', async () => {
+    api.capacity.mockRejectedValue({
+      response: { status: 404, data: { detail: 'this run has no capacity table; run the study with screening on' } },
+    })
+    renderPanel()
+    const section = await screen.findByTestId('capacity-section')
+    expect(await within(section).findByText(/run the study with screening on/)).toBeTruthy()
+  })
+
+  it('cannot start an AC search while a study for the project is queued or running', async () => {
+    queue.activeJob = { id: 'job-9' }
+    renderPanel()
+    const section = await screen.findByTestId('capacity-section')
+    const btn = await within(section).findByRole('button', { name: 'Compute AC capacity at BUS_16' })
+    expect((btn as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+
+// ── Connection-point assessment (increment 10) ────────────────────────────
+
+const connRow = (over: Partial<ConnectionRow>): ConnectionRow => ({
+  assessment_id: 'a1', hour: 7, bus: 'BUS_16', load_mw: 300, load_pf: 0.98, onsite_mw: 100,
+  onsite_converter: true, profile: 'eu_rfg_dcc_ce', check: 'load_trip', status: 'fail', value: 0.69,
+  unit: '%', limit: 3, detail: 'high voltage at BUS_19; high voltage at BUS_26',
+  clause: 'not set by RfG/DCC; IEC TR 61000-3-7 … 3 % used', source: 'assumed', ...over,
+})
+
+const assessed = (): ConnectionRow[] => [
+  connRow({ check: 'connection', status: 'pass', value: 0, unit: 'violations', limit: null,
+            detail: 'no new or worsened violation', clause: 'no new or worsened violation …', source: 'code' }),
+  connRow({ check: 'energisation', status: 'pass', value: -0.73, detail: 'voltage step -0.73 % at BUS_16' }),
+  connRow({}),
+  connRow({ check: 'q_lead', status: 'fail', value: 1.043, unit: 'pu', limit: 1.05,
+            detail: 'facility injecting 144.0 Mvar at BUS_16 (0.48 x 300.0 MW); high voltage at BUS_19',
+            clause: 'DCC Art. 15(1)(a): not wider than 48 percent …', source: 'code' }),
+  connRow({ check: 'scr_onsite', status: 'reported', value: 90, unit: '', limit: null,
+            detail: "Sk''min 9000 MVA / on-site converter 100 MVA: strong", source: 'assumed' }),
+  connRow({ hour: 19, check: 'load_trip', status: 'pass', value: 1.2, detail: 'voltage step +1.20 % at BUS_16' }),
+]
+
+describe('connection-point assessment', () => {
+  it('assesses a facility entered from a capacity row and shows each check with its clause', async () => {
+    api.assessConnection.mockResolvedValue({ assessment_id: 'a1', rows: assessed() })
+    renderPanel()
+    const cap = await screen.findByTestId('capacity-section')
+    await userEvent.click(await within(cap).findByRole('button', { name: 'Assess a facility at BUS_16' }))
+    const section = await screen.findByTestId('connection-section')
+    expect((within(section).getByLabelText('Facility bus') as HTMLInputElement).value).toBe('BUS_16')
+    await userEvent.clear(within(section).getByLabelText('Load (MW)'))
+    await userEvent.type(within(section).getByLabelText('Load (MW)'), '300')
+    await userEvent.clear(within(section).getByLabelText('On-site unit (MW)'))
+    await userEvent.type(within(section).getByLabelText('On-site unit (MW)'), '100')
+    api.connection.mockResolvedValue({ rows: assessed() })
+    await userEvent.click(within(section).getByRole('button', { name: 'Assess' }))
+    await waitFor(() => expect(api.assessConnection).toHaveBeenCalledWith('Study A', {
+      bus: 'BUS_16', load_mw: 300, load_pf: 0.98, onsite_mw: 100, onsite_converter: true,
+    }))
+    const trip = await within(section).findByTestId('connection-check-load_trip')
+    expect(trip.textContent).toContain('Load trip (on-site unit stays)')
+    expect(trip.textContent).toContain('fail')
+    expect(trip.textContent).toContain('+0.69 %')
+    expect(trip.textContent).toContain('high voltage at BUS_19')
+    expect(trip.textContent).toContain('assumed')
+    const q = within(section).getByTestId('connection-check-q_lead')
+    expect(q.textContent).toContain('1.043 pu')
+    expect(q.textContent).toContain('≤ 1.05 pu')
+    expect(q.textContent).toContain('DCC Art. 15(1)(a)')
+    expect(within(section).getByTestId('connection-check-scr_onsite').textContent).toContain('reported')
+  })
+
+  it('switches hours within an assessment', async () => {
+    api.connection.mockResolvedValue({ rows: assessed() })
+    renderPanel()
+    const section = await screen.findByTestId('connection-section')
+    await userEvent.selectOptions(await within(section).findByLabelText('Assessment hour'), '19')
+    expect((await within(section).findByTestId('connection-check-load_trip')).textContent).toContain('+1.20 %')
+  })
+
+  it('says it is a screen, not a certificate', async () => {
+    renderPanel()
+    const section = await screen.findByTestId('connection-section')
+    expect(section.textContent).toContain('not a compliance certificate')
+  })
+
+  it('cannot assess while a study for the project is queued or running', async () => {
+    queue.activeJob = { id: 'job-9' }
+    renderPanel()
+    const section = await screen.findByTestId('connection-section')
+    // A complete facility, so only the lock can be what disables it.
+    await userEvent.type(within(section).getByLabelText('Facility bus'), 'BUS_16')
+    await userEvent.type(within(section).getByLabelText('Load (MW)'), '50')
+    expect((within(section).getByRole('button', { name: 'Assess' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('shows the reason when an assessment is refused', async () => {
+    api.assessConnection.mockRejectedValue({ response: { status: 422, data: { detail: "unknown bus 'BUS_99'" } } })
+    renderPanel()
+    const section = await screen.findByTestId('connection-section')
+    await userEvent.type(within(section).getByLabelText('Facility bus'), 'BUS_99')
+    await userEvent.type(within(section).getByLabelText('Load (MW)'), '50')
+    await userEvent.click(within(section).getByRole('button', { name: 'Assess' }))
+    expect(await within(section).findByText(/unknown bus 'BUS_99'/)).toBeTruthy()
   })
 })

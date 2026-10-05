@@ -17,20 +17,20 @@ _PATTERN = re.compile(r'8760|freq="h"|Timedelta\(hours=1\)')
 
 # file (relative to services/) -> (count, reason)
 ALLOWED: dict[str, tuple[int, str]] = {
-    # From the master merge e364837 (energy-hub adequacy), reviewed at the IC P3
-    # gate: every one converts to or from a YEAR, weighted by Σ w where a step matters.
-    "adequacy/eh_stages.py": (1, "8760 h/yr in a common-mode occurrence rate 8760·q/MTTR — a unit"),
-    "adequacy/eh_study.py": (1, "horizon_years × 8760 = the modelled hours (horizon from Σ w) — a unit"),
-    "adequacy/levers.py": (2, "annualises Σ w·load by 8760 / Σ w, and a link's MWh/yr at full power "
-                              "(p_nom × 8760) — units, weighted by the snapshot weights"),
-    "solver/adequacy.py": (3, "an annual import-energy cap scaled to a period by Σ w / 8760 "
-                              "(formula, code, message) — a unit"),
-    "solver_service.py": (1, "prose: the same cap, E × Σw / 8760"),
     "adequacy/copt.py": (1, "8760 h/yr in the occurrence-rate formula — a unit, not a step"),
     "adequacy/mc.py": (2, "prose about horizon length and accumulator size"),
     "adequacy/metrics.py": (4, "HOURS_PER_YEAR constant + prose; weights are hours (WP1.0)"),
     "adequacy/occurrence.py": (2, "8760 h/yr in events/yr = 8760·rate/MTTR — a unit"),
     "adequacy/sweep.py": (3, "same occurrence formula as occurrence.py — a unit"),
+    "adequacy/eh_stages.py": (1, "common-mode occurrence 8760·q/MTTR events/yr — the "
+                                 "occurrence.py formula, a unit"),
+    "adequacy/eh_study.py": (1, "modelled hours = nyears × 8760 (nyears is Σ weights / 8760, "
+                                "weights in hours) — a unit"),
+    "adequacy/levers.py": (2, "annualise to MWh/yr: Σ w·p × 8760 / Σ w and p_nom × 8760 — "
+                              "8760 h/yr, weights in hours; a unit"),
+    "solver/adequacy.py": (3, "EH import-energy cap: E MWh/yr × Σ w / 8760 per period "
+                              "(formula, code, message) — a unit"),
+    "solver_service.py": (1, "comment restating the solver/adequacy.py cap formula"),
     "asset_results/compute.py": (2, "prose explaining why Σweights/8760 is avoided"),
     "chat_service.py": (1, "prompt text about CSV row counts"),
     "solver/periodized_costs.py": (3, "HOURS_PER_YEAR converts Σ objective weights to years "

@@ -1938,6 +1938,321 @@ TOOLS: list[dict[str, Any]] = [
         },
         [],
     ),
+    _t(
+        "export_eh_report_docx",
+        "Render the stored Energy Hub ReferenceDesignReport (the last "
+        "run_eh_study) as a Word .docx in the active project's uploads/ dir "
+        "— headline results, completeness, one section per report section "
+        "(an unestablished section says so), the FMEA top-N table with a "
+        "criticality chart, the analyst's worksheet rows and the study "
+        "pipeline. Every number is the assembler's own; nothing is "
+        "narrated. 404 eh_report_not_found when no EH study has been stored "
+        "— run run_eh_study first. `filename` (optional) overrides "
+        "eh_reference_design_<ts>.docx. The file appears in the chat "
+        "panel's file strip with a download button. Safety: write.",
+        {"filename": {"type": "string"}},
+        [],
+    ),
+
+    # ── Reports (9) — WP6: the generated study report ───────────────────────
+    # The routes are WP1/WP3/WP5's (`routers/reports.py`,
+    # `routers/report_jobs.py`); each tool calls its handler in-process for
+    # the ACTIVE project. Tables and figures are the software's, never the
+    # model's; prose is written per section by the active LLM profile and
+    # every number in it is audited against the evidence.
+    _t(
+        "generate_report",
+        "Start writing the client report of the active project from "
+        "everything this session established (the Energy Hub reference "
+        "design, the adequacy surfaces, the FMEA worksheet) on the ACTIVE LLM "
+        "profile: one section at a time, prose between the software's own "
+        "tables and figures, every number audited against the evidence. "
+        "Takes minutes and spends model tokens; ONE job at a time — 409 "
+        "report_job_in_flight while another runs (abort_report_generation "
+        "stops it). `sections` (optional) names the section ids to write; "
+        "omit it for the executive summary plus every section the evidence "
+        "established. `language` defaults to the template's detected language "
+        "when `template_file_id` names one (an upload of kind "
+        "report_template, see list_report_templates), else 'en'; "
+        "`instruction` is free text the writer follows. 400 no_evidence when "
+        "the session has nothing to report on (run a study first). Returns "
+        "{status:'running', report_id} — poll get_report_status until "
+        "done/aborted/failed, then read it with get_report. Only call this "
+        "when the user asks for a report or a document; build_study_report "
+        "is the in-chat summary. Safety: execution.",
+        {
+            "title": {"type": "string"},
+            "language": {"type": "string"},
+            "sections": {"type": "array", "items": {"type": "string"}},
+            "instruction": {"type": "string"},
+            "template_file_id": {"type": "string"},
+        },
+        [],
+    ),
+    _t(
+        "get_report_status",
+        "The report generation job of this session: {status: running|done|"
+        "aborted|failed, report_id, version, mode, section, progress{done, "
+        "total, current}, repairs, prose_failures, error, profile_id, model, "
+        "started_at, finished_at}. `prose_failures` names the sections the "
+        "model could not write (they keep their tables, stated as 'prose not "
+        "established'). {status:'no_data'} when no generation has run yet. "
+        "Safety: read.",
+        {},
+    ),
+    _t(
+        "abort_report_generation",
+        "Stop the running report job after its current section. The sections "
+        "already written are kept and the partial report is saved as a "
+        "version (status 'aborted'); the rest stay code-only. IDEMPOTENT and "
+        "200 after the job finished; 404 report_job_not_found when no "
+        "generation ever ran in this session. Safety: destructive.",
+        {},
+    ),
+    _t(
+        "list_reports",
+        "Every study report of the active project, newest first: [{report_id, "
+        "title, created_at, updated_at, latest_version, mode "
+        "(evidence_only|generated), evidence_hash, profile_id, model, "
+        "generation}]. Safety: read.",
+        {},
+    ),
+    _t(
+        "get_report",
+        "Read one study report of the active project (the newest when "
+        "`report_id` is omitted; the latest version unless `version` is "
+        "given). Sections come back with their paragraphs, bullets and "
+        "callouts (disclosures, gaps, not-established statements) intact, "
+        "each table as {table_id, columns, n_rows, caption} — rows through "
+        "get_report_table — and each figure as its id and caption. Every "
+        "section carries `audit`: `unverified` are numbers the prose states "
+        "that the evidence does not contain (relay them as numbers to "
+        "check), `verified` the ones it does. A report whose prose would not "
+        "fit one result comes back as an outline (`outline: true`, one row "
+        "per section with counts) — pass `section_id` to read one section in "
+        "full. 404 report_not_found when the project has no report yet "
+        "(generate_report writes one). Never re-type a report's numbers into "
+        "chat as new findings; the document is the deliverable. "
+        "Safety: read.",
+        {
+            "report_id": {"type": "string"},
+            "version": {"type": "integer"},
+            "section_id": {"type": "string"},
+        },
+        [],
+    ),
+    _t(
+        "get_report_table",
+        "The rows of one table of a report version, paginated: {table_id, "
+        "columns, caption, source_path, items (rows as lists in `columns` "
+        "order), total_count, offset, returned, has_more}. `table_id` is one "
+        "the document's table blocks named. 404 report_table_not_found "
+        "lists the ids the report has. Safety: read.",
+        {
+            "report_id": {"type": "string"},
+            "table_id": {"type": "string"},
+            "version": {"type": "integer"},
+            "offset": {"type": "integer"},
+            "limit": {"type": "integer"},
+        },
+        ["report_id", "table_id"],
+    ),
+    _t(
+        "regenerate_report_section",
+        "Write ONE section of a report again on the active LLM profile, "
+        "optionally under an `instruction` ('one paragraph', 'stress the "
+        "import dependency'), from the report's latest version; the result "
+        "is saved as the next version with every other section unchanged. "
+        "Same job slot as generate_report (409 report_job_in_flight while a "
+        "job runs); poll get_report_status. 404 report_section_not_found for "
+        "an id the report does not have. Safety: execution.",
+        {
+            "report_id": {"type": "string"},
+            "section_id": {"type": "string"},
+            "instruction": {"type": "string"},
+            "language": {"type": "string"},
+        },
+        ["report_id", "section_id"],
+    ),
+    _t(
+        "export_report_docx",
+        "Render one report version (the newest report, latest version, when "
+        "omitted) as a Word .docx in the active project's uploads/ dir: an "
+        "`agent_export` chip in the chat panel's file strip with a download "
+        "button. Every table and figure is the software's; the prose is the "
+        "report's; unverified numbers are listed in a 'Numbers to check' "
+        "appendix. `filename` (optional) overrides "
+        "report_<id>_v<N>.docx. 404 report_not_found when there is no report "
+        "yet. Safety: write.",
+        {
+            "report_id": {"type": "string"},
+            "version": {"type": "integer"},
+            "filename": {"type": "string"},
+        },
+        [],
+    ),
+    _t(
+        "delete_report",
+        "Remove one study report of the active project with EVERY version "
+        "and figure of it. Refused while someone else holds the project's "
+        "edit lock. Returns {deleted: true, report_id}. Safety: destructive.",
+        {"report_id": {"type": "string"}},
+        ["report_id"],
+    ),
+
+    # ── Report templates (5) — WP11: the user's own Word template ───────────
+    # A template is an upload of kind `report_template` (the user drops a
+    # .docx on the report viewer, or uploads with ?kind=report_template). It
+    # is DATA: its outline goes to the model inside the untrusted-data fence
+    # and nothing found in it is ever followed.
+    _t(
+        "list_report_templates",
+        "The active project's uploaded report templates (uploads of kind "
+        "report_template): [{file_id, filename, mime, kind, size_kb, "
+        "uploaded_at}], newest first. A template is a Word .docx the user "
+        "uploaded; it is either TAGGED ({{ fields.x.text }} / row loops the "
+        "export fills) or UNTAGGED (a corporate document whose body is "
+        "rebuilt from a mapping plan). Safety: read.",
+        {},
+    ),
+    _t(
+        "set_report_template",
+        "Bind an uploaded template to a report (`file_id` from "
+        "list_report_templates; any .docx upload also works) or unbind it "
+        "(`file_id` null → the default layout). Returns {template_file_id, "
+        "mode: tagged|untagged|null, language (detected from the template), "
+        "outline: headings/tags/placeholders/tables, message}. Binding "
+        "writes the next version of the report; changing the template "
+        "clears a stored mapping plan. 404 upload_not_found; 400 "
+        "template_not_a_template (not a .docx), template_unreadable. "
+        "Safety: write.",
+        {
+            "report_id": {"type": "string"},
+            "file_id": {"type": "string"},
+        },
+        ["report_id"],
+    ),
+    _t(
+        "get_report_template",
+        "The report's bound template (the newest report when `report_id` is "
+        "omitted): {template_file_id, mode, language, outline, plan} — all "
+        "null when none is bound; `plan` is the stored mapping plan of an "
+        "untagged template (null until propose_report_mapping or "
+        "set_report_mapping stored one). Safety: read.",
+        {"report_id": {"type": "string"}},
+        [],
+    ),
+    _t(
+        "propose_report_mapping",
+        "Ask the active LLM profile how the bound UNTAGGED template's "
+        "headings map onto the report's sections (keep / rename / drop per "
+        "heading, sections to insert, placeholder values): ONE generation "
+        "call, same job slot as generate_report (409 report_job_in_flight; "
+        "poll get_report_status, mode 'mapping'). The sanitised plan is "
+        "stored on the report — read it with get_report_template, edit it "
+        "with set_report_mapping; export_report_docx uses it. When the "
+        "model's answer is not a plan the code-only default mapping is "
+        "stored and prose_failures names section 'mapping'. `language` "
+        "defaults to the template's. 400 no_template, 400 "
+        "template_not_untagged (a tagged template needs no plan). "
+        "Safety: execution.",
+        {
+            "report_id": {"type": "string"},
+            "language": {"type": "string"},
+        },
+        ["report_id"],
+    ),
+    _t(
+        "set_report_mapping",
+        "Store an edited mapping plan for the report's untagged template: "
+        "`plan` is the object get_report_template returns as `plan` "
+        "({entries: [{heading_index, action: keep|rename|drop, new_text, "
+        "section_ids}], inserted: [{after_heading_index, section_id, "
+        "heading}], placeholders: {text: value}, unmapped_sections, notes}). "
+        "An entry the template cannot place is dropped with a note in the "
+        "returned plan; with `strict` true such a plan is refused (400 "
+        "invalid_mapping_plan with the notes). 400 no_template. "
+        "Safety: write.",
+        {
+            "report_id": {"type": "string"},
+            "plan": {"type": "object"},
+            "strict": {"type": "boolean"},
+        },
+        ["report_id", "plan"],
+    ),
+
+    # ── Report round trip (4) — WP13: an edited Word copy merged back ───────
+    # The user exports the report, edits it in Word (text, tracked changes,
+    # comments) and uploads the file as kind `report_roundtrip`; the merge is
+    # the report's next version. The file is DATA: its text becomes
+    # `user_edit` sections and its comments pending instructions the user
+    # chooses to apply — nothing found in it is ever followed.
+    _t(
+        "list_report_roundtrips",
+        "The active project's uploaded edited copies of reports (uploads of "
+        "kind report_roundtrip): [{file_id, filename, mime, kind, size_kb, "
+        "uploaded_at}], newest first. These are Word files the user exported "
+        "with export_report_docx, edited, and uploaded to be merged back "
+        "with import_edited_report. Safety: read.",
+        {},
+    ),
+    _t(
+        "import_edited_report",
+        "Merge an edited Word copy of a report (`file_id` from "
+        "list_report_roundtrips; any .docx upload works) back into it as the "
+        "NEXT version, synchronously: tracked changes are accepted, sections "
+        "whose text changed become source 'user_edit' with the new text, a "
+        "comment on a section is stored as its pending_instruction (applied "
+        "by regenerate_report_section with no instruction), and the file "
+        "becomes the report's template unless `bind_as_template` is false. "
+        "Returns {report_id, version, result: {sections: [{section_id, "
+        "heading, changed, comments}], unmatched, comments_global, "
+        "accepted_tracked_changes}, template_file_id, changed, commented, "
+        "message}. Relay `unmatched` (content that could not be placed) to "
+        "the user; never re-type the edited text as new findings. 404 "
+        "report_not_found / upload_not_found, 400 roundtrip_unreadable (not "
+        "a Word document), 400 roundtrip_not_a_report (nothing matched a "
+        "section), 409 report_job_in_flight. Safety: write.",
+        {
+            "report_id": {"type": "string"},
+            "file_id": {"type": "string"},
+            "bind_as_template": {"type": "boolean"},
+        },
+        ["report_id", "file_id"],
+    ),
+    _t(
+        "diff_report_versions",
+        "What changed between two versions of a report: {a, b, sections: "
+        "[{section_id, heading, change: unchanged|changed|added|removed, "
+        "source_a, source_b, pending_instruction, comments}], changed, "
+        "added, removed} — the last three list section ids. Use it after "
+        "import_edited_report (the user's edits) or a regenerate (the "
+        "model's rewrite) to say which sections moved; read a section's "
+        "text with get_report(report_id, section_id, version). 404 "
+        "report_version_not_found. Safety: read.",
+        {
+            "report_id": {"type": "string"},
+            "a": {"type": "integer"},
+            "b": {"type": "integer"},
+        },
+        ["report_id", "a", "b"],
+    ),
+    _t(
+        "export_report_pdf",
+        "Render one report version (the newest report, latest version, when "
+        "omitted) to PDF through LibreOffice on this host and save it as a "
+        "downloadable file in the chat panel's file strip. Only where the "
+        "host has LibreOffice: 501 pdf_not_available otherwise — then offer "
+        "export_report_docx, which always works; 500 pdf_conversion_failed "
+        "(the message carries LibreOffice's reason) when the conversion "
+        "fails. `filename` overrides report_<id>_v<N>.pdf. Safety: write.",
+        {
+            "report_id": {"type": "string"},
+            "version": {"type": "integer"},
+            "filename": {"type": "string"},
+        },
+        [],
+    ),
 
     # ── LLM provider switching (1) — Task 10 ────────────────────────────────
     _t(
@@ -2173,6 +2488,92 @@ TOOLS: list[dict[str, Any]] = [
         "5 Mvar Q per branch. Empty until a CSV is uploaded in the study view. "
         "Safety: read.",
         {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "gridspine_get_capacity",
+        "Connection capacity for a planning → dynamics project: how many MW of "
+        "new load or generation can connect at each bus, per selected hour, "
+        "and what stops it. Capacity is the most MW that creates no new "
+        "violation and worsens no existing one, intact and under every N-1 "
+        "outage (100 % loading, 0.9-1.1 pu), with the added MW balanced "
+        "pro-rata over the committed synchronous units and new load at pf "
+        "0.98. Returns {rows, hours, buses}: each row has bus, hour, kind "
+        "(load|generation), method (dc = estimate for every bus, written by "
+        "the study; ac = exact to 1 MW, computed on request), capacity_mw "
+        "(AC; null on dc rows), dc_estimate_mw, binding_kind "
+        "(thermal_intact, thermal_n1, v_low_*/v_high_*, n1_divergence, "
+        "ac_divergence, none_up_to_cap = at least the cap, never infinity), "
+        "binding_element, binding_contingency and binding_preexisting. When "
+        "binding_preexisting is true the limit was ALREADY violated before "
+        "connection: say the bus is blocked by an existing overload and do "
+        "not present the MW figure as headroom. Filter with bus, kind and "
+        "hour; unfiltered is 78 rows per hour on case39. 404 before a "
+        "screened run. Safety: read.",
+        {
+            "project_id": {"type": "string"},
+            "bus": {"type": "string"},
+            "kind": {"type": "string", "enum": ["load", "generation"]},
+            "hour": {"type": "integer"},
+        },
+        ["project_id"],
+    ),
+    _t(
+        "gridspine_compute_capacity",
+        "Compute the exact AC connection capacity at one bus for load or "
+        "generation, at every selected hour of the project's latest run, and "
+        "keep it in the run and its handoff bundles (replacing that bus's DC "
+        "rows). A few seconds per call. Returns {rows} in the "
+        "gridspine_get_capacity row shape. 409 while a study for the project "
+        "is queued or running; 422 for a bus the grid does not have. "
+        "Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "bus": {"type": "string"},
+            "kind": {"type": "string", "enum": ["load", "generation"]},
+        },
+        ["project_id", "bus", "kind"],
+    ),
+    _t(
+        "gridspine_assess_connection",
+        "Connection-point assessment of one facility (a load plus an optional "
+        "on-site unit such as a BESS, at one bus) at every selected hour of the "
+        "project's latest run, against a grid-code profile (default "
+        "eu_rfg_dcc_ce: EU RfG 2016/631 and DCC 2016/1388, Continental Europe). "
+        "Checks: connection (no new or worsened violation, intact and N-1), "
+        "energisation (voltage step, no re-dispatch), load_trip (the load drops, "
+        "the on-site unit stays), facility_trip, q_lead / q_lag (the DCC Art. "
+        "15(1)(a) reactive range, +/-0.48 x max(import, export)), and scr_onsite "
+        "/ scr_load (reported, not gated). Each row has status pass|fail|"
+        "reported, value, unit, limit, detail, the clause applied and its source "
+        "(code = stated by the regulation; assumed = an engineering choice, e.g. "
+        "the 3 % rapid-voltage-change limit, which RfG/DCC do not set). This is a "
+        "steady-state screen, not a compliance certificate: fault ride-through "
+        "needs RMS/EMT studies. Stored per facility (assessment_id); assessing "
+        "the same facility again replaces it. Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "bus": {"type": "string"},
+            "load_mw": {"type": "number"},
+            "load_pf": {"type": "number"},
+            "onsite_mw": {"type": "number"},
+            "onsite_converter": {"type": "boolean"},
+            "profile": {"type": "string"},
+        },
+        ["project_id", "bus", "load_mw"],
+    ),
+    _t(
+        "gridspine_get_connection_assessments",
+        "The stored connection-point assessments of a planning → dynamics "
+        "project's latest run, in gridspine_assess_connection's row shape plus "
+        "the facility (assessment_id, hour, bus, load_mw, load_pf, onsite_mw, "
+        "onsite_converter, profile). Filter by assessment_id and hour. Empty "
+        "before the first assessment. Safety: read.",
+        {
+            "project_id": {"type": "string"},
+            "assessment_id": {"type": "string"},
+            "hour": {"type": "integer"},
+        },
         ["project_id"],
     ),
     _t(
@@ -2627,6 +3028,40 @@ TOOL_ROUTES: dict[str, list] = {
     "export_to_csv": _SERVICE_CALL,
     "export_preview_png": _SERVICE_CALL,
     "export_chat_summary": _SERVICE_CALL,
+    # reports (1) — WP0 spike: in-process render + agent-export save
+    "export_eh_report_docx": _SERVICE_CALL,
+    # reports (9) — WP6: the WP1/WP3/WP5 routes, called in-process for the
+    # active project. `get_report_table` reads the same document GET and
+    # pages one of its tables; the rest are one route each.
+    "generate_report": [("POST", "/api/projects/{name}/reports/generate")],
+    "get_report_status": [("GET", "/api/projects/{name}/reports/generate/status")],
+    "abort_report_generation": [("POST", "/api/projects/{name}/reports/generate/abort")],
+    "list_reports": [("GET", "/api/projects/{name}/reports")],
+    "get_report": [("GET", "/api/projects/{name}/reports/{report_id}")],
+    "get_report_table": [("GET", "/api/projects/{name}/reports/{report_id}")],
+    "regenerate_report_section": [
+        ("POST", "/api/projects/{name}/reports/{report_id}/sections/{section_id}/regenerate"),
+    ],
+    "export_report_docx": [("POST", "/api/projects/{name}/reports/{report_id}/export")],
+    "delete_report": [("DELETE", "/api/projects/{name}/reports/{report_id}")],
+    # report templates (5) — WP11: the template routes, called in-process;
+    # `list_report_templates` is the uploads list filtered to one kind.
+    "list_report_templates": [("GET", "/api/projects/{name}/uploads")],
+    "set_report_template": [("POST", "/api/projects/{name}/reports/{report_id}/template")],
+    "get_report_template": [("GET", "/api/projects/{name}/reports/{report_id}/template")],
+    "propose_report_mapping": [
+        ("POST", "/api/projects/{name}/reports/{report_id}/template/plan"),
+    ],
+    "set_report_mapping": [("PUT", "/api/projects/{name}/reports/{report_id}/template/plan")],
+    # report round trip (4) — WP13: the round-trip routes, called in-process;
+    # `list_report_roundtrips` is the uploads list filtered to one kind and
+    # `export_report_pdf` is the export route with `format: pdf`.
+    "list_report_roundtrips": [("GET", "/api/projects/{name}/uploads")],
+    "import_edited_report": [("POST", "/api/projects/{name}/reports/{report_id}/roundtrip")],
+    "diff_report_versions": [
+        ("GET", "/api/projects/{name}/reports/{report_id}/versions/{a}/diff/{b}"),
+    ],
+    "export_report_pdf": [("POST", "/api/projects/{name}/reports/{report_id}/export")],
     "clear_uploads": _SERVICE_CALL,
     # asset_results (3) — Task 14. Real HTTP routes DO exist
     # (routers/asset_results.py, mounted at /api/results/asset in main.py)
@@ -2660,6 +3095,10 @@ TOOL_ROUTES: dict[str, list] = {
     "gridspine_export_handoff_bundle": _SERVICE_CALL,
     "gridspine_get_readback": _SERVICE_CALL,
     "gridspine_fetch_result_figure": _SERVICE_CALL,
+    "gridspine_get_capacity": _SERVICE_CALL,
+    "gridspine_compute_capacity": _SERVICE_CALL,
+    "gridspine_get_connection_assessments": _SERVICE_CALL,
+    "gridspine_assess_connection": _SERVICE_CALL,
     # Library (4) — P2 WP2.4c: router handlers, called in process with the
     # acting user (the Library ACL is the org's).
     "list_library_items": [("GET", "/api/library/items/{kind}")],

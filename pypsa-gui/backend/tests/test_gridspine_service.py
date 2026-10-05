@@ -606,3 +606,119 @@ def test_update_config_is_refused_while_a_study_is_queued(study, user_and_db, mo
         gs.update_config(row, {"k": 2})
     assert exc.value.status_code == 409
 
+
+
+# --------------------------------------------------------------------------
+# connection capacity (increment 9)
+# --------------------------------------------------------------------------
+
+def test_a_run_carries_a_dc_capacity_table_for_every_bus_and_kind(ran):
+    _db, row = ran
+    out = gs.get_capacity(row)
+    hours = out["hours"]
+    assert hours and len(out["buses"]) == 39
+    assert len(out["rows"]) == len(hours) * 39 * 2
+    first = out["rows"][0]
+    assert first["method"] == "dc" and first["capacity_mw"] is None   # NaN leaves as null
+    assert first["dc_estimate_mw"] >= 0
+
+
+def test_computing_ac_capacity_answers_every_selected_hour_and_is_kept(ran):
+    _db, row = ran
+    got = gs.compute_capacity(row, "BUS_16", "load")
+    hours = gs.get_capacity(row)["hours"]
+    assert sorted(r["hour"] for r in got["rows"]) == hours
+    assert all(r["method"] == "ac" and r["capacity_mw"] is not None for r in got["rows"])
+    kept = [r for r in gs.get_capacity(row)["rows"] if r["bus"] == "BUS_16" and r["kind"] == "load"]
+    assert all(r["method"] == "ac" for r in kept)
+
+
+def test_capacity_is_404_before_a_run_and_its_reason_is_given(study, user_and_db):
+    db, _user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    for call in (lambda: gs.get_capacity(row), lambda: gs.compute_capacity(row, "BUS_16", "load")):
+        with pytest.raises(HTTPException) as exc:
+            call()
+        assert exc.value.status_code == 404
+        assert "capacity" in exc.value.detail
+
+
+def test_an_unknown_bus_is_422_with_the_drivers_reason(ran):
+    _db, row = ran
+    with pytest.raises(HTTPException) as exc:
+        gs.compute_capacity(row, "BUS_99", "load")
+    assert exc.value.status_code == 422 and "BUS_99" in exc.value.detail
+
+
+def test_computing_capacity_is_refused_while_a_study_is_queued(ran, monkeypatch):
+    # The run directory is what a queued study is about to rewrite.
+    _db, row = ran
+    monkeypatch.setattr(gs, "_active_job_for", lambda project: {"id": "job", "status": "queued"})
+    with pytest.raises(HTTPException) as exc:
+        gs.compute_capacity(row, "BUS_16", "load")
+    assert exc.value.status_code == 409
+
+
+def test_capacity_refuses_a_capacity_expansion_project(plain_project):
+    for call in (lambda: gs.get_capacity(plain_project), lambda: gs.compute_capacity(plain_project, "BUS_16", "load")):
+        with pytest.raises(HTTPException) as exc:
+            call()
+        assert exc.value.status_code == 409
+
+
+
+def test_capacity_filters_narrow_the_rows_but_not_the_table_they_come_from(ran):
+    _db, row = ran
+    whole = gs.get_capacity(row)
+    hours = whole["hours"]
+    one_bus = gs.get_capacity(row, bus="BUS_16", kind="load")
+    assert len(one_bus["rows"]) == len(hours)
+    assert {r["bus"] for r in one_bus["rows"]} == {"BUS_16"}
+    assert one_bus["hours"] == hours and one_bus["buses"] == whole["buses"]
+    one_row = gs.get_capacity(row, bus="BUS_16", kind="generation", hour=hours[0])
+    assert len(one_row["rows"]) == 1 and one_row["rows"][0]["hour"] == hours[0]
+    assert gs.get_capacity(row, bus="BUS_99")["rows"] == []
+
+
+# --------------------------------------------------------------------------
+# connection-point assessment (increment 10)
+# --------------------------------------------------------------------------
+
+FACILITY = {"bus": "BUS_16", "load_mw": 300.0, "load_pf": 0.98, "onsite_mw": 100.0, "onsite_converter": True}
+
+
+def test_assessing_a_facility_answers_every_check_at_every_selected_hour_and_is_kept(ran):
+    _db, row = ran
+    got = gs.assess_facility(row, FACILITY)
+    hours = sorted({r["hour"] for r in got["rows"]})
+    assert hours and len(got["rows"]) == len(hours) * 8
+    assert {r["assessment_id"] for r in got["rows"]} == {got["assessment_id"]}
+    kept = gs.get_connection(row)
+    assert {r["assessment_id"] for r in kept["rows"]} == {got["assessment_id"]}
+    one = gs.get_connection(row, assessment_id=got["assessment_id"], hour=hours[0])
+    assert len(one["rows"]) == 8 and all(r["hour"] == hours[0] for r in one["rows"])
+
+
+def test_connection_is_empty_before_any_assessment_and_404_before_a_run(study, user_and_db, ran):
+    _db, done = ran
+    assert gs.get_connection(done)["rows"] == []
+    db, _user = user_and_db
+    fresh = db.get(Project, uuid.UUID(study["id"]))
+    with pytest.raises(HTTPException) as exc:
+        gs.assess_facility(fresh, FACILITY)
+    assert exc.value.status_code == 404 and "screened run" in exc.value.detail
+
+
+def test_a_bad_facility_is_422_with_the_drivers_reason(ran):
+    _db, row = ran
+    with pytest.raises(HTTPException) as exc:
+        gs.assess_facility(row, {**FACILITY, "bus": "BUS_99"})
+    assert exc.value.status_code == 422 and "BUS_99" in exc.value.detail
+
+
+def test_assessing_is_refused_while_a_study_is_queued(ran, monkeypatch):
+    _db, row = ran
+    monkeypatch.setattr(gs, "_active_job_for", lambda project: {"id": "job", "status": "queued"})
+    with pytest.raises(HTTPException) as exc:
+        gs.assess_facility(row, FACILITY)
+    assert exc.value.status_code == 409

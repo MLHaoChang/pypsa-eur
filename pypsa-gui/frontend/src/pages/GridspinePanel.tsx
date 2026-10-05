@@ -11,13 +11,13 @@
 // rule `useSolveQueue` applies to the queue list — and stops on any terminal
 // state. A study is a `kind: 'gridspine'` job in the ordinary queue, so
 // watching and aborting it are the Solve Queue panel's job, not this one's.
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, Play, RefreshCw, FlaskConical, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   gridspineApi, isNotAStudy, STAGES,
-  type DispatchSource, type FigureName, type RankedSnapshot, type ReadbackShort, type StageState, type StageStatus,
+  type CapacityKind, type CapacityRow, type ConnectionCheck, type ConnectionRow, type DispatchSource, type FigureName, type RankedSnapshot, type ReadbackShort, type StageState, type StageStatus,
   type StudyConfig, type StudyConfigPatch,
 } from '../api/gridspine'
 import { projectsApi } from '../api/projects'
@@ -31,6 +31,8 @@ export const SNAPSHOTS_KEY = (name: string) => ['gridspine', 'snapshots', name] 
 export const LEDGER_KEY = (name: string) => ['gridspine', 'ledger', name] as const
 export const CONFIG_KEY = (name: string) => ['gridspine', 'config', name] as const
 export const FIGURE_KEY = (name: string, hour: number, figure: FigureName) => ['gridspine', 'figure', name, hour, figure] as const
+export const CAPACITY_KEY = (name: string) => ['gridspine', 'capacity', name] as const
+export const CONNECTION_KEY = (name: string) => ['gridspine', 'connection', name] as const
 
 const STAGE_LABEL: Record<string, string> = {
   ingest: 'Ingest', dispatch: 'Unit commitment', ranking: 'Ranking (AC N-1 at every hour)',
@@ -79,6 +81,9 @@ function StudyView({ name }: { name: string }) {
   const qc = useQueryClient()
   const { data: queue } = useSolveQueue()
   const activeJob = activeJobForProject(queue, name)
+  // A capacity row's "Assess" fills the facility bus; the nonce re-applies it
+  // when the same bus is picked twice after the field was edited by hand.
+  const [assessAt, setAssessAt] = useState<{ bus: string; nonce: number } | null>(null)
 
   const status = useQuery({
     queryKey: STATUS_KEY(name),
@@ -197,6 +202,21 @@ function StudyView({ name }: { name: string }) {
             <p className="text-[12px] text-muted">{snapshots.isError ? errorText(snapshots.error) : 'Loading…'}</p>
           )}
         </PageSection>
+      )}
+
+      {done && (
+        <>
+          <CapacitySection
+            name={name}
+            locked={activeJob != null || status.data?.status === 'running'}
+            onAssess={bus => setAssessAt(a => ({ bus, nonce: (a?.nonce ?? 0) + 1 }))}
+          />
+          <ConnectionSection
+            name={name}
+            locked={activeJob != null || status.data?.status === 'running'}
+            assessAt={assessAt}
+          />
+        </>
       )}
 
       {ledger.data && (
@@ -763,6 +783,372 @@ function SnapshotTable({ rows, name, bundles }: { rows: RankedSnapshot[]; name: 
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+
+// ── Connection capacity (increment 9) ─────────────────────────────────────
+
+/** What stopped the capacity, in words an engineer acts on. A limit set by a
+ *  constraint that was ALREADY violated says so: that figure is the worsening
+ *  tolerance, not headroom, and read as "13.8 MW available" it would mislead. */
+function bindingText(r: CapacityRow): string {
+  const base = bindingBase(r)
+  if (!r.binding_preexisting) return base
+  const what = r.binding_kind.startsWith('thermal') ? 'overloaded' : 'outside limits'
+  return `${base} — already ${what} before connection`
+}
+
+function bindingBase(r: CapacityRow): string {
+  const after = r.binding_contingency ? ` after losing ${r.binding_contingency}` : ''
+  switch (r.binding_kind) {
+    case 'thermal_intact': case 'thermal_n1': return `overload of ${r.binding_element}${after}`
+    case 'v_low_intact': case 'v_low_n1': return `low voltage at ${r.binding_element}${after}`
+    case 'v_high_intact': case 'v_high_n1': return `high voltage at ${r.binding_element}${after}`
+    case 'n1_divergence': return `no load-flow solution${after}`
+    case 'ac_divergence': return 'no load-flow solution'
+    case 'none_up_to_cap': return 'nothing binds up to the cap'
+    default: return r.binding_kind
+  }
+}
+
+function capacityText(r: CapacityRow): string {
+  const capped = r.binding_kind === 'none_up_to_cap'
+  const v = r.method === 'ac' ? r.capacity_mw : r.dc_estimate_mw
+  if (v == null) return '—'
+  if (capped) return `≥ ${fmt(v)} MW`
+  return r.method === 'ac' ? `${fmt(v)} MW` : `≈ ${fmt(v)} MW`
+}
+
+function CapacitySection({ name, locked, onAssess }: { name: string; locked: boolean; onAssess: (bus: string) => void }) {
+  const qc = useQueryClient()
+  const [kind, setKind] = useState<CapacityKind>('load')
+  const [hour, setHour] = useState<number | null>(null)
+  const table = useQuery({
+    queryKey: CAPACITY_KEY(name),
+    queryFn: () => gridspineApi.capacity(name),
+    retry: false,
+  })
+  const compute = useMutation({
+    mutationFn: (bus: string) => gridspineApi.computeCapacity(name, bus, kind),
+    onSuccess: async (_r, bus) => {
+      await qc.invalidateQueries({ queryKey: CAPACITY_KEY(name) })
+      toast.success(`AC capacity at ${bus} (${kind}) computed for every selected hour`)
+    },
+    onError: (e) => toast.error(`Could not compute capacity: ${errorText(e)}`),
+  })
+
+  const hours = table.data?.hours ?? []
+  const shownHour = hour ?? hours[0]
+  const rows = (table.data?.rows ?? [])
+    .filter(r => r.hour === shownHour && r.kind === kind)
+    .sort((a, b) => a.bus.localeCompare(b.bus))
+
+  return (
+    <div data-testid="capacity-section">
+      <PageSection
+        title="Connection capacity"
+        hint="MW that can connect at each bus with no new or worsened violation, intact and under N-1"
+      >
+        {table.isError ? (
+          <p className="text-[12px] text-muted">{errorText(table.error)}</p>
+        ) : !table.data ? (
+          <p className="text-[12px] text-muted">Loading…</p>
+        ) : (
+          <>
+            <div className="flex items-center gap-3 mb-2 text-[12px]">
+              <label className="flex items-center gap-1">
+                Hour
+                <select
+                  aria-label="Capacity hour"
+                  className="bg-transparent border border-border rounded px-1"
+                  value={shownHour ?? ''}
+                  onChange={e => setHour(Number(e.target.value))}
+                >
+                  {hours.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </label>
+              <label className="flex items-center gap-1">
+                Connecting
+                <select
+                  aria-label="Connection kind"
+                  className="bg-transparent border border-border rounded px-1"
+                  value={kind}
+                  onChange={e => setKind(e.target.value as CapacityKind)}
+                >
+                  <option value="load">load (pf 0.98)</option>
+                  <option value="generation">generation</option>
+                </select>
+              </label>
+              <span className="text-[11px] text-muted">
+                ≈ DC estimate · AC is exact to 1 MW · balanced pro-rata over committed units
+              </span>
+            </div>
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="text-left text-muted">
+                  <th className="font-normal pr-3 whitespace-nowrap">Bus</th>
+                  <th className="font-normal pr-3 whitespace-nowrap">Capacity</th>
+                  <th className="font-normal pr-3 whitespace-nowrap">Method</th>
+                  <th className="font-normal">Binds on</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r => {
+                  const busy = compute.isPending && compute.variables === r.bus
+                  return (
+                    <tr key={r.bus} data-testid={`capacity-row-${r.bus}`} className="border-t border-border">
+                      <td className="py-1 pr-3 whitespace-nowrap align-top">{r.bus}</td>
+                      <td className="pr-3 whitespace-nowrap align-top tabular-nums">{capacityText(r)}</td>
+                      <td className="pr-3 whitespace-nowrap align-top">
+                        <Tag tone={r.method === 'ac' ? 'ok' : 'neutral'}>{r.method === 'ac' ? 'AC' : 'DC est.'}</Tag>
+                      </td>
+                      <td className="text-muted align-top">{bindingText(r)}</td>
+                      <td className="text-right whitespace-nowrap align-top pl-2">
+                        <Btn
+                          onClick={() => compute.mutate(r.bus)}
+                          disabled={locked || compute.isPending}
+                          aria-label={`Compute AC capacity at ${r.bus}`}
+                          title={locked ? 'A study for this project is queued or running' : 'Exact AC capacity at every selected hour (a few seconds)'}
+                        >
+                          {busy ? 'Computing…' : 'Compute AC'}
+                        </Btn>
+                        <Btn
+                          onClick={() => onAssess(r.bus)}
+                          aria-label={`Assess a facility at ${r.bus}`}
+                          title="Assess a facility at this bus against the grid code"
+                        >
+                          Assess
+                        </Btn>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </>
+        )}
+      </PageSection>
+    </div>
+  )
+}
+
+
+// ── Connection-point assessment (increment 10) ────────────────────────────
+
+const CHECK_LABEL: Record<ConnectionCheck, string> = {
+  connection: 'Connection (intact + N-1)',
+  energisation: 'Energisation step',
+  load_trip: 'Load trip (on-site unit stays)',
+  facility_trip: 'Whole-facility trip',
+  q_lead: 'Reactive range — injecting',
+  q_lag: 'Reactive range — absorbing',
+  scr_onsite: 'SCR, on-site converter',
+  scr_load: 'SCR, load',
+}
+const CHECK_ORDER = Object.keys(CHECK_LABEL) as ConnectionCheck[]
+
+const STATUS_TONE: Record<ConnectionRow['status'], 'ok' | 'err' | 'neutral'> = {
+  pass: 'ok', fail: 'err', reported: 'neutral',
+}
+
+function checkValueText(r: ConnectionRow): string {
+  if (r.value == null || !isFinite(r.value)) return '—'
+  switch (r.unit) {
+    case '%': return `${r.value >= 0 ? '+' : ''}${r.value.toFixed(2)} %`
+    case 'pu': return `${r.value.toFixed(3)} pu`
+    case 'violations': return r.value === 1 ? '1 violation' : `${r.value} violations`
+    default: return fmt(r.value)
+  }
+}
+
+/** The threshold the value was held to: a voltage step is a magnitude cap,
+ *  the injecting end of the reactive range is held under v_max and the
+ *  absorbing end over v_min. */
+function checkLimitText(r: ConnectionRow): string {
+  if (r.limit == null || !isFinite(r.limit)) return ''
+  if (r.unit === '%') return `≤ ${r.limit} %`
+  if (r.check === 'q_lag') return `≥ ${r.limit} pu`
+  return `≤ ${r.limit} pu`
+}
+
+function numberOr(v: string): number {
+  const n = Number(v)
+  return v.trim() === '' || !isFinite(n) ? NaN : n
+}
+
+function ConnectionSection({ name, locked, assessAt }: {
+  name: string
+  locked: boolean
+  assessAt: { bus: string; nonce: number } | null
+}) {
+  const qc = useQueryClient()
+  const ref = useRef<HTMLDivElement>(null)
+  const [bus, setBus] = useState('')
+  const [loadMw, setLoadMw] = useState('')
+  const [pf, setPf] = useState('0.98')
+  const [onsiteMw, setOnsiteMw] = useState('0')
+  const [converter, setConverter] = useState(true)
+  const [refusal, setRefusal] = useState<string | null>(null)
+  const [shown, setShown] = useState<string | null>(null)
+  const [hour, setHour] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!assessAt) return
+    setBus(assessAt.bus)
+    ref.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+  }, [assessAt])
+
+  const stored = useQuery({
+    queryKey: CONNECTION_KEY(name),
+    queryFn: () => gridspineApi.connection(name),
+    retry: false,
+  })
+  const assess = useMutation({
+    mutationFn: () => gridspineApi.assessConnection(name, {
+      bus: bus.trim(), load_mw: numberOr(loadMw), load_pf: numberOr(pf),
+      onsite_mw: numberOr(onsiteMw), onsite_converter: converter,
+    }),
+    onMutate: () => setRefusal(null),
+    onSuccess: async (r) => {
+      setShown(r.assessment_id)
+      setHour(null)
+      await qc.invalidateQueries({ queryKey: CONNECTION_KEY(name) })
+    },
+    onError: (e) => setRefusal(errorText(e)),
+  })
+
+  // Stored rows are the record; the mutation's own answer bridges the moment
+  // before the refetch lands.
+  const all = useMemo(() => {
+    const rows = stored.data?.rows ?? []
+    const fresh = assess.data
+    if (fresh && !rows.some(r => r.assessment_id === fresh.assessment_id)) return [...rows, ...fresh.rows]
+    return rows
+  }, [stored.data, assess.data])
+  const ids = [...new Set(all.map(r => r.assessment_id))]
+  const current = shown != null && ids.includes(shown) ? shown : ids[ids.length - 1]
+  const ofCurrent = all.filter(r => r.assessment_id === current)
+  const hours = [...new Set(ofCurrent.map(r => r.hour))].sort((a, b) => a - b)
+  const shownHour = hour != null && hours.includes(hour) ? hour : hours[0]
+  const rows = ofCurrent
+    .filter(r => r.hour === shownHour)
+    .sort((a, b) => CHECK_ORDER.indexOf(a.check) - CHECK_ORDER.indexOf(b.check))
+  const facilityText = (r: ConnectionRow) =>
+    `${r.bus}: ${fmt(r.load_mw)} MW load` + (r.onsite_mw > 0 ? ` + ${fmt(r.onsite_mw)} MW on-site` : '')
+
+  const ready = bus.trim() !== '' && isFinite(numberOr(loadMw)) && isFinite(numberOr(pf)) && isFinite(numberOr(onsiteMw))
+
+  return (
+    <div data-testid="connection-section" ref={ref}>
+      <PageSection
+        title="Connection-point assessment"
+        hint="A load plus on-site unit, against EU RfG/DCC (Continental Europe)"
+      >
+        <p className="text-[11.5px] text-muted mb-2">
+          A steady-state screen for the connection engineer, not a compliance certificate: fault
+          ride-through and dynamic support need the RMS/EMT study the handoff bundle is for.
+        </p>
+        <div className="flex flex-wrap items-end gap-3 mb-2">
+          <Field label="Facility bus">
+            <input className={`${INPUT} w-[110px] font-mono`} value={bus} onChange={e => setBus(e.target.value)} />
+          </Field>
+          <Field label="Load (MW)">
+            <input className={`${INPUT} w-[90px]`} inputMode="decimal" value={loadMw} onChange={e => setLoadMw(e.target.value)} />
+          </Field>
+          <Field label="Power factor">
+            <input className={`${INPUT} w-[70px]`} inputMode="decimal" value={pf} onChange={e => setPf(e.target.value)} />
+          </Field>
+          <Field label="On-site unit (MW)">
+            <input className={`${INPUT} w-[90px]`} inputMode="decimal" value={onsiteMw} onChange={e => setOnsiteMw(e.target.value)} />
+          </Field>
+          <Field label="Converter-interfaced" row>
+            <input type="checkbox" checked={converter} onChange={e => setConverter(e.target.checked)} />
+          </Field>
+          <Btn
+            variant="primary"
+            onClick={() => assess.mutate()}
+            disabled={locked || !ready || assess.isPending}
+            title={locked ? 'A study for this project is queued or running' : 'Every check at every selected hour (a few seconds per hour)'}
+          >
+            {assess.isPending ? 'Assessing…' : 'Assess'}
+          </Btn>
+        </div>
+        {refusal && <p className="text-[12px] text-danger mb-2">{refusal}</p>}
+
+        {stored.isError && !assess.data ? (
+          <p className="text-[12px] text-muted">{errorText(stored.error)}</p>
+        ) : rows.length === 0 ? (
+          <p className="text-[12px] text-muted">No facility assessed yet.</p>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-3 mb-2 text-[12px]">
+              {ids.length > 1 ? (
+                <label className="flex items-center gap-1">
+                  Facility
+                  <select
+                    aria-label="Assessed facility"
+                    className="bg-transparent border border-border rounded px-1"
+                    value={current}
+                    onChange={e => { setShown(e.target.value); setHour(null) }}
+                  >
+                    {ids.map(id => {
+                      const r = all.find(x => x.assessment_id === id)!
+                      return <option key={id} value={id}>{facilityText(r)}</option>
+                    })}
+                  </select>
+                </label>
+              ) : (
+                <span>{facilityText(ofCurrent[0])}</span>
+              )}
+              <label className="flex items-center gap-1">
+                Hour
+                <select
+                  aria-label="Assessment hour"
+                  className="bg-transparent border border-border rounded px-1"
+                  value={shownHour ?? ''}
+                  onChange={e => setHour(Number(e.target.value))}
+                >
+                  {hours.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </label>
+              <span className="text-[11px] text-muted">
+                no re-dispatch on a step or trip · SCR is reported, not gated
+              </span>
+            </div>
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="text-left text-muted">
+                  <th className="font-normal pr-3 whitespace-nowrap">Check</th>
+                  <th className="font-normal pr-3 whitespace-nowrap">Result</th>
+                  <th className="font-normal pr-3 whitespace-nowrap">Value</th>
+                  <th className="font-normal pr-3 whitespace-nowrap">Limit</th>
+                  <th className="font-normal">Detail · rule</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.check} data-testid={`connection-check-${r.check}`} className="border-t border-border">
+                    <td className="py-1 pr-3 whitespace-nowrap align-top">{CHECK_LABEL[r.check] ?? r.check}</td>
+                    <td className="pr-3 whitespace-nowrap align-top"><Tag tone={STATUS_TONE[r.status]}>{r.status}</Tag></td>
+                    <td className="pr-3 whitespace-nowrap align-top tabular-nums">{checkValueText(r)}</td>
+                    <td className="pr-3 whitespace-nowrap align-top tabular-nums text-muted">{checkLimitText(r)}</td>
+                    <td className="align-top">
+                      <div>{r.detail ?? ''}</div>
+                      <div className="text-[11px] text-muted flex items-start gap-1.5 mt-0.5">
+                        <Tag tone={r.source === 'code' ? 'accent' : 'warn'}>{r.source}</Tag>
+                        <span>{r.clause}</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+      </PageSection>
     </div>
   )
 }

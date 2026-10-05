@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:auth-gate": "vitest run vite.auth-gate.test.ts && node scripts/smoke-auth-gate.mjs"
+    "test:auth-gate": "vitest run vite.auth-gate.test.ts && node scripts/smoke-auth-gate.mjs",
+    "smoke:reports": "node scripts/smoke-reports.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.80.5",
@@ -18,6 +19,7 @@
     "@vitejs/plugin-react": "^4.7.0",
     "@xyflow/react": "^12.6.4",
     "axios": "^1.9.0",
+    "docx-preview": "0.4.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.511.0",
     "react": "^19.1.0",

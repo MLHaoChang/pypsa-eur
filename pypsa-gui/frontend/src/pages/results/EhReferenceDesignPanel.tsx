@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CompletenessChips, statusTone as sharedStatusTone } from '../../components/CompletenessChips'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Hexagon, Square } from 'lucide-react'
+import { FileText, Hexagon, Square } from 'lucide-react'
 import {
   resultsApi,
   type EhArchetype,
@@ -910,6 +910,7 @@ export function ehStudyQueryKeys(project: string | null) {
 
 export function EhReferenceDesignPanel() {
   const currentProject = useUIStore(s => s.currentProject)
+  const setSlidePanel = useUIStore(s => s.setSlidePanel)
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [archetype, setArchetype] = useState<EhArchetype>('strong_grid')
@@ -1425,6 +1426,18 @@ export function EhReferenceDesignPanel() {
                 {study.error}
               </span>
             )}
+            {/* WP7a: the study's report lives in the Reports panel (the
+                evidence-only report reads this reference design). Top-right
+                of the action row, beside the CSV exports below. */}
+            <button
+              type="button"
+              onClick={() => setSlidePanel('reports')}
+              data-testid="eh-open-reports"
+              title="Open the Reports panel — write a report from this reference design and export it to Word"
+              className="ml-auto inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent"
+            >
+              <FileText size={10} /> Reports
+            </button>
           </div>
 
           {!study && !report && !hasAnyTable && (

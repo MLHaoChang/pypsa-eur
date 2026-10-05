@@ -109,6 +109,10 @@ for dist in ("pypsa", "linopy", "xarray", "fastapi", "uvicorn", "starlette",
 # xarray and pypsa both resolve backends through entry points at first use.
 datas += collect_data_files("xarray", includes=["**/*.yaml", "**/*.yml"])
 datas += collect_data_files("pypsa", includes=["**/*.csv", "**/*.yaml"])
+# python-docx opens its bundled `templates/default.docx` (and the part
+# templates beside it) on every `Document()`; the report writer
+# (`services/reports/`) does that for the built-in report template.
+datas += collect_data_files("docx", includes=["templates/*"])
 
 # ── the planning → dynamics pipeline (gridspine; increment 6) ───────────────
 #
@@ -174,6 +178,10 @@ hiddenimports = [
     # from the bundle without a build error.
     "cloudpickle",
     "gridspine.drivers.study", "gridspine.drivers.status",
+    # `gridspine_service` imports `check_external` from it inside the gridspine
+    # guard; the packaging test derives the guarded imports and this was the
+    # one it named (red on master since #58).
+    "gridspine.drivers.year_study",
     # `drivers.readback` reached that guard with the PowerFactory read-back
     # (increment 6) and never reached this list. Analysis follows a try/except
     # import today, so this is not a fix for a broken build — it is the rule
@@ -181,6 +189,8 @@ hiddenimports = [
     # by `test_the_spec_names_every_gridspine_module_the_backend_guard_imports`,
     # which derives the list from the guard instead of trusting this one.
     "gridspine.drivers.readback",
+    "gridspine.drivers.capacity",
+    "gridspine.drivers.connection",
     # `drivers.year_study` (check_external, increment 7) reached the guard on
     # master and missed this list; the guard test caught it at the merge.
     "gridspine.drivers.year_study",

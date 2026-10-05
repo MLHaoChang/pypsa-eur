@@ -37,6 +37,7 @@ from gridspine.schema.contingency import (
     validate_contingency_results,
     validate_fault_levels,
 )
+from gridspine.schema.capacity import validate_capacity
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.dispatch import validate_dispatch, validate_loads
 from gridspine.static.contingency_set import EXT_GRID_EXCLUSION_LEDGER
@@ -232,6 +233,7 @@ class BundleInputs:
     case_name: str = "case39"
     screening: pd.DataFrame = None
     fault_levels: pd.DataFrame = None
+    capacity: pd.DataFrame = None     # increment 9: this hour's connection-capacity rows
 
 
 def export_bundle(outdir, inp: BundleInputs) -> Path:
@@ -280,6 +282,15 @@ def export_bundle(outdir, inp: BundleInputs) -> Path:
     if inp.fault_levels is not None:
         validate_fault_levels(inp.fault_levels).to_csv(bundle / "fault_levels.csv", index=False)
         files.append("fault_levels.csv")
+    if inp.capacity is not None:
+        cap = validate_capacity(inp.capacity)
+        if (cap["hour"] != hour).any():
+            raise ContractError(
+                f"capacity rows for hours {sorted(set(cap['hour']) - {hour})} handed to the "
+                f"bundle for hour {hour}"
+            )
+        cap.to_csv(bundle / "capacity.csv", index=False)
+        files.append("capacity.csv")
 
     files.append("manifest.json")
     (bundle / "manifest.json").write_text(json.dumps({

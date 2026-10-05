@@ -110,7 +110,11 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
 # because the source and destination ARE the same dir. The legacy bundle-file
 # loop already handles the small files; bundling dirs separately keeps it
 # robust to growth (e.g. agent_export PNGs accumulating in uploads/).
-_BUNDLE_DIRS = ("uploads",)
+# Study reports (`reports/<report_id>/{meta.json, v<N>.json, figures/}`,
+# services/reports/store.py) joined the tuple with the same semantics: always a
+# COPY on save-as, replaced wholesale on snapshot restore, walked recursively
+# into the bundle zip and extracted from it.
+_BUNDLE_DIRS = ("uploads", "reports")
 
 # Cap on the serialized blank-canvas layout document. Even a large network's
 # schematic is a few hundred KB of coordinates; 4 MB bounds a malformed or

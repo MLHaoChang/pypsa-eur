@@ -2271,7 +2271,12 @@ _ADEQUACY_GUIDE_CHAINING = (
     "answered. WRITING IT UP: a request for a report, a summary of findings "
     "or a client write-up goes through build_study_report. Carry every line "
     "of its required_disclosures, put its evidence_gaps BEFORE the numbers "
-    "they undermine, and state its not_established explicitly."
+    "they undermine, and state its not_established explicitly. When the user "
+    "asks for a client REPORT or a DOCUMENT (Word, a file to send), start "
+    "generate_report instead and poll get_report_status; build_study_report "
+    "remains the in-chat summary, and get_report is how you read a "
+    "generated report — never re-type its numbers as new findings, and relay "
+    "its audit.unverified entries as numbers to check."
 )
 _ADEQUACY_GUIDE = _ADEQUACY_GUIDE_FACTS + _ADEQUACY_GUIDE_CHAINING
 
