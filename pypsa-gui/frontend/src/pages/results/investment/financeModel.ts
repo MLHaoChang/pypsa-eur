@@ -153,6 +153,18 @@ interface HeadlineSpec {
   top?: string; section?: string; keys?: string[]
   /** Shown only when the report carries the key at all. */
   optional?: boolean
+  /** Shown only when the report has storage (an LCOS block with assets). */
+  storage?: boolean
+}
+
+/** The storage LCOS block of the project payload (owner decision 6), or null. */
+function lcosBlock(payload: Obj): Obj | null {
+  return isObj(payload.lcos) ? payload.lcos : null
+}
+
+function hasStorage(payload: Obj): boolean {
+  const b = lcosBlock(payload)
+  return !!b && isObj(b.assets) && Object.keys(b.assets).length > 0
 }
 
 const HEADLINES: HeadlineSpec[] = [
@@ -180,6 +192,10 @@ const HEADLINES: HeadlineSpec[] = [
     top: 'lcoe_finance_consistent_eur_per_mwh', section: 'project', keys: ['lcoe_nominal_per_mwh'] },
   { id: 'lcoe_real', label: 'LCOE (real)', kind: 'price', section: 'project',
     keys: ['lcoe_real_per_mwh'], optional: true },
+  { id: 'lcos', label: 'Storage LCOS (charging included, nominal)', kind: 'price', section: 'project',
+    keys: ['lcos_nominal_per_mwh'], storage: true },
+  { id: 'lcos_real', label: 'Storage LCOS (real)', kind: 'price', section: 'project',
+    keys: ['lcos_real_per_mwh'], storage: true },
   { id: 'ppa_price', label: 'Solved PPA price for the target IRR', kind: 'price',
     top: 'ppa_price_for_target_irr_eur_per_mwh', section: 'project', keys: ['solved_ppa_price'] },
 ]
@@ -192,6 +208,7 @@ export function headlines(report: InvestmentCaseReportPayload): Headline[] {
     const hasTop = !!h.top && h.top in top
     const key = (h.keys ?? []).find(k => k in payload)
     if (h.optional && !hasTop && !key) continue
+    if (h.storage && !hasStorage(payload)) continue
     // The report's own headline wins, a null one included (it is not
     // established — a section number never overrides it); the section payload
     // fills only a headline the export view does not carry.
@@ -202,11 +219,24 @@ export function headlines(report: InvestmentCaseReportPayload): Headline[] {
       const sec = h.section ? sectionOf(report, h.section) : null
       note = (isObj(raw) && typeof raw.reason === 'string' ? raw.reason : null)
         ?? (h.id === 'ppa_price' && typeof payload.solve_ppa_status === 'string' ? payload.solve_ppa_status : null)
+        ?? (h.storage ? lcosReason(payload) : null)
         ?? (sec && sec.status !== 'ok' ? sec.note ?? `the ${h.section} section is ${sec.status.replace(/_/g, ' ')}` : null)
     }
     out.push({ id: h.id, label: h.label, kind: h.kind, value, note })
   }
   return out
+}
+
+function lcosReason(payload: Obj): string | null {
+  const reasons = lcosBlock(payload)?.reasons
+  return Array.isArray(reasons) && reasons.length ? reasons.map(String).join('; ') : null
+}
+
+/** The price basis in words ("real basis, 2020 EUR"; GS Q6), or null when
+ *  the report states none. */
+export function basisStatement(report: InvestmentCaseReportPayload): string | null {
+  const v = payloadOf(report, 'project').basis_statement
+  return typeof v === 'string' && v ? v : null
 }
 
 /** The keys the headline row already shows, so a section's detail omits them. */

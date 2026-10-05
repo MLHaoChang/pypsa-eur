@@ -1043,6 +1043,10 @@ export interface TerminalValueRule {
 
 export interface FinanceInputs {
   currency?: string
+  /** The money year of the typed costs and rates; null = not stated (GS Q6). */
+  currency_year?: number | null
+  /** Nominal (escalated, the default) or real (constant money of `currency_year`). */
+  price_basis?: 'nominal' | 'real'
   financial_close: string
   cod_by_asset?: Record<string, string>
   construction_months_by_asset?: Record<string, number>

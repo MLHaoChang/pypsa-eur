@@ -1,7 +1,7 @@
 // The finance form and report mappings (IC P4 WP4.7a/b), without a DOM.
 import { describe, expect, it } from 'vitest'
 import {
-  cashflowPivot, cashTotals, counterfactualStatement, errorKey, errorsFor, established, financeErrors, fmtCell,
+  basisStatement, cashflowPivot, cashTotals, counterfactualStatement, errorKey, errorsFor, established, financeErrors, fmtCell,
   fmtHeadline, headlines, numOrNull, parseRateOrList, perYearLists, progressFraction, progressText,
   rateOrListText, studyFailure, studyProgress, studyStale, toTable, waccGate, withKey,
 } from './financeModel'
@@ -84,6 +84,25 @@ describe('the report', () => {
     expect(rows.find(h => h.id === 'equity_irr_post_tax')!.value).toBe(0.1)
     // lcoe_real is shown only when the report carries it.
     expect(rows.some(h => h.id === 'lcoe_real')).toBe(false)
+  })
+
+  it('the storage LCOS shows only with storage, a null one with its reason', () => {
+    const none = headlines({ sections: { project: { status: 'ok', payload: {
+      lcos_nominal_per_mwh: null, lcos: { assets: {}, reasons: ['no_storage'] } } } } })
+    expect(none.some(h => h.id.startsWith('lcos'))).toBe(false)
+    const rows = headlines({ sections: { project: { status: 'ok', payload: {
+      lcos_nominal_per_mwh: 136.39, lcos_real_per_mwh: null,
+      lcos: { assets: { bess: {} }, reasons: ['wacc_nominal_missing'] } } } } })
+    expect(rows.find(h => h.id === 'lcos')!.value).toBe(136.39)
+    const real = rows.find(h => h.id === 'lcos_real')!
+    expect(real.value).toBeNull()
+    expect(real.note).toBe('wacc_nominal_missing')
+  })
+
+  it('states the price basis in words, or null', () => {
+    expect(basisStatement({ sections: { project: { status: 'ok', payload: {
+      basis_statement: 'real basis, 2020 EUR' } } } })).toBe('real basis, 2020 EUR')
+    expect(basisStatement({})).toBeNull()
   })
 
   it('a headline of a not-established section carries its reason', () => {

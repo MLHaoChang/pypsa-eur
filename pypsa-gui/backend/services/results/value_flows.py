@@ -190,6 +190,17 @@ def _export_revenue(n, parsed) -> tuple[dict[str, float | None], dict | None]:
     return out, intervals
 
 
+def export_revenue(n, commercial) -> dict[str, float | None]:
+    """The export-price revenue per period key ("_" on a flat axis, "YYYY"
+    per investment period): Σ w · p0(export_link) · `links_t["ic_export_price"]`,
+    unweighted by the period's years — the ledger's `export_price` line.
+    Public (GS Q4, the engine facade). `{}` when the config prices no export
+    (no export Link or no `export_price_ref`: the caller reads 0); a period
+    whose price column or flow is missing is None, never 0 (ADR-0001).
+    `commercial` is a `CommercialConfig` or its dict."""
+    return _export_revenue(n, _lp._parse(commercial))[0]
+
+
 def _export_split(n, parsed, sides, bill, export_intervals, flags: list[str]) -> dict | None:
     """Per period and source, the export revenue split pro rata to each site-side
     generator's ELECTRIC output per interval (key (component, name)); intervals

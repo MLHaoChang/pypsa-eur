@@ -26,7 +26,12 @@ What it builds:
   charge, a ratchet: billed once per month present), scaled by 12 / the
   months present (`template_annualised_monthly:<item>:<factor>`), or None
   when its periods are restricted to some months
-  (`annualise_monthly_item_not_established:<item>`). A leap weight-majority
+  (`annualise_monthly_item_not_established:<item>`). A template that
+  represents a year (factor 1: a week weighted to 8,760 h) but bills fewer
+  than 12 months makes every monthly item's line None on both sides
+  (`monthly_item_months_missing:<item>:<months present>`; the operating cash
+  is then not established), or with `annualise` scales it by 12 / the months
+  present as above (U1 follow-up g, owner rule). A leap weight-majority
   year's 8,784-h template repeats every operating year (+0.27 % in common
   years; stated).
 * **The templates (C3, P3 WP3.1 mapping)** — one per period (`first_year` =
@@ -89,7 +94,17 @@ What it builds:
   negative S is flagged `degradation_bill_value_negative:<period>`.
 * **Assets (C6)** — `overnight_cost` = the TYPED `overnight_cost` column ×
   the optimised capacity, None when not typed (never back-calculated from the
-  annuitised `capital_cost`).
+  annuitised `capital_cost`). The owner's PoC meter Links (import members,
+  export Link) with no typed `overnight_cost` are not investments — no
+  capex, no COD, no LP rate in the gate — flagged
+  `meter_link_not_investment:<name>` (GS Q5: `single_owner` assigns them to
+  the site party); a typed meter Link stays an asset.
+* **Storage (the LCOS, owner decision 6)** — per owner storage asset on a
+  site electric bus, `Template.storage[a]` = a `StorageYear`: the year's
+  discharge and charge and the charging cost at what the site actually paid
+  in the dispatch (`_storage_years`: the grid share of each interval's charge
+  at the committed import price + the supply's price; the on-site-surplus
+  share at the export revenue forgone), scaled by the annualise factor.
 * **Dates, LP basis, hash** — `base_year` the modelled / first period year;
   COD from `fin.cod_by_asset` (every owner asset, one date); `LpBasis` from the
   config and the assets' own `discount_rate`; `finance_case_hash`.
@@ -123,7 +138,7 @@ from services.commercial import participants as P
 from services.commercial.lp_bindings import same_party
 from services.finance.case import (
     CONTRACT_CLASS, DEGRADATION_SOURCE, AssetFinance, FinanceCase, FinanceRefused, LpBasis,
-    Template, TemplateLine,
+    StorageYear, Template, TemplateLine,
 )
 from services.finance.cashflow import esc_class_for
 
@@ -1009,8 +1024,9 @@ def _scale(lines, f: float, monthly: dict[str, float | None] | None = None
            ) -> tuple[TemplateLine, ...]:
     """Annualise (C3): every line × f, except a monthly-billed item's lines
     (`monthly`: item → 12 / the months present, or None when that cannot be
-    stated) — review B5."""
-    if f == 1.0:
+    stated) — review B5. Also on a template that represents a year (f == 1)
+    with fewer than 12 billing months (U1 follow-up g)."""
+    if f == 1.0 and not monthly:
         return tuple(lines)
     monthly = monthly or {}
     out = []
@@ -1019,6 +1035,207 @@ def _scale(lines, f: float, monthly: dict[str, float | None] | None = None
         amount = None if (ln.amount is None or fx is None) else ln.amount * fx
         out.append(dataclasses.replace(ln, amount=amount))
     return tuple(out)
+
+
+# ── meter Links (GS Q5) ──────────────────────────────────────────────────────
+
+def _uncosted_meter_links(n, parsed, owned_list) -> list[str]:
+    """The owner's PoC meter Links (the import members and the export Link)
+    with no typed `overnight_cost`: under `single_owner` they are the owner's
+    (who carries the connection is a commercial fact), but they are not part
+    of the investment — their money is the connection lines. A meter Link
+    with a typed cost (a new connection built in the case) stays an asset."""
+    meter = set(_lp.import_links(parsed)) | ({parsed.export_link} if parsed.export_link
+                                             else set())
+    out = []
+    for comp, name in owned_list:
+        if comp != "Link" or name not in meter or name not in n.links.index:
+            continue
+        typed = _fin(n.links.at[name, "overnight_cost"]) if "overnight_cost" in n.links.columns \
+            else None
+        if typed is None:
+            out.append(name)
+    return sorted(out)
+
+
+# ── storage throughput and charging cost (the LCOS; owner decision 6) ──────────
+
+_STORAGE_FRAMES = {"StorageUnit": ("storage_units", "storage_units_t"),
+                   "Store": ("stores", "stores_t")}
+
+
+def _frame_col(n, result_df, frame_t: str, attr: str, name: str) -> np.ndarray | None:
+    df = result_df(n, frame_t, attr) if result_df is not None else None
+    if df is None:
+        df = getattr(getattr(n, frame_t), attr, None)
+    if df is None or name not in getattr(df, "columns", []):
+        return None
+    out = df[name].reindex(n.snapshots).to_numpy(dtype=float)
+    return None if np.isnan(out).any() else out
+
+
+def _charge_discharge(n, result_df, comp: str, name: str
+                      ) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """(charge MW ≥ 0, discharge MW ≥ 0) at the asset's bus per snapshot: a
+    StorageUnit's `p_store` / `p_dispatch` (else its net `p` split by sign),
+    a Store's `p` split by sign; None when not solved."""
+    _frame, frame_t = _STORAGE_FRAMES[comp]
+    if comp == "StorageUnit":
+        ch = _frame_col(n, result_df, frame_t, "p_store", name)
+        di = _frame_col(n, result_df, frame_t, "p_dispatch", name)
+        if ch is not None and di is not None:
+            return np.clip(ch, 0.0, None), np.clip(di, 0.0, None)
+    p = _frame_col(n, result_df, frame_t, "p", name)
+    if p is None:
+        return None, None
+    return np.clip(-p, 0.0, None), np.clip(p, 0.0, None)
+
+
+def _committed_price(n, link: str | None, solved: dict) -> np.ndarray | None:
+    """The per-interval €/MWh the solve committed on a meter Link
+    (`links_t["ic_energy_price"]`): 0 for a Link the solve deliberately left
+    unpriced; None for a priced Link whose record is gone (as
+    `energy_cost_rows`)."""
+    prices = _lp._frame(n, _lp.ENERGY_PRICE_ATTR)
+    if link in prices.columns:
+        out = prices[link].reindex(n.snapshots).to_numpy(dtype=float)
+        return None if np.isnan(out).any() else out
+    if link in n.links.index and link not in (solved.get("priced") or []):
+        return np.zeros(len(n.snapshots))
+    return None
+
+
+def _storage_years(n, parsed, sides, owned_list, result_df, accs: dict[str, dict[str, _Acc]],
+                   flags: list[str]) -> dict[str, dict[str, StorageYear]]:
+    """Per period and owner storage asset on a site-side electric bus: the
+    year's discharge and charge and what the charged energy cost the site in
+    the dispatch (`StorageYear`).
+
+    Per interval the site's import I (Σ max(p0, 0) over the import members)
+    covers the charge of all site-side storage C first: the grid share
+    g = min(1, I / C). The grid part is priced at the interval's import price —
+    the flow-weighted committed tariff price on the members plus the grid
+    supply's price (the commodity the site pays; 0 with no priced supply) —
+    escalating as `tariff`. The rest of the charge came from on-site surplus
+    (PV): priced at the export revenue it would otherwise have earned (−the
+    committed net price on the export Link: export price − export tariff
+    items), escalating as `export`; with no export Link the surplus would have
+    been curtailed: 0, flagged. A price that is not per interval (convex
+    energy tiers, a group net-import term), not committed, or a supply price
+    that is not one series makes that part None, flagged
+    `lcos_charge_price_not_established:<part>:<asset>` (plan C12)."""
+    electric = _lp._electric_bus_test(n, parsed)
+    storage = []          # every site-side electric storage (owner or not)
+    for comp, (frame, _t) in _STORAGE_FRAMES.items():
+        df = getattr(n, frame)
+        for name in df.index:
+            bus = str(df.at[name, "bus"])
+            if bus in sides.site and electric(bus):
+                storage.append((comp, str(name)))
+    owner_storage = [(c, a) for c, a in owned_list if c in _STORAGE_FRAMES]
+    out: dict[str, dict[str, StorageYear]] = {_key(p): {} for p in _periods(n)}
+    if not owner_storage:
+        return out
+    for c, a in owner_storage:
+        if (c, a) not in storage:
+            flags.append(f"lcos_not_applicable:{a}")            # not on a site electric bus
+    flows = {sa: _charge_discharge(n, result_df, *sa) for sa in storage}
+    total_charge = np.zeros(len(n.snapshots))
+    charge_known = True
+    for (ch, _di) in flows.values():
+        if ch is None:
+            charge_known = False
+        else:
+            total_charge += ch
+    solved = n.meta.get(_lp.META_LINKS) or {}
+    p0 = n.links_t.p0
+    members = [m for m in _lp.import_links(parsed) if m in n.links.index]
+    imp = np.zeros(len(n.snapshots))
+    weighted = np.zeros(len(n.snapshots))
+    imp_reason = None
+    if not solved:
+        imp_reason = "import_not_committed"
+    elif n.meta.get(_lp.META_TIERS) or n.meta.get(_lp.META_GROUP_NET):
+        imp_reason = "import_not_per_interval"
+    for mlink in members:
+        if mlink not in p0.columns:
+            imp_reason = imp_reason or "import_not_solved"
+            continue
+        f_l = np.clip(p0[mlink].reindex(n.snapshots).to_numpy(dtype=float), 0.0, None)
+        price = _committed_price(n, mlink, solved)
+        if price is None:
+            imp_reason = imp_reason or "import_not_committed"
+            price = np.zeros(len(n.snapshots))
+        imp += f_l
+        weighted += f_l * price
+    import_price = np.divide(weighted, imp, out=np.zeros_like(imp), where=imp > 0)
+    supply, why = _supply(n, parsed, sides)
+    if supply and why is None:
+        g0 = supply[0]
+        import_price = import_price + _series(n, "generators_t", "marginal_cost", g0,
+                                              n.generators.at[g0, "marginal_cost"])
+    elif supply:
+        imp_reason = imp_reason or f"supply_price:{why}"
+    surplus_price: np.ndarray | None
+    if parsed.export_link is None or parsed.export_link not in n.links.index:
+        surplus_price = np.zeros(len(n.snapshots))
+        no_export = True
+    else:
+        no_export = False
+        net = _committed_price(n, parsed.export_link, solved) if solved else None
+        surplus_price = None if net is None else -net
+    share = np.divide(np.minimum(imp, total_charge), total_charge,
+                      out=np.zeros_like(total_charge), where=total_charge > 1e-12)
+    w_all = n.snapshot_weightings.objective.to_numpy(dtype=float)
+    for comp, name in owner_storage:
+        if (comp, name) not in storage:
+            continue
+        ch, di = flows[(comp, name)]
+        for p in _periods(n):
+            k = _key(p)
+            m = _mask(n, p)
+            om = tuple(sorted(key for key, acc in accs.get(k, {}).items()
+                              if acc.source == "asset" and acc.stream in ("fom", "vom")
+                              and _asset_of(acc) == (comp, name)))
+            if ch is None or di is None or not charge_known:
+                flags.append(f"lcos_dispatch_not_established:{name}")
+                out[k][name] = StorageYear(0.0, 0.0, None, None, om_keys=om)
+                continue
+            w = w_all[m]
+            grid = w * ch[m] * share[m]
+            sur = w * ch[m] * (1.0 - share[m])
+            imp_cost: float | None = float((grid * import_price[m]).sum())
+            if imp_reason is not None and grid.sum() > 1e-9:
+                imp_cost = None
+                flags.append(f"lcos_charge_price_not_established:import:{name}")
+                flags.append(f"lcos_charge_price_not_established:{imp_reason}")
+            sur_mwh = float(sur.sum())
+            if surplus_price is None:
+                sur_cost = None if sur_mwh > 1e-9 else 0.0
+                if sur_cost is None:
+                    flags.append(f"lcos_charge_price_not_established:surplus:{name}")
+            else:
+                sur_cost = float((sur * surplus_price[m]).sum())
+            if sur_mwh > 1e-9:
+                flags.append(("lcos_charge_from_surplus_unpriced:" if no_export else
+                              "lcos_charge_from_surplus_at_export_price:")
+                             + f"{name}:{_num(sur_mwh)}")
+            out[k][name] = StorageYear(
+                discharge_mwh=float((w * di[m]).sum()), charge_mwh=float((w * ch[m]).sum()),
+                charge_import_cost=imp_cost, charge_surplus_cost=sur_cost, om_keys=om)
+    return out
+
+
+def _scale_storage(years: dict[str, StorageYear], f: float, base_year: int
+                   ) -> dict[str, StorageYear]:
+    def x(v):
+        return None if v is None else v * f
+    return {a: dataclasses.replace(sy, discharge_mwh=sy.discharge_mwh * f,
+                                   charge_mwh=sy.charge_mwh * f,
+                                   charge_import_cost=x(sy.charge_import_cost),
+                                   charge_surplus_cost=x(sy.charge_surplus_cost),
+                                   money_year=base_year)
+            for a, sy in years.items()}
 
 
 # ── the entry point ──────────────────────────────────────────────────────────
@@ -1044,11 +1261,16 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
     owner_gens = {name for comp, name in owned_list if comp == "Generator"}
     periods = _periods(n)
     flags: list[str] = []
+    # GS Q5: the owner's uncosted meter Links are not investments (no capex,
+    # no COD), disclosed — never an `overnight_cost_missing` on the case.
+    meter_skip = _uncosted_meter_links(n, parsed, owned_list)
+    flags += [f"meter_link_not_investment:{m}" for m in meter_skip]
+    invest_list = [(c, a) for c, a in owned_list if not (c == "Link" and a in meter_skip)]
 
     # Staged builds are P5 (plan C2).
     if periods[0] is not None:
         first = periods[0]
-        for comp, name in owned_list:
+        for comp, name in invest_list:
             df = getattr(n, _frame_of(comp) or "", None)
             if df is not None and name in df.index and "build_year" in df.columns:
                 by = _fin(df.at[name, "build_year"])
@@ -1108,6 +1330,11 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                                                      actual, owned, contracts, lost_load,
                                                      base_year, flags)
 
+    # The storage LCOS's throughput and charging cost (owner decision 6).
+    storage_years = _storage_years(n, parsed, P.classify_buses(n, parsed), owned_list,
+                                   result_df, accs, flags) \
+        if any(c in _STORAGE_FRAMES for c, _a in owned_list) else {}
+
     # P3's blocking input flags make the money of every period unknown (P3:
     # "the blocking ones make every period None"; review B3).
     blocking = P._blocking(inputs.input_flags)
@@ -1141,10 +1368,17 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                 flags += ["degradation_bill_first_order", "degradation_bill_volume_items_only"]
         f = factors[k]
         monthly: dict[str, float | None] = {}
-        if f != 1.0 and monthly_items:
-            months = _months_present(n, parsed, _mask(n, p))
+        months = _months_present(n, parsed, _mask(n, p)) if monthly_items else 12
+        if monthly_items and (f != 1.0 or months < 12):
+            # A monthly item is billed for the months present only. A template
+            # that represents a year (f == 1, a week weighted to 8,760 h) with
+            # fewer than 12 billing months would book that month's charge as
+            # the year's: None unless `annualise` (U1 follow-up g, owner rule).
             for item, restricted in monthly_items.items():
-                if restricted or months <= 0:
+                if f == 1.0 and not fin.annualise:
+                    monthly[item] = None
+                    flags.append(f"monthly_item_months_missing:{item}:{months}")
+                elif restricted or months <= 0:
                     monthly[item] = None
                     flags.append(f"annualise_monthly_item_not_established:{item}")
                 else:
@@ -1152,7 +1386,8 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                     flags.append(f"template_annualised_monthly:{item}:{_num(12.0 / months)}")
         templates.append(Template(first_year=year, lines=_scale(lines, f, monthly),
                                   energy_mwh={g: e * f for g, e in gen.items() if e is not None},
-                                  money_year=year))
+                                  money_year=year,
+                                  storage=_scale_storage(storage_years.get(k, {}), f, base_year)))
         if k in cf_lines:
             counterfactual.append(Template(first_year=year,
                                            lines=_scale(cf_lines[k], f, monthly),
@@ -1164,12 +1399,12 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
         flags.append("ledger_conservation_not_established")
     flags += list(ledger.flags) + list(conservation.flags)
 
-    assets, rates = _assets(n, owned_list)
+    assets, rates = _assets(n, invest_list)
     lp = LpBasis(discount_rate=_fin(getattr(cfg, "discount_rate", None)),
                  inflation_rate=_fin(getattr(cfg, "inflation_rate", None)),
                  auto_discount_periods=bool(getattr(cfg, "auto_discount_periods", False)),
                  asset_discount_rates=rates)
-    return FinanceCase(inputs=fin, owner=owner, base_year=base_year, cod=_cod(fin, owned_list),
+    return FinanceCase(inputs=fin, owner=owner, base_year=base_year, cod=_cod(fin, invest_list),
                        templates=tuple(templates), assets=assets,
                        flags=tuple(dict.fromkeys(flags)),
                        counterfactual=tuple(counterfactual), lp_basis=lp,
