@@ -322,6 +322,20 @@ def test_tariff_ref_load_issue_unit():
     assert issue["reason"] == "inline_differs_from_ref" and issue["id"] == "t"
 
 
+def test_an_unreadable_inline_tariff_names_no_exception_text():
+    """The issue goes back in the open and import responses (CodeQL
+    py/stack-trace-exposure): a fixed message per class, the
+    `bundle_pins._unreadable` rule, never the validator's own text."""
+    from services.commercial.binding import tariff_ref_load_issue
+
+    ref = {"kind": "tariff", "id": "t", "version": 1, "hash": "x" * 64}
+    issue = tariff_ref_load_issue({"poc_link": "import", "import_tariff_ref": ref,
+                                   "import_tariff": {"items": "not a list"}})
+    assert issue["reason"] == "inline_unreadable" and "'t'" in issue["message"]
+    assert "validation error" not in issue["message"].lower()
+    assert "not a list" not in issue["message"] and "(" not in issue["message"]
+
+
 def test_the_load_path_rechecks_the_tariff_ref_hash(client, install_network, session_ctx):
     """A project whose saved inline tariff no longer hashes to its ref (edited
     on disk, or a bundle) is flagged on load; the frontend's `replacesInline`
