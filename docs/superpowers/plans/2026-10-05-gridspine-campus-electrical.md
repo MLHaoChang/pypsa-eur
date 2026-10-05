@@ -473,6 +473,32 @@ This closes part one's "voltages not re-checked": the *with measures* column is 
 - `campus_cost.csv`: the annualised electrical cost per period;
 - the compliance table, re-solved with the chosen assets.
 
+### C8 as built (2026-10-05)
+
+**The campus file** (`ingest/campus.py`).
+- An optional `compensation` list: `name`, `bus`, `kind` (`capacitor_bank`, `shunt_reactor`, `statcom`), a tagged `q_mvar`, `steps` for a bank, optional `library_id` and `pypsa_name`.
+  - A capacitor bank is a pandapower `shunt` with a **negative** `q_mvar` per step (pandapower's load convention, checked by solving), `max_step = steps`, starting at step 0.
+  - A reactor is a one-step positive shunt, also starting off.
+  - A STATCOM is a controllable `sgen` at 0 MW, ±`q_mvar`; for IEC 60909 a current source of 1.2× its rating (the drafted inverter figure, ledgered). Shunts feed no fault current.
+- `existing: true` and `library_id` on a transformer or cable; `parallel` runs on a cable.
+- A file without these builds as before.
+
+**The dispatch** (`static/campus_reactive.py`). Inverters, then STATCOMs (continuous), then the fewest bank or reactor steps that bring the PCC into the band (the closest count when none does); the continuous sources then back off onto the band edge, never past zero. What is still missing is part one's residual, or, with `residual=False`, nothing: the PCC is where the real equipment puts it. `solve_cases(setpoints=...)` holds the dispatch in every case, N-1 included; every case reports the cable loading.
+
+**The selector** (`static/campus_invest.py`, `select_assets`). The choices the plan left open:
+- **Needs.** Every transformer group; the reactive gap (with the sizing margin); every cable over 100 %; every bus over its switchgear rating **and every unrated bus with library switchgear at its voltage**. A cable or bus first failing in a re-check becomes a need then.
+- **Candidates.** Transformers: n = 1..3 units of one size; intact share and (n ≥ 2, N-1 on) the survivors' share within the rating with the margin; a redundant group stays n ≥ 2; existing adequate units are a zero-cost "keep". Reactive: at most one entry of each kind, 1..3 units each, in the five combinations of the brief (under 200 with the shipped library). Cables: 1..3 runs of one section carrying the worst current with the margin. Switchgear: every rating that passes `judge`, times the **bays**: each transformer unit and cable run at the bus, each unit and compensation entry there, and the grid at the PCC.
+- **Check → need.** Transformer loading over 100 % **or the sizing rule on the re-solved flow** → that group; cable loading → that cable; PCC reactive → the reactive need, to the next candidate that adds Mvar in the short direction; a voltage → the reactive need, but if that does not shrink the excursion the need is unresolved, naming the tap change (out of scope); switchgear → that bus. A re-solve that does not converge stops the loop as an unresolved "load flow".
+- **Stop.** All checks pass; a need runs out (the state with its last candidate is re-checked once more, so the report is an AC result); non-convergence; 25 iterations.
+- **Timing.** Transformers from the first period; a compensation item from the first period the final re-check dispatches it; a cable from the first period it is overloaded; switchgear from the first period its rating fails, or the first period if it had none. Costed while `invest <= period < invest + lifetime`; no replacement. Unresolved needs are priced but not summed.
+- Fault levels in the re-check energise every STATCOM in every period (conservative).
+
+**The driver.** `invest_campus(run_dir, library=None, ...)` needs a prepared and ranked run, recomputes part one with the same profile and power factor, and writes `campus_investment.csv`, `campus_cost.csv`, `campus_invested.yaml`, `campus_compliance_invested.csv`, `campus_invest_history.csv` and (added) `campus_invest_dispatch.csv`. `size_campus` is unchanged.
+
+**On the solved Data Center Energy Hub template** (one period, pf 0.95 agreement, shipped library): 1 × 63 MVA 132/33 kV, 3 × 25 MVA 33/11 kV (no 33/11 unit above 25 MVA in the library, and three keep N-1), switchgear 31.5 kA at 132 kV (2 bays), 25 kA at 33 kV (11 bays) and 11 kV (5 bays), no compensation: €6.89 M capex, €610 k a year. Every check with measures passes, re-solved; no escalation was needed.
+
+**Mutations.** 39 by hand across the campus file, the dispatch and the selector. 26 were caught at once; tests were added for 11 survivors (the trim back onto the edge, a saturated STATCOM, the intact margin, an existing pair short of the margin, the grid's bay, the sizing-rule escalation, the directional reactive escalation, the dispatch held in the re-solve, the reactive margin, the STATCOM's fault current), and all are caught now. Two are equivalent: `<` against `<=` on two equal non-zero step distances (an exact float tie), and the early break once the PCC is in the band (the scan cannot then find a better count).
+
 ### C9: panel
 
 - **The library editor.** It edits the per-project copy, starting from the shipped default, with a reset.

@@ -252,8 +252,11 @@ def test_a_need_that_runs_out_of_candidates_is_reported_unresolved_not_passed(tm
     """The PCC draws 17.3 Mvar against a 15 Mvar band (2.3 Mvar short). The
     only bank is one 30 Mvar step: its rating covers the gap, but switched in
     it overshoots the band by more than it was short, so the dispatch leaves
-    it off, and one, two or three of them all fail the AC re-check."""
-    lib = library(tmp_path, capacitor_banks=[comp("capacitor_banks", "CAP30", 30.0, 100e3)])
+    it off, and one, two or three of them all fail the AC re-check. A bank
+    plus a reactor (cheaper than two banks) adds no capacitive Mvar, so the
+    escalation passes over it."""
+    lib = library(tmp_path, capacitor_banks=[comp("capacitor_banks", "CAP30", 30.0, 100e3)],
+                  shunt_reactors=[comp("shunt_reactors", "SR5", 5.0, 50e3)])
     table, sel = dark_hours((2030, 25.0))
     out = select_assets(lowpf_spec(), table, sel, lib, ReactiveRequirement(15.0, "c", "code"), PROFILE)
     got = row(out, "reactive")
@@ -380,13 +383,16 @@ def test_an_existing_adequate_transformer_is_kept_at_zero_and_compensation_is_bo
     """Three periods. Every inverter is off, the load is at pf 0.85; the PCC
     draws 13.5 Mvar at 20 MW (2030, 2050) and 17.3 Mvar at 25 MW (2040),
     against a 15 Mvar band. A 3 Mvar bank is needed in 2040 only; with a
-    5-year life it is gone by 2050."""
+    5-year life it is gone by 2050. The 2.3 Mvar gap is 2.8 Mvar with the
+    20 % margin, so the cheaper 2.5 Mvar bank is not a candidate."""
     spec = lowpf_spec()
     lib = library(tmp_path, transformers=[tr("T63", 63.0, 1.0e6)],
-                  capacitor_banks=[comp("capacitor_banks", "CAP3", 3.0, 120e3, life=5)],
+                  capacitor_banks=[comp("capacitor_banks", "CAP2p5", 2.5, 100e3, life=5),
+                                   comp("capacitor_banks", "CAP3", 3.0, 120e3, life=5)],
                   statcoms=[comp("statcoms", "ST5", 5.0, 500e3)])
     table, sel = dark_hours((2030, 20.0), (2040, 25.0), (2050, 20.0))
     out = select_assets(spec, table, sel, lib, ReactiveRequirement(15.0, "c", "code"), PROFILE)
+    assert out["history"].empty
     kept = row(out, "transformer TR1+TR2")
     assert kept["status"] == "kept" and bool(kept["existing"]) and kept["annualised_eur_per_a"] == 0.0
     assert out["spec"]["campus"]["transformers"] == spec["campus"]["transformers"]
@@ -408,6 +414,10 @@ def test_an_existing_adequate_transformer_is_kept_at_zero_and_compensation_is_bo
     assert comp_.at["pcc_reactive", "status_as_is"] == "fail"
     assert comp_.at["pcc_reactive", "status_with_measures"] == "pass"
     assert abs(comp_.at["pcc_reactive", "value_with_measures"]) <= 15.0 + 0.011
+    # every case is solved with that dispatch in place: the flow's PCC Q is the dispatch's
+    pcc = out["pcc"].set_index(["period", "case"])
+    assert pcc.at[(2040, "intact"), "q_mvar"] == pytest.approx(comp_.at["pcc_reactive", "value_with_measures"], abs=1e-6)
+    assert pcc.at[(2040, "N-1:TR1"), "q_mvar"] < 15.0 + 1.0                    # the bank stays in under N-1
 
 
 def test_a_campus_without_needs_beyond_its_transformers_reports_reactive_as_not_needed(tmp_path):
@@ -437,3 +447,76 @@ def test_a_voltage_compensation_cannot_lift_is_unresolved_with_the_tap_change_na
     comp_ = out["compliance"].set_index("check")
     assert comp_.at["campus_voltage", "status_with_measures"] == "fail"
     assert comp_.at["campus_voltage", "value_with_measures"] < 0.9
+
+
+def test_existing_transformers_short_of_the_margin_are_replaced_not_kept(tmp_path):
+    """At 30 MW (pf 0.85) a survivor carries about 38.5 MVA (solved here):
+    within its 40 MVA, but not with the 20 % margin. The existing pair is
+    not offered, so the library pair is chosen without an escalation."""
+    hour = {"DC_LOAD": -30.0, "BESS1": 0.0, "PV1": 0.0, "GEN1": 0.0}
+    survivor = max(s_hv(solve_direct(hour, [(40.0, 12.0)] * 2, out=0, lv_kv=21.0, pf=0.85)))
+    assert survivor < 40.0 < survivor * 1.2
+    lib = library(tmp_path, transformers=[tr("T63", 63.0, 1.2e6)])
+    table, sel = dark_hours((2030, 30.0))
+    out = select_assets(lowpf_spec(), table, sel, lib, WIDE, PROFILE)
+    got = row(out, "transformer TR1+TR2")
+    assert (got["library_id"], got["units"], got["status"], bool(got["existing"])) == ("T63", 2, "chosen", False)
+    assert got["capex_eur"] == pytest.approx(2 * 1.2e6)
+    assert out["history"].empty
+
+
+def test_the_pcc_switchgear_counts_the_grid_connection_as_a_bay(tmp_path):
+    lib = library(tmp_path, transformers=[tr("T63", 63.0, 1.0e6)], switchgear=[sg("SG110", 110.0, 31.5, 100e3)])
+    table, sel = hourly((2030, 7, {**H7, "DC_LOAD": -20.0}, {}))
+    out = select_assets(wide_cable_spec(), table, sel, lib, WIDE, PROFILE)
+    pcc = row(out, "switchgear PCC")
+    assert (pcc["library_id"], pcc["units"]) == ("SG110", 3)           # TR1, TR2 and the grid
+    assert out["spec"]["campus"]["pcc"]["ik_rated_ka"]["value"] == 31.5
+
+
+def test_a_statcom_bought_feeds_the_re_checked_fault_level(tmp_path):
+    """The only candidate is a STATCOM; the re-check energises it in the IEC
+    60909 run as a current source of 1.2 times its rating (the campus
+    file's screening), checked against the hand-built network."""
+    import pandapower.shortcircuit as sc
+    lib = library(tmp_path, statcoms=[comp("statcoms", "ST10", 10.0, 400e3)])
+    table, sel = dark_hours((2040, 25.0))
+    out = select_assets(lowpf_spec(), table, sel, lib, ReactiveRequirement(15.0, "c", "code"), PROFILE)
+    assert row(out, "reactive")["library_id"] == "ST10"
+    net = direct_net()
+    net.sgen["in_service"] = False
+    pp.create_sgen(net, net.bus.index[net.bus["name"] == "MV1"][0], p_mw=0.0, sn_mva=10.0, k=1.2, rx=0.1,
+                   generator_type="current_source")
+    sc.calc_sc(net, case="max", ip=True)
+    want = float(net.res_bus_sc.at[net.bus.index[net.bus["name"] == "MV1"][0], "ikss_ka"])
+    got = out["short_circuit"].set_index(["period", "bus"]).at[(2040, "MV1"), "ikss_max_ka"]
+    assert got == pytest.approx(want, rel=1e-9)
+
+
+def test_without_n_minus_1_the_intact_flow_with_the_margin_decides(tmp_path):
+    """One unit, N-1 off: 47.2 MVA at H7 (solved here) needs 56.7 MVA with
+    the 20 % margin. A cheaper 50 MVA unit would carry the flow without the
+    margin; it is not offered, so nothing is escalated."""
+    s = part_one_flow()
+    assert 50.0 > s and 50.0 < s * 1.2 < 63.0
+    lib = library(tmp_path, transformers=[tr("T50", 50.0, 0.9e6), tr("T63", 63.0, 1.2e6)])
+    table, sel = hourly((2030, 7, H7, {}))
+    out = select_assets(single_spec(), table, sel, lib, WIDE, PROFILE, SizingCriteria(margin=0.2, n_minus_1=False))
+    assert row(out, "transformer TR1")["library_id"] == "T63"
+    assert out["history"].empty
+
+
+def test_a_unit_within_its_rating_but_short_of_the_margin_after_the_re_solve_is_escalated(tmp_path):
+    """Rated 0.5 % above part one's flow x 1.2, an 18 % impedance unit loads
+    to about 85 %: within its rating, but its re-solved flow x 1.2 is above
+    it, so the sizing rule (not the loading) escalates it."""
+    s = part_one_flow()
+    rating = round(s * 1.2 * 1.005, 3)
+    resolved = max(s_hv(solve_direct(H7, [(rating, 18.0)])))
+    assert resolved < rating and resolved * 1.2 > rating                   # the oracle for the case
+    lib = library(tmp_path, transformers=[tr("T_CHEAP", rating, 1.0e6, vk=18.0), tr("T_OK", 70.0, 1.5e6)])
+    table, sel = hourly((2030, 7, H7, {}))
+    out = select_assets(single_spec(), table, sel, lib, WIDE, PROFILE, SizingCriteria(margin=0.2))
+    assert row(out, "transformer TR1")["library_id"] == "T_OK"
+    h = out["history"]
+    assert list(h["to"]) == ["1 x T_OK"] and list(h["check"]) == ["transformer_loading"]

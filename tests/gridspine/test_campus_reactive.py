@@ -293,8 +293,8 @@ def test_without_compensation_nothing_is_dispatched_and_the_setpoints_are_the_in
 @pytest.mark.parametrize("q_reactor, steps", [(15.0, 0), (10.0, 1)])
 def test_a_step_that_overshoots_is_kept_only_if_it_leaves_the_pcc_closer_to_the_band(q_reactor, steps):
     """At this hour the PCC exports 8.4 Mvar against a 1 Mvar band. A 15 Mvar
-    reactor would leave it 7.4 Mvar outside on the other side, no closer
-    (the fewest steps win the tie); a 10 Mvar one leaves it 1.9 Mvar outside."""
+    reactor would leave it about 7.4 Mvar outside on the other side, no
+    closer, so it stays off; a 10 Mvar one leaves it 1.9 Mvar outside."""
     spec = campus_spec()
     spec["campus"]["cables"]["CB1"]["c_nf_per_km"]["value"] = 4000.0
     spec["campus"]["cables"]["CB1"]["length_km"]["value"] = 20.0
@@ -306,3 +306,38 @@ def test_a_step_that_overshoots_is_kept_only_if_it_leaves_the_pcc_closer_to_the_
     res = reactive_need(build_campus(spec), rows(hour=hour), ReactiveRequirement(1.0, "c", "code"), residual=False)
     assert res.dispatch["SR1"]["steps"] == steps
     assert abs(res.q_final_mvar) > 1.0 + 0.01                 # neither lands in the band
+
+
+@pytest.mark.parametrize("q_bank, on_edge", [(22.0, True), (30.0, False)])
+def test_after_the_steps_the_inverters_back_off_onto_the_band_edge_but_never_past_zero(q_bank, on_edge):
+    """The PCC draws 38.3 Mvar against a 10 Mvar band; the charging battery
+    has 9.2 Mvar of headroom, then one bank step is needed. A 22 Mvar step
+    overshoots by less than the battery gave, so the battery backs off and
+    the PCC sits on the edge. A 30 Mvar step overshoots by more: the battery
+    backs off to zero, not into absorbing, and the PCC stays inside."""
+    camp = comp_campus({"name": "CAP1", "bus": "MV1", "kind": "capacitor_bank",
+                        "q_mvar": {"value": q_bank, "source": "assumed"}, "steps": 1})
+    hour = dict(DARK_HOUR, BESS1=-20.0)
+    res = reactive_need(camp, rows(hour=hour, status={"PV1": 0, "GEN1": 0}), ReactiveRequirement(10.0, "c", "code"),
+                        residual=False)
+    head = math.sqrt(22.0 ** 2 - 20.0 ** 2)
+    assert res.q0_mvar == pytest.approx(38.31, abs=0.01)
+    assert res.dispatch["CAP1"]["steps"] == 1
+    if on_edge:
+        assert res.q_final_mvar == pytest.approx(10.0, abs=0.01)
+        assert 0.0 < res.unit_q["BESS1"] < head
+    else:
+        assert res.unit_q["BESS1"] == pytest.approx(0.0, abs=1e-9)
+        assert -10.0 <= res.q_final_mvar < 10.0 - 0.5
+
+
+def test_a_statcom_too_small_runs_at_its_rating_and_the_rest_stays_a_gap():
+    lim = 12.0
+    camp = comp_campus({"name": "ST1", "bus": "MV1", "kind": "statcom", "q_mvar": {"value": 5.0, "source": "assumed"}})
+    hour, req = rows(hour=DARK_HOUR, status=DARK), ReactiveRequirement(lim, "c", "code")
+    real = reactive_need(camp, hour, req, residual=False)
+    assert real.dispatch["ST1"]["q_mvar"] == pytest.approx(5.0)
+    assert real.q_final_mvar > lim + 1.0 and real.q_comp_mvar == 0.0
+    need = reactive_need(camp, hour, req)
+    assert need.dispatch["ST1"]["q_mvar"] == pytest.approx(5.0) and need.q_comp_mvar > 0.0
+    assert need.q_final_mvar == pytest.approx(lim, abs=0.01)

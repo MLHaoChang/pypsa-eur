@@ -244,14 +244,14 @@ def reactive_need(campus, rows: pd.DataFrame, req: ReactiveRequirement, tol: flo
             q_now = settle(q0 - edge, False)
             if abs(q_now - edge) > tol:
                 full = allocate(sign * cap, False)                     # continuous at their limit
-                outside = lambda q: max(abs(q) - lim, 0.0)
+                outside = lambda q: max(abs(q) - lim - tol, 0.0)            # 0 in the band
                 best_k, best_d = 0, outside(_pcc_q(net))
                 for k in range(1, len(ladder) + 1):
                     switch(k)
                     d = outside(_pcc_q(net))
                     if d < best_d:
                         best_k, best_d = k, d
-                    if d <= tol or d > best_d:
+                    if d == 0.0 or d > best_d:
                         break                       # the fewest steps in the band, or past the best
                 switch(best_k)
                 allocate(full, False)

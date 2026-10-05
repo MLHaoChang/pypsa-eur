@@ -627,6 +627,12 @@ def _investment(needs, added, spec, study, library, lib_by_id, periods):
     return inv, pd.DataFrame(cost)
 
 
+def _pcc_table(study):
+    return pd.DataFrame([{"period": p, "hour": h, "case": case, "converged": f.converged, "p_mw": f.pcc_p_mw,
+                          "q_mvar": f.pcc_q_mvar, "losses_mw": f.losses_mw}
+                         for (p, h), cases in sorted(study.flows.items()) for case, f in cases.items()])
+
+
 def _dispatch_table(study):
     rows = []
     for (period, hour), r in sorted(study.reactive.items()):
@@ -647,7 +653,8 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
     (module docstring). ``profile`` is a grid-code profile or its name.
 
     Returns ``investment``, ``cost``, ``compliance``, ``dispatch``, ``spec``
-    (the invested campus file), ``history`` and ``unresolved``."""
+    (the invested campus file), ``history`` and ``unresolved``, and the
+    re-solved ``pcc`` flows (per hour and case) and ``short_circuit``."""
     profile = load_grid_code(profile) if isinstance(profile, str) else profile
     lib_by_id = {e["id"]: e for kind in ("transformers", "cables", "capacitor_banks", "shunt_reactors", "statcoms",
                                          "switchgear") for e in library[kind]}
@@ -726,4 +733,4 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
     return {"investment": investment.drop(columns=["lifetime_a"]), "cost": cost, "compliance": final,
             "dispatch": _dispatch_table(study), "spec": spec,
             "history": pd.DataFrame(history, columns=["iteration", "need", "from", "to", "check", "detail"]),
-            "unresolved": unresolved}
+            "unresolved": unresolved, "pcc": _pcc_table(study), "short_circuit": study.short_circuit}
