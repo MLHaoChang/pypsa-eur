@@ -334,3 +334,55 @@ lists the profiles a study can use.
 - Backend routes: draft from the project; save and edit the campus file;
   prepare, rank and size.
 - A browser run.
+
+## C6 as built (2026-10-05)
+
+**Backend.** `services/campus_electrical_service.py` keeps a hub project's
+study in `<project dir>/campus_electrical/`: the editable
+`campus_input.yaml`, the draft notes, the settings and the engine's run.
+It offers:
+- `get_state`, including a `stale` flag from the engine manifest's hashes;
+- `draft`, which will not overwrite the user's edits unless asked;
+- `save_campus`, which validates by building the campus;
+- `run`, which prepares, ranks and sizes.
+
+It refuses with these codes:
+
+| case | code |
+|---|---|
+| a project of another kind | 409 |
+| no saved network, an unsolved network, or bad settings | 422 |
+| a campus file over 1 MB | 413 |
+| a build without the engine | 503 |
+
+The gridspine imports are guarded, like `gridspine_service`'s.
+`routers/campus_electrical.py` serves `/api/campus-electrical` with
+GET, `/draft`, `PUT /campus` and `/run`. Drafting and running go to the
+threadpool, and writes check the edit lock.
+
+**Frontend.** `CampusElectricalPanel` covers:
+- the campus file: draft from project, edit, save, draft again (with a
+  confirm);
+- the settings: hours per criterion, connection-agreement power factor,
+  grid code, margin, N-1;
+- the results: compliance as is and with measures, transformers,
+  compensation, short circuit, critical hours, and a stale warning.
+
+It states that the study is steady-state and not a certificate.
+
+**Copilot.** Three tools:
+- `campus_get_study` (read);
+- `campus_draft_campus` (write);
+- `campus_run_study` (write).
+
+**Owner request: a Studies group.** Planning → dynamics, Campus electrical
+and Reports moved out of Simulation into their own STUDIES sidebar section,
+with its own icon in the collapsed strip.
+
+**Browser run** (Data Center template, solved with HiGHS):
+- open the project, then Studies → Campus electrical;
+- draft from the project, and run at power factor 0.95, which takes 2.9 s;
+- every table renders, and match the engine's numbers;
+- a campus with sk_min above sk_max is refused inline, naming the field.
+
+One cosmetic fix came from the run: a cut name no longer ends in `_`.
