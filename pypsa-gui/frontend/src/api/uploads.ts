@@ -13,6 +13,10 @@
  */
 import { rawFetchHeaders } from './csrf'
 
+/** `report_template` (WP11): a Word file a report renders into.
+ *  `report_roundtrip` (WP14): an edited export of a report, uploaded to be merged back. */
+export type UploadKind = 'user_upload' | 'agent_export' | 'report_template' | 'report_roundtrip'
+
 export interface UploadMeta {
   schema_version: number
   file_id: string
@@ -20,7 +24,7 @@ export interface UploadMeta {
   mime: string
   size: number
   sha256: string
-  kind: 'user_upload' | 'agent_export'
+  kind: UploadKind
   uploaded_at: number
   blob_ready: boolean
   version: number
@@ -75,11 +79,14 @@ async function _parseError(resp: Response): Promise<UploadError> {
 export async function uploadFile(
   projectName: string,
   file: File,
+  /** `report_template` stores the file as a report template (WP11), `report_roundtrip`
+   *  as an edited copy of a report (WP14); omitted = `user_upload`. */
+  kind?: UploadKind,
 ): Promise<UploadMeta> {
   const form = new FormData()
   form.append('file', file)
   const resp = await fetch(
-    `/api/projects/${encodeURIComponent(projectName)}/uploads`,
+    `/api/projects/${encodeURIComponent(projectName)}/uploads${_kindQuery(kind)}`,
     // No Content-Type: the browser must set its own multipart boundary.
     { method: 'POST', body: form, headers: { ...rawFetchHeaders('POST') } },
   )
@@ -89,10 +96,14 @@ export async function uploadFile(
   return resp.json() as Promise<UploadMeta>
 }
 
-/** List the active project's uploads, newest-first. */
-export async function listUploads(projectName: string): Promise<UploadMeta[]> {
+function _kindQuery(kind: UploadKind | undefined): string {
+  return kind ? `?kind=${encodeURIComponent(kind)}` : ''
+}
+
+/** List the active project's uploads, newest-first; `kind` filters (WP11). */
+export async function listUploads(projectName: string, kind?: UploadKind): Promise<UploadMeta[]> {
   const resp = await fetch(
-    `/api/projects/${encodeURIComponent(projectName)}/uploads`,
+    `/api/projects/${encodeURIComponent(projectName)}/uploads${_kindQuery(kind)}`,
   )
   if (!resp.ok) {
     throw await _parseError(resp)

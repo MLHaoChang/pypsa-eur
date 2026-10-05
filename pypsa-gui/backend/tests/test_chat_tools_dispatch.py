@@ -130,6 +130,151 @@ def test_update_component_bus_rename_routes_to_rename_bus(install_network):
     assert n.lines.at["L1", "bus0"] == "B1_renamed"
 
 
+def _install_bus_with_dependents(install_network):
+    n = _install_minimal_network(install_network)
+    n.add("Generator", "G1", bus="B1", p_nom=10.0)
+    n.add("Load", "D1", bus="B1", p_set=5.0)
+    return n
+
+
+def test_update_component_bus_rename_via_attrs_name(install_network):
+    """
+    `attrs={"name": new}` is a rename, as in the PUT body — it used to pass
+    `name` to BusCreate twice (TypeError). It takes the PUT path, so every
+    component referring to the bus is re-pointed.
+    """
+    n = _install_bus_with_dependents(install_network)
+
+    result = chat_tools.update_component("Bus", "B1", attrs={"name": "B1_new"})
+
+    assert result["name"] == "B1_new"
+    assert "B1_new" in n.buses.index
+    assert "B1" not in n.buses.index
+    assert n.lines.at["L1", "bus0"] == "B1_new"
+    assert n.generators.at["G1", "bus"] == "B1_new"
+    assert n.loads.at["D1", "bus"] == "B1_new"
+
+
+def test_update_component_bus_rename_via_attrs_name_with_other_attrs(install_network):
+    """A rename alongside other attrs applies both in one update."""
+    n = _install_bus_with_dependents(install_network)
+
+    chat_tools.update_component(
+        "Bus", "B1", attrs={"name": "B1_new", "v_nom": 220.0},
+    )
+
+    assert float(n.buses.at["B1_new", "v_nom"]) == 220.0
+    assert n.lines.at["L1", "bus0"] == "B1_new"
+    assert n.generators.at["G1", "bus"] == "B1_new"
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"attrs": {"name": "ic:B1"}},
+    {"new_name": "ic:B1"},
+    {"attrs": {"v_nom": 220.0}, "new_name": "ic:B1"},
+])
+def test_update_component_bus_rename_refuses_reserved_ic_prefix(
+    install_network, kwargs,
+):
+    """`ic:` bus names are reserved on every rename route; nothing changes."""
+    from fastapi import HTTPException
+    n = _install_bus_with_dependents(install_network)
+
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.update_component("Bus", "B1", **kwargs)
+
+    assert exc.value.status_code == 422
+    assert "bus names starting 'ic:' are reserved" in exc.value.detail
+    assert "B1" in n.buses.index
+    assert "ic:B1" not in n.buses.index
+    assert n.lines.at["L1", "bus0"] == "B1"
+    assert n.generators.at["G1", "bus"] == "B1"
+    assert float(n.buses.at["B1", "v_nom"]) == 1.0
+
+
+def test_update_component_bus_rename_refuses_occupied_name(install_network):
+    from fastapi import HTTPException
+    n = _install_bus_with_dependents(install_network)
+
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.update_component("Bus", "B1", attrs={"name": "B2"})
+
+    assert exc.value.status_code == 409
+    assert n.generators.at["G1", "bus"] == "B1"
+
+
+def test_update_component_rename_rejects_conflicting_targets(install_network):
+    from fastapi import HTTPException
+    n = _install_minimal_network(install_network)
+
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.update_component(
+            "Bus", "B1", attrs={"name": "X"}, new_name="Y",
+        )
+
+    assert exc.value.status_code == 400
+    assert "B1" in n.buses.index
+
+
+@pytest.mark.parametrize("component_class,attr,add_kwargs,attrs", [
+    ("Generator", "generators", {"bus": "B1", "p_nom": 10.0}, {}),
+    ("Load", "loads", {"bus": "B1", "p_set": 5.0}, {}),
+    ("Line", "lines", {"bus0": "B1", "bus1": "B2", "x": 0.1}, {}),
+    ("Link", "links", {"bus0": "B1", "bus1": "B2", "p_nom": 10.0}, {}),
+    ("StorageUnit", "storage_units", {"bus": "B1", "p_nom": 10.0}, {}),
+    ("Store", "stores", {"bus": "B1", "e_nom": 10.0}, {}),
+    ("Transformer", "transformers", {"bus0": "B1", "bus1": "B2", "x": 0.1},
+     {"bus0": "B1", "bus1": "B2"}),
+    ("GlobalConstraint", "global_constraints",
+     {"type": "primary_energy", "sense": "<=", "constant": 5.0,
+      "carrier_attribute": "co2_emissions"}, {}),
+])
+def test_update_component_rename_via_attrs_name_other_classes(
+    install_network, component_class, attr, add_kwargs, attrs,
+):
+    """
+    Every Create schema was built as `Schema(name=name, **attrs)`, so
+    `attrs={"name": ...}` was a TypeError on every class, not only Bus.
+    """
+    n = _install_minimal_network(install_network)
+    n.add(component_class, "C1", **add_kwargs)
+
+    result = chat_tools.update_component(
+        component_class, "C1", attrs={**attrs, "name": "C1_new"},
+    )
+
+    assert result["name"] == "C1_new"
+    df = getattr(n, attr)
+    assert "C1_new" in df.index
+    assert "C1" not in df.index
+
+
+@pytest.mark.parametrize("component_class,attr,add_kwargs", [
+    ("GlobalConstraint", "global_constraints",
+     {"type": "primary_energy", "sense": "<=", "carrier_attribute": "co2_emissions"}),
+    ("Generator", "generators", {"bus": "B1"}),
+])
+def test_update_component_rename_onto_an_occupied_name_is_refused(
+    install_network, component_class, attr, add_kwargs,
+):
+    """P2 gate assessor round 2: a rename onto an existing name is a 409 and
+    changes nothing. GlobalConstraint removed the source and re-added it
+    under the target, silently replacing the existing constraint."""
+    from fastapi import HTTPException
+    n = _install_minimal_network(install_network)
+    key = "constant" if component_class == "GlobalConstraint" else "p_nom"
+    n.add(component_class, "C1", **add_kwargs, **{key: 5.0})
+    n.add(component_class, "C2", **add_kwargs, **{key: 7.0})
+
+    for kwargs in ({"attrs": {"name": "C2"}}, {"new_name": "C2"}):
+        with pytest.raises(HTTPException) as exc:
+            chat_tools.update_component(component_class, "C1", **kwargs)
+        assert exc.value.status_code == 409, kwargs
+        df = getattr(n, attr)
+        assert {"C1", "C2"} <= set(df.index)
+        assert float(df.at["C1", key]) == 5.0 and float(df.at["C2", key]) == 7.0
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # (b) update_component({Bus, B1, control:'PV'}) — no coord change ⇒ no recompute
 # ─────────────────────────────────────────────────────────────────────────────

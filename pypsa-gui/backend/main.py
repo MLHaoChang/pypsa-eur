@@ -79,11 +79,15 @@ from routers import (
     adequacy_worksheet,
     compare,
     gridspine,
+    guides,
     io,
+    library,
     local_settings,
     network,
     project_network,
     projects,
+    report_jobs,
+    reports,
     results,
     simulation,
     snapshots,
@@ -1105,6 +1109,8 @@ app.include_router(
     tags=["admin"],
     dependencies=[Depends(local_mode.reject_in_local_mode)],
 )
+# Edge Investment Case (P1 WP1.1b): the org-scoped Library.
+app.include_router(library.router, prefix="/api/library", tags=["library"])
 app.include_router(network.router, prefix="/api/network", tags=["network"])
 # Mount /api/network/cluster from the dedicated clustering router. Sharing the
 # /api/network prefix keeps the endpoint adjacent to other network mutations.
@@ -1152,6 +1158,21 @@ app.include_router(
     adequacy_worksheet.router, prefix="/api/projects", tags=["adequacy"],
     dependencies=_projects_router_guard,
 )
+# Study reports (WP1): `/{name}/reports…` — same posture as the worksheet
+# (ProjectAccessDep on every route, lock-checked delete, paths joined only from
+# `AuthorizedProject.directory` + a regex-validated id). Registered BEFORE
+# projects.router for the same reason. The `reports/` directory is in
+# `projects._BUNDLE_DIRS`, so it travels with save-as, copy and snapshots.
+app.include_router(
+    reports.router, prefix="/api/projects", tags=["reports"],
+    dependencies=_projects_router_guard,
+)
+# Report generation (WP3): `/{name}/reports/generate…` and the per-section
+# regenerate — the LLM job over the same evidence, same guard, same lock check.
+app.include_router(
+    report_jobs.router, prefix="/api/projects", tags=["reports"],
+    dependencies=_projects_router_guard,
+)
 app.include_router(
     projects.router, prefix="/api/projects", tags=["projects"],
     dependencies=_projects_router_guard,
@@ -1172,6 +1193,8 @@ app.include_router(uploads.router, prefix="/api/projects", tags=["uploads"])
 # confirmation card lifecycle + abort endpoint. The router is mounted under
 # /api/chat; Phase 3 wires the real LLM call without changing route shapes.
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+# In-app guides (P21): static tour / field-help catalogue, read-only.
+app.include_router(guides.router, prefix="/api/guides", tags=["guides"])
 # Desktop-only. Every route 404s in web mode; see routers/local_settings.py.
 app.include_router(
     local_settings.router, prefix="/api/local-settings", tags=["local-settings"],

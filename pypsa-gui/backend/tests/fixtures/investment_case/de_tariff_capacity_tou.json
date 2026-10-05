@@ -1,0 +1,25 @@
+{
+  "id": "de_mv_capacity_tou_2026",
+  "name": "DE MV network + retail TOU (illustrative)",
+  "jurisdiction": "DE",
+  "dso_or_retailer": "illustrative DSO",
+  "valid_from": "2026-01-01",
+  "valid_to": "2026-12-31",
+  "items": [
+    {"id": "energy_tou", "kind": "energy", "unit": "per_kwh",
+     "periods": [
+       {"name": "peak", "rate": 0.16, "months": [1,2,3,10,11,12], "weekdays": [0,1,2,3,4], "start_hour": 7, "end_hour": 20},
+       {"name": "offpeak", "rate": 0.09}
+     ],
+     "settlement": "15min", "measured_on": "import", "direction": "cost"},
+    {"id": "network_capacity", "kind": "capacity", "unit": "per_kw_year",
+     "periods": [{"name": "all", "rate": 85.0}],
+     "settlement": "15min", "measured_on": "peak_import", "direction": "cost"},
+    {"id": "network_energy", "kind": "energy", "unit": "per_kwh",
+     "periods": [{"name": "all", "rate": 0.012}],
+     "settlement": "15min", "measured_on": "import", "direction": "cost"},
+    {"id": "meter_fixed", "kind": "fixed", "unit": "per_month",
+     "periods": [{"name": "all", "rate": 250.0}],
+     "settlement": "15min", "measured_on": "import", "direction": "cost"}
+  ]
+}

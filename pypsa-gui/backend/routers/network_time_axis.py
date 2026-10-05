@@ -81,6 +81,8 @@ from services.profile_shapes import (  # noqa: F401
     _wind_cf_profile,
 )
 from services.snapshot_index import (  # noqa: F401
+    hours_per_step,
+    is_sub_hourly,
     _build_period_multiindex,
     _infer_snapshot_freq,
 )
@@ -132,65 +134,8 @@ _ATTR_TO_CLASS: dict[str, str] = {
 }
 # Moved with its caller in the 2026-09-10 merge: this branch added it to
 # routers/network.py inside the range master had carved into this module.
-def _infer_snapshot_freq(n) -> str | None:
-    """
-    The snapshot index's resolution, as a pandas offset alias ("h", "3h", "D").
-
-    The Model Horizon page used to render its own form state here, which was
-    seeded to "h" at mount and never read back from the network — so a
-    3-hourly MultiIndex and a Daily flat index both reported "Hourly (h)".
-
-    MultiIndex networks are measured over the FIRST period's slice only: the
-    flattened timestep level contains a discontinuity at each period seam
-    (period P's last hour → period P+1's first), which would read as irregular.
-
-    `pd.infer_freq` is tried first because it names calendar frequencies ("D",
-    "MS", "W") that a raw timedelta cannot. It returns None for a
-    representative-week index — contiguous 168-hour blocks separated by gaps —
-    whose resolution is nevertheless hourly, so fall back to the modal
-    successive delta. Returns None when neither resolves; the UI renders that
-    as "irregular" rather than guessing.
-    """
-    sns = n.snapshots
-    try:
-        if isinstance(sns, pd.MultiIndex):
-            level0 = sns.get_level_values(0)
-            if len(level0) == 0:
-                return None
-            first = level0[0]
-            idx = pd.DatetimeIndex(sns[level0 == first].get_level_values(1))
-        else:
-            idx = pd.DatetimeIndex(sns)
-    except (ValueError, TypeError):
-        # `pd.DatetimeIndex(...)` raises (e.g. `DateParseError`, a `ValueError`
-        # subclass) on a non-parseable object index. No current GUI path
-        # produces one, but this helper runs unconditionally at the top of
-        # `get_snapshots` — degrade to "irregular" rather than 500ing the
-        # page's primary endpoint.
-        return None
-    if len(idx) < 2:
-        return None
-    try:
-        inferred = pd.infer_freq(idx)
-    except (ValueError, TypeError):
-        inferred = None
-    if inferred:
-        return inferred
-    deltas = idx.to_series().diff().dropna()
-    if deltas.empty:
-        return None
-    modal = deltas.mode()
-    if modal.empty:
-        return None
-    hours = modal.iloc[0].total_seconds() / 3600.0
-    if hours <= 0:
-        return None
-    if hours == 1.0:
-        return "h"
-    if float(hours).is_integer():
-        return f"{int(hours)}h"
-    return None
-
+# `_infer_snapshot_freq` lives in services/snapshot_index.py (imported above);
+# the router's former local copy shadowed it (WP1.0 review).
 
 @router.get("/snapshots")
 def get_snapshots():
@@ -204,8 +149,16 @@ def get_snapshots():
     # snapshot range to the data the user actually uploaded. `can_sample_weeks`
     # gates the representative-week sampler (needs a full-year hourly profile).
     ts_start, ts_end = _user_ts_extent()
-    can_sample_weeks = _annual_hourly_reference()[0] is not None
     freq = _infer_snapshot_freq(n)
+    # The sampler builds 168 HOURLY steps per week; on a sub-hourly axis it
+    # would silently swap the model's resolution for hourly (WP1.0). Refuse
+    # with a code the UI can explain.
+    if is_sub_hourly(freq):
+        can_sample_weeks, sample_weeks_reason = False, "not_supported_for_freq"
+    else:
+        _ref_idx, _ref_reason = _annual_hourly_reference()
+        can_sample_weeks = _ref_idx is not None
+        sample_weeks_reason = None if can_sample_weeks else _ref_reason
     if isinstance(sns, pd.MultiIndex):
         try:
             periods = [int(p) for p in sns.get_level_values(0)]
@@ -225,6 +178,7 @@ def get_snapshots():
             "ts_start": ts_start,
             "ts_end": ts_end,
             "can_sample_weeks": can_sample_weeks,
+            "sample_weeks_reason": sample_weeks_reason,
             "freq": freq,
         }
     snaps = [s.isoformat() if hasattr(s, "isoformat") else str(s) for s in sns]
@@ -233,6 +187,7 @@ def get_snapshots():
         "count": len(sns), "snapshots": snaps, "weightings": weightings,
         "ts_start": ts_start, "ts_end": ts_end,
         "can_sample_weeks": can_sample_weeks,
+        "sample_weeks_reason": sample_weeks_reason,
         "freq": freq,
     }
 @router.get("/snapshots/weightings.csv")
@@ -540,6 +495,13 @@ def set_snapshots(config: SnapshotConfig):
         kw: dict = {}
         if config.weightings is not None:
             kw["default_snapshot_weightings"] = config.weightings
+        else:
+            # Weights are HOURS (spec decision 18): a 15-minute step weighs
+            # 0.25, not PyPSA's default 1.0 — which counted every quarter-hour
+            # as a full hour and scaled energy and n.nyears 4×.
+            step_h = hours_per_step(config.freq)
+            if step_h is not None:
+                kw["default_snapshot_weightings"] = step_h
         # Demote any lingering MultiIndex (multi-period toggled off without
         # rebuilding n.snapshots, or a stale _t / weightings frame) to flat
         # FIRST. A direct set_snapshots(flat DatetimeIndex) on MultiIndex state
@@ -547,6 +509,16 @@ def set_snapshots(config: SnapshotConfig):
         # No-op when the network is already flat.
         _flatten_snapshot_state(n)
         n.set_snapshots(sns, **kw)
+        # PyPSA's set_snapshots only fills NEW rows with the default: a row
+        # whose timestamp existed before keeps its old weight, so hourly→15-min
+        # over the same day left 1.0 on every :00 quarter-hour (WP1.0 review).
+        # The route defines ONE step, so every row gets it.
+        # A calendar frequency (W, MS, …) has no fixed step: every row gets
+        # PyPSA's 1.0, the value its new rows already take, so no overlapping
+        # row keeps a weight from the previous axis (WP1.0 re-review C3).
+        w_all = kw.get("default_snapshot_weightings", 1.0)
+        for col in n.snapshot_weightings.columns:
+            n.snapshot_weightings[col] = float(w_all)
         # Re-apply full profiles (from _user_ts) aligned to the new snapshot range.
         _reapply_user_ts_to_network(n)
     change_log_service.log(
@@ -629,6 +601,13 @@ def set_multi_period_snapshots(body: dict):
         timestep_blocks = [base_idx for _ in periods_sorted]
 
     mi = _build_period_multiindex(periods_sorted, timestep_blocks)
+    # Step length per block, in hours (spec decision 18). None for a calendar
+    # frequency with no fixed length.
+    if per_period is not None:
+        block_hours = [hours_per_step(spec.get("freq", "h")) for spec in per_period]
+    else:
+        block_hours = [hours_per_step(freq)] * len(periods_sorted)
+    old_step_h = hours_per_step(_infer_snapshot_freq(n))
 
     # Preserve existing time series BEFORE reindex.
     _backup_network_ts_to_user_ts(n)
@@ -638,14 +617,32 @@ def set_multi_period_snapshots(body: dict):
     # CAPEX 50× on representative-week setups and producing renewable
     # over-build.
     captured_weights = _capture_snapshot_weights_per_timestep(n)
+    # Captured weights are only meaningful at the SAME resolution. Re-broadcast
+    # across a resolution change and an hourly axis's 1.0 lands on every :00
+    # quarter-hour of the new 15-minute axis (WP1.0) — so drop them then.
+    same_resolution = all(h is not None and h == old_step_h for h in block_hours)
+    if not same_resolution:
+        captured_weights = None
     with PyPSAService.get_lock():
         # n.set_snapshots is order-sensitive vs n.investment_periods: PyPSA's
         # multi-period machinery expects investment_periods to mirror the
         # MultiIndex's level-0 values. Set snapshots first, then sync periods.
         n.set_snapshots(mi)
         n.investment_periods = periods_sorted
-        # Re-broadcast the captured weights under each new period.
-        _reapply_snapshot_weights(n, captured_weights)
+        # Re-broadcast the captured weights under each new period — or, after
+        # a resolution change, set every row to its block's step length.
+        per_row = pd.Series(
+            np.concatenate([np.full(len(blk), h if h is not None else 1.0)
+                            for blk, h in zip(timestep_blocks, block_hours)]),
+            index=n.snapshots, dtype=float)
+        if captured_weights is not None:
+            # Rows the capture does not cover get their block's step length,
+            # not 1.0 (WP1.0 review: a flat 15-min day extended to two days
+            # padded the new day with 1.0).
+            _reapply_snapshot_weights(n, captured_weights, fill=per_row)
+        elif any(h is not None for h in block_hours):
+            for col in n.snapshot_weightings.columns:
+                n.snapshot_weightings[col] = per_row.values
         # Re-apply user time series (handles MultiIndex via the level-1 path
         # added in _reapply_user_ts_to_network).
         _reapply_user_ts_to_network(n)
@@ -685,6 +682,17 @@ def sample_representative_weeks(config: SampleWeeksConfig):
 
     if config.n_weeks < 1 or config.n_weeks > 5:
         raise HTTPException(400, "n_weeks must be between 1 and 5.")
+
+    axis_freq = _infer_snapshot_freq(PyPSAService.get_network())
+    if is_sub_hourly(axis_freq):
+        raise HTTPException(400, detail={
+            "code": "not_supported_for_freq",
+            # `message`, not `detail`: the frontend's formatApiDetail reads
+            # `message`/`msg` from an object detail (WP1.0 review #6).
+            "message": (f"Representative-week sampling builds 168 hourly steps per "
+                       f"week; the model axis is {axis_freq}. Sampling would silently "
+                       f"change the model's resolution, so it is refused."),
+        })
 
     idx, reason = _annual_hourly_reference()
     if idx is None:
@@ -1066,6 +1074,10 @@ def list_timeseries():
             continue
         comp_class = _ATTR_TO_CLASS.get(component, component)
         for attr in ts_store:
+            # `ic_*` frames are the Edge Investment Case's internal records
+            # (resolved Library series, committed prices), not user series.
+            if str(attr).startswith("ic_"):
+                continue
             df = ts_store[attr]
             if not df.empty:
                 # Filter transient column names (vintage clones'
@@ -1094,17 +1106,8 @@ def get_timeseries(component: str, attribute: str, columns: str | None = None):
     ts_store = getattr(n, f"{component}_t", None)
     if ts_store is None:
         raise HTTPException(404, f"Component '{component}' not found")
-    # An attribute this component has no time-varying table for can never be
-    # applied — `_reapply_user_ts_to_network` would have nowhere to write it —
-    # so it is a typo, not a partial upload. PyPSA initialises every
-    # time-varying attribute as an (empty) frame, so membership is the whole
-    # test.
-    if attribute not in ts_store:
-        raise HTTPException(
-            400,
-            f"'{component}' has no time-varying attribute '{attribute}'. "
-            f"Valid attributes: {', '.join(sorted(ts_store.keys()))}.",
-        )
+    if attribute.startswith("ic_"):
+        raise HTTPException(404, f"'{attribute}' is not a user time series")
 
     net_df = ts_store.get(attribute)
     wanted = [c.strip() for c in columns.split(",")] if columns else None
@@ -1186,8 +1189,8 @@ def set_timeseries(component: str, attribute: str, body: dict):
     import pandas as pd
     n = PyPSAService.get_network()
     ts_store = getattr(n, f"{component}_t", None)
-    if ts_store is None:
-        raise HTTPException(404)
+    if ts_store is None or attribute.startswith("ic_"):
+        raise HTTPException(404)  # `ic_*`: internal records, not user series
     with PyPSAService.get_lock():
         idx = pd.DatetimeIndex(body.get("index", []))
         cols = body.get("columns", [])
@@ -1235,6 +1238,10 @@ async def upload_timeseries(
       column stitch (replace that period's rows, keep the others). Required
       for "different weather year per period" workflows.
     """
+    if attribute.startswith("ic_"):
+        # `ic_*` are the Edge Investment Case's internal records (a pinned
+        # Library price, committed prices): an upload must not spoof them.
+        raise HTTPException(404, f"'{attribute}' is not a user time series")
     import io
 
     import numpy as _np

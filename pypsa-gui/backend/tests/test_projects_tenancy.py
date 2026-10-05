@@ -327,11 +327,28 @@ def test_explicit_null_clears_a_field(session_local):
     assert resp.json()["scenario_type"] is None
 
 
+def test_patch_accepts_the_sensitivity_category(session_local):
+    # Edge Investment Case P0 WP0.4: the fourth category through the real route.
+    _org, _admin, root = _seed_admin_root(session_local)
+    with _client_for("admin@example.com") as client:
+        resp = client.patch(
+            f"/api/projects/{root.id}/scenario",
+            json={"scenario_type": "sensitivity", "description": "capex +20%"},
+        )
+        bad = client.patch(
+            f"/api/projects/{root.id}/scenario", json={"scenario_type": "foo"}
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["scenario_type"] == "sensitivity"
+    assert bad.status_code == 400
+    assert "sensitivity" in bad.json()["detail"]
+
+
 def test_patch_rejects_an_unknown_category(session_local):
     _org, _admin, root = _seed_admin_root(session_local)
     with _client_for("admin@example.com") as client:
         resp = client.patch(
-            f"/api/projects/{root.id}/scenario", json={"scenario_type": "sensitivity"}
+            f"/api/projects/{root.id}/scenario", json={"scenario_type": "exotic"}
         )
     assert resp.status_code == 400
     assert "baseline" in resp.json()["detail"]

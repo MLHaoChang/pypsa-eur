@@ -1431,6 +1431,89 @@ def post_eh_study(body: EhStudyRequest | None = None):
     )
 
 
+@results_router.get("/eh_readiness")
+def get_eh_readiness(archetype: str, budget_solves: int | None = None,
+                     stages: str | None = None,
+                     dtc_attribution: str | None = None,
+                     pack_overrides: str | None = None):
+    """
+    Read-only Energy Hub readiness preflight (P14): which Links the pack
+    treats as imports and by which §6 rule, critical buses, DtC derivability,
+    SCR coverage, Class-B K, the MC hub boundary, and a per-stage solve
+    estimate against the budget — computed with the study driver's own
+    selectors on a private copy, so it cannot disagree with the run.
+
+    ``stages`` is an optional comma-separated override (same rules as
+    ``POST /eh_study``). ``pack_overrides`` is the same JSON object the
+    study takes (E2E review m3), validated identically — so the preview
+    describes the pack that will actually run.
+    """
+    from models.energy_hub import DEFAULT_EH_BUDGET_SOLVES, MAX_EH_BUDGET_SOLVES
+    from services.adequacy.eh_readiness import eh_readiness
+    from services.adequacy.eh_study_runner import _PACK_FACTORY
+
+    if archetype not in _PACK_FACTORY:
+        raise HTTPException(
+            422, f"unknown archetype {archetype!r}; expected one of "
+            f"{', '.join(_PACK_FACTORY)}")
+    budget = DEFAULT_EH_BUDGET_SOLVES if budget_solves is None else budget_solves
+    if not (1 <= budget <= MAX_EH_BUDGET_SOLVES):
+        raise HTTPException(
+            422, f"budget_solves must be between 1 and {MAX_EH_BUDGET_SOLVES}")
+    import json as _json
+
+    from services.adequacy.eh_study_runner import (
+        DTC_ATTRIBUTIONS,
+        apply_pack_overrides,
+    )
+    overrides = None
+    if pack_overrides:
+        try:
+            overrides = _json.loads(pack_overrides)
+        except ValueError as exc:
+            raise HTTPException(
+                422, f"pack_overrides must be a JSON object: {exc}") from exc
+        if not isinstance(overrides, dict):
+            raise HTTPException(422, "pack_overrides must be a JSON object")
+    if dtc_attribution is not None and dtc_attribution not in DTC_ATTRIBUTIONS:
+        raise HTTPException(
+            422, f"dtc_attribution must be one of {list(DTC_ATTRIBUTIONS)}")
+    stage_list = None
+    if stages:
+        stage_list = [x.strip() for x in stages.split(",") if x.strip()]
+    n = PyPSAService.get_network()
+    if n is None:
+        raise HTTPException(422, "no network is loaded")
+    from services.adequacy.eh_study import _private_copy
+
+    cfg = _state.get("solver_config")
+    # Copy under the lock, compute outside it: the preflight applies a pack
+    # and walks the network, and must not stall edits or a solve meanwhile.
+    with PyPSAService.get_lock():
+        snapshot = _private_copy(n)
+    try:
+        return eh_readiness(
+            snapshot,
+            apply_pack_overrides(_PACK_FACTORY[archetype](), overrides,
+                                 raise_http=True),
+            budget_solves=budget,
+            stages=stage_list,
+            voll=getattr(cfg, "voll", None) if cfg is not None else None,
+            dtc_attribution=dtc_attribution)
+    except ValueError as exc:
+        from services.adequacy.eh_study import readiness_refusal_classes
+        if isinstance(exc, readiness_refusal_classes()):
+            # The repo's OWN typed refusals: their messages are authored
+            # here and tell the caller what to change.
+            raise HTTPException(422, str(exc)) from exc
+        # Anything else (a numpy/pandas ValueError from deep in the walk)
+        # is an internal failure: log it, and do not echo its text
+        # (CodeQL py/stack-trace-exposure, PR #60).
+        logger.exception("eh_readiness failed for archetype %s", archetype)
+        raise HTTPException(
+            422, "readiness could not be computed for this network") from exc
+
+
 @results_router.get("/eh_reference_design")
 def get_eh_reference_design():
     """
@@ -1446,6 +1529,27 @@ def get_eh_reference_design():
     if status == 204:
         return Response(status_code=204)
     return body
+
+
+@results_router.get("/eh_review")
+def get_eh_review():
+    """
+    Review of the latest Energy Hub study (P24): findings with evidence,
+    recommendations and exact tool actions — the same body the chat tool
+    ``review_eh_study`` returns (one source: ``eh_review.review_latest``).
+
+    200 with ``{"status": "running", ...}`` while the study runs, 200 with
+    ``status: "ok"`` (plus the boolean ``stale``) once a report exists, and
+    204 when there is neither a study record nor a stored report (same
+    convention as ``/eh_reference_design``).
+    """
+    from services.adequacy.eh_review import review_latest
+
+    record = get_eh_study()
+    out = review_latest(_state, record if isinstance(record, dict) else None)
+    if out.get("status") == "no_data":
+        return Response(status_code=204)
+    return out
 
 
 @results_router.get("/eh_redundancy")
@@ -1659,6 +1763,43 @@ def get_asset_economics():
         return _not_solved()
     payload = compute_asset_economics(n, _state['solver_config'], result_df=_result_df)
     return _not_solved() if payload is None else payload
+
+
+@results_router.get("/billing")
+def get_billing():
+    """The site bill, contract settlement and billing-vs-LP gap of the last
+    solve (Edge Investment Case P2 WP2.5, `services/results/billing.py`).
+    Stores the compact billing frames in the solver state. 204 before a solve
+    or without a commercial config."""
+    from services.results.billing import compute_billing
+
+    n = PyPSAService.get_network()
+    if _solver_in_flight():
+        # The network carries the LP transforms mid-solve (review F9).
+        raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
+                                  "message": "a solve is running; read the bill after it ends"})
+    if not _dispatch_ready(n):
+        return Response(status_code=204)
+    payload = compute_billing(n, _state["solver_config"], state=_state, result_df=_result_df)
+    return Response(status_code=204) if payload is None else payload
+
+
+@results_router.get("/cfe_score")
+def get_cfe_score():
+    """Hourly 24/7 carbon-free matching of the site (P2 WP2.5,
+    `services/results/cfe_score.py`). 204 before a solve or without a
+    commercial config."""
+    from services.results.cfe_score import compute_cfe_score
+
+    n = PyPSAService.get_network()
+    if _solver_in_flight():
+        # The network carries the LP transforms mid-solve (review F9).
+        raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
+                                  "message": "a solve is running; read the score after it ends"})
+    if not _dispatch_ready(n):
+        return Response(status_code=204)
+    payload = compute_cfe_score(n, _state["solver_config"], result_df=_result_df)
+    return Response(status_code=204) if payload is None else payload
 
 
 @results_router.get("/eh_dtc_planning")

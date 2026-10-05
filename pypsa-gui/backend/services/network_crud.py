@@ -59,7 +59,38 @@ def _serialize_component(
             v = row.get("outage_rate_basis")
             if isinstance(v, str) and v.strip() in _BLANK_SPELLINGS:
                 row["outage_rate_basis"] = None
+    if attr == "loads":
+        _add_load_peak(n, rows)
     return rows
+
+
+def _add_load_peak(n: Any, rows: list[dict]) -> None:
+    """
+    Additive ``p_set_peak`` on Load rows (P22.9 bug 4): the value of
+    ``loads_t.p_set[name]`` with the largest MAGNITUDE when the load has a
+    time series, else the static ``p_set``, else ``None``. The sign is kept
+    (a generation-like load's peak is its most negative value — plain ``max``
+    would report its smallest injection, and the panel sums magnitudes). A load whose demand lives only in the series has
+    a static ``p_set`` of 0, so a panel summing the static column showed a
+    loaded bus as "0 MW". Computed here so the shim and the path-scoped route
+    serve the same number.
+    """
+    try:
+        ts = n.loads_t.p_set
+    except AttributeError:
+        ts = pd.DataFrame()
+    for row in rows:
+        name = row.get("name")
+        peak = None
+        if name in ts.columns:
+            series = ts[name].dropna()
+            if not series.empty:
+                peak = float(series.iloc[series.abs().to_numpy().argmax()])
+        if peak is None:
+            v = row.get("p_set")
+            if isinstance(v, (int, float)) and math.isfinite(v):
+                peak = float(v)
+        row["p_set_peak"] = peak
 
 
 def _get_component(component_class: str, attr: str) -> list[dict]:
@@ -174,16 +205,28 @@ def _drop_unknown_extras(component_class: str, attr: str, kwargs: dict) -> dict:
     so the model is the right authority — and the whitelist stays a whitelist:
     an undeclared, uncatalogued key is still dropped.
     """
+    from services.adequacy.eh_columns import coerce_eh_value, eh_columns_for
+
     n = PyPSAService.get_network()
+    # P14: whitelisted Energy Hub tags pass even before their column exists,
+    # coerced to their typed value (a bad value is a 422 naming the rule).
+    eh = eh_columns_for(component_class)
+    out_eh = {}
+    for k in [k for k in kwargs if k in eh]:
+        try:
+            out_eh[k] = coerce_eh_value(component_class, k, kwargs.pop(k))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
     allowed = attribute_catalog.input_attributes(n, component_class)
     if not allowed:
-        return kwargs
+        return {**kwargs, **out_eh}
     columns = set(getattr(n, attr).columns)
     declared = _declared_attributes(component_class)
-    return {
+    kept = {
         k: v for k, v in kwargs.items()
         if k in allowed or k in columns or k in declared
     }
+    return {**kept, **out_eh}
 
 
 def _normalise_flag_column(n, attr: str) -> None:
@@ -196,6 +239,15 @@ def _normalise_flag_column(n, attr: str) -> None:
     boundary that can add a row or replace a frame; a no-op on anything but
     generators, and 0.17 ms on a 300-row frame.
     """
+    if attr in ("buses", "links"):
+        # P14: a first write of an eh_* tag creates the column with NaN for
+        # every other row — make it typed (False / "") before anything saves.
+        try:
+            from services.adequacy.eh_columns import normalise_eh_columns
+            normalise_eh_columns(n)
+        except Exception:                                     # noqa: BLE001
+            pass
+        return
     if attr != "generators":
         return
     try:
@@ -211,6 +263,12 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
     # /bulk writes, rename, and global-constraint mutations all benefit
     # without each having to call an invalidation helper here.
     n = PyPSAService.get_network()
+    if component_class == "Bus":
+        from services.commercial.settlement_inputs import reserved_bus_name
+
+        if reserved_bus_name(name):
+            # `ic:` names the commercial reference frames' columns (P2 WP2.2-0).
+            raise HTTPException(422, f"bus names starting 'ic:' are reserved (got {name!r})")
     kwargs = _drop_unknown_extras(component_class, attr, kwargs)
     with PyPSAService.get_lock():
         df = getattr(n, attr)
@@ -331,6 +389,17 @@ def _reattach_component_series(n, attr: str, name: str,
 
 
 def _rename_component_safely(n, component_class: str, old: str, new: str) -> None:
+    if component_class == "Bus":
+        from services.commercial.settlement_inputs import reserved_bus_name
+
+        if reserved_bus_name(new):
+            # `ic:` names the commercial reference frames' columns (P2
+            # WP2.2-0; the PUT rename path, review 0b #1).
+            raise HTTPException(422, f"bus names starting 'ic:' are reserved (got {new!r})")
+    _rename_component_safely_impl(n, component_class, old, new)
+
+
+def _rename_component_safely_impl(n, component_class: str, old: str, new: str) -> None:
     """Rename a component, re-pointing whatever refers to it — without the
     ``KeyError`` PyPSA raises for every class but ``Bus``.
 
@@ -397,6 +466,13 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         if component_class != "Carrier":
             ensure_carrier(n, merged.get("carrier", ""))
         new_name = merged.pop("name", name)
+        if component_class == "Bus" and new_name != name:
+            from services.commercial.settlement_inputs import reserved_bus_name
+
+            if reserved_bus_name(new_name):
+                # Before any mutation (review 0b #1): nothing half-applied.
+                raise HTTPException(422, f"bus names starting 'ic:' are reserved "
+                                         f"(got {new_name!r})")
         # Refuse to rename onto an occupied name. Without this the remove+add
         # below silently destroyed the source component and (once the rename
         # goes through PyPSA) would drag its dependents onto the target — a

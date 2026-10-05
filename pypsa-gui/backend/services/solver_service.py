@@ -91,8 +91,22 @@ from services.validation_service import has_errors, validate_for_run
 from services.solver.adequacy import (  # noqa: F401
     _prm_margin,
     _wrap_with_ens_cap,
+    _wrap_with_import_energy_cap,
     _wrap_with_reserve_margin,
     reserve_margin_facts,
+)
+# Edge Investment Case commercial layer (spec §5.1): the PoC price writer and
+# the LP-terms wrapper, re-exported with the rest of the solver seams.
+from services.commercial.lp_bindings import (  # noqa: F401
+    META_DEMAND as _IC_META_DEMAND,
+    META_GROUP as _IC_META_GROUP,
+    effective_strategy as _ic_effective_strategy,
+    CommercialBindingError,
+    _wrap_with_commercial_bindings,
+    materialise_poc_prices,
+)
+from services.commercial.connection import (  # noqa: F401
+    apply_commercial_for_solve,
 )
 # ── The branch's own dependencies ────────────────────────────────────────────
 # The adequacy standards below (`reserve_margin_facts`, the ENS-cap and
@@ -162,6 +176,13 @@ class SolverConfig:
     # Per-zone ceiling as a multiple of the system target, applied to each
     # zone's OWN demand (zone = bus `country`). None = no zone ceilings.
     ens_zone_cap_multiple: float | None = None
+    # ── Energy import cap (EH spec §6 P17 amendment) ─────────────────────
+    # PACK-ONLY: set by `archetypes.solver_config_patch_with_preflight` from a
+    # weak_flexible pack, never a user global — absent from
+    # SolverConfigSchema and stripped by projects._solver_config_from_dict.
+    # Per period: Σ w·η·p0 over the grid→hub Links ≤ E × Σw / 8760.
+    import_energy_cap_mwh_per_year: float | None = None
+    import_energy_links: list = field(default_factory=list)
     # ── Planning reserve margin (Phase 8 spec §1) ─────────────────────────
     # Firm-capacity standard as a FRACTION (0.15 == 15 %). None/0 = off.
     # Enforced per active investment period by `_wrap_with_reserve_margin`:
@@ -376,6 +397,11 @@ class SolverConfig:
     lf_period_length_h: int = 168           # 168 = weekly; 24 = daily
     lf_cluster_method: str = "hierarchical"  # tsam: hierarchical | k_means | k_medoids
     lf_include_extreme: bool = True         # append peak-load + renewable-drought period
+    # Edge Investment Case commercial layer (spec §5.1). A plain dict here;
+    # the typed `CommercialConfig` lives on the API schema (P1 WP1.3). Any
+    # Library ref nested in it is pinned by `services/library/bundle_pins`
+    # at save (WP1.1c). None = no commercial layer: the LP is unchanged.
+    commercial: dict | None = None
 
     def __post_init__(self):
         # ── Sanitize solver_options ───────────────────────────────────────
@@ -493,9 +519,17 @@ def run_simulation(
         # Reliability target: per-period ENS cap (+ per-zone ceilings) on the
         # involuntary slack dispatch. Adds work only when a target is set.
         extra_fn = _wrap_with_ens_cap(network, extra_fn, config, log_queue=log_queue)
+        # Energy import cap (EH pack only). Adds work only when set.
+        extra_fn = _wrap_with_import_energy_cap(
+            network, extra_fn, config, log_queue=log_queue)
         # Firm-capacity standard: a per-period planning reserve margin on
         # derated installed capacity. Adds work only when a margin is set.
         extra_fn = _wrap_with_reserve_margin(
+            network, extra_fn, config, log_queue=log_queue)
+        # Edge Investment Case LP-level commercial terms (peaks, ratchets,
+        # tiers, group caps; spec §5.1). After the reserve margin, before the
+        # objective scale, which must stay last.
+        extra_fn = _wrap_with_commercial_bindings(
             network, extra_fn, config, log_queue=log_queue)
         # User-supplied numerical-conditioning scale on the LP objective.
         # Multiplies model.objective by a positive constant right before
@@ -712,7 +746,41 @@ def run_simulation(
                 # writes originals and re-solves don't double-apply.
                 # `captured` collects solve-only data (VOLL slack dispatch)
                 # that the restore step would otherwise wipe.
-                _real_restore, captured = _apply_modelling_assumptions(network, config, phase)
+                # Edge Investment Case (WP1.4a): the connection agreement is a
+                # transient transform like the modelling assumptions. Applied
+                # first, undone LAST (chained after their restore), so the
+                # assumptions snapshot and restore the agreement's state.
+                # WP1.3 PoC prices are transient too (spec §5.1; re-review #1/#2):
+                # the user's marginal_cost is never modified on disk. Runs with
+                # no commercial config as well — its commit clears stale frames.
+                try:
+                    # The strategy that will actually RUN (rolling falls back to
+                    # full with SCLOPF or multi-period; WP1.5a review #7).
+                    _ic_strategy = _ic_effective_strategy(
+                        getattr(config, "solve_strategy", "full"), sclopf=use_sclopf,
+                        multi_period=bool(config.multi_investment_periods))
+                    _ic_conn = apply_commercial_for_solve(
+                        network, getattr(config, "commercial", None),
+                        log=lambda m: _safe_log(log_queue, m),
+                        solve_strategy=_ic_strategy,
+                        multi_period=bool(config.multi_investment_periods))
+                except CommercialBindingError as exc:
+                    log_queue.put(f"[COMMERCIAL] ERROR: {exc}")
+                    phase("Commercial binding failed. Aborting.")
+                    status, condition = "error", "commercial_binding_failed"
+                    return status, condition
+                try:
+                    _real_restore, captured = _apply_modelling_assumptions(network, config, phase)
+                except BaseException:
+                    _ic_conn.undo()
+                    raise
+                _assumptions_restore = _real_restore
+
+                def _real_restore() -> None:
+                    try:
+                        _assumptions_restore()
+                    finally:
+                        _ic_conn.undo()
                 # Once-guarded restore wrapper. The network now carries the LP
                 # transforms; restore MUST run exactly once before the network
                 # can be serialised. The solve try/finally below calls this on
@@ -1060,6 +1128,22 @@ def run_simulation(
                         except Exception as exc:
                             phase(f"Myopic restore: skipped one entry ({exc})")
                     restore_modelling()
+                # Persist the commercial price frame only for a solve that
+                # produced a dispatch (re-review #5: no rows mixing one run's
+                # prices with another run's dispatch).
+                if status in ("ok", "optimal"):
+                    _ic_conn.commit()
+                    # The DSR dispatch record (IC P2 WP2.2-0): committed, or
+                    # cleared, only after a successful non-operational solve.
+                    from services.commercial.settlement_inputs import commit_dsr
+                    commit_dsr(network, captured.get("dsr_t"), captured.get("dsr_total_mwh"))
+                    # Published only after a successful solve, like the commit
+                    # (WP1.5a review #6); None after a plain successful solve.
+                    _emit_state(last_commercial_terms=(
+                        {**_ic_conn.facts,
+                         "demand_peaks": network.meta.get(_IC_META_DEMAND),
+                         "group": network.meta.get(_IC_META_GROUP)}
+                        if _ic_conn.facts.get("poc_link") else None))
                 # Adequacy report — emitted whenever a target was enforced
                 # AND the solve actually produced a dispatch, INCLUDING the
                 # nothing-shed case (achieved 0, binding=voll).

@@ -165,7 +165,7 @@ def _restore_base(network, lock, cfg, log_queue, final_state_update):
 
 def run_frontier_sweep(network, lock, cfg, targets: list[float], *,
                        log_queue=None, final_state_update=None,
-                       stop_event=None) -> dict:
+                       stop_event=None, restore_base: bool = True) -> dict:
     """
     Returns ``{"points": [...], "warning": str|None, "base_restored": bool,
     "base_restore_status": str|None, "aborted": bool}``. ``base_restored``
@@ -196,70 +196,84 @@ def run_frontier_sweep(network, lock, cfg, targets: list[float], *,
     ``exc.frontier_result`` so the caller can report the restore truthfully
     instead of guessing. Validation failures raise BEFORE the try — nothing
     has been solved yet, so there is nothing to restore.
+
+    ``restore_base=False`` is ONLY for a caller that passes a disposable
+    private copy (the Energy Hub study, plan P12 / Q4): there is no
+    foreground to restore, so the closing solve is skipped and
+    ``base_restored`` is None with status ``"skipped_private_copy"``. Every
+    HTTP route keeps the default (pinned by a test).
     """
-    from services.adequacy.sweep import _solve_once
+    from services.adequacy.sweep import _solve_once, preserve_bus_topology
 
-    eps = _validate(list(targets))
-    if float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
-        raise FrontierConfigError(
-            "the frontier requires VOLL > 0 — with no slack generators the "
-            "cap constrains nothing and every point collapses to the same "
-            "unconstrained plan")
+    # P22.9 bug 3: the points AND the closing `_restore_base` solve the
+    # network in place, so the topology columns PyPSA writes are put back
+    # after all of them (see `preserve_bus_topology`).
+    with preserve_bus_topology(network):
+        eps = _validate(list(targets))
+        if float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
+            raise FrontierConfigError(
+                "the frontier requires VOLL > 0 — with no slack generators the "
+                "cap constrains nothing and every point collapses to the same "
+                "unconstrained plan")
 
-    warning = non_convexity_warning(network, cfg)
-    points: list[dict] = []
-    # Built up front and MUTATED in place so the record the exception path
-    # hands back and the record the happy path returns are the same object.
-    result = {"points": points, "warning": warning, "base_restored": False,
-              "base_restore_status": None,
-              "aborted": False}
-    try:
-        for e in eps:
-            if stop_event is not None and stop_event.is_set():
-                result["aborted"] = True
-                break
-            sweep_cfg = dataclasses.replace(cfg, ens_cap_permyriad=e)
-            sink: dict = {}
-            _solve_once(sweep_cfg, network, lock, log_queue, sink)
-            status = sink.get("_status")
-            if status not in ("ok", "optimal"):
-                points.append({"target_permyriad": e, "status": sink.get("_condition")
-                               or status or "failed", "point": None})
-                continue
-            rep = sink.get("adequacy_report")
-            if not rep:
-                # A target was set and the solve succeeded, so the report is
-                # the contract. Its absence is a defect, not an empty result.
-                points.append({"target_permyriad": e, "status": "no_report",
-                               "point": None})
-                continue
-            sysblk = rep["target"]["system"]
-            points.append({
-                "target_permyriad": e,
-                "status": "ok",
-                "point": {
-                    "cap_mwh": float(sysblk["cap_mwh"]),
-                    "achieved_ens_mwh": float(sysblk["achieved_ens_mwh"]),
-                    "achieved_shed_hours": float(sysblk["achieved_shed_hours"]),
-                    "total_system_cost_eur": float(rep["cost"]["total_system_cost_eur"]),
-                    "engine": rep["engine"],
-                    "fidelity": rep["fidelity"],
-                },
-                "binding": rep["target"]["binding"],
-                "period_basis": rep["cost"]["period_basis"],
-            })
-    except BaseException as exc:
-        # The record rides along so the caller can report base_restored
-        # truthfully; the `finally` below fills it in before this propagates.
+        warning = non_convexity_warning(network, cfg)
+        points: list[dict] = []
+        # Built up front and MUTATED in place so the record the exception path
+        # hands back and the record the happy path returns are the same object.
+        result = {"points": points, "warning": warning, "base_restored": False,
+                  "base_restore_status": None,
+                  "aborted": False}
         try:
-            exc.frontier_result = result
-        except AttributeError:                                # pragma: no cover
-            pass
-        raise
-    finally:
-        result["base_restored"], result["base_restore_status"] = _restore_base(
-            network, lock, cfg, log_queue, final_state_update)
-    return result
+            for e in eps:
+                if stop_event is not None and stop_event.is_set():
+                    result["aborted"] = True
+                    break
+                sweep_cfg = dataclasses.replace(cfg, ens_cap_permyriad=e)
+                sink: dict = {}
+                _solve_once(sweep_cfg, network, lock, log_queue, sink)
+                status = sink.get("_status")
+                if status not in ("ok", "optimal"):
+                    points.append({"target_permyriad": e, "status": sink.get("_condition")
+                                   or status or "failed", "point": None})
+                    continue
+                rep = sink.get("adequacy_report")
+                if not rep:
+                    # A target was set and the solve succeeded, so the report is
+                    # the contract. Its absence is a defect, not an empty result.
+                    points.append({"target_permyriad": e, "status": "no_report",
+                                   "point": None})
+                    continue
+                sysblk = rep["target"]["system"]
+                points.append({
+                    "target_permyriad": e,
+                    "status": "ok",
+                    "point": {
+                        "cap_mwh": float(sysblk["cap_mwh"]),
+                        "achieved_ens_mwh": float(sysblk["achieved_ens_mwh"]),
+                        "achieved_shed_hours": float(sysblk["achieved_shed_hours"]),
+                        "total_system_cost_eur": float(rep["cost"]["total_system_cost_eur"]),
+                        "engine": rep["engine"],
+                        "fidelity": rep["fidelity"],
+                    },
+                    "binding": rep["target"]["binding"],
+                    "period_basis": rep["cost"]["period_basis"],
+                })
+        except BaseException as exc:
+            # The record rides along so the caller can report base_restored
+            # truthfully; the `finally` below fills it in before this propagates.
+            try:
+                exc.frontier_result = result
+            except AttributeError:                                # pragma: no cover
+                pass
+            raise
+        finally:
+            if restore_base:
+                result["base_restored"], result["base_restore_status"] = _restore_base(
+                    network, lock, cfg, log_queue, final_state_update)
+            else:
+                result["base_restored"] = None
+                result["base_restore_status"] = "skipped_private_copy"
+        return result
 
 
 def knee_index(points: list[dict], voll: float) -> int | None:

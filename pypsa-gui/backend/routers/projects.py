@@ -96,7 +96,11 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
                  # not have. test_bundle_sidecars now enumerates every
                  # SIDECAR_NAME under services/adequacy/ so a fourth sidecar
                  # cannot repeat this.
-                 "asset_health.json")
+                 "asset_health.json",
+                 # Edge Investment Case WP1.1c: the (id, version, hash) of every
+                 # Library series the project references, re-checked on open.
+                 # `test_library_bundle_pins` pins it equal to SIDECAR_NAME.
+                 "library_refs.json")
 
 # Per-project subdirectories that travel alongside the bundle FILES on every
 # project-to-project transition. Chatbot uploads (Phase A) live here under
@@ -106,7 +110,11 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
 # because the source and destination ARE the same dir. The legacy bundle-file
 # loop already handles the small files; bundling dirs separately keeps it
 # robust to growth (e.g. agent_export PNGs accumulating in uploads/).
-_BUNDLE_DIRS = ("uploads",)
+# Study reports (`reports/<report_id>/{meta.json, v<N>.json, figures/}`,
+# services/reports/store.py) joined the tuple with the same semantics: always a
+# COPY on save-as, replaced wholesale on snapshot restore, walked recursively
+# into the bundle zip and extracted from it.
+_BUNDLE_DIRS = ("uploads", "reports")
 
 # Cap on the serialized blank-canvas layout document. Even a large network's
 # schematic is a few hundred KB of coordinates; 4 MB bounds a malformed or
@@ -502,7 +510,9 @@ def _write_meta(project_dir: pathlib.Path, data: dict) -> None:
 # is refused on the way IN; a value already stored outside it (an older bundle,
 # a hand-edited metadata.json) is passed through to the client, which shows no
 # badge rather than breaking the row.
-_SCENARIO_TYPES = ("baseline", "scenario", "stress")
+# `sensitivity` — Edge Investment Case scenario matrix (spec §10); a plain
+# string column so adding it needed no migration (P0 WP0.4).
+_SCENARIO_TYPES = ("baseline", "scenario", "stress", "sensitivity")
 
 # The retired encoding: `"[stress] cold winter"` in `scenario_description`.
 # Still READ here, never written — a bundle exported before migration 0004,
@@ -1059,6 +1069,13 @@ async def import_bundle(
             atomic_write_bytes(target_path, zf.read(member))
 
     nc_path = dest / "network.nc"
+    from services.commercial.settlement_inputs import reserved_buses_in_netcdf
+
+    reserved = reserved_buses_in_netcdf(nc_path)
+    if reserved:
+        # `ic:` names the commercial reference frames' columns (P2 WP2.2-0):
+        # refused before anything is swapped (review 0b #2).
+        raise HTTPException(422, f"bus names starting 'ic:' are reserved: {reserved[:5]}")
     from services import dirty_state, undo_service
     undo_service.clear()
     dirty_state.clear()  # memory and disk now agree
@@ -1081,9 +1098,9 @@ async def import_bundle(
         active_project.set_active_project(db, session, _imported_project)
 
     cfg_path = dest / "solver_config.json"
+    from routers.simulation import _state, user_code_authorized
     stripped_fields: list[str] = []
     if cfg_path.exists():
-        from routers.simulation import _state, user_code_authorized
         cfg_data = json.loads(cfg_path.read_text())
         # `extra_functionality_code` is exec()-ed in-process with full FS and
         # network privileges, and `PUT /api/simulation/solver_config` refuses to
@@ -1110,6 +1127,10 @@ async def import_bundle(
         # enum values) — same path load_project uses, so a bundle from an older
         # GUI version imports instead of 500-ing on an unexpected key.
         _state["solver_config"] = _solver_config_from_dict(cfg_data)
+    else:
+        # Defaults, not the previously open project's config (WP1.1c review #2).
+        from services.solver_service import SolverConfig
+        _state["solver_config"] = SolverConfig()
 
     from routers.network import (
         _ensure_snapshots_cover_user_ts,
@@ -1177,8 +1198,13 @@ async def import_bundle(
         f"Imported project bundle '{file.filename}' as '{target_name}' "
         f"({len(n.buses)} buses, {len(n.snapshots)} snapshots)",
     )
+    from routers.simulation import _state as _sim_state
+    library_issues = _library_pin_issues(
+        db, _imported_project, dest,
+        _sim_state.get("solver_config") if cfg_path.exists() else None)
     return {
         "imported": target_name,
+        "library_issues": library_issues,
         # Present only when the import dropped something the caller was not
         # authorized to set, so a stripped field is never a silent difference
         # between the uploaded bundle and the imported project.
@@ -1209,7 +1235,37 @@ _TEMPLATE_DEFAULT_NAMES = {
     "ieee14": "IEEE 14-Bus",
     "belgium": "Belgium Grid",
     "ieee39": "IEEE 39-Bus (New England)",
+    # P19 Energy Hub templates (project_templates/eh_templates.py).
+    "eh_datacenter": "Data Center Energy Hub",
+    "eh_h2_hub": "Industrial Hydrogen Hub",
+    "eh_microgrid": "Island Microgrid",
 }
+
+# Sidecars a template directory may carry beside network.nc (P19): the EH
+# template metadata, its Class-C stress registry and its solver settings.
+# An allow-list, never a directory copy.
+_TEMPLATE_SIDECARS = ("eh_template.json", "adequacy_stress_scenarios.json",
+                      "solver_config.json")
+
+
+def _eh_template_builder(template_key: str):
+    """The EH template builder for ``template_key``, or None.
+
+    Loaded from ``project_templates/eh_templates.py`` by FILE PATH (the
+    directory is shipped as data, not as a package), so it works in a
+    checkout and in the frozen app alike.
+    """
+    import importlib.util
+
+    path = _PROJECT_TEMPLATES_DIR / "eh_templates.py"
+    if not path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("_eh_templates", path)
+    if spec is None or spec.loader is None:
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return getattr(mod, "BUILDERS", {}).get(template_key)
 
 
 def _solver_config_from_dict(data: dict):
@@ -1227,7 +1283,10 @@ def _solver_config_from_dict(data: dict):
     from dataclasses import fields as _dc_fields
 
     from services.solver_service import SolverConfig
-    valid_keys = {f.name for f in _dc_fields(SolverConfig)}
+    # EH P17: the energy import cap is PACK-ONLY (spec §6 amendment) — a
+    # saved or foreign config can never switch it on for an ordinary solve.
+    pack_only = {"import_energy_cap_mwh_per_year", "import_energy_links"}
+    valid_keys = {f.name for f in _dc_fields(SolverConfig)} - pack_only
     clean = {k: v for k, v in (data or {}).items() if k in valid_keys}
     # The 'lpf' mode was removed in v1.x — coerce any legacy value to 'lopf'.
     if clean.get("mode") == "lpf":
@@ -1302,7 +1361,13 @@ def create_from_template(
             f"{', '.join(sorted(_TEMPLATE_DEFAULT_NAMES))}.",
         )
     src_nc = _PROJECT_TEMPLATES_DIR / template_key / "network.nc"
+    eh_builder = None
     if not src_nc.exists():
+        # P19: network.nc is a gitignored build artifact (build-macos.sh);
+        # the EH templates are pure builders (no solve), so a fresh checkout
+        # or dev start builds them here instead of refusing.
+        eh_builder = _eh_template_builder(template_key)
+    if not src_nc.exists() and eh_builder is None:
         raise HTTPException(
             404,
             f"Template '{template_id}' is registered but its network.nc is "
@@ -1320,7 +1385,14 @@ def create_from_template(
     dest = project_registry.ensure_project_dir(_created_project)
     # `copy2` opens the destination for writing before it reads the source, so
     # a template that cannot be read leaves a truncated `network.nc` behind.
-    atomic_copy(src_nc, dest / "network.nc")
+    if eh_builder is not None:
+        eh_builder().export_to_netcdf(str(dest / "network.nc"))
+    else:
+        atomic_copy(src_nc, dest / "network.nc")
+    for sidecar in _TEMPLATE_SIDECARS:
+        src = _PROJECT_TEMPLATES_DIR / template_key / sidecar
+        if src.is_file():
+            atomic_copy(src, dest / sidecar)
 
     # Reset + load, mirroring import_bundle / load_project.
     from services import dirty_state, undo_service
@@ -1343,8 +1415,9 @@ def create_from_template(
     if session is not None:
         active_project.set_active_project(db, session, _created_project)
 
-    # Templates ship without user_ts / solver_config — reset both to defaults
-    # so no stale state from a previously-open project leaks into the new one.
+    # Templates ship without user_ts — reset it; solver_config is the
+    # template's own when it ships one (P19 EH templates set VOLL), else the
+    # defaults, so no stale state from a previously-open project leaks in.
     from routers.network import _reapply_user_ts_to_network, _restore_user_ts
     _restore_user_ts({})
     # Atomic lifecycle reset via `_state_update` (see F11 / G2 rationale).
@@ -1352,7 +1425,15 @@ def create_from_template(
 
     from routers.simulation import _state
     from routers.simulation import _state_update as _sim_state_update
-    _state["solver_config"] = SolverConfig()
+    _tpl_cfg = dest / "solver_config.json"
+    if _tpl_cfg.is_file():
+        try:
+            _state["solver_config"] = _solver_config_from_dict(
+                json.loads(_tpl_cfg.read_text()))
+        except (OSError, ValueError, TypeError):
+            _state["solver_config"] = SolverConfig()
+    else:
+        _state["solver_config"] = SolverConfig()
     _sim_state_update(status="idle", condition=None, objective=None, solve_time=None)
 
     n = PyPSAService.get_network()
@@ -1951,6 +2032,9 @@ def _save_context(
     )
     if cfg is not None:
         _atomic_write_text(dest / "solver_config.json", json.dumps(asdict(cfg), indent=2))
+        # Pin the Library versions the config references (WP1.1c).
+        from services.library import bundle_pins
+        bundle_pins.write_pins(dest, bundle_pins.collect_pins(asdict(cfg)))
 
     # Persist solve-time _state fields that n.export_to_netcdf doesn't
     # capture. Without these, after reload:
@@ -2204,6 +2288,26 @@ def _queue_solve_conflict(name: str) -> HTTPException:
     )
 
 
+def _library_pin_issues(db, project, src: pathlib.Path, cfg) -> list[dict]:
+    """
+    Re-check the project's Library pins (WP1.1c) against ITS org's Library and
+    log each issue. Reported, never repaired: the config keeps naming the
+    pinned version, and resolution at solve time refuses a mismatch.
+    """
+    from services.library import bundle_pins
+
+    if db is None or project is None:
+        return []
+    issues = bundle_pins.check_pins(
+        db, project.org_id, src, config=asdict(cfg) if cfg is not None else {})
+    for issue in issues:
+        change_log_service.log(
+            "warn", "Project", project.name,
+            f"Library pin {issue['code']} ({issue['reason']}): {issue['message']}",
+        )
+    return issues
+
+
 def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
     """
     Populate a (typically OFF-TO-THE-SIDE, background) ProjectContext from the
@@ -2388,6 +2492,7 @@ def activate_project(
         raise HTTPException(status_code=409, detail=_study)
 
     evicted: list[str] = []
+    library_issues: list[dict] = []
     # Hold this key's hydrate lock across the MISS so a concurrent cold path
     # (a path-scoped read, the session resolver, the solve dispatcher) cannot
     # build a SECOND context for the same project. A resident hit takes no
@@ -2407,6 +2512,8 @@ def activate_project(
             _hydrate_context_from_disk(ctx, src, project.name)
             project_registry.bind_context(ctx, project)
             evicted = PyPSAService.activate_context(ctx, register=True)
+            library_issues = _library_pin_issues(
+                db, project, src, ctx.solver_state.get("solver_config"))
 
     # Persist the pointer (Step 0b). Until this, "which project am I looking
     # at" lived only in process memory, so it was shared by every user on the
@@ -2419,7 +2526,21 @@ def activate_project(
     # by uuid, but everything downstream (frontend `currentProject`, autosave
     # `expect=`, chat.jsonl path) speaks names. `evicted` likewise — it lets the
     # frontend drop those projects' retained React Query caches.
-    return {"activated": project.name, "evicted": evicted, "lock": lock_info}
+    if resident is not None:
+        # A context can be resident without ever having been checked (the
+        # session resolver, the solve dispatcher and path-scoped reads hydrate
+        # without it; WP1.1c review #3). Check its IN-MEMORY config's refs —
+        # the sidecar on disk may lag unsaved edits.
+        from services.library import bundle_pins
+        cfg = PyPSAService.get_active_context().solver_state.get("solver_config")
+        library_issues = bundle_pins.check_pins(
+            db, project.org_id, None, config=asdict(cfg) if cfg is not None else {})
+        for issue in library_issues:
+            change_log_service.log(
+                "warn", "Project", project.name,
+                f"Library pin {issue['code']} ({issue['reason']}): {issue['message']}")
+    return {"activated": project.name, "evicted": evicted, "lock": lock_info,
+            "library_issues": library_issues}
 
 
 @router.post("/{project_id}/lock")
@@ -2572,14 +2693,21 @@ def load_project(
         project_registry.bind_context(PyPSAService.get_active_context(), project)
 
     cfg_path = src / "solver_config.json"
+    from routers.simulation import _state
     if cfg_path.exists():
-        from routers.simulation import _state
         data = json.loads(cfg_path.read_text())
         # Shared legacy-tolerant loader: filter to the live dataclass field set
         # (a missing key picks up the current default; unknown keys would
         # otherwise raise TypeError) and coerce removed enum values. Same path
         # import_bundle uses, so both routes accept old files identically.
         _state["solver_config"] = _solver_config_from_dict(data)
+    else:
+        # No file → defaults, not the PREVIOUS project's config (which
+        # `reset_network` carries forward): a later save would otherwise write
+        # that project's settings, commercial block and Library pins into this
+        # one (WP1.1c review #2; `create_from_template` already does this).
+        from services.solver_service import SolverConfig
+        _state["solver_config"] = SolverConfig()
 
     # Hydrate simulation state from metadata when the saved network has
     # dispatch tables. Without this, even though `n.generators_t.p` etc. are
@@ -2716,7 +2844,9 @@ def load_project(
         transformers=len(n.transformers),
         snapshots=len(n.snapshots),
     )
-    return {**summary.model_dump(), "lock": lock_info}
+    from routers.simulation import _state as _sim_state
+    library_issues = _library_pin_issues(db, project, src, _sim_state.get("solver_config"))
+    return {**summary.model_dump(), "lock": lock_info, "library_issues": library_issues}
 
 
 def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> ProjectInfo:

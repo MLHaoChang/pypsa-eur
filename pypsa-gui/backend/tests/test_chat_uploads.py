@@ -57,6 +57,7 @@ def demo_project(tmp_projects_dir):
 # router treats application/zip as the soft-mismatch fallback.
 _XLSX_LIKE = b"PK\x03\x04" + b"\x00" * 64
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -191,6 +192,33 @@ class TestListUploads:
         """No uploads/ dir present → list returns [] without crashing."""
         # demo_project fixture doesn't create uploads/ — perfect for this.
         assert upload_service.list_uploads(demo_project) == []
+
+    # WP11 — the `report_template` kind.
+    def test_add_with_kind_report_template_is_listed_by_kind(self, demo_project):
+        t = upload_service.add_upload(demo_project, b"PK\x03\x04tpl" * 4, "t.docx",
+                                      _DOCX_MIME, kind="report_template")
+        u = upload_service.add_upload(demo_project, b"alpha" * 10, "a.csv", "text/csv")
+        assert t.kind == "report_template" and u.kind == "user_upload"
+        assert [m.file_id for m in upload_service.list_uploads(
+            demo_project, kind="report_template")] == [t.file_id]
+        assert [m.file_id for m in upload_service.list_uploads(
+            demo_project, kind="user_upload")] == [u.file_id]
+        assert {m.file_id for m in upload_service.list_uploads(demo_project)} == {
+            t.file_id, u.file_id}
+        assert upload_service.list_uploads(demo_project, kind="agent_export") == []
+        assert UploadMeta.model_validate_json(t.model_dump_json()).kind == "report_template"
+
+    def test_dedup_promotes_a_user_upload_re_sent_as_a_template(self, demo_project):
+        """Dedup is on bytes; the template kind must win so the picker lists it."""
+        first = upload_service.add_upload(demo_project, b"PK\x03\x04same" * 4, "a.docx", _DOCX_MIME)
+        again = upload_service.add_upload(demo_project, b"PK\x03\x04same" * 4, "b.docx", _DOCX_MIME,
+                                          kind="report_template")
+        assert again.file_id == first.file_id and again.kind == "report_template"
+        assert again.filename == "a.docx" and again.uploaded_at == first.uploaded_at
+        assert upload_service.get_upload_meta(demo_project, first.file_id).kind == "report_template"
+        # The other direction never demotes.
+        third = upload_service.add_upload(demo_project, b"PK\x03\x04same" * 4, "c.docx", _DOCX_MIME)
+        assert third.kind == "report_template"
 
 
 class TestDelete:

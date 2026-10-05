@@ -51,6 +51,10 @@
       "surface": "banner",
       "why": "The profile cannot do what the turn needs (vision, tools). A configuration problem only the user can fix, and the turn is over. It already had KIND_COPY and did not route — the same unreachable-copy shape as inactive_acting_user."
     },
+    "commercial_binding_invalid": {
+      "surface": "inline",
+      "why": "The commercial config cannot bind to this network (a missing Link, an unrated snapshot, ...). The model reads the message and fixes the config within the turn."
+    },
     "confirmation_denied": {
       "surface": "inline",
       "why": "The user denied the card. Their own decision, already visible on the card."
@@ -79,6 +83,14 @@
       "surface": "banner",
       "why": "Upload rejected against the 25 MB cap. The user must act."
     },
+    "eh_report_not_found": {
+      "surface": "inline",
+      "why": "export_eh_report_docx found no stored Energy Hub report. Per-call; the message names the remedy (run_eh_study first) and the model relays it."
+    },
+    "figure_not_found": {
+      "surface": "inline",
+      "why": "Raised only by GET /{name}/reports/{id}/figures/{figure_id}, the report viewer's <img> source, for an unknown or malformed figure id. No tool serves figure bytes, so it never reaches a tool_error frame."
+    },
     "format_not_supported": {
       "surface": "inline",
       "why": "One tool could not read one format. Per-call, and the model can try another route."
@@ -91,9 +103,17 @@
       "surface": "banner",
       "why": "Attachment rejected against the 10 MB multimodal cap."
     },
+    "import_tariff_ref_conflict": {
+      "surface": "inline",
+      "why": "The project's inline tariff differs from the Library item its ref names. The model explains and asks which to keep; a binding code surfaced by attach_tariff."
+    },
     "inactive_acting_user": {
       "surface": "banner",
       "why": "The account stopped being active mid-turn. Nothing will work until it is fixed, and a gray tool line truncates that away — this is the correction the whole manifest generalises."
+    },
+    "inline_tariff_would_be_replaced": {
+      "surface": "inline",
+      "why": "attach_tariff refused to replace a project's inline import tariff with a different Library tariff. The model asks the user and calls again with replace_inline=true — a question it is already asking in prose."
     },
     "internal_error": {
       "surface": "inline",
@@ -115,6 +135,14 @@
       "surface": "inline",
       "why": "One image failed to decode in one tool call."
     },
+    "invalid_mapping_plan": {
+      "surface": "inline",
+      "why": "PUT /{name}/reports/{id}/template/plan (or set_report_mapping) received a body that is not a mapping plan, or a plan that needs sanitising under strict mode; the detail carries the sanitiser's notes naming the heading or section that does not exist. Per-call: the model (or the plan editor) corrects the plan within the turn, as with invalid_tool_args."
+    },
+    "invalid_report_id": {
+      "surface": "inline",
+      "why": "A report id that is not 16 lowercase hex characters, refused at the store boundary before any path is joined. Route-only in WP1; when WP6's report tools pass a model-typed id, the model sees the message and corrects within the turn, as with invalid_tool_args."
+    },
     "invalid_tool_args": {
       "surface": "inline",
       "why": "The model sent arguments that do not match the schema. It sees the error and retries within the turn; a banner would fire on a self-correcting step."
@@ -122,6 +150,10 @@
     "invalid_transcript": {
       "surface": "inline",
       "why": "Raised by POST /chat/import validating a pasted transcript. Route-only — no tool imports transcripts."
+    },
+    "library_ref_stale": {
+      "surface": "inline",
+      "why": "A Library reference no longer matches its item (edited or removed). The model re-reads the Library and retries or asks; a route code surfaced by attach_tariff."
     },
     "load_not_found": {
       "surface": "banner",
@@ -131,6 +163,10 @@
       "surface": "banner",
       "why": "The file type cannot be attached; the user is told to use the read tool instead."
     },
+    "missing_api_key": {
+      "surface": "banner",
+      "why": "The active LLM profile has no key in its slot. The chat turn reports it on its own error frame; the report generation routes (WP3) are the first to emit it as a tool_error literal. ChatPanel already routes this kind to the key-entry banner (TOOL_ERROR_BANNER_KINDS, KIND_COPY with the user.env field), so the classification must say banner or the frontend contract test fails."
+    },
     "no_acting_user": {
       "surface": "banner",
       "why": "No authenticated identity is bound to the turn, so every project-scoped tool 401s. Same family as inactive_acting_user and equally terminal — it was the one member of that family still unrouted."
@@ -139,6 +175,18 @@
       "surface": "inline",
       "why": "Most tools need a project; the model recovers by asking which one, in prose, inside the same turn. Promoting it would banner a question the assistant is already asking."
     },
+    "no_commercial_config": {
+      "surface": "inline",
+      "why": "attach_tariff needs a commercial config with a poc_link first. The model sets it (update_solver_config) and retries within the turn."
+    },
+    "no_evidence": {
+      "surface": "inline",
+      "why": "POST /{name}/reports/generate found no Energy Hub reference design, no reliability surface and no worksheet rows: there is nothing a model may narrate. The evidence-only POST still produces a document that states every section as not established; generation refuses. The message names the remedy (run a study) and the model relays it."
+    },
+    "no_template": {
+      "surface": "inline",
+      "why": "A mapping plan was proposed or stored (POST/PUT …/template/plan, propose_report_mapping, set_report_mapping) for a report that has no template bound. The message names the remedy (bind one with set_report_template) and the model relays it within the turn."
+    },
     "not_authorized": {
       "surface": "banner",
       "why": "The account may not take this action (e.g. switching the instance-wide profile). Terminal for the request and needs an administrator."
@@ -146,6 +194,14 @@
     "parallel_destructive_not_allowed": {
       "surface": "banner",
       "why": "Several destructive calls arrived in one turn and none ran. The user must reissue them one at a time."
+    },
+    "pdf_conversion_failed": {
+      "surface": "inline",
+      "why": "POST …/reports/{id}/export {format: pdf}: LibreOffice exited non-zero or wrote no file; the message carries the head of its stderr. Inline: the assistant relays the reason and offers the .docx, which rendered fine — the conversion is the only thing that failed."
+    },
+    "pdf_not_available": {
+      "surface": "inline",
+      "why": "POST …/reports/{id}/export {format: pdf} on a host without LibreOffice (soffice/libreoffice not on PATH): a capability, not a failure. Inline: the assistant offers the .docx instead; the viewer hides the PDF button from GET capabilities and never sends this."
     },
     "profile_switch_requires_new_chat": {
       "surface": "inline",
@@ -175,6 +231,46 @@
       "surface": "inline",
       "why": "The local per-session turn limiter, raised by the chat route before a turn starts — so it never arrives on a tool_error frame in practice."
     },
+    "report_job_in_flight": {
+      "surface": "inline",
+      "why": "POST /{name}/reports/generate (or a section regenerate) while a report job is still running — one job per process; the message says to wait or abort. Route-only in WP3; WP6's generate_report tool relays the message and the model waits or aborts within the turn."
+    },
+    "report_job_not_found": {
+      "surface": "inline",
+      "why": "POST /{name}/reports/generate/abort when no report generation has ever run in this session. Nothing to abort; the model relays it."
+    },
+    "report_mode_not_supported": {
+      "surface": "inline",
+      "why": "POST /{name}/reports was asked for a mode this build does not offer (only evidence_only until WP3's generator lands). Route-only in phase 1; when WP6's report tool passes a model-typed mode, the message names the supported one and the model corrects within the turn, as with invalid_tool_args."
+    },
+    "report_not_found": {
+      "surface": "inline",
+      "why": "No such study report (or version of it) in this project. Per-call; the message names the remedy (generate one first) and the model relays it, exactly as eh_report_not_found is handled."
+    },
+    "report_section_not_found": {
+      "surface": "inline",
+      "why": "A section id the report does not have, on generate (`sections`), on the per-section regenerate (WP3) or on get_report(section_id) (WP6). The message names the id; when WP6's tool passes a model-typed id the model corrects within the turn, as with invalid_tool_args."
+    },
+    "report_table_not_found": {
+      "surface": "inline",
+      "why": "get_report_table (WP6) was asked for a table id the report version does not carry. Tool-only: the routes serve whole documents. The message lists the ids the report has, so the model corrects within the turn, as with invalid_tool_args."
+    },
+    "report_version_not_found": {
+      "surface": "inline",
+      "why": "GET …/reports/{id}/versions/{a}/diff/{b}: one of the two versions does not exist. Inline: the tool result names the remedy (list_reports shows latest_version); the model corrects the argument."
+    },
+    "roundtrip_not_a_report": {
+      "surface": "inline",
+      "why": "POST …/reports/{id}/roundtrip: the file carries no sec:<id> bookmark and no heading that names a section of the report, so there is nothing to merge and nothing was written. Inline: the assistant tells the user which report the copy must come from."
+    },
+    "roundtrip_unreadable": {
+      "surface": "inline",
+      "why": "POST …/reports/{id}/roundtrip: the uploaded file is not a Word document the reader can open. Inline: the tool result names the file and the remedy (export again, edit in Word, upload the .docx); the assistant relays it."
+    },
+    "sdk_not_installed": {
+      "surface": "inline",
+      "why": "The SDK the active profile's wire needs is missing from this build, surfaced as a 400 by the report generation routes (WP3); the chat turn reports it on its own error frame. Per-call; the message says so and the model relays it."
+    },
     "session_not_yours": {
       "surface": "inline",
       "why": "Raised by the chat STREAM route when the caller-supplied session_id belongs to another user \u2014 sibling of unknown_session, and route-only for the same reason: the refusal happens before a turn starts, so it cannot arrive on a tool_error frame. Not a banner because the client already recovers from it without asking the user to do anything: api/chat.ts carries the error_kind onto the Error and ChatPanel calls startNewChat(), because the id comes from the project's shared transcript and a co-member's GET /history can mint it under their name first \u2014 so a legitimate user can meet this through no fault of their own and must not be left retrying an id the server will refuse forever."
@@ -194,6 +290,22 @@
     "study_in_flight": {
       "surface": "inline",
       "why": "An adequacy study is running and a save/queue was refused. Deliberately QUIET on the client (`QUIET_TOAST_CODES` in api/client.ts): it is a standing condition the caller handles, and one toast per autosave tick would bury the workbench."
+    },
+    "tagged_render_error": {
+      "surface": "inline",
+      "why": "POST …/reports/{id}/export (export_report_docx) with a TAGGED template whose tag the document cannot fill (an unknown field, table or figure id, or a Jinja syntax error); the message quotes the paragraph and lists the known names. Per-call: the user fixes the template or binds another, and the model relays the message rather than retrying."
+    },
+    "template_not_a_template": {
+      "surface": "inline",
+      "why": "set_report_template / POST …/template (or generate_report with template_file_id) named an upload that is neither of kind report_template nor a .docx by MIME. The message names the file and the remedy (upload a .docx with ?kind=report_template); the model corrects the file id within the turn, as with invalid_tool_args."
+    },
+    "template_not_untagged": {
+      "surface": "inline",
+      "why": "A mapping plan was proposed or stored for a TAGGED template, which fills its own tags and needs no plan. Per-call; the message says so and the model relays it (export_report_docx is the next step)."
+    },
+    "template_unreadable": {
+      "surface": "inline",
+      "why": "The bound template's bytes could not be opened as a Word document (docx_reader.TemplateReadError: a renamed zip, a truncated file) on bind, GET, plan or export. The message names the reason; the user must supply a real .docx, and the model relays it rather than retrying."
     },
     "time_column_parse_error": {
       "surface": "banner",
@@ -227,6 +339,10 @@
       "surface": "inline",
       "why": "A confirm arrived for a token this session does not know — a stale tab or a double-submit, not a user-actionable state."
     },
+    "unknown_library_kind": {
+      "surface": "inline",
+      "why": "A Library tool got a kind other than tariff / contract / connection_agreement. The model corrects the argument and retries, like invalid_tool_args."
+    },
     "unknown_profile_id": {
       "surface": "banner",
       "why": "The selected profile no longer exists — fires for every open chat the moment a super-admin deletes one, and C-4 made it reachable."
@@ -247,6 +363,10 @@
       "surface": "banner",
       "why": "Upload rejected on type. The user must supply something else."
     },
+    "unsupported_upload_kind": {
+      "surface": "inline",
+      "why": "POST or GET /{name}/uploads with a ?kind= that is not one a client may ask for (user_upload or report_template on upload; any known kind on list). Route-only today (no tool passes a kind); classified so a typo in a client cannot silently file a template as a plain upload or list nothing. The message lists the accepted kinds."
+    },
     "upload_not_found": {
       "surface": "banner",
       "why": "A referenced upload is gone. The user must re-attach."
@@ -254,6 +374,22 @@
     "upload_quota_exceeded": {
       "surface": "banner",
       "why": "The per-project upload quota is full. The user must delete something."
+    },
+    "urdb_invalid": {
+      "surface": "inline",
+      "why": "The URDB import arguments did not validate (e.g. valid_from not a date). The model corrects and retries."
+    },
+    "urdb_multiple_rates": {
+      "surface": "inline",
+      "why": "The uploaded OpenEI response holds several rates; the error lists them and the model retries with item_index, asking the user which one if unclear."
+    },
+    "urdb_refused": {
+      "surface": "inline",
+      "why": "A URDB import refused fields by name (the route's 422). The model lists them and asks whether to import partially (accept_partial) — a question in prose, within the turn."
+    },
+    "urdb_upload_unreadable": {
+      "surface": "inline",
+      "why": "The uploaded file is not a URDB rate the importer can read (not JSON, no rates, a REopt scenario with only a label). The model says so in prose and asks for another file."
     },
     "user_code_disabled": {
       "surface": "inline",

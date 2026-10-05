@@ -12,7 +12,8 @@ while the worker runs the whole default pipeline, then read the persisted
 ``GET /api/results/eh_reference_design`` and find, in ONE report,
 
 * a finite ``mc_lole_h`` and a ``certification`` verdict (WP1),
-* a frontier of at least three points, every cost ex-shed with a period
+* a frontier of at least three points (the ladder's five here; the stage
+  accepts two, a knee needs three), every cost ex-shed with a period
   basis (WP2),
 * a non-empty, criticality-ranked ``fmea_top`` carrying the Link-primary
   note (WP3),
@@ -24,9 +25,16 @@ while the worker runs the whole default pipeline, then read the persisted
   event on the PoC raises LOLE and is ranked as its own class-A mode,
 * the import SAMPLED rather than counted firm (plan 2026-09-27): the
   weak_flexible certification samples the PoC Link and the grid behind it
-  (``import_model == "zonal"``); on a firm-vs-sampled fixture pair a
-  reliable Link with q > 0 raises the MC LOLE over the firm block, while an
+  (``import_model == "zonal"``); on a firm-vs-sampled fixture pair the Link
+  WITHOUT outage data is not counted at all (decision 6, the P11 boundary —
+  merge 2026-09-28), so the Link WITH data lowers the MC LOLE, while an
   islanded off_grid hub certifies to the same LOLE either way.
+
+Merge of master (2026-09-28, docs/superpowers/qa/2026-09-28-merge-master-
+decisions.md): the report follows the branch's P11/P12 contract — verdict
+``pass`` / ``fail`` / ``inconclusive`` on the LOLE CI, frontier on a private
+copy (no closing restore, only on request for weak_flexible), fmea_top's
+Class-B ``rows`` with the class-A screening under ``class_a``.
 
 Runs in CI through ``tests/run_qa_drivers.py`` (``pixi run gui-qa-drivers``).
 Exit 0 = every step passed.
@@ -145,7 +153,11 @@ def section_1_weak_flexible() -> None:
     qa_support.install_network(certifiable_weak_network())
     qa_support.save_project(PROJECT)
     _configure(VOLL)
-    study = _run_study("weak_flexible")
+    # The frontier is a weak_flexible stage only on request (P12); the rest
+    # is the pack's default pipeline.
+    study = _run_study("weak_flexible", stages=[
+        "apply_pack", "ens_solve", "frontier", "mc_certify", "fmea_top",
+        "levers", "dtc_stress", "assemble"])
     if study.get("status") != "done":
         return
     r = c.get("/api/results/eh_reference_design")
@@ -181,14 +193,19 @@ def section_1_weak_flexible() -> None:
     _step("certification is ok", comp.get("certification") == "ok",
           f"status={comp.get('certification')} note={str(cert.get('note'))[:160]}")
     payload = cert.get("payload") or {}
-    _step("the verdict is a decision-2 verdict",
-          payload.get("verdict") in ("certified", "failed"),
+    _step("the verdict is a P11 verdict (decision 2 on the CI)",
+          payload.get("verdict") in ("pass", "fail", "inconclusive"),
           f"verdict={payload.get('verdict')}")
-    _step("the verdict agrees with LOLE vs target",
-          (payload.get("target_lole_h") is not None and lole is not None
-           and ((payload["verdict"] == "certified")
-                == (float(lole) <= float(payload["target_lole_h"]) + 1e-9))),
-          f"lole={lole} target={payload.get('target_lole_h')}")
+    ci = payload.get("lole_ci") or [None, None]
+    tgt = payload.get("target_lole_h_per_horizon")
+    _step("the verdict agrees with the LOLE CI vs the target",
+          tgt is not None and None not in ci and (
+              (payload["verdict"] == "pass") == (float(ci[1]) <= float(tgt))
+              and (payload["verdict"] == "fail") == (float(ci[0]) > float(tgt))),
+          f"ci={ci} target={tgt} verdict={payload.get('verdict')}")
+    _step("certified follows the verdict",
+          rep.get("certified") is (payload.get("verdict") == "pass"),
+          f"certified={rep.get('certified')}")
     _step("the MC charged no solves", _stage(rep, "mc_certify").get("solves_charged") == 0
           and _stage(rep, "mc_certify").get("status") == "run",
           str(_stage(rep, "mc_certify")))
@@ -229,16 +246,28 @@ def section_1_weak_flexible() -> None:
     _step("the frontier passes through the report's own target",
           any(abs(float(p["target_permyriad"]) - float(rep["ens_cap_permyriad"])) < 1e-9
               for p in pts), f"targets={[p.get('target_permyriad') for p in pts]}")
-    _step("the frontier's closing restore brought the plan back",
-          (fr.get("payload") or {}).get("base_restored") is True,
-          str((fr.get("payload") or {}).get("base_restore_status")))
-    _step("frontier solves are charged (points + restore)",
-          _stage(rep, "frontier").get("solves_charged") == len(pts) + 1,
+    _step("the frontier ran on a private copy (no closing restore, Q4)",
+          (fr.get("payload") or {}).get("restore_skipped_on_private_copy") is True,
+          str((fr.get("payload") or {}).get("restore_skipped_on_private_copy")))
+    frp = fr.get("payload") or {}
+    _step("a knee is reported only from ≥ 3 solved points (owner's Q3 rule)",
+          (isinstance(frp.get("knee_index"), int)
+           and frp.get("knee_status") == "ok" and len(ok_pts) >= 3)
+          or (frp.get("knee_index") is None
+              and frp.get("knee_status") == "not_established"
+              and bool(frp.get("knee_note"))),
+          f"knee={frp.get('knee_index')} status={frp.get('knee_status')} "
+          f"ok_points={len(ok_pts)}")
+    _step("frontier solves are charged (one per point)",
+          _stage(rep, "frontier").get("solves_charged") == len(pts),
           str(_stage(rep, "frontier")))
 
     # WP3 — FMEA top-N.
     fm = sections.get("fmea_top") or {}
-    top = (fm.get("payload") or {}).get("top") or []
+    fpay = fm.get("payload") or {}
+    top = fpay.get("rows") or []
+    class_a = fpay.get("class_a") or {}
+    a_rows = class_a.get("rows") or []
     _step("fmea_top is ok", comp.get("fmea_top") == "ok",
           f"status={comp.get('fmea_top')} note={str(fm.get('note'))[:160]}")
     _step("fmea_top is non-empty", bool(top), f"{len(top)} modes")
@@ -249,11 +278,15 @@ def section_1_weak_flexible() -> None:
     _step("the import Link's outage is a ranked Class-B mode",
           any(m.get("failure_class") == "B" and m.get("component_class") == "Link"
               for m in top), str([(m.get("failure_class"), m.get("name")) for m in top]))
+    _step("the class-A COPT screening rides beside it (zero solves)",
+          class_a.get("status") == "ok" and bool(a_rows)
+          and class_a.get("solves_charged") == 0,
+          f"status={class_a.get('status')} rows={len(a_rows)}")
     _step("the sampled import Link is ranked once (its Class-B row)",
-          sum(1 for m in top if m.get("name") in ("import_poc", "link:import_poc"))
-          == 1 and (fm.get("payload") or {}).get("import_link_ranking")
-          == {"import_poc": "class_b"},
-          str((fm.get("payload") or {}).get("import_link_ranking")))
+          sum(1 for m in top + a_rows
+              if m.get("name") in ("import_poc", "link:import_poc")) == 1
+          and class_a.get("import_link_ranking") == {"import_poc": "class_b"},
+          str(class_a.get("import_link_ranking")))
 
     # WP4 — LCOH flag on an electrical-only network.
     tea = rep.get("tea") or {}
@@ -333,14 +366,14 @@ def section_3_import_outages() -> None:
           s.get("import_model") == "sampled_unit"
           and s.get("import_firmness") == "outage_sampled",
           f"{s.get('import_model')} / {s.get('import_firmness')}")
-    _step("the Link without occurrence data is a firm block",
-          f.get("import_model") == "firm_block"
-          and f.get("import_firmness") == "planning_limit_only",
+    _step("the Link without occurrence data is not counted (decision 6)",
+          f.get("import_model") == "excluded"
+          and f.get("import_firmness") == "not_counted",
           f"{f.get('import_model')} / {f.get('import_firmness')}")
     ls, lf = s.get("_mc_lole_h"), f.get("_mc_lole_h")
-    _step("a reliable Link with q > 0 RAISES the MC LOLE over the firm block",
+    _step("counting the Link with its own outage data LOWERS the MC LOLE",
           isinstance(ls, (int, float)) and isinstance(lf, (int, float))
-          and ls > lf, f"sampled={ls} firm={lf}")
+          and ls < lf, f"sampled={ls} not_counted={lf}")
     WEAK_EVIDENCE["pair_sampled_lole_h"] = ls
     WEAK_EVIDENCE["pair_firm_lole_h"] = lf
 
@@ -424,27 +457,28 @@ def section_4_zonal_open_items() -> None:
     _step("an event on a sampled grid certifies through the zonal engine",
           cm.get("import_model") == "zonal" and cm.get("engine") == "mc_zonal",
           f"{cm.get('import_model')} / {cm.get('engine')}")
-    # WP4 event-only path: firm Link, unsampled grid, one event.
+    # WP4 event-only path: a Link WITHOUT its own outage data is not counted
+    # (decision 6, merge 2026-09-28), so its event has nothing to take down —
+    # it is disclosed as not applied, and LOLE equals the q = 0 control.
     eo = _certify(common_mode_network(event_only=True), "weak_flexible")
     eo0 = _certify(common_mode_network(rate=0.0, event_only=True),
                    "weak_flexible")
-    _step("the event-only path is disclosed as common_mode_sampled",
-          eo.get("import_model") == "firm_block"
-          and eo.get("import_firmness") == "common_mode_sampled"
-          and eo.get("engine") == "mc_zonal",
-          f"{eo.get('import_model')} / {eo.get('import_firmness')} / "
-          f"{eo.get('engine')}")
+    ev_eo = (eo.get("fleet_scope") or {}).get("import_common_mode") or []
+    _step("an event on an uncounted Link is disclosed, not applied",
+          eo.get("import_model") == "excluded"
+          and len(ev_eo) == 1 and ev_eo[0].get("applied") is False
+          and "not counted" in str(ev_eo[0].get("reason")),
+          f"{eo.get('import_model')} / {str(ev_eo)[:160]}")
     le, le0 = eo.get("_mc_lole_h"), eo0.get("_mc_lole_h")
-    _step("the event alone raises LOLE over the firm block (q = 0 control)",
-          isinstance(le, (int, float)) and isinstance(le0, (int, float))
-          and le > le0 and eo0.get("import_firmness") == "planning_limit_only",
-          f"event={le} control={le0} ({eo0.get('import_firmness')})")
+    _step("the uncounted Link's event changes nothing (q = 0 control)",
+          isinstance(le, (int, float)) and le == le0,
+          f"event={le} control={le0}")
     WEAK_EVIDENCE["event_only_lole_h"] = (le, le0)
 
     # WP3 + WP4: the screening mixes the event, ranks it, and carries the
     # exact import metric.
-    fm = _fmea(common_mode_network(), "weak_flexible")
-    top = fm.get("top") or []
+    fm = _fmea(common_mode_network(), "weak_flexible").get("class_a") or {}
+    top = fm.get("rows") or []
     _step("fmea_top ranks the common-mode event as its own class-A mode",
           any(m.get("component_class") == "CommonMode"
               and m.get("failure_class") == "A" for m in top),

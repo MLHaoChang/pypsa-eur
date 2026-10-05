@@ -12,7 +12,7 @@
 import { useCallback, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { Components } from 'react-markdown'
+import type { Components, Options } from 'react-markdown'
 import { extractCopyText } from '../utils/chatUi'
 
 function CodeBlockPre({ children, ...rest }: { children?: ReactNode } & Record<string, unknown>) {
@@ -79,10 +79,15 @@ const components: Components = {
   td: ({ node, ...p }) => <td className="border border-border px-2 py-1 align-top" {...p} />,
 }
 
-export default function ChatMarkdown({ children }: { children: string }) {
+// `rehypePlugins` is optional and off by default: the report viewer passes
+// `rehypeMarkUnverified` so audited numbers get their `<mark>` inside the
+// rendered prose (pages/reports/highlightUnverified.ts); chat passes nothing.
+export default function ChatMarkdown({
+  children, rehypePlugins,
+}: { children: string; rehypePlugins?: Options['rehypePlugins'] }) {
   return (
     <div className="chat-markdown break-words">
-      <Markdown remarkPlugins={[remarkGfm]} components={components}>
+      <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins ?? undefined} components={components}>
         {children}
       </Markdown>
     </div>

@@ -1,29 +1,23 @@
 """
-The EH study's certification / frontier / FMEA stages — thin wrappers that
-wire EXISTING engines into ``run_eh_study`` (plan
-docs/superpowers/plans/2026-09-26-eh-wire-skipped-stages.md, WP1–WP3).
+The EH study's fixed-plan fleet: which units the hub's MC certification and
+the class-A COPT screening sample, and how the import enters them (plans
+docs/superpowers/plans/2026-09-26-eh-wire-skipped-stages.md WP1/WP3 and
+2026-09-27 / 2026-09-28 eh-zonal-mc-*).
 
-Nothing here is a new engine and nothing here builds a report: each stage
-returns a ``(status, payload, note, solves_charged)`` fragment (plus the MC
-LOLE headline for ``mc_certify``) that ``eh_study`` hands to
-``assemble_reference_design_report`` (spec decision 16).
+MERGE NOTE (2026-09-28, docs/superpowers/qa/2026-09-28-merge-master-decisions.md).
+The stage BODIES (frontier / mc_certify / fmea_top) live in ``eh_study`` —
+the P11/P12 stage table with its budget rules, private copies and verdict
+contract. This module supplies what master's PR #53/#55 added on top: the
+hub-side fleet (``hub_fleet_scope``), the sampled import Link units with
+their hourly cap, the zonal grid areas behind the Link (``mc_zonal``) with
+grid storage and common-mode events, and the COPT screening of that fleet
+(``freeze_fixed_plan``). ``eh_study`` passes its gated hub boundary
+(``archetypes.hub_boundary_copy``) as ``boundary=`` so the sides and the
+decision-6 rule (a Link without its own outage data is not counted) are the
+ones the P11 spec amendment pins.
 
-THE FIXED PLAN. ``mc_certify`` and the class-A half of ``fmea_top`` are
-statements about ONE plan — the plan whose cost, sizing and TEA the report
-describes, i.e. the network as ``ens_solve`` left it. Both read that plan
-through ``freeze_fixed_plan``, taken under the mutation lock at the end of
-``ens_solve`` and BEFORE the frontier stage re-solves the network at other
-targets (decision-18 order puts ``frontier`` first). The frontier's closing
-restore re-solves the user's config and normally lands on the same optimum,
-but "normally" is not a certification: freezing first means the number the
-report certifies cannot depend on whether that restore came back clean.
-
-THE BUDGET. LP solves are charged to the study budget the way ``campaign``
-charges them: the frontier costs one solve per point plus the closing
-restore; the class-B Link sweep costs its base solve, one per Link and the
-restore; the MC and the COPT cost ZERO because they solve nothing. A stage
-that cannot fit in the remaining budget is reported ``skipped`` with a note
-naming the shortfall rather than run over it (spec decision 17).
+Nothing here is a new engine and nothing here builds a report or solves an
+LP: the MC and the COPT charge ZERO solves.
 """
 from __future__ import annotations
 
@@ -38,7 +32,6 @@ import numpy as np
 from models.energy_hub import (
     DEFAULT_EH_FMEA_TOP_N,
     DEFAULT_EH_FRONTIER_LADDER,
-    CertificationVerdict,
 )
 
 logger = logging.getLogger("pypsa_gui.eh_stages")
@@ -47,8 +40,14 @@ logger = logging.getLogger("pypsa_gui.eh_stages")
 # ``models.energy_hub``; the names are kept for callers and tests).
 EH_FRONTIER_LADDER: tuple[float, ...] = DEFAULT_EH_FRONTIER_LADDER
 FMEA_TOP_N = DEFAULT_EH_FMEA_TOP_N
-#: Fewer points than this is not a curve; the stage skips rather than run two.
-MIN_EH_FRONTIER_POINTS = 3
+#: Fewer points than this is not a curve (P12 rule, ``eh_study``: the frontier
+#: stage needs two solved points; master PR #53 asked for three — merge
+#: decision 2026-09-28 keeps the gated P12 budget rule).
+MIN_EH_FRONTIER_POINTS = 2
+#: The product owner's Q3 rule (2026-09-29): a curve needs 2 solved points,
+#: the KNEE needs 3 — a VOLL crossing must lie BETWEEN alternatives. Below
+#: this the knee is ``not_established`` and never reported.
+MIN_EH_FRONTIER_KNEE_POINTS = 3
 
 # Spec decision 14 / P2: FMEA top-N from the EH study is Link-primary Class-B
 # residual risk. AC Line/Transformer N-1 stays on SCLOPF and is omitted from
@@ -105,7 +104,7 @@ class ImportLinkModel:
     """How ONE identified import Link enters the hub's MC / COPT fleet."""
 
     name: str
-    model: str                 # sampled_unit | firm_block | islanded
+    model: str                 # sampled_unit | firm_block | islanded | excluded
     cap_mw_max: float
     q: float | None = None
     mttr_hours: float | None = None
@@ -183,9 +182,14 @@ class FleetScope:
         live = [m.model for m in self.link_models if m.model != "islanded"]
         if not live:
             return "islanded"
-        if all(m == "sampled_unit" for m in live):
+        # ``excluded`` (the EH study's decision-6 boundary, merge 2026-09-28):
+        # a Link without its own outage data is not counted at all.
+        counted = [m for m in live if m != "excluded"]
+        if not counted:
+            return "excluded"
+        if all(m == "sampled_unit" for m in counted):
             return "sampled_unit"
-        if all(m == "firm_block" for m in live):
+        if all(m == "firm_block" for m in counted):
             return "firm_block"
         return "mixed"
 
@@ -207,7 +211,8 @@ class FleetScope:
             # Review of PR #55: say the event is sampled too.
             return "outage_and_common_mode_sampled"
         return {"sampled_unit": "outage_sampled",
-                "mixed": "partially_outage_sampled"}.get(
+                "mixed": "partially_outage_sampled",
+                "excluded": "not_counted"}.get(
                     base, "planning_limit_only")
 
     def copt_import_model(self) -> str | None:
@@ -328,7 +333,8 @@ def _series(n, name: str, attr: str, default: float) -> np.ndarray:
     return np.full(len(n.snapshots), v, dtype=float)
 
 
-def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
+def hub_fleet_scope(n, overlay, *, sample_links: bool = True,
+                    boundary: dict | None = None) -> FleetScope:
     """
     Split the network at the identified import Link(s) → ``FleetScope``.
 
@@ -349,11 +355,22 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
       the Link becomes a two-state ``CoptUnit`` with that cap as its UP
       capacity; otherwise it is a firm block at the cap. A rate outside
       ``[0, 1)`` raises ``OutageRateError`` exactly as a generator's does.
+
+    ``boundary`` (the EH study, merge 2026-09-28): the ``info`` of
+    ``archetypes.hub_boundary_copy`` — the gated P11 hub boundary (spec §4
+    amendment). Its sides are authoritative (``removed_buses`` is the grid
+    side; carrier-only and ambiguous selections were already refused there),
+    and decision 6 applies: a Link it lists in ``excluded_import_links`` (no
+    outage data of its own, an energy-limited import) and a Link whose data
+    cannot build a chain are ``excluded`` — not counted in the MC / COPT at
+    all — instead of a firm block.
     """
     from services.adequacy.archetypes import select_import_links
     from services.adequacy.copt import solved_capacity
 
     links = select_import_links(n, overlay)
+    if boundary is not None:
+        links = [str(x) for x in boundary.get("import_links") or []]
     if not links:
         return FleetScope(mode="whole_network", common_mode=_ignored_common_mode(
             getattr(n, "links", None), set(), "whole-network scope (no identified hub boundary) — common-mode data not modelled"), note=(
@@ -370,7 +387,7 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
         lk for lk in links
         if ("eh_role" in ldf.columns and str(ldf.at[lk, "eh_role"]) == "grid_import")
         or str(ldf.at[lk, "bus0"]) in poc or str(ldf.at[lk, "bus1"]) in poc]
-    if len(identified) != len(links):
+    if boundary is None and len(identified) != len(links):
         return FleetScope(mode="whole_network", import_links=list(links),
                           common_mode=_ignored_common_mode(ldf, set(), "whole-network scope (no identified hub boundary) — common-mode data not modelled"),
                           note=(
@@ -386,15 +403,20 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
     grid_comps: set[int] = set()
     hub_comps: set[int] = set()
     orient: dict[str, tuple[str, str]] = {}
+    far = (set(str(b) for b in boundary.get("removed_buses") or [])
+           if boundary is not None else None)
     for lk in links:
         b0, b1 = str(ldf.at[lk, "bus0"]), str(ldf.at[lk, "bus1"])
         g, h = b0, b1
-        if (by_comp[comp[b0]] & crit) and not (by_comp[comp[b1]] & crit):
+        if far is not None:
+            if b1 in far and b0 not in far:
+                g, h = b1, b0
+        elif (by_comp[comp[b0]] & crit) and not (by_comp[comp[b1]] & crit):
             g, h = b1, b0
         orient[lk] = (g, h)
         grid_comps.add(comp[g])
         hub_comps.add(comp[h])
-    if grid_comps & hub_comps:
+    if far is None and grid_comps & hub_comps:
         return FleetScope(mode="whole_network", import_links=list(links),
                           common_mode=_ignored_common_mode(ldf, set(), "whole-network scope (no identified hub boundary) — common-mode data not modelled"),
                           note=(
@@ -403,7 +425,14 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
             "the whole network (single-area copper plate)"))
 
     excluded = sorted(b for b, c in comp.items() if c in grid_comps)
+    if far is not None:
+        excluded = sorted(far)
+        grid_comps = {comp[b] for b in far}
     ex_set = set(excluded)
+    # Decision 6 (EH boundary): Links the boundary refused to count, with why.
+    boundary_excluded = {
+        str(e.get("link")): str(e.get("reason") or "excluded by the hub boundary")
+        for e in ((boundary or {}).get("excluded_import_links") or [])}
     units = []
     for cname in ("generators", "storage_units"):
         df = getattr(n, cname, None)
@@ -453,6 +482,15 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
             models.append(ImportLinkModel(name=str(lk), model="islanded",
                                           cap_mw_max=0.0, source=src))
             continue
+        if str(lk) in boundary_excluded:
+            models.append(ImportLinkModel(
+                name=str(lk), model="excluded", cap_mw_max=cap_max,
+                source=src, reason=boundary_excluded[str(lk)]))
+            if cm is not None and cm.get("applied"):
+                cm["applied"] = False
+                cm["reason"] = ("import Link not counted in the MC fleet — "
+                                + boundary_excluded[str(lk)])
+            continue
         cap_total += delivered
         link_grid[str(lk)] = {"comp": comp[g], "delivered": delivered,
                               "sending": sending}
@@ -479,6 +517,19 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
             reason = "no occurrence data on the Link"
         else:
             reason = "Link sampling disabled (firm-block comparison)"
+        if boundary is not None:
+            # Decision 6: firm only when its outages are modelled — a Link
+            # that cannot be sampled is not counted (never a firm block).
+            cap_total -= delivered
+            link_grid.pop(str(lk), None)
+            models.append(ImportLinkModel(
+                name=str(lk), model="excluded", cap_mw_max=cap_max,
+                source=src, reason=reason + " — not counted (decision 6)"))
+            if cm is not None and cm.get("applied"):
+                cm["applied"] = False
+                cm["reason"] = ("import Link not counted in the MC fleet — "
+                                + reason)
+            continue
         firm += delivered
         models.append(ImportLinkModel(
             name=str(lk), model="firm_block", cap_mw_max=cap_max,
@@ -607,6 +658,8 @@ def _scope_note(scope: FleetScope, extra: str | None = None) -> str:
                          f"(q={m.q:.3g}, MTTR {m.mttr_hours:.3g} h)")
         elif m.model == "islanded":
             parts.append(f"{m.name}: islanded (0 MW)")
+        elif m.model == "excluded":
+            parts.append(f"{m.name}: not counted ({m.reason})")
         else:
             parts.append(f"{m.name}: firm block up to its planning cap "
                          f"({m.reason or 'no occurrence data'})")
@@ -684,7 +737,8 @@ def _grid_areas(network, cfg, scope: FleetScope, hub_inputs):
         expected_surplus_fraction,
     )
 
-    live = [m for m in scope.link_models if m.model != "islanded"]
+    live = [m for m in scope.link_models
+            if m.model not in ("islanded", "excluded")]
     if not live:
         return None, None
     unit_pos = {u.name: i for i, u in enumerate(hub_inputs.units)}
@@ -999,7 +1053,8 @@ def _screen(inputs, zonal, scope: FleetScope, *, voll: float, index):
 
 
 def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
-                      import_model: str = "auto") -> FixedPlanSnapshot:
+                      import_model: str = "auto",
+                      boundary: dict | None = None) -> FixedPlanSnapshot:
     """
     Snapshot the MC inputs and screen the fleet, ONCE, under ``lock``.
 
@@ -1019,6 +1074,8 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
     and adds the zonal grid area when the grid side can be sampled;
     ``"sampled_unit"`` stops at v1; ``"firm_block"`` is the pre-2026-09-27
     behaviour (every Link a firm block) — kept for comparisons and tests.
+
+    ``boundary``: the EH study's gated hub boundary (``hub_fleet_scope``).
     """
     from services.adequacy.mc import snapshot_inputs
 
@@ -1028,7 +1085,8 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
     with lock:
         try:
             scope = (hub_fleet_scope(network, overlay,
-                                     sample_links=import_model != "firm_block")
+                                     sample_links=import_model != "firm_block",
+                                     boundary=boundary)
                      if overlay is not None
                      else FleetScope(mode="whole_network",
                                      note="no import overlay given"))
@@ -1107,234 +1165,6 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
     return snap
 
 
-# ── WP1: mc_certify ───────────────────────────────────────────────────────
-
-def certification_verdict(*, mc_lole_h: float | None,
-                          target_lole_h: float | None) -> CertificationVerdict:
-    """
-    Spec decision 2. LOLE failure fails certification even when ENS is met
-    — ENS is the PLANNING metric and never enters this rule.
-    """
-    if mc_lole_h is None or not math.isfinite(float(mc_lole_h)):
-        return "not_established"
-    if target_lole_h is None:
-        return "no_target"
-    return "certified" if float(mc_lole_h) <= float(target_lole_h) + 1e-9 else "failed"
-
-
-def run_mc_certify_stage(
-    frozen: FixedPlanSnapshot,
-    pack,
-    *,
-    stop_event,
-    ens_met: bool | None,
-) -> tuple[str, dict | None, str | None, float | None]:
-    """
-    Sequential MC on the frozen plan → ``(status, payload, note, mc_lole_h)``.
-
-    This is the study's OWN baseline, not an ELCC replay, so it is the one
-    kind of call site that may carry ``stop_event`` into ``mc_adequacy``
-    (see that function's note on common random numbers). Charges no solves.
-
-    When the freeze built a zonal grid area (``frozen.zonal_inputs``) the
-    two-area engine (``mc_zonal``) runs instead — same batching, same
-    payload keys; ``import_model`` / ``import_firmness`` say which applied.
-    """
-    from services.adequacy.mc import MC_WARNING_V1, mc_adequacy
-    from services.adequacy.mc_zonal import zonal_mc_adequacy
-
-    target = pack.availability.target_lole_h
-    scope = frozen.scope or {}
-    import_disclosure = {"import_model": scope.get("import_model"),
-                         "import_firmness": scope.get("import_firmness")}
-    if frozen.mc_inputs is None:
-        note = frozen.mc_error or "MC inputs unavailable"
-        return "not_established", {
-            "metric": "mc_lole", "target_lole_h": target, "mc_lole_h": None,
-            "verdict": "not_established", "ens_met": ens_met,
-            "fleet_scope": frozen.scope, **import_disclosure,
-        }, note, None
-    draws = int(getattr(pack, "mc_draws", 200))
-    seed = int(getattr(pack, "mc_seed", 0))
-    cov_target = float(getattr(pack, "mc_cov_target", 0.05))
-    zonal = getattr(frozen, "zonal_inputs", None)
-    try:
-        if zonal is not None:
-            metrics = zonal_mc_adequacy(zonal, draws=draws, seed=seed,
-                                        cov_target=cov_target,
-                                        stop_event=stop_event)
-        else:
-            metrics = mc_adequacy(frozen.mc_inputs, draws=draws, seed=seed,
-                                  cov_target=cov_target, stop_event=stop_event)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("EH mc_certify failed")
-        return "not_established", {
-            "metric": "mc_lole", "target_lole_h": target, "mc_lole_h": None,
-            "verdict": "not_established", "ens_met": ens_met,
-        }, f"mc_certify failed: {exc}", None
-    lole = metrics.get("lole_hours")
-    lole = float(lole) if lole is not None and math.isfinite(float(lole)) else None
-    if stop_event is not None and stop_event.is_set():
-        note = (f"aborted during mc_certify after {metrics.get('n_samples')} "
-                "samples — LOLE not certified")
-        return "not_established", {
-            "metric": "mc_lole", "target_lole_h": target, "mc_lole_h": None,
-            "verdict": "not_established", "ens_met": ens_met,
-            "n_samples": metrics.get("n_samples"), "draws_requested": draws,
-        }, note, None
-    verdict = certification_verdict(mc_lole_h=lole, target_lole_h=target)
-    payload = {
-        "metric": "mc_lole",
-        "certification_metric": pack.availability.certification_metric,
-        "target_lole_h": target,
-        "mc_lole_h": lole,
-        "lole_ci": list(metrics.get("lole_ci") or []),
-        "eue_mwh": metrics.get("eue_mwh"),
-        "eue_ci": list(metrics.get("eue_ci") or []),
-        "by_period": metrics.get("by_period"),
-        "n_samples": metrics.get("n_samples"),
-        "draws_requested": draws,
-        "seed": seed,
-        "cov_target": cov_target,
-        "converged": metrics.get("converged"),
-        "resolution_floor_h": metrics.get("resolution_floor_h"),
-        "time_basis": metrics.get("time_basis"),
-        "horizon_years": metrics.get("horizon_years"),
-        "ens_met": ens_met,
-        "verdict": verdict,
-        "engine": "mc_zonal" if zonal is not None else "mc",
-        "fidelity": ("sequential_mc_two_area" if zonal is not None
-                     else "sequential_mc"),
-        "warning": MC_WARNING_V1,
-        "fleet_scope": frozen.scope,
-        **import_disclosure,
-    }
-    if verdict == "certified":
-        note = f"MC LOLE {lole:.3g} h ≤ target {float(target):.3g} h — certified"
-    elif verdict == "failed":
-        note = (f"MC LOLE {lole:.3g} h > target {float(target):.3g} h — "
-                "certification FAILED"
-                + (" although the ENS target is met (spec decision 2)"
-                   if ens_met else ""))
-    elif verdict == "no_target":
-        note = (f"MC LOLE {lole:.3g} h reported; the pack states no "
-                "target_lole_h to certify against")
-    else:
-        note = "MC LOLE not established"
-    return "ok" if verdict != "not_established" else "not_established", payload, note, lole
-
-
-# ── WP2: frontier ─────────────────────────────────────────────────────────
-
-def frontier_targets_for(ens_cap_permyriad: float | None,
-                         remaining_solves: int, *,
-                         ladder: tuple[float, ...] = EH_FRONTIER_LADDER,
-                         ) -> tuple[list[float], str | None]:
-    """
-    The ladder that fits: ``(targets, skip_reason)``. Empty targets + a
-    reason when the stage should be skipped.
-    """
-    if ens_cap_permyriad is None or not (
-            math.isfinite(float(ens_cap_permyriad)) and float(ens_cap_permyriad) > 0):
-        return [], "frontier needs a positive ens_cap_permyriad to sweep around"
-    affordable = int(remaining_solves) - 1  # the closing restore
-    if affordable < MIN_EH_FRONTIER_POINTS:
-        return [], (
-            f"budget: {remaining_solves} solve(s) left, frontier needs at least "
-            f"{MIN_EH_FRONTIER_POINTS} points + 1 closing restore")
-    factors = sorted({float(f) for f in ladder}, reverse=True)
-    if len(factors) < MIN_EH_FRONTIER_POINTS:
-        return [], (
-            f"frontier_ladder has {len(factors)} factor(s); a curve needs at "
-            f"least {MIN_EH_FRONTIER_POINTS}")
-    if affordable < len(factors):
-        # Trim from the outside in: keep the factors nearest ×1 (the report's
-        # own target) on a log scale, ties broken towards the looser side.
-        nearest = sorted(factors, key=lambda f: (abs(math.log(f)), -f))
-        factors = sorted(nearest[:affordable], reverse=True)
-    return [float(ens_cap_permyriad) * f for f in factors], None
-
-
-def run_frontier_stage(
-    network, lock, cfg, *,
-    ens_cap_permyriad: float | None,
-    remaining_solves: int,
-    stop_event,
-    log_queue,
-    final_state_update,
-    ladder: tuple[float, ...] = EH_FRONTIER_LADDER,
-) -> tuple[str, dict | None, str | None, int]:
-    """
-    ε-constraint frontier around the target → ``(status, payload, note,
-    solves_charged)``. Every cost field keeps ``excludes_shed_cost: true``
-    and its ``period_basis`` (spec decision 3).
-    """
-    from services.adequacy.frontier import (
-        FrontierBudgetError,
-        FrontierConfigError,
-        knee_index,
-        run_frontier_sweep,
-    )
-
-    targets, why = frontier_targets_for(ens_cap_permyriad, remaining_solves,
-                                        ladder=ladder)
-    if not targets:
-        return "skipped", None, why, 0
-    voll = float(getattr(cfg, "voll", 0.0) or 0.0)
-    try:
-        res = run_frontier_sweep(
-            network, lock, cfg, targets, stop_event=stop_event,
-            log_queue=log_queue, final_state_update=final_state_update)
-    except (FrontierBudgetError, FrontierConfigError) as exc:
-        # Refused before any solve: nothing spent, nothing to restore.
-        return "not_established", None, f"frontier refused: {exc}", 0
-    except Exception as exc:  # noqa: BLE001
-        partial = getattr(exc, "frontier_result", None) or {}
-        pts = list(partial.get("points") or [])
-        logger.exception("EH frontier stage failed")
-        return "not_established", {
-            "points": pts, "base_restored": partial.get("base_restored"),
-            "base_restore_status": partial.get("base_restore_status"),
-            "excludes_shed_cost": True,
-        }, f"frontier failed: {exc}", len(pts) + 1
-    points = []
-    period_basis = None
-    for p in res["points"]:
-        row = dict(p)
-        row["excludes_shed_cost"] = True
-        if row.get("period_basis") and period_basis is None:
-            period_basis = row["period_basis"]
-        points.append(row)
-    ok_points = [p for p in points if p.get("status") == "ok" and p.get("point")]
-    charged = len(points) + 1  # + the closing restore
-    payload = {
-        "targets_permyriad": targets,
-        "points": points,
-        "n_ok": len(ok_points),
-        "knee_index": knee_index(res["points"], voll),
-        "voll_eur_per_mwh": voll,
-        "warning": res.get("warning"),
-        "base_restored": res.get("base_restored"),
-        "base_restore_status": res.get("base_restore_status"),
-        "aborted": bool(res.get("aborted")),
-        "period_basis": period_basis,
-        "excludes_shed_cost": True,
-        "engine": "lp_proxy",
-    }
-    if res.get("aborted"):
-        return "not_established", payload, (
-            f"frontier aborted after {len(points)} of {len(targets)} points"), charged
-    if len(ok_points) < MIN_EH_FRONTIER_POINTS:
-        return "not_established", payload, (
-            f"only {len(ok_points)} of {len(targets)} frontier points solved "
-            f"(need {MIN_EH_FRONTIER_POINTS})"), charged
-    note = f"{len(ok_points)} points around {float(ens_cap_permyriad):g}‱"
-    if res.get("base_restored") is False:
-        note += (f"; closing restore did NOT bring the plan back "
-                 f"({res.get('base_restore_status')})")
-    return "ok", payload, note, charged
-
-
 # ── WP3: fmea_top ─────────────────────────────────────────────────────────
 
 def _flatten_mode(row: dict, *, rank: int) -> dict:
@@ -1379,113 +1209,3 @@ def _rank_import_links_once(modes: list[dict], scope: dict | None
             **fm, "name": link, "component_class": "Link",
             "mode_id": f"link:{link}:forced_outage"}})
     return out, ranking
-
-
-def run_fmea_top_stage(
-    network, lock, cfg, frozen: FixedPlanSnapshot, *,
-    remaining_solves: int,
-    stop_event,
-    log_queue,
-    final_state_update,
-    top_n: int = FMEA_TOP_N,
-) -> tuple[str, dict | None, str | None, int]:
-    """
-    Top-N ranked failure modes on the fixed plan → ``(status, payload,
-    note, solves_charged)``.
-
-    Class A comes from the frozen COPT screening (zero solves). Class B is
-    the Link outage sweep on frozen capacities when the network has Links
-    with occurrence data AND the remaining budget affords ``n + 2`` solves
-    (base, one per Link, closing restore); otherwise the payload says which
-    of those it lacked. Ranking is the worksheet's ``(-criticality, mode_id)``.
-    """
-    from services.adequacy.sweep import class_b_contingencies, run_class_b_sweep
-
-    # Review of PR #55: no early return on a COPT error — a hub with no
-    # sampled unit of its own (COPT screening skipped) still has a Link to
-    # rank by its Class-B row. With no mode at all the stage ends
-    # not_established below, with the COPT's reason.
-    modes: list[dict] = []
-    for r in frozen.copt_rows:
-        if r.get("failure_mode"):
-            modes.append({**r})
-    classes = {"A"} if modes else set()
-
-    class_b: dict[str, Any] = {"status": "skipped", "reason": None, "rows": 0,
-                               "solves_charged": 0, "base_restored": None,
-                               "base_restore_status": None}
-    charged = 0
-    try:
-        contingencies = class_b_contingencies(network)
-    except Exception as exc:  # noqa: BLE001
-        contingencies = []
-        class_b["reason"] = f"class_b_contingencies refused: {exc}"
-    need = len(contingencies) + 2
-    if not contingencies:
-        class_b["reason"] = class_b["reason"] or (
-            "no Link carries resolvable occurrence data (no Class-B contingency)")
-    elif frozen.voll <= 0:
-        class_b["reason"] = "Class-B sweep requires VOLL > 0"
-    elif need > int(remaining_solves):
-        class_b["reason"] = (
-            f"budget: Class-B sweep of {len(contingencies)} Link(s) needs "
-            f"{need} solves (base + links + restore), {remaining_solves} left")
-    elif stop_event is not None and stop_event.is_set():
-        class_b["reason"] = "aborted before the Class-B sweep"
-    else:
-        try:
-            rows, restore = run_class_b_sweep(
-                network, lock, cfg, log_queue=log_queue,
-                final_state_update=final_state_update, stop_event=stop_event)
-            solved = [r for r in rows if r.get("failure_mode")]
-            # Base solve + one per contingency actually attempted + restore.
-            attempted = len(rows)
-            charged = attempted + 2
-            class_b.update(
-                status="aborted" if restore.get("aborted") else "run",
-                rows=len(solved), solves_charged=charged,
-                base_restored=restore.get("base_restored"),
-                base_restore_status=restore.get("base_restore_status"),
-                unsolved=[{"id": r["id"], "status": r.get("status")}
-                          for r in rows if not r.get("failure_mode")],
-            )
-            for r in solved:
-                modes.append({**r})
-            if solved:
-                classes.add("B")
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("EH fmea_top Class-B sweep failed")
-            class_b.update(status="failed", reason=f"Class-B sweep failed: {exc}")
-    modes, link_ranking = _rank_import_links_once(modes, frozen.scope)
-    if not modes:
-        return "not_established", {
-            "top": [], "n_total_modes": 0, "classes_included": [],
-            "class_b": class_b, "voll_eur_per_mwh": frozen.voll,
-            "note": FMEA_TOP_LINK_PRIMARY_NOTE,
-        }, (frozen.copt_error or "no failure mode could be ranked"), charged
-    modes.sort(key=lambda r: (
-        -float((r.get("failure_mode") or {}).get("criticality_eur_per_year", 0.0) or 0.0),
-        str((r.get("failure_mode") or {}).get("mode_id", ""))))
-    top = [_flatten_mode(r, rank=i + 1) for i, r in enumerate(modes[:top_n])]
-    payload = {
-        "top": top,
-        "top_n": int(top_n),
-        "n_total_modes": len(modes),
-        "classes_included": sorted(classes),
-        "class_b": class_b,
-        "copt_metrics": frozen.copt_metrics,
-        "copt_error": frozen.copt_error,
-        "copt_fidelity_note": getattr(frozen, "copt_fidelity_note", None),
-        "fleet_scope": frozen.scope,
-        "voll_eur_per_mwh": frozen.voll,
-        "ranking": "criticality_eur_per_year desc, mode_id",
-        "note": FMEA_TOP_LINK_PRIMARY_NOTE,
-        "import_link_ranking": link_ranking,
-        "import_link_ranking_note": (IMPORT_LINK_RANKING_NOTE if link_ranking
-                                     else None),
-    }
-    note = FMEA_TOP_LINK_PRIMARY_NOTE + (
-        f"; top {len(top)} of {len(modes)} modes, classes {'+'.join(sorted(classes))}")
-    if class_b["status"] != "run" and class_b.get("reason"):
-        note += f"; Class-B {class_b['status']}: {class_b['reason']}"
-    return "ok", payload, note, charged

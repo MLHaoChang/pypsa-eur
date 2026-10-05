@@ -5,6 +5,8 @@ Two process-wide guards against hostile or oversized uploads:
 
 * ``read_capped`` — bounds an ``await file.read()`` so a multi-GB upload can't
   OOM the process (every import endpoint buffers the whole body into RAM).
+* ``UploadBudget`` — the same cap shared by every file ONE request reads, so
+  an endpoint taking two files buffers at most the cap, not twice it.
 * ``safe_extract`` — refuses zip members whose path escapes the destination
   (zip-slip / ``../`` traversal) before extracting.
 
@@ -55,6 +57,34 @@ async def read_capped(file: UploadFile, max_bytes: int = _DEFAULT_MAX_UPLOAD_BYT
             )
         chunks.append(chunk)
     return b"".join(chunks)
+
+
+class UploadBudget:
+    """One byte cap for all the files a single request reads.
+
+    ``read_capped`` bounds each file; an endpoint with N file fields would
+    still buffer N x the cap. Read every file of the request through one
+    budget instead. ``max_bytes`` defaults to the process cap, resolved when
+    the budget is made (so the env override applies and tests can patch it).
+    """
+
+    def __init__(self, max_bytes: int | None = None) -> None:
+        self.max_bytes = _DEFAULT_MAX_UPLOAD_BYTES if max_bytes is None else max_bytes
+        self.used = 0
+
+    async def read(self, file: UploadFile) -> bytes:
+        try:
+            data = await read_capped(file, self.max_bytes - self.used)
+        except HTTPException as exc:
+            if exc.status_code != 413:
+                raise
+            raise HTTPException(
+                413,
+                f"The files in this upload exceed the "
+                f"{self.max_bytes // (1024 * 1024)} MB limit together.",
+            ) from exc
+        self.used += len(data)
+        return data
 
 
 def safe_extract(zf: zipfile.ZipFile, dest: str) -> None:

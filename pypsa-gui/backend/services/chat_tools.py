@@ -156,8 +156,12 @@ def _validated_update_payload(
     schema_name = _COMPONENT_CREATE_SCHEMAS[component_class]
     Schema = _get_schema(schema_name)
     prefill = _identity_prefill(component_class, name)
-    # Prefill first; agent attrs win on conflict.
-    instance = Schema(name=name, **{**prefill, **attrs})
+    # Prefill first; agent attrs win on conflict. A `name` among the attrs is
+    # a rename (as in the PUT body): it replaces the schema's `name` rather
+    # than being passed a second time, and stays in the payload so
+    # `_update_component` pops it and renames.
+    fields = {**prefill, **attrs}
+    instance = Schema(name=fields.pop("name", name), **fields)
     dumped = instance.model_dump()
     return {k: dumped[k] for k in attrs if k in dumped}
 
@@ -295,76 +299,34 @@ def diagnose_network() -> dict:
     Dangling bus refs are deliberately NOT re-checked here: the preflight
     already reports them, and a second differently-worded copy is how two
     sources of truth start disagreeing.
+
+    The graph walk itself is `topology_analyzer.analyse_topology`, the same
+    one preflight and the study report read: two walks of one graph is how
+    the chat and the preflight start describing different networks. This
+    function only reshapes its islands into the tool's payload.
     """
+    from services.topology_analyzer import analyse_topology
+
     n = PyPSAService.get_network()
-    buses = list(n.buses.index)
-    if not buses:
+    report = analyse_topology(n)
+    if not report["n_islands"]:
         return {
             "bus_count": 0, "island_count": 0, "islands": [],
             "isolated_buses": [], "islands_without_generation": [],
             "islands_truncated": False, "verdict": "empty",
         }
 
-    # Union-find over the bus graph. Every branch class joins, including a
-    # multi-port Link's bus2/bus3/… — those extra ports are exactly how
-    # sector coupling reaches heat and hydrogen buses, so walking only
-    # bus0/bus1 would report a coupled network as a pile of fragments.
-    parent = {b: b for b in buses}
-
-    def find(x: str) -> str:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(a: str, b: str) -> None:
-        if a in parent and b in parent:
-            ra, rb = find(a), find(b)
-            if ra != rb:
-                parent[ra] = rb
-
-    for attr in ("lines", "links", "transformers"):
-        df = getattr(n, attr, None)
-        if df is None or df.empty:
-            continue
-        ports = [c for c in df.columns if c.startswith("bus")]
-        for row in df[ports].itertuples(index=False):
-            attached = [str(v) for v in row if isinstance(v, str) and v]
-            for other in attached[1:]:
-                union(attached[0], other)
-
-    groups: dict[str, list[str]] = {}
-    for b in buses:
-        groups.setdefault(find(b), []).append(b)
-
-    # Which buses can serve load, and how much load sits where.
-    supply: set[str] = set()
-    for attr in ("generators", "storage_units", "stores"):
-        df = getattr(n, attr, None)
-        if df is not None and not df.empty and "bus" in df.columns:
-            supply.update(str(b) for b in df["bus"])
-
-    load_by_bus: dict[str, float] = {}
-    loads = getattr(n, "loads", None)
-    if loads is not None and not loads.empty and "bus" in loads.columns:
-        p_set_t = getattr(n.loads_t, "p_set", None)
-        for name, bus in loads["bus"].items():
-            peak = 0.0
-            if p_set_t is not None and name in getattr(p_set_t, "columns", []):
-                series = p_set_t[name]
-                peak = float(series.max()) if len(series) else 0.0
-            else:
-                peak = float(loads.at[name, "p_set"]) if "p_set" in loads.columns else 0.0
-            load_by_bus[str(bus)] = load_by_bus.get(str(bus), 0.0) + peak
-
+    # `has_generation` is presence, not size: any generator, storage unit or
+    # store makes an island servable in the sense this tool reports. Peak load
+    # is the analyser's — summed across loads per snapshot, then maxed — so
+    # two loads peaking in different hours do not add into a phantom peak.
     islands = []
-    for members in groups.values():
-        members = sorted(members)
-        peak = sum(load_by_bus.get(b, 0.0) for b in members)
+    for island in report["islands"]:
+        peak = island["peak_load_mw"]
         islands.append({
-            "size": len(members),
-            "buses": members[:_MAX_BUSES_PER_ISLAND],
-            "has_generation": any(b in supply for b in members),
+            "size": island["n_buses"],
+            "buses": island["buses"][:_MAX_BUSES_PER_ISLAND],
+            "has_generation": island["has_supply_asset"],
             "has_load": peak > 0,
             "peak_load_mw": round(peak, 6),
         })
@@ -376,22 +338,22 @@ def diagnose_network() -> dict:
     # a defect — flagging the rest would train the agent to ignore the field.
     stranded = [i for i in islands if i["has_load"] and not i["has_generation"]]
 
-    branch_free = {
-        b for b in buses
-        if len(groups[find(b)]) == 1
-    }
-    isolated = sorted(branch_free)
+    # An island of one, which is wider than the analyser's degree-zero
+    # `isolated_buses`: a bus whose only branch is a self-loop or points at a
+    # missing bus is still stranded on its own.
+    isolated = sorted(i["buses"][0] for i in report["islands"]
+                      if i["n_buses"] == 1)
 
     if stranded:
         verdict = "infeasible_topology"
-    elif len(groups) > 1:
+    elif report["n_islands"] > 1:
         verdict = "fragmented"
     else:
         verdict = "connected"
 
     return {
-        "bus_count": len(buses),
-        "island_count": len(groups),
+        "bus_count": len(n.buses.index),
+        "island_count": report["n_islands"],
         "islands": islands[:_MAX_ISLANDS_REPORTED],
         "islands_truncated": len(islands) > _MAX_ISLANDS_REPORTED,
         "isolated_buses": isolated[:_MAX_ISLANDS_REPORTED],
@@ -592,7 +554,7 @@ _RESULTS_ENUM = (
     "losses", "carrier_kpis", "emissions", "transformers", "unit_commitment",
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
-    "asset_economics",
+    "asset_economics", "billing", "cfe_score",
 )
 
 
@@ -626,6 +588,9 @@ _RESULTS_HANDLER_NAMES: dict[str, str] = {
     "lost_load": "get_lost_load",
     "loads": "get_load_results",
     "asset_economics": "get_asset_economics",
+    # Edge Investment Case P2 WP2.5.
+    "billing": "get_billing",
+    "cfe_score": "get_cfe_score",
 }
 
 
@@ -755,38 +720,63 @@ def update_component(
     """
     v6 F1/F2/F3 dispatcher with EXPLICIT routing:
 
-      Bus + new_name → rename_bus  (n.rename_component_names preserves dependent
-                                    bus0/bus1 refs on lines/links/transformers)
-      Bus, no new_name → update_bus  (coord-change line-length recompute)
+      Bus + new_name, no attrs → rename_bus  (n.rename_component_names
+                                    preserves dependent bus0/bus1 refs)
+      Bus otherwise → update_bus  (coord-change line-length recompute; a
+                                   rename via attrs["name"] or new_name goes
+                                   through the PUT rename path)
       Transformer → update_transformer  (voltage validation + type sanitise)
       GlobalConstraint → update_global_constraint  (partial-PUT mitigation;
                                                    NOT in _COMPONENT_ATTRS)
       Other 7 classes (Carrier/Line/Link/Generator/StorageUnit/Store/Load/
                        ShuntImpedance) → _update_component direct
+
+    On every class, attrs["name"] (or new_name) renames, as the PUT body does.
     """
     attrs = dict(attrs or {})
 
-    # F1: Bus rename has its own endpoint
-    if component_class == "Bus" and new_name:
+    # F1: a bare Bus rename has its own endpoint
+    if component_class == "Bus" and new_name and not attrs:
         from routers.network import rename_bus
         return rename_bus(name, {"new_name": new_name})
 
-    # Bus non-rename: dedicated handler preserves coord-change recompute
+    # A rename can also arrive as attrs["name"], exactly as in the PUT body.
+    # Every path below builds the Create schema with the TARGET name and never
+    # passes `name` a second time (`Schema(name=name, **attrs)` with a `name`
+    # among the attrs was a TypeError on every class); the PUT handler then
+    # pops it from the merged row and renames under its own guards (404, 409
+    # on an occupied name, the reserved `ic:` bus prefix) and re-points
+    # dependents via `_rename_component_safely`.
+    if new_name:
+        if "name" in attrs and attrs["name"] != new_name:
+            raise HTTPException(
+                400,
+                f"new_name {new_name!r} and attrs.name {attrs['name']!r} "
+                "name different targets",
+            )
+        attrs["name"] = new_name
+    if "name" in attrs and not str(attrs["name"] or "").strip():
+        raise HTTPException(400, "new name cannot be empty")
+
+    # Bus: dedicated handler preserves coord-change recompute
     if component_class == "Bus":
         from routers.network import update_bus
-        bus = _get_schema("BusCreate")(name=name, **attrs)
+        target = attrs.pop("name", name)
+        bus = _get_schema("BusCreate")(name=target, **attrs)
         return update_bus(name, bus)
 
     # F2: Transformer needs voltage validation
     if component_class == "Transformer":
         from routers.network import update_transformer
-        tr = _get_schema("TransformerCreate")(name=name, **attrs)
+        target = attrs.pop("name", name)
+        tr = _get_schema("TransformerCreate")(name=target, **attrs)
         return update_transformer(name, tr)
 
     # F3: GlobalConstraint dedicated CRUD
     if component_class == "GlobalConstraint":
         from routers.network import update_global_constraint
-        gc = _get_schema("GlobalConstraintCreate")(name=name, **attrs)
+        target = attrs.pop("name", name)
+        gc = _get_schema("GlobalConstraintCreate")(name=target, **attrs)
         return update_global_constraint(name, gc)
 
     # Bare passthrough classes — direct _update_component
@@ -1352,7 +1342,272 @@ def update_solver_config(partial: dict) -> dict:
     from routers.simulation import update_solver_config as _h
     from models.schemas import SolverConfigSchema
     body = SolverConfigSchema(**partial)
-    return _h(body)
+    # The handler's user-code admin gate needs `db` + `user` (83d50f049; renamed from `actor` in 3e9f17d).
+    # Called bare they were `Depends` sentinels (merge review N6). With no
+    # acting identity bound, pass None: the gate then refuses user code
+    # (fail closed) and every other knob works as before.
+    if acting_user_id() is None:
+        return _h(body, db=None, user=None)
+    return _route(_h, body)
+
+
+# ── Library (4) — Edge Investment Case P2 WP2.4c ────────────────────────────
+# Router handlers called through `_route`, so the acting user's org and the
+# Library ACL apply exactly as over HTTP. Results stay compact (the chat's
+# per-result cap): a paged list, a tariff SUMMARY unless asked for the full
+# payload or one item, a small attach receipt (review M3).
+
+# The chat forwards at most ~1000 characters of an error: the listings are
+# compact strings, as many as fit, with the totals stated first (round 2 N2).
+_LIBRARY_ERROR_BUDGET = 700
+# Route / binding refusals carry `{"code": …}`; the chat's forwarder reads
+# `error_kind`. Library tools re-raise them under their code (review L1).
+# Written as `error_kind` literals so the manifest guard sees every kind
+# (round 2 N1).
+_LIBRARY_ERROR_KINDS = (
+    {"error_kind": "urdb_refused"}, {"error_kind": "urdb_invalid"},
+    {"error_kind": "library_ref_stale"}, {"error_kind": "import_tariff_ref_conflict"},
+    {"error_kind": "commercial_binding_invalid"}, {"error_kind": "solver_in_flight"},
+)
+_LIBRARY_CODES = {d["error_kind"]: d["error_kind"] for d in _LIBRARY_ERROR_KINDS}
+
+
+def _safe_text(value, limit: int = 60) -> str:
+    """Free text from an uploaded file (a rate's name) as the model may see it
+    in an error: printable word characters and spaces only (round 3)."""
+    import re as _re
+
+    return _re.sub(r"[^\w .,()/-]", "_", str(value))[:limit]
+
+
+def _fit(entries: list[str], budget: int = _LIBRARY_ERROR_BUDGET) -> list[str]:
+    out, used = [], 0
+    for e in entries:
+        e = e[:budget]   # the first entry is always admitted: never oversized (P2 gate)
+        if out and used + len(e) + 4 > budget:
+            break
+        out.append(e)
+        used += len(e) + 4
+    return out
+
+
+def _safe_field(name) -> str:
+    """A refused URDB field name as the model may see it: it comes from an
+    uploaded file, so it is reduced to an identifier (review L1)."""
+    import re as _re
+
+    return _re.sub(r"[^A-Za-z0-9_./]", "_", str(name))[:64]
+
+
+def _library_call(handler, *args, **kwargs):
+    try:
+        return _route(handler, *args, **kwargs)
+    except HTTPException as exc:
+        d = exc.detail
+        if isinstance(d, dict) and d.get("code") in _LIBRARY_CODES:
+            detail = {"error_kind": _LIBRARY_CODES[d["code"]],
+                      "message": str(d.get("message", ""))[:500]}
+            if isinstance(d.get("refusals"), list):
+                refusals = [r for r in d["refusals"] if isinstance(r, dict)]
+                shown = _fit([f"{_safe_field(r.get('field'))}: {str(r.get('reason'))[:60]}"
+                              for r in refusals])
+                detail = {"error_kind": detail["error_kind"],
+                          "refusals_total": len(refusals), "refusals_shown": len(shown),
+                          "refusals": shown,
+                          "message": detail["message"][:200]}
+            raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+        raise
+
+
+def _library_kind(kind: str):
+    from routers.library import ItemKind
+
+    try:
+        return ItemKind(kind)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "unknown_library_kind",
+            "message": f"kind is one of {[k.value for k in ItemKind]}, got {kind!r}"}) from exc
+
+
+def list_library_items(kind: str, offset: int = 0, limit: int | None = None) -> dict:
+    from routers.library import list_items as _h
+    rows = [r.model_dump(mode="json") for r in _library_call(_h, _library_kind(kind))]
+    return _paginate(rows, offset, limit)
+
+
+def _tariff_summary(payload: dict) -> dict:
+    items = []
+    for it in payload.get("items") or []:
+        periods = it.get("periods") or []
+        rates = [float(p.get("rate", 0.0)) for p in periods]
+        rates += [float(r) for p in periods for r in (p.get("tier_rates") or [])]
+        rates += [float(t.get("rate", 0.0)) for t in it.get("tiers") or []]
+        items.append({"id": it.get("id"), "kind": it.get("kind"), "unit": it.get("unit"),
+                      "direction": it.get("direction", "cost"),
+                      "periods": len(periods),
+                      "windows": sorted({str(p.get("name")) for p in periods}),
+                      "tiers": len(it.get("tiers") or []),
+                      "ratchet": it.get("ratchet") is not None,
+                      "rate_min": min(rates) if rates else None,
+                      "rate_max": max(rates) if rates else None})
+    return {"id": payload.get("id"), "name": payload.get("name"),
+            "jurisdiction": payload.get("jurisdiction"), "valid_from": payload.get("valid_from"),
+            "valid_to": payload.get("valid_to"),
+            "unsupported_fields": payload.get("unsupported_fields") or [], "items": items}
+
+
+def get_library_item(kind: str, name: str, version: int | None = None,
+                     detail: str = "summary", item_id: str | None = None) -> dict:
+    from routers.library import get_item as _h
+    out = _library_call(_h, _library_kind(kind), name, version=version).model_dump(mode="json")
+    payload = out["payload"]
+    if item_id is not None:
+        if kind != "tariff":
+            raise HTTPException(status_code=422, detail={
+                "error_kind": "unknown_library_kind",
+                "message": "item_id selects one item of a TARIFF"})
+        match = [i for i in payload.get("items") or [] if i.get("id") == item_id]
+        if not match:
+            raise HTTPException(status_code=404, detail=f"tariff {name!r} has no item {item_id!r}")
+        return {"ref": out["ref"], "meta": out["meta"], "item": match[0]}
+    if kind == "tariff" and detail != "full":
+        return {"ref": out["ref"], "meta": out["meta"], "summary": _tariff_summary(payload)}
+    return out
+
+
+def _urdb_rate(data, item_index: int | None = None):
+    """The rate object of an uploaded URDB file: the object itself, one item
+    of an OpenEI response, or a REopt scenario's `urdb_response`."""
+    def unreadable(message: str):
+        return HTTPException(status_code=422, detail={"error_kind": "urdb_upload_unreadable",
+                                                      "message": message})
+
+    if isinstance(data, dict) and isinstance(data.get("items"), list):
+        items = data["items"]
+        if not items:
+            raise unreadable("the OpenEI response lists no rates")
+        if item_index is None and len(items) > 1:
+            # A utility query returns many rates (superseded versions too):
+            # never pick one silently (review M4).
+            listing = _fit([f"{i}: {_safe_text(r.get('name') or r.get('label'))} "
+                            f"({_safe_text(r.get('startdate'), 24)})"
+                            for i, r in enumerate(items) if isinstance(r, dict)])
+            raise HTTPException(status_code=422, detail={
+                "error_kind": "urdb_multiple_rates", "rates_total": len(items),
+                "rates_shown": len(listing), "rates": listing,
+                "message": f"the upload holds {len(items)} rates; pass item_index"})
+        i = item_index or 0
+        if not 0 <= i < len(items):
+            raise unreadable(f"item_index {i} is outside the {len(items)} rates")
+        return items[i]
+    if item_index not in (None, 0):
+        raise unreadable("item_index applies to an OpenEI response with several rates")
+    if isinstance(data, dict) and isinstance(data.get("ElectricTariff"), dict):
+        et = data["ElectricTariff"]
+        if isinstance(et.get("urdb_response"), dict):
+            return et["urdb_response"]
+        label = et.get("urdb_label")
+        raise unreadable(f"the REopt scenario names URDB rate {_safe_text(label, 40)!r} "
+                         "but carries no "
+                         "urdb_response; upload the OpenEI rate itself" if label else
+                         "the REopt scenario carries no urdb_response")
+    return data
+
+
+def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
+                       accept_partial: bool = False, valid_from: str | None = None,
+                       item_index: int | None = None, tariff_id: str | None = None,
+                       jurisdiction: str | None = None) -> dict:
+    """An UPLOADED URDB JSON file (never an LLM-emitted blob) → a Library tariff."""
+    from routers.library import UrdbImportIn, import_urdb as _h
+    from services import upload_service
+
+    with _acting():   # identity before the file is read (review L4)
+        pass
+    project = _require_active_project()
+    blob = upload_service.get_upload_path(project, file_id)
+    try:
+        data = json.loads(blob.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "urdb_upload_unreadable",
+            "message": f"upload {file_id!r} is not a JSON file: {type(exc).__name__}"}) from exc
+    rate = _urdb_rate(data, item_index)
+    if not isinstance(rate, dict):
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "urdb_upload_unreadable",
+            "message": "the upload holds no URDB rate object"})
+    try:
+        body = UrdbImportIn(urdb_response=rate, name=name, cyclic_year=cyclic_year,
+                            accept_partial=accept_partial, valid_from=valid_from,
+                            tariff_id=tariff_id, jurisdiction=jurisdiction)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "urdb_invalid", "message": _safe_text(exc, 300)}) from exc
+    out = _library_call(_h, body).model_dump(mode="json")
+    refusals = out.get("refusals") or []
+    out["refusals_total"] = len(refusals)
+    out["refusals"] = _fit([f"{_safe_field(r.get('field'))}: {_safe_text(r.get('reason'))}"
+                            for r in refusals])
+    fields = out.get("unsupported_fields") or []
+    out["unsupported_fields"] = _fit([_safe_field(f) for f in fields])
+    out["unsupported_fields_total"] = len(fields)
+    return out
+
+
+def attach_tariff(name: str, version: int | None = None, replace_inline: bool = False) -> dict:
+    """Set `commercial.import_tariff_ref` to a Library tariff through the
+    solver-config route (which resolves and pins it). An inline tariff that is
+    not this item is never replaced silently (review M2)."""
+    from models.schemas import SolverConfigSchema
+    from routers.library import ItemKind, get_item as _get
+    from routers.simulation import get_solver_config as _cfg, update_solver_config as _put
+
+    ref = _library_call(_get, ItemKind.tariff, name, version=version).ref.model_dump(mode="json")
+    commercial = dict((_cfg() or {}).get("commercial") or {})
+    # The value-flow config is owned by its own route: omit it so the solver-config
+    # route keeps whatever is stored when this PUT lands (IC P3 WP3.0, plan C7).
+    commercial.pop("value_flows", None)
+    if not commercial.get("poc_link"):
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "no_commercial_config",
+            "message": "set the commercial config's poc_link first "
+                       "(update_solver_config), then attach the tariff"})
+    inline = commercial.get("import_tariff")
+    old_ref = commercial.get("import_tariff_ref")
+    replaced = None
+    if inline is not None or commercial.get("import_tariff_id"):
+        same = isinstance(old_ref, dict) and old_ref.get("hash") == ref["hash"]
+        if not same and isinstance(old_ref, dict) and inline is not None:
+            # The inline copy IS the old Library item (unedited): a plain
+            # switch between Library tariffs, nothing hand-made is lost (L5).
+            from models.commercial import Tariff
+            from services.commercial import hashing as _H
+
+            try:
+                same = _H.library_item_digest(Tariff.model_validate(inline)) == \
+                    old_ref.get("hash")
+            except ValueError:
+                same = False
+        replaced = {"id": (inline or {}).get("id") or commercial.get("import_tariff_id"),
+                    "name": (inline or {}).get("name"), "had_ref": old_ref is not None}
+        if not same and not replace_inline:
+            raise HTTPException(status_code=409, detail={
+                "error_kind": "inline_tariff_would_be_replaced",
+                "message": (f"the project's import tariff {replaced['id']!r} would be "
+                            f"replaced by Library tariff {name!r}; confirm with the user, "
+                            "then call again with replace_inline=true"),
+                "current": replaced})
+    commercial.pop("import_tariff", None)
+    commercial.pop("import_tariff_id", None)
+    commercial["import_tariff_ref"] = ref
+    out = _library_call(_put, SolverConfigSchema(commercial=commercial))
+    bound = (out.get("commercial") or {}).get("import_tariff") or {}
+    return {"import_tariff_ref": ref,
+            "import_tariff": {"id": bound.get("id"), "name": bound.get("name"),
+                              "items": len(bound.get("items") or [])},
+            "replaced": replaced}
 
 
 # ── Validation (3) ──────────────────────────────────────────────────────────
@@ -1453,6 +1708,12 @@ _ADEQUACY_HANDLER_NAMES: dict[str, str] = {
     "reserve_margin": "get_reserve_margin",
     "eh_study": "get_eh_study",
     "eh_reference_design": "get_eh_reference_design",
+    # EH sibling tables (E2E review m5): the report summarises them; these
+    # are the per-option / per-contingency rows behind each section.
+    "eh_redundancy": "get_eh_redundancy",
+    "eh_levers": "get_eh_levers",
+    "eh_dtc": "get_eh_dtc",
+    "eh_dtc_planning": "get_eh_dtc_planning",
 }
 
 # Why each kind can be empty. Surfaced verbatim on the no_data result so the
@@ -1485,6 +1746,10 @@ _ADEQUACY_NO_DATA_HINTS: dict[str, str] = {
         "no Energy Hub ReferenceDesignReport has been stored — run "
         "run_eh_study first"
     ),
+    "eh_redundancy": "no EH study with the redundancy stage has run",
+    "eh_levers": "no EH study with the levers stage has run",
+    "eh_dtc": "no EH study with the dtc_stress stage has run",
+    "eh_dtc_planning": "no EH study with the dtc_planning stage has run",
 }
 
 # Path outlier, same shape as get_results' ac_pf_status (v4-MAJOR-4): eleven of
@@ -1570,6 +1835,82 @@ def get_stress_scenarios(name: str) -> dict:
     """The per-project class-C stress-scenario registry."""
     from routers.adequacy_worksheet import get_stress_scenarios as _h
     return _h(project=_authorized_project(name))
+
+
+def put_stress_scenarios(name: str, scenarios: list) -> dict:
+    """Replace the per-project class-C registry (whole list; 422 names the
+    rule a scenario breaks). P22: lets the assistant apply a recommended
+    scenario — read the registry first and send it back with the change."""
+    from routers.adequacy_worksheet import (
+        StressScenariosPut,
+    )
+    from routers.adequacy_worksheet import put_stress_scenarios as _h
+    # Through `_route`: master's sidecar lock gate (68e5f62c3) declares `db`
+    # and `user`; called bare they arrived as `Depends` sentinels and every
+    # real (uuid-bearing) project crashed in server mode (merge review B1).
+    return _route(_h, body=StressScenariosPut(scenarios=scenarios),
+                  project=_authorized_project(name))
+
+
+def get_eh_template(name: str) -> dict:
+    """The Energy Hub template a project was created from (P19): recommended
+    archetype, pack overrides, stages, DtC attribution and study notes."""
+    from routers.adequacy_worksheet import get_eh_template as _h
+    out = _h(project=_authorized_project(name))
+    if not isinstance(out, dict):
+        return {"status": "no_data",
+                "message": f"project {name!r} was not created from an Energy "
+                           "Hub template"}
+    return out
+
+
+def get_feature_guide(tour: str | None = None, field: str | None = None) -> dict:
+    """The in-app guide (P21) the GUI's tours and hover tips show — the same
+    wording, so explanations match the screen. ``tour`` returns one tour's
+    steps; ``field`` one field's help; neither returns the index."""
+    from services.guides import load_guide
+    guide = load_guide("eh_fmea")
+    if field is not None:
+        text = guide["fields"].get(field)
+        if text is None:
+            raise HTTPException(
+                404, f"no guide entry for field {field!r}; known: "
+                f"{sorted(guide['fields'])}")
+        return {"field": field, "help": text}
+    if tour is not None:
+        t = guide["tours"].get(tour)
+        if t is None:
+            raise HTTPException(
+                404, f"no tour {tour!r}; known: {sorted(guide['tours'])}")
+        return {"tour": tour, **t}
+    return {"tours": {k: {"title": v["title"], "intro": v.get("intro"),
+                          "steps": len(v["steps"])}
+                      for k, v in guide["tours"].items()},
+            "fields": sorted(guide["fields"])}
+
+
+def review_eh_study() -> dict:
+    """Analyse the latest Energy Hub study (P22): findings with evidence,
+    recommendations and exact tool actions the user may choose to apply.
+    One source with ``GET /api/results/eh_review`` (P24):
+    ``eh_review.review_latest``."""
+    from routers import results as R
+    from services.adequacy.eh_review import review_latest
+
+    record = R.get_eh_study()
+    return review_latest(
+        R._state, record if isinstance(record, dict) else None,
+        no_data_message=_ADEQUACY_NO_DATA_HINTS["eh_reference_design"])
+
+
+def suggest_eh_setup(archetype: str | None = None) -> dict:
+    """Suggested Energy Hub tags for the live network (P25): the grid import
+    Link, the point-of-connection bus, critical buses, and units without
+    outage data — each with a reason and a ready update_component /
+    bulk_update_components action. READ: nothing is applied; the write tools
+    confirm whatever the user picks."""
+    from services.adequacy.eh_setup import suggest_eh_setup as _suggest
+    return _suggest(PyPSAService.get_network(), archetype=archetype)
 
 
 def _campaign_gated(study: str, start, **estimate_kwargs):
@@ -1737,6 +2078,11 @@ def run_eh_study(
     archetype: str,
     stages: list | None = None,
     budget_solves: int | None = None,
+    pack_overrides: dict | None = None,
+    dtc_config: dict | None = None,
+    dsr_buses: list | None = None,
+    mc: dict | None = None,
+    dtc_attribution: str | None = None,
 ) -> dict:
     """
     Start the Energy Hub reference-design study for one archetype pack.
@@ -1752,6 +2098,11 @@ def run_eh_study(
             archetype=archetype,
             stages=stages,
             budget_solves=budget_solves,
+            pack_overrides=pack_overrides,
+            dtc_config=dtc_config,
+            dtc_attribution=dtc_attribution,
+            dsr_buses=dsr_buses,
+            mc=mc,
         )),
         budget_solves=budget_solves)
 
@@ -1970,6 +2321,37 @@ def gridspine_fetch_result_figure(project_id: str, hour: int, name: str) -> dict
         return _h(_gridspine_project(db, user, project_id), name, hour)
 
 
+def gridspine_get_capacity(project_id: str, bus: str | None = None, kind: str | None = None,
+                           hour: int | None = None) -> dict:
+    from services.gridspine_service import get_capacity as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), bus=bus, kind=kind, hour=hour)
+
+
+def gridspine_compute_capacity(project_id: str, bus: str, kind: str) -> dict:
+    from services.gridspine_service import compute_capacity as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), bus, kind)
+
+
+def gridspine_get_connection_assessments(project_id: str, assessment_id: str | None = None,
+                                         hour: int | None = None) -> dict:
+    from services.gridspine_service import get_connection as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), assessment_id=assessment_id, hour=hour)
+
+
+def gridspine_assess_connection(project_id: str, bus: str, load_mw: float, load_pf: float = 0.98,
+                                onsite_mw: float = 0.0, onsite_converter: bool = True,
+                                profile: str = "eu_rfg_dcc_ce") -> dict:
+    from services.gridspine_service import assess_facility as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), {
+            "bus": bus, "load_mw": float(load_mw), "load_pf": float(load_pf),
+            "onsite_mw": float(onsite_mw), "onsite_converter": bool(onsite_converter), "profile": profile,
+        })
+
+
 def gridspine_export_handoff_bundle(project_id: str, hour: int) -> dict:
     from services.gridspine_service import export_handoff_bundle as _h
     with _acting() as (db, user):
@@ -2060,7 +2442,8 @@ def _route(handler, *args, **kwargs):
         # signature because handlers reached here declare different subsets and
         # would raise TypeError on an unexpected keyword — `reset_network`
         # (`routers/network.py:1898`) declares `db` and `session` but no `user`.
-        injected = {n: v for n, v in (("db", db), ("user", user)) if n in params}
+        injected = {n: v for n, v in (("db", db), ("user", user),
+                                      ("actor", user)) if n in params}
         if "session" in params and "session" not in kwargs:
             injected["session"] = _acting_session(db)
         # `_route`'s contract is "resolve whatever the target declares", and
@@ -2077,7 +2460,7 @@ def _route(handler, *args, **kwargs):
                     f"_route() cannot satisfy dependency {name!r} of "
                     f"{getattr(handler, '__module__', '?')}."
                     f"{getattr(handler, '__qualname__', handler)}: it supplies only "
-                    f"db/user/session. Resolve it at the call site or extend _route()."
+                    f"db/user/actor/session. Resolve it at the call site or extend _route()."
                 )
         return handler(*args, **{**injected, **kwargs})
 
@@ -3447,8 +3830,8 @@ def reconstruct_network_from_image(
         for b in buses_in:
             try:
                 bname = str(b.get("name") or "").strip()
-                if not bname or bname in existing_bus_names:
-                    continue
+                if not bname or bname in existing_bus_names or bname.startswith("ic:"):
+                    continue  # `ic:` is reserved (P2 WP2.2-0)
                 px = float(b.get("px") or 0.0)
                 py = float(b.get("py") or 0.0)
                 gx = (px - origin_x) * scale_x
@@ -3994,6 +4377,599 @@ def export_chat_summary(
     return _save_agent_export(
         payload, target, "text/markdown" if fmt == "md" else "text/plain",
     )
+
+
+def export_eh_report_docx(filename: str | None = None) -> dict:
+    """
+    The stored Energy Hub ``ReferenceDesignReport`` as a Word document in
+    the active project's uploads/ dir (an ``agent_export`` chip).
+
+    WP0 of the report-generation plan: no language model is involved —
+    every cell is the assembler's own number, formatted so that a missing
+    figure reads "not established" and never 0, and every report section is
+    present even when the study did not establish it.
+    """
+    import time as _time
+
+    from routers import results as results_router
+    from services.reports.docx_writer import (
+        DOCX_MIME,
+        render_reference_design_docx,
+    )
+    from services.reports.figures import fmea_pareto_png
+    from services.reports.evidence import fmea_top_modes
+
+    name = _require_active_project()
+    body = results_router.get_eh_reference_design()
+    if getattr(body, "status_code", None) == 204:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_kind": "eh_report_not_found",
+                "message": _ADEQUACY_NO_DATA_HINTS["eh_reference_design"],
+            },
+        )
+    # The analyst's class-D rows are part of the deliverable; a project that
+    # has no worksheet yet is the common case, not an error.
+    try:
+        worksheet = get_fmea_worksheet(name)
+    except HTTPException:
+        worksheet = None
+    figures: dict[str, bytes] = {}
+    fmea_section = (body.get("sections") or {}).get("fmea_top") or {}
+    png = fmea_pareto_png(fmea_top_modes(fmea_section.get("payload")))
+    if png:
+        figures["fmea_top"] = png
+    data = render_reference_design_docx(
+        body, fmea_worksheet=worksheet, figures=figures)
+    target = filename or f"eh_reference_design_{int(_time.time())}.docx"
+    if not target.lower().endswith(".docx"):
+        target += ".docx"
+    return _save_agent_export(data, target, DOCX_MIME)
+
+
+# ── Reports (WP6) — the generated study report ──────────────────────────────
+#
+# Thin wrappers over WP1/WP3/WP5's routes (`routers/reports.py`,
+# `routers/report_jobs.py`), called in-process for the ACTIVE project through
+# `_route(...)` exactly as `run_eh_study` wraps `post_eh_study`. Every refusal
+# the routes raise passes through unchanged (`detail["error_kind"]`), so the
+# manifest's `report_*` kinds are the tools' too. Not campaign-gated: a report
+# solves nothing — it narrates what the studies established.
+#
+# The one thing added here is SHAPE: `get_report` must fit the chat harness's
+# 4000-char result cap (`chat_service._truncate_result`), which a document
+# with its tables inline never would, so tables collapse to their id, columns
+# and row count (`get_report_table` pages the rows), figures to their id and
+# caption, and a document whose PROSE alone would not fit degrades to a
+# per-section outline with a hint to read one section at a time.
+
+# Under `_truncate_result`'s 4000, measured the same way it measures
+# (`len(json.dumps(result, default=str))`) on the very dict it measures.
+REPORT_RESULT_BUDGET = 3900
+_REPORT_HEADER_KEYS = ("report_id", "version", "title", "language", "created_at",
+                       "mode", "profile_id", "model", "evidence_hash")
+_PROSE_SOURCES = ("llm", "user_edit")
+
+
+def _report_project():
+    """The active project as the report routes take it (authorized, with its directory)."""
+    return _authorized_project(_require_active_project())
+
+
+def _newest_report_id(project) -> str:
+    """The newest report of the project, or the 404 that names the remedy."""
+    from services.reports import store
+
+    metas = store.list_reports(project.directory)
+    if not metas:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_kind": "report_not_found",
+                "message": (
+                    "This project has no study report yet — generate_report "
+                    "writes one from the session's results."
+                ),
+            },
+        )
+    return metas[0].report_id
+
+
+def _load_report_document(project, report_id: str, version: int | None) -> dict:
+    """One version of a report as the GET route serves it (a plain dict)."""
+    from routers.reports import get_report as _h
+    return _route(_h, report_id, version, project=project)
+
+
+def _json_len(payload: Any) -> int:
+    return len(json.dumps(payload, default=str))
+
+
+def _compact_block(block: dict, tables: dict, figures: dict) -> dict:
+    """A table reference becomes its shape, a figure its caption; prose stays."""
+    kind = block.get("type")
+    if kind == "table_ref":
+        table = tables.get(block.get("table_id")) or {}
+        out = {
+            "type": "table",
+            "table_id": block.get("table_id"),
+            "columns": list(table.get("columns") or []),
+            "n_rows": len(table.get("rows") or []),
+        }
+        caption = block.get("caption") or table.get("caption")
+        if caption:
+            out["caption"] = caption
+        return out
+    if kind == "figure_ref":
+        figure = figures.get(block.get("figure_id")) or {}
+        out = {"type": "figure", "figure_id": block.get("figure_id")}
+        caption = block.get("caption") or figure.get("caption")
+        if caption:
+            out["caption"] = caption
+        return out
+    return dict(block)
+
+
+def _compact_section(section: dict, tables: dict, figures: dict) -> dict:
+    """The section with its prose intact; an empty audit is left out."""
+    out = {
+        "section_id": section.get("section_id"),
+        "heading": section.get("heading"),
+        "source": section.get("source"),
+        "status": section.get("status"),
+        "blocks": [_compact_block(b, tables, figures) for b in section.get("blocks") or []],
+    }
+    if section.get("note"):
+        out["note"] = section["note"]
+    audit = section.get("audit") or {}
+    if audit.get("unverified") or audit.get("verified"):
+        # `unverified` intact — those are the numbers to check. `verified`
+        # as the texts alone: the evidence path each matched is the viewer's
+        # citation, and nothing in chat can dereference a JSON pointer.
+        out["audit"] = {
+            "unverified": list(audit.get("unverified") or []),
+            "verified": [v.get("text") if isinstance(v, dict) else v
+                         for v in audit.get("verified") or []],
+        }
+    return out
+
+
+def _outline_section(section: dict) -> dict:
+    """
+    One row per section: what is there, not what it says. Empty counts are
+    left out, and so is the heading — the id names the section and a
+    per-section read carries the heading — because a dozen such rows must
+    leave room for the sections that carry prose.
+    """
+    blocks = section.get("blocks") or []
+    audit = section.get("audit") or {}
+    out = {
+        "section_id": section.get("section_id"),
+        "source": section.get("source"),
+        "status": section.get("status"),
+    }
+    counts = {
+        "paragraphs": sum(1 for b in blocks if b.get("type") == "paragraph"),
+        "bullets": sum(len(b.get("items") or []) for b in blocks if b.get("type") == "bullets"),
+        "callouts": sum(1 for b in blocks if b.get("type") == "callout"),
+        "tables": [b.get("table_id") for b in blocks if b.get("type") == "table_ref"],
+        "figures": [b.get("figure_id") for b in blocks if b.get("type") == "figure_ref"],
+        "unverified": list(audit.get("unverified") or []),
+    }
+    out.update({k: v for k, v in counts.items() if v})
+    if section.get("note"):
+        out["note"] = section["note"]
+    return out
+
+
+def generate_report(
+    title: str | None = None,
+    language: str | None = None,
+    sections: list | None = None,
+    instruction: str | None = None,
+    template_file_id: str | None = None,
+) -> dict:
+    """
+    Start the report job for the active project on the active LLM profile.
+
+    The route collects the evidence and renders the figures in this call;
+    the prose is written on a daemon thread. An empty `sections` list means
+    the default target set, not a 422 — a model that passes `[]` means "all".
+    `language` left None is the template's detected language when
+    `template_file_id` names one (WP11), else "en" — the route's own rule.
+    """
+    from routers.report_jobs import GenerateReportBody, generate_report as _h
+
+    project = _report_project()
+    body = GenerateReportBody(
+        title=title, language=language or None,
+        sections=[str(s) for s in sections] if sections else None,
+        instruction=instruction, template_file_id=template_file_id or None,
+    )
+    result = _route(_h, body, project=project)
+    return {
+        **result,
+        "message": (
+            "Report generation started — poll get_report_status until it is "
+            "done, aborted or failed, then read the report with "
+            f"get_report('{result.get('report_id')}')."
+        ),
+    }
+
+
+def get_report_status() -> Any:
+    """The job record of this session; `no_data` when nothing has run yet."""
+    from routers.report_jobs import get_generate_status as _h
+
+    project = _report_project()
+    return _payload_or_no_data(
+        "report_job", _route(_h, project=project),
+        "no report generation has been run in this session — generate_report "
+        "starts one",
+    )
+
+
+def abort_report_generation() -> dict:
+    """Ask the running job to stop after its current section. Idempotent."""
+    from routers.report_jobs import abort_generate as _h
+
+    project = _report_project()
+    return _route(_h, project=project)
+
+
+def list_reports() -> list[dict]:
+    from routers.reports import list_reports as _h
+
+    project = _report_project()
+    return _route(_h, project=project)
+
+
+def get_report(
+    report_id: str | None = None,
+    version: int | None = None,
+    section_id: str | None = None,
+) -> dict:
+    """
+    One report version for the model, under the result cap by construction.
+
+    Prose blocks (paragraphs, bullets, callouts, fields) are intact; tables
+    are their shape, figures their caption; `audit` is the section's own.
+    When even that does not fit, the whole document comes back as an outline
+    and `section_id` reads one section in full.
+    """
+    project = _report_project()
+    rid = report_id if report_id is not None else _newest_report_id(project)
+    raw = _load_report_document(project, rid, version)
+    tables = raw.get("tables") or {}
+    figures = raw.get("figures") or {}
+    sections = list(raw.get("sections") or [])
+    if section_id is not None:
+        sections = [s for s in sections if s.get("section_id") == section_id]
+        if not sections:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error_kind": "report_section_not_found",
+                    "message": (
+                        f"Report {rid} has no section {section_id!r}; it has: "
+                        + ", ".join(s.get("section_id") for s in raw.get("sections") or [])
+                    ),
+                },
+            )
+    head = {k: raw.get(k) for k in _REPORT_HEADER_KEYS}
+    full = {
+        **head,
+        "sections": [_compact_section(s, tables, figures) for s in sections],
+        "message": (
+            "Tables are summarised as {table_id, columns, n_rows}: "
+            "get_report_table(report_id, table_id) pages the rows."
+        ),
+    }
+    if section_id is not None or _json_len(full) <= REPORT_RESULT_BUDGET:
+        return full
+    # Too big with everything in full: every section becomes a row, then the
+    # sections that carry PROSE are put back in full, in document order, as
+    # long as the budget allows — the most of the report one result can
+    # carry, and always under the cap. A row has no `blocks`.
+    rows = [_outline_section(s) for s in sections]
+    out = {
+        **head,
+        "outline": True,
+        "sections": rows,
+        "message": (
+            "Not everything fits one result: sections with `blocks` are in "
+            "full, the rest are rows. get_report(report_id, section_id=...) "
+            "reads any one in full; get_report_table pages a table."
+        ),
+    }
+    used = _json_len(out)
+    for i, section in enumerate(sections):
+        if section.get("source") not in _PROSE_SOURCES:
+            continue
+        whole = _compact_section(section, tables, figures)
+        delta = _json_len(whole) - _json_len(rows[i])
+        if used + delta <= REPORT_RESULT_BUDGET:
+            out["sections"][i] = whole
+            used += delta
+    return out
+
+
+def get_report_table(
+    report_id: str,
+    table_id: str,
+    version: int | None = None,
+    offset: int = 0,
+    limit: int | None = None,
+) -> dict:
+    """The rows of one table of a report version, in the shared page envelope."""
+    project = _report_project()
+    raw = _load_report_document(project, report_id, version)
+    tables = raw.get("tables") or {}
+    table = tables.get(table_id)
+    if table is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_kind": "report_table_not_found",
+                "message": (
+                    f"Report {report_id} (version {raw.get('version')}) has no "
+                    f"table {table_id!r}; it has: "
+                    + (", ".join(sorted(tables)) or "none")
+                ),
+            },
+        )
+    page = _paginate(list(table.get("rows") or []), offset, limit)
+    return {
+        "table_id": table_id,
+        "columns": list(table.get("columns") or []),
+        "caption": table.get("caption"),
+        "source_path": table.get("source_path"),
+        **page,
+    }
+
+
+def regenerate_report_section(
+    report_id: str,
+    section_id: str,
+    instruction: str | None = None,
+    language: str | None = None,
+) -> dict:
+    """One section again, from the latest version, saved as the next one."""
+    from routers.report_jobs import RegenerateSectionBody, regenerate_section as _h
+
+    project = _report_project()
+    body = RegenerateSectionBody(instruction=instruction, language=language)
+    result = _route(_h, report_id, section_id, body, project=project)
+    return {
+        **result,
+        "message": (
+            "Section rewrite started — poll get_report_status; when it is done, "
+            f"get_report('{report_id}') returns the new version and the "
+            "earlier versions stay readable."
+        ),
+    }
+
+
+def export_report_docx(
+    report_id: str | None = None,
+    version: int | None = None,
+    filename: str | None = None,
+) -> dict:
+    """
+    One report version as a Word document in the active project's uploads/
+    dir. The route renders and saves it as an `agent_export`; this returns
+    the chip in the same shape `_save_agent_export` gives the other exports.
+    """
+    from routers.reports import ExportReportBody, export_report as _h
+
+    project = _report_project()
+    rid = report_id if report_id is not None else _newest_report_id(project)
+    meta = _route(_h, rid, ExportReportBody(version=version, filename=filename),
+                  project=project)
+    return {
+        "file_id": meta["file_id"],
+        "filename": meta["filename"],
+        "mime": meta["mime"],
+        "size": meta["size"],
+        "kind": meta["kind"],
+        "report_id": rid,
+        "message": (
+            f"Exported '{meta['filename']}' ({meta['size']} bytes). It's "
+            "available as a downloadable file in the chat panel's file strip."
+        ),
+    }
+
+
+def delete_report(report_id: str) -> dict:
+    """Remove one report and every version of it (edit-lock checked by the route)."""
+    from routers.reports import delete_report as _h
+
+    project = _report_project()
+    return _route(_h, report_id, project=project)
+
+
+# ── WP11: user templates ────────────────────────────────────────────────────
+#
+# Thin wrappers over the template routes (`routers/reports.py`,
+# `routers/report_jobs.py`), called in-process for the active project. A
+# template is DATA: the mapping job shows its outline to the model inside the
+# untrusted-data fence, and nothing found in a template is ever followed.
+
+
+def list_report_templates() -> list[dict]:
+    """The active project's uploads of kind `report_template`, newest first."""
+    from services import upload_service
+
+    name = _require_active_project()
+    return [
+        {
+            "file_id": m.file_id,
+            "filename": m.filename,
+            "mime": m.mime,
+            "kind": m.kind,
+            "size_kb": round(m.size / 1024, 1),
+            "uploaded_at": m.uploaded_at,
+        }
+        for m in upload_service.list_uploads(name, kind="report_template")
+    ]
+
+
+def set_report_template(report_id: str, file_id: str | None = None) -> dict:
+    """Bind an upload as the report's template (null unbinds); the route's outline back."""
+    from routers.reports import BindTemplateBody, bind_template as _h
+
+    project = _report_project()
+    result = _route(_h, report_id, BindTemplateBody(file_id=file_id or None), project=project)
+    if result.get("template_file_id") is None:
+        message = (f"Report {report_id} now uses the default document layout; "
+                   "export_report_docx renders it with the bundled writer.")
+    elif result.get("mode") == "tagged":
+        message = (f"Report {report_id} is bound to a TAGGED template: its {{ }} tags "
+                   "are filled on export_report_docx; no mapping plan is needed.")
+    else:
+        message = (f"Report {report_id} is bound to an UNTAGGED template "
+                   f"(language {result.get('language') or 'undetected'}): "
+                   "propose_report_mapping proposes how its headings map onto the "
+                   "report, set_report_mapping edits the plan, export_report_docx "
+                   "rebuilds the body into it.")
+    return {**result, "message": message}
+
+
+def get_report_template(report_id: str | None = None) -> dict:
+    """The bound template's outline and stored plan (the newest report when omitted)."""
+    from routers.reports import get_template as _h
+
+    project = _report_project()
+    rid = report_id if report_id is not None else _newest_report_id(project)
+    return _route(_h, rid, project=project)
+
+
+def propose_report_mapping(report_id: str, language: str | None = None) -> dict:
+    """Start the mapping job for the report's untagged template (same slot as generate)."""
+    from routers.report_jobs import ProposeMappingBody, propose_template_plan as _h
+
+    project = _report_project()
+    result = _route(_h, report_id, ProposeMappingBody(language=language or None),
+                    project=project)
+    return {
+        **result,
+        "message": (
+            "Mapping proposal started — poll get_report_status until it is done "
+            f"(mode 'mapping'), then read the plan with get_report_template('{report_id}')."
+        ),
+    }
+
+
+def set_report_mapping(report_id: str, plan: dict, strict: bool = False) -> dict:
+    """Store a (user- or model-edited) mapping plan; the sanitised plan back."""
+    from routers.reports import put_template_plan as _h
+
+    project = _report_project()
+    body = dict(plan) if isinstance(plan, dict) else plan
+    if isinstance(body, dict) and strict:
+        body["strict"] = True
+    return _route(_h, report_id, body, project=project)
+
+
+# ── WP13: the round trip ────────────────────────────────────────────────────
+#
+# Thin wrappers over the round-trip routes (`routers/reports.py`), called
+# in-process for the active project. An edited copy is DATA: its text becomes
+# the report's `user_edit` sections and its comments become pending
+# instructions the user chooses to apply; nothing found in it is followed by
+# the assistant.
+
+
+def list_report_roundtrips() -> list[dict]:
+    """The active project's uploads of kind `report_roundtrip`, newest first."""
+    from services import upload_service
+
+    name = _require_active_project()
+    return [
+        {
+            "file_id": m.file_id,
+            "filename": m.filename,
+            "mime": m.mime,
+            "kind": m.kind,
+            "size_kb": round(m.size / 1024, 1),
+            "uploaded_at": m.uploaded_at,
+        }
+        for m in upload_service.list_uploads(name, kind="report_roundtrip")
+    ]
+
+
+def import_edited_report(report_id: str, file_id: str, bind_as_template: bool = True) -> dict:
+    """Merge an edited Word copy back as the report's next version; the route's answer plus a summary."""
+    from routers.reports import RoundTripBody, roundtrip_report as _h
+
+    project = _report_project()
+    result = _route(_h, report_id, RoundTripBody(file_id=file_id, bind_as_template=bool(bind_as_template)),
+                    project=project)
+    rt = result.get("result") or {}
+    sections = rt.get("sections") or []
+    changed = [s.get("section_id") for s in sections if s.get("changed") and s.get("section_id")]
+    commented = [s.get("section_id") for s in sections if s.get("comments") and s.get("section_id")]
+    unmatched = rt.get("unmatched") or []
+    parts = [f"Report {report_id} is now version {result.get('version')}: "
+             f"{len(changed)} section(s) edited by the user ({', '.join(changed) or 'none'}), "
+             f"{rt.get('accepted_tracked_changes', 0)} tracked change(s) accepted."]
+    if commented:
+        parts.append(f"Comments became pending instructions on: {', '.join(commented)} — "
+                     "regenerate_report_section(report_id, section_id) with no instruction "
+                     "applies each.")
+    if unmatched:
+        parts.append(f"{len(unmatched)} piece(s) of content could not be placed in any "
+                     "section and were NOT merged; relay them to the user.")
+    if result.get("template_file_id") == file_id:
+        parts.append("The edited file is now the report's template, so its styling "
+                     "survives the next export.")
+    return {**result, "changed": changed, "commented": commented, "message": " ".join(parts)}
+
+
+def diff_report_versions(report_id: str, a: int, b: int) -> dict:
+    """Per-section change between two versions, with the changed/added/removed ids summarised."""
+    from routers.reports import diff_report_versions as _h
+
+    project = _report_project()
+    out = _route(_h, report_id, int(a), int(b), project=project)
+    rows = out.get("sections") or []
+    return {
+        **out,
+        "changed": [r["section_id"] for r in rows if r.get("change") == "changed"],
+        "added": [r["section_id"] for r in rows if r.get("change") == "added"],
+        "removed": [r["section_id"] for r in rows if r.get("change") == "removed"],
+    }
+
+
+def export_report_pdf(
+    report_id: str | None = None,
+    version: int | None = None,
+    filename: str | None = None,
+) -> dict:
+    """
+    One report version as a PDF in the active project's uploads/ dir, when
+    this host has LibreOffice (501 `pdf_not_available` otherwise; the .docx
+    export always works).
+    """
+    from routers.reports import ExportReportBody, export_report as _h
+
+    project = _report_project()
+    rid = report_id if report_id is not None else _newest_report_id(project)
+    meta = _route(_h, rid, ExportReportBody(version=version, filename=filename, format="pdf"),
+                  project=project)
+    return {
+        "file_id": meta["file_id"],
+        "filename": meta["filename"],
+        "mime": meta["mime"],
+        "size": meta["size"],
+        "kind": meta["kind"],
+        "report_id": rid,
+        "message": (
+            f"Exported '{meta['filename']}' ({meta['size']} bytes) as PDF. It's "
+            "available as a downloadable file in the chat panel's file strip."
+        ),
+    }
 
 
 def build_study_report(project: str | None = None) -> dict:
@@ -4657,6 +5633,11 @@ DISPATCHERS: dict[str, Any] = {
     "get_asset_health": get_asset_health,
     "record_asset_health": record_asset_health,
     "get_stress_scenarios": get_stress_scenarios,
+    "put_stress_scenarios": put_stress_scenarios,
+    "get_eh_template": get_eh_template,
+    "get_feature_guide": get_feature_guide,
+    "review_eh_study": review_eh_study,
+    "suggest_eh_setup": suggest_eh_setup,
     "run_fmea_sweep": run_fmea_sweep,
     "run_frontier_study": run_frontier_study,
     "run_mc_study": run_mc_study,
@@ -4675,7 +5656,7 @@ DISPATCHERS: dict[str, Any] = {
     "solve_queue_list": solve_queue_list,
     "solve_queue_abort": solve_queue_abort,
     "solve_queue_clear_finished": solve_queue_clear_finished,
-    # gridspine (12)
+    # gridspine (16)
     "gridspine_create_study": gridspine_create_study,
     "gridspine_set_dispatch_source": gridspine_set_dispatch_source,
     "gridspine_get_config": gridspine_get_config,
@@ -4688,6 +5669,15 @@ DISPATCHERS: dict[str, Any] = {
     "gridspine_export_handoff_bundle": gridspine_export_handoff_bundle,
     "gridspine_get_readback": gridspine_get_readback,
     "gridspine_fetch_result_figure": gridspine_fetch_result_figure,
+    "gridspine_get_capacity": gridspine_get_capacity,
+    "gridspine_compute_capacity": gridspine_compute_capacity,
+    "gridspine_get_connection_assessments": gridspine_get_connection_assessments,
+    "gridspine_assess_connection": gridspine_assess_connection,
+    # library (4)
+    "list_library_items": list_library_items,
+    "get_library_item": get_library_item,
+    "import_urdb_tariff": import_urdb_tariff,
+    "attach_tariff": attach_tariff,
     # project_mgmt (21)
     "list_projects": list_projects,
     "load_project": load_project,
@@ -4750,6 +5740,29 @@ DISPATCHERS: dict[str, Any] = {
     "export_to_csv": export_to_csv,
     "export_preview_png": export_preview_png,
     "export_chat_summary": export_chat_summary,
+    # reports (WP0 spike) — the EH ReferenceDesignReport as a .docx chip
+    "export_eh_report_docx": export_eh_report_docx,
+    # reports (WP6) — the generated study report over the WP1/WP3/WP5 routes
+    "generate_report": generate_report,
+    "get_report_status": get_report_status,
+    "abort_report_generation": abort_report_generation,
+    "list_reports": list_reports,
+    "get_report": get_report,
+    "get_report_table": get_report_table,
+    "regenerate_report_section": regenerate_report_section,
+    "export_report_docx": export_report_docx,
+    "delete_report": delete_report,
+    # reports (WP11) — user templates over the template routes
+    "list_report_templates": list_report_templates,
+    "set_report_template": set_report_template,
+    "get_report_template": get_report_template,
+    "propose_report_mapping": propose_report_mapping,
+    "set_report_mapping": set_report_mapping,
+    # reports (WP13) — the round trip over the round-trip routes
+    "list_report_roundtrips": list_report_roundtrips,
+    "import_edited_report": import_edited_report,
+    "diff_report_versions": diff_report_versions,
+    "export_report_pdf": export_report_pdf,
     # uploads — bulk delete (1, locked decision row 7: independent of chat history)
     "clear_uploads": clear_uploads,
     # asset_results (3) — Task 14: per-asset results chat surface

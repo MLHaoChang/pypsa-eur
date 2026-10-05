@@ -200,3 +200,21 @@ def test_run_dtc_planning_refuses_missing_ens_cap():
             dtc=dtc,
         )
 
+
+
+def test_planning_note_names_each_contingency_condition():
+    """P20 finding: 'no DtC planning contingency solved' gave no reason. An
+    infeasible islanded plan must say which contingency and what to change."""
+    table = {"contingencies": [
+        {"contingency": "grid_import", "status": "warning",
+         "condition": "infeasible"},
+        {"contingency": "tie_b", "status": "error", "condition": "boom"}]}
+    status, note = D.dtc_planning_section_status(table)
+    assert status == "not_established"
+    assert "grid_import: infeasible" in note and "tie_b: boom" in note
+    assert "p_nom_max" in note and "ENS target" in note
+    stress = {"contingencies": [
+        {"contingency": "grid_import", "status": "warning",
+         "condition": "infeasible"}]}
+    status, note = D.dtc_section_status(stress)
+    assert "grid_import: infeasible" in note

@@ -25,14 +25,16 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
   createChatStream,
+  getChatHealth,
   getChatHistory,
   postChatAbort,
   postChatConfirm,
   type ChatFrame,
+  type ChatHealth,
   type InterruptedTurn,
 } from '../api/chat'
 import { useChatProfiles, CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
@@ -50,9 +52,10 @@ import { useChatStore, type ChatMessage, type UploadMetaUI } from '../store/chat
 import ApiKeySetup from './ApiKeySetup'
 import ChatLaunchGreeting from './ChatLaunchGreeting'
 import { buildUiContext } from '../utils/uiContext'
+import { plainWords } from '../pages/hubDesign/plainWords'
 import { postChatRewind } from '../api/chat'
 import * as speechOut from '../utils/speechOut'
-import { useUIStore } from '../store/uiStore'
+import { useUIStore, type UiMode } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
 import { useSpeechToText } from '../hooks/useSpeechToText'
 import { isNearBottom } from '../utils/chatUi'
@@ -143,6 +146,8 @@ function _normalizePanelId(raw: string): string {
     OpenProject: 'project_picker',
     NewProject: 'new_project', new_project: 'new_project',
     NewProjectWizard: 'new_project',
+    // Guided-mode spec §3.6 — the hub-design panel slot.
+    HubDesign: 'hubDesign', hubDesign: 'hubDesign', hub_design: 'hubDesign',
   }
   return aliases[key] ?? key
 }
@@ -221,7 +226,7 @@ function applyUiNavigate(d: {
     panel === 'results' || panel === 'simparams' || panel === 'timeseries'
     || panel === 'capacityBounds' || panel === 'overview' || panel === 'issues'
     || panel === 'scenarios' || panel === 'snapshots' || panel === 'horizon'
-    || panel === 'solveQueue'
+    || panel === 'solveQueue' || panel === 'hubDesign'
   ) {
     ui.setSlidePanel(panel)
   }
@@ -299,6 +304,173 @@ function _typed_confirmation_target(tool: string, args: Record<string, unknown>)
   return null
 }
 
+// P26 (carried from the P25 gate): in Guided every write-tier call asks for
+// confirmation, but some write-tier tools do not edit the network — they
+// write a file, back the project up, or open another project. The card says
+// what the call is for; "Confirm this change" stays for real edits. Keyed on
+// the tier as well, so a tool that ever moves tier falls back to the tier's
+// wording. Expert never reads this.
+const GUIDED_WRITE_PURPOSE: Record<string, { header: string; note: string }> = {}
+for (const t of ['export_to_csv', 'export_to_excel', 'export_preview_png', 'export_chat_summary',
+  'export_asset_results', 'gridspine_export_handoff_bundle']) {
+  GUIDED_WRITE_PURPOSE[t] = { header: 'Confirm: export a file',
+    note: 'Writes a file you can download. Your network is not changed.' }
+}
+GUIDED_WRITE_PURPOSE.create_project_snapshot = { header: 'Confirm: save a copy',
+  note: 'Saves a backup copy of the project as it is now. Your network is not changed.' }
+for (const t of ['load_project', 'activate_project']) {
+  GUIDED_WRITE_PURPOSE[t] = { header: 'Confirm: open a project',
+    note: 'Switches the workbench to another project. Save first if you have unsaved edits.' }
+}
+
+function guidedConfirmWording(tool: string, tier: string): { header: string; note: string | null } {
+  if (tier !== 'write') return { header: 'Confirm', note: null }
+  return Object.prototype.hasOwnProperty.call(GUIDED_WRITE_PURPOSE, tool)
+    ? GUIDED_WRITE_PURPOSE[tool]
+    : { header: 'Confirm this change', note: null }
+}
+
+// P26 (coordinator item 5): a Guided card leads with one plain sentence
+// about the call; the tool id and its JSON arguments move into a collapsed
+// "Details". Unknown tools fall back to "The assistant wants to use <tool
+// name in words>". Expert never reads this.
+const _str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null)
+const _count = (v: unknown): number | null => (Array.isArray(v) ? v.length : null)
+const GUIDED_CARD_SUMMARY: Record<string, (a: Record<string, unknown>) => string> = {
+  run_eh_study: (a) => {
+    const n = typeof a.budget_solves === 'number' && Number.isFinite(a.budget_solves) ? a.budget_solves : null
+    return n != null
+      ? `Run the reliability study for this site (about ${n} calculation steps)`
+      : 'Run the reliability study for this site'
+  },
+  run_fmea_sweep: () => 'Run the equipment-failure check (FMEA)',
+  run_simulation: () => 'Run a full calculation of the network',
+  update_component: (a) => `Change the settings of ${_str(a.name) ?? 'one component'}`,
+  bulk_update_components: (a) => {
+    const n = _count(a.names)
+    return n != null ? `Change the settings of ${n} components` : 'Change the settings of several components'
+  },
+  update_solver_config: (a) => {
+    const p = (a.partial ?? {}) as Record<string, unknown>
+    return typeof p.voll === 'number' && Number.isFinite(p.voll)
+      ? `Set the price of undelivered energy to €${p.voll.toLocaleString('en-US')} per MWh`
+      : 'Change the study settings'
+  },
+  put_stress_scenarios: (a) => {
+    const n = _count(a.scenarios)
+    return n != null ? `Save the list of hard conditions to test (${n} scenarios)`
+      : 'Save the list of hard conditions to test'
+  },
+  create_project_snapshot: (a) => _str(a.label)
+    ? `Save a backup copy named "${a.label}"` : 'Save a backup copy of the project',
+  load_project: (a) => _str(a.name) ? `Open the project ${a.name}` : 'Open another project',
+  activate_project: (a) => {
+    const n = _str(a.project_id) ?? _str(a.name)
+    return n ? `Open the project ${n}` : 'Open another project'
+  },
+  save_project: (a) => {
+    const n = _str(a.name)
+    const base = n ? `Save the project ${n}` : 'Save the project'
+    return a.force === true ? `${base}, overwriting the saved version` : base
+  },
+  // P26 gate B2: every destructive and execution tool names its target
+  // (BE/services/chat_tools_schema.py safety tiers), because the raw call is
+  // no longer the first thing on the card.
+  delete_component: (a) => `Delete ${_str(a.name) ?? 'a component'} from the network`,
+  cascade_delete_bus: (a) => `Delete the bus ${_str(a.name) ?? '(unnamed)'} and everything connected to it`,
+  batch_delete_components: (a) => {
+    const names = Array.isArray(a.names) ? a.names.map(String) : []
+    if (!names.length) return 'Delete several components from the network'
+    const shown = names.slice(0, 5).join(', ')
+    const rest = names.length - 5
+    return `Delete ${names.length} components from the network: ${shown}${rest > 0 ? ` and ${rest} more` : ''}`
+  },
+  cluster_network: (a) => typeof a.n_clusters === 'number'
+    ? `Simplify the network by merging buses into ${a.n_clusters} groups (replaces the current network)`
+    : 'Simplify the network by merging buses (replaces the current network)',
+  delete_vintage_bounds: (a) => `Remove the build-year limits of ${_str(a.name) ?? 'a component'}`,
+  delete_timeseries: (a) => `Delete ${_str(a.attribute) ? `the ${a.attribute}` : 'a'} time series of ${
+    _str(a.name) ?? 'a component'}`,
+  run_ac_pf_stage: () => 'Run the power-flow check on the network',
+  abort_simulation: () => 'Stop the running calculation',
+  force_reset_simulation: () => 'Force-reset the calculation state (stops anything running)',
+  run_frontier_study: () => 'Run the cost-versus-reliability check',
+  run_mc_study: (a) => typeof a.draws === 'number'
+    ? `Run the reliability simulation (${a.draws} runs)` : 'Run the reliability simulation',
+  run_coupling_loop: (a) => typeof a.target_lole_h === 'number'
+    ? `Size the design to meet ${a.target_lole_h} h/yr of shortfall (repeated calculations)`
+    : 'Size the design to meet the shortfall goal (repeated calculations)',
+  run_margin_loop: (a) => typeof a.target_lole_h === 'number'
+    ? `Size the reserve margin to meet ${a.target_lole_h} h/yr of shortfall (repeated calculations)`
+    : 'Size the reserve margin to meet the shortfall goal (repeated calculations)',
+  abort_adequacy_study: (a) => `Stop the running ${_str(a.study) ?? 'reliability'} study`,
+  solve_queue_enqueue: (a) => `Queue a calculation of the project ${_str(a.project_id) ?? '(current)'}`,
+  solve_queue_abort: (a) => `Stop the queued calculation ${_str(a.job_id) ?? ''}`.trimEnd(),
+  save_project_as: (a) => `Save the project under the new name ${_str(a.name) ?? '(unnamed)'}`,
+  save_project_a_copy: (a) => `Save a copy of the project named ${_str(a.name) ?? '(unnamed)'}`,
+  rename_project: (a) => `Rename the project ${_str(a.name) ?? '(unnamed)'} to ${_str(a.new_name) ?? '(unnamed)'}`,
+  delete_project: (a) => `Delete the project ${_str(a.name) ?? '(unnamed)'}`
+    + (a.cascade === true ? ' and every scenario made from it' : ''),
+  create_scenario: (a) => `Create the scenario ${_str(a.new_name) ?? '(unnamed)'} from ${_str(a.base) ?? 'the project'}`,
+  import_project_bundle: (a) => _str(a.filename)
+    ? `Import a project from the file ${a.filename}` : 'Import a project from a file',
+  create_project_from_template: (a) =>
+    `Create the project ${_str(a.new_name) ?? '(unnamed)'} from the ${_str(a.template_id) ?? ''} template`,
+  restore_project_snapshot: (a) =>
+    `Restore the project ${_str(a.name) ?? '(unnamed)'} to the backup ${_str(a.snapshot_id) ?? ''} (replaces the current network)`,
+  delete_project_snapshot: (a) =>
+    `Delete the backup ${_str(a.snapshot_id) ?? ''} of the project ${_str(a.name) ?? '(unnamed)'}`,
+  clear_audit_log: () => 'Clear the change log of this project',
+  undo_last: () => 'Undo the last change to the network',
+  clear_chat_history: () => "Delete this project's chat history",
+  apply_demand_from_excel: (a) =>
+    `Replace the demand of ${_str(a.load_name) ?? 'a load'} with values from the uploaded file ${_str(a.file_id) ?? ''}`.trimEnd(),
+  delete_upload: (a) => `Delete the uploaded file ${_str(a.file_id) ?? ''}`.trimEnd(),
+  reconstruct_network_from_image: (a) =>
+    `Build the network from the uploaded image ${_str(a.file_id) ?? ''} (replaces the current network)`,
+  clear_uploads: () => "Delete every uploaded file of this project",
+  set_active_profile: (a) => `Switch the assistant to the model profile ${_str(a.profile_id) ?? ''}`.trimEnd(),
+  gridspine_run_pipeline: (a) => `Run the GridSpine pipeline for the project ${_str(a.project_id) ?? '(current)'}`,
+}
+for (const t of ['import_network_nc', 'import_csv_bundle', 'import_excel', 'import_matpower']) {
+  GUIDED_CARD_SUMMARY[t] = (a) => (_str(a.filename)
+    ? `Replace the whole network with the imported file ${a.filename}`
+    : 'Replace the whole network with an imported file')
+}
+// The fallback names the first identifying argument it finds, in this order.
+const IDENTIFYING_ARGS = ['name', 'names', 'component', 'project_id', 'project', 'file_id', 'filename', 'path']
+function _identifying(a: Record<string, unknown>): string | null {
+  for (const k of IDENTIFYING_ARGS) {
+    const v = a[k]
+    if (typeof v === 'string' && v.trim()) return v
+    if (Array.isArray(v) && v.length) return v.map(String).join(', ')
+  }
+  return null
+}
+for (const t of ['export_to_csv', 'export_to_excel', 'export_preview_png', 'export_chat_summary',
+  'export_asset_results', 'gridspine_export_handoff_bundle']) {
+  GUIDED_CARD_SUMMARY[t] = (a) => (_str(a.filename) ? `Export the file ${a.filename}` : 'Export a file')
+}
+
+export function guidedCardSummary(tool: string, args: Record<string, unknown>): string {
+  const f = Object.prototype.hasOwnProperty.call(GUIDED_CARD_SUMMARY, tool) ? GUIDED_CARD_SUMMARY[tool] : null
+  if (f) return f(args ?? {})
+  const target = _identifying(args ?? {})
+  return `The assistant wants to use ${tool.replace(/_/g, ' ')}${target ? ` on ${target}` : ''}`
+}
+
+// P26 (coordinator item 6): after a Deny, Guided shows one plain line. The
+// backend's `confirmation_denied` error line is hidden (the "denied: <tool>"
+// line says the same thing) and the raw "denied: <tool>" goes under Details.
+// Render-only: the transcript keeps the raw lines, and Expert shows them.
+const DENIED_LINE = /^denied: \S+$/
+const DENIED_ERROR_LINE = /^✗ \S+ — confirmation_denied\b/
+export function guidedToolLine(content: string): { hidden: true } | { hidden: false; label: string | null } {
+  if (DENIED_ERROR_LINE.test(content)) return { hidden: true }
+  if (DENIED_LINE.test(content)) return { hidden: false, label: 'You declined — nothing was changed.' }
+  return { hidden: false, label: null }
+}
+
 interface ToolProgressFrame {
   tool_use_id: string
   line: string
@@ -360,6 +532,7 @@ function ConfirmationCard() {
   const setError = useChatStore((s) => s.setError)
   const sessionId = useChatStore((s) => s.sessionId)
   const appendMessage = useChatStore((s) => s.appendMessage)
+  const uiMode = useUIStore((s) => s.uiMode)
   const [secondsLeft, setSecondsLeft] = useState<number>(0)
   const [typedConfirmation, setTypedConfirmation] = useState<string>('')
   const timerRef = useRef<number | null>(null)
@@ -389,7 +562,14 @@ function ConfirmationCard() {
         // destructive action is harmless is the one lesson this card must
         // not give. Withdraw it and say why; the agent re-prompts with a
         // fresh token, which is the flow the backend already implements.
-        setPending(null)
+        // Only this card: a newer one may already be showing (R1).
+        if (useChatStore.getState().pending?.confirmation_token === pending.confirmation_token) {
+          setPending(null)
+        }
+        // P25 re-gate note 1: a card left to lapse ends its card run like a
+        // Deny — the rest of that click's queued actions are dropped.
+        const lapsedGroup = useChatStore.getState().activeRequest?.group
+        if (lapsedGroup) useChatStore.getState().dropRequestGroup(lapsedGroup)
         setError({
           error_kind: 'confirmation_expired',
           message: `The confirmation for ${pending.tool_name} expired before it was answered. Ask again to retry.`,
@@ -406,33 +586,47 @@ function ConfirmationCard() {
     }
   }, [pending])
 
+  // P25 re-gate R1: several Guided writes in one response are carded one
+  // after the other, and the NEXT card's SSE frame often lands while this
+  // card's /confirm POST is still in flight. Clear only the card that was
+  // answered — the token is captured before the await.
+  const clearIfStill = useCallback((token: string) => {
+    if (useChatStore.getState().pending?.confirmation_token === token) setPending(null)
+  }, [setPending])
+
   const onApprove = useCallback(async () => {
     if (!pending || !sessionId) return
+    const token = pending.confirmation_token
     try {
       await postChatConfirm(sessionId, {
-        token: pending.confirmation_token, decision: 'approve',
+        token, decision: 'approve',
       })
-      setPending(null)
+      clearIfStill(token)
     } catch (err) {
       toast.error(`confirmation failed: ${(err as Error).message}`)
     }
-  }, [pending, sessionId, setPending])
+  }, [pending, sessionId, clearIfStill])
 
   const onDeny = useCallback(async () => {
     if (!pending || !sessionId) return
+    const token = pending.confirmation_token
     try {
       await postChatConfirm(sessionId, {
-        token: pending.confirmation_token, decision: 'deny',
+        token, decision: 'deny',
       })
+      // P25 gate: a denial ends that card's run — the card's remaining
+      // queued actions (Improve: one message per action) are dropped.
+      const group = useChatStore.getState().activeRequest?.group
+      if (group) useChatStore.getState().dropRequestGroup(group)
       appendMessage({
         role: 'tool', content: `denied: ${pending.tool_name}`,
         tool_use_id: pending.tool_use_id, tool_name: pending.tool_name,
       })
-      setPending(null)
+      clearIfStill(token)
     } catch (err) {
       toast.error(`confirmation failed: ${(err as Error).message}`)
     }
-  }, [pending, sessionId, setPending, appendMessage])
+  }, [pending, sessionId, clearIfStill, appendMessage])
 
   if (!pending) return null
 
@@ -444,6 +638,9 @@ function ConfirmationCard() {
     ? _typed_confirmation_target(pending.tool_name, pending.args)
     : null
   const typedSatisfied = !requiresTyped || (typedTarget != null && typedConfirmation === typedTarget)
+  const guidedWording = uiMode === 'guided'
+    ? guidedConfirmWording(pending.tool_name, pending.safety_tier)
+    : null
 
   return (
     <div
@@ -462,15 +659,46 @@ function ConfirmationCard() {
       data-tool-name={pending.tool_name}
       data-safety-tier={pending.safety_tier}
     >
-      <div className="text-[11px] uppercase tracking-wider text-amber-500 mb-1">
-        Confirm · {pending.safety_tier}
+      <div className={uiMode === 'guided'
+        ? 'text-[12px] font-semibold text-amber-500 mb-1'
+        : 'text-[11px] uppercase tracking-wider text-amber-500 mb-1'}
+        data-testid="chat-confirmation-header">
+        {/* P25 re-gate note 2 / P26: plain words in Guided; Expert unchanged. */}
+        {guidedWording
+          ? guidedWording.header
+          : <>Confirm · {pending.safety_tier}</>}
       </div>
-      <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text">
-        {pending.tool_name}
-      </div>
-      <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mb-2 whitespace-pre-wrap break-all">
-        {JSON.stringify(pending.args, null, 2)}
-      </pre>
+      {guidedWording?.note && (
+        <div className="text-[11px] text-muted mb-1" data-testid="chat-confirmation-note">
+          {guidedWording.note}
+        </div>
+      )}
+      {guidedWording ? (
+        <>
+          <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text"
+            data-testid="chat-confirmation-summary">
+            {guidedCardSummary(pending.tool_name, pending.args)}
+          </div>
+          {/* P26 gate B2: a destructive card shows its raw call by default. */}
+          <details className="mb-2 text-[11px] text-muted" data-testid="chat-confirmation-details"
+            open={pending.safety_tier === 'destructive'}>
+            <summary className="cursor-pointer select-none">Details</summary>
+            <div className="font-mono mt-1">{pending.tool_name}</div>
+            <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mt-1 whitespace-pre-wrap break-all">
+              {JSON.stringify(pending.args, null, 2)}
+            </pre>
+          </details>
+        </>
+      ) : (
+        <>
+          <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text">
+            {pending.tool_name}
+          </div>
+          <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mb-2 whitespace-pre-wrap break-all">
+            {JSON.stringify(pending.args, null, 2)}
+          </pre>
+        </>
+      )}
       {requiresTyped && typedTarget && (
         <div className="mb-2" data-testid="chat-typed-confirmation">
           <div className="text-[10px] text-muted mb-1">
@@ -525,6 +753,10 @@ function ConfirmationCard() {
 const RETRYABLE_ERROR_KINDS = new Set([
   'rate_limited', 'upstream_error', 'internal_error', 'tool_call_cap_exceeded',
 ])
+// Exported for ChatPanel.hubDesignPanel.test.tsx only: drives the ui_event
+// navigate path without standing up a streamed turn.
+export const APPLY_UI_NAVIGATE_FOR_TEST = applyUiNavigate
+
 // Exported for the completeness test only (N-6): a kind listed here without
 // KIND_COPY renders a retry button under a raw snake_case title.
 export const RETRYABLE_ERROR_KINDS_FOR_TEST = RETRYABLE_ERROR_KINDS
@@ -1095,6 +1327,64 @@ const CHAT_STARTER_PROMPTS: { label: string; text: string }[] = [
   },
 ]
 
+/** Starter prompts in Guided mode: only destinations Guided shows, plus the
+ *  hub-design flow (guided-mode spec §10 addendum). */
+const CHAT_STARTER_PROMPTS_GUIDED: { label: string; text: string }[] = [
+  {
+    label: 'Open Hub design',
+    text: 'Open the Hub design panel',
+  },
+  // P26 gate: plain questions instead of "Check adequacy" / "Summarize this solve".
+  {
+    label: 'Explain my results',
+    text: 'Explain the results of my hub design study in plain language.',
+  },
+  {
+    label: 'What should I improve?',
+    text: 'What is the single most useful thing I can improve in my hub design, and why?',
+  },
+]
+
+/** The greeting chips for the current project and mode. */
+export function starterPromptsFor(
+  currentProject: string | null,
+  uiMode: UiMode,
+): { label: string; text: string }[] {
+  if (!currentProject) return CHAT_STARTER_PROMPTS_UNBOUND
+  return uiMode === 'guided' ? CHAT_STARTER_PROMPTS_GUIDED : CHAT_STARTER_PROMPTS
+}
+
+// P25 gate B2 — a request a hub-design card sent shows its plain label; the
+// text actually sent (tool name, JSON arguments, the instruction to the
+// model) stays available, collapsed. Render-only: the history keeps the sent
+// text, so a reloaded Improve request is recognised by its §5.7 sentence.
+const IMPROVE_REQUEST = /^Apply this recommendation from the study review: "(.+?)"\. Run the tool \w+ with exactly these arguments: /s
+
+export function userMessageLabel(m: Pick<ChatMessage, 'content' | 'display'>): string | null {
+  if (m.display) return m.display
+  const hit = IMPROVE_REQUEST.exec(m.content)
+  // P26: the same plain words the live label uses (delegate.actionLabel).
+  return hit ? `Apply this recommendation: ${plainWords(hit[1])}` : null
+}
+
+const WRAP = 'whitespace-pre-wrap break-words [overflow-wrap:anywhere]'
+
+function UserMessageText({ message }: { message: ChatMessage }) {
+  const label = userMessageLabel(message)
+  if (!label) return <span className={WRAP} data-testid="chat-message-text">{message.content}</span>
+  return (
+    <>
+      <span className={WRAP} data-testid="chat-message-label">{label}</span>
+      <details className="mt-1 text-[11px] text-muted" data-testid="chat-message-details">
+        <summary className="cursor-pointer select-none">Details</summary>
+        <span className={`${WRAP} block pt-1 font-mono`} data-testid="chat-message-text">
+          {message.content}
+        </span>
+      </details>
+    </>
+  )
+}
+
 function ChatStarterChips({
   prompts,
   onPick,
@@ -1168,6 +1458,8 @@ function ReplayAttachmentChips({ fileIds }: { fileIds: string[] }) {
 
 
 export default function ChatPanel() {
+  // Guided swaps the greeting chips for Guided-visible destinations.
+  const uiMode = useUIStore(s => s.uiMode)
   const qc = useQueryClient()
   // tool_use_id → safety_tier, written at tool_request, consumed at
   // tool_result / tool_error. `tool_result` frames don't carry the tier, so
@@ -1194,6 +1486,30 @@ export default function ChatPanel() {
   const setError = useChatStore((s) => s.setError)
   const setStreamCleanup = useChatStore((s) => s.setStreamCleanup)
   const closeStream = useChatStore((s) => s.closeStream)
+  const chatError = useChatStore((s) => s.error)
+
+  // Send gate (click-through obstacle 9): without a key for the ACTIVE
+  // profile every send came back as "API key missing". Same key ApiKeySetup
+  // and AssistantModelSettings use, so a key save or a profile switch
+  // re-reads it. Only an explicit `chat_ready: false` gates; unknown (probe
+  // failed, older backend without the field) stays open — a probe outage
+  // must not lock the assistant.
+  //
+  // `chat_ready` describes the instance's ACTIVE profile only. A turn runs on
+  // the session's pick when it names one (`profile_id` in the request, which
+  // routers/chat.py binds); a `null` pick follows the active profile — the
+  // same rule the model dropdown displays (`profileId ?? active`). So the
+  // gate applies only while the pick IS the active profile (QA gate B1: a
+  // user with no Anthropic key who picked a working local profile was
+  // locked out).
+  const { data: chatHealth } = useQuery<ChatHealth>({
+    queryKey: ['chat', 'health'],
+    queryFn: getChatHealth,
+    staleTime: 30_000,
+    retry: false,
+  })
+  const notReady = chatHealth?.chat_ready === false
+    && (profileId == null || profileId === chatHealth.active_profile?.id)
 
   const currentProject = useUIStore((s) => s.currentProject)
   // Read only for the autoscroll effect below — see the dependency-array
@@ -1660,6 +1976,16 @@ export default function ChatPanel() {
   }, [uploads, bumpUnseenExport])
 
   const [input, setInput] = useState('')
+  // P22: another panel (e.g. the EH panel's "Ask the assistant") seeds the
+  // composer; the text is shown for the user to send, never auto-sent.
+  const composerSeed = useChatStore((st) => st.composerSeed)
+  useEffect(() => {
+    if (!composerSeed) return
+    // Never overwrite an unsent draft: the request goes below it.
+    setInput((prev) => (prev.trim() ? `${prev}\n\n${composerSeed}` : composerSeed))
+    useChatStore.getState().seedComposer(null)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [composerSeed])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -2083,19 +2409,29 @@ export default function ChatPanel() {
   const [pendingSendText, setPendingSendText] = useState<string | null>(null)
   const [pendingSendAttachIds, setPendingSendAttachIds] = useState<string[]>([])
 
-  const dispatchSend = useCallback((text: string, attachIds: string[]) => {
+  // `fromCard` (guided-mode spec §6.1): a request a hub-design card queued.
+  // It is the same send, except that the composer is not the source — the
+  // user's draft (and its dictation flag) stays as it is, and the turn is a
+  // typed one.
+  const dispatchSend = useCallback((text: string, attachIds: string[],
+    opts?: { fromCard?: boolean; label?: string }) => {
     // FIRST, before the composer reset four lines below clears `dictatedRef`.
     // Reading it later — say, next to the createChatStream call that consumes
     // `input_mode` — always yields false, and the bug is invisible: the
     // request still carries the right mode, because that expression is
     // evaluated before the reset too. Only the SPOKEN answer goes missing.
-    voiceTurnRef.current = dictatedRef.current
+    voiceTurnRef.current = opts?.fromCard ? false : dictatedRef.current
     appendMessage({
       role: 'user', content: text,
       attachment_file_ids: attachIds.length > 0 ? attachIds : undefined,
+      ...(opts?.label ? { display: opts.label } : {}),
     })
-    setInput('')
-    dictatedRef.current = false
+    // A typed turn is nobody's card request: a denial in it drops nothing.
+    if (!opts?.fromCard) useChatStore.getState().setActiveRequest(null)
+    if (!opts?.fromCard) {
+      setInput('')
+      dictatedRef.current = false
+    }
     setStreaming(true)
     setError(null)
     const cleanup = createChatStream(
@@ -2151,7 +2487,7 @@ export default function ChatPanel() {
 
   const onSend = useCallback(() => {
     const text = input.trim()
-    if (!text || streaming) return
+    if (!text || streaming || notReady) return
     const attachIds = useChatStore.getState().attachedFileIds.slice()
     // First-send confirmation modal (default-ON friction killer).
     const firstAck = readPref('chat:firstSendAck') === '1'
@@ -2161,7 +2497,7 @@ export default function ChatPanel() {
       return
     }
     dispatchSend(text, attachIds)
-  }, [input, streaming, dispatchSend])
+  }, [input, streaming, notReady, dispatchSend])
 
   const confirmSendWithAttachments = useCallback(() => {
     if (pendingSendText == null) return
@@ -2185,6 +2521,34 @@ export default function ChatPanel() {
     setPendingSendAttachIds([])
   }, [])
 
+  // Guided-mode spec §6.1 — requests the hub-design cards SEND ("Let the
+  // assistant do this", the user's own click). One at a time, through the
+  // typed-message path, only when no turn is streaming, no confirmation card
+  // waits for an answer and the first-send modal is not open. Taking from the
+  // queue is what makes each request dispatch once, however often this
+  // re-renders. `attachIds = []`: card requests never carry the user's
+  // attached files (the button titles say so), so the attachment modal is
+  // never involved and `attachedFileIds` is left alone. Nothing here answers
+  // a confirmation card — writes still wait for the user.
+  const requestCount = useChatStore((s) => s.requestQueue.length)
+  const pendingCard = useChatStore((s) => s.pending)
+  //
+  // Without a key for the active profile (`notReady`, the same gate as Send)
+  // nothing is posted: the queue is dropped — it must not fire by surprise
+  // once a key is added — and the key form below says what to do.
+  useEffect(() => {
+    if (requestCount === 0) return
+    if (notReady) {
+      useChatStore.setState({ requestQueue: [] })
+      toast('Add an API key for the assistant first — nothing was sent.')
+      return
+    }
+    if (streaming || pendingCard != null || pendingSendText != null) return
+    const req = useChatStore.getState().takeNextRequest()
+    if (!req) return
+    dispatchSend(req.text, [], { fromCard: true, label: req.label })
+  }, [requestCount, streaming, pendingCard, pendingSendText, notReady, dispatchSend])
+
   const onAbort = useCallback(async () => {
     // Stopping a turn has to stop the VOICE as well. A synthesiser that keeps
     // reading an answer the user just cancelled is the single most alarming
@@ -2192,6 +2556,9 @@ export default function ChatPanel() {
     // why the machine is still talking.
     speechOut.cancelSpeech()
     voiceTurnRef.current = false
+    // P25 re-gate note 1: Stop ends the card run too — nothing a card
+    // queued is sent after the user stopped.
+    useChatStore.setState({ requestQueue: [] })
     if (!sessionId) return
     try {
       await postChatAbort(sessionId)
@@ -2732,7 +3099,7 @@ export default function ChatPanel() {
             navigate / summarize. Click fills the composer for edit-before-send. */}
         {messages.length === 0 && (
           <ChatStarterChips
-            prompts={currentProject ? CHAT_STARTER_PROMPTS : CHAT_STARTER_PROMPTS_UNBOUND}
+            prompts={starterPromptsFor(currentProject, uiMode)}
             disabled={streaming}
             onPick={(text) => {
               setInput(text)
@@ -2740,7 +3107,12 @@ export default function ChatPanel() {
             }}
           />
         )}
-        {messages.map((m) => (
+        {messages.map((m) => {
+          // P26 item 6: Guided renders a declined card as one plain line.
+          const toolLine = m.role === 'tool' && uiMode === 'guided' ? guidedToolLine(m.content) : null
+          if (toolLine?.hidden) return null
+          const toolLabel = toolLine && !toolLine.hidden ? toolLine.label : null
+          return (
           <div
             key={m.id}
             className={
@@ -2772,7 +3144,17 @@ export default function ChatPanel() {
                 tool tags aren't flattened. */}
             {m.role === 'assistant'
               ? <ChatMarkdown>{m.content}</ChatMarkdown>
-              : <span className="whitespace-pre-wrap">{m.content}</span>}
+              : m.role === 'user' ? <UserMessageText message={m} />
+              : toolLabel ? (
+                <>
+                  <span className="font-sans text-[12px] text-text" data-testid="chat-tool-label">{toolLabel}</span>
+                  <details className="mt-0.5" data-testid="chat-tool-details">
+                    <summary className="cursor-pointer select-none font-sans">Details</summary>
+                    <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>
+                  </details>
+                </>
+              )
+              : <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>}
             {m.role === 'tool' && m.tool_use_id && (
               <ToolProgressDetails toolUseId={m.tool_use_id} />
             )}
@@ -2782,7 +3164,8 @@ export default function ChatPanel() {
             <MessageActions message={m} streaming={streaming}
               onCopy={onCopyMessage} onRetry={onRetryMessage} onEdit={onEditMessage} />
           </div>
-        ))}
+          )
+        })}
         <ConfirmationCard />
         <div ref={messagesEndRef} />
         </div>
@@ -2820,6 +3203,15 @@ export default function ChatPanel() {
         onDelete={onDeleteChip}
         currentProject={currentProject}
       />
+      {/* The key form, inline, while Send is gated — unless the error
+          banner above already shows it for a missing_api_key turn. */}
+      {notReady && chatError?.error_kind !== 'missing_api_key' && (
+        <div className="px-3 py-2 border-t border-border bg-bg-2 shrink-0 text-[12px] text-muted"
+             data-testid="chat-send-gate">
+          The assistant needs an API key for the active model before it can answer.
+          <ApiKeySetup />
+        </div>
+      )}
       <div
         className="flex flex-col border-t border-border bg-bg-2 shrink-0"
         style={{ height: promptHeight }}
@@ -2947,10 +3339,12 @@ export default function ChatPanel() {
           <button
             className="self-end px-3 py-1.5 text-xs rounded bg-accent text-bg disabled:opacity-50 max-w-[260px]"
             onClick={onSend}
-            disabled={streaming || !input.trim()}
+            disabled={streaming || !input.trim() || notReady}
             data-testid="chat-send"
             title={
-              attachedFileIds.length > 0
+              notReady
+                ? 'Add an API key first (Settings → Assistant)'
+                : attachedFileIds.length > 0
                 ? `Sending with ${attachedFileIds.length} file(s): ` +
                   attachedFileIds
                     .map((fid) => uploads.find((u) => u.file_id === fid)?.filename || fid)

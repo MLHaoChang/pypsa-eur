@@ -489,9 +489,18 @@ def test_confirm_unknown_session_returns_404(client):
     assert r.json()["detail"]["error_kind"] == "unknown_session"
 
 
-def test_invalid_decision_returns_400_and_preserves_token(client, seeded_identity):
+def test_invalid_decision_returns_400_and_preserves_token(
+        client, seeded_identity, monkeypatch):
     """An unknown decision string returns 400 + leaves the token usable."""
-    sess = chat_service.get_or_create_session("sess-invalid", owner_user_id=str(seeded_identity["user_id"]))
+    # Same race as `test_approve_within_ttl_executes_tool`: the autouse
+    # `_short_confirmation_ttl` pins the TTL at 0.3s, and this test spends two
+    # requests on one token. On a loaded runner the token expired between them
+    # and the retry got 409 `confirmation_expired` (seen in the full suite; a
+    # 0.5s stall reproduces it). "Preserves token" must not race the TTL.
+    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 60.0)
+    # The session records its owner, as production does (master 7a6edcc2f).
+    sess = chat_service.get_or_create_session(
+        "sess-invalid", owner_user_id=str(seeded_identity["user_id"]))
     pc = sess.issue_confirmation(
         tool_name="delete_project", args={"name": "Q"},
         safety_tier="destructive",

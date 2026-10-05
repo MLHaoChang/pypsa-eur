@@ -90,7 +90,11 @@ def test_off_grid_zeros_import_and_undo_restores():
     assert float(n.links.at["import", "p_max_pu"]) == 1.0
 
 
-def test_energy_import_field_warns_and_stays_power_only():
+def test_energy_import_field_is_power_only_on_apply():
+    """P17 (spec §6 amendment): the energy field no longer warns "reserved"
+    — the cap travels as pack-only solver-config fields (see
+    test_energy_hub_import_energy_cap.py); apply itself stays power-only and
+    adds no GlobalConstraint row."""
     n = _hub_network()
     pack = default_weak_flexible_pack().model_copy(update={
         "import_overlay": ImportOverlaySpec(
@@ -99,7 +103,7 @@ def test_energy_import_field_warns_and_stays_power_only():
         ),
     })
     result = A.apply_archetype_pack_detailed(n, pack)
-    assert any("import_energy_mwh_per_year" in w for w in result.warnings)
+    assert not any("reserved" in w for w in result.warnings)
     assert float(n.links.at["import", "p_nom"]) == 40.0
     # No GlobalConstraint side effects in P1.
     gc = getattr(n, "global_constraints", None)
