@@ -2570,7 +2570,10 @@ TOOLS: list[dict[str, Any]] = [
         "campus_get_study shape. invest (default true) also buys the "
         "electrical assets from the project's asset library at least cost, "
         "re-checked by AC load flow at every critical hour: read the purchase "
-        "with campus_get_investment. 422 without a campus file or for a bad "
+        "with campus_get_investment. pcc_switchgear_by_operator (default "
+        "false) says the grid operator owns the PCC switchgear, so it is "
+        "neither bought nor costed: ask the user who owns it before assuming. "
+        "422 without a campus file or for a bad "
         "setting. Safety: write.",
         {
             "project_id": {"type": "string"},
@@ -2580,6 +2583,7 @@ TOOLS: list[dict[str, Any]] = [
             "margin": {"type": "number"},
             "n_minus_1": {"type": "boolean"},
             "invest": {"type": "boolean"},
+            "pcc_switchgear_by_operator": {"type": "boolean"},
         },
         ["project_id"],
     ),
@@ -2624,6 +2628,8 @@ TOOLS: list[dict[str, Any]] = [
         "unresolved ({need, reason}: needs the library could not meet), history "
         "(each escalation to a dearer candidate and the check that forced it), "
         "compliance_invested (the compliance table re-solved with the assets), "
+        "scope ({pcc_switchgear: campus|grid_operator}: whether the PCC switchgear "
+        "was costed to the campus or left to the grid operator, say which), "
         "library_is_default, stale, notes}. Say these with the numbers: costs "
         "are placeholders tagged assumed unless the user replaced them with "
         "quotes, so quote them as orders of magnitude; tap changers are not "

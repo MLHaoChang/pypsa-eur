@@ -70,6 +70,8 @@ class RunSettings(BaseModel):
     n_minus_1: bool = True
     #: Buy the electrical assets from the library after sizing (plan C9).
     invest: bool = True
+    #: The grid operator owns the PCC switchgear, so it is not bought or costed.
+    pcc_switchgear_by_operator: bool = False
 
 
 class ExtractRequest(BaseModel):

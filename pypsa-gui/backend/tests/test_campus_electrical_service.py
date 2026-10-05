@@ -342,8 +342,45 @@ def test_a_run_without_invest_has_no_investment_and_clears_the_previous_one(hub)
     assert not out["stale"]
 
 
-def test_invest_defaults_to_on_and_must_be_a_flag():
+def test_invest_defaults_to_on_and_the_operator_owns_no_switchgear_by_default():
     assert ce.DEFAULTS["invest"] is True
+    assert ce.DEFAULTS["pcc_switchgear_by_operator"] is False
+
+
+def pcc_switchgear_rows(res):
+    return [r for r in res["investment"] if r["need"] == "switchgear GRID"]
+
+
+def test_the_pcc_switchgear_is_costed_to_the_campus_unless_the_operator_owns_it(hub):
+    ce.draft(hub)
+    mine = ce.run(hub, {"k": 1, "pf": 0.95})
+    assert mine["results"]["scope"] == {"pcc_switchgear": "campus"}
+    assert mine["settings"]["pcc_switchgear_by_operator"] is False
+    assert [r["status"] for r in pcc_switchgear_rows(mine["results"])] == ["chosen"]
+    theirs = ce.run(hub, {"k": 1, "pf": 0.95, "pcc_switchgear_by_operator": True})
+    assert theirs["results"]["scope"] == {"pcc_switchgear": "grid_operator"}
+    assert theirs["settings"]["pcc_switchgear_by_operator"] is True
+    assert not [r for r in pcc_switchgear_rows(theirs["results"]) if r["status"] == "chosen"]
+    assert theirs["results"]["cost"][0]["capex_eur"] < mine["results"]["cost"][0]["capex_eur"]
+
+
+def test_the_engine_is_told_who_buys_the_pcc_switchgear(hub, monkeypatch):
+    ce.draft(hub)
+    seen = []
+    real = ce.cs.invest_campus
+    monkeypatch.setattr(ce.cs, "invest_campus",
+                        lambda run_dir, library=None, **kw: seen.append(kw["pcc_switchgear"]) or real(run_dir, library, **kw))
+    ce.run(hub, {"k": 1})
+    ce.run(hub, {"k": 1, "pcc_switchgear_by_operator": True})
+    assert seen == [True, False]
+
+
+def test_a_run_without_invest_has_no_scope(hub):
+    ce.draft(hub)
+    ce.run(hub, {"k": 1})
+    out = ce.run(hub, {"k": 1, "invest": False})
+    assert out["results"]["scope"] is None
+    assert not (ce.campus_dir(hub) / "run" / ce.cs.INVEST_SCOPE_JSON).exists()
 
 
 def test_a_run_buys_from_the_project_library_and_the_shipped_one_without_a_copy(hub):
@@ -502,6 +539,7 @@ def test_the_investment_summary_for_the_copilot_carries_the_caveats_with_the_num
     assert out["investment"] and out["cost"] and out["unresolved"] == [] and out["history"] == []
     assert out["compliance_invested"] and out["hub_cost"]["total"] > 0
     assert out["library_is_default"] is True and out["stale"] is False
+    assert out["scope"] == {"pcc_switchgear": "campus"}
     text = " ".join(out["notes"])
     assert "placeholder" in text and "assumed" in text and "tap" in text
     ce.save_library(hub, library_with(scaled_capex(2)))

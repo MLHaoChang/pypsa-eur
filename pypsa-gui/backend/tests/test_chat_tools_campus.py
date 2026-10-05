@@ -54,6 +54,8 @@ def test_the_descriptions_say_what_the_model_must_not_do():
     ("campus_run_study", {"project_id": "Chat Hub"}, "run", ({"pf": None},)),
     ("campus_run_study", {"project_id": "Chat Hub", "invest": False}, "run", ({"invest": False, "pf": None},)),
     ("campus_run_study", {"project_id": "Chat Hub", "invest": True}, "run", ({"invest": True, "pf": None},)),
+    ("campus_run_study", {"project_id": "Chat Hub", "pcc_switchgear_by_operator": True}, "run",
+     ({"pcc_switchgear_by_operator": True, "pf": None},)),
 ])
 def test_each_dispatcher_resolves_the_project_and_calls_its_service_function(hub, monkeypatch, tool, args,
                                                                            function, expected):
@@ -146,6 +148,10 @@ def test_the_library_descriptions_say_what_the_model_must_not_do():
     assert "tap" in inv and "not optimised" in inv
     assert "unresolved" in inv and "stale" in inv
     assert "invest" in desc["campus_run_study"]
+    assert "grid operator" in desc["campus_run_study"] and "ask the user who owns" in desc["campus_run_study"]
+    assert "campus|grid_operator" in inv
+    schema = {t["name"]: t["input_schema"] for t in TOOLS}
+    assert schema["campus_run_study"]["properties"]["pcc_switchgear_by_operator"] == {"type": "boolean"}
 
 
 @pytest.mark.parametrize("tool, args, function, expected", [

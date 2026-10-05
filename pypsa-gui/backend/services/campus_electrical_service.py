@@ -94,7 +94,8 @@ USED_LIBRARY_FILE = "campus_assets_used.yaml"
 SOLVER_CONFIG_FILE = "solver_config.json"
 MAX_CAMPUS_BYTES = 1_000_000
 MAX_LIBRARY_BYTES = 1_000_000
-DEFAULTS = {"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce", "margin": 0.2, "n_minus_1": True, "invest": True}
+DEFAULTS = {"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce", "margin": 0.2, "n_minus_1": True, "invest": True,
+            "pcc_switchgear_by_operator": False}
 
 _LOCKS: dict = {}
 _LOCKS_GUARD = threading.Lock()
@@ -202,6 +203,9 @@ def _results(run: Path):
         "compliance_invested": _read_csv(run / cs.COMPLIANCE_INVESTED_CSV),
         "history": _read_csv(run / cs.INVEST_HISTORY_CSV),
         "unresolved": _unresolved(investment),
+        # Who buys the PCC switchgear: {"pcc_switchgear": "campus" | "grid_operator"}.
+        "scope": (json.loads((run / cs.INVEST_SCOPE_JSON).read_text())
+                  if investment is not None and (run / cs.INVEST_SCOPE_JSON).is_file() else None),
     }
 
 
@@ -360,7 +364,7 @@ def get_investment(project) -> dict:
                 "stale": state["stale"], "notes": list(INVESTMENT_NOTES)}
     return {
         "investment": res["investment"], "cost": res["cost"], "unresolved": res["unresolved"],
-        "history": res["history"], "compliance_invested": res["compliance_invested"],
+        "history": res["history"], "compliance_invested": res["compliance_invested"], "scope": res["scope"],
         "hub_cost": state["hub_cost"], "hub_cost_reason": state["hub_cost_reason"],
         "library_is_default": _library_text(campus_dir(project))[1],
         "stale": state["stale"], "notes": list(INVESTMENT_NOTES),
@@ -468,6 +472,7 @@ def _settings(raw: dict, known: dict) -> dict:
         raise HTTPException(status_code=422, detail=f"unknown grid-code profile {s['profile']!r}; known {sorted(known)}")
     s["n_minus_1"] = bool(s["n_minus_1"])
     s["invest"] = bool(s["invest"])
+    s["pcc_switchgear_by_operator"] = bool(s["pcc_switchgear_by_operator"])
     return s
 
 
@@ -475,7 +480,7 @@ def _clear_investment(run_dir: Path) -> None:
     """Remove the investment files of an earlier run, so that a run that does
     not invest, or fails part way, never sits beside another run's purchases."""
     for name in (cs.INVESTMENT_CSV, cs.COST_CSV, cs.INVESTED_YAML, cs.COMPLIANCE_INVESTED_CSV,
-                 cs.INVEST_HISTORY_CSV, cs.INVEST_DISPATCH_CSV, USED_LIBRARY_FILE):
+                 cs.INVEST_HISTORY_CSV, cs.INVEST_DISPATCH_CSV, cs.INVEST_SCOPE_JSON, USED_LIBRARY_FILE):
         (run_dir / name).unlink(missing_ok=True)
 
 
@@ -509,7 +514,8 @@ def run(project, settings: dict) -> dict:
                 try:
                     used.write_bytes(_effective_library(d).read_bytes())
                     cs.invest_campus(run_dir, used if own.is_file() else None, criteria=criteria,
-                                     profile=s["profile"], pf=s["pf"], profile_dirs=profile_dirs)
+                                     profile=s["profile"], pf=s["pf"], profile_dirs=profile_dirs,
+                                     pcc_switchgear=not s["pcc_switchgear_by_operator"])
                 except BaseException:
                     _clear_investment(run_dir)       # never half a purchase beside the new sizing
                     raise
