@@ -48,6 +48,13 @@ uses, since pypsa-gui reaches gridspine through ``drivers`` and ``schema``
 only. It drafts a campus from the
 saved project, for the user to edit before ``prepare_campus``.
 
+A study may be held to a project's own grid-code profile (plan C10): one
+YAML file per profile in a directory, passed as ``extra_dirs`` to
+``grid_code_profiles`` and as ``profile_dirs`` to ``size_campus``. The
+grid-code functions the backend needs for its drafts (``validate_profile``,
+``confirm_limit``, ``unconfirmed``, ``load_grid_code``, ``PROFILE_ID``) are
+re-exported here for the same reason.
+
 Everything is validated before anything is written: the campus is built,
 the tables are made and checked, and only then do the files land. Each file
 is replaced atomically, so a refused campus leaves the run as it was.
@@ -71,7 +78,15 @@ from gridspine.static.campus_flow import SizingCriteria, size_transformers, solv
 from gridspine.static.campus_reactive import reactive_need, requirement_from, size_compensation
 from gridspine.static.campus_compliance import campus_compliance
 from gridspine.static.campus_sc import campus_fault_levels
-from gridspine.templates.grid_codes import list_grid_codes, load_grid_code
+from gridspine.templates.grid_codes import (  # noqa: F401  (re-exported: the backend's seam)
+    PROFILE_ID,
+    SOURCES as GRID_CODE_SOURCES,
+    confirm_limit,
+    list_grid_codes,
+    load_grid_code,
+    unconfirmed,
+    validate_profile,
+)
 
 CAMPUS_YAML = "campus.yaml"
 CAMPUS_MANIFEST = "campus_manifest.json"
@@ -125,9 +140,10 @@ def check_campus(spec: dict) -> None:
     build_campus(spec)
 
 
-def grid_code_profiles() -> dict:
-    """``{profile: title}`` a campus study can be held to."""
-    return list_grid_codes()
+def grid_code_profiles(extra_dirs=()) -> dict:
+    """``{profile: title}`` a campus study can be held to: the shipped
+    profiles, then the project's own in ``extra_dirs``."""
+    return list_grid_codes(extra_dirs=extra_dirs)
 
 
 def prepare_campus(run_dir, campus: dict, network_path) -> dict:
@@ -207,17 +223,20 @@ def _p_ref(campus, pcc: pd.DataFrame):
 
 
 def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,
-                pf: float | None = None) -> dict:
+                pf: float | None = None, profile_dirs=()) -> dict:
     """Solve the selected hours, size the transformers, and correct each hour
     into the PCC reactive band. Writes the per-hour tables, the two sizing
     tables and the requirement. Returns ``{"transformers", "compensation",
-    "requirement"}``."""
+    "requirement"}``. ``profile`` may name a project profile in
+    ``profile_dirs``; its unconfirmed limits reach the report as
+    ``extracted``."""
     run_dir = Path(run_dir)
+    code = load_grid_code(profile, extra_dirs=profile_dirs)
     hourly, pcc = campus_tables(run_dir)
     selection = selected_hours(run_dir)
     campus = load_run_campus(run_dir)
     p_ref, p_ref_from = _p_ref(campus, pcc)
-    req = requirement_from(load_grid_code(profile), p_ref, pf=pf)
+    req = requirement_from(code, p_ref, pf=pf)
     flows, reactive, trafo_rows, bus_rows, pcc_rows, q_rows = {}, {}, [], [], [], []
     for period, hour in selection[["period", "hour"]].itertuples(index=False):
         period, hour = int(period), int(hour)
@@ -256,7 +275,7 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
     compliance = campus_compliance(
         bus=pd.DataFrame(bus_rows), trafo=pd.DataFrame(trafo_rows), reactive=pd.DataFrame(q_rows),
         sizing=sizing, compensation=comp, short_circuit=short_circuit, requirement=requirement,
-        profile=load_grid_code(profile), pcc_bus=str(net.bus.at[int(net.ext_grid["bus"].iloc[0]), "name"]),
+        profile=code, pcc_bus=str(net.bus.at[int(net.ext_grid["bus"].iloc[0]), "name"]),
         bus_kv=dict(zip(net.bus["name"].astype(str), net.bus["vn_kv"].astype(float))),
     )
     _write_text_atomic(run_dir / COMPLIANCE_CSV, compliance.to_csv(index=False))
