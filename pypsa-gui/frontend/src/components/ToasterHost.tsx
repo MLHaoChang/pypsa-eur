@@ -5,22 +5,26 @@ import { useUIStore } from '../store/uiStore'
 /** react-hot-toast's own inset from the viewport edge. */
 export const TOAST_GAP = 16
 
+/** The routes whose page mounts `AssistantDock` (App.tsx, ProjectsHomePage). */
+const DOCK_ROUTES = new Set(['/app', '/projects'])
+
 /**
  * The app's one `<Toaster>` (bottom-right), moved out of main.tsx so it can
  * read the assistant dock (P31 C2).
  *
- * The dock is a right-hand column on the workbench (`AssistantDock`, its
- * width `assistantDockWidth` in the store) with the composer and its Send
- * button at the bottom. A bottom-right toast therefore sat over Send — the
- * "Created '<name>' from template" toast most of all, which fires as the new
- * project opens. While the dock is open on /app the toasts move left of it.
- * Off /app there is no dock on screen, so they keep the corner.
+ * The dock (`AssistantDock`, its width `assistantDockWidth` in the store) is
+ * a right-hand column — mounted by the workbench (/app) and by the projects
+ * page (/projects) — with the composer and its Send button at the bottom. A
+ * bottom-right toast therefore sat over Send: the "Created '<name>' from
+ * template" toast most of all, raised on /projects as the new project opens.
+ * While the dock is open on a page that mounts it, the toasts move left of
+ * it; elsewhere (login, admin) they keep the corner.
  */
 export default function ToasterHost() {
   const dockOpen = useUIStore(s => s.assistantDockOpen)
   const dockWidth = useUIStore(s => s.assistantDockWidth)
-  const onWorkbench = useLocation().pathname === '/app'
-  const right = dockOpen && onWorkbench ? dockWidth + TOAST_GAP : TOAST_GAP
+  const dockOnPage = DOCK_ROUTES.has(useLocation().pathname)
+  const right = dockOpen && dockOnPage ? dockWidth + TOAST_GAP : TOAST_GAP
   return (
     <Toaster
       position="bottom-right"
