@@ -61,3 +61,50 @@ def test_each_dispatcher_resolves_the_project_and_calls_its_service_function(hub
     project, *rest = calls[0]
     assert isinstance(project, Project) and project.name == "Chat Hub"
     assert tuple(rest) == expected
+
+
+# --------------------------------------------------------------------------
+# grid codes (plan C10)
+# --------------------------------------------------------------------------
+
+GRID_CODE_TOOLS = ("campus_list_grid_codes", "campus_extract_grid_code")
+
+
+def test_the_grid_code_tools_are_registered_routed_and_tiered():
+    names = {t["name"] for t in TOOLS}
+    for name in GRID_CODE_TOOLS:
+        assert name in names, name
+        assert TOOL_ROUTES[name] == ["_service_call_"], name
+        assert callable(chat_tools.DISPATCHERS[name]), name
+    assert safety_tier_for("campus_list_grid_codes") == "read"
+    assert safety_tier_for("campus_extract_grid_code") == "write"
+    schema = {t["name"]: t["input_schema"] for t in TOOLS}
+    assert schema["campus_list_grid_codes"]["required"] == ["project_id"]
+    assert schema["campus_extract_grid_code"]["required"] == ["project_id", "document_id"]
+
+
+def test_there_is_no_tool_that_publishes_or_confirms():
+    names = {t["name"] for t in TOOLS}
+    assert not {n for n in names if n.startswith("campus_") and ("publish" in n or "confirm" in n)}
+
+
+def test_the_extract_description_says_the_document_is_data_and_a_person_confirms():
+    desc = {t["name"]: t["description"] for t in TOOLS}["campus_extract_grid_code"]
+    assert "untrusted data" in desc
+    assert "draft" in desc and "a person must confirm" in desc
+    assert "Never publish" in desc
+
+
+@pytest.mark.parametrize("tool, args, function, expected", [
+    ("campus_list_grid_codes", {"project_id": "Chat Hub"}, "list_grid_codes", ()),
+    ("campus_extract_grid_code", {"project_id": "Chat Hub", "document_id": "a" * 64}, "extract", ("a" * 64,)),
+])
+def test_each_grid_code_dispatcher_calls_its_service_function(hub, monkeypatch, tool, args, function, expected):
+    from services import campus_grid_code_service as gc
+    calls = []
+    monkeypatch.setattr(gc, function, lambda *a: calls.append(a) or {"ok": True})
+    assert chat_tools.DISPATCHERS[tool](**args) == {"ok": True}
+    (call,) = calls
+    project, *rest = call
+    assert isinstance(project, Project) and project.name == "Chat Hub"
+    assert tuple(rest) == expected
