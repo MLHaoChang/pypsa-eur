@@ -183,6 +183,9 @@ The upfront investment per unit of capacity, as if built overnight.
 _Avoid_: CAPEX (ambiguous between this and Capital cost), investment cost
 
 **Capital cost**:
-PyPSA's annualised cost per unit of capacity per year; derivable from
-Overnight cost, lifetime and discount rate. Always labelled per year.
+PyPSA's periodic cost per unit of capacity, charged once per modelled horizon
+(a year when the time steps span one year), derived from the Overnight cost
+parts, their lifetimes and the discount rate. When an asset carries an Overnight
+cost, PyPSA uses it and ignores any Capital cost. Always labelled with its
+period.
 _Avoid_: CC (unlabelled), annual CAPEX

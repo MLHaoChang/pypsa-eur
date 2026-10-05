@@ -1,6 +1,6 @@
 # Plan: one investment engine, two faces (expert workbench and guided study)
 
-**Date:** 2026-10-05. **Status:** v1.2. Owner decisions in §8 taken 2026-10-05; independent review PASS WITH CONDITIONS, all conditions applied (§9).
+**Date:** 2026-10-05. **Status:** v1.3. Owner decisions in §8 taken 2026-10-05; independent review PASS WITH CONDITIONS, all conditions applied (§9); C1 corrected after the asset-parameterisation assessment (§9 R12, §10).
 **Replaces nothing yet.** It sequences two existing efforts so they converge instead of colliding:
 
 - **Edge Investment Case (IC)**: spec `docs/superpowers/specs/2026-09-26-edge-investment-case-design.md`.
@@ -110,11 +110,15 @@ so post-tax figures read `not_established`, which the report already discloses.
 
 **Compile rules (the contract of `study/compile.py`; review conditions R1, R2, R7, R9):**
 
-- **C1 Battery capex.** IC reads capex only from the typed `overnight_cost` x capacity
-  (`results/finance_case.py`), never the annuitised `capital_cost`; GS's pack sets only the two-annuity
-  `capital_cost`. Compile sets, on the StorageUnit, `overnight_cost = (storage EUR/kWh x max_hours +
-  inverter EUR/kW) x 1000` per MW, one `lifetime` (the storage lifetime), and the inverter replacement
-  through `FinanceInputs.replacement_capex`. The LP keeps the annuitised `capital_cost`.
+- **C1 Battery capex (corrected in v1.3).** The battery has two investment parts: a power part
+  (inverter, EUR/kW, inverter lifetime) and an energy part (storage, EUR/kWh x max_hours, storage
+  lifetime). Compile writes **both parts** as upfront values; it does **not** set PyPSA's
+  `overnight_cost` on the StorageUnit, because PyPSA 1.1.2 then annuitises that one value over one
+  lifetime and **ignores `capital_cost`** (`pypsa/costs.py::periodized_cost`), which would under-cost
+  the battery in the LP by about 12.7 % on the library's numbers. The LP keeps the two-annuity
+  `capital_cost` it has today. The finance engine reads the parts through one accessor
+  (`upfront_parts`, §10 S0/S0b) instead of the typed `overnight_cost` alone. Until S0 lands, C1 is
+  blocked: U2 must not ship a blended `overnight_cost`.
 - **C2 Terminal value.** IC's `TerminalValueRule` has `none | book_value | multiple_of_ebitda | fixed`;
   GS's `annuity_pv` salvage has no equivalent. Compile uses `fixed`, computed from the remaining
   annuities exactly as GS does today, and the report discloses it. GS's `BY_CONSTRUCTION` finding codes
@@ -221,8 +225,33 @@ and U2 the test port. All applied in v1.2:
 | R9 FinanceInputs is nominal, no currency year | should-fix | §4 C4; U1 d |
 | R10 vocabulary rename is a frontend contract change | nit | §4 last row; U2 |
 | R11 forks and `_bind_commercial`, flag and auth | nit | §4 C6 |
+| R12 (asset-parameterisation assessment) C1 as written sets `overnight_cost`, so PyPSA ignores `capital_cost` and under-costs the battery about 12.7 % | blocking | §4 C1 rewritten; §10 |
 
 **Split of work after the review:** owners unchanged for every phase. The IC session's U1 grows by
 items (d) to (g); the GS session's U2 grows by the compile rules, the test port, the removals in
 `objective_decomposition.py` and `validation_service.py`, and the vocabulary rename. U0, U3 and the
 order of U4 are unchanged.
+
+## 10. One asset parameter schema (proposed, owner decision pending)
+
+Source: `docs/superpowers/assessments/2026-10-05-uniform-asset-parameterisation.md`. The owner asked that
+every asset (battery, line, electrolyser, generator, ...) is parameterised the same way in both modes,
+with only the asset-specific variables differing. Today an asset can be costed on two incompatible bases
+(an upfront `overnight_cost` or an annualised `capital_cost`), PyPSA silently prefers the first, and
+which one applies depends on the entry path.
+
+**Proposal.** One declarative schema per asset class, with fixed group order on every screen: Identity,
+Size, Investment, Fixed O&M, Variable cost, Performance, Replacement/degradation, Provenance.
+Investment is typed only as **overnight parts** (basis, overnight cost, lifetime, FOM share per part).
+`capital_cost` is **derived in one function** and shown read-only. One accessor, `upfront_parts`, serves
+the LP cost code, the finance engine and the Assumptions ledger. Composite assets (battery, later HVDC)
+keep their parts in custom columns and leave PyPSA's `overnight_cost` empty.
+
+| Step | What | Owner | When |
+|---|---|---|---|
+| S0 Schema core | `services/asset_schema/{schema,derive,access}.py`, custom part columns, a derive hook in component create/update, `upfront_parts` in `periodized_costs`, capex-budget fallback fixed, two-part battery in the golden fixture (single-part numbers unchanged) | **to decide** (no owner today; touches shared hot files) | Own owner-merged PR, **before U2's PR** |
+| S0b Finance read | `finance_case._assets` reads `upfront_parts`; `cod_by_asset` defaults from `build_year` | IC session | In the U1 follow-up PR |
+| S1 Expert mode | Asset editors, quick-add, columns and tooltips rendered from the schema; labels fixed | to decide | After S0, parallel to U2/U3 |
+| S2 Guided mode | Assumptions ledger rows as a view of the schema's provenance | GS session | Inside U3 |
+| S3 Seeds | Templates and Energy Hub placeholders derived from the generic defaults pack | to decide | After U1 a, before U4 |
+| S4 Later | Store+Link batteries, HVDC, degradation in the LP | later | After U4 |
