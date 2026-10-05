@@ -903,3 +903,36 @@ The hub-design changes (B8 line and title, C12) are Guided surfaces.
 - **The B8 INFO line logs `skipErrorToast` failures from every caller,** including `fetchLocalSettings`'s hosted 404 (once per session) and the hub's quiet reads.
 
 No processes are left running.
+
+**P30 gate fixes.** The gate record is `docs/superpowers/qa/2026-10-05-guided-mode-deferred-gate-P30.md`: NO-GO on B6-1, plus S-1 and S-2. Fixed on `091bf899a`.
+
+- **B6-1** (`44e685888`). The line said `Saved to <root>/<name>/`. That was false for any name the backend's allocator changes (`safe_names.unique_dir_name`): `Grid` beside `grid` is saved in `Grid (2)`, `Study.` in `Study`, and `CON` in `CON_`. On a case-insensitive disk, the folder named was another project's.
+  - The line now reads `Saved in a folder named after the project, under <root>/`. It names the root only, so it is true for every name.
+  - *Spec deviation (§5.4):* the spec's `Saved to <projects_root>/<name>/` wording is replaced, because the frontend cannot predict the allocated folder.
+  - The red test is `NewProjectWizard.templates.test.tsx`: "never names a folder the allocator may change (Grid beside grid)". The test "shows the backend's root" was updated to the new wording. The smoke's B6 assertion now expects that exact sentence with the scratch root.
+- **S-1** (`c8ee7c552`). Three spec rows that the gate's mutants found unpinned now have tests. All three were green on arrival, because the code already met each row; each test kills its mutant:
+  - (a) free placement scrolls the target into view with `{block:'center'}`, and a placement that fits does not;
+  - (b) moving from bus A to bus B clears the request, and reselecting A does not replay it;
+  - (c) a fixed all-zero unit with a `p_min_pu` series still warns `gen_zero_costs`.
+- **S-2** (`c8ee7c552`). `setCurrentProject` and `requestAssetDetail` now clear `propertiesEditRequest`. Both tests were red first. A same-named bus in another project can no longer open in Edit.
+- **Note N-4.** The stale `OverviewPanel.tsx` comment now says that `skipErrorToast` leaves an INFO line since B8.
+- **Mutants: 7 of 7 killed** (`scratchpad/p30/mutate_gate.py`, `mutations-gate.log`):
+  - G-B6a: the folder name appended again;
+  - G-S1a: the free scroll dropped;
+  - G-S1a2: centre-scroll on every placement;
+  - G-S1b: clear only on a type change;
+  - G-S2a: the project switch keeps the request;
+  - G-S2b: the asset jump keeps the request;
+  - G-S1c: `p_min_pu` also exempts.
+- **Rows** (logs in `scratchpad/p30/`):
+
+  | Row | Command (cwd) | Result |
+  |---|---|---|
+  | 1 | not rerun. The only backend change is one new test, run in row 2 | — |
+  | 2 | the row-2 command above (`pypsa-gui/backend`, HEAD `c8ee7c552`) | 780 passed, 17 skipped (`row2-gate.log`) |
+  | 3 | `npx tsc --noEmit -p .` (`pypsa-gui/frontend`) | 0 errors |
+  | 4 | `npx vitest run` (`pypsa-gui/frontend`) | 244 files / 2826 passed (`row4-gate.log`). See the note after this table |
+  | 4s | `for i in $(seq 10); do npx vitest run src/components/GuidedTour src/pages/hubDesign src/layout/PropertiesPanel src/layout/AppHeader src/layout/NewProjectWizard; done` (`pypsa-gui/frontend`) | 10 / 10 green, 28 files / 248 tests each |
+  | 5 | `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs --phase P30 --out <scratchpad>/p30/smoke30g` (`pypsa-gui/frontend`, HEAD `c8ee7c552`) | PASS, 61 screenshots. 29 tour boxes, all inside the viewport and apart from the highlight. The line reads "Saved in a folder named after the project, under `<RUN>/projects/`" |
+
+  Row 4 note: a first run made while row 2 and the smoke shared the CPU had one 5 s timeout in `BottomPanel.test.tsx` ("select-all past the cap"). The rerun on a quiet machine passed in full.
