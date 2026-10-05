@@ -16,7 +16,6 @@ import toast from 'react-hot-toast'
 import { networkApi } from '../api/network'
 import { resultsApi } from '../api/simulation'
 import { projectsApi } from '../api/projects'
-import { rawFetchHeaders } from '../api/csrf'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { updateAsset } from '../utils/assetWrite'
@@ -24,7 +23,7 @@ import type { RescalePreview } from '../utils/rescale'
 import { isRenewableCarrier } from '../utils/carriers'
 import {
   registerPendingEdgeDelete, cancelPendingEdgeDelete,
-  drainPendingEdgeDeletes, flushPendingEdgeDeletes,
+  keepaliveFlushPendingEdgeDeletes, flushPendingEdgeDeletes,
 } from '../utils/pendingEdgeDeletes'
 import { ingestRescale } from '../utils/rescaleActions'
 import { useSimulationStore } from '../store/simulationStore'
@@ -2098,20 +2097,10 @@ export default function TopologyCanvas() {
       // (by navigating away within the 5s window) would silently survive
       // on the backend. keepalive hands off to the browser's background
       // network slot so the DELETE completes even after the page is gone.
-      for (const { edgeId } of drainPendingEdgeDeletes()) {
-        const isLink = edgeId.startsWith('link-')
-        const name = edgeId.replace(/^(line-|link-)/, '')
-        const url = `/api/network/${isLink ? 'links' : 'lines'}/${encodeURIComponent(name)}`
-        try {
-          fetch(url, {
-            method: 'DELETE',
-            // This site had no headers object at all — raw fetch bypasses the
-            // axios CSRF interceptor, so the pending delete 403s on unload.
-            headers: { ...rawFetchHeaders('DELETE') },
-            keepalive: true,
-          }).catch(() => { /* best effort */ })
-        } catch { /* keepalive unsupported — drop on the floor */ }
-      }
+      // (utils/pendingEdgeDeletes: CSRF header; A2 — dropped with one WARN
+      // while the tab is mismatched, since this raw fetch never meets the
+      // axios mismatch block.)
+      keepaliveFlushPendingEdgeDeletes()
     }
     window.addEventListener('pagehide', onPageHide)
     // Some browsers (notably Safari) don't always fire `pagehide` on

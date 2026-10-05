@@ -33,6 +33,7 @@ from models.energy_hub import (
     DEFAULT_EH_FMEA_TOP_N,
     DEFAULT_EH_FRONTIER_LADDER,
 )
+from services.adequacy.worksheet import zero_reason
 
 logger = logging.getLogger("pypsa_gui.eh_stages")
 
@@ -1048,6 +1049,11 @@ def _screen(inputs, zonal, scope: FleetScope, *, voll: float, index):
         occ = float(fm.get("occurrence_per_year") or 0.0)
         fm["criticality_eur_per_year"] = crit
         fm["severity_eur"] = crit / occ if occ > 0 else 0.0
+        # P29 (B3): the zonal merge re-derives the reason like copt's merge.
+        fm["zero_reason"] = zero_reason(
+            severity_eur=fm["severity_eur"], delta_eue_mwh=m["delta_eue_mwh"],
+            occurrence_per_year=occ,
+            in_metric_scope=bool(fm.get("in_metric_scope", True)), voll=voll)
     rows = sorted(merged.values(), key=lambda r: (-r["delta_eue_mwh"], r["name"]))
     return {**base_analysis, "metrics": metrics, "rows": rows}, base_units, note
 

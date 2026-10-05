@@ -224,3 +224,30 @@ describe('usage.reported (W-3)', () => {
     expect(useChatStore.getState().usage.reported).toBe(false)
   })
 })
+
+// P28 A3 (deferred spec §3.1): `boundProfileId` is the profile the resumed
+// session is bound to (from /history on hydrate). It describes ONE session,
+// so a project switch and a New chat — both start another session — clear it.
+describe('boundProfileId (P28 A3)', () => {
+  it('defaults to null and is set by setBoundProfileId', () => {
+    useChatStore.setState({ boundProfileId: null })
+    expect(useChatStore.getState().boundProfileId).toBeNull()
+    useChatStore.getState().setBoundProfileId('local-llm')
+    expect(useChatStore.getState().boundProfileId).toBe('local-llm')
+  })
+
+  it('resetForProjectSwitch clears it', () => {
+    useChatStore.getState().setBoundProfileId('local-llm')
+    useChatStore.getState().resetForProjectSwitch()
+    expect(useChatStore.getState().boundProfileId).toBeNull()
+  })
+
+  it('startNewChat clears it and leaves the pick alone', () => {
+    useChatStore.setState({ profileId: 'picked' })
+    useChatStore.getState().setBoundProfileId('local-llm')
+    useChatStore.getState().startNewChat()
+    expect(useChatStore.getState().boundProfileId).toBeNull()
+    expect(useChatStore.getState().profileId).toBe('picked')
+    useChatStore.setState({ profileId: null })
+  })
+})
