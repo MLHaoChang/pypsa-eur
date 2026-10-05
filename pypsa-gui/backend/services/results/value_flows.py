@@ -31,6 +31,7 @@ Imports no router.
 """
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import asdict
 from typing import Any, Callable
@@ -40,6 +41,8 @@ import pandas as pd
 
 from services.commercial import lp_bindings as _lp
 from services.commercial import participants as P
+
+_log = logging.getLogger(__name__)
 
 
 def _key(period) -> str:
@@ -515,7 +518,12 @@ def compute_value_flows(n, cfg, *, result_df, lost_load=None) -> dict | None:
     try:
         vf = P.parse_value_flows(parsed.value_flows)
     except P.ValueFlowsInvalid as exc:
-        return {"status": "value_flows_invalid", "reason": str(exc)[:500]}
+        # The payload is a route's answer: a fixed reason, never the
+        # validator's text; the detail goes to the server log.
+        _log.warning("stored value_flows does not validate: %s", exc)
+        return {"status": "value_flows_invalid",
+                "reason": "the stored value_flows does not validate; re-save it "
+                          "(PUT /simulation/commercial/value_flows names the field)"}
     if vf is None:
         return {"status": "not_established", "reason": "no_value_flows_config"}
     inputs = ledger_inputs(n, cfg, result_df=result_df, lost_load=lost_load)

@@ -15,6 +15,7 @@ import {
   type StressScenario,
 } from '../../api/simulation'
 import { nk } from '../../utils/queryKeys'
+import { useUIStore } from '../../store/uiStore'
 import { blockerMessage } from './McPanel'
 
 // Mirrors `stress.py` (MAX_SCENARIOS, _ID_RE, _validate bounds).
@@ -147,6 +148,8 @@ const INPUT = 'bg-bg border border-border rounded px-2 py-1 text-[10.5px] ' +
 
 export default function StressScenarioEditor({ project }: { project: string | null }) {
   const qc = useQueryClient()
+  // P29 gate S-1: no class letter on the Guided FMEA tab.
+  const guided = useUIStore(s => s.uiMode) === 'guided'
   const regKey = nk(project, 'adequacy', 'stress_scenarios')
   const { data: reg } = useQuery({
     queryKey: regKey,
@@ -213,7 +216,7 @@ export default function StressScenarioEditor({ project }: { project: string | nu
     <div className="border border-border rounded p-2" data-testid="stress-editor">
       <div className="flex items-center justify-between mb-1.5">
         <p className="text-[10px] font-semibold text-muted uppercase tracking-wide">
-          Stress scenarios (class C) · {scenarios.length}/{MAX_STRESS_SCENARIOS}
+          {guided ? 'Stress scenarios' : 'Stress scenarios (class C)'} · {scenarios.length}/{MAX_STRESS_SCENARIOS}
         </p>
         <button onClick={() => open()}
           disabled={full || editing !== null || !!registryError}

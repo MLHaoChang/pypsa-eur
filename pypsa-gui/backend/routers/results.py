@@ -1712,10 +1712,17 @@ def get_eh_review():
     recommendations and exact tool actions — the same body the chat tool
     ``review_eh_study`` returns (one source: ``eh_review.review_latest``).
 
-    200 with ``{"status": "running", ...}`` while the study runs, 200 with
-    ``status: "ok"`` (plus the boolean ``stale``) once a report exists, and
-    204 when there is neither a study record nor a stored report (same
-    convention as ``/eh_reference_design``).
+    200 with ``{"status": "running", ...}`` while the study runs. Otherwise
+    200 with ``status: "ok"`` (plus the boolean ``stale``) when a report
+    exists: the stored report, or else the study record's own copy
+    (``stale: true``). 204 when there is no stored report and no study
+    record with a report (same convention as ``/eh_reference_design``).
+
+    So a study whose worker raised has a record but no report, and returns
+    204 (a study clears the stored report when it starts). An aborted or
+    stage-failed study keeps its partial report and returns 200 ``ok``; its
+    ``summary.verdict`` is null unless MC certification finished before the
+    stop. Pinned by ``tests/test_eh_review_route.py``.
     """
     from services.adequacy.eh_review import review_latest
 

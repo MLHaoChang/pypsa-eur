@@ -59,11 +59,13 @@ def tariff_ref_load_issue(commercial) -> dict | None:
             "version": ref.get("version"), "hash": ref.get("hash")}
     try:
         cfg = CommercialConfig.model_validate(commercial)
-    except ValueError as exc:
+    except ValueError:
+        # The issue goes back in the open and import responses: a fixed message
+        # per class, never the validator's text (the `bundle_pins._unreadable` rule).
         return {**base, "reason": "inline_unreadable",
                 "message": f"the stored commercial config does not validate, so its inline "
-                           f"tariff cannot be checked against Library tariff {ref.get('id')!r} "
-                           f"({str(exc)[:200]})"}
+                           f"tariff cannot be checked against Library tariff {ref.get('id')!r}; "
+                           "re-save the commercial config to see which field"}
     if _H.library_item_digest(cfg.import_tariff) == cfg.import_tariff_ref.hash:
         return None
     return {**base, "reason": "inline_differs_from_ref",

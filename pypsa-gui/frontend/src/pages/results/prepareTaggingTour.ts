@@ -41,6 +41,6 @@ export async function prepareTaggingTour(
   ui.setSlidePanel(null)
   ui.setSelectedComponent({ type: 'Bus', name: bus.name })
   ui.openRightPanel()
-  ui.requestPropertiesEdit('Bus')
+  ui.requestPropertiesEdit({ type: 'Bus', name: bus.name })
   await waitForTestId(FIRST_TARGET, waitMs)
 }

@@ -3,12 +3,13 @@
 // (its first action) and Ask; Check risks runs the FMEA sweep exactly as the
 // FMEA tab does (the lifted hook), and a stress scenario is added through
 // the assistant.
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ShieldAlert } from 'lucide-react'
 import { resultsApi, type EhReviewFinding } from '../../../api/simulation'
-import { useStartFmeaSweep } from '../../../hooks/useStartFmeaSweep'
+import { fmeaModesRefetchInterval, useStartFmeaSweep } from '../../../hooks/useStartFmeaSweep'
 import { useStudyFinishedInvalidation } from '../../../hooks/useStudyFinishedInvalidation'
+import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStudyRunning'
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import { studyHasResults } from '../flow'
@@ -27,7 +28,7 @@ export function openFmeaTab(): void {
   ui.requestResultsTab('fmea')
 }
 
-function Finding({ f }: { f: EhReviewFinding }) {
+function Finding({ f, liveStudy }: { f: EhReviewFinding; liveStudy: boolean }) {
   const [why, setWhy] = useState(false)
   // One message per action (§5.7); the queue sends them one after another.
   const doTexts = actionTexts(f)
@@ -68,7 +69,8 @@ function Finding({ f }: { f: EhReviewFinding }) {
           {why ? '▾' : '▸'} Why
         </button>
         {doTexts.length > 0 && (
-          <DelegateButton testId={`hub-improve-do-${f.id}`} text={doTexts} display={doLabels} />
+          <DelegateButton testId={`hub-improve-do-${f.id}`} text={doTexts} display={doLabels}
+            disabled={liveStudy} disabledTitle={LIVE_STUDY_EDIT} />
         )}
         <AskButton testId={`hub-improve-ask-${f.id}`} text={askText(f)} label="Ask" />
       </div>
@@ -95,19 +97,37 @@ export function ImproveCard() {
   const { template } = useHubTemplate()
   const archetype = useHubDesignStore(s => s.archetype)
   const sweep = useStartFmeaSweep()
+  const liveStudy = useLiveStudyRunning()
   // P26: follow a sweep started here on FmeaTab's own query and options, so
   // /simulation/status is re-read when it ends (its closing re-solve leaves
   // fresh dispatch). FmeaTab does this only while it is open.
   const project = useUIStore(s => s.currentProject)
+  // A5: the mutation's state is per mount, not per project — a sweep started
+  // on project A left `isSuccess` (the "Started" line, the follow query)
+  // standing after a switch to B. Remember the project the success belongs
+  // to (so the very first render after a switch already stops following —
+  // an effect alone would let one fetch of B's modes through) and reset the
+  // mutation when the project changes.
+  const successFor = useRef<string | null | undefined>(undefined)
+  if (!sweep.isSuccess) successFor.current = undefined
+  else if (successFor.current === undefined) successFor.current = project
+  const following = sweep.isSuccess && successFor.current === project
+  const { reset: resetSweep } = sweep
+  const firstProject = useRef(project)
+  useEffect(() => {
+    if (firstProject.current === project) return
+    firstProject.current = project
+    resetSweep()
+  }, [project, resetSweep])
   const { data: modes } = useQuery({
     queryKey: nk(project, 'results', 'fmea_modes'),
     queryFn: () => resultsApi.getFmeaModes(),
-    refetchInterval: q =>
-      (q.state.data as { sweep_status?: string } | null)?.sweep_status === 'running'
-        ? 2000 : false,
-    enabled: sweep.isSuccess,
+    // One extra read after the sweep leaves `running` (A5): the first
+    // non-running sample can still carry the partial rows.
+    refetchInterval: fmeaModesRefetchInterval,
+    enabled: following,
   })
-  useStudyFinishedInvalidation(!sweep.isSuccess || modes === undefined ? undefined
+  useStudyFinishedInvalidation(!following || modes === undefined ? undefined
     : (modes as { sweep_status?: string | null } | null)?.sweep_status ?? null)
   const findings = (review?.findings ?? [])
     .filter(f => f.severity === 'high' || f.severity === 'medium')
@@ -122,7 +142,7 @@ export function ImproveCard() {
         </p>
       ) : (
         <ul data-testid="hub-improve-list" className="flex flex-col gap-2">
-          {findings.map(f => <Finding key={f.id} f={f} />)}
+          {findings.map(f => <Finding key={f.id} f={f} liveStudy={liveStudy} />)}
         </ul>
       )}
 
@@ -141,7 +161,7 @@ export function ImproveCard() {
             See the risk table
           </button>
         </div>
-        {sweep.isSuccess && (
+        {following && (
           <p data-testid="hub-improve-fmea-started" className="text-muted">
             Started — the check runs in the background; the risk table fills in as it goes.
           </p>

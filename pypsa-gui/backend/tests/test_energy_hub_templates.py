@@ -141,3 +141,16 @@ def test_eh_templates_build_on_demand_when_network_nc_is_missing(
     # a non-EH template still needs its prebuilt network.nc
     assert client.post("/api/projects/from_template/3bus",
                        params={"name": "x"}).status_code == 404
+
+
+@pytest.mark.parametrize("tid", IDS)
+def test_templates_validate_without_gen_zero_costs(tid):
+    """P30 (B5): the preflight (`validate_for_run`, what POST
+    /api/simulation/preflight runs) raises no `gen_zero_costs` on a template:
+    its zero-cost generators are the grid supply (a price series) and the
+    weather-profiled renewables."""
+    from services.solver_service import SolverConfig
+    from services.validation_service import validate_for_run
+    cfg = SolverConfig(**T.SOLVER_CONFIG)
+    codes = [i.code for i in validate_for_run(T.BUILDERS[tid](), cfg)]
+    assert "gen_zero_costs" not in codes, codes

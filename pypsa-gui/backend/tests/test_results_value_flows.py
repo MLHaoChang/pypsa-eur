@@ -72,6 +72,8 @@ def test_a_stored_value_that_does_not_validate_is_answered(reset_backend):
     n, cfg = _solve(_network(), _commercial(vf={"participants": "garbage"}))
     out = _get()
     assert out["status"] == "value_flows_invalid" and out["reason"]
+    # A fixed message, never the validator's text (CodeQL py/stack-trace-exposure).
+    assert "garbage" not in out["reason"] and "input" not in out["reason"].lower()
 
 
 @pytest.mark.live_solve

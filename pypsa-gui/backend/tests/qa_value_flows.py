@@ -237,9 +237,9 @@ def _independent_bridge(client, n, cfg, payload, p: str = "_") -> tuple[float, f
     terms["cost_breakdown_total"] = float(cb["total"])
     items = commercial_cost_terms(n, cfg.commercial)["items"]
     terms["lp_rows"] = -float(sum(cx + ox for _l, _p, cx, ox in items))
-    billing = client.get("/api/results/billing").json()
+    bill = client.get("/api/results/billing").json()
     payees = payload["provenance"]["tariff_payees"]
-    per_item = ((billing.get("per_period") or {}).get(p) or {}).get("per_item_sampled") or {}
+    per_item = ((bill.get("per_period") or {}).get(p) or {}).get("per_item_sampled") or {}
     terms["bill_external"] = float(sum(v for k, v in per_item.items()
                                        if side(payees.get(k)) == "external"))
     conn_payee = (cfg.commercial.get("value_flows") or {}).get("connection_fee_payee") or "dso"
@@ -252,7 +252,7 @@ def _independent_bridge(client, n, cfg, payload, p: str = "_") -> tuple[float, f
             fee += float(fixed.get("eur") or 0.0)
     terms["connection_external"] = fee
     contracts = 0.0
-    for ln in billing["contracts"]["lines"]:
+    for ln in bill["contracts"]["lines"]:
         if ln["value_stream"] in P._VOLUME_ONLY:
             continue
         a, b = side(ln["payer"]), side(ln["payee"])
@@ -613,8 +613,8 @@ def scenario_e() -> None:
     peak_items = {it.id for it in tariff.items if HA.is_peak_item(it)}
     mw = {members[0]: 40.0, members[1]: 10.0}
     shares = {members[0]: 0.7, members[1]: 0.3}
-    billing = client.get("/api/results/billing").json()
-    per_item = billing["per_period"]["_"]["per_item_sampled"]
+    bill = client.get("/api/results/billing").json()
+    per_item = bill["per_period"]["_"]["per_item_sampled"]
     w = n.snapshot_weightings.objective.to_numpy(dtype=float)
     exp_rev = float((w * n.links_t.p0["export"].to_numpy(dtype=float)
                      * n.links_t["ic_export_price"]["export"].to_numpy(dtype=float)).sum())
@@ -727,8 +727,8 @@ def scenario_g() -> None:
           bool(both) and (net < -1e-6).any() and (net > 1e-6).any())
     cb = client.get("/api/results/cost_breakdown").json()
     row = (cb.get("commercial") or {}).get("energy_net_group")
-    billing = client.get("/api/results/billing").json()
-    per = billing["per_period"]["_"]
+    bill = client.get("/api/results/billing").json()
+    per = bill["per_period"]["_"]
     billed = per["per_item"].get("net_energy")
     _step("G: LP row energy_net_group = billed net_energy (to the cent)",
           _cent(row, billed) and row > 1.0,
@@ -736,11 +736,11 @@ def scenario_g() -> None:
     dec = client.get("/api/results/objective_decomposition").json()
     _step("G: objective gap 0", dec.get("gap_pct") is not None and abs(dec["gap_pct"]) < 1e-6,
           f"{dec.get('gap_pct')}")
-    energy = billing["gap_summary"]["periods"]["_"].get("energy") or {}
+    energy = bill["gap_summary"]["periods"]["_"].get("energy") or {}
     _step("G: the billing gap's energy kind is fully attributed, no gate",
-          billing["gap_summary"]["gates"] == [] and energy.get("unattributed_pct") is not None
+          bill["gap_summary"]["gates"] == [] and energy.get("unattributed_pct") is not None
           and energy["unattributed_pct"] <= 1e-6,
-          f"gates {billing['gap_summary']['gates']}, energy {energy}")
+          f"gates {bill['gap_summary']['gates']}, energy {energy}")
     _step("G: no simultaneous_import_export flag",
           "simultaneous_import_export" not in (cb["commercial"].get("flags") or []))
     _four_checks("G", client, n, cfg, payload)

@@ -42,6 +42,24 @@ describe('plainWords', () => {
       .toBe('Not certified: expected shortfall 12.38 h/yr exceeds the 3 h/yr target — caused by equipment outages')
   })
 
+  // P30 (C11, R8): the lone rule, with nothing around it.
+  it('a lone dtc_planning effect', () => {
+    expect(plainWords('dtc_planning')).toBe('a plan for running without the grid')
+    expect(plainWords('add dtc_planning to the study'))
+      .toBe('add a plan for running without the grid to the study')
+  })
+
+  // P30 (C12): "Critical demand unserved when … is lost: 12.5 MWh" kept the
+  // unit; a number of MWh reads in words. A price per MWh is left alone.
+  it('a number of MWh reads as megawatt-hours', () => {
+    expect(plainWords('Critical demand unserved when grid_import is lost: 12.5 MWh'))
+      .toBe('Critical demand unserved when grid_import is lost: 12.5 megawatt-hours')
+    expect(plainWords('lost: 1,234.5 MWh')).toBe('lost: 1,234.5 megawatt-hours')
+    expect(plainWords('3 MWh or 40 MWh')).toBe('3 megawatt-hours or 40 megawatt-hours')
+    expect(plainWords('set VOLL to 5000 €/MWh')).toBe('set the price of undelivered energy to 5000 €/MWh')
+    expect(plainWords('12 MWhx')).toBe('12 MWhx')
+  })
+
   it('evidence values are rounded, lists too', () => {
     expect(evidenceValue(12.383928571428568)).toBe('12.38')
     expect(evidenceValue([7.68316774385459, 17.084689399002553])).toBe('[7.683, 17.08]')
