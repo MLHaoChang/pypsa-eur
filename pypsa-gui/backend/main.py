@@ -93,6 +93,7 @@ from routers import (
     vintage,
 )
 from services.pypsa_service import PyPSAService
+from services.study.body_limit import StudyBodyLimitMiddleware
 from settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -697,6 +698,12 @@ def _csrf_rejection(request: Request) -> JSONResponse | None:
 # before this note). The replica header must sit outside the auth gate so that
 # a rejected request still identifies which replica rejected it — otherwise the
 # multi-replica QA cases cannot attribute a failure.
+#
+# Innermost of all, the decision-study body limit (F1 B2): it refuses an
+# oversized `/api/projects/{name}/studies` body 413 before anything parses
+# it, and leaves every other route alone. Inside the auth gate, so an
+# unauthenticated request is still answered 401 first.
+app.add_middleware(StudyBodyLimitMiddleware)
 
 
 @app.middleware("http")

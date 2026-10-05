@@ -541,6 +541,55 @@ def test_reset_puts_the_seed_row_back(library, seeded):
         L.reset_rows(again, ["no_such_key"], KEY_DRIVERS, tou, library)
 
 
+# F1 B5: the three ledger branches the S2 re-gate found untested (each
+# survived its mutation there).
+
+def test_reset_clears_the_needs_attention_note(library, seeded):
+    """The note, not only the row: the runner's gate reads both."""
+    from services.study.packs import needs_attention_rows
+
+    led = L.apply_user_row(seeded, "demand_charge_price", 8000.0, unit="EUR/MW/month",
+                           changed_by="u1", changed_at=NOW)
+    tou = {"tariff": {"tariff_id": "tou_reference_illustrative"}}
+    again = L.reseed_ledger(led, KEY_DRIVERS, tou, library)
+    note = "needs_attention:demand_charge_price:"
+    assert any(n.startswith(note) for n in again.honesty_notes), again.honesty_notes
+    back = L.reset_rows(again, ["demand_charge_price"], KEY_DRIVERS, tou, library)
+    assert not any(n.startswith(note) for n in back.honesty_notes), back.honesty_notes
+    assert needs_attention_rows(back) == []
+
+
+def test_a_user_tariff_whose_source_says_illustrative_holds_the_badge(library):
+    """
+    BC-S2-1's second clause: provenance ``user`` is not enough when the
+    tariff itself says it is illustrative (case-insensitive).
+    """
+    tariff = {**USER_TARIFF, "source": "Illustrative"}
+    led = lib.seed_ledger(KEY_DRIVERS, {"tariff": {"custom": tariff}}, library)
+    assert _row(led, "tariff").provenance == "user"
+    m = L.maturity_from_ledger(_customise_key_drivers(led), "uploaded")
+    assert m.class_ == "screening"
+    assert m.reasons == ["tariff: site_a_contract (Illustrative, user)"]
+
+
+def test_a_reseed_re_derives_a_supplied_tariffs_prices(library, seeded_user):
+    """
+    A supplied tariff's own price rows are ``user`` / ``customised`` but were
+    never edited (``changed_at`` is None), so a re-seed after a tariff change
+    re-derives them from the new intake instead of keeping the old prices.
+    """
+    dc = _row(seeded_user, "demand_charge_price")
+    assert (dc.value, dc.provenance, dc.changed_at) == (7000.0, "user", None)
+    de = library.tariffs["de_industrial_illustrative"].demand_charge.price_per_mw_per_period
+    to_seed = L.reseed_ledger(seeded_user, KEY_DRIVERS, {}, library)
+    row = _row(to_seed, "demand_charge_price")
+    assert (row.value, row.provenance, row.status) == (de, "library", "default")
+    assert not any(n.startswith("needs_attention:") for n in to_seed.honesty_notes)
+    other = {**USER_TARIFF, "demand_charge": {"price_per_mw_per_period": 5000.0}}
+    to_other = L.reseed_ledger(seeded_user, KEY_DRIVERS, {"tariff": {"custom": other}}, library)
+    assert _row(to_other, "demand_charge_price").value == 5000.0
+
+
 # BC-S2-3: values outside a row's physical domain are refused.
 
 @pytest.mark.parametrize("key,value,unit,domain", [

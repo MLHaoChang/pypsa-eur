@@ -207,6 +207,57 @@ def test_decomposition_closes_with_the_demand_charge_term(solved):
     assert abs(d["residual_gap_pct"]) <= 1e-4
 
 
+# ── F1 B4 (gate S3 [N4]): the bridge reads the solve's demand charge ──────
+
+def _decompose(n, cfg) -> dict:
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.results.objective_decomposition import compute_objective_decomposition
+
+    return compute_objective_decomposition(n, compute_cost_breakdown(n, cfg), cfg)
+
+
+def test_the_bridge_reads_the_demand_charge_the_solve_used_not_the_current_one(
+        solved, tmp_path):
+    """
+    The Expert view's bridge passes the CURRENT solver config. A project
+    re-configured after its solve (a charge removed, or one added) must
+    still bridge with the charge the LP carried, which the solve records on
+    the network (`n.meta`) and which survives a save and reload.
+    """
+    base, _base_cfg, charged, charged_cfg, _ = solved
+    expected = _decompose(charged, charged_cfg)["demand_charge_eur"]
+    assert expected > 0
+
+    # The charge was removed from the config after the solve.
+    d = _decompose(charged, SolverConfig())
+    assert d["demand_charge_eur"] == pytest.approx(expected, rel=1e-12)
+    assert abs(d["residual_gap_pct"]) <= 1e-4
+
+    # A charge was added to the config after a solve without one.
+    d = _decompose(base, SolverConfig(demand_charge=DC))
+    assert d["demand_charge_eur"] == 0.0
+    assert abs(d["residual_gap_pct"]) <= 1e-4
+
+    # Saved and reloaded, the record holds.
+    path = tmp_path / "charged.nc"
+    charged.export_to_netcdf(str(path))
+    reloaded = pypsa.Network(str(path))
+    d = _decompose(reloaded, SolverConfig())
+    assert d["demand_charge_eur"] == pytest.approx(expected, rel=1e-12)
+
+
+def test_a_network_solved_before_the_record_falls_back_to_the_given_config(solved):
+    from services.study.tariff import SOLVE_DEMAND_CHARGE_META
+
+    _, _, charged, charged_cfg, _ = solved
+    recorded = charged.meta.pop(SOLVE_DEMAND_CHARGE_META)  # as if solved before F1
+    try:
+        assert _decompose(charged, charged_cfg)["demand_charge_eur"] > 0
+        assert _decompose(charged, SolverConfig())["demand_charge_eur"] == 0.0
+    finally:
+        charged.meta[SOLVE_DEMAND_CHARGE_META] = recorded
+
+
 def test_wrapper_composes_after_capex_budget_and_before_ens_cap():
     import inspect
 

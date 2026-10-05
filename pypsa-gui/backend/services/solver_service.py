@@ -1072,6 +1072,14 @@ def run_simulation(
                         except Exception as exc:
                             phase(f"Myopic restore: skipped one entry ({exc})")
                     restore_modelling()
+                # Record the demand charge this LP carried (None when none) on
+                # the network itself, so the objective bridge prices the solve
+                # that produced the dispatch, not a config changed since
+                # (gate S3 [N4]). Only on a solve that produced a dispatch.
+                if status in ("ok", "optimal"):
+                    from services.study.tariff import record_solved_demand_charge
+
+                    record_solved_demand_charge(network, config.demand_charge)
                 # Adequacy report — emitted whenever a target was enforced
                 # AND the solve actually produced a dispatch, INCLUDING the
                 # nothing-shed case (achieved 0, binding=voll).

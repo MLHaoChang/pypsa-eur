@@ -442,14 +442,17 @@ def _skip_code(ledger: AssumptionsLedger, tariff: Tariff, key: str) -> str | Non
         return "row_missing"
     if _kind(key) is None:
         return "row_not_modelled_in_tornado"
+    if key == "energy_price_level" and len(
+            {float(b.price_per_mwh) for b in tariff.energy_bands}) <= 1:
+        # One flat band: the level rescales nothing (gate S4 [S5]). Checked
+        # before the row's value: the ledger leaves this row null
+        # (`not_applicable`) on one band, and the report explains this code,
+        # not the generic one (gate S6 [N2]).
+        return "energy_price_level_no_effect_single_band"
     if row.value is None:
         return row.unavailable.get("value") or "row_has_no_value"
     if row.range is None:
         return "row_has_no_range"
-    if key == "energy_price_level" and len(
-            {float(b.price_per_mwh) for b in tariff.energy_bands}) <= 1:
-        # One flat band: the level rescales nothing (gate S4 [S5]).
-        return "energy_price_level_no_effect_single_band"
     if key == "demand_charge_price" and tariff.demand_charge is None:
         return "tariff_has_no_demand_charge"
     return None
