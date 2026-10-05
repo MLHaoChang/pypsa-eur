@@ -160,3 +160,149 @@ def test_an_idle_genset_or_a_dark_pv_offers_nothing_but_an_idle_battery_does():
     res = reactive_need(camp, rows(hour=hour), req)
     assert set(res.unit_q) == {"BESS1"}
     assert abs(res.q_inverters_mvar) <= 22.0 + 1e-9               # the battery's S alone
+
+
+# --------------------------------------------------------------------------
+# installed compensation is dispatched after the inverters (C8)
+# --------------------------------------------------------------------------
+
+DARK = {"BESS1": 0, "PV1": 0, "GEN1": 0}          # every inverter off: no headroom at all
+DARK_HOUR = dict(HOUR, BESS1=0.0, PV1=0.0, GEN1=0.0)
+
+
+def comp_campus(*entries, pf=0.85):
+    spec = campus_spec()
+    spec["campus"]["units"]["DC_LOAD"]["pf"]["value"] = pf
+    spec["campus"]["compensation"] = list(entries)
+    return build_campus(spec)
+
+
+def dark_net(pf=0.85):
+    """The hand-built campus at the dark hour: the load alone, every unit off."""
+    net = direct_net()
+    li = net.load.index[net.load["name"] == "DC_LOAD"][0]
+    net.load.at[li, "p_mw"] = 45.0
+    net.load.at[li, "q_mvar"] = 45.0 * math.tan(math.acos(pf))
+    net.sgen["in_service"] = False
+    return net
+
+
+def test_a_capacitor_bank_switches_the_fewest_steps_that_bring_the_pcc_into_the_band():
+    lim, n_steps, per_step = 15.0, 6, 4.0
+    camp = comp_campus({"name": "CAP1", "bus": "MV1", "kind": "capacitor_bank",
+                        "q_mvar": {"value": n_steps * per_step, "source": "assumed"}, "steps": n_steps})
+    res = reactive_need(camp, rows(hour=DARK_HOUR, status=DARK), ReactiveRequirement(lim, "c", "code"),
+                        residual=False)
+    # brute force over the step counts on the hand-built network
+    ref = dark_net()
+    sh = pp.create_shunt(ref, ref.bus.index[ref.bus["name"] == "MV1"][0], q_mvar=-per_step, step=0, max_step=n_steps)
+    q_at = {}
+    for k in range(n_steps + 1):
+        ref.shunt.at[sh, "step"] = k
+        pp.runpp(ref)
+        q_at[k] = float(ref.res_ext_grid["q_mvar"].iloc[0])
+    fewest = min(k for k, q in q_at.items() if abs(q) <= lim)
+    assert 1 < fewest < n_steps                                  # the case is not trivial
+    assert res.q0_mvar == pytest.approx(q_at[0], abs=1e-6) and not res.compliant_without
+    assert res.dispatch["CAP1"]["steps"] == fewest
+    assert res.q_final_mvar == pytest.approx(q_at[fewest], abs=1e-6)
+    assert res.q_comp_mvar == 0.0 and res.q_inverters_mvar == 0.0
+    assert res.dispatch["CAP1"]["q_mvar"] > 0                       # capacitive, reported + like q_comp
+    assert res.setpoints == {"sgen_q": {}, "shunt_step": {"CAP1": fewest}}
+
+
+def test_a_bank_too_small_is_switched_fully_and_the_rest_stays_a_gap():
+    lim = 5.0
+    camp = comp_campus({"name": "CAP1", "bus": "MV1", "kind": "capacitor_bank",
+                        "q_mvar": {"value": 6.0, "source": "assumed"}, "steps": 2})
+    hour, req = rows(hour=DARK_HOUR, status=DARK), ReactiveRequirement(lim, "c", "code")
+    real = reactive_need(camp, hour, req, residual=False)
+    ref = dark_net()
+    pp.create_shunt(ref, ref.bus.index[ref.bus["name"] == "MV1"][0], q_mvar=-3.0, step=2, max_step=2)
+    pp.runpp(ref)
+    assert real.dispatch["CAP1"]["steps"] == 2
+    assert real.q_final_mvar == pytest.approx(float(ref.res_ext_grid["q_mvar"].iloc[0]), abs=1e-6)
+    assert real.q_final_mvar > lim + 1.0 and real.q_comp_mvar == 0.0
+    # with the residual on (part one's sizing), the rest is reported as a gap and the PCC lands on the edge
+    need = reactive_need(camp, hour, req)
+    assert need.dispatch["CAP1"]["steps"] == 2 and need.q_comp_mvar > 0.0
+    assert need.q_final_mvar == pytest.approx(lim, abs=0.01)
+
+
+def _q_on_edge(net, bus, lim):
+    """The Q an sgen at ``bus`` must inject to put the PCC on ``+lim``,
+    by bisection on the hand-built network."""
+    g = pp.create_sgen(net, net.bus.index[net.bus["name"] == bus][0], p_mw=0.0, q_mvar=0.0)
+    lo, hi = 0.0, 60.0
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        net.sgen.at[g, "q_mvar"] = mid
+        pp.runpp(net)
+        lo, hi = (mid, hi) if float(net.res_ext_grid["q_mvar"].iloc[0]) > lim else (lo, mid)
+    return (lo + hi) / 2
+
+
+def test_a_statcom_supplies_the_gap_continuously():
+    lim = 12.0
+    camp = comp_campus({"name": "ST1", "bus": "MV1", "kind": "statcom", "q_mvar": {"value": 30.0, "source": "assumed"}})
+    res = reactive_need(camp, rows(hour=DARK_HOUR, status=DARK), ReactiveRequirement(lim, "c", "code"), residual=False)
+    gap = _q_on_edge(dark_net(), "MV1", lim)
+    assert res.dispatch["ST1"]["q_mvar"] == pytest.approx(gap, abs=0.02)
+    assert res.q_final_mvar == pytest.approx(lim, abs=0.01)
+    assert res.setpoints["sgen_q"]["ST1"] == pytest.approx(gap, abs=0.02)
+
+
+def test_the_inverters_go_first_and_the_statcom_covers_the_rest():
+    camp = comp_campus({"name": "ST1", "bus": "MV1", "kind": "statcom", "q_mvar": {"value": 40.0, "source": "assumed"}},
+                       pf=0.7)
+    res = reactive_need(camp, rows(), ReactiveRequirement(2.0, "c", "code"), residual=False)
+    head = sum(math.sqrt(camp.units.at[u, "s_mva"] ** 2 - HOUR[u] ** 2) for u in ("BESS1", "PV1"))
+    assert res.q_inverters_mvar == pytest.approx(head)                # every inverter at its limit first
+    assert res.dispatch["ST1"]["q_mvar"] > 0.0
+    assert res.q_final_mvar == pytest.approx(2.0, abs=0.01)
+    # a gap the inverters can cover leaves the STATCOM idle
+    res = reactive_need(camp, rows(), ReactiveRequirement(30.0, "c", "code"), residual=False)
+    assert res.dispatch["ST1"]["q_mvar"] == 0.0
+
+
+def test_a_shunt_reactor_absorbs_when_the_campus_pushes_reactive_power_out():
+    spec = campus_spec()
+    spec["campus"]["cables"]["CB1"]["c_nf_per_km"]["value"] = 4000.0
+    spec["campus"]["cables"]["CB1"]["length_km"]["value"] = 20.0
+    for uid in ("BESS1", "PV1", "GEN1"):
+        spec["campus"]["units"][uid]["s_mva"]["value"] = spec["campus"]["units"][uid]["p_mw"]["value"]
+    spec["campus"]["compensation"] = [
+        {"name": "CAP1", "bus": "MV1", "kind": "capacitor_bank", "q_mvar": {"value": 10.0, "source": "assumed"}, "steps": 2},
+        {"name": "SR1", "bus": "MV1", "kind": "shunt_reactor", "q_mvar": {"value": 8.0, "source": "assumed"}}]
+    camp = build_campus(spec)
+    hour = dict(HOUR, DC_LOAD=-2.0, BESS1=20.0, PV1=15.0, GEN1=10.0)
+    res = reactive_need(camp, rows(hour=hour), ReactiveRequirement(1.0, "c", "code"), residual=False)
+    assert res.q0_mvar < -1.0
+    assert res.dispatch["SR1"]["steps"] == 1 and res.dispatch["SR1"]["q_mvar"] < 0     # inductive
+    assert res.dispatch["CAP1"]["steps"] == 0                                         # the wrong direction stays off
+    assert abs(res.q_final_mvar) <= 1.0 + 0.01
+
+
+def test_without_compensation_nothing_is_dispatched_and_the_setpoints_are_the_inverters():
+    camp = lowpf_campus()
+    res = reactive_need(camp, rows(), ReactiveRequirement(15.0, "c", "code"))
+    assert res.dispatch == {} and res.q_installed_mvar == 0.0
+    assert res.setpoints == {"sgen_q": res.unit_q, "shunt_step": {}}
+
+
+@pytest.mark.parametrize("q_reactor, steps", [(15.0, 0), (10.0, 1)])
+def test_a_step_that_overshoots_is_kept_only_if_it_leaves_the_pcc_closer_to_the_band(q_reactor, steps):
+    """At this hour the PCC exports 8.4 Mvar against a 1 Mvar band. A 15 Mvar
+    reactor would leave it 7.4 Mvar outside on the other side, no closer
+    (the fewest steps win the tie); a 10 Mvar one leaves it 1.9 Mvar outside."""
+    spec = campus_spec()
+    spec["campus"]["cables"]["CB1"]["c_nf_per_km"]["value"] = 4000.0
+    spec["campus"]["cables"]["CB1"]["length_km"]["value"] = 20.0
+    for uid in ("BESS1", "PV1", "GEN1"):
+        spec["campus"]["units"][uid]["s_mva"]["value"] = spec["campus"]["units"][uid]["p_mw"]["value"]
+    spec["campus"]["compensation"] = [
+        {"name": "SR1", "bus": "MV1", "kind": "shunt_reactor", "q_mvar": {"value": q_reactor, "source": "assumed"}}]
+    hour = dict(HOUR, DC_LOAD=-2.0, BESS1=20.0, PV1=15.0, GEN1=10.0)
+    res = reactive_need(build_campus(spec), rows(hour=hour), ReactiveRequirement(1.0, "c", "code"), residual=False)
+    assert res.dispatch["SR1"]["steps"] == steps
+    assert abs(res.q_final_mvar) > 1.0 + 0.01                 # neither lands in the band
