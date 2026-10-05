@@ -760,6 +760,15 @@ class ProjectInfo(BaseModel):
     # 0006): the DTO carries the raw column and the client resolves the default,
     # so an old row and a row that chose the default look the same, as they are.
     project_kind: str | None = None
+    # A decision study's option or tornado fork (plan F1-F, F3; review v2
+    # [S11]): its metadata names the study and the base, AND its database
+    # parent is that base — the rule of `services/study/forks.py::
+    # is_study_owned`, so a copy of the keys elsewhere is not marked.
+    # `owner_study_name` is None when the study record is gone (the startup
+    # sweep removes such a fork). Set by `GET /api/projects/` only.
+    study_owned: bool = False
+    owner_study_id: str | None = None
+    owner_study_name: str | None = None
 
     @field_validator("parent_project", "scenario_description", "scenario_type", "project_kind", mode="before")
     @classmethod

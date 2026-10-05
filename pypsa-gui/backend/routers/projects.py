@@ -669,8 +669,34 @@ def _project_info_db(db, project) -> ProjectInfo:
     if project.parent_project_id is not None:
         parent = db.get(_Project, project.parent_project_id)
         parent_name = parent.name if parent is not None else None
+        if parent is not None:
+            _mark_study_owned(info, d, parent)
     info.parent_project = parent_name
     return info
+
+
+def _mark_study_owned(info: ProjectInfo, project_dir: pathlib.Path, parent) -> None:
+    """
+    Flag a decision study's fork in the list (plan F1-F, F3). The rule is
+    `services/study/forks.py::is_study_owned`: the owner keys in the fork's
+    metadata AND the database parent being the base they name. The study's
+    name is read from the base's sidecar; a gone or unreadable record leaves
+    it None, never fails the list.
+    """
+    meta = _read_meta(project_dir)
+    study_id = meta.get("owner_study_id")
+    if not study_id or meta.get("owner_base_project") != str(parent.id):
+        return
+    from services import project_registry
+    from services.study import store as study_store
+
+    info.study_owned = True
+    info.owner_study_id = str(study_id)
+    try:
+        info.owner_study_name = study_store.load_study(
+            project_registry.project_dir(parent), str(study_id)).name
+    except (study_store.StudyNotFound, study_store.StudyUnreadable, OSError):
+        info.owner_study_name = None
 
 
 def _serialize_registry_project(project) -> dict[str, str | None]:

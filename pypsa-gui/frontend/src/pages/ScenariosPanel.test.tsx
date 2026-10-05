@@ -809,3 +809,55 @@ describe('a solving project shows the solving reason, not the edit-lock one', ()
     expect(within(row).queryAllByTitle(READ_ONLY_MUTATION_MESSAGE)).toHaveLength(0)
   })
 })
+
+// Plan F1-F, F3 (review v2 [S11]): a decision study's option fork is an
+// ordinary child project to the tree. The list payload says whose it is
+// (`study_owned`, `owner_study_name`); the row carries a badge, and deleting
+// it says which study it belongs to before anything is removed.
+describe('a decision study’s own fork', () => {
+  const withFork = (studyName: string | null) => [
+    project({ name: 'loaded', id: 'id-loaded' }),
+    project({ name: 'site', id: 'id-site' }),
+    project({
+      name: 'site-opt-bess_1h', id: 'id-fork', parent_project: 'site',
+      study_owned: true, owner_study_id: 'a'.repeat(32), owner_study_name: studyName,
+    }),
+    project({ name: 'site-mine', id: 'id-mine', parent_project: 'site' }),
+  ]
+
+  it('is badged, naming the study; a user’s own child is not', async () => {
+    vi.mocked(projectsApi.list).mockResolvedValue(withFork('Battery at my site') as never)
+    renderPanel()
+    const row = await rowFor('site-opt-bess_1h')
+    const badge = within(row).getByText('Decision study')
+    expect(badge.closest('[title]')?.getAttribute('title')).toContain('“Battery at my site”')
+    expect(within(await rowFor('site-mine')).queryByText('Decision study')).toBeNull()
+  })
+
+  it('warns, naming the study, before it is deleted', async () => {
+    vi.mocked(projectsApi.list).mockResolvedValue(withFork('Battery at my site') as never)
+    renderPanel()
+    await userEvent.click(within(await rowFor('site-opt-bess_1h')).getByTitle('Delete this scenario'))
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toContain('belongs to the decision study “Battery at my site”')
+    expect(vi.mocked(projectsApi.delete)).not.toHaveBeenCalled()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(vi.mocked(projectsApi.delete)).toHaveBeenCalledWith('id-fork', false))
+  })
+
+  it('says so when the study it belonged to is gone', async () => {
+    vi.mocked(projectsApi.list).mockResolvedValue(withFork(null) as never)
+    renderPanel()
+    await userEvent.click(within(await rowFor('site-opt-bess_1h')).getByTitle('Delete this scenario'))
+    expect((await screen.findByRole('dialog')).textContent).toContain('a decision study that no longer exists')
+  })
+
+  it('an ordinary child keeps the ordinary prompt', async () => {
+    vi.mocked(projectsApi.list).mockResolvedValue(withFork('Battery at my site') as never)
+    renderPanel()
+    await userEvent.click(within(await rowFor('site-mine')).getByTitle('Delete this scenario'))
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toContain('This removes its files from disk.')
+    expect(dialog.textContent).not.toContain('decision study')
+  })
+})

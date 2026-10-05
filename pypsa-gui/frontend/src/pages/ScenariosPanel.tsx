@@ -19,6 +19,7 @@ import {
 } from '../utils/scenarioType'
 import { appLog } from '../store/simulationStore'
 import type { ProjectInfo } from '../api/types'
+import { STUDY_FORK_LABELS } from '../utils/decisionVocabulary'
 import { PageBody, PageSection, RowGrid, StatCard, Btn, Tag } from '../components/PageKit'
 import { Dialog } from '../components/Dialog'
 import { ConfirmDialog } from '../components/ConfirmDialog'
@@ -806,11 +807,14 @@ export default function ScenariosPanel() {
                   onEdit={(project) => { if (guardMutation(project.name)) setEditing(project) }}
                   onDelete={(name) => {
                     if (!guardMutation(name)) return
-                    const missing = projectList.find(p => p.name === name)?.missing
+                    const row = projectList.find(p => p.name === name)
                     setDeleting({
                       id: apiIdFor(name), name, cascade: false,
-                      message: missing
+                      message: row?.missing
                         ? `Remove the registry entry for '${name}'? Its files are already gone.`
+                        // Plan F1-F, F3: a study's own fork says whose it is.
+                        : row?.study_owned
+                        ? STUDY_FORK_LABELS.deleteWarning(name, row.owner_study_name ?? null)
                         : `Delete '${name}'? This removes its files from disk.`,
                     })
                   }}
@@ -972,6 +976,11 @@ function ScenarioNodeRow({
             {isCurrent && <Tag tone="accent">active</Tag>}
             {missing && <Tag tone="err">files missing</Tag>}
             {scenType && <Tag tone={SCEN_TYPE_TONE[scenType]}>{scenType}</Tag>}
+            {node.project.study_owned && (
+              <span title={STUDY_FORK_LABELS.badgeTitle(node.project.owner_study_name ?? null)}>
+                <Tag tone="purple">{STUDY_FORK_LABELS.badge}</Tag>
+              </span>
+            )}
           </div>
           {scenText && (
             <div className="text-[11px] text-ink-600 truncate mt-0.5" title={scenText}>

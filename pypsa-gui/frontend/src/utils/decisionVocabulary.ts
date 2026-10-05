@@ -589,3 +589,38 @@ export const EXPERT_WARNING =
 export const BASE_PROJECT_NOTE =
   'This study’s project holds the grid-only network built when the study was created. The options are '
   + 'rebuilt from your answers and assumptions on every run, so editing that network does not change the study.'
+
+// ── follow-ups F1-F: reopening a study, its forks in the project lists ────
+
+/** Getting back to a study after a reload (plan F1-F, F2; gate S8 [S5]). */
+export const REOPEN_LABELS = {
+  /** The project-home entry: the last open study's project, and its studies. */
+  homeHeading: 'Your decision studies',
+  homeIntro: (project: string) =>
+    `The decision studies in “${project}”, the project of the study you last had open.`,
+  lastOpen: 'Last open',
+  openStudy: (name: string) => `Open the decision study “${name}”`,
+  /** The panel, when the study it was showing is gone. */
+  lostTitle: 'The study you last had open is no longer there.',
+  lostAction: (project: string) =>
+    `It was in “${project}”; it, or its project, has been deleted or renamed. Open another study below.`,
+} as const
+
+/** A study's own fork in the project lists (plan F1-F, F3; review v2 [S11]). */
+export const STUDY_FORK_LABELS = {
+  badge: 'Decision study',
+  badgeTitle: (study: string | null) => (study
+    ? `Made and used by the decision study “${study}”. Its results are that study’s; leave it to the study.`
+    : 'Made by a decision study that no longer exists.'),
+  deleteWarning: (fork: string, study: string | null) => (study
+    ? `'${fork}' belongs to the decision study “${study}”: it holds one of that study’s options. `
+      + 'Deleting it removes the option’s results, and the study’s pages will say the option is not solved '
+      + 'until you run the study again. Delete it anyway? This removes its files from disk.'
+    : `'${fork}' was made by a decision study that no longer exists. Delete it? This removes its files from disk.`),
+} as const
+
+/** The range the robustness check moved a driver over (plan F1-F, F5; gate S9). */
+export const TESTED_RANGE_LABELS = {
+  tested: 'Range the robustness check tested',
+  recentred: 'Re-centred on your value',
+} as const
