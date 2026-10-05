@@ -421,7 +421,27 @@ the 300s TTL) and lets either party abort the other's turn.
 
 ### CH-7 — `batch_create_components` reports a partially-applied batch as a clean refusal
 
-**Moderate. REPORTED.**
+**Moderate. VERIFIED and FIXED.**
+
+The code argued against itself. Its non-HTTP branch carried exactly the right
+comment — "Validation passed and this still failed, so the batch IS partial. Say
+exactly what landed — claiming atomicity we did not deliver would send the agent
+looking for the wrong bug" — but the line above it was `except HTTPException: raise`.
+Pass 1 checks only the schema and name uniqueness; the per-class handler validators
+(the docstring's own "transformer voltage validation", a missing bus) run in
+`create_component` during pass 2 and raise HTTPException. So the honest message
+covered only the failure that rarely happens.
+
+Now any exception after something has landed reports what landed. The original
+status is kept (a voltage mismatch is the caller's data, not a 500) and a structured
+detail keeps its `error_kind` with `partially_applied` / `created` added beside it.
+A failure on the FIRST entry is re-raised unchanged — nothing landed, so calling it
+partial would be the same wrong claim in the other direction.
+
+Guard: three tests in `tests/test_chat_tools_batch.py`. One discriminates (fails
+against the previous code); one is a control (first-entry failure); one guards the
+fix's design choice (status kept, which the old non-HTTP branch would have forced
+to 500).
 
 Pass 1 validates only the schema and name uniqueness; handler-level validators
 (transformer voltage, bus existence) run in pass 2. An `HTTPException` there is

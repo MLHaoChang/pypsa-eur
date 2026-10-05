@@ -919,17 +919,36 @@ def batch_create_components(component_class: str, components: list[dict]) -> dic
         try:
             create_component(component_class, name,
                              {k: v for k, v in entry.items() if k != "name"})
-        except HTTPException:
-            raise
         except Exception as exc:  # noqa: BLE001
-            # Validation passed and this still failed, so the batch IS
-            # partial. Say exactly what landed — claiming atomicity we did
-            # not deliver would send the agent looking for the wrong bug.
-            raise HTTPException(
-                500,
-                f"batch partially applied: created {created} before "
-                f"{name!r} failed: {exc}",
-            ) from exc
+            if not created:
+                # Nothing has landed, so the batch is NOT partial and the
+                # handler's own error is the accurate one. Re-raise it as-is.
+                raise
+            # Something HAS landed, so the batch is partial — and this is true
+            # whatever raised. The previous shape re-raised an HTTPException
+            # bare and kept the honest message for every other exception,
+            # which covered the UNLIKELY failure only: pass 1 checks the schema
+            # and name uniqueness, but the per-class handler validators (the
+            # docstring's "transformer voltage validation", a missing bus) run
+            # in `create_component` here, and they raise HTTPException. So the
+            # common partial batch reached the agent as a plain refusal, and it
+            # concluded nothing had been created.
+            #
+            # The original status is kept: a voltage mismatch is the caller's
+            # data, not a server fault, and forcing 500 would say otherwise.
+            prefix = (f"batch partially applied: created {created} before "
+                      f"{name!r} failed")
+            if isinstance(exc, HTTPException):
+                detail = exc.detail
+                if isinstance(detail, dict):
+                    # Keep the structured error (and any `error_kind` the
+                    # frontend routes on); add what landed beside it.
+                    merged = {**detail, "partially_applied": True,
+                              "created": list(created)}
+                    merged["message"] = f"{prefix}: {detail.get('message', '')}".rstrip(": ")
+                    raise HTTPException(exc.status_code, merged) from exc
+                raise HTTPException(exc.status_code, f"{prefix}: {detail}") from exc
+            raise HTTPException(500, f"{prefix}: {exc}") from exc
         created.append(name)
     return {"created": created, "count": len(created)}
 
