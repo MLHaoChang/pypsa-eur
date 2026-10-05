@@ -287,6 +287,29 @@ Also at the S8 gate: a draft's load file travels in the intake as `load.csv_text
 
 ---
 
+## F1. Follow-ups after MVP-1 (from the findings note's "Still open")
+
+Small, contained items only; OPEN-ITEMS 1 (auth mode) and the MVP-2 list stay out. Same protocol: red first, mutation, independent gate.
+
+**F1-B (backend).**
+- B1 `reconcile_on_boot` drops (or fails typed) a queued job whose `storage_dir` is gone, instead of an untyped `FileNotFoundError` (gate S9 [N6]).
+- B2 A request-body size limit enforced before JSON parsing on the study routes (the 25 MB `csv_text` cap plus headroom), refused 413 typed (S8 [S-v2-1]).
+- B3 The tornado's single-band energy-price skip records `energy_price_level_no_effect_single_band`, as documented (S6 [N2]).
+- B4 `objective_decomposition._bridge` reads the demand-charge config the solve used, not the current one (S3 [N4]).
+- B5 Tests for the three untested ledger branches: reset clears the attention note; a user tariff whose source says illustrative; the re-seed filter re-deriving a supplied tariff's prices (S2).
+- B6 The export-price preflight also refuses import-to-export cycling ACROSS hours through storage on a custom tariff (an export price above the cheapest import band, with storage present), or flags it with a code if refusing is wrong for a real tariff (S3).
+
+**F1-F (frontend, with the backend flag it needs).**
+- F1 The `/yr` labels: `GenerationStack` (`CC (€/MW/yr)`, `CC (€/MWh/yr)`), `CapacityExpansion` and `propertyDocs`, with tests; the quick-add label and edit-mode badges get the tests S0 left out (S0 follow-up).
+- F2 Reopening a study after a reload: the decision panel restores the last open study (project + id) and its hub; a home-page entry lists a project's studies (S8 [S5]).
+- F3 Study-owned forks marked in project lists: a list-payload flag from the owner keys, a badge and a delete warning naming the study (review [S11]).
+- F4 The draft preview debounced (S8).
+- F5 The ledger step shows the range the tornado tested, marking a re-centred one (gate S9).
+
+**Acceptance.** Each item has a test that is red without it; the full backend suite, the full frontend suite, `tsc` and `run_qa_drivers.py` pass; the findings note's "Still open" is updated.
+
+- [ ] Gate F1
+
 ## Review deltas (v1 → v2)
 
 | Finding | Resolution in v2 |
