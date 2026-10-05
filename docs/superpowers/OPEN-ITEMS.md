@@ -52,7 +52,28 @@ one dict. Full analysis, reproduction and fix criteria:
 
 ## High
 
-*(Nothing open at this severity.)*
+### 13. Chat tools that write a project's upload store bypass its lock check
+
+`services/chat_tools.py`. The HTTP upload routes (`post_upload`,
+`delete_upload_route`) check the edit lock. Seven chat tools write the same
+store with no check of their own and are not gated at the chat seam:
+`clear_uploads` (destructive: deletes every upload of the active project) and
+the six `export_*` tools (additive, via `_save_agent_export` →
+`upload_service.add_upload(kind="agent_export")`). All seven are routeless, and
+`_LOCK_GATE_SERVICE_CALL_MUTATORS` only lists **network** mutators.
+
+They were excluded by a docstring justification that went stale: "upload /
+export / chat-history tools write ... on surfaces the middleware does not gate
+either". That stopped being true for uploads when the HTTP upload routes gained
+in-handler checks. Reproduced 2026-10-05: with the same non-holder identity,
+HTTP `DELETE .../uploads/{id}` was refused 409 while `clear_uploads` wiped the
+holder's files (`[...] -> []`), and HTTP `POST .../uploads` was refused 409
+while `export_to_csv` added a file (1 → 2). `uploads/` is in `_BUNDLE_DIRS`.
+Found while doing item 6. `tests/test_write_surface_lock_policy.py` lists all
+seven as `KNOWN_GAPS` and fails when one is fixed until its entry is deleted.
+Full analysis, reproduction and fix criteria:
+`findings/2026-10-05-chat-tools-bypass-the-upload-lock-check.md`. Server only.
+
 
 ## Medium
 
