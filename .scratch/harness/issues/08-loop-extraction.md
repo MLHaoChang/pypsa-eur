@@ -43,3 +43,5 @@ every name; identity holds). Three tunables moved with their readers —
 through `chat_service` now patch the new module; a tripwire in
 `test_harness_layout.py` (`MOVED_TUNABLES`) keeps it that way. loop.py:
 5,315 → ~4,040 lines.
+
+2026-10-05 (gate for step 2, 5439066): 2910 passed, 5 skipped, 0 failed.

@@ -100,3 +100,4 @@ now scans `harness/` too and pins the moved catalogue at its new path.
 - Issue 08 (step 1): `services/chat_service.py` → `harness/loop.py` whole, alias at the old path, 27 patched names untouched; `harness/sse.py` extracted by AST; the loop's 12 provider-word code sites pinned.
   Gate after the move: every test_chat*/test_llm*/test_tool_*/test_guided*/test_harness*/test_report* file — 2908 passed, 5 skipped, 0 failed (773f009).
 - Issue 08 (step 2): `fence`, `results`, `history`, `metrics` extracted; three tunables moved with their readers and seven test patch sites repointed; `MOVED_TUNABLES` tripwire.
+  Gate after step 2: 2910 passed, 5 skipped, 0 failed (5439066).
