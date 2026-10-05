@@ -233,6 +233,8 @@ def _broken(mutate):
     (lambda c: c["buses"].update(MV3={"vn_kv": 20.0}), "not connected"),
     (lambda c: c["units"].update(TR1={"kind": "load", "bus": "MV2", "p_mw": t(1.0), "pf": t(1.0)}), "duplicate"),
     (lambda c: c["units"].update(A_VERY_LONG_NAME={"kind": "load", "bus": "MV2", "p_mw": t(1.0), "pf": t(1.0)}), "12"),
+    (lambda c: c["pcc"].update(p_connection_mw=50.0), "value.*source"),
+    (lambda c: c["pcc"].update(p_connection_mw=t(0.0)), "positive"),
     (lambda c: c.update(pcc_extra=1), "unknown key"),
     (lambda c: c.pop("pcc"), "pcc"),
 ])

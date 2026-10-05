@@ -27,7 +27,15 @@ selected (period, hour), with its reasons joined by ``;``.
 (``gridspine.static.campus_flow``). It writes the per-hour results
 (``campus_lf_trafo.csv``, ``campus_lf_bus.csv`` and ``campus_lf_pcc.csv``,
 with a ``case`` column) and the transformer sizing
-(``campus_sizing_trafo.csv``).
+(``campus_sizing_trafo.csv``). It also corrects every selected hour into
+the PCC reactive band (``gridspine.static.campus_reactive``), writing
+``campus_reactive.csv``, the compensation sizing
+(``campus_sizing_compensation.csv``), and the requirement it applied
+(``campus_requirement.json``).
+- The band comes from the grid-code profile, or from the study's
+  connection-agreement power factor.
+- Its P_ref is the campus file's ``p_connection_mw``, or else the year's
+  peak import. The requirement records which one was used.
 
 ``draft_from_project`` is the "generate" step. It drafts a campus from the
 saved project, for the user to edit before ``prepare_campus``.
@@ -52,6 +60,8 @@ from gridspine.ranking.campus import campus_metrics, select_campus_hours
 from gridspine.schema.campus import HOURLY_CSV, PCC_CSV, validate_hourly, validate_pcc
 from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
+from gridspine.static.campus_reactive import reactive_need, requirement_from, size_compensation
+from gridspine.templates.grid_codes import load_grid_code
 
 CAMPUS_YAML = "campus.yaml"
 CAMPUS_MANIFEST = "campus_manifest.json"
@@ -62,6 +72,10 @@ LF_TRAFO_CSV = "campus_lf_trafo.csv"
 LF_BUS_CSV = "campus_lf_bus.csv"
 LF_PCC_CSV = "campus_lf_pcc.csv"
 SIZING_TRAFO_CSV = "campus_sizing_trafo.csv"
+REACTIVE_CSV = "campus_reactive.csv"
+SIZING_COMP_CSV = "campus_sizing_compensation.csv"
+REQUIREMENT_JSON = "campus_requirement.json"
+DEFAULT_PROFILE = "eu_rfg_dcc_ce"
 
 
 def _sha256_file(path: Path) -> str:
@@ -156,15 +170,27 @@ def selected_hours(run_dir) -> pd.DataFrame:
     return df.assign(reasons=df["reasons"].str.split(";"))
 
 
-def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria()) -> pd.DataFrame:
-    """Solve the selected hours and size the transformers. Writes the
-    per-hour load-flow tables and ``campus_sizing_trafo.csv``; returns the
-    sizing."""
+def _p_ref(campus, pcc: pd.DataFrame):
+    p = campus.params
+    hit = p[(p["param"] == "p_connection_mw")]
+    if len(hit):
+        return float(hit["value"].iloc[0]), "campus file p_connection_mw"
+    return float(pcc["import_mw"].abs().max()), "peak |import| over every hour of the prepared periods"
+
+
+def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,
+                pf: float | None = None) -> dict:
+    """Solve the selected hours, size the transformers, and correct each hour
+    into the PCC reactive band. Writes the per-hour tables, the two sizing
+    tables and the requirement. Returns ``{"transformers", "compensation",
+    "requirement"}``."""
     run_dir = Path(run_dir)
-    hourly, _ = campus_tables(run_dir)
+    hourly, pcc = campus_tables(run_dir)
     selection = selected_hours(run_dir)
     campus = load_run_campus(run_dir)
-    flows, trafo_rows, bus_rows, pcc_rows = {}, [], [], []
+    p_ref, p_ref_from = _p_ref(campus, pcc)
+    req = requirement_from(load_grid_code(profile), p_ref, pf=pf)
+    flows, reactive, trafo_rows, bus_rows, pcc_rows, q_rows = {}, {}, [], [], [], []
     for period, hour in selection[["period", "hour"]].itertuples(index=False):
         period, hour = int(period), int(hour)
         rows = hourly[(hourly["period"] == period) & (hourly["hour"] == hour)]
@@ -176,9 +202,20 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria()) -> pd.Data
                              "losses_mw": f.losses_mw})
             trafo_rows += [{**key, **r} for r in f.trafo.to_dict("records")]
             bus_rows += [{**key, **r} for r in f.bus.to_dict("records")]
+        r = reactive_need(campus, rows, req)
+        reactive[(period, hour)] = r
+        q_rows.append({"period": period, "hour": hour, "converged": r.converged, "q0_mvar": r.q0_mvar,
+                       "q_final_mvar": r.q_final_mvar, "q_inverters_mvar": r.q_inverters_mvar,
+                       "q_comp_mvar": r.q_comp_mvar, "compliant_without": r.compliant_without})
     sizing = size_transformers(flows, campus, criteria)
+    comp = size_compensation(reactive, criteria)
+    requirement = {"q_limit_mvar": req.q_limit_mvar, "clause": req.clause, "source": req.source,
+                   "profile": profile, "pf": pf, "p_ref_mw": p_ref, "p_ref_from": p_ref_from}
     _write_text_atomic(run_dir / LF_TRAFO_CSV, pd.DataFrame(trafo_rows).to_csv(index=False))
     _write_text_atomic(run_dir / LF_BUS_CSV, pd.DataFrame(bus_rows).to_csv(index=False))
     _write_text_atomic(run_dir / LF_PCC_CSV, pd.DataFrame(pcc_rows).to_csv(index=False))
     _write_text_atomic(run_dir / SIZING_TRAFO_CSV, sizing.to_csv(index=False))
-    return sizing
+    _write_text_atomic(run_dir / REACTIVE_CSV, pd.DataFrame(q_rows).to_csv(index=False))
+    _write_text_atomic(run_dir / SIZING_COMP_CSV, comp.to_csv(index=False))
+    _write_text_atomic(run_dir / REQUIREMENT_JSON, json.dumps(requirement, indent=2))
+    return {"transformers": sizing, "compensation": comp, "requirement": requirement}

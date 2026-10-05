@@ -128,7 +128,8 @@ def test_sizing_a_ranked_run_solves_every_selected_hour_and_sizes_each_transform
     run = tmp_path / "run"
     prepare_campus(run, draft_from_project(project).spec, project)
     sel = rank_campus(run, k=1)
-    sizing = size_campus(run)
+    out = size_campus(run)
+    sizing = out["transformers"]
     pcc = pd.read_csv(run / "campus_lf_pcc.csv")
     intact = pcc[pcc["case"] == "intact"]
     assert sorted(map(tuple, intact[["period", "hour"]].values.tolist())) == sorted(map(tuple, sel[["period", "hour"]].values.tolist()))
@@ -136,3 +137,33 @@ def test_sizing_a_ranked_run_solves_every_selected_hour_and_sizes_each_transform
     assert len(sizing) == 1 and sizing.iloc[0]["group"] == "GRID_IMPORT"
     assert sizing.iloc[0]["recommended_unit_mva"] >= sizing.iloc[0]["required_unit_mva"]
     assert (run / "campus_sizing_trafo.csv").is_file() and (run / "campus_lf_bus.csv").is_file()
+
+
+def test_sizing_corrects_each_selected_hour_into_the_pcc_band_and_records_the_rule(tmp_path, project):
+    import pandas as pd
+    run = tmp_path / "run"
+    spec = draft_from_project(project).spec
+    spec["campus"]["units"] = {k: dict(v, pf={"value": 0.7, "source": "assumed"}) if v["kind"] == "load" else v
+                               for k, v in spec["campus"]["units"].items()}
+    spec["campus"]["pcc"]["p_connection_mw"] = {"value": 60.0, "source": "measured"}
+    prepare_campus(run, spec, project)
+    rank_campus(run, k=1)
+    out = size_campus(run, pf=0.98)
+    req = out["requirement"]
+    assert req["p_ref_mw"] == 60.0 and req["p_ref_from"] == "campus file p_connection_mw"
+    assert req["source"] == "assumed" and "0.98" in req["clause"]
+    q = pd.read_csv(run / "campus_reactive.csv")
+    assert q["converged"].all()
+    assert (q["q_final_mvar"].abs() <= req["q_limit_mvar"] + 0.011).all()
+    comp = out["compensation"].set_index("direction")
+    assert comp.at["capacitive", "required_mvar"] > 0      # pf 0.7 loads need support
+    stored = json.loads((run / "campus_requirement.json").read_text())
+    assert stored == req
+
+
+def test_without_a_connection_capacity_the_peak_import_is_used_and_said_so(tmp_path, project):
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(project).spec, project)
+    rank_campus(run, k=1)
+    req = size_campus(run)["requirement"]
+    assert req["p_ref_from"].startswith("peak |import|") and req["source"] == "code"

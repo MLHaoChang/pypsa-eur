@@ -11,7 +11,9 @@ The description is one YAML mapping under ``campus``:
     The point of common coupling. It names the bus and its nominal kV and
     carries the grid operator's figures: ``sk_max_mva`` and ``sk_min_mva``
     (Sk''), ``rx_max`` and ``rx_min`` (R/X), and the set-point ``vm_pu``.
-    It becomes an ``ext_grid`` named ``GRID``.
+    It becomes an ``ext_grid`` named ``GRID``. Optionally it carries
+    ``p_connection_mw``, the contracted connection capacity, which is the
+    reactive requirement's P_ref.
 
 ``buses``
     The other buses, ``{name: {vn_kv}}``. Nominal voltage is a definition,
@@ -102,6 +104,9 @@ WINDING_TOLERANCE = 0.10
 
 _TOP = frozenset({"name", "f_hz", "pcc", "buses", "transformers", "cables", "units"})
 _PCC_FIELDS = ("vm_pu", "sk_max_mva", "sk_min_mva", "rx_max", "rx_min")
+#: Optional at the PCC: the contracted connection capacity, the P_ref of the
+#: reactive requirement. Without it the study uses the year's peak import.
+_PCC_OPTIONAL = ("p_connection_mw",)
 _TRAFO_FIELDS = ("sn_mva", "vn_hv_kv", "vn_lv_kv", "vk_percent", "vkr_percent", "pfe_kw", "i0_percent")
 _CABLE_FIELDS = ("length_km", "r_ohm_per_km", "x_ohm_per_km", "c_nf_per_km", "max_i_ka")
 _UNIT_FIELDS = {
@@ -206,7 +211,7 @@ def build_campus(spec) -> Campus:
 
     # buses: the PCC first, then the rest in file order
     pcc = c["pcc"]
-    _fields("pcc", pcc, _PCC_FIELDS, ("bus", "vn_kv", "pypsa_name"))
+    _fields("pcc", pcc, _PCC_FIELDS + _PCC_OPTIONAL, ("bus", "vn_kv", "pypsa_name"))
     if "bus" not in pcc or "vn_kv" not in pcc:
         raise ContractError("pcc: needs 'bus' and 'vn_kv'")
     buses = {str(pcc["bus"]): float(pcc["vn_kv"])}
@@ -231,6 +236,9 @@ def build_campus(spec) -> Campus:
 
     pcc_bus = str(pcc["bus"])
     pv = {f: _tagged(f"pcc.{pcc_bus}", f, pcc, rows) for f in _PCC_FIELDS}
+    for f in _PCC_OPTIONAL:
+        if f in pcc:
+            _tagged(f"pcc.{pcc_bus}", f, pcc, rows)
     if pv["sk_min_mva"] > pv["sk_max_mva"]:
         raise ContractError(f"pcc: sk_min_mva ({pv['sk_min_mva']}) is above sk_max_mva ({pv['sk_max_mva']})")
 
