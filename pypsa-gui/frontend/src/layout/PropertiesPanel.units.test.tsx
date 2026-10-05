@@ -8,7 +8,7 @@
 // it every year. The badge is the only place the difference is visible
 // without hovering, so it is pinned here for every read-out row.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
@@ -39,7 +39,7 @@ vi.mock('../api/simulation', async (importOriginal) => {
   }
 })
 
-import {
+import PropertiesPanel, {
   GeneratorCard, StorageUnitCard, StoreCard, LinkCard, LinePanel, TransformerPanel,
 } from './PropertiesPanel'
 
@@ -66,7 +66,10 @@ function rowText(label: string): string {
 
 function wrap(node: React.ReactNode, seed: Array<[string, unknown]>) {
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    // staleTime: the seeded rows stay authoritative; the mocked getters
+    // return [] and a mount refetch would otherwise drop the panel to
+    // "Loading…" before an edit click lands.
+    defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
   })
   for (const [key, value] of seed) client.setQueryData(nk('Demo', key), value)
   return render(<QueryClientProvider client={client}>{node}</QueryClientProvider>)
@@ -109,5 +112,61 @@ describe('capital-cost badges name the annuity per year', () => {
     wrap(<TransformerPanel name="T1" />, [['transformers', [TR]]])
     await screen.findByText('Capital cost')
     expect(rowText('Capital cost')).toContain('€/MVA/yr')
+  })
+})
+
+// Edit mode and the quick-add form label the same fields, so they carry the
+// same badges. S0 fixed them without a test (gate S0 [S3]); these pin them.
+// The badge sits inside the input's label as "Capital cost (€/MW/yr)".
+function expectEditBadges(unit: 'MW' | 'MWh' | 'MVA') {
+  expect(screen.getByText(`Capital cost (€/${unit}/yr)`)).toBeTruthy()
+  expect(screen.getByText(`FOM cost (€/${unit}/yr)`)).toBeTruthy()
+  // The upfront figure stays per unit, never per year.
+  expect(screen.getByText(`Overnight cost (€/${unit})`)).toBeTruthy()
+  expect(screen.queryByText(`Capital cost (€/${unit})`)).toBeNull()
+}
+
+describe('edit-mode capital-cost badges name the annuity per year', () => {
+  it('Generator edit form', () => {
+    wrap(<GeneratorCard gen={GEN} onRename={() => {}} />, [['generators', [GEN]]])
+    fireEvent.click(screen.getByRole('button', { name: /^Edit / }))
+    expectEditBadges('MW')
+  })
+  it('StorageUnit edit form', () => {
+    wrap(<StorageUnitCard su={SU} onRename={() => {}} />, [['storage_units', [SU]]])
+    fireEvent.click(screen.getByRole('button', { name: /^Edit / }))
+    expectEditBadges('MW')
+  })
+  it('Store edit form', () => {
+    wrap(<StoreCard store={STORE} onRename={() => {}} />, [['stores', [STORE]]])
+    fireEvent.click(screen.getByRole('button', { name: /^Edit / }))
+    expectEditBadges('MWh')
+  })
+  it('Link edit form', () => {
+    wrap(<LinkCard link={LINK} onRename={() => {}} />, [['links', [LINK]]])
+    fireEvent.click(screen.getByRole('button', { name: /^Edit / }))
+    expectEditBadges('MW')
+  })
+  it('Line edit form', async () => {
+    wrap(<LinePanel name="L1" />, [['lines', [LINE]]])
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Parameters' }))
+    expectEditBadges('MVA')
+  })
+  it('Transformer edit form', async () => {
+    wrap(<TransformerPanel name="T1" />, [['transformers', [TR]]])
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Parameters' }))
+    expectEditBadges('MVA')
+  })
+})
+
+describe('the quick-add form labels the annuity per year', () => {
+  it('a Generator added from a bus asks for Capital cost (€/MW/yr)', async () => {
+    useUIStore.setState({ selectedComponent: { type: 'Bus', name: 'B1' }, rightPanelOpen: true })
+    wrap(<PropertiesPanel />, [
+      ['buses', [{ name: 'B1', v_nom: 110, carrier: 'AC', control: 'PQ', country: '', sub_network: '', x: 0, y: 0 }]],
+    ])
+    fireEvent.click(await screen.findByRole('button', { name: /^Generator$/ }))
+    expect(screen.getByText('Capital cost (€/MW/yr)')).toBeTruthy()
+    expect(screen.queryByText('Capital cost (€/MW)')).toBeNull()
   })
 })

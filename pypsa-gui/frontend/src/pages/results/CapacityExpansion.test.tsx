@@ -340,3 +340,37 @@ it('still derives a real per-asset PV figure when the upfront cost resolved', as
   const capexCell = row.querySelectorAll('td')[row.querySelectorAll('td').length - 1]
   expect(capexCell.textContent).toBe('€324.2 k')
 })
+
+// ── Per-unit CAPEX heading names its basis (S0 follow-up, F1) ───────────────
+// In "Annualised" mode the per-unit column is the asset's annual fixed cost
+// (annuitised investment plus FOM), so it reads per year. In "Total
+// investment (PV)" mode it is the upfront overnight cost, which is not per
+// year. Both the expansion table and the retirement table carry it.
+function generatorRows() {
+  return [
+    // Built: p_nom_opt above p_nom.
+    { name: 'gas_new', bus: 'B1', carrier: 'gas', p_nom: 0, p_nom_opt: 50, p_nom_extendable: true,
+      capital_cost: 1000, build_year: 2026 },
+    // Retired: p_nom_opt below p_nom.
+    { name: 'coal_old', bus: 'B1', carrier: 'coal', p_nom: 80, p_nom_opt: 20, p_nom_extendable: true,
+      capital_cost: 900, build_year: 2000 },
+  ] as never
+}
+
+it('heads the per-unit CAPEX per year in annualised mode, on built and retired generators', async () => {
+  vi.mocked(networkApi.getGenerators).mockReset().mockResolvedValue(generatorRows())
+  renderPage()
+  await screen.findByText('gas_new')
+  await screen.findByText('coal_old')
+  expect(screen.getAllByText('CAPEX €/MW/yr')).toHaveLength(2)
+  expect(screen.queryByText('CAPEX €/MW')).toBeNull()
+})
+
+it('heads the per-unit CAPEX without /yr in total-investment (PV) mode', async () => {
+  vi.mocked(networkApi.getGenerators).mockReset().mockResolvedValue(generatorRows())
+  renderPage()
+  await screen.findByText('gas_new')
+  await switchToLifetimeMode()
+  expect(screen.getAllByText('CAPEX €/MW')).toHaveLength(2)
+  expect(screen.queryByText('CAPEX €/MW/yr')).toBeNull()
+})
