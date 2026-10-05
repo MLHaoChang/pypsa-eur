@@ -23,6 +23,12 @@ From these it prepares a run directory that the ranking (C3) and the sizing
 It writes ``campus_metrics.csv`` and ``campus_selected.csv``, one row per
 selected (period, hour), with its reasons joined by ``;``.
 
+``size_campus`` solves every selected hour, intact and transformer N-1
+(``gridspine.static.campus_flow``). It writes the per-hour results
+(``campus_lf_trafo.csv``, ``campus_lf_bus.csv`` and ``campus_lf_pcc.csv``,
+with a ``case`` column) and the transformer sizing
+(``campus_sizing_trafo.csv``).
+
 ``draft_from_project`` is the "generate" step. It drafts a campus from the
 saved project, for the user to edit before ``prepare_campus``.
 
@@ -45,12 +51,17 @@ from gridspine.producers.pypsa_nodal import load_solved_network
 from gridspine.ranking.campus import campus_metrics, select_campus_hours
 from gridspine.schema.campus import HOURLY_CSV, PCC_CSV, validate_hourly, validate_pcc
 from gridspine.schema.contracts import ContractError
+from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
 
 CAMPUS_YAML = "campus.yaml"
 CAMPUS_MANIFEST = "campus_manifest.json"
 METRICS_CSV = "campus_metrics.csv"
 SELECTED_CSV = "campus_selected.csv"
 DEFAULT_K = 3
+LF_TRAFO_CSV = "campus_lf_trafo.csv"
+LF_BUS_CSV = "campus_lf_bus.csv"
+LF_PCC_CSV = "campus_lf_pcc.csv"
+SIZING_TRAFO_CSV = "campus_sizing_trafo.csv"
 
 
 def _sha256_file(path: Path) -> str:
@@ -143,3 +154,31 @@ def selected_hours(run_dir) -> pd.DataFrame:
     """The stored selection: ``period``, ``hour``, ``reasons`` (a list)."""
     df = pd.read_csv(_require(Path(run_dir), SELECTED_CSV))
     return df.assign(reasons=df["reasons"].str.split(";"))
+
+
+def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria()) -> pd.DataFrame:
+    """Solve the selected hours and size the transformers. Writes the
+    per-hour load-flow tables and ``campus_sizing_trafo.csv``; returns the
+    sizing."""
+    run_dir = Path(run_dir)
+    hourly, _ = campus_tables(run_dir)
+    selection = selected_hours(run_dir)
+    campus = load_run_campus(run_dir)
+    flows, trafo_rows, bus_rows, pcc_rows = {}, [], [], []
+    for period, hour in selection[["period", "hour"]].itertuples(index=False):
+        period, hour = int(period), int(hour)
+        rows = hourly[(hourly["period"] == period) & (hourly["hour"] == hour)]
+        cases = solve_cases(campus, rows)
+        flows[(period, hour)] = cases
+        for case, f in cases.items():
+            key = {"period": period, "hour": hour, "case": case}
+            pcc_rows.append({**key, "converged": f.converged, "p_mw": f.pcc_p_mw, "q_mvar": f.pcc_q_mvar,
+                             "losses_mw": f.losses_mw})
+            trafo_rows += [{**key, **r} for r in f.trafo.to_dict("records")]
+            bus_rows += [{**key, **r} for r in f.bus.to_dict("records")]
+    sizing = size_transformers(flows, campus, criteria)
+    _write_text_atomic(run_dir / LF_TRAFO_CSV, pd.DataFrame(trafo_rows).to_csv(index=False))
+    _write_text_atomic(run_dir / LF_BUS_CSV, pd.DataFrame(bus_rows).to_csv(index=False))
+    _write_text_atomic(run_dir / LF_PCC_CSV, pd.DataFrame(pcc_rows).to_csv(index=False))
+    _write_text_atomic(run_dir / SIZING_TRAFO_CSV, sizing.to_csv(index=False))
+    return sizing

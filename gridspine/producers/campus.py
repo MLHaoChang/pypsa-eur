@@ -53,7 +53,7 @@ import re
 import numpy as np
 import pandas as pd
 
-from gridspine.schema.campus import validate_hourly, validate_pcc
+from gridspine.schema.campus import STANDARD_MVA, validate_hourly, validate_pcc
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.network import MAX_NAME_LEN
 
@@ -65,11 +65,6 @@ INVERTER_PF = 0.95
 GENSET_PF = 0.8
 #: Power factor of every load.
 LOAD_PF = 0.98
-
-#: Preferred transformer ratings in MVA (R10 series).
-STANDARD_MVA = (0.1, 0.16, 0.25, 0.4, 0.63, 1.0, 1.6, 2.5, 4.0, 6.3, 10.0, 16.0, 20.0, 25.0,
-                31.5, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0, 200.0, 250.0, 315.0,
-                400.0, 500.0, 630.0, 800.0, 1000.0)
 
 #: Typical transformer data by size class. Each row is ``(upper MVA,
 #: vk %, vkr %)``. vk follows the IEC 60076-5 Table 1 minimum short-circuit

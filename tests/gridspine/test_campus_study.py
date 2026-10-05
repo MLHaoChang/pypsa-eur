@@ -29,6 +29,7 @@ from gridspine.drivers.campus_study import (
     prepare_campus,
     rank_campus,
     selected_hours,
+    size_campus,
 )
 from gridspine.schema.campus import HOURLY_CSV, PCC_CSV
 from gridspine.schema.contracts import ContractError
@@ -120,3 +121,18 @@ def test_ranking_a_prepared_run_stores_the_selection_with_its_reasons(tmp_path, 
 def test_ranking_before_preparing_is_refused(tmp_path):
     with pytest.raises(ContractError, match="prepare"):
         rank_campus(tmp_path)
+
+
+def test_sizing_a_ranked_run_solves_every_selected_hour_and_sizes_each_transformer(tmp_path, project):
+    import pandas as pd
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(project).spec, project)
+    sel = rank_campus(run, k=1)
+    sizing = size_campus(run)
+    pcc = pd.read_csv(run / "campus_lf_pcc.csv")
+    intact = pcc[pcc["case"] == "intact"]
+    assert sorted(map(tuple, intact[["period", "hour"]].values.tolist())) == sorted(map(tuple, sel[["period", "hour"]].values.tolist()))
+    assert intact["converged"].all()
+    assert len(sizing) == 1 and sizing.iloc[0]["group"] == "GRID_IMPORT"
+    assert sizing.iloc[0]["recommended_unit_mva"] >= sizing.iloc[0]["required_unit_mva"]
+    assert (run / "campus_sizing_trafo.csv").is_file() and (run / "campus_lf_bus.csv").is_file()

@@ -27,6 +27,11 @@ PCC_COLUMNS = ("period", "hour", "weight", "import_mw")
 HOURLY_CSV = "campus_hourly.csv"
 PCC_CSV = "campus_pcc.csv"
 
+#: Preferred transformer ratings in MVA (R10 series).
+STANDARD_MVA = (0.1, 0.16, 0.25, 0.4, 0.63, 1.0, 1.6, 2.5, 4.0, 6.3, 10.0, 16.0, 20.0, 25.0,
+                31.5, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0, 200.0, 250.0, 315.0,
+                400.0, 500.0, 630.0, 800.0, 1000.0)
+
 #: MW tolerance for "carries no power".
 P_TOL_MW = 1e-6
 
