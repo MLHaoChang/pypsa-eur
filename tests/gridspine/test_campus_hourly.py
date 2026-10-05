@@ -126,9 +126,24 @@ def test_an_electrolyser_link_draws_its_input_power_as_a_load():
 def test_an_unsolved_project_is_refused():
     n = solved_hub()
     campus = draft_campus(n).spec
-    n.generators_t.p = n.generators_t.p.drop(columns=["pv"])
-    with pytest.raises(ContractError, match="pv.*solved"):
+    for ts, attr in (("generators_t", "p"), ("storage_units_t", "p"), ("loads_t", "p"), ("links_t", "p0")):
+        setattr(getattr(n, ts), attr, pd.DataFrame(index=n.snapshots))
+    with pytest.raises(ContractError, match="solved"):
         campus_hourly(n, campus)
+
+
+def test_an_asset_that_never_left_zero_has_no_saved_series_and_reads_as_zero(tmp_path):
+    """A saved network drops all-default time series: an idle battery comes
+    back from NetCDF with no column, and must read as 0 MW, not as unsolved."""
+    n = solved_hub()
+    n.storage_units_t.p["bess"] = 0.0
+    path = tmp_path / "n.nc"
+    n.export_to_netcdf(str(path))
+    m = pypsa.Network(str(path))
+    assert "bess" not in m.storage_units_t.p.columns
+    campus = draft_campus(m).spec
+    hourly, _ = campus_hourly(m, campus)
+    assert (_unit(hourly, campus, "bess")["p_mw"] == 0.0).all()
 
 
 def test_a_unit_with_no_project_name_is_refused():

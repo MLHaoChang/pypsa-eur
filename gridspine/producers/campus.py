@@ -355,8 +355,18 @@ def _find(n, pypsa_name, kind, uid):
     return hits[0]
 
 
-def _injection(n, tbl, ts, name, uid):
-    """The unit's injected power over every snapshot (a load is negative)."""
+def _solved(n) -> bool:
+    """A network carries dispatch results if any dispatch frame has a column."""
+    frames = (("generators_t", "p"), ("storage_units_t", "p"), ("links_t", "p0"), ("loads_t", "p"))
+    return any(len(getattr(getattr(n, ts, None), attr, pd.DataFrame()).columns) for ts, attr in frames)
+
+
+def _injection(n, tbl, ts, name, uid, solved):
+    """The unit's injected power over every snapshot (a load is negative).
+
+    A saved network drops a time series that stays at its default, so in a
+    solved network an asset with no column never left 0 MW. A network with
+    no dispatch results at all is unsolved, and is refused."""
     series = getattr(n, ts)
     if tbl == "loads":
         for attr in ("p", "p_set"):
@@ -367,6 +377,8 @@ def _injection(n, tbl, ts, name, uid):
     attr = "p0" if tbl == "links" else "p"
     frame = getattr(series, attr, pd.DataFrame())
     if name not in frame.columns:
+        if solved:
+            return pd.Series(0.0, index=n.snapshots)
         raise ContractError(f"unit {uid}: {name} has no hourly power in the project; is the project solved?")
     p = frame[name].astype(float)
     return -p if tbl == "links" else p
@@ -385,13 +397,14 @@ def campus_hourly(n, campus):
     c = campus["campus"]
     periods = _periods(n)
     multi = isinstance(n.snapshots, pd.MultiIndex)
+    solved = _solved(n)
     rows = []
     for uid, u in c["units"].items():
         pname = u.get("pypsa_name")
         if not pname:
             raise ContractError(f"unit {uid} has no pypsa_name, so the project cannot give its hourly power")
         tbl, ts = _find(n, pname, u["kind"], uid)
-        inj = _injection(n, tbl, ts, pname, uid)
+        inj = _injection(n, tbl, ts, pname, uid, solved)
         for period, sns in periods:
             on = _active(n, tbl, pname, period, multi)
             vals = inj.loc[sns].to_numpy() if on else np.zeros(len(sns))
