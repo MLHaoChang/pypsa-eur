@@ -66,6 +66,10 @@ Refused at load, each with a message naming the field:
 * a name outside the canonical charset or 12-character cap
   (``schema/network.py``).
 
+Any element may carry ``pypsa_name``, the name it has in the capacity-
+expansion project. It is a plain string and not a value, so it is untagged.
+It is how the project's hourly results find the element (plan C2).
+
 yaml/pandas/pandapower only, like the rest of ``ingest/``; never the unsafe
 full ``yaml.load``.
 """
@@ -202,12 +206,12 @@ def build_campus(spec) -> Campus:
 
     # buses: the PCC first, then the rest in file order
     pcc = c["pcc"]
-    _fields("pcc", pcc, _PCC_FIELDS, ("bus", "vn_kv"))
+    _fields("pcc", pcc, _PCC_FIELDS, ("bus", "vn_kv", "pypsa_name"))
     if "bus" not in pcc or "vn_kv" not in pcc:
         raise ContractError("pcc: needs 'bus' and 'vn_kv'")
     buses = {str(pcc["bus"]): float(pcc["vn_kv"])}
     for b, bspec in (c.get("buses") or {}).items():
-        _fields(f"buses.{b}", bspec, (), ("vn_kv",))
+        _fields(f"buses.{b}", bspec, (), ("vn_kv", "pypsa_name"))
         if str(b) in buses:
             raise ContractError(f"buses: duplicate bus {b!r}")
         try:
@@ -239,7 +243,7 @@ def build_campus(spec) -> Campus:
     edges = []
     for tname, ts in trafos.items():
         where = f"transformers.{tname}"
-        _fields(where, ts, _TRAFO_FIELDS, ("hv_bus", "lv_bus"))
+        _fields(where, ts, _TRAFO_FIELDS, ("hv_bus", "lv_bus", "pypsa_name"))
         hv, lv = str(ts.get("hv_bus")), str(ts.get("lv_bus"))
         if hv == lv:
             raise ContractError(f"{where}: hv_bus and lv_bus are the same bus {hv!r}")
@@ -262,7 +266,7 @@ def build_campus(spec) -> Campus:
 
     for cname, cs in cables.items():
         where = f"cables.{cname}"
-        _fields(where, cs, _CABLE_FIELDS, ("from_bus", "to_bus"))
+        _fields(where, cs, _CABLE_FIELDS, ("from_bus", "to_bus", "pypsa_name"))
         a, b = str(cs.get("from_bus")), str(cs.get("to_bus"))
         if a == b:
             raise ContractError(f"{where}: from_bus and to_bus are the same bus {a!r}")
@@ -289,14 +293,14 @@ def build_campus(spec) -> Campus:
         if kind not in UNIT_KINDS:
             raise ContractError(f"{where}: unknown kind {kind!r}; allowed {list(UNIT_KINDS)}")
         required = _UNIT_FIELDS[kind]
-        _fields(where, us, required, ("kind", "bus"))
+        _fields(where, us, required, ("kind", "bus", "pypsa_name"))
         bus = str(us.get("bus"))
         _bus_kv(where, buses, bus)
         v = {f: _tagged(where, f, us, rows) for f in required}
         uname = str(uname)
         row = {"unit_id": uname, "kind": kind, "bus": bus, "p_mw": v["p_mw"],
                "s_mva": v.get("s_mva", math.nan), "e_mwh": v.get("e_mwh", math.nan),
-               "pf": v.get("pf", math.nan)}
+               "pf": v.get("pf", math.nan), "pypsa_name": us.get("pypsa_name")}
         if kind == "load":
             if not 0 < v["pf"] <= 1:
                 raise ContractError(f"{where}.pf must be in (0, 1], got {v['pf']}")
