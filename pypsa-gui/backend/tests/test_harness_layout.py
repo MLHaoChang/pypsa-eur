@@ -318,6 +318,12 @@ MOVED_TUNABLES = {
     "SESSION_MESSAGES_MAX": "harness.history",
     "ROTATE_BYTES": "harness.history",
     "MAX_TOOL_RESULT_CHARS_PER_TURN": "harness.results",
+    "CONFIRMATION_TTL_SECONDS": "harness.session",
+    "SESSION_IDLE_TTL_SECONDS": "harness.session",
+    "SESSION_MAX_RESIDENT": "harness.session",
+    "AUTO_APPROVE_TIERS": "harness.confirm",
+    "STREAM_RATE_CAPACITY": "harness.ratelimit",
+    "STREAM_RATE_REFILL_PER_SEC": "harness.ratelimit",
 }
 
 
@@ -346,3 +352,27 @@ def test_moved_tunables_are_read_where_they_are_patched():
     for name, home in MOVED_TUNABLES.items():
         mod = importlib.import_module(home)
         assert getattr(chat_service, name) == getattr(mod, name)
+
+    # The alias forwards (PEP 562), never copies: a patch on the home is
+    # what the alias reads, and the loop declares every forwarded name.
+    from harness import loop
+
+    assert set(loop._FORWARDED_TUNABLES) == set(MOVED_TUNABLES)
+    assert {k: v for k, v in loop._FORWARDED_TUNABLES.items()} == MOVED_TUNABLES
+
+
+def test_a_patch_on_the_home_is_what_the_alias_reads(monkeypatch):
+    from harness import session
+    from services import chat_service
+
+    monkeypatch.setattr(session, "CONFIRMATION_TTL_SECONDS", 7.5)
+    assert chat_service.CONFIRMATION_TTL_SECONDS == 7.5
+
+
+def test_the_loop_has_no_bare_read_of_a_moved_tunable():
+    """A reader left in loop.py must go through the home module's attribute
+    (`harness_session.CONFIRMATION_TTL_SECONDS`), or a patch on the home
+    would not reach it."""
+    tree = ast.parse((HARNESS / "loop.py").read_text(encoding="utf-8"))
+    bare = sorted({n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id in MOVED_TUNABLES})
+    assert bare == []

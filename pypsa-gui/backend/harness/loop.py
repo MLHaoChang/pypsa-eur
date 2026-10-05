@@ -57,63 +57,43 @@ NO ANTHROPIC SDK IMPORT. `run_turn` drives an `LLMProvider` (the seam in
 """
 from __future__ import annotations
 
-import collections
 import concurrent.futures
 import contextvars
 import logging
 import os
-import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Callable, Generator
 
 from fastapi import HTTPException
 from services.llm_config import DEFAULT_MODEL, OPUS_MODEL  # noqa: F401 — OPUS_MODEL re-exported for tests (chat_service.OPUS_MODEL)
 from services.project_context import ProjectContext
+from harness import session as harness_session  # noqa: E402 — moved tunables are read live (issue 08)
 
 logger = logging.getLogger("pypsa_gui.chat")
 
 from harness.history import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    SESSION_MESSAGES_MAX, _message_is_tool_results, _is_turn_start, rewind_session, _drop_oldest_turn_group, TURN_SUMMARY_PREFIX, TURN_SUMMARY_MAX_CHARS, _SUMMARY_LINE_CHARS, _SUMMARY_MAX_LINES, is_turn_summary, _describe_dropped, _render_summary, _parse_summary, trim_session_messages, CHAT_FILENAME, ROTATE_BYTES, _redact_for_persist, get_persist_path, read_all_turns, read_all_turns_with_gap, _today_token_spend, append_turn, _pending_turn_path_unlocked, begin_pending_turn, read_pending_turn, clear_pending_turn, flush_to_disk, _rotate_chat_jsonl_unlocked, SAVE_LINEAGE_REBIND_MOVE, SAVE_LINEAGE_COPY, SAVE_LINEAGE_SCENARIO_COPY, _project_chat_paths, handle_save_lineage, handle_rename_lineage, handle_snapshot_lineage,
+    _message_is_tool_results, _is_turn_start, rewind_session, _drop_oldest_turn_group, TURN_SUMMARY_PREFIX, TURN_SUMMARY_MAX_CHARS, _SUMMARY_LINE_CHARS, _SUMMARY_MAX_LINES, is_turn_summary, _describe_dropped, _render_summary, _parse_summary, trim_session_messages, CHAT_FILENAME, _redact_for_persist, get_persist_path, read_all_turns, read_all_turns_with_gap, _today_token_spend, append_turn, _pending_turn_path_unlocked, begin_pending_turn, read_pending_turn, clear_pending_turn, flush_to_disk, _rotate_chat_jsonl_unlocked, SAVE_LINEAGE_REBIND_MOVE, SAVE_LINEAGE_COPY, SAVE_LINEAGE_SCENARIO_COPY, _project_chat_paths, handle_save_lineage, handle_rename_lineage, handle_snapshot_lineage,
 )
 
 
 
-# Confirmation card TTL (Phase 2 / F13). Tokens older than this are rejected
-# with 409 error_kind='confirmation_expired'; the agent re-prompts with a
-# fresh token. 300s matches the v6 plan default.
-CONFIRMATION_TTL_SECONDS: float = 300.0
-
-# Result-ref FIFO cap (Phase 2 / Phase 4 polish). The session keeps a small
-# in-memory list of recent (tool_name, result_summary) refs so the model can
-# reference earlier outputs without re-fetching. FIFO-capped so a long turn
-# doesn't grow unbounded.
-RESULT_REFS_MAXLEN: int = 50
-
-# Safety tier strings recognised by the M7 parallel-destructive pre-scan.
-# These match the textual `Safety: <tier>` markers in chat_tools_schema.py
-# tool descriptions. Any tool whose tier is in this set requires confirmation
-# AND must not appear alongside another such tool in a single turn.
-DESTRUCTIVE_TIERS = frozenset(["destructive", "execution", "execution_long_running"])
-# Guided mode (G3, P25 gate B1): "the assistant does the steps, you confirm" —
-# every CHANGE confirms, so `write` joins the card there. Expert keeps
-# DESTRUCTIVE_TIERS exactly. The M7 parallel pre-scan keeps DESTRUCTIVE_TIERS
-# in both modes: several Guided writes in one response are not refused, they
-# are carded one after the other (dispatch is sequential and blocks on each).
-GUIDED_CONFIRM_TIERS = DESTRUCTIVE_TIERS | frozenset(["write"])
+from harness.session import (  # noqa: E402, F401 — moved (issue 08); re-exported
+    RESULT_REFS_MAXLEN, PendingConfirmation, ChatSession, _SESSIONS, _SESSIONS_LOCK, get_session, session_owner_allows, _evict_idle_sessions_locked, get_or_create_session_reporting, get_or_create_session, drop_session, _reset_sessions_for_tests,
+)
 
 
-def _confirm_tiers(guided: bool) -> frozenset[str]:
-    """The tiers that go through the confirmation card this turn."""
-    return GUIDED_CONFIRM_TIERS if guided else DESTRUCTIVE_TIERS
+
+from harness.confirm import (  # noqa: E402, F401 — moved (issue 08); re-exported
+    DESTRUCTIVE_TIERS, GUIDED_CONFIRM_TIERS, _confirm_tiers, _is_guided, find_parallel_destructive, _safety_tier_for, _confirm_destructive_tool,
+)
 
 
-def _is_guided(ui_context: Any) -> bool:
-    """The turn's mode, from the same allow-listed key `_format_ui_context`
-    reads: exactly the string 'guided'; anything else is Expert."""
-    return isinstance(ui_context, dict) and ui_context.get("ui_mode") == "guided"
+
+
+
 
 # Tools that the agent itself uses to legitimately CHANGE the active
 # project binding. The P0 mid-turn-switch guard in `run_turn` refreshes
@@ -159,15 +139,6 @@ MAX_STREAM_RETRY_DELAY: float = float(os.environ.get("PYPSA_GUI_CHAT_RETRY_MAX",
 # error_kind values from _map_sdk_exception that are worth retrying.
 _RETRYABLE_SDK_KINDS: frozenset[str] = frozenset(["rate_limited", "upstream_error"])
 
-# Idle-session eviction (chat reliability). `_SESSIONS` is process-lifetime;
-# without eviction it leaks one ChatSession (a 400-msg deque + usage + pending
-# confirmations) per abandoned session id — every browser reload/tab mints one.
-# A cheap sweep runs opportunistically on session creation; chat.jsonl + GET
-# /history back replay, so dropping an idle in-memory session is safe.
-SESSION_IDLE_TTL_SECONDS: float = float(
-    os.environ.get("PYPSA_GUI_CHAT_SESSION_TTL", str(24 * 3600))
-)
-SESSION_MAX_RESIDENT: int = int(os.environ.get("PYPSA_GUI_CHAT_SESSION_MAX", "1000"))
 
 # Cross-session durable per-project/per-day token spend cap (#9). 0 = DISABLED
 # (default — ops opts in). When > 0, run_turn sums input+output tokens from
@@ -190,43 +161,17 @@ PER_TOOL_TIMEOUT_SECONDS: float = float(
     os.environ.get("PYPSA_GUI_CHAT_TOOL_TIMEOUT", "30.0")
 )
 
-# Per-tier auto-approve policy (#18). A comma-separated list of safety tiers
-# (intersected with DESTRUCTIVE_TIERS — only destructive/execution tiers are
-# confirmable) that the runtime auto-approves WITHOUT the human round-trip.
-# Default empty → every destructive tool still shows a confirmation card (zero
-# behavioural change). The M7 parallel-destructive pre-scan is UPSTREAM of this
-# and is NOT relaxed — auto-approve drops the human wait, not the serialisation
-# invariant. Read at call time via the module attribute so a test can
-# monkeypatch AUTO_APPROVE_TIERS directly.
-AUTO_APPROVE_TIERS: frozenset[str] = frozenset(
-    t.strip().lower()
-    for t in os.environ.get("PYPSA_GUI_CHAT_AUTO_APPROVE_TIERS", "").split(",")
-    if t.strip()
-) & DESTRUCTIVE_TIERS
 
-# /stream rate limit (#26, in-memory token bucket, keyed by session_id). 0 =
-# DISABLED (default — generous, so the SSE test suite never trips). When > 0,
-# each /stream call refills the session's bucket by elapsed*refill (capped at
-# capacity) and admits the request iff >= 1 token remains, else 429s with a
-# Retry-After header. This 429s at the HTTP layer BEFORE the SSE opens —
-# distinct from the SDK-driven rate_limited frame. Read at call time.
-STREAM_RATE_CAPACITY: float = float(
-    os.environ.get("PYPSA_GUI_CHAT_STREAM_RATE_CAPACITY", "0")
+from harness.ratelimit import (  # noqa: E402, F401 — moved (issue 08); re-exported
+    _RATE_BUCKETS, _RATE_LOCK, check_rate_limit,
 )
-STREAM_RATE_REFILL_PER_SEC: float = float(
-    os.environ.get("PYPSA_GUI_CHAT_STREAM_RATE_REFILL", "0.5")
-)
+
 
 from harness.metrics import (  # noqa: E402, F401 — moved (issue 08); re-exported
     _METRICS, _METRICS_LOCK, _metric_incr, _metric_error, _metric_record_duration, _metric_add_tokens, _percentile, _metrics_snapshot, _reset_metrics_for_tests,
 )
 
 
-# ── /stream rate-limit buckets (#26) ──────────────────────────────────────
-# key (session_id) -> (tokens, last_refill_monotonic). Mutated from the
-# request thread under _RATE_LOCK.
-_RATE_BUCKETS: dict[str, tuple[float, float]] = {}
-_RATE_LOCK = threading.Lock()
 
 # Per-tool-timeout worker pool (#16). A SINGLE module-level executor reused
 # across dispatches — spinning up a fresh ThreadPoolExecutor per call (up to
@@ -240,7 +185,7 @@ _TOOL_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 )
 
 from harness.results import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    MAX_TOOL_RESULT_CHARS_PER_TURN, _RESULT_CONTENT_CAP, _ERROR_DETAIL_CAP, _coerce_jsonable, _truncate_result, _truncation_marker, _apply_turn_tool_result_budget, _error_result_content, _result_to_anthropic_content,
+    _RESULT_CONTENT_CAP, _ERROR_DETAIL_CAP, _coerce_jsonable, _truncate_result, _truncation_marker, _apply_turn_tool_result_budget, _error_result_content, _result_to_anthropic_content,
 )
 
 
@@ -293,329 +238,8 @@ from services.redaction import (  # moved 2026-08-13 (provider seam, Task 1)
 
 
 
-@dataclass
-class PendingConfirmation:
-    """
-    Server-stamped confirmation card record (F13). Created when the agent
-    requests user approval for a destructive / execution tool; consumed
-    EXACTLY ONCE by `/api/chat/{session_id}/confirm`.
-
-    `expires_at` is a monotonic-clock deadline (so wall-clock changes do not
-    advance / retreat TTL). Lookups consume the entry — single-use enforced
-    by `ChatSession.consume_confirmation` under `ChatSession._lock`.
-    """
-
-    token: str
-    tool_name: str
-    args: dict[str, Any]
-    safety_tier: str  # one of DESTRUCTIVE_TIERS (+ "write" in Guided mode)
-    created_at: float
-    expires_at: float
-
-    def is_expired(self, now: float | None = None) -> bool:
-        return (now if now is not None else time.monotonic()) >= self.expires_at
 
 
-@dataclass
-class ChatSession:
-    """
-    In-memory chatbot conversation session for ONE project.
-
-    `session_id` — stable UUID hex (audit-log prefix `agent:<verb>:<session6>`).
-
-    `_lock` — per-session mutex. v4-MINOR-3 invariant: guards every mutation
-    of `pending_confirmations` / `confirmation_decisions` / `result_refs` /
-    `usage_acc` so two concurrent `/confirm` POSTs (from two browser tabs,
-    or a quick double-click) serialise — one wins (200), the other observes
-    a missing token and returns 404 (`error_kind='unknown_confirmation_token'`).
-
-    `confirmation_decisions` — once `/confirm` resolves a token, the decision
-    ('approve' | 'deny' | 'expired') is recorded here AND `_decision_event`
-    is set. The agent loop blocks on `_decision_event.wait()` and consults
-    this dict to learn the outcome. Phase 2 stub uses a per-token Event;
-    Phase 3 may switch to asyncio.Future once the SDK is wired.
-
-    `abort_event` — M8 invariant. Set when the SSE generator observes a
-    client disconnect; any cooperating worker thread checks this between
-    iterations to shut down cleanly.
-
-    `usage_acc` — running token totals (in / out / cache_read / cache_create).
-    M10: only token counts are stored; the client renders them as-is. No
-    cost figure is computed or stored anywhere.
-
-    `result_refs` — FIFO of recent tool-call result summaries the agent can
-    cite without re-issuing the tool call. Bounded by RESULT_REFS_MAXLEN.
-    """
-
-    session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
-    # WHO this conversation belongs to, as a string user id. `None` means "no
-    # owner recorded", which the /confirm, /rewind and /abort routes treat as
-    # REFUSE rather than allow — see `session_owner_allows`. Recorded once at
-    # creation and never reassigned: letting a later caller claim an existing
-    # session would be the hole this closes.
-    owner_user_id: str | None = None
-    created_at: float = field(default_factory=time.monotonic)
-    # Monotonic stamp of the last time this session was touched (created or
-    # resolved via get_or_create_session). Drives idle eviction.
-    last_activity: float = field(default_factory=time.monotonic)
-    model: str = DEFAULT_MODEL
-    # Task 7 — the LLM profile this session is bound to. `None` until the
-    # router's first `/stream` call resolves + binds one (or a caller that
-    # constructs a `ChatSession` directly and never sets it — `run_turn`
-    # falls back to `llm_config.resolve_legacy_model(session.model)` in that
-    # case, so a bare `ChatSession(model=...)` keeps resolving the profile
-    # its `model` string always implied). `bound_wire` is the bound
-    # profile's `wire` ("anthropic" | "openai") — kept alongside `profile_id`
-    # rather than re-resolved on every check because it is what the
-    # cross-wire guard in `routers/chat.py` compares against, and a profile
-    # can be edited/deleted out from under a live session id.
-    profile_id: str | None = None
-    bound_wire: str | None = None
-    # The active workflow, {"id", "step"}, or None (chat harness issue 06).
-    # Set by the start_workflow / advance_workflow / end_workflow tools; the
-    # per-turn addendum (`_workflow_addendum`) reads it.
-    workflow: dict[str, Any] | None = None
-    _lock: threading.Lock = field(default_factory=threading.Lock)
-    pending_confirmations: dict[str, PendingConfirmation] = field(default_factory=dict)
-    confirmation_decisions: dict[str, str] = field(default_factory=dict)
-    # Per-token Event the agent waits on. Keyed by token (cleared after
-    # consume). Always created under _lock so two concurrent /confirm cannot
-    # observe a missing event.
-    _decision_events: dict[str, threading.Event] = field(default_factory=dict)
-    abort_event: threading.Event = field(default_factory=threading.Event)
-    # #19 — True for the lifetime of one in-flight run_turn on this session.
-    # Guarded by `_lock` (v4-MINOR-3 doctrine): set/checked at run_turn entry,
-    # cleared in run_turn's try/finally so a concurrent second run_turn on the
-    # same session_id (two tabs) is rejected with turn_already_in_flight.
-    _turn_in_flight: bool = field(default=False)
-    # W-3 (ADR-0001) — whether the provider has EVER reported usage for this
-    # session. `stream_options.include_usage` is a request, not a guarantee:
-    # an OpenAI-compatible endpoint that omits the usage chunk leaves
-    # `usage_acc` at its zero initialisation, and shipping that renders as
-    # "0 in / 0 out · 0 cached" — indistinguishable from a legitimately
-    # unused session, which is precisely the "unresolvable rendered as a
-    # real value" shape ADR-0001 forbids. This wire is new on this branch,
-    # so the state is new too.
-    usage_reported: bool = False
-    # W-3 — turns started on this session, the fallback bound for an endpoint
-    # that never reports usage. See the ceiling in `_run_turn_body`.
-    turns_started: int = 0
-    usage_acc: dict[str, int] = field(
-        default_factory=lambda: {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "cache_read_tokens": 0,
-            "cache_create_tokens": 0,
-        }
-    )
-    result_refs: collections.deque = field(
-        default_factory=lambda: collections.deque(maxlen=RESULT_REFS_MAXLEN)
-    )
-    # Multi-turn message history for the Anthropic Messages API. Each entry
-    # is a dict matching the SDK's message shape ({role, content}). Run_turn
-    # appends user + assistant + tool_result messages per turn so subsequent
-    # turns see the full conversation context. Bounded via pairing-aware
-    # trim (A6) — NOT deque(maxlen=…), which can orphan a tool_use without
-    # its tool_result and make the next Anthropic call reject the sequence.
-    messages: collections.deque = field(default_factory=collections.deque)
-
-    # ── Identity ────────────────────────────────────────────────────────────
-    def session6(self) -> str:
-        """First 6 hex chars of session_id — audit-log action-prefix tag."""
-        return self.session_id[:6]
-
-    def append_history_message(self, msg: dict[str, Any]) -> None:
-        """
-        Append one history message and trim pairing-aware if over cap.
-
-        Scope of the sanitisation here — stated precisely, because the earlier
-        wording overclaimed: this is the only writer to `self.messages`, so
-        every entry in THIS deque is sanitised, whether it came from the live
-        turn or from the GET /history rehydration that replays chat.jsonl.
-        It is NOT the array sent to the API — `_run_turn_body` keeps a separate
-        local `messages` list which it appends to directly. That list is
-        seeded from this deque once per turn (and sanitised again at the seed,
-        since a caller may pass its own `message_history=`); everything
-        appended to it afterwards is freshly serialised by
-        `_serialise_for_anthropic` and therefore already well-formed.
-
-        A message with no blocks the API will accept is skipped entirely —
-        whether it was emptied by dropping or arrived with `content: []`,
-        which an aborted or refused generation produces. An empty content
-        array is itself a 400, so admitting one would swap the bug this
-        branch fixes for a neighbouring one.
-        """
-        sanitised = _sanitise_history_message(msg)
-        if sanitised is None:
-            return
-        self.messages.append(sanitised)
-        trim_session_messages(self.messages)
-
-    # ── Confirmation lifecycle (F13 + v4-MINOR-3) ──────────────────────────
-    def issue_confirmation(
-        self, *, tool_name: str, args: dict[str, Any], safety_tier: str,
-        ttl_seconds: float | None = None,
-    ) -> PendingConfirmation:
-        """
-        Mint a fresh single-use token bound to (tool_name, args). Caller emits
-        the token to the client in a `tool_pending_confirmation` SSE frame and
-        BLOCKS on `wait_for_decision(token, …)` until the user
-        approves / denies / TTL fires.
-
-        `ttl_seconds` resolves to the module-level `CONFIRMATION_TTL_SECONDS`
-        at CALL TIME (not function-def time) so a test can monkeypatch the
-        module attribute and observe the new value without touching the
-        per-call kwarg.
-        """
-        if ttl_seconds is None:
-            ttl_seconds = CONFIRMATION_TTL_SECONDS
-        token = uuid.uuid4().hex
-        now = time.monotonic()
-        pc = PendingConfirmation(
-            token=token,
-            tool_name=tool_name,
-            args=args,
-            safety_tier=safety_tier,
-            created_at=now,
-            expires_at=now + ttl_seconds,
-        )
-        with self._lock:
-            self.pending_confirmations[token] = pc
-            self._decision_events[token] = threading.Event()
-        return pc
-
-    def record_decision(self, token: str, decision: str) -> PendingConfirmation:
-        """
-        Atomically pop a pending token + record the decision. Idempotent on
-        re-call: returns 404 (replay defence) if the token was already
-        consumed by an earlier concurrent /confirm POST.
-
-        Returns the popped PendingConfirmation on success. Raises
-        HTTPException 404 / 409 with structured error_kind on
-        replay / expiry. v4-MINOR-3: both the lookup AND the pop happen
-        under `_lock`, so two concurrent /confirm POSTs against the same
-        token cannot BOTH succeed.
-        """
-        # Lazy import — avoids services.chat_service ↔ fastapi at module load.
-        from fastapi import HTTPException
-        with self._lock:
-            pc = self.pending_confirmations.pop(token, None)
-            event = self._decision_events.pop(token, None)
-            if pc is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail={
-                        "error_kind": "unknown_confirmation_token",
-                        "message": (
-                            "confirmation token not found; it may have been "
-                            "consumed by another request, expired and pruned, "
-                            "or never existed."
-                        ),
-                    },
-                )
-            if pc.is_expired():
-                # Pop already happened; signal the waiting agent so it can
-                # surface error_kind='confirmation_expired' rather than block.
-                self.confirmation_decisions[token] = "expired"
-                if event is not None:
-                    event.set()
-                raise HTTPException(
-                    status_code=409,
-                    detail={
-                        "error_kind": "confirmation_expired",
-                        "tool_name": pc.tool_name,
-                        "message": (
-                            f"confirmation token for {pc.tool_name!r} "
-                            f"expired ({int(time.monotonic() - pc.created_at)}s "
-                            f"after creation; TTL "
-                            f"{int(CONFIRMATION_TTL_SECONDS)}s). Ask the "
-                            "agent to re-prompt with a fresh token."
-                        ),
-                    },
-                )
-            if decision not in ("approve", "deny"):
-                # Defensive: keep the token around for a retry under _lock.
-                self.pending_confirmations[token] = pc
-                if event is not None:
-                    self._decision_events[token] = event
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "error_kind": "invalid_decision",
-                        "message": "decision must be 'approve' or 'deny'",
-                    },
-                )
-            self.confirmation_decisions[token] = decision
-        if event is not None:
-            event.set()
-        return pc
-
-    def wait_for_decision(self, token: str, timeout: float | None = None) -> str:
-        """
-        Block until /confirm resolves the token OR the TTL fires OR the
-        session is aborted. Returns the decision string ('approve' / 'deny'
-        / 'expired' / 'aborted').
-        """
-        with self._lock:
-            event = self._decision_events.get(token)
-            pc = self.pending_confirmations.get(token)
-        if event is None or pc is None:
-            # Token never issued or already consumed by `record_decision`
-            # (which pops pending + events but writes the decision into
-            # `confirmation_decisions`). Pop the decision so the dict
-            # doesn't accumulate across long sessions (INT-009).
-            with self._lock:
-                decision = self.confirmation_decisions.pop(token, None)
-            return decision or "expired"
-
-        # Compute remaining TTL relative to the token's expiry, capped by the
-        # caller-provided timeout if any.
-        now = time.monotonic()
-        remaining = max(0.0, pc.expires_at - now)
-        wait_for = remaining if timeout is None else min(remaining, timeout)
-        # Wake on the decision event OR on abort. Poll abort periodically
-        # so we don't need a separate combined-event primitive.
-        poll = 0.1
-        deadline = now + wait_for
-        while True:
-            if self.abort_event.is_set():
-                with self._lock:
-                    self.confirmation_decisions[token] = "aborted"
-                return "aborted"
-            slice_ = min(poll, max(0.0, deadline - time.monotonic()))
-            if event.wait(slice_):
-                # Phase 4 QA fix (INT-009): pop the decisions entry once
-                # consumed so long-running sessions don't leak unbounded
-                # tokens.
-                with self._lock:
-                    return self.confirmation_decisions.pop(token, "expired")
-            if time.monotonic() >= deadline:
-                # TTL elapsed without /confirm. Mark expired + pop the token
-                # under _lock so a late /confirm sees 404 (or 409 if its
-                # caller raced the expiry window — still safe under _lock).
-                with self._lock:
-                    self.pending_confirmations.pop(token, None)
-                    self._decision_events.pop(token, None)
-                    # Don't write expired into the dict — it's a transient
-                    # state that the caller observes via this return value.
-                    self.confirmation_decisions.pop(token, None)
-                return "expired"
-
-    # ── Usage / result refs (v4-MINOR-3) ───────────────────────────────────
-    def accrue_usage(self, **deltas: int) -> None:
-        with self._lock:
-            for k, v in deltas.items():
-                if k in self.usage_acc:
-                    self.usage_acc[k] += int(v)
-                    # W-3 — a real report arrived, so the totals below now
-                    # mean something. Set on any recognised key, including an
-                    # honest zero: "the endpoint told us zero" is a different
-                    # fact from "the endpoint never told us".
-                    self.usage_reported = True
-
-    def push_result_ref(self, ref: dict[str, Any]) -> None:
-        with self._lock:
-            self.result_refs.append(ref)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -624,147 +248,6 @@ class ChatSession:
 # agent loop is stubbed and tests construct sessions per-test.
 # ─────────────────────────────────────────────────────────────────────────
 
-_SESSIONS: dict[str, ChatSession] = {}
-_SESSIONS_LOCK = threading.Lock()
-
-
-def get_session(session_id: str) -> ChatSession | None:
-    with _SESSIONS_LOCK:
-        return _SESSIONS.get(session_id)
-
-
-def session_owner_allows(sess: "ChatSession", user_id: str | None) -> bool:
-    """
-    May `user_id` act on `sess`?
-
-    FAIL-CLOSED, deliberately. An owner-less session is refused rather than
-    shared: if a future creation path forgets to record the owner, the symptom is
-    "I cannot abort my own turn" — loud and fixed in minutes — instead of silently
-    reopening the hole this closes. `tests/test_chat_session_ownership.py` asserts
-    the normal path DOES record an owner, so that is a caught bug rather than a
-    discovered outage.
-
-    Before this existed, `/confirm`, `/rewind` and `/abort` authenticated (the
-    global /api middleware) and authorized nothing: `_SESSIONS` is a process
-    global and any signed-in caller who knew a session id could truncate a
-    stranger's conversation, kill their in-flight turn, or supply the approval
-    for their destructive tool. Verified cross-ORG before the fix.
-    """
-    if user_id is None:
-        # Local mode issues no cookie and has exactly one identity; nothing to
-        # distinguish, and refusing would break the desktop build.
-        import local_mode
-
-        return local_mode.is_local_mode()
-    return sess.owner_user_id == str(user_id)
-
-
-def _evict_idle_sessions_locked(now: float) -> None:
-    """
-    Drop idle-past-TTL sessions, then enforce the LRU resident cap.
-
-    ASSUMES `_SESSIONS_LOCK` is already held: it pops entries directly rather
-    than calling `drop_session` (which re-acquires the non-reentrant lock and
-    would deadlock). Cheap — one pass over a small dict on session creation.
-    """
-    if SESSION_IDLE_TTL_SECONDS > 0:
-        stale = [
-            sid for sid, s in _SESSIONS.items()
-            if now - s.last_activity > SESSION_IDLE_TTL_SECONDS
-        ]
-        for sid in stale:
-            _SESSIONS.pop(sid, None)
-    if SESSION_MAX_RESIDENT > 0 and len(_SESSIONS) > SESSION_MAX_RESIDENT:
-        # Evict the least-recently-active sessions until back at the cap.
-        ordered = sorted(_SESSIONS.values(), key=lambda s: s.last_activity)
-        for s in ordered[: len(_SESSIONS) - SESSION_MAX_RESIDENT]:
-            _SESSIONS.pop(s.session_id, None)
-
-
-def get_or_create_session_reporting(
-    session_id: str | None = None,
-    *,
-    model: str = DEFAULT_MODEL,
-    owner_user_id: str | None = None,
-) -> tuple[ChatSession, bool]:
-    """
-    Resolve-or-create a session, reporting whether THIS call minted it.
-
-    `created` is True only when this call registered a brand-new session --
-    the only safe basis for a caller (`GET /history`'s rehydration) to adopt
-    a profile onto it. Existence-check and creation happen under a SINGLE
-    `_SESSIONS_LOCK` acquisition (fix round 2): the round-1 fix read
-    "already registered?" via a standalone `get_session` call and then
-    creating/fetching via a SEPARATE `get_or_create_session` call -- two
-    critical sections with a gap between them where a concurrent `/stream`
-    could register-and-bind the session. Whoever observes it as freshly
-    created here did so atomically with the registration itself, so there's
-    no stale read to race.
-
-    Touches `last_activity` (create or reuse) and opportunistically sweeps idle
-    sessions so the in-memory registry can't grow unbounded.
-    """
-    with _SESSIONS_LOCK:
-        now = time.monotonic()
-        _evict_idle_sessions_locked(now)
-        if session_id and session_id in _SESSIONS:
-            sess = _SESSIONS[session_id]
-            sess.last_activity = now
-            return sess, False
-        sess = ChatSession(model=model)
-        # Set on CREATE only. An existing session's owner is never reassigned:
-        # `get_or_create` is reached by /stream and /history, and letting the
-        # second caller overwrite the owner would let anyone adopt a live
-        # session just by naming its id.
-        sess.owner_user_id = owner_user_id
-        if session_id:
-            sess.session_id = session_id
-        sess.last_activity = now
-        _SESSIONS[sess.session_id] = sess
-        return sess, True
-
-
-def get_or_create_session(
-    session_id: str | None = None,
-    *,
-    model: str = DEFAULT_MODEL,
-    owner_user_id: str | None = None,
-) -> ChatSession:
-    """
-    Resolve a session by id, creating a fresh one if unknown. Use the same
-    `session_id` across `/stream` and `/confirm` calls so the LLM/UI/server
-    agree on which conversation a token belongs to.
-
-    Thin wrapper over `get_or_create_session_reporting` -- kept because its
-    signature/return type is pinned by callers and tests that don't care
-    which branch fired.
-    """
-    sess, _created = get_or_create_session_reporting(
-        session_id, model=model, owner_user_id=owner_user_id,
-    )
-    return sess
-
-
-def drop_session(session_id: str) -> None:
-    """Called by `/abort` to release the session record. Safe on unknown id."""
-    with _SESSIONS_LOCK:
-        _SESSIONS.pop(session_id, None)
-
-
-def _reset_sessions_for_tests() -> None:
-    """
-    Test-only cleanup hook so the registry can't bleed across pytest runs.
-
-    Also clears the #20 metrics and #26 rate-limit buckets — the chat test
-    suites' autouse `_reset_chat_sessions` fixture calls this around every
-    test, so folding the resets here keeps turn-counts / bucket state from
-    bleeding without adding a second autouse seam.
-    """
-    with _SESSIONS_LOCK:
-        _SESSIONS.clear()
-    _reset_metrics_for_tests()
-    with _RATE_LOCK:
-        _RATE_BUCKETS.clear()
 
 
 
@@ -775,38 +258,20 @@ def _reset_sessions_for_tests() -> None:
 
 
 
-def check_rate_limit(key: str) -> tuple[bool, float]:
-    """
-    In-memory token-bucket rate-limit check for POST /stream (#26).
 
-    Returns `(allowed, retry_after_seconds)`. Keyed STRICTLY on the caller's
-    session_id — per-session is the right granularity (a session is one
-    conversation = one rate-limit subject). Per-IP / host keying is deliberately
-    NOT done: under TestClient `request.client.host` is the constant
-    'testclient' (every request collapses into one bucket) and behind a reverse
-    proxy every request shares the proxy IP unless X-Forwarded-For is parsed —
-    both out of scope here.
 
-    Disabled when STREAM_RATE_CAPACITY <= 0 (the default) → always allows.
-    Reads the module-level capacity / refill at call time so a test can
-    monkeypatch them.
-    """
-    capacity = STREAM_RATE_CAPACITY
-    refill = STREAM_RATE_REFILL_PER_SEC
-    if capacity <= 0:
-        return True, 0.0
-    now = time.monotonic()
-    with _RATE_LOCK:
-        tokens, last = _RATE_BUCKETS.get(key, (capacity, now))
-        # Refill by elapsed*rate, capped at capacity.
-        tokens = min(capacity, tokens + max(0.0, now - last) * refill)
-        if tokens >= 1.0:
-            _RATE_BUCKETS[key] = (tokens - 1.0, now)
-            return True, 0.0
-        # Denied — keep the (sub-1) token count, advance the clock.
-        _RATE_BUCKETS[key] = (tokens, now)
-        retry_after = (1.0 - tokens) / refill if refill > 0 else 1.0
-        return False, retry_after
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -838,26 +303,6 @@ from harness.sse import sse_frame  # noqa: E402, F401 — moved (issue 08); re-e
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def find_parallel_destructive(tool_calls: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """
-    Return the list of tool_use blocks in `tool_calls` whose safety tier is
-    destructive / execution / execution_long_running, if there are TWO OR
-    MORE. Empty list when the model emitted at most one destructive call —
-    serial confirmation flow is OK.
-
-    Each tool_use block is `{tool_use_id, name, args, safety_tier}`. The
-    pre-scan looks at `safety_tier`; callers populate it by looking up the
-    tool's `Safety: <tier>` marker in chat_tools_schema.TOOLS at request
-    time (Phase 3 will derive this from the description; Phase 2 stub
-    accepts an explicit `safety_tier` per block).
-    """
-    destructives = [
-        b for b in tool_calls
-        if (b.get("safety_tier") or "").lower() in DESTRUCTIVE_TIERS
-    ]
-    if len(destructives) <= 1:
-        return []
-    return destructives
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1125,7 +570,7 @@ def _dispatch_stub_call(
             "args": args,
             "safety_tier": tier,
             "confirmation_token": pc.token,
-            "ttl_seconds": CONFIRMATION_TTL_SECONDS,
+            "ttl_seconds": harness_session.CONFIRMATION_TTL_SECONDS,
         }
 
         decision = session.wait_for_decision(
@@ -1184,41 +629,6 @@ def _dispatch_stub_call(
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def _safety_tier_for(tool_name: str) -> str:
-    """
-    Resolve a tool's safety tier (read / write / destructive / execution /
-    execution_long_running) by grepping the documented `Safety: <tier>`
-    marker in its description.
-
-    THIS DEFAULT IS FAIL-**OPEN**, and the docstring used to claim the
-    opposite ("fails closed"). An unknown or unmarked tool resolves to
-    "read", and "read" is precisely the tier that gets NO confirmation card
-    — so a destructive tool whose author forgot the marker would execute
-    unconfirmed. The old wording named the behaviour ("no confirmation
-    card") while mislabelling its direction, which is how it survived
-    review.
-
-    The default is left as-is deliberately: making it confirmable would
-    start gating tools that are legitimately unmarked-as-read, changing
-    behaviour for the whole registry to defend against a case that does not
-    currently exist. What keeps it safe instead is
-    `test_every_tool_safety_marker_resolves_to_known_tier`
-    (tests/test_chat_tools_dispatch.py), which asserts every TOOLS entry
-    carries a marker resolving to its own literal tier — so a missing marker
-    is a CI failure rather than a silent runtime fail-open.
-    """
-    # Lazy import — keeps services.chat_service import-light when only the
-    # Phase 0/2 helpers are needed.
-    from harness.catalogue import TOOLS
-    for tool in TOOLS:
-        if tool["name"] == tool_name:
-            desc = tool["description"]
-            for tier in ("execution_long_running", "execution", "destructive",
-                          "write", "read"):
-                if f"Safety: {tier}" in desc:
-                    return tier
-            return "read"
-    return "read"
 
 
 _redact_for_log = redact_for_log  # moved 2026-08-13 (provider seam, Task 1)
@@ -2061,74 +1471,14 @@ def _profile_awareness_block() -> str:
     return block
 
 
-# Thinking blocks the API will reject on replay. `thinking` requires both
-# `thinking` and `signature`; `redacted_thinking` requires `data`. Blocks
-# written by the pre-fix serialiser (bare {"type": "thinking"}) are already
-# on disk in users' chat.jsonl — see _sanitise_history_message.
-_THINKING_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
-    "thinking": ("thinking", "signature"),
-    "redacted_thinking": ("data",),
-}
+from harness.history import (  # noqa: E402, F401 — moved (issue 08); re-exported
+    _THINKING_REQUIRED_FIELDS, _thinking_block_is_wellformed, _sanitise_history_message,
+)
 
 
-def _thinking_block_is_wellformed(block: Any) -> bool:
-    """
-    True unless `block` is a thinking / redacted_thinking block whose required
-    field is ABSENT or not a string. Non-thinking blocks and non-dict entries
-    are always True — this predicate only ever rejects the shape that produced
-    the observed 400.
-
-    PRESENCE AND TYPE, NOT TRUTHINESS — do not "tighten" this to `all(...)` on
-    the values. Measured against the live API (SDK 0.117.0, claude-sonnet-5,
-    reasoning-heavy prompt): adaptive thinking is on by default and returns
-    ThinkingBlock(thinking="", signature=<436 chars>) — an EMPTY thinking text
-    with a valid signature. That block is well-formed and replays fine; a
-    truthiness test drops it and silently discards the model's signed
-    reasoning from history. Only the shape the old serialiser produced —
-    the field missing entirely — is malformed.
-    """
-    if not isinstance(block, dict):
-        return True
-    required = _THINKING_REQUIRED_FIELDS.get(block.get("type"))
-    if required is None:
-        return True
-    return all(isinstance(block.get(field), str) for field in required)
 
 
-def _sanitise_history_message(msg: dict[str, Any]) -> dict[str, Any] | None:
-    """
-    Drop malformed thinking blocks from one history message.
 
-    The pre-fix serialiser persisted bare {"type": "thinking"} blocks into
-    live sessions' chat.jsonl. Fixing the serialiser does not repair what is
-    already stored: rehydrating that history replays the same invalid shape
-    and 400s again ('...thinking.thinking: Field required'). A thinking block
-    with no content carries no information and the API accepts an assistant
-    turn without one, so dropping is lossless. Well-formed thinking blocks
-    are preserved — the API rejects a turn whose signed thinking is altered.
-
-    Returns None when the message has no blocks the API will accept — whether
-    they were dropped here or the list arrived empty. BOTH cases must return
-    None: `content: []` is itself a 400 ("all messages must have non-empty
-    content"), and it is reachable without any dropping at all, from a refused
-    or aborted generation whose provider `message_done` event (`final_blocks`
-    in `run_turn`, the seam's serialised-blocks source) comes back empty. An
-    earlier version tested `len(kept) == len(content)` first, which is `0 == 0`
-    for an already-empty list and returned it unchanged — a guard the
-    docstring claimed but the code did not have.
-
-    Otherwise returns the message unchanged (same object) when nothing needed
-    dropping, or a shallow copy with the surviving blocks.
-    """
-    content = msg.get("content")
-    if not isinstance(content, list):
-        return msg
-    kept = [b for b in content if _thinking_block_is_wellformed(b)]
-    if not kept:
-        return None
-    if len(kept) == len(content):
-        return msg
-    return {**msg, "content": kept}
 
 
 @dataclass
@@ -3574,74 +2924,6 @@ def _run_turn_body(
             return
 
 
-def _confirm_destructive_tool(
-    session: ChatSession,
-    *,
-    tool_use_id: str,
-    tool_name: str,
-    args: dict[str, Any],
-    tier: str,
-    tool_results_collector: list[dict[str, Any]],
-    guided: bool = False,
-) -> Generator[tuple[str, dict[str, Any]], None, bool]:
-    """
-    Gate a destructive tool on the user's confirmation. Returns whether to
-    proceed.
-
-    Yields `tool_pending_confirmation` (carrying the token and TTL), BLOCKS on
-    the decision, and on anything but approval emits `tool_error` and pairs an
-    `is_error` result for this `tool_use_id`. That pairing is not optional:
-    Anthropic requires one result per `tool_use`, and a gap surfaces on the NEXT
-    turn as an SDK 400 rather than as a permissions problem.
-
-    Returning False aborts THIS tool, not the turn — the turn loop carries on
-    with the remaining tool calls.
-
-    Not every destructive tool is gated: `AUTO_APPROVE_TIERS` exempts some, and
-    dropping either half of `tier in DESTRUCTIVE_TIERS and tier not in
-    AUTO_APPROVE_TIERS` fails in a different direction — one blocks exempt tools
-    on a prompt nobody sent, the other runs destructive tools unprompted.
-
-    In Guided mode (`guided`) the `write` tier is gated too
-    (`GUIDED_CONFIRM_TIERS`, P25 gate B1); `AUTO_APPROVE_TIERS` never contains
-    `write`, so a Guided write always asks.
-
-    Phase E of `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`;
-    see `tests/test_chat_confirmation_gate_seam.py`.
-    """
-    if tier in _confirm_tiers(guided) and tier not in AUTO_APPROVE_TIERS:
-        pc = session.issue_confirmation(
-            tool_name=tool_name, args=args, safety_tier=tier,
-        )
-        yield "tool_pending_confirmation", {
-            "tool_use_id": tool_use_id,
-            "tool_name": tool_name,
-            "args": args,
-            "safety_tier": tier,
-            "confirmation_token": pc.token,
-            "ttl_seconds": CONFIRMATION_TTL_SECONDS,
-        }
-        decision = session.wait_for_decision(pc.token)
-        if decision != "approve":
-            error_kind = {
-                "deny": "confirmation_denied",
-                "expired": "confirmation_expired",
-                "aborted": "aborted",
-            }.get(decision, "unknown_decision")
-            yield "tool_error", {
-                "tool_use_id": tool_use_id,
-                "tool_name": tool_name,
-                "error_kind": error_kind,
-                "message": f"{decision} on confirmation for {tool_name!r}",
-            }
-            tool_results_collector.append({
-                "type": "tool_result",
-                "tool_use_id": tool_use_id,
-                "is_error": True,
-                "content": error_kind,
-            })
-            return False
-    return True
 
 
 
@@ -4027,11 +3309,30 @@ def _dispatch_real_tool_call(
 # ─────────────────────────────────────────────────────────────────────────
 
 
+# ── Moved tunables are forwarded, never copied (chat harness issue 08) ─────
+#
+# A tunable that left this module for another harness module is read HERE
+# through `__getattr__`, so `chat_service.CONFIRMATION_TTL_SECONDS` (the
+# route's /health, a test's assertion) is always the live value of its home.
+# A copy made by `from harness.session import CONFIRMATION_TTL_SECONDS` would
+# go stale the moment a test patched the home — the silent no-op the
+# `MOVED_TUNABLES` tripwire in tests/test_harness_layout.py exists to catch.
+_FORWARDED_TUNABLES: dict[str, str] = {
+    "MAX_TOOL_RESULT_CHARS_PER_TURN": "harness.results",
+    "SESSION_MESSAGES_MAX": "harness.history",
+    "ROTATE_BYTES": "harness.history",
+    "CONFIRMATION_TTL_SECONDS": "harness.session",
+    "SESSION_IDLE_TTL_SECONDS": "harness.session",
+    "SESSION_MAX_RESIDENT": "harness.session",
+    "AUTO_APPROVE_TIERS": "harness.confirm",
+    "STREAM_RATE_CAPACITY": "harness.ratelimit",
+    "STREAM_RATE_REFILL_PER_SEC": "harness.ratelimit",
+}
 
 
-
-
-
-
-
-
+def __getattr__(name: str):
+    home = _FORWARDED_TUNABLES.get(name)
+    if home is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    import importlib
+    return getattr(importlib.import_module(home), name)

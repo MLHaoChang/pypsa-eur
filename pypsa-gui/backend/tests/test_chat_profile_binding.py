@@ -28,6 +28,7 @@ import json
 import pytest
 
 from services import chat_service
+from harness import session as harness_session
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1336,7 +1337,7 @@ def test_set_active_profile_refused_for_a_non_super_admin(appdata, monkeypatch):
     from services.llm_fake import FakeProvider
     from services.llm_provider import LLMEvent
 
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 1.0)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 1.0)
     assert llm_config.resolve_active().id == "anthropic-sonnet"
 
     session = chat_service.ChatSession(model=llm_config.DEFAULT_MODEL)
@@ -1373,7 +1374,7 @@ def test_set_active_profile_approve_switches_active(
     from services.llm_fake import FakeProvider
     from services.llm_provider import LLMEvent
 
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 1.0)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 1.0)
     assert llm_config.resolve_active().id == "anthropic-sonnet"
 
     session = chat_service.ChatSession()
@@ -1415,7 +1416,7 @@ def test_set_active_profile_deny_leaves_active_unchanged(appdata, monkeypatch):
     from services.llm_fake import FakeProvider
     from services.llm_provider import LLMEvent
 
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 1.0)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 1.0)
     assert llm_config.resolve_active().id == "anthropic-sonnet"
 
     session = chat_service.ChatSession()
@@ -1460,7 +1461,7 @@ def test_set_active_profile_unknown_id_is_structured_tool_error(
     from services.llm_fake import FakeProvider
     from services.llm_provider import LLMEvent
 
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 1.0)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 1.0)
     assert llm_config.resolve_active().id == "anthropic-sonnet"
 
     session = chat_service.ChatSession()

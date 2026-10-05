@@ -39,6 +39,8 @@ import unittest.mock as mock
 import pytest
 
 from services import chat_service
+from harness import confirm as harness_confirm
+from harness import session as harness_session
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -232,7 +234,7 @@ def test_destructive_tool_blocks_until_approve(tmp_projects_dir, install_network
     install_network(n, name=None)
 
     # Short TTL so wait_for_decision returns promptly if the test fails to confirm
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 1.0)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 1.0)
 
     session = chat_service.ChatSession()
 
@@ -353,7 +355,7 @@ def test_project_exists_propagates_to_tool_error_kind(tmp_projects_dir, install_
     import pypsa
     from fastapi import HTTPException
 
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 0.5)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 0.5)
 
     n = pypsa.Network()
     n.add("Bus", "B1")
@@ -423,7 +425,7 @@ def test_descendants_exist_propagates_to_tool_error_kind(tmp_projects_dir, insta
     import pypsa
     from fastapi import HTTPException
 
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 0.5)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 0.5)
 
     n = pypsa.Network()
     n.add("Bus", "B1")
@@ -822,8 +824,8 @@ def test_idle_sessions_evicted_past_ttl(monkeypatch):
     """A session idle beyond the TTL is swept on the next session creation."""
     import time as _time
     chat_service._reset_sessions_for_tests()
-    monkeypatch.setattr(chat_service, "SESSION_IDLE_TTL_SECONDS", 100.0)
-    monkeypatch.setattr(chat_service, "SESSION_MAX_RESIDENT", 1000)
+    monkeypatch.setattr(harness_session, "SESSION_IDLE_TTL_SECONDS", 100.0)
+    monkeypatch.setattr(harness_session, "SESSION_MAX_RESIDENT", 1000)
 
     old = chat_service.get_or_create_session("old")
     old.last_activity = _time.monotonic() - 200.0   # backdate beyond TTL
@@ -837,8 +839,8 @@ def test_active_session_not_evicted_by_ttl(monkeypatch):
     """A recently-touched session is NOT swept (last_activity within TTL)."""
     import time as _time
     chat_service._reset_sessions_for_tests()
-    monkeypatch.setattr(chat_service, "SESSION_IDLE_TTL_SECONDS", 100.0)
-    monkeypatch.setattr(chat_service, "SESSION_MAX_RESIDENT", 1000)
+    monkeypatch.setattr(harness_session, "SESSION_IDLE_TTL_SECONDS", 100.0)
+    monkeypatch.setattr(harness_session, "SESSION_MAX_RESIDENT", 1000)
 
     keep = chat_service.get_or_create_session("keep")
     keep.last_activity = _time.monotonic() - 10.0    # within TTL
@@ -850,8 +852,8 @@ def test_active_session_not_evicted_by_ttl(monkeypatch):
 def test_lru_cap_evicts_least_recently_active(monkeypatch):
     """Over the resident cap, the lowest-last_activity session is evicted."""
     chat_service._reset_sessions_for_tests()
-    monkeypatch.setattr(chat_service, "SESSION_IDLE_TTL_SECONDS", 0)   # disable TTL branch
-    monkeypatch.setattr(chat_service, "SESSION_MAX_RESIDENT", 2)
+    monkeypatch.setattr(harness_session, "SESSION_IDLE_TTL_SECONDS", 0)   # disable TTL branch
+    monkeypatch.setattr(harness_session, "SESSION_MAX_RESIDENT", 2)
 
     s1 = chat_service.get_or_create_session("s1")
     s2 = chat_service.get_or_create_session("s2")
@@ -960,7 +962,7 @@ def test_agent_rebinding_tool_does_not_trigger_mid_turn_guard(tmp_projects_dir, 
     from services import chat_tools
     from services.pypsa_service import PyPSAService
 
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 1.0)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 1.0)
 
     n = pypsa.Network()
     n.add("Bus", "B1")
@@ -1042,7 +1044,7 @@ def test_agent_rebind_emits_project_rebound_frame(tmp_projects_dir, install_netw
     from services import chat_tools
     from services.pypsa_service import PyPSAService
 
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 1.0)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 1.0)
 
     n = pypsa.Network()
     n.add("Bus", "B1")
@@ -1089,7 +1091,7 @@ def test_external_project_switch_still_blocks(tmp_projects_dir, install_network,
     from services import chat_tools
     from services.pypsa_service import PyPSAService
 
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 1.0)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 1.0)
 
     n = pypsa.Network()
     n.add("Bus", "B1")
@@ -2167,8 +2169,7 @@ def test_auto_approve_tier_skips_confirmation(tmp_projects_dir, install_network,
     n.add("Bus", "B1"); n.add("Bus", "B2")
     install_network(n, name=None)
 
-    monkeypatch.setattr(
-        chat_service, "AUTO_APPROVE_TIERS", frozenset({"destructive"}),
+    monkeypatch.setattr(harness_confirm, "AUTO_APPROVE_TIERS", frozenset({"destructive"}),
     )
 
     session = chat_service.ChatSession()
@@ -2202,8 +2203,8 @@ def test_default_empty_auto_approve_still_confirms(tmp_projects_dir, install_net
     n = pypsa.Network(); n.add("Bus", "B1"); n.add("Bus", "B2")
     install_network(n, name=None)
 
-    monkeypatch.setattr(chat_service, "AUTO_APPROVE_TIERS", frozenset())
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 0.3)
+    monkeypatch.setattr(harness_confirm, "AUTO_APPROVE_TIERS", frozenset())
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 0.3)
 
     session = chat_service.ChatSession()
     turn1_events = [
@@ -2232,8 +2233,7 @@ def test_auto_approve_does_not_bypass_parallel_destructive(tmp_projects_dir, ins
     n = pypsa.Network(); n.add("Bus", "B1")
     install_network(n, name=None)
 
-    monkeypatch.setattr(
-        chat_service, "AUTO_APPROVE_TIERS", frozenset({"destructive"}),
+    monkeypatch.setattr(harness_confirm, "AUTO_APPROVE_TIERS", frozenset({"destructive"}),
     )
 
     session = chat_service.ChatSession()
@@ -2274,7 +2274,7 @@ def test_second_concurrent_turn_rejected_in_flight(tmp_projects_dir, install_net
     install_network(n, name=None)
 
     # Long enough that turn #1 is still blocking on the card when we fire #2.
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 5.0)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 5.0)
 
     session = chat_service.ChatSession()
     turn1_events = [

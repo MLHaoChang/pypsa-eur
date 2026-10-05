@@ -892,3 +892,73 @@ def handle_snapshot_lineage(
                 "chat: handle_snapshot_lineage(mode=%s) failed: %s",
                 mode, exc,
             )
+
+
+# Thinking blocks the API will reject on replay. `thinking` requires both
+# `thinking` and `signature`; `redacted_thinking` requires `data`. Blocks
+# written by the pre-fix serialiser (bare {"type": "thinking"}) are already
+# on disk in users' chat.jsonl — see _sanitise_history_message.
+_THINKING_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
+    "thinking": ("thinking", "signature"),
+    "redacted_thinking": ("data",),
+}
+
+
+def _thinking_block_is_wellformed(block: Any) -> bool:
+    """
+    True unless `block` is a thinking / redacted_thinking block whose required
+    field is ABSENT or not a string. Non-thinking blocks and non-dict entries
+    are always True — this predicate only ever rejects the shape that produced
+    the observed 400.
+
+    PRESENCE AND TYPE, NOT TRUTHINESS — do not "tighten" this to `all(...)` on
+    the values. Measured against the live API (SDK 0.117.0, claude-sonnet-5,
+    reasoning-heavy prompt): adaptive thinking is on by default and returns
+    ThinkingBlock(thinking="", signature=<436 chars>) — an EMPTY thinking text
+    with a valid signature. That block is well-formed and replays fine; a
+    truthiness test drops it and silently discards the model's signed
+    reasoning from history. Only the shape the old serialiser produced —
+    the field missing entirely — is malformed.
+    """
+    if not isinstance(block, dict):
+        return True
+    required = _THINKING_REQUIRED_FIELDS.get(block.get("type"))
+    if required is None:
+        return True
+    return all(isinstance(block.get(field), str) for field in required)
+
+
+def _sanitise_history_message(msg: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    Drop malformed thinking blocks from one history message.
+
+    The pre-fix serialiser persisted bare {"type": "thinking"} blocks into
+    live sessions' chat.jsonl. Fixing the serialiser does not repair what is
+    already stored: rehydrating that history replays the same invalid shape
+    and 400s again ('...thinking.thinking: Field required'). A thinking block
+    with no content carries no information and the API accepts an assistant
+    turn without one, so dropping is lossless. Well-formed thinking blocks
+    are preserved — the API rejects a turn whose signed thinking is altered.
+
+    Returns None when the message has no blocks the API will accept — whether
+    they were dropped here or the list arrived empty. BOTH cases must return
+    None: `content: []` is itself a 400 ("all messages must have non-empty
+    content"), and it is reachable without any dropping at all, from a refused
+    or aborted generation whose provider `message_done` event (`final_blocks`
+    in `run_turn`, the seam's serialised-blocks source) comes back empty. An
+    earlier version tested `len(kept) == len(content)` first, which is `0 == 0`
+    for an already-empty list and returned it unchanged — a guard the
+    docstring claimed but the code did not have.
+
+    Otherwise returns the message unchanged (same object) when nothing needed
+    dropping, or a shallow copy with the surviving blocks.
+    """
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return msg
+    kept = [b for b in content if _thinking_block_is_wellformed(b)]
+    if not kept:
+        return None
+    if len(kept) == len(content):
+        return msg
+    return {**msg, "content": kept}

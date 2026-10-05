@@ -1,6 +1,6 @@
 # 08 — The turn loop, session, confirmation and persistence move into the harness
 
-Status: ready-for-agent (in progress 2026-10-05: the loop moved whole to `harness/loop.py`; `sse`, `fence`, `results`, `history`, `metrics` extracted under the README's splitting rule; sessions, confirmation, budget gates, provider wiring and the turn body remain)
+Status: ready-for-agent (in progress 2026-10-05: the loop moved whole to `harness/loop.py`; `sse`, `fence`, `results`, `history`, `metrics`, `ratelimit`, `session`, `confirm` extracted under the README's splitting rule; budget gates, the stub loop, provider wiring, prompt assembly and the turn body remain)
 Type: task
 Blocked by: 02, 06, 07
 
@@ -45,3 +45,12 @@ through `chat_service` now patch the new module; a tripwire in
 5,315 → ~4,040 lines.
 
 2026-10-05 (gate for step 2, 5439066): 2910 passed, 5 skipped, 0 failed.
+
+2026-10-05 (step 3): `ratelimit.py`, `session.py`, `confirm.py` extracted
+(and the history sanitisers joined `history.py`). Six more tunables moved
+with their readers; the loop now FORWARDS every moved tunable (PEP 562
+`__getattr__`) instead of re-importing a copy, so `chat_service.<tunable>`
+reads the home's live value; the one loop reader left
+(`_dispatch_stub_call`'s ttl) reads `harness_session.CONFIRMATION_TTL_SECONDS`.
+36 test sites repointed across confirmation_gate_seam, e2e, profile_binding,
+sse and guided_write_confirmation. loop.py: 4,040 → 3,342 lines.

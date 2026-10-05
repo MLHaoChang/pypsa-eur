@@ -546,7 +546,6 @@ class OpenAICompatProvider:
         some versions; a lot of proxies never add it) is not a connection
         failure.
         """
-        import httpx
         headers: dict[str, str] = {}
         if self._key:
             headers["authorization"] = f"Bearer {self._key}"
