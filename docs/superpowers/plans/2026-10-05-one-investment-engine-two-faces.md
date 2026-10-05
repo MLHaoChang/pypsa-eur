@@ -232,7 +232,7 @@ items (d) to (g); the GS session's U2 grows by the compile rules, the test port,
 `objective_decomposition.py` and `validation_service.py`, and the vocabulary rename. U0, U3 and the
 order of U4 are unchanged.
 
-## 10. One asset parameter schema (proposed, owner decision pending)
+## 10. One asset parameter schema (adopted by the owner 2026-10-05)
 
 Source: `docs/superpowers/assessments/2026-10-05-uniform-asset-parameterisation.md`. The owner asked that
 every asset (battery, line, electrolyser, generator, ...) is parameterised the same way in both modes,
@@ -240,7 +240,7 @@ with only the asset-specific variables differing. Today an asset can be costed o
 (an upfront `overnight_cost` or an annualised `capital_cost`), PyPSA silently prefers the first, and
 which one applies depends on the entry path.
 
-**Proposal.** One declarative schema per asset class, with fixed group order on every screen: Identity,
+**Decision.** One declarative schema per asset class, with fixed group order on every screen: Identity,
 Size, Investment, Fixed O&M, Variable cost, Performance, Replacement/degradation, Provenance.
 Investment is typed only as **overnight parts** (basis, overnight cost, lifetime, FOM share per part).
 `capital_cost` is **derived in one function** and shown read-only. One accessor, `upfront_parts`, serves
@@ -249,7 +249,7 @@ keep their parts in custom columns and leave PyPSA's `overnight_cost` empty.
 
 | Step | What | Owner | When |
 |---|---|---|---|
-| S0 Schema core | `services/asset_schema/{schema,derive,access}.py`, custom part columns, a derive hook in component create/update, `upfront_parts` in `periodized_costs`, capex-budget fallback fixed, two-part battery in the golden fixture (single-part numbers unchanged) | **to decide** (no owner today; touches shared hot files) | Own owner-merged PR, **before U2's PR** |
+| S0 Schema core | `services/asset_schema/{schema,derive,access}.py`, custom part columns, a derive hook in component create/update, `upfront_parts` in `periodized_costs`, capex-budget fallback fixed, two-part battery in the golden fixture (single-part numbers unchanged) | **Coordinating session** (`claude/determined-tesla-np09ww`); additive edits to shared hot files (`models/schemas.py`, `network_crud.py`, `periodized_costs.py`, `solver/objective.py`) | Own owner-merged PR, **before U2's PR** |
 | S0b Finance read | `finance_case._assets` reads `upfront_parts`; `cod_by_asset` defaults from `build_year` | IC session | In the U1 follow-up PR |
 | S1 Expert mode | Asset editors, quick-add, columns and tooltips rendered from the schema; labels fixed | to decide | After S0, parallel to U2/U3 |
 | S2 Guided mode | Assumptions ledger rows as a view of the schema's provenance | GS session | Inside U3 |
