@@ -77,36 +77,31 @@ Full analysis, reproduction and fix criteria:
 
 ## Medium
 
-### 6. `ProjectAccessDep` is adopted by 6 of 23 routers
+### 6. Authorization denies by omission: lock dimension done, ACL dimension open
 
-`routers/deps.py:100` defines the right primitive — a per-route dependency that
-resolves the project named by the request and checks the caller's access. It is
-used by `compare`, `adequacy_worksheet`, `uploads`, `snapshots`, `gridspine` and
-`deps`, and NOT by the five routers carrying most of the surface: `network` (81
-routes), `results` (48), `chat` (20), `simulation` (14), `io` (8) — 171 of 267.
-Those rely on the path-prefix middleware instead.
+**Narrowed 2026-10-05.** The original entry ("`ProjectAccessDep` is adopted by
+6 of 23 routers") was partly stale and partly mis-framed: `/api/results/` has
+since been lock-gated; the count missed `ProjectDep`, a second ACL dependency
+on the same `resolve_project`; and the five large routers act on the ACTIVE
+project, which no path-param dependency can resolve. The item's own remedy was
+the right one: make the omission fail loudly.
 
-This is the structural cause of item 1, and it is a shape rather than a one-off:
-a prefix list denies by omission, so a new router under a new prefix is ungated
-by default, silently, with nothing failing. A dependency declared on the route
-has the opposite default. Worth a test that fails when a route is mounted under
-a prefix no mechanism covers — the omission is what needs to become loud.
-Source: finding 3 of the same audit.
+**Lock dimension: done** in `a266dd5`. `tests/test_write_surface_lock_policy.py`
+fails on any write route or non-read chat tool that is not gated, not
+verifiably holder-checked (calls are followed, not source-scanned), and not
+given a written reason. Mutation-tested seven ways; undoing item 12's fix turns
+it red naming that exact route. Writing it found item 13.
 
-**Fresh evidence, 2026-09-30: item 12 is the fourth miss in one router family.**
-`tests/test_worksheet_foreign_lock.py` already called the fix it guards "the
-third instance of one miss"; `put_asset_health` makes four, and it was ungated
-for 20 days with nothing failing. The proposed test now has a concrete shape to
-aim at, because enumerating write routes in the five routers under
-`/api/projects` and flagging those matched by no lock mechanism is exactly how
-item 12 was found — by hand, in one pass. Two of the four misses would have been
-red the day they landed.
+**Still open:**
+* the **ACL** dimension ("may this caller SEE this project") has the same shape
+  and no omission test. Nothing has been found there, and nothing has looked
+  systematically either;
+* three product questions the policy table now states rather than settles:
+  should gridspine studies, chat-history import/clear, and adequacy campaigns
+  respect the edit lock?
 
-Item 12 being CLOSED does not weaken this. The class is closed in that one
-router family — all three sidecar PUTs now carry the check — but the mechanism
-that let a route ship ungated for 20 days with nothing failing is untouched, and
-it is the same mechanism for every other prefix. Four hand-caught misses is the
-argument for the test, not against it.
+Plan and ground-truth counts:
+`plans/2026-10-05-item-6-write-surface-lock-policy.md`.
 
 ### 7. Node positions revert on the blank canvas
 
