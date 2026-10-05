@@ -5,7 +5,8 @@
  *
  *   cd pypsa-gui/frontend
  *   PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs \
- *     --phase P22.9|P23|P24-BE|P24|P25|P26|P27a|P27b|P28|P29|P30|P32 [--template eh_datacenter] [--out <dir>] [--keep]
+ *     --phase P22.9|P23|P24-BE|P24|P25|P26|P27a|P27b|P28|P29|P30|P31|P32 [--template eh_datacenter] [--out <dir>] [--keep]
+ *     [--self-test]   (P31 only: must FAIL with exit 1, by design — see P31 below)
  *
  * P24 walks the Guided hub design (spec §5) as a first-time user: the
  * template from /projects opens hubDesign at Site; Site rows match the
@@ -123,6 +124,16 @@
  * "Saved in a folder named after the project, under <scratch
  * PYPSAGUI_PROJECTS_ROOT>/" (the root only: gate B6-1).
  *
+ * P31 (deferred spec 2026-09-28 §6) — P26 (every step), with one more check
+ * on each template: right after "Created '<name>' from template" the toast's
+ * box and the assistant's `chat-send` box, sampled every frame while both are
+ * on screen, never intersect (C2). Then the re-gate B4 path (as in P24) on the
+ * P26 data-center project, whose "no failing eh_study response after
+ * recovery" check now counts real `/api/results/eh_study` responses with
+ * status ≥ 500 (C4). `--self-test` installs one 500 route again after
+ * recovery and drives one read through it: that run must print FAIL and exit
+ * 1 (gate row 5 records it as "expected FAIL").
+ *
  * It starts its own uvicorn (local mode, ANTHROPIC_API_KEY unset, app data
  * and projects under a scratch dir), Vite on 5173 and — after the send-gate
  * check — the OpenAI-wire stub model, then walks the phase path in a fresh
@@ -163,11 +174,11 @@ const TEMPLATE_NAMES = {
   eh_h2_hub: 'Industrial Hydrogen Hub',
   eh_microgrid: 'Island Microgrid',
 }
-const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25', 'P26', 'P27a', 'P27b', 'P28', 'P29', 'P30', 'P32'])
+const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25', 'P26', 'P27a', 'P27b', 'P28', 'P29', 'P30', 'P31', 'P32'])
 
 // ── args ────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
-  const out = { phase: null, template: 'eh_datacenter', keep: false,
+  const out = { phase: null, template: 'eh_datacenter', keep: false, selfTest: false,
     out: path.join(os.tmpdir(), 'pypsa-gui-smoke') }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
@@ -175,10 +186,15 @@ function parseArgs(argv) {
     else if (a === '--template') out.template = argv[++i]
     else if (a === '--out') out.out = argv[++i]
     else if (a === '--keep') out.keep = true
+    else if (a === '--self-test') out.selfTest = true
     else { console.error(`unknown argument ${a}`); process.exit(2) }
   }
   if (!PHASES.has(out.phase)) {
     console.error(`--phase must be one of ${[...PHASES].join(', ')} (later phases extend this script)`)
+    process.exit(2)
+  }
+  if (out.selfTest && out.phase !== 'P31') {
+    console.error('--self-test belongs to --phase P31 (deferred spec §6, C4)')
     process.exit(2)
   }
   if (!TEMPLATE_NAMES[out.template]) {
@@ -1259,41 +1275,8 @@ async function phaseP24(browser) {
 
     info(`verdicts: ${JSON.stringify(verdicts)}`)
 
-    // ── re-gate B4: the first eh_study read fails ─────────────────────────
-    step('B4: eh_study answers 500 on a freshly opened project → error line + Retry, bounded requests, no toasts')
-    const ctx2 = await browser.newContext({ viewport: { width: 1440, height: 900 } })
-    try {
-      const p2 = await ctx2.newPage()
-      p2.on('console', m => consoleLines.push(`[b4:${m.type()}] ${m.text()}`))
-      const by2 = id => p2.locator(`[data-testid="${id}"]`)
-      let n = 0
-      const fail = r => { n++; return r.fulfill({ status: 500, contentType: 'application/json', body: '{"detail":"boom"}' }) }
-      await p2.route('**/api/results/eh_study', fail)
-      await p2.goto(`${WEB}/app?project=${encodeURIComponent(TEMPLATE_NAMES.eh_datacenter)}`, { waitUntil: 'domcontentloaded' })
-      await by2('hub-load-error').waitFor({ state: 'visible', timeout: 60_000 })
-      check(/could not be read/.test(await by2('hub-load-error').textContent()), 'plain error line shown')
-      await by2('hub-card-site').waitFor({ state: 'visible', timeout: 15_000 })
-      ok('the Site card renders under the error line (not "Loading the project…")')
-      const n0 = n
-      await sleep(10_000)
-      const burst = n - n0
-      check(burst <= 2, `eh_study requests in the 10 s after the error: ${burst} (total ${n})`)
-      check((await p2.getByText('Loading the project…').count()) === 0, 'no "Loading the project…"')
-      const toasts = await p2.locator('[role="status"]').filter({ hasText: 'boom' }).count()
-      check(toasts === 0, `error toasts for the failed read: ${toasts}`)
-      await shot(p2, 'p24-b4-study-500-error-line')
-      await p2.unroute('**/api/results/eh_study', fail)
-      await by2('hub-load-retry').click()
-      await by2('hub-load-error').waitFor({ state: 'detached', timeout: 30_000 })
-      await by2('hub-card-site').waitFor({ state: 'visible', timeout: 15_000 })
-      ok('Retry recovers once the 500 is lifted: error line gone, Site card shown')
-      const n1 = n
-      await sleep(4_000)
-      check(n === n1, 'no further failing requests after recovery')
-      await shot(p2, 'p24-b4-after-retry')
-    } finally {
-      await ctx2.close()
-    }
+    // ── re-gate B4: the first eh_study read fails (P31 C4: real counter) ──
+    await b4StudyReadFailure(browser, TEMPLATE_NAMES.eh_datacenter, consoleLines)
   } catch (e) {
     try { await shot(page, 'FAILURE') } catch { /* page gone */ }
     const logFile = path.join(args.out, 'FAILURE-console.log')
@@ -1302,6 +1285,77 @@ async function phaseP24(browser) {
     throw e
   } finally {
     await context.close()
+  }
+}
+
+/**
+ * Re-gate B4 (P24), counter made real in P31 (C4): the first `eh_study` read
+ * of a freshly opened project answers 500 → the hub shows its error line and
+ * Retry, requests stay bounded, no toast; Retry after the 500 is lifted
+ * recovers. After recovery every `/api/results/eh_study` response is watched
+ * (`page.on('response')`) and one with status ≥ 500 fails the run. Before
+ * P31 the check compared a counter that only the (already removed) route
+ * handler incremented, so it could never fail.
+ *
+ * `selfTest` (the `--self-test` flag): after recovery one 500 route is
+ * installed again and one request is driven through it, so the counter must
+ * see it and the run must print FAIL and exit 1 — by design. The app sends
+ * no `eh_study` read of its own while no study runs (it polls only a running
+ * study), so the request is a `fetch` from the page; it goes through the same
+ * routing and response events as the app's own reads.
+ */
+async function b4StudyReadFailure(browser, project, consoleLines, { selfTest = false } = {}) {
+  step('B4: eh_study answers 500 on a freshly opened project → error line + Retry, bounded requests, no toasts')
+  const ctx2 = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  try {
+    const p2 = await ctx2.newPage()
+    p2.on('console', m => consoleLines.push(`[b4:${m.type()}] ${m.text()}`))
+    const by2 = id => p2.locator(`[data-testid="${id}"]`)
+    let n = 0
+    const fail = r => { n++; return r.fulfill({ status: 500, contentType: 'application/json', body: '{"detail":"boom"}' }) }
+    // P31 (C4): what the browser actually sends and receives, counted only
+    // once recovery is confirmed.
+    const isStudyRead = url => new URL(url).pathname === '/api/results/eh_study'
+    let watching = false
+    const after = { requests: 0, failing: [] }
+    p2.on('request', req => { if (watching && isStudyRead(req.url())) after.requests++ })
+    p2.on('response', res => {
+      if (watching && isStudyRead(res.url()) && res.status() >= 500) after.failing.push(res.status())
+    })
+    await p2.route('**/api/results/eh_study', fail)
+    await p2.goto(`${WEB}/app?project=${encodeURIComponent(project)}`, { waitUntil: 'domcontentloaded' })
+    await by2('hub-load-error').waitFor({ state: 'visible', timeout: 60_000 })
+    check(/could not be read/.test(await by2('hub-load-error').textContent()), 'plain error line shown')
+    await by2('hub-card-site').waitFor({ state: 'visible', timeout: 15_000 })
+    ok('the Site card renders under the error line (not "Loading the project…")')
+    const n0 = n
+    await sleep(10_000)
+    const burst = n - n0
+    check(burst <= 2, `eh_study requests in the 10 s after the error: ${burst} (total ${n})`)
+    check((await p2.getByText('Loading the project…').count()) === 0, 'no "Loading the project…"')
+    const toasts = await p2.locator('[role="status"]').filter({ hasText: 'boom' }).count()
+    check(toasts === 0, `error toasts for the failed read: ${toasts}`)
+    await shot(p2, 'p24-b4-study-500-error-line')
+    await p2.unroute('**/api/results/eh_study', fail)
+    await by2('hub-load-retry').click()
+    await by2('hub-load-error').waitFor({ state: 'detached', timeout: 30_000 })
+    await by2('hub-card-site').waitFor({ state: 'visible', timeout: 15_000 })
+    ok('Retry recovers once the 500 is lifted: error line gone, Site card shown')
+    watching = true
+    if (selfTest) {
+      info('--self-test: one 500 route is installed again AFTER recovery; this run must FAIL (exit 1) by design')
+      await p2.route('**/api/results/eh_study', fail)
+      const st = await p2.evaluate(() => fetch('/api/results/eh_study').then(r => r.status))
+      info(`--self-test: the driven eh_study read answered ${st}`)
+    }
+    await sleep(4_000)
+    watching = false
+    check(after.failing.length === 0,
+      `no failing eh_study response after recovery (${after.requests} eh_study request(s) seen, `
+      + `${after.failing.length} with status ≥ 500${after.failing.length ? `: ${after.failing.join(', ')}` : ''})`)
+    await shot(p2, 'p24-b4-after-retry')
+  } finally {
+    await ctx2.close()
   }
 }
 
@@ -1685,6 +1739,7 @@ async function phaseP26(browser) {
 async function p26Template(browser, tpl) {
   const consoleLines = []
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  if (args.phase === 'P31') await context.addInitScript(P31_TOAST_SAMPLER)
   const page = await context.newPage()
   page.on('console', m => consoleLines.push(`[${m.type()}] ${m.text()}`))
   page.on('pageerror', e => consoleLines.push(`[pageerror] ${e.message}`))
@@ -1716,6 +1771,7 @@ async function p26Template(browser, tpl) {
     await page.getByRole('button', { name: new RegExp(TEMPLATE_NAMES[tpl.id]) }).click()
     await page.waitForURL(/\/app\?project=/, { timeout: 60_000 })
     out.project = new URL(page.url()).searchParams.get('project')
+    if (args.phase === 'P31') out.p31Toast = await p31ToastCheck(page, L)
     await byId('ui-mode-switch').waitFor({ state: 'visible', timeout: 30_000 })
     check(await pressed('guided') && !(await pressed('expert')), 'ui-mode-switch: guided pressed')
     await byId('hub-design-panel').waitFor({ state: 'visible', timeout: 30_000 })
@@ -2813,6 +2869,74 @@ async function phaseP30(browser) {
   }
 }
 
+// ── P31 (deferred spec §6: C2 toast over Send, C4 real counter) ─────────────
+/** Runs in the page from the first document on: every animation frame in
+ *  which the "… from template" toast and `chat-send` are both on screen, it
+ *  records both boxes and their intersection area. The toast lives ~2 s and
+ *  is raised on /projects just before the client-side navigation to /app, so
+ *  a one-off read from the test could miss it; the sampler cannot. */
+const P31_TOAST_SAMPLER = () => {
+  const w = window
+  w.__p31 = { frames: 0, overlapFrames: 0, maxOverlap: 0, first: null, worst: null, toastSeen: false }
+  const box = el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height } }
+  const visible = b => b.w > 0 && b.h > 0
+  const tick = () => {
+    const toast = [...document.querySelectorAll('[role="status"]')]
+      .find(el => /from template/.test(el.textContent ?? ''))
+    // The toast's whole bar (icon + text), not only its text node.
+    const bar = toast?.parentElement ?? null
+    const send = document.querySelector('[data-testid="chat-send"]')
+    if (bar) w.__p31.toastSeen = true
+    if (bar && send) {
+      const a = box(bar), b = box(send)
+      if (visible(a) && visible(b)) {
+        const ix = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x))
+        const iy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y))
+        const area = ix * iy
+        const s = { toast: a, send: b, area }
+        w.__p31.frames++
+        if (!w.__p31.first) w.__p31.first = s
+        if (area > 0) w.__p31.overlapFrames++
+        if (!w.__p31.worst || area > w.__p31.worst.area) w.__p31.worst = s
+        w.__p31.maxOverlap = Math.max(w.__p31.maxOverlap, area)
+      }
+    }
+    requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+}
+
+/** C2: after "Created '<name>' from template" the toast and Send never
+ *  intersect while both are on screen (and they WERE both on screen, so the
+ *  check is not vacuous). */
+async function p31ToastCheck(page, label) {
+  step(`[${label}] P31 (C2): the "from template" toast and chat-send never intersect`)
+  await page.waitForFunction(() => window.__p31?.frames > 0, null, { timeout: 30_000 })
+    .catch(() => {})
+  await shot(page, `p31-${label}-toast-and-send`)
+  // Let the toast run out so every frame it shared with Send is sampled.
+  await page.waitForFunction(() => ![...document.querySelectorAll('[role="status"]')]
+    .some(el => /from template/.test(el.textContent ?? '')), null, { timeout: 30_000 }).catch(() => {})
+  const r = await page.evaluate(() => window.__p31)
+  info(`P31 toast sampler: ${JSON.stringify(r)}`)
+  check(r.toastSeen, 'the "… from template" toast was shown')
+  check(r.frames > 0, `the toast and chat-send were on screen together for ${r.frames} frame(s)`)
+  check(r.maxOverlap === 0,
+    `toast box ∩ chat-send box = ∅ in every shared frame (max overlap ${r.maxOverlap} px², `
+    + `toast ${JSON.stringify(r.worst?.toast)}, send ${JSON.stringify(r.worst?.send)})`)
+  return r
+}
+
+async function phaseP31(browser) {
+  const p26 = await phaseP26(browser)
+  for (const r of p26) check(r.p31Toast?.frames > 0 && r.p31Toast.maxOverlap === 0,
+    `[${r.id}] toast ∩ Send = ∅ over ${r.p31Toast?.frames} shared frame(s)`)
+  const dc = p26.find(r => r.id === 'eh_datacenter')?.project
+  check(!!dc, `P26 data-center project: ${dc}`)
+  await b4StudyReadFailure(browser, dc, [], { selfTest: args.selfTest })
+  return p26
+}
+
 async function phaseP29(browser) {
   const p26 = await phaseP26(browser)
   const dc = p26.find(r => r.id === 'eh_datacenter')
@@ -2993,7 +3117,7 @@ let startBackend = () => { throw new ToolingError('backend not configured yet') 
 let code = 0
 let browser
 try {
-  console.log(`smoke-guided --phase ${args.phase} --template ${args.template}`)
+  console.log(`smoke-guided --phase ${args.phase} --template ${args.template}${args.selfTest ? ' --self-test' : ''}`)
   console.log(`out: ${args.out}   run dir: ${RUN}`)
 
   step('self-check: Playwright launches a headless browser')
@@ -3043,6 +3167,7 @@ try {
   else if (args.phase === 'P28') await phaseP28(browser)
   else if (args.phase === 'P29') await phaseP29(browser)
   else if (args.phase === 'P30') await phaseP30(browser)
+  else if (args.phase === 'P31') await phaseP31(browser)
   else if (args.phase === 'P32') await phaseP32(browser)
   console.log(`\nPASS — ${shots.length} screenshots in ${args.out}`)
 } catch (e) {
