@@ -413,6 +413,51 @@ def _reconcile(sid: str, ledger: dict, run: dict, findings: dict) -> None:
           f"(+{EVIDENCE['upfront_cost_series_overstatement_pct']} %)")
     x = c.get(_study_url(BASE, sid, f"/options/{oid}/case.xlsx"))
     _step("the case workbook downloads", x.status_code == 200 and x.content[:2] == b"PK")
+    _record_figures(run, findings, case)
+
+
+def _record_figures(run: dict, findings: dict, case: dict) -> None:
+    """
+    Evidence only, no check (U2 plan WP0): the full-precision figures the U2
+    comparison reads, taken from payloads this driver already fetched — the
+    run record, the findings and the named option's case. No request, no
+    step, no exit-code change.
+    """
+    from services.study import packs
+
+    rob = findings.get("robustness") or {}
+    EVIDENCE["sizes"] = {
+        o["option_id"]: {s["asset"]: {"p_nom_opt": s.get("p_nom_opt"),
+                                      "e_nom_opt": s.get("e_nom_opt")}
+                         for s in o.get("sizes") or []}
+        for o in findings.get("options") or []}
+    EVIDENCE["attribution"] = {
+        a["option_id"]: {"status": a.get("status"), "battery_p_nom_mw": a.get("battery_p_nom_mw"),
+                         "battery_npv": a.get("battery_npv"), "option_npv": a.get("option_npv")}
+        for a in findings.get("battery_attribution") or []}
+    EVIDENCE["npv_bounds"] = {
+        "npv_centre": rob.get("npv_centre"), "option_id": rob.get("option_id"),
+        "tornado": {r["key"]: {"evaluation": r.get("evaluation"), "low_value": r["low_value"],
+                               "high_value": r["high_value"], "npv_low": r.get("npv_low"),
+                               "npv_high": r.get("npv_high")}
+                    for r in rob.get("tornado") or []}}
+    k = case.get("kpis") or {}
+    econ = (run["details"][case["option_id"]].get("asset_economics") or {}).get(
+        "storage_units") or []
+    lcos_incl = next((row.get("lcos_eur_per_mwh") for row in econ
+                      if row.get("name") == packs.BATTERY_NAME), None)
+    EVIDENCE["case_kpis"] = {
+        "option_id": case["option_id"], "npv": k.get("npv"), "irr": k.get("irr"),
+        "payback_simple": k.get("payback_simple"),
+        "payback_discounted": k.get("payback_discounted"), "capex_total": k.get("capex_total"),
+        "salvage_eur": k.get("salvage_eur"), "lcos_excl_charging": k.get("lcos"),
+        "lcos_incl_charging": lcos_incl,
+        "ledger_hash": (case.get("provenance") or {}).get("ledger_hash")}
+    EVIDENCE["bills"] = {
+        oid: {"total": (d.get("bill") or {}).get("total"),
+              "annual_bill": (d.get("bill") or {}).get("annual_bill"),
+              "by_component": (d.get("bill") or {}).get("by_component")}
+        for oid, d in sorted((run.get("details") or {}).items())}
 
 
 def _library():
@@ -581,6 +626,15 @@ def main_() -> int:
     for k, v in EVIDENCE.items():
         print(f"  {k}: {v}")
     print(f"\n{PASS} passed, {FAIL} failed ({EVIDENCE['total_s']} s)")
+    # U2 plan WP0: `QA_DECISION_STUDY_EVIDENCE_OUT=<path>` dumps EVIDENCE as
+    # JSON (read by `tests/u2_record_pre_numbers.py`); nothing else changes.
+    out = os.environ.get("QA_DECISION_STUDY_EVIDENCE_OUT")
+    if out:
+        import json
+
+        pathlib.Path(out).write_text(json.dumps(
+            {**EVIDENCE, "checks": {"passed": PASS, "failed": FAIL}}, indent=1, default=str),
+            encoding="utf-8")
     return 1 if FAIL else 0
 
 

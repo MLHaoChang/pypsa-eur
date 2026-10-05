@@ -1,0 +1,440 @@
+{
+ "driver": {
+  "attribution": {
+   "bess_1h": {
+    "battery_npv": 227029.49280588416,
+    "battery_p_nom_mw": 0.7957903841995242,
+    "option_npv": 227029.49280588416,
+    "status": "ok"
+   },
+   "bess_2h": {
+    "battery_npv": null,
+    "battery_p_nom_mw": 0.0,
+    "option_npv": 0.0,
+    "status": "skipped"
+   },
+   "bess_4h": {
+    "battery_npv": null,
+    "battery_p_nom_mw": 0.0,
+    "option_npv": 0.0,
+    "status": "skipped"
+   }
+  },
+  "bills": {
+   "bess_1h": {
+    "annual_bill": 786121.5483312911,
+    "by_component": {
+     "capacity": 0.0,
+     "demand": 68692.45296619344,
+     "energy": 602993.8499243134,
+     "export_credit": 0.0,
+     "fixed": 4800.0,
+     "network": 109635.24544078427,
+     "unavailable": {}
+    },
+    "total": 786121.5483312911
+   },
+   "bess_2h": {
+    "annual_bill": 866424.0,
+    "by_component": {
+     "capacity": 0.0,
+     "demand": 151199.99999999997,
+     "energy": 601128.0,
+     "export_credit": 0.0,
+     "fixed": 4800.0,
+     "network": 109296.0,
+     "unavailable": {}
+    },
+    "total": 866424.0
+   },
+   "bess_4h": {
+    "annual_bill": 866424.0,
+    "by_component": {
+     "capacity": 0.0,
+     "demand": 151199.99999999997,
+     "energy": 601128.0,
+     "export_credit": 0.0,
+     "fixed": 4800.0,
+     "network": 109296.0,
+     "unavailable": {}
+    },
+    "total": 866424.0
+   },
+   "none": {
+    "annual_bill": 866424.0,
+    "by_component": {
+     "capacity": 0.0,
+     "demand": 151199.99999999997,
+     "energy": 601128.0,
+     "export_credit": 0.0,
+     "fixed": 4800.0,
+     "network": 109296.0,
+     "unavailable": {}
+    },
+    "total": 866424.0
+   }
+  },
+  "capex": {
+   "case_capex_total": 580926.9804656527,
+   "p_nom_mw": 0.7957903841995242,
+   "sum_years_capex": 580926.9804656527,
+   "upfront_eur_per_mw": 730000.0
+  },
+  "case_kpis": {
+   "capex_total": 580926.9804656527,
+   "irr": 0.11270233261269219,
+   "lcos_excl_charging": 305.0300695946147,
+   "lcos_incl_charging": 450.4908132087241,
+   "ledger_hash": "4258ef46e3904d49",
+   "npv": 227029.49280588416,
+   "option_id": "bess_1h",
+   "payback_discounted": 13.258679684951593,
+   "payback_simple": 7.29031845708899,
+   "salvage_eur": 106849.54178734843
+  },
+  "checks": {
+   "failed": 0,
+   "passed": 60
+  },
+  "fom": {
+   "asset_economics_fom_cost_eur": 617.7322857348807,
+   "cost_breakdown_storageunit_fom": 617.73229,
+   "horizon_years": 25,
+   "sum_years_opex_fixed": 15443.307143372018
+  },
+  "npv_bounds": {
+   "npv_centre": 227029.49280588416,
+   "option_id": "bess_1h",
+   "tornado": {
+    "battery_inverter_eur_per_kw": {
+     "evaluation": "capex_only",
+     "high_value": 278.1063,
+     "low_value": 149.7495,
+     "npv_high": 162005.12424597566,
+     "npv_low": 335502.56367429293
+    },
+    "battery_storage_eur_per_kwh": {
+     "evaluation": "capex_only",
+     "high_value": 650.0,
+     "low_value": 350.00000000000006,
+     "npv_high": 107660.93517595548,
+     "npv_low": 346398.0504358128
+    },
+    "demand_charge_price": {
+     "evaluation": "redispatch",
+     "high_value": 11700.0,
+     "low_value": 6300.0,
+     "npv_high": 515482.0614635283,
+     "npv_low": -61423.07585175993
+    },
+    "discount_rate": {
+     "evaluation": "rate_only",
+     "high_value": 0.091,
+     "low_value": 0.049,
+     "npv_high": 99404.74744492768,
+     "npv_low": 400707.35621185414
+    }
+   }
+  },
+  "sizes": {
+   "bess_1h": {
+    "battery": {
+     "e_nom_opt": 0.7957903841995242,
+     "p_nom_opt": 0.7957903841995242
+    }
+   },
+   "bess_2h": {
+    "battery": {
+     "e_nom_opt": -0.0,
+     "p_nom_opt": -0.0
+    }
+   },
+   "bess_4h": {
+    "battery": {
+     "e_nom_opt": -0.0,
+     "p_nom_opt": -0.0
+    }
+   },
+   "none": {}
+  },
+  "upfront_cost_series_eur_per_mw": 881617.8562714397,
+  "verdict": {
+   "class": "marginal",
+   "drivers": [
+    "demand_charge_price"
+   ],
+   "option": "bess_1h",
+   "skipped_options": [
+    "bess_2h",
+    "bess_4h"
+   ]
+  }
+ },
+ "golden_s5": {
+  "bess_2h": {
+   "battery_p_nom_mw": 0.7719576815922196,
+   "bill_baseline": 866424.0,
+   "bill_option": 785306.1841104208,
+   "capex_total": 458272.600481453,
+   "discount_rate": 0.07,
+   "fom_annual": 557.3585892776363,
+   "horizon_years": 25,
+   "irr": 0.1556365549253083,
+   "lcos_excl_charging": 244.3901945714324,
+   "lcos_incl_charging": 391.11995129194753,
+   "ledger_hash": "5d1cea7bf9b5863d",
+   "market_revenue_at_duals": 49223.62531404373,
+   "net_cash_flow": [
+    -458272.600481453,
+    80560.45730030161,
+    80560.45730030161,
+    80560.45730030161,
+    80560.45730030161,
+    80560.45730030161,
+    80560.45730030161,
+    80560.45730030161,
+    80560.45730030161,
+    80560.45730030161,
+    -84582.82841159057,
+    80560.45730030161,
+    80560.45730030161,
+    80560.45730030161,
+    80560.45730030161,
+    80560.45730030161,
+    80560.45730030161,
+    80560.45730030161,
+    80560.45730030161,
+    80560.45730030161,
+    -84582.82841159057,
+    80560.45730030161,
+    80560.45730030161,
+    80560.45730030161,
+    80560.45730030161,
+    176967.12285884685
+   ],
+   "npv": 371681.6027750772,
+   "objective": 829729.809424455,
+   "payback_discounted": 7.514194192283404,
+   "payback_simple": 5.688555103072103,
+   "pv_p_nom_mw": null,
+   "replacements": {
+    "10": 165143.28571189218,
+    "20": 165143.28571189218
+   },
+   "salvage_eur": 96406.66555854524,
+   "savings_annual": 81117.81588957924,
+   "value_streams": {
+    "capacity": 0.0,
+    "demand": 83345.25975501556,
+    "energy": -1884.7601938307052,
+    "export_credit": 0.0,
+    "fixed": 0.0,
+    "network": -342.68367160559865
+   },
+   "vom_annual": 0.0
+  },
+  "bess_pv_2h": {
+   "battery_p_nom_mw": 0.8103971842669744,
+   "bill_baseline": 866424.0,
+   "bill_option": 500907.7207784771,
+   "capex_total": 2491114.7001993703,
+   "discount_rate": 0.07,
+   "fom_annual": 29195.772328812956,
+   "horizon_years": 25,
+   "irr": 0.12869042275903125,
+   "lcos_excl_charging": 126.7170106432846,
+   "lcos_incl_charging": 210.8515979896108,
+   "ledger_hash": "5d1cea7bf9b5863d",
+   "market_revenue_at_duals": 231055.42390598156,
+   "net_cash_flow": [
+    -2491114.7001993703,
+    336320.50689270993,
+    336320.50689270993,
+    336320.50689270993,
+    336320.50689270993,
+    336320.50689270993,
+    336320.50689270993,
+    336320.50689270993,
+    336320.50689270993,
+    336320.50689270993,
+    162953.9390965631,
+    336320.50689270993,
+    336320.50689270993,
+    336320.50689270993,
+    336320.50689270993,
+    336320.50689270993,
+    336320.50689270993,
+    336320.50689270993,
+    336320.50689270993,
+    336320.50689270993,
+    162953.9390965631,
+    336320.50689270993,
+    336320.50689270993,
+    336320.50689270993,
+    336320.50689270993,
+    1810728.433456548
+   ],
+   "npv": 1566950.7616387939,
+   "objective": 727163.144684475,
+   "payback_discounted": 11.383629495376542,
+   "payback_simple": 7.406966417882047,
+   "pv_p_nom_mw": 2.2742601357876504,
+   "replacements": {
+    "10": 173366.56779614688,
+    "20": 173366.56779614688
+   },
+   "salvage_eur": 1474407.926563838,
+   "savings_annual": 365516.2792215229,
+   "value_streams": {
+    "capacity": 0.0,
+    "demand": 91928.53331551311,
+    "energy": 219275.49126766546,
+    "export_credit": 14443.983498768808,
+    "fixed": 0.0,
+    "network": 39868.27113957553
+   },
+   "vom_annual": 0.0
+  },
+  "none": {
+   "battery_p_nom_mw": null,
+   "objective": 861624.0,
+   "pv_p_nom_mw": null
+  }
+ },
+ "plan": "docs/superpowers/plans/2026-10-05-guided-study-u2-engine-rewire.md WP0",
+ "provenance": {
+  "branch": "claude/edge-tool-ux-research-n0n2l6",
+  "commit": "f3f2ba59417443029907f25c4cf7598f173cff72",
+  "engine_code_uncommitted_changes": [],
+  "highspy": "1.14.0",
+  "ledger_hash": {
+   "driver": "4258ef46e3904d49",
+   "site_golden": "5d1cea7bf9b5863d"
+  },
+  "library_version": "technology-data v0.14.0",
+  "linopy": "0.8.0",
+  "pypsa": "1.1.2",
+  "python": "3.12.3",
+  "recorded_at": "2026-10-05T20:46:04+00:00"
+ },
+ "schema": "u2_pre_numbers/1",
+ "seed_bills": {
+  "de_industrial_illustrative": {
+   "bess_2h": {
+    "annual_bill": 785306.1841104208,
+    "by_component": {
+     "capacity": 0.0,
+     "demand": 67854.74024498441,
+     "energy": 603012.7601938307,
+     "export_credit": 0.0,
+     "fixed": 4800.0,
+     "network": 109638.6836716056,
+     "unavailable": {}
+    },
+    "total": 785306.1841104208
+   },
+   "bess_pv_2h": {
+    "annual_bill": 500907.7207784771,
+    "by_component": {
+     "capacity": 0.0,
+     "demand": 59271.46668448687,
+     "energy": 381852.50873233454,
+     "export_credit": -14443.983498768808,
+     "fixed": 4800.0,
+     "network": 69427.72886042447,
+     "unavailable": {}
+    },
+    "total": 500907.7207784771
+   },
+   "none": {
+    "annual_bill": 866424.0,
+    "by_component": {
+     "capacity": 0.0,
+     "demand": 151199.99999999997,
+     "energy": 601128.0,
+     "export_credit": 0.0,
+     "fixed": 4800.0,
+     "network": 109296.0,
+     "unavailable": {}
+    },
+    "total": 866424.0
+   }
+  },
+  "tou_reference_illustrative": {
+   "bess_2h": {
+    "annual_bill": 631583.6956579019,
+    "by_component": {
+     "capacity": 0.0,
+     "demand": 0.0,
+     "energy": 630983.6956579019,
+     "export_credit": 0.0,
+     "fixed": 600.0,
+     "network": 0.0,
+     "unavailable": {}
+    },
+    "total": 631583.6956579019
+   },
+   "bess_pv_2h": {
+    "annual_bill": 367640.14850753173,
+    "by_component": {
+     "capacity": 0.0,
+     "demand": 0.0,
+     "energy": 377873.13613160833,
+     "export_credit": -10832.987624076606,
+     "fixed": 600.0,
+     "network": 0.0,
+     "unavailable": {}
+    },
+    "total": 367640.14850753173
+   },
+   "none": {
+    "annual_bill": 638592.0,
+    "by_component": {
+     "capacity": 0.0,
+     "demand": 0.0,
+     "energy": 637992.0,
+     "export_credit": 0.0,
+     "fixed": 600.0,
+     "network": 0.0,
+     "unavailable": {}
+    },
+    "total": 638592.0
+   }
+  }
+ },
+ "tolerances": {
+  "arithmetic_abs": 1e-09,
+  "arithmetic_rel": 1e-09,
+  "lp_objective_rel": 1e-06,
+  "mw_abs": 0.0001,
+  "rate_and_years_abs": 1e-09,
+  "rule": "lp_objective_rel: every 'objective' leaf; mw_abs: p_nom_opt, e_nom_opt, battery_p_nom_mw, pv_p_nom_mw, p_nom_mw and every leaf of a '*_mw' map; rate_and_years_abs: irr, payback_simple, payback_discounted, discount_rate; everything else (money, LCOS, bills, ledger bounds) is arithmetic downstream of the dispatch, which the same code reproduces bit for bit: |got - want| <= arithmetic_rel * max(|got|, |want|) + arithmetic_abs. Strings, booleans and nulls compare exactly."
+ },
+ "toy_3month": {
+  "battery_p_nom_mw": 7.090727908937822,
+  "demand_charge_eur": 1578218.403542037,
+  "monthly_max_import_mw": {
+   "2030-01": 35.31087885758775,
+   "2030-02": 34.99275813893931,
+   "2030-03": 34.910923239608735
+  },
+  "objective": 7669821.11992656,
+  "objective_constant": 0.0,
+  "peak_import_mw": {
+   "2030-01": 35.31087885758775,
+   "2030-02": 34.99275813893931,
+   "2030-03": 34.910923239608735
+  },
+  "spec": {
+   "builder": "tests/u2_record_pre_numbers.py::toy_network",
+   "demand_price_eur_per_mw_month": 15000.0,
+   "months": [
+    "2030-01",
+    "2030-02",
+    "2030-03"
+   ],
+   "snapshots": 2160,
+   "solved_with": "services.solver.objective._wrap_with_demand_charge"
+  }
+ }
+}
