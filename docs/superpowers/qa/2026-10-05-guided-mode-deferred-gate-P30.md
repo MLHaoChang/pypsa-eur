@@ -204,3 +204,70 @@ The spec prescribes this wording, so the fix needs a one-line spec deviation, as
 29 / 34 killed. The survivors are Q-B4f, Q-B10c and Q-B5c (S-1), and Q-B7e and Q-B5e (N-6). (Q-B6c / Q-B6d are the frontend harness's Q-B6a / Q-B6b.)
 
 No processes are left running, and both scratch worktrees are removed. This file is the only repo write, and it is uncommitted.
+
+---
+
+## Re-gate (2026-10-05, HEAD `37d446c21`)
+
+**Scope:** `git diff ec0cc082b..37d446c21`. That is `44e685888` (B6-1), `c8ee7c552` (S-1, S-2, N-4 comment) and `37d446c21` (phase note), on top of the gate record `091bf899a`.
+**Scratch:** `qa30/rg/`. Mutations ran in `qa30/wt` and the live probe in `qa30/wt2`, both at HEAD and both removed now. No repo source or test was edited.
+
+### Verdict: **GO**
+
+The blocker is fixed: the line is now true for every name I tried, on the live dialog. S-1 and S-2 are fixed and pinned. Every gate row is green, and all 9 re-gate mutants are killed.
+
+### B6-1: the sentence is now true (live)
+- **The fix:** `NewProjectWizard.tsx:218-221` now reads `Saved in a folder named after the project, under <root>/`. It never names the folder.
+- **Live probe:** a scratch copy of the smoke in `wt2` opened the real dialog, typed each name, read the line, clicked *Create blank project*, and then listed `<root>` (`qa30/rg/probe.log`, screenshots `rg/probe/62…65-qa30rg-line-*.png`):
+
+  | Typed | Line | Folder created |
+  |---|---|---|
+  | `grid` | `Saved in a folder named after the project, under <root>/` | `grid` |
+  | `Grid` | same | `Grid (2)` |
+  | `Study.` | same | `Study` |
+  | `CON` | same | `CON_` |
+
+  Every folder is under `<root>` and named after the project, so the sentence is true in each case. Row 5's own assertion was tightened to match the line exactly.
+- **N-11 (note, out of B6's scope):** a pre-migration row that stores an *absolute* path is resolved as-is (`project_registry.project_dir:184-187`), and such a row can point outside `projects_root` by design. Typing that row's name on the Blank tab takes the overwrite path into that directory. The blank-tab line then does not hold, but the existing `willOverwrite` warning is the surface for that case. This needs a legacy row plus a deliberate overwrite, so it is not a blocker.
+
+### S-1 and S-2
+- **The S-1 survivors are now killed** (`qa30/rg/mut_fe.log`, `qa30/rg/mut_be.log`):
+  - Q-B4f: killed by "free placement scrolls the target into view (centred)".
+  - Q-B10c: killed by "a request for bus A is cleared when the selection moves to bus B".
+  - Q-B5c: killed by `test_a_p_min_pu_series_does_not_exempt`.
+- **S-2:**
+  - **The fix:** `uiStore.ts:813-814` (`requestAssetDetail`) and `:863-865` (`setCurrentProject`) now clear `propertiesEditRequest`.
+  - **My scratch test passes.** It covers three cases: after a switch the request is `null`; after an asset-detail jump it is `null`; and the normal path (select → open the panel → request → re-select the same component) **keeps** the request.
+  - **Normal Edit path:**
+    - `PropertiesPanel.editRequest.test.tsx` (9 tests) and `EhReferenceDesignPanel.taggingTour.test.tsx` are green.
+    - Live, the P22.9 tagging step opens the Bus Edit form, and the Link step reaches `2/2` (row 5).
+    - `prepareTaggingTour` calls neither cleared setter after it requests (`prepareTaggingTour.ts:41-45`).
+- **N-4 comment:** `OverviewPanel.tsx:185-188` now states the INFO + ERROR behaviour correctly.
+
+### Rows
+
+| # | Command (cwd) | Result |
+|---|---|---|
+| 1 | `git diff --stat 5a9052599..37d446c21 -- pypsa-gui/backend` → only `tests/test_validation_gen_costs.py` (+11, one new test, which row 2 runs) | the row-1 log stands |
+| 2 | the row-2 command from the first gate (`pypsa-gui/backend`, HEAD) | **780 passed, 17 skipped** (`qa30/rg/row2.log`; previously 779, +1 for the new test) |
+| 3 | `npx tsc --noEmit -p .` (`pypsa-gui/frontend`) | **0 errors** |
+| 4 | `npx vitest run` (`pypsa-gui/frontend`) | **244 files / 2826 passed** (`qa30/rg/row4.log`; previously 2820, +6 tests) |
+| 4s | `npx vitest run src/components/GuidedTour src/pages/hubDesign src/layout/PropertiesPanel src/layout/AppHeader` ×3 | **3 / 3 green, 224 each** |
+| 5 | `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs --phase P30 --out qa30/rg/smoke30` (`pypsa-gui/frontend`, main checkout) | **PASS, 61 screenshots, exit 0**. Its B6 check is now `line === "Saved in a folder named after the project, under <RUN>/projects/"`. The `wt2` probe run also passes |
+| 7 / E | `git diff bcb6a671f -- 'pypsa-gui/frontend/src/**' \| grep -c uiMode` → 6, unchanged. The four `*.expertUnchanged` tests and snapshots and `chat_tools_schema` have no diff since base | signed |
+
+### Re-gate mutation table (`qa30/mut_fe_rg.py`, `qa30/mut_be_rg.py`)
+
+| Id | Mutant | Result |
+|---|---|---|
+| Q-B4f | `free` does not scroll the target into view (previous survivor) | killed |
+| Q-B10c | the selection-change clear compares type only (previous survivor) | killed |
+| Q-B5c | exemption widened to `p_min_pu` series (previous survivor) | killed |
+| R-B6a | the line names the folder again (`{root}/{name}/`) | killed (2) |
+| R-B6b | the line shows with no root | killed (3) |
+| R-S2a | the project switch keeps the request | killed |
+| R-S2b | the asset-detail jump keeps the request | killed |
+| R-S1a | free placement scrolls with `block:'nearest'` | killed |
+| R-S1b | centre-scroll on every placement, not only `free` | killed |
+
+9 / 9 killed. The remaining notes from the first gate (N-1 … N-10) stand, and none of them blocks.

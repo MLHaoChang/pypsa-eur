@@ -936,3 +936,9 @@ No processes are left running.
   | 5 | `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs --phase P30 --out <scratchpad>/p30/smoke30g` (`pypsa-gui/frontend`, HEAD `c8ee7c552`) | PASS, 61 screenshots. 29 tour boxes, all inside the viewport and apart from the highlight. The line reads "Saved in a folder named after the project, under `<RUN>/projects/`" |
 
   Row 4 note: a first run made while row 2 and the smoke shared the CPU had one 5 s timeout in `BottomPanel.test.tsx` ("select-all past the cap"). The rerun on a quiet machine passed in full.
+
+## P30 result: GO at re-gate on `37d446c21`, 2026-10-05
+- **First gate:** NO-GO on B6-1: the New-project dialog said "Saved to <root>/<name>/" but the allocator renames some folders (`Grid` beside `grid` → `Grid (2)`, `Study.` → `Study`, `CON` → `CON_`). The line now reads "Saved in a folder named after the project, under <root>/" (spec §5.4 deviation, recorded).
+- **Should-fixes:** S-1 (three unpinned spec rows now tested) and S-2 (a pending edit request is cleared on a project switch and an asset-detail jump) fixed.
+- **Rows:** row 1 stands (6733 passed + 31 skipped on `5a9052599`; the only later backend change is one test); row 2 780 passed; tsc 0; vitest 2826; smoke P30 PASS (61 screenshots) and P29 PASS. Mutations: 29 of 34 killed at the first gate (survivors pinned since), 9 of 9 at the re-gate; implementer 40 of 42 + 7 of 7.
+- **Note:** a pre-migration project row with an absolute path can sit outside the root; the existing overwrite warning covers it.
