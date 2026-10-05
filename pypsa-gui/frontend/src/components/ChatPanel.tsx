@@ -495,6 +495,10 @@ const GUIDED_TOOL_PHRASE: Record<string, string> = {
   gridspine_run_pipeline: 'start the planning and dynamics study',
   solve_queue_enqueue: 'add the project to the solve queue',
   abort_adequacy_study: 'ask the running study to stop',
+  // Report jobs run in the background (poll get_report_status).
+  generate_report: 'start writing the project report',
+  regenerate_report_section: 'start rewriting one section of the report',
+  abort_report_generation: 'ask the report writing to stop',
 }
 export function guidedToolPhrase(tool: string): string {
   return Object.prototype.hasOwnProperty.call(GUIDED_TOOL_PHRASE, tool)

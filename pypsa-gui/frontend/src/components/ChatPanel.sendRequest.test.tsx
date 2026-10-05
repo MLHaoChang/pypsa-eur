@@ -820,7 +820,9 @@ describe('P29 gate B1-1: start-only tools never say they finished', () => {
   const fromSchema = [...schema.matchAll(/"([a-z_]+)",\s*\n\s*"Start /g)].map(m => m[1])
   const START_ONLY = [...new Set([...fromSchema,
     'run_simulation', 'run_ac_pf_stage', 'run_fmea_sweep', 'run_frontier_study', 'run_mc_study',
-    'run_coupling_loop', 'run_margin_loop', 'run_eh_study', 'gridspine_run_pipeline'])]
+    'run_coupling_loop', 'run_margin_loop', 'run_eh_study', 'gridspine_run_pipeline',
+    // a background report job (poll get_report_status), not "Start …" worded
+    'regenerate_report_section'])]
 
   it('the schema scan finds the study starters', () => {
     expect(fromSchema).toEqual(expect.arrayContaining([
@@ -838,6 +840,7 @@ describe('P29 gate B1-1: start-only tools never say they finished', () => {
   it.each<[string, string]>([
     ['solve_queue_enqueue', 'add the project to the solve queue'],
     ['abort_adequacy_study', 'ask the running study to stop'],
+    ['abort_report_generation', 'ask the report writing to stop'],
   ])('%s says what it asked for', (tool, phrase) => {
     expect(guidedToolPhrase(tool)).toBe(phrase)
   })
