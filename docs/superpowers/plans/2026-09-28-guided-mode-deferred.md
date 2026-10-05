@@ -1003,7 +1003,7 @@ Deferred spec §6 (C2, C3, C4, C5). All four items are done. Commits:
 
 | Row | Command (cwd) | Result |
 |---|---|---|
-| 1 | `PYTHONPATH=/home/user/pypsa-eur:/home/user/pypsa-eur/pypsa-gui/backend /tmp/claude-0/venv/bin/python -m pytest tests/ -m "not slow" -p no:cacheprovider -W ignore -q -o addopts=""` (`pypsa-gui/backend`, HEAD `1a2b91c75`) | ROW1_RESULT |
+| 1 | `PYTHONPATH=/home/user/pypsa-eur:/home/user/pypsa-eur/pypsa-gui/backend /tmp/claude-0/venv/bin/python -m pytest tests/ -m "not slow" -p no:cacheprovider -W ignore -q -o addopts=""` (`pypsa-gui/backend`, HEAD `1a2b91c75`) | 6738 passed, 31 skipped, 11 deselected, 0 failed in 53 min (`row1.log`; P30: 6733 + 1 gate test; +4 C5 tests) |
 | 2 | same interpreter, `-m pytest <the 14-file set> tests/test_validation*.py tests/test_local_settings*.py tests/test_energy_hub_templates.py -p no:cacheprovider -W ignore -q -o addopts=""` (`pypsa-gui/backend`, HEAD `1a2fff1c2`; the backend is unchanged after `10d3958c6`) | 784 passed, 17 skipped (`row2.log`; P30: 780 + 17; +4 C5 tests) |
 | 3 | `npx tsc --noEmit -p .` (`pypsa-gui/frontend`, HEAD `1a2b91c75`) | 0 errors |
 | 4 | `npx vitest run` (`pypsa-gui/frontend`, HEAD `1a2b91c75`) | 245 files / 2836 passed (`row4.log`; P30: 244 / 2826). The four `*.expertUnchanged` snapshots pass unchanged |
