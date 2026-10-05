@@ -1444,16 +1444,25 @@ lines; such a year is rare and its total is still the engine's).
 
 ## Phase 4 e2e QA gate
 
-- [ ] `backend/tests/qa_investment_case.py` (auto-discovered): S1, S1b, S2, S3, S3f to T through the engine
+- [x] `backend/tests/qa_investment_case.py` (auto-discovered): S1, S1b, S2, S3, S3f to T through the engine
   (the S3f deviation sized); F1–F6 by hand; the integration fixture through the routes (finance PUT → solve →
   value flows → `POST /results/investment_case` → report → xlsx round trip) with a **finite** equity IRR;
   the 7-day fixture refused `template_not_annual`; a `None` ledger line and a missing escalation class →
   `not_established`; staleness after a finance edit; the P1–P3 drivers still pass.
-- [ ] Frontend vitest and `tsc` green.
-- [ ] Full backend `not slow`, all QA drivers green; findings note
+- [x] Frontend vitest and `tsc` green.
+- [x] Full backend `not slow`, all QA drivers green; findings note
   `docs/superpowers/findings/<date>-ic-p4-finance.md` (every SAM deviation with its size; the counterfactual
   definition; the pack sources); assessor verdict recorded here.
-- [ ] ADR-0002: the live probe for P2–P4's chat changes run and recorded, or stated as owed.
+- [x] ADR-0002: the live probe for P2–P4's chat changes run and recorded, or stated as owed — **owed**
+  (no provider credentials in this environment; the findings note lists the probe steps).
+
+**Gate result (2026-10-05).** Full backend `not slow` 8,323 passed / 31 skipped / 0 failed at the final
+code (one audit-listing fix found by the suite, 8116895); all 26 QA drivers green; vitest 2,812 / 253 files;
+`tsc` clean; `qa_investment_case.py` 245/245. **Assessor: round 1 (21da322) PASS WITH CONDITIONS** —
+solve-for-PPA "ok" on an ambiguous IRR, an unknown ledger line dropped from the lines / xlsx /
+counterparty totals, note accuracy and the unpopulated conservation gate — **all fixed (7b62fdd, b45ef40,
+e4d629e); round 2 (e4d629e) PASS.** The P4 regression list at e4d629e: 1,774 passed, 18 skipped. Findings:
+`docs/superpowers/findings/2026-10-05-ic-p4-finance.md`. **Phase 4 is closed.**
 
 ## Scope boundaries (not P4)
 

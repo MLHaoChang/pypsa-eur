@@ -201,4 +201,29 @@ the plan:
 
 ## Assessor
 
-ASSESSOR_VERDICT
+**Assessor (independent; two rounds).** **Round 1 (21da322): PASS WITH CONDITIONS.** On an archive copy:
+the driver 243/243; 486 finance / IC tests passed; the P1–P3 drivers 30/30, 49/49 and 235/235; the IC vitest
+subset passed; `tsc` clean. Probes confirmed: an abort mid-run; an edit during a run (reported stale); a
+two-period case end to end (no step at the switch, contracts ending at their tenor, Σ lines = equity cash);
+debt + DSRA + ITC + counterfactual reconciling to 3e-8; every dated pack edge (US bonus, the `ca_federal`
+version, the §48E 2033–36 shares, the wind/solar termination, FEOC, the DE degressive window); and
+solve-for-PPA with debt on S2, S2c, S3d and S3f. Three conditions: (1) solve-for-PPA returned `ok` where the
+truncated equity cash has several IRRs and the engine's own IRR is not the target (S3 at 15 % / year 12 →
+71.01 at −10.5 %; at 20 % / year 15 → −8.5 %); (2) C12: an unknown ledger line was dropped from the cashflow
+lines, the xlsx and the per-counterparty totals (the retailer showed −1,800 over an unknown 23.7 M energy
+charge); (3) note accuracy (WP4.0's verdict, deviation sizes taken from review probes,
+`gates.conservation_ok` never populated, the site-party scope of the counterfactual). **Round 2 (e4d629e):
+PASS.** The driver 245/245; 672 backend tests passed (the guard suites included); 137 IC vitest tests
+passed; the manifest tests passed; `tsc` clean. Re-probed: S3's two ambiguous targets are now
+`solve_ppa_irr_ambiguous` with no headline price (a candidate price is kept as information; the chat refuses
+with its own kind), while the other S3 targets and all six S2 targets stay `ok` at the exact target. The
+unknown line is now listed in `lines_not_established` (15 years); the retailer's total is None; the xlsx has
+15 `not_established` rows; the frontend cells read "not established". `conservation_ok` is True in the
+export, the full report and the About sheet. The note corrections are made. Non-binding and stated: the JSON
+`cashflow_lines` still sum to a number unless `lines_not_established` is read; the xlsx and `GET …/report`
+carry no staleness marker (P5). The ADR-0002 live probe is owed.
+
+After the round-2 fixes the P4 regression list ran again at e4d629e: **1,774 passed, 18 skipped**.
+
+**Phase 4 is closed for the single-owner finance engine.** The chat surface (P2's, P3's and P4's tools)
+stays **not done** until the ADR-0002 probe above is run and recorded.
