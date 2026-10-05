@@ -183,3 +183,15 @@ def test_sizing_checks_short_circuit_per_period_with_that_periods_units(tmp_path
     assert mv_rows.at[2040, "ikss_max_ka"] > mv_rows.at[2030, "ikss_max_ka"]
     assert mv_rows.at[2040, "rated_ka"] == 25.0 and bool(mv_rows.at[2040, "adequate"])
     assert (run / "campus_short_circuit.csv").is_file()
+
+
+def test_sizing_ends_with_the_compliance_report(tmp_path, project):
+    import pandas as pd
+    from gridspine.static.campus_compliance import CHECKS
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(project).spec, project)
+    rank_campus(run, k=1)
+    out = size_campus(run)
+    stored = pd.read_csv(run / "campus_compliance.csv")
+    assert list(stored["check"]) == list(CHECKS) == list(out["compliance"]["check"])
+    assert set(stored["status_as_is"]) <= {"pass", "fail", "not_rated"}

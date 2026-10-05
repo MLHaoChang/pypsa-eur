@@ -107,7 +107,8 @@ def test_when_the_inverters_run_out_the_rest_is_capacitive_compensation():
     camp = lowpf_campus(pf=0.7)                                  # ~46 Mvar of load Q
     req = ReactiveRequirement(q_limit_mvar=2.0, clause="c", source="code")
     res = reactive_need(camp, rows(), req)
-    head = sum(math.sqrt(camp.units.at[u, "s_mva"] ** 2 - HOUR[u] ** 2) for u in ("BESS1", "PV1", "GEN1"))
+    # GEN1 is at 0 MW in this hour: not running, so it offers no Q
+    head = sum(math.sqrt(camp.units.at[u, "s_mva"] ** 2 - HOUR[u] ** 2) for u in ("BESS1", "PV1"))
     assert res.q_inverters_mvar == pytest.approx(head)          # every inverter at its limit
     assert res.q_comp_mvar > 0.0                                 # capacitive
     assert res.q_final_mvar == pytest.approx(2.0, abs=0.01)
@@ -150,3 +151,12 @@ def test_compensation_is_sized_to_the_worst_hour_in_each_direction_with_margin()
     assert (s.at["capacitive", "worst_period"], s.at["capacitive", "worst_hour"]) == (2040, 2)
     assert s.at["inductive", "required_mvar"] == pytest.approx(3.0)
     assert s.at["inductive", "recommended_mvar"] == pytest.approx(math.ceil(3.0 * 1.2))
+
+
+def test_an_idle_genset_or_a_dark_pv_offers_nothing_but_an_idle_battery_does():
+    camp = lowpf_campus(pf=0.8)
+    req = ReactiveRequirement(q_limit_mvar=5.0, clause="c", source="code")
+    hour = dict(HOUR, PV1=0.0, GEN1=0.0, BESS1=0.0)
+    res = reactive_need(camp, rows(hour=hour), req)
+    assert set(res.unit_q) == {"BESS1"}
+    assert abs(res.q_inverters_mvar) <= 22.0 + 1e-9               # the battery's S alone

@@ -16,7 +16,10 @@ the difference itself:
 
 1. **The inverters first.** BESS, PV, wind and gensets supply up to their
    headroom, ``sqrt(S^2 - P^2)`` at that hour's P (P has priority), shared
-   in proportion to it. A unit with status 0 offers nothing.
+   in proportion to it. A unit with status 0 offers nothing. Neither does a
+   genset, PV or wind unit at 0 MW: a genset that is not producing is not
+   running, and Q-at-night capability is not assumed. A battery offers its
+   headroom at any P (``ALWAYS_ON``).
 2. **Then compensation.** The remainder is a shunt at the main MV busbar
    (``compensation_bus``: the low-voltage side of the transformers at the
    PCC). Its sign: ``+`` is capacitive (supplying Q), ``-`` is inductive
@@ -43,6 +46,11 @@ from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_flow import SizingCriteria, apply_hour
 
 _SUPPLIERS = frozenset({"bess", "pv", "wind", "genset"})
+#: Units that offer reactive power at zero active power. A battery inverter
+#: stays connected and can run as a STATCOM. A genset that is not producing
+#: is not running. PV and wind at 0 MW are assumed to be disconnected:
+#: Q-at-night capability is not universal (ledgered, assumed).
+ALWAYS_ON = frozenset({"bess"})
 
 
 @dataclasses.dataclass(frozen=True)
@@ -111,6 +119,8 @@ def reactive_need(campus, rows: pd.DataFrame, req: ReactiveRequirement, tol: flo
         if not bool(net.sgen.at[i, "in_service"]):
             continue
         p = float(net.sgen.at[i, "p_mw"])
+        if u["kind"] not in ALWAYS_ON and abs(p) <= 1e-9:
+            continue                        # not running / no Q at night
         head[uid] = math.sqrt(max(float(u["s_mva"]) ** 2 - p ** 2, 0.0))
     total_head = sum(head.values())
     bus_idx = dict(zip(net.bus["name"].astype(str), net.bus.index))

@@ -38,7 +38,9 @@ the PCC reactive band (``gridspine.static.campus_reactive``), writing
   peak import. The requirement records which one was used.
 Finally it runs IEC 60909 at every bus for each period, with the units
 installed in that period energised, against any switchgear ratings
-(``campus_short_circuit.csv``, ``gridspine.static.campus_sc``).
+(``campus_short_circuit.csv``, ``gridspine.static.campus_sc``), and
+assembles the PCC compliance report (``campus_compliance.csv``,
+``gridspine.static.campus_compliance``) against the chosen profile.
 
 ``draft_from_project`` is the "generate" step. It drafts a campus from the
 saved project, for the user to edit before ``prepare_campus``.
@@ -64,6 +66,7 @@ from gridspine.schema.campus import HOURLY_CSV, PCC_CSV, validate_hourly, valida
 from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
 from gridspine.static.campus_reactive import reactive_need, requirement_from, size_compensation
+from gridspine.static.campus_compliance import campus_compliance
 from gridspine.static.campus_sc import campus_fault_levels
 from gridspine.templates.grid_codes import load_grid_code
 
@@ -80,6 +83,7 @@ REACTIVE_CSV = "campus_reactive.csv"
 SIZING_COMP_CSV = "campus_sizing_compensation.csv"
 REQUIREMENT_JSON = "campus_requirement.json"
 SHORT_CIRCUIT_CSV = "campus_short_circuit.csv"
+COMPLIANCE_CSV = "campus_compliance.csv"
 DEFAULT_PROFILE = "eu_rfg_dcc_ce"
 
 
@@ -229,5 +233,13 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
     _write_text_atomic(run_dir / SIZING_COMP_CSV, comp.to_csv(index=False))
     _write_text_atomic(run_dir / REQUIREMENT_JSON, json.dumps(requirement, indent=2))
     _write_text_atomic(run_dir / SHORT_CIRCUIT_CSV, short_circuit.to_csv(index=False))
+    net = campus.net
+    compliance = campus_compliance(
+        bus=pd.DataFrame(bus_rows), trafo=pd.DataFrame(trafo_rows), reactive=pd.DataFrame(q_rows),
+        sizing=sizing, compensation=comp, short_circuit=short_circuit, requirement=requirement,
+        profile=load_grid_code(profile), pcc_bus=str(net.bus.at[int(net.ext_grid["bus"].iloc[0]), "name"]),
+        bus_kv=dict(zip(net.bus["name"].astype(str), net.bus["vn_kv"].astype(float))),
+    )
+    _write_text_atomic(run_dir / COMPLIANCE_CSV, compliance.to_csv(index=False))
     return {"transformers": sizing, "compensation": comp, "requirement": requirement,
-            "short_circuit": short_circuit}
+            "short_circuit": short_circuit, "compliance": compliance}
