@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  isTruncatedPayload, weightedSum, snapshotWeightAt, effectiveWeightAt,
+  isTruncatedPayload, weightedSum, snapshotWeightAt, effectiveWeightAt, fmtEnergy, fmtMwhNumber,
   type TSPayload, type WeightCtx, type SnapshotWeightRow,
 } from './shared'
 import {
@@ -304,5 +304,46 @@ describe('snapshotWeightAt: FullLoadHoursSection\'s windowed-payload basis', () 
     }
     expect(withYears).toBeCloseTo(noYears * 3, 6)
     expect(noYears).not.toBeCloseTo(withYears, 0)
+  })
+})
+
+// ── fmtEnergy below 1 MWh (P31 C3) ───────────────────────────────────────────
+// Below 1 MWh the value stays in MWh with three decimals (it read "250.00 kWh"
+// in a column whose header had dropped the unit); zero reads "0 MWh", never
+// "0.00 kWh". Above 1 MWh nothing changes.
+describe('fmtEnergy (P31 C3)', () => {
+  it('keeps MWh with three decimals below 1 MWh', () => {
+    expect(fmtEnergy(0.25)).toBe('0.250 MWh')
+    expect(fmtEnergy(0.25, 0)).toBe('0.250 MWh')
+    expect(fmtEnergy(0.0004)).toBe('0.000 MWh')
+    expect(fmtEnergy(-0.5)).toBe('-0.500 MWh')
+    expect(fmtEnergy(0.999)).toBe('0.999 MWh')
+  })
+  it('renders zero as "0 MWh"', () => {
+    expect(fmtEnergy(0)).toBe('0 MWh')
+    expect(fmtEnergy(-0)).toBe('0 MWh')
+    expect(fmtEnergy(0, 0)).toBe('0 MWh')
+  })
+  it('is unchanged from 1 MWh up and for a missing value', () => {
+    expect(fmtEnergy(1)).toBe('1.00 MWh')
+    expect(fmtEnergy(424.24)).toBe('424.24 MWh')
+    expect(fmtEnergy(59558.51)).toBe('59.56 GWh')
+    expect(fmtEnergy(2.5e6, 1)).toBe('2.5 TWh')
+    expect(fmtEnergy(-1500)).toBe('-1.50 GWh')
+    expect(fmtEnergy(null)).toBe('—')
+    expect(fmtEnergy(Number.NaN)).toBe('—')
+  })
+})
+
+// The ΔEUE column states its unit once, in the header, so its cells are
+// bare MWh numbers (P31 C3): the header unit must be true for every cell.
+describe('fmtMwhNumber (P31 C3)', () => {
+  it('is a MWh number with no unit, never scaled to kWh / GWh', () => {
+    expect(fmtMwhNumber(315605.35)).toBe((315605.35).toLocaleString(undefined,
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+    expect(fmtMwhNumber(80.5)).toBe('80.50')
+    expect(fmtMwhNumber(0.25)).toBe('0.250')
+    expect(fmtMwhNumber(0)).toBe('0')
+    expect(fmtMwhNumber(null)).toBe('—')
   })
 })

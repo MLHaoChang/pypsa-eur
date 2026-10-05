@@ -9,7 +9,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { cellNum, EhReferenceDesignPanel } from './EhReferenceDesignPanel'
-import { fmtCurrency, fmtEnergy, fmtPower } from './shared'
+import { fmtCurrency, fmtEnergy, fmtMwhNumber, fmtPower } from './shared'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -101,14 +101,27 @@ describe('remaining EH panel numbers (bug 1 remainder)', () => {
     const panel = screen.getByTestId('eh-reference-design-panel')
     await screen.findByTestId('eh-redundancy-row-n1')
     const text = panel.textContent ?? ''
-    expect(text).toContain(fmtEnergy(315605.35, 2))       // 315.61 GWh
+    // P31 C3: the ΔEUE column carries its unit in the header, so its cell
+    // is the bare MWh number (asserted below), not fmtEnergy's GWh string.
     expect(text).not.toContain('315605.35')
     expect(text).toContain(fmtEnergy(12345.678, 2))
     expect(text).not.toContain('12345.68')
     expect(text).toContain(fmtEnergy(4321.5, 2))
     expect(text).not.toMatch(/4321\.5(?!\d)/)
     expect(text).toContain(fmtEnergy(80.5, 2))
-    expect(text).toContain(fmtEnergy(0.25, 2))            // 250.00 kWh
+    expect(text).toContain(fmtEnergy(0.25, 2))            // 0.250 MWh (P31 C3)
+    expect(text).not.toContain('kWh')
+  })
+
+  it('the class-B ΔEUE header names MWh and every cell is a bare MWh number (P31 C3)', async () => {
+    await open()
+    const row = await screen.findByTestId('eh-fmea-top-row-1')
+    const table = row.closest('table')!
+    const heads = Array.from(table.querySelectorAll('thead th')).map(th => th.textContent)
+    expect(heads[heads.length - 1]).toBe('ΔEUE (MWh)')
+    const tds = Array.from(row.querySelectorAll('td')).map(td => td.textContent)
+    expect(tds[tds.length - 1]).toBe(fmtMwhNumber(315605.35))
+    expect(tds[tds.length - 1]).not.toMatch(/Wh/)
   })
 
   it('DtC planning built MW goes through fmtPower', async () => {

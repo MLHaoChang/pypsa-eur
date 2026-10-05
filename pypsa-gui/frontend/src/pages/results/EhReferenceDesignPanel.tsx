@@ -29,7 +29,7 @@ import { ehStudyRefetchInterval } from './ehStudyPoll'
 import { useChatStore } from '../../store/chatStore'
 import { nk } from '../../utils/queryKeys'
 import { blockerMessage } from './McPanel'
-import { downloadCSV, downloadJSON, fmtCurrency, fmtEnergy, fmtPower } from './shared'
+import { downloadCSV, downloadJSON, fmtCurrency, fmtEnergy, fmtMwhNumber, fmtPower } from './shared'
 import { GuideButton, useGuide } from '../../components/GuidedTour'
 import { prepareTaggingTour } from './prepareTaggingTour'
 import { InfoTip } from '../../layout/properties/cardKit'
@@ -1884,7 +1884,7 @@ export function EhReferenceDesignPanel() {
                           <th className="text-left font-medium py-1 pr-3">Component</th>
                           <th className="text-right font-medium py-1 pr-3">Criticality €/yr</th>
                           <th className="text-right font-medium py-1 pr-3">Occ./yr</th>
-                          <th className="text-right font-medium py-1">ΔEUE</th>
+                          <th className="text-right font-medium py-1">ΔEUE (MWh)</th>
                         </tr>
                       </thead>
                       <tbody className="font-mono">
@@ -1917,7 +1917,10 @@ export function EhReferenceDesignPanel() {
                                 ? Number(m.occurrence_per_year).toFixed(2) : '—'}
                             </td>
                             <td className="py-0.5 text-right">
-                              {cellNum(m.delta_eue_mwh, 'mwh')}
+                              {/* P31 C3: the header carries the unit, so the
+                                  cell is the bare MWh number. */}
+                              {typeof m.delta_eue_mwh === 'number'
+                                ? fmtMwhNumber(m.delta_eue_mwh) : cell(m.delta_eue_mwh)}
                             </td>
                           </tr>
                         ))}
