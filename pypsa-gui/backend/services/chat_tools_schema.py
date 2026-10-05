@@ -2667,6 +2667,26 @@ TOOLS: list[dict[str, Any]] = [
          "replace_inline": {"type": "boolean"}},
         ["name"],
     ),
+    # ── Site connection (1) — IC U1 follow-up, item b ─────────────────────
+    _t(
+        "set_site_connection",
+        "Set the project's commercial root, the site's connection to the grid: "
+        "`poc_link` (the one-way Link importing grid → site, the point of "
+        "connection), optional `export_link` (the one-way Link site → grid that "
+        "carries export) and optional `timezone` (the site's IANA zone; set, naive "
+        "snapshots are UTC). Every other key of a stored commercial config (tariff, "
+        "contracts, participants) is kept, and an omitted export_link or timezone "
+        "keeps the stored value. The Links are checked first: a name that is not a "
+        "Link is refused (site_connection_link_missing, with likely candidates), "
+        "a Link the wrong way round (site_connection_wrong_direction), a two-way "
+        "Link or an unknown timezone (site_connection_invalid). Call it before "
+        "attach_tariff or define_participants when they report no_commercial_config. "
+        "Returns {commercial: {poc_link, export_link, timezone}, created, notes}. "
+        "Safety: write.",
+        {"poc_link": {"type": "string"}, "export_link": {"type": "string"},
+         "timezone": {"type": "string"}},
+        ["poc_link"],
+    ),
     # ── Participants (1) — Edge Investment Case P3 WP3.4 ──────────────────
     _t(
         "define_participants",
@@ -3106,6 +3126,8 @@ TOOL_ROUTES: dict[str, list] = {
     "import_urdb_tariff": [("POST", "/api/library/items/tariff/import_urdb")],
     "attach_tariff": [("GET", "/api/library/items/{kind}/{name}"),
                       ("PUT", "/api/simulation/solver_config")],
+    "set_site_connection": [("GET", "/api/simulation/solver_config"),
+                            ("PUT", "/api/simulation/solver_config")],
     "define_participants": [("POST", "/api/simulation/value_flows/template"),
                             ("GET", "/api/simulation/commercial/value_flows"),
                             ("PUT", "/api/simulation/commercial/value_flows")],

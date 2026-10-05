@@ -336,61 +336,23 @@ def get_solver_config():
 
 def _bind_commercial(commercial, user) -> dict | None:
     """
-    Bind a submitted commercial block to the ACTIVE network: a thin wrapper on
-    `services.commercial.binding.bind_commercial` (P2 WP2.4b-0), which checks
-    everything before any write. The route supplies the in-flight guard, the
-    project directory and the Library resolver: series resolve in the ACTIVE
-    PROJECT's org (the caller's org for an unsaved network). Refusals carry
-    `{code, message}`. Returns the plain dict stored on `SolverConfig.commercial`.
+    Bind a submitted commercial block to the ACTIVE network: a call of
+    `services.commercial.binding.bind_commercial_on_context` on the active
+    context (IC U1 follow-up, GS Q15), which supplies the in-flight guard, the
+    project directory and the Library resolvers (series resolve in the ACTIVE
+    PROJECT's org; the caller's org for an unsaved network) and checks
+    everything before any write. The in-flight check is this module's
+    `_solver_in_flight_ctx`. Refusals carry `{code, message}`. Returns the
+    plain dict stored on `SolverConfig.commercial`.
     """
-    import pathlib
-    from uuid import UUID
-
     from fastapi import HTTPException
 
     from services.commercial import binding
-    from services.library import series_store
-
-    ctx = PyPSAService.get_active_context()
-    if _solver_in_flight_ctx(ctx):
-        raise HTTPException(409, {"code": "solver_in_flight",
-                                  "message": "a solve is running on this project; change the "
-                                             "commercial config after it finishes"})
-    project_dir = pathlib.Path(ctx.storage_dir) if ctx.storage_dir else None
-
-    def resolver(read):
-        """A Library resolver in the ACTIVE PROJECT's org (the caller's org for
-        an unsaved network); `read(db, org, ref)` is the store's resolve."""
-        def resolve(ref):
-            from db.models import User
-            from db.session import SessionLocal
-            from services import library_acl
-
-            # The context carries the org id as a string (`org:uuid` registry key).
-            org = UUID(str(ctx.org_id)) if ctx.org_id else None
-            with SessionLocal() as db:
-                if org is None and isinstance(user, User):
-                    org = library_acl.org_of(db, user)
-                if org is None:
-                    raise binding.BindingRefusal(
-                        409, "library_org_unknown",
-                        "save the project first: a Library ref resolves in the project's "
-                        "organization")
-                try:
-                    return read(db, org, ref)
-                except (series_store.LibraryRefNotFound, series_store.LibraryRefStale) as exc:
-                    raise binding.BindingRefusal(409, "library_ref_stale", str(exc)) from exc
-        return resolve
-
-    from services.library import items as library_items
-
-    resolve, resolve_item = resolver(series_store.resolve), resolver(library_items.resolve)
 
     try:
-        return binding.bind_commercial(PyPSAService.get_network(), commercial,
-                                       project_dir=project_dir, resolve_ref=resolve,
-                                       lock=PyPSAService.get_lock(),
-                                       resolve_item=resolve_item)
+        return binding.bind_commercial_on_context(
+            PyPSAService.get_active_context(), commercial, user=user,
+            in_flight=lambda ctx: _solver_in_flight_ctx(ctx))
     except binding.BindingRefusal as exc:
         raise HTTPException(exc.status, {"code": exc.code, "message": exc.message}) from exc
 

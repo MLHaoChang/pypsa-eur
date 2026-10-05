@@ -2514,6 +2514,13 @@ def _check_commercial(n, solver_config) -> list[Issue]:
 
     from services.commercial.lp_bindings import effective_strategy
 
+    if not getattr(solver_config, "commercial", None):
+        # No commercial config (IC U1 f, owner decision 10): the import-to-export
+        # cycling check on the Links' own marginal costs.
+        from services.commercial.preflight import network_findings
+
+        return [Issue(severity=sev, code=code, component_class=cls, name=name, message=msg)
+                for sev, code, cls, name, msg in network_findings(n)]
     multi = bool(getattr(solver_config, "multi_investment_periods", False))
     strategy = effective_strategy(getattr(solver_config, "solve_strategy", "full"),
                                   sclopf=bool(getattr(solver_config, "sclopf", False)),

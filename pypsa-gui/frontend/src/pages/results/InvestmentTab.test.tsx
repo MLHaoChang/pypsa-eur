@@ -5,14 +5,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
-import { commercialApi, SolverInFlightError } from '../../api/commercial'
+import { commercialApi, NoCommercialConfigError, SolverInFlightError } from '../../api/commercial'
+import { networkApi } from '../../api/network'
 import InvestmentTab from './InvestmentTab'
 import { expectAllButtonsNamed } from '../../test-utils/accessibleName'
 
 vi.mock('../../api/commercial', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/commercial')>()
   return { ...actual, commercialApi: { ...actual.commercialApi,
-    getBilling: vi.fn(), getValueFlowsResult: vi.fn() } }
+    getBilling: vi.fn(), getValueFlowsResult: vi.fn(), getCommercial: vi.fn(),
+    saveSiteConnection: vi.fn() } }
+})
+// The Site connection form (IC U1 follow-up b) lists the network's Links.
+vi.mock('../../api/network', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/network')>()
+  return { ...actual, networkApi: { ...actual.networkApi, getLinks: vi.fn() } }
 })
 // The P4 sections (WP4.7) read the finance routes; the tab tests only switch to them.
 vi.mock('../../api/finance', async (importOriginal) => {
@@ -35,7 +42,17 @@ function renderTab() {
   return render(<QueryClientProvider client={qc}><InvestmentTab /></QueryClientProvider>)
 }
 
-beforeEach(() => { useUIStore.setState({ currentProject: 'Demo' }) })
+const ROOT = { poc_link: 'import', export_link: 'export', timezone: 'Europe/Berlin' }
+const LINKS = [
+  { name: 'import', bus0: 'grid', bus1: 'poc', p_min_pu: 0 },
+  { name: 'export', bus0: 'poc', bus1: 'grid', p_min_pu: 0 },
+]
+
+beforeEach(() => {
+  useUIStore.setState({ currentProject: 'Demo' })
+  vi.mocked(commercialApi.getCommercial).mockResolvedValue(ROOT as never)
+  vi.mocked(networkApi.getLinks).mockResolvedValue(LINKS as never)
+})
 afterEach(() => { cleanup(); vi.mocked(commercialApi.getBilling).mockReset()
                   vi.mocked(commercialApi.getValueFlowsResult).mockReset() })
 
@@ -156,5 +173,68 @@ describe('InvestmentTab billing failures', () => {
     vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(FLOWS as never)
     renderTab()
     await waitFor(() => expect(screen.getByTestId('ic-section-bill').getAttribute('title')).toMatch(/solve is running/))
+  })
+})
+
+
+describe('InvestmentTab site connection (IC U1 follow-up b)', () => {
+  it('shows the Site connection form when the project has no commercial config', async () => {
+    vi.mocked(commercialApi.getCommercial).mockResolvedValue(null)
+    vi.mocked(commercialApi.getBilling).mockResolvedValue(null)
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(null)
+    const { container } = renderTab()
+    const section = await screen.findByTestId('ic-site-connection')
+    expect(section.textContent).toMatch(/connection to the grid/i)
+    expect(await within(section).findByTestId('site-connection-form')).toBeTruthy()
+    expectAllButtonsNamed(container)
+  })
+
+  it('shows it in place of the dead end when a result says there is no commercial config', async () => {
+    vi.mocked(commercialApi.getBilling).mockRejectedValue(new NoCommercialConfigError('set it up'))
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(FLOWS as never)
+    renderTab()
+    expect(await screen.findByTestId('site-connection-form')).toBeTruthy()
+    await waitFor(() => expect(screen.getByTestId('ic-section-bill').getAttribute('title'))
+      .toMatch(/site connection/i))
+  })
+
+  it('saves the root and refreshes the commercial config', async () => {
+    vi.mocked(commercialApi.getCommercial).mockResolvedValue(null)
+    vi.mocked(commercialApi.getBilling).mockResolvedValue(null)
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(null)
+    vi.mocked(commercialApi.saveSiteConnection).mockResolvedValue({} as never)
+    renderTab()
+    const poc = await screen.findByLabelText(/point of connection/i) as HTMLSelectElement
+    await waitFor(() => expect(poc.value).toBe('import'))
+    fireEvent.change(screen.getByLabelText(/time zone/i), { target: { value: 'UTC' } })
+    const calls = vi.mocked(commercialApi.getCommercial).mock.calls.length
+    vi.mocked(commercialApi.getCommercial).mockResolvedValue(
+      { poc_link: 'import', export_link: 'export', timezone: 'UTC' } as never)
+    fireEvent.click(screen.getByRole('button', { name: 'Save site connection' }))
+    await waitFor(() => expect(commercialApi.saveSiteConnection).toHaveBeenCalledWith(
+      { poc_link: 'import', export_link: 'export', timezone: 'UTC' }))
+    await waitFor(() => expect(vi.mocked(commercialApi.getCommercial).mock.calls.length)
+      .toBeGreaterThan(calls))
+    // The connection is set: the summary replaces the form.
+    expect((await screen.findByTestId('ic-site-connection-summary')).textContent).toMatch(/import/)
+    expect(screen.queryByTestId('site-connection-form')).toBeNull()
+  })
+
+  it('a set connection is a summary line that opens the form to edit it', async () => {
+    vi.mocked(commercialApi.getBilling).mockResolvedValue(BILLING as never)
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(FLOWS as never)
+    const { container } = renderTab()
+    const summary = await screen.findByTestId('ic-site-connection-summary')
+    expect(summary.textContent).toMatch(/import/)
+    expect(summary.textContent).toMatch(/export/)
+    expect(summary.textContent).toMatch(/Europe\/Berlin/)
+    expect(screen.queryByTestId('site-connection-form')).toBeNull()
+    const edit = screen.getByRole('button', { name: 'Edit site connection' })
+    expect(edit.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(edit)
+    expect(await screen.findByTestId('site-connection-form')).toBeTruthy()
+    expectAllButtonsNamed(container)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByTestId('site-connection-form')).toBeNull()
   })
 })
