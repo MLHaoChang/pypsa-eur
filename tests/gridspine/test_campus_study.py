@@ -167,3 +167,19 @@ def test_without_a_connection_capacity_the_peak_import_is_used_and_said_so(tmp_p
     rank_campus(run, k=1)
     req = size_campus(run)["requirement"]
     assert req["p_ref_from"].startswith("peak |import|") and req["source"] == "code"
+
+
+def test_sizing_checks_short_circuit_per_period_with_that_periods_units(tmp_path, project):
+    run = tmp_path / "run"
+    spec = draft_from_project(project).spec
+    mv = next(k for k, v in spec["campus"]["buses"].items() if v["pypsa_name"] == "mv")
+    spec["campus"]["buses"][mv]["ik_rated_ka"] = {"value": 25.0, "source": "datasheet"}
+    prepare_campus(run, spec, project)
+    rank_campus(run, k=1)
+    fl = size_campus(run)["short_circuit"]
+    assert set(fl["period"]) == {2030, 2040}
+    mv_rows = fl[fl["bus"] == mv].set_index("period")
+    # the battery is built in 2040, so the MV fault level rises
+    assert mv_rows.at[2040, "ikss_max_ka"] > mv_rows.at[2030, "ikss_max_ka"]
+    assert mv_rows.at[2040, "rated_ka"] == 25.0 and bool(mv_rows.at[2040, "adequate"])
+    assert (run / "campus_short_circuit.csv").is_file()

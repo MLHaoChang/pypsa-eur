@@ -36,6 +36,9 @@ the PCC reactive band (``gridspine.static.campus_reactive``), writing
   connection-agreement power factor.
 - Its P_ref is the campus file's ``p_connection_mw``, or else the year's
   peak import. The requirement records which one was used.
+Finally it runs IEC 60909 at every bus for each period, with the units
+installed in that period energised, against any switchgear ratings
+(``campus_short_circuit.csv``, ``gridspine.static.campus_sc``).
 
 ``draft_from_project`` is the "generate" step. It drafts a campus from the
 saved project, for the user to edit before ``prepare_campus``.
@@ -61,6 +64,7 @@ from gridspine.schema.campus import HOURLY_CSV, PCC_CSV, validate_hourly, valida
 from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
 from gridspine.static.campus_reactive import reactive_need, requirement_from, size_compensation
+from gridspine.static.campus_sc import campus_fault_levels
 from gridspine.templates.grid_codes import load_grid_code
 
 CAMPUS_YAML = "campus.yaml"
@@ -75,6 +79,7 @@ SIZING_TRAFO_CSV = "campus_sizing_trafo.csv"
 REACTIVE_CSV = "campus_reactive.csv"
 SIZING_COMP_CSV = "campus_sizing_compensation.csv"
 REQUIREMENT_JSON = "campus_requirement.json"
+SHORT_CIRCUIT_CSV = "campus_short_circuit.csv"
 DEFAULT_PROFILE = "eu_rfg_dcc_ce"
 
 
@@ -209,6 +214,11 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
                        "q_comp_mvar": r.q_comp_mvar, "compliant_without": r.compliant_without})
     sizing = size_transformers(flows, campus, criteria)
     comp = size_compensation(reactive, criteria)
+    sc_frames = []
+    for period, block in hourly.groupby("period"):
+        installed = set(block.loc[block["status"] == 1, "unit_id"])
+        sc_frames.append(campus_fault_levels(campus, installed).assign(period=int(period)))
+    short_circuit = pd.concat(sc_frames, ignore_index=True)
     requirement = {"q_limit_mvar": req.q_limit_mvar, "clause": req.clause, "source": req.source,
                    "profile": profile, "pf": pf, "p_ref_mw": p_ref, "p_ref_from": p_ref_from}
     _write_text_atomic(run_dir / LF_TRAFO_CSV, pd.DataFrame(trafo_rows).to_csv(index=False))
@@ -218,4 +228,6 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
     _write_text_atomic(run_dir / REACTIVE_CSV, pd.DataFrame(q_rows).to_csv(index=False))
     _write_text_atomic(run_dir / SIZING_COMP_CSV, comp.to_csv(index=False))
     _write_text_atomic(run_dir / REQUIREMENT_JSON, json.dumps(requirement, indent=2))
-    return {"transformers": sizing, "compensation": comp, "requirement": requirement}
+    _write_text_atomic(run_dir / SHORT_CIRCUIT_CSV, short_circuit.to_csv(index=False))
+    return {"transformers": sizing, "compensation": comp, "requirement": requirement,
+            "short_circuit": short_circuit}
