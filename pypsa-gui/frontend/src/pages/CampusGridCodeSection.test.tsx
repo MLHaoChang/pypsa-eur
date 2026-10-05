@@ -24,6 +24,7 @@ const api = vi.hoisted(() => ({
   extractGridCode: vi.fn(), newGridCodeDraft: vi.fn(), getGridCodeDraft: vi.fn(),
   saveGridCodeDraft: vi.fn(), deleteGridCodeDraft: vi.fn(), confirmGridCodeLimit: vi.fn(),
   publishGridCode: vi.fn(), getPublishedGridCode: vi.fn(), deletePublishedGridCode: vi.fn(),
+  library: vi.fn(), saveLibrary: vi.fn(), resetLibrary: vi.fn(),
 }))
 vi.mock('../api/campusElectrical', async () => {
   const real = await vi.importActual<typeof import('../api/campusElectrical')>('../api/campusElectrical')
@@ -38,7 +39,7 @@ const DRAFT_YAML = 'title: VDE\nvoltage_bands: []\n'
 const state: CampusState = {
   campus_yaml: YAML, skipped: [],
   profiles: { eu_rfg_dcc_ce: 'EU RfG', vde_4110: 'VDE-AR-N 4110 (draft)' },
-  settings: null, results: null, stale: false,
+  settings: null, results: null, stale: false, hub_cost: null, hub_cost_reason: null,
 }
 
 const list = (over: Partial<GridCodeList> = {}): GridCodeList => ({
@@ -98,6 +99,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   api.state.mockResolvedValue(state)
   api.gridCodes.mockResolvedValue(list())
+  api.library.mockResolvedValue({ yaml: 'x: 1', is_default: true })
 })
 afterEach(() => cleanup())
 
