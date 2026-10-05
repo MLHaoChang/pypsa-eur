@@ -733,3 +733,173 @@ No processes are left running.
 - **Re-gate:** rows 3–5 pass (tsc 0; vitest 2793; smoke P29 PASS). Rows 1–2 stand (no backend change since `a994da65d`: 6716 passed + 31 skipped; row 2 776 passed). Mutations: 24 of 26 killed at the first gate (2 equivalent), 12 of 12 at the re-gate.
 - **R-1 (re-gate should-fix):** the zero-frequency text now also covers a missing or zero repair time.
 - **Out of phase:** `d95357335` (dispatch_status ignores a running solve's transient rows) was reviewed in this gate and holds.
+
+### P30 phase note (implementation, 2026-09-30, base `bcb6a671f`)
+
+Deferred spec §5 (B4, B7, B5, B6, B8, B9, B10, C11, C12). All nine items are done in P30; none moved to P31. Commits:
+- `ea312f851` B5, B6 backend;
+- `87309cff1` B4, B7;
+- `4e893431a` B6 (frontend), B8, B9, B10, C11, C12;
+- `4c9559755` smoke `--phase P30`;
+- `7a97688f0` B7 follow-up: the tagging tour's sentence, plus a smoke locator fix;
+- `c90556d2f` B4 follow-up: a step whose target is not on screen docks bottom-left;
+- `2787a2530` B7 follow-up: an optional step on screen when the tour starts keeps its place;
+- `5a9052599` tighter tests added after the mutation pass;
+- plus this note.
+
+The three follow-ups came from smoke runs. Each was test-first.
+
+**Anchor drift.** Re-checked on `bcb6a671f`:
+- `GuidedTour.tsx` placement is at `:193-206`, and the counter at `:221`.
+- `validation_service.py` `gen_zero_costs` is at `:1745-1764`.
+- `local_settings.py` `_state()` is at `:58-70`.
+- `NewProjectWizard.tsx` "Saved to" is at `:209-211`.
+- `HubDesignPanel.tsx` error line is at `:112-116`.
+- `client.ts` quiet branch is at `:232`.
+- `AppHeader.tsx` switch is at `:1040-1075`.
+- `uiStore.ts` request is at `:438,543,797`.
+- `PropertiesPanel.tsx` consumers are at `:1198,1647`.
+- `GoalCard.tsx` VOLL line is at `:136`.
+
+**What was built:**
+
+- **B4 (`GuidedTour.tsx`).** `placePopover(target, size, vw, vh)` is exported and pure.
+  - It tries below, above, right and left, in that order, with a 12 px gap. It takes the first one that fits inside an 8 px viewport margin and does not touch the highlight box (the target grown by 4 px).
+  - If none fits, the result is `free`: the side with the most room for the popover's own size, clamped into the viewport. The target is then scrolled into view (`block: 'center'`) once per step.
+  - The popover is measured through a `ref`, with a layout effect after each commit. It is re-measured on `resize`, on `scroll` (capture), through a `ResizeObserver` on itself, and through a `MutationObserver` on `document.body` (`childList`, `subtree`).
+  - All re-measuring is batched per animation frame. State changes only when the target box, the popover size or the set of available steps actually changed.
+  - Style: width 320, `maxWidth: calc(100vw - 16px)`, `maxHeight: calc(100vh - 16px)`, `overflowY: auto`. `data-placement` is set on `guide-tour`.
+- **B7.** All of `tour.steps` is kept.
+  - `next()` / `back()` look for the next or previous *available* step at the moment of the click. An optional step is available if its target is on screen now, or was on screen when the tour started (see deviation 2).
+  - The counter is "position among the steps shown now / their count". The Next / Done label and Back's disabled state come from the same set, which the observers keep current. So the label is true when an optional target appears or goes while a step is open.
+  - The intro shows on the first shown step.
+  - The `eh_tagging` "What to enter" sentence said "the tour includes that step only when it is started with a Link's Edit form open". That is no longer true. It now reads "the tour adds that step as soon as a Link's Edit form is open." (`test_guides.py::test_tagging_tour_says_when_the_link_step_appears`, red first.)
+- **B5 (`validation_service.py`).** A new helper `_zero_cost_generators(n)` builds the zero-cost mask. It excludes a generator with a `generators_t.marginal_cost` column or a `generators_t.p_max_pu` column. The warning's code, name and message are unchanged. After the fix no template generator warns. The seven exempted are exactly the probe's seven.
+- **B6.**
+  - `GET /api/local-settings` gains `projects_root`. The value is `settings.projects_root`, not `flat_projects_root` (see deviation 1).
+  - `LocalSettingsState.projects_root: string`.
+  - The Blank tab reads `useLocalSettings()` (the shared `['localSettings']` query). It shows `Saved to <root>/<name>/` (`data-testid="new-project-saved-to"`, with a `\` separator for a Windows root).
+  - It shows no line at all in hosted mode (404 → `null`) or when the read fails.
+- **B8.**
+  - `HubDesignPanel` names the first read in error: "study state", "template" or "readiness check". The line reads "This project's <x> could not be read from the server, so the steps below may be incomplete."
+  - Readiness is observed with `useHubReadiness(…, { observeOnly: true })`. That is the same key with `enabled: false`, so the panel sends no request of its own. Retry also re-reads readiness.
+  - Goal's disabled Run carries `title="The template could not be read — retry above."` The panel's Retry is above the card.
+  - `client.ts`: a `skipErrorToast` failure (not a quiet poll) now logs `appLog('INFO', '<METHOD> <url> — <msg> [no toast]')`. It never logs ERROR and never toasts.
+- **B9.** Each mode button has `aria-describedby="ui-mode-<m>-desc"`. A `<span id=… className="sr-only">` carries `UI_MODE_TITLES[m]` inside the switch group. `title` and the button names are unchanged.
+- **B10.**
+  - `propertiesEditRequest: { type: 'Bus' | 'Link'; name: string } | null` (`PropertiesEditRequest` is exported).
+  - Each card consumes the request only when type and name match its own component.
+  - `setSelectedComponent` clears the request unless the new selection *is* the requested component, because `prepareTaggingTour` selects and then asks.
+  - `prepareTaggingTour` passes the bus it selected.
+- **C11.**
+  - `plainWords.test.ts` gains a lone `dtc_planning` case.
+  - `AppHeader.uiMode.test.tsx` gains "a running queue job still shows Abort" (R15). The queued and store-running cases already existed.
+  - Q3–Q5: see deviation 6.
+- **C12.**
+  - `plainWords`: `/\b(\d+(?:\.\d+)?) MWh\b/g → '$1 megawatt-hours'`. It applies to titles and effects alike, through the one function. A price `€/MWh` is untouched.
+  - GoalCard reads `€X per <Term k="mwh">MWh</Term>`.
+  - Catalogue key `mwh`: "A megawatt-hour: the energy of one megawatt of power delivered for one hour, the same as 1 000 kilowatt-hours." It is in `eh_fmea_guide.json` and `TERM_FALLBACK`, word for word the same.
+
+**Deviations (with reasons):**
+1. **B6 root.**
+   - The spec names `get_settings().flat_projects_root` ("the value `PROJECTS_DIR` resolves from"). That is the auth-disabled legacy flat store, under app-data.
+   - `/local-settings` only exists in local mode, and local mode is auth mode with a local identity. There a project is saved at `settings.projects_root / <unique_dir_name(name)>`: `storage_paths.use_org_segment()` is false locally, and `project_registry.project_dir` rejoins the row with `projects_root`.
+   - The spec's own smoke assertion (the line contains `PYPSAGUI_PROJECTS_ROOT`) only holds for `projects_root`. A line with the flat root would be a false sentence.
+   - The red test pins `projects_root`, checks that it is *not* the flat root, and checks that `storage_path_for(…, org_segment=use_org_segment())` lands at `<root>/<name>`.
+2. **B7: "judged when reached" alone broke the P24 smoke** (the spec requires P30 ⊇ P24).
+   - In the after-study hub tour started on Results, the step before `hub-results-verdict` reveals the Goal card. When reached, the verdict was absent, so it was skipped (6 steps instead of 7).
+   - The rule is now the union: an optional step counts if it was on screen when the tour started (the pre-P30 rule; its `reveal` brings it back) or is on screen when reached (B7).
+   - This keeps every P24 walk unchanged (6 / 7 / 8 / 6 steps in the smoke) and the tagging tour's late Link step.
+   - Pinned by the unit test "an optional step on screen at the start is kept; its reveal brings it back". It was red before `2787a2530`.
+3. **B4: a step whose target is not on screen docks bottom-left (left 8, bottom 8), not centred.**
+   - The spec does not cover this case. The P30 smoke found that the centred popover covered the Link card's "Edit" button, which is exactly what the tagging tour asks the user to click. Playwright: "guide-tour intercepts pointer events".
+   - Unit test "a target not on screen → docked bottom-left". `placement` reads `free` there.
+4. **B8 wording and condition.**
+   - The third name reads "readiness check", not the bare "readiness" ("This project's readiness could not be read" is not a plain sentence).
+   - Run is disabled on `templateError && !template`, the existing `templateUnknown`. It is not disabled on every `templateError`. With a cached template, a failed re-read still runs with the correct settings, so disabling it would be a refusal with no reason behind it. The spec's red case (a first-load 500) is disabled with the title.
+5. **B9: `AppHeader.expertUnchanged` needed no update.** That test removes `ui-mode-switch` from the clone before comparing, and the new spans live inside the switch group. The spec expected a one-line update; none was needed. All four `*.expertUnchanged` snapshots are unchanged.
+6. **C11 Q3–Q5: no new `resultsApi.test.ts`.** `src/api/ehQuiet.test.ts` (P25 step 0) already pins exactly this. It covers `getEhStudy()` / `getEhTemplate()` with no argument, with `{quiet:false}` and with `{quiet:true}`. A duplicate file would only add upkeep. The three Q mutants are killed by it (below).
+7. **Smoke order.** `phaseP30` runs P22.9 first, renames its project "P30 Data Center" (as P27b does), then runs P24. P22.9's first step needs a backend with no stub profile, and P24 activates one. The spec lists them as "P24 + P22.9", with no order.
+
+**Changed assertions (one line each):**
+- `test_guides.py::test_hub_fields_present`: `== 28` → `29`. `mwh` joins `HUB_FIELDS` (C12).
+- `Term.test.tsx`: the key list gains `mwh` (C12).
+- `PropertiesPanel.editRequest.test.tsx` tests 1–3: requests are `{type, name}`. Test 3 now says the pending Bus request is kept by a Link card and named in full (B10, spec-mandated rewrite).
+- `EhReferenceDesignPanel.taggingTour.test.tsx`: the request equals `{ type: 'Bus', name: 'grid' }`, the bus prepare selected (B10).
+- `useHubData.test.tsx`: the readiness hook's named fields gain `refetch`, for the panel's Retry (B8). It is still named, never spread.
+- Local-settings fixtures (`localSettings.test.ts`, `CommandPalette.test.tsx`, `Sidebar.settingsNav.test.tsx`, `LocalSettings.test.tsx`) gain `projects_root`, which is required by the type (B6).
+
+**Red → green:**
+
+| Test | Before the fix |
+|---|---|
+| `test_validation_gen_costs.py` (new, 10) + `test_energy_hub_templates.py::test_templates_validate_without_gen_zero_costs` (3) | 9 red. The baseline, fixed-unit, extendable and static-`p_max_pu` guards were green. |
+| `test_local_settings_api.py::test_get_reports_the_projects_root_a_new_project_lands_in` | red (KeyError) |
+| `test_guides.py` (`mwh` ×3; the tagging sentence) | 4 red |
+| `GuidedTour.test.tsx` P30 (B4 ×5, then the docked case, then the resize-follow case; B7 ×2, then the start-kept case) | 6 red at first. The docked case and the start-kept case were each red before their follow-up. "Counts only visible steps" was green (a guard). |
+| `PropertiesPanel.editRequest.test.tsx` | 4 red |
+| `AppHeader.uiMode.test.tsx` (B9) | red. The R15 queue-running case was green: the header already handles it. |
+| `HubDesignPanel.flow.test.tsx` (template, readiness) / `GoalCard.test.tsx` (title; `term-mwh`) / `client.quietToast.test.ts` (INFO) / `plainWords.test.ts` (MWh) | 6 red. The study-state and both-fail ordering cases were green (guards). |
+| `NewProjectWizard.templates.test.tsx` B6 ×3 | 3 red |
+
+**Mutants** (scripts and logs in `scratchpad/p30/`: `mutate_fe.py`, `mutate_be.py`, `mutations-fe-final.log`, `mutations-be.log`):
+- **Backend: 7 of 7 killed.**
+  - M1 / M2: either exemption dropped.
+  - M3: widened to every non-extendable unit.
+  - M4: widened to a static `p_max_pu < 1`.
+  - M5: `flat_projects_root`.
+  - M6: key dropped.
+  - M7: the `mwh` key renamed.
+- **Frontend: 33 of 35 killed.**
+  - B4a–d, f;
+  - B7a–e;
+  - B10a–d;
+  - B9a–b;
+  - B8a–g;
+  - B6a–b;
+  - C12a–c;
+  - C11 R8, R15b, Q3–Q5.
+
+  B4c (the resize listener dropped) and B10c (Link card ignores the name) first survived. Two tests were added in `5a9052599`. The resize test silences the tour's `MutationObserver`, which in jsdom re-read the target too. Both are now killed.
+- **Two equivalent mutants:**
+  - B4e (the "apart from the highlight" check dropped) is equivalent by geometry. Every candidate is offset from the target by the 12 px gap, which is greater than the 4 px ring, so a candidate inside the viewport never touches the highlight. The check stays as documentation of the contract.
+  - C11-R15 (`jobRunning` dropped from `amber`) is equivalent in the rendered header. The header attaches to a running queue job and sets the simulation store to `running`, so `isRunning` already covers it. The test observed that (`useSimulationStore.status === 'running'` after mount).
+
+**Gate rows** (logs in `scratchpad/p30/`):
+
+| Row | Command (cwd) | Result |
+|---|---|---|
+| 1 | `PYTHONPATH=/home/user/pypsa-eur:/home/user/pypsa-eur/pypsa-gui/backend /tmp/claude-0/venv/bin/python -m pytest tests/ -m "not slow" -p no:cacheprovider -W ignore -q -o addopts=""` (`pypsa-gui/backend`, HEAD `5a9052599`; the backend is unchanged after `7a97688f0`) | 6733 passed, 31 skipped, 11 deselected, 0 failed in 53 min (`row1.log`; P29: 6716) |
+| 2 | same interpreter, `-m pytest <the 14-file set> tests/test_validation*.py tests/test_local_settings*.py tests/test_energy_hub_templates.py -p no:cacheprovider -W ignore -q -o addopts=""` (`pypsa-gui/backend`, HEAD `5a9052599`) | 779 passed, 17 skipped (`row2.log`; P29: 776 + 17) |
+| 3 | `npx tsc --noEmit -p .` (`pypsa-gui/frontend`) | 0 errors |
+| 4 | `npx vitest run` (`pypsa-gui/frontend`) | 244 files / 2820 passed (`row4.log`; P29: 2793). An earlier run made while the backend suite shared the CPU had one 5 s timeout in `BottomPanel.test.tsx`, plus an "after teardown" `document` error from `prepareTaggingTour`'s 3 s poll. Both files pass alone, and the clean full run passed. |
+| 4s | `for i in $(seq 10); do npx vitest run src/components/GuidedTour src/pages/hubDesign src/layout/PropertiesPanel src/layout/AppHeader; done` (`pypsa-gui/frontend`) | 10 / 10 green, 24 files / 219 tests each (`row4s-*.log`) |
+| 5 | `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs --phase P30 --out <scratchpad>/p30/smoke30f` (`pypsa-gui/frontend`, HEAD `5a9052599`) | PASS, 61 screenshots (the first PASS was `smoke30e` on `2787a2530`). Details below this table. |
+| 5 | same, `--phase P29 --out <scratchpad>/p30/smoke29` | PASS, 39 screenshots |
+| 7 | `git diff bcb6a671f -- 'pypsa-gui/frontend/src/**' \| grep -c uiMode` | 6, all in `AppHeader.uiMode.test.tsx` (store setups and one import). No product line branches on `uiMode`. |
+
+What the P30 smoke checked:
+- The tour box was checked 29 times, all inside the viewport and apart from the highlight: the hub tour before a study (6 steps), during the H2 study (6), after it from Results (7) and from Improve (8), and the tagging tour (2).
+- Tagging tour: the counter read `1/1` on the Bus step. With `grid_import` opened in Edit from the header search it read `1/2` with Next, then `2/2` on the Link step.
+- Preflight on all three templates: `ok`, 0 warnings, no `gen_zero_costs`.
+- `/local-settings.projects_root` and the Blank tab line both name `<RUN>/projects`.
+
+Row 7 also covers the behaviour changes that reach Expert, by design of the items. The spec scopes none of them to Guided:
+- tour placement and steps (every tour);
+- the B9 description;
+- the B10 scoping;
+- the B6 line;
+- the B8 INFO log.
+
+The hub-design changes (B8 line and title, C12) are Guided surfaces.
+
+**Known limitations / probe list:**
+- **"Saved to" for a name that already exists.** The allocator (`storage_paths.allocate_storage_path`) may add a suffix (`Name (2)`) for a new row. The Blank tab's overwrite path writes into the existing project. Probe: is `<root>/<name>/` true for every Blank-tab create in local mode?
+- **The tour now watches `document.body` (`childList`, `subtree`) while it is open.** Every mutation batch costs one frame callback, which only sets state on a change. Probe for render churn on a page with live polling (the FMEA tab during a sweep).
+- **An optional step whose target is absent, but whose `reveal` control is on screen, is still skipped.** An example is a Link selected but not in Edit. The spec rule is "target absent". Including reveal controls would make the pre-study hub tour reach the blocked Results / Improve rail steps.
+- **The Bus step after the user selects a Link.** Its target is gone, so the popover docks bottom-left with the existing "This control is not on screen right now…" note. That text is true.
+- **`free` placement.** In very small viewports the popover may still overlap the target; the spec allows this ("if none fits"). Probe: a 360×640 viewport on the hub tour.
+- **Readiness in the error line.** It is observed through the hub's own key (archetype plus template overrides). A readiness error from the Expert panel's differently keyed query does not show there.
+- **The B8 INFO line logs `skipErrorToast` failures from every caller,** including `fetchLocalSettings`'s hosted 404 (once per session) and the hub's quiet reads.
+
+No processes are left running.
