@@ -345,6 +345,18 @@ class StorageUnitCreate(BaseModel):
     discount_rate: float | None = None
     build_year: int = 0
     lifetime: _NoneToPosInf = Field(default=float("inf"))
+    # ── Investment parts (asset parameter schema, services/asset_schema) ──
+    # A battery's power part (inverter, EUR/MW) and energy part (storage
+    # block, EUR/MWh) with their own lifetimes and FOM shares. When either is
+    # priced, `capital_cost`, `fom_cost` and `lifetime` are DERIVED from them
+    # and `overnight_cost` stays empty (PyPSA would otherwise ignore
+    # `capital_cost`). Custom columns, netCDF round-trip for free.
+    inv_power_overnight: float | None = None
+    inv_power_lifetime: float | None = None
+    inv_power_fom_share: float | None = None
+    inv_energy_overnight: float | None = None
+    inv_energy_lifetime: float | None = None
+    inv_energy_fom_share: float | None = None
 
 
 class StoreCreate(BaseModel):
