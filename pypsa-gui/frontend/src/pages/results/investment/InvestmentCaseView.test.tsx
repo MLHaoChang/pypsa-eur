@@ -265,6 +265,26 @@ describe('InvestmentCaseView', () => {
     expect(within(cf).getByTestId('ic-cashflows-mismatch').textContent).toMatch(/2032/)
   })
 
+  it('a not-established line reads "not established" in its cells (P4 gate B2)', async () => {
+    const rep = structuredClone(REPORT)
+    const sections = rep.sections as Record<string, { payload: Record<string, unknown> }>
+    sections.project.payload = { ...sections.project.payload, owner: 'owner',
+      lines_not_established: [{ key: 'bill:energy', value_stream: 'energy_import',
+                                counterparty: 'retailer', source: 'bill', years: [2031, 2032] }] }
+    api.getReport.mockResolvedValue(rep)
+    renderView()
+    await screen.findByTestId('ic-report')
+    const cf = screen.getByTestId('ic-cashflows')
+    const header = within(cf).getAllByRole('columnheader').map(h => h.textContent)
+    const col = header.indexOf('energy import')
+    expect(col).toBeGreaterThan(0)
+    for (const y of [2031, 2032]) {
+      const cells = within(cf).getByTestId(`ic-cashflow-${y}`).children
+      expect(cells[col].textContent).toBe('not established')
+      expect(cells[col].getAttribute('data-established')).toBe('false')
+    }
+  })
+
   it('an unconfirmable currency says why, not "changed" (review B4)', async () => {
     api.getInvestmentCase.mockResolvedValue({ status: 'done',
       report: { present: true, stale: true, changed: [], reason: 'solve_in_flight' } })

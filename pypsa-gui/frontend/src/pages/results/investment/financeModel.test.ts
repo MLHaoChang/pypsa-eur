@@ -125,6 +125,19 @@ describe('the report', () => {
       .toEqual(['energy_import', 'avoided vs counterfactual · energy_import'])
   })
 
+  it('marks the cells of a not-established line, never "no line" or a partial sum (P4 gate B2)', () => {
+    const line = (year: number, stream: string, amount: number) => ({ year, participant: 'owner',
+      counterparty: 'x', value_stream: stream, amount, provenance: { source: 'ledger', mode: 'pf' } }) as CashflowLine
+    const p = cashflowPivot([line(2031, 'energy_import', -60), line(2031, 'ppa_settlement', 200)],
+      [{ value_stream: 'energy_import', source: 'bill', years: [2031, 2032] },
+       { value_stream: 'energy_import', source: 'counterfactual:bill', years: [2031] }])
+    expect(p.unknown[2031]).toEqual(['energy_import', 'avoided vs counterfactual · energy_import'])
+    expect(p.unknown[2032]).toEqual(['energy_import'])
+    expect(p.years).toEqual([2031, 2032])           // a year with only an unknown line has a row
+    expect(p.totals[2031]).toBe(140)                 // the pivot's sum is NOT the total (cashTotals)
+    expect(cashflowPivot([line(2031, 'fom', -1)]).unknown).toEqual({})
+  })
+
   it('takes the totals from the equity cash, never from a partial sum of lines', () => {
     const line = (year: number, amount: number) => ({ year, participant: 'owner', counterparty: 'x',
       value_stream: 'ppa_settlement', amount, provenance: { source: 's', mode: 'pf' } }) as CashflowLine

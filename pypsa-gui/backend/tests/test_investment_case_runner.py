@@ -426,3 +426,37 @@ def test_b4_the_workbook_strips_control_characters():
     wb = load_workbook(io.BytesIO(build_workbook(rep, project="p\x0bq")))
     about = {r[0].value: r[1].value for r in wb["About"].iter_rows(max_col=2)}
     assert about["Case"] == "case" and about["Project"] == "pq"
+
+
+def test_gate_b2_an_unknown_line_is_carried_never_dropped():
+    """P4 gate assessor B2 (C12): a line whose amount is not established has no
+    CashflowLine, so the report lists it with its years, its counterparty's
+    total is unknown (not the rest summed) and the xlsx writes a
+    not_established row per year."""
+    import io
+
+    import openpyxl
+
+    from services.finance.case import CONTRACT_CLASS, TemplateLine
+    from services.finance.export_xlsx import NOT_ESTABLISHED, build_workbook
+    from tests.test_finance_engine import LAYER, _case
+
+    lines = (TemplateLine("ppa", "ppa_settlement", 200.0, CONTRACT_CLASS, indexation=0.0,
+                          counterparty="offtaker"),
+             TemplateLine("bill", "energy_import", None, "tariff", counterparty="retailer"),
+             TemplateLine("stand", "network_fixed", -5.0, "tariff", counterparty="retailer"))
+    case = _case(lines=lines)
+    r = run_case(case, layers=LAYER)
+    rep = assemble_finance_sections(r, case, assumptions_hash="a" * 16, packs={})
+    miss = rep.sections["project"].payload["lines_not_established"]
+    assert [m["key"] for m in miss] == ["bill"] and len(miss[0]["years"]) == r.tl.analysis_years
+    part = rep.sections["participants"].payload
+    assert part["operating_cash_by_counterparty"]["retailer"] is None       # not −5 a year
+    assert part["counterparties_not_established"] == ["retailer"]
+    assert part["operating_cash_by_counterparty"]["offtaker"] is not None
+    assert not any(ln.provenance.source_id == "bill" for ln in rep.cashflow_lines)
+    ws = openpyxl.load_workbook(io.BytesIO(build_workbook(rep)))["CashflowLines"]
+    head = [c.value for c in next(ws.iter_rows(max_row=1))]
+    rows = [dict(zip(head, (c.value for c in row))) for row in ws.iter_rows(min_row=2)]
+    ne = [x for x in rows if x["source_id"] == "bill"]
+    assert len(ne) == r.tl.analysis_years and all(x["amount"] == NOT_ESTABLISHED for x in ne)

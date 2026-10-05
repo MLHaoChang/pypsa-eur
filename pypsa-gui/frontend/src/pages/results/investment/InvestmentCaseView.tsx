@@ -14,7 +14,7 @@ import { nk } from '../../../utils/queryKeys'
 import { blockerMessage } from '../../../utils/blockerMessage'
 import { downloadCSV } from '../shared'
 import {
-  AVOIDED_PREFIX, cashflowPivot, cashTotals, completenessRows, counterfactualStatement, fmtCell, fmtHeadline, gateLegs,
+  AVOIDED_PREFIX, cashflowPivot, cashTotals, completenessRows, missingLines, counterfactualStatement, fmtCell, fmtHeadline, gateLegs,
   HEADLINE_KEYS, headlines, label, NOT_ESTABLISHED, perYearLists, progressFraction, progressText,
   reportFlags, reportYears, sectionOf, studyFailure, studyProgress, studyStale, toTable,
   uncheckableReason, waccGate,
@@ -186,7 +186,9 @@ function Counterfactual({ report }: { report: InvestmentCaseReportPayload }) {
 
 function Cashflows({ report }: { report: InvestmentCaseReportPayload }) {
   const lines = report.cashflow_lines
-  const pivot = cashflowPivot(lines)
+  const projectPayload = sectionOf(report, 'project')?.payload as Record<string, unknown> | undefined
+  const pivot = cashflowPivot(lines, missingLines(report),
+                              typeof projectPayload?.owner === 'string' ? projectPayload.owner : null)
   const { totals, reason: incomplete, mismatch } = cashTotals(report, pivot)
   const hasAvoided = pivot.columns.some(c => c.includes(AVOIDED_PREFIX))
   if (!pivot.years.length) {
@@ -230,6 +232,10 @@ function Cashflows({ report }: { report: InvestmentCaseReportPayload }) {
               <th scope="row" className="text-left font-normal">{y}</th>
               {pivot.columns.map(c => {
                 const v = pivot.cells[y]?.[c]
+                if (pivot.unknown[y]?.includes(c)) {
+                  return <td key={c} className="text-right text-warn" data-established="false"
+                             title="a line in this cell is not established">{NOT_ESTABLISHED}</td>
+                }
                 return <td key={c} className="text-right" title={v === undefined ? 'no line' : undefined}>
                   {v === undefined ? '–' : fmtAmount(v)}</td>
               })}

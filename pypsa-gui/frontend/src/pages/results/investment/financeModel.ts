@@ -292,7 +292,14 @@ export interface CashflowPivot {
   /** year → column → summed amount; a missing cell has no line. */
   cells: Record<number, Record<string, number>>
   totals: Record<number, number>
+  /** year → the columns holding a line whose amount is NOT established (the
+   *  report lists them apart: a cashflow line's amount is a number). Such a
+   *  cell reads "not established", never "–" or a partial sum (P4 gate B2). */
+  unknown: Record<number, string[]>
 }
+
+interface MissingLine { value_stream?: string | null; source?: string | null;
+                        years?: number[] | null }
 
 /** A counterfactual line (source `counterfactual:*`): the supply cost the
  *  site would pay without the investment, NEGATED — returns are on the
@@ -302,7 +309,8 @@ export const isCounterfactualLine = (l: CashflowLine) =>
 
 export const AVOIDED_PREFIX = 'avoided vs counterfactual'
 
-export function cashflowPivot(lines: CashflowLine[] | null | undefined): CashflowPivot {
+export function cashflowPivot(lines: CashflowLine[] | null | undefined,
+                              missing?: MissingLine[] | null, owner?: string | null): CashflowPivot {
   const list = (lines ?? []).filter(l => l && typeof l.year === 'number')
   const parties = new Set(list.map(l => l.participant))
   // The counterfactual's lines get their own columns (WP4.7 review round 2,
@@ -320,8 +328,28 @@ export function cashflowPivot(lines: CashflowLine[] | null | undefined): Cashflo
     row[c] = (row[c] ?? 0) + l.amount
     totals[l.year] = (totals[l.year] ?? 0) + l.amount
   }
+  const unknown: Record<number, string[]> = {}
+  for (const m of missing ?? []) {
+    if (!m || typeof m.value_stream !== 'string') continue
+    const stream = typeof m.source === 'string' && m.source.startsWith('counterfactual:')
+      ? `${AVOIDED_PREFIX} · ${m.value_stream}` : m.value_stream
+    const c = parties.size > 1 ? `${owner ?? 'owner'} · ${stream}` : stream
+    if (!columns.includes(c)) columns.push(c)
+    for (const y of m.years ?? []) {
+      if (typeof y !== 'number') continue
+      cells[y] ??= {}
+      const u = (unknown[y] ??= [])
+      if (!u.includes(c)) u.push(c)
+    }
+  }
   const years = Object.keys(cells).map(Number).sort((a, b) => a - b)
-  return { years, columns, cells, totals }
+  return { years, columns, cells, totals, unknown }
+}
+
+/** The project payload's not-established lines (P4 gate B2). */
+export function missingLines(report: InvestmentCaseReportPayload | null | undefined): MissingLine[] {
+  const m = payloadOf(report, 'project').lines_not_established
+  return Array.isArray(m) ? m.filter(isObj) as MissingLine[] : []
 }
 
 /** The per-year Total of the cashflow table (WP4.7 review round 2, R2-1): the

@@ -287,6 +287,7 @@ def _project_payload(result, case) -> dict[str, Any]:
                         "rate": _num(ln.rate), "cash": _series(ln.cash)}
                        for ln in getattr(result.incentives, "lines", []) or []],
         "counterfactual": _counterfactual_block(result, case),
+        "lines_not_established": _lines_not_established(result),
         # The discount rates the returns above use (the chat's cash attribution
         # discounts at the report's own cost of equity).
         "cost_of_equity": _num(fin.cost_of_equity),
@@ -393,12 +394,44 @@ def _tax_payload(result, case, packs: dict[str, str]) -> dict[str, Any]:
     return out
 
 
+def _lines_not_established(result) -> list[dict[str, Any]]:
+    """Every operating line whose amount is not established (C12): it has no
+    `CashflowLine` (an amount is a number), so it is listed here — key,
+    stream, counterparty, source and the operating years it would cover — and
+    the report, the xlsx and the frontend show it as not established instead
+    of silently leaving it out (P4 gate assessor B2)."""
+    tl = result.tl
+    years = [int(y) for y in tl.years if tl.cod_year <= int(y) < tl.cod_year + tl.analysis_years]
+    out: list[dict[str, Any]] = []
+    for op, prefix in ((result.op, ""), (getattr(result, "op_counterfactual", None),
+                                         "counterfactual:")):
+        if op is None:
+            continue
+        for key, arr in (op.lines or {}).items():
+            if arr is not None:
+                continue
+            ln = op.line_meta.get(key)
+            out.append({"key": f"{prefix}{key}",
+                        "value_stream": _cashflow_stream(ln.stream) if ln else None,
+                        "counterparty": ln.counterparty if ln else None,
+                        "source": f"{prefix}{ln.source}" if ln else None,
+                        "years": years})
+    return out
+
+
 def _participants_payload(result, case) -> dict[str, Any]:
-    by_cp: dict[str, list[float]] = {}
+    by_cp: dict[str, list[float] | None] = {}
     n = result.tl.n
     for key, arr in (result.op.lines or {}).items():
         ln = result.op.line_meta.get(key)
-        if ln is None or arr is None:
+        if ln is None:
+            continue
+        if arr is None:
+            # A counterparty with an unknown line has an unknown total — never
+            # the sum of the rest (C12; P4 gate assessor B2).
+            by_cp[ln.counterparty] = None
+            continue
+        if ln.counterparty in by_cp and by_cp[ln.counterparty] is None:
             continue
         acc = by_cp.setdefault(ln.counterparty, [0.0] * n)
         for i in range(n):
@@ -407,7 +440,9 @@ def _participants_payload(result, case) -> dict[str, Any]:
         "structure": "single_owner",
         "owner": case.owner,
         "counterparties": sorted(by_cp),
-        "operating_cash_by_counterparty": {k: _series(v) for k, v in sorted(by_cp.items())},
+        "operating_cash_by_counterparty": {k: None if v is None else _series(v)
+                                           for k, v in sorted(by_cp.items())},
+        "counterparties_not_established": sorted(k for k, v in by_cp.items() if v is None),
         "declared_participants": [p.model_dump(mode="json") for p in case.inputs.participants],
     }
 

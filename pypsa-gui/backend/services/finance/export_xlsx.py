@@ -8,7 +8,8 @@ The investment-case workbook (IC P4 plan WP4.6d; the `asset_results` pattern).
 - `Summary` — the headline figures;
 - one sheet per report section (`IC_REPORT_SECTIONS`), its status, note and
   payload (scalars as rows; lists of records as tables);
-- `CashflowLines` — every `CashflowLine` with its provenance.
+- `CashflowLines` — every `CashflowLine` with its provenance, and a
+  `not_established` row per year for each line whose amount is unknown.
 
 An unknown value (`None`) is written as an explicit `not_established` cell,
 never an empty one or a 0 (ADR-0001). A text value that a spreadsheet would
@@ -167,6 +168,16 @@ def build_workbook(report: InvestmentCaseReport, *, project: str | None = None) 
              ln.amount, ln.provenance.source, ln.provenance.mode, ln.provenance.pack_hash,
              ln.provenance.seed, ln.provenance.source_id, ln.provenance.contract_id,
              ln.provenance.period] for ln in report.cashflow_lines]
+    # A line whose amount is not established has no CashflowLine: one explicit
+    # `not_established` row per year it covers, so a sum over this sheet can
+    # never read as complete (C12; P4 gate assessor B2).
+    proj = report.sections.get("project")
+    missing = ((proj.payload or {}).get("lines_not_established") or []) if proj else []
+    for m in missing:
+        for y in m.get("years") or [None]:
+            body.append([y, report.sections["project"].payload.get("owner"), m.get("counterparty"),
+                         m.get("value_stream"), None, None, None, m.get("source"), None, None,
+                         None, m.get("key"), None, None])
     _rows(cf, [header] + body)
 
     buf = io.BytesIO()

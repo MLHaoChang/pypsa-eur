@@ -61,7 +61,8 @@ from the product's code; the product is only the thing under test.
      through the router's adapter seam → SAM's price; nothing stored changes).
   L. Refusals and C12: the 7-day fixture refused `template_not_annual:168`
      through the routes (headlines None, the xlsx `not_established`) and, with
-     `annualise`, flagged `template_annualised:52.14`; a None ledger line →
+     `annualise`, flagged `template_annualised:52.14`; a None ledger line (carried
+     as not established in the payload, the counterparty totals and the xlsx) →
      operating `not_established`; a missing escalation class → not
      established through the routes; every None renders as None / "not
      established" / `not_established`, never 0.
@@ -1331,6 +1332,25 @@ def scenario_l() -> None:
         _step("L: …the report says not_established and the xlsx writes not_established, never 0",
               rep.completeness["project"] == "not_established"
               and all(summary.get(k) == NE for k in keys), f"{ {k: summary.get(k) for k in keys} }")
+        # P4 gate assessor B2: the unknown line is CARRIED, never dropped — listed in
+        # the payload, the retailer's total unknown (not the rest summed), and a
+        # not_established row per year on the CashflowLines sheet.
+        pl = rep.sections["project"].payload
+        miss = [m for m in pl.get("lines_not_established") or [] if m["key"] == "bill:energy"]
+        part = rep.sections["participants"].payload
+        cp = next((m["counterparty"] for m in miss), None)
+        ws = wb["CashflowLines"]
+        head = [c.value for c in next(ws.iter_rows(max_row=1))]
+        rows = [dict(zip(head, (c.value for c in r_))) for r_ in ws.iter_rows(min_row=2)]
+        ne_rows = [x for x in rows if x["source_id"] == "bill:energy" and x["amount"] == NE]
+        _step("L: …the unknown line is carried: listed in the payload with its years, its "
+              "counterparty's total not established, a not_established row per year in the xlsx "
+              "[P4 gate assessor B2]",
+              len(miss) == 1 and len(miss[0]["years"]) == r.tl.analysis_years
+              and cp is not None and part["operating_cash_by_counterparty"][cp] is None
+              and cp in part["counterparties_not_established"]
+              and len(ne_rows) == r.tl.analysis_years,
+              f"{miss[:1]} cp={cp} rows={len(ne_rows)}")
 
         # L2: a missing escalation class, through the routes.
         fin = {**STASH["fin"], "escalation": {k: v for k, v in STASH["fin"]["escalation"].items()
