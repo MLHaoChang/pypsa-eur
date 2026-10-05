@@ -631,7 +631,16 @@ class _Problem:
 
     def fault_only(self, point):
         """``{key: g}`` of the fault-level constraints alone (one IEC 60909
-        run per period)."""
+        run per period), cached by what feeds a fault: the other needs'
+        choices and the STATCOM units."""
+        stat_items = tuple(sorted(it for k in point.choice for it in self.options[k].cand.items if it[0] == "statcom"))
+        key = (tuple(k for k in point.choice if self.needs[self.options[k].need].kind != "reactive"), stat_items)
+        cache = self.__dict__.setdefault("_fault_cache", {})
+        if key not in cache:
+            cache[key] = self._fault_only(point)
+        return cache[key]
+
+    def _fault_only(self, point):
         _, spec, _ = self.realise(point)
         campus = build_campus(spec)
         statcoms = {str(n) for n, c in campus.compensation.iterrows() if c["kind"] == "statcom"}
@@ -753,8 +762,10 @@ def _solve_milp(prob, lin, point, backoff, delta, penalty, cuts=(), free_switch=
     K = len(prob.options)
     m = linopy.Model()
     x = m.add_variables(binary=True, coords=[np.arange(K)], dims=["k"], name="x")
-    for idx in prob.by_need:
-        m.add_constraints(x.loc[idx].sum() == 1)
+    member = np.zeros((len(prob.by_need), K))
+    for j, idx in enumerate(prob.by_need):
+        member[j, idx] = 1.0
+    m.add_constraints((xr.DataArray(member, dims=["n", "k"]) * x).sum("k") == 1)
     for k in lin.disabled:
         m.add_constraints(x.loc[[k]].sum() == 0)
     for choice in cuts:                         # a choice whose campus did not converge
@@ -805,10 +816,11 @@ def _solve_milp(prob, lin, point, backoff, delta, penalty, cuts=(), free_switch=
         qs = m.add_variables(lower=np.maximum(-q_ref * 4, stat0 - tr_delta),
                              upper=np.minimum(q_ref * 4, stat0 + tr_delta), coords=[np.arange(H)], dims=["h"], name="qs")
         trust(qs, stat0, 8 * q_ref, "h")
-        capx = sum(prob.options[k].q_stat * x.loc[k] for k in stat_opts)
-        for h in range(H):
-            m.add_constraints(qs.loc[h] - capx <= 0)
-            m.add_constraints(-qs.loc[h] - capx <= 0)
+        rating = np.zeros(K)
+        rating[stat_opts] = [prob.options[k].q_stat for k in stat_opts]
+        capx = (xr.DataArray(rating, dims=["k"]) * x).sum("k")
+        m.add_constraints(qs - capx <= 0)
+        m.add_constraints(-qs - capx <= 0)
         ms = m.add_variables(lower=0, coords=[np.arange(H)], dims=["h"], name="ms")
         s0d = xr.DataArray(stat0, dims=["h"])
         m.add_constraints(ms - qs >= -s0d)
@@ -822,8 +834,9 @@ def _solve_milp(prob, lin, point, backoff, delta, penalty, cuts=(), free_switch=
         n_max = np.array([[getattr(prob.options[k], f"{tag}_steps")] * H for k in opts])
         st = m.add_variables(lower=0, upper=n_max, integer=True, coords=[np.arange(len(opts)), np.arange(H)],
                              dims=[f"o{tag}", "h"], name=f"s{tag}")
-        for i, k in enumerate(opts):
-            m.add_constraints(st.loc[i] - int(n_max[i, 0]) * x.loc[k] <= 0)
+        pick = np.zeros((len(opts), K))
+        pick[np.arange(len(opts)), opts] = n_max[:, 0]
+        m.add_constraints(st - (xr.DataArray(pick, dims=[f"o{tag}", "k"]) * x).sum("k") <= 0)
         mvar = xr.DataArray([getattr(prob.options[k], f"{tag}_step_mvar") for k in opts], dims=[f"o{tag}"])
         nominal = (mvar * st).sum(f"o{tag}")                    # Mvar switched per hour
         terms.append((xr.DataArray(A_h[plane], dims=["c", "h"]) * nominal).sum("h"))
@@ -856,18 +869,31 @@ def _solve_milp(prob, lin, point, backoff, delta, penalty, cuts=(), free_switch=
         if need.kind != "switchgear":
             continue
         now, change = lin.bays[need.target["bus"]]
-        for r in prob.by_need[j]:
-            a = prob.options[r].cand.annual
-            obj.append(a * now * x.loc[r])
-            for k, d in change.items():
-                w = m.add_variables(lower=0, upper=1, name=f"w_{r}_{k}")
-                m.add_constraints(w - x.loc[r] - x.loc[k] >= -1)
-                m.add_constraints(w - x.loc[r] <= 0)
-                m.add_constraints(w - x.loc[k] <= 0)
-                obj.append(a * d * w)
+        rs = prob.by_need[j]
+        a = np.zeros(K)
+        a[rs] = [prob.options[r].cand.annual for r in rs]
+        obj.append((xr.DataArray(a * now, dims=["k"]) * x).sum())
+        if not change:
+            continue
+        ks = sorted(change)
+        # w[r, k] = x_r x_k exactly (binaries): w >= x_r + x_k - 1, w <= x_r, w <= x_k
+        w = m.add_variables(lower=0, upper=1, coords=[np.arange(len(rs)), np.arange(len(ks))], dims=["r", "q"],
+                            name=f"w{j}")
+        sel_r = np.zeros((len(rs), K))
+        sel_r[np.arange(len(rs)), rs] = 1.0
+        sel_k = np.zeros((len(ks), K))
+        sel_k[np.arange(len(ks)), ks] = 1.0
+        xr_ = (xr.DataArray(sel_r, dims=["r", "k"]) * x).sum("k")
+        xk_ = (xr.DataArray(sel_k, dims=["q", "k"]) * x).sum("k")
+        m.add_constraints(w - xr_ - xk_ >= -1)
+        m.add_constraints(w - xr_ <= 0)
+        m.add_constraints(w - xk_ <= 0)
+        coef = np.outer([prob.options[r].cand.annual for r in rs], [change[k] for k in ks])
+        obj.append((xr.DataArray(coef, dims=["r", "q"]) * w).sum())
     obj.append(penalty * sig.sum())
     m.add_objective(sum(obj[1:], obj[0]))
-    status, cond = m.solve(solver_name="highs", output_flag=False, mip_rel_gap=1e-9, mip_abs_gap=1e-6)
+    status, cond = m.solve(solver_name="highs", io_api="direct", output_flag=False, mip_rel_gap=1e-9,
+                           mip_abs_gap=1e-6)
     if status != "ok":
         raise ContractError(f"the MILP did not solve: {status}, {cond}")
     xs = np.round(x.solution.values).astype(int)
