@@ -29,7 +29,15 @@ Each round's findings, and what was done about them, are recorded in the plan un
 
 ## Gate evidence (2026-10-05)
 
-GATE_EVIDENCE_TABLE
+| Check | Result |
+|---|---|
+| `tests/qa_investment_case.py` | **243/243** (30 s) — the sections below |
+| The P4 regression list (the finance, investment-case and chat-IC files plus their billing / value-flow / registration neighbours) at 1979589 | **1,771 passed, 18 skipped** |
+| **Full backend suite (`-m "not slow"`, Python 3.12 venv)** at 1979589, 12 chunks | 8,322 passed, 31 skipped, 11 deselected `slow`, **1 failed**: `test_hourly_assumption_audit` — the adapter's two `8760` sites (the C3 annual check and the `annualise` factor) were unlisted. Both are units; listed with that reason and the inventory re-pinned (8116895, a test-only change). |
+| Chunk 07 re-run at 8116895 (the audit's chunk) | **809 passed, 7 skipped, 0 failed** → the full suite is **8,323 passed, 31 skipped, 0 failed** at the final code |
+| **All QA drivers** (`tests/run_qa_drivers.py`) at 8116895 | **26/26 passed** (the 25 of P3 + `qa_investment_case`; `qa_value_flows`, `qa_billing_contracts`, `qa_commercial_lp` among them) |
+| Frontend `vitest run` | **253 files, 2,812 tests passed** |
+| Frontend `tsc --noEmit` | clean |
 
 ### The driver — `tests/qa_investment_case.py` (243 checks)
 
