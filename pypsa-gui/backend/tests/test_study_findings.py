@@ -270,3 +270,28 @@ def test_a_money_fact_without_a_currency_year_is_null_with_a_flag():
     v = F.verdict([att], _rob("bess_2h", (5e4, 1e4)), fidelity="full_study")
     npv = v.facts["battery_npv"]
     assert npv.value is None and npv.unavailable == "currency_year_unknown"
+
+
+# ── F1 B3 (gate S6 [N2]): the single-band energy-price skip code ─────────
+
+def test_the_single_band_energy_price_skip_records_its_documented_code():
+    """
+    On a one-band tariff the ledger's ``energy_price_level`` row has no value
+    (``unavailable: not_applicable``). The skip rule returned that generic
+    code before its single-band check, so the report explained the generic
+    reason, not ``energy_price_level_no_effect_single_band``.
+    """
+    from services.study import library as lib
+
+    library = lib.load_library()
+    tariff = library.tariffs["de_industrial_illustrative"]
+    assert len({b.price_per_mwh for b in tariff.energy_bands}) == 1
+    led = lib.seed_ledger(["energy_price_level", "demand_charge_price"], {}, library)
+    assert next(r for r in led.rows if r.key == "energy_price_level").value is None
+    assert F._skip_code(led, tariff, "energy_price_level") == (
+        "energy_price_level_no_effect_single_band")
+    # A multi-band tariff keeps the bar.
+    tou = library.tariffs["tou_reference_illustrative"]
+    led_tou = lib.seed_ledger(["energy_price_level"],
+                              {"tariff": {"tariff_id": tou.tariff_id}}, library)
+    assert F._skip_code(led_tou, tou, "energy_price_level") is None
