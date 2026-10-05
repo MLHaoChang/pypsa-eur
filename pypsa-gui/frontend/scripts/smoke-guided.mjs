@@ -120,7 +120,8 @@
  * opened → the counter reads 2/2 and the Link step shows. Then
  * `POST /api/simulation/preflight` on each template project → no
  * `gen_zero_costs` issue; and the New-project dialog's Blank tab shows
- * "Saved to" with the smoke's scratch PYPSAGUI_PROJECTS_ROOT.
+ * "Saved in a folder named after the project, under <scratch
+ * PYPSAGUI_PROJECTS_ROOT>/" (the root only: gate B6-1).
  *
  * It starts its own uvicorn (local mode, ANTHROPIC_API_KEY unset, app data
  * and projects under a scratch dir), Vite on 5173 and — after the send-gate
@@ -2803,7 +2804,8 @@ async function phaseP30(browser) {
     await byId('new-project-wizard').waitFor({ state: 'visible', timeout: 15_000 })
     await byId('new-project-saved-to').waitFor({ state: 'visible', timeout: 15_000 })
     const line = ((await byId('new-project-saved-to').textContent()) ?? '').trim()
-    check(line.startsWith('Saved to ') && line.includes(root) && !line.includes('pypsa-gui/backend/projects'),
+    // P30 gate B6-1: the root only — the allocator may change the folder name.
+    check(line === `Saved in a folder named after the project, under ${root}/`,
       `"${line}"`)
     await shot(page, 'p30-new-project-saved-to')
   } finally {

@@ -165,6 +165,9 @@ function BlankTab({ existingProjects, onConfirm, onClose, isPending }: NewProjec
   const commit = () => { if (trimmed) onConfirm(trimmed) }
   // P30 (B6): the backend's own projects root (local mode). Hosted mode
   // (404 → null) and a failed read show no line rather than a wrong path.
+  // The folder itself is never named (gate B6-1): the backend's allocator
+  // may change it (`Grid` beside `grid` → `Grid (2)`, `Study.` → `Study`,
+  // `CON` → `CON_`), so only the root is a true statement.
   const { data: localSettings } = useLocalSettings()
   const root = localSettings?.projects_root?.replace(/[\\/]+$/, '') || null
   const sep = root && root.includes('\\') && !root.includes('/') ? '\\' : '/'
@@ -214,7 +217,7 @@ function BlankTab({ existingProjects, onConfirm, onClose, isPending }: NewProjec
         </div>
         {root && (
           <span className="text-[10px] text-muted" data-testid="new-project-saved-to">
-            Saved to <span className="font-mono">{root}{sep}{trimmed || '…'}{sep}</span>
+            Saved in a folder named after the project, under <span className="font-mono">{root}{sep}</span>
           </span>
         )}
       </label>

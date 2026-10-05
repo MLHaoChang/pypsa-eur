@@ -136,11 +136,11 @@ describe('NewProjectWizard — a created project opens the workbench', () => {
 // `fetchLocalSettings`) and a failed read shows nothing: no line, rather
 // than a path that is not true.
 describe('NewProjectWizard — where a blank project is saved (P30 B6)', () => {
-  function renderBlank() {
+  function renderBlank(existing: { name: string; bus_count: number }[] = []) {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={qc}>
-        <NewProjectWizard existingProjects={[]} onConfirm={() => {}} onClose={() => {}}
+        <NewProjectWizard existingProjects={existing as never} onConfirm={() => {}} onClose={() => {}}
           isPending={false} initialTab="blank" />
       </QueryClientProvider>,
     )
@@ -152,8 +152,25 @@ describe('NewProjectWizard — where a blank project is saved (P30 B6)', () => {
     vi.mocked(fetchLocalSettings).mockResolvedValue(STATE)
     renderBlank()
     const line = await screen.findByTestId('new-project-saved-to')
-    expect(line.textContent).toBe('Saved to /home/me/Documents/PyPSA Studio/Projects/new_project/')
+    expect(line.textContent).toBe(
+      'Saved in a folder named after the project, under /home/me/Documents/PyPSA Studio/Projects/')
     expect(screen.queryByText(/pypsa-gui\/backend\/projects/)).toBeNull()
+  })
+
+  // P30 gate B6-1: the backend's allocator (`safe_names.unique_dir_name`)
+  // changes some names — `Grid` beside `grid` is saved in `Grid (2)`,
+  // `Study.` in `Study`, `CON` in `CON_` — so the line never names the folder.
+  it('never names a folder the allocator may change (Grid beside grid)', async () => {
+    vi.mocked(fetchLocalSettings).mockResolvedValue(STATE)
+    renderBlank([{ name: 'grid', bus_count: 0 }])
+    const input = screen.getByPlaceholderText('my_project')
+    await userEvent.clear(input)
+    await userEvent.type(input, 'Grid')
+    const line = await screen.findByTestId('new-project-saved-to')
+    expect(line.textContent).not.toMatch(/\/Grid\/?$/)
+    expect(line.textContent).not.toContain('Projects/Grid')
+    expect(line.textContent).toBe(
+      'Saved in a folder named after the project, under /home/me/Documents/PyPSA Studio/Projects/')
   })
 
   it('no line in hosted mode (the route 404s → null)', async () => {
