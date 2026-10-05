@@ -12,6 +12,10 @@
 //   (`decisionQueries.ts`).
 // * The Expert view opens the chosen OPTION FORK (never the base project),
 //   after a plain warning that editing it there changes the study's case.
+// * Reopening (plan F1-F, F2): the last open study is remembered across a
+//   reload (`decisionStore`); one that answers 404 is forgotten and the
+//   picker says so. A 404 carrying a `decision_studies_*` code means the
+//   routes are off, not that the study is gone, and keeps it.
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
@@ -20,7 +24,7 @@ import { useAuthMode } from '../../auth/AuthModeProvider'
 import { useUIStore } from '../../store/uiStore'
 import { switchToProject } from '../../utils/projectActions'
 import {
-  EXPERT_REFUSAL, EXPERT_REFUSAL_FALLBACK, EXPERT_WARNING, OPTION_LABELS, UI_LABELS, VIEW_LABELS, errorCopy,
+  EXPERT_REFUSAL, EXPERT_REFUSAL_FALLBACK, EXPERT_WARNING, OPTION_LABELS, REOPEN_LABELS, UI_LABELS, VIEW_LABELS, errorCopy,
   type DecisionView,
 } from '../../utils/decisionVocabulary'
 import { dq, invalidateDerived, studyKey } from './decisionQueries'
@@ -51,7 +55,21 @@ export function Unavailable({ code, message }: { code: string; message?: string 
   )
 }
 
+function LostNotice() {
+  const lost = useDecisionStore(s => s.lost)
+  if (!lost) return null
+  return (
+    <div className="px-6 pt-6 max-w-2xl" data-testid="decision-lost">
+      <Banner tone="warn" title={REOPEN_LABELS.lostTitle}>{REOPEN_LABELS.lostAction(lost.project)}</Banner>
+    </div>
+  )
+}
+
 function StudyPicker({ project }: { project: string | null }) {
+  return <><LostNotice /><StudyList project={project} /></>
+}
+
+function StudyList({ project }: { project: string | null }) {
   const openStudy = useDecisionStore(s => s.openStudy)
   const q = useQuery({
     queryKey: ['decision', project ?? '', 'list'],
@@ -127,8 +145,12 @@ function StudyView({ at, pollMs }: { at: StudyRef; pollMs: number }) {
   const setView = useDecisionStore(s => s.setView)
   const setWatch = useDecisionStore(s => s.setWatch)
   const watch = useDecisionStore(s => s.watch)
+  const forget = useDecisionStore(s => s.forget)
 
   const study = useQuery(dq.study(project, studyId))
+  const studyErr = study.error ? studyError(study.error) : null
+  const gone = studyErr?.status === 404 && !studyErr.code?.startsWith('decision_studies_')
+  useEffect(() => { if (gone) forget({ project, studyId }) }, [gone, forget, project, studyId])
   const ledger = useQuery(dq.ledger(project, studyId))
   const library = useQuery(dq.library(project))
   const run = useQuery({ ...dq.run(project, studyId), refetchInterval: q => pollInterval(q.state.data ?? undefined, pollMs) })
@@ -229,10 +251,10 @@ function StudyView({ at, pollMs }: { at: StudyRef; pollMs: number }) {
     else setExpertMsg(EXPERT_REFUSAL[res.status] ?? EXPERT_REFUSAL_FALLBACK)
   }
 
-  if (study.error) {
-    const err = studyError(study.error)
-    if (err.code?.startsWith('decision_studies_')) return <Unavailable code={err.code} message={err.message} />
-    return <div className="p-6"><Refusal error={err} /></div>
+  if (studyErr) {
+    if (gone) return null
+    if (studyErr.code?.startsWith('decision_studies_')) return <Unavailable code={studyErr.code} message={studyErr.message} />
+    return <div className="p-6"><Refusal error={studyErr} /></div>
   }
   if (!s) return <p className="p-6 text-muted">Loading the study…</p>
 
@@ -309,7 +331,7 @@ function StudyView({ at, pollMs }: { at: StudyRef; pollMs: number }) {
         ) : current === 'ledger' ? (
           ledger.data ? (
             <LedgerReview payload={ledger.data} intake={s.intake} saving={putLedger.isPending} error={ledgerError}
-              csvUrl={studyUrls.ledgerCsv(project, studyId)}
+              csvUrl={studyUrls.ledgerCsv(project, studyId)} tested={f?.robustness.tornado ?? []}
               onSave={edits => putLedger.mutate({ rows: edits })}
               onReset={keys => putLedger.mutate({ reset: keys })} />
           ) : ledger.error ? <Refusal error={studyError(ledger.error)} /> : <p className="text-muted">Loading…</p>

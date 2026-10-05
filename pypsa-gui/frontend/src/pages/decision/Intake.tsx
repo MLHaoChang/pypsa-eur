@@ -16,6 +16,9 @@ import type { IntakePreview, StudyError, StudyIntake, StudyLibrary } from '../..
 import { decisionStudiesApi, studyError } from '../../api/decisionStudies'
 import { uploadFile, UploadError } from '../../api/uploads'
 import { StepShell } from '../modelHorizon/StepShell'
+
+/** How long an answer must settle before the load preview is posted (F4). */
+export const PREVIEW_DEBOUNCE_MS = 400
 import {
   BASIS_SENTENCE, INTAKE_NAV_LABEL, INTAKE_STEP_LABELS, UI_LABELS, VOCAB, errorCopy, helpFor, type IntakeStepId,
 } from '../../utils/decisionVocabulary'
@@ -132,10 +135,15 @@ export default function Intake({
       : load.source === 'sector_profile' ? Number(load.annual_mwh) > 0 : false
     if (!ready || leap) { setPreview(null); return }
     let live = true
-    decisionStudiesApi.preview(project, { site, load })
-      .then(p => { if (live) { setPreview(p); setPreviewErr(null) } })
-      .catch(e => { if (live) { setPreview(null); setPreviewErr(studyError(e)) } })
-    return () => { live = false }
+    // Plan F1-F, F4: debounced. Each change used to post the whole load file
+    // (up to the 25 MB cap) per keystroke in the site fields (gate S8
+    // [N-v2-1]); only an answer that settles for PREVIEW_DEBOUNCE_MS is sent.
+    const timer = setTimeout(() => {
+      decisionStudiesApi.preview(project, { site, load })
+        .then(p => { if (live) { setPreview(p); setPreviewErr(null) } })
+        .catch(e => { if (live) { setPreview(null); setPreviewErr(studyError(e)) } })
+    }, PREVIEW_DEBOUNCE_MS)
+    return () => { live = false; clearTimeout(timer) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadKey, project])
 

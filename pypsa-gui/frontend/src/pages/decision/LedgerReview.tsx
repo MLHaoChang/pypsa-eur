@@ -5,10 +5,13 @@
 // edit (an edit without one silently takes the row's). A flagged row names
 // its reason (the `needs_attention:<key>:<reason>` note) and can be reset.
 // PV rows are marked unused when PV is off. CSV export only (import is MVP-2).
+// A driver the robustness check moved shows the range it was tested over, read
+// from the findings' tornado rows, and a re-centred one is marked (plan F1-F,
+// F5; gate S9: the report and the workbooks already show it).
 import { useMemo, useState } from 'react'
-import type { LedgerPayload, LedgerRow, StudyError, StudyIntake } from '../../api/decisionStudies'
+import type { LedgerPayload, LedgerRow, StudyError, StudyIntake, TornadoRow } from '../../api/decisionStudies'
 import {
-  LEDGER_STATUS_LABELS, PROVENANCE_LABELS, ROW_MEANING, helpFor, needsAttentionReason,
+  LEDGER_STATUS_LABELS, PROVENANCE_LABELS, ROW_MEANING, TESTED_RANGE_LABELS, helpFor, needsAttentionReason,
 } from '../../utils/decisionVocabulary'
 import { isMoneyUnit, isPvRowUnused, ledgerCurrencyYearLabel, parseNeedsAttention } from './decisionModel'
 import { Button, Card, Chip, Refusal } from './DecisionUi'
@@ -22,10 +25,13 @@ function shown(r: LedgerRow): string {
   return PERCENT(r) ? String(Number((r.value * 100).toFixed(4))) : String(r.value)
 }
 
-function Row({ r, intake, attention, onSave, onReset, saving }: {
+const RECENTRED = 'range_recentred_on_user_value'
+
+function Row({ r, intake, attention, onSave, onReset, saving, tested }: {
   r: LedgerRow
   intake: StudyIntake
   attention: string | null
+  tested: TornadoRow | null
   onSave: (e: LedgerEditOut[]) => void
   onReset: (keys: string[]) => void
   saving: boolean
@@ -86,18 +92,27 @@ function Row({ r, intake, attention, onSave, onReset, saving }: {
       )}
       <p className="text-[10.5px] text-muted">
         Source: {r.source}{r.source_year != null ? ` (${r.source_year})` : ''}
-        {r.range && <> · plausible range {shownRange(r)} ({r.range.source === 'assumed' ? 'assumed ±30 %' : 'from the source'})</>}
+        {r.range && <> · plausible range {shownRange(r, r.range.low, r.range.high)} ({r.range.source === 'assumed' ? 'assumed ±30 %' : 'from the source'})</>}
       </p>
+      {tested && (
+        <p data-testid="ledger-tested-range" className="text-[10.5px] text-muted">
+          {TESTED_RANGE_LABELS.tested}: {shownRange(r, tested.low_value, tested.high_value)}
+          {tested.notes.includes(RECENTRED) && (
+            <> <span data-testid="ledger-recentred" className="font-medium text-warn">{TESTED_RANGE_LABELS.recentred}</span>
+              {' '}{helpFor(RECENTRED).text}</>
+          )}
+        </p>
+      )}
     </li>
   )
 }
 
-function shownRange(r: LedgerRow): string {
+function shownRange(r: LedgerRow, low: number, high: number): string {
   const f = (v: number) => (PERCENT(r) ? `${Number((v * 100).toFixed(2))} %` : `${Number(v.toFixed(4))} ${r.unit}`)
-  return `${f(r.range!.low)} to ${f(r.range!.high)}`
+  return `${f(low)} to ${f(high)}`
 }
 
-export default function LedgerReview({ payload, intake, onSave, onReset, saving, error, csvUrl }: {
+export default function LedgerReview({ payload, intake, onSave, onReset, saving, error, csvUrl, tested = [] }: {
   payload: LedgerPayload
   intake: StudyIntake
   onSave: (edits: LedgerEditOut[]) => void
@@ -105,6 +120,8 @@ export default function LedgerReview({ payload, intake, onSave, onReset, saving,
   saving: boolean
   error: StudyError | null
   csvUrl: string
+  /** The last tornado's rows (`findings.robustness.tornado`): what it tested. */
+  tested?: TornadoRow[]
 }) {
   const rows = payload.ledger.rows
   const attention = useMemo(() => {
@@ -128,7 +145,8 @@ export default function LedgerReview({ payload, intake, onSave, onReset, saving,
       <ul className="flex flex-col gap-2">
         {ordered.map(r => (
           <Row key={r.key} r={r} intake={intake} attention={attention.get(r.key) ?? null}
-            onSave={onSave} onReset={onReset} saving={saving} />
+            onSave={onSave} onReset={onReset} saving={saving}
+            tested={tested.find(t => t.key === r.key) ?? null} />
         ))}
       </ul>
     </Card>

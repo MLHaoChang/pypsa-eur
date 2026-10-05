@@ -12,6 +12,7 @@ import { redirectAfterLogout } from '../auth/logoutRedirect'
 import { getPostLoginPath } from '../auth/resume'
 import AssistantDock from '../components/AssistantDock'
 import NewProjectWizard, { type NewProjectTab } from '../layout/NewProjectWizard'
+import DecisionStudiesEntry from './decision/DecisionStudiesEntry'
 import { useUIStore } from '../store/uiStore'
 import { appLog } from '../store/simulationStore'
 import { formatRelativeTime, invalidateNetworkQueries } from '../utils/projectActions'
@@ -493,6 +494,10 @@ export default function ProjectsHomePage() {
             </div>
           </section>
         )}
+
+        {/* Plan F1-F, F2: the studies of the last open decision study's own
+            project (a study is not in the project the workbench reopens). */}
+        <DecisionStudiesEntry className={`p-5 sm:p-7 ${GLASS_PANEL}`} />
 
         <section aria-labelledby="start-heading" className="space-y-4">
           <div className="space-y-2">
