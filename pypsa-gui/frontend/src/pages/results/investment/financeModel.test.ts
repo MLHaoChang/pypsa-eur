@@ -1,11 +1,11 @@
 // The finance form and report mappings (IC P4 WP4.7a/b), without a DOM.
 import { describe, expect, it } from 'vitest'
 import {
-  cashflowPivot, counterfactualStatement, errorKey, errorsFor, established, financeErrors, fmtCell,
+  cashflowPivot, cashTotals, counterfactualStatement, errorKey, errorsFor, established, financeErrors, fmtCell,
   fmtHeadline, headlines, numOrNull, parseRateOrList, perYearLists, progressFraction, progressText,
   rateOrListText, studyFailure, studyProgress, studyStale, toTable, waccGate, withKey,
 } from './financeModel'
-import type { CashflowLine } from '../../../api/types'
+import type { CashflowLine, InvestmentCaseReportPayload } from '../../../api/types'
 
 describe('the form mappings', () => {
   it('an empty number is null, never 0', () => {
@@ -119,6 +119,27 @@ describe('the report', () => {
     const two = cashflowPivot([line(2030, 'energy', 1), line(2030, 'energy', 1, 'host')])
     expect(two.columns).toEqual(['owner · energy', 'host · energy'])
     expect(cashflowPivot(undefined).years).toEqual([])
+    const cfLine = { ...line(2030, 'energy_import', 100),
+                     provenance: { source: 'counterfactual:bill', mode: 'pf' } } as CashflowLine
+    expect(cashflowPivot([line(2030, 'energy_import', -60), cfLine]).columns)
+      .toEqual(['energy_import', 'avoided vs counterfactual · energy_import'])
+  })
+
+  it('takes the totals from the equity cash, never from a partial sum of lines', () => {
+    const line = (year: number, amount: number) => ({ year, participant: 'owner', counterparty: 'x',
+      value_stream: 'ppa_settlement', amount, provenance: { source: 's', mode: 'pf' } }) as CashflowLine
+    const pivot = cashflowPivot([line(2030, -10), line(2031, 5)])
+    const report = (cash: unknown, tax = 'ok') => ({ completeness: { project: 'ok', tax },
+      sections: { project: { status: 'ok', payload: { years: [2030, 2031], cash } },
+                  tax: { status: tax, note: tax === 'ok' ? null : 'tax_pack_missing' } } }) as
+      unknown as InvestmentCaseReportPayload
+    expect(cashTotals(report({ equity_post_tax: [-10, 5] }), pivot))
+      .toEqual({ totals: { 2030: -10, 2031: 5 }, reason: null, mismatch: [] })
+    const none = cashTotals(report({ equity_post_tax: null }, 'not_established'), pivot)
+    expect(none.totals).toEqual({ 2030: null, 2031: null })
+    expect(none.reason).toBe('tax tax_pack_missing')
+    expect(cashTotals(report({ equity_post_tax: [-10, 6] }), pivot).mismatch).toEqual([2031])
+    expect(cashTotals(report({ equity_post_tax: [-10] }), pivot).totals[2031]).toBeNull()
   })
 
   it('tables a list of records, and per-year lists by the report’s years', () => {

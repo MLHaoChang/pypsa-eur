@@ -169,7 +169,10 @@ describe('InvestmentCaseView', () => {
     const y2031 = within(cf).getByTestId('ic-cashflow-2031')
     expect(y2031.textContent).toMatch(/320\.00/)
     expect(y2031.textContent).toMatch(/-50\.00|−50\.00/)
-    expect(y2031.textContent).toMatch(/270\.00/)
+    // No tax pack → no post-tax equity cash: the Total is not established (the
+    // lines without tax would read as established; WP4.7 review round 2, R2-1).
+    expect(y2031.lastElementChild?.textContent).toBe('not established')
+    expect(within(cf).getByTestId('ic-cashflows-incomplete').textContent).toMatch(/tax_pack_missing/)
     expect(within(cf).getByTestId('ic-cashflow-2030').textContent).toMatch(/–/)
 
     // The debt schedule: a row per year with the DSCR; unknown years are
@@ -217,6 +220,49 @@ describe('InvestmentCaseView', () => {
     expect(within(cf).getByTestId('ic-cashflows-incomplete').textContent).toMatch(/incomplete/)
     const row = within(cf).getByTestId('ic-cashflow-2031')
     expect(row.lastElementChild?.textContent).toBe('not established')
+  })
+
+  it('totals are the engine\'s equity cash; counterfactual lines get their own columns (review r2)', async () => {
+    const rep = structuredClone(REPORT)
+    rep.completeness = { ...COMPLETENESS, tax: 'ok' }
+    const sections = rep.sections as Record<string, { status: string; note?: string | null;
+      payload: Record<string, unknown> }>
+    sections.tax = { status: 'ok', payload: {} }
+    // A real-shaped counterfactual case (an engine dump): the operating status
+    // says terminal not established — the cash stage defers a book value — but
+    // the engine resolved it and each year's lines sum to the equity cash.
+    sections.project.payload = { ...sections.project.payload,
+      operating_status: { operating: 'ok', capex: 'ok', terminal: 'not_established' },
+      cash: { equity_post_tax: [-1000, 330, 250] } }
+    rep.cashflow_lines = [
+      { year: 2030, participant: 'owner', counterparty: 'external', value_stream: 'capex', amount: -1000,
+        provenance: { source: 'capex', mode: 'pf' } },
+      { year: 2031, participant: 'owner', counterparty: 'grid', value_stream: 'energy_import', amount: -60,
+        provenance: { source: 'ledger', mode: 'pf' } },
+      { year: 2031, participant: 'owner', counterparty: 'grid', value_stream: 'energy_import', amount: 100,
+        provenance: { source: 'counterfactual:bill', mode: 'pf', source_id: 'bill' } },
+      { year: 2031, participant: 'owner', counterparty: 'offtaker', value_stream: 'ppa_settlement',
+        amount: 290, provenance: { source: 'ledger', mode: 'pf' } },
+      { year: 2032, participant: 'owner', counterparty: 'external', value_stream: 'terminal_value',
+        amount: 200, provenance: { source: 'terminal_value', mode: 'pf' } },
+      { year: 2032, participant: 'owner', counterparty: 'offtaker', value_stream: 'ppa_settlement',
+        amount: 40, provenance: { source: 'ledger', mode: 'pf' } },
+    ]
+    api.getReport.mockResolvedValue(rep)
+    renderView()
+    await screen.findByTestId('ic-report')
+    const cf = screen.getByTestId('ic-cashflows')
+    expect(within(cf).queryByTestId('ic-cashflows-incomplete')).toBeNull()
+    expect(within(cf).getByRole('columnheader', { name: 'avoided vs counterfactual · energy import' }))
+      .toBeTruthy()
+    expect(within(cf).getByRole('columnheader', { name: 'energy import' })).toBeTruthy()
+    expect(within(cf).getByTestId('ic-cashflows-avoided').textContent).toMatch(/not money received/)
+    const y2031 = within(cf).getByTestId('ic-cashflow-2031')
+    expect(y2031.textContent).toMatch(/100\.00/)        // the avoided cost, apart
+    expect(y2031.lastElementChild?.textContent).toBe('330.00')
+    // 2032: the lines (240) do not sum to the equity cash (250) — shown, not hidden.
+    expect(within(cf).getByTestId('ic-cashflow-2032').lastElementChild?.textContent).toBe('250.00')
+    expect(within(cf).getByTestId('ic-cashflows-mismatch').textContent).toMatch(/2032/)
   })
 
   it('an unconfirmable currency says why, not "changed" (review B4)', async () => {

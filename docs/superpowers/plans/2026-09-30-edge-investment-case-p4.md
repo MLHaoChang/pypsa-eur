@@ -1273,6 +1273,27 @@ headline mappings, the export's filename and injection guard and the C1 import b
 - Tests: run / abort with a mocked API; a fixture report including `not_established` and `stale`;
   `expectAllButtonsNamed`.
 
+**WP4.7 (a and b) review round 1: four findings; fixed (2cf0254).**
+- **B1:** a controlled number input reset "0.0" to "0" while typing (0.07 became 7). A shared `NumInput`
+  keeps the typed text and re-syncs only from outside; the finance editor and the P3 contracts editor use it.
+- **B2:** the cashflow table's totals read as established when the project was not (superseded in round 2).
+- **B3:** the counterfactual statement names the report's own reason.
+- **B4:** a report whose currency cannot be checked says why ("Unconfirmed: … a solve is running"), not
+  "changed".
+
+**WP4.7 review round 2 (on 367be7e): FAIL — two findings from the WP4.6b report changes; fixed.**
+Round-1 B1, B3 and B4 confirmed fixed; tsc clean; real report dumps render with no `undefined` / `NaN`.
+- **R2-1 (Major, C12):** the round-1 completeness heuristic was wrong both ways — "incomplete" on a
+  counterfactual case whose book-value terminal the engine resolved (the operating status still says
+  `terminal: not_established`), and established-looking totals without a tax pack (pre-tax sums). The Total
+  column is now the engine's `cash.equity_post_tax` per year (the lines sum to it since WP4.6b B2), "not
+  established" with the reason where it is null; a year whose lines do not sum to it is named, not hidden
+  (`cashTotals`).
+- **R2-2 (Minor, C13):** counterfactual lines were merged into the actual stream columns (an import of −60
+  showed as +40). They get their own "avoided vs counterfactual · <stream>" columns with a caption; the CSV
+  gains `source`, `source_id` and `contract_id`.
+- **Non-binding, taken:** the fallback stale text names the solver config.
+
 ---
 
 ## Carry-in register
