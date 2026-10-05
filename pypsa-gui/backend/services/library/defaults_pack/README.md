@@ -104,7 +104,8 @@ version and hash. It is the input for the report's assumptions appendix.
 
 The copy is made from the tariff as the file holds it, so editing a loaded pack's objects
 cannot yield a stamped, altered tariff. `tariff_is_unchanged(tariff)` says whether a tariff is
-still the pack's as shipped (everything but `pack_hash` equal); the guided ledger uses it to
+still the pack's as shipped (everything but `pack_hash` equal, and a stamp, when present,
+naming this pack version); the guided ledger uses it to
 mark a row `customised`.
 
 Write the copy inline into `CommercialConfig.import_tariff` and leave `import_tariff_ref` as
@@ -139,7 +140,13 @@ scaled so that the energy, `sum(MW x w)`, is `annual_mwh`:
 
 - `w` is `weights`, the hours each row stands for: pass the network's snapshot weightings
   for representative periods;
-- without `weights`, `w` is the index's step in hours, so a 15-minute index works as is.
+- without `weights`, `w` is the index's step in hours, so a 15-minute index works as is. An
+  index whose `freq` is not a fixed length (for example `MS`) needs `weights`.
+
+`annual_mwh` is per year, so each investment period is scaled on its own and every period
+carries `annual_mwh`. The periods are level 0 of a snapshot MultiIndex, passed as `index` or
+as the index of `weights`. On a plain index, a timestamp that does not increase starts a new
+period (one weather year reused in every period).
 
 The factors are read on the index's own clock. Pass the site clock: with
 `commercial.timezone` set the snapshots are UTC-naive, so convert them first.

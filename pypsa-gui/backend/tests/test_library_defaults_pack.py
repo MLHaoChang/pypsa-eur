@@ -562,3 +562,73 @@ def test_the_canonical_payload_is_rebuilt_from_the_files_alone():
     assert loader.parse_pack_dir(d).hash == hashlib.sha256(blob.encode()).hexdigest()
     # nothing the models add enters it
     assert "direction" not in json.dumps(loader.canonical_payload(d)["tariffs"])
+
+
+# ── review round 2 ──────────────────────────────────────────────────────────
+
+
+def _two_period_network():
+    import pypsa
+
+    m = pypsa.Network()
+    m.set_snapshots(pd.date_range("2030-01-01", periods=8760, freq="h"))
+    m.set_investment_periods([2030, 2040])
+    return m
+
+
+def _energy_per_period(s: pd.Series, snapshots: pd.MultiIndex, w) -> dict:
+    e = pd.Series(np.asarray(s.to_numpy()) * np.asarray(w, dtype=float), index=snapshots)
+    return e.groupby(level=0).sum().to_dict()
+
+
+def test_load_profile_scales_each_investment_period_on_its_own(pack):
+    """Review B5: `annual_mwh` is per YEAR. On a multi-period network every period must
+    carry it, whether the periods come from the index's MultiIndex, the weights'
+    MultiIndex, or timestamps that repeat (one weather year reused)."""
+    m = _two_period_network()
+    w = m.snapshot_weightings.generators
+    ts = pd.DatetimeIndex(m.snapshots.get_level_values(-1))
+    # (a) periods from the weights' MultiIndex
+    s = pack.load_profile_series("commercial_office", ts, annual_mwh=1000.0, weights=w)
+    assert _energy_per_period(s, m.snapshots, w) == pytest.approx({2030: 1000.0, 2040: 1000.0})
+    # (b) periods from the index's own MultiIndex; the result is on that index
+    s = pack.load_profile_series("commercial_office", m.snapshots, annual_mwh=1000.0, weights=w)
+    assert s.index.equals(m.snapshots)
+    assert _energy_per_period(s, m.snapshots, w) == pytest.approx({2030: 1000.0, 2040: 1000.0})
+    # (c) repeated timestamps, no weights: each run of increasing timestamps is a period
+    s = pack.load_profile_series("commercial_office", ts, annual_mwh=1000.0)
+    assert _energy_per_period(s, m.snapshots, np.ones(len(ts))) == \
+        pytest.approx({2030: 1000.0, 2040: 1000.0})
+    # one period: unchanged
+    one = pack.load_profile_series("commercial_office", ts[:8760], annual_mwh=1000.0)
+    np.testing.assert_allclose(s.to_numpy()[:8760], one.to_numpy())
+
+
+def test_load_profile_period_weights_differ(pack):
+    """Two periods with different weightings: each still carries `annual_mwh`."""
+    m = _two_period_network()
+    w = m.snapshot_weightings.generators.copy()
+    w.loc[2040] = 2.0
+    s = pack.load_profile_series("commercial_office", m.snapshots, annual_mwh=1000.0, weights=w)
+    assert _energy_per_period(s, m.snapshots, w) == pytest.approx({2030: 1000.0, 2040: 1000.0})
+
+
+def test_a_non_fixed_freq_index_needs_weights(pack):
+    idx = pd.date_range("2030-01-01", periods=12, freq="MS")
+    with pytest.raises(ValueError, match="fixed"):
+        pack.load_profile_series("commercial_office", idx, annual_mwh=1000.0)
+    s = pack.load_profile_series("commercial_office", idx, annual_mwh=1000.0,
+                                 weights=np.full(12, 730.0))
+    assert (s * 730.0).sum() == pytest.approx(1000.0)
+
+
+def test_tariff_is_unchanged_refuses_another_versions_stamp(pack):
+    t = pack.pack_tariff("de_industrial_illustrative")
+    other = t.model_copy(update={"pack_hash": "generic_defaults@1999-01-01:sha256:" + "0" * 64})
+    assert not pack.tariff_is_unchanged(other)
+    foreign = t.model_copy(update={"pack_hash": "some_other_pack@2026-10-05:sha256:" + "0" * 64})
+    assert not pack.tariff_is_unchanged(foreign)
+    garbage = t.model_copy(update={"pack_hash": "not a stamp"})
+    assert not pack.tariff_is_unchanged(garbage)
+    assert pack.tariff_is_unchanged(t)
+    assert pack.tariff_is_unchanged(t.model_copy(update={"pack_hash": None}))

@@ -450,8 +450,9 @@ class DefaultsPack(BaseModel):
 
     def tariff_is_unchanged(self, tariff: Tariff | Mapping[str, Any]) -> bool:
         """True when `tariff` is this pack's tariff of the same id, as shipped: everything
-        but `pack_hash` equal. False for an edited copy, an unknown id or an invalid
-        payload. The guided ledger's `customised` detection (plan §3 rule 5)."""
+        but `pack_hash` equal, and a stamp, when present, naming this pack and version.
+        False for an edited copy, an unknown id, another version's (or a non-pack) stamp,
+        or an invalid payload. The guided ledger's `customised` detection (plan §3 rule 5)."""
         if not isinstance(tariff, Tariff):
             try:
                 tariff = Tariff.model_validate(tariff)
@@ -459,6 +460,15 @@ class DefaultsPack(BaseModel):
                 return False
         if tariff.id not in self.tariffs:
             return False
+        if tariff.pack_hash is not None:
+            # A stamp names the pack and version the copy came from: another version's
+            # tariff is not this version's, even with the same content.
+            try:
+                pid, version, _ = parse_pack_stamp(tariff.pack_hash)
+            except DefaultsPackError:
+                return False
+            if (pid, version) != (self.pack_id, self.version):
+                return False
         ours = self.pack_tariff(tariff.id)
         return (tariff.model_dump(mode="json", exclude={"pack_hash"})
                 == ours.model_dump(mode="json", exclude={"pack_hash"}))
@@ -479,36 +489,49 @@ class DefaultsPack(BaseModel):
             raise UnknownLoadProfile(f"no load profile {profile_id!r}", list(self.load_profiles))
         return self.load_profiles[profile_id]
 
-    def load_profile_series(self, profile_id: str, index: pd.DatetimeIndex, *,
+    def load_profile_series(self, profile_id: str, index, *,
                             annual_mwh: float | None = None, weights=None) -> pd.Series:
         """The shape on `index`, in MW when `annual_mwh` is given.
+
+        `index` is a DatetimeIndex or a snapshot MultiIndex (period, timestamp); the
+        result is on `index` as given.
 
         Clock: each row's month, weekday/weekend and hour are read on the index's OWN
         clock (a tz-aware index on its zone's wall clock, a naive one as is). Pass the
         SITE clock: with `commercial.timezone` set the network's snapshots are UTC-naive,
         so convert them first (`idx.tz_localize("UTC").tz_convert(tz)`).
 
-        Scaling: with `annual_mwh`, the MW values are `shape x annual_mwh / sum(shape x w)`,
-        so the energy `sum(MW x w)` is `annual_mwh`. `w` is the hours each row stands
-        for: `weights` (the network's snapshot weightings: a scalar, an array or a Series
-        on `index` or on a snapshot MultiIndex whose last level is `index`); by default
-        the index's step in hours (its `freq`, else the median step). Representative
-        periods need their weightings passed. Without `annual_mwh`, the raw factors."""
+        Scaling: `annual_mwh` is per YEAR, so each investment period is scaled on its own:
+        in every period the MW values are `shape x annual_mwh / sum(shape x w)` over that
+        period's rows, so each period's energy `sum(MW x w)` is `annual_mwh`. The periods
+        are the MultiIndex level 0 of `index` (or of `weights`); on a plain index, a
+        timestamp that does not increase starts a new period (one weather year repeated).
+        `w` is the hours each row stands for: `weights` (the network's snapshot
+        weightings: a scalar, an array, or a Series on `index` or on a snapshot
+        MultiIndex whose last level is the timestamps); by default the index's step in
+        hours (a fixed `freq`, else the median step; a non-fixed `freq` such as `MS`
+        needs `weights`). Representative periods need their weightings passed. Without
+        `annual_mwh`, the raw factors."""
         prof = self.load_profile(profile_id)
-        if not isinstance(index, pd.DatetimeIndex) or len(index) == 0:
-            raise ValueError("index must be a non-empty DatetimeIndex")
+        stamps, periods = _timestamps_and_periods(index, weights)
         f = np.asarray(prof.factors, dtype=float).reshape(12, 2, 24)
-        shape = f[np.asarray(index.month) - 1, (np.asarray(index.weekday) >= 5).astype(int),
-                  np.asarray(index.hour)]
+        shape = f[np.asarray(stamps.month) - 1, (np.asarray(stamps.weekday) >= 5).astype(int),
+                  np.asarray(stamps.hour)]
         if annual_mwh is not None:
             if isinstance(annual_mwh, bool) or not isinstance(annual_mwh, (int, float, np.number)) \
                     or not math.isfinite(annual_mwh) or annual_mwh < 0:
                 raise ValueError(f"annual_mwh must be a finite number >= 0, got {annual_mwh!r}")
-            w = _row_hours(index, weights)
-            energy = float((shape * w).sum())
-            if not energy > 0:
-                raise ValueError("the shape carries no energy on this index and these weights")
-            shape = shape * (float(annual_mwh) / energy)
+            w = _row_hours(stamps, weights, periods)
+            out = np.empty_like(shape)
+            for g in np.unique(periods):
+                sel = periods == g
+                energy = float((shape[sel] * w[sel]).sum())
+                if not energy > 0:
+                    raise ValueError("the shape carries no energy on this index and these "
+                                     "weights" + (f" (period {g})" if len(np.unique(periods)) > 1
+                                                  else ""))
+                out[sel] = shape[sel] * (float(annual_mwh) / energy)
+            shape = out
         elif weights is not None:
             raise ValueError("weights scale the energy: pass them with annual_mwh")
         return pd.Series(shape, index=index, name=profile_id)
@@ -571,25 +594,53 @@ class DefaultsPack(BaseModel):
         return rows
 
 
-def _row_hours(index: pd.DatetimeIndex, weights) -> np.ndarray:
-    """The hours each row of `index` stands for (see `load_profile_series`)."""
-    n = len(index)
-    if weights is None:
-        if index.freq is not None:
-            step = pd.Timedelta(index.freq).total_seconds() / 3600.0
-        elif n > 1:
-            step = float(np.median(np.diff(index.asi8))) / 3.6e12
-        else:
-            raise ValueError("a one-row index has no step: pass weights")
-        return np.full(n, step)
-    if isinstance(weights, pd.Series):
-        if weights.index.equals(index):
-            arr = weights.to_numpy(dtype=float)
-        elif isinstance(weights.index, pd.MultiIndex) and len(weights) == n \
+def _timestamps_and_periods(index, weights) -> tuple[pd.DatetimeIndex, np.ndarray]:
+    """The rows' timestamps and a period label per row (see `load_profile_series`)."""
+    if isinstance(index, pd.MultiIndex):
+        stamps = pd.DatetimeIndex(index.get_level_values(-1))
+        periods = np.asarray(pd.factorize(index.get_level_values(0))[0])
+    elif isinstance(index, pd.DatetimeIndex):
+        stamps = index
+        if isinstance(weights, pd.Series) and isinstance(weights.index, pd.MultiIndex) \
+                and len(weights) == len(index) \
                 and pd.DatetimeIndex(weights.index.get_level_values(-1)).equals(index):
+            periods = np.asarray(pd.factorize(weights.index.get_level_values(0))[0])
+        else:
+            # a timestamp that does not increase starts a new period
+            steps = np.diff(index.asi8)
+            periods = np.concatenate([[0], np.cumsum(steps <= 0)]) if len(index) else \
+                np.zeros(0, dtype=int)
+    else:
+        raise ValueError("index must be a DatetimeIndex or a snapshot MultiIndex")
+    if len(stamps) == 0:
+        raise ValueError("index must not be empty")
+    return stamps, periods
+
+
+def _row_hours(stamps: pd.DatetimeIndex, weights, periods: np.ndarray) -> np.ndarray:
+    """The hours each row stands for (see `load_profile_series`)."""
+    n = len(stamps)
+    if weights is None:
+        if stamps.freq is not None:
+            try:
+                step = pd.Timedelta(stamps.freq).total_seconds() / 3600.0
+            except ValueError:
+                raise ValueError(f"the index's freq {stamps.freqstr!r} is not a fixed length: "
+                                 "pass weights (the hours each row stands for)") from None
+            return np.full(n, step)
+        diffs = np.diff(stamps.asi8)
+        same = periods[1:] == periods[:-1]
+        within = diffs[same & (diffs > 0)]
+        if len(within) == 0:
+            raise ValueError("an index with no step (one row per period): pass weights")
+        return np.full(n, float(np.median(within)) / 3.6e12)
+    if isinstance(weights, pd.Series):
+        if weights.index.equals(stamps) or (
+                isinstance(weights.index, pd.MultiIndex) and len(weights) == n
+                and pd.DatetimeIndex(weights.index.get_level_values(-1)).equals(stamps)):
             arr = weights.to_numpy(dtype=float)
         else:
-            arr = weights.reindex(index).to_numpy(dtype=float)
+            arr = weights.reindex(stamps).to_numpy(dtype=float)
     elif np.ndim(weights) == 0:
         arr = np.full(n, float(weights))
     else:
