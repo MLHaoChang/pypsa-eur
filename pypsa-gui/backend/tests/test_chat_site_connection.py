@@ -401,3 +401,26 @@ def test_a_new_poc_rechecks_the_unchanged_export_link_against_its_site_side():
         binding.check_site_connection(_net(reverse_export=True), "import", "export",
                                       check_export=False)
     assert exc.value.code == "site_connection_wrong_direction"
+
+
+# ── gate finding: a group contract's members are the site side ────────────
+
+
+def test_a_group_export_link_from_a_members_bus_is_on_the_site_side():
+    """V6: the export Link leaves member C's bus. The site side is reached
+    from every group member (`lp_bindings.import_links`), not the PoC alone."""
+    from tests.test_group_net_import import v6_network
+
+    n = v6_network()
+    members = ["import", "import_b", "import_c"]
+    binding.check_site_connection(n, "import", "export", group_members=members)
+    with pytest.raises(binding.BindingRefusal):   # the PoC alone does not reach poc_c
+        binding.check_site_connection(n, "import", "export")
+
+
+def test_the_route_accepts_a_group_contract_config(client, install_network):
+    from tests.test_group_net_import import v6_commercial, v6_network
+
+    install_network(v6_network(), name="sc_group_v6")
+    r = client.put("/api/simulation/solver_config", json={"commercial": v6_commercial()})
+    assert r.status_code == 200, r.text

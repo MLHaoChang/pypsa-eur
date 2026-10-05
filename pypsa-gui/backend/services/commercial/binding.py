@@ -377,7 +377,8 @@ def site_connection_candidates(n) -> dict[str, list[str]]:
 
 def check_site_connection(n, poc_link: str, export_link: str | None, *,
                           direction_only: bool = False, check_poc: bool = True,
-                          check_export: bool = True) -> None:
+                          check_export: bool = True,
+                          group_members: list[str] | None = None) -> None:
     """Refuse a meter this network cannot be: `BindingRefusal(422, code, …)`.
 
       * `site_connection_link_missing`: a name that is not a Link (the
@@ -390,7 +391,8 @@ def check_site_connection(n, poc_link: str, export_link: str | None, *,
         or whose `bus1` is (it never reaches the grid).
 
     The site side is what `lp_bindings._meter_sides` reaches from the PoC's
-    `bus1` without crossing the meter. An explicit `eh_role` tag beats the
+    `bus1` (a group contract's: every member's, `group_members`) without
+    crossing the meter. An explicit `eh_role` tag beats the
     name heuristic: a Link tagged `grid_import` is a PoC whatever its buses
     are called (a site bus named `microgrid_ac`); the name check runs only on
     an untagged Link, and a refusal caused by a tag says so.
@@ -455,8 +457,10 @@ def check_site_connection(n, poc_link: str, export_link: str | None, *,
                              f"export_link {export_link!r} is tagged eh_role=grid_import: it "
                              "is tagged as an import Link, not the export Link; name the "
                              "export Link (or retag it)")
-    site, _bypass = lp_bindings._meter_sides(
-        n, CommercialConfig(poc_link=poc_link, export_link=export_link))
+    # Unvalidated on purpose: only the meter Links are read, and a group's other
+    # fields (cap, contract) are the binding's to check.
+    site, _bypass = lp_bindings._meter_sides(n, CommercialConfig.model_construct(
+        poc_link=poc_link, export_link=export_link, group_members=list(group_members or [])))
     e0, e1 = str(n.links.at[export_link, "bus0"]), str(n.links.at[export_link, "bus1"])
     if e0 not in site or e1 in site:
         raise BindingRefusal(422, "site_connection_wrong_direction",

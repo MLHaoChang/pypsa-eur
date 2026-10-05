@@ -1759,7 +1759,8 @@ def set_site_connection(poc_link: str, export_link: str | None | _Unset = _UNSET
         commercial["timezone"] = timezone
     try:
         binding.check_site_connection(PyPSAService.get_network(), poc_link,
-                                      commercial.get("export_link"))
+                                      commercial.get("export_link"),
+                                      group_members=commercial.get("group_members"))
         body = SolverConfigSchema(commercial=commercial)
     except binding.BindingRefusal as exc:
         raise HTTPException(status_code=exc.status, detail={

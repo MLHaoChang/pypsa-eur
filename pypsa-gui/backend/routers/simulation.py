@@ -380,7 +380,8 @@ def _check_site_connection(commercial, stored) -> None:
         # config saved before this check is not refused; the pair check runs.
         binding.check_site_connection(PyPSAService.get_network(), commercial.poc_link,
                                       commercial.export_link, direction_only=True,
-                                      check_poc=poc_changed, check_export=export_changed)
+                                      check_poc=poc_changed, check_export=export_changed,
+                                      group_members=commercial.group_members)
     except binding.BindingRefusal as exc:
         raise HTTPException(exc.status, {"code": exc.code, "error_kind": exc.code,
                                          "message": exc.message}) from exc
