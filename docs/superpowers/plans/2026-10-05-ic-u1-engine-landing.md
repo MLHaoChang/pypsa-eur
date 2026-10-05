@@ -32,6 +32,7 @@ The owner merges both; no session merges to master.
 | D11 | The finance adapter **skips meter links with no typed cost** (`meter_link_not_investment:<name>`). |
 | D12 | `commercial_cost_terms` gains a **per-tariff-item block**. |
 | D13 | `binding.bind_commercial_on_context(ctx, …)` becomes public and part of the facade. |
+| D14 | **LCOS charging from on-site PV surplus** is priced at the **export revenue forgone** (the committed export price net of export tariff items), **floored at 0** (a site curtails rather than export at a loss); grid charging at the committed import price. Disclosed in the LCOS basis. |
 
 ## 3. The engine facade, frozen (coordinating plan §6)
 
@@ -109,7 +110,23 @@ imbalance (a year of energy against one month of demand in the objective).
   (disclosed: the week's peak stands for every month's). A single week weighted to a year with fewer than 12
   months reads not established.
 
-## 6. Status
+## 6. Review record
+
+**Part A — defaults pack (a) and flat export series (e).**
+- **Round 1 (c1d405a): PASS WITH CONDITIONS.** Transcription, tariffs, hand bills, hash pin and copy
+  independence verified. B1 the export helper refused a multi-period axis (repeated weather year); B2
+  `load_profile_series(annual_mwh=…)` ignored the step and the weightings (a 15-min index gave 250 MWh, 12
+  weighted weeks 4,345 MWh); B3 the battery energy part's FOM was a bare None (C12); B4 the pack hash
+  depended on the pydantic models' defaults. All fixed (b285bc6), plus pristine `pack_tariff` copies,
+  `tariff_is_unchanged()`, the manifest in `check_bundle`'s ROOTED and a docstring-only package `__init__`
+  (the IC tripwire).
+- **Round 2 (b285bc6): one new finding.** B5 per-period scaling: on a multi-period axis one year's energy
+  was spread over all periods. Fixed (f9f0f1d): each period carries `annual_mwh`; a stamp of another pack
+  version reads customised; a non-fixed index freq raises clearly.
+- **Round 3 (f9f0f1d): PASS.** Taken after it: a plain index that steps back is refused unless it repeats a
+  year exactly (out-of-order weeks doubled the energy).
+
+## 7. Status
 
 | Item | State |
 |---|---|

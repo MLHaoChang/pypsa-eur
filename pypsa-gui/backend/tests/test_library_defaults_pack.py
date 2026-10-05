@@ -632,3 +632,24 @@ def test_tariff_is_unchanged_refuses_another_versions_stamp(pack):
     assert not pack.tariff_is_unchanged(garbage)
     assert pack.tariff_is_unchanged(t)
     assert pack.tariff_is_unchanged(t.model_copy(update={"pack_hash": None}))
+
+
+def test_a_plain_index_that_goes_back_without_repeating_a_year_is_refused(pack):
+    """Round 3: only an exact repeat of the first period's timestamps (a reused weather
+    year) is read as a new period. Twelve weeks ordered July to June are not two periods:
+    reading them so would deliver 2000 MWh for an annual 1000, silently."""
+    months = [7, 8, 9, 10, 11, 12, 1, 2, 3, 4, 5, 6]
+    idx = pd.DatetimeIndex(np.concatenate([
+        pd.date_range(f"2030-{m:02d}-08", periods=168, freq="h").to_numpy() for m in months]))
+    w = np.full(len(idx), 8760 / len(idx))
+    with pytest.raises(ValueError, match="increas"):
+        pack.load_profile_series("commercial_office", idx, annual_mwh=1000.0, weights=w)
+    with pytest.raises(ValueError, match="increas"):
+        pack.load_profile_series("commercial_office", idx)
+    # a partial repeat (the second block is not the first one exactly) is refused too
+    year = pd.date_range("2030-01-01", periods=48, freq="h")
+    with pytest.raises(ValueError, match="increas"):
+        pack.load_profile_series("commercial_office", year.append(year[:24]), annual_mwh=1.0)
+    # the exact repeat is still two periods
+    s = pack.load_profile_series("commercial_office", year.append(year), annual_mwh=1.0)
+    assert s.iloc[:48].sum() == pytest.approx(1.0) and s.iloc[48:].sum() == pytest.approx(1.0)

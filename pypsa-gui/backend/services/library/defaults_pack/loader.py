@@ -504,8 +504,9 @@ class DefaultsPack(BaseModel):
         Scaling: `annual_mwh` is per YEAR, so each investment period is scaled on its own:
         in every period the MW values are `shape x annual_mwh / sum(shape x w)` over that
         period's rows, so each period's energy `sum(MW x w)` is `annual_mwh`. The periods
-        are the MultiIndex level 0 of `index` (or of `weights`); on a plain index, a
-        timestamp that does not increase starts a new period (one weather year repeated).
+        are the MultiIndex level 0 of `index` (or of `weights`); on a plain index, only an
+        exact repeat of the first period's timestamps starts a new period (one weather year
+        reused), and any other non-increasing plain index is refused.
         `w` is the hours each row stands for: `weights` (the network's snapshot
         weightings: a scalar, an array, or a Series on `index` or on a snapshot
         MultiIndex whose last level is the timestamps); by default the index's step in
@@ -606,10 +607,23 @@ def _timestamps_and_periods(index, weights) -> tuple[pd.DatetimeIndex, np.ndarra
                 and pd.DatetimeIndex(weights.index.get_level_values(-1)).equals(index):
             periods = np.asarray(pd.factorize(weights.index.get_level_values(0))[0])
         else:
-            # a timestamp that does not increase starts a new period
+            # A plain index restarts a period only as an EXACT repeat of the first
+            # period's timestamps (one weather year reused in every period). Any other
+            # backward step is refused: reading it as a new period would scale each block
+            # to `annual_mwh` and multiply the energy silently.
             steps = np.diff(index.asi8)
             periods = np.concatenate([[0], np.cumsum(steps <= 0)]) if len(index) else \
                 np.zeros(0, dtype=int)
+            if len(index) and periods[-1] > 0:
+                first = index.asi8[periods == 0]
+                for g in range(1, int(periods[-1]) + 1):
+                    block = index.asi8[periods == g]
+                    if len(block) != len(first) or not np.array_equal(block, first):
+                        raise ValueError(
+                            "the index's timestamps are not increasing and do not repeat the "
+                            "first period's timestamps exactly; order the rows in time, or "
+                            "pass a snapshot MultiIndex (or weights on one) for several "
+                            "investment periods")
     else:
         raise ValueError("index must be a DatetimeIndex or a snapshot MultiIndex")
     if len(stamps) == 0:

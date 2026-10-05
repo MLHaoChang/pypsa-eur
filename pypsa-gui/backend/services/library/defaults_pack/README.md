@@ -145,8 +145,9 @@ scaled so that the energy, `sum(MW x w)`, is `annual_mwh`:
 
 `annual_mwh` is per year, so each investment period is scaled on its own and every period
 carries `annual_mwh`. The periods are level 0 of a snapshot MultiIndex, passed as `index` or
-as the index of `weights`. On a plain index, a timestamp that does not increase starts a new
-period (one weather year reused in every period).
+as the index of `weights`. On a plain index, a new period starts only where the first
+period's timestamps repeat exactly (one weather year reused in every period). Any other
+plain index whose timestamps are not increasing is refused with a `ValueError`.
 
 The factors are read on the index's own clock. Pass the site clock: with
 `commercial.timezone` set the snapshots are UTC-naive, so convert them first.
