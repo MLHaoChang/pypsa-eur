@@ -37,9 +37,9 @@ or unreadable file is a 422.
 **Extraction.** ONE Messages API call: the PDF as a base64 ``document``
 block, ``EXTRACTION_SYSTEM_PROMPT``, and one tool, ``record_grid_code``, whose
 input is the profile schema with ``page`` and ``quote`` per limit. The tool
-is forced with ``tool_choice`` where the model accepts that; the newest
-models refuse a forced tool with a 400, and are asked by the prompt instead
-(``_tool_choice``). The client is the copilot's own builder
+is forced with ``tool_choice``; a model that answers that with a 400 is
+asked once more with ``auto``, the prompt alone asking for the tool. No list
+of model names is kept, so none goes stale. The client is the copilot's own builder
 (``chat_service._build_anthropic_client``, ``ANTHROPIC_API_KEY``); the model
 is the configured default (the active LLM profile's, when it is an Anthropic
 profile on that key, else ``llm_config.DEFAULT_MODEL``). The document is
@@ -99,8 +99,6 @@ _TEMPLATE = "generic_assumed"
 EXTRACTION_TOOL = "record_grid_code"
 EXTRACTION_MAX_TOKENS = 16000
 EXTRACTION_TIMEOUT_S = 300.0
-#: Models that answer 400 to a forced ``tool_choice``: asked by the prompt.
-_NO_FORCED_TOOL = ("claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-mythos-5-1")
 
 EXTRACTION_SYSTEM_PROMPT = """\
 You read a grid-code document and record its connection-point limits by calling the `record_grid_code` tool exactly once.
@@ -447,10 +445,8 @@ def _extraction_model() -> str:
     return llm_config.DEFAULT_MODEL
 
 
-def _tool_choice(model: str) -> dict:
-    if any(model.startswith(m) for m in _NO_FORCED_TOOL):
-        return {"type": "auto"}
-    return {"type": "tool", "name": EXTRACTION_TOOL}
+#: Tried in order: the forced tool, then (after a 400 only) the prompt alone.
+_TOOL_CHOICES = ({"type": "tool", "name": EXTRACTION_TOOL}, {"type": "auto"})
 
 
 _NO_KEY = (
@@ -472,26 +468,28 @@ def _client():
 
 
 def _call(client, model: str, pdf: bytes):
-    """The one Messages API call. Only an exception's class name leaves here:
-    an SDK message can carry request details, and the key never travels."""
-    try:
-        return client.messages.create(
-            model=model,
-            max_tokens=EXTRACTION_MAX_TOKENS,
-            system=EXTRACTION_SYSTEM_PROMPT,
-            tools=[EXTRACTION_TOOL_SCHEMA],
-            tool_choice=_tool_choice(model),
-            messages=[{"role": "user", "content": [
-                {"type": "document", "source": {"type": "base64", "media_type": "application/pdf",
-                                                "data": base64.standard_b64encode(pdf).decode("ascii")}},
-                {"type": "text", "text": _EXTRACTION_REQUEST},
-            ]}],
-            timeout=EXTRACTION_TIMEOUT_S,
-        )
-    except Exception as exc:  # noqa: BLE001 - every failure is a 502 naming its class only
-        logger.warning("campus grid code: extraction call failed: %s", type(exc).__name__)
-        raise HTTPException(status_code=502,
-                            detail=f"the extraction call failed ({type(exc).__name__}); nothing was saved")
+    """The Messages API call: the forced tool, and once more with ``auto``
+    only if that was a 400 (a model that will not take a forced tool). Only
+    an exception's class name leaves here: an SDK message can carry request
+    details, and the key never travels."""
+    messages = [{"role": "user", "content": [
+        {"type": "document", "source": {"type": "base64", "media_type": "application/pdf",
+                                        "data": base64.standard_b64encode(pdf).decode("ascii")}},
+        {"type": "text", "text": _EXTRACTION_REQUEST},
+    ]}]
+    for i, choice in enumerate(_TOOL_CHOICES):
+        try:
+            return client.messages.create(
+                model=model, max_tokens=EXTRACTION_MAX_TOKENS, system=EXTRACTION_SYSTEM_PROMPT,
+                tools=[EXTRACTION_TOOL_SCHEMA], tool_choice=choice, messages=messages,
+                timeout=EXTRACTION_TIMEOUT_S,
+            )
+        except Exception as exc:  # noqa: BLE001 - every failure is a 502 naming its class only
+            name = type(exc).__name__
+            if name == "BadRequestError" and i + 1 < len(_TOOL_CHOICES):
+                continue
+            logger.warning("campus grid code: extraction call failed: %s", name)
+            raise HTTPException(status_code=502, detail=f"the extraction call failed ({name}); nothing was saved")
 
 
 def _tool_input(resp) -> dict:

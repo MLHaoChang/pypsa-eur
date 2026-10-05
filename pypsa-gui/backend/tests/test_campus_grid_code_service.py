@@ -318,14 +318,54 @@ def test_one_call_sends_the_pdf_as_a_document_with_the_tool_forced(hub, fake_api
     assert text["type"] == "text" and gc.EXTRACTION_TOOL in text["text"]
 
 
-@pytest.mark.parametrize("model, forced", [
-    ("claude-sonnet-5", True), ("claude-opus-5", True),
-    # models that answer 400 to a forced tool_choice: asked by the prompt instead
-    ("claude-opus-5-5", False), ("claude-sonnet-5-5", False), ("claude-fable-5-1", False),
+class BadRequestError(Exception):
+    """Named like the SDK's 400, which is all the service looks at."""
+
+
+class APIConnectionError(Exception):
+    pass
+
+
+class ForcedRefusingClient(FakeClient):
+    """A model that answers 400 to a forced tool_choice and then complies
+    when asked by the prompt alone."""
+
+    def _create(self, **kwargs):
+        self.calls.append(kwargs)
+        if kwargs["tool_choice"]["type"] == "tool":
+            raise BadRequestError("tool_choice not supported")
+        return self._response
+
+
+@pytest.mark.parametrize("model", ["claude-sonnet-5", "claude-opus-5-5", "any-future-model"])
+def test_every_model_is_asked_with_the_tool_forced_first(hub, fake_api, monkeypatch, model):
+    """No list of model names to go stale: the forced tool is always tried."""
+    monkeypatch.setattr(gc, "_extraction_model", lambda: model)
+    client = fake_api(response(tool_input()))
+    gc.extract(hub, _upload(hub)["id"], "tso")
+    assert [c["tool_choice"] for c in client.calls] == [{"type": "tool", "name": gc.EXTRACTION_TOOL}]
+
+
+def test_a_400_to_the_forced_tool_is_retried_once_with_the_prompt_asking(hub, monkeypatch):
+    doc = _upload(hub)
+    client = ForcedRefusingClient(response(tool_input()))
+    monkeypatch.setattr(chat_service, "_build_anthropic_client", lambda: (client, None))
+    out = gc.extract(hub, doc["id"], "tso")
+    assert [c["tool_choice"]["type"] for c in client.calls] == ["tool", "auto"]
+    assert out["id"] == "tso"
+
+
+@pytest.mark.parametrize("error, calls", [
+    (BadRequestError("bad pdf"), 2),        # a 400 on both asks: retried once, then given up
+    (APIConnectionError("down"), 1),        # anything else is not retried
 ])
-def test_the_tool_is_forced_where_the_model_accepts_it(model, forced):
-    choice = gc._tool_choice(model)
-    assert choice == ({"type": "tool", "name": gc.EXTRACTION_TOOL} if forced else {"type": "auto"})
+def test_other_failures_are_not_retried_beyond_once_and_save_nothing(hub, fake_api, error, calls):
+    doc = _upload(hub)
+    client = fake_api(error=error)
+    with pytest.raises(HTTPException) as exc:
+        gc.extract(hub, doc["id"], "tso")
+    assert exc.value.status_code == 502 and type(error).__name__ in exc.value.detail
+    assert len(client.calls) == calls
 
 
 def test_the_model_is_the_configured_default_not_a_literal(monkeypatch):
