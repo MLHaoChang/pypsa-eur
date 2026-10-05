@@ -495,6 +495,8 @@ const GUIDED_TOOL_PHRASE: Record<string, string> = {
   gridspine_run_pipeline: 'start the planning and dynamics study',
   solve_queue_enqueue: 'add the project to the solve queue',
   abort_adequacy_study: 'ask the running study to stop',
+  // The finance engine runs in the background (poll get_investment_case).
+  run_investment_case: 'start the investment case',
   // Report jobs run in the background (poll get_report_status).
   generate_report: 'start writing the project report',
   regenerate_report_section: 'start rewriting one section of the report',
