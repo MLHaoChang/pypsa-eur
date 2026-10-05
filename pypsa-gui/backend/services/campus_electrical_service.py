@@ -14,6 +14,10 @@ keeps everything under ``<project dir>/campus_electrical/``:
     The last run's settings: k, power factor, profile, margin, N-1.
 ``run/``
     The engine's run directory.
+``campus_assets.yaml``
+    The project's copy of the asset library (plan C9), once the user has saved
+    one. Until then the shipped default is used. Validated by the engine's
+    loader before it is kept.
 ``grid_codes/``
     The project's own grid codes: uploaded documents, drafts and published
     profiles (``services/campus_grid_code_service.py``, plan C10). A
@@ -29,7 +33,15 @@ The functions:
 * ``draft``: writes the campus file from the network. It refuses with 409
   rather than overwrite an existing file unless asked.
 * ``save_campus``: validates by building the campus, then writes it.
-* ``run``: prepare, rank and size, in one call.
+* ``run``: prepare, rank and size, then (unless ``invest`` is off) buy the
+  electrical assets from the library at least cost, AC-checked, in one call.
+  The library a run used is kept as ``run/campus_assets_used.yaml``, so a
+  later change to the library flags the results as stale.
+* ``get_library``, ``save_library``, ``reset_library``: the asset library.
+* ``hub_cost``, in ``get_state``: the solved hub's own system cost, from the
+  helper the results pages use, for the panel to show beside the electrical
+  annualised cost. It never fails the state: when it cannot be computed it is
+  ``null``, with ``hub_cost_reason``.
 
 Every function refuses a project of another kind with 409, the way the
 planning study refuses a capacity-expansion project. A missing network, an
@@ -40,6 +52,8 @@ unsolved network, a description that does not build, and bad settings are
 import hashlib
 import json
 import math
+import os
+import tempfile
 import threading
 from pathlib import Path
 
@@ -75,8 +89,12 @@ NOTES_FILE = "draft_notes.json"
 SETTINGS_FILE = "settings.json"
 NETWORK_FILE = "network.nc"
 GRID_CODES_SUBDIR = "grid_codes"
+LIBRARY_FILE = "campus_assets.yaml"
+USED_LIBRARY_FILE = "campus_assets_used.yaml"
+SOLVER_CONFIG_FILE = "solver_config.json"
 MAX_CAMPUS_BYTES = 1_000_000
-DEFAULTS = {"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce", "margin": 0.2, "n_minus_1": True}
+MAX_LIBRARY_BYTES = 1_000_000
+DEFAULTS = {"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce", "margin": 0.2, "n_minus_1": True, "invest": True}
 
 _LOCKS: dict = {}
 _LOCKS_GUARD = threading.Lock()
@@ -156,11 +174,20 @@ def _read_csv(path: Path):
     return _records(pd.read_csv(path)) if path.is_file() else None
 
 
+def _unresolved(investment):
+    """``[{need, reason}]`` of the needs the investment could not meet, or
+    None when the investment did not run."""
+    if investment is None:
+        return None
+    return [{"need": r["need"], "reason": r["reason"]} for r in investment if r["status"] == "unresolved"]
+
+
 def _results(run: Path):
     if not (run / cs.COMPLIANCE_CSV).is_file():
         return None
     selection = pd.read_csv(run / cs.SELECTED_CSV)
     selection["reasons"] = selection["reasons"].str.split(";")
+    investment = _read_csv(run / cs.INVESTMENT_CSV)
     return {
         "selection": _records(selection),
         "transformers": _read_csv(run / cs.SIZING_TRAFO_CSV),
@@ -169,6 +196,12 @@ def _results(run: Path):
         "compliance": _read_csv(run / cs.COMPLIANCE_CSV),
         "reactive": _read_csv(run / cs.REACTIVE_CSV),
         "requirement": json.loads((run / cs.REQUIREMENT_JSON).read_text()),
+        # Part two: what the library was drawn on. All None when the run did not invest.
+        "investment": investment,
+        "cost": _read_csv(run / cs.COST_CSV),
+        "compliance_invested": _read_csv(run / cs.COMPLIANCE_INVESTED_CSV),
+        "history": _read_csv(run / cs.INVEST_HISTORY_CSV),
+        "unresolved": _unresolved(investment),
     }
 
 
@@ -180,6 +213,20 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def _effective_library(d: Path) -> Path:
+    """The library a run now would use: the project's copy, else the shipped one."""
+    own = d / LIBRARY_FILE
+    return own if own.is_file() else Path(cs.ASSET_LIBRARY_PATH)
+
+
+def _library_stale(d: Path) -> bool:
+    """A run that invested kept the library it used; the results are stale when
+    the library a run would use now is another one. A run that did not invest
+    kept none, and does not depend on the library."""
+    used = d / "run" / USED_LIBRARY_FILE
+    return used.is_file() and _sha256_file(_effective_library(d)) != _sha256_file(used)
+
+
 def _stale(project, d: Path) -> bool:
     manifest = d / "run" / cs.CAMPUS_MANIFEST
     campus = d / CAMPUS_FILE
@@ -189,7 +236,82 @@ def _stale(project, d: Path) -> bool:
     m = json.loads(manifest.read_text())
     text = yaml.safe_dump(yaml.safe_load(campus.read_text()), sort_keys=False)
     return (hashlib.sha256(text.encode()).hexdigest() != m.get("campus_sha256")
-            or _sha256_file(nc) != m.get("network_sha256"))
+            or _sha256_file(nc) != m.get("network_sha256")
+            or _library_stale(d))
+
+
+# ── the hub's own system cost ────────────────────────────────────────────────
+
+_HUB_COST_CACHE: dict = {}
+_HUB_COST_CACHE_MAX = 32
+
+
+def hub_cost_of(n, cfg) -> dict:
+    """The system cost of the solved network ``n``, from
+    ``services.results.cost_breakdown.compute_cost_breakdown``, the helper
+    behind the results pages and the value ledger. Capex (annualised, with the
+    fixed O&M) plus opex, as solved.
+
+    * a multi-period network: ``basis`` ``per_period`` and ``per_period``
+      ``{period: cost per year}``, each period's years-weighted cost divided by
+      its years (as ``value_flows`` reconciles it). ``total`` is the whole
+      horizon;
+    * a single-period network has no split: ``basis`` ``single_period``,
+      ``per_period`` None, and ``total`` the cost as solved.
+
+    Raises ``ValueError`` (with the reason) when there is nothing to report."""
+    from services.period_utils import period_years_map, years_for_period
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.solver_service import SolverConfig
+
+    cb = compute_cost_breakdown(n, cfg if cfg is not None else SolverConfig())
+    if cb is None or cb.get("total") is None or not math.isfinite(cb["total"]):
+        raise ValueError("no cost statistics: the project's network carries none (not solved, or nothing priced)")
+    by_period = cb.get("by_period") or []
+    if not by_period:
+        return {"basis": "single_period", "per_period": None, "total": float(cb["total"])}
+    years = period_years_map(n)
+    per_period = {}
+    for entry in by_period:
+        y = years_for_period(years, entry["period"])
+        per_period[str(int(entry["period"]))] = float(entry["total"]) / y
+    return {"basis": "per_period", "per_period": per_period, "total": float(cb["total"])}
+
+
+def _solver_config(project):
+    """The project's saved solver config, else the default; the same one the
+    results pages price with."""
+    from services.solver_service import SolverConfig
+
+    path = project_registry.project_dir(project) / SOLVER_CONFIG_FILE
+    if not path.is_file():
+        return SolverConfig()
+    from routers.projects import _solver_config_from_dict            # the loader the solve queue uses
+    return _solver_config_from_dict(json.loads(path.read_text()))
+
+
+def hub_cost(project) -> tuple:
+    """``(hub_cost, reason)`` for the project's saved network: the one is None
+    when the other is a string. Never raises."""
+    nc = project_registry.project_dir(project) / NETWORK_FILE
+    try:
+        if not nc.is_file():
+            return None, "the project has no saved network"
+        cfg_path = nc.parent / SOLVER_CONFIG_FILE
+        stamp = [(p.stat().st_mtime_ns, p.stat().st_size) if p.is_file() else None for p in (nc, cfg_path)]
+        key = (str(nc), *stamp)
+        if key in _HUB_COST_CACHE:
+            return _HUB_COST_CACHE[key], None
+        import pypsa
+        with _netcdf_lock():
+            n = pypsa.Network(str(nc))
+        out = hub_cost_of(n, _solver_config(project))
+    except Exception as exc:                                    # a comparison figure must never fail the state
+        return None, str(exc) or type(exc).__name__
+    if len(_HUB_COST_CACHE) >= _HUB_COST_CACHE_MAX:
+        _HUB_COST_CACHE.clear()
+    _HUB_COST_CACHE[key] = out
+    return out, None
 
 
 def get_state(project) -> dict:
@@ -199,6 +321,7 @@ def get_state(project) -> dict:
     notes = d / NOTES_FILE
     settings = d / SETTINGS_FILE
     results = _results(d / "run")
+    cost, reason = hub_cost(project) if results else (None, "no study has run yet")
     return {
         "campus_yaml": campus.read_text() if campus.is_file() else None,
         "skipped": json.loads(notes.read_text()) if notes.is_file() else [],
@@ -206,6 +329,41 @@ def get_state(project) -> dict:
         "settings": json.loads(settings.read_text()) if settings.is_file() else None,
         "results": results,
         "stale": bool(results) and _stale(project, d),
+        "hub_cost": cost,
+        "hub_cost_reason": reason,
+    }
+
+
+INVESTMENT_NOTES = (
+    "Every cost in the shipped asset library is an assumed order-of-magnitude placeholder, tagged assumed; "
+    "replace it with quotes before relying on any figure in euro.",
+    "Voltage excursions are met by compensation, not by changing a transformer tap: tap changers are not "
+    "optimised, and an excursion that compensation cannot shrink is reported unresolved.",
+    "A steady-state study at the critical hours, with an asset bought from the first period that needs it and "
+    "no replacement; unresolved needs are priced but not summed.",
+)
+
+
+def get_investment(project) -> dict:
+    """What the last run bought, for the copilot: the investment table, the
+    electrical cost per period beside the hub's system cost, the unresolved
+    needs, the escalation history and the compliance re-checked with the
+    assets, with the caveats that go with the figures. ``investment`` is None,
+    with a ``reason``, before a run or when the run did not invest."""
+    state = get_state(project)
+    res = state["results"]
+    if res is None:
+        return {"investment": None, "reason": "no study has run yet: run the study (campus_run_study) first",
+                "notes": list(INVESTMENT_NOTES)}
+    if res["investment"] is None:
+        return {"investment": None, "reason": "the last run did not invest: run the study again with invest on",
+                "stale": state["stale"], "notes": list(INVESTMENT_NOTES)}
+    return {
+        "investment": res["investment"], "cost": res["cost"], "unresolved": res["unresolved"],
+        "history": res["history"], "compliance_invested": res["compliance_invested"],
+        "hub_cost": state["hub_cost"], "hub_cost_reason": state["hub_cost_reason"],
+        "library_is_default": _library_text(campus_dir(project))[1],
+        "stale": state["stale"], "notes": list(INVESTMENT_NOTES),
     }
 
 
@@ -244,6 +402,56 @@ def save_campus(project, text: str) -> dict:
     return {"campus_yaml": text}
 
 
+# ── the asset library (plan C9) ──────────────────────────────────────────────
+
+def _library_text(d: Path) -> tuple:
+    own = d / LIBRARY_FILE
+    if own.is_file():
+        return own.read_text(), False
+    return Path(cs.ASSET_LIBRARY_PATH).read_text(), True
+
+
+def get_library(project) -> dict:
+    """The library a study of this project buys from: ``{yaml, is_default}``.
+    ``is_default`` is True until the user saves a copy."""
+    require_capacity_expansion(project)
+    text, is_default = _library_text(campus_dir(project))
+    return {"yaml": text, "is_default": is_default}
+
+
+def save_library(project, text: str) -> dict:
+    """Validate the text with the engine's loader, then keep it as the
+    project's copy. The loader's message names the entry and the field. A
+    refused text leaves the previous copy as it was."""
+    require_capacity_expansion(project)
+    if len(text.encode()) > MAX_LIBRARY_BYTES:
+        raise HTTPException(status_code=413, detail=f"the asset library is larger than {MAX_LIBRARY_BYTES} bytes")
+    d = campus_dir(project)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".library-", suffix=".yaml")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        try:
+            cs.load_asset_library(tmp)
+        except yaml.YAMLError as exc:
+            raise HTTPException(status_code=422, detail=f"the asset library is not valid YAML: {exc}")
+        except ContractError as exc:
+            raise _unprocessable(exc)
+        os.replace(tmp, d / LIBRARY_FILE)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+    return {"yaml": text, "is_default": False}
+
+
+def reset_library(project) -> dict:
+    """Delete the project's copy, so the shipped default is used again."""
+    require_capacity_expansion(project)
+    d = campus_dir(project)
+    (d / LIBRARY_FILE).unlink(missing_ok=True)
+    return get_library(project)
+
+
 def _settings(raw: dict, known: dict) -> dict:
     s = {**DEFAULTS, **{k: v for k, v in (raw or {}).items() if v is not None or k == "pf"}}
     unknown = sorted(set(s) - set(DEFAULTS))
@@ -259,11 +467,21 @@ def _settings(raw: dict, known: dict) -> dict:
     if s["profile"] not in known:
         raise HTTPException(status_code=422, detail=f"unknown grid-code profile {s['profile']!r}; known {sorted(known)}")
     s["n_minus_1"] = bool(s["n_minus_1"])
+    s["invest"] = bool(s["invest"])
     return s
 
 
+def _clear_investment(run_dir: Path) -> None:
+    """Remove the investment files of an earlier run, so that a run that does
+    not invest, or fails part way, never sits beside another run's purchases."""
+    for name in (cs.INVESTMENT_CSV, cs.COST_CSV, cs.INVESTED_YAML, cs.COMPLIANCE_INVESTED_CSV,
+                 cs.INVEST_HISTORY_CSV, cs.INVEST_DISPATCH_CSV, USED_LIBRARY_FILE):
+        (run_dir / name).unlink(missing_ok=True)
+
+
 def run(project, settings: dict) -> dict:
-    """Prepare, rank and size the campus; returns ``get_state``."""
+    """Prepare, rank and size the campus, then buy the electrical assets from
+    the library (``invest``, default on); returns ``get_state``."""
     require_capacity_expansion(project)
     d = campus_dir(project)
     campus = d / CAMPUS_FILE
@@ -273,13 +491,28 @@ def run(project, settings: dict) -> dict:
     nc = _network(project)
     spec = yaml.safe_load(campus.read_text())
     run_dir = d / "run"
+    criteria = SizingCriteria(margin=float(s["margin"]), n_minus_1=s["n_minus_1"])
+    profile_dirs = (grid_codes_dir(project),)
     with _lock(run_dir):
         try:
             with _netcdf_lock():
                 cs.prepare_campus(run_dir, spec, nc)
             cs.rank_campus(run_dir, k=s["k"])
-            cs.size_campus(run_dir, SizingCriteria(margin=float(s["margin"]), n_minus_1=s["n_minus_1"]),
-                           profile=s["profile"], pf=s["pf"], profile_dirs=(grid_codes_dir(project),))
+            cs.size_campus(run_dir, criteria, profile=s["profile"], pf=s["pf"], profile_dirs=profile_dirs)
+            _clear_investment(run_dir)               # the earlier run's purchases belong to its sizing, not this one's
+            if s["invest"]:
+                # The library is read once and kept: the engine buys from this
+                # copy, and a later change to the library is then a different
+                # file from the one the results were made with.
+                own = d / LIBRARY_FILE
+                used = run_dir / USED_LIBRARY_FILE
+                try:
+                    used.write_bytes(_effective_library(d).read_bytes())
+                    cs.invest_campus(run_dir, used if own.is_file() else None, criteria=criteria,
+                                     profile=s["profile"], pf=s["pf"], profile_dirs=profile_dirs)
+                except BaseException:
+                    _clear_investment(run_dir)       # never half a purchase beside the new sizing
+                    raise
         except ContractError as exc:
             raise _unprocessable(exc)
         (d / SETTINGS_FILE).write_text(json.dumps(s))
