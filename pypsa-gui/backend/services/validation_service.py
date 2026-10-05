@@ -2150,6 +2150,18 @@ def _check_reserve_margin(n, solver_config) -> list[Issue]:
     return issues
 
 
+#: The two export-cycling warnings below. A decision study keeps them (it
+#: keeps no other preflight warning) and discloses them (gate F1 BC-F1-1).
+EXPORT_CYCLING_CODES = ("tariff_export_exceeds_import",
+                        "tariff_export_exceeds_import_via_storage")
+
+
+def export_cycling_flags(issues) -> list[str]:
+    """The export-cycling codes among `issues`, once each, in a stable order."""
+    found = {i.code for i in issues}
+    return [c for c in EXPORT_CYCLING_CODES if c in found]
+
+
 def _check_export_cycling(n) -> list[Issue]:
     """
     Tariff sanity (decision study S3; review v1 N13): for every pair of

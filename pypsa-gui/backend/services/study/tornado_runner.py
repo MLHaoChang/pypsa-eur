@@ -115,7 +115,7 @@ class ForkSolver:
         from services import project_registry
         from services.adequacy import campaign
         from services.solve_queue import solve_queue
-        from services.validation_service import validate_for_run
+        from services.validation_service import export_cycling_flags, validate_for_run
 
         if self.stop_event.is_set() or self.record.get("deadline_exceeded"):
             # Gate S9 [N2]: after a solve outlived the deadline the solver is
@@ -128,10 +128,18 @@ class ForkSolver:
         except campaign.CampaignBudgetError:
             R._set(self.ctx, self.record, budget_exhausted=True)
             return None
-        errors = [i for i in validate_for_run(net, cfg) if i.severity == "error"]
+        issues = validate_for_run(net, cfg)
+        errors = [i for i in issues if i.severity == "error"]
         if errors:
             raise F.VariantFailed("preflight_failed", "; ".join(
                 f"{i.code} {i.name}" for i in errors[:3]))
+        # Gate F1 BC-F1-1: a variant's prices (the energy-price level) can make
+        # export cycling pay where the centre did not; kept and disclosed.
+        flags = export_cycling_flags(issues)
+        if flags:
+            with self.ctx.solver_state_lock:
+                kept = self.record.setdefault("preflight_flags", [])
+                kept.extend(c for c in flags if c not in kept)
         self.count += 1
         slug = f"v{self.count:02d}"
         row = study_forks.create_variant_fork(
@@ -356,6 +364,7 @@ def _save(base_dir, study_id, inp, record, outcome, status, error, left) -> None
         "forks_left": left, "budget_exhausted": bool(record.get("budget_exhausted")),
         "ledger_hash": hashes.get("ledger_hash"),
         "option_network_hashes": hashes.get("option_network_hashes") or {},
+        "preflight_flags": list(record.get("preflight_flags") or []),
     }
     if outcome is not None:
         rob = outcome.robustness

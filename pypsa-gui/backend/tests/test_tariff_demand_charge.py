@@ -258,6 +258,26 @@ def test_a_network_solved_before_the_record_falls_back_to_the_given_config(solve
         charged.meta[SOLVE_DEMAND_CHARGE_META] = recorded
 
 
+def test_a_failed_solve_leaves_the_previous_record_beside_the_previous_dispatch():
+    """
+    Gate F1 [S2]. The record is written only on a solve that produced a
+    dispatch. A failed solve keeps the previous dispatch in `links_t.p0`, so
+    it must keep the record that describes it: stamping the failed run's
+    config (here: no charge) would bridge the old dispatch without its charge.
+    """
+    from services.study.tariff import SOLVE_DEMAND_CHARGE_META
+
+    n, _cfg, _ = _solve(demand_charge=DC)
+    assert n.meta[SOLVE_DEMAND_CHARGE_META] == DC
+    p0_before = n.links_t.p0.copy()
+    # More load than the connection can carry, with no slack: infeasible.
+    n.loads_t.p_set["site_load"] = 500.0
+    status, condition, lines, _ = _run(n)
+    assert status not in ("ok", "optimal"), (status, condition, lines[-10:])
+    assert n.meta[SOLVE_DEMAND_CHARGE_META] == DC
+    assert n.links_t.p0.equals(p0_before)
+
+
 def test_wrapper_composes_after_capex_budget_and_before_ens_cap():
     import inspect
 

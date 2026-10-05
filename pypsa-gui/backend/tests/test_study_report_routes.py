@@ -364,3 +364,56 @@ def test_an_intake_edit_after_the_run_is_seen_by_every_reader(
         r = getattr(client, method)(f"/api/projects/{name}/studies/{sid}/{url}")
         assert r.status_code == 409, (url, r.status_code)
         assert r.json()["detail"]["error_kind"] == "intake_changed_since_run", url
+
+
+# ── gate F1 BC-F1-1: the export-cycling preflight flags reach the study ──
+
+def _tou_with_export(price: float) -> dict:
+    """The gate's probe: the TOU seed tariff, supplied with a custom export price."""
+    from services.study.library import load_library
+
+    t = load_library().tariffs["tou_reference_illustrative"].model_dump(mode="json")
+    t.update(tariff_id="tou_custom_export", source="my contract",
+             export={"price_per_mwh": price, "series_ref": None, "cap_mw": None})
+    return t
+
+
+_CYCLING = "tariff_export_exceeds_import"
+
+
+def test_an_export_credit_that_cycles_is_disclosed_by_the_run_findings_verdict_and_report(
+        client, api_project, studies_on, fake):
+    """
+    125 EUR/MWh of export credit against an off-peak band of 90: the LP pays
+    itself to cycle energy through the connection. The study path used to keep
+    only preflight ERRORS, so this warning never reached the study.
+    """
+    from services.study import report as Rep
+
+    name = "rep-cycling"
+    intake = {**NO_PV_TOU, "tariff": {"custom": _tou_with_export(125.0)}}
+    sid = _full(client, api_project, name, intake=intake)
+    run = client.get(f"/api/projects/{name}/studies/{sid}/run").json()
+    assert run["preflight_flags"] == {o: [_CYCLING] for o in run["solved"]}, run
+    tornado = client.get(f"/api/projects/{name}/studies/{sid}/findings/tornado").json()
+    assert tornado["preflight_flags"] == [_CYCLING], tornado
+    findings = client.get(f"/api/projects/{name}/studies/{sid}/findings").json()
+    assert _CYCLING in findings["honesty_notes"]
+    assert _CYCLING in findings["verdict"]["disclosures"], findings["verdict"]
+    body = _post(client, name, sid)
+    shown = {d["code"]: d["text"] for d in body["required_disclosures"]}
+    assert shown.get(_CYCLING) == Rep.HELP[_CYCLING]
+
+
+def test_a_tariff_whose_export_stays_below_import_discloses_no_cycling(
+        client, api_project, studies_on, fake):
+    name = "rep-no-cycling"
+    intake = {**NO_PV_TOU, "tariff": {"custom": _tou_with_export(30.0)}}
+    sid = _full(client, api_project, name, intake=intake)
+    run = client.get(f"/api/projects/{name}/studies/{sid}/run").json()
+    assert run["preflight_flags"] == {}
+    tornado = client.get(f"/api/projects/{name}/studies/{sid}/findings/tornado").json()
+    assert tornado["preflight_flags"] == []
+    findings = client.get(f"/api/projects/{name}/studies/{sid}/findings").json()
+    codes = set(findings["honesty_notes"]) | set(findings["verdict"]["disclosures"])
+    assert not {c for c in codes if c.startswith("tariff_export_exceeds")}

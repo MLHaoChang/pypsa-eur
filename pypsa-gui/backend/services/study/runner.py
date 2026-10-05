@@ -579,12 +579,15 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
     from services import project_registry
     from services.adequacy import campaign
     from services.solve_queue import solve_queue
-    from services.validation_service import validate_for_run
+    from services.validation_service import export_cycling_flags, validate_for_run
 
     PyPSAService.bind_request_context(ctx)
     db = SessionLocal()
     created: list[tuple[Any, Any, Any]] = []   # (opt, fork row, cfg)
     outcomes: dict[str, dict] = {}
+    # Gate F1 BC-F1-1: the export-cycling WARNINGS are kept per option (the
+    # study keeps no other preflight warning) and disclosed by the findings.
+    preflight_flags: dict[str, list[str]] = {}
     status, error = "failed", None
     study = None
     try:
@@ -611,10 +614,14 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
                                            library=library, question=question,
                                            resolve_upload=resolve_upload)
             cfg = packs.option_solver_config(ledger, tariff)
-            errors = [i for i in validate_for_run(net, cfg) if i.severity == "error"]
+            issues = validate_for_run(net, cfg)
+            errors = [i for i in issues if i.severity == "error"]
             if errors:
                 raise packs.PackError("preflight_failed", "; ".join(
                     f"{i.code} {i.name}: {i.message}" for i in errors[:5]))
+            flags = export_cycling_flags(issues)
+            if flags:
+                preflight_flags[opt.option_id] = flags
             row = study_forks.create_option_fork(
                 db, user_id, base_row=base_row, study_id=study_id,
                 option_id=opt.option_id, network=net, solver_config=cfg)
@@ -699,7 +706,8 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
             final = _finish(db, ctx, record, study_id=study_id, base_row_id=base_row_id,
                             base_dir=base_dir, created=created, outcomes=outcomes,
                             fidelity=fidelity, status=status, error=error,
-                            run_ledger=ledger, run_intake=intake)
+                            run_ledger=ledger, run_intake=intake,
+                            preflight_flags=preflight_flags)
         except Exception:  # noqa: BLE001
             logger.exception("decision study %s: finishing the run failed", study_id)
         finally:
@@ -720,8 +728,14 @@ def _uuid(value):
     return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
 
 
+def _flag_codes(preflight_flags: dict[str, list[str]] | None) -> list[str]:
+    """Every option's export-cycling codes, once each (gate F1 BC-F1-1)."""
+    return list(dict.fromkeys(c for codes in (preflight_flags or {}).values() for c in codes))
+
+
 def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcomes,
-            fidelity, status, error, run_ledger, run_intake) -> dict:
+            fidelity, status, error, run_ledger, run_intake,
+            preflight_flags: dict[str, list[str]] | None = None) -> dict:
     """
     Remove unsolved forks, write the findings and the run record; return the
     live record's terminal fields, which the worker publishes after release.
@@ -790,7 +804,8 @@ def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcom
                     if k in solved_rows and v.get("network_hash")}),
             baseline=baseline,
             honesty_notes=tuple(
-                ["options_not_established:" + ",".join(pending)] if pending else []),
+                (["options_not_established:" + ",".join(pending)] if pending else [])
+                + _flag_codes(preflight_flags)),
         )
         store.save_aux(base_dir, study_id, "findings", findings.model_dump(mode="json", by_alias=True))
         run_record = {
@@ -800,6 +815,7 @@ def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcom
             # The intake the forks were built from (the report's appendix).
             "intake": dict(run_intake),
             "fork_removal_refused": removal_errors,
+            "preflight_flags": dict(preflight_flags or {}),
         }
         store.save_aux(base_dir, study_id, "run", run_record)
         study = study.model_copy(update={

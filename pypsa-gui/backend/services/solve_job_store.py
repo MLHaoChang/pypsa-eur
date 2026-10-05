@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import stat
 import uuid
 from collections.abc import Iterable
 from datetime import UTC, datetime, timezone
@@ -450,12 +451,30 @@ STORAGE_MISSING_CONDITION = "project_storage_missing"
 
 def _storage_dir_gone(row: dict) -> bool:
     """
-    True when the row names a `storage_dir` that is no longer a directory.
+    True when the row names a `storage_dir` that is provably not a directory.
 
-    A row with no `storage_dir` (a foreground or hand-made job) is not judged.
+    Only a stat that answers "no such path" (`FileNotFoundError`, or
+    `NotADirectoryError` for a path under a file) or a path that is not a
+    directory counts. A stat that fails for any other reason (the macOS
+    privacy gate before the projects root is granted, an unmounted volume,
+    EACCES on a parent) leaves the job to be restored as before: that
+    directory may come back (gate F1 BC-F1-2, the fork sweep's "unreadable
+    is not absent"). A row with no `storage_dir` (a foreground or hand-made
+    job) is not judged.
     """
     storage_dir = row.get("storage_dir")
-    return bool(storage_dir) and not os.path.isdir(storage_dir)
+    if not storage_dir:
+        return False
+    try:
+        st = os.stat(storage_dir)
+    except (FileNotFoundError, NotADirectoryError):
+        return True
+    except OSError:
+        logger.warning(
+            "solve-queue boot reconciliation: storage_dir %r of job %s cannot be "
+            "read; restoring the job", storage_dir, row.get("id"))
+        return False
+    return not stat.S_ISDIR(st.st_mode)
 
 
 def _fail_storage_missing(row: dict) -> None:

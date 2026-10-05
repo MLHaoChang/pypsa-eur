@@ -424,6 +424,18 @@ def test_preflight_flags_cycling_across_hours_through_storage():
         _CROSS]
 
 
+def test_the_study_keeps_both_cycling_codes_and_no_other_warning():
+    """Gate F1 BC-F1-1: the filter the decision study's runners apply."""
+    from services.solver_service import SolverConfig
+    from services.validation_service import export_cycling_flags, validate_for_run
+
+    issues = validate_for_run(_cross_hour_network(), SolverConfig())
+    assert any(i.severity == "warning" and i.code != _CROSS for i in issues)
+    assert export_cycling_flags(issues) == [_CROSS]
+    same_hour = validate_for_run(_cycling_network(40.0), SolverConfig())
+    assert export_cycling_flags(same_hour) == ["tariff_export_exceeds_import"]
+
+
 def test_cross_hour_cycling_needs_storage_and_a_gain_after_losses():
     from services.validation_service import _check_export_cycling
 

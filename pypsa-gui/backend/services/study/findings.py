@@ -1184,6 +1184,8 @@ def assemble_findings(study, base_dir, db, base_uuid: str, *,
         robustness = Robustness.model_validate(tornado["robustness"])
         ref_bills = {k: Bill.model_validate(v)
                      for k, v in (tornado.get("reference_bills") or {}).items()}
+        # Gate F1 BC-F1-1: export cycling a tornado variant's prices allowed.
+        notes.extend(c for c in tornado.get("preflight_flags") or () if c not in notes)
     else:
         attributions, _cases = centre_attributions(ctx)
         note = "tornado_stale" if tornado is not None else "tornado_not_run"
@@ -1226,6 +1228,15 @@ def assemble_findings(study, base_dir, db, base_uuid: str, *,
                 expected=expected)
     if changed and v.status == "ok":
         v = v.model_copy(update={"reasons": tuple(v.reasons) + ("fork_changed_since_run",)})
+    # Gate F1 BC-F1-1: a tariff on which the LP cycles energy through the
+    # connection for profit is disclosed by the verdict itself, whatever its
+    # class: the battery's value may rest on an export a real meter does not pay.
+    from services.validation_service import EXPORT_CYCLING_CODES
+
+    cycling = [c for c in EXPORT_CYCLING_CODES if c in notes]
+    if cycling:
+        v = v.model_copy(update={"disclosures": tuple(dict.fromkeys(
+            [*v.disclosures, *cycling]))})
     explained: list[dict] = []
     for oid, opt in ctx.options.items():
         explained.extend(explain(oid, opt.network))
