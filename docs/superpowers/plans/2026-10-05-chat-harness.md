@@ -1,6 +1,6 @@
 # Plan: the chat harness — one folder for everything a model-agnostic assistant needs
 
-**Status:** v1.2, 2026-10-05. Phases 0, 1 and 2 landed on `claude/amazing-mendel-m087zw`; owner decisions Q1–Q14 taken (spec §8). The issue-06 follow-up (`workflow_state` frame, history key, the panel's strip) is in. Next: phase 3 (issues 08, 09).
+**Status:** v1.2, 2026-10-05. Phases 0, 1 and 2 landed on `claude/amazing-mendel-m087zw`; owner decisions Q1–Q14 taken (spec §8). The issue-06 follow-up and the parity probe (issue 09) are in. Next: issue 08 (the loop moves into the harness) and the live OpenAI run.
 **Spec (contract-level):** [`.scratch/harness/spec.md`](../../../.scratch/harness/spec.md); issues under `.scratch/harness/issues/`.
 **Requested:** 2026-10-05. The assistant should connect to Claude, OpenAI/Codex, Kimi or any other model and not feel different: one harness of functions, workflows and skills that any model drives the same way; a chat opens with a menu of what the user can do; the assistant can run a grill-style interview with recommendations the user picks from; and all of it grouped in one folder instead of spread over files.
 **Builds on:** [`specs/2026-08-05-llm-provider-seam-design.md`](../specs/2026-08-05-llm-provider-seam-design.md) (the harness/provider split and the word "harness"), [`plans/2026-09-09-chat-turn-loop-decomposition.md`](2026-09-09-chat-turn-loop-decomposition.md) (how the loop is cut), [`specs/2026-09-27-guided-mode.md`](../specs/2026-09-27-guided-mode.md) (the Guided addendum and delegation texts), [`plans/2026-10-05-one-investment-engine-two-faces.md`](2026-10-05-one-investment-engine-two-faces.md) §5 U3 and §8 (the investment workflow's steps and tools).
@@ -55,7 +55,7 @@ Dependency arrow: `services/* ← harness ← harness/providers`. A test greps
 | **0 — the folder** (done) | 01, 12 | package, README, protocol + catalogue moved with shims, `events.py` with the AST tripwire, workflow and skill registries with six workflow definitions and the `grill` skill, loader tests, glossary terms | identity tests; the chat/llm/tool test files unchanged and green; layering grep clean |
 | **1 — the text** (done) | 02, 07, 10 | prompts in Markdown (byte-identical, hash-pinned), adapters under `harness/providers/`, bundle `datas` | pinned hashes unchanged; `test_llm_provider_seam.py` unchanged; both live probes run (ADR-0002) |
 | **2 — the behaviour** (done) | 03, 04, 05, 06 | start menu endpoint + chips from it; `ask_user` + Choice card; `use_skill` + skill block; `start_workflow` + per-turn addendum; Guided mode consumes the `hub-design` workflow | Guided tests unchanged; Expert turns byte-identical; `FakeProvider` frame sequences for each new tool; vitest + tsc clean |
-| **3 — the loop** | 08, 09 | session, confirmation, budget, history, loop, sse moved under the harness; parity probe on stub + two live wires | the recorded frame sequence unchanged; manifest test scans the new paths; runbook names the runs |
+| **3 — the loop** (09 done) | 08, 09 | session, confirmation, budget, history, loop, sse moved under the harness; parity probe on stub + two live wires | the recorded frame sequence unchanged; manifest test scans the new paths; runbook names the runs |
 | **4 — the outside** | 11 | MCP exposure (if Q8 is yes) | its own spec |
 
 Phases 1 and 2 are independent of each other after phase 0; run them on
@@ -96,3 +96,4 @@ now scans `harness/` too and pins the moved catalogue at its new path.
 - Issue 05: `use_skill` + `_skills_block` (tools-on only, a new prompt part; the P25 snapshot test stubs it like the profile block).
 - Issue 06: `ChatSession.workflow`, `start_workflow` / `advance_workflow` / `end_workflow`, `_workflow_addendum`; `_guided_mode_addendum` and `_GUIDED_STEPS` are derived from the `hub-design` workflow (Q5, Q13); Expert turns without a workflow byte-identical; Guided tests unchanged.
 - Issue 06 follow-up: `workflow_state` frame after each workflow tool, `/chat/history.workflow`, the panel's workflow strip with Leave, `ui_context.workflow` while active.
+- Issue 09: `run_chat_smoke.py --workflow` parity battery; runbook `runbooks/harness-parity-probe.md`. Stub 3/3, live Anthropic 3/3. Its first run caught the workflow tools' session binding being lost under `iterate_in_threadpool`; fixed at the dispatch site, red-first test added.

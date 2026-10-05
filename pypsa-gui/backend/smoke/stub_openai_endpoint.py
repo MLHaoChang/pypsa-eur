@@ -147,6 +147,9 @@ def _scripted_call(text: str) -> tuple[str, dict] | None:
 # "ask me which to open"; the stub answers with an ask_user card, then
 # closes the turn once the presented result is back.
 _ASK = "ask me which"
+# Chat harness issue 09: the parity battery's workflow prompts.
+_START_WF = "Start the build-network workflow"
+_END_WF = "Please end the current workflow"
 _SITE_GRID = "Run suggest_eh_setup, then tag the import Link"
 _SITE_CRITICAL = "no critical load is tagged"
 _SITE_ALL = "fix every gap you can, one confirmation at a time"
@@ -369,6 +372,14 @@ class Handler(BaseHTTPRequestHandler):
             said = (f"Understood — {name} was not applied." if _DECLINED.search(result)
                     else f"Done — {name} applied.")
             emit(_sse({"choices": [{"delta": {"content": said}}]}))
+        elif _START_WF in text and not scripted and not turn_tools:
+            emit(_sse(_call("call_stub_8", "start_workflow", {"workflow_id": "build-network"})))
+        elif _START_WF in text and not scripted:
+            emit(_sse({"choices": [{"delta": {"content": "Started: first, see what is there."}}]}))
+        elif _END_WF in text and not scripted and not turn_tools:
+            emit(_sse(_call("call_stub_9", "end_workflow", {})))
+        elif _END_WF in text and not scripted:
+            emit(_sse({"choices": [{"delta": {"content": "Workflow ended."}}]}))
         elif _ASK in text and not scripted and not turn_tools:
             emit(_sse(_call("call_stub_7", "ask_user", {
                 "title": "Q1 — Which project?",

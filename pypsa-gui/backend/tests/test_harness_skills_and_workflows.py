@@ -244,3 +244,33 @@ def test_history_carries_the_workflow_key(client):
     r = client.get("/api/chat/history")
     assert r.status_code == 200
     assert "workflow" in r.json()
+
+
+# ── the route drives the loop step by step in fresh contexts ───────────────
+
+def test_workflow_tools_survive_a_per_step_context_copy():
+    """
+    `routers/chat.py` drives `run_turn` through Starlette's
+    `iterate_in_threadpool`, which runs EVERY `next()` in a fresh copy of the
+    task's context — a ContextVar set at turn start is gone when the tool
+    runs. The parity probe (issue 09) caught `start_workflow` answering
+    `internal_error` over HTTP; this drives the generator the same way.
+    """
+    import contextvars
+
+    from harness.providers.fake import FakeProvider
+    from services import chat_service
+
+    session = chat_service.ChatSession(model="claude-sonnet-5")
+    fake = FakeProvider([_tool_turn("start_workflow", {"workflow_id": "build-network"}), _text_turn()])
+    gen = chat_service.run_turn(session, "build", provider=fake)
+    events = []
+    while True:
+        try:
+            events.append(contextvars.copy_context().run(next, gen))
+        except StopIteration:
+            break
+    names = [n for n, _ in events]
+    assert "tool_error" not in names, dict(events).get("tool_error")
+    assert dict(events)["tool_result"]["result"]["step"] == "orient"
+    assert session.workflow == {"id": "build-network", "step": "orient"}

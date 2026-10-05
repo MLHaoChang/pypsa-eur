@@ -4408,6 +4408,7 @@ def _dispatch_real_tool_call(
     turn; once `used >= MAX_TOOL_RESULT_CHARS_PER_TURN`, further success
     payloads are replaced with an omitted stub.
     """
+    from services import chat_tools as _chat_tools  # noqa: PLC0415
     tool_use_id = tu.get("id") or uuid.uuid4().hex
     tool_name = tu.get("name") or "<missing-name>"
     args = tu.get("input") or {}
@@ -4565,6 +4566,15 @@ def _dispatch_real_tool_call(
             # and a ThreadPoolExecutor worker does NOT inherit contextvars —
             # without this every project tool would raise 401 no matter who is
             # signed in.
+            # The chat session for the workflow tools (issue 06). Bound HERE,
+            # in the same `next()` step as the copy below, and not only at
+            # turn start: the route drives this generator through Starlette's
+            # `iterate_in_threadpool`, which runs every `next()` in a fresh
+            # copy of the task's context, so a ContextVar set in an earlier
+            # step is gone by the time the tool runs. The parity probe (issue
+            # 09) caught it: start_workflow answered `internal_error` over
+            # HTTP on both wires while the direct-call tests passed.
+            _chat_tools.set_chat_session(session)
             _ctx_snapshot = contextvars.copy_context()
             future = _TOOL_EXECUTOR.submit(
                 lambda: _ctx_snapshot.run(lambda: handler(**(args or {})))

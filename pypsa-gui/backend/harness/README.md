@@ -59,6 +59,14 @@ not block), `use_skill` (a skill's body on demand), `start_workflow`,
 step's body rides each turn as per-turn user content, after the context
 block and outside the untrusted fence). None of them touches a project.
 
+## Measuring parity
+
+`backend/smoke/run_chat_smoke.py --workflow --profile <id>` drives the same
+battery (start menu, one Choice card, a workflow started and ended) on any
+profile; `docs/superpowers/runbooks/harness-parity-probe.md` has the recipe
+and the runs. Run it on every wire you can reach before calling a harness
+change done.
+
 ## Adding a workflow
 
 Create `workflows/<id>.md`:
