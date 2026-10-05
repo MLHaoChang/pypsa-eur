@@ -447,3 +447,34 @@ it('re-fires the stick-to-bottom autoscroll when the assistant dock expands', as
     scrollSpy.mockRestore()
   }
 })
+
+// CH-2 — an agent-driven raw import is a rebind to an UNBOUND project. The
+// handler used to act only on a truthy `to`, so `to: null` left
+// `currentProject` on the old name; the autosave then sent `expect=<old>` to a
+// backend that was unbound, which the save guard lets through (its identity
+// check only fires against a BOUND backend), and the imported network was
+// written over the previous project's folder. ImportExport.tsx clears the
+// active project for the same import made by hand; this pins chat to that.
+it('clears the active project when the agent rebinds to an unbound (imported) network', async () => {
+  renderPanel()
+  await sendAndScript([
+    { event: 'session_init', data: { session_id: 'sess-import' } },
+    {
+      event: 'project_rebound',
+      data: { from: 'Demo', to: null, via_tool: 'import_network_nc' },
+    },
+  ])
+  await waitFor(() => expect(useUIStore.getState().currentProject).toBeNull())
+})
+
+it('still follows a rebind to a named project (control)', async () => {
+  renderPanel()
+  await sendAndScript([
+    { event: 'session_init', data: { session_id: 'sess-activate' } },
+    {
+      event: 'project_rebound',
+      data: { from: 'Demo', to: 'Other', via_tool: 'activate_project' },
+    },
+  ])
+  await waitFor(() => expect(useUIStore.getState().currentProject).toBe('Other'))
+})

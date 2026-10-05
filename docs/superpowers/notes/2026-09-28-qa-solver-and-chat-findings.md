@@ -5,7 +5,8 @@ Date: 2026-09-28, against `master` at `9f83f37` plus the fixes on
 2026-09-28 review had in scope and never got a reviewer; the eleven findings from
 that pass are in `2026-09-28-qa-e2e-findings.md`.
 
-Sixteen findings, from two independent reviewers working read-only and in parallel.
+Sixteen findings, from two independent reviewers working read-only and in parallel,
+plus CH-9, found on 2026-10-05 while closing CH-2.
 
 ## How to read the status column
 
@@ -272,10 +273,11 @@ of result keys per tool is better than removing this one key.
 
 ### CH-2 — a project switch made by a tool does not take effect for the rest of the turn (server mode)
 
-**Serious. VERIFIED (empirically) and FIXED.**
+**Serious. VERIFIED (empirically) and FIXED — at the second attempt, plus its import
+half. The first fix recorded here did not work in production; see the correction.**
 
-Measured before the fix, binding a request context to A and dispatching a tool that
-publishes B through the same `copy_context().run(...)` the dispatcher uses:
+Measured before the first fix, binding a request context to A and dispatching a tool
+that publishes B through the same `copy_context().run(...)` the dispatcher uses:
 
     bound  : A
     inside : B   <- the tool believes it switched
@@ -291,26 +293,62 @@ therefore kept its old `currentProject` and the next autosave's `expect=` 409'd,
 which is the 2026-06-08 incident that frame exists to prevent. And the guard meant to
 catch EXTERNAL switches could not fire either.
 
-Fixed with `PyPSAService.adopt_active_from(snapshot)`, called by the dispatcher after
-a whitelisted tool returns. Two deliberate limits:
+**Correction (2026-10-05).** The first fix, `PyPSAService.adopt_active_from(snapshot)`,
+copied the switch back into the dispatcher's context after the tool returned. That
+context is itself a throwaway: `routers/chat.py` streams the turn as a SYNC
+generator, and Starlette's `iterate_in_threadpool` runs every `next()` in a FRESH copy
+of the request task's context — the router says so in two comments. The adopt was
+discarded at the next `yield`. Its tests drove the generator with `list(...)`, in one
+context, which is the one case where it works. Re-measured with a `next()` per fresh
+copy: after `activate_project("B")` from A, the next step of the turn saw **A**.
+An async handler (every import) adds a third copy, the `asyncio.run` task, whose
+publish the adopt could not see even in one context.
 
-  * it carries ONLY the active-project var. Copying every var back would let a tool
-    change the acting user and session — a privilege-transfer primitive, not a fix;
-  * it runs only for `PROJECT_REBINDING_TOOLS`. `import_*` and anything else reaching
-    `reset_network` publishes too, but publishes an UNBOUND context and is not
-    whitelisted; adopting it would make `_project_switched` fire and refuse the rest
-    of the turn with `project_switched_mid_turn`, turning a silent bug into a loud one.
+Fixed with a turn CELL, `PyPSAService._turn_cell`: a one-element list bound from the
+event-loop task in `chat_stream` (beside `set_acting_user`, for the same reason).
+Every per-item copy, and every copy below those, holds the same list, so a write into
+it survives all of them. Every read of the request context goes through `_scoped()`
+and every write through `_set_scoped()`, so no caller can bypass it, and outside a
+chat turn both are exactly the old ContextVar. `adopt_active_from` stays for callers
+without a cell, and it had to change: it now adopts only when the tool changed the var
+IN ITS COPY. Compared against the cell, an async import's stale snapshot reads as a
+switch back to the old project, and the adopt would quietly undo the import. The new
+async test caught that before it shipped.
 
-**Still open, narrower:** after an `import_*` in server mode the imported network
-lands in the registry (visible from the next request) but not for the rest of the
-same turn. Fixing that properly means deciding whether an import IS a rebind — a
-question about the guard's design, not this dispatcher.
+The adopt is no longer scoped to `PROJECT_REBINDING_TOOLS`. The cell follows every
+tool, so the direct path does too, or the two would disagree. A copy only the tool
+writes to cannot carry another tab's switch, so following it is never wrong. Whether
+the turn may CONTINUE is still the guard's call: a tool that changes identity without
+being on the list stops the turn, loudly.
 
-Guard: `tests/test_chat_tool_project_switch_reaches_the_turn.py`, driven through the
-real `_dispatch_real_tool_call` with fakes under real tool names (a real
-`activate_project` needs a database, two projects and a resident registry entry that
-would test everything except this). It pins the scoping and the no-op case as controls;
-the primary test fails against the previous code.
+**The import half, which this entry used to leave open.** An import IS a rebind, and
+the UI already treats it as one: `ImportExport.tsx` clears the active project "so the
+5-min autosave ... can't CLAIM and overwrite the previously-active project's folder".
+Off the list, a chat import was worse than stale. Measured in LOCAL mode with a real
+`import_network_nc` in a real turn:
+
+    import_network_nc  -> ok (1 bus over a 3-bus project X)
+    list_components    -> project_switched_mid_turn; the turn stops
+    project_rebound    -> none; the panel keeps currentProject = X
+    autosave(expect=X) -> the save guard PASSES and writes the import over X
+
+The guard passes because its identity check only fires against a BOUND backend. The
+four raw imports, the bundle import and create-from-template are now rebinding tools.
+The panel's `project_rebound` handler acted only on a truthy `to`, so it now also
+handles `to: null` the way `ImportExport.tsx` does: clear the active project.
+
+Guards: `tests/test_chat_tool_project_switch_reaches_the_turn.py`, rewritten to drive
+the real dispatcher through a real `StreamingResponse` over a sync generator, so
+TestClient's `iterate_in_threadpool` makes the per-item copies. It pins the mechanism
+(no cell: the switch is lost), the async publish, the no-op control, the
+direct-caller adopt, and, by spy, that `chat_stream` binds the cell. Also
+`tests/test_chat_import_is_a_rebind.py` and two cases in
+`frontend/src/components/ChatPanel.test.tsx`. Each was checked against its mutation:
+no cell bind in the route, `_scoped` ignoring the cell, the adopt comparing against
+the cell, an import dropped from the list, and the frontend `to: null` branch removed.
+
+
+Original report, for the record:
 
 `chat_service._dispatch_real_tool_call` runs each tool in
 `contextvars.copy_context()` on an executor. `PyPSAService.set_active` publishes
@@ -516,6 +554,40 @@ succeeds. `main.py`'s own comment says gating an abort "would be actively harmfu
 ... trap it with no way to stop it". Fails closed, so the direction is safe, but it
 recreates the trapped-study scenario in chat.
 `tests/test_chat_tools_lock_gate_parity.py` compares only the prefix sets.
+
+
+### CH-9 — in server mode a raw import over HTTP is invisible to the next request
+
+**Serious. VERIFIED (empirically) and FIXED. Found 2026-10-05 while closing CH-2's
+import half; not from the original two reviews.**
+
+`POST /api/io/import/{netcdf,csv,excel,matpower}` calls `reset_network`, which in a
+request publishes the new UNBOUND context into the session's scratch slot. But every
+request re-resolves its context from the session's active-project POINTER
+(`active_project.resolve_for_session`), and the import routes never moved it. So the
+next request resolved the previous project again. Measured with the authenticated
+TestClient: save and activate a 3-bus project, import a 1-bus file. The response is a
+200 reporting 1 bus. `GET /network/buses` returns the 3 buses, and `/network/meta`
+still says `loaded_project: X`. The frontend then clears `currentProject` as it does
+after every raw import, so the user is shown the OLD network labelled as unsaved, and
+a Save As would have saved that network under the new name.
+
+`/network/reset` (New Project) had already met exactly this and says so: "Leaving the
+pointer set would make the very next request re-resolve the old project ... the reset
+would appear to silently undo itself." The four imports now un-point the session the
+same way (`routers/io._unbind_session`), on SUCCESS only. A refused import (an `ic:`
+bus) raises before that point, and the session stays on its project, which is still
+resident and untouched, because the reset landed in the scratch slot. The chat import
+wrappers call these async routes directly, so they now pass the acting db and session
+themselves (`chat_tools._import_raw`), as `import_project_bundle` already did.
+
+Local mode was never affected: there is no pointer, and the process foreground is
+what every request reads.
+
+Guards, in `tests/test_chat_import_is_a_rebind.py`: the HTTP import is what the next
+request sees; a refused import leaves the session on its project; and the chat tool
+moves the acting session's pointer. The first and third fail with the
+un-pointing removed, and with the wrapper's session dropped, respectively.
 
 ---
 

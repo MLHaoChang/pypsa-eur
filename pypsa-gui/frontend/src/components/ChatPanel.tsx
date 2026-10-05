@@ -39,6 +39,7 @@ import {
 } from '../api/chat'
 import { useChatProfiles, CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
 import { nk } from '../utils/queryKeys'
+import { invalidateNetworkQueries } from '../utils/projectActions'
 import { invalidateAssetQueries, isMutatingTier } from '../utils/assetWrite'
 import {
   deleteUpload,
@@ -2340,6 +2341,19 @@ export default function ChatPanel() {
           qc.invalidateQueries({ queryKey: nk(d.to, 'simulationStatus') })
           qc.invalidateQueries({ queryKey: nk(d.to, 'snapshots') })
           toast(`Active project: ${d.to}`, { icon: '🔀' })
+        } else if (d.to === null && useUIStore.getState().currentProject !== null) {
+          // Open → UNBOUND: the agent imported a raw network (.nc / .csv /
+          // .xlsx / .m), which belongs to no saved project. Same answer as
+          // ImportExport.tsx gives the same import made by hand: clear the
+          // active project so the 5-min autosave (which bails when
+          // currentProject is null) cannot claim the previous project's
+          // folder and write the imported network over it. The backend's
+          // `expect` guard cannot catch that — it only fires against a
+          // BOUND backend. The user binds it with an explicit Save As.
+          useUIStore.getState().setCurrentProject(null)
+          invalidateNetworkQueries(qc, null)
+          qc.invalidateQueries({ queryKey: nk(null, 'results') })
+          toast('Imported network is not saved yet — use Save As to keep it', { icon: '🔀' })
         }
         // Render a small tool-line so the conversation explains what
         // happened.

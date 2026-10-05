@@ -122,12 +122,30 @@ def _is_guided(ui_context: Any) -> bool:
 # against the newly-activated scenario) isn't wrongly blocked as a
 # "switched mid-turn" violation. EXTERNAL switches (another browser tab,
 # autosave) — which are what the guard is meant to catch — still fire.
+#
+# The imports belong here because an import IS a rebind, and the UI already
+# treats it as one. A raw import (.nc/.csv/.xlsx/.m) replaces the network with
+# one that belongs to no saved project — `ImportExport.tsx` answers that with
+# `setCurrentProject(null)` "so the 5-min autosave ... can't CLAIM and
+# overwrite the previously-active project's folder". A bundle or a template
+# becomes a NEW project and moves the session pointer to it. Off this list, all
+# six switched the binding the turn was pinned to, so the very next tool in the
+# turn was refused as `project_switched_mid_turn` and no `project_rebound`
+# frame reached the panel — and the panel, still holding the old name, let its
+# autosave write the imported network over that project: the save guard's
+# `expect` check only fires against a BOUND backend.
 PROJECT_REBINDING_TOOLS = frozenset([
     "activate_project",
     "load_project",
     "save_project_as",
     "rename_project",
     "restore_project_snapshot",
+    "import_network_nc",
+    "import_csv_bundle",
+    "import_excel",
+    "import_matpower",
+    "import_project_bundle",
+    "create_project_from_template",
 ])
 
 # Default + selectable models: `DEFAULT_MODEL` / `OPUS_MODEL` are imported
@@ -4774,20 +4792,24 @@ def _dispatch_real_tool_call(
                 # `currentProject` too, which is the `expect=` 409 the
                 # rebound frame exists to prevent (incident 2026-06-08).
                 #
-                # SCOPED to the rebinding tools on purpose. `import_*` and
-                # anything else reaching `reset_network` also publishes, but
-                # it publishes an UNBOUND context and is not on that
-                # whitelist — adopting it here would make `_project_switched`
-                # fire and refuse the rest of the turn with
-                # `project_switched_mid_turn`, turning a silent staleness bug
-                # into a loud refusal. That case is narrower and is recorded
-                # in the register rather than fixed by widening this.
-                if tool_name in PROJECT_REBINDING_TOOLS:
-                    from services.pypsa_service import (
-                        PyPSAService as _PyPSAService,
-                    )
+                #
+                # In production this is now belt-and-braces: `routers/chat.py`
+                # binds a turn CELL that every context copy shares, so the
+                # tool's publish already reached the turn, and this adopt
+                # finds nothing to do. It is what a caller without a cell (a
+                # direct `run_turn`, a test) relies on, and it adopts for
+                # EVERY tool so both paths agree. That used to be scoped to
+                # `PROJECT_REBINDING_TOOLS`, to keep an import's switch from
+                # tripping `project_switched_mid_turn`; the imports are on that
+                # list now, and a switch only a tool can have made — a copy
+                # nobody else writes to — is never the external one the guard
+                # is for. A switch that changes identity without being on the
+                # list still stops the turn, loudly, which is the safe failure.
+                from services.pypsa_service import (
+                    PyPSAService as _PyPSAService,
+                )
 
-                    _PyPSAService.adopt_active_from(_ctx_snapshot)
+                _PyPSAService.adopt_active_from(_ctx_snapshot)
             except concurrent.futures.TimeoutError:
                 # Anthropic requires a tool_result for every tool_use_id in the
                 # next user message (same invariant the project_switched and

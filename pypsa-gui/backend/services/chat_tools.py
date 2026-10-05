@@ -2948,6 +2948,25 @@ def delete_project_snapshot(name: str, snapshot_id: str) -> None:
 # ── Import / Export (8) ─────────────────────────────────────────────────────
 
 
+def _import_raw(handler, upload) -> dict:
+    """Run one raw-import route (async) with the acting db + session supplied.
+
+    The routes un-point the session after a successful import (see
+    `routers.io._unbind_session`), so they now declare `db` and `session`. The
+    handler is async, so `_route` cannot be used — its `with _acting()` would
+    close `db` before the coroutine ran — and the dependencies are injected by
+    hand inside the block instead, exactly as `import_project_bundle` does.
+
+    With no acting identity (a direct in-process call) there is no session
+    whose pointer could move, and these tools never required one before, so
+    that case keeps working rather than turning into a 401.
+    """
+    if _ACTING_USER_ID.get() is None:
+        return _sync(handler(upload, db=None, session=None))
+    with _acting() as (db, _user):
+        return _sync(handler(upload, db=db, session=_acting_session(db)))
+
+
 def import_network_nc(bytes_b64: str, filename: str = "network.nc") -> dict:
     import base64
     import io
@@ -2955,7 +2974,7 @@ def import_network_nc(bytes_b64: str, filename: str = "network.nc") -> dict:
     from routers.io import import_netcdf as _h
     data = base64.b64decode(bytes_b64)
     upload = UploadFile(filename=filename, file=io.BytesIO(data))
-    return _sync(_h(upload))
+    return _import_raw(_h, upload)
 
 
 def import_csv_bundle(bytes_b64: str, filename: str = "csv.zip") -> dict:
@@ -2965,7 +2984,7 @@ def import_csv_bundle(bytes_b64: str, filename: str = "csv.zip") -> dict:
     from routers.io import import_csv as _h
     data = base64.b64decode(bytes_b64)
     upload = UploadFile(filename=filename, file=io.BytesIO(data))
-    return _sync(_h(upload))
+    return _import_raw(_h, upload)
 
 
 def import_excel(bytes_b64: str, filename: str = "network.xlsx") -> dict:
@@ -2975,7 +2994,7 @@ def import_excel(bytes_b64: str, filename: str = "network.xlsx") -> dict:
     from routers.io import import_excel as _h
     data = base64.b64decode(bytes_b64)
     upload = UploadFile(filename=filename, file=io.BytesIO(data))
-    return _sync(_h(upload))
+    return _import_raw(_h, upload)
 
 
 def import_matpower(bytes_b64: str, filename: str = "case.m") -> dict:
@@ -2985,7 +3004,7 @@ def import_matpower(bytes_b64: str, filename: str = "case.m") -> dict:
     from routers.io import import_matpower as _h
     data = base64.b64decode(bytes_b64)
     upload = UploadFile(filename=filename, file=io.BytesIO(data))
-    return _sync(_h(upload))
+    return _import_raw(_h, upload)
 
 
 def _save_agent_export(data: bytes, filename: str, mime: str) -> dict:

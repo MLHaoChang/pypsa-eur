@@ -1097,6 +1097,14 @@ async def chat_stream(
     # the note above requires. None (local mode issues no cookie) is legal and
     # is what the HTTP path passes there too.
     _chat_tools.set_acting_session(getattr(acting_session, "id", None))
+    # And the PROJECT, for the same reason and from the same place: a tool that
+    # switches the active project (activate, load, an import, an undo) publishes
+    # through a ContextVar, and `_gen()`'s per-item copies would drop that
+    # publish at the next yield — so the rest of the turn edited the previous
+    # project. The cell is shared by reference across those copies. See
+    # `PyPSAService._turn_cell`.
+    from services.pypsa_service import PyPSAService as _PyPSAService
+    _PyPSAService.bind_turn_cell()
 
     _acting_user_id = (
         str(getattr(getattr(request.state, "auth_user", None), "id", None) or "")
