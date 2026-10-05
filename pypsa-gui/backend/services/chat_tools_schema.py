@@ -453,9 +453,8 @@ TOOLS: list[dict[str, Any]] = [
         "bulk_update_components",
         "Atomic bulk attribute set on N components of one class (PATCH "
         "/api/network/_bulk). Single lock acquisition, single audit entry. "
-        "NOT undoable from chat: undo snapshots are taken by the HTTP "
-        "middleware, which a chat tool call does not pass through — do not "
-        "tell the user this can be undone. Backend coerces values against "
+        "Undoable as part of this turn (one undo reverts the turn's network "
+        "edits). Backend coerces values against "
         "df[col].dtype; "
         "all-or-nothing on unknown names. Safety: write.",
         {
@@ -1676,15 +1675,16 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _empty(
         "undo_last",
-        "Roll back the most recent mutation ON THE UNDO STACK (pops the "
-        "per-project stack). The stack is fed by the user's CANVAS edits, not "
-        "by your own tool calls: undo snapshots are taken by the HTTP "
-        "middleware, which a tool call does not pass through. So this does NOT "
-        "undo an edit you just made — it undoes whatever the user last did in "
-        "the UI, or refuses if the stack is empty. Do not offer it as a way to "
-        "reverse your own change; reverse that with an explicit inverse edit. "
-        "Returns {undone: bool, remaining: int} (remaining = undo-stack depth "
-        "after the pop). Safety: destructive.",
+        "Roll back the most recent step ON THE UNDO STACK (pops the "
+        "per-project stack). The stack holds the user's canvas edits AND your "
+        "turns: before the first network-changing tool of a turn, one "
+        "snapshot is taken, so one undo reverts EVERYTHING you changed in that "
+        "turn — not just your last call. Called later in the same turn, it "
+        "returns the network to how it was when the turn began. If the user "
+        "edited the canvas after your turn, the newest step is theirs and this "
+        "reverts that instead. Refuses when the stack is empty. Returns "
+        "{undone: bool, remaining: int} (remaining = undo-stack depth after "
+        "the pop). Safety: destructive.",
     ),
     _empty(
         "undo_status",

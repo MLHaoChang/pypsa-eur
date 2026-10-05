@@ -16,14 +16,14 @@ audit log, _user_ts cleanup, and vintage-bounds cleanup because they go through
 the same _create/_update/_delete_component generic helpers (and dedicated
 wrappers for Bus rename / Transformer / GlobalConstraint).
 
-They do NOT inherit UNDO. That is the one item calling handlers directly costs
-us: `push_undo_snapshot` is driven by the HTTP middleware in `main.py`, which
-an in-process call never passes through. So a chat edit pushes no snapshot,
-and a later `undo_last` either refuses ("nothing to undo") or reverts an
-OLDER canvas edit while reporting `{"undone": true}` — the destructive tool
-reporting success for something the user did not ask to undo. This sentence
-used to list undo alongside the other four; it was the only one of the five
-that was not true.
+UNDO is the one they cannot inherit, because `push_undo_snapshot` is driven by
+the HTTP middleware in `main.py`, which an in-process call never passes
+through. For a long time nothing replaced it: a chat edit pushed no snapshot,
+and a later `undo_last` either refused or reverted an OLDER canvas edit while
+reporting `{"undone": true}`. The dispatcher now pushes it instead — ONE
+snapshot per turn, per project, before the turn's first network-changing tool
+(`UNDO_CAPTURED_TOOLS` below; `chat_service._snapshot_for_turn_undo`). So one
+undo reverts everything the assistant changed in its last turn.
 
 Phase 1 invariants enforced here:
   * F1 — update_component dispatches Bus rename to rename_bus (preserves
@@ -5869,13 +5869,17 @@ _LOCK_GATE_WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 # Tools with no HTTP route (`_service_call_` in TOOL_ROUTES) that nonetheless
 # mutate the resident network. The route-derived rule below cannot see them,
 # and they are exactly as capable of overwriting a lock holder's work as the
-# routed ones — `batch_delete_components` more so than most.
-_LOCK_GATE_SERVICE_CALL_MUTATORS = frozenset({
+# routed ones — `batch_delete_components` more so than most. The undo capture
+# (`_undo_captured_tool_names`) needs the same list for the same reason.
+_NETWORK_SERVICE_CALL_MUTATORS = frozenset({
     "batch_create_components",
     "batch_delete_components",
     "generate_exemplary_timeseries",
     "apply_demand_from_excel",
     "reconstruct_network_from_image",
+})
+
+_LOCK_GATE_SERVICE_CALL_MUTATORS = _NETWORK_SERVICE_CALL_MUTATORS | frozenset({
     # Write edges into the PROJECT DIRECTORY that call their service layer
     # directly, so they never reach the REST handler that checks the lock.
     # `routers/uploads.py` decided this question the other way and said so:
@@ -6051,3 +6055,56 @@ DISPATCHERS.update({
     name: _lock_gated(name, DISPATCHERS[name])
     for name in _lock_gated_tool_names()
 })
+
+
+# ── Undo capture (CH-3) ─────────────────────────────────────────────────────
+#
+# Undo snapshots are pushed by `main.undo_snapshot_middleware`, and a chat tool
+# calls its handler in-process, so a chat edit used to push nothing: a later
+# `undo_last` either refused or reverted an OLDER canvas edit while reporting
+# `{"undone": true}`. The dispatcher now pushes the snapshot itself — see
+# `chat_service._snapshot_for_turn_undo` — for exactly the tools below.
+#
+# Mirrors of main.py's two undo constants. Kept in step by
+# `tests/test_chat_undo_snapshot.py`, which compares them against main's, so
+# this comment is not the only thing holding them together.
+_UNDO_PREFIXES = ("/api/network/", "/api/io/")
+_UNDO_EXCLUDE = frozenset({"/api/network/undo", "/api/network/undo/info"})
+
+
+def _undo_captured_tool_names() -> frozenset[str]:
+    """
+    The tools whose call is preceded by an undo snapshot: middleware parity,
+    derived the way `_lock_gated_tool_names` is.
+
+    A tool is captured when its tier is not "read" AND it either maps to a
+    write route the middleware would snapshot (`_UNDO_PREFIXES`, minus
+    `_UNDO_EXCLUDE`) or is one of the routeless network mutators. Project-
+    folder writes (uploads, chat history, campaigns) are deliberately NOT in
+    it: the undo stack holds the NETWORK, so a snapshot before them would be an
+    undo step that changes nothing.
+    """
+    from services.chat_tools_schema import TOOL_ROUTES, safety_tier_for
+
+    captured: set[str] = set()
+    for name in DISPATCHERS:
+        if safety_tier_for(name) == "read":
+            continue
+        if name in _NETWORK_SERVICE_CALL_MUTATORS:
+            captured.add(name)
+            continue
+        for route in TOOL_ROUTES.get(name, ()):
+            if not isinstance(route, tuple):
+                continue
+            method, path = route
+            if (
+                method.upper() in _LOCK_GATE_WRITE_METHODS
+                and any(path.startswith(p) for p in _UNDO_PREFIXES)
+                and path not in _UNDO_EXCLUDE
+            ):
+                captured.add(name)
+                break
+    return frozenset(captured)
+
+
+UNDO_CAPTURED_TOOLS = _undo_captured_tool_names()

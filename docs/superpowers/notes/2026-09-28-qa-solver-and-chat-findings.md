@@ -362,7 +362,7 @@ why the suite does not catch it.
 
 ### CH-3 — `undo_last` reverts the wrong thing, and the schema says otherwise
 
-**Serious. VERIFIED (both halves). DOCUMENTATION HALF FIXED; behaviour still open.**
+**Serious. VERIFIED (both halves). Both halves FIXED — the behaviour on 2026-10-05.**
 
 The false claims are corrected: the `chat_tools` module docstring no longer lists undo
 among what tools inherit (it listed five things and was wrong about exactly one), the
@@ -370,9 +370,35 @@ among what tools inherit (it listed five things and was wrong about exactly one)
 `undo_last` schema now tells the model plainly that the stack holds the user's CANVAS
 edits and not its own, and not to offer it as a way to reverse its own change.
 
-Still open: giving chat writes a real snapshot. That is a design change — a snapshot
-is an `export_to_netcdf` round-trip, so one per in-process tool call is not obviously
-affordable — and it is not attempted here.
+**Behaviour, fixed 2026-10-05.** Chat writes now get a real snapshot: the dispatcher
+pushes ONE per turn, per project, before the turn's first network-changing tool
+(`chat_service._snapshot_for_turn_undo`), at the same seam and for the same reason as
+the dirty mark beside it. The unit is the TURN, which answers the cost question this
+entry left open — a 30-edit turn pays one `export_to_netcdf`, not thirty — and is what
+the texts the model reads had promised all along ("Writes participate in the
+turn-level undo"; a reconstruction "created inside one undo snapshot so a misread can be
+reverted in one click"). It is also what a user means by "undo what the assistant just
+did". An `undo_last` inside the turn pops that snapshot, so the next edit re-arms and
+pushes a fresh one. The record of which stacks the turn has pushed to lives on the
+`ChatSession` — keyed by the project's `_UndoState` object, which survives an in-place
+swap — not in a ContextVar, for the reason CH-2's correction gives.
+
+Which tools: derived like the lock gate (`chat_tools.UNDO_CAPTURED_TOOLS`) — write
+routes under the middleware's undo prefixes minus its exclusions, plus the routeless
+network mutators; project-folder writes are out, since a snapshot before them would
+be an undo step that changes nothing. Kept on failure rather than popped as the
+middleware pops a 4xx: a tool that fails partway may have changed the network, the
+same reasoning the dirty mark records.
+
+The schemas now say what happens: `undo_last` reverts the whole of the assistant's
+last turn (or, called within a turn, returns to its start), and a canvas edit made
+after the turn is the newer step.
+
+Guard: `tests/test_chat_undo_snapshot.py` (8) — one step for a two-edit turn through
+the real `run_turn`, one step per turn across turns on one session, the re-arm after an
+in-turn undo, no step for a read tool or an unconfirmed destructive one, and the
+constants against `main.py`'s. Bitten four ways: the push removed, the once-per-turn
+check removed, the re-arm removed, the turn-boundary reset removed.
 
 Undo snapshots are pushed by the HTTP middleware in `main.py`. Chat tools call
 handlers in-process, so a chat edit pushes nothing. `undo_last` therefore either

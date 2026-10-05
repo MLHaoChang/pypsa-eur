@@ -581,6 +581,13 @@ class ChatSession:
     # cleared in run_turn's try/finally so a concurrent second run_turn on the
     # same session_id (two tabs) is rejected with turn_already_in_flight.
     _turn_in_flight: bool = field(default=False)
+    # CH-3 — the undo stacks this turn has already pushed its one snapshot
+    # onto (each project's `_UndoState` object; see `_snapshot_for_turn_undo`).
+    # A list of objects compared by identity, not a set of names: the state
+    # object is what `reset_network`/`set_network` carry across an in-place
+    # swap (undo, clustering), so it identifies "this project's stack" where a
+    # name would not. Emptied at the start and end of every turn.
+    _undo_snapshotted: list = field(default_factory=list)
     # W-3 (ADR-0001) — whether the provider has EVER reported usage for this
     # session. `stream_options.include_usage` is a request, not a guarantee:
     # an OpenAI-compatible endpoint that omits the usage chunk leaves
@@ -3822,6 +3829,7 @@ def run_turn(
             yield "session_done", {"reason": "turn_already_in_flight"}
             return
         session._turn_in_flight = True
+        session._undo_snapshotted = []
 
     _metric_incr("turns")
     _t_start = time.monotonic()
@@ -3864,6 +3872,7 @@ def run_turn(
         _metric_record_duration(time.monotonic() - _t_start)
         with session._lock:
             session._turn_in_flight = False
+            session._undo_snapshotted = []
         # C-3 — the turn's profile must not outlive the turn. A tool invoked
         # OUTSIDE a turn (a direct call, a test) has no profile to honour and
         # must take the pre-profile path; leaving a stale value bound would
@@ -4593,6 +4602,63 @@ def _confirm_destructive_tool(
 
 
 
+def _snapshot_for_turn_undo(session: ChatSession, tool_name: str) -> None:
+    """
+    CH-3 — push ONE undo snapshot per turn, per project, before the turn's
+    first network-changing tool.
+
+    Undo snapshots are pushed by `main.undo_snapshot_middleware`; a chat tool
+    calls its handler in-process and never passes through it, so a chat edit
+    pushed nothing, and `undo_last` then either refused or — worse — reverted
+    an OLDER canvas edit while reporting `{"undone": true}`.
+
+    Per TURN rather than per tool call, for two reasons. It is what the texts
+    the model reads already promised — "Writes participate in the turn-level
+    undo", and an image reconstruction "created inside one undo snapshot so a
+    misread can be reverted in one click" — and it is the unit a user means by
+    "undo what the assistant just did". And it bounds the cost the register
+    named as the open question: a snapshot is an `export_to_netcdf`
+    round-trip, so a 30-edit turn pays for one, not thirty. (A canvas drag gets
+    the same treatment from the middleware's coalesce window.)
+
+    Kept on failure, not popped the way the middleware pops on a 4xx: the
+    dirty-marking just above makes the same call for the same reason — a tool
+    that fails partway may still have changed the network. An undo step that
+    turns out to change nothing costs less than an edit that cannot be undone.
+    """
+    from services import chat_tools as _chat_tools
+
+    if tool_name not in _chat_tools.UNDO_CAPTURED_TOOLS:
+        return
+    try:
+        from services.pypsa_service import PyPSAService
+
+        stack = PyPSAService.get_active_context().undo
+    except Exception:  # noqa: BLE001 — never block a tool on undo machinery
+        return
+    if any(stack is done for done in session._undo_snapshotted):
+        return
+    from services.network_undo import push_undo_snapshot
+
+    push_undo_snapshot()  # logs and swallows its own failures
+    session._undo_snapshotted.append(stack)
+
+
+def _forget_turn_undo(session: ChatSession) -> None:
+    """After an `undo_last` in this turn, the turn's snapshot has been popped:
+    the NEXT network-changing tool must push a fresh one, or the edits after
+    the undo would have no step of their own."""
+    try:
+        from services.pypsa_service import PyPSAService
+
+        stack = PyPSAService.get_active_context().undo
+    except Exception:  # noqa: BLE001
+        return
+    session._undo_snapshotted = [
+        done for done in session._undo_snapshotted if done is not stack
+    ]
+
+
 def _dispatch_real_tool_call(
     session: ChatSession,
     tu: dict[str, Any],
@@ -4748,6 +4814,10 @@ def _dispatch_real_tool_call(
     if tier != "read":
         from services import dirty_state
         dirty_state.mark_dirty()
+    # Same seam, same reason: the HTTP middleware's undo snapshot never runs
+    # for an in-process call either. After the confirmation gate, so a refused
+    # tool costs no snapshot. See `_snapshot_for_turn_undo`.
+    _snapshot_for_turn_undo(session, tool_name)
 
     # Execute via the chat_tools dispatcher. `handler` was resolved above the
     # confirmation gate — see Improvement #19 there.
@@ -4860,6 +4930,11 @@ def _dispatch_real_tool_call(
             "content": _error_result_content(detail, exc, error_kind),
         })
         return
+
+    # Only a SUCCESSFUL undo reaches this line (a refused one raised above and
+    # returned), and it popped this turn's snapshot — see `_forget_turn_undo`.
+    if tool_name == "undo_last":
+        _forget_turn_undo(session)
 
     # Long-running execution tier: bridge solver log lines into tool_progress
     # frames between tool_running and tool_result. run_simulation /
