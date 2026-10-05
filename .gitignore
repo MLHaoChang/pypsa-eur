@@ -95,6 +95,7 @@ CLAUDE.md
 !.claude/hooks/session-start.sh
 # ...and the vendored agent skills (see .claude/skills/MATTPOCOCK-SKILLS.md)
 !.claude/skills/
+!.claude/CLAUDE.md
 .github/copilot-instructions.md
 CLAUDE.local.md
 # generated DAGs for docs
