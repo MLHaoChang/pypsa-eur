@@ -384,8 +384,8 @@ export interface ProjectInfo {
   project_kind?: string | null
   // A decision study's option or tornado fork (plan F1-F, F3): the backend
   // verifies the owner keys AND the database parent (forks.is_study_owned).
-  // `owner_study_name` is null when the study record is gone. Absent on
-  // payloads other than GET /api/projects/.
+  // `owner_study_name` is null when the study record is gone. Optional: an
+  // older backend does not send them.
   study_owned?: boolean
   owner_study_id?: string | null
   owner_study_name?: string | null

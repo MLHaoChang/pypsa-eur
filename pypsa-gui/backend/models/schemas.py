@@ -765,7 +765,7 @@ class ProjectInfo(BaseModel):
     # parent is that base — the rule of `services/study/forks.py::
     # is_study_owned`, so a copy of the keys elsewhere is not marked.
     # `owner_study_name` is None when the study record is gone (the startup
-    # sweep removes such a fork). Set by `GET /api/projects/` only.
+    # sweep removes such a fork). Set on every registry row (`_project_info_db`).
     study_owned: bool = False
     owner_study_id: str | None = None
     owner_study_name: str | None = None

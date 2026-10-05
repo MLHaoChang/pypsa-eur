@@ -57,6 +57,9 @@ list_projects,ProjectInfo,parent_project,parent_project,True
 list_projects,ProjectInfo,scenario_description,scenario_description,True
 list_projects,ProjectInfo,scenario_type,scenario_type,True
 list_projects,ProjectInfo,project_kind,project_kind,True
+list_projects,ProjectInfo,study_owned,study_owned,True
+list_projects,ProjectInfo,owner_study_id,owner_study_id,True
+list_projects,ProjectInfo,owner_study_name,owner_study_name,True
 list_scenarios,ProjectInfo,name,name,True
 list_scenarios,ProjectInfo,id,id,True
 list_scenarios,ProjectInfo,created_at,created_at,True
@@ -70,3 +73,6 @@ list_scenarios,ProjectInfo,parent_project,parent_project,True
 list_scenarios,ProjectInfo,scenario_description,scenario_description,True
 list_scenarios,ProjectInfo,scenario_type,scenario_type,True
 list_scenarios,ProjectInfo,project_kind,project_kind,True
+list_scenarios,ProjectInfo,study_owned,study_owned,True
+list_scenarios,ProjectInfo,owner_study_id,owner_study_id,True
+list_scenarios,ProjectInfo,owner_study_name,owner_study_name,True
