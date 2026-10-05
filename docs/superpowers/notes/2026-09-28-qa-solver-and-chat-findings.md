@@ -146,7 +146,23 @@ Fix shape: compute and publish it only when the final status is `completed`.
 
 ### SL-5 — a `BaseException` in a queue job leaves the context permanently owned
 
-**Moderate (rare trigger, severe effect). REPORTED.**
+**Moderate (rare trigger, severe effect). VERIFIED and FIXED, both halves.**
+
+`_dispatch_loop` catches BaseException and carries on — right for the dispatcher.
+`_run_solve_job` caught only `Exception`, and its `finally` released the job row and
+not the context, so `thread` stayed pointed at the dispatcher, which never exits. The
+`finally` now releases the context whenever this run still owns it — a no-op on the
+success and `Exception` paths, which already release it.
+
+The restore guard set its once-flag BEFORE restoring, so the defensive second call in
+the KeyboardInterrupt handler — which exists for exactly the interrupted-restore case
+— found it set and did nothing. It is now marked after; re-running is safe because
+SL-1 made the undo walk idempotent.
+
+Guard: `tests/test_queue_releases_what_it_claims.py`, driving a real queued job whose
+fake `run_simulation` raises a non-KeyboardInterrupt BaseException, plus a control that
+the dispatcher survives and runs the next job. The restore-guard ordering is pinned
+structurally, and says so: reaching it for real needs an interrupt mid-restore.
 
 `_run_solve_job` catches `Exception`, not `BaseException`, and its `finally` updates
 only the job row. A `SystemExit` from user `extra_functionality_code`, or a late
@@ -182,7 +198,24 @@ a rename during a queued or running job exactly as local mode does.
 
 ### SL-7 — `_claim` lacks the desktop-quit drain gate its docstring claims to share
 
-**Moderate. REPORTED.**
+**Moderate. VERIFIED and FIXED — and live here:** `gridspine` imports in this
+environment, although `2026-09-08-baseline-failures-characterised.md` lists it absent.
+
+`_claim` now checks the drain in the same critical section as the status flip, as the
+inline claim does and for the reason its comment gives, and returns a tri-state
+(`claimed` / `cancelled` / `parked`). A bool could not express it: `False` sends the
+job down the abort path, which records a terminal status and loses a job the drain
+exists to keep. The docstring's "both runners claim identically" was false and now
+says so.
+
+The second half was worse than "minor": the "no storage directory" return sat between
+`_claim` — which had already published the log queue — and the try/finally that closes
+it, so anything streaming that job's log waited forever. It is inside the `try` now.
+
+Worth recording: the first cut of the parked test let the unparked job run a REAL
+study against a nonexistent directory, and against the old code it hung rather than
+failed — a test that hangs on the bug it guards burns the CI timeout and reports
+nothing. The study is stubbed now, and the old code fails in two seconds.
 
 `_claim`'s docstring says it was extracted "so both runners claim identically", but the
 `_draining` check exists only in `_run_solve_job`'s own inlined claim block;

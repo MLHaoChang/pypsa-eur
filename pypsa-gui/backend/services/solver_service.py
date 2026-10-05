@@ -726,8 +726,15 @@ def run_simulation(
                 def _guarded_restore() -> None:
                     if _restore_done["v"]:
                         return
-                    _restore_done["v"] = True
                     _real_restore()
+                    # Marked AFTER the restore, not before. The defensive second
+                    # call in the KeyboardInterrupt handler exists for exactly
+                    # one case — an interrupt landing mid-restore — and with the
+                    # flag set first, that call found it already True and did
+                    # nothing, leaving the network half-restored. Re-running is
+                    # safe: `_run_undo_actions` guards every entry and is
+                    # documented idempotent.
+                    _restore_done["v"] = True
 
                 restore_modelling = _guarded_restore
                 # Clear any stale loss DataFrames from a previous solve. PyPSA
