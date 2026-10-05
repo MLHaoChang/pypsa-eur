@@ -364,7 +364,7 @@ def _switchgear_need(bus, study, library, first_period):
                 _switchgear_candidates(library, kv, ik, ip, f_hz), first_period)
 
 
-def _needs(spec, study, library, criteria, periods, lib_by_id):
+def _needs(spec, study, library, criteria, periods, lib_by_id, skip_buses=frozenset()):
     camp, c = study.campus, spec["campus"]
     first = periods[0]
     needs = []
@@ -394,6 +394,8 @@ def _needs(spec, study, library, criteria, periods, lib_by_id):
         needs.append(_cable_need(str(name), study, library, criteria, spec))
     sc = study.short_circuit
     for bus, rows in sc.groupby("bus", sort=False):
+        if str(bus) in skip_buses:
+            continue
         rated = rows["rated_ka"].notna().all()
         failing = rows[[str(a).lower() == "false" for a in rows["adequate"]]] if rated else rows.iloc[0:0]
         if rated and len(failing):
@@ -648,13 +650,19 @@ def _dispatch_table(study):
 # --------------------------------------------------------------------------
 
 def select_assets(campus_spec, hourly, selection, library, req, profile, criteria: SizingCriteria = SizingCriteria(),
-                  max_iter: int = MAX_ITER) -> dict:
+                  max_iter: int = MAX_ITER, pcc_switchgear: bool = True) -> dict:
     """Least-cost assets for ``campus_spec`` at the selected hours, AC-checked
     (module docstring). ``profile`` is a grid-code profile or its name.
 
     Returns ``investment``, ``cost``, ``compliance``, ``dispatch``, ``spec``
     (the invested campus file), ``history`` and ``unresolved``, and the
-    re-solved ``pcc`` flows (per hour and case) and ``short_circuit``."""
+    re-solved ``pcc`` flows (per hour and case) and ``short_circuit``.
+
+    ``pcc_switchgear`` says who buys the PCC's switchgear (owner decision,
+    2026-10-05: a study setting, costed to the campus by default). False
+    means the grid operator owns it: the PCC bus is never a need, and its
+    switchgear row reports what it finds without buying anything. The
+    choice is returned as ``scope``."""
     profile = load_grid_code(profile) if isinstance(profile, str) else profile
     lib_by_id = {e["id"]: e for kind in ("transformers", "cables", "capacitor_banks", "shunt_reactors", "statcoms",
                                          "switchgear") for e in library[kind]}
@@ -666,13 +674,15 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
     periods = sorted(installed)
     base = _study(build_campus(campus_spec), hours, rows_of, installed, req, criteria, recheck=False)
     as_is = _compliance(base, req, profile)
-    needs = _needs(campus_spec, base, library, criteria, periods, lib_by_id)
+    skip = frozenset() if pcc_switchgear else frozenset({str(campus_spec["campus"]["pcc"]["bus"])})
+    needs = _needs(campus_spec, base, library, criteria, periods, lib_by_id, skip)
     history, last_voltage, stop = [], None, any(n.unresolved for n in needs)
     for it in range(1, max_iter + 1):
         spec, added = _apply(campus_spec, needs, lib_by_id)
         study = _study(build_campus(spec), hours, rows_of, installed, req, criteria, recheck=True)
         compliance = _compliance(study, req, profile)
-        fails = _failures(study, compliance, needs, req, criteria)
+        fails = [f for f in _failures(study, compliance, needs, req, criteria)
+                 if f[1] != "switchgear" or f[0].split(" ", 1)[1] not in skip]
         if not fails or stop:
             break
         if it == max_iter:
@@ -733,4 +743,5 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
     return {"investment": investment.drop(columns=["lifetime_a"]), "cost": cost, "compliance": final,
             "dispatch": _dispatch_table(study), "spec": spec,
             "history": pd.DataFrame(history, columns=["iteration", "need", "from", "to", "check", "detail"]),
-            "unresolved": unresolved, "pcc": _pcc_table(study), "short_circuit": study.short_circuit}
+            "unresolved": unresolved, "pcc": _pcc_table(study), "short_circuit": study.short_circuit,
+            "scope": {"pcc_switchgear": "campus" if pcc_switchgear else "grid_operator"}}

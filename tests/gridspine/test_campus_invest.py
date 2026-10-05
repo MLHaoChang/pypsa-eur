@@ -520,3 +520,28 @@ def test_a_unit_within_its_rating_but_short_of_the_margin_after_the_re_solve_is_
     assert row(out, "transformer TR1")["library_id"] == "T_OK"
     h = out["history"]
     assert list(h["to"]) == ["1 x T_OK"] and list(h["check"]) == ["transformer_loading"]
+
+
+def test_pcc_switchgear_owned_by_the_grid_operator_is_not_bought(tmp_path):
+    """Owner decision (2026-10-05): costing the PCC bay is a study setting.
+    With the operator owning it, the PCC is never a need, neither at the start
+    nor when a re-check fails there; its compliance row still reports it."""
+    lib = library(tmp_path, transformers=[tr("T63", 63.0, 1.0e6)], switchgear=[sg("SG110", 110.0, 31.5, 100e3)])
+    table, sel = hourly((2030, 7, {**H7, "DC_LOAD": -20.0}, {}))
+    out = select_assets(wide_cable_spec(), table, sel, lib, WIDE, PROFILE, pcc_switchgear=False)
+    assert "switchgear PCC" not in set(out["investment"]["need"])
+    assert "ik_rated_ka" not in out["spec"]["campus"]["pcc"]
+    assert out["scope"] == {"pcc_switchgear": "grid_operator"}
+    assert out["compliance"].set_index("check").at["switchgear", "status_with_measures"] == "not_rated"
+    assert select_assets(wide_cable_spec(), table, sel, lib, WIDE, PROFILE)["scope"] == {"pcc_switchgear": "campus"}
+
+
+def test_a_rated_pcc_that_fails_is_reported_not_bought_when_the_operator_owns_it(tmp_path):
+    lib = library(tmp_path, transformers=[tr("T63", 63.0, 1.0e6)], switchgear=[sg("SG110", 110.0, 31.5, 100e3)])
+    spec = wide_cable_spec()
+    spec["campus"]["pcc"]["ik_rated_ka"] = {"value": 0.5, "source": "datasheet"}
+    table, sel = hourly((2030, 7, {**H7, "DC_LOAD": -20.0}, {}))
+    out = select_assets(spec, table, sel, lib, WIDE, PROFILE, pcc_switchgear=False)
+    assert "switchgear PCC" not in set(out["investment"]["need"])
+    assert out["compliance"].set_index("check").at["switchgear", "status_with_measures"] == "fail"
+    assert out["history"].empty or "switchgear PCC" not in set(out["history"]["need"])

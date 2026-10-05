@@ -119,6 +119,7 @@ INVESTED_YAML = "campus_invested.yaml"
 COMPLIANCE_INVESTED_CSV = "campus_compliance_invested.csv"
 INVEST_HISTORY_CSV = "campus_invest_history.csv"
 INVEST_DISPATCH_CSV = "campus_invest_dispatch.csv"
+INVEST_SCOPE_JSON = "campus_invest_scope.json"
 DEFAULT_PROFILE = "eu_rfg_dcc_ce"
 
 
@@ -297,11 +298,13 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
 
 
 def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,
-                  pf: float | None = None) -> dict:
+                  pf: float | None = None, pcc_switchgear: bool = True) -> dict:
     """Least-cost electrical assets for a ranked run, AC-checked (module
     docstring). ``library`` is a path, or None for the shipped library.
+    ``pcc_switchgear`` False leaves the PCC's switchgear to the grid
+    operator (``select_assets``); the choice is written with the results.
     Writes the investment files and returns ``{"investment", "cost",
-    "compliance", "history", "dispatch", "spec", "unresolved"}``."""
+    "compliance", "history", "dispatch", "spec", "unresolved", "scope"}``."""
     run_dir = Path(run_dir)
     hourly, pcc = campus_tables(run_dir)
     selection = selected_hours(run_dir)
@@ -309,7 +312,8 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
     lib = load_asset_library(library)
     p_ref, _ = _p_ref(build_campus(spec), pcc)
     grid_code = load_grid_code(profile)
-    out = select_assets(spec, hourly, selection, lib, requirement_from(grid_code, p_ref, pf=pf), grid_code, criteria)
+    out = select_assets(spec, hourly, selection, lib, requirement_from(grid_code, p_ref, pf=pf), grid_code, criteria,
+                        pcc_switchgear=pcc_switchgear)
     build_campus(out["spec"])                                # the invested file must build before it is written
     _write_text_atomic(run_dir / INVESTMENT_CSV, out["investment"].to_csv(index=False))
     _write_text_atomic(run_dir / COST_CSV, out["cost"].to_csv(index=False))
@@ -317,4 +321,5 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
     _write_text_atomic(run_dir / COMPLIANCE_INVESTED_CSV, out["compliance"].to_csv(index=False))
     _write_text_atomic(run_dir / INVEST_HISTORY_CSV, out["history"].to_csv(index=False))
     _write_text_atomic(run_dir / INVEST_DISPATCH_CSV, out["dispatch"].to_csv(index=False))
+    _write_text_atomic(run_dir / INVEST_SCOPE_JSON, json.dumps(out["scope"], indent=2))
     return out
