@@ -20,7 +20,7 @@ import logging
 import os
 import uuid
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -449,15 +449,21 @@ STORAGE_MISSING_CONDITION = "project_storage_missing"
 
 
 def _storage_dir_gone(row: dict) -> bool:
-    """True when the row names a `storage_dir` that is no longer a directory.
-    A row with no `storage_dir` (a foreground or hand-made job) is not judged."""
+    """
+    True when the row names a `storage_dir` that is no longer a directory.
+
+    A row with no `storage_dir` (a foreground or hand-made job) is not judged.
+    """
     storage_dir = row.get("storage_dir")
     return bool(storage_dir) and not os.path.isdir(storage_dir)
 
 
 def _fail_storage_missing(row: dict) -> None:
-    """Mark the persisted row `failed` with `STORAGE_MISSING_CONDITION`. It is
-    never restored: there is nothing on disk to solve."""
+    """
+    Mark the persisted row `failed` with `STORAGE_MISSING_CONDITION`.
+
+    It is never restored: there is nothing on disk to solve.
+    """
     from db.models import SolveJobRow
     from db.session import SessionLocal
 
@@ -466,7 +472,7 @@ def _fail_storage_missing(row: dict) -> None:
         if orm is None:
             return
         orm.status = "failed"
-        orm.finished_at = datetime.now(tz=timezone.utc)
+        orm.finished_at = datetime.now(tz=UTC)
         orm.condition = STORAGE_MISSING_CONDITION
         orm.error = (
             "The project's directory no longer exists, so this queued solve "

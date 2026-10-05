@@ -1,4 +1,4 @@
-"""
+r"""
 A request-body size limit on the decision-study routes, enforced before the
 body is parsed as JSON (F1 B2, gate S8 [S-v2-1]).
 
@@ -16,8 +16,8 @@ Only ``/api/projects/{name}/studies`` paths are limited (the same anchored
 pattern as ``main._SOLVER_BLOCKING_EXEMPT_PATTERNS``); every other route
 keeps its own limits.
 
-The headroom: JSON escaping at most doubles a CSV's bytes (``\\n``, ``\\"``
-and ``\\\\`` take two each, and a browser's ``JSON.stringify`` leaves
+The headroom: JSON escaping at most doubles a CSV's bytes (``\n``, ``\"``
+and ``\\`` take two each, and a browser's ``JSON.stringify`` leaves
 non-ASCII text alone), so twice the cap plus 1 MB for the rest of the intake
 admits every file the handler's cap admits. A body just over the cap still
 reaches the handler and gets its typed ``load_upload_invalid``.
