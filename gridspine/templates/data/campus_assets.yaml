@@ -1,0 +1,722 @@
+# The shipped default asset library for the campus electrical study (plan C7).
+#
+# EVERY COST HERE IS AN ORDER-OF-MAGNITUDE PLACEHOLDER, to be replaced by
+# vendor quotes. No price, rating or impedance below was checked against a
+# price list, a datasheet or a standard, so every value is tagged `assumed`:
+# it is a typical figure written down, not a figure read from a text. Where a
+# number comes from elsewhere in this repository it says so in a note:
+# transformer vk, vkr, no-load losses and i0 are producers/campus.py's
+# typical class data (_TRAFO_CLASS, PFE_KW_PER_MVA, I0_PERCENT), and a
+# switchgear peak rating is 2.5 x its short-time rating, the 50 Hz ratio in
+# static/campus_sc.py (PEAK_FACTOR). Both are themselves unverified.
+#
+# Layout. Every number is {value, source[, note]}; `source` is one of
+# measured | datasheet | assumed. Every entry has a unique `id`, a capex
+# (`capex_eur`, or `capex_eur_per_km` for a cable, or per bay for
+# switchgear), `opex_frac` (fixed opex per year as a fraction of capex) and
+# `lifetime_a`. The library has one discount rate, a currency and a price
+# year. A project may carry an edited copy; this file is the default.
+
+discount_rate: {value: 0.07, source: assumed, note: "a stand-in; set the project's own rate"}
+currency: EUR
+price_year: 2026
+
+transformers:
+  - id: TR_132_33_20
+    hv_kv: {value: 132.0, source: assumed}
+    lv_kv: {value: 33.0, source: assumed}
+    s_mva: {value: 20.0, source: assumed}
+    vk_percent: {value: 8.0, source: assumed, note: "producers/campus.py _TRAFO_CLASS"}
+    vkr_percent: {value: 0.6, source: assumed}
+    pfe_kw: {value: 20.0, source: assumed, note: "producers/campus.py PFE_KW_PER_MVA x s_mva"}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1100000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_132_33_25
+    hv_kv: {value: 132.0, source: assumed}
+    lv_kv: {value: 33.0, source: assumed}
+    s_mva: {value: 25.0, source: assumed}
+    vk_percent: {value: 8.0, source: assumed}
+    vkr_percent: {value: 0.6, source: assumed}
+    pfe_kw: {value: 25.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1300000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_132_33_31p5
+    hv_kv: {value: 132.0, source: assumed}
+    lv_kv: {value: 33.0, source: assumed}
+    s_mva: {value: 31.5, source: assumed}
+    vk_percent: {value: 10.0, source: assumed}
+    vkr_percent: {value: 0.5, source: assumed}
+    pfe_kw: {value: 31.5, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1500000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_132_33_40
+    hv_kv: {value: 132.0, source: assumed}
+    lv_kv: {value: 33.0, source: assumed}
+    s_mva: {value: 40.0, source: assumed}
+    vk_percent: {value: 10.0, source: assumed}
+    vkr_percent: {value: 0.5, source: assumed}
+    pfe_kw: {value: 40.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1800000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_132_33_50
+    hv_kv: {value: 132.0, source: assumed}
+    lv_kv: {value: 33.0, source: assumed}
+    s_mva: {value: 50.0, source: assumed}
+    vk_percent: {value: 11.0, source: assumed}
+    vkr_percent: {value: 0.4, source: assumed}
+    pfe_kw: {value: 50.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 2100000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_132_33_63
+    hv_kv: {value: 132.0, source: assumed}
+    lv_kv: {value: 33.0, source: assumed}
+    s_mva: {value: 63.0, source: assumed}
+    vk_percent: {value: 11.0, source: assumed}
+    vkr_percent: {value: 0.4, source: assumed}
+    pfe_kw: {value: 63.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 2500000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_132_33_80
+    hv_kv: {value: 132.0, source: assumed}
+    lv_kv: {value: 33.0, source: assumed}
+    s_mva: {value: 80.0, source: assumed}
+    vk_percent: {value: 12.5, source: assumed}
+    vkr_percent: {value: 0.35, source: assumed}
+    pfe_kw: {value: 80.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 3000000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_132_33_100
+    hv_kv: {value: 132.0, source: assumed}
+    lv_kv: {value: 33.0, source: assumed}
+    s_mva: {value: 100.0, source: assumed}
+    vk_percent: {value: 12.5, source: assumed}
+    vkr_percent: {value: 0.35, source: assumed}
+    pfe_kw: {value: 100.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 3500000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_110_20_16
+    hv_kv: {value: 110.0, source: assumed}
+    lv_kv: {value: 20.0, source: assumed}
+    s_mva: {value: 16.0, source: assumed}
+    vk_percent: {value: 8.0, source: assumed}
+    vkr_percent: {value: 0.6, source: assumed}
+    pfe_kw: {value: 16.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 800000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_110_20_20
+    hv_kv: {value: 110.0, source: assumed}
+    lv_kv: {value: 20.0, source: assumed}
+    s_mva: {value: 20.0, source: assumed}
+    vk_percent: {value: 8.0, source: assumed}
+    vkr_percent: {value: 0.6, source: assumed}
+    pfe_kw: {value: 20.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 950000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_110_20_25
+    hv_kv: {value: 110.0, source: assumed}
+    lv_kv: {value: 20.0, source: assumed}
+    s_mva: {value: 25.0, source: assumed}
+    vk_percent: {value: 8.0, source: assumed}
+    vkr_percent: {value: 0.6, source: assumed}
+    pfe_kw: {value: 25.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1100000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_110_20_31p5
+    hv_kv: {value: 110.0, source: assumed}
+    lv_kv: {value: 20.0, source: assumed}
+    s_mva: {value: 31.5, source: assumed}
+    vk_percent: {value: 10.0, source: assumed}
+    vkr_percent: {value: 0.5, source: assumed}
+    pfe_kw: {value: 31.5, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1300000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_110_20_40
+    hv_kv: {value: 110.0, source: assumed}
+    lv_kv: {value: 20.0, source: assumed}
+    s_mva: {value: 40.0, source: assumed}
+    vk_percent: {value: 10.0, source: assumed}
+    vkr_percent: {value: 0.5, source: assumed}
+    pfe_kw: {value: 40.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1550000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_110_20_50
+    hv_kv: {value: 110.0, source: assumed}
+    lv_kv: {value: 20.0, source: assumed}
+    s_mva: {value: 50.0, source: assumed}
+    vk_percent: {value: 11.0, source: assumed}
+    vkr_percent: {value: 0.4, source: assumed}
+    pfe_kw: {value: 50.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1800000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_110_20_63
+    hv_kv: {value: 110.0, source: assumed}
+    lv_kv: {value: 20.0, source: assumed}
+    s_mva: {value: 63.0, source: assumed}
+    vk_percent: {value: 11.0, source: assumed}
+    vkr_percent: {value: 0.4, source: assumed}
+    pfe_kw: {value: 63.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 2150000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_33_11_2p5
+    hv_kv: {value: 33.0, source: assumed}
+    lv_kv: {value: 11.0, source: assumed}
+    s_mva: {value: 2.5, source: assumed}
+    vk_percent: {value: 6.0, source: assumed}
+    vkr_percent: {value: 0.9, source: assumed}
+    pfe_kw: {value: 2.5, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 160000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_33_11_4
+    hv_kv: {value: 33.0, source: assumed}
+    lv_kv: {value: 11.0, source: assumed}
+    s_mva: {value: 4.0, source: assumed}
+    vk_percent: {value: 7.0, source: assumed}
+    vkr_percent: {value: 0.8, source: assumed}
+    pfe_kw: {value: 4.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 220000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_33_11_6p3
+    hv_kv: {value: 33.0, source: assumed}
+    lv_kv: {value: 11.0, source: assumed}
+    s_mva: {value: 6.3, source: assumed}
+    vk_percent: {value: 7.0, source: assumed}
+    vkr_percent: {value: 0.8, source: assumed}
+    pfe_kw: {value: 6.3, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 300000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_33_11_10
+    hv_kv: {value: 33.0, source: assumed}
+    lv_kv: {value: 11.0, source: assumed}
+    s_mva: {value: 10.0, source: assumed}
+    vk_percent: {value: 8.0, source: assumed}
+    vkr_percent: {value: 0.6, source: assumed}
+    pfe_kw: {value: 10.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 420000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_33_11_16
+    hv_kv: {value: 33.0, source: assumed}
+    lv_kv: {value: 11.0, source: assumed}
+    s_mva: {value: 16.0, source: assumed}
+    vk_percent: {value: 8.0, source: assumed}
+    vkr_percent: {value: 0.6, source: assumed}
+    pfe_kw: {value: 16.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 600000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_33_11_20
+    hv_kv: {value: 33.0, source: assumed}
+    lv_kv: {value: 11.0, source: assumed}
+    s_mva: {value: 20.0, source: assumed}
+    vk_percent: {value: 8.0, source: assumed}
+    vkr_percent: {value: 0.6, source: assumed}
+    pfe_kw: {value: 20.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 700000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_33_11_25
+    hv_kv: {value: 33.0, source: assumed}
+    lv_kv: {value: 11.0, source: assumed}
+    s_mva: {value: 25.0, source: assumed}
+    vk_percent: {value: 8.0, source: assumed}
+    vkr_percent: {value: 0.6, source: assumed}
+    pfe_kw: {value: 25.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 800000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_20_0p4_0p4
+    hv_kv: {value: 20.0, source: assumed}
+    lv_kv: {value: 0.4, source: assumed}
+    s_mva: {value: 0.4, source: assumed}
+    vk_percent: {value: 4.0, source: assumed}
+    vkr_percent: {value: 1.2, source: assumed}
+    pfe_kw: {value: 0.4, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 20000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_20_0p4_0p63
+    hv_kv: {value: 20.0, source: assumed}
+    lv_kv: {value: 0.4, source: assumed}
+    s_mva: {value: 0.63, source: assumed}
+    vk_percent: {value: 4.0, source: assumed}
+    vkr_percent: {value: 1.2, source: assumed}
+    pfe_kw: {value: 0.63, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 26000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_20_0p4_1p0
+    hv_kv: {value: 20.0, source: assumed}
+    lv_kv: {value: 0.4, source: assumed}
+    s_mva: {value: 1.0, source: assumed}
+    vk_percent: {value: 5.0, source: assumed}
+    vkr_percent: {value: 1.0, source: assumed}
+    pfe_kw: {value: 1.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 35000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_20_0p4_1p6
+    hv_kv: {value: 20.0, source: assumed}
+    lv_kv: {value: 0.4, source: assumed}
+    s_mva: {value: 1.6, source: assumed}
+    vk_percent: {value: 6.0, source: assumed}
+    vkr_percent: {value: 0.9, source: assumed}
+    pfe_kw: {value: 1.6, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 48000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_20_0p4_2p5
+    hv_kv: {value: 20.0, source: assumed}
+    lv_kv: {value: 0.4, source: assumed}
+    s_mva: {value: 2.5, source: assumed}
+    vk_percent: {value: 6.0, source: assumed}
+    vkr_percent: {value: 0.9, source: assumed}
+    pfe_kw: {value: 2.5, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 65000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+
+cables:
+  - id: CB_33_AL95
+    vn_kv: {value: 33.0, source: assumed}
+    cross_section_mm2: {value: 95.0, source: assumed, note: "typical three-core XLPE, aluminium conductor, buried"}
+    r_ohm_per_km: {value: 0.32, source: assumed}
+    x_ohm_per_km: {value: 0.134, source: assumed}
+    c_nf_per_km: {value: 135.0, source: assumed}
+    max_i_ka: {value: 0.22, source: assumed}
+    capex_eur_per_km: {value: 90000, source: assumed}
+    opex_frac: {value: 0.005, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: CB_33_AL150
+    vn_kv: {value: 33.0, source: assumed}
+    cross_section_mm2: {value: 150.0, source: assumed}
+    r_ohm_per_km: {value: 0.206, source: assumed}
+    x_ohm_per_km: {value: 0.125, source: assumed}
+    c_nf_per_km: {value: 150.0, source: assumed}
+    max_i_ka: {value: 0.27, source: assumed}
+    capex_eur_per_km: {value: 110000, source: assumed}
+    opex_frac: {value: 0.005, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: CB_33_AL240
+    vn_kv: {value: 33.0, source: assumed}
+    cross_section_mm2: {value: 240.0, source: assumed}
+    r_ohm_per_km: {value: 0.125, source: assumed}
+    x_ohm_per_km: {value: 0.115, source: assumed}
+    c_nf_per_km: {value: 170.0, source: assumed}
+    max_i_ka: {value: 0.35, source: assumed}
+    capex_eur_per_km: {value: 140000, source: assumed}
+    opex_frac: {value: 0.005, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: CB_33_AL400
+    vn_kv: {value: 33.0, source: assumed}
+    cross_section_mm2: {value: 400.0, source: assumed}
+    r_ohm_per_km: {value: 0.078, source: assumed}
+    x_ohm_per_km: {value: 0.11, source: assumed}
+    c_nf_per_km: {value: 190.0, source: assumed}
+    max_i_ka: {value: 0.44, source: assumed}
+    capex_eur_per_km: {value: 190000, source: assumed}
+    opex_frac: {value: 0.005, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: CB_20_AL95
+    vn_kv: {value: 20.0, source: assumed}
+    cross_section_mm2: {value: 95.0, source: assumed}
+    r_ohm_per_km: {value: 0.32, source: assumed}
+    x_ohm_per_km: {value: 0.12, source: assumed}
+    c_nf_per_km: {value: 250.0, source: assumed}
+    max_i_ka: {value: 0.22, source: assumed}
+    capex_eur_per_km: {value: 70000, source: assumed}
+    opex_frac: {value: 0.005, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: CB_20_AL150
+    vn_kv: {value: 20.0, source: assumed}
+    cross_section_mm2: {value: 150.0, source: assumed}
+    r_ohm_per_km: {value: 0.206, source: assumed}
+    x_ohm_per_km: {value: 0.115, source: assumed}
+    c_nf_per_km: {value: 280.0, source: assumed}
+    max_i_ka: {value: 0.28, source: assumed}
+    capex_eur_per_km: {value: 85000, source: assumed}
+    opex_frac: {value: 0.005, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: CB_20_AL240
+    vn_kv: {value: 20.0, source: assumed}
+    cross_section_mm2: {value: 240.0, source: assumed}
+    r_ohm_per_km: {value: 0.125, source: assumed}
+    x_ohm_per_km: {value: 0.105, source: assumed}
+    c_nf_per_km: {value: 320.0, source: assumed}
+    max_i_ka: {value: 0.36, source: assumed}
+    capex_eur_per_km: {value: 110000, source: assumed}
+    opex_frac: {value: 0.005, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: CB_20_AL400
+    vn_kv: {value: 20.0, source: assumed}
+    cross_section_mm2: {value: 400.0, source: assumed}
+    r_ohm_per_km: {value: 0.078, source: assumed}
+    x_ohm_per_km: {value: 0.1, source: assumed}
+    c_nf_per_km: {value: 380.0, source: assumed}
+    max_i_ka: {value: 0.46, source: assumed}
+    capex_eur_per_km: {value: 150000, source: assumed}
+    opex_frac: {value: 0.005, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: CB_11_AL95
+    vn_kv: {value: 11.0, source: assumed}
+    cross_section_mm2: {value: 95.0, source: assumed}
+    r_ohm_per_km: {value: 0.32, source: assumed}
+    x_ohm_per_km: {value: 0.108, source: assumed}
+    c_nf_per_km: {value: 300.0, source: assumed}
+    max_i_ka: {value: 0.22, source: assumed}
+    capex_eur_per_km: {value: 55000, source: assumed}
+    opex_frac: {value: 0.005, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: CB_11_AL150
+    vn_kv: {value: 11.0, source: assumed}
+    cross_section_mm2: {value: 150.0, source: assumed}
+    r_ohm_per_km: {value: 0.206, source: assumed}
+    x_ohm_per_km: {value: 0.1, source: assumed}
+    c_nf_per_km: {value: 350.0, source: assumed}
+    max_i_ka: {value: 0.28, source: assumed}
+    capex_eur_per_km: {value: 65000, source: assumed}
+    opex_frac: {value: 0.005, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: CB_11_AL240
+    vn_kv: {value: 11.0, source: assumed}
+    cross_section_mm2: {value: 240.0, source: assumed}
+    r_ohm_per_km: {value: 0.125, source: assumed}
+    x_ohm_per_km: {value: 0.095, source: assumed}
+    c_nf_per_km: {value: 400.0, source: assumed}
+    max_i_ka: {value: 0.36, source: assumed}
+    capex_eur_per_km: {value: 85000, source: assumed}
+    opex_frac: {value: 0.005, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: CB_11_AL400
+    vn_kv: {value: 11.0, source: assumed}
+    cross_section_mm2: {value: 400.0, source: assumed}
+    r_ohm_per_km: {value: 0.078, source: assumed}
+    x_ohm_per_km: {value: 0.09, source: assumed}
+    c_nf_per_km: {value: 470.0, source: assumed}
+    max_i_ka: {value: 0.46, source: assumed}
+    capex_eur_per_km: {value: 115000, source: assumed}
+    opex_frac: {value: 0.005, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+
+capacitor_banks:
+  - id: CAP_33_5M
+    vn_kv: {value: 33.0, source: assumed}
+    q_mvar: {value: 5.0, source: assumed}
+    steps: {value: 2, source: assumed}
+    capex_eur: {value: 90000, source: assumed}
+    opex_frac: {value: 0.02, source: assumed}
+    lifetime_a: {value: 25, source: assumed}
+  - id: CAP_33_10M
+    vn_kv: {value: 33.0, source: assumed}
+    q_mvar: {value: 10.0, source: assumed}
+    steps: {value: 2, source: assumed}
+    capex_eur: {value: 150000, source: assumed}
+    opex_frac: {value: 0.02, source: assumed}
+    lifetime_a: {value: 25, source: assumed}
+  - id: CAP_33_20M
+    vn_kv: {value: 33.0, source: assumed}
+    q_mvar: {value: 20.0, source: assumed}
+    steps: {value: 4, source: assumed}
+    capex_eur: {value: 280000, source: assumed}
+    opex_frac: {value: 0.02, source: assumed}
+    lifetime_a: {value: 25, source: assumed}
+  - id: CAP_20_2M
+    vn_kv: {value: 20.0, source: assumed}
+    q_mvar: {value: 2.0, source: assumed}
+    steps: {value: 1, source: assumed}
+    capex_eur: {value: 50000, source: assumed}
+    opex_frac: {value: 0.02, source: assumed}
+    lifetime_a: {value: 25, source: assumed}
+  - id: CAP_20_5M
+    vn_kv: {value: 20.0, source: assumed}
+    q_mvar: {value: 5.0, source: assumed}
+    steps: {value: 2, source: assumed}
+    capex_eur: {value: 90000, source: assumed}
+    opex_frac: {value: 0.02, source: assumed}
+    lifetime_a: {value: 25, source: assumed}
+  - id: CAP_20_10M
+    vn_kv: {value: 20.0, source: assumed}
+    q_mvar: {value: 10.0, source: assumed}
+    steps: {value: 4, source: assumed}
+    capex_eur: {value: 150000, source: assumed}
+    opex_frac: {value: 0.02, source: assumed}
+    lifetime_a: {value: 25, source: assumed}
+  - id: CAP_11_1M
+    vn_kv: {value: 11.0, source: assumed}
+    q_mvar: {value: 1.0, source: assumed}
+    steps: {value: 1, source: assumed}
+    capex_eur: {value: 30000, source: assumed}
+    opex_frac: {value: 0.02, source: assumed}
+    lifetime_a: {value: 25, source: assumed}
+  - id: CAP_11_2p5M
+    vn_kv: {value: 11.0, source: assumed}
+    q_mvar: {value: 2.5, source: assumed}
+    steps: {value: 1, source: assumed}
+    capex_eur: {value: 50000, source: assumed}
+    opex_frac: {value: 0.02, source: assumed}
+    lifetime_a: {value: 25, source: assumed}
+  - id: CAP_11_5M
+    vn_kv: {value: 11.0, source: assumed}
+    q_mvar: {value: 5.0, source: assumed}
+    steps: {value: 2, source: assumed}
+    capex_eur: {value: 85000, source: assumed}
+    opex_frac: {value: 0.02, source: assumed}
+    lifetime_a: {value: 25, source: assumed}
+
+shunt_reactors:
+  - id: SR_33_5M
+    vn_kv: {value: 33.0, source: assumed}
+    q_mvar: {value: 5.0, source: assumed}
+    capex_eur: {value: 150000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 30, source: assumed}
+  - id: SR_33_10M
+    vn_kv: {value: 33.0, source: assumed}
+    q_mvar: {value: 10.0, source: assumed}
+    capex_eur: {value: 250000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 30, source: assumed}
+  - id: SR_33_20M
+    vn_kv: {value: 33.0, source: assumed}
+    q_mvar: {value: 20.0, source: assumed}
+    capex_eur: {value: 450000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 30, source: assumed}
+  - id: SR_20_2M
+    vn_kv: {value: 20.0, source: assumed}
+    q_mvar: {value: 2.0, source: assumed}
+    capex_eur: {value: 90000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 30, source: assumed}
+  - id: SR_20_5M
+    vn_kv: {value: 20.0, source: assumed}
+    q_mvar: {value: 5.0, source: assumed}
+    capex_eur: {value: 150000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 30, source: assumed}
+  - id: SR_20_10M
+    vn_kv: {value: 20.0, source: assumed}
+    q_mvar: {value: 10.0, source: assumed}
+    capex_eur: {value: 250000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 30, source: assumed}
+  - id: SR_11_1M
+    vn_kv: {value: 11.0, source: assumed}
+    q_mvar: {value: 1.0, source: assumed}
+    capex_eur: {value: 60000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 30, source: assumed}
+  - id: SR_11_2p5M
+    vn_kv: {value: 11.0, source: assumed}
+    q_mvar: {value: 2.5, source: assumed}
+    capex_eur: {value: 100000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 30, source: assumed}
+  - id: SR_11_5M
+    vn_kv: {value: 11.0, source: assumed}
+    q_mvar: {value: 5.0, source: assumed}
+    capex_eur: {value: 160000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 30, source: assumed}
+
+statcoms:
+  - id: SC_33_5M
+    vn_kv: {value: 33.0, source: assumed}
+    q_mvar: {value: 5.0, source: assumed, note: "symmetric: +/- this much"}
+    losses_percent: {value: 1.2, source: assumed}
+    capex_eur: {value: 450000, source: assumed}
+    opex_frac: {value: 0.03, source: assumed}
+    lifetime_a: {value: 20, source: assumed}
+  - id: SC_33_10M
+    vn_kv: {value: 33.0, source: assumed}
+    q_mvar: {value: 10.0, source: assumed}
+    losses_percent: {value: 1.2, source: assumed}
+    capex_eur: {value: 800000, source: assumed}
+    opex_frac: {value: 0.03, source: assumed}
+    lifetime_a: {value: 20, source: assumed}
+  - id: SC_33_20M
+    vn_kv: {value: 33.0, source: assumed}
+    q_mvar: {value: 20.0, source: assumed}
+    losses_percent: {value: 1.2, source: assumed}
+    capex_eur: {value: 1500000, source: assumed}
+    opex_frac: {value: 0.03, source: assumed}
+    lifetime_a: {value: 20, source: assumed}
+  - id: SC_20_2M
+    vn_kv: {value: 20.0, source: assumed}
+    q_mvar: {value: 2.0, source: assumed}
+    losses_percent: {value: 1.2, source: assumed}
+    capex_eur: {value: 250000, source: assumed}
+    opex_frac: {value: 0.03, source: assumed}
+    lifetime_a: {value: 20, source: assumed}
+  - id: SC_20_5M
+    vn_kv: {value: 20.0, source: assumed}
+    q_mvar: {value: 5.0, source: assumed}
+    losses_percent: {value: 1.2, source: assumed}
+    capex_eur: {value: 500000, source: assumed}
+    opex_frac: {value: 0.03, source: assumed}
+    lifetime_a: {value: 20, source: assumed}
+  - id: SC_20_10M
+    vn_kv: {value: 20.0, source: assumed}
+    q_mvar: {value: 10.0, source: assumed}
+    losses_percent: {value: 1.2, source: assumed}
+    capex_eur: {value: 850000, source: assumed}
+    opex_frac: {value: 0.03, source: assumed}
+    lifetime_a: {value: 20, source: assumed}
+  - id: SC_11_1M
+    vn_kv: {value: 11.0, source: assumed}
+    q_mvar: {value: 1.0, source: assumed}
+    losses_percent: {value: 1.2, source: assumed}
+    capex_eur: {value: 150000, source: assumed}
+    opex_frac: {value: 0.03, source: assumed}
+    lifetime_a: {value: 20, source: assumed}
+  - id: SC_11_2p5M
+    vn_kv: {value: 11.0, source: assumed}
+    q_mvar: {value: 2.5, source: assumed}
+    losses_percent: {value: 1.2, source: assumed}
+    capex_eur: {value: 300000, source: assumed}
+    opex_frac: {value: 0.03, source: assumed}
+    lifetime_a: {value: 20, source: assumed}
+  - id: SC_11_5M
+    vn_kv: {value: 11.0, source: assumed}
+    q_mvar: {value: 5.0, source: assumed}
+    losses_percent: {value: 1.2, source: assumed}
+    capex_eur: {value: 500000, source: assumed}
+    opex_frac: {value: 0.03, source: assumed}
+    lifetime_a: {value: 20, source: assumed}
+
+switchgear:
+  - id: SG_132_31p5
+    vn_kv: {value: 132.0, source: assumed}
+    ik_rated_ka: {value: 31.5, source: assumed}
+    ip_rated_ka: {value: 78.75, source: assumed, note: "2.5 x ik_rated_ka, the 50 Hz ratio in static/campus_sc.py"}
+    capex_eur: {value: 450000, source: assumed}
+    opex_frac: {value: 0.01, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: SG_132_40p0
+    vn_kv: {value: 132.0, source: assumed}
+    ik_rated_ka: {value: 40.0, source: assumed}
+    ip_rated_ka: {value: 100.0, source: assumed}
+    capex_eur: {value: 517000, source: assumed}
+    opex_frac: {value: 0.01, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: SG_110_31p5
+    vn_kv: {value: 110.0, source: assumed}
+    ik_rated_ka: {value: 31.5, source: assumed}
+    ip_rated_ka: {value: 78.75, source: assumed}
+    capex_eur: {value: 400000, source: assumed, note: "per bay"}
+    opex_frac: {value: 0.01, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: SG_110_40p0
+    vn_kv: {value: 110.0, source: assumed}
+    ik_rated_ka: {value: 40.0, source: assumed}
+    ip_rated_ka: {value: 100.0, source: assumed}
+    capex_eur: {value: 460000, source: assumed}
+    opex_frac: {value: 0.01, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: SG_33_25p0
+    vn_kv: {value: 33.0, source: assumed}
+    ik_rated_ka: {value: 25.0, source: assumed}
+    ip_rated_ka: {value: 62.5, source: assumed}
+    capex_eur: {value: 81000, source: assumed}
+    opex_frac: {value: 0.01, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: SG_33_31p5
+    vn_kv: {value: 33.0, source: assumed}
+    ik_rated_ka: {value: 31.5, source: assumed}
+    ip_rated_ka: {value: 78.75, source: assumed}
+    capex_eur: {value: 90000, source: assumed}
+    opex_frac: {value: 0.01, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: SG_33_40p0
+    vn_kv: {value: 33.0, source: assumed}
+    ik_rated_ka: {value: 40.0, source: assumed}
+    ip_rated_ka: {value: 100.0, source: assumed}
+    capex_eur: {value: 103000, source: assumed}
+    opex_frac: {value: 0.01, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: SG_20_25p0
+    vn_kv: {value: 20.0, source: assumed}
+    ik_rated_ka: {value: 25.0, source: assumed}
+    ip_rated_ka: {value: 62.5, source: assumed}
+    capex_eur: {value: 54000, source: assumed}
+    opex_frac: {value: 0.01, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: SG_20_31p5
+    vn_kv: {value: 20.0, source: assumed}
+    ik_rated_ka: {value: 31.5, source: assumed}
+    ip_rated_ka: {value: 78.75, source: assumed}
+    capex_eur: {value: 60000, source: assumed}
+    opex_frac: {value: 0.01, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: SG_20_40p0
+    vn_kv: {value: 20.0, source: assumed}
+    ik_rated_ka: {value: 40.0, source: assumed}
+    ip_rated_ka: {value: 100.0, source: assumed}
+    capex_eur: {value: 69000, source: assumed}
+    opex_frac: {value: 0.01, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: SG_11_25p0
+    vn_kv: {value: 11.0, source: assumed}
+    ik_rated_ka: {value: 25.0, source: assumed}
+    ip_rated_ka: {value: 62.5, source: assumed}
+    capex_eur: {value: 40000, source: assumed}
+    opex_frac: {value: 0.01, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: SG_11_31p5
+    vn_kv: {value: 11.0, source: assumed}
+    ik_rated_ka: {value: 31.5, source: assumed}
+    ip_rated_ka: {value: 78.75, source: assumed}
+    capex_eur: {value: 45000, source: assumed}
+    opex_frac: {value: 0.01, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: SG_11_40p0
+    vn_kv: {value: 11.0, source: assumed}
+    ik_rated_ka: {value: 40.0, source: assumed}
+    ip_rated_ka: {value: 100.0, source: assumed}
+    capex_eur: {value: 52000, source: assumed}
+    opex_frac: {value: 0.01, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
