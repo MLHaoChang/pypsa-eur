@@ -308,7 +308,7 @@ Small, contained items only; OPEN-ITEMS 1 (auth mode) and the MVP-2 list stay ou
 
 **Acceptance.** Each item has a test that is red without it; the full backend suite, the full frontend suite, `tsc` and `run_qa_drivers.py` pass; the findings note's "Still open" is updated.
 
-- [ ] Gate F1
+- [x] Gate F1 — **GO WITH BINDING CONDITIONS** on `10f8abc`, closed in `3a95432` (2026-10-05, `docs/superpowers/notes/2026-10-05-f1-gate.md`): BC-F1-1 the study kept only preflight errors, so the export-cycling warnings never reached it (now kept, recorded and disclosed); BC-F1-2 an unreadable directory failed a queued job as gone (now only a missing one); BC-F1-3 findings note updated. On `3a95432`: full backend suite 0 failed (four chunks), full frontend suite 2,160 passed in 196 files, `tsc` clean, `run_qa_drivers.py` all 23 passed (`qa_decision_study` 76 s). Residuals in the findings note's F1 section. Next: U2 per `docs/superpowers/plans/2026-10-05-guided-study-u2-engine-rewire.md`, after the IC U1 PRs and S0 (#78) are merged.
 
 ## Review deltas (v1 → v2)
 
