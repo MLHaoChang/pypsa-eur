@@ -277,9 +277,17 @@ export function reportFlags(report: InvestmentCaseReportPayload, section: string
   return [...new Set(flags)]
 }
 
+/** Plain chip labels for the report sections (UX assessment Q7). */
+const SECTION_LABELS: Record<string, string> = {
+  design: 'Design', commercial: 'Commercial', dispatch_modes: 'Dispatch modes',
+  participants: 'Participants', project: 'Project', debt: 'Debt', tax: 'Tax',
+  tax_equity: 'Tax equity', uncertainty: 'Uncertainty', gates: 'Gates',
+}
+
 export function completenessRows(report: InvestmentCaseReportPayload): CompletenessRow[] {
   return Object.entries(report.completeness ?? {}).map(([name, status]) => ({
     name, status: String(status ?? 'not_established'),
+    label: SECTION_LABELS[name] ?? name.replace(/_/g, ' '),
     note: sectionOf(report, name)?.note ?? null,
   }))
 }

@@ -54,13 +54,14 @@ export function completeness(billing: BillingPayload | null | undefined,
     : flows?.status === 'value_flows_invalid' ? 'failed' : 'not_established'
   const cons = flows?.conservation_ok
   return [
-    { name: 'bill', status: billingError ? 'failed' : billOk ? 'ok' : 'not_established',
+    { name: 'bill', label: 'Bill', status: billingError ? 'failed' : billOk ? 'ok' : 'not_established',
       note: billingError ? loadFailure(billingError)
         : !billing ? 'no bill: solve with a commercial config first'
           : missing.length ? `not established for ${missing.join(', ')}` : null },
-    { name: 'participants', status: participants,
+    { name: 'participants', label: 'Participants', status: participants,
       note: flows?.status === 'ok' ? null : (flows?.reason ?? 'no value-flow result') },
-    { name: 'conservation', status: cons === true ? 'ok' : cons === false ? 'failed' : 'not_established' },
+    { name: 'conservation', label: 'Value-flow balance',
+      status: cons === true ? 'ok' : cons === false ? 'failed' : 'not_established' },
   ]
 }
 

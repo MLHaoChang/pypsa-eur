@@ -56,6 +56,10 @@ describe('InvestmentTab', () => {
     renderTab()
     await waitFor(() => expect(screen.getByTestId('ic-section-bill').getAttribute('data-status')).toBe('not_established'))
     await waitFor(() => expect(screen.getByTestId('ic-section-participants').getAttribute('data-status')).toBe('not_established'))
+    // Plain labels and plain status words, never the raw ids (UX assessment Q7).
+    expect(screen.getByTestId('ic-section-bill').textContent).toBe('Bill: not established')
+    expect(screen.getByTestId('ic-section-participants').textContent).toBe('Participants: not established')
+    expect(screen.getByTestId('ic-section-conservation').textContent).toBe('Value-flow balance: not established')
   })
 
   it('shows unknown bill amounts as not established, never 0', async () => {
