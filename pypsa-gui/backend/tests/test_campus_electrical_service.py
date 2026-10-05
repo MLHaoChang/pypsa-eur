@@ -568,3 +568,25 @@ def test_a_failed_investment_leaves_no_half_purchase_and_is_a_422(hub, monkeypat
     run_dir = ce.campus_dir(hub) / "run"
     assert not (run_dir / ce.USED_LIBRARY_FILE).exists() and not (run_dir / ce.cs.INVESTMENT_CSV).exists()
     assert not ce.get_state(hub)["stale"]
+
+
+def test_the_unresolved_needs_are_the_unresolved_rows_with_their_reasons():
+    rows = [
+        {"need": "transformer T", "status": "chosen", "reason": None},
+        {"need": "reactive", "status": "unresolved", "reason": "campus_voltage: 0.88 pu; needs a tap change"},
+        {"need": "switchgear MV", "status": "kept", "reason": None},
+    ]
+    assert ce._unresolved(rows) == [{"need": "reactive", "reason": "campus_voltage: 0.88 pu; needs a tap change"}]
+    assert ce._unresolved([]) == [] and ce._unresolved(None) is None
+
+
+def test_an_unresolved_row_reaches_the_state_and_the_copilot_summary(hub):
+    ce.draft(hub)
+    ce.run(hub, {"k": 1})
+    path = ce.campus_dir(hub) / "run" / ce.cs.INVESTMENT_CSV
+    df = pd.read_csv(path)
+    df.loc[1, ["status", "reason"]] = ["unresolved", "campus_voltage: needs a tap change"]
+    df.to_csv(path, index=False)
+    want = [{"need": df.loc[1, "need"], "reason": "campus_voltage: needs a tap change"}]
+    assert ce.get_state(hub)["results"]["unresolved"] == want
+    assert ce.get_investment(hub)["unresolved"] == want
