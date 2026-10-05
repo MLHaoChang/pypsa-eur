@@ -386,3 +386,139 @@ with its own icon in the collapsed strip.
 - a campus with sk_min above sk_max is refused inline, naming the field.
 
 One cosmetic fix came from the run: a cut name no longer ends in `_`.
+
+## Part two: investing in the electrical assets (owner, 2026-10-05)
+
+Written before the code. Part one *recommends* a transformer size and a
+compensation rating. Part two makes the electrical assets an **investment
+decision**, with the same economics the capacity expansion uses:
+
+- capex, fixed opex and lifetime, annualised;
+- chosen from a library;
+- re-checked by AC load flow at every critical hour, so that voltages, flows
+  and the grid code all hold with the chosen assets in place.
+
+### Owner decisions (2026-10-05, second round)
+
+| question | decision |
+|---|---|
+| How the assets are chosen | **Both.** A least-cost pick, AC-checked, comes first. A MILP follows, run in a loop with adaptive convergence to absorb the linearisation error. |
+| Whether electrical cost feeds back into the hub's capacity expansion | **Report alongside**, as electrical capex, opex and annualised cost per period, next to the hub's system cost and as a total. The PyPSA project is not changed. |
+| How a grid code is given | **Upload the document.** The copilot drafts a profile, the user reviews and saves it, and nothing is used before then. Until a real code is supplied, a **generic `assumed` profile** is used. |
+| Where the asset library lives | A **shipped default**, plus a **per-project copy** editable in the panel. |
+| Agents | Coordination by the session model; implementation is delegated to subagents, with the model chosen per task. |
+
+### How a grid code reaches the study (recommendation, accepted)
+
+The easiest route is to **upload the PDF**. The copilot drafts a profile from it:
+
+1. **The upload.** It goes to the project (`campus_electrical/grid_codes/`), never to the repository. Licensed texts such as VDE stay with their licensee.
+2. **The draft.** The copilot reads the document and drafts a profile in the same schema as `grid_codes.yaml`:
+   - each limit carries the clause, the page and a verbatim quote;
+   - each value is tagged `extracted`, a new tag.
+3. **Validation.** The draft passes the same loader as a shipped profile, so an impossible band or a missing clause is refused with the field named.
+4. **Review.** The user reviews it in a form, side by side with the quote, and confirms each limit; a confirmed limit becomes `code`. A limit left unconfirmed stays `extracted` and is shown as such on every report row.
+5. **Without a key.** The extraction needs `ANTHROPIC_API_KEY` (or `PROBE_ANTHROPIC_KEY` mapped onto it at launch) in the environment settings. A session sees a new environment variable only when it starts. Without one, the form alone works: the user types the limits in.
+
+### C7: the asset library and the generic grid code
+
+- `gridspine/templates/data/campus_assets.yaml` is the shipped default. Every value is `{value, source}`, as in a campus file. The catalogue:
+
+  | kind | entries |
+  |---|---|
+  | transformers | hv/lv kV, MVA, vk %, vkr %, no-load losses kW, i0 %, in R10 sizes at 132/33, 110/20, 33/11, 20/0.4 kV |
+  | cables | kV, cross-section, R, X and C per km, rated kA; capex per km |
+  | capacitor banks | kV, Mvar, number of switched steps |
+  | shunt reactors | kV, Mvar |
+  | STATCOMs | kV, ±Mvar, losses % |
+  | switchgear | kV, rated Ik'' and peak kA; capex per bay |
+
+  Each entry carries `capex_eur`, `opex_frac` (fixed opex per year as a fraction of capex) and `lifetime_a`. The library has one `discount_rate`, plus its currency and price year.
+- **Costs.** Every cost is tagged `assumed`, with a note saying it is an order of magnitude to be replaced by quotes. No price is presented as sourced unless it was checked against a text.
+- `gridspine/templates/campus_assets.py` holds:
+  - `load_asset_library(path=None)`, which validates units, tags, positive ratings and unique ids, and refuses unknown fields;
+  - `annuity(r, n)`, the same formula as pypsa-gui's `solver_service._annuity`, which a test checks;
+  - `annualised_cost(entry, library)`.
+- **`generic_assumed` profile** in `grid_codes.yaml`, every limit tagged `assumed`:
+  - PCC voltage 0.90–1.10 pu at every kV;
+  - PCC reactive band ±tan(acos 0.95) = 0.329 × P_ref;
+  - RVC 3 %;
+  - an optional `campus_voltage` band of 0.95–1.05 pu.
+
+  A profile may now carry `campus_voltage`. Without it, the existing behaviour holds: the code bands are used as an `assumed` design limit.
+
+### C8: least-cost selection, AC-checked
+
+For each **need** the study finds, the candidates come from the library, at the right voltages, and are ranked by annualised cost (capex annuity + opex):
+
+| need | candidates |
+|---|---|
+| a transformer group | n units × size; with N-1, the survivors must carry the group |
+| the reactive gap, capacitive and inductive | capacitor banks (steps), shunt reactors, STATCOMs, and combinations that cover both directions |
+| an overloaded cable | the next cross-section up, or a parallel run (a new `cable_loading` check) |
+| an under-rated bus | a switchgear bay rating, × the number of bays at that bus |
+
+**The loop:**
+1. Take the cheapest combination.
+2. Apply it to the campus net.
+3. **Re-solve AC at every critical hour and case.**
+4. Escalate a need to its next-cheapest candidate while any check fails.
+
+This closes part one's "voltages not re-checked": the *with measures* column is now a real AC result.
+
+**Timing.** An asset is invested in the first period that needs it, and carried to the end of its life.
+
+**Outputs:**
+- `campus_investment.csv`: asset, need, period, units, capex, opex, annualised cost;
+- `campus_cost.csv`: the annualised electrical cost per period;
+- the compliance table, re-solved with the chosen assets.
+
+### C9: panel
+
+- **The library editor.** It edits the per-project copy, starting from the shipped default, with a reset.
+- **The investment table and cost summary.** The electrical cost per period is shown next to the hub's system cost from the solved project, and as a total.
+- **Chat tools**, which read and edit the library and read the investment.
+- **The bundle** carries the library used and the investment table.
+
+### C10: grid-code upload and extraction
+
+- **The upload route.** It takes a PDF only, with a size budget, and stores the file in the project.
+- **The extraction.** A service function calls the Anthropic API with the document and a strict output schema; the copilot tool calls the same function.
+- **The draft.** It is validated by the profile loader and saved as a *draft* profile.
+- **The review form.** Limits are confirmed one by one, with the quote shown beside each.
+- **Profiles listed.** Project profiles appear next to the shipped ones in the grid-code picker.
+- **Tests.** They mock the API. A live run happens in a session that has the key.
+
+### C11: MILP with successive linearisation
+
+- **Variables:**
+  - binaries for each discrete option (transformer n × size, STATCOM size, cable size, switchgear rating);
+  - integers for capacitor and reactor steps;
+  - continuous inverter Q per hour and case, inside a polygon of its capability circle.
+- **Linearisation**, per hour and case, around the current AC point:
+  - for continuous Q: sensitivities of bus voltage, PCC Q and branch loading, from the load-flow Jacobian;
+  - for each discrete option: its effect, by finite difference. One AC solve per option and hour is affordable, because options are few.
+- **Objective:** minimum annualised cost, built in linopy and solved with HiGHS (both already in the environment).
+- **The loop**, with an adaptive convergence rate:
+  1. Solve the MILP.
+  2. Apply the result, and re-solve AC at every hour and case.
+  3. Measure, per constraint, the **linearisation error**: AC minus linear.
+  4. **Tighten each limit** by a back-off β × that error. β grows while a violation persists and relaxes when there is ample slack.
+  5. **Bound the change in continuous Q** by a trust region Δ:
+     - Δ doubles when the predicted and actual changes agree (ratio ρ near 1);
+     - Δ halves when they disagree.
+  6. Re-linearise, and go back to 1.
+- **When it stops.** It stops when the AC check passes and the cost changes by less than a tolerance, or after a maximum number of iterations.
+- **The least-cost result (C8)** is the warm start and the upper bound.
+- **What is reported:** the iteration history (cost, worst violation, worst linearisation error, Δ, β), and MILP against least-cost.
+
+### Order, PRs and agents
+
+| PR | increments | implementer |
+|---|---|---|
+| 1 | C7 + C8 (engine) | C7: Sonnet (patterned data and loader); C8: Opus (engineering judgement) |
+| 2 | C9 (panel, routes, chat tools) | Sonnet; Haiku for mechanical updates (snapshots, route inventory, packaging list) |
+| 3 | C10 (upload and extraction) | Opus for the schema, prompt and upload safety; Sonnet for the form |
+| 4 | C11 (MILP loop) | Opus |
+
+The coordinator writes each brief from this plan and reviews every diff. It also runs the gates and mutation checks before anything is pushed.
