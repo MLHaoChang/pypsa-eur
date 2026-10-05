@@ -4630,6 +4630,33 @@ def _dispatch_real_tool_call(
             )
             try:
                 result = future.result(timeout=PER_TOOL_TIMEOUT_SECONDS)
+                # The tool ran inside a COPY of this context, so anything it
+                # published through a contextvar died with that copy. For a
+                # tool whose whole job is to change the active project, that
+                # means the switch never reached this thread: `run_turn`'s
+                # `PROJECT_REBINDING_TOOLS` check re-reads
+                # `get_active_context().loaded_project` here and saw the OLD
+                # name, so it emitted no `project_rebound` frame and never
+                # refreshed `turn_project_holder` — and every later tool in
+                # the turn ran against the previous project while the model
+                # believed it had moved. The frontend kept its old
+                # `currentProject` too, which is the `expect=` 409 the
+                # rebound frame exists to prevent (incident 2026-06-08).
+                #
+                # SCOPED to the rebinding tools on purpose. `import_*` and
+                # anything else reaching `reset_network` also publishes, but
+                # it publishes an UNBOUND context and is not on that
+                # whitelist — adopting it here would make `_project_switched`
+                # fire and refuse the rest of the turn with
+                # `project_switched_mid_turn`, turning a silent staleness bug
+                # into a loud refusal. That case is narrower and is recorded
+                # in the register rather than fixed by widening this.
+                if tool_name in PROJECT_REBINDING_TOOLS:
+                    from services.pypsa_service import (
+                        PyPSAService as _PyPSAService,
+                    )
+
+                    _PyPSAService.adopt_active_from(_ctx_snapshot)
             except concurrent.futures.TimeoutError:
                 # Anthropic requires a tool_result for every tool_use_id in the
                 # next user message (same invariant the project_switched and

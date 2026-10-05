@@ -239,7 +239,45 @@ of result keys per tool is better than removing this one key.
 
 ### CH-2 — a project switch made by a tool does not take effect for the rest of the turn (server mode)
 
-**Serious. REPORTED — reviewer demonstrated the mechanism in-process.**
+**Serious. VERIFIED (empirically) and FIXED.**
+
+Measured before the fix, binding a request context to A and dispatching a tool that
+publishes B through the same `copy_context().run(...)` the dispatcher uses:
+
+    bound  : A
+    inside : B   <- the tool believes it switched
+    after  : A   <- what the rest of the turn sees
+    next   : A   <- the next tool in the same turn
+
+It is worse than a stale read, because TWO mechanisms depend on that thread seeing
+the switch and both were dead. `run_turn`'s `PROJECT_REBINDING_TOOLS` check — whose
+own comment names the broken flow, "activate_project -> update_component against the
+newly-activated scenario" — re-reads the same stale view, so it emitted no
+`project_rebound` frame and never refreshed `turn_project_holder`. The frontend
+therefore kept its old `currentProject` and the next autosave's `expect=` 409'd,
+which is the 2026-06-08 incident that frame exists to prevent. And the guard meant to
+catch EXTERNAL switches could not fire either.
+
+Fixed with `PyPSAService.adopt_active_from(snapshot)`, called by the dispatcher after
+a whitelisted tool returns. Two deliberate limits:
+
+  * it carries ONLY the active-project var. Copying every var back would let a tool
+    change the acting user and session — a privilege-transfer primitive, not a fix;
+  * it runs only for `PROJECT_REBINDING_TOOLS`. `import_*` and anything else reaching
+    `reset_network` publishes too, but publishes an UNBOUND context and is not
+    whitelisted; adopting it would make `_project_switched` fire and refuse the rest
+    of the turn with `project_switched_mid_turn`, turning a silent bug into a loud one.
+
+**Still open, narrower:** after an `import_*` in server mode the imported network
+lands in the registry (visible from the next request) but not for the rest of the
+same turn. Fixing that properly means deciding whether an import IS a rebind — a
+question about the guard's design, not this dispatcher.
+
+Guard: `tests/test_chat_tool_project_switch_reaches_the_turn.py`, driven through the
+real `_dispatch_real_tool_call` with fakes under real tool names (a real
+`activate_project` needs a database, two projects and a resident registry entry that
+would test everything except this). It pins the scoping and the no-op case as controls;
+the primary test fails against the previous code.
 
 `chat_service._dispatch_real_tool_call` runs each tool in
 `contextvars.copy_context()` on an executor. `PyPSAService.set_active` publishes

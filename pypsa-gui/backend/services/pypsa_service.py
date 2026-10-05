@@ -268,6 +268,40 @@ class PyPSAService:
             cls._request_slot.set(key)
 
     @classmethod
+    def adopt_active_from(cls, snapshot) -> bool:
+        """Carry a project switch made inside `snapshot` into THIS context.
+
+        `snapshot` is a `contextvars.Context` that some other thread ran work
+        in. A `ContextVar.set()` performed inside `Context.run()` mutates that
+        Context and is invisible to the caller once `run()` returns — which is
+        exactly what happens to a chat tool: `chat_service` dispatches every
+        tool as `copy_context().run(...)` on an executor (it has to, because a
+        pool worker inherits no contextvars), so `_publish_active`'s
+        `_request_ctx.set(ctx)` landed on the copy and died with it. In server
+        mode the rest of the turn therefore kept operating on the PREVIOUS
+        project while the model believed it had switched.
+
+        Only the active-project var is carried, deliberately: the acting user
+        and session are bound per request and a tool has no business changing
+        them, so a blanket "copy every var back" would turn this into a
+        privilege-transfer primitive.
+
+        Returns True when a switch was actually adopted. No-op outside a
+        request, where `_publish_active` writes the process foreground
+        (`cls._active`) instead and nothing was ever lost.
+        """
+        if cls._request_ctx.get() is None:
+            return False
+        try:
+            switched = snapshot[cls._request_ctx]
+        except (KeyError, TypeError):
+            return False
+        if switched is None or switched is cls._request_ctx.get():
+            return False
+        cls._request_ctx.set(switched)
+        return True
+
+    @classmethod
     def _publish_active(cls, ctx: ProjectContext) -> None:
         """
         Make `ctx` the active one for whoever is asking.
