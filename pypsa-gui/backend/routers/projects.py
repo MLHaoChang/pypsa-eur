@@ -1577,35 +1577,13 @@ def save_project(
 
 
 
-def _study_in_flight_detail(state, doing: str) -> dict | None:
-    """The structured 409 for an action a live study forbids, or None.
-
-    Whole-branch review, findings S5 and M12. Save and activate gated on
-    `_solver_in_flight` only — a study's worker is never `state["thread"]` —
-    while load, import, template and reset were guarded (Phase 11). A save
-    landing between a sweep's lock-free contingency mutations exported the
-    CONTINGENCY network, and its `results_state.pkl` with the contingency's
-    lost load, as the user's project; and a switch left the study running on
-    a project the user could no longer see or abort. Same shape as the
-    in-flight refusal so the chat agent and the frontend read one field.
-    """
-    from services.project_context import STUDY_LABELS, running_study_key
-    key = running_study_key(state)
-    if key is None:
-        return None
-    label = STUDY_LABELS.get(key, key)
-    verb = doing.split()[0]
-    return {
-        "error_kind": "study_in_flight",
-        "study": key,
-        "message": (
-            f"Cannot {doing} while {label} is running — it re-solves the "
-            "in-memory network between its own iterates (a sweep applies each "
-            "contingency in turn; a loop re-solves under each candidate), so "
-            f"a {verb} now would act on a mid-study plan rather than yours. "
-            "Wait for it to finish, or abort it, and retry."
-        ),
-    }
+# `_study_in_flight_detail` moved to `services/study_state.py` (P27a) so the
+# network-edit handlers can raise the same dict; re-imported under its old
+# name for this module's two callers (save, activate), which keep the default
+# `keys` (every study).
+from services.study_state import (  # noqa: E402
+    study_in_flight_detail as _study_in_flight_detail,
+)
 
 
 def _refuse_save_during_study(ctx) -> None:
