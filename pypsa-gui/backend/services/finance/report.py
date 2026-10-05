@@ -273,6 +273,9 @@ def _project_payload(result, case) -> dict[str, Any]:
         "lcoe_real_per_mwh": _num(m.get("lcoe_real_per_mwh")),
         "solved_ppa_price": _num(m.get("solved_ppa_price")),
         "solve_ppa_status": m.get("solve_ppa_status"),
+        # A price that zeroes the NPV but not at the case's own IRR (several
+        # IRRs) — information only, never the headline (P4 gate assessor B1).
+        "solve_ppa_candidate_price": _num(m.get("solve_ppa_candidate_price")),
         "solved_ppa_price_money_year": m.get("solved_ppa_price_money_year"),
         "cash": {k: _series(v) for k, v in cash.items()},
         "incremental_net": _series(result.op_incremental.get("net")),

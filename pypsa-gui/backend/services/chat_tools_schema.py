@@ -2338,7 +2338,8 @@ TOOLS: list[dict[str, Any]] = [
         "equity_post_tax_irr_at_target_year, flags}. Refusals: solve_ppa_contract_not_found, "
         "solve_ppa_ambiguous_contract, solve_ppa_not_owner_sold, solve_ppa_not_linear, "
         "solve_ppa_needs_redispatch (the contract changes the dispatch), "
-        "solve_ppa_price_unknown, solve_ppa_cash_not_established, solve_ppa_no_root (its "
+        "solve_ppa_price_unknown, solve_ppa_cash_not_established, solve_ppa_irr_ambiguous (the "
+        "price zeroes the NPV but the case has several IRRs), solve_ppa_no_root (its "
         "`code` says why), investment_case_refused, investment_case_not_solved, "
         "investment_case_busy, investment_case_request_invalid, finance_inputs_missing, "
         "finance_inputs_invalid, tax_pack_not_found. Safety: read.",

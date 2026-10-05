@@ -73,6 +73,36 @@ def test_s1b_solve_for_ppa_finds_sams_price():
     assert r.case.templates[0].lines[0].price == S.sam_params("s1b").ppa_price_per_mwh
 
 
+def test_a_solved_price_whose_irr_is_not_the_target_is_not_established():
+    """P4 gate assessor B1: on S3 (gearing, a moratorium, the ITC) the equity
+    cash to year 12 changes sign several times, so the NPV is 0 at 15 % AND at
+    −10.5 %; the engine's own IRR (C9: the root closest to 0) is −10.5 %. The
+    price is not the one for a 15 % IRR as reported: not established, the
+    candidate kept as information; the report's headline stays None."""
+    from services.finance.report import assemble_finance_sections
+
+    case = S.to_finance_case("s3")
+    case = dataclasses.replace(case, inputs=case.inputs.model_copy(
+        update={"solve_ppa": SolvePpa(target_irr=0.15, target_year=12)}))
+    r = run_case(case, layers=S.sam_tax_layers("s3"))
+    m = r.metrics
+    assert m["solve_ppa_status"].startswith("solve_ppa_irr_ambiguous:")
+    assert m["solved_ppa_price"] is None and m["solve_ppa_candidate_price"] > 0
+    assert m["solved_equity_irr_at_target_year"] == pytest.approx(-0.10539, abs=1e-4)
+    assert "irr_multiple_sign_changes" in r.flags
+    rep = assemble_finance_sections(r, case)
+    assert rep.ppa_price_for_target_irr_eur_per_mwh is None
+    assert rep.sections["project"].payload["solve_ppa_candidate_price"] > 0
+    # S2's six targets stay clean (a unique IRR at the solved price).
+    for target, year in ((0.10, 10), (0.12, 18), (0.15, 20)):
+        c2 = S.to_finance_case("s2")
+        c2 = dataclasses.replace(c2, inputs=c2.inputs.model_copy(
+            update={"solve_ppa": SolvePpa(target_irr=target, target_year=year)}))
+        m2 = run_case(c2, layers=S.sam_tax_layers("s2")).metrics
+        assert m2["solve_ppa_status"] == "ok", (target, year, m2["solve_ppa_status"])
+        assert m2["solved_equity_irr_at_target_year"] == pytest.approx(target, abs=1e-6)
+
+
 def test_s1_all_equity_project_return_is_the_equity_return_and_s2_llcr_is_the_dscr():
     r = _sam_run("s1")
     np.testing.assert_allclose(r.cash["project_post_tax"], r.cash["equity_post_tax"])

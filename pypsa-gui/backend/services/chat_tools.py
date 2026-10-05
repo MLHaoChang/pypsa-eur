@@ -1861,6 +1861,7 @@ _SOLVE_PPA_ERROR_KINDS = (
     {"error_kind": "solve_ppa_not_owner_sold"}, {"error_kind": "solve_ppa_not_linear"},
     {"error_kind": "solve_ppa_needs_redispatch"}, {"error_kind": "solve_ppa_price_unknown"},
     {"error_kind": "solve_ppa_cash_not_established"}, {"error_kind": "solve_ppa_no_root"},
+    {"error_kind": "solve_ppa_irr_ambiguous"},
     {"error_kind": "investment_case_refused"},
 )
 _SOLVE_PPA_MESSAGES = {
@@ -1876,6 +1877,11 @@ _SOLVE_PPA_MESSAGES = {
     "solve_ppa_price_unknown": "the contract's price is not established in the case",
     "solve_ppa_cash_not_established": "the post-tax equity cash is not established at a zero "
                                       "price (see get_investment_case for the reasons)",
+    "solve_ppa_irr_ambiguous": "a price makes the equity NPV zero at the target rate, but the "
+                               "equity cash to the target year has several IRRs and the case's "
+                               "own IRR at that price is another one (see `code`): the price "
+                               "does not give the target IRR as reported, so it is not "
+                               "established",
     "solve_ppa_no_root": "no price in the search range reaches the target IRR in the target "
                          "year (see `code` for why)",
 }

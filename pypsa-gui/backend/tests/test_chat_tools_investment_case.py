@@ -345,6 +345,20 @@ def test_an_unknown_solve_status_is_not_reported_as_no_root(s1b, store, monkeypa
     assert exc.value.detail["code"] == "some_future_status"
 
 
+def test_an_ambiguous_irr_is_its_own_refusal(s1b, store, monkeypatch):
+    """P4 gate assessor B1: a price that zeroes the NPV at an IRR that is not
+    the case's own is refused as `solve_ppa_irr_ambiguous`, its IRR in `code`."""
+    import services.finance.engine as E
+
+    monkeypatch.setattr(E, "solve_ppa", lambda *a, **k: {
+        "solve_ppa_status": "solve_ppa_irr_ambiguous:-0.10539", "solved_ppa_price": None})
+    sp = s1b["case"].inputs.solve_ppa
+    with pytest.raises(HTTPException) as exc:
+        _tool("solve_ppa_price", target_irr=sp.target_irr, target_year=sp.target_year)
+    assert exc.value.detail["error_kind"] == "solve_ppa_irr_ambiguous"
+    assert exc.value.detail["code"] == "solve_ppa_irr_ambiguous:-0.10539"
+
+
 def test_solve_ppa_price_never_mutates_the_stored_inputs(s1b, store):
     rep = _report()
     store(rep)

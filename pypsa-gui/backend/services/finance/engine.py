@@ -577,11 +577,25 @@ def solve_ppa(case: FinanceCase, pack: JurisdictionPack | None = None, *,
         out["solve_ppa_status"] = "solve_ppa_no_root"
         return out
     s = brentq(lambda x: g(x), lo, hi, xtol=1e-12, rtol=1e-12, maxiter=200)
+    solved = run_case(_scaled(case, keys, s), pack, layers=layers, _solve=False)
+    v, irr_flags = irr(solved.cash["equity_post_tax"][:end])
+    out["solved_equity_irr_at_target_year"] = v
+    # NPV = 0 at the target is necessary, not sufficient: truncated equity cash
+    # with several sign changes has several IRRs, and the engine's own (C9:
+    # the root closest to 0) may be another one. Then the price does NOT give
+    # the target IRR as the report states it — not established (P4 gate
+    # assessor B1: S3 at 15 % / year 12 gave 71.01 at an IRR of −10.5 %).
+    if v is None or abs(v - sp.target_irr) > 1e-6:
+        out["solve_ppa_status"] = ("solve_ppa_irr_ambiguous:"
+                                   f"{'none' if v is None else round(v, 6)}")
+        out["solve_ppa_candidate_price"] = price0 * s
+        out["solve_ppa_flags"] = sorted(set(out.get("solve_ppa_flags", [])) | set(irr_flags))
+        return out
     out["solved_ppa_price"] = price0 * s
     out["solve_ppa_status"] = "ok"
-    solved = run_case(_scaled(case, keys, s), pack, layers=layers, _solve=False)
-    v, _ = irr(solved.cash["equity_post_tax"][:end])
-    out["solved_equity_irr_at_target_year"] = v
+    if irr_flags:                     # the target IS the C9 IRR, but say it is not unique
+        out["solve_ppa_flags"] = sorted(set(out.get("solve_ppa_flags", [])) |
+                                        {f"solve_ppa_{f}" for f in irr_flags})
     return out
 
 

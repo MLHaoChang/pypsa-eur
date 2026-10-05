@@ -247,6 +247,10 @@
       "surface": "inline",
       "why": "solve_ppa_price on a contract that changes the dispatch: a finance-only solve cannot re-dispatch (plan C9). The model explains the limit in prose."
     },
+    "solve_ppa_irr_ambiguous": {
+      "surface": "inline",
+      "why": "solve_ppa_price: a price makes the NPV zero at the target, but the truncated equity cash has several IRRs and the engine's own (the root closest to 0) is not the target, so the price does not give the target IRR as reported (P4 gate). Its `code` carries that IRR; the model explains, nothing to fix in the UI."
+    },
     "solve_ppa_no_root": {
       "surface": "inline",
       "why": "solve_ppa_price: no price in the search range reaches the target (its `code` says why, e.g. the target is met at a zero price). A finding the model reports, not a failure to route."
