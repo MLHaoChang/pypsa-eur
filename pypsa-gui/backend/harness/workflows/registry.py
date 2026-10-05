@@ -58,6 +58,10 @@ class Workflow:
     # Text before the first step heading: rules that hold for every step
     # (the Guided rules of `hub-design`, for example). Empty when absent.
     preamble: str = ""
+    # Contexts in which the preamble is included (default: every context in
+    # `when`). `hub-design` uses it to bind the Guided rules to Guided mode
+    # while its steps are offered in Expert too (owner decisions Q11, Q13).
+    preamble_when: frozenset[str] = field(default_factory=frozenset)
     project_kinds: frozenset[str] = field(default_factory=frozenset)
     path: Path | None = None
 
@@ -66,6 +70,10 @@ class Workflow:
             if s.id == step_id:
                 return s
         raise KeyError(step_id)
+
+    def preamble_for(self, context: str) -> str:
+        """The preamble when `context` is one it applies to, else ""."""
+        return self.preamble if context in self.preamble_when else ""
 
     def offered_in(self, context: str, project_kind: str | None = None) -> bool:
         if self.status != "active" or context not in self.when:
@@ -95,6 +103,9 @@ def _parse(path: Path) -> Workflow:
     status = meta.get("status", "active")
     if status not in STATUSES:
         raise WorkflowError(f"{path.name}: unknown status {status!r}")
+    preamble_when = frozenset(meta.get("preamble_when") or when)
+    if not preamble_when <= when:
+        raise WorkflowError(f"{path.name}: preamble_when must be a subset of when")
     # Split the body into step sections, keyed by the heading's id.
     sections: dict[str, str] = {}
     parts = _STEP_HEADING.split(body)
@@ -119,7 +130,7 @@ def _parse(path: Path) -> Workflow:
         id=meta["id"], title=meta["title"], intent=meta["intent"], when=when,
         order=int(meta["order"]), status=status,
         opening_request=meta["opening_request"].strip(), steps=tuple(steps),
-        preamble=preamble, project_kinds=frozenset(meta.get("project_kinds", []) or []), path=path,
+        preamble=preamble, preamble_when=preamble_when, project_kinds=frozenset(meta.get("project_kinds", []) or []), path=path,
     )
 
 

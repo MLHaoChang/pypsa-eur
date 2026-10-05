@@ -1,6 +1,6 @@
 # Chat harness — spec
 
-Status: ready-for-agent (phase 0 is implemented on this branch; phases 1+ wait on the owner decisions in §8)
+Status: ready-for-agent (phase 0 implemented; owner decisions Q1–Q14 taken 2026-10-05, see §8; phases 1–2 in progress)
 Date: 2026-10-05
 Plan: `docs/superpowers/plans/2026-10-05-chat-harness.md`
 Context: `pypsa-gui` (vocabulary in `pypsa-gui/CONTEXT.md`; ADR-0002 and ADR-0004 apply)
@@ -227,10 +227,29 @@ client are user text and go through the same path as any typed message.
 - MCP exposure (Q8) beyond reserving the place.
 - The vision sub-call's direct Anthropic SDK use (recorded as a known second path; it moves when the loop moves).
 
-## §8. Owner decisions (grill round 1)
+## §8. Owner decisions (grill rounds 1–2, taken 2026-10-05)
 
-Asked in the grilling format. Each carries the recommended answer; phase 0
-proceeds on the recommendations, later phases wait for the answers.
+Asked in the grilling format through the app's question UI. The owner chose
+the recommended answer on every question except Q11.
+
+| # | Decision |
+|---|---|
+| Q1 | Backend package `pypsa-gui/backend/harness/`. |
+| Q2 | Markdown with YAML front matter. |
+| Q3 | The start menu is served by `GET /api/chat/workflows`; the hardcoded chip arrays go. |
+| Q4 | `ask_user` ends the turn; the pick is the next user message. The confirmation card stays blocking. |
+| Q5 | Guided mode is folded into the `hub-design` workflow, wording and write-tier confirmation kept. |
+| Q6 | All six workflows are active in the first menu; `investment-decision` stays planned. |
+| Q7 | History format and the new-chat-on-wire-switch rule stay. |
+| Q8 | MCP exposure later, own spec. |
+| Q9 | Adapters move to `harness/providers/` in phase 1; `llm_config` stays in `services/`. |
+| Q10 | A start-menu chip sends its opening request immediately through the request queue, labelled with the chip title. |
+| Q11 | **`hub-design` is offered in Expert mode too** (owner's choice over the recommendation). |
+| Q12 | This session implements phases 1 and 2 now, on this branch. |
+| Q13 | In Expert, `hub-design` brings its steps only: the plain-language rules and the write-tier confirmation stay bound to Guided mode (`ui_mode`), never to the workflow. The workflow's Guided preamble is therefore marked `preamble_when: [guided]`. Expert turns outside a workflow stay byte-identical. |
+| Q14 | Phase 1's ADR-0002 gate: the live Anthropic probe runs here; the OpenAI-compatible wire runs against the repo's stub endpoint, and the report says so; the live OpenAI run stays owed until a key or endpoint is available. |
+
+The questions as asked, with the recommendations:
 
 ❓ **Q1 — Place and name**: `pypsa-gui/backend/harness/` importable as `harness`, or a repo-root `harness/` folder?
 ➡️ Backend package. The seam spec already calls this layer the harness; the backend must import it; a root folder would read as developer tooling.

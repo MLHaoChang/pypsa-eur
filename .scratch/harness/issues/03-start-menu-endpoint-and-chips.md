@@ -15,3 +15,7 @@ fetches it with React Query under a `['chat','workflows',ctx]` key and renders
 
 Done when: the chips shown in Expert, Guided and unbound match the
 registry; a provider switch does not change them; vitest and tsc are clean.
+
+## Comments
+
+2026-10-05 (owner, Q10): a chip sends immediately, labelled with its title.

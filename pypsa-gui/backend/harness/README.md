@@ -61,6 +61,7 @@ intent: <one sentence shown as the chip tooltip and to the model>
 when: [unbound | expert | guided]
 order: <menu position>
 status: active | planned  # planned = validated but never offered
+preamble_when: [guided]   # optional: contexts the preamble applies to (default: `when`)
 opening_request: <the message the chip sends>
 steps:
   - id: <step>

@@ -1,6 +1,6 @@
 # Plan: the chat harness — one folder for everything a model-agnostic assistant needs
 
-**Status:** v1.0, 2026-10-05. Phase 0 landed on `claude/amazing-mendel-m087zw`. Owner decisions pending: spec §8, Q1–Q9 (phase 0 proceeds on the recommended answers; phases 1+ wait).
+**Status:** v1.1, 2026-10-05. Phase 0 landed on `claude/amazing-mendel-m087zw`; owner decisions Q1–Q14 taken (spec §8); phases 1 and 2 in progress on the same branch.
 **Spec (contract-level):** [`.scratch/harness/spec.md`](../../../.scratch/harness/spec.md); issues under `.scratch/harness/issues/`.
 **Requested:** 2026-10-05. The assistant should connect to Claude, OpenAI/Codex, Kimi or any other model and not feel different: one harness of functions, workflows and skills that any model drives the same way; a chat opens with a menu of what the user can do; the assistant can run a grill-style interview with recommendations the user picks from; and all of it grouped in one folder instead of spread over files.
 **Builds on:** [`specs/2026-08-05-llm-provider-seam-design.md`](../specs/2026-08-05-llm-provider-seam-design.md) (the harness/provider split and the word "harness"), [`plans/2026-09-09-chat-turn-loop-decomposition.md`](2026-09-09-chat-turn-loop-decomposition.md) (how the loop is cut), [`specs/2026-09-27-guided-mode.md`](../specs/2026-09-27-guided-mode.md) (the Guided addendum and delegation texts), [`plans/2026-10-05-one-investment-engine-two-faces.md`](2026-10-05-one-investment-engine-two-faces.md) §5 U3 and §8 (the investment workflow's steps and tools).
@@ -71,12 +71,14 @@ separate branches. Phase 3 waits for both.
 6. **Markdown is loaded from the package only** (spec D12).
 7. **Model tiering.** Implementation of each issue: Opus-class or lower, one issue per agent, TDD. Plan and spec changes and gate verdicts: Fable.
 
-## 5. Grill round 1 (owner decisions)
+## 5. Grill rounds 1–2 (owner decisions, 2026-10-05)
 
-The nine questions and recommended answers are in spec §8. Phase 0 is
-consistent with every recommendation and reversible on each (the registries
-are data; the moves are shims). Answer them in the spec file or in the chat;
-phase 1 starts on Q1, Q2, Q9; phase 2 on Q3–Q6.
+Fourteen questions, recorded in spec §8. The owner chose the recommended
+answer on all but Q11: `hub-design` is offered in **both** modes. Q13 settles
+what that means: the steps travel with the workflow; the plain-language rules
+and the write-tier confirmation stay bound to Guided mode itself. Q14 sets the
+phase-1 gate: live Anthropic probe plus the OpenAI stub, with the live OpenAI
+run recorded as owed. Q12: this session carries phases 1 and 2.
 
 ## 6. Phase 0 record (2026-10-05)
 

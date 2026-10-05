@@ -18,3 +18,11 @@ Done when: the Guided tests (`test_guided_mode_prompt.py`,
 `test_guided_write_confirmation.py`) pass unchanged; a scripted turn that
 starts `build-network` carries its step text; Expert turns without a
 workflow are byte-identical.
+
+## Comments
+
+2026-10-05 (owner, Q11/Q13): `hub-design` is offered in Expert too. The
+workflow's preamble (the Guided rules) is included only when `ui_mode` is
+guided (`preamble_when: [guided]`); the write-tier confirmation stays on
+`_confirm_tiers(guided)` as today. An Expert turn inside `hub-design` gets
+the step body only.

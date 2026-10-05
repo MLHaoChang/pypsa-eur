@@ -12,4 +12,6 @@ each leaving a shim. `services/llm_config.py` stays (settings). The
 except `harness/providers/` imports an SDK or names a wire.
 
 Done when: `test_llm_provider_seam.py` passes with no change; the live
-probes are run on both wires and named in the PR (ADR-0002).
+Anthropic probe is run and the OpenAI wire is run against the stub
+endpoint, both named in the report with the live OpenAI run recorded as
+owed (owner decision Q14).

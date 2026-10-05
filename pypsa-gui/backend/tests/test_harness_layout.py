@@ -193,11 +193,16 @@ def test_hub_design_carries_the_guided_rules_as_its_preamble():
     assert wf.preamble.startswith("Guided mode is on.")
     assert "never apply a change the user has not asked for" in wf.preamble
     assert [s.id for s in wf.steps] == ["start", "site", "goal", "results", "improve"]
+    # Owner decisions Q11/Q13: offered in Expert too, but the Guided rules
+    # are bound to Guided mode, not to the workflow.
+    assert wf.offered_in("expert") and wf.offered_in("guided")
+    assert wf.preamble_for("guided") == wf.preamble
+    assert wf.preamble_for("expert") == ""
 
 
 @pytest.mark.parametrize("context,expect_present,expect_absent", [
     ("unbound", {"open-project"}, {"build-network", "hub-design"}),
-    ("expert", {"build-network", "explain-results"}, {"open-project", "hub-design"}),
+    ("expert", {"build-network", "explain-results", "hub-design"}, {"open-project"}),
     ("guided", {"hub-design", "explain-results"}, {"open-project", "build-network"}),
 ])
 def test_menu_per_context(context, expect_present, expect_absent):
@@ -219,6 +224,18 @@ def test_a_malformed_workflow_fails_at_load(tmp_path):
         "## Step: b\nwrong heading\n", encoding="utf-8",
     )
     with pytest.raises(workflows.WorkflowError, match="has no '## Step: a'"):
+        workflows.load_all(tmp_path)
+
+
+def test_preamble_when_must_be_within_when(tmp_path):
+    from harness import workflows
+
+    (tmp_path / "w.md").write_text(
+        "---\nid: w\ntitle: x\nintent: y\nwhen: [expert]\npreamble_when: [guided]\norder: 1\n"
+        "opening_request: go\nsteps:\n  - id: a\n    title: A\n    done_when: z\n---\n"
+        "rules\n\n## Step: a\nbody\n", encoding="utf-8",
+    )
+    with pytest.raises(workflows.WorkflowError, match="preamble_when"):
         workflows.load_all(tmp_path)
 
 

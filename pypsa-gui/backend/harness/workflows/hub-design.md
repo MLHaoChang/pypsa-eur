@@ -1,8 +1,9 @@
 ---
 id: hub-design
 title: Hub design, step by step
-intent: The Guided path for a site's reliability design, from template to improvements, with the assistant doing each step on request.
-when: [guided]
+intent: The site's reliability design in five steps, from template to improvements, with the assistant doing each step on request.
+when: [guided, expert]
+preamble_when: [guided]
 order: 5
 opening_request: Open the Hub design panel and walk me through it, starting with the Start card.
 steps:
