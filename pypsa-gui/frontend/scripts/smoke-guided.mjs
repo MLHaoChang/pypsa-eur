@@ -2877,7 +2877,7 @@ async function phaseP30(browser) {
  *  a one-off read from the test could miss it; the sampler cannot. */
 const P31_TOAST_SAMPLER = () => {
   const w = window
-  w.__p31 = { frames: 0, overlapFrames: 0, maxOverlap: 0, first: null, worst: null, toastSeen: false }
+  w.__p31 = { frames: 0, onScreenFrames: 0, overlapFrames: 0, maxOverlap: 0, first: null, worst: null, settled: null, toastSeen: false }
   const box = el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height } }
   const visible = b => b.w > 0 && b.h > 0
   const tick = () => {
@@ -2896,6 +2896,12 @@ const P31_TOAST_SAMPLER = () => {
         const s = { toast: a, send: b, area }
         w.__p31.frames++
         if (!w.__p31.first) w.__p31.first = s
+        // The toast slides in from below the viewport; frames with its whole
+        // box on screen are the ones a user sees, and there must be some.
+        if (a.x >= 0 && a.y >= 0 && a.x + a.w <= innerWidth && a.y + a.h <= innerHeight) {
+          w.__p31.onScreenFrames++
+          w.__p31.settled = s
+        }
         if (area > 0) w.__p31.overlapFrames++
         if (!w.__p31.worst || area > w.__p31.worst.area) w.__p31.worst = s
         w.__p31.maxOverlap = Math.max(w.__p31.maxOverlap, area)
@@ -2920,7 +2926,9 @@ async function p31ToastCheck(page, label) {
   const r = await page.evaluate(() => window.__p31)
   info(`P31 toast sampler: ${JSON.stringify(r)}`)
   check(r.toastSeen, 'the "… from template" toast was shown')
-  check(r.frames > 0, `the toast and chat-send were on screen together for ${r.frames} frame(s)`)
+  check(r.frames > 0 && r.onScreenFrames > 0,
+    `the toast and chat-send were rendered together for ${r.frames} frame(s), ${r.onScreenFrames} with the whole toast `
+    + `on screen (toast ${JSON.stringify(r.settled?.toast)}, send ${JSON.stringify(r.settled?.send)})`)
   check(r.maxOverlap === 0,
     `toast box ∩ chat-send box = ∅ in every shared frame (max overlap ${r.maxOverlap} px², `
     + `toast ${JSON.stringify(r.worst?.toast)}, send ${JSON.stringify(r.worst?.send)})`)
@@ -2929,8 +2937,8 @@ async function p31ToastCheck(page, label) {
 
 async function phaseP31(browser) {
   const p26 = await phaseP26(browser)
-  for (const r of p26) check(r.p31Toast?.frames > 0 && r.p31Toast.maxOverlap === 0,
-    `[${r.id}] toast ∩ Send = ∅ over ${r.p31Toast?.frames} shared frame(s)`)
+  for (const r of p26) check(r.p31Toast?.onScreenFrames > 0 && r.p31Toast.maxOverlap === 0,
+    `[${r.id}] toast ∩ Send = ∅ over ${r.p31Toast?.frames} shared frame(s) (${r.p31Toast?.onScreenFrames} fully on screen)`)
   const dc = p26.find(r => r.id === 'eh_datacenter')?.project
   check(!!dc, `P26 data-center project: ${dc}`)
   await b4StudyReadFailure(browser, dc, [], { selfTest: args.selfTest })
