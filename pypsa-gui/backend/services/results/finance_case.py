@@ -1173,7 +1173,7 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                        templates=tuple(templates), assets=assets,
                        flags=tuple(dict.fromkeys(flags)),
                        counterfactual=tuple(counterfactual), lp_basis=lp,
-                       counterfactual_hash=cf_hash)
+                       counterfactual_hash=cf_hash, conservation_ok=conservation.ok)
 
 
 # ── the hash ─────────────────────────────────────────────────────────────────

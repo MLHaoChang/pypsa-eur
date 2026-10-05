@@ -967,6 +967,12 @@ def _xlsx_checks(label: str, content: bytes, export: dict, full: dict) -> None:
           f"{about.get('Counterfactual')!r:.120} | {about.get('CFADS')!r:.80}")
     _step(f"{label}: About — the assumptions hash", about.get("Assumptions hash") ==
           full["assumptions_hash"])
+    # P4 gate assessor 3c: the conservation gate comes from the adapter's P3
+    # ledger check, so a case built from a ledger has it established.
+    _step(f"{label}: About / Summary — value-flow conservation is the ledger's (True here), "
+          "not a constant not_established",
+          export.get("conservation_ok") is True and about.get("Value-flow conservation") is True,
+          f"export {export.get('conservation_ok')!r}, About {about.get('Value-flow conservation')!r}")
 
 
 def _xl_eq(got, want) -> bool:

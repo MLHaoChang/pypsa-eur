@@ -134,3 +134,7 @@ class FinanceCase:
     # served load, the connection and the commodity (plan C13; the report's
     # provenance). None when there is no counterfactual.
     counterfactual_hash: str | None = None
+    # The P3 ledger's conservation check (True / False / None = not
+    # established) for the report's `gates.conservation_ok`; None without a
+    # ledger (a hand or SAM case) — P4 gate assessor condition 3c.
+    conservation_ok: bool | None = None

@@ -12,7 +12,7 @@ explained through four chat tools, exported as xlsx and shown in the Investment 
 
 | WP | Deliverable | Review rounds → final verdict |
 |---|---|---|
-| 4.0 | SAM oracle fixtures (S1, S1b, S1l, S2, S2c, S2t, S3, S3d, S3f) and their mapping, plan amendments, the C1 tripwire, the hourly fixture | conditions → **PASS** |
+| 4.0 | SAM oracle fixtures (S1, S1b, S1l, S2, S2c, S2t, S3, S3d, S3f) and their mapping, plan amendments, the C1 tripwire, the hourly fixture | **PASS WITH CONDITIONS** (4 binding, all fixed; no second round was run — the fixtures are exercised by every later WP's SAM parity and by this gate's section A) |
 | 4.1 | Timeline, operating cashflows, escalation / indexation / tenor, terminal value | conditions → **PASS** |
 | 4.2a/b | Debt: amount / gearing, annuity / level, fees, IDC, DSCR sculpting, the gearing cap, DSRA, reserve interest | conditions → two findings → **PASS** (round 3) |
 | 4.3a | Tax and depreciation; `us_federal` and `eu_de` packs | conditions → **PASS** |
@@ -31,7 +31,7 @@ Each round's findings, and what was done about them, are recorded in the plan un
 
 | Check | Result |
 |---|---|
-| `tests/qa_investment_case.py` | **243/243** (30 s) — the sections below |
+| `tests/qa_investment_case.py` | **243/243** (30 s) at 21da322; **245/245** after the assessor's conditions (b45ef40 and the conservation gate) — the sections below |
 | The P4 regression list (the finance, investment-case and chat-IC files plus their billing / value-flow / registration neighbours) at 1979589 | **1,771 passed, 18 skipped** |
 | **Full backend suite (`-m "not slow"`, Python 3.12 venv)** at 1979589, 12 chunks | 8,322 passed, 31 skipped, 11 deselected `slow`, **1 failed**: `test_hourly_assumption_audit` — the adapter's two `8760` sites (the C3 annual check and the `annualise` factor) were unlisted. Both are units; listed with that reason and the inventory re-pinned (8116895, a test-only change). |
 | Chunk 07 re-run at 8116895 (the audit's chunk) | **809 passed, 7 skipped, 0 failed** → the full suite is **8,323 passed, 31 skipped, 0 failed** at the final code |
@@ -39,7 +39,7 @@ Each round's findings, and what was done about them, are recorded in the plan un
 | Frontend `vitest run` | **253 files, 2,812 tests passed** |
 | Frontend `tsc --noEmit` | clean |
 
-### The driver — `tests/qa_investment_case.py` (243 checks)
+### The driver — `tests/qa_investment_case.py` (245 checks)
 
 - **A (114): SAM to T.** S1, S1b, S2, S3 and S3f through `run_case`; every per-year array, the IRRs
   (≤ 1e-5; pre-tax against a stdlib IRR of SAM's own pre-tax cash), NPV, LCOE, debt size and DSCR. S1b's
@@ -77,19 +77,38 @@ rule, not the cash).
 
 **Found by the driver:** the xlsx Summary sheet read `wacc_vs_discount_rate_consistent` and
 `conservation_ok` from the dump's top level (they live under `gates`), so it always wrote them
-`not_established` — fixed (it reads the export view) and tested.
+`not_established` — fixed (it reads the export view) and tested. **Found by the assessor** (condition 3c):
+P4 never set `gates.conservation_ok`, so those rows were `not_established` even when the ledger
+conserved. The adapter now carries the P3 ledger's conservation result on the case
+(`FinanceCase.conservation_ok`, additive) into the report's gates; a driver step asserts True on the
+integration fixture's About sheet and export view.
 
-## SAM deviations (each recorded in the plan, sized by a test)
+**Found by the assessor and fixed at the gate** (the driver now 245 checks):
+- **Condition 1 — solve-for-PPA "ok" at a price whose IRR is not the target.** NPV = 0 at the target is
+  necessary, not sufficient: the truncated equity cash can have several IRRs (S3 at 15 % / year 12 → 71.01
+  at an IRR of −10.5 %). `solve_ppa` now checks the C9 IRR at the solved price; if it is not the target
+  the status is `solve_ppa_irr_ambiguous:<irr>`, the candidate price kept as information
+  (`solve_ppa_candidate_price`), the headline None; the chat refuses with its own kind. A unique target IRR
+  over several sign changes stays ok, flagged. Tested on S3 (and S2's targets stay clean). 7b62fdd.
+- **Condition 2 — C12: an unknown ledger line dropped.** A not-established line has no `CashflowLine` (an
+  amount is a number — the contract is unchanged); it was missing from the lines, the xlsx and the
+  per-counterparty totals (the retailer showed −1,800 over an unknown 23.7 M energy charge). The project
+  payload now lists `lines_not_established` (key, stream, counterparty, source, years); that
+  counterparty's total is None (`counterparties_not_established`); the xlsx writes a `not_established` row
+  per year; the frontend shows those cells "not established". Tested: backend unit, a driver L step
+  through the adapter, frontend pivot and view. b45ef40.
+
+## SAM deviations (each recorded in the plan; sized by a test except where the size column says it is from a review probe)
 
 | Deviation | Ours | SAM | Size | Oracle |
 |---|---|---|---|---|
 | Gearing with a closing fee (C8) | D = g·TIC (`gearing_base="capex"`) | D = g·TIC·(1 + g·f), a one-step | SAM − ours = 0.36·f·TIC exactly (1,109,473.20 on S3f); S3f equity IRR at our debt 0.3296 vs SAM 0.3431 | S3f |
-| The DSRA in the gearing base | `gearing_base="capex"` excludes it; `"total_uses"` reproduces SAM to 1e-7 | D = g·(TIC + DSRA(D))·(1 + g·f) | the DSRA term | S3d |
+| The DSRA in the gearing base | `gearing_base="capex"` excludes it; `"total_uses"` reproduces SAM to 1e-7 | D = g·(TIC + DSRA(D))·(1 + g·f) | the DSRA term: SAM − ours = 1,232,519.76 on S3d | S3d |
 | Salvage in CFADS | CFADS = revenue − costs − replacement (terminal excluded) | sculpts on the salvage when the tenor reaches the last year | SAM D − ours = salvage / 1.3 / 1.07^25 exactly | S2t |
 | A negative sculpting basis | pays 0, flags `sculpt_basis_negative_no_service` | books a negative service (a negative debt) | case-dependent; no oracle can express it (tested by hand) | — |
 | The remaining tax basis at the end | written off in the last year (`remaining_basis_written_off`) | dropped | IRR +0.23 pp on S1l (SL-39); 0 on every other oracle | S1l |
-| PTC rounding | the statute: the base amount to 0.05 ¢ | $0.001/kWh | ±$65k a year, +0.036 % over the term on the probe | test pins 2027: 0.6294 → 0.65 ¢ |
-| A taxable grant's year | taxed in the year received (index 0) | year 1 | −0.94 bp of IRR on S1 + $5M | test |
+| PTC rounding | the statute: the base amount to 0.05 ¢ | $0.001/kWh | ±$65k a year, +0.036 % over the term — **from the WP4.4 review probe; the test pins our rounding** (2027: 0.6294 → 0.65 ¢), not the size | — |
+| A taxable grant's year | taxed in the year received (index 0) | year 1 | −0.94 bp of IRR on S1 + $5M — **from the WP4.4 review probe; the test pins our year**, not the size | — |
 | Not modelled (zeroed in the oracles) | — | property tax, insurance, working-capital / receivables / equipment reserves, state ITC, CBI / IBI / PBI, TOD revenue factors, the mid-quarter convention, construction financing cost | stated | — |
 
 No tolerance was loosened for any of these (plan: "a SAM convention not followed is a recorded deviation —
@@ -98,7 +117,9 @@ never a loosened tolerance").
 ## The counterfactual (C13)
 
 Returns are on the owner's **incremental** cash: the owner's total operating cash minus a **counterfactual
-supply cost** — the same site, tariff and connection agreement **without the owner's investable assets**:
+supply cost** — the same site, tariff and connection agreement **without the owner's investable assets**.
+The adapter builds one **only when the owner is the site party** (the bill payer); otherwise there is no
+counterfactual and incremental = total (the payload's block says so with its basis):
 
 - **The meter:** import = the site-side electric loads' demand minus the actual dispatch's shed (the served
   load; the same shed on both sides, since P4 does not re-dispatch; disclosed `load_shed_excluded:<mwh>`,
@@ -143,7 +164,18 @@ Pins at the gate: `ca_federal` 2026-01-01 `fb50f1d768b16ce8`, 2026-03-26 `0810f6
   on a blocking P3 flag (P3's flags are site-wide) — narrowing to contracts that can involve the owner is a
   P5 item, as is `ledger_conservation_failed` as a None line.
 - The staleness key digests the whole solver config (minus finance / commercial): a solve-only setting also
-  marks the report stale — the safe direction, stated in the UI.
+  marks the report stale — the safe direction, stated in the UI. Staleness is reported by
+  `GET /results/investment_case` (the frontend and the chat show it); `GET …/report` and `export.xlsx`
+  carry only the assumptions hash, so a workbook exported after an edit shows the earlier figures with that
+  hash as the only tell (an About "current at export" row is a P5 item).
+- No tax pack covers a financial close before 2026-01-01 (`tax_pack_not_found`); earlier closes need a
+  pack version.
+- Review items noted and not taken (each recorded under its WP): in `carryforward` mode the lifecycle tax
+  never offsets the supply-cost losses; the unlevered book-value terminal carries the levered basis;
+  §163(j) / Zinsvortrag interest still carried forward at the end of the axis is not reported; the
+  slow-contraction debt fixed point can stop up to 6e-5 relative from the root; the interest caps use an
+  EBITDA proxy; `test_finance_debt._close` compares arrays at an array-max relative tolerance (the
+  driver's per-year T covers the gate).
 - openpyxl writes 16 significant digits: a 17th-digit ulp can move on read-back (the driver compares the
   xlsx at relative 1e-15).
 - Tax equity (P7); per-asset CODs, staged builds, archetype streams, a generic production incentive (P5);
