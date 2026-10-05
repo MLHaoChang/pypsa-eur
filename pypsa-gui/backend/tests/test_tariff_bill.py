@@ -375,6 +375,91 @@ def test_preflight_densifies_only_the_paired_links(monkeypatch):
     assert calls == [["grid_export", "grid_import"]]
 
 
+# ── F1 B6 (gate S3 [S2]): cycling ACROSS hours through storage ───────────
+
+def _cross_hour_network(*, storage: str | None = "su", eta_rt: float = 0.9) -> pypsa.Network:
+    """
+    A custom tariff no single hour flags: import 50 before 06:00 and 120
+    after; a market-indexed export credit of 0 at night and 100 from 17:00
+    to 20:00. Each hour's credit is below that hour's import price, but a
+    battery that charges at 50 and exports at 100 × 0.9 earns 40 per MWh.
+    """
+    idx = pd.date_range("2030-01-01", periods=48, freq="h")
+    n = pypsa.Network()
+    n.set_snapshots(idx)
+    n.add("Bus", "grid")
+    n.add("Bus", "site")
+    n.add("Generator", "grid_supply", bus="grid", p_nom=100.0, p_min_pu=-1.0)
+    imp = pd.Series(np.where(idx.hour < 6, 50.0, 120.0), index=idx)
+    credit = pd.Series(np.where((idx.hour >= 17) & (idx.hour <= 20), 100.0, 0.0), index=idx)
+    n.add("Link", "grid_import", bus0="grid", bus1="site", p_nom=10.0, marginal_cost=imp)
+    n.add("Link", "grid_export", bus0="site", bus1="grid", p_nom=10.0, marginal_cost=-credit)
+    n.add("Load", "l", bus="site", p_set=1.0)
+    if storage == "su":
+        n.add("StorageUnit", "bess", bus="site", p_nom_extendable=True, max_hours=2.0,
+              efficiency_store=eta_rt ** 0.5, efficiency_dispatch=eta_rt ** 0.5)
+    elif storage == "store":
+        n.add("Store", "bess_store", bus="site", e_nom_extendable=True)
+    return n
+
+
+_CROSS = "tariff_export_exceeds_import_via_storage"
+
+
+def test_preflight_flags_cycling_across_hours_through_storage():
+    from services.solver_service import SolverConfig
+    from services.validation_service import validate_for_run
+
+    issues = validate_for_run(_cross_hour_network(), SolverConfig())
+    assert not [i for i in issues if i.code == "tariff_export_exceeds_import"]
+    hit = [i for i in issues if i.code == _CROSS]
+    assert len(hit) == 1, [(i.code, i.message) for i in issues]
+    assert hit[0].severity == "warning"
+    for name in ("grid_import", "grid_export", "bess"):
+        assert name in hit[0].message
+    # A Store on the site bus shifts energy across hours as well.
+    from services.validation_service import _check_export_cycling
+
+    assert [i.code for i in _check_export_cycling(_cross_hour_network(storage="store"))] == [
+        _CROSS]
+
+
+def test_cross_hour_cycling_needs_storage_and_a_gain_after_losses():
+    from services.validation_service import _check_export_cycling
+
+    assert _check_export_cycling(_cross_hour_network(storage=None)) == []
+    # 100 × 0.4 = 40 < 50: the round trip loses more than the spread.
+    assert _check_export_cycling(_cross_hour_network(eta_rt=0.4)) == []
+
+
+def test_a_pair_flagged_in_the_same_hour_is_not_flagged_twice():
+    from services.validation_service import _check_export_cycling
+
+    n = _cycling_network(40.0)
+    n.add("StorageUnit", "bess", bus="site", p_nom_extendable=True, max_hours=2.0)
+    assert [i.code for i in _check_export_cycling(n)] == ["tariff_export_exceeds_import"]
+
+
+def test_the_seed_tariffs_do_not_flag_cycling_with_a_battery_at_the_site():
+    """S4 acceptance, now across hours too: no seed tariff pays a grid round trip."""
+    from services.study.library import load_library
+    from services.validation_service import _check_export_cycling
+
+    library = load_library()
+    assert library.tariffs
+    idx = pd.date_range("2025-01-01", periods=8760, freq="h")
+    for tariff_id, tariff in library.tariffs.items():
+        n = pypsa.Network()
+        n.set_snapshots(idx)
+        n.add("Bus", "grid")
+        n.add("Bus", "site")
+        n.add("Link", "grid_import", bus0="grid", bus1="site", p_nom=10.0)
+        n.add("Link", "grid_export", bus0="site", bus1="grid", p_nom=10.0)
+        n.add("StorageUnit", "bess", bus="site", p_nom_extendable=True, max_hours=4.0)
+        write_tariff_prices(n, tariff, "grid_import", "grid_export")
+        assert _check_export_cycling(n) == [], tariff_id
+
+
 # ── capacity charge (gate S3 BC-S3-2) ─────────────────────────────────────
 
 def test_contracted_capacity_charge_is_priced_on_the_contracted_mw():

@@ -2164,6 +2164,10 @@ def _check_export_cycling(n) -> list[Issue]:
     (both links run at once, or a battery charges from the grid to export),
     which no real meter pays. A warning, not an error: some contracts do pay
     export above import in some hours, and the user decides.
+
+    A pair no single hour flags is checked again ACROSS hours when storage
+    sits at the site end (`_cross_hour_cycling`,
+    `tariff_export_exceeds_import_via_storage`, gate S3 [S2]).
     """
     links = getattr(n, "links", None)
     if links is None or len(links) < 2 or not {"bus0", "bus1"} <= set(links.columns):
@@ -2201,6 +2205,13 @@ def _check_export_cycling(n) -> list[Issue]:
         gain = np.maximum(gain_ab.to_numpy(), gain_ba.to_numpy())
         hit = gain > 1e-9
         if not hit.any():
+            # No hour pays on its own; storage at either end may still
+            # carry a cheap import hour to a dear export hour.
+            for imp, exp, site in ((a, b, b1), (b, a, b0)):
+                issue = _cross_hour_cycling(n, mc, eff, imp, exp, site)
+                if issue is not None:
+                    issues.append(issue)
+                    break
             continue
         first = mc.index[hit][0]
         issues.append(_warn(
@@ -2213,6 +2224,89 @@ def _check_export_cycling(n) -> list[Issue]:
             "the tariff's export price against its energy bands.",
         ))
     return issues
+
+
+def _site_storage(n, bus: str) -> tuple[str, float] | None:
+    """
+    The storage on `bus` that can hold energy from one hour to another, as
+    `(name, round-trip efficiency)`, the most efficient first. A StorageUnit
+    counts when it has (or may build) power and has hours; a Store when it
+    has (or may build) energy, at round-trip 1.0 (its losses sit on Links
+    this check does not walk). Inactive rows are skipped. Standing losses
+    are ignored, which can only make the check flag more, never less.
+    """
+    best: tuple[str, float] | None = None
+
+    def _on_bus(df):
+        if df is None or not len(df) or "bus" not in df.columns:
+            return df.iloc[0:0] if df is not None else None
+        rows = df[df["bus"].astype(str) == bus]
+        if "active" in rows.columns:
+            rows = rows[rows["active"].astype(bool)]
+        return rows
+
+    def _num(row, col, default):
+        try:
+            v = float(row.get(col, default))
+        except (TypeError, ValueError):
+            return default
+        return default if v != v else v
+
+    su = _on_bus(getattr(n, "storage_units", None))
+    if su is not None:
+        for name, row in su.iterrows():
+            can = bool(row.get("p_nom_extendable", False)) or _num(row, "p_nom", 0.0) > 0
+            if not can or _num(row, "max_hours", 0.0) <= 0:
+                continue
+            eta = _num(row, "efficiency_store", 1.0) * _num(row, "efficiency_dispatch", 1.0)
+            if best is None or eta > best[1]:
+                best = (str(name), eta)
+    st = _on_bus(getattr(n, "stores", None))
+    if st is not None:
+        for name, row in st.iterrows():
+            if bool(row.get("e_nom_extendable", False)) or _num(row, "e_nom", 0.0) > 0:
+                if best is None or 1.0 > best[1]:
+                    best = (str(name), 1.0)
+    return best
+
+
+def _cross_hour_cycling(n, mc, eff, imp: str, exp: str, site: str) -> Issue | None:
+    """
+    Gate S3 [S2] (F1 B6): with storage at the `site` end of an import/export
+    pair, energy bought in the cheapest import hour can be exported in the
+    dearest export hour. It pays when
+
+        max_t(−mc_exp[t]) × efficiency_imp × η_round_trip − min_t(mc_imp[t]) > 0.
+
+    Hour order is not checked (a cyclic state of charge makes it irrelevant,
+    and an acyclic one only narrows the gain), so this can flag a tariff the
+    LP would not quite exploit; it never misses one it would. A warning with
+    its own code, like the same-hour check: some real tariffs (a market-
+    indexed import with a market-indexed export) do pay a battery for this,
+    and then the result is real. Refusing would block them.
+    """
+    store = _site_storage(n, site)
+    if store is None:
+        return None
+    name, eta = store
+    credit = -mc[exp]
+    best_credit = float(credit.max())
+    cheapest = float(mc[imp].min())
+    gain = best_credit * float(eff[imp]) * eta - cheapest
+    if not gain > 1e-9:
+        return None
+    return _warn(
+        "tariff_export_exceeds_import_via_storage", "Link", str(imp),
+        f"Links '{imp}' (import) and '{exp}' (export) with storage '{name}' "
+        f"at '{site}': no single hour pays, but the highest export credit "
+        f"({best_credit:,.2f} per MWh, first at {credit.idxmax()}) after the "
+        f"import link's efficiency and the storage's round trip "
+        f"({float(eff[imp]) * eta:.2f}) exceeds the cheapest import price "
+        f"({cheapest:,.2f}, first at {mc[imp].idxmin()}). Charging from the "
+        f"grid and exporting later would earn up to {gain:,.2f} per MWh, and "
+        "the LP will do it. Check the tariff's export price against its "
+        "energy bands; if the tariff really pays this, the result is real.",
+    )
 
 
 def _check_profiled_occurrence_units(n) -> list[Issue]:

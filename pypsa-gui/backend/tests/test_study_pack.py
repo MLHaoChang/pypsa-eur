@@ -170,6 +170,10 @@ def test_export_price_below_import_price_every_hour(library, tariff_id):
     # Gate S3 [S2]: cross-hour cycling through the battery does not pay either.
     rte = _v(led, "battery_round_trip_efficiency")
     assert (-mc["grid_export"]).max() * rte < mc["grid_import"].min()
+    # F1 B6: and the preflight that checks it on any tariff stays silent here.
+    from services.validation_service import _check_export_cycling
+
+    assert len(n.storage_units) and _check_export_cycling(n) == []
 
 
 @pytest.mark.parametrize("option_id", ["none", "bess_1h", "bess_2h", "bess_4h", "bess_pv_2h"])
