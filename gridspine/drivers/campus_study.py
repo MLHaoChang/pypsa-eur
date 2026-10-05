@@ -19,6 +19,10 @@ From these it prepares a run directory that the ranking (C3) and the sizing
     Both inputs by sha256, the periods and the unit count. A later stage can
     then recognise a run whose project or campus has changed since.
 
+``rank_campus`` then ranks the prepared hours (``gridspine.ranking.campus``).
+It writes ``campus_metrics.csv`` and ``campus_selected.csv``, one row per
+selected (period, hour), with its reasons joined by ``;``.
+
 ``draft_from_project`` is the "generate" step. It drafts a campus from the
 saved project, for the user to edit before ``prepare_campus``.
 
@@ -38,11 +42,15 @@ import yaml
 from gridspine.ingest.campus import Campus, build_campus
 from gridspine.producers.campus import CampusDraft, campus_hourly, draft_campus
 from gridspine.producers.pypsa_nodal import load_solved_network
+from gridspine.ranking.campus import campus_metrics, select_campus_hours
 from gridspine.schema.campus import HOURLY_CSV, PCC_CSV, validate_hourly, validate_pcc
 from gridspine.schema.contracts import ContractError
 
 CAMPUS_YAML = "campus.yaml"
 CAMPUS_MANIFEST = "campus_manifest.json"
+METRICS_CSV = "campus_metrics.csv"
+SELECTED_CSV = "campus_selected.csv"
+DEFAULT_K = 3
 
 
 def _sha256_file(path: Path) -> str:
@@ -114,3 +122,24 @@ def campus_tables(run_dir):
 def load_run_campus(run_dir) -> Campus:
     """The campus of a prepared run, built from its stored ``campus.yaml``."""
     return build_campus(yaml.safe_load(_require(Path(run_dir), CAMPUS_YAML).read_text()))
+
+
+def rank_campus(run_dir, k: int = DEFAULT_K) -> pd.DataFrame:
+    """Rank the prepared run's hours and select the critical ones (k per
+    criterion, per period). Writes ``campus_metrics.csv`` and
+    ``campus_selected.csv``; returns the selection."""
+    run_dir = Path(run_dir)
+    hourly, pcc = campus_tables(run_dir)
+    spec = yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text())
+    metrics = campus_metrics(hourly, pcc, spec)
+    selection = select_campus_hours(metrics, k=k)
+    _write_text_atomic(run_dir / METRICS_CSV, metrics.reset_index().to_csv(index=False))
+    _write_text_atomic(run_dir / SELECTED_CSV,
+                       selection.assign(reasons=selection["reasons"].map(";".join)).to_csv(index=False))
+    return selection
+
+
+def selected_hours(run_dir) -> pd.DataFrame:
+    """The stored selection: ``period``, ``hour``, ``reasons`` (a list)."""
+    df = pd.read_csv(_require(Path(run_dir), SELECTED_CSV))
+    return df.assign(reasons=df["reasons"].str.split(";"))

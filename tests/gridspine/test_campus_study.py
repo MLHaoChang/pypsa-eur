@@ -27,6 +27,8 @@ from gridspine.drivers.campus_study import (
     draft_from_project,
     load_run_campus,
     prepare_campus,
+    rank_campus,
+    selected_hours,
 )
 from gridspine.schema.campus import HOURLY_CSV, PCC_CSV
 from gridspine.schema.contracts import ContractError
@@ -102,3 +104,19 @@ def test_preparing_again_replaces_the_previous_run(tmp_path, project):
 def test_tables_of_a_run_that_was_never_prepared_are_refused(tmp_path):
     with pytest.raises(ContractError, match="prepare"):
         campus_tables(tmp_path)
+
+
+def test_ranking_a_prepared_run_stores_the_selection_with_its_reasons(tmp_path, project):
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(project).spec, project)
+    sel = rank_campus(run, k=1)
+    stored = selected_hours(run)
+    assert stored[["period", "hour"]].values.tolist() == sel[["period", "hour"]].values.tolist()
+    assert list(stored["reasons"]) == list(sel["reasons"])
+    assert set(stored["period"]) == {2030, 2040}
+    assert all(r.startswith("max_") for rs in stored["reasons"] for r in rs)
+
+
+def test_ranking_before_preparing_is_refused(tmp_path):
+    with pytest.raises(ContractError, match="prepare"):
+        rank_campus(tmp_path)
