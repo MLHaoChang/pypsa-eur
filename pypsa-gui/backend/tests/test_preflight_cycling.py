@@ -496,3 +496,37 @@ def test_a_sector_style_network_at_8760_h_is_fast():
     t0 = time.perf_counter()
     P.network_findings(n)
     assert time.perf_counter() - t0 < 0.3
+
+
+# ── round 2 review: the pair gains are built in chunks ────────────────────
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_the_findings_do_not_depend_on_the_chunk_size(seed, monkeypatch):
+    n = _random_network(seed)
+    monkeypatch.setattr(P, "_PAIR_CHUNK", 1)
+    one = P.network_findings(n)
+    monkeypatch.setattr(P, "_PAIR_CHUNK", 10_000)
+    every = P.network_findings(n)
+    monkeypatch.setattr(P, "_PAIR_CHUNK", 3)
+    some = P.network_findings(n)
+    assert one == every == some
+    assert one   # the networks do find something
+
+
+def test_the_chunk_bounds_the_gain_array(monkeypatch):
+    """No (snapshots × pairs) array wider than the chunk is built."""
+    widths = []
+    real = np.maximum
+
+    def spy(a, b, *args, **kwargs):
+        out = real(a, b, *args, **kwargs)
+        if getattr(out, "ndim", 0) == 2:
+            widths.append(out.shape[1])
+        return out
+
+    n = _random_network(0, buses=20)
+    monkeypatch.setattr(P, "_PAIR_CHUNK", 4)
+    monkeypatch.setattr(P.np, "maximum", spy)
+    P.network_findings(n)
+    assert widths and max(widths) <= 4

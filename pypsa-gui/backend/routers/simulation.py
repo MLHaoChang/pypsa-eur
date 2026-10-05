@@ -358,24 +358,29 @@ def _bind_commercial(commercial, user) -> dict | None:
 
 
 def _check_site_connection(commercial, stored) -> None:
-    """The meter Links' direction (IC U1 follow-up b, review B1): when the
-    submitted `poc_link` or `export_link` differs from the stored one, the
-    same check `set_site_connection` runs (`binding.check_site_connection`),
-    direction only: a missing or two-way Link stays the binding's own refusal.
+    """The meter Links' direction (IC U1 follow-up b, review B1): for the
+    submitted `poc_link` / `export_link` that differs from the stored one (that
+    side only), the same check `set_site_connection` runs
+    (`binding.check_site_connection`), direction only: a missing or two-way
+    Link stays the binding's own refusal.
     A refusal is `{code, error_kind, message}` (the chat tool's kinds)."""
     from fastapi import HTTPException
 
     from services.commercial import binding
 
     before = stored if isinstance(stored, dict) else {}
-    if (commercial.poc_link, commercial.export_link) == (before.get("poc_link"),
-                                                         before.get("export_link")):
+    poc_changed = commercial.poc_link != before.get("poc_link")
+    export_changed = commercial.export_link != before.get("export_link")
+    if not (poc_changed or export_changed):
         return
     if _solver_in_flight_ctx(PyPSAService.get_active_context()):
         return   # `_bind_commercial` refuses it (solver_in_flight) before any read
     try:
+        # Only the side that changed (round 2 review): an untouched Link of a
+        # config saved before this check is not refused; the pair check runs.
         binding.check_site_connection(PyPSAService.get_network(), commercial.poc_link,
-                                      commercial.export_link, direction_only=True)
+                                      commercial.export_link, direction_only=True,
+                                      check_poc=poc_changed, check_export=export_changed)
     except binding.BindingRefusal as exc:
         raise HTTPException(exc.status, {"code": exc.code, "error_kind": exc.code,
                                          "message": exc.message}) from exc

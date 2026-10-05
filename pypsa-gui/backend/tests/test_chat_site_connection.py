@@ -332,3 +332,72 @@ def test_during_a_solve_the_route_refuses_in_flight_before_reading_the_links(
     r = client.put("/api/simulation/solver_config",
                    json={"commercial": {"poc_link": "export", "export_link": "import"}})
     assert r.status_code == 409 and r.json()["detail"]["code"] == "solver_in_flight"
+
+
+# ── round 2 review: re-check only the side that changed ───────────────────
+
+
+def _microgrid_untagged_with_spare_export():
+    n = _microgrid(tag_import="", tag_export="")
+    n.add("Link", "tie_out2", bus0="microgrid_ac", bus1="mainland", p_nom=5.0)
+    return n
+
+
+def _store_root(commercial):
+    import dataclasses
+
+    from routers.simulation import _state
+
+    _state["solver_config"] = dataclasses.replace(_state["solver_config"],
+                                                  commercial=commercial)
+
+
+def test_adding_an_export_link_does_not_recheck_an_unchanged_poc(client, install_network):
+    """A config saved before the route check: an untagged PoC into a bus
+    named like the grid. Adding the export Link must not refuse the PoC."""
+    install_network(_microgrid_untagged_with_spare_export(), name="sc_side_exp")
+    _store_root({"poc_link": "tie_in"})
+    r = client.put("/api/simulation/solver_config",
+                   json={"commercial": {"poc_link": "tie_in", "export_link": "tie_out"}})
+    assert r.status_code == 200, r.text
+    r = client.put("/api/simulation/solver_config",
+                   json={"commercial": {"poc_link": "tie_in", "export_link": "tie_out2"}})
+    assert r.status_code == 200, r.text
+
+
+def test_changing_the_poc_to_that_link_is_still_refused(client, install_network):
+    install_network(_microgrid_untagged_with_spare_export(), name="sc_side_poc")
+    _store_root({"poc_link": "tie_out", "export_link": None})
+    r = client.put("/api/simulation/solver_config", json={"commercial": {"poc_link": "tie_in"}})
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["code"] == "site_connection_wrong_direction"
+
+
+def test_the_pair_check_runs_when_either_side_changes(client, install_network):
+    install_network(_microgrid_untagged_with_spare_export(), name="sc_side_pair")
+    _store_root({"poc_link": "tie_in"})
+    r = client.put("/api/simulation/solver_config",
+                   json={"commercial": {"poc_link": "tie_in", "export_link": "tie_in"}})
+    # Refused (the request model already refuses one Link as both; the
+    # route's pair check is the same rule behind it).
+    assert r.status_code == 422, r.text
+
+
+def test_check_site_connection_can_skip_a_side():
+    n = _microgrid_untagged_with_spare_export()
+    binding.check_site_connection(n, "tie_in", "tie_out", check_poc=False)
+    with pytest.raises(binding.BindingRefusal):
+        binding.check_site_connection(n, "tie_in", None, check_export=False)
+    with pytest.raises(binding.BindingRefusal) as exc:   # the pair check always runs
+        binding.check_site_connection(n, "tie_in", "tie_in", check_poc=False,
+                                      check_export=False)
+    assert exc.value.code == "site_connection_invalid"
+
+
+def test_a_new_poc_rechecks_the_unchanged_export_link_against_its_site_side():
+    """The export Link's site-side test is a pair check: a new PoC moves the
+    site side, so it runs even when only the PoC changed."""
+    with pytest.raises(binding.BindingRefusal) as exc:
+        binding.check_site_connection(_net(reverse_export=True), "import", "export",
+                                      check_export=False)
+    assert exc.value.code == "site_connection_wrong_direction"

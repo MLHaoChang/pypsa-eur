@@ -376,7 +376,8 @@ def site_connection_candidates(n) -> dict[str, list[str]]:
 
 
 def check_site_connection(n, poc_link: str, export_link: str | None, *,
-                          direction_only: bool = False) -> None:
+                          direction_only: bool = False, check_poc: bool = True,
+                          check_export: bool = True) -> None:
     """Refuse a meter this network cannot be: `BindingRefusal(422, code, …)`.
 
       * `site_connection_link_missing`: a name that is not a Link (the
@@ -397,7 +398,11 @@ def check_site_connection(n, poc_link: str, export_link: str | None, *,
     `direction_only` (the solver-config route): a missing or two-way Link is
     left to the binding, which refuses it with its own code
     (`commercial_binding_invalid`); only the direction and the one-Link-as-both
-    checks run. Pure: no write."""
+    checks run. `check_poc` / `check_export` False skip that side's own
+    checks (the route re-checks only the Link that changed, so a config saved
+    before the route check is not refused for a Link the user did not touch);
+    the pair checks always run: one Link as both, and the export Link on the
+    site side of the PoC (a new PoC moves the site side). Pure: no write."""
     from models.commercial import CommercialConfig
 
     def missing(name, what):
@@ -419,7 +424,10 @@ def check_site_connection(n, poc_link: str, export_link: str | None, *,
             export_link = None
         else:
             missing(export_link, "export_link")
-    for name, what in ((poc_link, "poc_link"), (export_link, "export_link")):
+    sides = [(poc_link, "poc_link")] if check_poc else []
+    if check_export:
+        sides.append((export_link, "export_link"))
+    for name, what in sides:
         if name is not None and _two_way(n, name):
             if direction_only:
                 return
@@ -428,21 +436,21 @@ def check_site_connection(n, poc_link: str, export_link: str | None, *,
                                  "meter Links must be one-way (model export with a separate "
                                  "export_link)")
     b0, b1 = str(n.links.at[poc_link, "bus0"]), str(n.links.at[poc_link, "bus1"])
-    role = _role(n, poc_link)
+    role = _role(n, poc_link) if check_poc else ""
     if role == "grid_export":
         raise BindingRefusal(422, "site_connection_wrong_direction",
                              f"poc_link {poc_link!r} is tagged eh_role=grid_export: it is "
                              "tagged as the export Link, not the point of connection; name "
                              "the import Link (or retag it)")
-    if not role and _grid_like(n, b1) and not _grid_like(n, b0):
+    if check_poc and not role and _grid_like(n, b1) and not _grid_like(n, b0):
         raise BindingRefusal(422, "site_connection_wrong_direction",
                              f"poc_link {poc_link!r} runs {b0} → {b1}, into the grid: the "
                              "point of connection imports from the grid side (bus0) to the "
                              "site (bus1); name the Link that runs the other way, or tag it "
                              f"eh_role=grid_import if {b1!r} is the site")
-    if export_link is None:
+    if export_link is None or not (check_poc or check_export):
         return
-    if _role(n, export_link) == "grid_import":
+    if check_export and _role(n, export_link) == "grid_import":
         raise BindingRefusal(422, "site_connection_wrong_direction",
                              f"export_link {export_link!r} is tagged eh_role=grid_import: it "
                              "is tagged as an import Link, not the export Link; name the "

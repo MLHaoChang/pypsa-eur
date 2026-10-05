@@ -279,6 +279,9 @@ def _contract_warnings(n, cfg, dsr: dict) -> list[tuple[str, str, str, str, str]
 CYCLING_CODES = ("tariff_export_exceeds_import", "tariff_export_exceeds_import_via_storage",
                  "commercial.arbitrage_loop", "commercial.arbitrage_loop_via_storage")
 _GAIN_EPS = 1e-9
+#: Pairs per (snapshots × pairs) gain array in `network_findings` (≈ 18 MB per
+#: array at 8760 h).
+_PAIR_CHUNK = 256
 
 
 def cycling_flags(issues) -> list[str]:
@@ -373,7 +376,8 @@ def _returning_buses(n, cfg, site: set[str]) -> set[str]:
     `p_min_pu` < 0; the meter Links are not walked. A heat tank behind a heat
     pump, or an H2 Store behind an electrolyser with no fuel cell, is not on
     such a bus; a battery Store behind a charger and a discharger is (review
-    round 1, B2). Static attributes only."""
+    round 1, B2). Static attributes only: a Link that is two-way only through
+    `links_t.p_min_pu` is walked one way (a known false negative)."""
     electric = _lp._electric_bus_test(n, cfg)
     meter = set(_lp.import_links(cfg)) | ({cfg.export_link} if cfg.export_link else set())
     fwd: dict[str, set[str]] = {}
@@ -586,18 +590,29 @@ def _network_findings(n) -> list[tuple[str, str, str, str, str]]:
         return []
     eff = (links["efficiency"] if "efficiency" in links.columns
            else pd.Series(1.0, index=links.index)).astype(float).fillna(1.0)
-    # Every pair at once (review round 1, B4): a (snapshots × pairs) gain.
+    # The pairs in chunks of `_PAIR_CHUNK` (review rounds 1–2, B4): a
+    # (snapshots × chunk) gain at a time, so 6,000 pairs at 8760 h stay well
+    # below a gigabyte. Per pair: snapshots that pay, the first, the largest.
     m = mc.to_numpy(dtype=float)
     at = {name: i for i, name in enumerate(mc.columns)}
     ia = np.array([at[a] for a, _, _, _ in pairs])
     ib = np.array([at[b] for _, b, _, _ in pairs])
     ea = eff.reindex([a for a, _, _, _ in pairs]).to_numpy(dtype=float)
     eb = eff.reindex([b for _, b, _, _ in pairs]).to_numpy(dtype=float)
-    with np.errstate(invalid="ignore"):
-        gain = np.maximum(-m[:, ib] * ea - m[:, ia], -m[:, ia] * eb - m[:, ib])
-        hit = gain > _GAIN_EPS
-    counts = hit.sum(axis=0)
-    first = hit.argmax(axis=0)
+    counts = np.zeros(len(pairs), dtype=int)
+    first = np.zeros(len(pairs), dtype=int)
+    top = np.zeros(len(pairs), dtype=float)
+    step = max(1, int(_PAIR_CHUNK))
+    for lo in range(0, len(pairs), step):
+        sl = slice(lo, lo + step)
+        A, B = ia[sl], ib[sl]
+        with np.errstate(invalid="ignore"):
+            gain = np.maximum(-m[:, B] * ea[sl] - m[:, A], -m[:, A] * eb[sl] - m[:, B])
+            hit = gain > _GAIN_EPS
+        counts[sl] = hit.sum(axis=0)
+        first[sl] = hit.argmax(axis=0)
+        if len(m):
+            top[sl] = gain.max(axis=0)   # numpy's max, as GS reports it
     storage: dict | None = None
     stats: dict[str, tuple[float, int, float, int]] = {}
 
@@ -626,12 +641,11 @@ def _network_findings(n) -> list[tuple[str, str, str, str, str]]:
                     out.append(issue)
                     break
             continue
-        top = float(gain[:, k].max())   # numpy's max, as GS reports it
         out.append(("warning", "tariff_export_exceeds_import", "Link", str(a),
                     f"Links '{a}' ({b0}→{b1}) and '{b}' ({b1}→{b0}): the "
                     f"export price exceeds the import price in "
                     f"{int(counts[k])} snapshot(s) (first {mc.index[first[k]]}, up to "
-                    f"{top:,.2f} per MWh), so cycling energy "
+                    f"{float(top[k]):,.2f} per MWh), so cycling energy "
                     "out and back in would pay and the LP will do it. Check "
                     "the tariff's export price against its energy bands."))
     return out
