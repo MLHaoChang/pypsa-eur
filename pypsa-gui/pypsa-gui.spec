@@ -85,7 +85,7 @@ datas = [
     # issue 10). Each loader resolves `Path(__file__).resolve().parent` of
     # `harness/<part>/__init__.py`, which under _MEIPASS is
     # `harness/<part>/`, so the data must keep that exact layout. The prompt
-    # fragments are not optional: `services/chat_service.py` reads them at
+    # fragments are not optional: `harness/loop.py` reads them at
     # import, so a bundle without them does not start.
     (str(BACKEND / "harness" / "prompts"), "harness/prompts"),
     (str(BACKEND / "harness" / "workflows"), "harness/workflows"),

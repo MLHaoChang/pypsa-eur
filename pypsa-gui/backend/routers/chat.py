@@ -32,7 +32,8 @@ from starlette.responses import StreamingResponse
 from db.models import Session as SessionRow
 from db.models import User
 from deps import current_session, optional_user
-from services import app_secrets, chat_service, llm_config
+from harness import loop as chat_service
+from services import app_secrets, llm_config
 
 logger = logging.getLogger("pypsa_gui.chat")
 

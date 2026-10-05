@@ -152,7 +152,8 @@ Its README is the contract (layering, how to add a tool, a workflow or a
 skill); the spec is `.scratch/harness/spec.md` and the plan
 `docs/superpowers/plans/2026-10-05-chat-harness.md`. The system-prompt text
 is `backend/harness/prompts/*.md` (byte-identical to the old constants and
-pinned by hash); the adapters are `backend/harness/providers/`. The old
+pinned by hash); the adapters are `backend/harness/providers/`; the turn
+loop itself is `backend/harness/loop.py`. The old `services.chat_service`,
 `services.llm_provider`, `services.chat_tools_schema`, `services.llm_anthropic`,
 `services.llm_openai_compat` and `services.llm_fake` paths are aliases and
 keep working.
@@ -236,7 +237,8 @@ The server enforces hard ceilings — once a cap is hit the stream emits
 | Output tokens / session | 200,000 | `MAX_OUTPUT_TOKENS_PER_SESSION` |
 
 All four live as module-level constants in
-[backend/services/chat_service.py](backend/services/chat_service.py); tune
+[backend/harness/loop.py](backend/harness/loop.py) (the former
+`services/chat_service.py`, still importable under that name); tune
 them per deployment.
 
 ## Interrupted turns and damaged history

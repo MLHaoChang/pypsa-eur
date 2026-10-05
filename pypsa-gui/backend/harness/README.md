@@ -14,7 +14,8 @@ harness/
   skills/         procedures the model loads on demand (<name>/SKILL.md)
   prompts/        the system-prompt fragments as Markdown, byte-identical to the old constants
   providers/      anthropic, openai_compat, fake — the only place a wire is named
-  loop ...        (phase 3) session, confirmation, budget, history, loop, sse
+  loop.py         the turn loop, sessions, confirmation, budgets, history (moved whole from services/chat_service.py)
+  sse.py          the SSE framing of a yielded (event, payload)
 ```
 
 Spec: `.scratch/harness/spec.md`. Plan:
@@ -44,11 +45,15 @@ Spec: `.scratch/harness/spec.md`. Plan:
    user content. The system prompt stays byte-identical and cached.
 6. **The confirmation card is not negotiable.** A workflow may say "a card
    follows"; it cannot change which tier gets one.
-7. **Old paths still work.** `services.llm_provider`,
-   `services.chat_tools_schema`, `services.llm_anthropic`,
-   `services.llm_openai_compat` and `services.llm_fake` are `sys.modules`
-   aliases of the harness modules: same objects, same monkeypatches. New
-   code imports from `harness.*`.
+7. **Old paths still work.** `services.chat_service`,
+   `services.llm_provider`, `services.chat_tools_schema`,
+   `services.llm_anthropic`, `services.llm_openai_compat` and
+   `services.llm_fake` are `sys.modules` aliases of the harness modules:
+   same objects, same monkeypatches. New code imports from `harness.*`.
+8. **The loop's provider words only go down.** `loop.py` arrived carrying
+   the seam spec's known leaks (wire branches for history portability, the
+   vision sub-call's client, capability refusals); the layout test pins
+   their count. A new one goes into `providers/`, not into the loop.
 
 ## The harness tools
 
@@ -58,6 +63,24 @@ not block), `use_skill` (a skill's body on demand), `start_workflow`,
 `advance_workflow`, `end_workflow` (the session's `{id, step}`; the current
 step's body rides each turn as per-turn user content, after the context
 block and outside the untrusted fence). None of them touches a project.
+
+## Splitting the loop
+
+`loop.py` is one module on purpose for now. The suite patches 27 of its
+names (`CONFIRMATION_TTL_SECONDS` eighteen times, the retry delays, the
+rate and session caps, `ROTATE_BYTES`, `AUTO_APPROVE_TIERS`, a few
+functions) through `chat_service.<name>`, and a function that moves to
+another module stops reading the patched name. So a further extraction
+follows one rule: **a tunable moves together with every reader, and the
+tests that patch it move their target to the new module in the same
+commit**, with the frame-recording gate
+(`tests/test_chat_turn_frame_contract.py`, re-recorded only by
+`tests/record_chat_turn_frames.py`) unchanged. Candidates in order of
+independence: `sse` (done), result shaping (`_coerce_jsonable`,
+`_truncate_result`, the result budget), history trimming and the turn
+summary, the chat.jsonl persistence and WAL with `ROTATE_BYTES`, the
+session registry with its caps and TTL, confirmation with its TTL and
+`AUTO_APPROVE_TIERS`, the budget gates, and last the turn body itself.
 
 ## Measuring parity
 

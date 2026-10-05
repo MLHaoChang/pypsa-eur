@@ -36,7 +36,7 @@ ALLOWED: dict[str, tuple[int, str]] = {
                               "(formula, code, message) — a unit"),
     "solver_service.py": (1, "comment restating the solver/adequacy.py cap formula"),
     "asset_results/compute.py": (2, "prose explaining why Σweights/8760 is avoided"),
-    "chat_service.py": (1, "prompt text about CSV row counts"),
+    "harness/loop.py": (1, "prompt text about CSV row counts"),
     "solver/periodized_costs.py": (3, "HOURS_PER_YEAR converts Σ objective weights to years "
                                       "(PyPSA's n.nyears) to scale annual FOM and capital cost "
                                       "to the modelled horizon — a unit, not a step (FOM merge, "

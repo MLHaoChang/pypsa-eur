@@ -1,6 +1,6 @@
 # Chat Turn-Loop Decomposition Implementation Plan
 
-**Target:** `pypsa-gui/backend/services/chat_service.py` — specifically
+**Target:** `pypsa-gui/backend/harness/loop.py` (until 2026-10-05 `services/chat_service.py`; that path is now an alias — chat harness issue 08) — specifically
 `_run_turn_body` (566 lines) and `_dispatch_real_tool_call` (292 lines).
 
 **Status:** Phases 0, A, B, C, D done; Phase E's confirmation gate done, its
