@@ -5,7 +5,7 @@ import pathlib
 import tempfile
 import zipfile
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from models.schemas import ImportSummary
 from services import change_log_service
 from services.pypsa_service import PyPSAService
@@ -192,6 +192,17 @@ def _reset_with_ts_clear() -> None:
     _restore_user_ts({})
 
 
+def _refuse_reserved_buses(n) -> None:
+    """An imported network may not name a bus `ic:…` (the commercial reference
+    frames' namespace, P2 WP2.2-0): the import is undone and refused."""
+    from services.commercial.settlement_inputs import reserved_bus_name
+
+    bad = [str(b) for b in n.buses.index if reserved_bus_name(b)]
+    if bad:
+        _reset_with_ts_clear()
+        raise HTTPException(422, f"bus names starting 'ic:' are reserved: {bad[:5]}")
+
+
 @router.post("/import/netcdf")
 async def import_netcdf(file: UploadFile = File(...)):
     data = await read_capped(file)
@@ -204,6 +215,7 @@ async def import_netcdf(file: UploadFile = File(...)):
             n = PyPSAService.get_network()
             with PyPSAService.get_netcdf_io_lock():
                 PyPSAService.import_network_from_netcdf(n, tmp)
+                _refuse_reserved_buses(n)
     finally:
         tmp.unlink(missing_ok=True)
     summary = _build_summary(n)
@@ -225,6 +237,7 @@ async def import_csv(file: UploadFile = File(...)):
             _reset_with_ts_clear()
             n = PyPSAService.get_network()
             n.import_from_csv_folder(tmpdir)
+            _refuse_reserved_buses(n)
             from services.adequacy.eh_columns import normalise_eh_columns
             normalise_eh_columns(n)
     summary = _build_summary(n)
@@ -262,6 +275,7 @@ async def import_excel(file: UploadFile = File(...)):
                         n.add(comp_class, str(name), **{k: v for k, v in row_dict.items() if v is not None})
                     except Exception:
                         pass
+        _refuse_reserved_buses(n)
         # P14: typed eh_* tags (a sheet's TRUE/1/blank → bool; netCDF-safe).
         from services.adequacy.eh_columns import normalise_eh_columns
         normalise_eh_columns(n)
@@ -280,6 +294,7 @@ async def import_matpower(file: UploadFile = File(...)):
         _reset_with_ts_clear()
         n = PyPSAService.get_network()
         _parse_matpower(n, data)
+        _refuse_reserved_buses(n)
     summary = _build_summary(n)
     change_log_service.log(
         "import", "Network", file.filename or "network.m",

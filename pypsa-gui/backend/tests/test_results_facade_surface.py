@@ -62,6 +62,8 @@ _HANDLER_PARAMS: dict[str, list[str]] = {
     "get_lost_load": ["from_", "to_"],
     "get_load_results": ["source", "from_", "to_"],
     "get_asset_economics": [],
+    "get_billing": [],          # P2 WP2.5
+    "get_cfe_score": [],        # P2 WP2.5
 }
 
 # Non-route names other modules import from `routers.results`.
@@ -84,6 +86,8 @@ _LIFTED: dict[str, tuple[str, str]] = {
     "get_statistics": ("services.results.statistics", "compute_statistics"),
     "get_load_results": ("services.results.loads", "compute_load_results"),
     "get_lost_load": ("services.results.lost_load", "compute_lost_load"),
+    "get_billing": ("services.results.billing", "compute_billing"),
+    "get_cfe_score": ("services.results.cfe_score", "compute_cfe_score"),
 }
 
 # The two shared helpers move to services with a `result_df` keyword; the

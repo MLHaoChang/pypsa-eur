@@ -9,7 +9,7 @@ import {
   Thermometer, Zap, Camera, LayoutDashboard,
   Sun, Moon, Rows2, Rows3,
   GitBranch as GitBranchIcon, ListChecks, FlaskConical,
-  MessageSquare, LayoutGrid, Users, SlidersHorizontal, Compass,
+  MessageSquare, LayoutGrid, Users, SlidersHorizontal, FileText, Compass,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
@@ -1389,6 +1389,11 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
         title="Rank a year's extreme hours, screen N-1/N-2 and fault levels, and export PowerFactory handoff bundles (gridspine)."
         active={activeSlidePanel === 'gridspine'}
         onClick={() => { setSlidePanel(activeSlidePanel === 'gridspine' ? null : 'gridspine'); onCloseModal?.() }}
+      />
+      <SItem icon={<FileText size={15} />} label="Reports"
+        title="Study reports written from the Energy Hub reference design and the adequacy study; read them here and export to Word."
+        active={activeSlidePanel === 'reports'}
+        onClick={() => { setSlidePanel(activeSlidePanel === 'reports' ? null : 'reports'); onCloseModal?.() }}
       />
       {/* The Assistant row used to live here, as the last of seven. It is not
           a simulation feature — it answers questions about the network and

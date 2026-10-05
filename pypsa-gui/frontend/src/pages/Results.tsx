@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck} from 'lucide-react'
+import { TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase} from 'lucide-react'
 import { simulationApi, resultsApi } from '../api/simulation'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
@@ -20,6 +20,7 @@ import Curtailment from './results/Curtailment'
 import LostLoadTab from './results/LostLoadTab'
 import AdequacyTab from './results/AdequacyTab'
 import FmeaTab from './results/FmeaTab'
+import InvestmentTab from './results/InvestmentTab'
 import StorageCycling from './results/StorageCycling'
 import AssetDetail from './results/asset/AssetDetail'
 import { PageHeader } from '../components/PageKit'
@@ -40,13 +41,13 @@ import {
 type ResultsTab =
   | 'overview' | 'capex' | 'dispatch' | 'loadflow' | 'prices' | 'emissions'
   | 'economics' | 'curtailment' | 'lostload' | 'adequacy' | 'storage'
-  | 'asset' | 'fmea'
+  | 'asset' | 'fmea' | 'investment'
 const RESULTS_TAB_KEY = 'results:active-tab'
 
 const VALID_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>([
   'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'emissions',
   'economics', 'curtailment', 'lostload', 'adequacy', 'storage', 'asset',
-  'fmea',
+  'fmea', 'investment',
 ])
 
 function loadInitialTab(): ResultsTab {
@@ -75,6 +76,7 @@ const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip:
   { id: 'adequacy',   label: 'Adequacy',           Icon: ShieldCheck,      tip: 'Reliability targets, COPT screening, the cost-vs-availability frontier, sequential Monte Carlo and the reliability-targeted planning loop' },
   { id: 'storage',    label: 'Storage cycling',    Icon: BatteryCharging,  tip: 'Equivalent full-cycle count per storage unit + carrier rollup', expertOnly: true },
   { id: 'fmea',       label: 'FMEA',               Icon: ShieldAlert,      tip: 'Failure modes ranked by €/yr criticality — computed rows + expert class-D rows, mitigability, CSV export' },
+  { id: 'investment', label: 'Investment',         Icon: Briefcase,        tip: 'The investment case: the site bill, participants and value flows, the Library, tariffs and contracts', expertOnly: true },
   { id: 'asset',      label: 'Asset Detail',       Icon: Crosshair,        tip: 'One asset in full — every applicable result, as numbers or charts, exportable', expertOnly: true },
 ]
 
@@ -105,6 +107,8 @@ const RESULTS_TO_COMPARE_TAB: Record<ResultsTab, CompareTab> = {
   asset: 'overview',
   // No FMEA compare tab exists (yet) — alias to overview like `asset`.
   fmea: 'overview',
+  // No investment compare tab exists (IC P3 WP3.5) — alias to overview.
+  investment: 'overview',
 }
 
 export default function Results() {
@@ -713,6 +717,7 @@ export default function Results() {
                   {t === 'fmea'        && <FmeaTab />}
                   {t === 'storage'     && <StorageCycling />}
                   {t === 'asset'       && <AssetDetail />}
+                  {t === 'investment'  && <InvestmentTab />}
                 </>
               )
             })()}

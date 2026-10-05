@@ -63,6 +63,9 @@ def apply_update_global_constraint(name: str, body, *, merge_partial_update) -> 
             n, "global_constraints", name, body.model_dump(exclude_unset=True)
         )
         new_name = merged.pop("name", name)
+        if new_name != name and new_name in n.global_constraints.index:
+            # remove + add would silently replace the existing constraint.
+            raise HTTPException(409, f"GlobalConstraint '{new_name}' already exists")
         n.remove("GlobalConstraint", name)
         n.add("GlobalConstraint", new_name, **merged)
     change_log_service.log(

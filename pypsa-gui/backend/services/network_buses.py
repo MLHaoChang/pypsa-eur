@@ -106,6 +106,11 @@ def apply_rename_bus(name: str, body: dict):
     new_name = (body.get("new_name") or "").strip()
     if not new_name:
         raise HTTPException(400, "new_name cannot be empty")
+    from services.commercial.settlement_inputs import reserved_bus_name
+
+    if reserved_bus_name(new_name):
+        # `ic:` names the commercial reference frames' columns (P2 WP2.2-0).
+        raise HTTPException(422, f"bus names starting 'ic:' are reserved (got {new_name!r})")
     n = PyPSAService.get_network()
     with PyPSAService.get_lock():
         if name not in n.buses.index:

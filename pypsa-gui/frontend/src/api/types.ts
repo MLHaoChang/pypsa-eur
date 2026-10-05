@@ -168,6 +168,9 @@ export interface SnapshotInfo {
   // True when a flat uploaded profile spans all 12 months of one year at
   // hourly resolution — gates the representative-week sampler.
   can_sample_weeks?: boolean
+  /** Why sampling is unavailable: `not_supported_for_freq` on a sub-hourly axis,
+   *  otherwise the backend's reason text; null when sampling is available. */
+  sample_weeks_reason?: string | null
   // Snapshot resolution as a pandas offset alias ("h", "3h", "D"), measured
   // from the FIRST investment period on MultiIndex networks. null when the
   // backend could not infer one. The Resolution stat card renders this —
@@ -314,6 +317,239 @@ export interface SolverConfig {
   // a sensible default for UC. mip_time_limit_s = 0 disables the cap.
   mip_gap: number
   mip_time_limit_s: number
+  // Edge Investment Case commercial layer (P1 WP1.3). Mirrors
+  // backend/models/commercial.py `CommercialConfig`; null = no commercial layer.
+  commercial?: CommercialConfig | null
+}
+/** A pinned Library item (backend `PriceSeriesRef`). */
+export interface LibraryRef {
+  id: string; version: number; hash: string; source: string
+  vintage_year?: number | null; provider?: string | null
+}
+export interface TariffPeriod {
+  name: string; rate: number
+  months?: number[]; weekdays?: number[]
+  start_hour?: number | null; end_hour?: number | null
+  /** Per-period tier rates on the item's thresholds (IC P2 WP2.1a-ii). */
+  tier_rates?: number[] | null
+}
+export interface TariffTier { threshold: number; rate: number }
+/** Range mode (`lookback_months`, optionally `cyclic_year`) or designated months
+ *  (`months`, year-wide) — exactly one of the two (IC P2 WP2.1a-iii). */
+export interface TariffRatchet {
+  lookback_months?: number | null; share: number
+  months?: number[] | null; cyclic_year?: boolean
+}
+export interface TariffItem {
+  id: string
+  kind: 'energy' | 'demand' | 'capacity' | 'fixed' | 'certificate' | 'tax_levy'
+  unit: 'per_kwh' | 'per_kw_month' | 'per_kw_year' | 'per_month' | 'per_kva_year' | 'per_day'
+  periods: TariffPeriod[]
+  tiers?: TariffTier[] | null
+  ratchet?: TariffRatchet | null
+  settlement?: '15min' | '30min' | 'h'
+  measured_on?: 'import' | 'export' | 'net' | 'peak_import'
+  direction?: 'cost' | 'revenue'
+}
+export interface Tariff {
+  id: string; name: string; jurisdiction: string
+  dso_or_retailer?: string | null
+  valid_from: string; valid_to?: string | null
+  items: TariffItem[]
+  pack_hash?: string | null
+  // URDB fields a partial import could not map (P2 WP2.4b-i)
+  unsupported_fields?: string[]
+}
+/** A pinned Library item version (IC P2 WP2.4a); `hash` is the item's canonical-JSON sha256. */
+export interface LibraryItemRef {
+  kind: 'tariff' | 'contract' | 'connection_agreement'
+  id: string
+  version: number
+  hash: string
+}
+
+export interface ConnectionAgreement {
+  kind: 'firm' | 'non_firm_static' | 'non_firm_dynamic' | 'fca'
+  import_cap_mw: number
+  export_cap_mw?: number | null
+  envelope?: LibraryRef | null
+  curtailment_hours_per_year?: number | null
+  curtailment_compensation_eur_per_mwh?: number | null
+  capacity_fee?: TariffItem | null
+  /** The Library template this agreement was copied from (provenance only). */
+  library_ref?: LibraryItemRef | null
+  available_from: string
+  group?: string | null
+}
+/** Fields every settled contract carries (IC P2 WP2.2). */
+interface ContractBase {
+  id: string
+  base_year?: number | null
+  library_ref?: LibraryItemRef | null
+}
+/** Mirrors backend `PpaContract` (IC P2 WP2.2a/b, WP2.2d `changes_dispatch`). */
+export interface PpaContract extends ContractBase {
+  type: 'ppa'
+  kind: 'pay_as_produced' | 'baseload' | 'as_consumed_btm' | 'sleeved'
+  price: number
+  indexation_pct_per_year?: number
+  volume_cap_mwh_per_year?: number | null
+  floor?: number | null
+  cap?: number | null
+  tenor_years: number
+  seller: string
+  buyer: string
+  asset_ids: string[]
+  reference_price?: LibraryRef | null
+  changes_dispatch?: boolean
+  pricing?: 'fixed' | 'market_plus_premium'
+  premium_eur_per_mwh?: number | null
+  baseload_mw?: number | null
+  sleeving_fee_eur_per_mwh?: number | null
+  sleeving_party?: string | null
+}
+export interface CfdContract extends ContractBase {
+  type: 'cfd'
+  strike: number
+  reference_price?: LibraryRef | null
+  tenor_years: number
+  asset_ids: string[]
+  generator_owner?: string | null
+  counterparty?: string | null
+  indexation_pct_per_year?: number
+  reference?: 'interval' | 'monthly_capture'
+  suspend_on_negative_price?: boolean
+}
+export interface DrContract extends ContractBase {
+  type: 'dr'
+  availability_eur_per_mw_year: number
+  activation_eur_per_mwh: number
+  max_events?: number | null
+  max_duration_h?: number | null
+  notice_h?: number | null
+  asset_ids?: string[]
+  load_ids?: string[]
+  counterparty?: string | null
+  contracted_mw?: number | null
+}
+export interface LeaseContract extends ContractBase {
+  type: 'lease'
+  lessor: string
+  lessee: string
+  annual_payment: number
+  tenor_years: number
+  asset_ids: string[]
+}
+export interface EaasContract extends ContractBase {
+  type: 'eaas'
+  provider: string
+  customer: string
+  fee_eur_per_mwh?: number | null
+  fee_eur_per_year?: number | null
+  tenor_years: number
+  asset_ids: string[]
+}
+export interface RetailContract extends ContractBase {
+  type: 'retail'
+  retailer: string
+  customer: string
+  tariff_id: string
+  tenor_years: number
+}
+/** A settled contract (IC P2 WP2.2), discriminated by `type` (IC P3 WP3.0 types each variant). */
+export type CommercialContract =
+  | PpaContract | CfdContract | DrContract | LeaseContract | EaasContract | RetailContract
+
+// ── Participants and value flows (IC P3 WP3.0; spec §7) ─────────────────────
+export type ParticipantRole =
+  | 'site_owner' | 'developer' | 'investor' | 'lender' | 'tax_equity' | 'dso' | 'tso'
+  | 'retailer' | 'tenant' | 'landlord' | 'hub_member' | 'offtaker' | 'other'
+export type ValueStreamKind =
+  | 'energy_import' | 'energy_export' | 'network_capacity' | 'network_energy'
+  | 'demand_charge' | 'retail_fixed' | 'ancillary' | 'dr_availability' | 'dr_activation'
+  | 'ppa_settlement' | 'cfd_settlement' | 'certificates' | 'lease' | 'eaas_fee' | 'fuel'
+  | 'fom' | 'vom' | 'capex' | 'incentive' | 'tax' | 'debt_service' | 'other'
+export interface Participant {
+  id: string; name: string; role: ParticipantRole; currency?: string
+}
+export interface AllocationKey {
+  basis: 'contracted_capacity' | 'peak_contribution' | 'energy' | 'fixed_shares'
+  /** participant id → share, for fixed_shares (sum 1) */
+  shares?: Record<string, number> | null
+}
+/** Item id wins over kind; one of the two is set. */
+export interface TariffPayeeRule {
+  kind?: TariffItem['kind'] | null; item_id?: string | null; payee: string
+}
+export interface AssetOwnership {
+  asset_id: string
+  component: 'Generator' | 'StorageUnit' | 'Store' | 'Link' | 'Line' | 'Transformer'
+  /** Must be a participant. */
+  owner: string
+}
+export interface HubMember { link: string; participant: string; contracted_mw?: number | null }
+export interface ValueFlowConfig {
+  template?: 'single_owner' | 'btm_ppa' | 'landlord_tenant' | 'dso_developer' | 'energy_hub' | 'custom'
+  template_version?: string | null
+  built_digest?: string | null
+  participants?: Participant[]
+  /** Default: retailer, dso, tso, market, tax_authority, capex_supplier, om_contractor. */
+  externals?: string[]
+  tariff_payees?: TariffPayeeRule[]
+  asset_owners?: AssetOwnership[]
+  hub_members?: HubMember[]
+  allocation?: AllocationKey | null
+  export_revenue_to?: 'site_party' | 'asset_owner'
+}
+/**
+ * GET/PUT /api/simulation/commercial/value_flows (IC P3 WP3.0). Send `digest` back as
+ * If-Match (always). The stored value is raw: trust `value_flows`' shape only when
+ * `status === 'ok'` (a hand-edited file can hold any JSON; the status is then
+ * `value_flows_invalid`).
+ */
+export interface ValueFlowsState {
+  value_flows: ValueFlowConfig | null
+  digest: string
+  status: 'ok' | 'not_set' | 'no_commercial_config' | 'value_flows_invalid'
+  message?: string
+}
+
+export interface CommercialConfig {
+  poc_link: string
+  import_tariff_id?: string | null
+  /** A Library tariff; PUT /solver_config resolves it into the inline import_tariff. */
+  import_tariff_ref?: LibraryItemRef | null
+  /** Contracts settled on the solved dispatch (IC P2 WP2.2). */
+  contracts?: CommercialContract[]
+  /** The grid's carbon-free share per snapshot, a Library series (IC P2 WP2.2-0). */
+  grid_cfe_share_ref?: LibraryRef | null
+  /** Who the site is in contract parties (IC P2 WP2.2c); default "site". */
+  site_party?: string
+  import_tariff?: Tariff | null
+  export_price_ref?: LibraryRef | null
+  export_link?: string | null
+  timezone?: string | null
+  connection?: ConnectionAgreement | null
+  group_contract?: string | null
+  /** Energy-hub group contract: member PoC Links, combined import ≤ group_cap_mw. */
+  group_members?: string[]
+  group_cap_mw?: number | null
+  demand_items?: string[]
+  /** Metered monthly import peaks before the horizon, {"YYYY-MM": kW} (ratchet seed). */
+  meter_history_peaks_kw?: Record<string, number>
+  /** Metered import energy per month, {"YYYY-MM": kWh}: prices a non-convex tier in the LP (P2 WP2.1c-ii). */
+  meter_history_energy_kwh?: Record<string, number>
+  /** P6 hook: a floor on a month's modelled peak, {"YYYY-MM": MW}. */
+  initial_peak_lower_bound?: Record<string, number>
+  /** Site power factor for per-kVA tariff items (IC P2 WP2.1a-i). */
+  power_factor?: number | null
+  /**
+   * Participants and value-flow assignment (IC P3 WP3.0). Stored raw and
+   * validated by the server on write (PUT /api/simulation/commercial/value_flows
+   * only — PUT /solver_config refuses a change to it); a stored value that no
+   * longer validates makes the ledger answer `value_flows_invalid`.
+   */
+  value_flows?: ValueFlowConfig | null
 }
 /**
  * Actionable failure card for a finished solve. Produced by the backend's
@@ -386,7 +622,7 @@ export interface ProjectInfo {
   // graph reconstructed by walking these pointers across the list.
   parent_project?: string | null
   scenario_description?: string | null
-  // Scenario category — 'baseline' | 'scenario' | 'stress', or null/absent
+  // Scenario category — 'baseline' | 'scenario' | 'stress' | 'sensitivity', or null/absent
   // when uncategorised. A real column since backend migration 0004; before
   // that it was a `[type]` prefix on the description, which every surface but
   // one rendered as prose. Typed as a bare string because the set is

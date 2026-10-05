@@ -32,8 +32,9 @@ queue a job kind rather than inventing a second one here.
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
@@ -45,9 +46,10 @@ from deps import optional_user
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services import gridspine_service as gs
 from services import project_registry
-from services.upload_guard import read_capped
+from services.upload_guard import UploadBudget
 
-#: Per-part cap for the two client TABLES, well below the process-wide 512 MB
+#: Cap for the two client TABLES together (one `UploadBudget` per request),
+#: well below the process-wide 512 MB
 #: that exists for a clustered `network.nc`. A year of hourly dispatch for 50
 #: units is ~440k rows, around 20 MB of CSV, and an Excel workbook of the same
 #: is smaller still — so 64 MB is generous for every legitimate file while taking
@@ -216,9 +218,10 @@ async def upload_readback(
 ):
     """The engineer's PowerFactory export for hour `hour`'s bundle: the bus
     CSV is required, the branch CSV optional (spec stage 6). Both are read
-    under the same size cap as every other upload."""
-    bus_bytes = await read_capped(bus)
-    branch_bytes = await read_capped(branches) if branches is not None else None
+    under ONE size cap, shared, so two files cannot buffer twice it."""
+    budget = UploadBudget()
+    bus_bytes = await budget.read(bus)
+    branch_bytes = await budget.read(branches) if branches is not None else None
     # Off the event loop: the comparison parses the engineer's CSVs and reads the
     # bundle, and none of that is async. See the note on the external upload.
     return await run_in_threadpool(
@@ -239,15 +242,16 @@ async def upload_external_dispatch(
     (increment 7). Two files, or one Excel workbook with `dispatch` and `loads`
     sheets — the producer decides and says so when the single file cannot carry
     both. Validated on arrival, so a 422 here means the engineer's file needs
-    fixing before the study is worth queueing. Both read under the same size cap
-    as every other upload.
+    fixing before the study is worth queueing. Both are read under ONE
+    `TABLE_MAX_BYTES` budget, shared, so the pair cannot buffer twice it.
 
     Under `/dispatch-source/` rather than `/uploads/` on purpose: the effect of
     this call is to SET the study's dispatch source, which is what
     `PUT /{name}/dispatch-source` does for the other three.
     """
-    dispatch_bytes = await read_capped(dispatch, TABLE_MAX_BYTES)
-    loads_bytes = await read_capped(loads, TABLE_MAX_BYTES) if loads is not None else None
+    budget = UploadBudget(TABLE_MAX_BYTES)
+    dispatch_bytes = await budget.read(dispatch)
+    loads_bytes = await budget.read(loads) if loads is not None else None
     # Off the event loop. The service call loads case39 and hands the client's
     # bytes to pandas/openpyxl, all of it synchronous and all of it sized by the
     # CLIENT: a crafted workbook that costs minutes to parse would otherwise
@@ -257,6 +261,70 @@ async def upload_external_dispatch(
         _row(proj, db), dispatch_bytes, dispatch.filename,
         loads_bytes, loads.filename if loads is not None else None,
     )
+
+
+class CapacityRequest(BaseModel):
+    """One AC connection-capacity search: a bus name and what connects there."""
+    bus: str = Field(min_length=1, max_length=64)
+    kind: Literal["load", "generation"]
+
+
+@router.get("/{name}/capacity")
+def get_capacity(
+    bus: str | None = Query(None, max_length=64),
+    kind: Literal["load", "generation"] | None = None,
+    hour: int | None = Query(None, ge=0),
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+):
+    """Increment 9: the run's connection-capacity table (DC for every bus, plus
+    any AC answers computed since), optionally narrowed by bus, kind and hour."""
+    return gs.get_capacity(_row(proj, db), bus=bus, kind=kind, hour=hour)
+
+
+@router.post("/{name}/capacity")
+async def compute_capacity(
+    body: CapacityRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+):
+    """The AC connection capacity at one bus, every selected hour. Seconds of
+    CPU (an AC load flow and an N-1 batch per bisection step), so off the event
+    loop, as the uploads are."""
+    return await run_in_threadpool(gs.compute_capacity, _row(proj, db), body.bus, body.kind)
+
+
+class FacilityRequest(BaseModel):
+    """One facility for the connection-point assessment: a load plus an on-site
+    unit (BESS or generator) at one bus."""
+    bus: str = Field(min_length=1, max_length=64)
+    load_mw: float = Field(ge=0, le=100_000)
+    load_pf: float = Field(0.98, gt=0, le=1)
+    onsite_mw: float = Field(0.0, ge=0, le=100_000)
+    onsite_converter: bool = True
+    profile: str = Field("eu_rfg_dcc_ce", min_length=1, max_length=64)
+
+
+@router.get("/{name}/connection")
+def get_connection(
+    assessment_id: str | None = Query(None, max_length=64),
+    hour: int | None = Query(None, ge=0),
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+):
+    """Increment 10: the stored connection-point assessments."""
+    return gs.get_connection(_row(proj, db), assessment_id=assessment_id, hour=hour)
+
+
+@router.post("/{name}/connection")
+async def assess_connection(
+    body: FacilityRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+):
+    """Assess one facility at every selected hour: several AC solves and an N-1
+    batch per hour, so off the event loop."""
+    return await run_in_threadpool(gs.assess_facility, _row(proj, db), body.model_dump())
 
 
 @router.get("/{name}/readback")

@@ -266,6 +266,27 @@ def test_openpyxl_is_required_because_nothing_catches_its_absence():
     assert "openpyxl" in _pinned_distributions()
 
 
+def test_defusedxml_ships_because_openpyxl_only_hardens_itself_when_it_can_import_it():
+    """
+    openpyxl parses every uploaded workbook (`io.py`'s template upload, and
+    pandas' Excel engine) and guards against entity-expansion ("billion
+    laughs") and quadratic-blowup XML ONLY if `defusedxml` is importable —
+    `openpyxl.xml.DEFUSEDXML` is decided at import by trying it. Nothing in
+    this codebase imports defusedxml, so the import scan above cannot see the
+    need, and the failure is silent: an unhardened parser still parses. The
+    `test` environment happened to carry it transitively while the build venv
+    and the default environment did not — so every test ran hardened and the
+    app did not.
+    """
+    assert "defusedxml" in _pinned_distributions()
+
+
+def test_openpyxl_parses_uploads_with_defusedxml_in_this_environment():
+    import openpyxl.xml
+
+    assert openpyxl.xml.DEFUSEDXML is True
+
+
 def test_a_guard_that_does_not_catch_importerror_is_not_a_guard():
     """
     Mutation check on `_catches_import_error`. `except ValueError` must not

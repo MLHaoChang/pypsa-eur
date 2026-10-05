@@ -83,6 +83,8 @@ from gridspine.static.loadflow import LFResult, apply_snapshot, run_lf
 from gridspine.static.lodf import N2_LEDGER, dc_base, to_sensitivities
 from gridspine.static.shortcircuit import FAULT_LEDGER, fault_levels
 from gridspine.static.strength import SCR_LEDGER, scr
+from gridspine.schema.capacity import CAPACITY_CSV
+from gridspine.static.capacity import CAPACITY_LEDGER, dc_rows
 from gridspine.templates.unit_params import load_unit_params, load_unit_templates
 
 STAGES = ["ingest", "dispatch", "ranking", "loadflow", "screening", "handoff"]
@@ -211,6 +213,7 @@ def _ledger(unit_params, screen: bool = True, ac_pass: dict | None = None) -> li
                 *N2_LEDGER,
                 *FAULT_LEDGER,
                 *SCR_LEDGER,
+                *CAPACITY_LEDGER,
                 "SCR is taken at the IEC 60909 MINIMUM case, the conservative choice "
                 "for weak-grid screening (assumed)",
                 "N-2 verified at prune threshold 0 by default: the measured lossless "
@@ -554,6 +557,7 @@ def study_dispatch(
         if screen:
             n2_set = n2_candidates(branch_contingencies(net))
         screening, faults, strength, thresholds, ac_severity = {}, {}, {}, {}, {}
+        capacity = {}
 
         converged = []
         n_selected = len(selection)
@@ -593,6 +597,9 @@ def study_dispatch(
                     ignore_index=True,
                 )
                 strength[hour] = scr(faults[hour][faults[hour]["case"] == "min"], registry, templates)
+                # Increment 9: the DC connection-capacity screen, every bus, both
+                # kinds. The AC answer is on demand (drivers/capacity.py).
+                capacity[hour] = dc_rows(net, hour)
                 progress.tick("screening", i, n_selected)
 
             stage = "handoff"
@@ -622,6 +629,10 @@ def study_dispatch(
 
         bundles, extra = {}, {}
         if screen:
+            art["capacity"] = outdir / CAPACITY_CSV
+            pd.concat([capacity[h] for h in hours_selected], ignore_index=True).to_csv(
+                art["capacity"], index=False
+            )
             # The two numbers the ledger README declares, measured on the hours
             # this run actually selected — which is why bundles are written in a
             # second pass, after every hour has been screened.
@@ -662,6 +673,7 @@ def study_dispatch(
                     lf=lf_results[hour], ledger_entries=ledger, measurements=measurements,
                     f_hz=CASE39_F_HZ, case_name="case39",
                     screening=screening[hour], fault_levels=faults[hour],
+                    capacity=capacity[hour],
                 ))
                 art[f"bundle_{hour}"] = bundles[hour]
                 progress.tick("handoff", i, len(hours_selected))

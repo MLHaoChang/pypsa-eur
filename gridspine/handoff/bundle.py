@@ -37,11 +37,12 @@ from gridspine.schema.contingency import (
     validate_contingency_results,
     validate_fault_levels,
 )
+from gridspine.schema.capacity import validate_capacity
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.dispatch import validate_dispatch, validate_loads
 from gridspine.static.contingency_set import EXT_GRID_EXCLUSION_LEDGER
 from gridspine.static.loadflow import check_net_carries_hour
-from gridspine.templates.unit_params import UnitTemplates, provenance_counts
+from gridspine.templates.unit_params import UnitTemplates, ibr_params, provenance_counts
 
 #: Numbers increment 3 owes the ledger. A missing KEY raises; None renders as
 #: "not yet measured" with the owner, so the gap is declared, never papered.
@@ -97,6 +98,8 @@ def write_ledger_readme(entries, templates: UnitTemplates, measurements: dict, p
     counts = provenance_counts(templates)
     assumed = templates.params[templates.params["source"] == "assumed"]
     inverters = templates.units.index[templates.units["model"] == "inverter"].tolist()
+    converters = [u for u in inverters if u in set(ibr_params(templates).index)]
+    no_record = [u for u in inverters if u not in converters]
     models = templates.units["model"].value_counts()
 
     lines = ["# gridspine handoff — assumptions ledger", ""]
@@ -151,11 +154,29 @@ def write_ledger_readme(entries, templates: UnitTemplates, measurements: dict, p
             lines.append(f"- {key}: {value}")
     lines.append("")
 
+    lines += ["## Converter dynamics", ""]
+    lines.append(
+        "Inverter-based units carrying a converter group get the WECC "
+        "second-generation generic pair in the .dyr: REGCA1 (converter interface) "
+        "and REECA1 (electrical controls: reactive current injection during a dip, "
+        "P/Q priority, current limit). Wind is modelled as Type 4 (full converter), "
+        "with no drive-train model. Values are per unit on MBASE and tagged like "
+        "every other parameter; the shipped set is generic and `assumed` — typical "
+        "values, not a vendor model. Units: "
+        f"{', '.join(converters) if converters else 'none'}."
+    )
+    lines.append("")
+
     lines += ["## Omissions", ""]
     lines.append(
-        "Inverter-based units have no .dyr record: no IBR dynamic model (REGC/REEC) "
-        "is in scope yet, so they enter the dynamics case as static injections. "
-        f"Units affected: {', '.join(inverters) if inverters else 'none'}."
+        "Inverter-based units without a REGCA1/REECA1 group have no .dyr record and "
+        "enter the dynamics case as static injections. "
+        f"Units affected: {', '.join(no_record) if no_record else 'none'}."
+    )
+    lines.append(
+        "No plant controller (REPCA1) record: the sites have no modelled point of "
+        "connection or collector, so each converter holds its Q or V reference at "
+        "the load-flow value under its own REECA1 control."
     )
     lines.append("")
 
@@ -212,6 +233,7 @@ class BundleInputs:
     case_name: str = "case39"
     screening: pd.DataFrame = None
     fault_levels: pd.DataFrame = None
+    capacity: pd.DataFrame = None     # increment 9: this hour's connection-capacity rows
 
 
 def export_bundle(outdir, inp: BundleInputs) -> Path:
@@ -230,8 +252,8 @@ def export_bundle(outdir, inp: BundleInputs) -> Path:
     files.append(raw.name)
 
     dyr = bundle / f"{stem}.dyr"
-    written = write_dyr(inp.net, inp.unit_params, dyr)
-    omitted = [uid for uid, _n, _i, _mb, sync in _machines(inp.net) if not sync]
+    written = write_dyr(inp.net, inp.unit_params, dyr, ibr=ibr_params(inp.templates))
+    omitted = [uid for uid, _n, _i, _mb, _sync in _machines(inp.net) if uid not in written]
     files.append(dyr.name)
 
     write_contingencies(inp.contingency_set, inp.net, bundle / "contingencies.csv")
@@ -260,6 +282,15 @@ def export_bundle(outdir, inp: BundleInputs) -> Path:
     if inp.fault_levels is not None:
         validate_fault_levels(inp.fault_levels).to_csv(bundle / "fault_levels.csv", index=False)
         files.append("fault_levels.csv")
+    if inp.capacity is not None:
+        cap = validate_capacity(inp.capacity)
+        if (cap["hour"] != hour).any():
+            raise ContractError(
+                f"capacity rows for hours {sorted(set(cap['hour']) - {hour})} handed to the "
+                f"bundle for hour {hour}"
+            )
+        cap.to_csv(bundle / "capacity.csv", index=False)
+        files.append("capacity.csv")
 
     files.append("manifest.json")
     (bundle / "manifest.json").write_text(json.dumps({

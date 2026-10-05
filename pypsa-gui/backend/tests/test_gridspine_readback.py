@@ -134,3 +134,16 @@ def test_the_router_uploads_and_reads_back_end_to_end(client, _auth_db, seeded_i
     bad = client.post("/api/gridspine/Router Readback/readback/19",
                       files={"bus": ("x.csv", b"bus_name,vm_pu\nBUS_01,1\n", "text/csv")})
     assert bad.status_code == 422 and "missing required columns" in bad.json()["detail"]
+
+
+def test_the_read_back_route_caps_its_two_files_together(client, _auth_db, seeded_identity, monkeypatch):
+    """Each CSV fits the cap alone; together they do not. One request, one cap."""
+    import services.upload_guard as ug
+
+    resp = client.post("/api/gridspine/projects", json={"name": "Budget Readback", "config": CONFIG})
+    assert resp.status_code == 200, resp.text
+    monkeypatch.setattr(ug, "_DEFAULT_MAX_UPLOAD_BYTES", len(BUS_OK) + 10)
+    resp = client.post("/api/gridspine/Budget Readback/readback/19",
+                       files={"bus": ("b.csv", BUS_OK, "text/csv"),
+                              "branches": ("br.csv", b"x" * 20, "text/csv")})
+    assert resp.status_code == 413, resp.text

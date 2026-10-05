@@ -314,7 +314,7 @@ export interface UploadMetaUI {
   filename: string
   mime: string
   size: number
-  kind: 'user_upload' | 'agent_export'
+  kind: import('../api/uploads').UploadKind
   uploaded_at: number
   // Phase D polish #4 — PDF page count + truncation flag. Server-stamped
   // on upload; rendered as a badge in the chip strip.

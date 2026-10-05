@@ -10,6 +10,12 @@ import Sidebar from './Sidebar'
 // BEFORE P23 touched it (same mocks, same store state). The only Expert-visible
 // difference P23 is allowed to make is the new `data-testid` attributes listed
 // in §3.5, so those — and only those — are stripped before comparing.
+//
+// The snapshot IS re-recorded when the Expert sidebar legitimately gains an
+// entry (the Reports view, PR #64, added one under Planning → dynamics): it
+// pins that Guided mode changes nothing in Expert, not that Expert never
+// changes. Re-record with `npx vitest run src/layout/Sidebar.expertUnchanged.test.tsx -u`
+// and check the diff is exactly the entry that was added.
 const NEW_TEST_IDS = /\s?data-testid="(sidebar-section-(project|data|simulation)|sidebar-mode-switcher)"/g
 function normalise(html: string): string {
   return html.replace(NEW_TEST_IDS, '')

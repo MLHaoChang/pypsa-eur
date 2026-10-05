@@ -26,6 +26,7 @@ vi.mock('./results/AdequacyTab', () => stub('adequacy-stub'))
 vi.mock('./results/FmeaTab', () => stub('fmea-stub'))
 vi.mock('./results/StorageCycling', () => stub('storage-stub'))
 vi.mock('./results/asset/AssetDetail', () => stub('asset-stub'))
+vi.mock('./results/InvestmentTab', () => stub('investment-stub'))
 // The rail's CompareView reports the tab Results seeded it with.
 vi.mock('./CompareView', () => ({
   default: ({ initialTab }: { initialTab?: string }) => <div data-testid="compare-stub" data-initial-tab={initialTab} />,
@@ -52,7 +53,7 @@ vi.mock('../api/network', () => ({
 import Results from './Results'
 
 const ALL_IDS = ['overview', 'capex', 'dispatch', 'loadflow', 'prices', 'economics', 'emissions',
-  'curtailment', 'lostload', 'adequacy', 'storage', 'fmea', 'asset']
+  'curtailment', 'lostload', 'adequacy', 'storage', 'fmea', 'investment', 'asset']
 
 async function renderResults() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -129,7 +130,7 @@ describe('Results in Expert mode', () => {
     expect(tabIds()).toEqual(ALL_IDS.filter(id => id !== 'overview'))
   })
 
-  it('multi-period: all thirteen tabs, in order', async () => {
+  it('multi-period: all fourteen tabs, in order', async () => {
     snapState.periods = [2030, 2040]
     await renderResults()
     expect(await screen.findByTestId('results-tab-overview')).toBeTruthy()

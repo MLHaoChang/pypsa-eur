@@ -234,6 +234,12 @@ RESULT_STATE_KEYS = (
     "eh_dtc_stress",
     "eh_dtc_planning",
     "last_reserve_margin",
+    # Edge Investment Case (P0 WP0.5): the report, the billing pass's
+    # per-item frames, and the solved `ic_*` commercial terms the cost
+    # breakdown needs to reconcile after a reload (spec §5.1).
+    "investment_case_report",
+    "billing_frames",
+    "last_commercial_terms",
     "ac_pf_convergence", "ac_pf_convergence_list",
     "ac_pf_slack_bus_used", "ac_pf_stripped_voll_slacks",
     "ac_pf_converged_count", "ac_pf_total_snapshots",
@@ -422,6 +428,9 @@ class ProjectSolverState:
     last_lost_load: Any = None
     adequacy_report: Any = None   # minimal AdequacyReport dict (target solves)
     eh_reference_design_report: Any = None  # ReferenceDesignReport dict (EH study)
+    investment_case_report: Any = None  # InvestmentCaseReport dict (IC study)
+    billing_frames: Any = None          # {tariff_item: DataFrame} from the billing pass
+    last_commercial_terms: Any = None   # solved ic_* terms for reload-safe reconciliation
     eh_redundancy_comparison: Any = None
     eh_lever_comparison: Any = None  # Phase 3c import/storage lever table
     eh_dtc_stress: Any = None  # Phase 4a DtC stress table

@@ -222,6 +222,18 @@ def freeze_capacities(n, lock=None) -> Callable[[], None]:
         df.loc[idx, min_col] = size
         df.loc[idx, max_col] = size + 1e-6
 
+    # Edge Investment Case: tell the commercial layer this is an OPERATIONAL
+    # solve, so a connection agreement pins the designed connection instead of
+    # re-sizing it per contingency (WP1.4 review round 2 #1). Set LAST, once
+    # the pins are in place, so a raise above can never leave it behind.
+    setattr(n, "_ic_operational", True)
+
+    def _clear_operational(n=n):
+        if hasattr(n, "_ic_operational"):
+            delattr(n, "_ic_operational")
+
+    undo_ops.append(_clear_operational)
+
     def undo_all() -> None:
         with (lock if lock is not None else contextlib.nullcontext()):
             for op in reversed(undo_ops):
@@ -430,6 +442,13 @@ def run_contingency_sweep(network, lock, cfg, contingencies: list[dict], *,
             base_eue = _electrical_eue_mwh(base_sink.get("last_lost_load"), network)
             results["base"] = {"eue_mwh": base_eue,
                                "status": base_sink.get("_status")}
+            # Edge Investment Case: the operational pin disclosed a design that was
+            # not solved with the current connection agreement — surface it
+            # (WP1.4 round 4 condition 2).
+            _conn_facts = ((base_sink.get("last_commercial_terms") or {})
+                           .get("connection") or {})
+            if _conn_facts.get("operational_design_mismatch"):
+                results["base"]["commercial_flags"] = ["operational_design_mismatch"]
             for c in contingencies:
                 # Phase 12e: checked BETWEEN contingencies and acted on with a
                 # `break`, never an exception — the closing re-solve below sits

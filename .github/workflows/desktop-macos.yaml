@@ -1,0 +1,103 @@
+name: Desktop app (macOS)
+
+# Builds the macOS .app on a real Mac with pypsa-gui/build-macos.sh — its own
+# test gate, freeze and bundle scan, unmodified — and then LAUNCHES THE FROZEN
+# APP and runs a planning → dynamics study through it over HTTP.
+#
+# The launch is the point. The build's gate tests SOURCE, and check_bundle.py
+# only lists files; whether the frozen bundle can actually solve — PyPSA's unit
+# commitment through HiGHS, pandapower's load flow, lightsim2grid's native N-1
+# screen, the PSS/E writers — is only observable here, and lightsim2grid's
+# binary is the macOS risk the gridspine plans name.
+#
+# UNSIGNED. build-macos.sh signs only when CODESIGN_IDENTITY is set, and
+# notarises only with NOTARY_PROFILE; both need an Apple Developer ID this
+# repository's CI does not hold. So this proves the bundle builds and runs on
+# macOS, not that Gatekeeper will accept it.
+#
+# Not on every push: the gate alone is the full backend suite, and the whole
+# job is well over an hour of macOS runner time. It runs on demand, and on
+# pushes to the branch that carries packaging changes.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/macos-desktop-build]
+
+jobs:
+  build-and-smoke:
+    name: Build and smoke-test the .app
+    runs-on: macos-latest
+    timeout-minutes: 240
+    env:
+      SKIP_DMG: "1"
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup Pixi
+      uses: prefix-dev/setup-pixi@v0.10.0
+      with:
+        pixi-version: v0.68.1
+        cache: true
+        cache-write: false
+
+    - name: Install the frontend's node modules
+      # build-macos.sh runs `npm run build` but assumes node_modules exist; node
+      # itself comes from the pixi environment, as the script requires.
+      run: |
+        pixi install -e default --frozen
+        cd pypsa-gui/frontend && ../../.pixi/envs/default/bin/npm ci
+
+    - name: Standalone CPython for the build venv
+      # D14: the frozen app is built from a pip-wheel venv on a standalone
+      # CPython, never from the conda interpreter. Same build the script names.
+      run: |
+        curl -sSL -o "$RUNNER_TEMP/cpython.tar.gz" \
+          https://github.com/astral-sh/python-build-standalone/releases/download/20260728/cpython-3.13.14%2B20260728-aarch64-apple-darwin-install_only.tar.gz
+        mkdir -p pypsa-gui/.build-python
+        tar xzf "$RUNNER_TEMP/cpython.tar.gz" -C pypsa-gui/.build-python --strip-components=1
+        pypsa-gui/.build-python/bin/python3 -V
+
+    - name: Build (test gate, freeze, bundle scan)
+      run: BUILD_PYTHON="$PWD/pypsa-gui/.build-python/bin/python3" bash pypsa-gui/build-macos.sh
+
+    - name: Launch the frozen app and run a study through it
+      run: |
+        export PYPSAGUI_APP_DATA_DIR="$RUNNER_TEMP/appdata"
+        export PYPSAGUI_PROJECTS_ROOT="$RUNNER_TEMP/projects"
+        APP="pypsa-gui/dist-app/PyPSA Studio.app/Contents/MacOS/PyPSA Studio"
+        "$APP" > "$RUNNER_TEMP/app-stdout.log" 2>&1 &
+        PID=$!
+        # The port is ephemeral (launcher.bind_socket) and not written anywhere
+        # a script can read, so take it from the process's listening socket.
+        PORT=""
+        for i in $(seq 1 120); do
+          PORT=$(lsof -nP -a -p "$PID" -iTCP -sTCP:LISTEN 2>/dev/null \
+                 | awk 'NR>1 {n=split($9,a,":"); print a[n]; exit}')
+          [ -n "$PORT" ] && break
+          if ! kill -0 "$PID" 2>/dev/null; then
+            echo "::error::the frozen app exited before listening"
+            cat "$RUNNER_TEMP/app-stdout.log"; exit 1
+          fi
+          sleep 2
+        done
+        [ -n "$PORT" ] || { echo "::error::the frozen app never listened"; exit 1; }
+        echo "frozen app pid $PID listening on 127.0.0.1:$PORT"
+        python3 pypsa-gui/backend/smoke/frozen_study.py --port "$PORT" \
+          --out "$RUNNER_TEMP/frozen_bundle.zip"
+
+    - name: Stop the app
+      if: always()
+      run: pkill -f "PyPSA Studio" || true
+
+    - name: Upload logs and the study bundle
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: desktop-macos
+        path: |
+          ${{ runner.temp }}/app-stdout.log
+          ${{ runner.temp }}/appdata/**/*.log
+          ${{ runner.temp }}/frozen_bundle.zip
+        if-no-files-found: warn
+        retention-days: 14

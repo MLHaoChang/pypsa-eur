@@ -74,7 +74,10 @@ def _candidate_dirs(root: Path, *, org_segment: bool) -> list[Path]:
     """
     if not root.is_dir():
         return []
-    level_one = sorted(entry for entry in root.iterdir() if entry.is_dir())
+    # Hidden entries (`.library`, the Edge Investment Case Library) are never
+    # project directories at any depth.
+    level_one = sorted(entry for entry in root.iterdir()
+                       if entry.is_dir() and not entry.name.startswith("."))
     if not org_segment:
         return level_one
     return sorted(

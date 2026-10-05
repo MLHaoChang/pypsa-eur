@@ -42,7 +42,7 @@ export type CanvasMode = 'select' | 'connect'
 // deliberately NOT among them: `activeSlidePanel` holds ONE value, so while
 // `'chat'` was a member the assistant was mutually exclusive with every view
 // it exists to explain. It lives in `assistantDockOpen` below instead.
-export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings' | 'gridspine' | 'hubDesign'
+export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings' | 'gridspine' | 'hubDesign' | 'reports'
 // Command-palette open mode. `null` = closed. `'all'` = full surface (⌘K).
 // `'projects'` = focused project switcher (⌘P).
 export type PaletteMode = 'all' | 'projects' | null
@@ -433,6 +433,11 @@ interface UIStore {
   // anchor has to live outside it — a set(SlidePanel) parameter cannot
   // survive that remount. Consumed then cleared by the section itself.
   settingsSectionRequest: string | null
+  // WP7b: "generation pre-armed" — the Adequacy tab's Reports button opens
+  // the Reports panel WITH the Generate dialog. Same shape as the settings
+  // deep link: the panel subtree remounts on every switch, so the flag lives
+  // here and ReportsPanel consumes then clears it.
+  reportGenerateRequest: boolean
   // Ask the Properties panel's Bus / Link card to open its Edit form (the EH
   // tagging tour's targets only render in Edit). Consumed then cleared by the
   // card showing exactly that component (P30 B10); a selection change to any
@@ -542,6 +547,8 @@ interface UIStore {
   clearResultsTabRequest: () => void
   requestSettingsSection: (section: string) => void
   clearSettingsSectionRequest: () => void
+  requestReportGenerate: () => void
+  clearReportGenerateRequest: () => void
   requestPropertiesEdit: (c: PropertiesEditRequest) => void
   clearPropertiesEditRequest: () => void
   requestEhReport: () => void
@@ -609,6 +616,7 @@ export const useUIStore = create<UIStore>((set) => ({
   bottomTabRequest: null,
   resultsTabRequest: null,
   settingsSectionRequest: null,
+  reportGenerateRequest: false,
   propertiesEditRequest: null,
   ehReportRequest: false,
   assetDetailRequest: null,
@@ -803,6 +811,8 @@ export const useUIStore = create<UIStore>((set) => ({
   clearResultsTabRequest: () => set({ resultsTabRequest: null }),
   requestSettingsSection: (section) => set({ settingsSectionRequest: section }),
   clearSettingsSectionRequest: () => set({ settingsSectionRequest: null }),
+  requestReportGenerate: () => set({ reportGenerateRequest: true }),
+  clearReportGenerateRequest: () => set({ reportGenerateRequest: false }),
   requestPropertiesEdit: (c) => set({ propertiesEditRequest: c }),
   clearPropertiesEditRequest: () => set({ propertiesEditRequest: null }),
   requestEhReport: () => set({ ehReportRequest: true }),

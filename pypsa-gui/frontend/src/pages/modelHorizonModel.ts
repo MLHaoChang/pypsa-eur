@@ -89,6 +89,8 @@ export function buildWeightingRows(
  * card and the `<select>` read one list.
  */
 export const FREQ_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '15min', label: '15-minute' },
+  { value: '30min', label: '30-minute' },
   { value: 'h',   label: 'Hourly (h)' },
   { value: '3h',  label: '3-hourly' },
   { value: '6h',  label: '6-hourly' },
@@ -96,6 +98,24 @@ export const FREQ_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'W',   label: 'Weekly (W)' },
   { value: 'MS',  label: 'Monthly (MS)' },
 ]
+
+/**
+ * Length of one snapshot step in HOURS for a fixed frequency — what the
+ * backend now writes as the default snapshot weighting (15min → 0.25, h → 1,
+ * 3h → 3, D → 24). `null` for calendar frequencies (W, MS) and unknown input.
+ */
+export function stepHoursForFreq(freq: string | null | undefined): number | null {
+  if (!freq) return null
+  const f = freq.trim().toLowerCase()
+  const m = /^(\d*)\s*(min|t|h|d)$/.exec(f)
+  if (!m) return null
+  const n = m[1] === '' ? 1 : Number(m[1])
+  if (!Number.isFinite(n) || n <= 0) return null
+  const unit = m[2]
+  if (unit === 'min' || unit === 't') return n / 60
+  if (unit === 'h') return n
+  return n * 24
+}
 
 /**
  * Human label for the resolution reported by `GET /snapshots`.
@@ -238,6 +258,8 @@ export interface HorizonSummaryContext {
   rangeLabel: string
   canSampleWeeks: boolean
   weightsAreDefault: boolean
+  /** `GET /snapshots` `sample_weeks_reason` — `not_supported_for_freq` on a sub-hourly axis. */
+  sampleWeeksReason?: string | null
 }
 
 function plural(n: number, word: string): string {
@@ -323,13 +345,15 @@ export function stepSummary(step: HorizonStepId, ctx: HorizonSummaryContext): st
       const weights = ctx.weightsAreDefault ? 'default weights' : 'custom weights'
       const capability = ctx.canSampleWeeks
         ? 'representative weeks available'
-        : 'upload an hourly profile to enable sampling'
+        : ctx.sampleWeeksReason === 'not_supported_for_freq'
+          ? 'sampling needs an hourly axis'
+          : 'upload an hourly profile to enable sampling'
       return `${snapshotCountLabel(ctx.snapshotCount)} · ${weights} · ${capability}`
     }
 
     case 'weights':
       return ctx.weightsAreDefault
-        ? 'Default weights (every snapshot weighted 1)'
+        ? 'Default weights (each snapshot weighted by its step length)'
         : 'Custom weights applied'
   }
 }

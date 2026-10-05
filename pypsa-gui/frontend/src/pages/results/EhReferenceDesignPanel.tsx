@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { CompletenessChips, statusTone as sharedStatusTone } from '../../components/CompletenessChips'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Hexagon, Square } from 'lucide-react'
+import { FileText, Hexagon, Square } from 'lucide-react'
 import {
   resultsApi,
   type EhArchetype,
@@ -214,12 +215,9 @@ export function completenessRows(
   return out
 }
 
+// Shared with the Investment tab since IC P3 WP3.5; re-exported for callers.
 export function statusTone(status: EhSectionStatus): string {
-  // The theme's success token: the accent is the brand red, which read as an
-  // error on every "ok" chip (click-through obstacle 5).
-  if (status === 'ok') return 'text-success'
-  if (status === 'skipped') return 'text-muted'
-  return 'text-warn'
+  return sharedStatusTone(status)
 }
 
 /** Sections that are not_established with a reason, in chip order.
@@ -915,6 +913,7 @@ export function ehStudyQueryKeys(project: string | null) {
 
 export function EhReferenceDesignPanel() {
   const currentProject = useUIStore(s => s.currentProject)
+  const setSlidePanel = useUIStore(s => s.setSlidePanel)
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [archetype, setArchetype] = useState<EhArchetype>('strong_grid')
@@ -1430,6 +1429,18 @@ export function EhReferenceDesignPanel() {
                 {study.error}
               </span>
             )}
+            {/* WP7a: the study's report lives in the Reports panel (the
+                evidence-only report reads this reference design). Top-right
+                of the action row, beside the CSV exports below. */}
+            <button
+              type="button"
+              onClick={() => setSlidePanel('reports')}
+              data-testid="eh-open-reports"
+              title="Open the Reports panel — write a report from this reference design and export it to Word"
+              className="ml-auto inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent"
+            >
+              <FileText size={10} /> Reports
+            </button>
           </div>
 
           {!study && !report && !hasAnyTable && (
@@ -1586,24 +1597,12 @@ export function EhReferenceDesignPanel() {
                 </ul>
               )}
 
-              {completeness.length > 0 && (
-                <ul
-                  className="flex flex-wrap gap-1.5"
-                  data-testid="eh-completeness"
-                >
-                  {completeness.map(({ name, status }) => (
-                    <li
-                      key={name}
-                      className={`text-[10px] border border-border rounded px-1.5 py-0.5 ${statusTone(status)}`}
-                      data-testid={`eh-section-${name}`}
-                      data-status={status}
-                      title={report.sections?.[name]?.note ?? undefined}
-                    >
-                      {name}: {status}
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <CompletenessChips
+                rows={completeness.map(({ name, status }) => ({
+                  name, status, note: report.sections?.[name]?.note ?? null }))}
+                testId="eh-completeness"
+                itemTestIdPrefix="eh-section-"
+              />
 
               {notEstablishedNotes(report).length > 0 && (
                 <ul
