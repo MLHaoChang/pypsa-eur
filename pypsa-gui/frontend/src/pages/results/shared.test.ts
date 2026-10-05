@@ -346,4 +346,11 @@ describe('fmtMwhNumber (P31 C3)', () => {
     expect(fmtMwhNumber(0)).toBe('0')
     expect(fmtMwhNumber(null)).toBe('—')
   })
+  it('keeps the sign: a negative below 1 MWh has three decimals, above it is grouped (gate N-6)', () => {
+    expect(fmtMwhNumber(-0.5)).toBe('-0.500')
+    expect(fmtMwhNumber(-1500.5)).toBe((-1500.5).toLocaleString(undefined,
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+    expect(fmtMwhNumber(-0)).toBe('0')
+    expect(fmtMwhNumber(Number.NaN)).toBe('—')
+  })
 })

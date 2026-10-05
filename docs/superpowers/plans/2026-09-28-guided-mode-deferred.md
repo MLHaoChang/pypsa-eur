@@ -1031,3 +1031,5 @@ No `chat_tools_schema.TOOLS`, tool description or system-prompt change (row 2's 
 - **The self-test's failing read is a page `fetch`, not an app read** (deviation 3). It proves the counter; it does not prove the app would re-read after recovery.
 
 No processes are left running.
+
+**P31 gate fixes** (gate record `docs/superpowers/qa/2026-10-05-guided-mode-deferred-gate-P31.md`, GO): S-1 — `test_eh_review_route.py::test_a_study_clears_an_earlier_stored_report_so_a_raised_study_is_204` stores a report (review 200), runs the real `run_eh_study` made to raise right after its clear (`redundancy._detach_solver_model` patched), and asserts `/eh_review` → 204; it kills the gate's M-C5 mutant (the clear without `EH_REPORT_STORE_KEY`), green on arrival since the code was right. N-6 — pinned as the code is (correct): `fmtMwhNumber` keeps the sign (`-0.500`, grouped `-1,500.50`, `-0` → `0`, NaN → `—`) and a missing ΔEUE cell reads `—` (`EhReferenceDesignPanel.formatting.test.tsx`); both gate mutants (F2, F7) killed. Rows: row 2 785 passed + 17 skipped (`row2-gate.log`); tsc 0; vitest 245 files / 2838 passed (`row4-gate.log`); no rendered output changed, so no smoke.

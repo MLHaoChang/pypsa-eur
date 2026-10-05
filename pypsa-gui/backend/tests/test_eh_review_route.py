@@ -234,3 +234,29 @@ def test_a_stage_failed_study_is_200_ok(client, install_network, monkeypatch):
     r = client.get(REVIEW_URL)
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "ok"
+
+
+def test_a_study_clears_an_earlier_stored_report_so_a_raised_study_is_204(
+        client, install_network, monkeypatch, session_ctx):
+    """P31 gate S-1: the docstring's "a study clears the stored report when it
+    starts". An earlier stored report is reviewed (200); then the REAL
+    ``run_eh_study`` raises right after its clear, and the review is 204 —
+    not the previous study's report as ``ok``."""
+    _setup(client, install_network)
+    ctx = session_ctx(client)
+    ctx.solver_state[EH_REPORT_STORE_KEY] = {**_PARTIAL, "pack_hash": "h",
+                                             "assumptions_hash": "a"}
+    before = client.get(REVIEW_URL)
+    assert before.status_code == 200, before.text
+    assert before.json()["stale"] is False
+
+    def boom(network):
+        raise RuntimeError("after the clear")
+
+    monkeypatch.setattr("services.adequacy.redundancy._detach_solver_model", boom)
+    assert client.post(STUDY_URL,
+                       json={"archetype": "weak_flexible"}).status_code == 200
+    rec = _poll(client)
+    assert rec["status"] == "failed" and "after the clear" in (rec["error"] or "")
+    r = client.get(REVIEW_URL)
+    assert r.status_code == 204, r.text

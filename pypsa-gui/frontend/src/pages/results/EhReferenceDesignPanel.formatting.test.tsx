@@ -124,6 +124,20 @@ describe('remaining EH panel numbers (bug 1 remainder)', () => {
     expect(tds[tds.length - 1]).not.toMatch(/Wh/)
   })
 
+  it('a missing ΔEUE reads "—", never "0" (gate N-6)', async () => {
+    const rows = REPORT.sections.fmea_top.payload.rows
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue({ ...REPORT, sections: {
+      ...REPORT.sections,
+      fmea_top: { ...REPORT.sections.fmea_top, payload: { rows: [{ ...rows[0], delta_eue_mwh: null }] } },
+    } } as never)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><EhReferenceDesignPanel /></QueryClientProvider>)
+    await userEvent.setup().click(screen.getByTestId('eh-reference-design-toggle'))
+    const row = await screen.findByTestId('eh-fmea-top-row-1')
+    const tds = Array.from(row.querySelectorAll('td')).map(td => td.textContent)
+    expect(tds[tds.length - 1]).toBe('—')
+  })
+
   it('DtC planning built MW goes through fmtPower', async () => {
     vi.mocked(resultsApi.getEhDtcPlanning).mockResolvedValue({
       contingencies: [{ contingency: 'x', status: 'ok', cost_at_target_eur: 1, built_p_nom_mw: 40.00000123 }],
