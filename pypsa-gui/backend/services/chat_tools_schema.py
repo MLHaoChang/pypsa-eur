@@ -2331,7 +2331,8 @@ TOOLS: list[dict[str, Any]] = [
         "year) that gives the target post-tax equity IRR (`target_irr`, a fraction, e.g. "
         "0.1) at operating year `target_year` (1 = the first year after COD), on the "
         "stored finance inputs and the current solve. `contract_id` picks the contract "
-        "(omit when the case has one PPA). A what-if: NOTHING is saved — the stored "
+        "(omit when the case has one PPA); `owner` the participant whose case is solved "
+        "(default: the owner of the last run). A what-if: NOTHING is saved — the stored "
         "inputs and report are unchanged. Returns {solved_ppa_price_per_mwh, currency, "
         "money_year, contract_id, price_in_stored_inputs_per_mwh, "
         "equity_post_tax_irr_at_target_year, flags}. Refusals: solve_ppa_contract_not_found, "
@@ -2339,10 +2340,12 @@ TOOLS: list[dict[str, Any]] = [
         "solve_ppa_needs_redispatch (the contract changes the dispatch), "
         "solve_ppa_price_unknown, solve_ppa_cash_not_established, solve_ppa_no_root (its "
         "`code` says why), investment_case_refused, investment_case_not_solved, "
-        "finance_inputs_missing. Safety: read.",
+        "investment_case_busy, investment_case_request_invalid, finance_inputs_missing, "
+        "finance_inputs_invalid, tax_pack_not_found. Safety: read.",
         {"target_irr": {"type": "number"},
          "target_year": {"type": "integer", "minimum": 1},
-         "contract_id": {"type": "string"}},
+         "contract_id": {"type": "string"},
+         "owner": {"type": "string"}},
         ["target_irr", "target_year"],
     ),
     _t(

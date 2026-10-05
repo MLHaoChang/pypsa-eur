@@ -237,6 +237,35 @@ def test_cashflow_pages_cover_every_line_once_and_cut_ids(solved, store):
     assert past["items"] == [] and past["has_more"] is False
 
 
+def test_cashflow_pages_never_read_as_summing_to_an_unknown_cash(solved, store):
+    """WP4.6c review F1 (C12): a not-established line is left out of the lines,
+    so the page says the equity cash is not established and which lines are,
+    and does not claim the lines sum to it; a NaN amount reads "not
+    established" (F4), never NaN or 0."""
+    def unknown(rep):
+        p = rep["sections"]["project"]
+        p["status"], p["note"] = "not_established", "line_not_established:fuel"
+        rep["completeness"]["project"] = "not_established"
+        p["payload"]["cash"]["equity_post_tax"] = None
+        p["payload"]["operating_status"] = {"operating": "not_established", "capex": "ok"}
+        first = min(rep["cashflow_lines"], key=lambda ln: ln["year"])   # on page 1
+        first["amount"] = float("nan")
+    store(_report(mutate=unknown))
+    out = _tool("get_investment_case", detail="cashflows")
+    assert out["equity_post_tax_cash"] == "not established"
+    assert "line_not_established:fuel" in out["lines_not_established"]
+    assert "operating:operating" in out["lines_not_established"]
+    assert "NOT established" in out["basis"] and "sum to the post-tax" not in out["basis"]
+    assert [r["amount"] for r in out["items"]].count("not established") == 1
+    json.dumps(out, allow_nan=False)                    # strict JSON: no NaN reaches the model
+    assert _tool("explain_cashflow")["equity_irr"]["status"] == "not_established"
+    # An established case says so, and the lines sum to it.
+    store(_report())
+    ok = _tool("get_investment_case", detail="cashflows")
+    assert ok["equity_post_tax_cash"] == "established" and "lines_not_established" not in ok
+    assert "sum to the post-tax equity cash" in ok["basis"]
+
+
 def test_bad_arguments_are_request_invalid(solved, store):
     store(_report())
     for kw in ({"detail": "lines"}, {"detail": "cashflows", "page": 0}):
@@ -254,7 +283,7 @@ def s1b(solved, monkeypatch):
     inputs stored, SAM's tax layers for the solve."""
     case = S.to_finance_case("s1b", solve=True)
     holder = {"case": case}
-    _fake_build(monkeypatch, lambda: holder["case"])
+    holder["calls"] = _fake_build(monkeypatch, lambda: holder["case"])
     monkeypatch.setattr(chat_tools, "_ic_solve_layers", lambda c: S.sam_tax_layers("s1b"))
     _put_finance(S.to_finance_case("s2").inputs.model_dump(mode="json"))
     yield holder
@@ -282,6 +311,38 @@ def test_solve_ppa_price_matches_the_engine(s1b, store):
                  target_year=sp.target_year, contract_id="ppa")
     assert out2["solved_ppa_price_per_mwh"] == pytest.approx(ref2["solved_ppa_price"], abs=1e-4)
     assert out2["solved_ppa_price_per_mwh"] > out["solved_ppa_price_per_mwh"]
+
+
+def test_solve_ppa_price_solves_the_last_runs_owner(s1b, store):
+    """WP4.6c review F2: the solve builds the SAME case as the report — the
+    owner of the last run (its record, else the report's provenance), or the
+    one named."""
+    st = _sim_state()
+    rep = _report()
+    rep["sections"]["project"]["payload"]["provenance"]["owner"] = "site_owner_B"
+    store(rep)
+    sp = s1b["case"].inputs.solve_ppa
+    _tool("solve_ppa_price", target_irr=sp.target_irr, target_year=sp.target_year)
+    assert s1b["calls"][-1]["owner"] == "site_owner_B"
+    st["investment_case"] = {"status": "done", "owner": "dev_A"}
+    _tool("solve_ppa_price", target_irr=sp.target_irr, target_year=sp.target_year)
+    assert s1b["calls"][-1]["owner"] == "dev_A"
+    _tool("solve_ppa_price", target_irr=sp.target_irr, target_year=sp.target_year, owner="dev_C")
+    assert s1b["calls"][-1]["owner"] == "dev_C"
+    with pytest.raises(HTTPException) as exc:
+        _tool("solve_ppa_price", target_irr=sp.target_irr, target_year=sp.target_year, owner=" ")
+    assert exc.value.detail["error_kind"] == "investment_case_request_invalid"
+
+
+def test_an_unknown_solve_status_is_not_reported_as_no_root(s1b, store, monkeypatch):
+    import services.finance.engine as E
+
+    monkeypatch.setattr(E, "solve_ppa", lambda *a, **k: {"solve_ppa_status": "some_future_status"})
+    sp = s1b["case"].inputs.solve_ppa
+    with pytest.raises(HTTPException) as exc:
+        _tool("solve_ppa_price", target_irr=sp.target_irr, target_year=sp.target_year)
+    assert exc.value.detail["error_kind"] == "investment_case_refused"
+    assert exc.value.detail["code"] == "some_future_status"
 
 
 def test_solve_ppa_price_never_mutates_the_stored_inputs(s1b, store):
@@ -400,7 +461,8 @@ def test_explain_cashflow_attributes_the_equity_npv_and_the_min_dscr_year(solved
     # The min-DSCR year: argmin of the debt payload's DSCR; CFADS reconciles.
     d = rep["sections"]["debt"]["payload"]
     dscr = [(v, i) for i, v in enumerate(d["dscr"]) if v is not None]
-    v, i = min(dscr)
+    vmin = min(w for w, _ in dscr)                       # a tie: the earliest year (review F3)
+    v, i = next((w, j) for w, j in dscr if abs(w - vmin) <= 1e-9 * max(1.0, vmin))
     m = out["min_dscr_year"]
     assert m["status"] == "ok" and m["year"] == p["years"][i]
     assert m["dscr"] == pytest.approx(v, abs=1e-4)

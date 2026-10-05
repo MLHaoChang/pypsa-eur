@@ -25,7 +25,9 @@ from typing import Any
 
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 
-from models.finance import IC_EXPORT_KEYS, IC_REPORT_SECTIONS, InvestmentCaseReport
+from models.finance import (
+    IC_EXPORT_KEYS, IC_REPORT_SECTIONS, InvestmentCaseReport, export_investment_case,
+)
 from services.finance.debt import CFADS_DEFINITION
 
 NOT_ESTABLISHED = "not_established"
@@ -134,7 +136,9 @@ def build_workbook(report: InvestmentCaseReport, *, project: str | None = None) 
     _rows(about, rows)
 
     summary = wb.create_sheet("Summary")
-    raw = report.model_dump(mode="json")
+    # The export view (the gate flags live under `gates`; reading the dump's
+    # top level wrote them as not established — P4 gate driver finding).
+    raw = export_investment_case(report)
     _rows(summary, [["Figure", "Value"]] + [
         [k, raw.get(k)] for k in IC_EXPORT_KEYS
         if k not in ("completeness", "sections", "cashflow_lines", "gates", "packs", "pipeline")

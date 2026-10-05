@@ -75,3 +75,14 @@ def test_formula_injection_stays_text():
     flags = [row for row in wb["About"].iter_rows() if row[0].value == "Flag"]
     evil = [row[1] for row in flags if str(row[1].value).startswith("=")]
     assert evil and all(c.data_type == "s" for c in evil)
+
+
+def test_the_summary_sheet_reads_the_gate_flags_from_the_export_view():
+    """P4 gate driver finding: the gate flags live under `gates`; the Summary
+    sheet wrote them as not established whatever their value."""
+    rep = _report().model_copy(update={"gates": GatesBlock(wacc_vs_discount_rate_consistent=True,
+                                                           conservation_ok=False)})
+    wb = openpyxl.load_workbook(io.BytesIO(build_workbook(rep)))
+    summary = {r[0].value: r[1].value for r in wb["Summary"].iter_rows(min_row=2, max_col=2)}
+    assert summary["wacc_vs_discount_rate_consistent"] is True
+    assert summary["conservation_ok"] is False

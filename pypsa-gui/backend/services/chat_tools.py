@@ -2106,7 +2106,7 @@ def _ic_cashflow_rows(report: dict) -> list[dict]:
         src = prov.get("source")
         sid = prov.get("source_id")
         row = {"year": ln.get("year"), "stream": _cut(ln.get("value_stream"), 40),
-               "counterparty": _cut(ln.get("counterparty")), "amount": _eur(ln.get("amount")),
+               "counterparty": _cut(ln.get("counterparty")), "amount": _ne(ln.get("amount"), 2),
                "source": _cut(f"{src}:{sid}" if sid else src, 120)}
         if prov.get("contract_id"):
             row["contract"] = _cut(prov["contract_id"])
@@ -2137,8 +2137,30 @@ def _pack_pages(rows: list[dict], budget: int) -> list[list[dict]]:
     return pages
 
 
+def _ic_equity_cash_state(report: dict) -> tuple[bool, list[str]]:
+    """(the post-tax equity cash is established, what is not): a None line is
+    left out of the lines, so the pages must say so — never sum to a total
+    that reads as established (C12; WP4.6c review F1)."""
+    proj = _section(report, "project")
+    p = proj.get("payload") or {}
+    eq = (p.get("cash") or {}).get("equity_post_tax")
+    ok = isinstance(eq, list) and bool(eq) and all(_ne(v) != _NE for v in eq)
+    missing: list[str] = []
+    if proj.get("status") not in (None, "ok") and proj.get("note"):
+        missing.append(str(proj["note"]))
+    missing += [f"operating:{k}" for k, v in (p.get("operating_status") or {}).items()
+                if v != "ok"]
+    missing += [f"counterfactual:{k}" for k in
+                ((p.get("counterfactual") or {}).get("lines_not_established") or [])]
+    if not ok and not missing:
+        tax = _section(report, "tax")
+        missing.append(f"tax:{tax.get('note') or tax.get('status') or 'not established'}")
+    return ok, [_cut(m, 160) for m in missing[:10]]
+
+
 def _ic_cashflow_page(status: dict | None, report: dict, page: int) -> dict:
     rows = _ic_cashflow_rows(report)
+    cash_ok, not_established = _ic_equity_cash_state(report)
     pages = _pack_pages(rows, _IC_PAGE_CHARS)
     items = pages[page - 1] if page <= len(pages) else []
     before = sum(len(pg) for pg in pages[:page - 1])
@@ -2148,11 +2170,17 @@ def _ic_cashflow_page(status: dict | None, report: dict, page: int) -> dict:
            "pages": len(pages), "total_count": len(rows), "returned": len(items),
            "has_more": before + len(items) < len(rows), "items": items,
            "currency": p.get("currency"), "stale": _NE if stale is None else stale,
+           "equity_post_tax_cash": "established" if cash_ok else _NE,
            "basis": ("one line per (year, stream line), + = cash in to the owner: the "
                      "owner's total operating lines plus the counterfactual supply cost's "
-                     "lines NEGATED (source counterfactual:*), so each year's lines already "
-                     "sum to the post-tax equity cash on the incremental basis — do not "
-                     "subtract the counterfactual again")}
+                     "lines NEGATED (source counterfactual:*) — do not subtract the "
+                     "counterfactual again. " + (
+                         "Each year's lines sum to the post-tax equity cash." if cash_ok else
+                         "The post-tax equity cash is NOT established: a line that is not "
+                         "established is left out, so these lines must not be summed into a "
+                         "total (see lines_not_established)."))}
+    if not cash_ok:
+        out["lines_not_established"] = not_established
     if page > len(pages):
         out["note"] = f"past the last page ({len(pages)})"
     return out
@@ -2185,8 +2213,20 @@ def _ic_solve_layers(case):
     return None
 
 
+def _ic_default_owner(sim_state) -> str | None:
+    """The owner the last run used (its record, else the stored report's
+    provenance): `solve_ppa_price` solves the SAME case (WP4.6c review F2)."""
+    rec = sim_state.get("investment_case")
+    if isinstance(rec, dict) and rec.get("owner"):
+        return str(rec["owner"])
+    rep = sim_state.get("investment_case_report")
+    prov = ((_section(rep, "project").get("payload") or {}).get("provenance") or {}) \
+        if isinstance(rep, dict) else {}
+    return str(prov["owner"]) if prov.get("owner") else None
+
+
 def solve_ppa_price(target_irr: float, target_year: int,
-                    contract_id: str | None = None) -> dict:
+                    contract_id: str | None = None, owner: str | None = None) -> dict:
     """The price of an owner-sold PPA for a target post-tax equity IRR in a
     target operating year (IC P4 C9), from the stored finance inputs and the
     current solved network. Builds the case through the router's adapter seam
@@ -2224,7 +2264,10 @@ def solve_ppa_price(target_irr: float, target_year: int,
                   "set the finance inputs first (PUT /api/simulation/finance)")
     with _ic_errors():
         finance_inputs_or_422(raw)
-    build = _ic_build_case(n, cfg, owner=None, lost_load=sim_state.get("last_lost_load"))
+    if owner is not None and (not isinstance(owner, str) or not owner.strip()):
+        _ic_raise(422, "investment_case_request_invalid", "owner must be a non-empty string")
+    owner = owner if owner is not None else _ic_default_owner(sim_state)
+    build = _ic_build_case(n, cfg, owner=owner, lost_load=sim_state.get("last_lost_load"))
     try:
         case = build()
     except FinanceRefused as exc:
@@ -2245,8 +2288,10 @@ def solve_ppa_price(target_irr: float, target_year: int,
     code = str(out.get("solve_ppa_status") or "")
     if code != "ok":
         kind = code.split(":", 1)[0]
-        if kind not in _SOLVE_PPA_MESSAGES:
-            kind = "solve_ppa_no_root"
+        if kind not in _SOLVE_PPA_MESSAGES:      # an unknown status is not "no root"
+            _ic_raise(422, "investment_case_refused",
+                      "the PPA price solve did not complete (see `code`)", code=_cut(code, 120),
+                      contract_id=_cut(contract_id))
         _ic_raise(422, kind, _SOLVE_PPA_MESSAGES[kind], code=_cut(code, 120),
                   contract_id=_cut(contract_id))
     # The contract the engine priced and its price in the stored inputs (the
@@ -2309,8 +2354,10 @@ def _ic_label(ln: dict) -> str:
 
 
 def _money(v):
-    """Money rounded to the cent, -0.0 written as 0.0."""
-    return None if v is None else round(float(v), 2) + 0.0
+    """Money rounded to the cent, -0.0 written as 0.0; None / NaN / inf → "not
+    established" (WP4.6c review F4)."""
+    f = _ne(v)
+    return _NE if f == _NE else round(float(f), 2) + 0.0
 
 
 def _ic_rate(report: dict, sim_state) -> tuple[float, str]:
@@ -2340,7 +2387,7 @@ def _ic_equity_attribution(report: dict, rate: float, top: int) -> dict:
     p = _section(report, "project").get("payload") or {}
     years = [int(y) for y in p.get("years") or []]
     eq = ((p.get("cash") or {}).get("equity_post_tax"))
-    if not years or eq is None or any(v is None for v in eq):
+    if not years or eq is None or any(_ne(v) == _NE for v in eq):
         note = _section(report, "project").get("note") or \
             "the post-tax equity cash is not established"
         return {"status": "not_established", "reason": str(note)[:300]}
@@ -2352,6 +2399,9 @@ def _ic_equity_attribution(report: dict, rate: float, top: int) -> dict:
         amt = ln.get("amount")
         if i is None or amt is None:
             continue
+        if _ne(amt) == _NE:                       # NaN / inf in a stored report (review F4)
+            return {"status": "not_established",
+                    "reason": f"a cashflow line amount is not finite ({_cut(_ic_label(ln))})"}
         by_label.setdefault(_ic_label(ln), [0.0] * len(years))[i] += float(amt)
     cf = p.get("counterfactual_net")
     if p.get("has_counterfactual") and cf and all(v is not None for v in cf) and \
@@ -2392,7 +2442,9 @@ def _ic_min_dscr_year(report: dict, top: int) -> dict:
     if d.get("status") != "ok" or not cands or not years:
         return {"status": "not_established",
                 "reason": str(d.get("note") or "no debt service, so no DSCR")[:300]}
-    v, i = min(cands)                    # a tie: the earliest year
+    vmin = min(v for v, _ in cands)
+    v, i = next((w, j) for w, j in cands                # a tie: the earliest year
+                if abs(w - vmin) <= 1e-9 * max(1.0, abs(vmin)))
     year = years[i]
     tied = sum(1 for w, _ in cands if abs(w - v) <= 1e-9 * max(1.0, abs(v)))
 
