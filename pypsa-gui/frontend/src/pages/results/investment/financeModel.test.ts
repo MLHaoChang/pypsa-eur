@@ -137,7 +137,7 @@ describe('the report', () => {
       .toEqual({ totals: { 2030: -10, 2031: 5 }, reason: null, mismatch: [] })
     const none = cashTotals(report({ equity_post_tax: null }, 'not_established'), pivot)
     expect(none.totals).toEqual({ 2030: null, 2031: null })
-    expect(none.reason).toBe('tax tax_pack_missing')
+    expect(none.reason).toBe('the tax section: tax_pack_missing')
     expect(cashTotals(report({ equity_post_tax: [-10, 6] }), pivot).mismatch).toEqual([2031])
     expect(cashTotals(report({ equity_post_tax: [-10] }), pivot).totals[2031]).toBeNull()
   })

@@ -351,7 +351,7 @@ export function cashTotals(report: InvestmentCaseReportPayload | null | undefine
     const tax = sectionOf(report, 'tax')
     const taxStatus = (report?.completeness as Record<string, string> | undefined)?.tax ?? tax?.status
     if (status !== undefined && status !== 'ok') reason = project?.note ?? `the project section is ${status}`
-    else if (taxStatus !== undefined && taxStatus !== 'ok') reason = `tax ${tax?.note ?? taxStatus}`
+    else if (taxStatus !== undefined && taxStatus !== 'ok') reason = `the tax section: ${tax?.note ?? taxStatus}`
     else reason = 'the post-tax equity cash is not established'
   }
   return { totals, reason, mismatch }
