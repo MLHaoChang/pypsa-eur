@@ -34,6 +34,7 @@ recomputes `demand_charge_eur` through `BillCalculator.demand_charge` from
 """
 from __future__ import annotations
 
+import copy
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -482,6 +483,30 @@ class BillCalculator:
             currency_year=tariff.currency_year, unavailable=bill_flags,
             fidelity=None if fidelity is None else Fidelity(fidelity),
             honesty_notes=tuple(notes), partial_billing_periods=partial)
+
+
+#: `n.meta` key holding the demand-charge config the last successful LOPF
+#: solve carried (`None` when it carried none). Written by `run_simulation`;
+#: it travels with the network through a save, a reload and a fork copy.
+SOLVE_DEMAND_CHARGE_META = "pypsa_gui_solve_demand_charge"
+
+
+def record_solved_demand_charge(n, raw) -> None:
+    """Record on `n` the demand-charge config its solve carried."""
+    n.meta[SOLVE_DEMAND_CHARGE_META] = copy.deepcopy(raw) if raw else None
+
+
+def solved_demand_charge_config(n, fallback):
+    """
+    The demand-charge config the network's dispatch was solved with, as
+    `record_solved_demand_charge` stored it. A network solved before that
+    record existed has no key, and `fallback` (the caller's config) is the
+    best that can be said for it (gate S3 [N4]).
+    """
+    meta = getattr(n, "meta", None) or {}
+    if SOLVE_DEMAND_CHARGE_META in meta:
+        return meta[SOLVE_DEMAND_CHARGE_META]
+    return fallback
 
 
 def demand_charge_eur_from_network(n, raw) -> float | None:

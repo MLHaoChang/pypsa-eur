@@ -94,7 +94,8 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
         under auto-discount). Applied to what the LP charges: OPEX and the
         extendable fixed cost.
       * ``demand_charge_eur`` — the site demand charge the LP carried
-        (`cfg.demand_charge`, decision study S3): Σ price × peak import per
+        (decision study S3; the config the solve recorded in `n.meta`, or
+        `cfg.demand_charge` for a network solved before that record): Σ price × peak import per
         billing period, recomputed from `links_t.p0` by the bill calculator,
         never read from `n.model`. ``0.0`` when no charge is configured;
         ``None`` (and left in the residual) when the import links carry no
@@ -136,10 +137,16 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
     cb_total = float(cost_breakdown["total"])
     # The demand charge is refused on multi-period networks, so it is one
     # flat-network term at LP weight 1.0; it is not in `cost_breakdown`.
-    from services.study.tariff import demand_charge_eur_from_network
+    # Priced with the charge the SOLVE carried (recorded on the network by
+    # `run_simulation`), not `cfg`'s, which may have changed since (gate S3
+    # [N4]); `cfg`'s only for a network solved before that record existed.
+    from services.study.tariff import (
+        demand_charge_eur_from_network,
+        solved_demand_charge_config,
+    )
 
-    demand_charge = demand_charge_eur_from_network(
-        n, getattr(cfg, "demand_charge", None) if cfg is not None else None)
+    demand_charge = demand_charge_eur_from_network(n, solved_demand_charge_config(
+        n, getattr(cfg, "demand_charge", None) if cfg is not None else None))
     return {
         "nonextendable_fixed_cost_eur": nonext_reported,
         "period_weighting_adjustment_eur": lp_basis - (cb_total - nonext_reported),
