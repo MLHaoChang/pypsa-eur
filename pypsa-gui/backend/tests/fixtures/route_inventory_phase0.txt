@@ -42,6 +42,8 @@ GET     /api/gridspine/{name}/capacity                           -> get_capacity
 POST    /api/gridspine/{name}/capacity                           -> compute_capacity_api_gridspine__name__capacity_post
 GET     /api/gridspine/{name}/config                             -> get_config_api_gridspine__name__config_get
 PUT     /api/gridspine/{name}/config                             -> update_config_api_gridspine__name__config_put
+GET     /api/gridspine/{name}/connection                         -> get_connection_api_gridspine__name__connection_get
+POST    /api/gridspine/{name}/connection                         -> assess_connection_api_gridspine__name__connection_post
 POST    /api/gridspine/{name}/dispatch-source                    -> set_dispatch_source_api_gridspine__name__dispatch_source_post
 POST    /api/gridspine/{name}/dispatch-source/external           -> upload_external_dispatch_api_gridspine__name__dispatch_source_external_post
 GET     /api/gridspine/{name}/figures/{hour}/{figure}            -> fetch_result_figure_api_gridspine__name__figures__hour___figure__get

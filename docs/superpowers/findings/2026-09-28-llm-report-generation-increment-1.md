@@ -270,6 +270,31 @@ plus the three fixes it found.
    (one paragraph). The tools fixture is re-recorded and the test's
    docstring says so; the no-tools variant was unaffected.
 
+## §6c — Browser end-to-end on `master` after the merge, 2026-09-30
+
+PR #64 merged at `9b65250`; `master` is at `a9a1f5b` (#67). The phase-3
+browser smoke had last run before the second `master` merge, so it was run
+again on `master` itself: uvicorn in local desktop mode on :8765 serving the
+built SPA, `node scripts/smoke-reports.mjs --base http://127.0.0.1:8765 --browser`.
+
+| Leg | Result |
+|---|---|
+| API journey: health → fixture network → save → `strong_grid` study → evidence-only report → generate refused `missing_api_key` (no key here) → list / get / figure / export → `.docx` blob | 19/19 |
+| Browser journey: Reports row → panel lists the report → Generate button → viewer shows 16 sections → per-section Regenerate → no page errors | 8/8 after one fix (below); the first run failed at the Reports row |
+
+**Found and fixed (this commit).** A fresh Playwright profile is a first run,
+which `master`'s guided mode (spec §3.2, G4) starts in Guided — and Guided
+hides the Reports row, an Expert-only sidebar entry (§3.5). The journey is
+the Expert one, so the script now chooses Expert before the SPA boots,
+through the same two `localStorage` keys the mode switcher writes. Open
+product question, not changed here: whether a Guided-mode user should reach
+Reports at all (today only through the Energy Hub panel's report request).
+
+**Still not covered by a browser leg.** The generate and regenerate legs
+(need an LLM key), the template picker / mapping-plan editor / `docx-preview`
+pane (phase 4) and the round-trip upload / version diff (phase 5): those
+are exercised by the backend QA drivers and the component tests only.
+
 ## Increment 1 — status
 
 Phases 0–5 delivered on `claude/fmea-llm-reporting-feasibility-jtm6w1`
