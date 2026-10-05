@@ -267,3 +267,17 @@ def test_investing_before_ranking_is_refused(tmp_path, project):
     prepare_campus(run, draft_from_project(project).spec, project)
     with pytest.raises(ContractError, match="campus_selected"):
         invest_campus(run)
+
+
+def test_the_pcc_switchgear_scope_is_a_study_setting_and_is_written(tmp_path, project):
+    import json
+    from gridspine.drivers.campus_study import INVEST_SCOPE_JSON
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(project).spec, project)
+    rank_campus(run, k=1)
+    pcc = draft_from_project(project).spec["campus"]["pcc"]["bus"]
+    by_operator = invest_campus(run, pcc_switchgear=False)
+    assert f"switchgear {pcc}" not in set(by_operator["investment"]["need"])
+    assert json.loads((run / INVEST_SCOPE_JSON).read_text()) == {"pcc_switchgear": "grid_operator"}
+    invest_campus(run)
+    assert json.loads((run / INVEST_SCOPE_JSON).read_text()) == {"pcc_switchgear": "campus"}

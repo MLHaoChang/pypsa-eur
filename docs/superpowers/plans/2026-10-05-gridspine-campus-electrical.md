@@ -492,6 +492,7 @@ This closes part one's "voltages not re-checked": the *with measures* column is 
 - **Stop.** All checks pass; a need runs out (the state with its last candidate is re-checked once more, so the report is an AC result); non-convergence; 25 iterations.
 - **Timing.** Transformers from the first period; a compensation item from the first period the final re-check dispatches it; a cable from the first period it is overloaded; switchgear from the first period its rating fails, or the first period if it had none. Costed while `invest <= period < invest + lifetime`; no replacement. Unresolved needs are priced but not summed.
 - Fault levels in the re-check energise every STATCOM in every period (conservative).
+- **Who buys the PCC switchgear** (owner decision, 2026-10-05): a study setting, `pcc_switchgear`, costed to the campus by default. Set to the grid operator, the PCC bus is never a need, a failing PCC rating is reported and not bought, and the choice is written to `campus_invest_scope.json`.
 
 **The driver.** `invest_campus(run_dir, library=None, ...)` needs a prepared and ranked run, recomputes part one with the same profile and power factor, and writes `campus_investment.csv`, `campus_cost.csv`, `campus_invested.yaml`, `campus_compliance_invested.csv`, `campus_invest_history.csv` and (added) `campus_invest_dispatch.csv`. `size_campus` is unchanged.
 
