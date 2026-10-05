@@ -23,8 +23,15 @@ import yaml
 from gridspine.drivers.campus_study import (
     CAMPUS_MANIFEST,
     CAMPUS_YAML,
+    COMPLIANCE_INVESTED_CSV,
+    COST_CSV,
+    INVEST_DISPATCH_CSV,
+    INVEST_HISTORY_CSV,
+    INVESTED_YAML,
+    INVESTMENT_CSV,
     campus_tables,
     draft_from_project,
+    invest_campus,
     load_run_campus,
     prepare_campus,
     rank_campus,
@@ -205,3 +212,58 @@ def test_an_unsolved_project_cannot_be_drafted(tmp_path):
     n.export_to_netcdf(str(path))
     with pytest.raises(ContractError, match="not solved"):
         draft_from_project(path)
+
+
+def test_investing_a_sized_run_buys_from_the_library_and_re_solves_the_compliance(tmp_path, project):
+    """The hub end to end with the shipped library: prepare, rank, size,
+    invest. Every check with measures is an AC result that passes (or has
+    no rating to judge), and the invested campus file loads."""
+    import pandas as pd
+    from gridspine.ingest.campus import load_campus
+    from gridspine.static.campus_invest import INVEST_CHECKS
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(project).spec, project)
+    rank_campus(run, k=1)
+    size_campus(run)
+    out = invest_campus(run)
+    for name in (INVESTMENT_CSV, COST_CSV, INVESTED_YAML, COMPLIANCE_INVESTED_CSV, INVEST_HISTORY_CSV,
+                 INVEST_DISPATCH_CSV):
+        assert (run / name).is_file(), name
+    comp = pd.read_csv(run / COMPLIANCE_INVESTED_CSV)
+    assert list(comp["check"]) == list(INVEST_CHECKS)
+    assert set(comp["status_with_measures"]) <= {"pass", "not_rated"}
+    inv = pd.read_csv(run / INVESTMENT_CSV)
+    assert set(inv["status"]) <= {"chosen", "kept", "not_needed"}
+    assert inv["library_id"].dropna().str.len().gt(0).all()
+    camp = load_campus(run / INVESTED_YAML)
+    assert set(camp.net.trafo["name"]) == set(yaml.safe_load((run / INVESTED_YAML).read_text())["campus"]["transformers"])
+    cost = pd.read_csv(run / COST_CSV)
+    assert list(cost["period"]) == [2030, 2040] and (cost["annualised_eur_per_a"] > 0).all()
+    assert set(out) >= {"investment", "cost", "compliance", "history", "dispatch", "spec", "unresolved"}
+    assert out["unresolved"] == []
+
+
+def test_a_project_library_replaces_the_shipped_one(tmp_path, project):
+    import pandas as pd
+    from gridspine.templates.campus_assets import DEFAULT_PATH
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(project).spec, project)
+    rank_campus(run, k=1)
+    lib = yaml.safe_load(DEFAULT_PATH.read_text())
+    lib["transformers"] = [e for e in lib["transformers"] if e["id"] != "TR_110_20_63"]
+    path = tmp_path / "project_assets.yaml"
+    path.write_text(yaml.safe_dump(lib))
+    shipped = invest_campus(run)["investment"]
+    edited = invest_campus(run, library=path)["investment"]
+    assert "TR_110_20_63" not in set(edited["library_id"].dropna())
+    assert len(shipped) and len(edited)
+    with pytest.raises(ContractError, match="not found"):
+        invest_campus(run, library=tmp_path / "nope.yaml")
+    assert pd.read_csv(run / INVESTMENT_CSV)["library_id"].fillna("").tolist() == edited["library_id"].fillna("").tolist()
+
+
+def test_investing_before_ranking_is_refused(tmp_path, project):
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(project).spec, project)
+    with pytest.raises(ContractError, match="campus_selected"):
+        invest_campus(run)

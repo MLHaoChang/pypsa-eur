@@ -395,3 +395,18 @@ def test_a_study_run_against_a_project_profile_reports_its_unconfirmed_limits(tm
     assert stored.at["pcc_reactive", "source"] == "extracted"
     with pytest.raises(ContractError, match="tso"):
         size_campus(run, profile="tso")
+
+
+def test_the_investment_step_takes_project_profiles_too(tmp_path, project):  # noqa: F811
+    """C8 and C10 meet here: the investment's re-checked compliance is judged
+    against the project's own (unconfirmed) code, and says so."""
+    from gridspine.drivers.campus_study import invest_campus
+    codes = tmp_path / "codes"
+    _write(codes, "tso", extracted())
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(project).spec, project)
+    rank_campus(run, k=1)
+    rows = invest_campus(run, profile="tso", profile_dirs=[codes])["compliance"].set_index("check")
+    assert rows.at["pcc_reactive", "source"] == "extracted"
+    with pytest.raises(ContractError, match="tso"):
+        invest_campus(run, profile="tso")
