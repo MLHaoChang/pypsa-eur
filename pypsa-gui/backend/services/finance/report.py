@@ -313,6 +313,9 @@ def _counterfactual_block(result, case) -> dict[str, Any]:
         "lines_not_established": sorted({ln.key for ln in lines if ln.amount is None}),
         "reasons": list(result.reasons.get("counterfactual", [])),
         "flags": sorted(f for f in result.flags if f.startswith("counterfactual")),
+        # What it was built from — tariff, served load, connection, commodity
+        # (plan C13; WP4.6a review B9). None for a hand-built case.
+        "hash": getattr(case, "counterfactual_hash", None),
     }
 
 

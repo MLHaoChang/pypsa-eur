@@ -1173,6 +1173,95 @@ The `GET …/export.xlsx` route lands with WP4.6b.
   export is valued at 0, so its amount is arbitrary; WP4.0 review R6 and round 2), and its uncosted
   `grid_sink` passes the commodity check.
 
+**WP4.6a review round 1 (1d6ebfe): FAIL; fixed.**
+- **B1 (LCOE key mismatch):** the counterfactual commodity is keyed like the actual commodity line
+  (`asset:opex:Generator:<supply>`; several commodity lines share it pro rata), source
+  `counterfactual` / `commodity`. The C5 pair is marked `source="degradation"`
+  (`case.DEGRADATION_SOURCE`), and `engine._asset_costs` skips it: it is avoided-bill value, not a
+  cost of the investment. F6 LCOE pinned at 176.18 $/MWh, derived by hand in the test as
+  (capex + PV tax) / PV energy (was 629.79). Integration fixture: 143.23 (was 609.46). SAM parity and
+  the hand LCOE tests are unchanged.
+- **B2 (site conversion load):** chosen to **include** it. The actual electric draw of non-owner
+  site conversion Links is Σ p_k over their ports on site electric buses (a heat pump, an
+  electrolyser; meter and generating Links excluded). It is added to the counterfactual served load
+  and disclosed as `counterfactual_includes_conversion_load:<mwh>`.
+  - Why include rather than refuse: that load exists without the investment. P4 does not
+    re-dispatch, so its actual draw is the first-order counterfactual, the same rule as the shed.
+    A flexible load that would shift without the PV is the same re-dispatch limit C13 already
+    states.
+  - An unknown draw gives `counterfactual_not_established:conversion_load_unknown`.
+  - An **owner** conversion Link beside a non-electric site load (the owner's heat pump) gives
+    `counterfactual_not_established:owner_conversion_load`: the site without it has no stated
+    heat source.
+  - The cost lines of assets outside the owner's set (a boiler's gas) are copied into the
+    counterfactual, except the commodity, which is rated on the meter.
+  - Tested:
+    - the heat pump case gives 725,600 by hand;
+    - the boiler case gives 557,700;
+    - an owner heat pump is not established.
+- **B3 (blocking P3 flags):** following P3's own semantics ("the blocking ones make every period
+  None"), each `P._blocking(inputs.input_flags)` flag puts a None line
+  `ledger_input_not_established:<flag>` in every period. `ledger.flags` and `conservation.flags`
+  join `case.flags`. Tested with `config_changed_since_solve`: operating is not established and
+  IRR and LCOE are None.
+- **B4 (money year per line):** new `TemplateLine.money_year` (None = the template's), and
+  `cashflow` escalates each line from it. Tested: no step at the period switch.
+- **B5 (annualise):** under `annualise`, monthly-billed items (P3 `demand_charge`: demand charges
+  and ratchets) scale by 12 / (the billing months present on the tariff clock) instead of
+  8,760 / hours, on both sides, flagged `template_annualised_monthly:<item>:<factor>`.
+  - An item whose periods are restricted to some months is None, flagged
+    `annualise_monthly_item_not_established:<item>`.
+  - On the 7-day fixture the factor is 12 (it was 52.14).
+- **B6 (unknown party):** a cash line with an unknown party that could be the owner becomes a None
+  line flagged `ledger_party_unknown:<key>`. "Could be the owner" means:
+  - a contract line, unless the contract is known, names none of the owner's assets and does not
+    name the owner;
+  - an asset line on the owner's asset;
+  - any other line.
+
+  A line between two known other parties is skipped. Unit-tested with a CfD whose payee is unknown,
+  a DR line with an unknown amount, another party's CfD, and a known third-party line.
+- **B7 (S items):** S now selects items **by volume basis**: `unit == "per_kwh"`, measured on
+  `import` or `net`, `direction == "cost"`. Energy, levies and certificates all count.
+  - The flag is renamed `degradation_bill_volume_items_only`.
+  - A negative S is flagged `degradation_bill_value_negative:<period>`.
+  - F6 + LEVY: S = 503,700 + 20 · 6 · 365 = 547,500. F6 alone is unchanged (503,700).
+- **B8 (degradation links):**
+  - A single-asset `as_consumed_btm` PPA degrades with its asset (first order), as does a
+    single-asset per-MWh-only EaaS.
+  - Export with no split, when the owner owns all site generation (Generators only), is split by
+    generation share, one part per generator degrading with it. This is first order (exported
+    stored energy degrades too), flagged `export_degrades_by_generation_share:<key>`.
+  - Any other generation-linked line is a None line with `degradation_link_unknown:<key>`, unless
+    none of its owner generators degrades (then the number stands).
+  - Tested: a BTM PPA, export without a split, and an EaaS on PV + BESS (None, and a number at 0
+    degradation).
+- **B9 (counterfactual hash):** `FinanceCase.counterfactual_hash` is sha256[:16] over the tariff
+  digest, the served load, the connection (the agreement digest and its lines) and the commodity
+  (the supply, the reason, the hash of mc and the amounts). `report._counterfactual_block` carries
+  it as `"hash"`. Tested: stable, independent of the finance inputs, changed by a tariff change.
+- **Non-binding, taken:**
+  - the commodity tolerance is max(0.01, 1e-9·|ledger|);
+  - `_generation` returns None for a generator with no solved column or a NaN. The case then gets a
+    None line `generation_not_established:<g>`, and `_site_generation` returns None;
+  - zero actual import with a priced supply is flagged `counterfactual_commodity_omitted:no_actual_import`;
+  - stated in the adapter: a leap weight-majority year's 8,784-h template repeats every year
+    (+0.27 %).
+- **Design choice 8 (S is volume-only, now by volume basis):** the C5 first-order bill effect
+  degrades only the items billed per kWh on the import volume, plus the commodity. Demand,
+  capacity and fixed charges are shaved by storage or the peak, not in proportion to the
+  generation's energy, so they do not degrade with it. S also carries any BESS TOU arbitrage that
+  the dispatch attributes to the PV's share. This is first order and stated by
+  `degradation_bill_first_order` and `degradation_bill_volume_items_only`.
+- **Money-year convention:**
+  - contract lines are in the period year, because P2 indexes contract prices to the modelled
+    year;
+  - tariff, connection-fee, export-price, opex, fuel and commodity lines are in the **base year**,
+    and so are the counterfactual lines, the C5 pair and the None marker lines. P2 does not
+    escalate these between periods, so the engine escalates them once, from the base year;
+  - `Template.money_year` stays the period year: the default for contract lines, and what
+    solve-for-PPA reports.
+
 ## WP4.6b Finance inputs route, runner, study routes, persistence
 
 - **Storage:** `solver_config.finance` (a dict, `FinanceInputs` JSON); **excluded from the solve digest**

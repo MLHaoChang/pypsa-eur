@@ -22,11 +22,26 @@ What it builds:
   8,760 (8,784 in a leap weight-majority year), else refused
   `template_not_annual:<hours>`; `fin.annualise` scales every template line
   (actual and counterfactual) and the energy by 8,760 / hours, flagged
-  `template_annualised:<factor>`.
+  `template_annualised:<factor>` — except a monthly-billed item (a demand
+  charge, a ratchet: billed once per month present), scaled by 12 / the
+  months present (`template_annualised_monthly:<item>:<factor>`), or None
+  when its periods are restricted to some months
+  (`annualise_monthly_item_not_established:<item>`). A leap weight-majority
+  year's 8,784-h template repeats every operating year (+0.27 % in common
+  years; stated).
 * **The templates (C3, P3 WP3.1 mapping)** — one per period (`first_year` =
   `money_year` = the period year; flat: the weight-majority year): the owner's
   `basis == "cash"` ledger lines (`annuity` / `model_only` are not converted),
-  signed from the owner (+ when it is the payee), `None` kept. Key
+  signed from the owner (+ when it is the payee), `None` kept; a line with an
+  unknown party that could be the owner is a None line
+  (`ledger_party_unknown:<key>`). Money years: contract lines in the period
+  year (P2 indexes them to it), every other line in the BASE year
+  (`TemplateLine.money_year`; P2 escalates nothing else between periods).
+  P3's blocking input flags (`participants._blocking`: drift, a partial
+  tariff, an unbilled period, an unsettled contract, an export split not
+  established) put a None line `ledger_input_not_established:<flag>` in every
+  period; the ledger's and the conservation check's flags join `case.flags`.
+  Key
   `<source>:<source_id>`, except contract lines, whose ledger `source_id`
   carries a settlement row index that differs between periods: they are keyed
   `contract:<id>:<P2 stream>` (stable across periods). Lines of one key in a
@@ -37,26 +52,41 @@ What it builds:
 * **Degradation links (C5)** — the export split (`LedgerInputs.export_split`,
   `export_revenue_to="asset_owner"`) is decomposed per owner Generator
   (`<key>:<asset>`, `degrades_with` the asset; the rest stays on `<key>`);
-  a pay-as-produced / sleeved PPA or a CfD on exactly one owner generator and
-  an owner generator's own vom / fuel line degrade with it; other
-  generation-linked lines are flagged `degradation_link_unknown:<key>`.
+  export with no split when the owner owns all site generation is split by
+  generation share (`export_degrades_by_generation_share:<key>`, first order:
+  stored-energy export degrades too); a pay-as-produced / sleeved /
+  as-consumed PPA, a CfD or a per-MWh-only EaaS on exactly one owner
+  generator, and an owner generator's own vom / fuel line degrade with it;
+  any other generation-linked line is a None line flagged
+  `degradation_link_unknown:<key>` (never an undegraded number), unless none
+  of its owner generators degrades.
   `energy_mwh` = the owner's GENERATORS' output for one year of the period
   (objective weights, which never carry the period's years), never storage.
 * **The counterfactual (C13)** — only when the owner is the site party (it
   pays the bill): per period the tariff bill rated by `billing.rate_meter` on
   the served load (site-side electric loads' demand − the actual DSR shed per
-  bus − the VoLL shed per load; export 0; shed disclosed
+  bus − the VoLL shed per load + the actual electric draw of non-owner site
+  conversion Links — a heat pump, an electrolyser —
+  `counterfactual_includes_conversion_load:<mwh>`; export 0; shed disclosed
   `load_shed_excluded:<mwh>`), the commodity on the meter basis (cross-checked
-  against the ledger's `commodity_from_grid_side_generator` line to a cent),
-  the owner's connection-fee lines copied, and the lines of contracts that
-  name none of the owner's assets copied (they would exist without the
-  investment; flagged `counterfactual_keeps_contract:<id>`). Contracts on the
-  owner's assets are absent.
+  against the ledger's `commodity_from_grid_side_generator` line to
+  max(a cent, 1e-9 relative)) KEYED LIKE the actual commodity line, the
+  owner's connection-fee lines copied, the cost lines of assets outside the
+  owner's copied (a boiler's gas), and the lines of contracts that name none
+  of the owner's assets copied (they would exist without the investment;
+  flagged `counterfactual_keeps_contract:<id>`). Contracts on the owner's
+  assets are absent. An owner conversion Link beside a non-electric site
+  load (the owner's heat pump) → `counterfactual_not_established:
+  owner_conversion_load`. `counterfactual_hash` = sha256[:16] of the tariff,
+  the served load, the connection and the commodity.
 * **The first-order bill effect of degradation (C5)** — per owner generator
-  with a degradation entry: S = (counterfactual − actual) energy-volume bill items +
-  commodity, g = its share of on-site generation; `bill_degradation:<a>` =
-  +S·g degrading with it and `bill_degradation_base:<a>` = −S·g: in operating
-  year k they net −S·g·(1 − f_k).
+  with a degradation entry: S = (counterfactual − actual) items billed per
+  kWh on the import volume (energy, levies, certificates — by volume basis,
+  not stream) + commodity, g = its share of on-site generation;
+  `bill_degradation:<a>` = +S·g degrading with it and
+  `bill_degradation_base:<a>` = −S·g (`source="degradation"`: value, never
+  an asset cost in the LCOE): in operating year k they net −S·g·(1 − f_k). A
+  negative S is flagged `degradation_bill_value_negative:<period>`.
 * **Assets (C6)** — `overnight_cost` = the TYPED `overnight_cost` column ×
   the optimised capacity, None when not typed (never back-calculated from the
   annuitised `capital_cost`).
@@ -92,12 +122,14 @@ from services.commercial import lp_bindings as _lp
 from services.commercial import participants as P
 from services.commercial.lp_bindings import same_party
 from services.finance.case import (
-    CONTRACT_CLASS, AssetFinance, FinanceCase, FinanceRefused, LpBasis, Template, TemplateLine,
+    CONTRACT_CLASS, DEGRADATION_SOURCE, AssetFinance, FinanceCase, FinanceRefused, LpBasis,
+    Template, TemplateLine,
 )
 from services.finance.cashflow import esc_class_for
 
 ANNUAL_TOL = 0.005                      # plan C3: within 0.5 % of a year
-COMMODITY_TOL = 0.01                    # plan C13: the ledger cross-check, a cent
+COMMODITY_TOL = 0.01                    # plan C13: the ledger cross-check, a cent …
+COMMODITY_REL_TOL = 1e-9                # … or relative, for a large ledger (review round 1)
 _EPS_MW = 1e-6
 
 _CAPACITY_COLS = {"Generator": "p_nom", "StorageUnit": "p_nom", "Store": "e_nom", "Link": "p_nom",
@@ -230,26 +262,46 @@ def _indexed_price(c, year: int) -> float | None:
     return _K.indexed(c.price, c.indexation_pct_per_year, c.base_year, year)
 
 
-def _contract_link(c, owner_gens: set[str]) -> tuple[bool, str | None]:
-    """(generation-linked, the degrading owner generator or None)."""
+def _contract_link(c, owner_gens: set[str]) -> tuple[bool, str | None, list[str]]:
+    """(generation-linked, the degrading owner generator or None, the owner
+    generators it names). A single-asset pay-as-produced, sleeved or
+    as-consumed PPA, a single-asset CfD and a per-MWh-only EaaS on one asset
+    degrade with that asset (as-consumed: first order — the consumed volume
+    falls with the generation; WP4.6a review B8)."""
     if c is None:
-        return False, None
+        return False, None, []
     t = getattr(c, "type", None)
     assets = list(getattr(c, "asset_ids", []) or [])
     on_owner = [a for a in assets if a in owner_gens]
     if not on_owner:
-        return False, None
+        return False, None, []
+    single = assets[0] if len(assets) == 1 else None
     if t == "ppa":
         if c.kind == "baseload":
-            return False, None                      # financial: a fixed MW, not the output
-        if c.kind in ("pay_as_produced", "sleeved") and len(assets) == 1:
-            return True, assets[0]                  # volume = the asset's generation
-        return True, None                           # as-consumed, or several assets
+            return False, None, on_owner            # financial: a fixed MW, not the output
+        if c.kind in ("pay_as_produced", "sleeved", "as_consumed_btm"):
+            return True, single, on_owner           # volume = the asset's (consumed) output
+        return True, None, on_owner
     if t == "cfd":
-        return True, (assets[0] if len(assets) == 1 else None)   # difference × generation
-    if t == "eaas" and c.fee_eur_per_mwh is not None:
-        return True, None                           # per MWh delivered, plus any fixed fee
-    return False, None
+        return True, single, on_owner               # difference × generation
+    if t == "eaas" and getattr(c, "fee_eur_per_mwh", None) is not None:
+        # Per MWh delivered: degrades with one asset when there is no fixed fee
+        # beside it on the same line.
+        fixed = getattr(c, "fee_eur_per_year", None) is not None
+        return True, (None if fixed else single), on_owner
+    return False, None, on_owner
+
+
+def _degrades(fin, assets) -> bool:
+    """Whether any of `assets` degrades (a missing entry counts: unknown)."""
+    for a in assets:
+        spec = fin.degradation_by_asset.get(a)
+        if spec is None:
+            return True
+        vals = spec if isinstance(spec, list) else [spec]
+        if any(float(v) != 0.0 for v in vals):
+            return True
+    return False
 
 
 @dataclasses.dataclass
@@ -271,19 +323,50 @@ class _Acc:
         self.amount = None if (self.amount is None or v is None) else self.amount + v
 
 
-def _owner_lines(ledger, inputs, owner: str, k: str, flags: list[str]) -> dict[str, _Acc]:
+def _could_involve(ln, owner: str, contracts: dict, owned_names: set[str]) -> bool:
+    """A line with an unknown party: could the unknown party be the owner?
+    A contract line — unless the contract is known, names none of the owner's
+    assets and does not name the owner as a party; an asset line — when the
+    asset is the owner's (or unnamed); any other line — yes (WP4.6a review B6)."""
+    if ln.source == "contract":
+        c = contracts.get(ln.contract_id)
+        if c is None:
+            return True
+        if any(a in owned_names for a in (getattr(c, "asset_ids", None) or [])):
+            return True
+        try:
+            parties = P._contract_parties(c)
+        except AttributeError:
+            return True
+        return any(p is not None and same_party(p, owner) for _r, p in parties)
+    if ln.source == "asset":
+        return ln.asset is None or ln.asset in owned_names
+    return True
+
+
+def _owner_lines(ledger, inputs, owner: str, k: str, flags: list[str], *,
+                 contracts: dict | None = None,
+                 owned_names: set[str] | None = None) -> dict[str, _Acc]:
+    """The owner's cash lines of period `k`, summed per key and signed from the
+    owner. A line with an unknown party that could be the owner is a None
+    line flagged `ledger_party_unknown:<key>` — never dropped (review B6)."""
+    contracts = contracts or {}
+    owned_names = owned_names or set()
     out: dict[str, _Acc] = {}
     for ln in ledger.periods.get(k, []):
         if ln.basis != "cash":
             continue                           # annuity / model_only: not converted (P3 pin)
         sign = _owner_sign(ln, owner)
-        if sign is None:
-            if ln.amount is None and ln.payer is None and ln.payee is None:
-                flags.append(f"ledger_line_party_unknown:{ln.source}:{ln.source_id}")
-            continue
         key = _line_key(ln, inputs)
-        v = None if ln.amount is None else sign * ln.amount
-        other = ln.payer if sign > 0 else ln.payee
+        if sign is None:
+            if (ln.payer is not None and ln.payee is not None) or \
+                    not _could_involve(ln, owner, contracts, owned_names):
+                continue                       # between other parties
+            flags.append(f"ledger_party_unknown:{key}")
+            v, other = None, (ln.payer or ln.payee or "unknown")
+        else:
+            v = None if ln.amount is None else sign * ln.amount
+            other = ln.payer if sign > 0 else ln.payee
         if key in out:
             out[key].add(v)
             out[key].flags += [f for f in ln.flags if f not in out[key].flags]
@@ -300,9 +383,15 @@ def _is_commodity(acc: _Acc) -> bool:
     return acc.source == "asset" and "commodity_from_grid_side_generator" in acc.flags
 
 
-def _template_lines(accs: dict[str, _Acc], *, k: str, year: int, inputs, vf, owner: str,
-                    owned: set[tuple[str, str]], owner_gens: set[str], contracts: dict,
+def _template_lines(accs: dict[str, _Acc], *, k: str, year: int, base_year: int, inputs, vf,
+                    owner: str, owned: set[tuple[str, str]], owner_gens: set[str],
+                    contracts: dict, fin, gen: dict[str, float | None],
+                    site_gens: list[str], gen_links: list[str],
                     flags: list[str]) -> list[TemplateLine]:
+    """The owner's template lines of one period. Money years (review B4):
+    contract lines stay in the template's (the period year — P2 indexes their
+    prices to it); every other line is in the BASE year (P2 does not escalate
+    tariffs, connection fees, export prices or costs between periods)."""
     split = (inputs.export_split or {}).get(k) or {}
     owners = {(o.component, o.asset_id): o.owner for o in vf.asset_owners}
     lines: list[TemplateLine] = []
@@ -310,25 +399,32 @@ def _template_lines(accs: dict[str, _Acc], *, k: str, year: int, inputs, vf, own
         base = dict(stream=a.stream, esc_class=a.esc_class, tariff_item=a.tariff_item,
                     counterparty=a.counterparty, source=a.source, source_id=a.source_id,
                     period=k)
-        sid = "export_price" if a.source == "export_price" else a.source_id
-        # The split was established for this source (possibly with no part
-        # of the owner's generation in it).
-        parts = split.get(sid) if a.source in ("export_price", "bill") else None
-        has_split = parts is not None
         if a.source == "contract":
             c = contracts.get(a.contract_id)
-            linked, asset = _contract_link(c, owner_gens)
+            linked, asset, on_owner = _contract_link(c, owner_gens)
+            amount = a.amount
             if linked and asset is None:
+                # Several assets, or a mixed fee: which generation scales it is
+                # not known — a None line, never an undegraded number (C12,
+                # review B8), unless none of its generators degrades.
                 flags.append(f"degradation_link_unknown:{key}")
+                if _degrades(fin, on_owner):
+                    amount = None
             pct = getattr(c, "indexation_pct_per_year", None) if c is not None else None
             stream_p2 = key.rsplit(":", 1)[-1]
             lines.append(TemplateLine(
-                key=key, amount=a.amount, contract_id=a.contract_id, degrades_with=asset,
+                key=key, amount=amount, contract_id=a.contract_id, degrades_with=asset,
                 indexation=None if pct is None else float(pct) / 100.0,
                 tenor_years=getattr(c, "tenor_years", None) if c is not None else None,
                 price=_indexed_price(c, year) if stream_p2 == "ppa_energy" else None,
                 changes_dispatch=bool(getattr(c, "changes_dispatch", False)), **base))
             continue
+        base["money_year"] = base_year
+        sid = "export_price" if a.source == "export_price" else a.source_id
+        # The split was established for this source (possibly with no part
+        # of the owner's generation in it).
+        parts = split.get(sid) if a.source in ("export_price", "bill") else None
+        has_split = parts is not None
         if has_split and a.amount is not None:
             # The export split per owner generator (C5): each part degrades
             # with its asset; the rest (storage export, no site generation,
@@ -348,15 +444,47 @@ def _template_lines(accs: dict[str, _Acc], *, k: str, year: int, inputs, vf, own
             if abs(rest) > 1e-9:
                 lines.append(TemplateLine(key=key, amount=rest, **base))
             continue
+        if a.stream == "energy_export" and owner_gens and a.amount is not None:
+            lines += _export_by_generation(key, a, base, fin=fin, gen=gen, site_gens=site_gens,
+                                           gen_links=gen_links, owner_gens=owner_gens,
+                                           flags=flags)
+            continue
         degrades = None
         if a.source == "asset" and not _is_commodity(a) and a.stream in ("vom", "fuel"):
             comp = a.source_id.split(":")[1] if a.source_id.count(":") >= 2 else None
             if comp == "Generator" and a.asset in owner_gens:
                 degrades = a.asset                  # Σ w·p·mc of the asset itself
-        if a.stream == "energy_export" and owner_gens:
-            flags.append(f"degradation_link_unknown:{key}")
         lines.append(TemplateLine(key=key, amount=a.amount, degrades_with=degrades, **base))
     return lines
+
+
+def _export_by_generation(key: str, a: _Acc, base: dict, *, fin, gen, site_gens, gen_links,
+                          owner_gens, flags) -> list[TemplateLine]:
+    """An export line with no per-asset split (C5, review B8). No site
+    generation in the period: storage export, nothing degrades. The owner owns
+    ALL site generation (Generators only): the line is split by each
+    generator's share of the period's generation, each part degrading with it
+    — first order, stated (`export_degrades_by_generation_share:<key>`; export
+    of stored energy is degraded with it). Otherwise (other parties'
+    generation, a converting Link) a None line `degradation_link_unknown`,
+    unless none of the owner's generators degrades."""
+    site_owner = [g for g in site_gens if g in owner_gens]
+    vals = [gen.get(g) for g in site_owner]
+    if any(v is None for v in vals):
+        flags.append(f"degradation_link_unknown:{key}")
+        return [TemplateLine(key=key, amount=None, **base)]
+    total = float(sum(vals))
+    all_owned = set(site_gens) <= owner_gens and not gen_links
+    if total <= 0.0 and all_owned:
+        return [TemplateLine(key=key, amount=a.amount, **base)]
+    if all_owned:
+        flags.append(f"export_degrades_by_generation_share:{key}")
+        return [TemplateLine(key=f"{key}:{g}", amount=a.amount * float(gen[g]) / total,
+                             degrades_with=g, **base)
+                for g in sorted(site_owner) if float(gen[g]) > 0.0]
+    flags.append(f"degradation_link_unknown:{key}")
+    amount = a.amount if not _degrades(fin, sorted(owner_gens)) else None
+    return [TemplateLine(key=key, amount=amount, **base)]
 
 
 # ── generation ───────────────────────────────────────────────────────────────
@@ -368,28 +496,36 @@ def _gen_frame(n, result_df) -> pd.DataFrame | None:
     return p
 
 
-def _generation(n, result_df, names, mask) -> dict[str, float]:
+def _generation(n, result_df, names, mask) -> dict[str, float | None]:
+    """Σ w·max(p, 0) per generator over the period (MWh); None when the
+    generator has no solved column or a NaN in it — never a silent 0."""
     p = _gen_frame(n, result_df)
     w = n.snapshot_weightings.objective.to_numpy(dtype=float)[mask]
-    out = {}
+    out: dict[str, float | None] = {}
     for g in names:
         if p is None or g not in p.columns:
-            out[g] = 0.0
+            out[g] = None
             continue
-        v = np.clip(p[g].reindex(n.snapshots).to_numpy(dtype=float)[mask], 0.0, None)
-        out[g] = float((w * v).sum())
+        v = p[g].reindex(n.snapshots).to_numpy(dtype=float)[mask]
+        out[g] = None if np.isnan(v).any() else float((w * np.clip(v, 0.0, None)).sum())
     return out
 
 
-def _site_generation(n, parsed, result_df, mask) -> float:
+def _site_generation(n, parsed, result_df, mask) -> float | None:
     """On-site electric generation of the period (MWh): the site's Generators
-    and converting Links, the export split's definition."""
+    and converting Links, the export split's definition; None when unknown."""
     gens = _lp.site_generators(n, parsed)
-    total = sum(_generation(n, result_df, gens, mask).values())
+    vals = list(_generation(n, result_df, gens, mask).values())
+    if any(v is None for v in vals):
+        return None
+    total = float(sum(vals))
     links = _lp.site_link_generation(n, parsed, lambda k: getattr(n.links_t, f"p{k}", None))
     if links is not None and not links.empty:
         w = n.snapshot_weightings.objective.to_numpy(dtype=float)[mask]
-        total += float((w[:, None] * links.clip(lower=0.0).to_numpy(dtype=float)[mask]).sum())
+        arr = links.to_numpy(dtype=float)[mask]
+        if np.isnan(arr).any():
+            return None
+        total += float((w[:, None] * np.clip(arr, 0.0, None)).sum())
     return total
 
 
@@ -538,17 +674,122 @@ def _non_owner_site_assets(n, parsed, sides, owned: set[tuple[str, str]]) -> lis
     return sorted(out)
 
 
-def _cf_none(key: str, flag: str, k: str) -> TemplateLine:
+def _conversion_draw(n, parsed, sides, owned) -> tuple[np.ndarray, list[str], list[str], bool]:
+    """Site conversion load (review B2): the electric draw of site Links that
+    take site electricity into a non-electric bus (a heat pump, an
+    electrolyser) — Σ over their ports on site-side electric buses of p_k
+    (PyPSA: + = withdrawn from the bus). Returns (the non-owner Links' draw MW
+    per snapshot, those Links, the OWNER's such Links, whether a draw is
+    unknown). Meter Links and converting (generating) Links are not load."""
+    electric = _lp._electric_bus_test(n, parsed)
+    meter = set(_lp.import_links(parsed)) | ({parsed.export_link} if parsed.export_link else set())
+    generating = set(_lp.site_generating_links(n, parsed))
+    draw = np.zeros(len(n.snapshots))
+    names: list[str] = []
+    owner: list[str] = []
+    unknown = False
+    for link in n.links.index:
+        name = str(link)
+        if name in meter or name in generating:
+            continue
+        ports = []
+        for k in range(5):
+            col = f"bus{k}"
+            if col in n.links.columns:
+                b = str(n.links.at[name, col]).strip()
+                if b and b != "nan":
+                    ports.append((k, b))
+        e_ports = [k for k, b in ports if b in sides.site and electric(b)]
+        if not e_ports or all(electric(b) for _k, b in ports):
+            continue                              # no site electric port, or a plain branch
+        if ("Link", name) in owned:
+            owner.append(name)
+            continue
+        tot = np.zeros(len(n.snapshots))
+        for k in e_ports:
+            df = getattr(n.links_t, f"p{k}", None)
+            if df is None or name not in getattr(df, "columns", []):
+                unknown = True
+                break
+            tot += df[name].reindex(n.snapshots).to_numpy(dtype=float)
+        else:
+            if np.isnan(tot).any():
+                unknown = True
+                continue
+            draw += tot
+            names.append(name)
+    return draw, sorted(names), sorted(owner), unknown
+
+
+def _s_items(tariff) -> set[str]:
+    """The C5 S items (review B7): billed per kWh on the IMPORT volume (an
+    import or net meter, a cost) — energy, levies, certificates alike; demand,
+    capacity and fixed charges are shaved by storage / the peak, not in
+    proportion to the generation, so they do not degrade with it."""
+    if tariff is None:
+        return set()
+    return {it.id for it in tariff.items
+            if it.unit == "per_kwh" and it.measured_on in ("import", "net")
+            and it.direction == "cost"}
+
+
+def _monthly_items(tariff) -> dict[str, bool]:
+    """Items billed per month on a peak (demand charges, ratchets; P3's
+    `demand_charge` stream) → whether their periods are restricted to some
+    months (then an annualised partial year cannot say what the other months
+    bill)."""
+    if tariff is None:
+        return {}
+    return {it.id: any(getattr(per, "months", None) for per in it.periods)
+            for it in tariff.items
+            if it.kind == "demand" or (it.measured_on == "peak_import" and it.kind != "capacity")}
+
+
+def _months_present(n, parsed, mask) -> int:
+    """Distinct billing months of the period's snapshots on the tariff clock
+    (as `bill_site` / `rate` see them)."""
+    ts = _times(n, mask)
+    idx = ts.tz_localize("UTC") if parsed.timezone and ts.tz is None else ts
+    local = idx.tz_convert(parsed.timezone) if (idx.tz is not None and parsed.timezone) else idx
+    return len(set(local.strftime("%Y-%m")))
+
+
+def _c5_pair(g: str, s: float | None, share: float | None, k: str, base_year: int,
+             flags: list[str]) -> tuple[TemplateLine, TemplateLine]:
+    """The first-order bill effect of `g`'s degradation (C5): +S·g degrading
+    with it and −S·g not; in operating year k they net −S·g·(1 − f_k). Marked
+    `DEGRADATION_SOURCE` (value, never the investment's own cost — review
+    B1). A negative S (the generation RAISES the volume bill) is flagged."""
+    v = None if (s is None or share is None) else s * share
+    if s is not None and s < 0:
+        flags.append(f"degradation_bill_value_negative:{k}")
+    common = dict(stream="energy_import", esc_class="tariff", source=DEGRADATION_SOURCE,
+                  source_id=g, period=k, money_year=base_year)
+    return (TemplateLine(key=f"bill_degradation:{g}", amount=v, degrades_with=g, **common),
+            TemplateLine(key=f"bill_degradation_base:{g}", amount=None if v is None else -v,
+                         **common))
+
+
+def _cf_none(key: str, flag: str, k: str, base_year: int) -> TemplateLine:
     return TemplateLine(key=key, stream="other", amount=None, esc_class="tariff",
-                        source="counterfactual", source_id=flag, period=k)
+                        source="counterfactual", source_id=flag, period=k, money_year=base_year)
+
+
+def _asset_of(a: _Acc) -> tuple[str, str] | None:
+    """(component, name) of an `asset:<stream>:<Component>:<name>` line."""
+    parts = a.source_id.split(":", 2)
+    return (parts[1], parts[2]) if len(parts) == 3 else None
 
 
 def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, dict[str, _Acc]],
                     templates_actual: dict[str, list[TemplateLine]], owned, contracts,
-                    lost_load, flags: list[str]) -> tuple[dict[str, list[TemplateLine]],
-                                                          dict[str, float | None]]:
+                    lost_load, base_year: int, flags: list[str]
+                    ) -> tuple[dict[str, list[TemplateLine]], dict[str, float | None], str]:
     """Per period the counterfactual lines and S (avoided import value:
-    counterfactual − actual import bill + commodity), for C5."""
+    counterfactual − actual per-kWh import items + commodity), for C5; and the
+    counterfactual's hash (C13)."""
+    from services.commercial import hashing as _H
+
     loads = _site_loads(n, parsed, sides)
     if _lossy_poc(n, parsed, sides, {str(n.loads.at[ld, "bus"]) for ld in loads}):
         raise FinanceRefused("counterfactual_not_established:lossy_poc",
@@ -559,16 +800,33 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
     shed_mwh = float((w_all * shed).sum())
     if shed_mwh > 0.0:
         flags.append(f"load_shed_excluded:{_num(shed_mwh)}")
+    # Site conversion load (review B2): it exists without the investment; P4
+    # does not re-dispatch, so its actual draw is the counterfactual's.
+    draw, converters, owner_conv, draw_unknown = _conversion_draw(n, parsed, sides, owned)
+    if converters:
+        served = np.clip(served + draw, 0.0, None)
+        flags.append(f"counterfactual_includes_conversion_load:{_num(float((w_all * draw).sum()))}")
+        flags.append("counterfactual_conversion_load_links:" + ",".join(converters))
     others = _non_owner_site_assets(n, parsed, sides, owned)
     blockers = [f"counterfactual_not_established:{r}" for r in shed_reasons]
     if others:
         blockers.append("counterfactual_not_established:non_owner_site_assets")
         flags.append("counterfactual_removes_non_owner_assets:" + ",".join(others))
+    if draw_unknown:
+        blockers.append("counterfactual_not_established:conversion_load_unknown")
+    electric = _lp._electric_bus_test(n, parsed)
+    if owner_conv and any(str(n.loads.at[ld, "bus"]) in sides.site
+                          and not electric(str(n.loads.at[ld, "bus"])) for ld in n.loads.index):
+        # The owner's heat pump (say) serves a non-electric load: the site
+        # without it has no stated source for that load.
+        blockers.append("counterfactual_not_established:owner_conversion_load")
+        flags.append("counterfactual_owner_conversion_links:" + ",".join(owner_conv))
     flags += blockers
 
     # The tariff bill on the served-load meter (C13; `rate_meter` = bill_site's rating).
     items = inputs.bill_items
     payees = P.resolve_tariff_payees(items, vf, inputs.retailer)
+    s_items = _s_items(parsed.import_tariff)
     bill = None
     if parsed.import_tariff is not None:
         bill = _billing.rate_meter(n, parsed, served, np.zeros(len(n.snapshots)))
@@ -592,16 +850,18 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
 
     out: dict[str, list[TemplateLine]] = {}
     avoided: dict[str, float | None] = {}
+    hash_commodity: dict[str, float | None] = {}
+    hash_connection: dict[str, list] = {}
     for p in _periods(n):
         k = _key(p)
         m = _mask(n, p)
         lines: list[TemplateLine] = []
         for b in blockers:
-            lines.append(_cf_none(f"counterfactual:{b.split(':', 1)[1]}", b, k))
+            lines.append(_cf_none(f"counterfactual:{b.split(':', 1)[1]}", b, k, base_year))
         if any(a.source == "allocation" for a in ledger_accs[k].values()):
             flags.append("counterfactual_not_established:hub_allocation")
             lines.append(_cf_none("counterfactual:hub_allocation",
-                                  "counterfactual_not_established:hub_allocation", k))
+                                  "counterfactual_not_established:hub_allocation", k, base_year))
         # bill
         cf_import_bill: float | None = 0.0
         act_import_bill: float | None = 0.0
@@ -615,30 +875,30 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
                 lines.append(TemplateLine(
                     key=f"bill:{item_id}", stream=stream, amount=None if v is None else -v,
                     esc_class=_esc(stream), tariff_item=item_id, counterparty=payees[item_id],
-                    source="bill", source_id=item_id, period=k))
-                # S counts the energy-volume items only (plan C5 review): demand,
-                # capacity and fixed charges are shaved by storage / the peak,
-                # not in proportion to the PV's energy, so they do not degrade
-                # with it.
-                if stream in ("energy_import", "network_energy"):
+                    source="bill", source_id=item_id, period=k, money_year=base_year))
+                # S counts the items billed per kWh on the import volume (plan
+                # C5; review B7: levies and certificates too, by volume basis).
+                if item_id in s_items:
                     a = (inputs.bill.get(k) or {}).get(item_id)
                     cf_import_bill = None if (cf_import_bill is None or v is None) \
                         else cf_import_bill + v
                     act_import_bill = None if (act_import_bill is None or a is None) \
                         else act_import_bill + a
-        # commodity
-        commodity = [a for a in ledger_accs[k].values() if _is_commodity(a)]
+        # commodity — keyed like the actual commodity line(s) (review B1), so
+        # the engine nets it as a saving, never an asset cost.
+        commodity = [(key, a) for key, a in ledger_accs[k].items() if _is_commodity(a)]
         cf_comm: float | None = 0.0
         act_comm: float | None = 0.0
         if commodity:
-            ledger_comm = None if any(a.amount is None for a in commodity) \
-                else -sum(a.amount for a in commodity)           # the site pays: > 0
+            ledger_comm = None if any(a.amount is None for _k, a in commodity) \
+                else -sum(a.amount for _k, a in commodity)           # the site pays: > 0
             reason = why
             if reason is None and mc is None:
                 reason = "no_priced_supply_generator"
             if reason is None:
                 actual = float((w_all[m] * imp_actual[m] * mc[m]).sum())
-                if ledger_comm is None or abs(actual - ledger_comm) > COMMODITY_TOL:
+                tol = max(COMMODITY_TOL, COMMODITY_REL_TOL * abs(ledger_comm or 0.0))
+                if ledger_comm is None or abs(actual - ledger_comm) > tol:
                     reason = "ledger_cross_check"
             if reason is None:
                 cf_comm = float((w_all[m] * served[m] * mc[m]).sum())
@@ -647,13 +907,32 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
                 cf_comm = act_comm = None
                 flags += ["counterfactual_commodity_not_established",
                           f"counterfactual_commodity_not_established:{reason}"]
-            lines.append(TemplateLine(
-                key="counterfactual:commodity", stream="energy_import",
-                amount=None if cf_comm is None else -cf_comm, esc_class="tariff",
-                counterparty="market", source="counterfactual", source_id="commodity", period=k))
-        # connection fees and the contracts that exist without the assets
+            amounts = [a.amount for _k, a in commodity]
+            tot = sum(amounts) if all(x is not None for x in amounts) else None
+            for key, a in commodity:
+                share = (a.amount / tot) if (tot not in (None, 0.0)) else 1.0 / len(commodity)
+                lines.append(TemplateLine(
+                    key=key, stream=a.stream, amount=None if cf_comm is None
+                    else -cf_comm * share, esc_class=a.esc_class, counterparty=a.counterparty,
+                    source="counterfactual", source_id="commodity", period=k,
+                    money_year=base_year))
+        elif supply and why is None and mc is not None and \
+                float((w_all[m] * served[m] * np.abs(mc[m])).sum()) > 0.0:
+            # The supply is priced but the actual side imports nothing: no
+            # ledger commodity line to key or cross-check the counterfactual's.
+            flags.append("counterfactual_commodity_omitted:no_actual_import")
+        hash_commodity[k] = cf_comm
+        # connection fees, the contracts that exist without the assets, and the
+        # costs of assets outside the owner's (they exist without it too —
+        # review B2); the commodity is the meter's, above.
+        not_owned = {key for key, a in ledger_accs[k].items()
+                     if a.source == "asset" and not _is_commodity(a)
+                     and _asset_of(a) not in owned}
         for ln in templates_actual[k]:
             if ln.source == "connection":
+                lines.append(ln)
+                hash_connection.setdefault(k, []).append([ln.key, ln.amount])
+            elif ln.source == "asset" and ln.key in not_owned:
                 lines.append(ln)
             elif ln.source == "contract":
                 c = contracts.get(ln.contract_id)
@@ -666,7 +945,21 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
         out[k] = lines
         avoided[k] = None if None in (cf_import_bill, act_import_bill, cf_comm, act_comm) else \
             (cf_import_bill + cf_comm) - (act_import_bill + act_comm)
-    return out, avoided
+    # C13: what the counterfactual was built from.
+    blob = {
+        "tariff": None if parsed.import_tariff is None else _H.digest(parsed.import_tariff),
+        "served_load": hashlib.sha256(np.ascontiguousarray(np.round(served, 9)).tobytes())
+        .hexdigest(),
+        "connection": {"agreement": None if parsed.connection is None
+                       else _H.digest(parsed.connection), "lines": hash_connection},
+        "commodity": {"supply": supply, "why": why,
+                      "mc": None if mc is None else hashlib.sha256(
+                          np.ascontiguousarray(np.round(mc, 9)).tobytes()).hexdigest(),
+                      "amount": hash_commodity},
+    }
+    cf_hash = hashlib.sha256(json.dumps(blob, sort_keys=True, default=str).encode()) \
+        .hexdigest()[:16]
+    return out, avoided, cf_hash
 
 
 # ── assets, dates ────────────────────────────────────────────────────────────
@@ -706,11 +999,20 @@ def _cod(fin, owned_list) -> date:
     return next(iter(dates))
 
 
-def _scale(lines, f: float) -> tuple[TemplateLine, ...]:
+def _scale(lines, f: float, monthly: dict[str, float | None] | None = None
+           ) -> tuple[TemplateLine, ...]:
+    """Annualise (C3): every line × f, except a monthly-billed item's lines
+    (`monthly`: item → 12 / the months present, or None when that cannot be
+    stated) — review B5."""
     if f == 1.0:
         return tuple(lines)
-    return tuple(dataclasses.replace(ln, amount=None if ln.amount is None else ln.amount * f)
-                 for ln in lines)
+    monthly = monthly or {}
+    out = []
+    for ln in lines:
+        fx = monthly[ln.tariff_item] if ln.tariff_item in monthly else f
+        amount = None if (ln.amount is None or fx is None) else ln.amount * fx
+        out.append(dataclasses.replace(ln, amount=amount))
+    return tuple(out)
 
 
 # ── the entry point ──────────────────────────────────────────────────────────
@@ -768,60 +1070,95 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                                  "annualise to scale it (stated as an approximation)")
 
     contracts = {c.id: c for c in parsed.contracts}
+    owned_names = {name for _c, name in owned_list}
+    base_year = info[_key(periods[0])][0]
+    site_gens = _lp.site_generators(n, parsed)
+    gen_links = _lp.site_generating_links(n, parsed)
+    gens: dict[str, dict[str, float | None]] = {}
+    site_total: dict[str, float | None] = {}
+    for p in periods:
+        m = _mask(n, p)
+        gens[_key(p)] = _generation(n, result_df, sorted(owner_gens), m)
+        site_total[_key(p)] = _site_generation(n, parsed, result_df, m)
     accs: dict[str, dict[str, _Acc]] = {}
     actual: dict[str, list[TemplateLine]] = {}
     for p in periods:
         k = _key(p)
-        accs[k] = _owner_lines(ledger, inputs, owner, k, flags)
-        actual[k] = _template_lines(accs[k], k=k, year=info[k][0], inputs=inputs, vf=vf,
-                                    owner=owner, owned=owned, owner_gens=owner_gens,
-                                    contracts=contracts, flags=flags)
+        accs[k] = _owner_lines(ledger, inputs, owner, k, flags, contracts=contracts,
+                               owned_names=owned_names)
+        actual[k] = _template_lines(accs[k], k=k, year=info[k][0], base_year=base_year,
+                                    inputs=inputs, vf=vf, owner=owner, owned=owned,
+                                    owner_gens=owner_gens, contracts=contracts, fin=fin,
+                                    gen=gens[k], site_gens=site_gens, gen_links=gen_links,
+                                    flags=flags)
 
     # C13: the counterfactual, when the owner is the site party that pays the bill.
     cf_lines: dict[str, list[TemplateLine]] = {}
     avoided: dict[str, float | None] = {}
+    cf_hash = None
     if same_party(owner, inputs.site_party):
         sides = P.classify_buses(n, parsed)
-        cf_lines, avoided = _counterfactual(n, cfg, parsed, sides, inputs, vf, accs, actual,
-                                            owned, contracts, lost_load, flags)
+        cf_lines, avoided, cf_hash = _counterfactual(n, cfg, parsed, sides, inputs, vf, accs,
+                                                     actual, owned, contracts, lost_load,
+                                                     base_year, flags)
+
+    # P3's blocking input flags make the money of every period unknown (P3:
+    # "the blocking ones make every period None"; review B3).
+    blocking = P._blocking(inputs.input_flags)
+    monthly_items = _monthly_items(parsed.import_tariff)
 
     # C5: degradation's first-order bill effect, per owner generator.
     templates, counterfactual = [], []
     for p in periods:
         k = _key(p)
         year, _hours = info[k]
-        m = _mask(n, p)
-        gen = _generation(n, result_df, sorted(owner_gens), m)
+        gen = gens[k]
         lines = list(actual[k])
+        for b in blocking:
+            lines.append(TemplateLine(key=f"ledger_input_not_established:{b}", stream="other",
+                                      amount=None, esc_class="opex", source="ledger_input",
+                                      source_id=b, period=k, money_year=base_year))
+        for g in sorted(owner_gens):
+            if gen[g] is None:
+                flags.append(f"generation_not_established:{g}")
+                lines.append(TemplateLine(key=f"generation_not_established:{g}", stream="other",
+                                          amount=None, esc_class="opex", source="generation",
+                                          source_id=g, period=k, money_year=base_year))
         if k in avoided:
-            site_total = _site_generation(n, parsed, result_df, m)
+            st = site_total[k]
             for g in sorted(owner_gens):
-                if g not in fin.degradation_by_asset or site_total <= 0 or gen[g] <= 0:
+                if g not in fin.degradation_by_asset or gen[g] is None or gen[g] <= 0 or \
+                        (st is not None and st <= 0):
                     continue
-                s = avoided[k]
-                v = None if s is None else s * gen[g] / site_total
-                common = dict(stream="energy_import", esc_class="tariff", source="degradation",
-                              source_id=g, period=k)
-                lines.append(TemplateLine(key=f"bill_degradation:{g}", amount=v,
-                                          degrades_with=g, **common))
-                lines.append(TemplateLine(key=f"bill_degradation_base:{g}",
-                                          amount=None if v is None else -v, **common))
-                flags += ["degradation_bill_first_order", "degradation_bill_energy_items_only"]
+                share = None if st is None else gen[g] / st
+                lines += _c5_pair(g, avoided[k], share, k, base_year, flags)
+                flags += ["degradation_bill_first_order", "degradation_bill_volume_items_only"]
         f = factors[k]
-        templates.append(Template(first_year=year, lines=_scale(lines, f),
-                                  energy_mwh={g: e * f for g, e in gen.items()},
+        monthly: dict[str, float | None] = {}
+        if f != 1.0 and monthly_items:
+            months = _months_present(n, parsed, _mask(n, p))
+            for item, restricted in monthly_items.items():
+                if restricted or months <= 0:
+                    monthly[item] = None
+                    flags.append(f"annualise_monthly_item_not_established:{item}")
+                else:
+                    monthly[item] = 12.0 / months
+                    flags.append(f"template_annualised_monthly:{item}:{_num(12.0 / months)}")
+        templates.append(Template(first_year=year, lines=_scale(lines, f, monthly),
+                                  energy_mwh={g: e * f for g, e in gen.items() if e is not None},
                                   money_year=year))
         if k in cf_lines:
-            counterfactual.append(Template(first_year=year, lines=_scale(cf_lines[k], f),
+            counterfactual.append(Template(first_year=year,
+                                           lines=_scale(cf_lines[k], f, monthly),
                                            money_year=year))
 
     if conservation.ok is False:
         flags.append("ledger_conservation_failed")
     elif conservation.ok is None:
         flags.append("ledger_conservation_not_established")
+    flags += list(ledger.flags) + list(conservation.flags)
 
     assets, rates = _assets(n, owned_list)
-    base_year = info[_key(periods[0])][0]
     lp = LpBasis(discount_rate=_fin(getattr(cfg, "discount_rate", None)),
                  inflation_rate=_fin(getattr(cfg, "inflation_rate", None)),
                  auto_discount_periods=bool(getattr(cfg, "auto_discount_periods", False)),
@@ -829,7 +1166,8 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
     return FinanceCase(inputs=fin, owner=owner, base_year=base_year, cod=_cod(fin, owned_list),
                        templates=tuple(templates), assets=assets,
                        flags=tuple(dict.fromkeys(flags)),
-                       counterfactual=tuple(counterfactual), lp_basis=lp)
+                       counterfactual=tuple(counterfactual), lp_basis=lp,
+                       counterfactual_hash=cf_hash)
 
 
 # ── the hash ─────────────────────────────────────────────────────────────────

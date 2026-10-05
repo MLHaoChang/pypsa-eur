@@ -396,6 +396,10 @@ def test_the_integration_fixture_end_to_end(reset_backend):
     irr = r.metrics["equity_post_tax_irr"]
     assert irr is not None and np.isfinite(irr)
     assert irr == pytest.approx(EQUITY_IRR_POST_TAX, abs=1e-5)
+    # LCOE (review B1): the PV + BESS's own costs are the BESS's vom only (the
+    # commodity and the C5 pair are no longer "asset costs"): 143.23 $/MWh,
+    # was 609.46 with the key mismatch.
+    assert r.metrics["lcoe_nominal_per_mwh"] == pytest.approx(143.23, abs=0.01)
 
     # C6 / C10 inputs and the hash.
     assets = {a.name: a for a in case.assets}
@@ -889,3 +893,21 @@ def test_b9_the_counterfactual_hash(reset_backend):
     assert _case(n, other, _fin(cod_by_asset={"pv": COD})).counterfactual_hash != h
     block = _counterfactual_block(run_case(case, layers=_layer()), case)
     assert block["hash"] == h
+
+
+def test_generation_with_no_solved_column_is_unknown_never_zero():
+    import pypsa
+
+    from services.results.finance_case import _generation
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=3, freq="h"))
+    n.add("Bus", "b")
+    n.add("Generator", "pv", bus="b", p_nom=1.0)
+    n.add("Generator", "ghost", bus="b", p_nom=1.0)
+    p = pd.DataFrame({"pv": [0.5, -0.1, np.nan]}, index=n.snapshots)
+    mask = np.ones(3, dtype=bool)
+    got = _generation(n, lambda _n, _c, _a: p, ["pv", "ghost"], mask)
+    assert got == {"pv": None, "ghost": None}
+    p.loc[p.index[2], "pv"] = 1.0
+    assert _generation(n, lambda _n, _c, _a: p, ["pv"], mask) == {"pv": pytest.approx(1.5)}
