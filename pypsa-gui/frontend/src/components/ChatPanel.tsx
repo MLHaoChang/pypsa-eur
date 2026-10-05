@@ -53,7 +53,7 @@ import ApiKeySetup from './ApiKeySetup'
 import ChatLaunchGreeting from './ChatLaunchGreeting'
 import { buildUiContext } from '../utils/uiContext'
 import { plainWords } from '../pages/hubDesign/plainWords'
-import { postChatRewind } from '../api/chat'
+import { getWorkflowMenu, postChatRewind, type ChoiceRequestFrame, type WorkflowContext, type WorkflowMenu } from '../api/chat'
 import * as speechOut from '../utils/speechOut'
 import { useUIStore, type UiMode } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
@@ -523,6 +523,72 @@ function UsageMeter() {
       {usage.input_tokens.toLocaleString()} in / {usage.output_tokens.toLocaleString()} out
       {' · '}{usage.cache_read_tokens.toLocaleString()} cached
     </span>
+  )
+}
+
+/**
+ * The Choice card (chat harness issue 04): what `ask_user` renders. A pick
+ * goes out as the next user message through the request queue — labelled
+ * "<title>: <option>" in the transcript — so the assistant's next turn
+ * starts with the answer. Nothing blocks on it: the user can equally type
+ * an answer, and the card goes away when the next turn starts.
+ */
+export function ChoiceCard() {
+  const choice = useChatStore((s) => s.choice)
+  const setChoice = useChatStore((s) => s.setChoice)
+  const sendRequest = useChatStore((s) => s.sendRequest)
+  const streaming = useChatStore((s) => s.streaming)
+  if (!choice) return null
+  const pick = (label: string) => {
+    sendRequest(label, { source: 'choice-card', label: `${choice.title}: ${label}` })
+    setChoice(null)
+  }
+  return (
+    <div
+      className="border border-accent/50 bg-accent/5 rounded p-3 mx-3 my-2"
+      data-testid="chat-choice-card"
+      role="group"
+      aria-labelledby="chat-choice-title"
+    >
+      <div id="chat-choice-title" className="text-sm font-medium mb-1 text-text"
+        data-testid="chat-choice-title">
+        {choice.title}
+      </div>
+      <div className="text-[12px] text-text/90 mb-2" data-testid="chat-choice-question">
+        {choice.question}
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {choice.options.map((o) => (
+          <button
+            key={o.label}
+            type="button"
+            disabled={streaming}
+            onClick={() => pick(o.label)}
+            data-testid="chat-choice-option"
+            data-recommended={o.recommended ? 'true' : undefined}
+            className={`text-left px-2.5 py-1.5 text-[12px] rounded border transition-colors disabled:opacity-50 disabled:pointer-events-none ${
+              o.recommended
+                ? 'border-accent/70 bg-accent/10 hover:bg-accent/20'
+                : 'border-border bg-bg-2/60 hover:bg-bg-3/50 hover:border-accent/40'
+            }`}
+          >
+            <span className="font-medium text-text">{o.label}</span>
+            {o.recommended && (
+              <span className="ml-2 text-[10px] uppercase tracking-wide text-accent"
+                data-testid="chat-choice-recommended">Recommended</span>
+            )}
+            {o.description && (
+              <div className="text-[11px] text-muted mt-0.5">{o.description}</div>
+            )}
+          </button>
+        ))}
+      </div>
+      {choice.allow_free_text && (
+        <div className="text-[11px] text-muted mt-2" data-testid="chat-choice-free-text">
+          Or type your own answer below.
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -1299,59 +1365,33 @@ function MessageActions({ message, streaming, onCopy, onRetry, onEdit }: {
   )
 }
 
-/** Starter prompts when no project is loaded. */
-const CHAT_STARTER_PROMPTS_UNBOUND: { label: string; text: string }[] = [
-  {
-    label: 'Open a project',
-    text: 'List my projects and open project_name',
-  },
-  {
-    label: 'Browse projects',
-    text: 'Open the project picker',
-  },
-]
+// The start menu (chat harness issue 03). The chips used to be three arrays
+// here; they are now the harness's workflow registry, served by
+// `GET /chat/workflows?context=…` so every LLM provider — and any future
+// external client — sees the same menu. What remains in the panel is the
+// mapping from where the user is to the registry's context, and the render.
 
-/** Starter prompts when a project is loaded but the conversation is empty. */
-const CHAT_STARTER_PROMPTS: { label: string; text: string }[] = [
-  {
-    label: 'Compare two scenarios',
-    text: 'Compare scenario_a vs scenario_b on total cost and open the compare rail',
-  },
-  {
-    label: 'Open Economics',
-    text: 'Open the Results Economics tab',
-  },
-  {
-    label: 'Summarize this solve',
-    text: 'Summarize the key results of the current project',
-  },
-]
-
-/** Starter prompts in Guided mode: only destinations Guided shows, plus the
- *  hub-design flow (guided-mode spec §10 addendum). */
-const CHAT_STARTER_PROMPTS_GUIDED: { label: string; text: string }[] = [
-  {
-    label: 'Open Hub design',
-    text: 'Open the Hub design panel',
-  },
-  // P26 gate: plain questions instead of "Check adequacy" / "Summarize this solve".
-  {
-    label: 'Explain my results',
-    text: 'Explain the results of my hub design study in plain language.',
-  },
-  {
-    label: 'What should I improve?',
-    text: 'What is the single most useful thing I can improve in my hub design, and why?',
-  },
-]
-
-/** The greeting chips for the current project and mode. */
-export function starterPromptsFor(
+/** Which start menu applies: no project → `unbound`; otherwise the UI mode. */
+export function workflowContextFor(
   currentProject: string | null,
   uiMode: UiMode,
-): { label: string; text: string }[] {
-  if (!currentProject) return CHAT_STARTER_PROMPTS_UNBOUND
-  return uiMode === 'guided' ? CHAT_STARTER_PROMPTS_GUIDED : CHAT_STARTER_PROMPTS
+): WorkflowContext {
+  if (!currentProject) return 'unbound'
+  return uiMode === 'guided' ? 'guided' : 'expert'
+}
+
+export const WORKFLOW_MENU_QUERY_KEY = ['chat', 'workflows'] as const
+
+/** The start menu for one context. `retry: false` and a quiet fetch: the
+ *  menu is a courtesy, and a backend that cannot serve it must not toast or
+ *  spin — the chips are simply absent, like every other greeting fact. */
+export function useWorkflowMenu(context: WorkflowContext) {
+  return useQuery<WorkflowMenu>({
+    queryKey: [...WORKFLOW_MENU_QUERY_KEY, context],
+    queryFn: () => getWorkflowMenu(context),
+    retry: false,
+    staleTime: 5 * 60_000,
+  })
 }
 
 // P25 gate B2 — a request a hub-design card sent shows its plain label; the
@@ -1385,13 +1425,14 @@ function UserMessageText({ message }: { message: ChatMessage }) {
   )
 }
 
-function ChatStarterChips({
+export function ChatStarterChips({
   prompts,
   onPick,
   disabled,
 }: {
-  prompts: { label: string; text: string }[]
-  onPick: (text: string) => void
+  /** `label` is the chip, `text` what a click sends, `title` the tooltip. */
+  prompts: { label: string; text: string; title?: string }[]
+  onPick: (prompt: { label: string; text: string }) => void
   disabled?: boolean
 }) {
   return (
@@ -1399,7 +1440,7 @@ function ChatStarterChips({
       className="m-3 mt-4"
       data-testid="chat-starter-chips"
     >
-      <div className="text-[11px] text-muted mb-2">Try asking</div>
+      <div className="text-[11px] text-muted mb-2">What would you like to do?</div>
       <div className="flex flex-wrap gap-1.5">
         {prompts.map((p) => (
           <button
@@ -1407,9 +1448,9 @@ function ChatStarterChips({
             type="button"
             disabled={disabled}
             className="px-2.5 py-1 text-[11px] rounded border border-border bg-bg-2/60 text-text hover:bg-bg-3/50 hover:border-accent/40 disabled:opacity-50 disabled:pointer-events-none transition-colors"
-            onClick={() => onPick(p.text)}
+            onClick={() => onPick(p)}
             data-testid="chat-starter-chip"
-            title={p.text}
+            title={p.title ?? p.text}
           >
             {p.label}
           </button>
@@ -1512,6 +1553,12 @@ export default function ChatPanel() {
     && (profileId == null || profileId === chatHealth.active_profile?.id)
 
   const currentProject = useUIStore((s) => s.currentProject)
+  // The start menu for where the user is (chat harness issue 03). Fetched
+  // whenever the panel is mounted so the chips are known by the time the
+  // greeting renders; a click goes through `sendRequest` like a card does.
+  const sendRequest = useChatStore((s) => s.sendRequest)
+  const setChoice = useChatStore((s) => s.setChoice)
+  const workflowMenu = useWorkflowMenu(workflowContextFor(currentProject, uiMode))
   // Read only for the autoscroll effect below — see the dependency-array
   // comment there for why AssistantDock's collapsed state has to be visible
   // here at all.
@@ -2159,6 +2206,8 @@ export default function ChatPanel() {
       case 'session_init': {
         const d = _frame_data<SessionInitFrame>(frame)
         setSessionId(d.session_id)
+        // A new turn answers (or moves past) any Choice card still showing.
+        setChoice(null)
         // The dropdown's fallback display (`profileId ?? active_profile_id`)
         // is only as fresh as its last fetch — refetch on every new session
         // so an admin's `set_active_profile` elsewhere, or a prior turn's A8
@@ -2291,6 +2340,17 @@ export default function ChatPanel() {
             tool_use_id: d.tool_use_id, tool_name: d.tool_name,
           })
         }
+        break
+      }
+      case 'choice_request': {
+        const d = _frame_data<ChoiceRequestFrame>(frame)
+        setChoice({
+          tool_use_id: d.tool_use_id,
+          title: d.title,
+          question: d.question,
+          options: Array.isArray(d.options) ? d.options : [],
+          allow_free_text: d.allow_free_text !== false,
+        })
         break
       }
       case 'ui_event': {
@@ -3080,15 +3140,19 @@ export default function ChatPanel() {
             above a live conversation is a header repeating what they have
             moved past. */}
         {messages.length === 0 && <ChatLaunchGreeting />}
-        {/* Discoverability chips: unbound → open/browse; bound → compare /
-            navigate / summarize. Click fills the composer for edit-before-send. */}
-        {messages.length === 0 && (
+        {/* The start menu: the harness's workflows for this context. A click
+            SENDS the workflow's opening request through the request queue,
+            labelled with the chip (owner decision Q10) — the same path the
+            hub-design cards use — so one click starts the flow. Absent until
+            the menu is known; never a spinner, never an error. */}
+        {messages.length === 0 && workflowMenu.data && workflowMenu.data.workflows.length > 0 && (
           <ChatStarterChips
-            prompts={starterPromptsFor(currentProject, uiMode)}
+            prompts={workflowMenu.data.workflows.map((w) => ({
+              label: w.title, text: w.opening_request, title: w.intent,
+            }))}
             disabled={streaming}
-            onPick={(text) => {
-              setInput(text)
-              requestAnimationFrame(() => textareaRef.current?.focus())
+            onPick={(p) => {
+              sendRequest(p.text, { source: 'start-menu', label: p.label })
             }}
           />
         )}
@@ -3151,6 +3215,7 @@ export default function ChatPanel() {
           </div>
           )
         })}
+        <ChoiceCard />
         <ConfirmationCard />
         <div ref={messagesEndRef} />
         </div>

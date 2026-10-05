@@ -1747,7 +1747,43 @@ TOOLS: list[dict[str, Any]] = [
         ["snapshot_iso"],
     ),
 
-    # ── Conversation (2) ───────────────────────────────────────────────────
+    # ── Harness: ask the user (chat harness issue 04) ──────────────────────────
+    _t(
+        "ask_user",
+        "Ask the user ONE structured question with options, rendered as a "
+        "Choice card in the chat. Use it whenever you need a decision from "
+        "the user — which project, which option, which value — instead of "
+        "asking in prose; mark exactly one option `recommended` and say why "
+        "in its description. Up to 8 options; free text is allowed unless "
+        "allow_free_text is false. This tool does NOT wait: it returns "
+        "{status: 'presented'} at once and the user's pick arrives as their "
+        "NEXT message (its text is the option label). So after calling it, "
+        "end your turn with at most one short sentence; do not call it "
+        "twice in one turn and do not guess the answer. Safety: read.",
+        {
+            "title": {"type": "string", "description": "The decision, as a short heading (Q1 — …)."},
+            "question": {"type": "string", "description": "Why it matters, one or two sentences."},
+            "options": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 8,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "label": {"type": "string"},
+                        "description": {"type": "string"},
+                        "recommended": {"type": "boolean"},
+                    },
+                    "required": ["label"],
+                },
+                "description": "The real alternatives; exactly one `recommended: true`.",
+            },
+            "allow_free_text": {"type": "boolean", "description": "Default true."},
+        },
+        ["title", "question", "options"],
+    ),
+
+# ── Conversation (2) ───────────────────────────────────────────────────
 
     _t(
         "list_chat_history",
@@ -2911,6 +2947,7 @@ TOOL_ROUTES: dict[str, list] = {
     "ui_select_component": _UI_EVENT,
     "ui_open_panel": _UI_EVENT,
     "ui_set_snapshot": _UI_EVENT,
+    "ask_user": _UI_EVENT,
     # conversation (2)
     "list_chat_history": _CHAT_JSONL,
     "clear_chat_history": _CHAT_JSONL,

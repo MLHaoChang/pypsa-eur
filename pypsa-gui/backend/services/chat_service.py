@@ -4557,7 +4557,21 @@ def _dispatch_real_tool_call(
     # sentinel from the Anthropic-facing tool_result payload.
     ui_event_payload: dict[str, Any] | None = None
     result_for_model = result
-    if isinstance(result, dict) and result.get("_ui_event"):
+    if isinstance(result, dict) and result.get("_ui_event") \
+            and result.get("kind") == "choice":
+        # `ask_user` (chat harness issue 04): a Choice card, not navigation.
+        # Its own frame so the panel renders a card rather than driving
+        # uiStore, and a compact acknowledgement for the model that says the
+        # answer is NOT in this result — it arrives as the next user message.
+        ui_event_payload = {"tool_use_id": tool_use_id}
+        ui_event_payload.update({k: v for k, v in result.items() if k != "_ui_event"})
+        result_for_model = {
+            "ok": True, "status": "presented", "awaiting": "user",
+            "title": ui_event_payload.get("title"),
+            "options": [o.get("label") for o in ui_event_payload.get("options", [])],
+        }
+        yield "choice_request", ui_event_payload
+    elif isinstance(result, dict) and result.get("_ui_event"):
         ui_event_payload = {
             k: v for k, v in result.items() if k != "_ui_event"
         }

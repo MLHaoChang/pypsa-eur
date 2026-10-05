@@ -44,6 +44,9 @@ FRAME_PAYLOADS: dict[str, tuple[str, ...]] = {
     "tool_error": ("tool_use_id", "tool_name", "error_kind", "message"),
     # UI control (a `_ui_event` tool result becomes a frame)
     "ui_event": ("kind",),
+    # `ask_user` (issue 04): the panel renders a Choice card; the pick is
+    # the next user message, so the turn does not block on it.
+    "choice_request": ("tool_use_id", "title", "question", "options", "allow_free_text"),
 }
 
 FRAMES: frozenset[str] = frozenset(FRAME_PAYLOADS)

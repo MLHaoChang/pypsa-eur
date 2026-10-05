@@ -667,6 +667,43 @@ def get_chat_profiles(
     }
 
 
+@router.get("/workflows")
+def get_chat_workflows(
+    context: Literal["unbound", "expert", "guided"] = "unbound",
+    project_kind: str | None = None,
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """
+    The start menu (chat harness issue 03): the workflows offered when a chat
+    opens in `context` — `unbound` (no project), `expert` or `guided` — in
+    menu order. The panel renders them as chips and sends `opening_request`
+    through its request queue, labelled with `title` (owner decision Q10).
+
+    Served from `harness.workflows` so the menu is one source of truth for
+    every provider and for any future external client; the three hardcoded
+    chip arrays the panel used to carry are gone. Nothing here depends on an
+    LLM profile or a key: the menu renders with no key configured, like the
+    launch greeting. Gated on "authenticated" like `/profiles`.
+    """
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    from harness import workflows
+
+    return {
+        "context": context,
+        "workflows": [
+            {
+                "id": wf.id,
+                "title": wf.title,
+                "intent": wf.intent,
+                "opening_request": wf.opening_request,
+                "steps": [{"id": s.id, "title": s.title} for s in wf.steps],
+            }
+            for wf in workflows.menu(context, project_kind)
+        ],
+    }
+
+
 def _recover_pending_turn(ctx: Any) -> dict[str, Any] | None:
     """
     Resolve the WAL record left by an interrupted turn (#20), or None.

@@ -3097,6 +3097,69 @@ def ui_set_snapshot(snapshot_iso: str, period: int | None = None) -> dict:
             "snapshot_iso": snapshot_iso, "period": period}
 
 
+# ── Harness: ask the user (chat harness issue 04) ──────────────────────────
+
+ASK_USER_MAX_OPTIONS = 8
+
+
+def ask_user(
+    title: str,
+    question: str,
+    options: list[dict],
+    allow_free_text: bool = True,
+) -> dict:
+    """
+    Present a structured question. Non-blocking by design (owner decision
+    Q4): the loop turns this marker into a `choice_request` frame, the panel
+    renders a Choice card, and the pick comes back as the next user message.
+    The model gets `{status: "presented"}` and is told to end its turn.
+
+    Validation is strict and typed (`invalid_tool_args`) because a half-built
+    card — no options, two recommendations — is worse than none.
+    """
+    def bad(message: str) -> HTTPException:
+        return HTTPException(status_code=422, detail={
+            "error_kind": "invalid_tool_args", "message": f"ask_user: {message}",
+        })
+
+    if not isinstance(title, str) or not title.strip():
+        raise bad("title must be a non-empty string")
+    if not isinstance(question, str) or not question.strip():
+        raise bad("question must be a non-empty string")
+    if not isinstance(options, list) or not options:
+        raise bad("options must be a non-empty list")
+    if len(options) > ASK_USER_MAX_OPTIONS:
+        raise bad(f"at most {ASK_USER_MAX_OPTIONS} options")
+    clean: list[dict] = []
+    seen: set[str] = set()
+    for i, opt in enumerate(options):
+        if not isinstance(opt, dict):
+            raise bad(f"option {i} must be an object")
+        label = str(opt.get("label") or "").strip()
+        if not label:
+            raise bad(f"option {i} needs a label")
+        if label.lower() in seen:
+            raise bad(f"option labels must be distinct ({label!r} repeats)")
+        seen.add(label.lower())
+        entry: dict[str, Any] = {"label": label[:120]}
+        desc = opt.get("description")
+        if isinstance(desc, str) and desc.strip():
+            entry["description"] = " ".join(desc.split())[:400]
+        if opt.get("recommended"):
+            entry["recommended"] = True
+        clean.append(entry)
+    if sum(1 for o in clean if o.get("recommended")) > 1:
+        raise bad("mark at most one option as recommended")
+    return {
+        "_ui_event": True,
+        "kind": "choice",
+        "title": " ".join(title.split())[:160],
+        "question": " ".join(question.split())[:800],
+        "options": clean,
+        "allow_free_text": bool(allow_free_text),
+    }
+
+
 # ── Conversation (2) ────────────────────────────────────────────────────────
 
 
@@ -5681,6 +5744,7 @@ DISPATCHERS: dict[str, Any] = {
     "ui_select_component": ui_select_component,
     "ui_open_panel": ui_open_panel,
     "ui_set_snapshot": ui_set_snapshot,
+    "ask_user": ask_user,
     # conversation (2)
     "list_chat_history": list_chat_history,
     "clear_chat_history": clear_chat_history,
