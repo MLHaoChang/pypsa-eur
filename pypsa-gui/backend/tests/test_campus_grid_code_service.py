@@ -218,6 +218,12 @@ def test_an_oversized_pdf_is_refused(hub, monkeypatch):
     assert _status(exc) == 413
 
 
+def test_a_pdf_exactly_at_the_size_and_page_caps_is_accepted(hub, monkeypatch):
+    monkeypatch.setattr(gc, "MAX_PDF_BYTES", len(PDF))
+    monkeypatch.setattr(gc, "MAX_PDF_PAGES", 2)
+    assert _upload(hub)["pages"] == 2
+
+
 def test_the_caps_are_the_apis(hub):
     # 32 MB is the API's request limit, and base64 grows a file by 4/3
     assert gc.MAX_PDF_BYTES * 4 / 3 < 32 * 1024 * 1024
