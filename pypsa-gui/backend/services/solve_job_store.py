@@ -17,6 +17,7 @@ behind this seam.
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from collections.abc import Iterable
 from datetime import datetime, timezone
@@ -389,7 +390,11 @@ def reconcile_on_boot() -> tuple[int, int]:
         would let a job that crashed the process crash-loop the boot.
       * every job left `queued` is re-enqueued under its own id and the
         dispatcher starts. That is the walk-away promise: a batch queued at
-        18:00 survives a restart at 18:05.
+        18:00 survives a restart at 18:05. The exception is a queued job whose
+        `storage_dir` is gone (a study fork swept at startup, a project
+        deleted on disk): it is marked `failed` with
+        `STORAGE_MISSING_CONDITION` and not restored, because the worker
+        could only fail it as an untyped `FileNotFoundError`.
 
     NEVER RAISES. Called from `lifespan`, where `ensure_schema` is local-mode
     only — in web mode Alembic is somebody else's deployment step, so the table
@@ -398,6 +403,7 @@ def reconcile_on_boot() -> tuple[int, int]:
     """
     interrupted = 0
     resumed = 0
+    storage_missing = 0
     try:
         from db.models import SolveJobRow
         from db.session import SessionLocal
@@ -417,6 +423,10 @@ def reconcile_on_boot() -> tuple[int, int]:
                 db.commit()
 
         for row in load_by_status(("queued",)):
+            if _storage_dir_gone(row):
+                _fail_storage_missing(row)
+                storage_missing += 1
+                continue
             _job, created = solve_queue.restore(row)
             if created:
                 resumed += 1
@@ -424,7 +434,46 @@ def reconcile_on_boot() -> tuple[int, int]:
         logger.exception("solve-queue boot reconciliation failed; continuing without it")
         return interrupted, resumed
     logger.info(
-        "solve-queue boot reconciliation: %d job(s) marked interrupted, %d resumed",
-        interrupted, resumed,
+        "solve-queue boot reconciliation: %d job(s) marked interrupted, %d resumed, "
+        "%d failed (project directory gone)",
+        interrupted, resumed, storage_missing,
     )
     return interrupted, resumed
+
+
+#: The `condition` a queued job gets at boot when its project directory is
+#: gone (a study fork swept while the process was down, a project deleted on
+#: disk). Typed, so the listing says why, instead of the worker's untyped
+#: `FileNotFoundError` under `queue_error` (gate S9 [N6]).
+STORAGE_MISSING_CONDITION = "project_storage_missing"
+
+
+def _storage_dir_gone(row: dict) -> bool:
+    """True when the row names a `storage_dir` that is no longer a directory.
+    A row with no `storage_dir` (a foreground or hand-made job) is not judged."""
+    storage_dir = row.get("storage_dir")
+    return bool(storage_dir) and not os.path.isdir(storage_dir)
+
+
+def _fail_storage_missing(row: dict) -> None:
+    """Mark the persisted row `failed` with `STORAGE_MISSING_CONDITION`. It is
+    never restored: there is nothing on disk to solve."""
+    from db.models import SolveJobRow
+    from db.session import SessionLocal
+
+    with SessionLocal() as db:
+        orm = db.get(SolveJobRow, row["id"])
+        if orm is None:
+            return
+        orm.status = "failed"
+        orm.finished_at = datetime.now(tz=timezone.utc)
+        orm.condition = STORAGE_MISSING_CONDITION
+        orm.error = (
+            "The project's directory no longer exists, so this queued solve "
+            "cannot run. Queue it again from the project if it still exists."
+        )
+        db.commit()
+    logger.warning(
+        "solve-queue boot reconciliation: job %s for project %r failed — its "
+        "storage_dir %r is gone", row["id"], row.get("project_id"), row.get("storage_dir"),
+    )
