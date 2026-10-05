@@ -105,7 +105,8 @@ it is needed.
 
 **The loop.**
 
-1. Start from C8's result: its choice and its dispatch.
+1. Start from C8's result: its choice and its dispatch (inverter Q
+   clipped into the polygon; C8 uses the whole circle).
 2. Linearise there and solve the MILP, with each limit tightened by
    ``beta_c x |e_c|`` (``e_c`` the last linearisation error of that
    constraint) and every continuous Q within ``Delta`` of the current one
@@ -402,8 +403,7 @@ class _Problem:
         self.f_hz = int(round(float(base.net.f_hz)))
         self.comp_bus = compensation_bus(base)
         self.skip = state.skip_buses
-        self.needs = [n for n in state.needs if n.kind in ("transformer", "reactive", "cable", "switchgear")
-                      and str(n.target.get("bus", "")) not in (self.skip if n.kind == "switchgear" else ())]
+        self.needs = [n for n in state.needs if n.kind in ("transformer", "reactive", "cable", "switchgear")]
         self.groups = {f"{n.target['hv_bus']}/{n.target['lv_bus']}" for n in self.needs if n.kind == "transformer"}
         # the inverters each hour may use, with their P (campus_reactive's rule)
         units = base.units
@@ -792,8 +792,10 @@ def _solve_milp(prob, lin, point, backoff, delta, penalty, cuts=(), free_switch=
         m.add_constraints(r - var + big * z <= delta + big)
 
     if inv:
-        lo = np.array([max(q_range(*prob.avail[v])[0], u0[i] - tr_delta) for i, v in enumerate(inv)])
-        hi = np.array([min(q_range(*prob.avail[v])[1], u0[i] + tr_delta) for i, v in enumerate(inv)])
+        # bounds: the circle (and a literal trust region); the polygon below is the capability
+        circle = np.array([math.sqrt(max(sv * sv - pv * pv, 0.0)) for pv, sv in (prob.avail[v] for v in inv)])
+        lo = np.maximum(-circle, u0 - tr_delta)
+        hi = np.minimum(circle, u0 + tr_delta)
         lo = np.minimum(lo, hi)
         u = m.add_variables(lower=lo, upper=hi, coords=[np.arange(len(inv))], dims=["v"], name="u")
         trust(u, u0, 4 * q_ref, "v")
@@ -953,14 +955,17 @@ def _penalty(prob, campus_spec):
 
 
 def _warm_start(prob, state):
-    """C8's final dispatch as a point on the MILP's options."""
+    """C8's final dispatch as a point on the MILP's options. C8 shares the
+    inverters' Q within their circle; here it is clipped into the polygon,
+    the MILP's capability."""
     choice = tuple(prob.x0)
     inv, stat, steps = {}, {}, {}
     rk = next((k for k in choice if prob.needs[prob.options[k].need].kind == "reactive"), None)
     for key, r in state.study.reactive.items():
         for u, q in r.unit_q.items():
             if (key, u) in prob.avail:
-                inv[(key, u)] = float(q)
+                lo, hi = q_range(*prob.avail[(key, u)])
+                inv[(key, u)] = min(max(float(q), lo), hi)
         for name, d in r.dispatch.items():
             if d["kind"] == "statcom":
                 stat[key] = stat.get(key, 0.0) + float(d["q_mvar"])

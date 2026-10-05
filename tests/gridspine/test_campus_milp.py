@@ -270,6 +270,9 @@ def test_the_milp_finds_the_joint_optimum_that_c8s_greedy_choice_misses(tmp_path
     h = out["milp_history"]
     assert h.iloc[0]["note"].startswith("C8") and h.iloc[0]["cost"] == pytest.approx(c8_cost)
     assert bool(h["feasible"].iloc[-1]) and h["cost"].iloc[-1] == pytest.approx(best[0])
+    # one discrete change (the transformer) and one switched step out: the
+    # linear model predicted the AC result to within a scale unit
+    assert h.iloc[1]["worst_lin_error"] < 1.0
 
 
 # --------------------------------------------------------------------------
@@ -446,3 +449,97 @@ def test_switchgear_is_costed_per_bay_of_the_joint_choice_and_the_pcc_is_a_study
     assert ("switchgear PCC" in inv.index) is pcc_switchgear
     assert ("switchgear PCC" in set(out["comparison"]["need"])) is pcc_switchgear
     assert out["scope"] == {"pcc_switchgear": "campus" if pcc_switchgear else "grid_operator"}
+
+
+def test_bays_a_choice_adds_are_priced_in_the_milp(tmp_path):
+    """Every inverter off and 50 MW at pf 0.85 behind a 100 MVA, 18 % unit: MV2
+    sits below 0.90 pu, and about 6 Mvar at MV1 lifts it (solved here). C8
+    escalates to one small bank, which its dispatch (for the PCC band, wide
+    here) leaves off, so C8 is unresolved. The MILP may take two small
+    banks (cheaper as banks) or one big one (cheaper with MV1's dear
+    switchgear, one bay fewer)."""
+    from gridspine.static.campus_milp import select_assets_milp
+
+    def v_min(q):
+        net = t50_net(50.0, 0.0)
+        net.trafo.at[0, "sn_mva"], net.trafo.at[0, "vk_percent"] = 100.0, 18.0
+        net.sgen["in_service"] = False
+        pp.create_shunt(net, 1, q_mvar=-q, p_mw=0.0)
+        pp.runpp(net)
+        return float(net.res_bus["vm_pu"].min())
+
+    assert v_min(0.0) < v_min(4.0) < 0.9 < v_min(8.0)                         # the oracle
+    lib = library(tmp_path, transformers=[tr("T100", 100.0, 1.5e6, vk=18.0)],
+                  capacitor_banks=[comp("capacitor_banks", "CAP_S", 4.0, 70e3), comp("capacitor_banks", "CAP_B", 8.0, 160e3)],
+                  switchgear=[sg("SG20", 20.0, 31.5, 200e3)])
+    spec = single_spec()
+    spec["campus"]["units"]["DC_LOAD"]["pf"] = {"value": 0.85, "source": "assumed"}
+    table, sel = dark_hours((2030, 50.0))
+    c8 = select_assets(spec, table, sel, lib, WIDE, PROFILE)
+    assert c8["investment"].set_index("need").at["reactive", "library_id"] == "CAP_S" and c8["unresolved"]
+    out = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE, c8=c8)
+    bank = lambda capex: capex * (crf(RATE, 25) + 0.02)
+    bay = 200e3 * (crf(RATE, 40) + 0.01)
+    assert 2 * bank(70e3) < bank(160e3) < 2 * bank(70e3) + bay
+    cmp_ = out["comparison"].set_index("need")
+    assert cmp_.at["reactive", "milp_choice"] == "1 x CAP_B"
+    assert out["investment"].set_index("need").at["switchgear MV1", "units"] == 5    # T100, cable, battery, PV, bank
+    want = 1.5e6 * (crf(RATE, 40) + 0.01) + bank(160e3) + (5 + 3) * bay
+    assert out["summary"]["milp_cost"] == pytest.approx(want)
+    assert set(out["compliance"]["status_with_measures"]) <= {"pass", "not_rated"}
+    # priced right, the MILP never proposes the two small banks: no rejected
+    # step, and the loop converges instead of shrinking Delta to its floor
+    h = out["milp_history"]
+    assert out["summary"]["stop"] == "converged" and not h["choice"].str.contains("2 x CAP_S").any()
+
+
+def test_a_rated_pcc_left_to_the_grid_operator_constrains_nothing(tmp_path):
+    """The PCC rated far below its fault level (Ik'' about 15.7 kA against
+    5 kA): with the switchgear the grid operator's, C8 ignores it and so
+    does the MILP, which still finds the joint optimum."""
+    from gridspine.static.campus_milp import select_assets_milp
+    spec, table, sel, lib, req = joint_case(tmp_path)
+    spec["campus"]["pcc"]["ik_rated_ka"] = {"value": 5.0, "source": "datasheet"}
+    out = select_assets_milp(spec, table, sel, lib, req, PROFILE, pcc_switchgear=False)
+    assert out["fallback"] is None
+    h = out["milp_history"]
+    assert (h["slack"] == 0).all() and (h.loc[h["feasible"], "worst_violation"] == 0).all()
+    assert out["comparison"].set_index("need").at["transformer TR1", "milp_choice"] == "1 x T_B"
+    assert out["scope"] == {"pcc_switchgear": "grid_operator"}
+
+
+def test_the_battery_is_held_to_the_polygon_not_the_circle(tmp_path):
+    """The battery discharges at P = S cos^2(pi/8), midway between two
+    vertices, where the octagon allows 7.8 Mvar and the circle 11.5. The
+    grid holds the PCC at 1.05 pu, so the voltages hold. T_R is rated so
+    that it carries the hour with the margin only with Q beyond the
+    octagon, and passes every check with the circle's Q (solved here). The
+    MILP must not buy it."""
+    from gridspine.static.campus_milp import q_range, select_assets_milp
+    p_bess = 22.0 * math.cos(math.pi / 8) ** 2
+    q_poly, q_circle = q_range(p_bess, 22.0)[1], math.sqrt(22.0 ** 2 - p_bess ** 2)
+    assert q_circle - q_poly > 3.0
+
+    def at(q, rating):
+        net = t50_net(55.0, q)
+        net.trafo.at[0, "sn_mva"], net.ext_grid.at[0, "vm_pu"] = rating, 1.05
+        net.sgen.loc[net.sgen["name"] == "BESS1", "p_mw"] = p_bess
+        pp.runpp(net)
+        return net
+
+    rating = round(1.2 * (s_t50(at(q_poly, 60.0)) + s_t50(at(q_circle, 60.0))) / 2, 2)
+    inside, outside = at(q_poly, rating), at(q_circle, rating)
+    assert s_t50(inside) * 1.2 > rating > s_t50(outside) * 1.2                     # the oracle
+    assert outside.res_bus["vm_pu"].between(0.9, 1.1).all() and outside.res_trafo.at[0, "loading_percent"] < 100
+    spec, table, sel, lib = transformer_case(tmp_path, load=55.0)
+    table.loc[table["unit_id"] == "BESS1", "p_mw"] = p_bess
+    lib["transformers"] = [tr("T_R", rating, 1.1e6), tr("T80", 80.0, 1.5e6)]
+    spec["campus"]["pcc"]["vm_pu"] = {"value": 1.05, "source": "assumed"}
+    c8 = select_assets(spec, table, sel, lib, WIDE, PROFILE)
+    assert c8["investment"].set_index("need").at["transformer TR1", "library_id"] == "T80"
+    out = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE, c8=c8)
+    assert out["investment"].set_index("need").at["transformer TR1", "library_id"] == "T80"
+    h = out["milp_history"]
+    assert not h.loc[h["choice"].str.contains("T_R"), "feasible"].any()
+    q = out["dispatch"].loc[out["dispatch"]["element"] == "inverters", "q_mvar"].abs()
+    assert (q <= q_poly + 1e-6).all()
