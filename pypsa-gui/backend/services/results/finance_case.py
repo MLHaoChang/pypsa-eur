@@ -858,7 +858,9 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
         lines: list[TemplateLine] = []
         for b in blockers:
             lines.append(_cf_none(f"counterfactual:{b.split(':', 1)[1]}", b, k, base_year))
+        blocked = bool(blockers)
         if any(a.source == "allocation" for a in ledger_accs[k].values()):
+            blocked = True
             flags.append("counterfactual_not_established:hub_allocation")
             lines.append(_cf_none("counterfactual:hub_allocation",
                                   "counterfactual_not_established:hub_allocation", k, base_year))
@@ -943,7 +945,11 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
                     lines.append(ln)
                     flags.append(f"counterfactual_keeps_contract:{ln.contract_id}")
         out[k] = lines
-        avoided[k] = None if None in (cf_import_bill, act_import_bill, cf_comm, act_comm) else \
+        # A blocked counterfactual leaves S unknown too: its bill-item sum alone
+        # would carry a number (even a negative one) into the C5 pair (C12;
+        # WP4.6a review round 2).
+        avoided[k] = None if blocked or None in (cf_import_bill, act_import_bill, cf_comm,
+                                                 act_comm) else \
             (cf_import_bill + cf_comm) - (act_import_bill + act_comm)
     # C13: what the counterfactual was built from.
     blob = {

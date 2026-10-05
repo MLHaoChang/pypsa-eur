@@ -726,6 +726,11 @@ def test_b2_site_conversion_load_and_non_owner_asset_costs(reset_backend, site):
     if site == "owner_heat_pump":
         assert "counterfactual_not_established:owner_conversion_load" in case.flags
         assert _lines(cf)["counterfactual:owner_conversion_load"].amount is None
+        # S is unknown with it: the C5 pair carries no number (WP4.6a review
+        # round 2 — S·g was −1,080,400, "raising" the owner's cash as pv degrades).
+        assert _lines(t)["bill_degradation:pv"].amount is None
+        assert _lines(t)["bill_degradation_base:pv"].amount is None
+        assert not any(f.startswith("degradation_bill_value_negative") for f in case.flags)
         return
     act, cfl = _lines(t), _lines(cf)
     if site == "heat_pump":

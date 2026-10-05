@@ -36,8 +36,8 @@ from the product's code; the product is only the thing under test.
      adapter: bill, demand and commodity on both sides, the incremental cash
      557,700 $/yr, the C5 energy term S = 503,700, year 2, the LCOE 176.18
      $/MWh (WP4.6a review B1), and two review variants: + a per-kWh levy (S
-     547,500 — B7) and + a non-owner heat pump (incremental 725,600 or flagged
-     — B2).
+     547,500 — B7) and + a non-owner heat pump (incremental 725,600, its draw
+     disclosed — B2).
   I. The integration fixture (`build_edge_hourly_year`) through the routes:
      PUT the commercial config, the value flows and the finance inputs
      (If-Match; a stale tag 412s) → solve → `/results/value_flows` closes →
@@ -882,11 +882,15 @@ def scenario_h() -> None:
     if case2 is not None:
         r2 = run_case(case2, layers=_layer())
         n2 = r2.op_incremental["net"]
-        flagged = any(f.startswith("counterfactual_not_established") for f in case2.flags)
+        flagged = any(f.startswith("counterfactual_includes_conversion_load:")
+                      for f in case2.flags)
         v = None if n2 is None else float(n2[1])
-        _step("H/heat pump: incremental = 725,600 by hand, or not established and flagged "
+        # The adapter includes the draw (WP4.6a round 1, B2): the number, disclosed
+        # (the "or not established" alternative dropped after round 2).
+        _step("H/heat pump: incremental = 725,600 by hand, the draw disclosed "
               "[WP4.6a review B2]",
-              (v is not None and _cent(v, hh["incremental"])) or (v is None and flagged),
+              v is not None and _cent(v, hh["incremental"])
+              and abs(hh["incremental"] - 725_600.0) < 1e-6 and flagged,
               f"{v} vs {hh['incremental']:,.2f}; flags "
               f"{[f for f in case2.flags if 'counterfactual' in f]}")
 

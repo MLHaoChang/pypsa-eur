@@ -278,7 +278,7 @@ def _project_payload(result, case) -> dict[str, Any]:
         "incremental_net": _series(result.op_incremental.get("net")),
         "counterfactual_net": _series(result.op_incremental.get("counterfactual")),
         "has_counterfactual": bool(case.counterfactual),
-        "operating_status": dict(getattr(result.op, "status", {}) or {}),
+        "operating_status": _operating_status(result),
         "incentives_status": result.sections.get("incentives"),
         "incentives": [{"kind": ln.kind, "assets": list(ln.assets), "share": _num(ln.share),
                         "rate": _num(ln.rate), "cash": _series(ln.cash)}
@@ -291,6 +291,18 @@ def _project_payload(result, case) -> dict[str, Any]:
         "cfads_definition": CFADS_DEFINITION,
         "flags": list(result.flags),
     }
+
+
+def _operating_status(result) -> dict[str, str]:
+    """The operating stage's sub-statuses, with the terminal value as the
+    ENGINE resolved it: the cash stage defers a book value (it needs the tax
+    basis) and an EBITDA multiple (it needs the incremental EBITDA), so its own
+    `terminal` status reads not established where the engine then established
+    it (WP4.7 review round 2)."""
+    status = dict(getattr(result.op, "status", {}) or {})
+    if "terminal" in status and getattr(result, "terminal", None) is not None:
+        status["terminal"] = "ok"
+    return status
 
 
 def _counterfactual_block(result, case) -> dict[str, Any]:

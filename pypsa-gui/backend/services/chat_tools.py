@@ -2438,7 +2438,7 @@ def _ic_min_dscr_year(report: dict, top: int) -> dict:
     p = _section(report, "project").get("payload") or {}
     years = [int(y) for y in p.get("years") or []]
     dscr = dp.get("dscr") or []
-    cands = [(v, i) for i, v in enumerate(dscr) if v is not None]
+    cands = [(float(v), i) for i, v in enumerate(dscr) if _ne(v) != _NE]   # NaN-safe
     if d.get("status") != "ok" or not cands or not years:
         return {"status": "not_established",
                 "reason": str(d.get("note") or "no debt service, so no DSCR")[:300]}

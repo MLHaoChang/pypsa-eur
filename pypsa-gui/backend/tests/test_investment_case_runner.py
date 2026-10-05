@@ -303,6 +303,9 @@ def test_b2_each_years_lines_sum_to_the_post_tax_equity_cash(terminal):
     if terminal != "none":
         tv_lines = [ln for ln in rep.cashflow_lines if ln.value_stream == "terminal_value"]
         assert tv_lines and tv_lines[-1].year == years[-1]
+    # The payload's terminal status is the engine's resolution, not the cash
+    # stage's deferral (WP4.7 review round 2).
+    assert rep.sections["project"].payload["operating_status"]["terminal"] == "ok"
 
 
 def test_b6_the_counterfactual_block_and_one_cfads_definition():

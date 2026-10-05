@@ -1262,6 +1262,17 @@ The `GET …/export.xlsx` route lands with WP4.6b.
   - `Template.money_year` stays the period year: the default for contract lines, and what
     solve-for-PPA reports.
 
+**WP4.6a review round 2 (30312a0): PASS.** B1–B9 re-probed and confirmed (F6 LCOE 176.18 by hand; the
+non-owner heat pump 725,600 by hand; the boiler 557,700; the drift case not established; no money-year step;
+the 7-day demand ×12; S with the levy 547,500; each degradation-link case; the hash). The three stated limits
+were judged acceptable. The P4 driver's F6, LCOE, bill and F1/F4 oracles were spot-checked as independent
+arithmetic; its integration IRR is a pin and its LCOE check verifies the definition, labelled as such.
+- **Taken:** S is None when the counterfactual is blocked (any blocker or a hub allocation) — its bill-item
+  sum alone put a number, even a negative one, into the C5 pair (tested on the owner heat pump); the
+  driver's heat-pump step now requires 725,600 with the draw disclosed.
+- **Not taken (P5):** `ledger_conservation_failed` as a None line (a flag today, as in P3); narrowing B3 to
+  the contracts that can involve the owner.
+
 ## WP4.6b Finance inputs route, runner, study routes, persistence
 
 - **Storage:** `solver_config.finance` (a dict, `FinanceInputs` JSON); **excluded from the solve digest**
@@ -1334,6 +1345,24 @@ headline mappings, the export's filename and injection guard and the C1 import b
   `test_chat_tools_endpoint_map.py`, `test_chat_tools_identity.py`; error kinds in `tool-error-kinds.json`
   (and the FE manifest test).
 
+**WP4.6c review round 1 (0f4e664): PASS WITH CONDITIONS; fixed (2dc2167).** Confirmed: `explain_cashflow`
+reconciles on four rich cases (counterfactual once, CFADS split = the debt payload's, rate = the payload's
+cost of equity); the size caps hold under hostile text; paging is complete and deterministic;
+`solve_ppa_price` never mutates state, even on an engine exception; the campaign charges 0 solves and a
+refusal nothing.
+- **F1 (C12):** the cashflow pages left out a not-established line and still said the lines sum to the
+  equity cash. Now `equity_post_tax_cash` and `lines_not_established`, and the sentence only when it holds.
+- **F2:** `solve_ppa_price` built with `owner=None` (refused on a multi-owner site; a different case from
+  the report). It takes `owner`, defaulting to the last run's (record, else the report's provenance).
+- **F3:** the min-DSCR year was not the earliest on a tie. Fixed, and the test oracle with it.
+- **F4:** a stored NaN / inf amount reached the model as `NaN`. Now "not established"; the attribution says
+  not established.
+- **Non-binding, taken:** an unknown solve status maps to `investment_case_refused` (not "no root"); the
+  schema lists every refusal.
+
+**WP4.6c review round 2 (2dc2167): PASS.** F1–F4 confirmed (895 tests on the reviewer's copy). Its one
+hardening item (NaN-safe DSCR candidates) taken.
+
 ## WP4.6d xlsx export
 
 - `export_xlsx.py` (openpyxl, the `asset_results` pattern): one sheet per section, `CashflowLines`, and
@@ -1382,6 +1411,13 @@ Round-1 B1, B3 and B4 confirmed fixed; tsc clean; real report dumps render with 
   showed as +40). They get their own "avoided vs counterfactual · <stream>" columns with a caption; the CSV
   gains `source`, `source_id` and `contract_id`.
 - **Non-binding, taken:** the fallback stale text names the solver config.
+
+**WP4.7 review round 3 (f32d63e): PASS.** R2-1 and R2-2 confirmed on real report dumps (totals = the
+engine's equity cash including a book-value terminal; no tax → "not established"; a removed line named as a
+mismatch; the avoided-cost column apart). Taken: the reason reads "the tax section: …"; the backend's
+`operating_status.terminal` now reports the engine's resolution (it read not established after the engine
+resolved a book value). Not taken: rows from `payload.years` for an all-zero year (the backend omits zero
+lines; such a year is rare and its total is still the engine's).
 
 ---
 
