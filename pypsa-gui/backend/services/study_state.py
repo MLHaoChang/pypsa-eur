@@ -27,6 +27,7 @@ not a guard.
 from __future__ import annotations
 
 from services.project_context import (
+    LIVE_NETWORK_STUDIES,
     STUDY_KEYS,
     STUDY_LABELS,
     record_is_running,
@@ -37,8 +38,10 @@ from services.pypsa_service import PyPSAService
 # study record, RE-EXPORTED from `project_context` (which owns the list, beside
 # RESULT_STATE_KEYS — see the note there). Order is the order a blocked caller
 # is told about them, so the cheapest-to-explain blocker comes first.
-__all__ = ["STUDY_KEYS", "STUDY_LABELS", "record_is_running", "study_running",
-           "running_study", "blocking_study_detail"]
+__all__ = ["STUDY_KEYS", "STUDY_LABELS", "LIVE_NETWORK_STUDIES",
+           "record_is_running", "study_running", "running_study",
+           "blocking_study_detail", "study_in_flight_detail",
+           "refuse_edit_during_live_study"]
 
 # What each study is called in a 409 message. A user who is told "a study is
 # running" cannot act; one who is told WHICH can go and abort it.
@@ -84,3 +87,68 @@ def blocking_study_detail() -> str | None:
             "network between its own solves — a foreground solve now would "
             "silently change the plan it is measuring. Wait for it to finish, "
             "or abort it.")
+
+
+def study_in_flight_detail(state, doing: str, *,
+                           keys=STUDY_KEYS) -> dict | None:
+    """The structured 409 for an action a live study forbids, or None.
+
+    Whole-branch review, findings S5 and M12. Save and activate gated on
+    `_solver_in_flight` only — a study's worker is never `state["thread"]` —
+    while load, import, template and reset were guarded (Phase 11). A save
+    landing between a sweep's lock-free contingency mutations exported the
+    CONTINGENCY network, and its `results_state.pkl` with the contingency's
+    lost load, as the user's project; and a switch left the study running on
+    a project the user could no longer see or abort. Same shape as the
+    in-flight refusal so the chat agent and the frontend read one field.
+
+    ``keys`` narrows which studies count (P27a: an edit is refused only by
+    ``LIVE_NETWORK_STUDIES``); the order a blocked caller is told about them
+    stays STUDY_KEYS' order. Moved here from ``routers/projects.py`` so the
+    network-edit handlers can raise the same dict without importing a router.
+    """
+    if not state:
+        return None
+    key = None
+    for k in STUDY_KEYS:
+        if k not in keys:
+            continue
+        try:
+            if record_is_running(state.get(k)):
+                key = k
+                break
+        except Exception:                                     # noqa: BLE001
+            continue
+    if key is None:
+        return None
+    label = STUDY_LABELS.get(key, key)
+    verb = doing.split()[0]
+    return {
+        "error_kind": "study_in_flight",
+        "study": key,
+        "message": (
+            f"Cannot {doing} while {label} is running — it re-solves the "
+            "in-memory network between its own iterates (a sweep applies each "
+            "contingency in turn; a loop re-solves under each candidate), so "
+            f"a {verb} now would act on a mid-study plan rather than yours. "
+            "Wait for it to finish, or abort it, and retry."
+        ),
+    }
+
+
+def refuse_edit_during_live_study() -> None:
+    """Raise the `study_in_flight` 409 when a live-network study is running on
+    the ACTING context (P27a, A1).
+
+    The chat tools call the network-edit handlers in process, so they never
+    meet `main.py`'s middleware; this is their chokepoint. The chat worker
+    copies contextvars, so `get_solver_state()` here is the acting project's
+    — a chat edit on project X is refused only by X's study.
+    """
+    from fastapi import HTTPException
+
+    detail = study_in_flight_detail(PyPSAService.get_solver_state(),
+                                    "edit the network",
+                                    keys=LIVE_NETWORK_STUDIES)
+    if detail:
+        raise HTTPException(status_code=409, detail=detail)

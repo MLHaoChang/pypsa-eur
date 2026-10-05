@@ -178,7 +178,12 @@ export interface SnapshotInfo {
   // from the network.
   freq?: string | null
 }
-export interface NetworkMeta { name: string; snapshot_count: number; bus_count: number }
+export interface NetworkMeta {
+  name: string; snapshot_count: number; bus_count: number
+  /** The project the backend is bound to (`null` for an unbound draft) —
+   *  the A2 mismatch check compares it with `currentProject`. */
+  loaded_project?: string | null
+}
 export interface SolverConfig {
   solver_name: string; mode: string; transmission_losses: boolean
   multi_investment_periods: boolean; solver_options: Record<string, unknown>

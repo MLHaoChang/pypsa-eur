@@ -262,6 +262,17 @@ RESULT_STATE_KEYS = (
 STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
              "eh_study")
 
+# The studies that re-solve the USER'S OWN network object in place, between
+# their iterates — so an edit landing mid-study is either overwritten by the
+# study's restore or measured as if it were the user's plan (P27a, A1). These
+# refuse component edits; the others do not, and the evidence is in the code:
+# `mc` snapshots the network under the lock and never mutates it
+# (`mc_loop_runner.py`, the `network.copy()` under `lock`), and `eh_study`
+# solves a private `network.copy()` (`eh_study.py`). A key added to STUDY_KEYS
+# must be classified here on purpose.
+LIVE_NETWORK_STUDIES = frozenset({"fmea_sweep", "frontier", "coupling_loop",
+                                  "margin_loop"})
+
 # What each study is called in a refusal. A user who is told "a study is
 # running" cannot act; one who is told WHICH can go and deal with it.
 STUDY_LABELS = {

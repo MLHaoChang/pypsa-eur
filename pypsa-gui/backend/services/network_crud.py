@@ -27,6 +27,7 @@ from services.asset_schema.schema import CLASS_ATTR
 from services.carrier_catalog import ensure_carrier
 from services.pypsa_service import PyPSAService
 from services.serialization import df_to_json
+from services.study_state import refuse_edit_during_live_study
 from services.user_timeseries import (
     _user_ts_delete_asset,
     _user_ts_rename_asset,
@@ -241,7 +242,18 @@ def _apply_investment_parts(n, component_class: str, name: str, parts: dict) -> 
                 discount_rate=effective_discount_rate(own_rate, _global_discount_rate()))
 
 
+def _refuse_edit_during_live_study() -> None:
+    """P27a (A1): the chat path's chokepoint. The chat tools reach these
+    handlers in process, never through `main.py`'s middleware, so a
+    live-network study (sweep, frontier, coupling / margin loop) refuses the
+    edit here with the same `study_in_flight` dict. The bus cascade / rename,
+    bulk and global-constraint handlers do not route through the three below
+    and call `study_state.refuse_edit_during_live_study` themselves."""
+    refuse_edit_during_live_study()
+
+
 def _create_component(component_class: str, attr: str, name: str, kwargs: dict) -> dict:
+    _refuse_edit_during_live_study()
     # Dispatch invalidation lives in the undo middleware (main.py) — it runs
     # after every successful /api/network/* mutation, so cascade-delete,
     # /bulk writes, rename, and global-constraint mutations all benefit
@@ -442,6 +454,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
     "PV"}` PUT would otherwise wipe `marginal_cost`, `p_nom`, etc. to schema
     defaults via the destructive remove+add cycle.
     """
+    _refuse_edit_during_live_study()
     n = PyPSAService.get_network()
     kwargs, submitted_parts = split_parts(component_class, kwargs)
     kwargs = _drop_unknown_extras(component_class, attr, kwargs)
@@ -509,6 +522,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
 
 
 def _delete_component(component_class: str, attr: str, name: str) -> None:
+    _refuse_edit_during_live_study()
     n = PyPSAService.get_network()
     with PyPSAService.get_lock():
         df = getattr(n, attr)
