@@ -54,3 +54,5 @@ reads the home's live value; the one loop reader left
 (`_dispatch_stub_call`'s ttl) reads `harness_session.CONFIRMATION_TTL_SECONDS`.
 36 test sites repointed across confirmation_gate_seam, e2e, profile_binding,
 sse and guided_write_confirmation. loop.py: 4,040 → 3,342 lines.
+
+2026-10-05 (gate for step 3, 5180c4c): 2912 passed, 5 skipped, 0 failed.

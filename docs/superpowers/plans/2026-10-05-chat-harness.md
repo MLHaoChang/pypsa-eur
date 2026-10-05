@@ -102,3 +102,4 @@ now scans `harness/` too and pins the moved catalogue at its new path.
 - Issue 08 (step 2): `fence`, `results`, `history`, `metrics` extracted; three tunables moved with their readers and seven test patch sites repointed; `MOVED_TUNABLES` tripwire.
   Gate after step 2: 2910 passed, 5 skipped, 0 failed (5439066).
 - Issue 08 (step 3): `ratelimit`, `session`, `confirm` extracted; six tunables moved; the loop forwards moved tunables (PEP 562) and reads the one it still needs by attribute; 36 test sites repointed; tripwires for forwarding and bare reads.
+  Gate after step 3: 2912 passed, 5 skipped, 0 failed (5180c4c).
