@@ -14,6 +14,11 @@ keeps everything under ``<project dir>/campus_electrical/``:
     The last run's settings: k, power factor, profile, margin, N-1.
 ``run/``
     The engine's run directory.
+``grid_codes/``
+    The project's own grid codes: uploaded documents, drafts and published
+    profiles (``services/campus_grid_code_service.py``, plan C10). A
+    published profile is offered next to the shipped ones and accepted by
+    ``run``.
 
 The functions:
 
@@ -69,6 +74,7 @@ CAMPUS_FILE = "campus_input.yaml"
 NOTES_FILE = "draft_notes.json"
 SETTINGS_FILE = "settings.json"
 NETWORK_FILE = "network.nc"
+GRID_CODES_SUBDIR = "grid_codes"
 MAX_CAMPUS_BYTES = 1_000_000
 DEFAULTS = {"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce", "margin": 0.2, "n_minus_1": True}
 
@@ -105,6 +111,21 @@ def campus_dir(project) -> Path:
     path = project_registry.ensure_project_dir(project) / SUBDIR
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def grid_codes_dir(project) -> Path:
+    """Where the project's grid codes live; its ``*.yaml`` are the published
+    profiles the engine loads next to the shipped ones."""
+    return campus_dir(project) / GRID_CODES_SUBDIR
+
+
+def profiles(project) -> dict:
+    """``{profile: title}`` a study of this project can be held to: the
+    shipped profiles and the project's published ones."""
+    try:
+        return cs.grid_code_profiles(extra_dirs=(grid_codes_dir(project),))
+    except ContractError as exc:
+        raise _unprocessable(exc)
 
 
 def _network(project) -> Path:
@@ -181,7 +202,7 @@ def get_state(project) -> dict:
     return {
         "campus_yaml": campus.read_text() if campus.is_file() else None,
         "skipped": json.loads(notes.read_text()) if notes.is_file() else [],
-        "profiles": cs.grid_code_profiles(),
+        "profiles": profiles(project),
         "settings": json.loads(settings.read_text()) if settings.is_file() else None,
         "results": results,
         "stale": bool(results) and _stale(project, d),
@@ -223,7 +244,7 @@ def save_campus(project, text: str) -> dict:
     return {"campus_yaml": text}
 
 
-def _settings(raw: dict) -> dict:
+def _settings(raw: dict, known: dict) -> dict:
     s = {**DEFAULTS, **{k: v for k, v in (raw or {}).items() if v is not None or k == "pf"}}
     unknown = sorted(set(s) - set(DEFAULTS))
     if unknown:
@@ -235,8 +256,8 @@ def _settings(raw: dict) -> dict:
         raise HTTPException(status_code=422, detail=f"pf must be in (0, 1], got {s['pf']!r}")
     if not isinstance(s["margin"], (int, float)) or not 0 <= s["margin"] <= 2:
         raise HTTPException(status_code=422, detail=f"margin must be between 0 and 2, got {s['margin']!r}")
-    if s["profile"] not in cs.grid_code_profiles():
-        raise HTTPException(status_code=422, detail=f"unknown grid-code profile {s['profile']!r}; known {sorted(cs.grid_code_profiles())}")
+    if s["profile"] not in known:
+        raise HTTPException(status_code=422, detail=f"unknown grid-code profile {s['profile']!r}; known {sorted(known)}")
     s["n_minus_1"] = bool(s["n_minus_1"])
     return s
 
@@ -248,7 +269,7 @@ def run(project, settings: dict) -> dict:
     campus = d / CAMPUS_FILE
     if not campus.is_file():
         raise HTTPException(status_code=422, detail="there is no campus file yet; draft one from the project or save your own")
-    s = _settings(settings)
+    s = _settings(settings, profiles(project))
     nc = _network(project)
     spec = yaml.safe_load(campus.read_text())
     run_dir = d / "run"
@@ -258,7 +279,7 @@ def run(project, settings: dict) -> dict:
                 cs.prepare_campus(run_dir, spec, nc)
             cs.rank_campus(run_dir, k=s["k"])
             cs.size_campus(run_dir, SizingCriteria(margin=float(s["margin"]), n_minus_1=s["n_minus_1"]),
-                           profile=s["profile"], pf=s["pf"])
+                           profile=s["profile"], pf=s["pf"], profile_dirs=(grid_codes_dir(project),))
         except ContractError as exc:
             raise _unprocessable(exc)
         (d / SETTINGS_FILE).write_text(json.dumps(s))
