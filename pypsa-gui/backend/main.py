@@ -79,6 +79,7 @@ from routers import (
     adequacy_worksheet,
     compare,
     gridspine,
+    campus_electrical,
     guides,
     io,
     library,
@@ -1175,6 +1176,9 @@ app.include_router(snapshots.router, prefix="/api/projects", tags=["snapshots"])
 # bundles, not the project's network, and every handler is a thin wrapper over
 # services/gridspine_service.py — the same functions the copilot's tools call.
 app.include_router(gridspine.router, prefix="/api/gridspine", tags=["gridspine"])
+# The campus electrical study of a hub project (gridspine campus engine, plan
+# C6): its own prefix, like gridspine's, for the same reason.
+app.include_router(campus_electrical.router, prefix="/api/campus-electrical", tags=["campus-electrical"])
 # Chatbot file uploads (Phase A) — per-project file storage at
 # `projects/<name>/uploads/`. Mounted under the same /api/projects prefix
 # so its routes (`/{name}/uploads`, `/{name}/uploads/{file_id}/...`) follow

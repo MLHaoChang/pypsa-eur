@@ -355,7 +355,7 @@ def _find(n, pypsa_name, kind, uid):
     return hits[0]
 
 
-def _solved(n) -> bool:
+def is_solved(n) -> bool:
     """A network carries dispatch results if any dispatch frame has a column."""
     frames = (("generators_t", "p"), ("storage_units_t", "p"), ("links_t", "p0"), ("loads_t", "p"))
     return any(len(getattr(getattr(n, ts, None), attr, pd.DataFrame()).columns) for ts, attr in frames)
@@ -397,7 +397,7 @@ def campus_hourly(n, campus):
     c = campus["campus"]
     periods = _periods(n)
     multi = isinstance(n.snapshots, pd.MultiIndex)
-    solved = _solved(n)
+    solved = is_solved(n)
     rows = []
     for uid, u in c["units"].items():
         pname = u.get("pypsa_name")
