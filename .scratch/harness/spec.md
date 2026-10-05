@@ -1,6 +1,6 @@
 # Chat harness — spec
 
-Status: ready-for-agent (phase 0 implemented; owner decisions Q1–Q14 taken 2026-10-05, see §8; phases 1–2 in progress)
+Status: ready-for-agent (phases 0–2 implemented 2026-10-05; owner decisions Q1–Q14 in §8; open: issues 08, 09, 11 and the issue-06 follow-up)
 Date: 2026-10-05
 Plan: `docs/superpowers/plans/2026-10-05-chat-harness.md`
 Context: `pypsa-gui` (vocabulary in `pypsa-gui/CONTEXT.md`; ADR-0002 and ADR-0004 apply)

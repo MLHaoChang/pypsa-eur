@@ -1783,6 +1783,46 @@ TOOLS: list[dict[str, Any]] = [
         ["title", "question", "options"],
     ),
 
+    _t(
+        "use_skill",
+        "Load a skill — a written procedure for one kind of request — and "
+        "follow it. The skills you can load are listed in your instructions "
+        "as `name — description`; load one only when the user's request "
+        "matches its description, then follow its text step by step. "
+        "Returns the procedure. Safety: read.",
+        {"name": {"type": "string", "description": "The skill's name, as listed."}},
+        ["name"],
+    ),
+
+    _t(
+        "start_workflow",
+        "Start one of the harness's workflows — a step-by-step flow you lead "
+        "(the start-menu chips name them; the ids are their slugs, e.g. "
+        "build-network, import-data, run-study, explain-results, "
+        "improve-design, hub-design, open-project). Sets the session's "
+        "current workflow and step and returns the first step's "
+        "instructions; from then on every turn carries the current step's "
+        "instructions until advance_workflow moves it or end_workflow clears "
+        "it. Safety: read.",
+        {"workflow_id": {"type": "string"}},
+        ["workflow_id"],
+    ),
+
+    _t(
+        "advance_workflow",
+        "Move the active workflow to another of its steps (normally the next "
+        "one, once the current step's 'done when' holds). Returns that "
+        "step's instructions. Safety: read.",
+        {"step": {"type": "string", "description": "A step id of the active workflow."}},
+        ["step"],
+    ),
+
+    _empty(
+        "end_workflow",
+        "Leave the active workflow (the user wants to do something else, or "
+        "the last step is done). Safety: read.",
+    ),
+
 # ── Conversation (2) ───────────────────────────────────────────────────
 
     _t(
@@ -2948,6 +2988,10 @@ TOOL_ROUTES: dict[str, list] = {
     "ui_open_panel": _UI_EVENT,
     "ui_set_snapshot": _UI_EVENT,
     "ask_user": _UI_EVENT,
+    "use_skill": _SERVICE_CALL,
+    "start_workflow": _SERVICE_CALL,
+    "advance_workflow": _SERVICE_CALL,
+    "end_workflow": _SERVICE_CALL,
     # conversation (2)
     "list_chat_history": _CHAT_JSONL,
     "clear_chat_history": _CHAT_JSONL,

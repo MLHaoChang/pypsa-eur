@@ -1,6 +1,6 @@
 # 04 — `ask_user` tool and the Choice card
 
-Status: ready-for-agent
+Status: ready-for-agent (done 2026-10-05: `ask_user`, `choice_request`, ChoiceCard)
 Type: task
 Blocked by: 01
 

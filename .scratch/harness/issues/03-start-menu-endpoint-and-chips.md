@@ -1,6 +1,6 @@
 # 03 — `GET /api/chat/workflows` and chips read from it
 
-Status: ready-for-agent
+Status: ready-for-agent (done 2026-10-05: `GET /api/chat/workflows`, chips send on click)
 Type: task
 Blocked by: 01
 

@@ -1,6 +1,6 @@
 # Plan: the chat harness — one folder for everything a model-agnostic assistant needs
 
-**Status:** v1.1, 2026-10-05. Phase 0 landed on `claude/amazing-mendel-m087zw`; owner decisions Q1–Q14 taken (spec §8); phases 1 and 2 in progress on the same branch.
+**Status:** v1.2, 2026-10-05. Phases 0, 1 and 2 landed on `claude/amazing-mendel-m087zw`; owner decisions Q1–Q14 taken (spec §8). Next: phase 3 (issues 08, 09) and the issue-06 follow-up (a `workflow_state` frame so the panel can show and restore the step).
 **Spec (contract-level):** [`.scratch/harness/spec.md`](../../../.scratch/harness/spec.md); issues under `.scratch/harness/issues/`.
 **Requested:** 2026-10-05. The assistant should connect to Claude, OpenAI/Codex, Kimi or any other model and not feel different: one harness of functions, workflows and skills that any model drives the same way; a chat opens with a menu of what the user can do; the assistant can run a grill-style interview with recommendations the user picks from; and all of it grouped in one folder instead of spread over files.
 **Builds on:** [`specs/2026-08-05-llm-provider-seam-design.md`](../specs/2026-08-05-llm-provider-seam-design.md) (the harness/provider split and the word "harness"), [`plans/2026-09-09-chat-turn-loop-decomposition.md`](2026-09-09-chat-turn-loop-decomposition.md) (how the loop is cut), [`specs/2026-09-27-guided-mode.md`](../specs/2026-09-27-guided-mode.md) (the Guided addendum and delegation texts), [`plans/2026-10-05-one-investment-engine-two-faces.md`](2026-10-05-one-investment-engine-two-faces.md) §5 U3 and §8 (the investment workflow's steps and tools).
@@ -53,8 +53,8 @@ Dependency arrow: `services/* ← harness ← harness/providers`. A test greps
 | Phase | Issues | Delivers | Gate |
 |---|---|---|---|
 | **0 — the folder** (done) | 01, 12 | package, README, protocol + catalogue moved with shims, `events.py` with the AST tripwire, workflow and skill registries with six workflow definitions and the `grill` skill, loader tests, glossary terms | identity tests; the chat/llm/tool test files unchanged and green; layering grep clean |
-| **1 — the text** | 02, 07, 10 | prompts in Markdown (byte-identical, hash-pinned), adapters under `harness/providers/`, bundle `datas` | pinned hashes unchanged; `test_llm_provider_seam.py` unchanged; both live probes run (ADR-0002) |
-| **2 — the behaviour** | 03, 04, 05, 06 | start menu endpoint + chips from it; `ask_user` + Choice card; `use_skill` + skill block; `start_workflow` + per-turn addendum; Guided mode consumes the `hub-design` workflow | Guided tests unchanged; Expert turns byte-identical; `FakeProvider` frame sequences for each new tool; vitest + tsc clean |
+| **1 — the text** (done) | 02, 07, 10 | prompts in Markdown (byte-identical, hash-pinned), adapters under `harness/providers/`, bundle `datas` | pinned hashes unchanged; `test_llm_provider_seam.py` unchanged; both live probes run (ADR-0002) |
+| **2 — the behaviour** (done) | 03, 04, 05, 06 | start menu endpoint + chips from it; `ask_user` + Choice card; `use_skill` + skill block; `start_workflow` + per-turn addendum; Guided mode consumes the `hub-design` workflow | Guided tests unchanged; Expert turns byte-identical; `FakeProvider` frame sequences for each new tool; vitest + tsc clean |
 | **3 — the loop** | 08, 09 | session, confirmation, budget, history, loop, sse moved under the harness; parity probe on stub + two live wires | the recorded frame sequence unchanged; manifest test scans the new paths; runbook names the runs |
 | **4 — the outside** | 11 | MCP exposure (if Q8 is yes) | its own spec |
 
@@ -85,3 +85,13 @@ run recorded as owed. Q12: this session carries phases 1 and 2.
 See `harness/README.md` for the layout and the commit message for the test
 evidence. The hourly-assumption audit (`tests/test_hourly_assumption_audit.py`)
 now scans `harness/` too and pins the moved catalogue at its new path.
+
+## 7. Phases 1 and 2 record (2026-10-05)
+
+- Issue 02: eleven prompt fragments in `harness/prompts/*.md`; 27 sha256 pins unchanged; chat_service.py −370 lines.
+- Issue 07: adapters under `harness/providers/` with alias shims. ADR-0002: live Anthropic probe PASSED on 45145a6; OpenAI wire on the stub; live OpenAI run owed (Q14).
+- Issue 10: bundle datas + three `check_bundle` probes.
+- Issue 03: `GET /api/chat/workflows`; chips from it, send on click (Q10). Full vitest 251 files / 2846 passed.
+- Issue 04: `ask_user` → `choice_request` → ChoiceCard, non-blocking (Q4).
+- Issue 05: `use_skill` + `_skills_block` (tools-on only, a new prompt part; the P25 snapshot test stubs it like the profile block).
+- Issue 06: `ChatSession.workflow`, `start_workflow` / `advance_workflow` / `end_workflow`, `_workflow_addendum`; `_guided_mode_addendum` and `_GUIDED_STEPS` are derived from the `hub-design` workflow (Q5, Q13); Expert turns without a workflow byte-identical; Guided tests unchanged.

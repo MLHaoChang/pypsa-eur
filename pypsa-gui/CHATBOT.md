@@ -157,6 +157,18 @@ pinned by hash); the adapters are `backend/harness/providers/`. The old
 `services.llm_openai_compat` and `services.llm_fake` paths are aliases and
 keep working.
 
+What the harness adds to the assistant (all read tier, see the README):
+
+- **The start menu.** An empty chat shows the workflows for where you are
+  (`GET /api/chat/workflows`); a chip sends the workflow's opening request.
+- **Workflows.** `start_workflow` / `advance_workflow` / `end_workflow` keep
+  the session on a step; the step's instructions ride every turn. Guided
+  mode's rules are the `hub-design` workflow's preamble.
+- **Choice cards.** `ask_user` renders a question with options and a
+  recommendation; your pick is sent as your next message.
+- **Skills.** `use_skill` loads a procedure (`grill` first); the prompt
+  carries only the catalogue.
+
 ## Voice input
 
 The composer mic button uses the browser **Web Speech API** (English,

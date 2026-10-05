@@ -3160,6 +3160,114 @@ def ask_user(
     }
 
 
+_CHAT_SESSION: ContextVar[Any] = ContextVar("chat_session", default=None)
+
+
+def set_chat_session(session: Any) -> None:
+    """Bind the ChatSession whose workflow state this turn's tools may move
+    (chat harness issue 06). Set by run_turn beside set_turn_profile; the
+    executor copies the context, so the tool thread sees it."""
+    _CHAT_SESSION.set(session)
+
+
+def chat_session() -> Any:
+    return _CHAT_SESSION.get()
+
+
+def use_skill(name: str) -> dict:
+    """The body of a harness skill (issue 05). The catalogue (names and
+    descriptions) is in the system prompt; the body only travels on
+    request, so the prompt stays stable while procedures change."""
+    from harness import skills
+    key = str(name or "").strip().lower()
+    try:
+        skill = skills.get(key)
+    except KeyError:
+        raise HTTPException(status_code=404, detail={
+            "error_kind": "unknown_skill",
+            "message": f"no skill named {key!r}; the available skills are listed in your instructions",
+        }) from None
+    return {"name": skill.name, "description": skill.description, "instructions": skill.body}
+
+
+def _workflow_session():
+    sess = chat_session()
+    if sess is None:
+        raise HTTPException(status_code=500, detail={
+            "error_kind": "internal_error",
+            "message": "workflow tools need a chat session bound to the turn",
+        })
+    return sess
+
+
+def _describe_step(wf, step) -> dict:
+    ids = [s.id for s in wf.steps]
+    return {
+        "workflow": wf.id,
+        "title": wf.title,
+        "step": step.id,
+        "step_title": step.title,
+        "step_index": ids.index(step.id) + 1,
+        "step_count": len(ids),
+        "done_when": step.done_when,
+        "instructions": step.body,
+        "steps": [{"id": s.id, "title": s.title} for s in wf.steps],
+        "note": ("These instructions are also attached to each of your turns "
+                 "while this workflow is active; call advance_workflow when the "
+                 "step is done, end_workflow to leave."),
+    }
+
+
+def start_workflow(workflow_id: str) -> dict:
+    """Start a workflow on this session (issue 06): state is (id, step) on
+    the ChatSession; the per-turn addendum carries the step from the next
+    turn on, and this result carries it for the current one."""
+    from harness import workflows
+    key = str(workflow_id or "").strip().lower()
+    wf = workflows.registry().get(key)
+    if wf is None or wf.status != "active":
+        raise HTTPException(status_code=404, detail={
+            "error_kind": "unknown_workflow",
+            "message": f"no active workflow {key!r}; the ids are "
+                       + ", ".join(sorted(w.id for w in workflows.registry().values()
+                                          if w.status == "active")),
+        })
+    sess = _workflow_session()
+    step = wf.steps[0]
+    sess.workflow = {"id": wf.id, "step": step.id}
+    return _describe_step(wf, step)
+
+
+def advance_workflow(step: str) -> dict:
+    from harness import workflows
+    sess = _workflow_session()
+    state = getattr(sess, "workflow", None)
+    if not state:
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "no_active_workflow",
+            "message": "no workflow is active on this session; call start_workflow first",
+        })
+    wf = workflows.get(state["id"])
+    key = str(step or "").strip().lower()
+    try:
+        target = wf.step(key)
+    except KeyError:
+        raise HTTPException(status_code=404, detail={
+            "error_kind": "unknown_workflow_step",
+            "message": f"{wf.id!r} has no step {key!r}; its steps are "
+                       + ", ".join(s.id for s in wf.steps),
+        }) from None
+    sess.workflow = {"id": wf.id, "step": target.id}
+    return _describe_step(wf, target)
+
+
+def end_workflow() -> dict:
+    sess = _workflow_session()
+    state = getattr(sess, "workflow", None)
+    sess.workflow = None
+    return {"ended": state["id"] if state else None}
+
+
 # ── Conversation (2) ────────────────────────────────────────────────────────
 
 
@@ -5745,6 +5853,10 @@ DISPATCHERS: dict[str, Any] = {
     "ui_open_panel": ui_open_panel,
     "ui_set_snapshot": ui_set_snapshot,
     "ask_user": ask_user,
+    "use_skill": use_skill,
+    "start_workflow": start_workflow,
+    "advance_workflow": advance_workflow,
+    "end_workflow": end_workflow,
     # conversation (2)
     "list_chat_history": list_chat_history,
     "clear_chat_history": clear_chat_history,

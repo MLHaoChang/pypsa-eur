@@ -1,6 +1,6 @@
 # 06 — `start_workflow` / `advance_workflow` tools and the per-turn addendum
 
-Status: ready-for-agent
+Status: ready-for-agent (done 2026-10-05 (backend; the frontend `ui_context.workflow` rebind is a follow-up))
 Type: task
 Blocked by: 03, 04
 
@@ -26,3 +26,12 @@ workflow's preamble (the Guided rules) is included only when `ui_mode` is
 guided (`preamble_when: [guided]`); the write-tier confirmation stays on
 `_confirm_tiers(guided)` as today. An Expert turn inside `hub-design` gets
 the step body only.
+
+2026-10-05 (implementation): state is `ChatSession.workflow`, bound to the
+tools through a ContextVar beside the turn profile. The backend accepts
+`ui_context.workflow = {id, step}` and rebinds a session that has no state;
+the frontend does not send it yet (the session id is not persisted across a
+reload, so the state is lost with the session). Follow-up: a `workflow_state`
+frame after start/advance/end so the panel can show the step and send the
+pair back after a reload. The hub-design panel still sends `guided_step`;
+reconciling it with the workflow step is part of the same follow-up.

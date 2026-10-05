@@ -550,6 +550,10 @@ class ChatSession:
     # can be edited/deleted out from under a live session id.
     profile_id: str | None = None
     bound_wire: str | None = None
+    # The active workflow, {"id", "step"}, or None (chat harness issue 06).
+    # Set by the start_workflow / advance_workflow / end_workflow tools; the
+    # per-turn addendum (`_workflow_addendum`) reads it.
+    workflow: dict[str, Any] | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
     pending_confirmations: dict[str, PendingConfirmation] = field(default_factory=dict)
     confirmation_decisions: dict[str, str] = field(default_factory=dict)
@@ -2163,32 +2167,91 @@ def _sanitise_ui_value(value: Any) -> str | None:
 # only in Guided; `'expert'` is accepted and renders exactly as no key.
 # Anything else is dropped (fail closed, like every other key here), and so
 # is a `guided_step` outside the five cards or without Guided.
-_GUIDED_STEPS = {
-    "start": "Start", "site": "Site", "goal": "Goal",
-    "results": "Results", "improve": "Improve",
-}
+# The five hub-design cards are the steps of the `hub-design` workflow
+# (harness/workflows/hub-design.md); the Guided rules are its preamble.
+# Derived here so the loop and the registry cannot disagree (owner decisions
+# Q5, Q13: Guided mode is the workflow's first consumer, and the rules stay
+# bound to Guided mode itself).
+def _hub_design_workflow():
+    from harness import workflows
+    return workflows.get("hub-design")
+
+
+_GUIDED_STEPS = {step.id: step.title for step in _hub_design_workflow().steps}
 
 
 def _guided_mode_addendum(step: str | None) -> str:
     """The Guided rules for ONE turn — per-turn user content, never the
     system prompt (which stays byte-identical in both modes, so the prompt
     cache and Expert behaviour are unchanged). `step` is an allow-listed
-    `guided_step`; with none the card clause is dropped."""
+    `guided_step`; with none the card clause is dropped.
+
+    The text is the `hub-design` workflow's preamble, reflowed to one line,
+    with the card clause spliced in at the sentence the spec puts it
+    (guided-mode spec §6.2). `test_guided_mode_prompt` pins the result."""
+    rules = " ".join(_hub_design_workflow().preamble.split())
     card = (
         f'the user is on the "{_GUIDED_STEPS[step]}" card of the hub design '
         "— refer to it by name and say what to do there; "
         if step in _GUIDED_STEPS else ""
     )
-    return (
-        "Guided mode is on. Rules for this turn: answer in plain language a "
-        "non-specialist can follow; keep it short (about 120 words unless the "
-        "user asks for detail); gloss any technical term in a few words the "
-        f"first time; {card}when the user delegates a step, do it with the "
-        "tools rather than explaining how, and before any write or run say in "
-        "one sentence what will change and that a confirmation card follows; "
-        "never apply a change the user has not asked for; questions are "
-        "welcome at any time."
+    splice = "the first time; when the user delegates a step"
+    assert splice in rules, "hub-design preamble lost the card-clause anchor"
+    return rules.replace(splice, f"the first time; {card}when the user delegates a step", 1)
+
+
+def _workflow_addendum(session: Any, ui_context: dict[str, Any] | None) -> str | None:
+    """
+    The active workflow's current step, for the USER turn (chat harness
+    issue 06, spec D4). Per-turn content like the Guided addendum, never the
+    system prompt. None when no workflow is active — an Expert turn outside a
+    workflow is byte-identical to before.
+
+    A client may carry `ui_context.workflow = {id, step}` (a reloaded page
+    whose server session was lost); it rebinds only when the session has no
+    state of its own and the pair names a real step.
+    """
+    from harness import workflows
+    state = getattr(session, "workflow", None)
+    if not state and isinstance(ui_context, dict):
+        cand = ui_context.get("workflow")
+        if isinstance(cand, dict):
+            wid, sid = cand.get("id"), cand.get("step")
+            if isinstance(wid, str) and isinstance(sid, str):
+                try:
+                    workflows.get(wid).step(sid)
+                except KeyError:
+                    pass
+                else:
+                    session.workflow = state = {"id": wid, "step": sid}
+    if not state:
+        return None
+    try:
+        wf = workflows.get(state["id"])
+        step = wf.step(state["step"])
+    except KeyError:
+        session.workflow = None
+        return None
+    context = "guided" if _is_guided(ui_context) else "expert"
+    ids = [s.id for s in wf.steps]
+    parts: list[str] = []
+    # In Guided the mode rules already arrive through `_guided_mode_addendum`;
+    # outside it a workflow's own preamble (if it applies there) comes here.
+    if context != "guided":
+        pre = wf.preamble_for(context)
+        if pre:
+            parts.append(" ".join(pre.split()))
+    parts.append(
+        f'Workflow "{wf.title}", step {ids.index(step.id) + 1} of {len(ids)}: '
+        f'"{step.title}". Done when: {step.done_when}'
     )
+    parts.append(step.body)
+    parts.append(
+        "When this step's completion criterion holds, call advance_workflow "
+        "with the next step; call end_workflow if the user wants to do "
+        "something else. Questions are welcome at any time."
+    )
+    return "\n\n".join(parts)
 
 
 def _format_ui_context(ui_context: dict[str, Any] | None) -> str | None:
@@ -2585,6 +2648,10 @@ def _build_system_prompt(
         # LABELS only: never an id, never a base_url. Redaction is
         # secrets-only and would scrub neither.
         *( [_profile_awareness_block()] if include_tools else [] ),
+        # Chat harness issue 05 — the skill catalogue (names + descriptions;
+        # bodies arrive through use_skill). TOOLS-ON ONLY: it names a tool.
+        # A NEW part, the sanctioned way past the pinned constants.
+        *( [_skills_block()] if include_tools else [] ),
         _DOMAIN_GUIDE if include_tools else _DOMAIN_GUIDE_FACTS,
         _SOLVER_ERROR_DECODER if include_tools else _SOLVER_ERROR_DECODER_FACTS,
         _PRICE_CONGESTION_GUIDE if include_tools else _PRICE_CONGESTION_GUIDE_FACTS,
@@ -2606,6 +2673,18 @@ def _build_system_prompt(
     # change to the prompt everyone gets. Filtering keeps the prompt identical
     # to the no-block case instead.
     return "\n\n".join(p for p in parts if p)
+
+
+def _skills_block() -> str:
+    """The harness skill catalogue for the system prompt (issue 05): one line
+    per skill, names and descriptions only. Never raises — a broken skill
+    file must not cost a turn (the loader test catches it first)."""
+    try:
+        from harness import skills
+        return skills.catalogue_block()
+    except Exception:  # noqa: BLE001 — prompt meta must never abort a turn
+        logger.warning("chat: skill catalogue block unavailable", exc_info=True)
+        return ""
 
 
 def _profile_awareness_block() -> str:
@@ -3552,6 +3631,7 @@ def run_turn(
         # byte-exactly is unchanged on every exit.
         from services import chat_tools as _chat_tools  # noqa: PLC0415
         _chat_tools.set_turn_profile(None)
+        _chat_tools.set_chat_session(None)
         # Every exit reached from inside this process is an end the user can
         # observe, so none of them should leave a "this turn was interrupted"
         # record behind. Only a crash skips this line — which is the point.
@@ -3723,6 +3803,7 @@ def _run_turn_body(
     # can be dispatched; the executor submit site already copies the context.
     from services import chat_tools as _chat_tools  # noqa: PLC0415
     _chat_tools.set_turn_profile(profile)
+    _chat_tools.set_chat_session(session)
 
     if provider is None:
         # `_provider_for_profile` reproduces the exact priority this branch
@@ -3804,6 +3885,12 @@ def _run_turn_body(
     # `history_cache_anchor` still hits. Rewriting old turns' context each
     # turn would break that cache for a fidelity nobody asked for.
     ui_block = _format_ui_context(ui_context)
+    # The active workflow's step rides the same per-turn slot (issue 06):
+    # after the context block (outside the untrusted fence), before the
+    # user's words. Absent on a turn with no workflow, so nothing changes.
+    wf_block = _workflow_addendum(session, ui_context)
+    if wf_block:
+        ui_block = f"{ui_block}\n\n{wf_block}" if ui_block else wf_block
     if ui_block:
         if isinstance(user_content, str):
             user_content = f"{ui_block}\n\n{user_content}"

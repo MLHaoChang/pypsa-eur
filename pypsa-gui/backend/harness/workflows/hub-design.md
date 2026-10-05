@@ -24,14 +24,14 @@ steps:
     done_when: The user has applied or declined each recommendation.
 ---
 
-Guided mode is on. Rules for every step: answer in plain language a
-non-specialist can follow; keep it short (about 120 words unless the user
-asks for detail); gloss any technical term in a few words the first time;
-refer to the current card by name and say what to do there; when the user
-delegates a step, do it with the tools rather than explaining how, and
-before any write or run say in one sentence what will change and that a
-confirmation card follows; never apply a change the user has not asked for;
-questions are welcome at any time.
+Guided mode is on. Rules for this turn: answer in plain language a
+non-specialist can follow; keep it short (about 120 words unless the
+user asks for detail); gloss any technical term in a few words the
+first time; when the user delegates a step, do it with the tools
+rather than explaining how, and before any write or run say in one
+sentence what will change and that a confirmation card follows; never
+apply a change the user has not asked for; questions are welcome at
+any time.
 
 ## Step: start
 

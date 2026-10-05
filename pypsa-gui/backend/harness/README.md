@@ -50,6 +50,15 @@ Spec: `.scratch/harness/spec.md`. Plan:
    aliases of the harness modules: same objects, same monkeypatches. New
    code imports from `harness.*`.
 
+## The harness tools
+
+Five read-tier tools exist only for the harness (catalogue banner "Harness"):
+`ask_user` (a Choice card; the pick is the next user message, the turn does
+not block), `use_skill` (a skill's body on demand), `start_workflow`,
+`advance_workflow`, `end_workflow` (the session's `{id, step}`; the current
+step's body rides each turn as per-turn user content, after the context
+block and outside the untrusted fence). None of them touches a project.
+
 ## Adding a workflow
 
 Create `workflows/<id>.md`:
@@ -100,6 +109,6 @@ agents and the app.
 | `prompts` | `services/chat_service._build_system_prompt` (the constants are loaded from here) | — |
 | `providers` | `chat_service._provider_for_profile`, the connection test in `routers/chat.py` | — |
 | `catalogue` | `chat_service._tools_payload`, `chat_tools`, the schema tests, the smoke scripts | — |
-| `events` | the tripwire test | issue 04 adds `choice_request` |
-| `workflows` | the loader tests | issue 03 (`GET /api/chat/workflows`, chips), issue 06 (`start_workflow`, per-turn addendum; Guided consumes `hub-design`) |
-| `skills` | the loader tests | issue 05 (`use_skill`, the catalogue block in the prompt) |
+| `events` | the tripwire test; `choice_request` is what `ask_user` emits | — |
+| `workflows` | `GET /api/chat/workflows` (the start menu the panel renders), the `start_workflow` / `advance_workflow` / `end_workflow` tools, `chat_service._workflow_addendum` (the per-turn step), `_guided_mode_addendum` (the `hub-design` preamble) | — |
+| `skills` | `chat_service._skills_block` (the catalogue in the tools-on prompt), the `use_skill` tool | — |

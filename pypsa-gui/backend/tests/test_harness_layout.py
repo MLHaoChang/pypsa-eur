@@ -191,7 +191,7 @@ def test_hub_design_carries_the_guided_rules_as_its_preamble():
 
     wf = workflows.get("hub-design")
     assert wf.preamble.startswith("Guided mode is on.")
-    assert "never apply a change the user has not asked for" in wf.preamble
+    assert "never apply a change the user has not asked for" in " ".join(wf.preamble.split())
     assert [s.id for s in wf.steps] == ["start", "site", "goal", "results", "improve"]
     # Owner decisions Q11/Q13: offered in Expert too, but the Guided rules
     # are bound to Guided mode, not to the workflow.
