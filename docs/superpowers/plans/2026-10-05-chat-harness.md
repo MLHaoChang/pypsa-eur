@@ -98,3 +98,4 @@ now scans `harness/` too and pins the moved catalogue at its new path.
 - Issue 06 follow-up: `workflow_state` frame after each workflow tool, `/chat/history.workflow`, the panel's workflow strip with Leave, `ui_context.workflow` while active.
 - Issue 09: `run_chat_smoke.py --workflow` parity battery; runbook `runbooks/harness-parity-probe.md`. Stub 3/3, live Anthropic 3/3. Its first run caught the workflow tools' session binding being lost under `iterate_in_threadpool`; fixed at the dispatch site, red-first test added.
 - Issue 08 (step 1): `services/chat_service.py` → `harness/loop.py` whole, alias at the old path, 27 patched names untouched; `harness/sse.py` extracted by AST; the loop's 12 provider-word code sites pinned.
+  Gate after the move: every test_chat*/test_llm*/test_tool_*/test_guided*/test_harness*/test_report* file — 2908 passed, 5 skipped, 0 failed (773f009).

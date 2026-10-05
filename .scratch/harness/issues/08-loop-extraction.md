@@ -32,3 +32,5 @@ move into providers/. Step 2 begun with `harness/sse.py` (`sse_frame`,
 AST-selected). Remaining extractions, each a patch-surface move per the
 README rule: result shaping, trim/summary, persistence + WAL, sessions,
 confirmation, budget gates, the turn body.
+
+2026-10-05 (gate for step 1, 773f009): 2908 passed, 5 skipped, 0 failed across the chat/provider/tool/Guided/harness/report files.
