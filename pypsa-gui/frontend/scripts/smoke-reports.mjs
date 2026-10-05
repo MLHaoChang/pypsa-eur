@@ -322,15 +322,20 @@ const T = (id) => `[data-testid="${id}"]`
 
 /** Click `report-export` (or another export trigger) and wait for docx-preview to have rendered the new file. */
 async function exportAndPreview(page, trigger) {
+  // The blob wait is armed before the click: when the preview pane is already
+  // open (a second export), it fetches the new blob as soon as the export lands.
+  let fileId = null
+  const blobWait = page.waitForResponse(r => fileId !== null && r.url().includes(`/uploads/${fileId}/blob`), { timeout: 60_000 })
+  blobWait.catch(() => {})
   const [exportResp] = await Promise.all([
     page.waitForResponse(r => r.request().method() === 'POST' && /\/reports\/[0-9a-f]{16}\/export$/.test(new URL(r.url()).pathname), { timeout: 60_000 }),
     page.locator(trigger).click(),
   ])
   if (exportResp.status() !== 200) return { ok: false, why: `export answered ${exportResp.status()}` }
   const upload = await exportResp.json()
+  fileId = upload.file_id
   await page.locator(T('export-preview-panel')).waitFor({ timeout: 30_000 })
   const toggle = page.locator(T('export-preview-toggle'))
-  const blobWait = page.waitForResponse(r => r.url().includes(`/uploads/${upload.file_id}/blob`), { timeout: 60_000 })
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click()
   await blobWait
   const pane = page.locator(T('docx-preview'))
@@ -448,8 +453,19 @@ async function browserTemplates(page, reportId, title, generated) {
 
   if (generated) {
     // With a usable LLM profile the proposal runs for real; the manual review below then edits it.
-    await page.locator(T('mapping-propose')).click()
-    const rec = await poll(R('/generate/status'), { timeoutMs: 600_000, everyMs: 1500 })
+    // Wait for the propose POST to start the job, then for the job record to be
+    // the mapping job: polling straight after the click reads the previous
+    // (regenerate) record, already done.
+    await Promise.all([
+      page.waitForResponse(r => r.request().method() === 'POST' && /\/template\/plan$/.test(new URL(r.url()).pathname), { timeout: 60_000 }),
+      page.locator(T('mapping-propose')).click(),
+    ])
+    let rec = { status: 'timeout' }
+    for (const t0 = Date.now(); Date.now() - t0 < 600_000;) {
+      rec = await poll(R('/generate/status'), { timeoutMs: 600_000, everyMs: 1500 })
+      if (rec.mode === 'mapping' || !String(rec.status).match(/^(done|error|failed)$/)) break
+      await new Promise(r => setTimeout(r, 1500))
+    }
     step('Propose with the assistant: the mapping job reaches done', rec.status === 'done' && rec.mode === 'mapping', `status=${rec.status} mode=${rec.mode} error=${short(rec.error)}`)
     await page.locator(T('mapping-dirty')).waitFor({ state: 'detached', timeout: 30_000 }).catch(() => {})
   } else {

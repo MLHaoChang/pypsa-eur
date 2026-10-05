@@ -303,6 +303,8 @@ desktop mode on :8765 serving the built SPA; the venv from the session hook.
 
 ### 7.1 Live LLM probe — still UNPROBED, and why
 
+*(Superseded by §7.5: the probe ran on 2026-10-05.)*
+
 The probe was to run on the anthropic profile with the environment's key.
 **This container has no key**: `GET /api/chat/health` on the local backend
 answered `anthropic_api_key_present: false` (`active_profile: anthropic-sonnet`,
@@ -402,16 +404,62 @@ be a first-class Guided step at all is the product question to decide.
 | Frontend | `npx vitest run --testTimeout=20000` | 251 files, 2843 tests passed (TemplatePicker +1) |
 | Frontend | `npx tsc -b` | clean |
 | End-to-end QA | drivers 0, 1, 2, 4, 5 | 18/18, 38/38, 47/47, 47/47, 37/37 |
-| End-to-end QA | `qa_reports_live_anthropic.py` | UNPROBED (no key), exit 0; `--require-key` exit 2 |
-| End-to-end QA | `smoke-reports.mjs --browser` | 62/62 after the picker fix |
+| End-to-end QA | `qa_reports_live_anthropic.py` | UNPROBED (no key), exit 0; `--require-key` exit 2 — 23/23 with a key (§7.5) |
+| End-to-end QA | `smoke-reports.mjs --browser` | 62/62 after the picker fix — 73/73 with a key and the race fixes (§7.5) |
+
+### 7.5 Live probe with a key, 2026-10-05
+
+A later session on this branch (`2320ee4`) had a personal Anthropic key in
+its environment. It was passed only on the commands that needed it, as
+`ANTHROPIC_API_KEY`, with the session's `ANTHROPIC_BASE_URL` unset so the
+SDK reached `https://api.anthropic.com`. A one-call check answered 200 from
+`claude-sonnet-5`.
+
+**The report was written by profile `anthropic-sonnet`, model
+`claude-sonnet-5`** (the job record's `profile`/`model`, in both the probe
+and the smoke).
+
+| Run | Result |
+|---|---|
+| `tests/qa_reports_live_anthropic.py --require-key` | **23/23 PASS**. 7 target sections; 6 model-written (`executive_summary`, `target`, `cost`, `sizing`, `tea`, `copt`), `fmea_top` fell back with a "prose not established" note (`repairs=1`, `prose_failures=['fmea_top']`). 75 numeric tokens in the prose, none silently accepted; one flagged as not in the evidence (Executive summary: `4`), and the exported "Numbers to check" appendix lists exactly that one. The regenerate under an instruction wrote v2 with 15/15 other sections byte-identical, still model prose. |
+| `smoke-reports.mjs --browser` (uvicorn local mode with the key, built SPA) | first run **2 FAIL**, after the fixes below **73/73 PASS**, `GENERATION PATH: generated`: generate, regenerate and "Propose with the assistant" (mapping job `done`, `mode: mapping`) ran for real. |
+
+**Two smoke-script races, fixed on this branch** (both only show on the
+generation path, which no earlier run reached):
+
+* After clicking "Propose with the assistant" the smoke polled
+  `…/generate/status` before the propose `POST …/template/plan` had
+  started the job, and read the previous (regenerate) record, already
+  `done` — `status=done mode=regenerate`. It now waits for the POST and
+  polls until the record is the mapping job's.
+* `exportAndPreview` armed the blob wait after the export answered. On
+  the second export the preview pane was already open and fetched the new
+  blob immediately, so the wait missed it (60 s timeout). The wait is now
+  armed before the click and matched once the `file_id` is known.
+
+**Found by the first run, not fixed here: a mapping job can overwrite a
+plan saved by hand.** Because of the first race, the smoke edited and saved
+the plan while the mapping job was still waiting on the model; the job
+finished after the save and export. `run_mapping_job` stores its proposal
+unconditionally (`services/reports/report_job.py`,
+`store.update_meta(…, mapping_plan=plan)`), and
+`PUT …/template/plan` (`routers/reports.py`, `put_template_plan`) has no
+`_job_slot_busy()` guard — the round-trip merge route has one (409
+`report_job_in_flight`). In the editor only the Propose button is
+disabled while a job runs (`MappingPlanEditor.tsx`, `disabled={jobBusy}`);
+the rows and Save plan are not. So a user who edits during a proposal can
+lose their saved plan to the job. Smallest fix: the same 409 guard on
+`put_template_plan`, and Save plan disabled while `jobBusy`.
 
 ## Increment 1 — status
 
 Phases 0–5 delivered on `claude/fmea-llm-reporting-feasibility-jtm6w1`
 (increments 1, 2 and 3), gated twice against `master` (§6, §6b); phases 4
-and 5 have a browser leg since §7. Not done: the workstation checks listed
-per phase and the live LLM probe — still no key in the container (§7.1; the
-driver `qa_reports_live_anthropic.py` is ready for a session that has one).
+and 5 have a browser leg since §7. The live LLM probe ran on
+2026-10-05 (§7.5): 23/23, report written by `claude-sonnet-5` on the
+`anthropic-sonnet` profile, browser smoke 73/73 on the generation path.
+Not done: the workstation checks listed per phase, and the mapping-job vs.
+hand-saved-plan overwrite found in §7.5.
 Open product question: Reports in Guided mode (§7.3). `export_eh_report_docx`
 (WP0) remains alongside `export_report_docx`; keep as the no-LLM shortcut or
 remove in review.
