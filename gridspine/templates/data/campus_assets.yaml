@@ -264,6 +264,28 @@ transformers:
     capex_eur: {value: 800000, source: assumed}
     opex_frac: {value: 0.015, source: assumed}
     lifetime_a: {value: 40, source: assumed}
+  - id: TR_33_11_31p5
+    hv_kv: {value: 33.0, source: assumed}
+    lv_kv: {value: 11.0, source: assumed}
+    s_mva: {value: 31.5, source: assumed}
+    vk_percent: {value: 10.0, source: assumed}
+    vkr_percent: {value: 0.5, source: assumed}
+    pfe_kw: {value: 31.5, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 950000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
+  - id: TR_33_11_40
+    hv_kv: {value: 33.0, source: assumed}
+    lv_kv: {value: 11.0, source: assumed}
+    s_mva: {value: 40.0, source: assumed}
+    vk_percent: {value: 10.0, source: assumed}
+    vkr_percent: {value: 0.5, source: assumed}
+    pfe_kw: {value: 40.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1100000, source: assumed}
+    opex_frac: {value: 0.015, source: assumed}
+    lifetime_a: {value: 40, source: assumed}
   - id: TR_20_0p4_0p4
     hv_kv: {value: 20.0, source: assumed}
     lv_kv: {value: 0.4, source: assumed}
