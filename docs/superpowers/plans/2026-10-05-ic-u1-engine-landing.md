@@ -145,6 +145,12 @@ imbalance (a year of energy against one month of demand in the objective).
   copies). Also taken: drop the efficiency-blind gate (an export fee with a negative import price hid a
   loop), the import efficiency at the import snapshot, the D13 signature pin, one time-zone default
   (None), the error-kind texts, clearing `export_link` / `timezone` in chat, refreshing preflight on save.
+- **Round 2 (b22d22f): PASS.** B1–B4 re-probed fixed; GS parity again 0 mismatches on the 1,500 random
+  networks (and 400 with NaN marginal costs); `validate_for_run` on the 40-node network 0.50 → 0.11–0.20 s.
+  Taken after it: the PUT re-checks only the meter Link that changed (an edit of a pre-existing config
+  whose untagged PoC runs into a grid-named bus was refused for the unchanged PoC), and the raw check
+  works in chunks of pairs (one snapshots × pairs array peaked at 1.7 GB at 6,172 pairs). Known and
+  documented: a Link two-way only through `links_t.p_min_pu` is not walked for returning storage.
 - **U2 checklist:** once GS merges master both copies emit `tariff_export_exceeds_import`; GS removes its
   copy in U2.
 
@@ -152,9 +158,9 @@ imbalance (a year of energy against one month of demand in the objective).
 
 | Item | State |
 |---|---|
-| U1 PR | #81 open; CodeQL findings being fixed |
+| U1 PR | #81 green and mergeable (CodeQL fixed in 056a8ad); owner merges |
 | (a) defaults pack, (e) export helper | done (part A, PASS round 3) |
-| (b) site connection, (f) preflight port, D13 | round-1 fixes in progress |
+| (b) site connection, (f) preflight port, D13 | done (part C, PASS round 2) |
 | (d), LCOS, D11, D12, Q12b / Q14 tests, Q4 facade test | done (part B, PASS round 2) |
 | (c) this facade section | done |
 | (g) | done with part B (rule in §5) |
