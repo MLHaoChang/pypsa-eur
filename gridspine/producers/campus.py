@@ -50,8 +50,10 @@ import dataclasses
 import math
 import re
 
+import numpy as np
 import pandas as pd
 
+from gridspine.schema.campus import validate_hourly, validate_pcc
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.network import MAX_NAME_LEN
 
@@ -319,3 +321,112 @@ def draft_campus(n) -> CampusDraft:
     if not spec["cables"]:
         del spec["cables"]
     return CampusDraft(spec={"campus": spec}, skipped=skipped)
+
+
+# ── the hourly results, per investment period (plan C2) ────────────────────
+
+_SERIES = (
+    # (network table, time-series attribute, campus kinds it may hold)
+    ("generators", "generators_t", ("pv", "wind", "genset")),
+    ("storage_units", "storage_units_t", ("bess",)),
+    ("loads", "loads_t", ("load",)),
+    ("links", "links_t", ("load",)),
+)
+_COMPONENT = {"generators": "Generator", "storage_units": "StorageUnit", "loads": "Load", "links": "Link"}
+
+
+def _periods(n):
+    """``[(period label, snapshots of that period)]``. A multi-period network
+    has one entry per investment period. A single-period network has one,
+    labelled with the year of its first snapshot (0 for a non-datetime
+    index)."""
+    sns = n.snapshots
+    if isinstance(sns, pd.MultiIndex):
+        return [(int(p), sns[sns.get_level_values(0) == p]) for p in sns.get_level_values(0).unique()]
+    first = sns[0]
+    return [(int(first.year) if hasattr(first, "year") else 0, sns)]
+
+
+def _find(n, pypsa_name, kind, uid):
+    hits = [(tbl, ts) for tbl, ts, kinds in _SERIES
+            if pypsa_name in getattr(n, tbl).index and kind in kinds]
+    if not hits:
+        raise ContractError(
+            f"unit {uid}: pypsa_name {pypsa_name!r} is not a {kind} in the project "
+            "(no generator, storage unit, load or link of that name can be one)"
+        )
+    if len(hits) > 1:
+        raise ContractError(f"unit {uid}: pypsa_name {pypsa_name!r} is ambiguous in the project ({[h[0] for h in hits]})")
+    return hits[0]
+
+
+def _injection(n, tbl, ts, name, uid):
+    """The unit's injected power over every snapshot (a load is negative)."""
+    series = getattr(n, ts)
+    if tbl == "loads":
+        for attr in ("p", "p_set"):
+            frame = getattr(series, attr, pd.DataFrame())
+            if name in frame.columns:
+                return -frame[name].astype(float)
+        return pd.Series(-float(n.loads.at[name, "p_set"]), index=n.snapshots)
+    attr = "p0" if tbl == "links" else "p"
+    frame = getattr(series, attr, pd.DataFrame())
+    if name not in frame.columns:
+        raise ContractError(f"unit {uid}: {name} has no hourly power in the project; is the project solved?")
+    p = frame[name].astype(float)
+    return -p if tbl == "links" else p
+
+
+def _active(n, tbl, name, period, multi):
+    if not multi or "build_year" not in getattr(n, tbl).columns:
+        return True
+    return bool(n.get_active_assets(_COMPONENT[tbl], period)[name])
+
+
+def campus_hourly(n, campus):
+    """``(hourly, pcc)`` for a solved hub network ``n`` and its campus
+    description ``campus`` (the mapping), per investment period. See
+    ``gridspine.schema.campus`` for the two tables."""
+    c = campus["campus"]
+    periods = _periods(n)
+    multi = isinstance(n.snapshots, pd.MultiIndex)
+    rows = []
+    for uid, u in c["units"].items():
+        pname = u.get("pypsa_name")
+        if not pname:
+            raise ContractError(f"unit {uid} has no pypsa_name, so the project cannot give its hourly power")
+        tbl, ts = _find(n, pname, u["kind"], uid)
+        inj = _injection(n, tbl, ts, pname, uid)
+        for period, sns in periods:
+            on = _active(n, tbl, pname, period, multi)
+            vals = inj.loc[sns].to_numpy() if on else np.zeros(len(sns))
+            rows.append(pd.DataFrame({"unit_id": uid, "period": period, "hour": np.arange(len(sns)),
+                                      "p_mw": vals, "status": int(on)}))
+    hourly = validate_hourly(pd.concat(rows, ignore_index=True))
+
+    pcc_bus = c["pcc"].get("pypsa_name")
+    if not pcc_bus:
+        raise ContractError("the campus PCC has no pypsa_name, so the project cannot give its import")
+    links = n.links
+    flow = pd.Series(0.0, index=n.snapshots)
+    touching = 0
+    for lname in links.index:
+        if links.at[lname, "bus0"] == pcc_bus:
+            flow = flow + n.links_t.p0[lname].astype(float)
+            touching += 1
+        elif links.at[lname, "bus1"] == pcc_bus:
+            flow = flow + n.links_t.p1[lname].astype(float)
+            touching += 1
+    if not touching:
+        grid = [g for g in n.generators.index if n.generators.at[g, "bus"] == pcc_bus
+                and str(n.generators.at[g, "carrier"]).lower() in GRID_CARRIERS]
+        if not grid:
+            raise ContractError(f"nothing in the project connects the PCC bus {pcc_bus!r} to the campus")
+        flow = n.generators_t.p[grid].astype(float).sum(axis=1)
+    weight = n.snapshot_weightings["objective"]
+    pcc = pd.concat([
+        pd.DataFrame({"period": period, "hour": np.arange(len(sns)),
+                      "weight": weight.loc[sns].to_numpy(), "import_mw": flow.loc[sns].to_numpy()})
+        for period, sns in periods
+    ], ignore_index=True)
+    return hourly, validate_pcc(pcc)
