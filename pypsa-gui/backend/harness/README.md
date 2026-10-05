@@ -12,8 +12,8 @@ harness/
   events.py       the closed vocabulary of frames the turn loop yields to the UI
   workflows/      the start menu and the step-by-step flows (Markdown + front matter)
   skills/         procedures the model loads on demand (<name>/SKILL.md)
-  prompts/        (phase 1) the system-prompt fragments, byte-identical to today
-  providers/      (phase 1) anthropic, openai_compat, fake — the only place a wire is named
+  prompts/        the system-prompt fragments as Markdown, byte-identical to the old constants
+  providers/      anthropic, openai_compat, fake — the only place a wire is named
   loop ...        (phase 3) session, confirmation, budget, history, loop, sse
 ```
 
@@ -44,10 +44,11 @@ Spec: `.scratch/harness/spec.md`. Plan:
    user content. The system prompt stays byte-identical and cached.
 6. **The confirmation card is not negotiable.** A workflow may say "a card
    follows"; it cannot change which tier gets one.
-7. **Old paths still work.** `services.llm_provider` and
-   `services.chat_tools_schema` are `sys.modules` aliases of the harness
-   modules: same objects, same monkeypatches. New code imports from
-   `harness.*`.
+7. **Old paths still work.** `services.llm_provider`,
+   `services.chat_tools_schema`, `services.llm_anthropic`,
+   `services.llm_openai_compat` and `services.llm_fake` are `sys.modules`
+   aliases of the harness modules: same objects, same monkeypatches. New
+   code imports from `harness.*`.
 
 ## Adding a workflow
 
@@ -95,7 +96,9 @@ agents and the app.
 
 | Part | Consumed by (today) | Wired by |
 |---|---|---|
-| `protocol` | `services/chat_service.run_turn`, `services/reports/generator.py`, the three adapters | — |
+| `protocol` | `services/chat_service.run_turn`, `services/reports/generator.py`, `providers/*` | — |
+| `prompts` | `services/chat_service._build_system_prompt` (the constants are loaded from here) | — |
+| `providers` | `chat_service._provider_for_profile`, the connection test in `routers/chat.py` | — |
 | `catalogue` | `chat_service._tools_payload`, `chat_tools`, the schema tests, the smoke scripts | — |
 | `events` | the tripwire test | issue 04 adds `choice_request` |
 | `workflows` | the loader tests | issue 03 (`GET /api/chat/workflows`, chips), issue 06 (`start_workflow`, per-turn addendum; Guided consumes `hub-design`) |

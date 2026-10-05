@@ -1,6 +1,6 @@
 # 07 — Provider adapters move to `harness/providers/`
 
-Status: ready-for-agent
+Status: ready-for-agent (done 2026-10-05: three adapters moved with alias shims; `llm_config` stays)
 Type: task
 Blocked by: 01
 

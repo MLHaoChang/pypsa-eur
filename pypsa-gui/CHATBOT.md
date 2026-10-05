@@ -150,9 +150,12 @@ Everything the assistant needs that is not a language model lives in
 vocabulary, the workflows the assistant leads and the skills it can load.
 Its README is the contract (layering, how to add a tool, a workflow or a
 skill); the spec is `.scratch/harness/spec.md` and the plan
-`docs/superpowers/plans/2026-10-05-chat-harness.md`. `services/llm_provider`
-and `services/chat_tools_schema` are aliases of `harness.protocol` and
-`harness.catalogue` and keep working.
+`docs/superpowers/plans/2026-10-05-chat-harness.md`. The system-prompt text
+is `backend/harness/prompts/*.md` (byte-identical to the old constants and
+pinned by hash); the adapters are `backend/harness/providers/`. The old
+`services.llm_provider`, `services.chat_tools_schema`, `services.llm_anthropic`,
+`services.llm_openai_compat` and `services.llm_fake` paths are aliases and
+keep working.
 
 ## Voice input
 

@@ -1,6 +1,6 @@
 # 10 — Ship the harness Markdown in the desktop bundle
 
-Status: ready-for-agent
+Status: ready-for-agent (done 2026-10-05: three datas entries, three ROOTED probes in check_bundle)
 Type: task
 Blocked by: 01
 

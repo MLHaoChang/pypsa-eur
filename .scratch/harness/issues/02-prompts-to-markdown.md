@@ -1,6 +1,6 @@
 # 02 — Prompt fragments move into `harness/prompts/*.md`, byte-identical
 
-Status: ready-for-agent
+Status: ready-for-agent (done on `claude/amazing-mendel-m087zw`, 2026-10-05: eleven fragments, loader reflows, 27 sha256 pins)
 Type: task
 Blocked by: 01
 
