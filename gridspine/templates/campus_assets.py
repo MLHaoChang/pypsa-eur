@@ -117,7 +117,7 @@ def _check_library(data):
     rate = _tagged("library", "discount_rate", data)
     if not 0 <= rate < 1:
         raise ContractError(f"library.discount_rate must lie in [0, 1), got {rate}")
-    cur = data.get("currency") if "currency" in data else None
+    cur = data.get("currency")
     if not isinstance(cur, str) or not cur:
         raise ContractError(f"library: currency must be a non-empty string, got {cur!r}")
     year = data.get("price_year")

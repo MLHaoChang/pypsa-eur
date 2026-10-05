@@ -37,7 +37,10 @@ MAY_BE_ZERO = {"pfe_kw", "i0_percent", "c_nf_per_km", "opex_frac"}
 
 
 def raw():
-    return copy.deepcopy(RAW)
+    """The shipped library cut to two entries per kind: every refusal below
+    edits entry 0 or 1, and writing and re-reading all of it per case made
+    this file a minute long."""
+    return copy.deepcopy({k: v[:2] if k in KINDS else v for k, v in RAW.items()})
 
 
 def write(tmp_path, data):
@@ -153,6 +156,7 @@ def test_a_bank_has_whole_steps_and_a_statcom_losses():
 
 def test_the_raw_library_is_itself_valid(tmp_path):
     assert load_asset_library(write(tmp_path, raw()))["currency"] == "EUR"
+    assert load_asset_library(write(tmp_path, copy.deepcopy(RAW))) == LIB
 
 
 @pytest.mark.parametrize("kind, field", [(k, f) for k in FIELDS for f in (*FIELDS[k], *COST[k])])
