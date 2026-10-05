@@ -420,15 +420,15 @@ A dry `git merge-tree --write-tree HEAD origin/master` at `10f8abc` / `855bbac` 
 - **Q5** Should `single_owner` assign the PoC meter Links to the owner as assets? If yes, how do non-investment assets avoid `overnight_cost_missing`?
 - **Q6** A currency-year field (C4 / U1 d) machine-readable on `FinanceInputs` or the report, not only a note.
 - **Q7** Pack schema: the §6.1 metadata beside each IC `Tariff`; `derived` formula ids; load profiles as pack content or not.
-- **Q8** (owner) Accept `levelised_cost = null` for the guided battery case, or ask IC for a storage LCOS metric?
+- **Q8** *Answered (parent v1.6 decision 6):* keep LCOS. IC adds a storage LCOS metric (charging cost included) to the finance engine; the adapter maps the guided `lcos` to it, never null. §4.3's "LCOS → null" delta is withdrawn; WP7 asserts the guided LCOS equals the engine metric, and records its delta against GS's pro forma figure (which excluded charging energy).
 - **Q9** `jurisdiction` / `valid_from` for illustrative tariffs.
-- **Q10** (owner) `tax_levy` / `certificate` items in the guided bill: a seventh component, or under `network` / `energy`?
-- **Q11** (owner) Keep `models/study.py::Tariff` as a guided intake form (`TariffForm`) that only compiles, or move the guided tariff step onto IC items?
+- **Q10** *Answered (decision 7):* a seventh bill component, **"Taxes & levies"**. WP4 extends `BillComponents` and `Bill.by_component` with `taxes_levies`, `findings.STREAMS` and `proforma.BILL_COMPONENTS`'s successor with the matching stream, the import-time six-key assertion becomes seven, the frontend `decisionStudies.ts` type and `decisionVocabulary.ts` label follow, and the adapter maps `tax_levy` and `certificate` item kinds to it.
+- **Q11** *Answered (decision 8):* keep the simple guided form (`TariffForm`, today's `models/study.py::Tariff`) that only compiles into IC's `Tariff`; experts edit the full items in IC's Tariff builder. One tariff is stored (the compiled one); the form is the guided view of it.
 - **Q12** Confirm `commercial_cost_terms` exposes the demand amount per item for `demand_charge_eur` and that master's `objective_decomposition._bridge` closes with the "Commercial" component.
-- **Q13** (owner) Keep the formula cash-flow sheet as a view over the engine, or rely on IC's static `build_workbook` only?
+- **Q13** *Answered (decision 9):* keep the live-formula cash-flow workbook as a view over the engine's numbers. WP8 keeps `proforma_xlsx`'s formula sheet (renamed to a view module) fed from the engine's `FinanceResult`, and reuses `build_workbook`'s other sheets; the in-repo evaluator test stays.
 - **Q14** Is the export revenue in the P3 ledger streamed as `energy_export` (export escalation class) in both the actual and the counterfactual templates?
 - **Q15** `binding.bind_commercial` in the facade, and the org a study-owned project's Library series live in (C6, R2).
-- **Q16** (owner) Port the `marginal_cost` reverse-pair cycling check for non-commercial networks into IC's preflight, keep it in `validation_service`, or drop it?
+- **Q16** *Answered (decision 10):* the cycling check (same-hour and F1-B6's cross-hour) moves into IC's `commercial/preflight.py` (IC U1 f), also for networks without a commercial setup. U2 removes GS's copy in `validation_service` only once IC's lands, and keeps F1's BC-F1-1 behaviour (the study keeps and discloses the warning) by reading the engine preflight's codes.
 
 ---
 
