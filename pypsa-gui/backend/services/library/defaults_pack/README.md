@@ -8,7 +8,7 @@ two faces" §3 rule 4). The pack holds:
 - two illustrative tariffs;
 - two synthetic load profiles.
 
-The loader is `loader.py`: `load_defaults_pack(version=None)`. The flat export price helper is
+The loader is `loader.py`: `from services.library.defaults_pack.loader import load_defaults_pack`. The package `__init__` re-exports nothing. The flat export price helper is
 `services/library/export_series.py`.
 
 ## Spec decision 20
@@ -37,10 +37,16 @@ To change any content:
    `test_every_version_is_pinned_and_its_hash_matches` fails until the new version is pinned.
    It also fails if a pinned version's content changes.
 
-The hash is a sha256 over the canonical JSON of the **parsed** content: every value row,
-finance, tariffs and profile metadata. For each load profile it covers the sha256 of the
-profile's file bytes, after normalising line endings to LF. The hash does not cover the file
-location.
+The hash is a sha256 over the canonical JSON of the **raw files** (`canonical_payload`):
+
+- `values.csv` rows as strings, header first;
+- `finance.yaml` and `tariffs.json` as loaded, without `_comment`;
+- the manifest without `files`;
+- each load profile file's sha256, after normalising line endings to LF.
+
+No model's dump enters the hash, so a model change (for example a new default field on
+`TariffItem`) does not re-hash a shipped version. Validation is a separate step. The file
+location does not enter the hash.
 
 `load_defaults_pack()` with no argument loads the latest version.
 
@@ -64,7 +70,8 @@ Costs use the asset schema's part vocabulary (S0):
 - PV is one `investment` part, priced per MW.
 
 A field the catalogue does not carry is None, never 0. For example, technology-data books the
-battery's FOM on the inverter only, so the energy part has no FOM value.
+battery's FOM on the inverter only, so the energy part's `fom_share` row has no value, status
+`not_available` and the note `fom_booked_on_power_part`.
 
 Tariff rates are stored in the IC units: per kWh and per kW-month. Each item's `source_rows`
 keep the seed price in EUR/MWh, EUR/MW/month or EUR/month. The loader checks each rate against
@@ -95,6 +102,11 @@ version and hash. It is the input for the report's assumptions appendix.
 `pack_tariff(id)` returns a deep copy of the tariff. Its `Tariff.pack_hash` is set to
 `generic_defaults@<version>:sha256:<hash>`; `parse_pack_stamp` reads that string back.
 
+The copy is made from the tariff as the file holds it, so editing a loaded pack's objects
+cannot yield a stamped, altered tariff. `tariff_is_unchanged(tariff)` says whether a tariff is
+still the pack's as shipped (everything but `pack_hash` equal); the guided ledger uses it to
+mark a row `customised`.
+
 Write the copy inline into `CommercialConfig.import_tariff` and leave `import_tariff_ref` as
 `None`. A ref would be resolved in the org Library, which does not hold pack tariffs, and would
 fail with `library_ref_stale`. This is owner decision R3.
@@ -119,3 +131,15 @@ The two tariffs have these jurisdictions:
   joins no tax pack.
 
 Both tariffs have `valid_from` 2020-01-01, the money year of the seed, and an open `valid_to`.
+
+## Load profiles
+
+`load_profile_series(id, index, annual_mwh=..., weights=...)` returns MW. The values are
+scaled so that the energy, `sum(MW x w)`, is `annual_mwh`:
+
+- `w` is `weights`, the hours each row stands for: pass the network's snapshot weightings
+  for representative periods;
+- without `weights`, `w` is the index's step in hours, so a 15-minute index works as is.
+
+The factors are read on the index's own clock. Pass the site clock: with
+`commercial.timezone` set the snapshots are UTC-naive, so convert them first.

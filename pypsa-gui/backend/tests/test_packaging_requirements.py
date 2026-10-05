@@ -359,7 +359,7 @@ def test_the_spec_ships_the_generic_defaults_pack_data():
     """IC U1 (a): the defaults pack's loader is a module (collected by import)
     but its versioned data files are not — the spec must list them, at the
     path the loader resolves (`services/library/defaults_pack/versions`)."""
-    from services.library.defaults_pack import VERSIONS_DIR
+    from services.library.defaults_pack.loader import VERSIONS_DIR
 
     text = SPEC.read_text(encoding="utf-8")
     assert '"services/library/defaults_pack/versions"' in text

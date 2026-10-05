@@ -14,7 +14,8 @@ so `commercial.binding.bind_commercial` aligns it one to one and covers every sn
 The series is stored naive when the snapshots are naive, which `align_to_snapshots` reads on
 the snapshot clock in both timezone modes (with `commercial.timezone` set, naive snapshots are
 UTC; without it they are the site clock), so a flat price is never shifted. A multi-period
-snapshot MultiIndex contributes its timestamp level.
+snapshot MultiIndex contributes its UNIQUE timestamps (a weather year repeated in every
+investment period is minted once), which must be increasing.
 
 Minting is idempotent on content (`put_series`): the same price on the same axis returns the
 same version; a changed price is the next version. `put_series` ROLLS BACK `db` on a version
@@ -39,8 +40,13 @@ FLAT_EXPORT_NOTE = "flat_export_price"
 
 
 def _axis(snapshots) -> pd.DatetimeIndex:
-    idx = snapshots.get_level_values(-1) if isinstance(snapshots, pd.MultiIndex) else snapshots
-    idx = pd.DatetimeIndex(idx)
+    if isinstance(snapshots, pd.MultiIndex):
+        # A multi-period network may repeat one weather year in every period
+        # (`set_investment_periods([2030, 2040])`): mint each timestamp ONCE.
+        # `align_to_snapshots` maps the deduplicated series onto every repeat.
+        idx = pd.DatetimeIndex(snapshots.get_level_values(-1)).unique()
+    else:
+        idx = pd.DatetimeIndex(snapshots)
     if len(idx) == 0:
         raise ValueError("snapshots are empty: a flat export series needs the axis it covers")
     if not idx.is_monotonic_increasing or idx.has_duplicates:

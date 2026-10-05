@@ -122,7 +122,7 @@ def test_the_pack_export_price_binds_through_the_commercial_binding(db, org, tmp
     from models.commercial import CommercialConfig
     from services.commercial.binding import bind_commercial
     from services.library import series_store as S
-    from services.library.defaults_pack import load_defaults_pack
+    from services.library.defaults_pack.loader import load_defaults_pack
     from services.library.export_series import put_flat_export_series
 
     pack = load_defaults_pack("2026-10-05")
@@ -147,3 +147,72 @@ def test_the_pack_export_price_binds_through_the_commercial_binding(db, org, tmp
     assert stored["import_tariff"]["pack_hash"] == pack.stamp
     written = n.links_t["ic_export_price"]["export"].to_numpy()
     np.testing.assert_array_equal(written, np.full(24, 40.0))
+
+
+def _site_network(snapshots):
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(snapshots)
+    n.add("Bus", "grid")
+    n.add("Bus", "site")
+    n.add("Generator", "market", bus="grid", p_nom=100, marginal_cost=50)
+    n.add("Load", "load", bus="site", p_set=1.0)
+    n.add("Link", "import", bus0="grid", bus1="site", p_nom=10)
+    n.add("Link", "export", bus0="site", bus1="grid", p_nom=10)
+    return n
+
+
+def test_a_multi_period_network_repeating_one_weather_year_binds(db, org, tmp_path):
+    """Review B1: `set_investment_periods([2030, 2040])` reuses one weather year, so the
+    timestamp level repeats. The helper mints the UNIQUE timestamps once and the binding
+    maps that series onto every period's (repeated) snapshots."""
+    from models.commercial import CommercialConfig
+    from services.commercial.binding import bind_commercial
+    from services.library import series_store as S
+    from services.library.export_series import put_flat_export_series
+
+    n = _site_network(pd.date_range("2030-01-01", periods=24, freq="h"))
+    n.set_investment_periods([2030, 2040])
+    assert n.snapshots.get_level_values(-1).has_duplicates
+    ref = put_flat_export_series(db, org, "flat_mp_repeat", 40.0, snapshots=n.snapshots,
+                                 root=tmp_path)
+    back = S.resolve(db, org, ref, root=tmp_path)
+    assert len(back) == 24 and back.index.is_unique
+    commercial = CommercialConfig.model_validate({
+        "poc_link": "import", "export_link": "export", "export_price_ref": ref.model_dump()})
+    bind_commercial(n, commercial, project_dir=None,
+                    resolve_ref=lambda r: S.resolve(db, org, r, root=tmp_path))
+    written = n.links_t["ic_export_price"]["export"].to_numpy()
+    assert len(written) == 48
+    np.testing.assert_array_equal(written, np.full(48, 40.0))
+
+
+def test_a_multi_index_whose_unique_timestamps_go_backwards_is_refused(db, org, tmp_path):
+    from services.library.export_series import put_flat_export_series
+
+    t = pd.DatetimeIndex(["2030-01-01 02:00", "2030-01-01 01:00"])
+    mi = pd.MultiIndex.from_arrays([[2030, 2030], t], names=["period", "timestep"])
+    with pytest.raises(ValueError):
+        put_flat_export_series(db, org, "flat_mp_backwards", 1.0, snapshots=mi,
+                               root=tmp_path)
+
+
+def test_the_bundle_check_requires_the_pack_beside_alembic_ini():
+    """The frozen app reads the pack `__file__`-relative, so the bundle smoke check lists
+    its manifest among the rooted files (and the spec ships the directory)."""
+    import sys
+    from pathlib import Path
+
+    backend = Path(__file__).resolve().parents[1]
+    spec = (backend.parent / "pypsa-gui.spec").read_text(encoding="utf-8")
+    assert '"services/library/defaults_pack/versions"' in spec
+    sys.path.insert(0, str(backend / "smoke"))
+    try:
+        import check_bundle
+    finally:
+        sys.path.pop(0)
+    from services.library.defaults_pack import loader
+
+    for v in loader.available_versions():
+        assert f"services/library/defaults_pack/versions/{v}/manifest.json" in check_bundle.ROOTED

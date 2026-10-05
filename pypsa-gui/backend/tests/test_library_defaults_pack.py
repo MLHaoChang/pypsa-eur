@@ -36,7 +36,7 @@ VERSION = "2026-10-05"
 
 @pytest.fixture(scope="module")
 def pack():
-    from services.library.defaults_pack import load_defaults_pack
+    from services.library.defaults_pack.loader import load_defaults_pack
 
     return load_defaults_pack(VERSION)
 
@@ -45,7 +45,7 @@ def pack():
 
 
 def test_loads_the_vendored_version_and_none_means_the_latest(pack):
-    from services.library import defaults_pack as D
+    from services.library.defaults_pack import loader as D
 
     assert pack.pack_id == "generic_defaults" and pack.version == VERSION
     assert VERSION in D.available_versions()
@@ -53,7 +53,7 @@ def test_loads_the_vendored_version_and_none_means_the_latest(pack):
 
 
 def test_an_unknown_version_is_refused_not_fetched():
-    from services.library import defaults_pack as D
+    from services.library.defaults_pack import loader as D
 
     with pytest.raises(D.UnknownPackVersion) as exc:
         D.load_defaults_pack("1999-01-01")
@@ -63,7 +63,7 @@ def test_an_unknown_version_is_refused_not_fetched():
 
 
 def test_unknown_ids_raise_typed_errors(pack):
-    from services.library import defaults_pack as D
+    from services.library.defaults_pack import loader as D
 
     cases = [(lambda: pack.cost_parts("fusion"), D.UnknownTechnology),
              (lambda: pack.cost_part("battery", "flux"), D.UnknownCostPart),
@@ -154,8 +154,15 @@ def test_the_battery_has_a_power_part_and_an_energy_part(pack):
     assert power.lifetime.value == 10.0 and energy.lifetime.value == 25.0
     assert power.efficiency is not None and power.efficiency.value == 0.96
     # technology-data carries the battery's FOM on the inverter only: the energy part's
-    # FOM is NOT established (None), never a silent 0 (ADR-0001).
-    assert energy.fom_share is None and energy.efficiency is None
+    # FOM is a row that says so (not established, value None), never a silent 0 and never
+    # silently absent (ADR-0001; review C12).
+    assert energy.fom_share is not None
+    assert energy.fom_share.value is None and energy.fom_share.status == "not_available"
+    assert energy.fom_share.note == "fom_booked_on_power_part"
+    assert energy.fom_share.source.strip() and energy.fom_share.source_year == 2026
+    assert energy.efficiency is None
+    row = next(r for r in pack.assumption_rows() if r.key == "battery.energy.fom_share")
+    assert row.value is None and row.note == "fom_booked_on_power_part"
     assert pack.cost_part("battery", "power") == power
 
 
@@ -189,7 +196,7 @@ def test_unit_conversions_by_hand(pack):
 
 
 def test_derived_round_trip_efficiency_comes_from_the_closed_registry(pack):
-    from services.library import defaults_pack as D
+    from services.library.defaults_pack import loader as D
 
     rte = pack.value("battery.round_trip_efficiency")
     assert rte.derived is not None
@@ -324,7 +331,7 @@ def test_tou_bands_partition_every_hour_of_the_week(pack):
 
 
 def test_pack_tariff_is_an_independent_stamped_copy(pack):
-    from services.library import defaults_pack as D
+    from services.library.defaults_pack import loader as D
 
     a = pack.pack_tariff("de_industrial_illustrative")
     b = pack.pack_tariff("de_industrial_illustrative")
@@ -343,7 +350,7 @@ def test_pack_tariff_is_an_independent_stamped_copy(pack):
 
 
 def test_mutating_a_loaded_pack_does_not_leak_into_the_next_load():
-    from services.library import defaults_pack as D
+    from services.library.defaults_pack import loader as D
 
     first = D.load_defaults_pack(VERSION)
     with pytest.raises(Exception):
@@ -352,6 +359,26 @@ def test_mutating_a_loaded_pack_does_not_leak_into_the_next_load():
     second = D.load_defaults_pack(VERSION)
     assert second.pack_tariff("de_industrial_illustrative").items[0].periods[0].rate == \
         pytest.approx(0.110)
+    # The mutated pack itself cannot hand out a STAMPED altered tariff either: pack_tariff
+    # copies from the pristine parse, not from the (mutable) model tree.
+    assert first.pack_tariff("de_industrial_illustrative").items[0].periods[0].rate == \
+        pytest.approx(0.110)
+
+
+def test_tariff_is_unchanged_detects_customisation(pack):
+    """Coordinating plan §3 rule 5: a pack tariff the user edited is `customised`."""
+    t = pack.pack_tariff("de_industrial_illustrative")
+    assert pack.tariff_is_unchanged(t)
+    assert pack.tariff_is_unchanged(t.model_dump(mode="json"))          # a stored dict too
+    restamped = t.model_copy(update={"pack_hash": None})
+    assert pack.tariff_is_unchanged(restamped)                          # pack_hash ignored
+    edited = t.model_copy(deep=True)
+    edited.items[2].periods[0].rate = 9.5
+    assert not pack.tariff_is_unchanged(edited)
+    renamed = t.model_copy(update={"name": "mine"})
+    assert not pack.tariff_is_unchanged(renamed)
+    foreign = t.model_copy(update={"id": "not_a_pack_tariff"})
+    assert not pack.tariff_is_unchanged(foreign)
 
 
 def test_a_stamped_copy_binds_inline_in_a_commercial_config(pack):
@@ -382,17 +409,60 @@ def test_load_profiles_are_pack_files_with_a_manifest_hash(pack):
         assert len(prof.factors) == 12 * 2 * 24
 
 
-def test_load_profile_series_is_scaled_to_annual_mwh(pack):
+def test_load_profile_series_is_mw_scaled_to_annual_mwh(pack):
     idx = pd.date_range("2030-01-01", periods=8760, freq="h")
     s = pack.load_profile_series("commercial_office", idx, annual_mwh=1000.0)
     assert isinstance(s, pd.Series) and s.index.equals(idx)
-    assert s.sum() == pytest.approx(1000.0)
+    assert s.sum() == pytest.approx(1000.0)                  # MW x 1 h
     # Shape: a Monday 10:00 in July is above that Monday's 03:00.
     assert s.loc["2030-07-01 10:00"] > s.loc["2030-07-01 03:00"]
     shape = pack.load_profile_series("industrial_two_shift", idx)
     assert shape.loc["2030-01-01 00:00"] == pytest.approx(0.4)          # the raw factor
     with pytest.raises(ValueError):
         pack.load_profile_series("commercial_office", idx, annual_mwh=-1.0)
+    assert pack.load_profile_series("commercial_office", idx,
+                                    annual_mwh=np.float64(10.0)).sum() == pytest.approx(10.0)
+
+
+def test_load_profile_on_a_15min_index_delivers_the_annual_energy(pack):
+    """MW, not MWh per row: on 15-minute steps the energy is MW x 0.25 h (review B2)."""
+    idx = pd.date_range("2030-01-01", periods=8760 * 4, freq="15min")
+    s = pack.load_profile_series("commercial_office", idx, annual_mwh=1000.0)
+    assert (s * 0.25).sum() == pytest.approx(1000.0)
+    hourly = pack.load_profile_series("commercial_office",
+                                      pd.date_range("2030-01-01", periods=8760, freq="h"),
+                                      annual_mwh=1000.0)
+    # the same MW level at the same wall-clock hour, whatever the step
+    assert s.loc["2030-07-01 10:15"] == pytest.approx(hourly.loc["2030-07-01 10:00"])
+
+
+def test_load_profile_on_weighted_weeks_delivers_the_annual_energy(pack):
+    """12 representative weeks weighted month-hours / 168: the weights (the network's
+    snapshot weightings) carry the energy, not the row count (review B2)."""
+    weeks = [pd.date_range(f"2030-{m:02d}-08", periods=168, freq="h") for m in range(1, 13)]
+    idx = weeks[0].append(weeks[1:])
+    w = np.concatenate([np.full(168, pd.Period(f"2030-{m:02d}").days_in_month * 24 / 168)
+                        for m in range(1, 13)])
+    for weights in (w, pd.Series(w, index=idx)):
+        s = pack.load_profile_series("commercial_office", idx, annual_mwh=1000.0,
+                                     weights=weights)
+        assert (s.to_numpy() * w).sum() == pytest.approx(1000.0)
+    with pytest.raises(ValueError):
+        pack.load_profile_series("commercial_office", idx, annual_mwh=1000.0, weights=w[:10])
+    with pytest.raises(ValueError):
+        pack.load_profile_series("commercial_office", idx, annual_mwh=1000.0, weights=-w)
+
+
+def test_load_profile_reads_the_index_clock(pack):
+    """The factors are read on the index's OWN clock: a UTC index is read in UTC, so the
+    caller converts to the site clock first."""
+    z = pd.date_range("2030-07-01", periods=24, freq="h", tz="UTC")
+    utc = pack.load_profile_series("commercial_office", z)
+    berlin = pack.load_profile_series("commercial_office", z.tz_convert("Europe/Berlin"))
+    assert utc.iloc[6] == pack.load_profile_series(
+        "commercial_office", pd.date_range("2030-07-01 06:00", periods=1, freq="h")).iloc[0]
+    assert berlin.iloc[6] == pack.load_profile_series(
+        "commercial_office", pd.date_range("2030-07-01 08:00", periods=1, freq="h")).iloc[0]
 
 
 # ── the hash pin ────────────────────────────────────────────────────────────
@@ -402,7 +472,7 @@ def test_every_version_is_pinned_and_its_hash_matches():
     """Pinned per VERSION, like the tax packs (`fixtures/investment_case/pack_hashes.json`):
     a changed row changes its version's hash and this fails until the pin is re-reviewed;
     a new version cannot slip in unpinned."""
-    from services.library import defaults_pack as D
+    from services.library.defaults_pack import loader as D
 
     pinned = json.loads((FIXTURES / "pack_hashes.json").read_text())
     assert set(pinned) == {"generic_defaults"}
@@ -447,3 +517,48 @@ def test_a_derived_row_that_disagrees_with_its_formula_is_refused(tmp_path):
     values.write_text(text.replace(",square,", ",cube,"))
     with pytest.raises(loader.DefaultsPackError, match="cube"):
         loader.parse_pack_dir(dst)
+
+
+def test_the_hash_is_over_the_files_not_the_models(monkeypatch):
+    """Review B4: the hash is a canonical payload of the RAW parsed files (CSV rows as
+    strings, the JSON / YAML as loaded, the manifest without `files`, the profile shas).
+    A model change (a new default field, a renamed dump key) must not re-hash a shipped
+    version. Proven by making every model dump junk: the hash still matches the pin."""
+    from models import commercial as M
+    from services.library.defaults_pack import loader
+
+    pinned = json.loads((FIXTURES / "pack_hashes.json").read_text())["generic_defaults"]
+    for cls in (loader.PackValue, loader.FinanceDefaults, loader.PackTariff,
+                loader.PackTariffMeta, loader.LoadProfile, M.Tariff, M.TariffItem,
+                M.TariffPeriod):
+        monkeypatch.setattr(cls, "model_dump",
+                            lambda self, **kw: {"a_new_default_field": True}, raising=True)
+    assert loader.parse_pack_dir(loader.version_dir(VERSION)).hash == pinned[VERSION]
+
+
+def test_the_canonical_payload_is_rebuilt_from_the_files_alone():
+    import csv
+    import hashlib
+
+    import yaml
+
+    from services.library.defaults_pack import loader
+
+    d = loader.version_dir(VERSION)
+    manifest = json.loads((d / "manifest.json").read_text())
+    with (d / "values.csv").open(newline="") as fh:
+        rows = list(csv.reader(fh))
+    tariffs = json.loads((d / "tariffs.json").read_text())
+    tariffs.pop("_comment")
+    expected = {
+        "manifest": {k: v for k, v in manifest.items() if k != "files"},
+        "values": rows,
+        "finance": yaml.safe_load((d / "finance.yaml").read_text()),
+        "tariffs": tariffs,
+        "load_profile_files": {p["file"]: p["sha256"] for p in manifest["load_profiles"]},
+    }
+    assert loader.canonical_payload(d) == expected
+    blob = json.dumps(expected, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    assert loader.parse_pack_dir(d).hash == hashlib.sha256(blob.encode()).hexdigest()
+    # nothing the models add enters it
+    assert "direction" not in json.dumps(loader.canonical_payload(d)["tariffs"])

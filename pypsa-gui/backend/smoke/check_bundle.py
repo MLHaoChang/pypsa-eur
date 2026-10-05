@@ -178,6 +178,10 @@ ROOTED = (
     # routers/projects.py; the P19 EH templates are loaded from it BY FILE
     # PATH (merge review N8) — a basename match elsewhere is not enough.
     "project_templates/eh_templates.py",
+    # The generic defaults pack (IC U1 a): `defaults_pack.loader.VERSIONS_DIR` =
+    # parents[0] of services/library/defaults_pack/loader.py / "versions"; one
+    # manifest per vendored version.
+    "services/library/defaults_pack/versions/2026-10-05/manifest.json",
 )
 
 

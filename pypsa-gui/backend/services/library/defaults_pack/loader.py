@@ -21,9 +21,11 @@ One version is one directory, ``versions/<YYYY-MM-DD>/``, holding:
   is kept and checked against the IC rate through :data:`TARIFF_CONVERSIONS`;
 * ``load_profiles/*.csv``: synthetic month x daytype x hour shapes.
 
-The pack hash is the sha256 of the canonical JSON of the PARSED content (values,
-finance, tariffs, profile metadata including each profile file's sha256). It is pinned
-per version in ``tests/fixtures/defaults_pack/pack_hashes.json``.
+The pack hash is the sha256 of the canonical JSON of the RAW files (`canonical_payload`:
+CSV rows as strings, the YAML / JSON as loaded, the manifest without `files`, each profile
+file's sha256), never of a model's dump, so a model change cannot re-hash a shipped
+version. Validation is separate. It is pinned per version in
+``tests/fixtures/defaults_pack/pack_hashes.json``.
 
 Nothing is downloaded: an unknown version is refused. Lookups of unknown ids raise a
 :class:`DefaultsPackLookupError` subclass carrying a stable ``code``.
@@ -48,7 +50,8 @@ from typing import Any, Callable, Literal, Mapping, Sequence
 import numpy as np
 import pandas as pd
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (BaseModel, ConfigDict, Field, PrivateAttr, ValidationError,
+                      field_validator)
 
 from models.commercial import Tariff
 
@@ -58,7 +61,8 @@ __all__ = [
     "Derived", "FinanceDefaults", "LoadProfile", "PackRange", "PackTariff", "PackTariffMeta",
     "PackValue", "UnknownCostPart", "UnknownFormula", "UnknownLoadProfile", "UnknownPackTariff",
     "UnknownPackValue", "UnknownPackVersion", "UnknownTechnology",
-    "available_versions", "derive", "load_defaults_pack", "parse_pack_dir", "parse_pack_stamp",
+    "available_versions", "canonical_payload", "derive", "load_defaults_pack", "parse_pack_dir",
+    "parse_pack_stamp",
     "version_dir",
 ]
 
@@ -382,6 +386,9 @@ class DefaultsPack(BaseModel):
     finance: FinanceDefaults
     tariffs: dict[str, PackTariff]
     load_profiles: dict[str, LoadProfile]
+    # The tariff payloads exactly as the file holds them (JSON text: immutable), so
+    # `pack_tariff` copies from the pristine parse, never from the mutable model tree.
+    _tariff_json: tuple[tuple[str, str], ...] = PrivateAttr(default=())
 
     # -- identity ----------------------------------------------------------
 
@@ -435,9 +442,26 @@ class DefaultsPack(BaseModel):
         """A deep COPY of the tariff, stamped with the pack id, version and hash in
         `Tariff.pack_hash`, to write inline into `CommercialConfig.import_tariff`
         (leave `import_tariff_ref` None)."""
-        t = self._pack_tariff(tariff_id).tariff.model_copy(deep=True)
+        self._pack_tariff(tariff_id)                      # the typed error for an unknown id
+        raw = dict(self._tariff_json)[tariff_id]
+        t = Tariff.model_validate(json.loads(raw))
         t.pack_hash = self.stamp
         return t
+
+    def tariff_is_unchanged(self, tariff: Tariff | Mapping[str, Any]) -> bool:
+        """True when `tariff` is this pack's tariff of the same id, as shipped: everything
+        but `pack_hash` equal. False for an edited copy, an unknown id or an invalid
+        payload. The guided ledger's `customised` detection (plan §3 rule 5)."""
+        if not isinstance(tariff, Tariff):
+            try:
+                tariff = Tariff.model_validate(tariff)
+            except (ValidationError, TypeError, ValueError):
+                return False
+        if tariff.id not in self.tariffs:
+            return False
+        ours = self.pack_tariff(tariff.id)
+        return (tariff.model_dump(mode="json", exclude={"pack_hash"})
+                == ours.model_dump(mode="json", exclude={"pack_hash"}))
 
     def tariff_meta(self, tariff_id: str) -> PackTariffMeta:
         return self._pack_tariff(tariff_id).meta.model_copy(deep=True)
@@ -456,11 +480,20 @@ class DefaultsPack(BaseModel):
         return self.load_profiles[profile_id]
 
     def load_profile_series(self, profile_id: str, index: pd.DatetimeIndex, *,
-                            annual_mwh: float | None = None) -> pd.Series:
-        """The shape on `index` (each row's month, weekday/weekend and hour on the index's
-        own clock). With `annual_mwh`, scaled so the values SUM to it: MWh per row, i.e.
-        MW on an hourly index (the guided study's convention). Without it, the raw
-        factors."""
+                            annual_mwh: float | None = None, weights=None) -> pd.Series:
+        """The shape on `index`, in MW when `annual_mwh` is given.
+
+        Clock: each row's month, weekday/weekend and hour are read on the index's OWN
+        clock (a tz-aware index on its zone's wall clock, a naive one as is). Pass the
+        SITE clock: with `commercial.timezone` set the network's snapshots are UTC-naive,
+        so convert them first (`idx.tz_localize("UTC").tz_convert(tz)`).
+
+        Scaling: with `annual_mwh`, the MW values are `shape x annual_mwh / sum(shape x w)`,
+        so the energy `sum(MW x w)` is `annual_mwh`. `w` is the hours each row stands
+        for: `weights` (the network's snapshot weightings: a scalar, an array or a Series
+        on `index` or on a snapshot MultiIndex whose last level is `index`); by default
+        the index's step in hours (its `freq`, else the median step). Representative
+        periods need their weightings passed. Without `annual_mwh`, the raw factors."""
         prof = self.load_profile(profile_id)
         if not isinstance(index, pd.DatetimeIndex) or len(index) == 0:
             raise ValueError("index must be a non-empty DatetimeIndex")
@@ -468,9 +501,16 @@ class DefaultsPack(BaseModel):
         shape = f[np.asarray(index.month) - 1, (np.asarray(index.weekday) >= 5).astype(int),
                   np.asarray(index.hour)]
         if annual_mwh is not None:
-            if isinstance(annual_mwh, bool) or not math.isfinite(annual_mwh) or annual_mwh < 0:
+            if isinstance(annual_mwh, bool) or not isinstance(annual_mwh, (int, float, np.number)) \
+                    or not math.isfinite(annual_mwh) or annual_mwh < 0:
                 raise ValueError(f"annual_mwh must be a finite number >= 0, got {annual_mwh!r}")
-            shape = shape / shape.sum() * float(annual_mwh)
+            w = _row_hours(index, weights)
+            energy = float((shape * w).sum())
+            if not energy > 0:
+                raise ValueError("the shape carries no energy on this index and these weights")
+            shape = shape * (float(annual_mwh) / energy)
+        elif weights is not None:
+            raise ValueError("weights scale the energy: pass them with annual_mwh")
         return pd.Series(shape, index=index, name=profile_id)
 
     # -- the report's assumptions appendix ----------------------------------
@@ -529,6 +569,36 @@ class DefaultsPack(BaseModel):
                 illustrative=p.illustrative,
                 note=("synthetic; " if p.synthetic else "") + (p.note or ""), **stamp))
         return rows
+
+
+def _row_hours(index: pd.DatetimeIndex, weights) -> np.ndarray:
+    """The hours each row of `index` stands for (see `load_profile_series`)."""
+    n = len(index)
+    if weights is None:
+        if index.freq is not None:
+            step = pd.Timedelta(index.freq).total_seconds() / 3600.0
+        elif n > 1:
+            step = float(np.median(np.diff(index.asi8))) / 3.6e12
+        else:
+            raise ValueError("a one-row index has no step: pass weights")
+        return np.full(n, step)
+    if isinstance(weights, pd.Series):
+        if weights.index.equals(index):
+            arr = weights.to_numpy(dtype=float)
+        elif isinstance(weights.index, pd.MultiIndex) and len(weights) == n \
+                and pd.DatetimeIndex(weights.index.get_level_values(-1)).equals(index):
+            arr = weights.to_numpy(dtype=float)
+        else:
+            arr = weights.reindex(index).to_numpy(dtype=float)
+    elif np.ndim(weights) == 0:
+        arr = np.full(n, float(weights))
+    else:
+        arr = np.asarray(weights, dtype=float)
+    if arr.shape != (n,):
+        raise ValueError(f"weights must give one value per index row ({n}), got {arr.shape}")
+    if not np.isfinite(arr).all() or (arr < 0).any():
+        raise ValueError("weights must be finite hours >= 0 covering every index row")
+    return arr
 
 
 def _ic_unit_label(currency: str, unit: str) -> str:
@@ -847,8 +917,42 @@ def _parse_profile(directory: Path, spec: Mapping[str, Any]) -> LoadProfile:
 
 
 def _canonical_hash(payload: Mapping[str, Any]) -> str:
-    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    try:
+        blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise DefaultsPackError(f"pack content is not canonical JSON: {exc}") from None
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def canonical_payload(directory: Path) -> dict[str, Any]:
+    """What the pack hash covers: the RAW files, never a model's dump, so a model change
+    (a new default field) cannot re-hash a shipped version (review B4; the tax packs'
+    `canonical_payload` recipe). `values.csv` rows as strings (header first),
+    `finance.yaml` and `tariffs.json` as loaded (`_comment` dropped), the manifest
+    without `files` (file names, not content), and each load profile file's sha256 of
+    its LF-normalised bytes."""
+    directory = Path(directory)
+    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    files = manifest.get("files") or {}
+    with (directory / files.get("values", "values.csv")).open(encoding="utf-8",
+                                                               newline="") as fh:
+        rows = [list(r) for r in csv.reader(fh)]
+    finance = yaml.safe_load((directory / files.get("finance", "finance.yaml"))
+                             .read_text(encoding="utf-8"))
+    tariffs = json.loads((directory / files.get("tariffs", "tariffs.json"))
+                         .read_text(encoding="utf-8"))
+    if isinstance(tariffs, dict):
+        tariffs.pop("_comment", None)
+    profile_files = {}
+    for spec in manifest.get("load_profiles") or []:
+        rel = str(spec.get("file") or "")
+        path = directory / rel
+        if not rel or not path.is_file():
+            raise DefaultsPackError(f"load profile file {rel!r} is missing")
+        profile_files[rel] = _file_sha256(path)
+    return {"manifest": {k: v for k, v in manifest.items() if k != "files"},
+            "values": rows, "finance": finance, "tariffs": tariffs,
+            "load_profile_files": profile_files}
 
 
 def parse_pack_dir(directory: Path) -> DefaultsPack:
@@ -879,19 +983,19 @@ def parse_pack_dir(directory: Path) -> DefaultsPack:
             raise DefaultsPackError(f"tariff {tid!r} is in {pt.meta.currency} "
                                     f"{pt.meta.currency_year}; the pack is in "
                                     f"{finance.currency} {finance.currency_year}")
-    payload = {
-        "pack_id": PACK_ID, "version": version, "title": manifest.get("title"),
-        "seeded_from": manifest.get("seeded_from") or {},
-        "values": [v.model_dump(mode="json") for v in values],
-        "finance": finance.model_dump(mode="json"),
-        "tariffs": {t: p.model_dump(mode="json") for t, p in tariffs.items()},
-        "load_profiles": {p: prof.model_dump(mode="json", exclude={"factors"})
-                          for p, prof in sorted(profiles.items())},
-    }
-    return DefaultsPack(pack_id=PACK_ID, version=version, title=str(manifest.get("title") or ""),
-                        seeded_from=payload["seeded_from"], hash=_canonical_hash(payload),
+    # Validation (above) and hashing (here) are separate: the hash reads the files only.
+    digest = _canonical_hash(canonical_payload(directory))
+    raw_tariffs = json.loads((directory / files.get("tariffs", "tariffs.json"))
+                             .read_text(encoding="utf-8"))
+    pristine = tuple((e["tariff"]["id"], json.dumps(e["tariff"], sort_keys=True))
+                     for e in raw_tariffs["tariffs"])
+    pack = DefaultsPack(pack_id=PACK_ID, version=version,
+                        title=str(manifest.get("title") or ""),
+                        seeded_from=manifest.get("seeded_from") or {}, hash=digest,
                         cost_values=values, finance=finance, tariffs=tariffs,
                         load_profiles=profiles)
+    pack._tariff_json = pristine
+    return pack
 
 
 # ── versions ────────────────────────────────────────────────────────────────
