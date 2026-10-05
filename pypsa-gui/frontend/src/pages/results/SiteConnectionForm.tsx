@@ -10,14 +10,15 @@ import { commercialApi, SaveRefusedError, SolverInFlightError, type SiteConnecti
 import { networkApi } from '../../api/network'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
-import { browserTimeZone, exportCandidates, oneWay, pocCandidates, timeZoneOptions } from './siteConnection'
+import { exportCandidates, gridHints, oneWay, pocCandidates, timeZoneOptions } from './siteConnection'
 
 export interface SiteConnectionFormProps {
   /** The stored root, or null when the project has no commercial config. */
   initial: SiteConnection | null
   onSaved?: () => void
   onCancel?: () => void
-  /** The zone a NEW connection starts with (default: the browser's). */
+  /** The zone a NEW connection starts with (default: none, the snapshots are
+   *  already site time; the same default as the chat tool). */
   defaultTimeZone?: string
 }
 
@@ -32,16 +33,22 @@ export default function SiteConnectionForm({ initial, onSaved, onCancel, default
   const project = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
   const links = useQuery({ queryKey: nk(project, 'links'), queryFn: networkApi.getLinks })
+  // The grid-like rule reads bus carriers and grid_supply Generators too (the
+  // backend's `_grid_like`); either read failing only weakens the suggestions.
+  const buses = useQuery({ queryKey: nk(project, 'buses'), queryFn: networkApi.getBuses })
+  const gens = useQuery({ queryKey: nk(project, 'generators'), queryFn: networkApi.getGenerators })
+  const hints = gridHints(buses.data ?? [],
+                          (gens.data ?? []) as Array<{ bus: string; eh_role?: string | null }>)
   const meters = (links.data ?? []).filter(oneWay)
-  const pocHints = pocCandidates(meters)
+  const pocHints = pocCandidates(meters, hints)
   // `null` = not touched: follow the stored value, else the first suggestion.
   const [poc, setPoc] = useState<string | null>(null)
   const pocValue = poc ?? initial?.poc_link ?? pocHints[0] ?? meters[0]?.name ?? ''
-  const expHints = exportCandidates(meters, pocValue)
+  const expHints = exportCandidates(meters, pocValue, hints)
   const [exp, setExp] = useState<string | null>(null)
   const expValue = exp ?? (initial ? (initial.export_link ?? '') : (expHints[0] ?? ''))
   const [tz, setTz] = useState<string>(
-    initial ? (initial.timezone ?? '') : (defaultTimeZone ?? browserTimeZone()))
+    initial ? (initial.timezone ?? '') : (defaultTimeZone ?? ''))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const zones = timeZoneOptions(initial?.timezone, tz)
@@ -65,6 +72,8 @@ export default function SiteConnectionForm({ initial, onSaved, onCancel, default
       await qc.invalidateQueries({ queryKey: nk(project, 'commercial') })
       await qc.invalidateQueries({ queryKey: nk(project, 'results') })
       await qc.invalidateQueries({ queryKey: nk(project, 'value_flows') })
+      // The commercial preflight (Issues panel) reads the meter Links too.
+      await qc.invalidateQueries({ queryKey: nk(project, 'preflight') })
       onSaved?.()
     } catch (err) {
       setError(saveError(err))

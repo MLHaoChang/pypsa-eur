@@ -147,10 +147,9 @@ def commercial_findings(n, commercial, *, solve_strategy: str = "full",
 
 def _warnings(n, cfg, adders, price, demand) -> list[tuple[str, str, str, str, str]]:
     out: list[tuple[str, str, str, str, str]] = []
-    # The efficiency-blind count is an upper bound (η ≤ 1 only lowers the
-    # gain): it gates the netted count, and is the seam the solve shares.
-    blind = _lp.circulation_risk_snapshots(n, cfg, adders, price)
-    loops = _materialised_loops(n, cfg, adders, price) if blind else 0
+    # Netted of η_import, never gated on the efficiency-blind count: with an
+    # export FEE, η < 1 raises the gain (review round 1, item 1).
+    loops = _materialised_loops(n, cfg, adders, price) if cfg.export_link is not None else 0
     if loops:
         members = _lp.import_links(cfg)
         out.append(("warning", "commercial.arbitrage_loop", "Link", cfg.export_link,
@@ -365,33 +364,97 @@ def _materialised_loops(n, cfg, adders, price) -> int:
     return int((gain > _GAIN_EPS).sum())
 
 
+def _returning_buses(n, cfg, site: set[str]) -> set[str]:
+    """The site buses (behind the meter) that electricity can reach AND come
+    back from: reachable from an electric site bus (`lp_bindings.
+    _electric_bus_test`) along the flow directions, and able to reach one.
+    Lines and transformers run both ways; a Link runs bus0 → bus_k (bus_k →
+    bus0 for a port with a negative static efficiency), both ways when its
+    `p_min_pu` < 0; the meter Links are not walked. A heat tank behind a heat
+    pump, or an H2 Store behind an electrolyser with no fuel cell, is not on
+    such a bus; a battery Store behind a charger and a discharger is (review
+    round 1, B2). Static attributes only."""
+    electric = _lp._electric_bus_test(n, cfg)
+    meter = set(_lp.import_links(cfg)) | ({cfg.export_link} if cfg.export_link else set())
+    fwd: dict[str, set[str]] = {}
+    back: dict[str, set[str]] = {}
+
+    def edge(a, b):
+        if a in site and b in site and a != b:
+            fwd.setdefault(a, set()).add(b)
+            back.setdefault(b, set()).add(a)
+
+    for comp in ("lines", "transformers"):
+        df = getattr(n, comp)
+        for b0, b1 in zip(df["bus0"].astype(str), df["bus1"].astype(str)):
+            edge(b0, b1)
+            edge(b1, b0)
+    links = n.links
+    for name in links.index:
+        if name in meter:
+            continue
+        b0 = str(links.at[name, "bus0"])
+        two_way = float(links.at[name, "p_min_pu"]) < 0
+        for k in (1, 2, 3, 4):
+            col = "bus1" if k == 1 else f"bus{k}"
+            if col not in links.columns:
+                continue
+            bk = str(links.at[name, col]).strip()
+            if not bk or bk == "nan":
+                continue
+            ecol = "efficiency" if k == 1 else f"efficiency{k}"
+            eff = float(links.at[name, ecol]) if ecol in links.columns else 1.0
+            src, dst = (bk, b0) if eff < 0 else (b0, bk)
+            edge(src, dst)
+            if two_way:
+                edge(dst, src)
+
+    def reach(starts, graph):
+        seen, todo = set(), list(starts)
+        while todo:
+            b = todo.pop()
+            if b in seen:
+                continue
+            seen.add(b)
+            todo.extend(graph.get(b, ()))
+        return seen
+
+    elec = {b for b in site if electric(b)}
+    return reach(elec, fwd) & reach(elec, back)
+
+
 def _materialised_cross_interval(n, cfg, adders, price):
     """`commercial.arbitrage_loop_via_storage`, or None: storage BEHIND the
-    meter (any bus on its site side, `lp_bindings._meter_sides`; the losses of
-    the Links between are ignored, so this flags more, never less). Interval
-    order is not checked (a cyclic state of charge makes it irrelevant; an
-    acyclic one only narrows the gain)."""
+    meter on a bus electricity can come back from (`_returning_buses`; the
+    losses of the Links between are ignored, so this flags more, never less).
+    For each import Link m the gain is
+
+        max_t(η_rt × max(export credit) × η_m[t] − import cost_m[t]),
+
+    the import Link's efficiency read at the IMPORT snapshot (review round 1,
+    item 2). Interval order is not checked (a cyclic state of charge makes it
+    irrelevant; an acyclic one only narrows the gain)."""
     site, _bypass = _lp._meter_sides(n, cfg)
-    store = _site_storage(n, site)
+    store = _site_storage(n, _returning_buses(n, cfg, site))
     if store is None:
         return None
     name, eta = store
     imp, exp, eff = _materialised(n, cfg, adders, price)
     credit = -exp
     best = int(np.argmax(credit))
-    gains = {m: float(credit[best] * eff[m][best] * eta - imp[m].min()) for m in imp}
-    member = max(gains, key=gains.get)
-    gain = gains[member]
+    per = {m: eta * credit[best] * eff[m] - imp[m] for m in imp}
+    member = max(per, key=lambda m: float(per[m].max()))
+    cheap = int(np.argmax(per[member]))
+    gain = float(per[member][cheap])
     if not gain > _GAIN_EPS:
         return None
-    cheap = int(np.argmin(imp[member]))
     return ("warning", "commercial.arbitrage_loop_via_storage", "Link", member,
             f"No single snapshot pays, but with storage {name!r} behind the meter, energy "
-            f"imported through {member!r} at its cheapest ({imp[member][cheap]:,.2f} per MWh, "
-            f"first at {n.snapshots[cheap]}) and exported through {cfg.export_link!r} at the "
-            f"highest credit ({credit[best]:,.2f} per MWh, first at {n.snapshots[best]}), "
-            f"after the import Link's efficiency and the storage's round trip "
-            f"({float(eff[member][best]) * eta:.2f}), earns up to {gain:,.2f} per MWh, and "
+            f"imported through {member!r} ({imp[member][cheap]:,.2f} per MWh at "
+            f"{n.snapshots[cheap]}) and exported through {cfg.export_link!r} at the highest "
+            f"credit ({credit[best]:,.2f} per MWh, first at {n.snapshots[best]}), after the "
+            f"import Link's efficiency and the storage's round trip "
+            f"({float(eff[member][cheap]) * eta:.2f}), earns up to {gain:,.2f} per MWh, and "
             "the LP will do it. Check the export price against the tariff's energy rates; "
             "if the tariff really pays this, the result is real.")
 
@@ -420,27 +483,67 @@ def _reverse_pairs(links) -> list[tuple[str, str, str, str]]:
     return pairs
 
 
-def _raw_cross_hour(n, mc, eff, imp: str, exp: str, site: str):
+def _storage_by_bus(n) -> dict[str, tuple[str, float]]:
+    """{bus: (name, round trip)} of the best storage on each bus, built ONCE
+    per call (review round 1, B4) with `_site_storage`'s rules and tie order:
+    StorageUnits in row order (a strictly higher round trip wins), then a
+    Store (round trip 1.0) only where nothing reaches 1.0."""
+    best: dict[str, tuple[str, float]] = {}
+
+    def rows(df):
+        if df is None or not len(df) or "bus" not in df.columns:
+            return None
+        if "active" in df.columns:
+            df = df[df["active"].astype(bool)]
+        return df
+
+    def col(df, name, default):
+        if name not in df.columns:
+            return np.full(len(df), default, dtype=float)
+        return pd.to_numeric(df[name], errors="coerce").fillna(default).to_numpy(dtype=float)
+
+    su = rows(getattr(n, "storage_units", None))
+    if su is not None and len(su):
+        ext = (su["p_nom_extendable"].astype(bool).to_numpy() if "p_nom_extendable" in su.columns
+               else np.zeros(len(su), dtype=bool))
+        ok = (ext | (col(su, "p_nom", 0.0) > 0)) & (col(su, "max_hours", 0.0) > 0)
+        eta = col(su, "efficiency_store", 1.0) * col(su, "efficiency_dispatch", 1.0)
+        for name, bus, e in zip(su.index[ok], su["bus"].astype(str).to_numpy()[ok], eta[ok]):
+            if bus not in best or e > best[bus][1]:
+                best[bus] = (str(name), float(e))
+    st = rows(getattr(n, "stores", None))
+    if st is not None and len(st):
+        ext = (st["e_nom_extendable"].astype(bool).to_numpy() if "e_nom_extendable" in st.columns
+               else np.zeros(len(st), dtype=bool))
+        ok = ext | (col(st, "e_nom", 0.0) > 0)
+        for name, bus in zip(st.index[ok], st["bus"].astype(str).to_numpy()[ok]):
+            if bus not in best or 1.0 > best[bus][1]:
+                best[bus] = (str(name), 1.0)
+    return best
+
+
+def _raw_cross_hour(snapshots, stats, eff, storage, imp: str, exp: str, site: str):
     """`tariff_export_exceeds_import_via_storage` for one direction of a pair,
     or None: max_t(−mc_exp) × η_imp × η_round_trip − min_t(mc_imp) > 0 with
-    storage on `site` (GS `_cross_hour_cycling`, ported)."""
-    store = _site_storage(n, [site])
+    storage on `site` (GS `_cross_hour_cycling`, ported). `stats[link]` is
+    (max credit, its first index, min cost, its first index), NaN-skipping
+    like pandas."""
+    store = storage.get(str(site))
     if store is None:
         return None
     name, eta = store
-    credit = -mc[exp]
-    best_credit = float(credit.max())
-    cheapest = float(mc[imp].min())
+    best_credit, i_credit, _, _ = stats[exp]
+    _, _, cheapest, i_cheap = stats[imp]
     gain = best_credit * float(eff[imp]) * eta - cheapest
     if not gain > _GAIN_EPS:
         return None
     return ("warning", "tariff_export_exceeds_import_via_storage", "Link", str(imp),
             f"Links '{imp}' (import) and '{exp}' (export) with storage '{name}' "
             f"at '{site}': no single hour pays, but the highest export credit "
-            f"({best_credit:,.2f} per MWh, first at {credit.idxmax()}) after the "
+            f"({best_credit:,.2f} per MWh, first at {snapshots[i_credit]}) after the "
             f"import link's efficiency and the storage's round trip "
             f"({float(eff[imp]) * eta:.2f}) exceeds the cheapest import price "
-            f"({cheapest:,.2f}, first at {mc[imp].idxmin()}). Charging from the "
+            f"({cheapest:,.2f}, first at {snapshots[i_cheap]}). Charging from the "
             f"grid and exporting later would earn up to {gain:,.2f} per MWh, and "
             "the LP will do it. Check the tariff's export price against its "
             "energy bands; if the tariff really pays this, the result is real.")
@@ -483,27 +586,52 @@ def _network_findings(n) -> list[tuple[str, str, str, str, str]]:
         return []
     eff = (links["efficiency"] if "efficiency" in links.columns
            else pd.Series(1.0, index=links.index)).astype(float).fillna(1.0)
-    out: list[tuple[str, str, str, str, str]] = []
-    for a, b, b0, b1 in pairs:
-        gain_ab = -mc[b] * float(eff[a]) - mc[a]
-        gain_ba = -mc[a] * float(eff[b]) - mc[b]
-        gain = np.maximum(gain_ab.to_numpy(), gain_ba.to_numpy())
+    # Every pair at once (review round 1, B4): a (snapshots × pairs) gain.
+    m = mc.to_numpy(dtype=float)
+    at = {name: i for i, name in enumerate(mc.columns)}
+    ia = np.array([at[a] for a, _, _, _ in pairs])
+    ib = np.array([at[b] for _, b, _, _ in pairs])
+    ea = eff.reindex([a for a, _, _, _ in pairs]).to_numpy(dtype=float)
+    eb = eff.reindex([b for _, b, _, _ in pairs]).to_numpy(dtype=float)
+    with np.errstate(invalid="ignore"):
+        gain = np.maximum(-m[:, ib] * ea - m[:, ia], -m[:, ia] * eb - m[:, ib])
         hit = gain > _GAIN_EPS
-        if not hit.any():
+    counts = hit.sum(axis=0)
+    first = hit.argmax(axis=0)
+    storage: dict | None = None
+    stats: dict[str, tuple[float, int, float, int]] = {}
+
+    def link_stats(name):
+        if name not in stats:
+            col = m[:, at[name]]
+            credit = np.where(np.isnan(col), -np.inf, -col)
+            cost = np.where(np.isnan(col), np.inf, col)
+            ic, ip = int(np.argmax(credit)), int(np.argmin(cost))
+            stats[name] = (float(credit[ic]), ic, float(cost[ip]), ip)
+        return stats[name]
+
+    out: list[tuple[str, str, str, str, str]] = []
+    for k, (a, b, b0, b1) in enumerate(pairs):
+        if not counts[k]:
             # No snapshot pays on its own; storage at either end may still
             # carry a cheap import hour to a dear export hour.
+            if storage is None:
+                storage = _storage_by_bus(n)
+            if not storage:
+                continue
+            link_stats(a), link_stats(b)
             for imp, exp, site in ((a, b, b1), (b, a, b0)):
-                issue = _raw_cross_hour(n, mc, eff, imp, exp, site)
+                issue = _raw_cross_hour(mc.index, stats, eff, storage, imp, exp, site)
                 if issue is not None:
                     out.append(issue)
                     break
             continue
-        first = mc.index[hit][0]
+        top = float(gain[:, k].max())   # numpy's max, as GS reports it
         out.append(("warning", "tariff_export_exceeds_import", "Link", str(a),
                     f"Links '{a}' ({b0}→{b1}) and '{b}' ({b1}→{b0}): the "
                     f"export price exceeds the import price in "
-                    f"{int(hit.sum())} snapshot(s) (first {first}, up to "
-                    f"{float(gain.max()):,.2f} per MWh), so cycling energy "
+                    f"{int(counts[k])} snapshot(s) (first {mc.index[first[k]]}, up to "
+                    f"{top:,.2f} per MWh), so cycling energy "
                     "out and back in would pay and the LP will do it. Check "
                     "the tariff's export price against its energy bands."))
     return out

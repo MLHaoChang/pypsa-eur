@@ -5,7 +5,7 @@ The router's `_bind_commercial` bound the ACTIVE context only. The helper takes
 any `ProjectContext`, so a study-owned fork (GS U2 `compile.bind_on_fork`) binds
 its own network, off the foreground, with its Library series resolved in the
 fork's own org: `ctx.org_id`, which a fork inherits from its base project
-(`project_registry.fork`), and which is `local_mode.LOCAL_ORG_ID` in local mode.
+(`project_registry.create_scenario`), and which is `local_mode.LOCAL_ORG_ID` in local mode.
 """
 from __future__ import annotations
 

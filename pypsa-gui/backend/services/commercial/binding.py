@@ -241,7 +241,8 @@ def context_resolvers(ctx, user=None) -> tuple[Callable[[object], pd.Series],
     WHICH ORG. A ref resolves in the PROJECT's org, `ctx.org_id` (stamped on
     every loaded context by `project_registry.bind_context`); `user`'s org only
     when the context has none (an unsaved network). A fork (a study-owned
-    project) inherits `org_id` from its base project (`project_registry.fork`),
+    project) inherits `org_id` from its base project
+    (`project_registry.create_scenario`),
     so a study's fork resolves, and mints, its series in its base project's
     org. In local mode that is always `local_mode.LOCAL_ORG_ID`: the desktop
     build seeds one org, and every project row takes the local user's org.
@@ -337,21 +338,34 @@ def _two_way(n, name: str) -> bool:
 
 
 def _role(n, name: str) -> str:
-    return str(n.links.at[name, "eh_role"]) if "eh_role" in n.links.columns else ""
+    """The Link's `eh_role` tag, "" when untagged (absent, NaN or blank)."""
+    if "eh_role" not in n.links.columns:
+        return ""
+    raw = n.links.at[name, "eh_role"]
+    if raw is None or (isinstance(raw, float) and raw != raw):
+        return ""
+    tag = str(raw).strip()
+    return "" if tag.casefold() in ("", "nan", "none") else tag
 
 
 def site_connection_candidates(n) -> dict[str, list[str]]:
     """One-way Links that could be the meter, most likely first:
     `poc_link` from a grid-like bus (or tagged `eh_role=grid_import`) into a
     bus that is not, `export_link` the other way (or tagged `grid_export`).
-    Two-way Links are never listed: the binding refuses them."""
+    A Link tagged for the other side is never listed; two-way Links never
+    are (the binding refuses them). Mirrored in the frontend's
+    `pages/results/siteConnection.ts`."""
     one_way = [str(l) for l in n.links.index if not _two_way(n, l)]
 
     def score(link: str, into_site: bool) -> int:
         b0, b1 = str(n.links.at[link, "bus0"]), str(n.links.at[link, "bus1"])
         src, dst = (b0, b1) if into_site else (b1, b0)
-        tag = "grid_import" if into_site else "grid_export"
-        return (4 if _role(n, link) == tag else 0) + \
+        tag, other = (("grid_import", "grid_export") if into_site
+                      else ("grid_export", "grid_import"))
+        role = _role(n, link)
+        if role == other:
+            return 0    # a tag beats the name: never offered for the other side
+        return (4 if role == tag else 0) + \
             (2 if _grid_like(n, src) and not _grid_like(n, dst) else 0)
 
     def ranked(into_site: bool) -> list[str]:
@@ -361,7 +375,8 @@ def site_connection_candidates(n) -> dict[str, list[str]]:
     return {"poc_link": ranked(True), "export_link": ranked(False)}
 
 
-def check_site_connection(n, poc_link: str, export_link: str | None) -> None:
+def check_site_connection(n, poc_link: str, export_link: str | None, *,
+                          direction_only: bool = False) -> None:
     """Refuse a meter this network cannot be: `BindingRefusal(422, code, …)`.
 
       * `site_connection_link_missing`: a name that is not a Link (the
@@ -374,7 +389,15 @@ def check_site_connection(n, poc_link: str, export_link: str | None) -> None:
         or whose `bus1` is (it never reaches the grid).
 
     The site side is what `lp_bindings._meter_sides` reaches from the PoC's
-    `bus1` without crossing the meter. Pure: no write."""
+    `bus1` without crossing the meter. An explicit `eh_role` tag beats the
+    name heuristic: a Link tagged `grid_import` is a PoC whatever its buses
+    are called (a site bus named `microgrid_ac`); the name check runs only on
+    an untagged Link, and a refusal caused by a tag says so.
+
+    `direction_only` (the solver-config route): a missing or two-way Link is
+    left to the binding, which refuses it with its own code
+    (`commercial_binding_invalid`); only the direction and the one-Link-as-both
+    checks run. Pure: no write."""
     from models.commercial import CommercialConfig
 
     def missing(name, what):
@@ -383,28 +406,47 @@ def check_site_connection(n, poc_link: str, export_link: str | None) -> None:
         raise BindingRefusal(422, "site_connection_link_missing",
                              f"{what} {name!r} is not a Link in this network{hint}")
 
-    if poc_link not in n.links.index:
-        missing(poc_link, "poc_link")
-    if export_link is not None and export_link not in n.links.index:
-        missing(export_link, "export_link")
-    if export_link == poc_link:
+    if export_link is not None and export_link == poc_link:
         raise BindingRefusal(422, "site_connection_invalid",
                              f"{poc_link!r} cannot be both the import (poc_link) and the "
                              "export Link: model export with a second, one-way Link")
+    if poc_link not in n.links.index:
+        if direction_only:
+            return
+        missing(poc_link, "poc_link")
+    if export_link is not None and export_link not in n.links.index:
+        if direction_only:
+            export_link = None
+        else:
+            missing(export_link, "export_link")
     for name, what in ((poc_link, "poc_link"), (export_link, "export_link")):
         if name is not None and _two_way(n, name):
+            if direction_only:
+                return
             raise BindingRefusal(422, "site_connection_invalid",
                                  f"{what} {name!r} allows reverse flow (p_min_pu < 0); the "
                                  "meter Links must be one-way (model export with a separate "
                                  "export_link)")
     b0, b1 = str(n.links.at[poc_link, "bus0"]), str(n.links.at[poc_link, "bus1"])
-    if _role(n, poc_link) == "grid_export" or (_grid_like(n, b1) and not _grid_like(n, b0)):
+    role = _role(n, poc_link)
+    if role == "grid_export":
+        raise BindingRefusal(422, "site_connection_wrong_direction",
+                             f"poc_link {poc_link!r} is tagged eh_role=grid_export: it is "
+                             "tagged as the export Link, not the point of connection; name "
+                             "the import Link (or retag it)")
+    if not role and _grid_like(n, b1) and not _grid_like(n, b0):
         raise BindingRefusal(422, "site_connection_wrong_direction",
                              f"poc_link {poc_link!r} runs {b0} → {b1}, into the grid: the "
                              "point of connection imports from the grid side (bus0) to the "
-                             "site (bus1); name the Link that runs the other way")
+                             "site (bus1); name the Link that runs the other way, or tag it "
+                             f"eh_role=grid_import if {b1!r} is the site")
     if export_link is None:
         return
+    if _role(n, export_link) == "grid_import":
+        raise BindingRefusal(422, "site_connection_wrong_direction",
+                             f"export_link {export_link!r} is tagged eh_role=grid_import: it "
+                             "is tagged as an import Link, not the export Link; name the "
+                             "export Link (or retag it)")
     site, _bypass = lp_bindings._meter_sides(
         n, CommercialConfig(poc_link=poc_link, export_link=export_link))
     e0, e1 = str(n.links.at[export_link, "bus0"]), str(n.links.at[export_link, "bus1"])

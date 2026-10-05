@@ -19,7 +19,8 @@ vi.mock('../../api/commercial', async (importOriginal) => {
 // The Site connection form (IC U1 follow-up b) lists the network's Links.
 vi.mock('../../api/network', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/network')>()
-  return { ...actual, networkApi: { ...actual.networkApi, getLinks: vi.fn() } }
+  return { ...actual, networkApi: { ...actual.networkApi, getLinks: vi.fn(),
+    getBuses: vi.fn().mockResolvedValue([]), getGenerators: vi.fn().mockResolvedValue([]) } }
 })
 // The P4 sections (WP4.7) read the finance routes; the tab tests only switch to them.
 vi.mock('../../api/finance', async (importOriginal) => {

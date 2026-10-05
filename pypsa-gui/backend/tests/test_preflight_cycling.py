@@ -260,3 +260,239 @@ def test_a_crash_in_the_raw_check_is_a_warning_not_a_500(monkeypatch):
     out = P.network_findings(_cycling_network(40.0))
     assert _codes(out) == ["commercial.preflight_incomplete"]
     assert out[0][0] == "warning"
+
+
+# ── round 1 review: B2 (storage only where electricity can come back) ─────
+
+
+def _behind_meter(kind: str):
+    """The evening-export / night-import case (85.38 €/MWh with the BESS),
+    the BESS replaced by storage of `kind` behind the meter."""
+    n = _edge(_evening, storage=False)
+    if kind == "heat_tank":
+        n.add("Bus", "heat", carrier="heat")
+        n.add("Link", "heat_pump", bus0="site", bus1="heat", p_nom=10.0, efficiency=3.0)
+        n.add("Store", "tank", bus="heat", e_nom_extendable=True)
+    elif kind in ("h2_no_fc", "h2_fc"):
+        n.add("Bus", "h2", carrier="H2")
+        n.add("Link", "electrolyser", bus0="site", bus1="h2", p_nom=10.0, efficiency=0.7)
+        n.add("Store", "h2_store", bus="h2", e_nom_extendable=True)
+        if kind == "h2_fc":
+            n.add("Link", "fuel_cell", bus0="h2", bus1="site", p_nom=10.0, efficiency=0.5)
+    elif kind == "battery_bus":
+        n.add("Bus", "battery", carrier="battery")
+        n.add("Link", "charger", bus0="site", bus1="battery", p_nom=10.0, efficiency=0.95)
+        n.add("Link", "discharger", bus0="battery", bus1="site", p_nom=10.0, efficiency=0.95)
+        n.add("Store", "battery_store", bus="battery", e_nom_extendable=True)
+    elif kind == "ac_battery":
+        n.add("StorageUnit", "bess2", bus="site", p_nom=5.0, max_hours=2.0,
+              efficiency_store=0.95, efficiency_dispatch=0.95)
+    return n
+
+
+@pytest.mark.parametrize("kind", ["heat_tank", "h2_no_fc"])
+def test_storage_that_cannot_return_electricity_is_not_a_loop(kind):
+    out = P.commercial_findings(_behind_meter(kind), _commercial(TOU))
+    assert C_CROSS not in _codes(out)
+
+
+@pytest.mark.parametrize("kind", ["ac_battery", "battery_bus", "h2_fc"])
+def test_storage_that_can_return_electricity_still_warns(kind):
+    out = P.commercial_findings(_behind_meter(kind), _commercial(TOU))
+    assert C_CROSS in _codes(out)
+
+
+# ── round 1 review: non-binding 1 and 2 ────────────────────────────────────
+
+
+def test_a_loop_the_efficiency_blind_count_misses_is_found():
+    """Import paid −7 €/MWh, an export FEE of 10, η_import = 0.5: blind,
+    −7 + 10 = +3 (no loop); netted, 0.5 × (−10) − (−7) = +2 per MWh: a loop
+    in all 672 quarter-hours."""
+    n = build_edge_15min()
+    n.links.loc["import", ["marginal_cost", "efficiency"]] = [-7.0, 0.5]
+    n.add("Link", "export", bus0="poc", bus1="grid", p_nom=80.0, carrier="AC",
+          marginal_cost=10.0)
+    out = P.commercial_findings(n, {"poc_link": "import", "export_link": "export"})
+    hit = [f for f in out if f[1] == C_SAME]
+    assert len(hit) == 1 and "672" in hit[0][4]
+
+
+def test_the_storage_variant_reads_the_efficiency_at_the_import_snapshot():
+    """η_import 0.3 at night (the cheap import) and 1.0 otherwise. At the
+    import snapshot: 150 × 0.3 × 0.9025 − 50 = −9.39; by day 150 × 0.9025 −
+    200 < 0. Read at the export snapshot (η 1.0) it would wrongly be +85.38."""
+    n = _edge(_evening)
+    h = np.asarray(n.snapshots.hour)
+    n.links_t.efficiency["import"] = np.where(h < 6, 0.3, 1.0)
+    out = P.commercial_findings(n, _commercial(TOU))
+    assert C_CROSS not in _codes(out) and C_SAME not in _codes(out)
+
+
+# ── round 1 review: B4 (one storage map per call, numpy gains) ─────────────
+
+
+def _gs_reference(n):
+    """The GS branch's `_check_export_cycling` + `_cross_hour_cycling` +
+    `_site_storage`, verbatim but for the tuple output: the parity oracle."""
+    links = n.links
+    if len(links) < 2:
+        return []
+    by_buses: dict = {}
+    for name, b0, b1 in zip(links.index, links["bus0"].astype(str), links["bus1"].astype(str)):
+        by_buses.setdefault((b0, b1), []).append(name)
+    pairs, seen = [], set()
+    for (b0, b1), forward in by_buses.items():
+        for a in forward:
+            for b in by_buses.get((b1, b0), []):
+                key = frozenset((a, b))
+                if a == b or key in seen:
+                    continue
+                seen.add(key)
+                pairs.append((a, b, b0, b1))
+    if not pairs:
+        return []
+    paired = pd.Index(sorted({x for a, b, _, _ in pairs for x in (a, b)}))
+    mc = n.get_switchable_as_dense("Link", "marginal_cost", inds=paired)
+    eff = links["efficiency"].astype(float).fillna(1.0)
+
+    def num(row, col, default):
+        try:
+            v = float(row.get(col, default))
+        except (TypeError, ValueError):
+            return default
+        return default if v != v else v
+
+    def site_storage(bus):
+        best = None
+        for df, is_su in ((n.storage_units, True), (n.stores, False)):
+            rows = df[df["bus"].astype(str) == bus]
+            if "active" in rows.columns:
+                rows = rows[rows["active"].astype(bool)]
+            for name, row in rows.iterrows():
+                if is_su:
+                    can = bool(row.get("p_nom_extendable", False)) or num(row, "p_nom", 0.0) > 0
+                    if not can or num(row, "max_hours", 0.0) <= 0:
+                        continue
+                    eta = num(row, "efficiency_store", 1.0) * num(row, "efficiency_dispatch", 1.0)
+                    if best is None or eta > best[1]:
+                        best = (str(name), eta)
+                elif bool(row.get("e_nom_extendable", False)) or num(row, "e_nom", 0.0) > 0:
+                    if best is None or 1.0 > best[1]:
+                        best = (str(name), 1.0)
+        return best
+
+    out = []
+    for a, b, b0, b1 in pairs:
+        gain = np.maximum((-mc[b] * float(eff[a]) - mc[a]).to_numpy(),
+                          (-mc[a] * float(eff[b]) - mc[b]).to_numpy())
+        hit = gain > 1e-9
+        if not hit.any():
+            for imp, exp, site in ((a, b, b1), (b, a, b0)):
+                store = site_storage(site)
+                if store is None:
+                    continue
+                name, eta = store
+                credit = -mc[exp]
+                g = float(credit.max()) * float(eff[imp]) * eta - float(mc[imp].min())
+                if g > 1e-9:
+                    out.append((SAME + "_via_storage", imp, name, round(g, 9),
+                                credit.idxmax(), mc[imp].idxmin()))
+                    break
+            continue
+        out.append((SAME, a, b, int(hit.sum()), mc.index[hit][0], round(float(gain.max()), 9)))
+    return out
+
+
+def _random_network(seed: int, buses: int = 12, hours: int = 48) -> pypsa.Network:
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range("2030-01-01", periods=hours, freq="h")
+    n = pypsa.Network()
+    n.set_snapshots(idx)
+    for i in range(buses):
+        n.add("Bus", f"b{i}")
+    for k in range(buses * 2):
+        i, j = rng.choice(buses, size=2, replace=False)
+        mc = rng.normal(40, 30, hours) if rng.random() < 0.6 else float(rng.normal(20, 30))
+        n.add("Link", f"l{k}", bus0=f"b{i}", bus1=f"b{j}", p_nom=1.0,
+              efficiency=float(rng.uniform(0.3, 1.0)),
+              marginal_cost=pd.Series(mc, index=idx) if np.ndim(mc) else mc)
+    # Anti-phase pairs: an import dear by day, an export credit high in the
+    # evening, so some pairs pay only ACROSS hours (the storage branch).
+    h = np.arange(hours) % 24
+    for k in range(buses // 2):
+        i, j = rng.choice(buses, size=2, replace=False)
+        imp = rng.uniform(30, 60) + np.where(h < 6, 0.0, rng.uniform(40, 80))
+        credit = np.where((h >= 17) & (h <= 20), rng.uniform(40, 120), 0.0)
+        n.add("Link", f"p{k}_in", bus0=f"b{i}", bus1=f"b{j}", p_nom=1.0,
+              efficiency=float(rng.uniform(0.6, 1.0)), marginal_cost=pd.Series(imp, index=idx))
+        n.add("Link", f"p{k}_out", bus0=f"b{j}", bus1=f"b{i}", p_nom=1.0,
+              marginal_cost=pd.Series(-credit, index=idx))
+    for k in range(buses):
+        b = f"b{rng.integers(buses)}"
+        if rng.random() < 0.5:
+            n.add("StorageUnit", f"su{k}", bus=b, p_nom=float(rng.choice([0.0, 1.0])),
+                  p_nom_extendable=bool(rng.random() < 0.3), max_hours=float(rng.choice([0.0, 2.0])),
+                  efficiency_store=float(rng.uniform(0.5, 1.0)),
+                  efficiency_dispatch=float(rng.uniform(0.5, 1.0)))
+        else:
+            n.add("Store", f"st{k}", bus=b, e_nom=float(rng.choice([0.0, 1.0])))
+    return n
+
+
+def _as_reference(findings, n):
+    """Our tuples projected onto the oracle's fields (parsed from the facts
+    the message carries)."""
+    import re
+
+    out = []
+    for _sev, code, _cls, name, msg in findings:
+        if code == SAME:
+            a, b = re.findall(r"'([^']+)'", msg)[:2]
+            count = int(re.search(r"in (\d+) snapshot", msg).group(1))
+            out.append((code, a, b, count))
+        else:
+            out.append((code, name, re.findall(r"storage '([^']+)'", msg)[0]))
+    return out
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_the_vectorised_check_matches_the_gs_reference(seed):
+    n = _random_network(seed)
+    ref = _gs_reference(n)
+    got = P.network_findings(n)
+    assert _as_reference(got, n) == [r[:4] if r[0] == SAME else r[:3] for r in ref]
+    # The figures in the messages agree too.
+    for (_s, code, _c, _n, msg), r in zip(got, ref):
+        if code == SAME:
+            assert f"{r[5]:,.2f}" in msg and f"first {r[4]}" in msg
+        else:
+            assert f"{r[3]:,.2f}" in msg
+
+
+def test_a_sector_style_network_at_8760_h_is_fast():
+    """40 buses, 80 reverse-paired Links with hourly prices, storage on half
+    the buses, a year of hours: well under 0.1 s on the reference machine
+    (asserted at 0.3 s against CI noise)."""
+    import time
+
+    rng = np.random.default_rng(0)
+    idx = pd.date_range("2030-01-01", periods=8760, freq="h")
+    n = pypsa.Network()
+    n.set_snapshots(idx)
+    for i in range(40):
+        n.add("Bus", f"b{i}")
+    mc = pd.DataFrame(rng.uniform(20, 80, (8760, 80)), index=idx,
+                      columns=[f"f{i}" for i in range(40)] + [f"r{i}" for i in range(40)])
+    for i in range(40):
+        j = (i + 1) % 40
+        n.add("Link", f"f{i}", bus0=f"b{i}", bus1=f"b{j}", p_nom=1.0, efficiency=0.9)
+        n.add("Link", f"r{i}", bus0=f"b{j}", bus1=f"b{i}", p_nom=1.0, efficiency=0.9)
+        if i % 2 == 0:
+            n.add("StorageUnit", f"su{i}", bus=f"b{i}", p_nom=1.0, max_hours=4.0,
+                  efficiency_store=0.6, efficiency_dispatch=0.6)
+    n.links_t.marginal_cost = mc
+    P.network_findings(n)   # warm-up
+    t0 = time.perf_counter()
+    P.network_findings(n)
+    assert time.perf_counter() - t0 < 0.3

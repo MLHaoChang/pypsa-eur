@@ -1722,14 +1722,24 @@ _SITE_CONNECTION_ERROR_KINDS = (
 )
 
 
-def set_site_connection(poc_link: str, export_link: str | None = None,
-                        timezone: str | None = None) -> dict:
+class _Unset:
+    """An omitted argument (distinct from an explicit null, which clears)."""
+
+    def __repr__(self) -> str:
+        return "<unset>"
+
+
+_UNSET = _Unset()
+
+
+def set_site_connection(poc_link: str, export_link: str | None | _Unset = _UNSET,
+                        timezone: str | None | _Unset = _UNSET) -> dict:
     """Set the commercial root (`poc_link`, `export_link`, `timezone`) through
     the solver-config route, keeping every other key of a stored commercial
-    config (the route keeps the value flows itself). An omitted `export_link`
-    or `timezone` keeps the stored value. The Links are checked first
-    (`binding.check_site_connection`): they exist, are one-way and point
-    grid → site (PoC) and site → grid (export)."""
+    config (the route keeps the value flows itself). An OMITTED `export_link`
+    or `timezone` keeps the stored value; an explicit null clears it. The
+    Links are checked first (`binding.check_site_connection`): they exist, are
+    one-way and point grid → site (PoC) and site → grid (export)."""
     from pydantic import ValidationError
 
     from models.schemas import SolverConfigSchema
@@ -1743,9 +1753,9 @@ def set_site_connection(poc_link: str, export_link: str | None = None,
     commercial = dict(stored) if isinstance(stored, dict) else {}
     commercial.pop("value_flows", None)   # owned by its own route (plan C7)
     commercial["poc_link"] = poc_link
-    if export_link is not None:
+    if not isinstance(export_link, _Unset):
         commercial["export_link"] = export_link
-    if timezone is not None:
+    if not isinstance(timezone, _Unset):
         commercial["timezone"] = timezone
     try:
         binding.check_site_connection(PyPSAService.get_network(), poc_link,
@@ -1766,7 +1776,9 @@ def set_site_connection(poc_link: str, export_link: str | None = None,
         if "error_kind" in d or "code" not in d:
             raise
         # A refusal of the kept config (a tariff, a contract, a connection
-        # agreement) is still the binding's: say which code.
+        # agreement) with no chat kind of its own (e.g. `fca_needs_saved_project`;
+        # `_library_call` already gave `commercial_binding_invalid`,
+        # `library_ref_stale` and `solver_in_flight` theirs): say which code.
         raise HTTPException(status_code=exc.status_code, detail={
             "error_kind": "site_connection_invalid", "code": str(d["code"])[:80],
             "message": str(d.get("message", ""))[:500]}) from exc

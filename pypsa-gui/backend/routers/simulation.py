@@ -357,6 +357,30 @@ def _bind_commercial(commercial, user) -> dict | None:
         raise HTTPException(exc.status, {"code": exc.code, "message": exc.message}) from exc
 
 
+def _check_site_connection(commercial, stored) -> None:
+    """The meter Links' direction (IC U1 follow-up b, review B1): when the
+    submitted `poc_link` or `export_link` differs from the stored one, the
+    same check `set_site_connection` runs (`binding.check_site_connection`),
+    direction only: a missing or two-way Link stays the binding's own refusal.
+    A refusal is `{code, error_kind, message}` (the chat tool's kinds)."""
+    from fastapi import HTTPException
+
+    from services.commercial import binding
+
+    before = stored if isinstance(stored, dict) else {}
+    if (commercial.poc_link, commercial.export_link) == (before.get("poc_link"),
+                                                         before.get("export_link")):
+        return
+    if _solver_in_flight_ctx(PyPSAService.get_active_context()):
+        return   # `_bind_commercial` refuses it (solver_in_flight) before any read
+    try:
+        binding.check_site_connection(PyPSAService.get_network(), commercial.poc_link,
+                                      commercial.export_link, direction_only=True)
+    except binding.BindingRefusal as exc:
+        raise HTTPException(exc.status, {"code": exc.code, "error_kind": exc.code,
+                                         "message": exc.message}) from exc
+
+
 def user_code_authorized(db, actor) -> bool:
     """
     True iff `actor` may set `extra_functionality_code` in this deployment.
@@ -512,6 +536,8 @@ def update_solver_config(
         # An explicit null clears the layer (and its FCA stress entry); a null
         # when nothing is stored (a full-payload PUT from the settings form)
         # touches nothing (WP1.4 round 3 #6).
+        if cfg.commercial is not None:
+            _check_site_connection(cfg.commercial, stored_commercial)
         submitted["commercial"] = _bind_commercial(cfg.commercial, user)
         rebound = submitted["commercial"] is not None
     # Legacy mode 'lpf' was removed in v1.x — coerce to 'lopf' silently so

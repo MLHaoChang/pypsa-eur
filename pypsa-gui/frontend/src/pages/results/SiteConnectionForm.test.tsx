@@ -8,7 +8,7 @@ import { useUIStore } from '../../store/uiStore'
 import { commercialApi, SaveRefusedError } from '../../api/commercial'
 import { networkApi } from '../../api/network'
 import SiteConnectionForm from './SiteConnectionForm'
-import { exportCandidates, pocCandidates, timeZoneOptions } from './siteConnection'
+import { exportCandidates, gridHints, pocCandidates, timeZoneOptions } from './siteConnection'
 import { expectAllButtonsNamed } from '../../test-utils/accessibleName'
 import type { Link } from '../../api/types'
 
@@ -18,7 +18,8 @@ vi.mock('../../api/commercial', async (importOriginal) => {
 })
 vi.mock('../../api/network', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/network')>()
-  return { ...actual, networkApi: { ...actual.networkApi, getLinks: vi.fn() } }
+  return { ...actual, networkApi: { ...actual.networkApi, getLinks: vi.fn(), getBuses: vi.fn(),
+                                    getGenerators: vi.fn() } }
 })
 
 const link = (name: string, bus0: string, bus1: string, extra: Partial<Link> = {}) =>
@@ -43,6 +44,8 @@ function renderForm(props: Partial<Parameters<typeof SiteConnectionForm>[0]> = {
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo' })
   vi.mocked(networkApi.getLinks).mockResolvedValue(LINKS)
+  vi.mocked(networkApi.getBuses).mockResolvedValue([] as never)
+  vi.mocked(networkApi.getGenerators).mockResolvedValue([] as never)
 })
 afterEach(() => { cleanup(); vi.mocked(commercialApi.saveSiteConnection).mockReset() })
 
@@ -65,7 +68,58 @@ describe('site connection candidates', () => {
   })
 })
 
+describe('site connection candidates: the backend rules (review round 1, B1/B3)', () => {
+  // No bus is NAMED like the grid here: the hints come from the carrier and
+  // from an eh_role=grid_supply Generator, as in binding._grid_like.
+  const PLAIN = [link('in', 'mainland', 'site'), link('out', 'site', 'mainland'),
+                 link('in2', 'feeder', 'site'), link('out2', 'site', 'feeder')]
+
+  it('reads a grid-like bus from its carrier and from a grid_supply Generator', () => {
+    expect(pocCandidates(PLAIN)).toEqual([])
+    const byCarrier = gridHints([{ name: 'mainland', carrier: 'grid' }] as never, [])
+    expect(pocCandidates(PLAIN, byCarrier)).toEqual(['in'])
+    expect(exportCandidates(PLAIN, 'in', byCarrier)[0]).toBe('out')
+    const bySupply = gridHints([], [{ name: 'g', bus: 'feeder', eh_role: 'grid_supply' }] as never)
+    expect(pocCandidates(PLAIN, bySupply)).toEqual(['in2'])
+  })
+
+  it('a tag beats the name: a grid_import Link into a bus named like the grid is suggested,'
+     + ' a Link tagged for the other side never is', () => {
+    const links = [link('tie_in', 'mainland', 'microgrid_ac', { eh_role: 'grid_import' }),
+                   link('tie_out', 'microgrid_ac', 'mainland', { eh_role: 'grid_export' })]
+    expect(pocCandidates(links)).toEqual(['tie_in'])
+    expect(exportCandidates(links, 'tie_in')).toEqual(['tie_out'])
+    expect(pocCandidates([link('x', 'grid', 'site', { eh_role: 'grid_export' })])).toEqual([])
+  })
+})
+
 describe('SiteConnectionForm', () => {
+  it('a new connection defaults to "already site time", like the chat tool', async () => {
+    renderForm()
+    const tz = await screen.findByLabelText(/time zone/i) as HTMLSelectElement
+    expect(tz.value).toBe('')
+  })
+
+  it('suggests the PoC from the bus carriers the network reports', async () => {
+    vi.mocked(networkApi.getLinks).mockResolvedValue(
+      [link('b_out', 'site', 'mainland'), link('a_in', 'mainland', 'site')])
+    vi.mocked(networkApi.getBuses).mockResolvedValue([{ name: 'mainland', carrier: 'grid' }] as never)
+    renderForm()
+    const poc = await screen.findByLabelText(/point of connection/i) as HTMLSelectElement
+    await waitFor(() => expect(poc.value).toBe('a_in'))
+    expect((screen.getByLabelText(/export link/i) as HTMLSelectElement).value).toBe('b_out')
+  })
+
+  it('invalidates the preflight issues on save', async () => {
+    vi.mocked(commercialApi.saveSiteConnection).mockResolvedValue({} as never)
+    const { qc } = renderForm()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    const poc = await screen.findByLabelText(/point of connection/i) as HTMLSelectElement
+    await waitFor(() => expect(poc.value).toBe('import'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save site connection' }))
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: ['preflight', 'Demo'] }))
+  })
+
   it('preselects the suggested Links and the given time zone, and saves the root', async () => {
     vi.mocked(commercialApi.saveSiteConnection).mockResolvedValue({} as never)
     const { onSaved, container } = renderForm({ defaultTimeZone: 'Europe/Berlin' })

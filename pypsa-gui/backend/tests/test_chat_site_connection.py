@@ -182,3 +182,153 @@ def test_a_kept_export_link_that_became_two_way_is_refused(client, install_netwo
     with pytest.raises(HTTPException) as exc:
         chat_tools.DISPATCHERS["set_site_connection"](poc_link="import")
     assert exc.value.detail["error_kind"] == "site_connection_invalid"
+
+
+# ── round 1 review: B3 (a tag beats the name heuristic) ────────────────────
+
+
+def _microgrid(tag_import="grid_import", tag_export="grid_export"):
+    """A site bus whose NAME contains "grid": mainland → microgrid_ac."""
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(range(3))
+    for b in ("mainland", "microgrid_ac"):
+        n.add("Bus", b, carrier="AC")
+    n.add("Link", "tie_in", bus0="mainland", bus1="microgrid_ac", p_nom=5.0)
+    n.add("Link", "tie_out", bus0="microgrid_ac", bus1="mainland", p_nom=5.0)
+    n.links["eh_role"] = ""
+    if tag_import:
+        n.links.loc["tie_in", "eh_role"] = tag_import
+    if tag_export:
+        n.links.loc["tie_out", "eh_role"] = tag_export
+    return n
+
+
+def test_a_grid_import_tag_beats_a_site_bus_named_like_the_grid():
+    binding.check_site_connection(_microgrid(), "tie_in", "tie_out")
+    assert binding.site_connection_candidates(_microgrid())["poc_link"][0] == "tie_in"
+
+
+def test_an_untagged_link_into_a_grid_named_bus_is_still_refused_by_the_name_check():
+    with pytest.raises(binding.BindingRefusal) as exc:
+        binding.check_site_connection(_microgrid(tag_import="", tag_export=""), "tie_in", None)
+    assert exc.value.code == "site_connection_wrong_direction"
+
+
+def test_a_grid_export_tag_refusal_names_the_tag():
+    n = _net()
+    n.links["eh_role"] = ""
+    n.links.loc["export", "eh_role"] = "grid_export"
+    n.links.loc["export", ["bus0", "bus1"]] = ["grid", "poc"]   # even pointing grid → site
+    with pytest.raises(binding.BindingRefusal) as exc:
+        binding.check_site_connection(n, "export", None)
+    assert exc.value.code == "site_connection_wrong_direction"
+    assert "eh_role" in exc.value.message and "grid_export" in exc.value.message
+    assert "into the grid" not in exc.value.message
+
+
+# ── round 1 review: B1 (the form's PUT is checked too) ─────────────────────
+
+
+def test_the_solver_config_route_refuses_meter_links_the_wrong_way_round(client,
+                                                                          install_network):
+    install_network(_net(), name="sc_route")
+    r = client.put("/api/simulation/solver_config",
+                   json={"commercial": {"poc_link": "export", "export_link": "import"}})
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert detail["code"] == "site_connection_wrong_direction"
+    assert detail["error_kind"] == "site_connection_wrong_direction"
+    assert "export" in detail["message"]
+    from routers.simulation import get_solver_config
+
+    assert get_solver_config()["commercial"] is None
+
+
+def test_the_route_accepts_the_right_way_round_and_keeps_the_binding_codes(client,
+                                                                           install_network):
+    install_network(_net(), name="sc_route_ok")
+    r = client.put("/api/simulation/solver_config",
+                   json={"commercial": {"poc_link": "import", "export_link": "export"}})
+    assert r.status_code == 200, r.text
+    # A missing Link is still the binding's own refusal (its existing code).
+    r = client.put("/api/simulation/solver_config", json={"commercial": {"poc_link": "pv"}})
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "commercial_binding_invalid"
+
+
+def test_the_route_does_not_recheck_unchanged_meter_links(client, install_network,
+                                                          monkeypatch):
+    install_network(_net(), name="sc_route_same")
+    body = {"commercial": {"poc_link": "import", "export_link": "export"}}
+    assert client.put("/api/simulation/solver_config", json=body).status_code == 200
+    calls = []
+    monkeypatch.setattr(binding, "check_site_connection",
+                        lambda *a, **k: calls.append(a))
+    body["commercial"]["site_party"] = "owner"
+    assert client.put("/api/simulation/solver_config", json=body).status_code == 200
+    assert calls == []
+
+
+# ── round 1 review: non-binding 5 ──────────────────────────────────────────
+
+
+def test_an_explicit_null_clears_the_export_link_and_the_timezone(client, install_network):
+    install_network(_net(), name="sc_clear")
+    chat_tools.DISPATCHERS["set_site_connection"](poc_link="import", export_link="export",
+                                                  timezone="UTC")
+    out = chat_tools.DISPATCHERS["set_site_connection"](poc_link="import", export_link=None,
+                                                        timezone=None)
+    assert out["commercial"] == {"poc_link": "import", "export_link": None, "timezone": None}
+
+
+def test_the_schema_says_null_clears():
+    from services.chat_tools_schema import TOOLS
+
+    tool = next(t for t in TOOLS if t["name"] == "set_site_connection")
+    props = tool["input_schema"]["properties"]
+    assert props["export_link"]["type"] == ["string", "null"]
+    assert props["timezone"]["type"] == ["string", "null"]
+    assert "null" in tool["description"]
+
+
+def test_a_kept_config_refused_without_a_kind_of_its_own_is_site_connection_invalid(
+        client, install_network):
+    """The rewrap is reachable: a kept FCA agreement on an unsaved network is
+    the binding's `fca_needs_saved_project`, which has no chat kind."""
+    import dataclasses
+
+    from routers.simulation import _state
+
+    install_network(_net())          # unbound: no project directory
+    fca = {"kind": "fca", "import_cap_mw": 50.0, "curtailment_hours_per_year": 100,
+           "available_from": "2030-01-01"}
+    _state["solver_config"] = dataclasses.replace(
+        _state["solver_config"], commercial={"poc_link": "import", "connection": fca})
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.DISPATCHERS["set_site_connection"](poc_link="import")
+    assert exc.value.detail["error_kind"] == "site_connection_invalid"
+    assert exc.value.detail["code"] == "fca_needs_saved_project"
+
+
+def test_a_link_tagged_for_the_other_side_is_never_a_candidate_for_this_one():
+    n = _net()
+    n.links["eh_role"] = ""
+    n.links.loc["export", "eh_role"] = "grid_import"      # mis-tagged, named grid-side
+    got = binding.site_connection_candidates(n)
+    assert "export" not in got["export_link"]
+    n.links.loc["import", "eh_role"] = "grid_export"
+    assert "import" not in binding.site_connection_candidates(n)["poc_link"]
+
+
+def test_during_a_solve_the_route_refuses_in_flight_before_reading_the_links(
+        client, install_network, monkeypatch):
+    import routers.simulation as S
+
+    install_network(_net(), name="sc_route_busy")
+    monkeypatch.setattr(S, "_solver_in_flight_ctx", lambda ctx: True)
+    monkeypatch.setattr(binding, "check_site_connection",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("read")))
+    r = client.put("/api/simulation/solver_config",
+                   json={"commercial": {"poc_link": "export", "export_link": "import"}})
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "solver_in_flight"

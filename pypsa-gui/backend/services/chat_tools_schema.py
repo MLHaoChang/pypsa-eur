@@ -2675,16 +2675,18 @@ TOOLS: list[dict[str, Any]] = [
         "connection), optional `export_link` (the one-way Link site → grid that "
         "carries export) and optional `timezone` (the site's IANA zone; set, naive "
         "snapshots are UTC). Every other key of a stored commercial config (tariff, "
-        "contracts, participants) is kept, and an omitted export_link or timezone "
-        "keeps the stored value. The Links are checked first: a name that is not a "
+        "contracts, participants) is kept. An omitted export_link or timezone keeps "
+        "the stored value; an explicit null clears it (no export link; snapshots "
+        "already in site time). The Links are checked first: a name that is not a "
         "Link is refused (site_connection_link_missing, with likely candidates), "
         "a Link the wrong way round (site_connection_wrong_direction), a two-way "
-        "Link or an unknown timezone (site_connection_invalid). Call it before "
+        "Link, an unknown timezone, or a refusal of the kept config with no kind of "
+        "its own, `code` naming it (site_connection_invalid). Call it before "
         "attach_tariff or define_participants when they report no_commercial_config. "
         "Returns {commercial: {poc_link, export_link, timezone}, created, notes}. "
         "Safety: write.",
-        {"poc_link": {"type": "string"}, "export_link": {"type": "string"},
-         "timezone": {"type": "string"}},
+        {"poc_link": {"type": "string"}, "export_link": {"type": ["string", "null"]},
+         "timezone": {"type": ["string", "null"]}},
         ["poc_link"],
     ),
     # ── Participants (1) — Edge Investment Case P3 WP3.4 ──────────────────
