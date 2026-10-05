@@ -143,6 +143,17 @@ ever echoing the key value, so you can probe the backend's view safely.
 `GET /api/chat/settings/api-key` (super-admin only) additionally reports where
 the live key came from and its last four characters — never more.
 
+## The harness
+
+Everything the assistant needs that is not a language model lives in
+`backend/harness/` — the provider seam, the tool catalogue, the frame
+vocabulary, the workflows the assistant leads and the skills it can load.
+Its README is the contract (layering, how to add a tool, a workflow or a
+skill); the spec is `.scratch/harness/spec.md` and the plan
+`docs/superpowers/plans/2026-10-05-chat-harness.md`. `services/llm_provider`
+and `services/chat_tools_schema` are aliases of `harness.protocol` and
+`harness.catalogue` and keep working.
+
 ## Voice input
 
 The composer mic button uses the browser **Web Speech API** (English,

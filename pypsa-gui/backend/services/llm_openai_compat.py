@@ -49,7 +49,7 @@ import logging
 from typing import Any, Iterator
 
 from services import redaction
-from services.llm_provider import LLMEvent, LLMRequest, ProviderError
+from harness.protocol import LLMEvent, LLMRequest, ProviderError
 
 logger = logging.getLogger("pypsa_gui.chat")
 

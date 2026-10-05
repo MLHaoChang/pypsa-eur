@@ -12,7 +12,7 @@ from __future__ import annotations
 import copy
 from typing import Any, Iterator
 
-from services.llm_provider import LLMEvent, LLMRequest, ProviderError
+from harness.protocol import LLMEvent, LLMRequest, ProviderError
 
 
 class FakeProvider:

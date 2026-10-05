@@ -1518,7 +1518,7 @@ def agent_loop_stub(
     session.abort_event.clear()
 
     # session_init: tools + replay (Phase 4 polish) + model identity
-    from services.chat_tools_schema import TOOLS  # local: avoid cycle at module load
+    from harness.catalogue import TOOLS  # local: avoid cycle at module load
     # Task 7 — the stub is driven by `routers/chat.py`'s script path, which
     # binds `session.profile_id`/`bound_wire` the SAME way the real run_turn
     # path does, before branching on `has_explicit_script`. Reported here too
@@ -1738,7 +1738,7 @@ def _safety_tier_for(tool_name: str) -> str:
     """
     # Lazy import — keeps services.chat_service import-light when only the
     # Phase 0/2 helpers are needed.
-    from services.chat_tools_schema import TOOLS
+    from harness.catalogue import TOOLS
     for tool in TOOLS:
         if tool["name"] == tool_name:
             desc = tool["description"]
@@ -1775,7 +1775,8 @@ from services.llm_anthropic import (  # moved 2026-08-13 (provider seam)
 # module reference at call time — it's invoked via the
 # `chat_service._build_anthropic_client` alias above, which is the actual
 # patch surface tests pin, not `llm_anthropic.build_client`.
-from services import llm_anthropic, llm_openai_compat, llm_provider
+from harness import protocol as llm_provider
+from services import llm_anthropic, llm_openai_compat
 
 
 def llm_config_module():
@@ -2021,7 +2022,7 @@ def _tools_payload(turn_ctx=None) -> list[dict[str, Any]]:
     already report. Only the gridspine tools are gated, because on any other
     project every one of them would 409 before doing anything.
     """
-    from services.chat_tools_schema import TOOLS
+    from harness.catalogue import TOOLS
     tools = list(TOOLS)
     if _bound_project_kind(turn_ctx) != "planning_dynamics":
         tools = [

@@ -1,0 +1,85 @@
+# Plan: the chat harness — one folder for everything a model-agnostic assistant needs
+
+**Status:** v1.0, 2026-10-05. Phase 0 landed on `claude/amazing-mendel-m087zw`. Owner decisions pending: spec §8, Q1–Q9 (phase 0 proceeds on the recommended answers; phases 1+ wait).
+**Spec (contract-level):** [`.scratch/harness/spec.md`](../../../.scratch/harness/spec.md); issues under `.scratch/harness/issues/`.
+**Requested:** 2026-10-05. The assistant should connect to Claude, OpenAI/Codex, Kimi or any other model and not feel different: one harness of functions, workflows and skills that any model drives the same way; a chat opens with a menu of what the user can do; the assistant can run a grill-style interview with recommendations the user picks from; and all of it grouped in one folder instead of spread over files.
+**Builds on:** [`specs/2026-08-05-llm-provider-seam-design.md`](../specs/2026-08-05-llm-provider-seam-design.md) (the harness/provider split and the word "harness"), [`plans/2026-09-09-chat-turn-loop-decomposition.md`](2026-09-09-chat-turn-loop-decomposition.md) (how the loop is cut), [`specs/2026-09-27-guided-mode.md`](../specs/2026-09-27-guided-mode.md) (the Guided addendum and delegation texts), [`plans/2026-10-05-one-investment-engine-two-faces.md`](2026-10-05-one-investment-engine-two-faces.md) §5 U3 and §8 (the investment workflow's steps and tools).
+
+## 1. What exists, measured
+
+| Concern | Where it lives today | Provider-neutral? | Travels when the model changes? |
+|---|---|---:|---:|
+| Provider seam (`LLMProvider`, `LLMRequest`, `LLMEvent`) | `services/llm_provider.py` (90 lines) | yes | yes |
+| Adapters | `services/llm_anthropic.py`, `llm_openai_compat.py`, `llm_fake.py` | n/a | n/a |
+| Profiles (which model, which key, tools/vision flags) | `services/llm_config.py` | yes | yes |
+| Tool catalogue: 182 tools, tiers as `Safety:` text, route map | `services/chat_tools_schema.py` (3,043 lines) | yes | yes |
+| Tool handlers | `services/chat_tools.py` (5,939 lines; `DISPATCHERS` dict) | yes | yes |
+| System prompt: 11 constants, FACTS/CHAINING split, hash-pinned | `services/chat_service.py` :2065–2833 | yes | yes |
+| Loop, session, confirmation, budgets, WAL, lineage | `services/chat_service.py` (5,345 lines) | yes | yes |
+| Guided addendum + the five step names | `chat_service.py` :2435–2461 | yes | yes |
+| Guided "Let the assistant do this" texts | `frontend/src/pages/hubDesign/delegate.ts` | yes | yes, but it is frontend code |
+| Chat-start "Try asking" chips | `frontend/src/components/ChatPanel.tsx` :1303–1349 (three arrays) | yes | yes, but it is frontend code |
+| Structured question to the user | does not exist | — | — |
+| Skills for the in-app assistant | do not exist | — | — |
+| SSE frame vocabulary (16 names) | implicit in the `yield` sites of `chat_service.py` | yes | yes |
+
+The seam is already cut, so the provider swap works today. What does not exist
+is the place where behaviour that must travel is *put*: a workflow is a
+frontend edit, a question is prose, a procedure is nothing. The folder is
+the deliverable; the moves make it honest.
+
+## 2. Target tree
+
+```
+pypsa-gui/backend/harness/
+  README.md            the contract: what is here, what may import what, how to add a tool / workflow / skill
+  __init__.py
+  protocol.py          ← services/llm_provider.py (shim stays)          [phase 0]
+  catalogue.py         ← services/chat_tools_schema.py (shim stays)     [phase 0]
+  events.py            closed vocabulary of turn-loop frames + tripwire  [phase 0]
+  workflows/           registry.py + *.md (front matter + "## Step:" sections) [phase 0 data, phase 2 behaviour]
+  skills/              registry.py + <name>/SKILL.md (Agent Skills layout)   [phase 0 data, phase 2 behaviour]
+  prompts/             *.md, loader reassembles the pinned bytes           [phase 1]
+  providers/           anthropic.py, openai_compat.py, fake.py             [phase 1]
+  session.py confirm.py budget.py history.py loop.py sse.py               [phase 3]
+  mcp.py               external agents (decision Q8)                       [phase 4]
+```
+
+Dependency arrow: `services/* ← harness ← harness/providers`. A test greps
+`harness/` (excluding `providers/`) for `anthropic`, `openai`, `cache_control`.
+
+## 3. Phases
+
+| Phase | Issues | Delivers | Gate |
+|---|---|---|---|
+| **0 — the folder** (done) | 01, 12 | package, README, protocol + catalogue moved with shims, `events.py` with the AST tripwire, workflow and skill registries with six workflow definitions and the `grill` skill, loader tests, glossary terms | identity tests; the chat/llm/tool test files unchanged and green; layering grep clean |
+| **1 — the text** | 02, 07, 10 | prompts in Markdown (byte-identical, hash-pinned), adapters under `harness/providers/`, bundle `datas` | pinned hashes unchanged; `test_llm_provider_seam.py` unchanged; both live probes run (ADR-0002) |
+| **2 — the behaviour** | 03, 04, 05, 06 | start menu endpoint + chips from it; `ask_user` + Choice card; `use_skill` + skill block; `start_workflow` + per-turn addendum; Guided mode consumes the `hub-design` workflow | Guided tests unchanged; Expert turns byte-identical; `FakeProvider` frame sequences for each new tool; vitest + tsc clean |
+| **3 — the loop** | 08, 09 | session, confirmation, budget, history, loop, sse moved under the harness; parity probe on stub + two live wires | the recorded frame sequence unchanged; manifest test scans the new paths; runbook names the runs |
+| **4 — the outside** | 11 | MCP exposure (if Q8 is yes) | its own spec |
+
+Phases 1 and 2 are independent of each other after phase 0; run them on
+separate branches. Phase 3 waits for both.
+
+## 4. Rules
+
+1. **Behaviour-preserving moves.** A move is `git mv` + shim + identity test. Defects found go to `docs/superpowers/findings/`, not into the move.
+2. **The system prompt is byte-identical** through every phase: the pinned hashes in `test_chat_profile_binding.py` are the gate, and new blocks (skill catalogue) are appended, never inserted into a pinned constant.
+3. **Per-turn addenda, never the system prompt**, for anything that changes with the user's place (workflow step, Guided rules, ui_context). The cache argument in `_format_ui_context`'s docstring applies.
+4. **Confirmation tiers are untouched.** A workflow step may say "a confirmation card follows"; it cannot change which tier gets a card.
+5. **ADR-0002.** Any phase that touches the loop or adds a tool runs both live probes and names them in its report.
+6. **Markdown is loaded from the package only** (spec D12).
+7. **Model tiering.** Implementation of each issue: Opus-class or lower, one issue per agent, TDD. Plan and spec changes and gate verdicts: Fable.
+
+## 5. Grill round 1 (owner decisions)
+
+The nine questions and recommended answers are in spec §8. Phase 0 is
+consistent with every recommendation and reversible on each (the registries
+are data; the moves are shims). Answer them in the spec file or in the chat;
+phase 1 starts on Q1, Q2, Q9; phase 2 on Q3–Q6.
+
+## 6. Phase 0 record (2026-10-05)
+
+See `harness/README.md` for the layout and the commit message for the test
+evidence. The hourly-assumption audit (`tests/test_hourly_assumption_audit.py`)
+now scans `harness/` too and pins the moved catalogue at its new path.

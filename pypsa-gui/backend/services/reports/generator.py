@@ -26,7 +26,7 @@ from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from services.llm_provider import LLMRequest, ProviderError
+from harness.protocol import LLMRequest, ProviderError
 from services.reports import prompts
 
 MAX_PARAGRAPH_CHARS = 1200
