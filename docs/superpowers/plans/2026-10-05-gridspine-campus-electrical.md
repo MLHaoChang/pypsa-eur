@@ -209,3 +209,47 @@ deliverable is the campus YAML contract and builder, tested against a
 hand-built two-transformer campus. That campus's load flow and short
 circuit are checked against pandapower solved directly. Auto-generation
 from the hub template follows in the same increment.
+
+## C1 as built (2026-10-05)
+
+**Stage A: `gridspine.ingest.campus`.**
+- Builds the campus description into a pandapower net:
+  - the PCC as an `ext_grid` with the grid operator's Sk''max/min and R/X;
+  - transformers, buses and cables;
+  - units of kind load, bess, pv, wind or genset.
+- Every number carries a tag, as in the unit templates.
+- An impossible or untagged campus is refused at load.
+- Units are PQ injections. A genset runs in power-factor control, so it is
+  not a voltage-controlling `gen`. For IEC 60909 it is screened as a current
+  source of 1/x''d (ledgered).
+- Tests:
+  - The build solves identically to the same network written directly in
+    pandapower.
+  - The PCC Ik'' and peak current come out by hand from Sk'' and R/X.
+  - 12 mutations, all caught.
+
+**Stage B: `gridspine.producers.campus.draft_campus`.**
+- Drafts the campus file from a solved hub network.
+- Transformers are sized from the optimised MW at pf 0.95, rounded up to
+  the next R10 size, with typical impedance by size class.
+- Assets are typed by carrier. Unbuilt assets are skipped and listed.
+- Every supplied value is tagged `assumed`.
+- All three pypsa-gui hub templates draft, build and converge.
+- One real bug was found and fixed: a NaN `eh_poc` marked a second PCC.
+- 16 mutations, all caught.
+
+**Amended.** The plan's "generalising the study" step is replaced by a
+**separate campus driver**, arriving with C2. The case39 year study does
+transmission work a campus does not need: unit commitment, N-2, and PSS/E
+bundles.
+- Rebuilding it would put the existing studies at risk for no gain.
+- The campus driver takes:
+  - the campus file;
+  - the solved project.
+- It writes:
+  - the hourly tables per period;
+  - the campus ranking;
+  - the sizing results.
+- Its manifest records both inputs, so every later step rebuilds the same
+  network.
+- The `storage` unit kind arrives with the campus dispatch tables in C2.
