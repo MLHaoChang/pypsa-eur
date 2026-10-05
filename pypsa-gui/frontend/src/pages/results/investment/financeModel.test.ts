@@ -97,6 +97,12 @@ describe('the report', () => {
     const real = rows.find(h => h.id === 'lcos_real')!
     expect(real.value).toBeNull()
     expect(real.note).toBe('wacc_nominal_missing')
+    const noInfl = headlines({ sections: { project: { status: 'ok', payload: {
+      lcos_nominal_per_mwh: null, lcos_real_per_mwh: null,
+      lcos: { assets: { bess: {} }, reasons: ['no_discharge:bess', 'real_not_established:inflation_missing'] } } } } })
+    expect(noInfl.find(h => h.id === 'lcos')!.note).toBe('no_discharge:bess')
+    expect(noInfl.find(h => h.id === 'lcos_real')!.note)
+      .toBe('no_discharge:bess; real_not_established:inflation_missing')
   })
 
   it('states the price basis in words, or null', () => {

@@ -1041,10 +1041,13 @@ def _scale(lines, f: float, monthly: dict[str, float | None] | None = None
 
 def _uncosted_meter_links(n, parsed, owned_list) -> list[str]:
     """The owner's PoC meter Links (the import members and the export Link)
-    with no typed `overnight_cost`: under `single_owner` they are the owner's
-    (who carries the connection is a commercial fact), but they are not part
-    of the investment — their money is the connection lines. A meter Link
-    with a typed cost (a new connection built in the case) stays an asset."""
+    with no typed `overnight_cost` and no LP-sized cost: under `single_owner`
+    they are the owner's (who carries the connection is a commercial fact),
+    but they are not part of the investment — their money is the connection
+    lines. A meter Link with a typed cost (a new connection built in the
+    case), or an extendable one with a `capital_cost` (a connection the LP
+    sized — review B2), stays an asset: the latter reads
+    `overnight_cost_missing` (C12), never a silently dropped capex."""
     meter = set(_lp.import_links(parsed)) | ({parsed.export_link} if parsed.export_link
                                              else set())
     out = []
@@ -1053,7 +1056,10 @@ def _uncosted_meter_links(n, parsed, owned_list) -> list[str]:
             continue
         typed = _fin(n.links.at[name, "overnight_cost"]) if "overnight_cost" in n.links.columns \
             else None
-        if typed is None:
+        ext = bool(n.links.at[name, "p_nom_extendable"]) \
+            if "p_nom_extendable" in n.links.columns else False
+        cc = _fin(n.links.at[name, "capital_cost"]) if "capital_cost" in n.links.columns else None
+        if typed is None and (not ext or not cc):
             out.append(name)
     return sorted(out)
 
@@ -1106,7 +1112,8 @@ def _committed_price(n, link: str | None, solved: dict) -> np.ndarray | None:
 
 
 def _storage_years(n, parsed, sides, owned_list, result_df, accs: dict[str, dict[str, _Acc]],
-                   flags: list[str]) -> dict[str, dict[str, StorageYear]]:
+                   flags: list[str], factors: dict[str, float] | None = None
+                   ) -> dict[str, dict[str, StorageYear]]:
     """Per period and owner storage asset on a site-side electric bus: the
     year's discharge and charge and what the charged energy cost the site in
     the dispatch (`StorageYear`).
@@ -1119,11 +1126,15 @@ def _storage_years(n, parsed, sides, owned_list, result_df, accs: dict[str, dict
     escalating as `tariff`. The rest of the charge came from on-site surplus
     (PV): priced at the export revenue it would otherwise have earned (−the
     committed net price on the export Link: export price − export tariff
-    items), escalating as `export`; with no export Link the surplus would have
-    been curtailed: 0, flagged. A price that is not per interval (convex
+    items, floored at 0 per interval — at a negative net price the site would
+    curtail, forgoing nothing: `lcos_surplus_price_floored:<asset>`, review
+    B1), escalating as `export`; with no export Link the surplus would have
+    been curtailed: 0, flagged. The surplus MWh in the flags is annualised
+    (× the template factor). A price that is not per interval (convex
     energy tiers, a group net-import term), not committed, or a supply price
     that is not one series makes that part None, flagged
     `lcos_charge_price_not_established:<part>:<asset>` (plan C12)."""
+    factors = factors or {}
     electric = _lp._electric_bus_test(n, parsed)
     storage = []          # every site-side electric storage (owner or not)
     for comp, (frame, _t) in _STORAGE_FRAMES.items():
@@ -1184,6 +1195,14 @@ def _storage_years(n, parsed, sides, owned_list, result_df, accs: dict[str, dict
         no_export = False
         net = _committed_price(n, parsed.export_link, solved) if solved else None
         surplus_price = None if net is None else -net
+    # A negative net export price (a negative market price, or export tariff
+    # items with no price): the site would curtail rather than export, so the
+    # surplus forgoes no revenue — floored at 0, never a negative charging
+    # cost (review B1). A negative IMPORT price is real money and stays.
+    floored = np.zeros(len(n.snapshots), dtype=bool) if surplus_price is None \
+        else surplus_price < 0.0
+    if floored.any():
+        surplus_price = np.clip(surplus_price, 0.0, None)
     share = np.divide(np.minimum(imp, total_charge), total_charge,
                       out=np.zeros_like(total_charge), where=total_charge > 1e-12)
     w_all = n.snapshot_weightings.objective.to_numpy(dtype=float)
@@ -1216,10 +1235,12 @@ def _storage_years(n, parsed, sides, owned_list, result_df, accs: dict[str, dict
                     flags.append(f"lcos_charge_price_not_established:surplus:{name}")
             else:
                 sur_cost = float((sur * surplus_price[m]).sum())
+                if float(sur[floored[m]].sum()) > 1e-9:
+                    flags.append(f"lcos_surplus_price_floored:{name}")
             if sur_mwh > 1e-9:
                 flags.append(("lcos_charge_from_surplus_unpriced:" if no_export else
                               "lcos_charge_from_surplus_at_export_price:")
-                             + f"{name}:{_num(sur_mwh)}")
+                             + f"{name}:{_num(sur_mwh * factors.get(k, 1.0))}")
             out[k][name] = StorageYear(
                 discharge_mwh=float((w * di[m]).sum()), charge_mwh=float((w * ch[m]).sum()),
                 charge_import_cost=imp_cost, charge_surplus_cost=sur_cost, om_keys=om)
@@ -1332,7 +1353,7 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
 
     # The storage LCOS's throughput and charging cost (owner decision 6).
     storage_years = _storage_years(n, parsed, P.classify_buses(n, parsed), owned_list,
-                                   result_df, accs, flags) \
+                                   result_df, accs, flags, factors) \
         if any(c in _STORAGE_FRAMES for c, _a in owned_list) else {}
 
     # P3's blocking input flags make the money of every period unknown (P3:

@@ -223,6 +223,18 @@ def test_lcos_not_established_is_none_with_a_reason(make, reason):
     assert f"lcos_not_established:{reason}" in r.flags
 
 
+def test_the_real_lcos_without_inflation_is_none_with_its_reason():
+    """Review B round 1: the reason is in `lcos.reasons` too (the headline reads
+    it), while the nominal LCOS stays established."""
+    r = run_case(_case(_fin(inflation=None)), layers=LAYER)
+    assert r.metrics["lcos_nominal_per_mwh"] == pytest.approx(_hand_lcos(), rel=1e-12)
+    assert r.metrics["lcos_real_per_mwh"] is None
+    assert r.lcos["reasons"] == ["real_not_established:inflation_missing"]
+    assert r.lcos["assets"]["bess"]["reasons"] == []
+    assert "lcos_real_not_established:inflation_missing" in r.flags
+    assert not any(f.startswith("lcos_not_established") for f in r.flags)
+
+
 def test_no_storage_is_none_and_adds_no_flag():
     base = run_case(_case(storage={}), layers=LAYER)
     assert base.metrics["lcos_nominal_per_mwh"] is None

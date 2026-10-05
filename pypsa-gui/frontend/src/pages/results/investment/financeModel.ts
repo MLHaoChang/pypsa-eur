@@ -219,7 +219,7 @@ export function headlines(report: InvestmentCaseReportPayload): Headline[] {
       const sec = h.section ? sectionOf(report, h.section) : null
       note = (isObj(raw) && typeof raw.reason === 'string' ? raw.reason : null)
         ?? (h.id === 'ppa_price' && typeof payload.solve_ppa_status === 'string' ? payload.solve_ppa_status : null)
-        ?? (h.storage ? lcosReason(payload) : null)
+        ?? (h.storage ? lcosReason(payload, h.id === 'lcos_real') : null)
         ?? (sec && sec.status !== 'ok' ? sec.note ?? `the ${h.section} section is ${sec.status.replace(/_/g, ' ')}` : null)
     }
     out.push({ id: h.id, label: h.label, kind: h.kind, value, note })
@@ -227,9 +227,13 @@ export function headlines(report: InvestmentCaseReportPayload): Headline[] {
   return out
 }
 
-function lcosReason(payload: Obj): string | null {
+/** Why an LCOS is not established: the nominal one reads the block's reasons
+ *  but the real-only ones (`real_not_established:*`); the real one reads all. */
+function lcosReason(payload: Obj, real: boolean): string | null {
   const reasons = lcosBlock(payload)?.reasons
-  return Array.isArray(reasons) && reasons.length ? reasons.map(String).join('; ') : null
+  if (!Array.isArray(reasons)) return null
+  const shown = reasons.map(String).filter(r => real || !r.startsWith('real_not_established'))
+  return shown.length ? shown.join('; ') : null
 }
 
 /** The price basis in words ("real basis, 2020 EUR"; GS Q6), or null when

@@ -241,3 +241,53 @@ def test_the_public_export_revenue_accessor(solved):
     assert export_revenue(n, unpriced) == {}
     n.links_t["ic_export_price"] = n.links_t["ic_export_price"].drop(columns=["export"])
     assert export_revenue(n, cfg.commercial) == {"_": None}
+
+
+@pytest.mark.live_solve
+def test_a_negative_export_price_floors_the_surplus_charge_at_zero(reset_backend):
+    """Review B1: at −50 €/MWh the site would rather curtail than export, so
+    a MWh of PV surplus put into the battery forgoes no revenue: 0, not a
+    negative cost that lowers the LCOS. Flagged `lcos_surplus_price_floored`."""
+    from services.finance.engine import run_case
+
+    n = _site()
+    hour = np.arange(24)
+    midday = (hour >= 10) & (hour < 14)
+    n.links_t["ic_export_price"] = pd.DataFrame(
+        {"export": np.where(midday, -50.0, 10.0)}, index=n.snapshots)
+    n, cfg = _solve(n, _commercial(_single_owner(n)))
+    case = _build(n, cfg)
+    sy = case.templates[0].storage["bess"]
+    ch = n.storage_units_t.p_store["bess"].to_numpy(float)
+    assert W * ch[midday].sum() > 1.0                     # it still charges from the PV
+    assert sy.charge_surplus_cost == pytest.approx(0.0, abs=1e-9)
+    assert "lcos_surplus_price_floored:bess" in case.flags
+    r = run_case(case)
+    assert r.metrics["lcos_nominal_per_mwh"] is not None
+    # The import part is unchanged by the floor (night charge at 80 €/MWh).
+    assert sy.charge_import_cost == pytest.approx(80.0 * W * ch[hour < 6].sum(), rel=1e-9)
+
+
+@pytest.mark.live_solve
+def test_an_lp_sized_costed_meter_link_stays_an_asset(reset_backend):
+    """Review B2: an extendable meter Link with a capital_cost is a connection
+    the LP sized — part of the case, not skipped: it keeps its LP rate in the
+    WACC gate and reads `overnight_cost_missing` (C12), as before."""
+    from services.finance.engine import run_case
+
+    n = _site()
+    n.links.loc["import", ["p_nom_extendable", "p_nom", "p_nom_min", "p_nom_max",
+                           "capital_cost"]] = [True, 0.0, 0.0, 20.0, 50_000.0]
+    n.links.loc["import", "discount_rate"] = 0.04
+    n, cfg = _solve(n, _commercial(_single_owner(n)))
+    assert float(n.links.at["import", "p_nom_opt"]) > 0.0
+    case = _build(n, cfg, _fin(cod_by_asset={"pv": COD, "bess": COD, "import": COD}))
+    assert "import" in {a.name for a in case.assets}
+    assert "meter_link_not_investment:import" not in case.flags
+    assert "meter_link_not_investment:export" in case.flags       # fixed, uncosted
+    assert case.lp_basis.asset_discount_rates["import"] == pytest.approx(0.04)
+    r = run_case(case)
+    assert "overnight_cost_missing:import" in r.op.reasons["capex"]
+    # An extendable meter Link with no capital cost is still not an investment.
+    n.links.loc["import", "capital_cost"] = 0.0
+    assert "meter_link_not_investment:import" in _build(n, cfg).flags

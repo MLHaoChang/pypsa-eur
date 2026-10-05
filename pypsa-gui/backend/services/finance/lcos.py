@@ -32,7 +32,10 @@ an asset with no entry is not established, as for a generator's energy
 it. A lease or contract on the asset is not O&M and is not counted.
 
 Every unknown term makes the asset's LCOS None with a reason
-(`lcos_not_established:<reason>` joins the run's flags), never a 0. A case
+(`lcos_not_established:<reason>` joins the run's flags), never a 0. A real
+LCOS with no inflation stated is None with `real_not_established:
+inflation_missing` in the block's reasons (flag
+`lcos_real_not_established:inflation_missing`). A case
 without storage reads `reasons == ["no_storage"]` and adds no flag.
 """
 from __future__ import annotations
@@ -172,12 +175,17 @@ def storage_lcos(case: FinanceCase, op: Operating, tl: Timeline) -> dict:
             established = False
         all_reasons += rs
         out["assets"][a] = rec
-    out["reasons"] = sorted(set(all_reasons))
+    nominal_reasons = sorted(set(all_reasons))
+    # The real LCOS's own reason joins the block's reasons (the headline reads
+    # them) but never the nominal `lcos_not_established:*` flags.
+    real_reasons = ["real_not_established:inflation_missing"] \
+        if "lcos_real_not_established:inflation_missing" in flags else []
+    out["reasons"] = nominal_reasons + real_reasons
     if established and den_tot > 0:
         out["lcos_nominal_per_mwh"] = num_tot / den_tot
         if real_rate is not None and den_real_tot > 0:
             out["lcos_real_per_mwh"] = num_tot / den_real_tot
-    out["flags"] = sorted(set(flags + [f"lcos_not_established:{x}" for x in out["reasons"]]))
+    out["flags"] = sorted(set(flags + [f"lcos_not_established:{x}" for x in nominal_reasons]))
     return out
 
 

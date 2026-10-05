@@ -74,15 +74,32 @@ SIGNATURES: dict[str, str] = {
         "(n, commercial: 'dict | None', *, years=None) -> 'dict'",
     "services.results.value_flows.export_revenue":
         "(n, commercial) -> 'dict[str, float | None]'",
-    # TODO(orchestrator, after C lands): the context-level binding helper —
-    # "services.commercial.binding.bind_commercial_on_context": "(ctx, commercial, *, ...)",
-    # TODO(orchestrator, after A lands): the generic defaults-pack loader and
-    # the flat export-series helper (U1 a, e) —
-    # "services.library.<defaults pack module>.<loader>": "(...)",
-    # "services.library.<export helper module>.<helper>": "(...)",
+    # The context-level commercial binding (C, U1 follow-up b; GS Q15).
+    "services.commercial.binding.bind_commercial_on_context":
+        "(ctx, commercial, *, user=None, in_flight: 'Callable[[object], bool] | None' = None)"
+        " -> 'dict | None'",
+    # The generic defaults pack (A, U1 follow-up a) and the flat export series (e).
+    "services.library.defaults_pack.loader.load_defaults_pack":
+        "(version: 'str | None' = None) -> 'DefaultsPack'",
+    "services.library.defaults_pack.loader.DefaultsPack.load_profile_series":
+        "(self, profile_id: 'str', index, *, annual_mwh: 'float | None' = None, weights=None)"
+        " -> 'pd.Series'",
+    "services.library.defaults_pack.loader.DefaultsPack.pack_tariff":
+        "(self, tariff_id: 'str') -> 'Tariff'",
+    "services.library.defaults_pack.loader.DefaultsPack.tariff_is_unchanged":
+        "(self, tariff: 'Tariff | Mapping[str, Any]') -> 'bool'",
+    "services.library.export_series.put_flat_export_series":
+        "(db: 'DBSession', org_id: 'UUID', name: 'str', eur_per_mwh: 'float', *, snapshots, "
+        "source: 'str' = 'flat export price', vintage_year: 'int | None' = None, "
+        "description: 'str | None' = None, created_by: 'UUID | None' = None, "
+        "root: 'Path | None' = None) -> 'PriceSeriesRef'",
 }
 
 # Result types the guided study reads by attribute.
+# The `FinanceResult` fields the guided study reads (`cash`, `metrics`, `lcos`)
+# must stay; other fields may be added.
+RESULT_FIELDS_READ = ("cash", "metrics", "lcos")
+
 DATACLASS_FIELDS: dict[str, tuple[str, ...]] = {
     "services.commercial.tariff_engine.RatingResult": (
         "lines", "fixed_lines", "monthly", "annual", "per_item", "total", "total_supported",
@@ -108,8 +125,14 @@ MODEL_FIELDS: dict[str, tuple[str, ...]] = {
 
 
 def _get(path: str):
+    """A module attribute, or a class attribute one level down
+    (`pkg.module.Class.method`)."""
     module, _, name = path.rpartition(".")
-    return getattr(importlib.import_module(module), name)
+    try:
+        return getattr(importlib.import_module(module), name)
+    except ModuleNotFoundError:
+        module, _, cls = module.rpartition(".")
+        return getattr(getattr(importlib.import_module(module), cls), name)
 
 
 @pytest.mark.parametrize("path", sorted(SIGNATURES))
@@ -130,6 +153,13 @@ def test_a_facade_result_type_keeps_its_fields(path):
 @pytest.mark.parametrize("path", sorted(MODEL_FIELDS))
 def test_the_compiled_model_field_names_are_frozen(path):
     assert sorted(_get(path).model_fields) == sorted(MODEL_FIELDS[path])
+
+
+def test_the_finance_result_keeps_the_fields_the_guided_study_reads():
+    from services.finance.engine import FinanceResult
+
+    names = {f.name for f in dataclasses.fields(FinanceResult)}
+    assert set(RESULT_FIELDS_READ) <= names, sorted(set(RESULT_FIELDS_READ) - names)
 
 
 def test_finance_refused_keeps_its_code_and_detail():
