@@ -306,3 +306,43 @@ def test_a_skill_whose_name_differs_from_its_folder_fails(tmp_path):
     (d / "SKILL.md").write_text("---\nname: bar\ndescription: d\n---\nbody\n", encoding="utf-8")
     with pytest.raises(skills.SkillError, match="must equal the folder name"):
         skills.load_all(tmp_path)
+
+
+# ── 6. the splitting rule: a moved tunable is patched on its new module ───
+
+# Tunables that left harness/loop.py for another harness module (issue 08).
+# Patching them through the `chat_service` alias rebinds the loop's
+# re-exported name only; the readers live in the new module and never see
+# it — the patch silently no-ops. So the suite must patch the new home.
+MOVED_TUNABLES = {
+    "SESSION_MESSAGES_MAX": "harness.history",
+    "ROTATE_BYTES": "harness.history",
+    "MAX_TOOL_RESULT_CHARS_PER_TURN": "harness.results",
+}
+
+
+def test_no_test_patches_a_moved_tunable_through_the_alias():
+    offenders: list[str] = []
+    for path in sorted((BACKEND / "tests").glob("test_*.py")):
+        text = path.read_text(encoding="utf-8")
+        for name, home in MOVED_TUNABLES.items():
+            for pat in (rf'setattr\(\s*chat_service\s*,\s*"{name}"',
+                        rf'chat_service\.{name}\s*=[^=]',
+                        rf'"services\.chat_service\.{name}"',
+                        rf'"harness\.loop\.{name}"'):
+                for m in re.finditer(pat, text):
+                    line = text.count("\n", 0, m.start()) + 1
+                    offenders.append(f"{path.name}:{line}: patch {name} on {home}, not the alias")
+    assert offenders == [], "\n".join(offenders)
+
+
+def test_moved_tunables_are_read_where_they_are_patched():
+    """The re-exported name and the new module's name are the same object
+    until someone patches; the readers are in the new module."""
+    import importlib
+
+    from services import chat_service
+
+    for name, home in MOVED_TUNABLES.items():
+        mod = importlib.import_module(home)
+        assert getattr(chat_service, name) == getattr(mod, name)

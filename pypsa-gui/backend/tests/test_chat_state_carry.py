@@ -30,6 +30,7 @@ import pytest
 from routers import projects as projects_router
 from routers.simulation import BufferedLogQueue
 from services import chat_service
+from harness import history as harness_history
 from services.chat_service import ChatSession
 from services.project_context import ChatState, ProjectContext
 from services.pypsa_service import PyPSAService
@@ -541,7 +542,7 @@ def test_append_turn_rotates_when_oversize(tmp_projects_dir, monkeypatch):
     monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
     # Lower the rotation threshold for the test so we don't have to fabricate
     # a 5 MiB file.
-    monkeypatch.setattr(chat_service, "ROTATE_BYTES", 100)
+    monkeypatch.setattr(harness_history, "ROTATE_BYTES", 100)
 
     n = pypsa.Network()
     ctx = ProjectContext(network=n, loaded_project="rot")

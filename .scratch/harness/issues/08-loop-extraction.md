@@ -1,6 +1,6 @@
 # 08 — The turn loop, session, confirmation and persistence move into the harness
 
-Status: ready-for-agent (in progress 2026-10-05: the loop moved whole to `harness/loop.py` with an alias; `sse.py` extracted; the rest follows the README's splitting rule)
+Status: ready-for-agent (in progress 2026-10-05: the loop moved whole to `harness/loop.py`; `sse`, `fence`, `results`, `history`, `metrics` extracted under the README's splitting rule; sessions, confirmation, budget gates, provider wiring and the turn body remain)
 Type: task
 Blocked by: 02, 06, 07
 
@@ -34,3 +34,12 @@ README rule: result shaping, trim/summary, persistence + WAL, sessions,
 confirmation, budget gates, the turn body.
 
 2026-10-05 (gate for step 1, 773f009): 2908 passed, 5 skipped, 0 failed across the chat/provider/tool/Guided/harness/report files.
+
+2026-10-05 (step 2): `fence.py`, `results.py`, `history.py`, `metrics.py`
+extracted by AST selection of whole top-level nodes (the loop re-imports
+every name; identity holds). Three tunables moved with their readers —
+`MAX_TOOL_RESULT_CHARS_PER_TURN` → results, `SESSION_MESSAGES_MAX` and
+`ROTATE_BYTES` → history — and the seven test sites that patched them
+through `chat_service` now patch the new module; a tripwire in
+`test_harness_layout.py` (`MOVED_TUNABLES`) keeps it that way. loop.py:
+5,315 → ~4,040 lines.

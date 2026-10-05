@@ -14,8 +14,12 @@ harness/
   skills/         procedures the model loads on demand (<name>/SKILL.md)
   prompts/        the system-prompt fragments as Markdown, byte-identical to the old constants
   providers/      anthropic, openai_compat, fake — the only place a wire is named
-  loop.py         the turn loop, sessions, confirmation, budgets, history (moved whole from services/chat_service.py)
+  loop.py         the turn loop, sessions, confirmation and budget gates (the former services/chat_service.py)
   sse.py          the SSE framing of a yielded (event, payload)
+  fence.py        the untrusted-content delimiters and the neutraliser
+  results.py      tool-result shaping: coercion, truncation, the per-turn result budget, error content
+  history.py      the in-memory trim and turn summary, chat.jsonl persistence, the pending-turn WAL, lineage
+  metrics.py      the process-wide chat metrics behind GET /api/chat/metrics
 ```
 
 Spec: `.scratch/harness/spec.md`. Plan:
@@ -75,12 +79,16 @@ follows one rule: **a tunable moves together with every reader, and the
 tests that patch it move their target to the new module in the same
 commit**, with the frame-recording gate
 (`tests/test_chat_turn_frame_contract.py`, re-recorded only by
-`tests/record_chat_turn_frames.py`) unchanged. Candidates in order of
-independence: `sse` (done), result shaping (`_coerce_jsonable`,
-`_truncate_result`, the result budget), history trimming and the turn
-summary, the chat.jsonl persistence and WAL with `ROTATE_BYTES`, the
-session registry with its caps and TTL, confirmation with its TTL and
-`AUTO_APPROVE_TIERS`, the budget gates, and last the turn body itself.
+`tests/record_chat_turn_frames.py`) unchanged. Done so far: `sse`, `fence`, `results` (`MAX_TOOL_RESULT_CHARS_PER_TURN`
+moved; seven test sites repointed), `history` (`SESSION_MESSAGES_MAX`,
+`ROTATE_BYTES` moved; six sites repointed), `metrics`. The layout test's
+`MOVED_TUNABLES` tripwire fails any test that still patches one of them
+through the alias. Still in `loop.py`, in order of independence: the
+session registry with its caps and TTL (`CONFIRMATION_TTL_SECONDS` is
+patched eighteen times), confirmation with `AUTO_APPROVE_TIERS`, the
+budget gates (`MAX_TOOL_CALLS_PER_TURN` and friends are read by the turn
+body), the provider wiring (its twelve provider-word sites belong in
+`providers/`), and last the turn body itself.
 
 ## Measuring parity
 
