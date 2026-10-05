@@ -163,4 +163,4 @@ So C1, C2 and C4 are expected to give zero deltas once S0b lands.
    - `value_flow_templates.build` and `template_status`;
    - `build_finance_case`, `run_case` and `FinanceRefused`;
    - optionally `demand_amount`.
-6. **New decision.** Naming and cleanup of the minted per-study export series.
+6. **Decided by the owner (2026-10-05).** Minted per-study export series are named after the study (`decision-study:<base_uuid>:<study_id>:export`, labelled with the study's name) and deleted with it, except one another project still pins. IC needs to add `series_store.delete_series` and a pin check; the rule is in the sub-plan.
