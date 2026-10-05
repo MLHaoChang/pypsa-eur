@@ -1,6 +1,6 @@
 # Plan: one investment engine, two faces (expert workbench and guided study)
 
-**Date:** 2026-10-05. **Status:** v1.3. Owner decisions in §8 taken 2026-10-05; independent review PASS WITH CONDITIONS, all conditions applied (§9); C1 corrected after the asset-parameterisation assessment (§9 R12, §10).
+**Date:** 2026-10-05. **Status:** v1.4. Owner decisions in §8 taken 2026-10-05; independent review PASS WITH CONDITIONS, all conditions applied (§9); C1 corrected after the asset-parameterisation assessment (§9 R12, §10).
 **Replaces nothing yet.** It sequences two existing efforts so they converge instead of colliding:
 
 - **Edge Investment Case (IC)**: spec `docs/superpowers/specs/2026-09-26-edge-investment-case-design.md`.
@@ -255,3 +255,22 @@ keep their parts in custom columns and leave PyPSA's `overnight_cost` empty.
 | S2 Guided mode | Assumptions ledger rows as a view of the schema's provenance | GS session | Inside U3 |
 | S3 Seeds | Templates and Energy Hub placeholders derived from the generic defaults pack | to decide | After U1 a, before U4 |
 | S4 Later | Store+Link batteries, HVDC, degradation in the LP | later | After U4 |
+
+## 11. UX/UI roadmap (proposed, owner decisions pending)
+
+Source: `docs/superpowers/assessments/2026-10-05-ux-ui-overall-assessment.md` (app launched and walked
+in a browser at 1440 and 390 px wide). Direction: **one shell, two layouts**. A right-hand inspector
+hosts Properties and the Assistant as tabs (one right panel at a time); slide panels get at least
+560 px instead of a hard half width; the Expert sidebar is ordered by task (Build, Time, Economics, Run,
+Results, Reports); the Guided rail follows the question (Question, Site, Key choices, Run, Verdict,
+Improve, Report); Results regroup into Summary, System, Reliability, Investment; provenance chips are
+shared by both modes.
+
+| Batch | Items (assessment §5) | Owner | When |
+|---|---|---|---|
+| Engine-side fixes | Q2 Investment tab calls `/results/value_flows`, which exists only on the IC branch (503 toasts on master); Q7 plain labels for the completeness chips | IC session | With the U1 PR |
+| Shell polish PR | Q1 panel width policy, Q3 `$` to `€`, Q5 battery size and cost at creation, Q6 solve feedback and Abort/Optimal overlap, Q10 Settings out of SIMULATION, Q12 one header row; plus the free items Q4, Q8, Q9, Q11 | to decide | Between U1's follow-up PR and U2 (touches shared `App.tsx` / `layout/*`) |
+| Shell change | M1 right inspector, M2 task-ordered sidebar | to decide | Right after U2, before U3, so U3 builds on the new shell |
+| Economics in Expert | M4 cost-mode control becomes the S1 asset cards of §10; S2 Economics section hosting IC's editors | IC (editors) + whoever owns S1 | After U1 follow-up and S0 |
+| Guided shell | M7 hide expert chrome in Guided, M8 Guided without an API key, S1 question-first rail | GS session | Inside U3 |
+| Later | M3 Summary tab, M5 catalogue-driven forms, M6 type scale (quiet window, both sessions merged), M9 responsive, M10 validation catalogue, S3 table view, S4 report page, S5 deep links | to decide | After U3 |
