@@ -53,7 +53,7 @@ import ApiKeySetup from './ApiKeySetup'
 import ChatLaunchGreeting from './ChatLaunchGreeting'
 import { buildUiContext } from '../utils/uiContext'
 import { plainWords } from '../pages/hubDesign/plainWords'
-import { getWorkflowMenu, postChatRewind, type ChoiceRequestFrame, type WorkflowContext, type WorkflowMenu } from '../api/chat'
+import { getWorkflowMenu, postChatRewind, type ChoiceRequestFrame, type WorkflowContext, type WorkflowMenu, type WorkflowState } from '../api/chat'
 import * as speechOut from '../utils/speechOut'
 import { useUIStore, type UiMode } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
@@ -523,6 +523,40 @@ function UsageMeter() {
       {usage.input_tokens.toLocaleString()} in / {usage.output_tokens.toLocaleString()} out
       {' · '}{usage.cache_read_tokens.toLocaleString()} cached
     </span>
+  )
+}
+
+/**
+ * The workflow strip (chat harness issue 06): which workflow and step the
+ * session is on, from the `workflow_state` frame and `/chat/history`.
+ * "Leave" asks the assistant to end it (the assistant calls end_workflow);
+ * nothing here changes server state directly.
+ */
+export function WorkflowStrip() {
+  const workflow = useChatStore((s) => s.workflow)
+  const sendRequest = useChatStore((s) => s.sendRequest)
+  if (!workflow) return null
+  return (
+    <div
+      className="mx-3 mt-2 px-2.5 py-1.5 text-[11px] rounded border border-accent/40 bg-accent/5 flex items-center gap-2"
+      data-testid="chat-workflow-strip"
+    >
+      <span className="text-muted">Workflow</span>
+      <span className="text-text font-medium" data-testid="chat-workflow-title">{workflow.title}</span>
+      <span className="text-muted">·</span>
+      <span className="text-text" data-testid="chat-workflow-step">
+        step {workflow.step_index} of {workflow.step_count}: {workflow.step_title}
+      </span>
+      <button
+        type="button"
+        className="ml-auto px-1.5 py-0.5 rounded border border-border text-muted hover:text-text hover:border-accent/40"
+        onClick={() => sendRequest('Please end the current workflow.', { source: 'workflow-strip', label: 'Leave the workflow' })}
+        data-testid="chat-workflow-leave"
+        title="Ask the assistant to end this workflow"
+      >
+        Leave
+      </button>
+    </div>
   )
 }
 
@@ -1558,6 +1592,7 @@ export default function ChatPanel() {
   // greeting renders; a click goes through `sendRequest` like a card does.
   const sendRequest = useChatStore((s) => s.sendRequest)
   const setChoice = useChatStore((s) => s.setChoice)
+  const setWorkflow = useChatStore((s) => s.setWorkflow)
   const workflowMenu = useWorkflowMenu(workflowContextFor(currentProject, uiMode))
   // Read only for the autoscroll effect below — see the dependency-array
   // comment there for why AssistantDock's collapsed state has to be visible
@@ -1716,6 +1751,8 @@ export default function ChatPanel() {
         }
       }
       setMessages(seeded)
+      // The server session's workflow step, if it is still resident.
+      setWorkflow(h.workflow ?? null)
       if (h.last_session_id) {
         setSessionId(h.last_session_id)
       }
@@ -2340,6 +2377,11 @@ export default function ChatPanel() {
             tool_use_id: d.tool_use_id, tool_name: d.tool_name,
           })
         }
+        break
+      }
+      case 'workflow_state': {
+        const d = _frame_data<{ workflow: WorkflowState | null }>(frame)
+        setWorkflow(d.workflow ?? null)
         break
       }
       case 'choice_request': {
@@ -3246,6 +3288,7 @@ export default function ChatPanel() {
       {/* Phase D — live upload chip strip. Hidden when no project loaded or
           no uploads exist. Each chip carries a checkbox controlling
           attach-to-next-message + a delete (trash) button. */}
+      <WorkflowStrip />
       <UploadChipStrip
         uploads={uploads}
         attachedFileIds={attachedFileIds}

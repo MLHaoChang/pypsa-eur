@@ -1,6 +1,6 @@
 # Plan: the chat harness — one folder for everything a model-agnostic assistant needs
 
-**Status:** v1.2, 2026-10-05. Phases 0, 1 and 2 landed on `claude/amazing-mendel-m087zw`; owner decisions Q1–Q14 taken (spec §8). Next: phase 3 (issues 08, 09) and the issue-06 follow-up (a `workflow_state` frame so the panel can show and restore the step).
+**Status:** v1.2, 2026-10-05. Phases 0, 1 and 2 landed on `claude/amazing-mendel-m087zw`; owner decisions Q1–Q14 taken (spec §8). The issue-06 follow-up (`workflow_state` frame, history key, the panel's strip) is in. Next: phase 3 (issues 08, 09).
 **Spec (contract-level):** [`.scratch/harness/spec.md`](../../../.scratch/harness/spec.md); issues under `.scratch/harness/issues/`.
 **Requested:** 2026-10-05. The assistant should connect to Claude, OpenAI/Codex, Kimi or any other model and not feel different: one harness of functions, workflows and skills that any model drives the same way; a chat opens with a menu of what the user can do; the assistant can run a grill-style interview with recommendations the user picks from; and all of it grouped in one folder instead of spread over files.
 **Builds on:** [`specs/2026-08-05-llm-provider-seam-design.md`](../specs/2026-08-05-llm-provider-seam-design.md) (the harness/provider split and the word "harness"), [`plans/2026-09-09-chat-turn-loop-decomposition.md`](2026-09-09-chat-turn-loop-decomposition.md) (how the loop is cut), [`specs/2026-09-27-guided-mode.md`](../specs/2026-09-27-guided-mode.md) (the Guided addendum and delegation texts), [`plans/2026-10-05-one-investment-engine-two-faces.md`](2026-10-05-one-investment-engine-two-faces.md) §5 U3 and §8 (the investment workflow's steps and tools).
@@ -95,3 +95,4 @@ now scans `harness/` too and pins the moved catalogue at its new path.
 - Issue 04: `ask_user` → `choice_request` → ChoiceCard, non-blocking (Q4).
 - Issue 05: `use_skill` + `_skills_block` (tools-on only, a new prompt part; the P25 snapshot test stubs it like the profile block).
 - Issue 06: `ChatSession.workflow`, `start_workflow` / `advance_workflow` / `end_workflow`, `_workflow_addendum`; `_guided_mode_addendum` and `_GUIDED_STEPS` are derived from the `hub-design` workflow (Q5, Q13); Expert turns without a workflow byte-identical; Guided tests unchanged.
+- Issue 06 follow-up: `workflow_state` frame after each workflow tool, `/chat/history.workflow`, the panel's workflow strip with Leave, `ui_context.workflow` while active.

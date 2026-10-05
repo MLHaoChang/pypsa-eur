@@ -47,6 +47,9 @@ FRAME_PAYLOADS: dict[str, tuple[str, ...]] = {
     # `ask_user` (issue 04): the panel renders a Choice card; the pick is
     # the next user message, so the turn does not block on it.
     "choice_request": ("tool_use_id", "title", "question", "options", "allow_free_text"),
+    # After start_workflow / advance_workflow / end_workflow: the session's
+    # workflow step for the panel's strip, or `workflow: null`.
+    "workflow_state": ("workflow",),
 }
 
 FRAMES: frozenset[str] = frozenset(FRAME_PAYLOADS)

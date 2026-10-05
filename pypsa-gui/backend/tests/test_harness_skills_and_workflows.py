@@ -216,3 +216,31 @@ def test_in_expert_hub_design_brings_its_steps_but_not_the_guided_rules():
     text = _last_user_text(fake, 0)
     assert "Guided mode is on." not in text
     assert 'Workflow "Hub design, step by step", step 2 of 5' in text
+
+
+# ── the panel's step strip (issue 06 follow-up) ─────────────────────────────
+
+def test_a_workflow_tool_is_followed_by_a_workflow_state_frame():
+    from harness.events import FRAMES
+    from services import chat_service
+
+    assert "workflow_state" in FRAMES
+    session = chat_service.ChatSession(model="claude-sonnet-5")
+    events, _ = _run(session, "build", _tool_turn("start_workflow", {"workflow_id": "build-network"}), _text_turn())
+    names = [n for n, _ in events]
+    assert names.index("workflow_state") == names.index("tool_result") + 1
+    assert dict(events)["workflow_state"] == {"workflow": {
+        "id": "build-network", "title": "Build a network",
+        "step": "orient", "step_title": "See what is there", "step_index": 1, "step_count": 6,
+    }}
+    events, _ = _run(session, "stop", _tool_turn("end_workflow", {}, "tu_2"), _text_turn())
+    assert dict(events)["workflow_state"] == {"workflow": None}
+    # A read tool that is not a workflow tool emits no state frame.
+    events, _ = _run(session, "x", _tool_turn("use_skill", {"name": "grill"}, "tu_3"), _text_turn())
+    assert "workflow_state" not in [n for n, _ in events]
+
+
+def test_history_carries_the_workflow_key(client):
+    r = client.get("/api/chat/history")
+    assert r.status_code == 200
+    assert "workflow" in r.json()

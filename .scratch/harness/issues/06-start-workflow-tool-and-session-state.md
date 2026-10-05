@@ -1,6 +1,6 @@
 # 06 — `start_workflow` / `advance_workflow` tools and the per-turn addendum
 
-Status: ready-for-agent (done 2026-10-05 (backend; the frontend `ui_context.workflow` rebind is a follow-up))
+Status: ready-for-agent (done 2026-10-05, follow-up included: `workflow_state` frame, `/chat/history.workflow`, the panel's strip, `ui_context.workflow`)
 Type: task
 Blocked by: 03, 04
 
@@ -35,3 +35,10 @@ reload, so the state is lost with the session). Follow-up: a `workflow_state`
 frame after start/advance/end so the panel can show the step and send the
 pair back after a reload. The hub-design panel still sends `guided_step`;
 reconciling it with the workflow step is part of the same follow-up.
+
+2026-10-05 (follow-up done): `workflow_state` frame after each workflow
+tool (`harness.events`), `GET /chat/history` carries `workflow` for the
+resident session, the panel shows a strip (title · step i of n · Leave,
+which asks the assistant to end it) and sends `ui_context.workflow` while a
+workflow is active, so a session that lost its state is rebound. Still open:
+reconciling the hub-design panel's `guided_step` with the workflow step.

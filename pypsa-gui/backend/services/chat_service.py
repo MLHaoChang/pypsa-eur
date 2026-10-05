@@ -2200,6 +2200,31 @@ def _guided_mode_addendum(step: str | None) -> str:
     return rules.replace(splice, f"the first time; {card}when the user delegates a step", 1)
 
 
+_WORKFLOW_STATE_TOOLS = frozenset({"start_workflow", "advance_workflow", "end_workflow"})
+
+
+def _workflow_state_payload(session: Any) -> dict[str, Any]:
+    """What the panel shows for the session's workflow (issue 06 follow-up):
+    `{"workflow": None}` or the step with its position. Carried on the
+    `workflow_state` frame after a workflow tool and on `GET /chat/history`
+    so a reloaded page shows the step again."""
+    from harness import workflows
+    state = getattr(session, "workflow", None)
+    if not state:
+        return {"workflow": None}
+    try:
+        wf = workflows.get(state["id"])
+        step = wf.step(state["step"])
+    except KeyError:
+        return {"workflow": None}
+    ids = [s.id for s in wf.steps]
+    return {"workflow": {
+        "id": wf.id, "title": wf.title,
+        "step": step.id, "step_title": step.title,
+        "step_index": ids.index(step.id) + 1, "step_count": len(ids),
+    }}
+
+
 def _workflow_addendum(session: Any, ui_context: dict[str, Any] | None) -> str | None:
     """
     The active workflow's current step, for the USER turn (chat harness
@@ -4698,6 +4723,10 @@ def _dispatch_real_tool_call(
         "tool_name": tool_name,
         "result": _truncate_result(result_for_model),
     }
+    if tool_name in _WORKFLOW_STATE_TOOLS:
+        # The panel's step strip follows the session's state (issue 06
+        # follow-up); emitted after the result so the two frames agree.
+        yield "workflow_state", _workflow_state_payload(session)
     content = _result_to_anthropic_content(result_for_model)
     if result_char_budget is not None:
         content = _apply_turn_tool_result_budget(content, result_char_budget)

@@ -266,6 +266,20 @@ export interface ChoiceRequestFrame {
   allow_free_text: boolean
 }
 
+// ── The session's workflow step (chat harness issue 06) ─────────────────────
+//
+// `workflow_state` arrives after start_workflow / advance_workflow /
+// end_workflow, and `GET /chat/history` carries the same shape, so a reload
+// shows the strip again while the server session is resident.
+export interface WorkflowState {
+  id: string
+  title: string
+  step: string
+  step_title: string
+  step_index: number
+  step_count: number
+}
+
 // ── U-1 — supplying the Anthropic API key from inside the app ──────────────
 //
 // The packaged app ships no `backend/.env` (it would carry a real key and the
@@ -343,6 +357,8 @@ export interface InterruptedTurn {
 export interface ChatHistory {
   turns: ChatTurn[]
   last_session_id: string | null
+  /** The bound session's workflow step (chat harness issue 06), or null. */
+  workflow?: WorkflowState | null
   bound_project: string | null
   // How many on-disk records were unreadable. Non-zero means `turns` is
   // INCOMPLETE — say so rather than rendering a quietly shorter conversation.

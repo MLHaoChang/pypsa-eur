@@ -109,6 +109,6 @@ agents and the app.
 | `prompts` | `services/chat_service._build_system_prompt` (the constants are loaded from here) | — |
 | `providers` | `chat_service._provider_for_profile`, the connection test in `routers/chat.py` | — |
 | `catalogue` | `chat_service._tools_payload`, `chat_tools`, the schema tests, the smoke scripts | — |
-| `events` | the tripwire test; `choice_request` is what `ask_user` emits | — |
+| `events` | the tripwire test; `choice_request` is what `ask_user` emits, `workflow_state` what the workflow tools emit | — |
 | `workflows` | `GET /api/chat/workflows` (the start menu the panel renders), the `start_workflow` / `advance_workflow` / `end_workflow` tools, `chat_service._workflow_addendum` (the per-turn step), `_guided_mode_addendum` (the `hub-design` preamble) | — |
 | `skills` | `chat_service._skills_block` (the catalogue in the tools-on prompt), the `use_skill` tool | — |

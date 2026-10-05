@@ -773,7 +773,8 @@ def chat_history(limit: int = 200,
         return {"turns": [], "last_session_id": None,
                 "bound_project": ctx.loaded_project,
                 "history_gap": history_gap,
-                "pending_turn": pending_turn}
+                "pending_turn": pending_turn,
+                "workflow": None}
     if limit > 0:
         turns = turns[-limit:]
 
@@ -781,6 +782,9 @@ def chat_history(limit: int = 200,
     # is process-lifetime; after a backend restart the session is gone in
     # memory but the chat.jsonl is the durable record.
     last_session_id = None
+    # The bound session's workflow step (issue 06 follow-up), so a reloaded
+    # page shows the strip again while the server session is still resident.
+    workflow_state = None
     if turns:
         last_rec = turns[-1]
         last_session_id = last_rec.get("session_id")
@@ -849,6 +853,7 @@ def chat_history(limit: int = 200,
                 sess.profile_id = resolved_profile.id
                 sess.bound_wire = resolved_profile.wire
                 sess.model = resolved_profile.model
+            workflow_state = chat_service._workflow_state_payload(sess)["workflow"]
             # Rebuild the in-memory message history so the next turn can
             # thread the prior conversation into the Anthropic SDK (INT-001
             # threading fix). Best-effort: skip turns missing required keys.
@@ -884,6 +889,7 @@ def chat_history(limit: int = 200,
         "bound_project": ctx.loaded_project,
         "history_gap": history_gap,
         "pending_turn": pending_turn,
+        "workflow": workflow_state,
     }
 
 
