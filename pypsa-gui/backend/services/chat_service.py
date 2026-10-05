@@ -833,6 +833,40 @@ def get_session(session_id: str) -> ChatSession | None:
         return _SESSIONS.get(session_id)
 
 
+# CH-6 — the transcript key naming the user who ran a turn (the session owner).
+TURN_AUTHOR_KEY = "owner_user_id"
+
+
+def turn_is_callers(rec: dict[str, Any], user_id: str | None) -> bool:
+    """
+    Did `user_id` run this transcript turn?
+
+    `chat.jsonl` is per PROJECT and shared by everyone who works on it, but a
+    chat session is per USER. GET /history used to hand back the session of the
+    LAST turn in the file, whoever ran it, and mint it owned by whoever asked
+    first — so a co-member could end up owning another user's thread, which the
+    `/stream` ownership check then refused to its real author. Picking the
+    caller's own last turn removes the conflict at the source.
+
+    A record without an author predates this key, and keeps the behaviour it
+    always had: it counts as the caller's. Treating it as nobody's in server
+    mode was the stricter option and the worse one — every server user would
+    lose session continuity (and the model its prior context) on the first
+    reload after upgrading — while what it would prevent is bounded already:
+    `/history` will not hand back or rebuild a live session with a DIFFERENT
+    known owner, and `/stream` refuses one with `session_not_yours`, which the
+    panel recovers from by starting a new chat. Legacy records age out with
+    each user's next turn. With no caller identity at all there is nothing to
+    distinguish, which is also the pre-existing behaviour.
+    """
+    if user_id is None:
+        return True
+    author = rec.get(TURN_AUTHOR_KEY)
+    if author is None:
+        return True
+    return str(author) == str(user_id)
+
+
 def session_owner_allows(sess: "ChatSession", user_id: str | None) -> bool:
     """
     May `user_id` act on `sess`?
@@ -4407,6 +4441,12 @@ def _run_turn_body(
                     "assistant": _redact_for_persist(assistant_blocks),
                     "usage": usage_snapshot,
                 }
+                # CH-6 — who ran this turn, so GET /history can hand each user
+                # back THEIR session rather than whoever spoke last. Omitted
+                # when there is no owner (a direct `run_turn`), which reads as
+                # a legacy record. See `turn_is_callers`.
+                if session.owner_user_id is not None:
+                    turn_record[TURN_AUTHOR_KEY] = session.owner_user_id
                 # Phase C — persist which uploads were attached to this
                 # turn so the chat panel can render their chips on
                 # rehydration. Field omitted when empty so legacy turns

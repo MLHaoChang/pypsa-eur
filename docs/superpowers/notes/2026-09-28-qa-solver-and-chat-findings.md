@@ -477,7 +477,7 @@ that makes every later turn 400 at the provider.
 ### CH-6 — chat session ownership is not enforced on `/stream` or `/history`
 
 **`/stream` half: VERIFIED and FIXED. `/history` half: VERIFIED, left open by
-design — see below.**
+design at first, FIXED on 2026-10-05 — see the last section.**
 
 `session_owner_allows` was added for `/confirm`, `/rewind` and `/abort`; `/stream`
 was not one of the three, and it is the worst of the four to leave open. It resolves
@@ -509,6 +509,33 @@ Note the interaction, which is the honest cost of the `/stream` fix: where that 
 occurs, the rightful user now meets a clear 403 at stream time and is moved onto a
 fresh session, instead of having their turn run and then block on a confirmation card
 they can never answer until the 300s TTL expires. Worse before, and visible now.
+
+**The `/history` half, fixed 2026-10-05.** The three rejected repairs all answered
+"whose is THIS session?" for a session that was never the caller's. The fix is to
+stop asking: each persisted turn now records its author (`owner_user_id`, the
+session owner), and `/history` returns the session of the CALLER's last turn —
+searched across the whole transcript, before `limit` trims it — instead of the
+file's. Alice no longer adopts Bob's thread, so `/stream` has nothing to refuse
+her.
+
+Records written before the key keep their old behaviour (they count as the
+caller's). The stricter reading — nobody's, in server mode — was implemented first
+and reverted: it costs every server user their session continuity, and the model its
+prior context, on the first reload after upgrading. What it would prevent is
+bounded anyway. `/history` will not hand back or rebuild a live session registered to
+a DIFFERENT known owner (a legacy or forged record), and `/stream` refuses one, which
+the panel recovers from. Legacy records age out with each user's next turn.
+`/chat/import` drops the key: on an imported turn it names a user of another
+install, or is forged. The key is also stripped from the `/history` response, so
+co-members' user ids do not reach each other's browsers.
+
+Guard: `tests/test_chat_history_per_user.py` (8) — per-user sessions, minted with the
+right owner; no session for a user with no turns, and no minting of the colleague's;
+the legacy and mixed-file cases; a live session with a different owner neither
+returned nor rebuilt; the key absent from the wire; the write side records it; import
+drops it. Each mechanism was checked against its mutation.
+
+Original report, for the record:
 
 `/confirm`, `/rewind` and `/abort` all call `session_owner_allows`; `chat_stream` does
 not, and `chat_history` mints the session owned by whoever fetched it first. Since

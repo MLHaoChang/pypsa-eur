@@ -737,6 +737,15 @@ def chat_history(limit: int = 200,
                 "bound_project": ctx.loaded_project,
                 "history_gap": history_gap,
                 "pending_turn": pending_turn}
+    # CH-6 — the CALLER's last turn, not the file's. The transcript is shared
+    # by everyone on the project; a session is one user's. Searched over the
+    # whole transcript, before `limit` trims it, so a user whose last turn is
+    # older than the window still gets their own session back.
+    actor_id = str(actor.id) if actor is not None else None
+    own_turns = [
+        rec for rec in turns
+        if rec.get("session_id") and chat_service.turn_is_callers(rec, actor_id)
+    ]
     if limit > 0:
         turns = turns[-limit:]
 
@@ -744,8 +753,8 @@ def chat_history(limit: int = 200,
     # is process-lifetime; after a backend restart the session is gone in
     # memory but the chat.jsonl is the durable record.
     last_session_id = None
-    if turns:
-        last_rec = turns[-1]
+    if own_turns:
+        last_rec = own_turns[-1]
         last_session_id = last_rec.get("session_id")
         if last_session_id:
             # Task 7 — resolve the profile the LATEST turn was recorded
@@ -808,7 +817,20 @@ def chat_history(limit: int = 200,
             # NOT already registered (this GET minted it) adopts the
             # resolved profile; an already-live session is left exactly as
             # `/stream` bound it.
-            if session_was_freshly_minted:
+            # Defence in depth for CH-6: an id that is the caller's by the
+            # transcript but registered to a DIFFERENT known owner (a legacy or
+            # forged record) is neither handed back nor rebuilt — rebuilding
+            # would overwrite another user's live session from this GET. An
+            # owner-less session (no production path creates one) keeps the
+            # pre-CH-6 behaviour, like an author-less record does.
+            if (
+                not session_was_freshly_minted
+                and sess.owner_user_id is not None
+                and not chat_service.session_owner_allows(sess, actor_id)
+            ):
+                last_session_id = None
+                sess = None
+            if sess is not None and session_was_freshly_minted:
                 sess.profile_id = resolved_profile.id
                 sess.bound_wire = resolved_profile.wire
                 sess.model = resolved_profile.model
@@ -836,8 +858,10 @@ def chat_history(limit: int = 200,
             # The transcript is also the wrong source mid-turn: it holds only
             # COMPLETED turns, so rebuilding from it discards the in-flight one
             # wholesale even when the clear itself is survivable.
-            with sess._lock:
-                turn_in_flight = sess._turn_in_flight
+            turn_in_flight = True
+            if sess is not None:
+                with sess._lock:
+                    turn_in_flight = sess._turn_in_flight
             if not turn_in_flight:
                 with sess._lock:
                     sess.messages.clear()
@@ -860,7 +884,12 @@ def chat_history(limit: int = 200,
                             })
 
     return {
-        "turns": turns,
+        # The author key is how THIS route picks a session; it is not part of
+        # the wire, so co-members' user ids do not reach each other's browser.
+        "turns": [
+            {k: v for k, v in rec.items() if k != chat_service.TURN_AUTHOR_KEY}
+            for rec in turns
+        ],
         "last_session_id": last_session_id,
         "bound_project": ctx.loaded_project,
         "history_gap": history_gap,
@@ -939,6 +968,13 @@ def chat_import(body: ImportRequest) -> dict[str, Any]:
         return {"imported": 0, "project": ctx.loaded_project}
     imported = 0
     for turn in body.turns:
+        # An author key on an imported turn names a user of ANOTHER install
+        # (or is forged), so here it would either match nobody — stranding the
+        # conversation for the user who imported it — or name someone it
+        # should not. Dropped, the turn reads as a legacy record: continuable
+        # by whoever imports it, and still refused by GET /history if its
+        # session is live under a different owner. CH-6.
+        turn = {k: v for k, v in turn.items() if k != chat_service.TURN_AUTHOR_KEY}
         redacted = chat_service._redact_for_persist(turn)
         chat_service.append_turn(ctx, redacted)
         imported += 1
