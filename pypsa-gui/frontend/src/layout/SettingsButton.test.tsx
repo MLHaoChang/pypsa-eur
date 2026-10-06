@@ -1,5 +1,9 @@
+// Q10 (UX assessment 2026-10-05) moved Settings from the sidebar's SIMULATION
+// group to a header button (SettingsButton.tsx); these tests moved with it, and
+// a last block pins that the sidebar no longer carries the row.
+//
 // Fix round 1, item (3) — Task 15's Settings nav row gates on
-// `useLocalSettingsAvailable() || useLLMSettingsAvailable()` (Sidebar.tsx),
+// `useLocalSettingsAvailable() || useLLMSettingsAvailable()`,
 // but no test ever exercised the llm-reachable-only branch: every existing
 // mock left `fetchLLMSettingsOrNull` unmocked (→ a real, failing network
 // call → unreachable), so the OR always happened to resolve via
@@ -15,6 +19,7 @@ import { useUIStore } from '../store/uiStore'
 import { fetchLocalSettings, type LocalSettingsState } from '../api/localSettings'
 import { fetchLLMSettingsOrNull, type LLMSettingsPayload } from '../api/llmSettings'
 import Sidebar from './Sidebar'
+import SettingsButton from './SettingsButton'
 
 vi.mock('../api/network', () => ({
   networkApi: { getMeta: vi.fn().mockResolvedValue({ bus_count: 3 }) },
@@ -74,6 +79,7 @@ function renderSidebar() {
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <Sidebar />
+        <SettingsButton />
       </MemoryRouter>
     </QueryClientProvider>,
   )
@@ -91,7 +97,7 @@ beforeEach(() => {
   })
 })
 
-describe('Sidebar Settings row — gates on EITHER surface (Task 15)', () => {
+describe('Settings button — gates on EITHER surface (Task 15)', () => {
   it('is absent when neither local-settings nor llm-settings is reachable', async () => {
     vi.mocked(fetchLocalSettings).mockResolvedValue(null)
     vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(null)
@@ -133,7 +139,7 @@ describe('Sidebar Settings row — gates on EITHER surface (Task 15)', () => {
 // `staleTime: Infinity` and no refetch-on-focus it stayed hidden for the rest
 // of the session. The outage copy built inside AssistantModelSettings could
 // never be seen by the person it was written for.
-describe('Sidebar Settings row — an OUTAGE must not hide the door (C-11)', () => {
+describe('Settings button — an OUTAGE must not hide the door (C-11)', () => {
   it('is present when llm-settings ERRORS on a web deployment', async () => {
     vi.mocked(fetchLocalSettings).mockResolvedValue(null)
     vi.mocked(fetchLLMSettingsOrNull).mockRejectedValue(new Error('500'))
@@ -155,5 +161,31 @@ describe('Sidebar Settings row — an OUTAGE must not hide the door (C-11)', () 
 
     await screen.findByText('Solver Settings')
     expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull()
+  })
+})
+
+describe('Q10 — Settings is a header control, not a SIMULATION row', () => {
+  it('the sidebar carries no Settings row even when settings are reachable', async () => {
+    vi.mocked(fetchLocalSettings).mockResolvedValue(LOCAL_STATE)
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(LLM_PAYLOAD)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } })
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter><Sidebar /></MemoryRouter>
+      </QueryClientProvider>,
+    )
+    await screen.findByText('Solver Settings')
+    expect(screen.queryByText(/^Settings$/)).toBeNull()
+  })
+
+  it('opens and closes the Settings pane', async () => {
+    vi.mocked(fetchLocalSettings).mockResolvedValue(LOCAL_STATE)
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(null)
+    renderSidebar()
+    const btn = await screen.findByRole('button', { name: 'Settings' })
+    btn.click()
+    await waitFor(() => expect(useUIStore.getState().activeSlidePanel).toBe('settings'))
+    btn.click()
+    await waitFor(() => expect(useUIStore.getState().activeSlidePanel).toBeNull())
   })
 })
