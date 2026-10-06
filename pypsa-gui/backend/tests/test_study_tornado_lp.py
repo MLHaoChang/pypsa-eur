@@ -222,3 +222,37 @@ def test_a_zero_size_battery_is_judged_by_its_size_not_its_npv_sign():
     v = F.verdict(out.attributions, out.robustness, fidelity="full_study")
     assert (v.status, v.class_, v.sentence_template) == ("ok", "not_recommended",
                                                          "not_recommended_none")
+
+
+def test_every_tornado_solve_keeps_the_studys_export_price():
+    """
+    Gate U2-WP6 S4/W5 (mutation M13): IC credits export only when the
+    config carries `export_price_ref`, so every price-bound re-dispatch AND
+    the PV-only reference solve must carry the run's export series; without
+    it, export would earn 0 and move the `bess_pv` bounds silently. The
+    configs are read at the solve seam: the reference is solved on the LP (the
+    battery's value, hence the bars, needs it), each re-dispatch is an
+    identity solve (the dispatch is the centre's).
+    """
+    from models.commercial import PriceSeriesRef
+
+    n, _cfg = ic_site_option("bess_pv_2h")
+    ctx = _ctx(sf.site_ledger(), {"bess_pv_2h": n}, _question("demand_charge_price"))
+    calls: list[tuple[str, object]] = []
+
+    def solve(net, cfg, vid):
+        calls.append((vid, cfg))
+        return lp_solve(net, cfg, vid) if vid.startswith("ref-") else net
+
+    out = F.run_tornado(ctx, solve)
+    assert out.robustness.status == "ok", out.robustness
+    vids = [vid for vid, _ in calls]
+    assert "ref-bess_pv_2h" in vids, vids
+    # Each bound re-dispatches the option and its PV-only reference.
+    assert len([v for v in vids if not v.startswith("ref-")]) == 4, vids
+    want = PriceSeriesRef.model_validate(FAKE_REF)
+    for vid, cfg in calls:
+        got = (cfg.commercial or {}).get("export_price_ref")
+        assert got is not None, f"{vid}: no export price on the solve"
+        assert PriceSeriesRef.model_validate(got) == want, vid
+        assert cfg.commercial["export_link"] == "grid_export", vid

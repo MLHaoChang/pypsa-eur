@@ -9,6 +9,7 @@ import {
   sectionStatuses, sortTornado, streamsBasis, verdictTone, maturityLabel, isMoneyUnit,
 } from './decisionModel'
 import { findings, findingsPv, ledger, report, run, study } from './__fixtures__/payloads'
+import { ERROR_FALLBACK, errorCopy } from '../../utils/decisionVocabulary'
 
 const nullKpi: Figure = {
   key: 'battery_npv', label: 'Battery NPV', value: null, unit: 'EUR', basis: null, currency_year: null,
@@ -161,6 +162,15 @@ describe('the report', () => {
     }
     expect(rerunNeeded('study_running')).toBe(false)
     expect(rerunNeeded(null)).toBe(false)
+  })
+
+  it('explains a run calculated before the price update in plain words, with a re-run offer', () => {
+    // Gate U2-WP6 W3: the tornado's 409 for a run recorded before WP6.
+    const copy = errorCopy('engine_inputs_changed_since_run')
+    expect(copy).not.toBe(ERROR_FALLBACK)
+    expect(rerunNeeded('engine_inputs_changed_since_run')).toBe(true)
+    expect(`${copy.title} ${copy.action}`).toMatch(/run the study again/i)
+    expect(`${copy.title} ${copy.action}`).not.toMatch(/engine|investment-case|commercial/i)
   })
 })
 

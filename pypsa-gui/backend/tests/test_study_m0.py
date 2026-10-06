@@ -221,3 +221,68 @@ def test_an_energy_price_level_edit_on_a_flat_tariff_is_refused(
         "reseed": True,
         "rows": [{"key": "energy_price_level", "value": 1.5, "unit": "multiplier"}]})
     assert r.status_code == 200, r.text
+
+
+# ── Gate U2-WP6 W2: a failed creation leaves no minted export series ───────
+
+def _minted_spy(monkeypatch) -> list[str]:
+    """Record the name of every export series the creation mints."""
+    from services.study import compile as study_compile
+
+    real = study_compile.mint_export_series
+    names: list[str] = []
+
+    def spy(db, org_id, *, base_uuid, study_id, **kw):
+        ref = real(db, org_id, base_uuid=base_uuid, study_id=study_id, **kw)
+        names.append(study_compile.export_series_name(base_uuid, study_id))
+        assert ref is not None and ref.id == names[-1]   # the seed tariff exports
+        return ref
+
+    monkeypatch.setattr(study_compile, "mint_export_series", spy)
+    return names
+
+
+def _series_rows(session_local, name: str) -> int:
+    from sqlalchemy import select
+
+    from db.models import LibraryItem
+
+    with session_local() as db:
+        return len(db.scalars(select(LibraryItem).where(
+            LibraryItem.kind == "series", LibraryItem.name == name)).all())
+
+
+def test_a_creation_that_fails_after_the_mint_leaves_no_series(
+        client, api_project, studies_on, _auth_db, monkeypatch):
+    from routers import studies as studies_router
+
+    _engine, session_local = _auth_db
+    api_project("m0-orphan-src")
+    names = _minted_spy(monkeypatch)
+
+    def boom(*_a, **_k):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(studies_router.store, "save_study", boom)
+    with pytest.raises(RuntimeError, match="disk full"):   # the original error, unmasked
+        create_pack_study(client, "m0-orphan-src", "m0-orphan-base")
+    assert len(names) == 1 and names[0].startswith("decision-study:")
+    assert _series_rows(session_local, names[0]) == 0
+    assert client.get("/api/projects/m0-orphan-base/studies/").status_code == 404
+
+
+def test_a_bind_refusal_after_the_mint_leaves_no_series(
+        client, api_project, studies_on, _auth_db, monkeypatch):
+    _engine, session_local = _auth_db
+    api_project("m0-orphan-bind")
+    names = _minted_spy(monkeypatch)
+
+    def refuse(*_a, **_k):
+        raise P.PackError("library_series_unresolved", "the export series did not resolve")
+
+    monkeypatch.setattr(P, "bind_option", refuse)
+    r = create_pack_study(client, "m0-orphan-bind", "m0-orphan-bind-base")
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "library_series_unresolved"
+    assert len(names) == 1
+    assert _series_rows(session_local, names[0]) == 0

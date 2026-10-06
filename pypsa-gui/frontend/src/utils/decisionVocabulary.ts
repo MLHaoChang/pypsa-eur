@@ -352,6 +352,10 @@ export const ERROR_COPY: Record<string, ErrorCopy> = {
     title: 'Your answers (site, load, tariff or PV) changed after the run.',
     action: 'The options were built from the old ones. Run the study again.', rerun: true,
   },
+  engine_inputs_changed_since_run: {
+    title: 'This study’s results were calculated before an update to how prices are applied.',
+    action: 'Run the study again to refresh them.', rerun: true,
+  },
   study_never_run: { title: 'The study has not been run yet.', action: 'Open Run and start it.' },
   tornado_never_run: { title: 'The robustness check has not been run yet.', action: 'Start it on the How robust page.' },
   report_never_assembled: { title: 'The report has not been assembled yet.', action: 'Assemble it from the latest findings.' },

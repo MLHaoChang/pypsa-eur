@@ -659,13 +659,16 @@ def _create_pack_study(body: StudyCreate, project: AuthorizedProject,
     row = project_registry.create_root(db, user, base_name)
     base_dir = project_registry.ensure_project_dir(row)
     key = project_registry.registry_key(row)
+    org_id, base_uuid = row.org_id, row.id  # read before a rollback deletes the row
+    from services.study import compile as study_compile
+
+    minting = False
     try:
         # U2 WP6: the base project carries the engine's commercial config,
         # bound to the study's export series (minted in the base's org under
         # the owner's name; the run re-uses it), like every option fork.
-        from services.study import compile as study_compile
-
         try:
+            minting = True
             ref = study_compile.mint_export_series(
                 db, row.org_id, base_uuid=row.id, study_id=study_id, study_name=body.name,
                 tariff=tariff, snapshots=network.snapshots)
@@ -726,8 +729,36 @@ def _create_pack_study(body: StudyCreate, project: AuthorizedProject,
             _force_rmtree(base_dir)
         except Exception:  # noqa: BLE001
             pass
+        if minting:
+            # Gate U2-WP6 W2: the mint COMMITTED, so the series outlives the
+            # base unless deleted here, after the base is gone (its own
+            # binding would keep it). Never masks the original error.
+            try:
+                _discard_minted_series(db, org_id, base_uuid=base_uuid, study_id=study_id)
+            except Exception:  # noqa: BLE001
+                pass
         raise
     return {**_out(study), "base_project_name": row.name}
+
+
+def _discard_minted_series(db: DBSession, org_id, *, base_uuid, study_id: str) -> None:
+    """
+    Delete every version of a failed creation's export series. The pin check
+    reads every OTHER project directory of the org: the base is excluded even
+    if its row survived the rollback, since it is dead and its own binding is
+    what is being undone.
+    """
+    from sqlalchemy import select
+
+    from db.models import Project
+    from services import project_registry
+    from services.study import compile as study_compile
+
+    db.rollback()  # a failure inside the session leaves it unusable until rolled back
+    others = [project_registry.project_dir(p) for p in db.scalars(
+        select(Project).where(Project.org_id == org_id, Project.id != base_uuid)).all()]
+    study_compile.discard_export_series_of_failed_creation(
+        db, org_id, base_uuid=base_uuid, study_id=study_id, other_project_dirs=others)
 
 
 def _copy_upload(project: AuthorizedProject, base_dir, file_id: str) -> None:

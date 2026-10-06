@@ -36,7 +36,9 @@ What it compiles (WP4):
   the adapter reads, the tariff's metadata and a digest.
 * :func:`mint_export_series` — the study's export series under the owner's
   name ``decision-study:<base_uuid>:<study_id>:export`` (C3), idempotent on
-  content; :func:`delete_export_series` its delete (WORKAROUND, see there).
+  content; :func:`delete_export_series` its delete (WORKAROUND, see there);
+  :func:`discard_export_series_of_failed_creation` the creation rollback's
+  delete, once the base is gone (gate U2-WP6 W2).
 * :func:`bind_on_network` — C6: the commercial block bound on the fork's
   IN-MEMORY network (`binding.bind_commercial`) before the runner writes it.
 * :func:`type_meter_links` — row 28 way (a) (WORKAROUND, Q5).
@@ -72,7 +74,8 @@ __all__ = [
     "BILL_COMPONENT_KEYS", "CAPACITY_ASSUMED_CONNECTION", "CompileError", "CompiledCommercial", "EXPORT_LINK",
     "EXPORT_SERIES_SOURCE", "EngineTariff", "NETWORK_PREFIX", "POC_LINK", "SETTLEMENT",
     "SITE_PARTY", "apply_ledger", "bind_on_network", "commercial_from_form",
-    "commercial_from_ledger", "delete_export_series", "export_series_name",
+    "commercial_from_ledger", "delete_export_series",
+    "discard_export_series_of_failed_creation", "export_series_name",
     "library_series_resolver", "mint_export_series", "solver_config", "tariff_to_engine",
     "type_meter_links", "with_value_flows",
 ]
@@ -609,6 +612,33 @@ def delete_export_series(db, org_id: UUID, *, base_uuid: UUID | str, study_id: s
                            "forks): a delete never skips the pin check")
     return _ic_internals_delete_series(db, org_id, export_series_name(base_uuid, study_id),
                                        project_dirs=dirs, root=root)
+
+
+def discard_export_series_of_failed_creation(db, org_id: UUID, *, base_uuid: UUID | str,
+                                              study_id: str,
+                                              other_project_dirs: Iterable[Path],
+                                              root: Path | None = None) -> dict[str, Any]:
+    """
+    Delete every version of the series a study CREATION minted before it
+    failed (gate U2-WP6 W2), once its rollback has removed the base project's
+    row and directory.
+
+    Unlike :func:`delete_export_series`, the base is not among the pin
+    sources: it no longer exists, and its own binding is what the rollback is
+    undoing. Every OTHER project directory of the org is still checked, so the
+    pin rule stays honest (none can pin the series in practice, since its name
+    embeds the dead base's uuid). An org with no other project has nothing that
+    could pin it, so an empty list is accepted here, and only here. None is
+    refused (`export_series_pin_sources_missing`): the caller enumerates the
+    org, never skips it. COMMITS `db`.
+    """
+    if other_project_dirs is None:
+        raise CompileError("export_series_pin_sources_missing",
+                           "pass every other project directory of the org (possibly "
+                           "none): a delete never skips the pin check")
+    return _ic_internals_delete_series(db, org_id, export_series_name(base_uuid, study_id),
+                                       project_dirs=[Path(d) for d in other_project_dirs],
+                                       root=root)
 
 
 def _ic_internals_delete_series(db, org_id: UUID, name: str, *, project_dirs: list[Path],

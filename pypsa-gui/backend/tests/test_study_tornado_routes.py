@@ -335,6 +335,32 @@ def test_a_fork_changed_since_the_run_refuses_the_tornado(
     assert "bess_2h" not in {a["option_id"] for a in body["battery_attribution"]}
 
 
+def test_a_run_recorded_before_the_engine_pricing_refuses_the_tornado(
+        client, api_project, studies_on, fake, project_storage_dir):
+    """
+    Gate U2-WP6 S3/W3 (mutation M10): a pre-WP6 run record carries no
+    `export_series`; its forks hold the tariff in the Links, so re-dispatching
+    them under the commercial config would price it twice. The tornado
+    refuses with a re-run code and starts no solve.
+    """
+    from services.study import store
+
+    sid = _run(client, api_project, "tor-prewp6")
+    base_dir = project_storage_dir("tor-prewp6")
+    record = store.load_aux(base_dir, sid, "run")
+    assert record.get("export_series"), "the fixture's run must record its series"
+    record.pop("export_series")
+    store.save_aux(base_dir, sid, "run", record)
+    calls = len(fake.calls)
+
+    r = client.post(f"/api/projects/tor-prewp6/studies/{sid}/findings/tornado", json={})
+    assert r.status_code == 409, r.text
+    detail = r.json()["detail"]
+    assert detail["error_kind"] == "engine_inputs_changed_since_run"
+    assert "engine" not in detail["message"].lower()
+    assert len(fake.calls) == calls
+
+
 def test_a_ledger_edited_after_the_run_refuses_the_findings(
         client, api_project, studies_on, fake):
     sid = _run(client, api_project, "tor-led")

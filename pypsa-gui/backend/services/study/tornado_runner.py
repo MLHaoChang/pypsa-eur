@@ -216,8 +216,8 @@ def start_tornado(study_id: str, *, base_row, db, user_id,
         # the tariff written into the Links; re-dispatching them on the
         # engine's commercial config would price the tariff twice.
         raise R.RunRefused(409, "engine_inputs_changed_since_run", (
-            "the last run was solved before the study moved onto the investment-case "
-            "engine; re-run the study before the sensitivity analysis"))
+            "the last run's results were calculated before an update to how prices "
+            "are applied; re-run the study before the sensitivity analysis"))
     solves = F.estimate_tornado_solves(inp.question, inp.ledger, inp.tariff, inp.sizes())
     budget = max(1, solves) if budget_solves is None else int(budget_solves)
 

@@ -571,6 +571,46 @@ def test_a_delete_without_pin_sources_is_refused(local_db, dirs):
         assert series_store.latest_ref(db, org, ref.id) is not None
 
 
+def test_a_failed_creations_series_is_discarded_unless_another_project_pins_it(
+        local_db, tmp_path):
+    """
+    Gate U2-WP6 W2: the creation rollback's delete runs once the base is gone,
+    so an org with no other project (empty list) deletes every version; None
+    is still refused, and another project's pin still keeps the series.
+    """
+    import uuid
+
+    from services.library import bundle_pins, series_store
+
+    session_local, org, root = local_db
+    discard = _C().discard_export_series_of_failed_creation
+    with session_local() as db:
+        def mint(base, sid, price=40.0):
+            return _C().mint_export_series(db, org, base_uuid=base, study_id=sid,
+                                           study_name="A",
+                                           tariff=_form(export={"price_per_mwh": price}),
+                                           snapshots=JAN_FEB, root=root)
+        base, sid = uuid.uuid4(), "7" * 32
+        ref = mint(base, sid)
+        mint(base, sid, 41.0)
+        with pytest.raises(_C().CompileError) as exc:
+            discard(db, org, base_uuid=base, study_id=sid, other_project_dirs=None, root=root)
+        assert exc.value.code == "export_series_pin_sources_missing"
+        out = discard(db, org, base_uuid=base, study_id=sid, other_project_dirs=[], root=root)
+        assert out == {"deleted_versions": 2, "kept": None}
+        assert series_store.latest_ref(db, org, ref.id) is None
+
+        pinned_base = uuid.uuid4()
+        pinned = mint(pinned_base, sid)
+        other = tmp_path / "expert_pins_it"
+        other.mkdir()
+        bundle_pins.write_pins(other, [pinned])
+        out = discard(db, org, base_uuid=pinned_base, study_id=sid,
+                      other_project_dirs=[_empty_project(root), other], root=root)
+        assert out == {"deleted_versions": 0, "kept": "export_series_kept_in_use"}
+        assert series_store.latest_ref(db, org, pinned.id) is not None
+
+
 def test_a_ref_in_a_projects_commercial_config_keeps_the_series(local_db, tmp_path):
     """
     Gate U2-S1 C3(b): a ref copied into a project's `solver_config.json`
