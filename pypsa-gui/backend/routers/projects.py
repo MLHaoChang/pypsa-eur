@@ -459,8 +459,12 @@ def _register_created_context() -> None:
     key = ctx.registry_key
     if key is None:
         return
-    PyPSAService.register(key, ctx)
+    # Re-key FIRST (out of the scratch slot, under its own key), then register:
+    # registering first left the ctx under both slots during the cap check,
+    # which counted it twice and evicted an unrelated project a create early
+    # (P33b gate N-3). `register` then sees `prior is ctx` — no write-back.
     PyPSAService.rekey_context(ctx)
+    PyPSAService.register(key, ctx)
 
 
 def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None:
@@ -1131,10 +1135,13 @@ async def import_bundle(
         # refused before anything is swapped (review 0b #2).
         raise HTTPException(422, f"bus names starting 'ic:' are reserved: {reserved[:5]}")
     from services import dirty_state, undo_service
-    undo_service.clear()
-    dirty_state.clear()  # memory and disk now agree
     with PyPSAService.get_lock():
+        # A different project: a fresh context (own undo, counter 0, no result
+        # state of the project being left — P33b gate B-1). The clears apply
+        # to the new context, never to the resident one being left.
         PyPSAService.reset_network()
+        undo_service.clear()
+        dirty_state.clear()  # memory and disk now agree
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
             PyPSAService.import_network_from_netcdf(n, nc_path)
@@ -1451,10 +1458,13 @@ def create_from_template(
 
     # Reset + load, mirroring import_bundle / load_project.
     from services import dirty_state, undo_service
-    undo_service.clear()
-    dirty_state.clear()  # memory and disk now agree
     with PyPSAService.get_lock():
+        # A different project: a fresh context (own undo, counter 0, no result
+        # state of the project being left — P33b gate B-1). The clears apply
+        # to the new context, never to the resident one being left.
         PyPSAService.reset_network()
+        undo_service.clear()
+        dirty_state.clear()  # memory and disk now agree
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
             PyPSAService.import_network_from_netcdf(n, dest / "network.nc")
@@ -1507,6 +1517,9 @@ def create_from_template(
         "condition": None,
         "solve_time": None,
         "user_ts_count": 0,
+        # P33b gate S-4: a fresh project's edit counter, on disk from creation
+        # (the new context starts at 0; a cold hydrate then agrees with memory).
+        "network_revision": int(PyPSAService.get_active_context().network_revision or 0),
         "parent_project": None,
         "scenario_description": None,
     })
@@ -2714,14 +2727,16 @@ def load_project(
             f"was interrupted). Project loaded from the previous good copy.",
         )
 
-    # Clear undo history — snapshots from a previous project are meaningless
-    # after loading a different one.
+    # The loaded project gets its own empty undo stack and a clean dirty flag:
+    # `reset_network()` builds a fresh context (P33b gate B-1), so the clears
+    # below apply to IT. They used to run before the swap — on the project
+    # being left, whose resident context then read clean and lost its history.
     from services import dirty_state, undo_service
-    undo_service.clear()
-    dirty_state.clear()  # memory and disk now agree
 
     with PyPSAService.get_lock():
         PyPSAService.reset_network()
+        undo_service.clear()
+        dirty_state.clear()  # memory and disk now agree
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
             PyPSAService.import_network_from_netcdf(n, nc_path)

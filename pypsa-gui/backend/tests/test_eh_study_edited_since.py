@@ -421,3 +421,83 @@ def test_the_revision_survives_save_and_reload(
     assert client.get("/api/projects/rev-persist").status_code == 200
     assert _rev(client) == rev
     assert client.get(STUDY_URL).json()["edited_since_study"] is True
+
+
+# ── Gate S-2: three rules the first gate found unpinned ───────────────────
+
+def _study_then_save(client, install_network, monkeypatch, session_state, name, edits_before=2):
+    from tests.test_eh_study_record_survives_reactivation import run_study
+    fake_done(monkeypatch)
+    hub_project(client, install_network, name)
+    for _ in range(edits_before):
+        _edit_bus(client)
+    rec = run_study(client)
+    t = (session_state(client).get("eh_study") or {}).get("thread")
+    if t is not None:
+        t.join(5)
+    assert client.post(f"/api/projects/{name}").status_code == 200
+    return rec
+
+
+def test_load_and_import_restore_the_projects_own_counter(
+        client, install_network, monkeypatch, session_state, api_project):
+    """Q4a: switching to ANOTHER project must compare its record against ITS
+    saved counter — not against the counter of the project being left, nor 0."""
+    rec = _study_then_save(client, install_network, monkeypatch, session_state, "own-b")
+    saved = rec["network_revision"]
+    assert saved >= 2
+    api_project("own-a")
+    for _ in range(5):
+        _edit_bus(client)
+    assert _rev(client) != saved
+
+    assert client.get("/api/projects/own-b").status_code == 200
+    assert _rev(client) == saved
+    assert client.get(STUDY_URL).json()["edited_since_study"] is False
+
+    bundle = client.get("/api/projects/own-b/bundle").content
+    assert client.get("/api/projects/own-a").status_code == 200
+    r = client.post("/api/projects/import_bundle",
+                    files={"file": ("b.zip", bundle, "application/zip")},
+                    params={"name": "own-b-imported"})
+    assert r.status_code == 200, r.text
+    assert _rev(client) == saved
+    assert client.get(STUDY_URL).json()["edited_since_study"] is False
+
+
+def test_a_counter_below_the_captured_one_reads_edited(
+        client, install_network, monkeypatch, session_state, registry_key_for,
+        project_storage_dir):
+    """Q3a: `!=`, not `>`. A metadata.json without the counter (an older save, a
+    hand copy) hydrates to 0 beside a record captured at N > 0 — the network on
+    disk is not known to be the studied one, so it must read edited."""
+    import json
+    rec = _study_then_save(client, install_network, monkeypatch, session_state, "below")
+    assert rec["network_revision"] > 0
+    meta_path = project_storage_dir("below") / "metadata.json"
+    meta = json.loads(meta_path.read_text())
+    meta.pop("network_revision")
+    meta_path.write_text(json.dumps(meta))
+    from services.pypsa_service import PyPSAService
+    with PyPSAService._registry_lock:
+        PyPSAService._contexts.pop(registry_key_for("below"), None)
+    assert client.post("/api/projects/below/activate").status_code == 200
+    assert _rev(client) == 0
+    assert client.get(STUDY_URL).json()["edited_since_study"] is True
+
+
+def test_an_io_import_is_an_edit(client, install_network, tmp_path):
+    """Q2a: the HTTP seam covers `/api/io/` as well as `/api/network/`."""
+    import pypsa
+    hub_project(client, install_network, "io-edit")
+    assert client.post("/api/network/reset").status_code == 200   # a draft (OPEN-ITEMS 12)
+    r0 = _rev(client)
+    n = pypsa.Network()
+    n.add("Bus", "imported")
+    path = tmp_path / "in.nc"
+    n.export_to_netcdf(path)
+    r = client.post("/api/io/import/netcdf",
+                    files={"file": ("in.nc", path.read_bytes(), "application/x-netcdf")})
+    assert r.status_code == 200, r.text
+    assert [b["name"] for b in client.get("/api/network/buses").json()] == ["imported"]
+    assert _rev(client) == r0 + 1

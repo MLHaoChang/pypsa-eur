@@ -505,3 +505,51 @@ def test_a_created_project_is_resident_under_its_own_key(
         bound2 = [k for k, c in PyPSAService._contexts.items() if c.loaded_project == "res-imported"]
     assert held2 is not None and held2 is session_ctx(client)
     assert bound2 == [key2]
+
+
+# ── Gate S-1: a restore drops a record the snapshot does not carry ────────
+
+def test_a_snapshot_without_results_does_not_bring_back_a_later_study(
+        client, install_network, monkeypatch, session_state, project_storage_dir):
+    """The restore copied only the files the snapshot HAS, so a snapshot taken
+    with no results left the project's later `results_state.pkl` in place: its
+    study record — of a different network — was mapped onto the restored one,
+    and a counter that the restore moved back could read "not edited"."""
+    def move(dx):
+        b = client.get("/api/network/buses").json()[0]
+        r = client.put(f"/api/network/buses/{b['name']}",
+                       json={**b, "x": float(b.get("x") or 0) + dx})
+        assert r.status_code == 200, r.text
+
+    def rev():
+        return client.get("/api/network/undo/info").json()["network_revision"]
+
+    def xs():
+        return [b["x"] for b in client.get("/api/network/buses").json()]
+
+    fake_done(monkeypatch)
+    a = hub_project(client, install_network, "coll")
+    s0 = client.post(f"/api/projects/{a}/snapshots", json={"label": "s0"}).json()["id"]
+    r0 = rev()
+    move(1)
+    move(1)
+    assert client.post(f"/api/projects/{a}", params={"force": True}).status_code == 200
+    assert not (project_storage_dir(a) / "results_state.pkl").exists()
+    s1 = client.post(f"/api/projects/{a}/snapshots", json={"label": "s1"}).json()["id"]
+    x_s1 = xs()
+    assert client.post(f"/api/projects/{a}/snapshots/{s0}/restore").status_code == 200
+    assert rev() == r0
+    move(5)
+    move(5)
+    assert rev() == r0 + 2
+    x_studied = xs()
+    run_study(client)
+    _wait_thread_exit(session_state, client)
+    assert client.post(f"/api/projects/{a}", params={"force": True}).status_code == 200
+    assert client.post(f"/api/projects/{a}/snapshots/{s1}/restore").status_code == 200
+    assert xs() == x_s1 and x_s1 != x_studied
+    r = client.get(STUDY_URL)
+    assert r.status_code == 204, (
+        f"S1 carries no study, but {r.json() if r.status_code == 200 else r.status_code} "
+        "was restored from the project's later results_state.pkl")
+    assert not (project_storage_dir(a) / "results_state.pkl").exists()

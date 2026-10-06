@@ -644,8 +644,6 @@ def restore_snapshot(
     # (e.g. autosave triggering during restore) could lose updates without
     # the lock.
     from services import dirty_state, undo_service
-    undo_service.clear()
-    dirty_state.clear()  # memory and disk now agree
     with PyPSAService.get_lock():
         # Copy snapshot's files over the project's. Use atomic-write per file
         # so a crash mid-restore leaves either the pre-restore file or the
@@ -658,6 +656,15 @@ def restore_snapshot(
                 # must not survive to pin refs the restored config no longer
                 # names (Edge Investment Case WP1.1c review #6).
                 if fname == "library_refs.json" and (snap_dir / "solver_config.json").exists():
+                    (project_dir / fname).unlink(missing_ok=True)
+                # P33b gate S-1: no `results_state.pkl` in the snapshot means
+                # the snapshot's state had NO side results — `_save_context`
+                # deletes the pkl in that case. Leaving the project's later pkl
+                # in place restored its results onto a network they do not
+                # describe, including a finished EH study record (D-1) that
+                # could read "not edited". The pre-restore safety snapshot
+                # keeps the removed file.
+                if fname == "results_state.pkl":
                     (project_dir / fname).unlink(missing_ok=True)
                 continue
             _atomic_write_with(project_dir / fname, lambda p, src=src: shutil.copy2(src, p))
@@ -678,7 +685,13 @@ def restore_snapshot(
         # Reload in-memory network from the restored files. Lock is already
         # held — `reset_network()` and `import_from_netcdf()` are safe to
         # call inside the same `with` block.
+        # A fresh context (own undo, counter 0, no carried results — P33b
+        # gate B-1): the snapshot may be ANOTHER project's, and even for this
+        # one the restored state is a new baseline. The clears apply to the
+        # new context; they used to run first, on the project being left.
         PyPSAService.reset_network()
+        undo_service.clear()
+        dirty_state.clear()  # memory and disk now agree
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
             PyPSAService.import_network_from_netcdf(

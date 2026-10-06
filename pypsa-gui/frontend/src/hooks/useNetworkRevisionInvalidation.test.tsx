@@ -82,13 +82,30 @@ describe('useNetworkRevisionInvalidation (P33b)', () => {
     const hook = setup()
     await waitFor(() => expect(networkApi.undoInfo).toHaveBeenCalled())
     await sample('A', 5)
+    // Deterministic (P33b gate S-3): B's own fetch answers the same value the
+    // test plants, and is awaited, so B's first sample is 9 whichever lands
+    // first. It used to answer 5, and when that fetch landed before the
+    // planted 9 the test saw a genuine 5 → 9 transition on B.
+    vi.mocked(networkApi.undoInfo).mockResolvedValue(info(9) as never)
     await act(async () => { useUIStore.setState({ currentProject: 'B' }) })
+    await waitFor(() => expect(
+      (qc.getQueryData(nk('B', 'undoInfo')) as { network_revision?: number } | undefined)
+        ?.network_revision).toBe(9))
     await sample('B', 9)
     hook.rerender({ on: true })
     expect(hubCalls('A')).toHaveLength(0)
     expect(hubCalls('B')).toHaveLength(0)
     await sample('B', 10)
     expect(hubCalls('B')).toHaveLength(2)
+  })
+
+  it('a backwards move (a Saved-snapshot restore moves the counter back) also invalidates', async () => {
+    setup()
+    await waitFor(() => expect(networkApi.undoInfo).toHaveBeenCalled())
+    await sample('A', 7)
+    expect(spy).not.toHaveBeenCalled()
+    await sample('A', 5)
+    expect(hubCalls('A')).toHaveLength(2)
   })
 
   it('enabled: false never invalidates (and never fetches); re-enabling with a moved revision invalidates once', async () => {

@@ -142,7 +142,7 @@ def apply_undo():
                 if prev_state.get(k) is not None
                 and not record_is_running(prev_state.get(k))
             }
-            PyPSAService.reset_network()
+            PyPSAService.reset_network(carry="same")  # same project, in place
             n = PyPSAService.get_network()
             with PyPSAService.get_netcdf_io_lock():
                 PyPSAService.import_network_from_netcdf(n, tmp)

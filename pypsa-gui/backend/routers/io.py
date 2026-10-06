@@ -188,7 +188,9 @@ def export_matpower():
 def _reset_with_ts_clear() -> None:
     """Reset network and clear any user-uploaded time series."""
     from routers.network import _restore_user_ts
-    PyPSAService.reset_network()
+    # The same workspace gets a new network: a COPY of the undo stack keeps the
+    # import undoable without touching the outgoing context's own history.
+    PyPSAService.reset_network(carry="copy")
     _restore_user_ts({})
 
 

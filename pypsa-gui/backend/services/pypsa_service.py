@@ -12,14 +12,29 @@ import pypsa
 from services.commercial import settlement_inputs as _ic_settlement_inputs  # noqa: F401
 
 from services.project_context import (
+    RESULT_STATE_KEYS,
     STUDY_KEYS,
     ProjectContext,
     record_is_running,
     running_study_key,
     study_swap_refusal,
 )
+from services.undo_service import _UndoState
 
 logger = logging.getLogger(__name__)
+
+
+def _copy_undo_state(src: _UndoState) -> _UndoState:
+    """An independent copy of an undo stack (same entries, own deque and locks),
+    so the two contexts can never push onto or pop from each other's history."""
+    from collections import deque
+
+    with src.lock:
+        out = _UndoState()
+        out.stack = deque(src.stack, maxlen=src.stack.maxlen)
+        out.total_bytes = src.total_bytes
+        out.last_push = src.last_push
+    return out
 
 
 class PyPSAService:
@@ -389,7 +404,8 @@ class PyPSAService:
 
     @classmethod
     def reset_network(cls, *, allow_during_study: bool = False,
-                      action: str = "replace the network") -> None:
+                      action: str = "replace the network",
+                      carry: str = "fresh") -> None:
         # Swap in a fresh, UNBOUND context — no on-disk project owns it yet.
         # reset_network runs at the START of every load/import/restore (which
         # then re-bind via set_loaded_project at the end), and on explicit
@@ -397,6 +413,26 @@ class PyPSAService:
         # empty transient registry, so a load that fails mid-import leaves
         # identity unbound (rather than dangling on the previous project) and a
         # subsequent autosave can't misdirect.
+        # ★ `carry` — what of the outgoing context's PER-PROJECT state the new
+        # one inherits (P33b gate B-1). It used to hand over the outgoing
+        # `_UndoState` OBJECT on every swap; with both contexts resident
+        # (P33b step 4b) and an undo that lands (step 0), project B's edits
+        # then sat on project A's stack, and Undo in A replaced A's network
+        # with B's — which a save wrote into A's files.
+        #   "same"  — an in-place replace of the SAME project (undo): share
+        #             the undo stack, keep the edit counter and result state.
+        #   "copy"  — the same workspace gets a new network (io import into
+        #             the open draft): a COPY of the undo stack (the capture the
+        #             middleware pushed before the import stays undoable, and
+        #             the outgoing context's own stack is never touched) and
+        #             the counter.
+        #   "fresh" — (default) a DIFFERENT project or a blank draft (load,
+        #             template, bundle import, Saved-snapshot restore, New):
+        #             its own empty undo stack, counter 0 (the routes restore a
+        #             saved project's counter from metadata.json) and no result
+        #             state of the project being left.
+        if carry not in ("same", "copy", "fresh"):
+            raise ValueError(f"reset_network carry={carry!r}")
         prev = cls._request_ctx.get() or cls._active
         # ★ REFUSE BY DEFAULT while a study is live (Phase 11).
         #
@@ -477,6 +513,18 @@ class PyPSAService:
             for key in STUDY_KEYS:
                 if not record_is_running(state.get(key)):
                     state[key] = None
+            if carry == "fresh":
+                # The project being left keeps its results; the new one starts
+                # without them (load / import / restore re-read their own from
+                # results_state.pkl; a template project has none).
+                for key in RESULT_STATE_KEYS:
+                    state[key] = None
+            if carry == "same":
+                undo_state = prev.undo
+            elif carry == "copy":
+                undo_state = _copy_undo_state(prev.undo)
+            else:
+                undo_state = _UndoState()
             cls._publish_active(ProjectContext(
                 network=n,
                 # ★ A COPY, not the same dict (Phase 11 review, BLOCKER 5).
@@ -500,7 +548,7 @@ class PyPSAService:
                 # is coarser than necessary and never wrong.
                 solver_state=state,
                 solver_state_lock=prev.solver_state_lock,
-                undo=prev.undo,
+                undo=undo_state,
                 # Carry the mutation_lock forward too (B4 Inc 2): the foreground
                 # `get_lock()` then returns ONE persistent RLock across every
                 # reset/set swap — byte-identical to the old global `_lock`, and
@@ -519,7 +567,8 @@ class PyPSAService:
                 chat_state=prev.chat_state,
                 # P33b: the edit counter belongs to the project, like `undo`;
                 # a load / restore re-hydrates it from metadata.json.
-                network_revision=prev.network_revision,
+                network_revision=(prev.network_revision
+                                  if carry in ("same", "copy") else 0),
             ))
         else:
             cls._publish_active(ProjectContext(network=n))
