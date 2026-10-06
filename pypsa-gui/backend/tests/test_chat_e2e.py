@@ -39,6 +39,7 @@ import unittest.mock as mock
 import pytest
 
 from services import chat_service
+from harness import budget as harness_budget
 from harness import confirm as harness_confirm
 from harness import session as harness_session
 
@@ -568,7 +569,7 @@ def test_tool_call_per_turn_cap_emits_error(tmp_projects_dir, install_network, m
     n.add("Bus", "B1")
     install_network(n, name=None)
 
-    monkeypatch.setattr(chat_service, "MAX_TOOL_CALLS_PER_TURN", 2)
+    monkeypatch.setattr(harness_budget, "MAX_TOOL_CALLS_PER_TURN", 2)
 
     session = chat_service.ChatSession()
     # Three read-tier tool_use blocks in ONE assistant message — third must
@@ -651,8 +652,8 @@ def test_sdk_rate_limit_error_emits_rate_limited_frame(tmp_projects_dir, fake_an
     # rate_limited is now RETRYABLE — without zeroing the backoff this test would
     # sleep ~7s (3 retries) before surfacing the frame. Zero the delays so it
     # exercises retry-exhaust instantly; the frame is still emitted at the end.
-    monkeypatch.setattr(chat_service, "BASE_STREAM_RETRY_DELAY", 0.0)
-    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(harness_budget, "BASE_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(harness_budget, "MAX_STREAM_RETRY_DELAY", 0.0)
 
     session = chat_service.ChatSession()
     client = FakeAnthropicClient(
@@ -671,9 +672,9 @@ def test_sdk_rate_limit_error_emits_rate_limited_frame(tmp_projects_dir, fake_an
 
 def _zero_retry_delays(monkeypatch):
     """Make the retry backoff instant so retry tests don't actually sleep."""
-    monkeypatch.setattr(chat_service, "BASE_STREAM_RETRY_DELAY", 0.0)
-    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRY_DELAY", 0.0)
-    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRIES", 3)
+    monkeypatch.setattr(harness_budget, "BASE_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(harness_budget, "MAX_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(harness_budget, "MAX_STREAM_RETRIES", 3)
 
 
 class _RaiseNThenSucceedClient:
@@ -1932,7 +1933,7 @@ def test_daily_token_cap_refuses_new_turn_when_exceeded(
 
     from routers import projects as projects_router
     monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
-    monkeypatch.setattr(chat_service, "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", 50)
+    monkeypatch.setattr(harness_budget, "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", 50)
 
     import pypsa
     n = pypsa.Network(); n.add("Bus", "B1")
@@ -1966,7 +1967,7 @@ def test_daily_cap_disabled_when_zero_lets_turn_proceed(
 
     from routers import projects as projects_router
     monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
-    monkeypatch.setattr(chat_service, "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", 0)
+    monkeypatch.setattr(harness_budget, "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", 0)
 
     import pypsa
     n = pypsa.Network(); n.add("Bus", "B1")
@@ -1997,7 +1998,7 @@ def test_daily_cap_ignores_yesterday_tokens(
 
     from routers import projects as projects_router
     monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
-    monkeypatch.setattr(chat_service, "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", 50)
+    monkeypatch.setattr(harness_budget, "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", 50)
 
     import pypsa
     n = pypsa.Network(); n.add("Bus", "B1")
@@ -2106,7 +2107,7 @@ def test_tool_timeout_emits_tool_timeout_and_is_error_result(tmp_projects_dir, i
     n = pypsa.Network(); n.add("Bus", "B1")
     install_network(n, name=None)
 
-    monkeypatch.setattr(chat_service, "PER_TOOL_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(harness_budget, "PER_TOOL_TIMEOUT_SECONDS", 0.2)
 
     from services import chat_tools
 
@@ -2154,7 +2155,8 @@ def test_solver_tools_excluded_from_timeout_wrapper():
     # The inline (non-timeout) call is guarded by the solver-tool name check.
     assert 'if tool_name in ("run_simulation", "run_ac_pf_stage"):' in src
     assert "result = handler(**(args or {}))" in src
-    assert "future.result(timeout=PER_TOOL_TIMEOUT_SECONDS)" in src
+    # The timeout is read live from harness.budget (chat harness issue 08).
+    assert "future.result(timeout=harness_budget.PER_TOOL_TIMEOUT_SECONDS)" in src
 
 
 # ─────────────────────────────────────────────────────────────────────────

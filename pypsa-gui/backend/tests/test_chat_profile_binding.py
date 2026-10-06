@@ -28,6 +28,7 @@ import json
 import pytest
 
 from services import chat_service
+from harness import budget as harness_budget
 from harness import session as harness_session
 
 
@@ -380,9 +381,9 @@ def test_a8_fallback_uses_profile_fallback_model(appdata, monkeypatch):
 
     # Small + zero-delay retry budget so the fallback fires on the first
     # rate_limited without any real backoff sleep.
-    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRIES", 0)
-    monkeypatch.setattr(chat_service, "BASE_STREAM_RETRY_DELAY", 0.0)
-    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(harness_budget, "MAX_STREAM_RETRIES", 0)
+    monkeypatch.setattr(harness_budget, "BASE_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(harness_budget, "MAX_STREAM_RETRY_DELAY", 0.0)
 
     session = chat_service.ChatSession(model="primary-model")
     session.profile_id = "custom-fb"
@@ -652,9 +653,9 @@ def test_a8_fallback_is_turn_scoped_across_multiple_rounds(
 
     # Small + zero-delay retry budget, same as the single-round A8 test
     # above, so both rate_limited failures resolve without real backoff.
-    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRIES", 0)
-    monkeypatch.setattr(chat_service, "BASE_STREAM_RETRY_DELAY", 0.0)
-    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(harness_budget, "MAX_STREAM_RETRIES", 0)
+    monkeypatch.setattr(harness_budget, "BASE_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(harness_budget, "MAX_STREAM_RETRY_DELAY", 0.0)
 
     session = chat_service.ChatSession(model="primary-model")
     session.profile_id = "custom-fb-multi"
@@ -1744,9 +1745,9 @@ def test_stream_with_no_profile_id_still_runs_normally(appdata, client):
 
 @pytest.fixture()
 def _fast_retries(monkeypatch):
-    monkeypatch.setattr(chat_service, "BASE_STREAM_RETRY_DELAY", 0.0)
-    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRY_DELAY", 0.0)
-    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRIES", 2)
+    monkeypatch.setattr(harness_budget, "BASE_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(harness_budget, "MAX_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(harness_budget, "MAX_STREAM_RETRIES", 2)
 
 
 def _ok_turn(text="ok"):
@@ -2197,7 +2198,7 @@ def test_an_endpoint_that_reports_no_usage_still_hits_a_session_ceiling(
         base_url=None, model="claude-sonnet-5", tools=False, vision=True,
         auth="none", fallback_model=None, max_output_tokens=None)
     llm_config.save_profiles([profile], "anthropic-sonnet")
-    monkeypatch.setattr(chat_service, "MAX_TURNS_PER_SESSION", 5)
+    monkeypatch.setattr(harness_budget, "MAX_TURNS_PER_SESSION", 5)
 
     session = chat_service.ChatSession(model="claude-sonnet-5")
     session.profile_id = "nousage"
@@ -2240,7 +2241,7 @@ def test_the_turn_ceiling_does_not_fire_when_usage_IS_reported(appdata, monkeypa
         base_url=None, model="claude-sonnet-5", tools=False, vision=True,
         auth="none", fallback_model=None, max_output_tokens=None)
     llm_config.save_profiles([profile], "anthropic-sonnet")
-    monkeypatch.setattr(chat_service, "MAX_TURNS_PER_SESSION", 5)
+    monkeypatch.setattr(harness_budget, "MAX_TURNS_PER_SESSION", 5)
 
     session = chat_service.ChatSession(model="claude-sonnet-5")
     session.profile_id = "withusage"

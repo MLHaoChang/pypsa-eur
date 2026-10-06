@@ -1,6 +1,6 @@
 # 08 — The turn loop, session, confirmation and persistence move into the harness
 
-Status: ready-for-agent (in progress 2026-10-05: the loop moved whole to `harness/loop.py`; `sse`, `fence`, `results`, `history`, `metrics`, `ratelimit`, `session`, `confirm`, `providers/wiring`, `stub` extracted under the README's splitting rule; the budget and retry tunables, prompt assembly and the turn body remain)
+Status: ready-for-agent (in progress 2026-10-05: the loop moved whole to `harness/loop.py`; `sse`, `fence`, `results`, `history`, `metrics`, `ratelimit`, `session`, `confirm`, `providers/wiring`, `stub`, `budget` extracted under the README's splitting rule; prompt assembly and the turn body remain)
 Type: task
 Blocked by: 02, 06, 07
 
@@ -64,3 +64,9 @@ sse and guided_write_confirmation. loop.py: 4,040 → 3,342 lines.
 `_build_anthropic_client` (a function three tests intercept) is forwarded and
 patched on wiring; the loop's vendor-word pin came down accordingly.
 loop.py: 3,342 → 2,872 lines.
+
+2026-10-06 (step 5): the budget and retry tunables, the per-tool timeout and
+`_turn_budget_block` moved to `harness/budget.py`; the turn body, the stream
+seam and the dispatch read them as `harness_budget.<NAME>` (rewritten by AST
+position), ten more names are forwarded, 33 test sites repointed across
+seven files.

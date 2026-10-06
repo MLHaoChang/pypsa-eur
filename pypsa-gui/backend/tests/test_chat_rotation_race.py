@@ -267,7 +267,7 @@ def test_append_turn_fsyncs_the_chat_jsonl_descriptor(
         synced_inodes.append(_os.fstat(fd).st_ino)
         real_fsync(fd)
 
-    monkeypatch.setattr(chat_service.os, "fsync", recording_fsync)
+    monkeypatch.setattr(harness_history.os, "fsync", recording_fsync)
 
     chat_service.append_turn(ctx, {"role": "user", "content": "durable?"})
 

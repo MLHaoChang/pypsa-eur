@@ -334,6 +334,17 @@ MOVED_TUNABLES = {
     "STREAM_RATE_CAPACITY": "harness.ratelimit",
     "STREAM_RATE_REFILL_PER_SEC": "harness.ratelimit",
     "_build_anthropic_client": "harness.providers.wiring",
+    "_today_token_spend": "harness.history",
+    "MAX_OUTPUT_TOKENS_PER_TURN": "harness.budget",
+    "MAX_TOOL_CALLS_PER_TURN": "harness.budget",
+    "MAX_TURNS_PER_SESSION": "harness.budget",
+    "MAX_OUTPUT_TOKENS_PER_SESSION": "harness.budget",
+    "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP": "harness.budget",
+    "MAX_STREAM_RETRIES": "harness.budget",
+    "BASE_STREAM_RETRY_DELAY": "harness.budget",
+    "MAX_STREAM_RETRY_DELAY": "harness.budget",
+    "_RETRYABLE_SDK_KINDS": "harness.budget",
+    "PER_TOOL_TIMEOUT_SECONDS": "harness.budget",
 }
 
 

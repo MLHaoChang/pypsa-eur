@@ -60,7 +60,6 @@ from __future__ import annotations
 import concurrent.futures
 import contextvars
 import logging
-import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -74,7 +73,7 @@ from services.project_context import ProjectContext
 logger = logging.getLogger("pypsa_gui.chat")
 
 from harness.history import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    _message_is_tool_results, _is_turn_start, rewind_session, _drop_oldest_turn_group, TURN_SUMMARY_PREFIX, TURN_SUMMARY_MAX_CHARS, _SUMMARY_LINE_CHARS, _SUMMARY_MAX_LINES, is_turn_summary, _describe_dropped, _render_summary, _parse_summary, trim_session_messages, CHAT_FILENAME, _redact_for_persist, get_persist_path, read_all_turns, read_all_turns_with_gap, _today_token_spend, append_turn, _pending_turn_path_unlocked, begin_pending_turn, read_pending_turn, clear_pending_turn, flush_to_disk, _rotate_chat_jsonl_unlocked, SAVE_LINEAGE_REBIND_MOVE, SAVE_LINEAGE_COPY, SAVE_LINEAGE_SCENARIO_COPY, _project_chat_paths, handle_save_lineage, handle_rename_lineage, handle_snapshot_lineage,
+    _message_is_tool_results, _is_turn_start, rewind_session, _drop_oldest_turn_group, TURN_SUMMARY_PREFIX, TURN_SUMMARY_MAX_CHARS, _SUMMARY_LINE_CHARS, _SUMMARY_MAX_LINES, is_turn_summary, _describe_dropped, _render_summary, _parse_summary, trim_session_messages, CHAT_FILENAME, _redact_for_persist, get_persist_path, read_all_turns, read_all_turns_with_gap, append_turn, _pending_turn_path_unlocked, begin_pending_turn, read_pending_turn, clear_pending_turn, flush_to_disk, _rotate_chat_jsonl_unlocked, SAVE_LINEAGE_REBIND_MOVE, SAVE_LINEAGE_COPY, SAVE_LINEAGE_SCENARIO_COPY, _project_chat_paths, handle_save_lineage, handle_rename_lineage, handle_snapshot_lineage,
 )
 
 
@@ -136,47 +135,15 @@ PROJECT_REBINDING_TOOLS = frozenset([
 # replaces it with a mapping that also covers the free-text passthrough case
 # (an unrecognized model string is not refused; see `test_chat_models.py`).
 
-# Hard per-session token caps. The client shows the running token counts
-# (M10), but the server enforces a token-count ceiling so a misbehaving
-# model + tool-use loop cannot burn unbounded budget. Defaults match the v6
-# plan; ops can override via env or a future endpoint.
-MAX_OUTPUT_TOKENS_PER_TURN: int = 8192
-MAX_TOOL_CALLS_PER_TURN: int = 25
-MAX_TURNS_PER_SESSION: int = 100
-MAX_OUTPUT_TOKENS_PER_SESSION: int = 200_000
-
-# Transient-SDK-error retry (chat reliability). A rate-limit (429) or an
-# Anthropic overload (5xx) that fails the stream BEFORE any token is emitted is
-# retried with capped exponential backoff (1s → 2s → 4s, capped at 8s). A
-# failure AFTER partial output is surfaced instead — re-streaming would
-# duplicate already-yielded tokens. Env-overridable.
-MAX_STREAM_RETRIES: int = int(os.environ.get("PYPSA_GUI_CHAT_MAX_RETRIES", "3"))
-BASE_STREAM_RETRY_DELAY: float = float(os.environ.get("PYPSA_GUI_CHAT_RETRY_BASE", "1.0"))
-MAX_STREAM_RETRY_DELAY: float = float(os.environ.get("PYPSA_GUI_CHAT_RETRY_MAX", "8.0"))
-# error_kind values from _map_sdk_exception that are worth retrying.
-_RETRYABLE_SDK_KINDS: frozenset[str] = frozenset(["rate_limited", "upstream_error"])
-
-
-# Cross-session durable per-project/per-day token spend cap (#9). 0 = DISABLED
-# (default — ops opts in). When > 0, run_turn sums input+output tokens from
-# THIS project's chat.jsonl (+ rotation backup) for records stamped today and
-# refuses a NEW turn once the sum reaches the cap. Complements the in-memory
-# per-session output ceiling (MAX_OUTPUT_TOKENS_PER_SESSION) — that one resets
-# on backend restart / new session; this one is durable on disk. Read at call
-# time via the module attribute so a test can monkeypatch it.
-PYPSA_GUI_CHAT_DAILY_TOKEN_CAP: int = int(
-    os.environ.get("PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", "0")
+from harness.budget import (  # noqa: E402, F401 — moved (issue 08); re-exported
+    _turn_budget_block,
 )
+from harness import budget as harness_budget  # noqa: E402 — moved tunables are read live (issue 08)
 
-# Per-tool execution deadline (#16). A non-solver tool handler that hangs on a
-# blocking read/write would freeze the SSE worker thread indefinitely; we run
-# it on a worker thread and abandon it after this many seconds, emitting a
-# tool_timeout. Solver tools (run_simulation / run_ac_pf_stage) are EXCLUDED —
-# they spawn their own worker + lifecycle poll (solver_log_bridge) and are
-# legitimately long-running. Read at call time via the module attribute.
-PER_TOOL_TIMEOUT_SECONDS: float = float(
-    os.environ.get("PYPSA_GUI_CHAT_TOOL_TIMEOUT", "30.0")
-)
+
+
+
+
 
 
 from harness.ratelimit import (  # noqa: E402, F401 — moved (issue 08); re-exported
@@ -1109,7 +1076,7 @@ def _stream_assistant_message(
     attempt = 0
     # +1 slot reserved so a late fallback can still run once after the normal
     # retry budget is spent.
-    max_attempts = MAX_STREAM_RETRIES + 1
+    max_attempts = harness_budget.MAX_STREAM_RETRIES + 1
     while attempt < max_attempts:
         emitted_this_attempt = False
         final_blocks: list[dict[str, Any]] = []
@@ -1170,16 +1137,16 @@ def _stream_assistant_message(
             else:
                 error_kind, msg = "internal_error", _redact_for_log(exc)
             retriable = (
-                error_kind in _RETRYABLE_SDK_KINDS
+                error_kind in harness_budget._RETRYABLE_SDK_KINDS
                 and not emitted_this_attempt
-                and attempt < MAX_STREAM_RETRIES
+                and attempt < harness_budget.MAX_STREAM_RETRIES
                 and not session.abort_event.is_set()
             )
             if retriable:
                 _metric_incr("retries")
                 delay = min(
-                    MAX_STREAM_RETRY_DELAY,
-                    BASE_STREAM_RETRY_DELAY * (2 ** attempt),
+                    harness_budget.MAX_STREAM_RETRY_DELAY,
+                    harness_budget.BASE_STREAM_RETRY_DELAY * (2 ** attempt),
                 )
                 # `msg` used to be computed and thrown away, which is why the
                 # thinking-block 400 could not be diagnosed from the log file
@@ -1190,7 +1157,7 @@ def _stream_assistant_message(
                 # upstream exception text to disk.
                 logger.warning(
                     "chat: transient SDK error %r — retry %d/%d in %.1fs: %s",
-                    error_kind, attempt + 1, MAX_STREAM_RETRIES, delay,
+                    error_kind, attempt + 1, harness_budget.MAX_STREAM_RETRIES, delay,
                     _redact_secrets_in_str(msg),
                 )
                 time.sleep(delay)
@@ -1372,13 +1339,13 @@ def _dispatch_tool_uses(
         # MAX_TOOL_CALLS_PER_TURN. The cap is the only per-turn bound there is;
         # nothing may skip it.
         tool_call_count += 1
-        if tool_call_count > MAX_TOOL_CALLS_PER_TURN:
+        if tool_call_count > harness_budget.MAX_TOOL_CALLS_PER_TURN:
             yield "tool_error", {
                 "tool_use_id": tu.get("id"),
                 "tool_name": tu.get("name"),
                 "error_kind": "tool_call_cap_exceeded",
                 "message": (
-                    f"more than {MAX_TOOL_CALLS_PER_TURN} tool calls in "
+                    f"more than {harness_budget.MAX_TOOL_CALLS_PER_TURN} tool calls in "
                     "one turn; refusing further dispatch this turn."
                 ),
             }
@@ -1457,52 +1424,6 @@ def _dispatch_tool_uses(
     )
 
 
-def _turn_budget_block(
-    session: ChatSession,
-    turn_ctx: Any,
-) -> tuple[str, dict[str, Any]] | None:
-    """
-    The frame that refuses this turn on budget grounds, or ``None`` to proceed.
-
-    Both caps are checked here so that both short-circuit in the same place:
-    BEFORE `session_init` (the panel treats that frame as "a turn started" and
-    would have to tear it down again) and BEFORE the SDK client is built (a
-    capped turn must not reach the API). Moving either gate below the client
-    build would keep every frame assertion passing while still spending money.
-
-    `turn_ctx` is the P0-pinned context — the project this turn would PERSIST
-    to — so a mid-turn project switch cannot move the turn onto another
-    project's daily budget.
-
-    Phase B of `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`;
-    see `tests/test_chat_budget_gates_seam.py`.
-    """
-    # Cap enforcement — refuse to start a new turn if the session output
-    # budget is already exhausted.
-    if session.usage_acc["output_tokens"] >= MAX_OUTPUT_TOKENS_PER_SESSION:
-        return "session_done", {
-            "reason": "budget_exhausted",
-            "kind": "output_tokens",
-            "limit": MAX_OUTPUT_TOKENS_PER_SESSION,
-        }
-
-    # #9 — cross-session durable per-project/per-day token spend cap. Checked
-    # against the P0-pinned turn_ctx (the project this turn would persist to),
-    # not the live active context. 0 = disabled (default), so zero disk cost
-    # unless ops opts in. Sits alongside the session-output ceiling so both
-    # budget gates short-circuit BEFORE the SDK client is built (no API call
-    # when capped). Reads the module attribute at call time (monkeypatchable).
-    daily_cap = PYPSA_GUI_CHAT_DAILY_TOKEN_CAP
-    if daily_cap > 0:
-        spent = _today_token_spend(turn_ctx)
-        if spent >= daily_cap:
-            return "session_done", {
-                "reason": "daily_budget_exhausted",
-                "kind": "daily_tokens",
-                "limit": daily_cap,
-                "spent": spent,
-            }
-    return None
 
 
 def _build_user_content(
@@ -1944,11 +1865,11 @@ def _run_turn_body(
     # daily cap refuses — a silent behaviour change, and a merge is the
     # worst place to make one. The helper stays the pure predicate its
     # own seam test exercises.
-    if not session.usage_reported and session.turns_started >= MAX_TURNS_PER_SESSION:
+    if not session.usage_reported and session.turns_started >= harness_budget.MAX_TURNS_PER_SESSION:
         yield "session_done", {
             "reason": "budget_exhausted",
             "kind": "turns",
-            "limit": MAX_TURNS_PER_SESSION,
+            "limit": harness_budget.MAX_TURNS_PER_SESSION,
         }
         return
     with session._lock:
@@ -2218,7 +2139,7 @@ def _run_turn_body(
     # Per-profile token cap (Task 7) — resolved once for the whole turn;
     # `profile.max_output_tokens is None` means "no override", the same
     # meaning `llm_config` documents for that field.
-    max_output_tokens = profile.max_output_tokens or MAX_OUTPUT_TOKENS_PER_TURN
+    max_output_tokens = profile.max_output_tokens or harness_budget.MAX_OUTPUT_TOKENS_PER_TURN
 
     while True:
         if session.abort_event.is_set():
@@ -2412,11 +2333,11 @@ def _run_turn_body(
             messages.append({"role": "user", "content": tool_results})
             with session._lock:
                 session.append_history_message({"role": "user", "content": tool_results})
-            if tool_call_count > MAX_TOOL_CALLS_PER_TURN:
+            if tool_call_count > harness_budget.MAX_TOOL_CALLS_PER_TURN:
                 yield "error", {
                     "error_kind": "tool_call_cap_exceeded",
                     "message": (
-                        f"more than {MAX_TOOL_CALLS_PER_TURN} tool calls in "
+                        f"more than {harness_budget.MAX_TOOL_CALLS_PER_TURN} tool calls in "
                         "one turn; refusing further dispatch this turn."
                     ),
                 }
@@ -2674,7 +2595,7 @@ def _dispatch_real_tool_call(
                 lambda: _ctx_snapshot.run(lambda: handler(**(args or {})))
             )
             try:
-                result = future.result(timeout=PER_TOOL_TIMEOUT_SECONDS)
+                result = future.result(timeout=harness_budget.PER_TOOL_TIMEOUT_SECONDS)
             except concurrent.futures.TimeoutError:
                 # Anthropic requires a tool_result for every tool_use_id in the
                 # next user message (same invariant the project_switched and
@@ -2686,7 +2607,7 @@ def _dispatch_real_tool_call(
                     "error_kind": "tool_timeout",
                     "message": (
                         f"tool {tool_name!r} exceeded the "
-                        f"{PER_TOOL_TIMEOUT_SECONDS:g}s execution deadline"
+                        f"{harness_budget.PER_TOOL_TIMEOUT_SECONDS:g}s execution deadline"
                     ),
                 }
                 tool_results_collector.append({
@@ -2869,6 +2790,16 @@ def _dispatch_real_tool_call(
 # go stale the moment a test patched the home — the silent no-op the
 # `MOVED_TUNABLES` tripwire in tests/test_harness_layout.py exists to catch.
 _FORWARDED_TUNABLES: dict[str, str] = {
+    "MAX_OUTPUT_TOKENS_PER_TURN": "harness.budget",
+    "MAX_TOOL_CALLS_PER_TURN": "harness.budget",
+    "MAX_TURNS_PER_SESSION": "harness.budget",
+    "MAX_OUTPUT_TOKENS_PER_SESSION": "harness.budget",
+    "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP": "harness.budget",
+    "MAX_STREAM_RETRIES": "harness.budget",
+    "BASE_STREAM_RETRY_DELAY": "harness.budget",
+    "MAX_STREAM_RETRY_DELAY": "harness.budget",
+    "_RETRYABLE_SDK_KINDS": "harness.budget",
+    "PER_TOOL_TIMEOUT_SECONDS": "harness.budget",
     "MAX_TOOL_RESULT_CHARS_PER_TURN": "harness.results",
     "SESSION_MESSAGES_MAX": "harness.history",
     "ROTATE_BYTES": "harness.history",
@@ -2880,6 +2811,8 @@ _FORWARDED_TUNABLES: dict[str, str] = {
     "STREAM_RATE_REFILL_PER_SEC": "harness.ratelimit",
     # A patched FUNCTION whose only reader moved: the same rule applies.
     "_build_anthropic_client": "harness.providers.wiring",
+    # A patched function whose only reader (the budget gate) moved.
+    "_today_token_spend": "harness.history",
 }
 
 

@@ -56,6 +56,8 @@ import re
 import pytest
 
 from services import chat_service
+from harness import history as harness_history
+from harness import budget as harness_budget
 from harness.providers import wiring as harness_wiring
 from tests.test_chat_e2e import (
     FakeAnthropicClient,
@@ -161,8 +163,8 @@ def _scenarios(install_network):
 
     def daily_token_cap():
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(chat_service, "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", 5)
-            mp.setattr(chat_service, "_today_token_spend", lambda _ctx: 9)
+            mp.setattr(harness_budget, "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", 5)
+            mp.setattr(harness_history, "_today_token_spend", lambda _ctx: 9)
             session = chat_service.ChatSession()
             return list(chat_service.run_turn(session, "hi",
                                               client=_plain_text_client()))

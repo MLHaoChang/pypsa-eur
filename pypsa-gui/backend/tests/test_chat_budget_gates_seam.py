@@ -36,6 +36,8 @@ import inspect
 import pytest
 
 from services import chat_service
+from harness import history as harness_history
+from harness import budget as harness_budget
 from harness.providers import wiring as harness_wiring
 
 
@@ -91,16 +93,16 @@ def test_the_daily_cap_is_off_at_zero(monkeypatch):
     has not opted in should pay nothing for the feature.
     """
     calls = []
-    monkeypatch.setattr(chat_service, "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", 0)
-    monkeypatch.setattr(chat_service, "_today_token_spend",
+    monkeypatch.setattr(harness_budget, "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", 0)
+    monkeypatch.setattr(harness_history, "_today_token_spend",
                         lambda ctx: calls.append(ctx) or 10**9)
     assert _seam()(chat_service.ChatSession(), _Ctx()) is None
     assert calls == [], "the disabled cap still read the day's spend from disk"
 
 
 def test_the_daily_cap_blocks_and_reports_what_was_spent(monkeypatch):
-    monkeypatch.setattr(chat_service, "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", 100)
-    monkeypatch.setattr(chat_service, "_today_token_spend", lambda _ctx: 100)
+    monkeypatch.setattr(harness_budget, "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", 100)
+    monkeypatch.setattr(harness_history, "_today_token_spend", lambda _ctx: 100)
     frame = _seam()(chat_service.ChatSession(), _Ctx())
     assert frame is not None
     name, payload = frame
@@ -118,11 +120,11 @@ def test_the_daily_cap_is_read_from_the_module_at_call_time(monkeypatch):
     The property that keeps every daily-cap test honest. Capture the value in a
     default argument and this passes while those tests stop testing anything.
     """
-    monkeypatch.setattr(chat_service, "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", 0)
+    monkeypatch.setattr(harness_budget, "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", 0)
     session = chat_service.ChatSession()
     assert _seam()(session, _Ctx()) is None
-    monkeypatch.setattr(chat_service, "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", 1)
-    monkeypatch.setattr(chat_service, "_today_token_spend", lambda _ctx: 5)
+    monkeypatch.setattr(harness_budget, "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", 1)
+    monkeypatch.setattr(harness_history, "_today_token_spend", lambda _ctx: 5)
     assert _seam()(session, _Ctx()) is not None, (
         "the cap was captured rather than read at call time"
     )
@@ -134,8 +136,8 @@ def test_the_daily_cap_is_measured_against_the_context_it_was_given(monkeypatch)
     mid-turn project switch moves the turn onto another project's budget.
     """
     seen = []
-    monkeypatch.setattr(chat_service, "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", 100)
-    monkeypatch.setattr(chat_service, "_today_token_spend",
+    monkeypatch.setattr(harness_budget, "PYPSA_GUI_CHAT_DAILY_TOKEN_CAP", 100)
+    monkeypatch.setattr(harness_history, "_today_token_spend",
                         lambda ctx: (seen.append(ctx), 0)[1])
     pinned = _Ctx("the-pinned-one")
     _seam()(chat_service.ChatSession(), pinned)
