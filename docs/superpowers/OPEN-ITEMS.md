@@ -54,6 +54,11 @@ one dict. Full analysis, reproduction and fix criteria:
 
 ### 13. Chat tools that write a project's upload store bypass its lock check
 
+**Fixed independently in #76 (`e36c041`), not yet on master.** Do not fix
+again. When #76 lands, close this entry and delete the 7 `KNOWN_GAPS` and 3
+`TOOL_POLICY` entries the write-surface test then fails on (verified by trial
+merge on 2026-10-05).
+
 `services/chat_tools.py`. The HTTP upload routes (`post_upload`,
 `delete_upload_route`) check the edit lock. Seven chat tools write the same
 store with no check of their own and are not gated at the chat seam:
@@ -76,32 +81,6 @@ Full analysis, reproduction and fix criteria:
 
 
 ## Medium
-
-### 6. Authorization denies by omission: lock dimension done, ACL dimension open
-
-**Narrowed 2026-10-05.** The original entry ("`ProjectAccessDep` is adopted by
-6 of 23 routers") was partly stale and partly mis-framed: `/api/results/` has
-since been lock-gated; the count missed `ProjectDep`, a second ACL dependency
-on the same `resolve_project`; and the five large routers act on the ACTIVE
-project, which no path-param dependency can resolve. The item's own remedy was
-the right one: make the omission fail loudly.
-
-**Lock dimension: done** in `a266dd5`. `tests/test_write_surface_lock_policy.py`
-fails on any write route or non-read chat tool that is not gated, not
-verifiably holder-checked (calls are followed, not source-scanned), and not
-given a written reason. Mutation-tested seven ways; undoing item 12's fix turns
-it red naming that exact route. Writing it found item 13.
-
-**Still open:**
-* the **ACL** dimension ("may this caller SEE this project") has the same shape
-  and no omission test. Nothing has been found there, and nothing has looked
-  systematically either;
-* three product questions the policy table now states rather than settles:
-  should gridspine studies, chat-history import/clear, and adequacy campaigns
-  respect the edit lock?
-
-Plan and ground-truth counts:
-`plans/2026-10-05-item-6-write-surface-lock-policy.md`.
 
 ### 7. Node positions revert on the blank canvas
 
@@ -191,6 +170,24 @@ NOT reused or compacted — other findings and assessments cite these numbers.
   mutation-verified after. **This closes the class in this router family — all
   three sidecar PUTs now carry the check** — but not the shape that produced it,
   which is item 6.
+* **6** — authorization denied by omission. Closed by two omission tests
+  rather than by a migration. The original entry ("`ProjectAccessDep` adopted
+  by 6 of 23 routers") was partly stale and partly mis-framed; see
+  `plans/2026-10-05-item-6-write-surface-lock-policy.md`.
+  - LOCK half, `a266dd5`: `tests/test_write_surface_lock_policy.py` fails on
+    any write route or non-read chat tool with no edit-lock decision. Writing
+    it found item 13.
+  - ACL half, `828094e`: `tests/test_project_route_acl_policy.py` fails on any
+    project-naming route or tool that does not reach
+    `project_acl.ensure_project_access` (`find_project` alone is scoped to the
+    org only). It also fails on any API family that uses `{name}` without
+    declaring what it names. No gap was found: all 75 routes passed.
+
+  Both are mutation-tested seven ways. Not covered by either, by design:
+  whether the check runs on the very project the path names (behavioural
+  tenancy tests hold that). Three product questions the lock table states
+  rather than settles (gridspine studies, chat-history import, adequacy
+  campaigns) are in the plan. #76 settles two of them.
 * **5** — chat sessions have no owner, so the confirmation gate rests on id
   secrecy. Closed by the same commit as item 3: `owner_user_id` plus one
   comparison is exactly the fix this item asked for, so `/confirm` no longer

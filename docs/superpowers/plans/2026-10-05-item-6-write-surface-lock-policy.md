@@ -1,6 +1,6 @@
 # Item 6: make an ungated write path fail loudly
 
-**Date:** 2026-10-05 · **Status:** step 1 done (`a266dd5`); steps 2-4 open.
+**Date:** 2026-10-05 · **Status:** steps 1 and 3 done (`a266dd5`, `828094e`); step 2 fixed independently by #76 (`e36c041`); step 4 is the owner's.
 **Source:** OPEN-ITEMS item 6, from finding 3 of
 `assessments/2026-09-12-per-route-authorization-audit.md`.
 
@@ -41,14 +41,31 @@ must be gated, verifiably holder-checked, carry a written policy entry, or be a
 `KNOWN_GAPS` entry pointing at an open item (a ratchet). Mutation-tested against
 seven ways the gap comes back; see the `a266dd5` commit message.
 
-## Step 2: fix item 13
+## Step 2: fix item 13 (fixed independently by #76, `e36c041`)
+
+#76 gates `clear_uploads`, `delete_upload`, `clear_chat_history`,
+`start_campaign` and `end_campaign` at the seam, and all six exports through one
+`_check_foreign_lock("export")` in `_save_agent_export`. It also splits the
+list into `_NETWORK_SERVICE_CALL_MUTATORS` and the gated set, as proposed here.
+Verified by trial-merging #76 into #80: the policy test's ratchet fires on
+exactly the 7 `KNOWN_GAPS` entries and the 3 `TOOL_POLICY` entries it made
+redundant. Whichever of #76 and #80 lands second deletes those 10 entries.
+The original sketch follows.
+
 
 Gate the seven upload-store tools at the chat seam. Delete their `KNOWN_GAPS`
 lines; the ratchet forces this. Rename or split `_LOCK_GATE_SERVICE_CALL_MUTATORS`,
 whose name says "network", and correct the stale docstring line that let it
 through. Fix criteria are in the item 13 finding.
 
-## Step 3: the same ratchet for the ACL dimension
+## Step 3: the same ratchet for the ACL dimension (done, `828094e`)
+
+**Result: no gap.** All 75 project-naming routes reach
+`project_acl.ensure_project_access`; so does every project-taking tool whose
+argument names a project. `tests/test_project_route_acl_policy.py` now fails on
+the next one that does not, and on any API family that uses `{name}` without
+declaring what it names. The original sketch of this step follows.
+
 
 "May this caller SEE this project" has no omission test. None has been found,
 but none has been looked for systematically either. Shape: every route whose
