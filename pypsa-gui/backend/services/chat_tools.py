@@ -2356,8 +2356,25 @@ def gridspine_export_handoff_bundle(project_id: str, hour: int) -> dict:
     from services.gridspine_service import export_handoff_bundle as _h
     with _acting() as (db, user):
         # Pass-through, as above: the service answers 422 on a bad hour.
-        path = _h(_gridspine_project(db, user, project_id), hour)
-        return {"path": str(path), "filename": path.name, "bytes": path.stat().st_size}
+        project = _gridspine_project(db, user, project_id)
+        path = _h(project, hour)
+        # The DOWNLOAD ROUTE, not `str(path)`. The absolute path named the
+        # server's storage root and the org and project UUIDs, and it was
+        # useless to the model and the user alike — nothing can fetch a
+        # server-side path. The route is what the study view links to.
+        # `hour` as the service accepted it — never `int(hour)` here: the
+        # tools are pass-throughs, and coercing in the wrapper turns the
+        # service's 422 into a 500 (test_gridspine_service pins that).
+        from urllib.parse import quote
+
+        return {
+            "download_url": (
+                f"/api/gridspine/{quote(project.name, safe='')}"
+                f"/bundles/{quote(str(hour), safe='')}"
+            ),
+            "filename": path.name,
+            "bytes": path.stat().st_size,
+        }
 
 
 @contextlib.contextmanager
@@ -3386,11 +3403,10 @@ def apply_demand_from_excel(
     value_col: str,
     load_name: str,
     sheet_name: str | None = None,
-    replace: bool = False,
 ) -> dict:
     """
     Parse an Excel/CSV upload's `time_col` + `value_col` into a per-snapshot
-    Load demand profile. Two-pass:
+    Load demand profile, replacing any profile the Load already has. Two-pass:
 
       Pass 1 (NO mutation): parse the time + value columns, align to
         n.snapshots, return structured `error_kind` on mismatch.
@@ -4214,6 +4230,30 @@ def set_active_profile(profile_id: str) -> dict:
 # `add_upload`.
 
 
+# A spreadsheet treats a cell that STARTS with one of these as a formula, and
+# the cells these two tools write come from the model — which copies component
+# names, uploaded files and imported networks into them. So a bus named
+# `=HYPERLINK("https://…","open")` became a live link in a file the user was
+# invited to download and open. (Register: lower-confidence notes, 2026-09-28.)
+_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _inert_csv_cell(value):
+    """A CSV cell a spreadsheet will show as text, never evaluate.
+
+    OWASP's mitigation: prefix a leading apostrophe. Applied to strings only,
+    and not to a string that IS a number (`"-5"`, `"+3.2"`): that is data a
+    spreadsheet reads as the number it is, and an apostrophe would turn it
+    into text.
+    """
+    if isinstance(value, str) and value.startswith(_FORMULA_TRIGGERS):
+        try:
+            float(value)
+        except ValueError:
+            return "'" + value
+    return value
+
+
 def export_to_excel(sheets: dict, filename: str) -> dict:
     """
     Materialise a multi-sheet xlsx workbook from `sheets`.
@@ -4237,6 +4277,13 @@ def export_to_excel(sheets: dict, filename: str) -> dict:
         ws = wb.create_sheet(title=str(sheet_name)[:31] or "Sheet")
         for row in (rows or []):
             ws.append(list(row))
+            # openpyxl stores ANY string starting with "=" as a formula
+            # (`data_type == "f"`), which Excel evaluates on open. A string
+            # cell is shown as written, so force the type rather than edit
+            # the text: in xlsx the cell type decides, not the characters.
+            for cell in ws[ws.max_row]:
+                if cell.data_type == "f":
+                    cell.data_type = "s"
     buf = _io.BytesIO()
     wb.save(buf)
     payload = buf.getvalue()
@@ -4268,9 +4315,9 @@ def export_to_csv(rows: list, columns: list, filename: str) -> dict:
     buf = _io.StringIO()
     w = csv.writer(buf, lineterminator="\r\n")
     if columns:
-        w.writerow(list(columns))
+        w.writerow([_inert_csv_cell(c) for c in columns])
     for row in (rows or []):
-        w.writerow(list(row))
+        w.writerow([_inert_csv_cell(c) for c in row])
     payload = buf.getvalue().encode("utf-8")
     if len(payload) > 25 * 1024 * 1024:
         raise HTTPException(

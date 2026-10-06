@@ -4684,6 +4684,21 @@ def _snapshot_for_turn_undo(session: ChatSession, tool_name: str) -> None:
         return
     if any(stack is done for done in session._undo_snapshotted):
         return
+    # Not while a live-network study runs. Every captured tool is refused then
+    # (the study gate, or the swap refusal for an import or a re-cluster), and
+    # the HTTP middleware returns that refusal BEFORE it snapshots. Snapshotting
+    # first would export a network the study is re-solving between iterates —
+    # holding the network lock against it — for an undo step that changes
+    # nothing.
+    try:
+        from services.project_context import LIVE_NETWORK_STUDIES
+        from services.study_state import study_in_flight_detail
+
+        if study_in_flight_detail(PyPSAService.get_solver_state(),
+                                  "edit the network", keys=LIVE_NETWORK_STUDIES):
+            return
+    except Exception:  # noqa: BLE001 — the gate itself will still refuse
+        pass
     from services.network_undo import push_undo_snapshot
 
     push_undo_snapshot()  # logs and swallows its own failures
@@ -5222,7 +5237,8 @@ def _error_result_content(detail: Any, exc: BaseException, error_kind: str) -> s
     message embeds an address would still pass it through. No code path
     currently does that — `project_locks` puts the address in the dict, never in
     the message — so the structural fix covers the real path, and a general
-    address scrub here would mangle more than it protects.
+    address scrub here would mangle more than it protects. Storage PATHS in a
+    bare exception's text are handled: see `_redact_storage_roots`.
     """
     free_text: str | None = None
     if isinstance(detail, dict):
@@ -5238,8 +5254,41 @@ def _error_result_content(detail: Any, exc: BaseException, error_kind: str) -> s
         return error_kind
 
     free_text = _redact_secrets_in_str(free_text[:_ERROR_DETAIL_CAP])
+    free_text = _redact_storage_roots(free_text)
     free_text = _neutralise_untrusted_delimiters(free_text)
     return f"{error_kind}\n{_UNTRUSTED_OPEN}\n{free_text}\n{_UNTRUSTED_CLOSE}"
+
+
+_STORAGE_PLACEHOLDER = "<project storage>"
+
+
+def _redact_storage_roots(text: str) -> str:
+    """Replace the server's project storage roots in model-facing error text.
+
+    A bare exception — a `FileNotFoundError` from a missing sidecar, an
+    `OSError` from a full disk — carries the absolute path it failed on, and
+    under the org-scoped layout that path is `<root>/<org uuid>/<project
+    uuid>/…`: the server's directory layout and two tenant identifiers, sent to
+    a third-party provider and replayed on every later turn. The model needs
+    the FILE NAME to explain the error, not where the server keeps it, so only
+    the root is replaced and the rest of the message survives. Targeted rather
+    than a general path scrub, which would mangle legitimate text (an uploaded
+    file's own name, a URL).
+    """
+    try:
+        from settings import get_settings
+
+        settings = get_settings()
+        roots = {
+            str(p) for root in (settings.projects_root, settings.flat_projects_root)
+            for p in (root, Path(root).resolve())
+        }
+    except Exception:  # noqa: BLE001 — never fail an error path on its scrub
+        return text
+    # Longest first, so a root nested inside another is not half-replaced.
+    for root in sorted((r for r in roots if len(r) > 1), key=len, reverse=True):
+        text = text.replace(root, _STORAGE_PLACEHOLDER)
+    return text
 
 
 # Result members that identify a PERSON. Scrubbed from every model-facing

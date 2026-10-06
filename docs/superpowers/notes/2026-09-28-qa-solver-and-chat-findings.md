@@ -646,17 +646,53 @@ un-pointing removed, and with the wrapper's session dropped, respectively.
 
 ## Lower-confidence notes worth keeping
 
-Not counted above; recorded so they are not rediscovered from scratch.
+Recorded on 2026-09-28 and not counted above. **Each was verified on 2026-10-06**;
+the outcome is given per note. The four that were real are fixed, and so is one
+interaction the #82 merge created. Guard: `tests/test_chat_tool_output_hygiene.py`
+(6 tests), with each fix checked against its mutation.
 
-- `chat.jsonl` is written only when a turn ends cleanly. A turn ending via abort, the
-  tool-call cap, a mid-turn project switch or a stream error leaves no transcript
-  record although its mutations already ran.
-- `export_to_csv` / `export_to_excel` write model-supplied cells unmodified, so a
-  component name beginning with `=` becomes a formula in a downloadable file.
-- `export_*` tools are tagged `Safety: read` but write into the project's uploads
-  directory and consume quota.
-- `gridspine_export_handoff_bundle` returns an absolute server path (containing org
-  and project UUIDs) to the model.
-- `apply_demand_from_excel(replace=...)` is declared in the schema and ignored.
-- Non-HTTPException error text (e.g. a `FileNotFoundError` carrying absolute storage
-  paths) still reaches the provider; `_error_result_content` documents this residual.
+- **`chat.jsonl` is written only when a turn ends cleanly.** VERIFIED, left as a
+  design decision. A turn ending by abort, the tool-call cap, a mid-turn project
+  switch or a stream error leaves no transcript record, although its mutations ran.
+  They are not unrecorded: the change log has every one. Persisting a partial turn
+  is a design change, not a patch: an interrupted assistant message can end on a
+  `tool_use` with no `tool_result`, and replaying that from `/history` makes every
+  later turn of the session invalid to the provider. That needs an explicit
+  "interrupted turn" record shape and a sanitiser on rehydration.
+- **`export_to_csv` / `export_to_excel` write model-supplied cells unmodified.**
+  VERIFIED and FIXED, and worse than noted for xlsx. openpyxl stores any string
+  starting with `=` as a live formula (`data_type == "f"`), not merely text a
+  spreadsheet might interpret, so a bus named `=HYPERLINK(...)` became a working
+  link in a file the user was invited to open. CSV cells starting with = + - @ tab
+  or CR now get OWASP's leading apostrophe, except strings that are numbers
+  (`"-5"`). xlsx formula cells are re-typed as strings, so the text survives
+  unchanged.
+- **`export_*` tools are tagged `Safety: read` but write into the uploads directory
+  and consume quota.** VERIFIED, left as a product decision. Re-tiering them changes
+  their confirmation behaviour, which this register does not decide. The part that
+  was a defect, a non-holder writing into a locked project, is closed at their
+  shared chokepoint (`_save_agent_export` calls `_check_foreign_lock`; CH-4).
+- **`gridspine_export_handoff_bundle` returns an absolute server path.** VERIFIED and
+  FIXED. `str(path)` named the storage root plus the org and project UUIDs, and was
+  of no use to anyone, since nothing can fetch a server-side path. The tool now
+  returns the download route the study view uses,
+  `/api/gridspine/{name}/bundles/{hour}`.
+- **`apply_demand_from_excel(replace=...)` is declared and ignored.** VERIFIED and
+  FIXED by removal. Nothing read the flag, and the tool always replaces the Load's
+  profile, which is what the confirmation card already says. The flag offered the
+  model an option that did not exist. It is gone from the signature and the schema,
+  and the description now says "REPLACING any profile it already has".
+- **Non-HTTPException error text reaches the provider.** VERIFIED and FIXED for the
+  identifying part. A bare exception such as `FileNotFoundError` carries the
+  absolute path it failed on, which under the org-scoped layout is
+  `<root>/<org uuid>/<project uuid>/…`. `_error_result_content` now replaces the
+  two storage roots with `<project storage>`, keeping the file name the model needs
+  to explain the error. Targeted rather than a general path scrub, which would
+  mangle legitimate text.
+- **New, from the #82 merge: a chat edit refused by a live study still cost an undo
+  snapshot.** VERIFIED and FIXED. The HTTP middleware returns the study refusal
+  before it snapshots; the chat dispatcher snapshotted first, and the gate (inside
+  the handler) refused afterwards. That exported a network the study was
+  re-solving, holding the network lock against it, for an undo step that changes
+  nothing. Every captured tool is refused during a live-network study, so
+  `_snapshot_for_turn_undo` now skips while one runs.

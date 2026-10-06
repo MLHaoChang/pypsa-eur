@@ -1807,7 +1807,7 @@ TOOLS: list[dict[str, Any]] = [
     _t(
         "apply_demand_from_excel",
         "Write a demand profile from an uploaded Excel/CSV into the named "
-        "Load's p_set time-series. Values are mapped to snapshots POSITIONALLY "
+        "Load's p_set time-series, REPLACING any profile it already has. Values are mapped to snapshots POSITIONALLY "
         "(row 0 → first snapshot, row 1 → second, etc.), so the spreadsheet "
         "order matters. Both FLAT and MULTI-PERIOD networks are supported. "
         "Row-count rules:\n"
@@ -1829,7 +1829,6 @@ TOOLS: list[dict[str, Any]] = [
             "time_col": {"type": "string"},
             "value_col": {"type": "string"},
             "load_name": {"type": "string"},
-            "replace": {"type": "boolean"},
         },
         ["file_id", "time_col", "value_col", "load_name"],
     ),
@@ -2468,8 +2467,8 @@ TOOLS: list[dict[str, Any]] = [
         "gridspine_export_handoff_bundle",
         "Zip one selected hour's handoff bundle (.raw, .dyr, contingencies, "
         "screening, fault levels, ledger) inside the project directory and "
-        "return {path, filename, bytes}. The user downloads it from the "
-        "study view; this tool prepares it. Safety: write.",
+        "return {download_url, filename, bytes}. The user downloads it from "
+        "the study view (or that URL); this tool prepares it. Safety: write.",
         {
             "project_id": {"type": "string"},
             "hour": {"type": "integer"},
