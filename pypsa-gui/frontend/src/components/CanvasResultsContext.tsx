@@ -78,16 +78,34 @@ interface OverlayData {
   // aggregated horizon-end value) when vintage_results aren't available
   // or the snapshot index isn't multi-period.
   byAssetGroupCapacity: Map<string, number>
+  // Per COMPONENT, what the group maps say per group (plan 1 A2: the
+  // schematic's individual asset nodes). Key `${Class}:${name}` — the key
+  // the 3D view's states use too. Built from the same chunks, no new
+  // endpoint. `dispatchMW` follows the per-class sign convention above (a
+  // Link: p0, positive = drawing from bus0); `socPct` only for storage with
+  // a known energy capacity; `capacity` is the period-effective p_nom (a
+  // Store: e_nom), the number the node label shows instead of the installed
+  // sizing figure.
+  byAsset: Map<string, AssetOverlay>
+}
+
+export interface AssetOverlay {
+  cls: 'Generator' | 'Load' | 'StorageUnit' | 'Store' | 'Link'
+  dispatchMW: number | null
+  socPct: number | null
+  capacity: number | null
 }
 
 const EMPTY: OverlayData = {
   enabled: false, idx: 0, iso: '', kind: 'p',
   byBus: new Map(), byLine: new Map(), byLink: new Map(),
   byAssetGroup: new Map(), byAssetGroupSoC: new Map(),
-  byAssetGroupCapacity: new Map(),
+  byAssetGroupCapacity: new Map(), byAsset: new Map(),
 }
 
-const CanvasResultsContext = createContext<OverlayData>(EMPTY)
+/** Exported for component tests that render one overlay consumer with a hand-built value. */
+export const CanvasResultsContext = createContext<OverlayData>(EMPTY)
+export type { OverlayData }
 export const useCanvasResults = () => useContext(CanvasResultsContext)
 
 // Backend's ts_payload returns `periods` as a separate int[] alongside
@@ -606,12 +624,45 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
     }
     // Loads have no capacity expansion — skip.
 
+    // ── Per component (A2's asset nodes) — the same rows, one entry each ──
+    const byAsset = new Map<string, AssetOverlay>()
+    const soc = (energy: number | undefined, cap: number): number | null =>
+      energy != null && Number.isFinite(energy) && cap > 0 ? (energy / cap) * 100 : null
+    for (const g of generators as Generator[]) {
+      byAsset.set(`Generator:${g.name}`, {
+        cls: 'Generator', dispatchMW: gMap?.get(g.name) ?? null, socPct: null,
+        capacity: effectiveCapForAsset('Generator', g.name, g.p_nom_opt ?? g.p_nom ?? 0),
+      })
+    }
+    for (const ld of loads as Load[]) {
+      byAsset.set(`Load:${ld.name}`, { cls: 'Load', dispatchMW: lMap?.get(ld.name) ?? null, socPct: null, capacity: null })
+    }
+    for (const s of storageUnits as StorageUnit[]) {
+      const pNom = effectiveCapForAsset('StorageUnit', s.name, s.p_nom_opt ?? s.p_nom ?? 0)
+      byAsset.set(`StorageUnit:${s.name}`, {
+        cls: 'StorageUnit', dispatchMW: sdMap?.get(s.name) ?? null,
+        socPct: soc(socMap?.get(s.name), (s.max_hours ?? 0) * pNom), capacity: pNom,
+      })
+    }
+    for (const s of stores as Store[]) {
+      const eNom = effectiveCapForAsset('Store', s.name, s.e_nom_opt ?? s.e_nom ?? 0)
+      byAsset.set(`Store:${s.name}`, {
+        cls: 'Store', dispatchMW: stMap?.get(s.name) ?? null, socPct: soc(eMap?.get(s.name), eNom), capacity: eNom,
+      })
+    }
+    for (const lk of links as LinkT[]) {
+      byAsset.set(`Link:${lk.name}`, {
+        cls: 'Link', dispatchMW: linkMap?.get(lk.name) ?? null, socPct: null,
+        capacity: effectiveCapForAsset('Link', lk.name, lk.p_nom_opt ?? lk.p_nom ?? 0),
+      })
+    }
+
     return {
       enabled: true,
       idx, iso,
       kind: flowOverlayKind,
       byBus, byLine, byLink, byAssetGroup, byAssetGroupSoC,
-      byAssetGroupCapacity,
+      byAssetGroupCapacity, byAsset,
     }
   }, [
     enableQueries, resultsSnapshotIdx, gensTS, loadTS, linesTS, linksTS, linesReactiveTS,

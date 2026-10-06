@@ -44,6 +44,13 @@ import {
   buildLinkEdges, componentNameFromEdgeId, derivedPortFlow, getLinkColor, FALLBACK_COLORS,
 } from './topologyEdges'
 import { runLayout, BUS_R, ASSET_R, type LayoutSatellite } from './topologyLayout'
+import {
+  buildAssetNodes, buildAssetEdges, assetNodeLinkNames, assetSatellites, ringOffsets, liveAssetPositions,
+  componentFromAssetNodeId, isAssetNodeId, defaultAssetMode, countNonBusComponents, assetLegend,
+  INDIVIDUAL_MAX_COMPONENTS, type AssetMode, type AssetNodeDescriptor,
+} from './topologyAssets'
+import { formatSizing, type MatchContext } from '../utils/assetTypes'
+import { assetIcon } from '../utils/assetTypeIcon'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type AssetCategory = 'Thermal' | 'Renewables' | 'Storage' | 'Load'
@@ -797,6 +804,114 @@ function AssetGroupNode({ id, data, selected }: NodeProps) {
               lineHeight: 1.4,
             }}>{c}</div>
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Asset node (A2, *individual* mode) ─────────────────────────────────────────
+// One component as a card: the shared type icon and colour, the name, the
+// sizing figure the type names — and, with the overlay on, what the group
+// bubble shows for a group: dispatch with direction, SoC gauge for storage,
+// the period-effective capacity in place of the installed figure.
+const ASSET_NODE_W = 84
+
+export function AssetNode({ id, data, selected }: NodeProps) {
+  const d = data as unknown as AssetNodeDescriptor
+  const color = d.color
+  const [hovered, setHovered] = useState(false)
+  const overlapping = useContext(OverlapContext)
+  const highlight = useContext(HighlightContext)
+  const isOverlapping = overlapping.has(id)
+  const isHighlighted = highlight?.type === d.cls && highlight.name === d.name
+
+  const results = useCanvasResults()
+  const ov = results.enabled ? results.byAsset.get(`${d.cls}:${d.name}`) : undefined
+  const dispatchMW = ov?.dispatchMW ?? null
+  const socPct = ov?.socPct ?? null
+  const socTint = socPct == null ? color : socColor(socPct)
+  // Sign convention by class, as the group bubble: generators inject (▲);
+  // a load consumes (▼); storage ▲ discharge / ▼ charge; a conversion Link
+  // draws from its bus0 when p0 > 0 (▼ — an electrolyser taking power).
+  let arrow = ''
+  let dispatchColor = color
+  let dispatchTitle = ''
+  if (dispatchMW != null && Number.isFinite(dispatchMW)) {
+    if (d.cls === 'Load') { arrow = '▼'; dispatchColor = '#dc2626'; dispatchTitle = `Consumption at this snapshot: ${dispatchMW.toFixed(2)} MW` }
+    else if (d.cls === 'StorageUnit' || d.cls === 'Store') { arrow = dispatchMW >= 0 ? '▲' : '▼'; dispatchColor = dispatchMW >= 0 ? '#16a34a' : '#d97706'; dispatchTitle = `Dispatch at this snapshot (positive = discharge): ${dispatchMW.toFixed(2)} MW` }
+    else if (d.cls === 'Link') { arrow = dispatchMW >= 0 ? '▼' : '▲'; dispatchColor = dispatchMW >= 0 ? '#d97706' : '#16a34a'; dispatchTitle = `p0 at this snapshot (positive = drawn from ${d.bus}): ${dispatchMW.toFixed(2)} MW` }
+    else { arrow = dispatchMW >= 0 ? '▲' : '▼'; dispatchColor = '#16a34a'; dispatchTitle = `Generation at this snapshot: ${dispatchMW.toFixed(2)} MW` }
+  }
+  // The figure: the installed sizing figure, or with the overlay on the
+  // period-effective capacity in the same unit (a StorageUnit sized in MWh
+  // shows p_nom × max_hours).
+  let figure = d.sizing ? formatSizing(d.sizing) : ''
+  if (ov?.capacity != null && Number.isFinite(ov.capacity) && d.sizing) {
+    const amount = d.sizing.unit === 'MWh' && d.cls === 'StorageUnit' ? ov.capacity * (d.maxHours ?? 0) : ov.capacity
+    figure = formatSizing({ amount, unit: d.sizing.unit })
+  }
+
+  return (
+    <div
+      data-asset-node={d.id}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="select-none cursor-pointer"
+      title={`${d.typeLabel} · ${d.name}${d.carrier ? ` · ${d.carrier}` : ''}`}
+      style={{
+        width: ASSET_NODE_W,
+        backgroundColor: 'var(--color-bg)',
+        border: `${selected ? 2 : 1.2}px solid ${color}`,
+        borderRadius: 7,
+        boxShadow: isOverlapping
+          ? '0 0 0 2px rgba(239,68,68,0.4), 0 2px 8px rgba(0,0,0,0.12)'
+          : isHighlighted
+          ? '0 0 0 3px #2f81f7, 0 2px 8px rgba(0,0,0,0.12)'
+          : selected
+          ? `0 0 0 2px ${color}22, 0 2px 8px rgba(0,0,0,0.12)`
+          : hovered ? '0 2px 7px rgba(0,0,0,0.12)' : '0 1px 4px rgba(0,0,0,0.08)',
+        filter: selected ? `drop-shadow(0 0 3px ${color}88)` : undefined,
+        transform: hovered && !selected ? 'translate(-1px, -2px)' : undefined,
+        transition: 'transform 120ms, box-shadow 120ms',
+        padding: '5px 4px 4px',
+      }}
+    >
+      <Handle type="source" position={Position.Left} style={CENTER_HANDLE} />
+      <Handle type="target" position={Position.Left} style={CENTER_HANDLE} />
+
+      <div style={{
+        width: 28, height: 28, margin: '0 auto 3px',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        backgroundColor: hovered || selected ? `${color}22` : `${color}12`,
+        borderRadius: 5, color, transition: 'background-color 120ms',
+      }}>
+        {assetIcon(d.icon)}
+      </div>
+
+      {/* Name — the thing the user designs; the type is the tooltip and the legend. */}
+      <div style={{ fontSize: 8.5, fontWeight: 600, color: 'var(--color-text)', textAlign: 'center', lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {d.name}
+      </div>
+      {figure && (
+        <div data-testid="asset-figure" style={{ fontSize: 8, color: 'var(--color-muted)', marginTop: 1, textAlign: 'center' }}>{figure}</div>
+      )}
+
+      {dispatchMW != null && Number.isFinite(dispatchMW) && (
+        <div style={{ fontSize: 8.5, fontWeight: 600, color: dispatchColor, marginTop: 2, textAlign: 'center', lineHeight: 1.15 }} title={dispatchTitle}>
+          {arrow} {fmtMW(Math.abs(dispatchMW))}
+        </div>
+      )}
+
+      {socPct != null && Number.isFinite(socPct) && (
+        <div
+          style={{ fontSize: 8, fontWeight: 500, color: socTint, marginTop: 1, textAlign: 'center', lineHeight: 1.15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}
+          title={`State of charge at this snapshot: ${socPct.toFixed(1)} %`}
+        >
+          <span aria-hidden style={{ display: 'inline-block', width: 22, height: 4, background: '#e5e7eb', borderRadius: 2, overflow: 'hidden' }}>
+            <span style={{ display: 'block', height: '100%', width: `${Math.max(0, Math.min(100, socPct))}%`, background: socTint }} />
+          </span>
+          <span>SoC {socPct.toFixed(0)} %</span>
         </div>
       )}
     </div>
@@ -1711,7 +1826,7 @@ function NewConnectionDialog({
   )
 }
 
-const nodeTypes = { bus: BusNode, assetGroup: AssetGroupNode }
+const nodeTypes = { bus: BusNode, assetGroup: AssetGroupNode, asset: AssetNode }
 const edgeTypes = { network: EditableEdge }
 
 // ── Results pill ───────────────────────────────────────────────────────────────
@@ -1797,7 +1912,7 @@ export default function TopologyCanvas() {
     resultSource, setResultSource, resultsSnapshotIdx,
     flowOverlayKind, setFlowOverlayKind,
     pendingNodePosition, setPendingNodePosition,
-    currentProject,
+    currentProject, openRightPanel, requestPropertiesEdit,
   } = useUIStore()
   const queryClient = useQueryClient()
 
@@ -1819,13 +1934,16 @@ export default function TopologyCanvas() {
     : (acPfStatus?.converged_per_snapshot?.[currentSnapIso] ?? true)
 
   const { data: buses = [] }      = useQuery({ queryKey: nk(currentProject, 'buses'),         queryFn: networkApi.getBuses })
-  const { data: lines = [] }      = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines })
-  const { data: links = [] }      = useQuery({ queryKey: nk(currentProject, 'links'),         queryFn: networkApi.getLinks })
-  const { data: transformers = [] } = useQuery({ queryKey: nk(currentProject, 'transformers'), queryFn: networkApi.getTransformers })
-  const { data: generators = [] } = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
-  const { data: loads = [] }      = useQuery({ queryKey: nk(currentProject, 'loads'),         queryFn: networkApi.getLoads })
-  const { data: sus = [] }        = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
-  const { data: stores = [] }     = useQuery({ queryKey: nk(currentProject, 'stores'),        queryFn: networkApi.getStores })
+  const { data: lines = [], isPending: linesPending }      = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines })
+  const { data: links = [], isPending: linksPending }      = useQuery({ queryKey: nk(currentProject, 'links'),         queryFn: networkApi.getLinks })
+  const { data: transformers = [], isPending: trsPending } = useQuery({ queryKey: nk(currentProject, 'transformers'), queryFn: networkApi.getTransformers })
+  const { data: generators = [], isPending: gensPending } = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
+  const { data: loads = [], isPending: loadsPending }      = useQuery({ queryKey: nk(currentProject, 'loads'),         queryFn: networkApi.getLoads })
+  const { data: sus = [], isPending: susPending }        = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
+  const { data: stores = [], isPending: storesPending }     = useQuery({ queryKey: nk(currentProject, 'stores'),        queryFn: networkApi.getStores })
+  // The default asset mode is decided on the component count, so not before
+  // the lists have answered: until then the canvas draws today's grouped view.
+  const listsReady = !(linesPending || linksPending || trsPending || gensPending || loadsPending || susPending || storesPending)
 
   const saveBusMut = useMutation({
     // The Asset-write chokepoint (utils/assetWrite.ts) owns fetch, spread,
@@ -1885,6 +2003,9 @@ export default function TopologyCanvas() {
   // falling back to localStorage for the unsaved / no-project case. This makes
   // the schematic correct on the FIRST render after a map→blank switch.
   const savedStateRef = useRef<PersistedState | null>(localLayoutFor(currentProject))
+  // A2: the user's *grouped* / *individual* choice, from the layout document;
+  // undefined = none made, the default rule (component count) decides.
+  const [assetModeChoice, setAssetModeChoice] = useState<AssetMode | undefined>(() => savedStateRef.current?.assetMode)
 
   // ── Server-side latent layout load ──────────────────────────────────────
   // `layoutEpoch` is bumped whenever a fresh layout document is loaded for the
@@ -1925,10 +2046,12 @@ export default function TopologyCanvas() {
     // Bump the epoch so the node-sync (allRfNodes) and edge-sync effects
     // re-apply the new state.
     savedStateRef.current = localLayoutFor(currentProject)
+    setAssetModeChoice(savedStateRef.current?.assetMode)
     setLayoutEpoch(e => e + 1)
     let cancelled = false
     loadLayoutNewestWins(currentProject).then(resolved => {
       if (cancelled) return
+      setAssetModeChoice(resolved?.assetMode)
       // The NEWEST of server document, module cache (an in-session drag not
       // yet round-tripped to layout.json) and per-project localStorage (a
       // PUT that failed) wins by `savedAt` — not the server unconditionally,
@@ -2012,7 +2135,17 @@ export default function TopologyCanvas() {
   // in the same handler as the setNodes/setEdges that changed the layout, so
   // reading state at call time would persist the PREVIOUS layout and every
   // save would land one change behind. See topologyLayoutStore.
-  const scheduleSave = useLayoutPersistence(nodes, edges)
+  // A2: the mode choice and the asset-node positions not on the canvas ride
+  // along, pruned of deleted components (`liveAssetPositions`) once the lists
+  // have answered — before that, nothing is pruned, so a save in the loading
+  // window cannot drop every asset position. `allAssetDescs` is declared
+  // below; the callback runs in the save effect, after this render.
+  const scheduleSave = useLayoutPersistence(nodes, edges, () => ({
+    assetMode: assetModeChoice,
+    assetNodes: listsReady
+      ? liveAssetPositions(posCache.current, new Set(allAssetDescs.map(d => d.id)))
+      : liveAssetPositions(posCache.current, new Set(Object.keys(posCache.current))),
+  }))
 
   // Page-unload flush for pending edge-deletes. (The layout has its own
   // unload flush, inside useLayoutPersistence.) `pagehide` is the modern,
@@ -2107,10 +2240,34 @@ export default function TopologyCanvas() {
     Object.fromEntries(buses.map(b => [b.name, b.carrier ?? ''])),
     [buses])
 
+  // ── A2: asset nodes ───────────────────────────────────────────────────────
+  const matchCtx = useMemo<MatchContext>(() => ({
+    members: buses.map(b => b.name),
+    busCarrier: name => busCarrier[name],
+  }), [buses, busCarrier])
+  // Every component that would be a node — in both modes, so a save in
+  // grouped mode still knows which cached asset positions are live.
+  const allAssetDescs = useMemo(() => buildAssetNodes({
+    generators: generators as Generator[], loads: loads as Load[],
+    storageUnits: sus as StorageUnit[], stores: stores as Store[], links: links as import('../api/types').Link[],
+  }, matchCtx), [generators, loads, sus, stores, links, matchCtx])
+  const nonBusCount = countNonBusComponents({
+    generators: generators.length, loads: loads.length, storageUnits: sus.length, stores: stores.length,
+    links: links.length, lines: lines.length, transformers: transformers.length,
+  })
+  const assetMode: AssetMode = assetModeChoice ?? (listsReady ? defaultAssetMode(nonBusCount) : 'grouped')
+  const assetDescs = useMemo(() => (assetMode === 'individual' ? allAssetDescs : []), [assetMode, allAssetDescs])
+  // Links drawn as nodes draw no edge.
+  const assetLinkNames = useMemo(() => assetNodeLinkNames(assetDescs), [assetDescs])
+  const setAssetMode = useCallback((mode: AssetMode) => {
+    setAssetModeChoice(mode)
+    scheduleSave()
+  }, [scheduleSave])
+
   // ── Build all React Flow nodes (buses + asset group nodes) ─────────────────
   const allRfNodes = useMemo<Node[]>(() => {
     // Build asset descriptors for all buses
-    const assetDescs = buildAssetDescriptors(
+    const groupDescs = buildAssetDescriptors(
       buses as Bus[], generators as Generator[], loads as Load[],
       sus as StorageUnit[], stores as Store[],
     )
@@ -2142,7 +2299,7 @@ export default function TopologyCanvas() {
     if (stillUncached.length > 0) {
       const layoutPos = runLayout(
         (buses as Bus[]).map(b => ({ id: b.name, v_nom: b.v_nom ?? 1 })),
-        groupSatellites(assetDescs),
+        groupSatellites(groupDescs),
       )
       Object.entries(layoutPos).forEach(([id, p]) => {
         if (!posCache.current[id]) posCache.current[id] = p
@@ -2154,6 +2311,25 @@ export default function TopologyCanvas() {
       position: posCache.current[b.name] ?? { x: 400, y: 400 },
       data: { bus: b },
     }))
+
+    // A2: individual asset nodes. A node seen for the first time is placed
+    // on the ring around its bus (by zone, deterministic by name); a cached
+    // (dragged or saved) position wins.
+    const assetNodes: Node[] = []
+    if (assetDescs.length > 0) {
+      const uncached = assetDescs.filter(d => !posCache.current[d.id])
+      if (uncached.length > 0) {
+        const offs = ringOffsets(assetDescs)
+        uncached.forEach(d => {
+          const busPos = posCache.current[d.bus] ?? { x: 400, y: 400 }
+          const off = offs.get(d.id) ?? { dx: 0, dy: 160 }
+          posCache.current[d.id] = { x: busPos.x + off.dx, y: busPos.y + off.dy }
+        })
+      }
+      assetDescs.forEach(d => {
+        assetNodes.push({ id: d.id, type: 'asset', position: posCache.current[d.id], data: d as unknown as Record<string, unknown> })
+      })
+    }
 
     // Build asset group nodes with metadata
     const agNodes: Node[] = []
@@ -2190,11 +2366,13 @@ export default function TopologyCanvas() {
       addGroup('Load',       busLoads,      busLoads.map(l => l.carrier),      busLoads.reduce((s, l) => s + Math.abs(l.p_set ?? 0), 0))
     })
 
-    return [...busNodes, ...agNodes.filter(n => visibleGroups.has(n.id))]
+    // Grouped mode: the bubbles the user has shown. Individual mode: every asset.
+    const groups = assetMode === 'grouped' ? agNodes.filter(n => visibleGroups.has(n.id)) : []
+    return [...busNodes, ...assetNodes, ...groups]
   // `layoutEpoch` forces a re-seed of posCache when a new project's layout
   // is loaded (the component doesn't remount on project switch).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buses, generators, loads, sus, stores, visibleGroups, layoutEpoch])
+  }, [buses, generators, loads, sus, stores, visibleGroups, layoutEpoch, assetDescs, assetMode])
 
   // ── Network edges (lines / links / transformers) ───────────────────────────
   const rfNetworkEdges = useMemo(() => [
@@ -2205,7 +2383,8 @@ export default function TopologyCanvas() {
     // One edge per Link (bus0 → bus1) plus one per set extra port
     // (`link-<name>#<port>`, bus0 → bus<port>), coloured by the far bus's
     // carrier — the pure builder in ./topologyEdges, tested over the palette.
-    ...buildLinkEdges(links, {
+    // A Link drawn as an asset node (A2, individual mode) is not also an edge.
+    ...buildLinkEdges(links.filter(l => !assetLinkNames.has(l.name)), {
       linkColor: c => linkColorMap[c] ?? FALLBACK_COLORS[0],
       busCarrier: b => busCarrier[b],
       portColor: c => getLinkColor(c, 0),
@@ -2214,10 +2393,18 @@ export default function TopologyCanvas() {
       id: `tr-${t.name}`, source: t.bus0, target: t.bus1, type: 'network',
       data: { type: 'transformer' as const, color: '#16a34a', waypoints: [] as WP[], history: [[]] as WP[][] } satisfies EdgeData,
     })),
-  ], [lines, links, transformers, busVNom, busCarrier, linkColorMap])
+  ], [lines, links, transformers, busVNom, busCarrier, linkColorMap, assetLinkNames])
 
   // ── Dashed connector edges from bus → asset group nodes ────────────────────
   const rfAssetEdges = useMemo<Edge[]>(() => {
+    // A2, individual mode: one dashed edge from each of a node's buses to the
+    // node (a multi-port Link: one per port), in the type colour.
+    if (assetMode === 'individual') {
+      return buildAssetEdges(assetDescs).map(e => ({
+        id: e.id, source: e.source, target: e.target, type: 'network',
+        data: { type: 'asset' as const, color: e.color, waypoints: [] as WP[], history: [[]] as WP[][] } satisfies EdgeData,
+      }))
+    }
     const edges: Edge[] = []
     buses.forEach(bus => {
       const busGens   = (generators as Generator[]).filter(g => g.bus === bus.name)
@@ -2248,7 +2435,7 @@ export default function TopologyCanvas() {
       })
     })
     return edges.filter(e => visibleGroups.has(e.target))
-  }, [buses, generators, loads, sus, stores, visibleGroups])
+  }, [buses, generators, loads, sus, stores, visibleGroups, assetMode, assetDescs])
 
   const handleEdgeUndo = useCallback(() => {
     if (!edgeCtxMenu) return
@@ -2425,7 +2612,7 @@ export default function TopologyCanvas() {
     // Asset-group pseudo-nodes can't anchor Lines — they represent
     // aggregated generators/loads/storage rendered next to a bus, not
     // electrical buses themselves. Refuse the connection cleanly.
-    if (source.startsWith('assetgrp-') || target.startsWith('assetgrp-')) {
+    if (source.startsWith('assetgrp-') || target.startsWith('assetgrp-') || isAssetNodeId(source) || isAssetNodeId(target)) {
       toast.error('Lines can only connect buses')
       return
     }
@@ -2496,6 +2683,9 @@ export default function TopologyCanvas() {
   }, [highlightedComponent, setHighlightedComponent])
 
   const onNodeClick = useCallback((e: React.MouseEvent, node: { id: string }) => {
+    // A2: an asset node selects its component, in any mode.
+    const asset = componentFromAssetNodeId(node.id)
+    if (asset) { setSelectedComponent({ type: asset.cls, name: asset.name }); return }
     if (canvasMode === 'connect' && !node.id.startsWith('assetgrp-')) {
       if (!connectSource) {
         setConnectSource(node.id)
@@ -2521,12 +2711,13 @@ export default function TopologyCanvas() {
   }, [setSelectedComponent])
 
   const onNodeDrag = useCallback((_: React.MouseEvent, draggedNode: { id: string; position: { x: number; y: number } }) => {
-    const dragR = draggedNode.id.startsWith('assetgrp-') ? ASSET_R : BUS_R
+    const radiusOf = (id: string) => (id.startsWith('assetgrp-') || isAssetNodeId(id) ? ASSET_R : BUS_R)
+    const dragR = radiusOf(draggedNode.id)
     const { x: dx, y: dy } = draggedNode.position
     const hits = new Set<string>()
     nodesRef.current.forEach(n => {
       if (n.id === draggedNode.id) return
-      const nR = n.id.startsWith('assetgrp-') ? ASSET_R : BUS_R
+      const nR = radiusOf(n.id)
       const dist = Math.sqrt((n.position.x - dx) ** 2 + (n.position.y - dy) ** 2)
       if (dist < dragR + nR + 10) { hits.add(draggedNode.id); hits.add(n.id) }
     })
@@ -2544,14 +2735,21 @@ export default function TopologyCanvas() {
     scheduleSave()
   }, [scheduleSave])
 
-  const runAutoLayout = useCallback(() => {
-    const assetDescs = buildAssetDescriptors(
+  // Every satellite the layout places: the group bubbles at their category
+  // offsets and (A5) the individual asset nodes by zone around their bus —
+  // both, whatever the mode, so switching modes after a layout is tidy too.
+  const allSatellites = useCallback((): LayoutSatellite[] => {
+    const groupDescs = buildAssetDescriptors(
       buses as Bus[], generators as Generator[], loads as Load[],
       sus as StorageUnit[], stores as Store[],
     )
+    return [...groupSatellites(groupDescs), ...assetSatellites(allAssetDescs)]
+  }, [buses, generators, loads, sus, stores, allAssetDescs])
+
+  const runAutoLayout = useCallback(() => {
     const layoutPos = runLayout(
       (buses as Bus[]).map(b => ({ id: b.name, v_nom: b.v_nom ?? 1 })),
-      groupSatellites(assetDescs),
+      allSatellites(),
     )
     Object.entries(layoutPos).forEach(([id, p]) => { posCache.current[id] = p })
     setNodes(prev => prev.map(n => ({
@@ -2565,7 +2763,7 @@ export default function TopologyCanvas() {
     toast.success('Layout reset — waypoints cleared')
     scheduleSave()
     setTimeout(() => rfInstance.current?.fitView({ padding: 0.25, duration: 400, maxZoom: 0.85 }), 50)
-  }, [buses, generators, loads, sus, stores, setNodes, setEdges, scheduleSave])
+  }, [buses, allSatellites, setNodes, setEdges, scheduleSave])
 
   const handleResetDiagram = useCallback(() => {
     try { localStorage.removeItem(storageKeyFor(currentProject)) } catch { /* noop */ }
@@ -2575,15 +2773,11 @@ export default function TopologyCanvas() {
     // so allRfNodes must NOT re-apply anything for this epoch.
     layoutSeededEpoch.current = layoutEpoch
     posCache.current = {}
-    const assetDescs = buildAssetDescriptors(
-      buses as Bus[], generators as Generator[], loads as Load[],
-      sus as StorageUnit[], stores as Store[],
-    )
     // Always the schematic layout algorithm — the blank canvas never seeds
     // from geographic bus.x/y. See the "latent coordinates" note at the top.
     const layoutPos = runLayout(
       (buses as Bus[]).map(b => ({ id: b.name, v_nom: b.v_nom ?? 1 })),
-      groupSatellites(assetDescs),
+      allSatellites(),
     )
     Object.entries(layoutPos).forEach(([id, p]) => { posCache.current[id] = p })
     setNodes(prev => prev.map(n => ({ ...n, position: posCache.current[n.id] ?? n.position })))
@@ -2595,12 +2789,21 @@ export default function TopologyCanvas() {
     scheduleSave()
     toast.success('Diagram reset — positions and waypoints cleared')
     setTimeout(() => rfInstance.current?.fitView({ padding: 0.25, duration: 400, maxZoom: 0.85 }), 50)
-  }, [buses, generators, loads, sus, stores, setNodes, setEdges, scheduleSave, layoutEpoch, currentProject])
+  }, [buses, allSatellites, setNodes, setEdges, scheduleSave, layoutEpoch, currentProject])
 
   const onNodeDoubleClick = useCallback((e: React.MouseEvent, node: Node) => {
     if (node.id.startsWith('assetgrp-')) return
+    // A2: an asset node opens the editor the Properties panel uses for it —
+    // select, make sure the panel is open, ask its card to start editing.
+    const asset = componentFromAssetNodeId(node.id)
+    if (asset) {
+      setSelectedComponent({ type: asset.cls, name: asset.name })
+      openRightPanel()
+      requestPropertiesEdit({ type: asset.cls, name: asset.name })
+      return
+    }
     setBusEditor({ busName: node.id, anchorX: e.clientX, anchorY: e.clientY })
-  }, [])
+  }, [setSelectedComponent, openRightPanel, requestPropertiesEdit])
 
   const getConnectedCount = useCallback((busName: string) => {
     const ls = (lines as import('../api/types').Line[]).filter(l => l.bus0 === busName || l.bus1 === busName).length
@@ -2682,7 +2885,7 @@ export default function TopologyCanvas() {
 
   const onNodeContextMenu = useCallback((e: React.MouseEvent, node: { id: string }) => {
     e.preventDefault()
-    if (node.id.startsWith('assetgrp-')) return
+    if (node.id.startsWith('assetgrp-') || isAssetNodeId(node.id)) return
     const busName = node.id
     const busGens   = (generators as Generator[]).filter(g => g.bus === busName)
     const busLoads  = (loads as Load[]).filter(l => l.bus === busName)
@@ -2868,10 +3071,12 @@ export default function TopologyCanvas() {
           maskColor="color-mix(in srgb, var(--color-canvas) 72%, transparent)"
           nodeColor={(n) => {
             if (n.type === 'assetGroup') return CATEGORY_CONFIG[(n.data as unknown as AssetGroupData).category]?.color ?? '#6b7280'
+            if (n.type === 'asset') return (n.data as unknown as AssetNodeDescriptor).color ?? '#6b7280'
             return getLineColor((n.data as unknown as { bus?: Bus })?.bus?.v_nom ?? 1)
           }}
           nodeStrokeColor={(n) => {
             if (n.type === 'assetGroup') return CATEGORY_CONFIG[(n.data as unknown as AssetGroupData).category]?.color ?? '#6b7280'
+            if (n.type === 'asset') return (n.data as unknown as AssetNodeDescriptor).color ?? '#6b7280'
             return getLineColor((n.data as unknown as { bus?: Bus })?.bus?.v_nom ?? 1)
           }}
         />}
@@ -2977,6 +3182,27 @@ export default function TopologyCanvas() {
                 >
                   <Layers size={15} />
                 </button>
+                {/* A2: Assets — grouped (four bubbles per bus, shown on
+                    request) or individual (one node per asset). Persisted in
+                    layout.json; the default follows the component count. */}
+                <div className="flex flex-col border border-border rounded-md overflow-hidden text-[9.5px]"
+                  role="group" aria-label="Assets: grouped or individual"
+                  title={`Assets — grouped: one bubble per bus and category · individual: one node per asset (default: individual up to ${INDIVIDUAL_MAX_COMPONENTS} components)`}>
+                  <button
+                    type="button"
+                    aria-label="Assets grouped"
+                    aria-pressed={assetMode === 'grouped'}
+                    onClick={() => setAssetMode('grouped')}
+                    className={`px-1.5 py-1 transition-colors ${assetMode === 'grouped' ? 'bg-accent text-white' : 'text-muted hover:text-text'}`}
+                  >Grp</button>
+                  <button
+                    type="button"
+                    aria-label="Assets individual"
+                    aria-pressed={assetMode === 'individual'}
+                    onClick={() => setAssetMode('individual')}
+                    className={`px-1.5 py-1 border-t border-border transition-colors ${assetMode === 'individual' ? 'bg-accent text-white' : 'text-muted hover:text-text'}`}
+                  >Each</button>
+                </div>
                 {/* Result-source toggle (LOPF / AC PF). Only meaningful when
                     Stage 2 results are available AND the results overlay is on
                     — otherwise the canvas isn't reading either set. Mirrors
@@ -3092,13 +3318,30 @@ export default function TopologyCanvas() {
                   })}
                 </>
               )}
-              <p className="text-[9px] font-bold text-muted uppercase tracking-[0.14em] mb-2 mt-3">Asset groups</p>
-              {(Object.entries(CATEGORY_CONFIG) as [AssetCategory, typeof CATEGORY_CONFIG[AssetCategory]][]).map(([cat, cfg]) => (
-                <div key={cat} className="flex items-center gap-2 mb-1">
-                  <cfg.Icon size={12} style={{ color: cfg.color, flexShrink: 0 }} />
-                  <span className="text-[10.5px] text-ink-700">{cat}</span>
-                </div>
-              ))}
+              {assetMode === 'individual' ? (
+                <>
+                  {/* A5: one row per asset type present, the shared colour and icon
+                      (the same rows the map and the 3D legend draw). */}
+                  <p className="text-[9px] font-bold text-muted uppercase tracking-[0.14em] mb-2 mt-3">Assets · type</p>
+                  {assetLegend(assetDescs).map(row => (
+                    <div key={row.id} className="flex items-center gap-2 mb-1" data-testid="legend-asset-type">
+                      <span style={{ color: row.color, display: 'inline-flex', flexShrink: 0 }}>{assetIcon(row.icon)}</span>
+                      <span className="text-[10.5px] text-ink-700 truncate" title={row.label}>{row.label}</span>
+                    </div>
+                  ))}
+                  {assetDescs.length === 0 && <p className="text-[9.5px] text-muted">No assets</p>}
+                </>
+              ) : (
+                <>
+                  <p className="text-[9px] font-bold text-muted uppercase tracking-[0.14em] mb-2 mt-3">Asset groups</p>
+                  {(Object.entries(CATEGORY_CONFIG) as [AssetCategory, typeof CATEGORY_CONFIG[AssetCategory]][]).map(([cat, cfg]) => (
+                    <div key={cat} className="flex items-center gap-2 mb-1">
+                      <cfg.Icon size={12} style={{ color: cfg.color, flexShrink: 0 }} />
+                      <span className="text-[10.5px] text-ink-700">{cat}</span>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
             )}
           </div>
