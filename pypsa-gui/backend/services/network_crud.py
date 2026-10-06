@@ -9,6 +9,7 @@ router. Never imports ``routers.*``.
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 
 import pandas as pd
@@ -148,6 +149,42 @@ def _meta_payload(n: Any, loaded_project: str | None) -> dict:
         "snapshot_count": len(n.snapshots),
         "bus_count": len(n.buses),
     }
+# PyPSA's multi-port Link columns: `bus2`, `bus3`, … and the matching
+# `efficiency2`, `efficiency3`, …. Mirrors `pypsa.constants.RE_PORTS_GE_2`
+# (`^bus((?:[2-9]|[1-9]\d+))$`) with the efficiency family added — these are
+# the only per-port Input attributes PyPSA honours (`optimize.py` reads
+# `bus{i}` and `efficiency{i}`; `p{i}` is an Output it writes). Spelled as a
+# regex, not a list, so a fourth port is admitted without a code change.
+_LINK_PORT_RE = re.compile(r"^(bus|efficiency)((?:[2-9]|[1-9]\d+))$")
+
+
+def _link_port_extras(kwargs: dict) -> dict:
+    """
+    The multi-port keys of a Link body that name a SET port (A1).
+
+    PyPSA does not list `bus2` / `efficiency2` in the Link catalog — the
+    columns appear on first use — so on a network with no multi-port Link yet
+    the catalog + existing-column test below drops them, and a CHP created
+    from the palette silently loses its heat port. This arm admits them.
+
+    A port counts as set when its `bus{i}` is a non-empty string; its
+    `efficiency{i}` rides along. `LinkCreate` declares `bus3` / `bus4` /
+    `efficiency3` with "" / 1.0 defaults and the create route dumps the whole
+    model, so an unset port must NOT survive — a `bus3` column of empty
+    strings would make PyPSA treat every Link as three-ported.
+    """
+    set_ports = {
+        m.group(2)
+        for k, v in kwargs.items()
+        if (m := _LINK_PORT_RE.match(k)) and m.group(1) == "bus"
+        and isinstance(v, str) and v != ""
+    }
+    return {
+        k: v for k, v in kwargs.items()
+        if (m := _LINK_PORT_RE.match(k)) and m.group(2) in set_ports
+    }
+
+
 def _drop_unknown_extras(component_class: str, attr: str, kwargs: dict) -> dict:
     """
     Drop any key PyPSA does not recognise for this component class (spec D21).
@@ -158,9 +195,11 @@ def _drop_unknown_extras(component_class: str, attr: str, kwargs: dict) -> dict:
     would let an arbitrary key reach `n.add()`, so the two ship together.
 
     A key passes if the catalog reports it as an Input attribute, OR it is
-    already a column on the frame. The second arm is what preserves today's
-    behaviour for fields a Create model declares but PyPSA marks Output —
-    narrowing to catalog-Input alone would be a silent behaviour change.
+    already a column on the frame, OR (Link only) it is a multi-port column
+    naming a set port — see `_link_port_extras`. The second arm is what
+    preserves today's behaviour for fields a Create model declares but PyPSA
+    marks Output — narrowing to catalog-Input alone would be a silent
+    behaviour change.
     """
     from services.adequacy.eh_columns import coerce_eh_value, eh_columns_for
 
@@ -178,7 +217,8 @@ def _drop_unknown_extras(component_class: str, attr: str, kwargs: dict) -> dict:
     if not allowed:
         return {**kwargs, **out_eh}
     columns = set(getattr(n, attr).columns)
-    kept = {k: v for k, v in kwargs.items() if k in allowed or k in columns}
+    ports = _link_port_extras(kwargs) if component_class == "Link" else {}
+    kept = {k: v for k, v in kwargs.items() if k in allowed or k in columns or k in ports}
     return {**kept, **out_eh}
 
 
