@@ -130,6 +130,10 @@ CAPACITY_SPEC_ATTR = "_ic_capacity_spec"   # transient: set by apply, read by th
 CAPACITY_BUILT_ATTR = "_ic_capacity_built"  # transient: set by the LP wrapper
 GROUP_SPEC_ATTR = "_ic_group_spec"      # transient: set by apply, read by the LP wrapper
 TIER_SPEC_ATTR = "_ic_tier_spec"        # transient: set by apply, read by the LP wrapper
+META_GROUP_NET = "ic_group_net"         # the group net-import term a solve bound (P3 WP3.3b)
+GROUP_NET_PRICE_ATTR = "ic_group_net_price"   # links_t: €/MWh on net import, column = PoC
+GROUP_NET_SPEC_ATTR = "_ic_group_net_spec"    # transient: set by apply, read by the LP wrapper
+GROUP_NET_BUILT_ATTR = "_ic_group_net_built"  # transient: set by the LP wrapper
 TIER_BUILT_ATTR = "_ic_tier_built"
 _KWH_PER_MWH = 1000.0
 
@@ -261,8 +265,11 @@ def _side(item: TariffItem) -> str:
 #       (WP2.1c-ii).
 #   4 — tariff capacity items bound (WP2.1c-iii);
 #   5 — changes_dispatch PPAs bound (WP2.2d).
-LP_RECIPE = 5
+#   6 — a net cost energy item on a multi-member group with an export Link
+#       priced once on the group's net import (P3 WP3.3b; refused before).
+LP_RECIPE = 6
 PPA_DISPATCH_RECIPE = 5
+GROUP_NET_RECIPE = 6
 WINDOWED_TIERS_RECIPE = 3
 CAPACITY_RECIPE = 4
 
@@ -306,6 +313,28 @@ def group_spec(cfg: CommercialConfig) -> dict | None:
         return None
     return {"name": cfg.group_contract, "members": list(cfg.group_members),
             "cap_mw": float(cfg.group_cap_mw)}
+
+
+def group_net_items(cfg: CommercialConfig) -> list:
+    """The net COST energy items a multi-member group with an export Link
+    prices on its net import (P3 WP3.3b): the group meter nets Σ members −
+    export per interval, which per-member adders (gross import) cannot."""
+    if len(cfg.group_members) < 2 or cfg.export_link is None or cfg.import_tariff is None:
+        return []
+    return [i for i in cfg.import_tariff.items
+            if i.measured_on == "net" and i.direction == "cost" and not _is_demand(i)
+            and i.kind != "capacity" and not i.tiers and _lp_reason(i) is None]
+
+
+def group_net_hash(cfg: CommercialConfig, version: int = _H.HASH_VERSION) -> str | None:
+    """What the group net-import term binds (drift check): its items, the
+    members, the export Link and the site clock."""
+    items = group_net_items(cfg)
+    if not items:
+        return None
+    return _H.digest({"items": _H.canonical(items, version=version),
+                      "members": sorted(cfg.group_members), "export": cfg.export_link,
+                      "timezone": cfg.timezone}, version=version)
 
 
 def import_links(cfg: CommercialConfig) -> list[str]:
@@ -354,10 +383,15 @@ def _adders(n, cfg: CommercialConfig) -> tuple[dict[str, np.ndarray], list[str],
     energy_items: list[str] = []
     not_in_lp: dict[str, str] = {}
     notes: list[str] = []
+    net_group = {i.id for i in group_net_items(cfg)}
     for item in (cfg.import_tariff.items if cfg.import_tariff is not None else []):
         reason = _lp_reason(item)
         if reason is not None:
             not_in_lp[item.id] = reason
+            continue
+        if item.id in net_group:
+            # Priced once on the group's net import (`_group_net_spec`), never
+            # on the member or export adders (P3 WP3.3b).
             continue
         if item.kind == "capacity":
             if item.periods[0].rate < 0:
@@ -522,11 +556,184 @@ def _meter_sides(n, cfg: CommercialConfig) -> tuple[set[str], set[str]]:
     return seen, bypass
 
 
+def _electric_bus_test(n, cfg: CommercialConfig):
+    """`bus -> bool`: an electric bus — a carrier in `participants._ELECTRIC`
+    (an empty carrier counts: PyPSA's default is "AC", so only a hand-cleared
+    carrier is empty) or the PoC site bus's own carrier."""
+    from services.commercial.participants import _ELECTRIC
+
+    carriers = n.buses["carrier"] if "carrier" in n.buses.columns else None
+    poc_bus = str(n.links.at[cfg.poc_link, "bus1"]) if cfg.poc_link in n.links.index else None
+    site_carrier = str(carriers.get(poc_bus, "")) if (carriers is not None and poc_bus) else ""
+
+    def electric(bus: str) -> bool:
+        c = str(carriers.get(bus, "")) if carriers is not None else ""
+        return c.strip().casefold() in _ELECTRIC or c == site_carrier
+
+    return electric
+
+
 def site_generators(n, cfg: CommercialConfig) -> list[str]:
-    """The Generators BEHIND the commercial meter (`_meter_sides`). One
-    definition for the preflight and the settlement inputs (review 2.2c #3)."""
+    """The Generators BEHIND the commercial meter (`_meter_sides`) that make
+    ELECTRICITY: on an electric bus. One definition for the preflight, the
+    settlement inputs and the ledger's export split (review 2.2c #3). A
+    Generator on a gas, heat or other non-electric bus (a fuel supply, a
+    solar-thermal collector) is not electric generation, whatever else is on
+    its bus; a Link converting it is (`site_generating_ports`; IC P3 gate
+    condition 2, rounds 1–2)."""
     seen, _ = _meter_sides(n, cfg)
-    return [str(g) for g in n.generators.index if str(n.generators.at[g, "bus"]) in seen]
+    electric = _electric_bus_test(n, cfg)
+    return [str(g) for g in n.generators.index
+            if str(n.generators.at[g, "bus"]) in seen and electric(str(n.generators.at[g, "bus"]))]
+
+
+_LINK_PORTS = (1, 2, 3, 4)
+
+
+def _converting_links(n, cfg: CommercialConfig) -> dict[str, tuple[list[int], bool]]:
+    """{link: (electric ports to sum, mixed)} for the site's converting Links.
+
+    PyPSA Link semantics (IC P3 gate round 5): a Link's INPUTS are bus0 and
+    every port k with a negative `efficiency{k}` (at any snapshot); its
+    OUTPUTS are the other ports; a Link with a negative `p_min_pu` is
+    REVERSIBLE — every port is both an input and an output.
+
+    A site-side Link CONVERTS when a non-electric input feeds an electric
+    site-side output (a CHP, a fuel cell). Whether that output is generation
+    depends on where its non-electric inputs' energy COMES FROM, followed
+    upstream through the non-electric side (round 4), never on what merely
+    sits on the bus:
+    - PRIMARY origin: a Generator that can produce, on the bus or upstream
+      (gas → CHP; gas → reformer → H2 → fuel cell; gas boiler → heat Store →
+      ORC);
+    - CHARGED origin: site electricity entering the non-electric side — any
+      Link with an electric input delivering there (a charger, an
+      electrolyser, however many hops), and every REVERSIBLE Link touching an
+      electric site bus (a reversible fuel cell electrolyses too).
+    Stores and StorageUnits only buffer: never an origin. Primary only →
+    generation; charged only, or no origin → not generation (stored site
+    electricity); both → `mixed` (`site_link_generation` makes it NaN
+    whenever it delivers — never a guess). A reversible converter always
+    charges its own side, so it is never plain generation.
+
+    The ports summed are ALL its electric site-side ports: the output is net
+    of an electric input on the converter itself (an engine's auxiliary
+    draw, `efficiency2 < 0` on the site bus) — that draw is consumption, not
+    an origin."""
+    seen, _ = _meter_sides(n, cfg)
+    meter = set(import_links(cfg)) | ({cfg.export_link} if cfg.export_link else set())
+    electric = _electric_bus_test(n, cfg)
+
+    def negative(attr: str, name) -> bool:
+        tv = getattr(n.links_t, attr, None)
+        if tv is not None and name in getattr(tv, "columns", []):
+            if bool((tv[name] < 0).any()):
+                return True
+        v = n.links.at[name, attr] if attr in n.links.columns else None
+        try:
+            return v is not None and float(v) < 0
+        except (TypeError, ValueError):
+            return False
+
+    def ports_of(name) -> list[tuple[int, str, bool]]:
+        """(k, bus, is_input) for ports 0–4 (port 0 = bus0, always an input)."""
+        out = [(0, str(n.links.at[name, "bus0"]), True)]
+        for k in _LINK_PORTS:
+            col = f"bus{k}"
+            b = str(n.links.at[name, col]).strip() if col in n.links.columns else ""
+            if b and b != "nan":
+                out.append((k, b, negative("efficiency" if k == 1 else f"efficiency{k}", name)))
+        return out
+
+    pmax_t = getattr(n.generators_t, "p_max_pu", None)
+
+    def can_produce(g) -> bool:
+        if pmax_t is not None and g in getattr(pmax_t, "columns", []):
+            return bool((pmax_t[g] > 0).any())
+        v = n.generators.at[g, "p_max_pu"] if "p_max_pu" in n.generators.columns else 1.0
+        return bool(float(v) > 0)
+
+    edges: dict[str, set[str]] = {}
+    charged_seed: set[str] = set()
+    candidates: list[tuple[str, list[int], set[str]]] = []
+    for name in n.links.index:
+        if name in meter or str(n.links.at[name, "bus0"]) not in seen:
+            continue
+        ports = [(k, b, inp) for k, b, inp in ports_of(name) if b in seen]
+        reversible = negative("p_min_pu", name)
+        ins = {b for _, b, inp in ports if inp or reversible}
+        outs = {b for _, b, inp in ports if not inp or reversible}
+        ne_in = {b for b in ins if not electric(b)}
+        ne_out = {b for b in outs if not electric(b)}
+        e_in = {b for b in ins if electric(b)}
+        e_out = {b for b in outs if electric(b)}
+        for b in ne_in:
+            edges.setdefault(b, set()).update(ne_out - {b})
+        if e_in:
+            charged_seed |= ne_out           # site electricity enters the non-electric side
+        if e_out and ne_in:
+            candidates.append((str(name), [k for k, b, _ in ports if electric(b)], ne_in))
+    primary_seed = {str(n.generators.at[g, "bus"]) for g in n.generators.index
+                    if can_produce(g) and str(n.generators.at[g, "bus"]) in seen
+                    and not electric(str(n.generators.at[g, "bus"]))}
+
+    def reach(seed: set[str]) -> set[str]:
+        got, todo = set(seed), list(seed)
+        while todo:
+            for b in edges.get(todo.pop(), ()):
+                if b not in got:
+                    got.add(b)
+                    todo.append(b)
+        return got
+
+    charged, primary = reach(charged_seed), reach(primary_seed)
+    out: dict[str, tuple[list[int], bool]] = {}
+    for name, sum_ports, ne_in in candidates:
+        if not ne_in & primary:
+            continue                    # stored site electricity, or no origin
+        out[name] = (sum_ports, bool(ne_in & charged))
+    return out
+
+
+def site_generating_ports(n, cfg: CommercialConfig) -> dict[str, list[int]]:
+    """Links behind the meter that CONVERT a primary non-electric input into
+    site electricity (a CHP, a fuel cell on bought fuel), with the output ports
+    (1–4) that land on a site-side ELECTRIC bus (`_converting_links`). The
+    output of those ports (−p_k, net: an auxiliary draw on a port with a
+    negative efficiency is subtracted) is site generation beside
+    `site_generators` — a CHP's heat on bus1 and power on bus2 counts the power
+    only. An electric-input Link (a feeder, the PoC, a heat pump, a charger) is
+    not generation, nor is a Link fed by storage (a Store battery's discharger,
+    an H2 fuel cell after an electrolyser): storage discharging moves energy the
+    site already had (IC P3 gate, condition 2 and round 3)."""
+    return {k: ports for k, (ports, _mixed) in _converting_links(n, cfg).items()}
+
+
+def site_generating_links(n, cfg: CommercialConfig) -> list[str]:
+    """The converting Links of `site_generating_ports`."""
+    return list(site_generating_ports(n, cfg))
+
+
+def site_link_generation(n, cfg: CommercialConfig, port_frame) -> pd.DataFrame:
+    """Per converting Link, the MW it delivers to site-side electric buses:
+    Σ over its electric ports of −p_k (`port_frame(k)` gives the solved
+    `links_t.p<k>` frame, or None). A port with no solved value is NaN — kept
+    (ADR-0001: the reader says not established, never a silent 0). A MIXED
+    Link (its input bus holds both a primary source and storage) is NaN
+    whenever it delivers: how much of it is generation is not known."""
+    cols = {}
+    for link, (ports, mixed) in _converting_links(n, cfg).items():
+        total = pd.Series(0.0, index=n.snapshots)
+        for k in ports:
+            df = port_frame(k)
+            if df is None or link not in getattr(df, "columns", []):
+                total = total + np.nan
+            else:
+                total = total - df[link].reindex(n.snapshots).astype(float)
+        if mixed:
+            total = total.where(~(total > 1e-9), np.nan)     # unknown only when it delivers
+        cols[link] = total
+    return pd.DataFrame(cols, index=n.snapshots)
 
 
 def meter_bypass_buses(n, cfg: CommercialConfig) -> list[str]:
@@ -648,15 +855,26 @@ def validate_for_network(n, cfg: CommercialConfig | dict, *,
                 f"group_members must include poc_link {cfg.poc_link!r}: the group's tariff "
                 "is the PoC's")
         grid_bus = n.links.at[cfg.poc_link, "bus0"]
-        net = [i.id for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
-               if i.measured_on == "net" and not _is_demand(i)]
-        if net and cfg.export_link is not None and len(cfg.group_members) > 1:
-            # The bill nets the group's import against its export on the group
-            # meter; per-member adders charge each member's gross import.
+        # A net COST item on a multi-member group with an export Link is priced
+        # on the group's net import (P3 WP3.3b; P1 refused it). A negative rate
+        # would pay the LP to import: refused, naming the item. A net REVENUE
+        # item stays refused (WP3.3b review #1): priced on gross export next to
+        # a circulation-neutral net cost item, it pays the LP to import through
+        # a member and export at once.
+        for item in group_net_items(cfg):
+            neg = [p.name for p in item.periods if p.rate < 0]
+            if neg:
+                raise CommercialBindingError(
+                    f"net energy item {item.id!r} on the group has a negative rate in "
+                    f"period(s) {neg}; the group's net import is priced only at rates >= 0")
+        revenue = [i.id for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
+                   if i.measured_on == "net" and i.direction == "revenue" and not _is_demand(i)]
+        if revenue and cfg.export_link is not None and len(cfg.group_members) > 1:
             raise CommercialBindingError(
-                f"energy items measured on net ({net}) on a multi-member group with an export "
-                "Link would charge gross member import the group meter nets out; not supported "
-                "in P1 (price them on import and export separately)")
+                f"net revenue items ({revenue}) on a multi-member group with an export Link "
+                "would be priced on gross export, which pays the LP to import through a member "
+                "and export at once; not supported (price them on export instead)")
+        _group_net_spec(n, cfg)   # dry run: a group net item no period covers (review #2)
         for member in cfg.group_members:
             _require_link(n, member, "group_members")
             _require_one_way(n, member, "group_members")
@@ -1549,6 +1767,92 @@ def add_group_terms(n) -> None:
     n.model.add_constraints(flow <= float(spec["cap_mw"]), name="ic_group_cap")
 
 
+def _group_net_spec(n, cfg: CommercialConfig) -> dict | None:
+    """The group net-import term (P3 WP3.3b): €/MWh per snapshot (Σ of the
+    net cost items' rates), the members and the export Link, or None."""
+    items = group_net_items(cfg)
+    if not items:
+        return None
+    local = _local_clock(n.snapshots, cfg.timezone)
+    price = np.zeros(len(n.snapshots))
+    for item in items:
+        r = _rates(item, local)
+        if np.isnan(r).any():
+            raise CommercialBindingError(
+                f"tariff item {item.id!r} has no period covering {int(np.isnan(r).sum())} "
+                "snapshot(s); add a catch-all period")
+        price += r * _KWH_PER_MWH
+    return {"items": [i.id for i in items], "members": list(cfg.group_members),
+            "export": cfg.export_link, "link": cfg.poc_link, "price": price,
+            "items_hash": group_net_hash(cfg), "hash_version": _H.HASH_VERSION}
+
+
+def add_group_net_terms(n) -> None:
+    """ic_group_net_import[t], ic_group_net_export[t] ≥ 0 with
+    net_import − net_export = Σ_members p[t] − p_export[t], and objective +=
+    Σ_t w_t · price_t · net_import[t], weighted as a marginal cost (the
+    snapshot's objective weight, times its period's in a multi-invest solve),
+    over the snapshots the LP holds (a rolling window, a myopic period). No
+    capacity bounds: members or the PoC may be extendable. With rates ≥ 0 the
+    split is bounded; where a rate is 0 it is degenerate, so the record and the
+    rows use max(0, Σ p_member − p_export) from the dispatch, never the
+    variables."""
+    import xarray as xr
+
+    spec = getattr(n, GROUP_NET_SPEC_ATTR, None)
+    if not spec:
+        return
+    if getattr(n, "has_scenarios", False):
+        raise CommercialBindingError("a net energy item on a group is not supported on a "
+                                     "stochastic (scenario) network")
+    m = n.model
+    flow = (m["Link-p"].sel(name=spec["members"]).sum("name")
+            - m["Link-p"].sel(name=spec["export"]))
+    snaps = m["Link-p"].indexes["snapshot"]
+    pos = n.snapshots.get_indexer(snaps)
+    if (pos < 0).any():
+        raise CommercialBindingError("the LP's snapshots are not on the network's axis")
+    coord = m["Link-p"].coords["snapshot"]
+    zero = xr.DataArray(np.zeros(len(pos)), coords={"snapshot": coord}, dims="snapshot")
+    net_imp = m.add_variables(lower=zero, name="ic_group_net_import")
+    net_exp = m.add_variables(lower=zero, name="ic_group_net_export")
+    m.add_constraints(net_imp - net_exp - flow == 0, name="ic_group_net_balance")
+    w = n.snapshot_weightings.objective.to_numpy(dtype=float)[pos]
+    if getattr(n, "_multi_invest", False):
+        periods = n.snapshots.get_level_values(0)[pos]
+        w = w * n.investment_period_weightings["objective"].reindex(periods).to_numpy(dtype=float)
+    coef = xr.DataArray(np.asarray(spec["price"], dtype=float)[pos] * w,
+                        coords={"snapshot": coord}, dims="snapshot")
+    m.objective += (net_imp * coef).sum()
+    setattr(n, GROUP_NET_BUILT_ATTR, True)
+
+
+def group_net_amounts(n) -> dict | None:
+    """{period (None flat): €} the committed group net-import term charged,
+    unweighted per period, from the dispatch: Σ w · price · max(0, Σ p_member
+    − p_export). None when the record or its inputs are gone."""
+    rec = n.meta.get(META_GROUP_NET) if hasattr(n, "meta") else None
+    if not rec:
+        return None
+    prices = _frame(n, GROUP_NET_PRICE_ATTR)
+    p0 = getattr(n.links_t, "p0", None)
+    links = [*rec.get("members", []), rec.get("export")]
+    if rec.get("link") not in prices.columns or p0 is None or \
+            any(link not in p0.columns for link in links):
+        return None
+    price = prices[rec["link"]].to_numpy(dtype=float)
+    flow = (np.sum([p0[m].to_numpy(dtype=float) for m in rec["members"]], axis=0)
+            - p0[rec["export"]].to_numpy(dtype=float))
+    if np.isnan(price).any() or np.isnan(flow).any():
+        return None
+    amount = n.snapshot_weightings.objective.to_numpy(dtype=float) * price * \
+        np.clip(flow, 0.0, None)
+    if isinstance(n.snapshots, pd.MultiIndex):
+        s = pd.Series(amount, index=n.snapshots).groupby(level=0).sum()
+        return {int(p): float(v) for p, v in s.items()}
+    return {None: float(amount.sum())}
+
+
 def _group_shares(n, spec: dict) -> dict | None:
     """Each member's share of the group's import energy (cost allocation is P3)."""
     p0 = n.links_t.p0
@@ -1781,6 +2085,9 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
             n.meta.pop(META_GROUP, None)
             n.meta.pop(META_CAPACITY, None)
             n.meta.pop(META_PPA, None)
+            n.meta.pop(META_GROUP_NET, None)
+            if hasattr(n.links_t, "get") and n.links_t.get(GROUP_NET_PRICE_ATTR) is not None:
+                n.links_t[GROUP_NET_PRICE_ATTR] = pd.DataFrame(index=n.snapshots)
             n.meta.pop("ic_contracts", None)   # the pre-review solve record (WP2.2c #2)
             if n.generators_t.get(PPA_PRICE_ATTR) is not None:
                 n.generators_t[PPA_PRICE_ATTR] = pd.DataFrame(index=n.snapshots)
@@ -1795,6 +2102,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
     notes = notes + [x for x in demand_notes if x not in notes]
     tier_spec, tiered_items, nonconvex_items = _tier_spec(n, cfg)
     capacity = _capacity_spec(n, cfg)
+    group_net = _group_net_spec(n, cfg)
     refuse_windowed_terms(demand, tier_spec, solve_strategy, multi_period, capacity)
     ppa_adders = _ppa_dispatch_spec(n, cfg) or {}
     has_price = cfg.export_price_ref is not None
@@ -1864,6 +2172,19 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
 
         applied._undo.append(undo_group)
 
+    built_net: dict = {}
+    if group_net is not None:
+        setattr(n, GROUP_NET_SPEC_ATTR, group_net)
+
+        def undo_group_net() -> None:
+            if getattr(n, GROUP_NET_BUILT_ATTR, False):
+                built_net["v"] = True        # read BEFORE the flags go: commit runs after undo
+            for attr in (GROUP_NET_SPEC_ATTR, GROUP_NET_BUILT_ATTR):
+                if hasattr(n, attr):
+                    delattr(n, attr)
+
+        applied._undo.append(undo_group_net)
+
     solved_capacity: dict = {}
     if capacity is not None:
         setattr(n, CAPACITY_SPEC_ATTR, capacity)
@@ -1897,6 +2218,16 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
             n.meta[META_GROUP] = {**group, "energy_share": _group_shares(n, group)}
         else:
             n.meta.pop(META_GROUP, None)
+        if built_net:
+            n.links_t[GROUP_NET_PRICE_ATTR] = pd.DataFrame(
+                {group_net["link"]: group_net["price"]}, index=n.snapshots)
+            n.meta[META_GROUP_NET] = {k: group_net[k] for k in (
+                "items", "members", "export", "link", "items_hash", "hash_version")}
+            n.meta[META_GROUP_NET]["lp_recipe"] = GROUP_NET_RECIPE
+        else:
+            n.meta.pop(META_GROUP_NET, None)
+            if hasattr(n.links_t, "get") and n.links_t.get(GROUP_NET_PRICE_ATTR) is not None:
+                n.links_t[GROUP_NET_PRICE_ATTR] = pd.DataFrame(index=n.snapshots)
         if "v" in solved_tiers:
             n.meta[META_TIERS] = solved_tiers["v"]
         else:
@@ -1951,6 +2282,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
         "tiered_items": tiered_items, "nonconvex_tier_items": nonconvex_items,
         "nonconvex_tier_predicted": predicted_tiers(n, cfg),
         "capacity_items": [i.id for i in capacity_lp_items(cfg)],
+        "group_net_items": (group_net or {}).get("items", []),
         "ppa_dispatch": {c.id: list(c.asset_ids) for c in dispatch_ppas(cfg)},
         "not_in_lp": not_in_lp, "notes": notes, "timezone": cfg.timezone,
         "simultaneous_flow_risk_snapshots": risk,
@@ -1981,6 +2313,7 @@ def _wrap_with_commercial_bindings(network, user_fn, cfg, log_queue=None):
         add_demand_terms(n)
         add_tier_terms(n)
         add_group_terms(n)
+        add_group_net_terms(n)
         add_ppa_terms(n)
 
     return fn
@@ -2070,7 +2403,15 @@ def energy_cost_rows(n, commercial: dict | None) -> dict | None:
            "energy_export": row([exp_link] if exp_link else [], "energy_export"),
            "included_in_total": True}
     imp_p0 = [p0_of(link) for link in imp_links]
-    if imp_links and exp_link and all(v is not None for v in imp_p0) \
+    # With every net item of a group priced on its net import (WP3.3b), a member
+    # importing while another exports is ordinary metering, not a mispricing
+    # (review #3): the flag is for net items split by direction.
+    group_net = {i.id for i in group_net_items(cfg)} if cfg is not None else set()
+    split_net = cfg is None or any(
+        i.measured_on == "net" and not _is_demand(i) and i.id not in group_net
+        for i in (cfg.import_tariff.items if cfg.import_tariff is not None else []))
+    exact_group = bool(group_net) and not split_net and n.meta.get(META_GROUP_NET)
+    if imp_links and exp_link and not exact_group and all(v is not None for v in imp_p0) \
             and p0_of(exp_link) is not None:
         both = (sum(imp_p0) > 1e-6) & (p0_of(exp_link) > 1e-6)
         if bool(both.any()):

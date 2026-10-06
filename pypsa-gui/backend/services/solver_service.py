@@ -402,6 +402,11 @@ class SolverConfig:
     # Library ref nested in it is pinned by `services/library/bundle_pins`
     # at save (WP1.1c). None = no commercial layer: the LP is unchanged.
     commercial: dict | None = None
+    # Edge Investment Case finance inputs (IC P4 WP4.6b): the `FinanceInputs`
+    # JSON, validated and set ONLY by `PUT /api/simulation/finance` (If-Match);
+    # the solver-config PUT keeps it. Nothing at solve time reads it, and it is
+    # in no solve fingerprint (a finance edit never makes a dispatch stale).
+    finance: dict | None = None
 
     def __post_init__(self):
         # ── Sanitize solver_options ───────────────────────────────────────

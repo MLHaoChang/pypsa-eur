@@ -47,9 +47,18 @@ in `pixi.toml`.
   2.8, `DataCentreLoadSpec` UPS loss 0.03, `BessSpec` DoD 0.9, `DebtTranche` fees 0.0,
   `TaxEquityStructure.itc_recapture_years` 5, and `FinanceInputs.escalation` (a missing key must be
   defined as 0 or `not_established`) — must be recorded as sourced assumptions or become `None`.
+  **Placed (IC P4 plan v1.0, WP4.0, 2026-09-30):** the finance items closed in P4 — `DebtTranche` fees, DSRA
+  months and grace years default to `None` (0 must be typed), `itc_recapture_years` → `None` (P7's), and
+  `escalation` per the P4 plan C4 (a class with cashflows and no rate is `not_established`). The archetype
+  items (`GensetSpec` heat rate, `DataCentreLoadSpec` UPS loss, `BessSpec` DoD) are **deferred to P5**
+  (the archetype builders), where they become sourced assumptions or `None`.
 - Gate finding 7 (P4): `physical_quantities` imports `services.solver_service` (like
   `asset_economics`); finance consuming it inherits the solve stack transitively, which the direct
   tripwire does not catch. P4 decides whether to move `periodized_capital_costs` behind a leaf module.
+  **Closed (IC P4 plan v1.0 C1, WP4.0, 2026-09-30):** the finance engine takes a plain `FinanceCase`; the one
+  adapter that reads a solved network lives in `services/results/` and is injected into the runner by the
+  router. The tripwire forbids `services.results` in `services/finance/**`, and a subprocess test imports
+  every finance module and asserts `services.solver_service` is not loaded (transitive).
 - FOM: `physical_quantities` exposes FOM separately; the delegated fix
   (`claude/fix-fom-reconciliation`) decides whether economics fold it into fixed cost.
 

@@ -318,3 +318,55 @@ def clear_dispatch(n: pypsa.Network) -> bool:
             )
             cleared = True
     return cleared
+
+
+# ── dispatch digest (IC P4 WP4.6b) ───────────────────────────────────────────
+#
+# The investment-case report is valued on ONE solve: its staleness key carries a
+# digest of the result tables it read, so a re-solve (or a restore of another
+# solve's results) marks the stored report stale. What the finance adapter reads:
+# the dispatch, the optimised capacities (capex), the prices and the weights.
+_DIGEST_T_TABLES: tuple[tuple[str, str], ...] = (
+    ("generators_t", "p"), ("storage_units_t", "p"), ("storage_units_t", "state_of_charge"),
+    ("stores_t", "p"), ("stores_t", "e"), ("links_t", "p0"), ("links_t", "p1"),
+    ("lines_t", "p0"), ("loads_t", "p"), ("buses_t", "marginal_price"),
+)
+_DIGEST_STATIC: tuple[tuple[str, str], ...] = (
+    ("generators", "p_nom_opt"), ("storage_units", "p_nom_opt"), ("stores", "e_nom_opt"),
+    ("links", "p_nom_opt"), ("lines", "s_nom_opt"),
+)
+
+
+def _hash_frame(h, label: str, obj) -> None:
+    h.update(label.encode())
+    if obj is None or getattr(obj, "empty", True):
+        h.update(b"\x00empty")
+        return
+    if isinstance(obj, pd.DataFrame):
+        h.update("\x1f".join(map(str, obj.columns)).encode())
+    h.update(pd.util.hash_pandas_object(obj, index=True).to_numpy().tobytes())
+
+
+def dispatch_digest(n, result_df=None) -> str:
+    """A digest of the solve's result tables (dispatch, optimised capacities,
+    prices, snapshot weights and the objective). `result_df(n, accessor,
+    attr)` reads a table the way the results router does (the stored LOPF
+    snapshot first); default: the live network. Deterministic across
+    processes; an unsolved network has a digest too (its empty tables')."""
+    import hashlib
+
+    h = hashlib.sha256()
+    obj = getattr(n, "objective", None)
+    h.update(repr(None if obj is None else float(obj)).encode())
+    _hash_frame(h, "snapshot_weightings", getattr(n, "snapshot_weightings", None))
+    for acc, attr in _DIGEST_T_TABLES:
+        if result_df is not None:
+            df = result_df(n, acc, attr)
+        else:
+            df = getattr(getattr(n, acc, None), attr, None)
+        _hash_frame(h, f"{acc}.{attr}", df)
+    for comp, col in _DIGEST_STATIC:
+        frame = getattr(n, comp, None)
+        ser = frame[col] if frame is not None and col in frame.columns else None
+        _hash_frame(h, f"{comp}.{col}", ser)
+    return h.hexdigest()[:32]

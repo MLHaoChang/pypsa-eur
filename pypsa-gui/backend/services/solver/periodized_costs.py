@@ -190,6 +190,29 @@ def fill_periodized_cost_defaults(
 
     undo: list[tuple[str, str, pd.Index, pd.Series]] = []
 
+    # Composite assets (a battery's power and energy parts): re-derive the annual `capital_cost` with the
+    # discount rate in force, BEFORE the horizon scaling below scales it like any typed `capital_cost`.
+    # Lazy import: `asset_schema` imports `_annuity` from this module.
+    from services.asset_schema.derive import derive_composite, effective_discount_rate, has_parts
+    from services.asset_schema.schema import CLASS_ATTR, COMPOSITE
+
+    for comp_class in COMPOSITE:
+        df = getattr(n, CLASS_ATTR[comp_class], None)
+        if df is None or df.empty:
+            continue
+        rows = [name for name in df.index if has_parts(comp_class, df.loc[name])]
+        if not rows:
+            continue
+        idx = pd.Index(rows)
+        original = df.loc[idx, "capital_cost"].copy()
+        for name in rows:
+            row = df.loc[name]
+            rate = effective_discount_rate(row.get("discount_rate"), cfg.discount_rate)
+            df.at[name, "capital_cost"] = derive_composite(
+                comp_class, row, max_hours=float(row.get("max_hours", 1.0)), discount_rate=rate,
+            )["capital_cost"]
+        undo.append((CLASS_ATTR[comp_class], "capital_cost", idx, original))
+
     # FOM and directly typed capital_cost: annual -> per modelled horizon.
     # Separate pass because the loop below skips every class without
     # `overnight_cost`.
@@ -332,8 +355,23 @@ def upfront_cost_series(n, comp_class: str) -> pd.Series:
 
     Callers decide what unknown means for their response; this function has no
     opinion and swallows nothing.
+
+    A composite asset (a battery with power and energy parts) is the exception
+    to the back-calculation: its upfront cost is the sum of its parts, read
+    through `asset_schema.access`, because one lifetime cannot recover a
+    two-annuity `capital_cost`.
     """
-    return n.c[comp_class].overnight_cost
+    from services.asset_schema.access import upfront_parts
+    from services.asset_schema.derive import has_parts
+    from services.asset_schema.schema import CLASS_ATTR, COMPOSITE
+
+    upfront = n.c[comp_class].overnight_cost.copy()
+    if comp_class in COMPOSITE:
+        df = getattr(n, CLASS_ATTR[comp_class])
+        for name in df.index:
+            if has_parts(comp_class, df.loc[name]):
+                upfront.loc[name] = sum(p.upfront_per_unit for p in upfront_parts(n, comp_class, name))
+    return upfront
 
 
 def _reference_build_year(n) -> float:

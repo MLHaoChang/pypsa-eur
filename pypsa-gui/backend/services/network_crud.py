@@ -17,6 +17,14 @@ from fastapi import HTTPException
 
 from services import attribute_catalog, change_log_service, vintage_service
 from services.adequacy.occurrence import BLANK_SPELLINGS as _BLANK_SPELLINGS
+from services.asset_schema.derive import (
+    apply_parts,
+    derive_composite,
+    effective_discount_rate,
+    has_parts,
+    split_parts,
+)
+from services.asset_schema.schema import CLASS_ATTR
 from services.carrier_catalog import ensure_carrier
 from services.pypsa_service import PyPSAService
 from services.serialization import df_to_json
@@ -258,6 +266,38 @@ def _normalise_flag_column(n, attr: str) -> None:
         pass
 
 
+def _global_discount_rate() -> float:
+    cfg = PyPSAService.get_solver_state().get("solver_config")
+    rate = cfg.get("discount_rate") if isinstance(cfg, dict) else getattr(cfg, "discount_rate", None)
+    return 0.07 if rate is None else float(rate)
+
+
+def _check_investment_parts(component_class: str, parts: dict, *, max_hours: Any) -> None:
+    """Refuse a priced part without a lifetime BEFORE anything is mutated (422)."""
+    if not has_parts(component_class, parts):
+        return
+    try:
+        derive_composite(component_class, parts,
+                         max_hours=1.0 if max_hours is None else float(max_hours),
+                         discount_rate=_global_discount_rate())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+def _apply_investment_parts(n, component_class: str, name: str, parts: dict) -> None:
+    """
+    Write a composite asset's investment parts and derive its PyPSA cost columns (`services/asset_schema`).
+    The parts bypass the catalog whitelist because they are GUI columns, not PyPSA attributes; an asset with no
+    priced part is left exactly as `n.add` wrote it. Callers run `_check_investment_parts` first.
+    """
+    if not parts:
+        return
+    df = getattr(n, CLASS_ATTR[component_class])
+    own_rate = df.at[name, "discount_rate"] if "discount_rate" in df.columns else None
+    apply_parts(n, component_class, name, parts,
+                discount_rate=effective_discount_rate(own_rate, _global_discount_rate()))
+
+
 def _refuse_edit_during_live_study() -> None:
     """P27a (A1): the chat path's chokepoint. The chat tools reach these
     handlers in process, never through `main.py`'s middleware, so a
@@ -281,7 +321,9 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
         if reserved_bus_name(name):
             # `ic:` names the commercial reference frames' columns (P2 WP2.2-0).
             raise HTTPException(422, f"bus names starting 'ic:' are reserved (got {name!r})")
+    kwargs, parts = split_parts(component_class, kwargs)
     kwargs = _drop_unknown_extras(component_class, attr, kwargs)
+    _check_investment_parts(component_class, parts, max_hours=kwargs.get("max_hours"))
     with PyPSAService.get_lock():
         df = getattr(n, attr)
         if name in df.index:
@@ -289,6 +331,7 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
         if component_class != "Carrier":
             ensure_carrier(n, kwargs.get("carrier", ""))
         n.add(component_class, name, **kwargs)
+        _apply_investment_parts(n, component_class, name, parts)
         _normalise_flag_column(n, attr)
     change_log_service.log("add", component_class, name, f"Added {component_class.lower()} '{name}'")
     return {"name": name}
@@ -469,6 +512,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
     """
     _refuse_edit_during_live_study()
     n = PyPSAService.get_network()
+    kwargs, submitted_parts = split_parts(component_class, kwargs)
     kwargs = _drop_unknown_extras(component_class, attr, kwargs)
     with PyPSAService.get_lock():
         df = getattr(n, attr)
@@ -476,6 +520,9 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
             raise HTTPException(404, f"{component_class} '{name}' not found")
         # Read current row + overlay the user's partial dict (shared helper).
         merged = _merge_partial_update(n, attr, name, kwargs)
+        merged, current_parts = split_parts(component_class, merged)
+        parts = {**current_parts, **submitted_parts}
+        _check_investment_parts(component_class, parts, max_hours=merged.get("max_hours"))
         if component_class != "Carrier":
             ensure_carrier(n, merged.get("carrier", ""))
         new_name = merged.pop("name", name)
@@ -511,6 +558,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         # already used it; this path is the one the Properties panel's edit
         # cards take, and it did not.
         n.add(component_class, name, **merged)
+        _apply_investment_parts(n, component_class, name, parts)
         _reattach_component_series(n, attr, name, saved_series)
         # Re-key any saved per-period bounds so the modal data follows the
         # rename instead of stranding under the old key.

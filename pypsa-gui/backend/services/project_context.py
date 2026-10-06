@@ -280,7 +280,7 @@ def cleared_result_state() -> dict[str, None]:
 # so `pypsa_service` cannot import `study_state`, but it already imports this
 # module.
 STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
-             "eh_study")
+             "eh_study", "investment_case")
 
 # The studies that re-solve the USER'S OWN network object in place, between
 # their iterates — so an edit landing mid-study is either overwritten by the
@@ -302,6 +302,9 @@ STUDY_LABELS = {
     "coupling_loop": "a coupling-loop study",
     "margin_loop": "a margin-loop study",
     "eh_study": "an Energy Hub study",
+    # Edge Investment Case P4 WP4.6b: the finance run reads the solved network's
+    # result tables, so it holds the mesh like any other study.
+    "investment_case": "an investment-case run",
 }
 
 # The studies a user can actually STOP.
@@ -317,7 +320,7 @@ STUDY_LABELS = {
 # Pinned by a test against the routes that actually exist, so this cannot
 # drift the day someone REMOVES an abort.
 ABORTABLE_STUDIES = ("coupling_loop", "margin_loop", "mc", "frontier",
-                     "fmea_sweep", "eh_study")
+                     "fmea_sweep", "eh_study", "investment_case")
 
 
 def record_is_running(record) -> bool:
@@ -491,6 +494,10 @@ class ProjectSolverState:
     coupling_loop: Any = None
     margin_loop: Any = None
     eh_study: Any = None
+    # IC P4 WP4.6b: the investment-case run's record (status, stage, refusal
+    # code). Its REPORT is result state (`investment_case_report`); the record
+    # is not persisted, like every study record above.
+    investment_case: Any = None
 
     def as_dict(self) -> dict[str, Any]:
         """A plain dict with the same keys/values — the legacy `_state` shape."""
