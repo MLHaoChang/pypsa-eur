@@ -129,6 +129,24 @@ describe('ResultsCard body', () => {
     expect(r1.textContent).not.toContain('€0')
   })
 
+  // P29 (B3): the hub reads the row's `zero_reason`, the same text as the
+  // FMEA tab; without the field it falls back to "no measurable cost".
+  it('a zero-cost risk says why', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(study({ ...REPORT, sections: { ...REPORT.sections,
+      fmea_top: { status: 'ok', payload: { rows: [
+        { mode_id: 'B:a', name: 'site_transformer', criticality_eur_per_year: 7_890_000, zero_reason: null },
+        { mode_id: 'B:e', name: 'electrolyser', criticality_eur_per_year: 0, zero_reason: 'out_of_scope' },
+        { mode_id: 'A:g', name: 'genset_1', criticality_eur_per_year: 0, zero_reason: 'no_shortfall' },
+      ] } } } }))
+    mount()
+    const r1 = await screen.findByTestId('hub-results-risks-1')
+    expect(r1.textContent).toContain('not counted (outside the electricity metric)')
+    expect(r1.textContent).not.toContain('no measurable cost')
+    expect(screen.getByTestId('hub-results-risks-2').textContent)
+      .toContain('no shortfall — the site copes without it')
+    expect(screen.getByTestId('hub-results-risks-0').textContent).toContain(fmtCurrency(7_890_000))
+  })
+
   it('stale banner from the boolean (not the source text)', async () => {
     vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ stale: true, source: 'stored report' }))
     mount()

@@ -13,7 +13,18 @@ export function statusTone(status: SectionStatus): string {
   return 'text-warn'
 }
 
-export interface CompletenessRow { name: string; status: SectionStatus; note?: string | null }
+export interface CompletenessRow {
+  name: string; status: SectionStatus; note?: string | null
+  /** A plain label for the chip; with it the status reads in words too
+   *  ("not established", not `not_established`). Without it the chip shows
+   *  the raw ids, as the Energy Hub panel does. */
+  label?: string
+}
+
+/** A status in words: `not_established` → "not established". */
+export function plainStatus(status: SectionStatus): string {
+  return String(status).replace(/_/g, ' ')
+}
 
 export function CompletenessChips({ rows, testId, itemTestIdPrefix, label }: {
   rows: CompletenessRow[]
@@ -25,7 +36,7 @@ export function CompletenessChips({ rows, testId, itemTestIdPrefix, label }: {
   if (rows.length === 0) return null
   return (
     <ul className="flex flex-wrap gap-1.5" data-testid={testId} aria-label={label}>
-      {rows.map(({ name, status, note }) => (
+      {rows.map(({ name, status, note, label: chip }) => (
         <li
           key={name}
           className={`text-[10px] border border-border rounded px-1.5 py-0.5 ${statusTone(status)}`}
@@ -33,7 +44,7 @@ export function CompletenessChips({ rows, testId, itemTestIdPrefix, label }: {
           data-status={status}
           title={note ?? undefined}
         >
-          {name}: {status}
+          {chip ? `${chip}: ${plainStatus(status)}` : `${name}: ${status}`}
         </li>
       ))}
     </ul>

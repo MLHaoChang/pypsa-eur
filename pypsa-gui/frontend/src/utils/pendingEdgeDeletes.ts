@@ -11,6 +11,11 @@
 // persists what the user sees. It lives outside TopologyCanvas because the
 // save flows must not have to import the canvas (and because a pending delete
 // outlives the canvas being unmounted).
+import { useUIStore } from '../store/uiStore'
+import { appLog } from '../store/simulationStore'
+import { mismatchSentence } from './projectMismatch'
+import { rawFetchHeaders } from '../api/csrf'
+
 export interface PendingEdgeDelete {
   /** React Flow edge id, e.g. `line-L1` / `link-K1`. */
   edgeId: string
@@ -56,6 +61,55 @@ export function drainPendingEdgeDeletes(): PendingEdgeDelete[] {
   return entries
 }
 
+/**
+ * A2 (deferred spec 2026-09-28 §2.1): while this tab and the backend disagree
+ * about the open project, a pending delete would remove a same-named line or
+ * link from the OTHER project's live network. Drop every pending delete with
+ * one WARN; the canvas is re-read when the tab reloads or switches.
+ */
+function dropIfProjectMismatch(where: string): boolean {
+  const m = useUIStore.getState().projectMismatch
+  if (!m) return false
+  const n = drainPendingEdgeDeletes().length
+  if (n > 0) {
+    appLog('WARN', `Dropped ${n} pending edge delete(s) on ${where} — ${mismatchSentence(m)}`)
+  }
+  return true
+}
+
+/**
+ * The `pagehide` keepalive path's drain: the entries to DELETE with a raw
+ * `fetch` (which the axios interceptor never sees) — none while the tab is
+ * mismatched.
+ */
+export function drainPendingEdgeDeletesForUnload(): PendingEdgeDelete[] {
+  if (dropIfProjectMismatch('unload')) return []
+  return drainPendingEdgeDeletes()
+}
+
+/**
+ * The `pagehide` / `beforeunload` flush (moved here from TopologyCanvas so it
+ * is testable): DELETE every pending edge with `fetch keepalive`, which
+ * survives the page going away — axios requests are cancelled on unload. A raw
+ * fetch bypasses the axios interceptors, so it carries its own CSRF header and
+ * — A2 — goes through `drainPendingEdgeDeletesForUnload`, which drops the lot
+ * (one WARN) while the tab and the backend disagree about the open project.
+ */
+export function keepaliveFlushPendingEdgeDeletes(): void {
+  for (const { edgeId } of drainPendingEdgeDeletesForUnload()) {
+    const isLink = edgeId.startsWith('link-')
+    const name = edgeId.replace(/^(line-|link-)/, '')
+    const url = `/api/network/${isLink ? 'links' : 'lines'}/${encodeURIComponent(name)}`
+    try {
+      fetch(url, {
+        method: 'DELETE',
+        headers: { ...rawFetchHeaders('DELETE') },
+        keepalive: true,
+      }).catch(() => { /* best effort */ })
+    } catch { /* keepalive unsupported — drop on the floor */ }
+  }
+}
+
 export interface FlushDeletesResult { flushed: number; failed: number }
 
 /**
@@ -65,6 +119,7 @@ export interface FlushDeletesResult { flushed: number; failed: number }
  * file it writes stays consistent with reality either way.
  */
 export async function flushPendingEdgeDeletes(): Promise<FlushDeletesResult> {
+  if (dropIfProjectMismatch('save')) return { flushed: 0, failed: 0 }
   const entries = drainPendingEdgeDeletes()
   if (entries.length === 0) return { flushed: 0, failed: 0 }
   const results = await Promise.allSettled(entries.map(e => e.commit()))

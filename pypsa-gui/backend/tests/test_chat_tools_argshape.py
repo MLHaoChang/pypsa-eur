@@ -71,7 +71,7 @@ WAIVERS: dict[tuple[str, str], str] = {}
 
 # Wrappers that call their first argument with the rest (plus the injected
 # db / user / session), so `_route(_h, x)` is a delegation to `_h(x)`.
-_ROUTERS = ("_route", "_library_call")
+_ROUTERS = ("_route", "_library_call", "_value_flow_call")
 
 
 class _Sentinel:
