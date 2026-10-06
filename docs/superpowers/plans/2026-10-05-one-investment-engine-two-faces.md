@@ -123,6 +123,13 @@ so post-tax figures read `not_established`, which the report already discloses.
   GS's `annuity_pv` salvage has no equivalent. Compile uses `fixed`, computed from the remaining
   annuities exactly as GS does today, and the report discloses it. GS's `BY_CONSTRUCTION` finding codes
   ("NPV = LP saving x annuity factor") are re-derived or dropped in `qa_decision_study.py`.
+  **Amended by IC S0b (2026-10-06, `2026-10-06-ic-s0b-replacements-terminal.md` S6, D10):** the engine
+  now computes GS's salvage itself, `TerminalValueRule(method="remaining_life_annuity")` (no `value`), so
+  compile uses `remaining_life_annuity` instead of a hand-computed `fixed`, with
+  `replacement_rule="part_lifetimes"` (D9). With both, financial close one year before COD,
+  `capex_phasing = [1.0]`, `analysis_years` = the horizon, no escalation and no tax, the case NPV is the LP
+  saving × the annuity factor exactly for whole-year part lifetimes, so the `BY_CONSTRUCTION` identity can
+  be kept.
 - **C3 Export.** IC prices export only through `export_price_ref`, a Library series (per org).
   Compile mints a flat export series per study (`series_store.put_series`, using the
   helper from U1 e) and binds it through `PUT /solver_config` → `_bind_commercial` (local "project org"

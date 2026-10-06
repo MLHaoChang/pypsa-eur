@@ -21,6 +21,8 @@ in that period).
 """
 from __future__ import annotations
 
+import dataclasses
+import math
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -33,6 +35,10 @@ CONTRACT_CLASS = "contract"
 # with the asset, −S·g not): part of the avoided-bill VALUE, never a cost of
 # the investment itself — the LCOE's asset costs skip it (WP4.6a review B1).
 DEGRADATION_SOURCE = "degradation"
+# The adapter's flag for an asset whose only cost is a `capital_cost`
+# back-calculation (IC S0b plan S1): its capex is not established, and the
+# engine gives this as the reason beside `overnight_cost_missing:<asset>`.
+UPFRONT_FROM_CAPITAL_COST = "upfront_only_from_capital_cost"
 
 
 class FinanceRefused(ValueError):
@@ -123,15 +129,78 @@ class Template:
 
 
 @dataclass(frozen=True)
+class AssetPart:
+    """One investment part of an owner asset (IC S0b plan S2): what it cost
+    (`overnight_cost` = the part's upfront per unit × the asset's capacity,
+    currency, before contingency; None = not established), its lifetime
+    (years; `math.inf` = never replaced, None = not stated) and its fixed O&M
+    share (a fraction of `overnight_cost` a year; None = not stated)."""
+
+    name: str
+    overnight_cost: float | None
+    lifetime_years: float | None
+    fom_share: float | None = None
+
+
+@dataclass(frozen=True)
 class AssetFinance:
     """An owner asset's capital side (plan C6). `overnight_cost` is the total
-    installed cost before contingency (currency); None = not established."""
+    installed cost before contingency (currency); None = not established.
+
+    `parts` (IC S0b plan S2; additive, after `carrier` so positional
+    construction keeps working): the asset's investment parts as the adapter
+    read them through `asset_schema.access.upfront_parts`; empty for a hand
+    case, which then has one effective part (`effective_parts`). With parts,
+    `overnight_cost` is their sum (None exactly when some part's cost is None)
+    and `lifetime_years` the asset's own `lifetime` column (the longest part
+    for a composite) — refused (`ValueError`) otherwise, so capex has one
+    source of truth (`scale_capex` moves them together)."""
 
     name: str
     component: str
     overnight_cost: float | None
     lifetime_years: float | None = None
     carrier: str | None = None                  # incentive eligibility (WP4.4)
+    parts: tuple[AssetPart, ...] = ()
+
+    def __post_init__(self):
+        if not self.parts:
+            return
+        costs = [p.overnight_cost for p in self.parts]
+        if any(c is None for c in costs) != (self.overnight_cost is None):
+            raise ValueError(f"{self.name}: overnight_cost {self.overnight_cost!r} disagrees with "
+                             f"its parts {costs} (None exactly when a part's cost is None)")
+        if self.overnight_cost is not None and not math.isclose(
+                sum(costs), self.overnight_cost, rel_tol=1e-9, abs_tol=1e-6):
+            raise ValueError(f"{self.name}: overnight_cost {self.overnight_cost!r} is not the sum "
+                             f"of its parts {costs}")
+
+
+def effective_parts(a: AssetFinance) -> tuple[AssetPart, ...]:
+    """The parts every capex reader reads (IC S0b plan S2, review B4/B5): the
+    asset's own, or — a hand case with none — one part `investment` of its
+    `overnight_cost` over its `lifetime_years`."""
+    if a.parts:
+        return a.parts
+    return (AssetPart("investment", a.overnight_cost, a.lifetime_years, None),)
+
+
+def scale_capex(case: FinanceCase, f: float) -> FinanceCase:
+    """The case with every purchase's cost × `f` (IC S0b plan S2): each
+    asset's parts and `overnight_cost` together, and the amounts of the
+    `fixed` `replacement_capex` entries — one CAPEX bound moves every purchase
+    (a `part_lifetimes` replacement is its part's cost, so it moves with it).
+    Not established costs stay None; the case is not mutated."""
+    def x(v):
+        return None if v is None else v * f
+
+    assets = tuple(dataclasses.replace(
+        a, overnight_cost=x(a.overnight_cost),
+        parts=tuple(dataclasses.replace(p, overnight_cost=x(p.overnight_cost)) for p in a.parts))
+        for a in case.assets)
+    inputs = case.inputs.model_copy(update={"replacement_capex": [
+        (year, asset, amount * f) for year, asset, amount in case.inputs.replacement_capex]})
+    return dataclasses.replace(case, inputs=inputs, assets=assets)
 
 
 @dataclass(frozen=True)

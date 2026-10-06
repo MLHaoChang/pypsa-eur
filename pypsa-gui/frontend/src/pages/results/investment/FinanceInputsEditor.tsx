@@ -353,7 +353,8 @@ function IncentiveEditor({ inc, i, set, remove, errors, report }: {
 
 /** Every top-level path the form places; the rest of a 422 is shown at the top. */
 const PLACED = ['currency', 'currency_year', 'price_basis', 'financial_close', 'acquisition_date', 'construction_start', 'analysis_years',
-  'annualise', 'cod_by_asset', 'capex_phasing', 'contingency_share', 'escalation', 'degradation_by_asset',
+  'annualise', 'cod_by_asset', 'capex_phasing', 'contingency_share', 'replacement_rule', 'escalation',
+  'degradation_by_asset',
   'debt', 'tax_pack_id', 'hebesatz_pct', 'state_rate', 'tax_losses', 'financing_fee_tax', 'pwa_met',
   'small_business_163j', 'depreciation_class_by_asset', 'incentives', 'wacc_nominal', 'cost_of_equity',
   'inflation', 'reserves_rate', 'terminal_value', 'solve_ppa']
@@ -407,6 +408,11 @@ function Form({ d, set, errors, report, assets }: {
         </Row>
         <NumField label="Contingency" hint="(share of capex)" value={d.contingency_share}
                   errors={e('contingency_share')} onChange={v => set('contingency_share', v)} />
+        <SelectField label="Replacements" value={d.replacement_rule} errors={e('replacement_rule')}
+                     empty="(default: the stated replacement entries)"
+                     options={[['fixed', 'the stated replacement entries'],
+                               ['part_lifetimes', 'each part at the end of its lifetime']]}
+                     onChange={v => set('replacement_rule', v ?? undefined)} />
       </fieldset>
       <fieldset className="border border-border rounded p-2 space-y-1">
         <legend className="font-semibold">Escalation (nominal, a year)</legend>
@@ -488,9 +494,11 @@ function Form({ d, set, errors, report, assets }: {
         <SelectField label="Terminal value method" value={tv.method} errors={e('terminal_value.method')}
                      empty="(default: none)"
                      options={[['none', 'none'], ['book_value', 'book value'],
-                               ['multiple_of_ebitda', 'a multiple of EBITDA'], ['fixed', 'a fixed amount']]}
+                               ['multiple_of_ebitda', 'a multiple of EBITDA'], ['fixed', 'a fixed amount'],
+                               ['remaining_life_annuity', "the parts' remaining life (LP annuity)"]]}
                      onChange={v => set('terminal_value', withKey(tv, 'method', v ?? undefined))} />
-        <NumField label="Terminal value" hint="(the multiple, or the amount)" value={tv.value}
+        <NumField label="Terminal value" hint="(the multiple, or the amount; none for the remaining life)"
+                  value={tv.value}
                   errors={e('terminal_value.value')}
                   onChange={v => set('terminal_value', withKey(tv, 'value', v))} />
         <FieldErrors id="tv-errors" list={errorsFor(errors, 'terminal_value',

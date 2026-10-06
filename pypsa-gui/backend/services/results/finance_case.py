@@ -92,11 +92,18 @@ What it builds:
   `bill_degradation_base:<a>` = −S·g (`source="degradation"`: value, never
   an asset cost in the LCOE): in operating year k they net −S·g·(1 − f_k). A
   negative S is flagged `degradation_bill_value_negative:<period>`.
-* **Assets (C6)** — `overnight_cost` = the TYPED `overnight_cost` column ×
-  the optimised capacity, None when not typed (never back-calculated from the
-  annuitised `capital_cost`). The owner's PoC meter Links (import members,
-  export Link) with no typed `overnight_cost` are not investments — no
-  capex, no COD, no LP rate in the gate — flagged
+* **Assets (C6; IC S0b S1, S2)** — every owner asset's investment comes
+  from `asset_schema.access.upfront_parts` (the one accessor): its parts
+  (`AssetFinance.parts`: a two-part battery's power and energy, else one
+  `investment` part), each part's cost = its upfront per unit × the optimised
+  capacity, `overnight_cost` their sum. A typed `overnight_cost` of 0 is an
+  established 0. A cost the accessor back-calculates from the annuitised
+  `capital_cost` is NOT established (it can include fixed O&M; rule C12):
+  None, flagged `upfront_only_from_capital_cost:<a>`; the config's
+  `discount_rate` is passed so the back-calculation is detected. The
+  owner's PoC meter Links (import members, export Link) with no typed
+  `overnight_cost` are not investments — no capex, no COD, no LP rate in the
+  gate — flagged
   `meter_link_not_investment:<name>` (GS Q5: `single_owner` assigns them to
   the site party); a typed meter Link stays an asset.
 * **Storage (the LCOS, owner decision 6)** — per owner storage asset on a
@@ -106,7 +113,9 @@ What it builds:
   at the committed import price + the supply's price; the on-site-surplus
   share at the export revenue forgone), scaled by the annualise factor.
 * **Dates, LP basis, hash** — `base_year` the modelled / first period year;
-  COD from `fin.cod_by_asset` (every owner asset, one date); `LpBasis` from the
+  COD from `fin.cod_by_asset`, else 1 January of the asset's `build_year`
+  (`cod_from_build_year:<a>`; PyPSA's 0 is absent — IC S0b S3), one date for
+  every owner asset; `LpBasis` from the
   config and the assets' own `discount_rate`; `finance_case_hash`.
 
 Refusal vs None: a lossy PoC chain REFUSES the case (a counterfactual that
@@ -131,14 +140,17 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
+from services.asset_schema import schema as _schema
+from services.asset_schema.access import upfront_parts
+from services.asset_schema.derive import has_parts, number
 from services.commercial import billing as _billing
 from services.commercial import contracts as _K
 from services.commercial import lp_bindings as _lp
 from services.commercial import participants as P
 from services.commercial.lp_bindings import same_party
 from services.finance.case import (
-    CONTRACT_CLASS, DEGRADATION_SOURCE, AssetFinance, FinanceCase, FinanceRefused, LpBasis,
-    StorageYear, Template, TemplateLine,
+    CONTRACT_CLASS, DEGRADATION_SOURCE, UPFRONT_FROM_CAPITAL_COST, AssetFinance, AssetPart,
+    FinanceCase, FinanceRefused, LpBasis, StorageYear, Template, TemplateLine,
 )
 from services.finance.cashflow import esc_class_for
 
@@ -990,34 +1002,96 @@ def _capacity(df, name: str, col: str) -> float | None:
     return opt if opt is not None else _fin(df.at[name, col]) if col in df.columns else None
 
 
-def _assets(n, owned_list) -> tuple[tuple[AssetFinance, ...], dict[str, float | None]]:
-    assets, rates = [], {}
+def _parts(n, comp: str, name: str, df, cap: float | None, *, discount_rate: float | None
+           ) -> tuple[tuple[AssetPart, ...], list[str]]:
+    """The asset's investment parts (IC S0b plan S1, S2), each part's cost = its
+    upfront per unit × the capacity (None without one), and the flags. Capex
+    comes only from `asset_schema.access.upfront_parts`, except a typed
+    `overnight_cost` of exactly 0 on a single-part asset, read first: an
+    established part of 0 (the accessor would fall through to `capital_cost`).
+    A part back-calculated from `capital_cost` is NOT established — it can
+    include fixed O&M (IC rule C12, owner decision 2026-10-06): no parts,
+    flagged `upfront_only_from_capital_cost:<a>`. A non-finite upfront cost is
+    not established (the `_fin` rule); an infinite lifetime stays `math.inf`."""
+    if comp not in _schema.CLASS_ATTR:
+        return (), []
+    row = df.loc[name]
+    life = number(row.get("lifetime"))
+    if _fin(row.get("overnight_cost")) == 0.0 and not has_parts(comp, row):
+        return (AssetPart("investment", 0.0, life, None),), []
+    got = upfront_parts(n, comp, name, discount_rate=discount_rate)
+    if got is None:
+        return (), []
+    if any(p.derived_from_capital_cost for p in got):
+        return (), [f"{UPFRONT_FROM_CAPITAL_COST}:{name}"]
+    return tuple(AssetPart(p.name, None if (cap is None or not math.isfinite(p.upfront_per_unit))
+                           else p.upfront_per_unit * cap, p.lifetime, p.fom_share)
+                 for p in got), []
+
+
+def _assets(n, owned_list, *, discount_rate: float | None = None
+            ) -> tuple[tuple[AssetFinance, ...], dict[str, float | None], list[str]]:
+    """The owner's `AssetFinance`s with their parts (S1, S2), their own
+    discount rates, and the flags (`upfront_only_from_capital_cost:<a>`).
+    `discount_rate` is the config's: passed so a back-calculation from
+    `capital_cost` is detected and flagged rather than read as None."""
+    assets, rates, flags = [], {}, []
     for comp, name in owned_list:
         df = getattr(n, _frame_of(comp) or "", None)
         if df is None or name not in df.index:
             raise FinanceRefused("owner_asset_missing", f"{comp} {name!r} is not in the network")
-        typed = _fin(df.at[name, "overnight_cost"]) if "overnight_cost" in df.columns else None
         cap = _capacity(df, name, _CAPACITY_COLS[comp])
-        overnight = None if (typed is None or cap is None) else typed * cap
+        parts, f = _parts(n, comp, name, df, cap, discount_rate=discount_rate)
+        flags += f
+        costs = [p.overnight_cost for p in parts]
+        overnight = None if (not parts or any(c is None for c in costs)) else float(sum(costs))
         life = _fin(df.at[name, "lifetime"]) if "lifetime" in df.columns else None
         carrier = str(df.at[name, "carrier"]) if "carrier" in df.columns else None
         assets.append(AssetFinance(name=name, component=comp, overnight_cost=overnight,
-                                   lifetime_years=life, carrier=carrier or None))
+                                   lifetime_years=life, carrier=carrier or None, parts=parts))
         rates[name] = _fin(df.at[name, "discount_rate"]) if "discount_rate" in df.columns \
             else None
-    return tuple(assets), rates
+    return tuple(assets), rates, flags
 
 
-def _cod(fin, owned_list) -> date:
-    names = [name for _c, name in owned_list]
-    missing = [a for a in names if a not in fin.cod_by_asset]
+def _build_year(n, comp: str, name: str) -> int | None:
+    """An asset's `build_year` as a year, or None when absent (S3, review B2):
+    PyPSA's default 0, NaN, a negative or a non-integer value is absent."""
+    df = getattr(n, _frame_of(comp) or "", None)
+    if df is None or name not in df.index or "build_year" not in df.columns:
+        return None
+    by = _fin(df.at[name, "build_year"])
+    if by is None or by <= 0 or not float(by).is_integer():
+        return None
+    return int(by)
+
+
+def _cod(n, fin, owned_list) -> tuple[date, list[str]]:
+    """The case's COD and its flags (S3): each owner asset's `cod_by_asset`
+    entry, else 1 January of its `build_year` (flagged
+    `cod_from_build_year:<a>`), else `cod_missing`; one COD for all assets
+    (`cod_mismatch` otherwise — staged builds are P5)."""
+    dates: dict[str, date] = {}
+    flags: list[str] = []
+    missing = []
+    for comp, name in owned_list:
+        if name in fin.cod_by_asset:
+            dates[name] = fin.cod_by_asset[name]
+            continue
+        by = _build_year(n, comp, name)
+        if by is None:
+            missing.append(name)
+            continue
+        dates[name] = date(by, 1, 1)
+        flags.append(f"cod_from_build_year:{name}")
     if missing:
-        raise FinanceRefused("cod_missing", f"cod_by_asset names no date for {missing}")
-    dates = {fin.cod_by_asset[a] for a in names}
-    if len(dates) > 1:
+        raise FinanceRefused("cod_missing", f"cod_by_asset names no date for {missing} and they "
+                             "have no build_year")
+    distinct = set(dates.values())
+    if len(distinct) > 1:
         raise FinanceRefused("cod_mismatch",
-                             f"the owner's assets have different CODs {sorted(dates)} (P5)")
-    return next(iter(dates))
+                             f"the owner's assets have different CODs {sorted(distinct)} (P5)")
+    return next(iter(distinct)), flags
 
 
 def _scale(lines, f: float, monthly: dict[str, float | None] | None = None
@@ -1420,12 +1494,15 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
         flags.append("ledger_conservation_not_established")
     flags += list(ledger.flags) + list(conservation.flags)
 
-    assets, rates = _assets(n, invest_list)
-    lp = LpBasis(discount_rate=_fin(getattr(cfg, "discount_rate", None)),
+    lp_rate = _fin(getattr(cfg, "discount_rate", None))
+    assets, rates, asset_flags = _assets(n, invest_list, discount_rate=lp_rate)
+    cod, cod_flags = _cod(n, fin, invest_list)
+    flags += asset_flags + cod_flags
+    lp = LpBasis(discount_rate=lp_rate,
                  inflation_rate=_fin(getattr(cfg, "inflation_rate", None)),
                  auto_discount_periods=bool(getattr(cfg, "auto_discount_periods", False)),
                  asset_discount_rates=rates)
-    return FinanceCase(inputs=fin, owner=owner, base_year=base_year, cod=_cod(fin, invest_list),
+    return FinanceCase(inputs=fin, owner=owner, base_year=base_year, cod=cod,
                        templates=tuple(templates), assets=assets,
                        flags=tuple(dict.fromkeys(flags)),
                        counterfactual=tuple(counterfactual), lp_basis=lp,
