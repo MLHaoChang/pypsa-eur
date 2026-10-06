@@ -44,6 +44,10 @@ export interface Link {
   name: string; bus0: string; bus1: string; carrier: string; efficiency: number
   /** Third port (CHP heat output, …). PyPSA's default for an unused port is ''. */
   bus2?: string
+  bus3?: string
+  /** Per-port efficiencies (`p_i = -p0 × efficiency_i`); PyPSA's default is 1. */
+  efficiency2?: number
+  efficiency3?: number
   p_nom_opt?: number
   p_nom: number; p_nom_extendable: boolean; p_nom_min: number; p_nom_max: number | null
   p_min_pu: number; p_max_pu: number
