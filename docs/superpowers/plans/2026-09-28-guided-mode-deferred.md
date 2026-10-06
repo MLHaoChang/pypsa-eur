@@ -1270,3 +1270,10 @@ No processes are left running.
 | 4s | the four touched suites ×10 (`pypsa-gui/frontend`) | **10 / 10**, 226 tests each (`row4sg.log`); the hook file alone 30 / 30 (`hook30.log`) |
 | 5 | `--phase P33b` / `P28` / `P30`, one at a time (`pypsa-gui/frontend`) | **PASS** 47 / PASS 43 / PASS 61 screenshots (`smokeg-*.log`). P33b: (C0) done, (C3) both surfaces 2.1 s after the edit, (C4) rev0 + 2, (E2) done + edited after the restart |
 | 7 | unchanged: no frontend `src` product change in the fixes (only the hook test) | 11, as before |
+
+**P33b re-gate follow-up (GO, `qa/2026-10-06-guided-p33b-gate.md` §Re-gate):**
+- **RS-1:** the "project left keeps its undo history and unsaved flag" rule now has load, another project's restore, bundle import and io import variants in `tests/test_project_switch_isolation.py`. The reviewer's G5 (restore clears before the swap) and G5b (load) are killed, as is the same mutant in `import_bundle` (G5c).
+- **RN-1** (pre-existing: re-loading the open project with unsaved edits writes the displaced edited copy to disk while memory holds the disk copy) is recorded as OPEN-ITEMS 13.
+- **RN-2:** "New" and an io import still push the middleware's pre-request capture onto the outgoing project's own stack (the push runs before the swap). It restores that project's own pre-request network: redundant but valid, and harmless. The io-import variant asserts that depth (edit + capture = 2).
+- Rows run: the touched file and row 2 (below). The full backend suite on `1b6be6311` is the coordinator's run (`scratchpad/p33b/row1-final.log`).
+

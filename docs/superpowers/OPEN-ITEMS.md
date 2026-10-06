@@ -191,6 +191,10 @@ re-keying, so it is outside step 0. (The related note about `import_bundle` and
 lossy — the next project switch dropped the unregistered ctx.) Severity: High
 (a write that is silently not read back). Server only.
 
+### 13. Re-loading the open project with unsaved edits leaves memory and disk disagreeing
+
+Added 2026-10-06, found at the P33b re-gate (`qa/2026-10-06-guided-p33b-gate.md`, RN-1; pre-existing, identical on `240b2a00e` and after P33b). Under sessions, with project A resident and an unsaved edit in memory (bus x 0 → 1), `GET /api/projects/A` (load) reads the disk: memory holds x = 0 and the undo stack is empty. `load_project` then calls `PyPSAService.register(key, ctx)` (`routers/projects.py`, the registration after the import), which displaces the resident A ctx and writes it back through `_save_evicted_ctx` — so **disk** now holds the edited copy (x = 1) while **memory** holds the disk copy (x = 0). The next save or autosave overwrites the edit silently; a restart instead brings it back. Probe: `scratchpad/qa33b/test_qa_regate.py::test_reload_same_project`. Fix direction: a load of the project the caller is already on must not write the displaced context back (it is the copy the user chose to discard), or must ask first; the same displacement mechanism is why P33b's deviation 1 rejected registering `prev` inside `reset_network`. Severity: Medium (a deliberate "discard and reload" is undone on the next restart, or an edit is lost on the next save, depending on order). Server only.
+
 ## Verification / CI
 
 ### 11. Three CI signals that cannot be trusted

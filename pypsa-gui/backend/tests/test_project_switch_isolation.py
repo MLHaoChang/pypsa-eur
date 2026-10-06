@@ -251,3 +251,76 @@ def test_an_io_import_copies_the_undo_stack_rather_than_sharing_it(
     assert c.post("/api/network/undo").status_code == 200
     assert _xs(c) == xs0
     assert c.post("/api/network/undo").status_code == 409
+
+
+# ── Re-gate RS-1: the project left keeps its state on every switch path ───
+
+def _left_keeps_state(client, a, switch, *, own_depth=1):
+    assert client.post(f"/api/projects/{a}/activate").status_code == 200
+    _move(client, 2.0)
+    edited = _xs(client)
+    info = client.get("/api/network/undo/info").json()
+    assert info["depth"] == 1 and info["unsaved"] is True
+    switch()
+    assert client.post(f"/api/projects/{a}/activate").status_code == 200
+    assert _xs(client) == edited
+    info = client.get("/api/network/undo/info").json()
+    assert info["unsaved"] is True, f"{a}'s unsaved edit reads as clean after the switch"
+    assert info["depth"] == own_depth, f"{a} lost its own undo history to the switch"
+
+
+def test_load_of_another_project_leaves_the_left_projects_state(
+        client, api_project, install_network):
+    a = api_project("left-load-a")
+    _hub_project(client, install_network, "left-load-b")
+
+    def switch():
+        assert client.get("/api/projects/left-load-b").status_code == 200
+    _left_keeps_state(client, a, switch)
+
+
+def test_restore_of_another_project_leaves_the_left_projects_state(
+        client, api_project, install_network):
+    a = api_project("left-rst-a")
+    _hub_project(client, install_network, "left-rst-b")
+    snap = client.post("/api/projects/left-rst-b/snapshots", json={"label": "s"}).json()["id"]
+
+    def switch():
+        r = client.post(f"/api/projects/left-rst-b/snapshots/{snap}/restore")
+        assert r.status_code == 200, r.text
+    _left_keeps_state(client, a, switch)
+
+
+def test_bundle_import_leaves_the_left_projects_state(client, api_project, install_network):
+    a = api_project("left-imp-a")
+    _hub_project(client, install_network, "left-imp-src")
+    bundle = client.get("/api/projects/left-imp-src/bundle").content
+
+    def switch():
+        r = client.post("/api/projects/import_bundle",
+                        files={"file": ("b.zip", bundle, "application/zip")},
+                        params={"name": "left-imp-b"})
+        assert r.status_code == 200, r.text
+    _left_keeps_state(client, a, switch)
+
+
+def test_io_import_leaves_the_left_projects_state(local_client, tmp_path, monkeypatch):
+    """Local mode (the import is the foreground). The middleware's pre-import
+    capture of A lands on A's own stack (re-gate RN-2: a redundant but valid
+    entry), so A's depth is its edit + that capture."""
+    import pypsa
+
+    from services import undo_service
+    monkeypatch.setattr(undo_service, "claim_push_slot", lambda *a, **k: True)
+    c = local_client
+    assert c.post("/api/projects/from_template/eh_h2_hub", params={"name": "LIO"}).status_code == 200
+    n = pypsa.Network()
+    n.add("Bus", "imported", x=0.0, y=0.0)
+    path = tmp_path / "in.nc"
+    n.export_to_netcdf(path)
+
+    def switch():
+        r = c.post("/api/io/import/netcdf",
+                   files={"file": ("in.nc", path.read_bytes(), "application/x-netcdf")})
+        assert r.status_code == 200, r.text
+    _left_keeps_state(c, "LIO", switch, own_depth=2)
