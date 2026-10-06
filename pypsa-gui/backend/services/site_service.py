@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import pathlib
 import re
 import shutil
@@ -201,13 +202,26 @@ def rename_component_on_disk(project_dir: pathlib.Path | str | None, component_c
 # ── site directories ────────────────────────────────────────────────────────
 
 def site_dir(project_dir: pathlib.Path, site_id: str) -> pathlib.Path:
-    """`<project>/sites/<id>`, refusing any id that could leave the project."""
+    """
+    `<project>/sites/<id>`, refusing any id that could leave the project.
+
+    The id is checked against `SITE_ID_RE` first, and that rule alone keeps a
+    separator or a dot-segment out. The containment below is the barrier
+    anyway, spelled the way `campus_grid_code_service._inside` spells it:
+    realpath of the joined path, required to sit under realpath of the sites
+    root plus a separator (so a sibling folder sharing the prefix does not
+    pass, and a symlinked id pointing out of the tree does not either).
+    `Path.resolve().is_relative_to()` says the same thing, but CodeQL does not
+    read it as a sanitiser (py/path-injection on #93), and every caller of
+    the returned path inherited the alert. The string form is what it reads.
+    """
     if not isinstance(site_id, str) or not SITE_ID_RE.match(site_id):
         raise SitesInvalid(f"site id must match {SITE_ID_RE.pattern}")
-    target = project_dir / SITES_DIR / site_id
-    if not target.resolve().is_relative_to(project_dir.resolve()):
+    root_real = os.path.realpath(project_dir / SITES_DIR)
+    full = os.path.realpath(os.path.join(root_real, site_id))
+    if not full.startswith(root_real + os.sep):
         raise SitesInvalid("site id resolves outside the project")
-    return target
+    return pathlib.Path(full)
 
 
 def prune_site_dirs(

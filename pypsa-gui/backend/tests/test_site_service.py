@@ -185,6 +185,28 @@ def test_site_dir_rejects_unsafe_ids(tmp_path, bad):
         ss.site_dir(tmp_path, bad)
 
 
+def test_site_dir_refuses_a_symlinked_id_that_points_out(tmp_path):
+    """An id that passes the pattern but whose directory is a symlink out of
+    the tree is still refused: containment is on the resolved path."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sites = tmp_path / "proj" / ss.SITES_DIR
+    sites.mkdir(parents=True)
+    (sites / "escape").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ss.SitesInvalid):
+        ss.site_dir(tmp_path / "proj", "escape")
+
+
+def test_site_dir_does_not_accept_a_sibling_sharing_the_prefix(tmp_path):
+    """`<project>/sites-evil/...` must not pass as inside `<project>/sites`:
+    the check is on the root plus a separator, not a bare prefix."""
+    proj = tmp_path / "proj"
+    (proj / ss.SITES_DIR).mkdir(parents=True)
+    d = ss.site_dir(proj, "ok")
+    assert d.parent == (proj / ss.SITES_DIR).resolve()
+    assert str(d).startswith(str((proj / ss.SITES_DIR).resolve()) + "/")
+
+
 def test_site_dir_is_contained(tmp_path):
     d = ss.site_dir(tmp_path, "0f3a9c2b")
     assert d == tmp_path / ss.SITES_DIR / "0f3a9c2b"
