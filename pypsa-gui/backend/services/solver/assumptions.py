@@ -24,6 +24,8 @@ still does — repointing it at this module would be a behaviour-neutral tidy-up
 that widened the diff of a refactor whose whole claim is that no call site
 changed.
 """
+import contextlib
+import contextvars
 import math
 
 import pandas as pd
@@ -47,6 +49,39 @@ from services.vintage_service import apply_vintage_bounds
 # so the per-carrier load-scaler lookups on this backend match what the
 # frontend's Multi-period planning UI writes. Collapses common spellings
 # (empty / 'AC' / 'electricity') into a single 'electrical' bucket.
+
+# P16 (spec §10 amendment, decision Q5): per-Load VOLL priority for the DtC
+# stress re-dispatch. Deliberately NOT a SolverConfig field — that dataclass
+# is built from every solve request body and saved project, and R5 requires
+# the premium never reach ens_solve, the frontier, a sweep or a user solve.
+# A ContextVar is scoped to the caller's own (synchronous) run_simulation.
+_VOLL_LOAD_PREMIUM: contextvars.ContextVar[dict[str, float]] = (
+    contextvars.ContextVar("voll_load_premium", default={}))
+
+
+def current_voll_load_premium() -> dict[str, float]:
+    """Load id → VOLL multiplier in force for the current solve ({} = none)."""
+    return dict(_VOLL_LOAD_PREMIUM.get())
+
+
+@contextlib.contextmanager
+def voll_load_premium(premium: dict[str, float]):
+    """Price the named Loads' VOLL slacks at ``voll × multiplier`` for solves
+    run inside this block (DtC stress only). Multipliers must be >= 1: a
+    premium ranks shed, it never makes a Load cheaper to shed."""
+    clean: dict[str, float] = {}
+    for load_id, mult in (premium or {}).items():
+        m = float(mult)
+        if not (math.isfinite(m) and m >= 1.0):
+            raise ValueError(
+                f"VOLL premium for Load {load_id!r} must be >= 1, got {mult!r}")
+        clean[str(load_id)] = m
+    token = _VOLL_LOAD_PREMIUM.set(clean)
+    try:
+        yield clean
+    finally:
+        _VOLL_LOAD_PREMIUM.reset(token)
+
 
 _LOAD_ELECTRICAL_ALIASES = frozenset({
     "", "ac", "electricity", "electric", "electrical", "el",
@@ -747,6 +782,11 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
     #    dispatch). Sized at 10× the observed max so the slack always has
     #    headroom — bumping further would slow the solver without benefit.
     if cfg.voll > 0 and not n.buses.empty and not n.loads.empty:
+        # P16: a per-Load VOLL multiplier set ONLY by the DtC stress loop
+        # around its own re-dispatch (never a SolverConfig field — see
+        # `voll_load_premium`). Empty everywhere else.
+        premium = current_voll_load_premium()
+        costs: list[float] = []
         added = []
         # P6(b): one involuntary VOLL slack per Load (not per bus), so shared-
         # bus industrial/residential (or AC+H₂) shed is attributable. Size
@@ -754,44 +794,81 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
         # system-wide 10× max headroom (and a large Load is never undersized).
         p_set_t = getattr(getattr(n, "loads_t", None), "p_set", None)
         skipped_orphan = 0
+        names: list[str] = []
+        buses: list[str] = []
+        p_noms: list[float] = []
+        max_pu: dict[str, pd.Series] = {}
+        nan_loads: list[str] = []
         for load_id in n.loads.index:
             bus = str(n.loads.at[load_id, "bus"]) if "bus" in n.loads.columns else ""
             if not bus or bus not in n.buses.index:
                 skipped_orphan += 1
                 continue
-            peak = 0.0
-            try:
-                if p_set_t is not None and load_id in getattr(p_set_t, "columns", []):
-                    peak = float(p_set_t[load_id].max())
-                elif "p_set" in n.loads.columns:
-                    peak = float(n.loads.at[load_id, "p_set"] or 0.0)
-            except (TypeError, ValueError):
-                peak = 0.0
-            slack_pnom = max(peak, 1.0) * 10.0
             name = voll_slack_name(load_id)
             if name in n.generators.index:
                 continue  # don't double-add if a previous run leaked
-            # Mark BEFORE n.add so a GET landing during the add window
-            # still hides the row (filtering an absent name is a no-op).
-            # On n.add failure we unmark to keep the registry consistent.
-            PyPSAService.mark_transient("Generator", name)
+            # This Load's demand per snapshot (time series overrides static).
+            try:
+                if p_set_t is not None and load_id in getattr(p_set_t, "columns", []):
+                    demand = p_set_t[load_id].reindex(n.snapshots)
+                    if demand.isna().any():
+                        nan_loads.append(str(load_id))
+                        demand = demand.fillna(0.0)
+                else:
+                    static = (float(n.loads.at[load_id, "p_set"])
+                              if "p_set" in n.loads.columns else 0.0)
+                    demand = pd.Series(
+                        static if static == static else 0.0, index=n.snapshots)
+                peak = float(demand.max()) if len(demand) else 0.0
+            except (TypeError, ValueError):
+                demand, peak = None, 0.0
+            slack_pnom = max(peak, 1.0) * 10.0
+            # The slack may shed at most what ITS Load demands in each
+            # snapshot. Unbounded (10× peak, p_max_pu=1) it could "shed"
+            # more than its Load and export the surplus over Links — at equal
+            # VoLL the LP is indifferent, so unserved energy was attributed
+            # to the wrong Load/bus, even above that Load's own demand.
+            max_pu[name] = (
+                (demand.clip(lower=0.0) / slack_pnom).clip(upper=1.0)
+                if demand is not None
+                else pd.Series(1.0, index=n.snapshots))
+            names.append(name)
+            buses.append(bus)
+            p_noms.append(slack_pnom)
+            costs.append(float(cfg.voll) * float(premium.get(str(load_id), 1.0)))
+        if nan_loads:
+            phase(
+                f"WARNING: {len(nan_loads)} Load(s) have p_set gaps "
+                f"({', '.join(nan_loads[:5])}); their VOLL slack is 0 in the "
+                "missing snapshots — no shedding is available there.")
+        if names:
+            # One batched add (a per-Load add with a time series is ~3× slower
+            # on large networks). Mark BEFORE n.add so a GET landing during
+            # the add window still hides the rows; unmark on failure.
+            for name in names:
+                PyPSAService.mark_transient("Generator", name)
             try:
                 n.add(
-                    "Generator", name,
-                    bus=bus,
-                    p_nom=slack_pnom,
-                    marginal_cost=cfg.voll,
+                    "Generator", names,
+                    bus=buses,
+                    p_nom=p_noms,
+                    marginal_cost=costs if premium else cfg.voll,
                     # The convention's owner is services/adequacy/slack.py.
                     carrier=INVOLUNTARY_SLACK_CARRIER,
+                    p_max_pu=pd.DataFrame(max_pu, index=n.snapshots),
                 )
             except Exception:
-                PyPSAService.unmark_transient("Generator", name)
+                for name in names:
+                    PyPSAService.unmark_transient("Generator", name)
                 raise
-            added.append(name)
+        added = list(names)
         if added:
             phase(
                 f"Added {len(added)} VOLL slack generator(s) at {cfg.voll:.0f} EUR/MWh "
                 f"(one per Load; each sized to 10× that Load's peak)."
+                + (f" DtC priority: {sum(1 for c in costs if c != cfg.voll)} "
+                   "critical Load slack(s) carry a VOLL premium for this "
+                   "re-dispatch only." if premium else "")
                 + (f" Skipped {skipped_orphan} Load(s) with missing bus." if skipped_orphan else "")
             )
             # Restore = remove the slacks.
@@ -932,12 +1009,23 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
             name = f"{DSR_SLACK_PREFIX}{bus}"
             if name in n.generators.index:
                 continue
+            # Respond with at most `share` of the bus's load IN EACH SNAPSHOT
+            # (p_nom = share × peak, p_max_pu = load(t) / peak). A flat
+            # share × peak let the tier "respond" above the bus's own demand
+            # and export the surplus over Links — cheaper than VoLL, so it
+            # displaced shedding and peakers anywhere it could reach.
+            if hasattr(per_snap, "reindex"):
+                dsr_max_pu = (per_snap.reindex(n.snapshots).fillna(0.0)
+                              .clip(lower=0.0) / peak).clip(upper=1.0)
+            else:
+                dsr_max_pu = 1.0
             PyPSAService.mark_transient("Generator", name)
             try:
                 n.add(
                     "Generator", name,
                     bus=bus,
                     p_nom=dsr_share * peak,
+                    p_max_pu=dsr_max_pu,
                     marginal_cost=dsr_price,
                     carrier=DSR_SLACK_CARRIER,
                 )
@@ -1173,8 +1261,10 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
         # ValidationRefused and the generic exception path all reach it
         # through `_guarded_restore`).
         try:
+            from services.adequacy.eh_columns import normalise_eh_columns
             from services.adequacy.occurrence import normalise_flag_column
             normalise_flag_column(n)
+            normalise_eh_columns(n)
         except Exception:
             pass
 

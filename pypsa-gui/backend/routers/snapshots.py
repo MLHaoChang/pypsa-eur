@@ -653,6 +653,12 @@ def restore_snapshot(
         for fname in _BUNDLE_FILES:
             src = snap_dir / fname
             if not src.exists():
+                # The Library pins are DERIVED from the restored config: a
+                # snapshot without them pinned nothing, so the live sidecar
+                # must not survive to pin refs the restored config no longer
+                # names (Edge Investment Case WP1.1c review #6).
+                if fname == "library_refs.json" and (snap_dir / "solver_config.json").exists():
+                    (project_dir / fname).unlink(missing_ok=True)
                 continue
             _atomic_write_with(project_dir / fname, lambda p, src=src: shutil.copy2(src, p))
 

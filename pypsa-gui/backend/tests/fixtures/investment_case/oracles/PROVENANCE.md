@@ -1,0 +1,57 @@
+# Billing oracles — provenance (IC P2)
+
+Plan: `docs/superpowers/plans/2026-09-27-edge-investment-case-p2.md` § Oracles.
+
+Source repository: **REopt.jl** (https://github.com/NREL/REopt.jl), commit
+`6d4328916b6801e29da0b09e4ca1ccbccbf37ac9`, licensed under the Apache License,
+Version 2.0. REopt's `NOTICE` is reproduced in `REOPT_NOTICE` (Copyright 2023
+Alliance for Sustainable Energy, LLC) and its licence text in `REOPT_LICENSE`
+(Apache-2.0 §4(a), §4(d)). Derived files are marked as modified here (§4(b)).
+`r4_blended.tariff.json` keeps the default 15-min demand settlement; on REopt's
+hourly R4a load that adds only a `resolution` note (a flat load has the same
+hourly and 15-min peak). Files here are marked:
+
+- **verbatim** — copied unchanged from the REopt repository (`*.reopt.json` are
+  whole scenario files, byte-identical);
+- **derived** — inputs copied from a REopt test body, or a hand translation of
+  a verbatim file into this tool's `Tariff` model (a modification under
+  Apache-2.0 §4(b));
+- **self-authored** — written for this project.
+
+| File | Kind | Source | Expected value |
+|---|---|---|---|
+| `r1_leap_year.reopt.json` | verbatim | `test/scenarios/leap_year.json` (at this commit the 12×24 schedules are JSON arrays, not strings; the importer accepts both) | runtests.jl L4143–4210: a 10 kW load at hour 31·24+29·24+3·24+16: 2023 energy `0.28 × 10`, demand `18.05 × 10`; 2024 energy `0.36 × 10`, demand `(18.05 + 10) × 10`. The Feb-28/29 facility case (10 kW at 1-based hours 31·24+27·24+8 and 31·24+28·24+8, 07:00 local, outside every TOU demand window so `demand_tou` is 0): in 2023 the two hours fall on Feb 28 and Mar 1, two months, `2 × 18.05 × 10 = 361.0`; in 2024 on Feb 28 and Feb 29, one month, `18.05 × 10 = 180.5` |
+| `r1_leap_year.urdb.json` | derived (the `urdb_response` sub-object extracted and re-indented; content-equal) | same | — |
+| `r1_leap_year.tariff.json` | derived (hand translation by the WP2.4b-i mapping rules: URDB period `k` → period name `str(k)` fragments; facility demand `demand`, TOU demand `demand_tou`; `demandwindow` absent ⇒ `15min`; `$/day` fixed ⇒ `per_day`, a documented deviation from REopt's × 30.4375) | same | same |
+| `r2_tiered_tou_demand.reopt.json` | verbatim | `test/scenarios/tiered_tou_demand.json` | the R2 test reads `max`, the tier rates and `annual_kwh` from it |
+| `r2_tiered_tou_demand.urdb.json` | derived (the `urdb_response` sub-object extracted and re-indented; content-equal) | same | — |
+| `r3_case2.tariff.json` | derived (inputs from the test body) | "Lookback Demand Charges" case 2, runtests.jl L1911–1932: `monthly_demand_rates`, `demand_lookback_percent` 0.75, `demand_lookback_months` Jan/Apr/Dec; load 100 kW (2022) with 200 kW at hour 21 (Jan), 400 at 2402 (Apr), 500 at 4087 (Jun), 300 at 8332 (Dec), 0-based | `Σ monthly_peaks × monthly_demand_rates`, `monthly_peaks = [300,300,300,400,300,500,300,…,300]` |
+| `r3_case3.tariff.json` | derived | case 3, L1935–1956: `demand_lookback_range` 6, 75 %, same load; REopt's range lookback is cyclic within the rate year | `monthly_peaks = [225,225,225,400,300,500,375,…,375]` |
+| `r3prime.urdb.json` | **self-authored** (reconstructed: the URDB rate `539f6a23…` of case 1, L1893–1909, needs an OpenEI key and is not in the repo) | 35 % lookback, 5 other cold months at 10.5 $/kW, 6 warm at 11.5 $/kW, authored in **range** mode (`lookbackrange` 11); load 1 kW with 100 kW at hour 7 (Jan), 2022 | `100 × (10.5 + 0.35·10.5·5 + 0.35·11.5·6)` with `cyclic_year=True` |
+| `r3prime.tariff.json` | derived (hand translation of the above, `cyclic_year=True`) | same | same |
+| `r4_no_techs.reopt.json` | verbatim | `test/scenarios/no_techs.json` | the R4a test reads the blended rates and `annual_kwh` from it |
+| `r2_tiered_tou_demand.tariff.json` | derived (hand translation of the above) | same | demand `12 × (50 × 0 + (P − 50) × 12)`, `P = 1e6 / 8760` kW flat (runtests.jl L2025–2037); energy not pinned by REopt |
+| `r4_blended.tariff.json` | derived (from `test/scenarios/no_techs.json` blended rates) | "Blended tariff" L384–391 (R4a); "Fifteen minute load" L537–545 (R4b) | R4a: energy `0.10 × 10000 = 1000.00`, demand `12 × 10 × 10000/8760`; R4b (15-min, 35,040 × 1 kW, 2017; REopt asserts only annual kWh — the bill is **formula-derived**): energy `876.00`, demand `120.00` |
+
+The URDB `max` of a tier is cumulative (URDB definition); REopt reads it as a
+width. The readings agree for two tiers, the only tier cases pinned here.
+
+`r2_tiered_tou_demand.tariff.json`: the demand item's `settlement` is `15min`
+since WP2.4b-i (the URDB rate has no `demandwindow`, and the importer's rule
+assumes 15 min and says so). It was `h` before. On REopt's hourly axis both bill
+the same peak.
+
+## Hand-rated bills H1–H3 (`../bills/`)
+
+**Self-authored.** Each file carries its arithmetic in `_working`; the numbers
+are produced by `../bills/h_bills_arithmetic.py`, which uses the Python stdlib
+only (calendar, datetime, zoneinfo) and never imports the tariff engine.
+`test_tariff_engine_core.py` regenerates the files and requires them unchanged,
+then rates each through the engine to the cent; the P2 gate driver repeats the
+rating (scenario E). Rates are illustrative, not published price sheets.
+
+| File | What it pins | Total |
+|---|---|---|
+| `h1_de_rlm.json` | DE medium-voltage RLM, 2030, Europe/Berlin: Arbeitspreis (energy), Leistungspreis on the annual 15-min peak (capacity, `peak_import`, spread by hours / 8,760 over DST months of 743 and 745 h), Stromsteuer and Konzessionsabgabe (tax_levy), Messstellenbetrieb (fixed per month); the Benutzungsdauer price-pair choice worked out; §19 StromNEV individual charges a documented non-support | 296,457.36 |
+| `h2_nl_business.json` | NL business connection, 2030, Europe/Amsterdam: supply TOU (normaal/dal), energy-tax bands as tiers (annual bands as monthly thresholds, with the condition under which the annual total is exact), guarantees of origin (certificate), vastrecht (fixed per day), heffingskorting (fixed per day, revenue), kW-max (demand) | 266,097.52 |
+| `h3_us_ci.json` | US C&I, June–August 2030, America/New_York: a 3-tier windowed energy tariff (URDB proportional split), facility demand with an 11-month 80 % ratchet seeded from meter history, a split-peak TOU demand window (two fragments, one peak) beside a mid-peak window, a per-day customer charge | 128,227.64 |

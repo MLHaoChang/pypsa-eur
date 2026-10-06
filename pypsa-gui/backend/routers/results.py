@@ -16,12 +16,15 @@ header.
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
-from typing import Any
+import re
+from typing import Any, Literal
 
 import threading as _threading
 
 from fastapi import APIRouter, HTTPException, Query, Response
+from pydantic import BaseModel, ConfigDict
 
 from services.dispatch_status import dispatch_status as _dispatch_status
 from services.pypsa_service import PyPSAService
@@ -52,6 +55,9 @@ from services.adequacy.fmea_sweep_runner import (  # noqa: F401
 from services.adequacy.eh_study_runner import (  # noqa: F401
     EhStudyRequest,
 
+)
+from services.finance.investment_case_runner import (  # noqa: F401
+    InvestmentCaseRequest,
 )
 from services.results.prices import _apply_merit_order_correction  # noqa: F401
 from services.results.cost_breakdown import (  # noqa: F401
@@ -1431,6 +1437,257 @@ def post_eh_study(body: EhStudyRequest | None = None):
     )
 
 
+# ── Edge Investment Case P4: the single-owner finance run (WP4.6b) ──────────
+#
+# The runner (`services/finance/investment_case_runner.py`) never imports the
+# results layer (plan C1): this router injects `build_case`, a closure over
+# `services.results.finance_case.build_finance_case`, and the staleness inputs.
+
+_IC_LOCK_WAIT_S = 2.0
+
+
+def _ic_build_case(n, cfg, *, owner: str | None, lost_load):
+    """The adapter closure the runner calls in its worker (plan C1). A seam:
+    tests replace this factory with one returning a fake `build_case`."""
+    def build():
+        from models.finance import FinanceInputs
+        from services.results.finance_case import build_finance_case
+
+        fin = FinanceInputs.model_validate(cfg.finance)
+        with PyPSAService.get_lock():
+            return build_finance_case(n, cfg, fin, result_df=_result_df, lost_load=lost_load,
+                                      owner=owner)
+    return build
+
+
+def _ic_case_hash(case) -> str | None:
+    from services.results.finance_case import finance_case_hash
+
+    return finance_case_hash(case)
+
+
+def _ic_assumptions(cfg, n) -> tuple[str, dict]:
+    """(hash, parts) of the inputs a finance case is built from: the finance
+    inputs, the value flows, the rest of the commercial config, the rest of
+    the solver config (review B1), the dispatch digest of the solve and the
+    pack versions (WP4.6b staleness key)."""
+    from pydantic import ValidationError as _VE
+
+    from models.finance import FinanceInputs
+    from services.dispatch_status import dispatch_digest
+    from services.finance.investment_case_runner import assumptions_digest, pack_versions
+
+    raw = getattr(cfg, "finance", None)
+    try:
+        fin = FinanceInputs.model_validate(raw) if raw is not None else None
+    except _VE:
+        fin = None
+    solver = dataclasses.asdict(cfg) if dataclasses.is_dataclass(cfg) else None
+    return assumptions_digest(finance=raw, commercial=getattr(cfg, "commercial", None),
+                              dispatch=dispatch_digest(n, _result_df), packs=pack_versions(fin),
+                              solver=solver)
+
+
+def _ic_current_assumptions() -> tuple[tuple[str, dict] | None, str | None]:
+    """The current staleness key, or (None, why) when it cannot be read now
+    (a solve running, the network busy) — the report is then reported stale,
+    never silently current."""
+    if _solver_in_flight():
+        return None, "solve_in_flight"
+    lock = PyPSAService.get_lock()
+    if not lock.acquire(timeout=_IC_LOCK_WAIT_S):
+        return None, "network_busy"
+    try:
+        return _ic_assumptions(_state["solver_config"], PyPSAService.get_network()), None
+    except Exception as exc:  # noqa: BLE001 — a read must not 500 on a bad input
+        logger.warning("investment_case staleness key not computable: %s", exc)
+        return None, "current_assumptions_not_established"
+    finally:
+        lock.release()
+
+
+@results_router.get("/investment_case")
+def get_investment_case():
+    """
+    The investment-case run: its status (stage, refusal code) and whether the
+    stored report is still current (IC P4 WP4.6b). `report.stale` is true when
+    any input changed since the run — the finance inputs, the value flows, the
+    commercial config, the solve (dispatch digest) or a pack — with `changed`
+    naming them; a report whose current key cannot be read is stale too.
+    204 when neither a run nor a report exists.
+    """
+    from services.finance.investment_case_runner import public_record, staleness
+
+    record = public_record(_state.get("investment_case"))
+    stored = _state.get("investment_case_report")
+    if not record and not stored:
+        return Response(status_code=204)
+    if stored is not None and hasattr(stored, "model_dump"):
+        stored = stored.model_dump(mode="json")
+    current, why = _ic_current_assumptions() if stored else (None, None)
+    body = record or {"status": "idle", "study": "investment_case"}
+    body["report"] = staleness(stored, current, reason=why)
+    return body
+
+
+@results_router.post("/investment_case/abort")
+def post_investment_case_abort():
+    """Ask a running investment-case run to stop (stops at its next stage;
+    stores nothing). Same contract as the other study aborts."""
+    return _abort_study(
+        "investment_case",
+        "no investment-case run has been recorded in this session",
+    )
+
+
+@results_router.post("/investment_case")
+def post_investment_case(body: InvestmentCaseRequest | None = None):
+    """
+    Start the single-owner investment-case run in a worker thread (IC P4
+    WP4.6b): build the `FinanceCase` from the solved network and the stored
+    finance inputs, run the finance engine, store the report for
+    `GET /results/investment_case/report`. 409 while a solve or another study
+    runs, or before a solve; 422 without (valid) finance inputs.
+    """
+    from routers.simulation import _state_update
+    from services.finance.investment_case_runner import start_investment_case
+    _refuse_if_mesh_busy("investment_case")
+    n = PyPSAService.get_network()
+    if not _dispatch_ready(n):
+        raise HTTPException(409, {"code": "not_solved",
+                                  "message": "solve the network first: the investment case "
+                                             "values the solved dispatch"})
+    cfg = _state["solver_config"]
+    owner = body.owner if body is not None else None
+    return start_investment_case(
+        body,
+        build_case=_ic_build_case(n, cfg, owner=owner, lost_load=_state.get("last_lost_load")),
+        solver_state=_state,
+        state_update=_state_update,
+        publish_study=_publish_study,
+        assumptions=lambda: _ic_assumptions(cfg, n),
+        case_hash=_ic_case_hash,
+        state_lock=PyPSAService.get_solver_state_lock(),
+    )
+
+
+@results_router.get("/investment_case/report")
+def get_investment_case_report(detail: Literal["export", "full"] = "export"):
+    """The stored `InvestmentCaseReport`: the stable export view
+    (`ic_report_http_payload`, default) or, with `detail=full`, the whole
+    report — sections with their payloads and the cashflow lines (the
+    results view, IC P4 WP4.7b). 204 before a run. Staleness is on
+    `GET /results/investment_case`."""
+    from services.finance.report import ic_report_http_payload, load_ic_report
+
+    if detail == "full":
+        report = load_ic_report(_state)
+        return Response(status_code=204) if report is None else report.model_dump(mode="json")
+    payload, status = ic_report_http_payload(_state)
+    return Response(status_code=204) if payload is None else payload
+
+
+@results_router.get("/investment_case/export.xlsx")
+def get_investment_case_export():
+    """The stored report as a workbook (IC P4 WP4.6d): About, Summary, one sheet
+    per section, CashflowLines; None as `not_established`; formula-looking
+    names stored as text. 204 before a run."""
+    from services.finance.export_xlsx import build_workbook
+    from services.finance.report import load_ic_report
+
+    report = load_ic_report(_state)
+    if report is None:
+        return Response(status_code=204)
+    return Response(
+        content=build_workbook(report),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition":
+                 f'attachment; filename="investment_case_{re.sub(r"[^A-Za-z0-9_-]", "_", report.case_id)[:40]}.xlsx"'})
+
+
+@results_router.get("/eh_readiness")
+def get_eh_readiness(archetype: str, budget_solves: int | None = None,
+                     stages: str | None = None,
+                     dtc_attribution: str | None = None,
+                     pack_overrides: str | None = None):
+    """
+    Read-only Energy Hub readiness preflight (P14): which Links the pack
+    treats as imports and by which §6 rule, critical buses, DtC derivability,
+    SCR coverage, Class-B K, the MC hub boundary, and a per-stage solve
+    estimate against the budget — computed with the study driver's own
+    selectors on a private copy, so it cannot disagree with the run.
+
+    ``stages`` is an optional comma-separated override (same rules as
+    ``POST /eh_study``). ``pack_overrides`` is the same JSON object the
+    study takes (E2E review m3), validated identically — so the preview
+    describes the pack that will actually run.
+    """
+    from models.energy_hub import DEFAULT_EH_BUDGET_SOLVES, MAX_EH_BUDGET_SOLVES
+    from services.adequacy.eh_readiness import eh_readiness
+    from services.adequacy.eh_study_runner import _PACK_FACTORY
+
+    if archetype not in _PACK_FACTORY:
+        raise HTTPException(
+            422, f"unknown archetype {archetype!r}; expected one of "
+            f"{', '.join(_PACK_FACTORY)}")
+    budget = DEFAULT_EH_BUDGET_SOLVES if budget_solves is None else budget_solves
+    if not (1 <= budget <= MAX_EH_BUDGET_SOLVES):
+        raise HTTPException(
+            422, f"budget_solves must be between 1 and {MAX_EH_BUDGET_SOLVES}")
+    import json as _json
+
+    from services.adequacy.eh_study_runner import (
+        DTC_ATTRIBUTIONS,
+        apply_pack_overrides,
+    )
+    overrides = None
+    if pack_overrides:
+        try:
+            overrides = _json.loads(pack_overrides)
+        except ValueError as exc:
+            raise HTTPException(
+                422, f"pack_overrides must be a JSON object: {exc}") from exc
+        if not isinstance(overrides, dict):
+            raise HTTPException(422, "pack_overrides must be a JSON object")
+    if dtc_attribution is not None and dtc_attribution not in DTC_ATTRIBUTIONS:
+        raise HTTPException(
+            422, f"dtc_attribution must be one of {list(DTC_ATTRIBUTIONS)}")
+    stage_list = None
+    if stages:
+        stage_list = [x.strip() for x in stages.split(",") if x.strip()]
+    n = PyPSAService.get_network()
+    if n is None:
+        raise HTTPException(422, "no network is loaded")
+    from services.adequacy.eh_study import _private_copy
+
+    cfg = _state.get("solver_config")
+    # Copy under the lock, compute outside it: the preflight applies a pack
+    # and walks the network, and must not stall edits or a solve meanwhile.
+    with PyPSAService.get_lock():
+        snapshot = _private_copy(n)
+    try:
+        return eh_readiness(
+            snapshot,
+            apply_pack_overrides(_PACK_FACTORY[archetype](), overrides,
+                                 raise_http=True),
+            budget_solves=budget,
+            stages=stage_list,
+            voll=getattr(cfg, "voll", None) if cfg is not None else None,
+            dtc_attribution=dtc_attribution)
+    except ValueError as exc:
+        from services.adequacy.eh_study import readiness_refusal_classes
+        if isinstance(exc, readiness_refusal_classes()):
+            # The repo's OWN typed refusals: their messages are authored
+            # here and tell the caller what to change.
+            raise HTTPException(422, str(exc)) from exc
+        # Anything else (a numpy/pandas ValueError from deep in the walk)
+        # is an internal failure: log it, and do not echo its text
+        # (CodeQL py/stack-trace-exposure, PR #60).
+        logger.exception("eh_readiness failed for archetype %s", archetype)
+        raise HTTPException(
+            422, "readiness could not be computed for this network") from exc
+
+
 @results_router.get("/eh_reference_design")
 def get_eh_reference_design():
     """
@@ -1446,6 +1703,34 @@ def get_eh_reference_design():
     if status == 204:
         return Response(status_code=204)
     return body
+
+
+@results_router.get("/eh_review")
+def get_eh_review():
+    """
+    Review of the latest Energy Hub study (P24): findings with evidence,
+    recommendations and exact tool actions — the same body the chat tool
+    ``review_eh_study`` returns (one source: ``eh_review.review_latest``).
+
+    200 with ``{"status": "running", ...}`` while the study runs. Otherwise
+    200 with ``status: "ok"`` (plus the boolean ``stale``) when a report
+    exists: the stored report, or else the study record's own copy
+    (``stale: true``). 204 when there is no stored report and no study
+    record with a report (same convention as ``/eh_reference_design``).
+
+    So a study whose worker raised has a record but no report, and returns
+    204 (a study clears the stored report when it starts). An aborted or
+    stage-failed study keeps its partial report and returns 200 ``ok``; its
+    ``summary.verdict`` is null unless MC certification finished before the
+    stop. Pinned by ``tests/test_eh_review_route.py``.
+    """
+    from services.adequacy.eh_review import review_latest
+
+    record = get_eh_study()
+    out = review_latest(_state, record if isinstance(record, dict) else None)
+    if out.get("status") == "no_data":
+        return Response(status_code=204)
+    return out
 
 
 @results_router.get("/eh_redundancy")
@@ -1659,6 +1944,124 @@ def get_asset_economics():
         return _not_solved()
     payload = compute_asset_economics(n, _state['solver_config'], result_df=_result_df)
     return _not_solved() if payload is None else payload
+
+
+@results_router.get("/billing")
+def get_billing():
+    """The site bill, contract settlement and billing-vs-LP gap of the last
+    solve (Edge Investment Case P2 WP2.5, `services/results/billing.py`).
+    Stores the compact billing frames in the solver state. 204 before a solve
+    or without a commercial config."""
+    from services.results.billing import compute_billing
+
+    n = PyPSAService.get_network()
+    if _solver_in_flight():
+        # The network carries the LP transforms mid-solve (review F9).
+        raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
+                                  "message": "a solve is running; read the bill after it ends"})
+    if not _dispatch_ready(n):
+        return Response(status_code=204)
+    payload = compute_billing(n, _state["solver_config"], state=_state, result_df=_result_df)
+    return Response(status_code=204) if payload is None else payload
+
+
+_PREVIEW_LOCK_WAIT_S = 2.0
+
+
+class BillingPreviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tariff: dict
+
+
+@results_router.post("/billing/preview")
+def preview_billing(body: BillingPreviewIn):
+    """The last solve's dispatch billed under a DRAFT import tariff (IC P3
+    WP3.7b, `services/results/billing.compute_billing_preview`): nothing is
+    stored, no gap is computed, the drift flags are replaced by
+    `preview_dispatch_not_optimised_for_draft`. 409 during a solve or without
+    a commercial config, 204 before a solve, 422 for a draft that does not
+    validate or bind on this network. Holds the network lock while it reads."""
+    from pydantic import ValidationError as _VE
+
+    from services.commercial.lp_bindings import CommercialBindingError
+    from services.results.billing import compute_billing_preview
+
+    busy = HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
+                               "message": "a solve is running; preview the bill after it ends"})
+    if _solver_in_flight():
+        raise busy
+    # A solve holds this lock for its whole run: never wait out a solve — a
+    # 409, as during a solve (WP3.7b review round 2 #1). A short wait lets a
+    # quick network edit finish; the in-flight check is repeated under the
+    # lock, so a solve cannot start in between.
+    lock = PyPSAService.get_lock()
+    if not lock.acquire(timeout=_PREVIEW_LOCK_WAIT_S):
+        raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
+                                  "message": "the network is busy (a solve or an edit); preview "
+                                             "the bill again in a moment"})
+    try:
+        if _solver_in_flight():
+            raise busy
+        cfg = _state["solver_config"]
+        if not getattr(cfg, "commercial", None):
+            raise HTTPException(409, {"code": "no_commercial_config",
+                                      "message": "set the commercial config (poc_link) first"})
+        n = PyPSAService.get_network()
+        if not _dispatch_ready(n):
+            return Response(status_code=204)
+        try:
+            payload = compute_billing_preview(n, cfg, body.tariff)
+        except _VE as exc:
+            raise HTTPException(422, {"code": "tariff_invalid",
+                                      "message": str(exc.errors()[0].get("msg"))[:300],
+                                      "errors": [{"loc": list(e.get("loc", ())),
+                                                  "msg": str(e.get("msg"))[:200]}
+                                                 for e in exc.errors()[:20]]}) from exc
+        except CommercialBindingError as exc:
+            raise HTTPException(422, {"code": "tariff_not_bindable",
+                                      "message": str(exc)[:500]}) from exc
+    finally:
+        lock.release()
+    return Response(status_code=204) if payload is None else payload
+
+
+@results_router.get("/cfe_score")
+def get_cfe_score():
+    """Hourly 24/7 carbon-free matching of the site (P2 WP2.5,
+    `services/results/cfe_score.py`). 204 before a solve or without a
+    commercial config."""
+    from services.results.cfe_score import compute_cfe_score
+
+    n = PyPSAService.get_network()
+    if _solver_in_flight():
+        # The network carries the LP transforms mid-solve (review F9).
+        raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
+                                  "message": "a solve is running; read the score after it ends"})
+    if not _dispatch_ready(n):
+        return Response(status_code=204)
+    payload = compute_cfe_score(n, _state["solver_config"], result_df=_result_df)
+    return Response(status_code=204) if payload is None else payload
+
+
+@results_router.get("/value_flows")
+def get_value_flows():
+    """The participants' ledger of the last solve: value-flow lines, totals per
+    participant, a bipartite Sankey and the conservation checks (Edge
+    Investment Case P3 WP3.4, `services/results/value_flows.py`). 204 before a
+    solve or without a commercial config; 200 `status: "not_established"`
+    without a value-flows config."""
+    from services.results.value_flows import compute_value_flows
+
+    n = PyPSAService.get_network()
+    if _solver_in_flight():
+        raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
+                                  "message": "a solve is running; read the value flows after it "
+                                             "ends"})
+    if not _dispatch_ready(n):
+        return Response(status_code=204)
+    payload = compute_value_flows(n, _state["solver_config"], result_df=_result_df,
+                                  lost_load=_state.get("last_lost_load"))
+    return Response(status_code=204) if payload is None else payload
 
 
 @results_router.get("/eh_dtc_planning")

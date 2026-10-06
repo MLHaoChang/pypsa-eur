@@ -79,7 +79,7 @@ def test_off_grid_certification_ignores_generation_behind_the_islanded_poc():
     sec = report.sections["certification"]
     # The bug: with grid_supply in the copper plate the LOLE is ~0 and the
     # verdict reads "certified" for a hub that cannot reach it.
-    assert sec.payload["verdict"] == "failed", sec.note
+    assert sec.payload["verdict"] == "fail", sec.note   # P11 vocabulary
     assert report.mc_lole_h is not None and report.mc_lole_h > 3.0
     scope = sec.payload["fleet_scope"]
     assert scope["mode"] == "hub_side"
@@ -113,11 +113,12 @@ def test_weak_flexible_counts_import_as_firm_up_to_its_planning_cap_only():
     assert scope["import_cap_mw_max"] == pytest.approx(50.0)
     assert scope["import_firm_mw_max"] is None
     assert scope["import_model"] == "zonal"
-    # The screened (class-A) fleet is the same hub-side fleet.
-    top = report.sections["fmea_top"].payload["top"]
-    names = {m["name"] for m in top if m["failure_class"] == "A"}
+    # The screened (class-A) fleet is the same hub-side fleet — carried in
+    # fmea_top's class-A block beside the Class-B ranking (merge 2026-09-28).
+    class_a = report.sections["fmea_top"].payload["class_a"]
+    names = {m["name"] for m in class_a["rows"] if m["failure_class"] == "A"}
     assert names == {"base", "peaker"}
-    assert report.sections["fmea_top"].payload["fleet_scope"] == scope
+    assert class_a["fleet_scope"] == scope
     # Undo restored the Link after the study.
     assert float(n.links.at["import_poc", "p_nom"]) == pytest.approx(100.0)
 

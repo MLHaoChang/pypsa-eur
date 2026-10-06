@@ -242,6 +242,20 @@ describe('the scenario category is a real field', () => {
     expect(within(row).getByText('cold winter')).toBeTruthy()
   })
 
+  it('badges a sensitivity row (Edge Investment Case scenario matrix)', async () => {
+    vi.mocked(projectsApi.list).mockResolvedValue([
+      project({ name: 'loaded', id: 'id-loaded' }),
+      project({
+        name: 'sens', id: 'id-sens',
+        scenario_type: 'sensitivity', scenario_description: 'capex +20%',
+      }),
+    ] as never)
+    renderPanel()
+    const row = await rowFor('sens')
+    expect(within(row).getByText('sensitivity')).toBeTruthy()
+    expect(within(row).getByText('capex +20%')).toBeTruthy()
+  })
+
   it('still decodes a legacy tag for a bundle the backend has not split', async () => {
     vi.mocked(projectsApi.list).mockResolvedValue([
       project({ name: 'loaded', id: 'id-loaded' }),
@@ -392,7 +406,7 @@ describe('editing a scenario after it was created', () => {
       project({ name: 'loaded', id: 'id-loaded' }),
       project({
         name: 'exotic', id: 'id-exotic',
-        scenario_type: 'sensitivity', scenario_description: 'keep my category',
+        scenario_type: 'exotic', scenario_description: 'keep my category',
       }),
     ] as never)
     renderPanel()

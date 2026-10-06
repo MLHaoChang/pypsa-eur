@@ -10,16 +10,26 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const activate = vi.fn()
 const save = vi.fn()
+const list = vi.fn()
 const getLockStatus = vi.fn()
 
 vi.mock('../api/projects', () => ({
   projectsApi: {
     activate: (...a: unknown[]) => activate(...a),
     save: (...a: unknown[]) => save(...a),
+    list: (...a: unknown[]) => list(...a),
   },
 }))
+const getEhStudy = vi.fn()
+const getEhReview = vi.fn()
+const getFmeaModes = vi.fn()
 vi.mock('../api/simulation', () => ({
   simulationApi: { getLockStatus: (...a: unknown[]) => getLockStatus(...a) },
+  resultsApi: {
+    getEhStudy: (...a: unknown[]) => getEhStudy(...a),
+    getEhReview: (...a: unknown[]) => getEhReview(...a),
+    getFmeaModes: (...a: unknown[]) => getFmeaModes(...a),
+  },
 }))
 vi.mock('../api/network', () => ({ networkApi: {} }))
 vi.mock('./pendingEdgeDeletes', () => ({
@@ -44,6 +54,8 @@ function reject409(detail: unknown) {
 beforeEach(() => {
   activate.mockReset()
   save.mockReset()
+  list.mockReset()
+  list.mockResolvedValue([])
   save.mockResolvedValue({ ts_columns_saved: 0 })
   getLockStatus.mockReset()
   getLockStatus.mockResolvedValue({ lock_held: false, worker_alive: false })
@@ -103,5 +115,139 @@ describe('switchToProject on a 409 from activate', () => {
       Object.assign(new Error('404'), { response: { status: 404, data: { detail: 'nope' } } }),
     )
     await expect(switchToProject('B', qc)).resolves.toEqual({ status: 'not-found' })
+  })
+})
+
+
+// ── A planning → dynamics study has no network to activate ─────────────────
+//
+// Found by driving the real app in Chromium, which no component test could:
+// a study opened from the Projects page came up as "No project open" with a
+// "Project '<id>' not found" toast. `/activate` hydrates a network context from
+// `network.nc`, and a study deliberately has none — it is a config and a run
+// directory — so the backend 404s for every study, and has since increment 4.
+// It went unnoticed because the ONE path that ever opened a study, the
+// new-project wizard, never calls `/activate`: it sets the current project and
+// opens the study panel directly. So a study could be created and never
+// re-opened. These hold `switchToProject` — which every other entry point uses
+// (the project card, tabs, sidebar, command palette, workspace panel) — to what
+// the wizard does.
+
+const STUDY = { id: 's-uuid-1', name: 'Study S', project_kind: 'planning_dynamics' }
+const NETWORK = { id: 'b-uuid-2', name: 'B', project_kind: null }
+const cached = (projects: unknown[]) => ({
+  getQueryData: (key: unknown[]) => (key[0] === 'projects' ? projects : undefined),
+  invalidateQueries: vi.fn().mockResolvedValue(undefined),
+  removeQueries: vi.fn(),
+}) as never
+
+describe('switchToProject with a planning → dynamics study', () => {
+  it('opens a study by id without asking the backend to activate a network', async () => {
+    const r = await switchToProject('s-uuid-1', cached([STUDY, NETWORK]))
+    expect(activate).not.toHaveBeenCalled()
+    expect(r).toEqual({ status: 'switched' })
+    expect(useUIStore.getState().currentProject).toBe('Study S')
+    expect(useUIStore.getState().activeSlidePanel).toBe('gridspine')
+  })
+
+  it('opens a study by name the same way', async () => {
+    await switchToProject('Study S', cached([STUDY, NETWORK]))
+    expect(activate).not.toHaveBeenCalled()
+    expect(useUIStore.getState().currentProject).toBe('Study S')
+  })
+
+  it('looks the kind up when the project list is not cached yet', async () => {
+    // The browser case exactly: `/app?project=<id>` on a fresh page load,
+    // before anything has populated the ['projects'] query.
+    list.mockResolvedValue([STUDY, NETWORK])
+    const r = await switchToProject('s-uuid-1', qc)
+    expect(list).toHaveBeenCalledTimes(1)
+    expect(activate).not.toHaveBeenCalled()
+    expect(r).toEqual({ status: 'switched' })
+    expect(useUIStore.getState().currentProject).toBe('Study S')
+  })
+
+  it("does not save a network under a study's name on the way out", async () => {
+    // Leaving a study used to save "the current project" — whatever network the
+    // backend happened to hold — under the study's name.
+    useUIStore.setState({ currentProject: 'Study S' })
+    activate.mockResolvedValue({ activated: 'B', evicted: [] })
+    await switchToProject('B', cached([STUDY, NETWORK]))
+    expect(save).not.toHaveBeenCalled()
+    expect(activate).toHaveBeenCalledWith('B')
+  })
+
+  it('still activates an ordinary project, and still saves an ordinary outgoing one', async () => {
+    useUIStore.setState({ currentProject: 'A' })
+    activate.mockResolvedValue({ activated: 'B', evicted: [] })
+    const r = await switchToProject('B', cached([STUDY, NETWORK, { id: 'a', name: 'A', project_kind: null }]))
+    expect(save).toHaveBeenCalledTimes(1)
+    expect(activate).toHaveBeenCalledWith('B')
+    expect(r).toEqual({ status: 'switched' })
+  })
+
+  it('falls back to the ordinary path when the kind cannot be looked up', async () => {
+    // A failed list must not strand the user: the switch proceeds exactly as
+    // it did before this change, and a genuine study then fails the way it
+    // always did rather than in a new way.
+    list.mockRejectedValue(new Error('network down'))
+    activate.mockResolvedValue({ activated: 'B', evicted: [] })
+    const r = await switchToProject('B', qc)
+    expect(activate).toHaveBeenCalledWith('B')
+    expect(r).toEqual({ status: 'switched' })
+  })
+})
+
+
+// ── A6 (deferred spec 2026-09-28 §2.3): the hub's queries follow a switch ────
+//
+// A mid-study project switch must not leave project A's study, review or risk
+// rows on project B's cards. Every hub query is keyed by project (`nk`), so
+// after `switchToProject` A's queries have no observer left and B's are
+// fetched — once each.
+describe('switchToProject and the hub-design queries (A6)', () => {
+  it("A's eh_study / eh_review / fmea_modes go inactive; B's are fetched once each", async () => {
+    const { createElement } = await import('react')
+    const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query')
+    const { renderHook, waitFor } = await import('@testing-library/react')
+    const { useHubStudy, useHubReview } = await import('../pages/hubDesign/useHubData')
+    const { useLiveStudyRunning } = await import('../hooks/useLiveStudyRunning')
+    const { nk } = await import('./queryKeys')
+
+    useUIStore.setState({ currentProject: 'A' })
+    const per = (p: string | null) => p === 'A'
+      ? { study: { status: 'running' }, review: { status: 'ok', findings: [{ id: 'a-only' }] }, modes: { per_mode: [{ name: 'a_gen' }], sweep_status: null } }
+      : { study: null, review: null, modes: { per_mode: [{ name: 'b_gen' }], sweep_status: null } }
+    getEhStudy.mockImplementation(async () => per(useUIStore.getState().currentProject).study)
+    getEhReview.mockImplementation(async () => per(useUIStore.getState().currentProject).review)
+    getFmeaModes.mockImplementation(async () => per(useUIStore.getState().currentProject).modes)
+    activate.mockResolvedValue({ activated: 'B', evicted: [] })
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const wrapper = ({ children }: { children: React.ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children)
+    renderHook(() => ({ study: useHubStudy(), review: useHubReview(true), live: useLiveStudyRunning() }),
+      { wrapper })
+    await waitFor(() => expect(client.getQueryData(nk('A', 'results', 'fmea_modes'))).toBeTruthy())
+    await waitFor(() => expect(client.getQueryData(nk('A', 'results', 'eh_review'))).toBeTruthy())
+    getEhStudy.mockClear(); getEhReview.mockClear(); getFmeaModes.mockClear()
+
+    const r = await switchToProject('B', client as never)
+    expect(r).toEqual({ status: 'switched' })
+
+    await waitFor(() => expect(getFmeaModes).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(getEhStudy).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(getEhReview).toHaveBeenCalledTimes(1))
+    for (const root of ['eh_study', 'eh_review', 'fmea_modes']) {
+      const old = client.getQueryCache().find({ queryKey: nk('A', 'results', root), exact: true })
+      expect(old?.isActive(), `A's ${root} still observed`).toBe(false)
+      const cur = client.getQueryCache().find({ queryKey: nk('B', 'results', root), exact: true })
+      expect(cur?.isActive(), `B's ${root} observed`).toBe(true)
+    }
+    // No cross-project rows: B's modes are B's.
+    expect(JSON.stringify(client.getQueryData(nk('B', 'results', 'fmea_modes')))).not.toContain('a_gen')
+    await new Promise(res => setTimeout(res, 50))
+    expect(getFmeaModes).toHaveBeenCalledTimes(1)
+    expect(getEhStudy).toHaveBeenCalledTimes(1)
   })
 })

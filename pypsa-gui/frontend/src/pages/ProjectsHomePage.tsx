@@ -217,11 +217,14 @@ export default function ProjectsHomePage() {
   })
   // Resolves to `[]` when the backend has no unclaimed bundles AND when the
   // endpoint is missing (auth disabled) — either way the section stays hidden.
+  // Not issued at all in local mode: the route does not exist there, and the
+  // axios client logs the 404 before listUnclaimed swallows it (bug 7).
   const { data: unclaimed = [] } = useQuery({
     queryKey: UNCLAIMED_KEY,
     queryFn: projectsApi.listUnclaimed,
     staleTime: 10_000,
     retry: false,
+    enabled: authEnabled,
   })
 
   const rootProjects = useMemo(
@@ -319,6 +322,9 @@ export default function ProjectsHomePage() {
       return name
     },
     onSuccess: (name: string) => {
+      // G4 (guided-mode spec §3.4): a new project starts Guided unless the
+      // user chose a mode explicitly. First, before the navigation below.
+      useUIStore.getState().noteNewProjectCreated('blank')
       invalidateNetworkQueries(queryClient, name)
       addTab(name)
       setCurrentProject(name)

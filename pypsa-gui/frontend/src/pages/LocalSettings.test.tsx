@@ -39,7 +39,7 @@ vi.mock('../api/llmSettings', async (orig) => ({
   fetchLLMSettingsOrNull: vi.fn(),
 }))
 
-const STATE: LocalSettingsState = { key_set: true, key_hint: '7f3a', key_redactable: true, log_path: '/tmp/app.log' }
+const STATE: LocalSettingsState = { key_set: true, key_hint: '7f3a', key_redactable: true, log_path: '/tmp/app.log', projects_root: '/tmp/projects' }
 
 const LLM_PAYLOAD: LLMSettingsPayload = {
   active_profile_id: 'anthropic-sonnet',
@@ -163,7 +163,7 @@ describe('desktop-vs-web visibility', () => {
 describe('A8 — unredactable key disclosure', () => {
   it('warns when the stored key is too short to be redacted from logs', async () => {
     vi.mocked(fetchLocalSettings).mockResolvedValue({
-      key_set: true, key_hint: null, key_redactable: false, log_path: '/tmp/pypsa-gui.log',
+      key_set: true, key_hint: null, key_redactable: false, log_path: '/tmp/pypsa-gui.log', projects_root: '/tmp/projects',
     })
     renderPane()
     const warning = await screen.findByTestId('local-settings-key-unredactable')
@@ -172,7 +172,7 @@ describe('A8 — unredactable key disclosure', () => {
 
   it('says nothing for a key redaction can blot out', async () => {
     vi.mocked(fetchLocalSettings).mockResolvedValue({
-      key_set: true, key_hint: '…wxyz', key_redactable: true, log_path: '/tmp/pypsa-gui.log',
+      key_set: true, key_hint: '…wxyz', key_redactable: true, log_path: '/tmp/pypsa-gui.log', projects_root: '/tmp/projects',
     })
     renderPane()
     // Anchor on rendered CONTENT, not on the fetch having been called: the
@@ -185,7 +185,7 @@ describe('A8 — unredactable key disclosure', () => {
 
   it('says nothing when no key is set, rather than claiming it is safe', async () => {
     vi.mocked(fetchLocalSettings).mockResolvedValue({
-      key_set: false, key_hint: null, key_redactable: null, log_path: '/tmp/pypsa-gui.log',
+      key_set: false, key_hint: null, key_redactable: null, log_path: '/tmp/pypsa-gui.log', projects_root: '/tmp/projects',
     })
     renderPane()
     // Anchor on rendered CONTENT, not on the fetch having been called: the

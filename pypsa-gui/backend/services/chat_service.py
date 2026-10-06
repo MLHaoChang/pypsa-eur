@@ -97,6 +97,23 @@ RESULT_REFS_MAXLEN: int = 50
 # tool descriptions. Any tool whose tier is in this set requires confirmation
 # AND must not appear alongside another such tool in a single turn.
 DESTRUCTIVE_TIERS = frozenset(["destructive", "execution", "execution_long_running"])
+# Guided mode (G3, P25 gate B1): "the assistant does the steps, you confirm" —
+# every CHANGE confirms, so `write` joins the card there. Expert keeps
+# DESTRUCTIVE_TIERS exactly. The M7 parallel pre-scan keeps DESTRUCTIVE_TIERS
+# in both modes: several Guided writes in one response are not refused, they
+# are carded one after the other (dispatch is sequential and blocks on each).
+GUIDED_CONFIRM_TIERS = DESTRUCTIVE_TIERS | frozenset(["write"])
+
+
+def _confirm_tiers(guided: bool) -> frozenset[str]:
+    """The tiers that go through the confirmation card this turn."""
+    return GUIDED_CONFIRM_TIERS if guided else DESTRUCTIVE_TIERS
+
+
+def _is_guided(ui_context: Any) -> bool:
+    """The turn's mode, from the same allow-listed key `_format_ui_context`
+    reads: exactly the string 'guided'; anything else is Expert."""
+    return isinstance(ui_context, dict) and ui_context.get("ui_mode") == "guided"
 
 # Tools that the agent itself uses to legitimately CHANGE the active
 # project binding. The P0 mid-turn-switch guard in `run_turn` refreshes
@@ -105,12 +122,30 @@ DESTRUCTIVE_TIERS = frozenset(["destructive", "execution", "execution_long_runni
 # against the newly-activated scenario) isn't wrongly blocked as a
 # "switched mid-turn" violation. EXTERNAL switches (another browser tab,
 # autosave) — which are what the guard is meant to catch — still fire.
+#
+# P27a (A8): the creating tools bind too. `create_project_from_template` and
+# `import_project_bundle` swap in the new project and move the session's
+# pointer; `save_project` of an UNBOUND draft binds it (`was_unbound`). Without
+# them here the frontend kept the old name (autosave `expect` → identity 409)
+# and every later tool in the same turn was refused as a mid-turn switch. The
+# frame still fires only on an actual move, so Save-a-Copy (`rebind=False`)
+# and a save of the already-bound project emit nothing.
 PROJECT_REBINDING_TOOLS = frozenset([
     "activate_project",
     "load_project",
     "save_project_as",
     "rename_project",
     "restore_project_snapshot",
+    "create_project_from_template",
+    "import_project_bundle",
+    "save_project",
+    # P27a gate finding 3: the network imports replace the network through
+    # `reset_network`, which UNBINDS it (`loaded_project` X → None). The frame
+    # then carries `to: null`; a later same-turn tool is not a foreign switch.
+    "import_network_nc",
+    "import_csv_bundle",
+    "import_excel",
+    "import_matpower",
 ])
 
 # Default + selectable models: `DEFAULT_MODEL` / `OPUS_MODEL` are imported
@@ -470,7 +505,7 @@ class PendingConfirmation:
     token: str
     tool_name: str
     args: dict[str, Any]
-    safety_tier: str  # one of DESTRUCTIVE_TIERS
+    safety_tier: str  # one of DESTRUCTIVE_TIERS (+ "write" in Guided mode)
     created_at: float
     expires_at: float
 
@@ -2254,9 +2289,55 @@ _ADEQUACY_GUIDE_CHAINING = (
     "answered. WRITING IT UP: a request for a report, a summary of findings "
     "or a client write-up goes through build_study_report. Carry every line "
     "of its required_disclosures, put its evidence_gaps BEFORE the numbers "
-    "they undermine, and state its not_established explicitly."
+    "they undermine, and state its not_established explicitly. When the user "
+    "asks for a client REPORT or a DOCUMENT (Word, a file to send), start "
+    "generate_report instead and poll get_report_status; build_study_report "
+    "remains the in-chat summary, and get_report is how you read a "
+    "generated report — never re-type its numbers as new findings, and relay "
+    "its audit.unverified entries as numbers to check."
 )
 _ADEQUACY_GUIDE = _ADEQUACY_GUIDE_FACTS + _ADEQUACY_GUIDE_CHAINING
+
+# Energy Hub workflow support (plan 2026-09-26 P22). A NEW part, per the
+# sanctioned way past the pinned-prompt hashes. FACTS names no tool (the
+# tools-off model still needs the vocabulary); CHAINING is the workflow.
+_EH_GUIDE_FACTS = (
+    "Energy Hub (EH) studies. An archetype pack is the planning situation: "
+    "strong_grid (free import), weak_flexible (capped import, SCR gate, DSR "
+    "opt-in), off_grid (import islanded). A ReferenceDesignReport marks each "
+    "section ok, skipped or not_established — a not_established section "
+    "was requested but could not be shown and its note says why; never "
+    "report it as zero. Certification is pass only when the MC LOLE 95 % CI "
+    "lies below the target; inconclusive is not a failure. Templates "
+    "(data center, hydrogen hub, island microgrid) are SYNTHETIC "
+    "illustrative data — say so before anyone reads a decision into them. "
+)
+_EH_GUIDE_CHAINING = (
+    "Supporting the EH workflow: to explain what a field or control does "
+    "or what to enter, read get_feature_guide (the same wording the GUI's "
+    "tour shows) instead of paraphrasing from memory. For a template "
+    "project, read get_eh_template and pass its recommended archetype, "
+    "pack_overrides, stages and dtc_attribution to run_eh_study unchanged. "
+    "After a study finishes, call review_eh_study, present its findings "
+    "with their evidence numbers (highest severity first), and OFFER the "
+    "listed actions — never apply one the user has not asked for; each "
+    "action names the exact tool and arguments, and write / execution "
+    "tools will ask the user to confirm. When the user agrees, run exactly "
+    "that action, wait for the study, and call review_eh_study again to "
+    "report what changed. Class-C scenarios are added with "
+    "put_stress_scenarios (read the registry first, send the whole list). "
+    "A finding without an action (e.g. a tag whose value only the user "
+    "knows) is a question for the user, not a guess. "
+    # Guided-mode spec §6.3: the one intended system-prompt change of P25
+    # (the tool exists in both modes, so the sentence is true in each — P25
+    # gate B1). Pinned by test_guided_mode_prompt.
+    "For a network that is not tagged yet, call suggest_eh_setup, present "
+    "each suggestion with its reason, and apply only the ones the user picks "
+    "with update_component / bulk_update_components (in Guided mode every "
+    "change asks the user for confirmation; in Expert mode edits apply "
+    "directly)."
+)
+_EH_GUIDE = _EH_GUIDE_FACTS + _EH_GUIDE_CHAINING
 
 # Untrusted-content boundary clause (#2, prompt half). Pairs with the
 # <untrusted_data> wrapping in _result_to_anthropic_content + the attachment
@@ -2349,11 +2430,52 @@ def _sanitise_ui_value(value: Any) -> str | None:
     if len(text) > _work_cap:
         text = text[:_work_cap]
     text = _neutralise_untrusted_delimiters(text)
+    #
+    # Stripped until stable (P25 gate note 3): one pass let a NESTED
+    # delimiter through — `</untru</untrusted_data>sted_data>` became the
+    # closing tag once the inner one was removed. The linear neutraliser above
+    # already reaches that fixpoint; this loop is kept as a defence in depth
+    # (merge of master c671f5e83 with P25). It is bounded by the work cap and
+    # does not iterate when the neutraliser is correct.
+    while _UNTRUSTED_OPEN in text or _UNTRUSTED_CLOSE in text:
+        text = text.replace(_UNTRUSTED_OPEN, "").replace(_UNTRUSTED_CLOSE, "")
     # Collapse whitespace so a name cannot fake a second line of context.
     text = " ".join(text.split())
     if len(text) > _UI_CONTEXT_MAX_VALUE_CHARS:
         text = text[:_UI_CONTEXT_MAX_VALUE_CHARS] + "…"
     return text or None
+
+
+# Guided mode (guided-mode spec §6.2). The frontend sends `ui_mode: 'guided'`
+# only in Guided; `'expert'` is accepted and renders exactly as no key.
+# Anything else is dropped (fail closed, like every other key here), and so
+# is a `guided_step` outside the five cards or without Guided.
+_GUIDED_STEPS = {
+    "start": "Start", "site": "Site", "goal": "Goal",
+    "results": "Results", "improve": "Improve",
+}
+
+
+def _guided_mode_addendum(step: str | None) -> str:
+    """The Guided rules for ONE turn — per-turn user content, never the
+    system prompt (which stays byte-identical in both modes, so the prompt
+    cache and Expert behaviour are unchanged). `step` is an allow-listed
+    `guided_step`; with none the card clause is dropped."""
+    card = (
+        f'the user is on the "{_GUIDED_STEPS[step]}" card of the hub design '
+        "— refer to it by name and say what to do there; "
+        if step in _GUIDED_STEPS else ""
+    )
+    return (
+        "Guided mode is on. Rules for this turn: answer in plain language a "
+        "non-specialist can follow; keep it short (about 120 words unless the "
+        "user asks for detail); gloss any technical term in a few words the "
+        f"first time; {card}when the user delegates a step, do it with the "
+        "tools rather than explaining how, and before any write or run say in "
+        "one sentence what will change and that a confirmation card follows; "
+        "never apply a change the user has not asked for; questions are "
+        "welcome at any time."
+    )
 
 
 def _format_ui_context(ui_context: dict[str, Any] | None) -> str | None:
@@ -2395,15 +2517,32 @@ def _format_ui_context(ui_context: dict[str, Any] | None) -> str | None:
         if klass and name:
             lines.append(f"  selected component: {klass} '{name}'")
 
+    # Guided only (§6.2). An Expert context — `ui_mode: 'expert'` or no key —
+    # adds nothing here, so its block is byte-identical to before P25.
+    mode = ui_context.get("ui_mode")
+    guided = isinstance(mode, str) and mode == "guided"
+    step = ui_context.get("guided_step") if guided else None
+    step = step if isinstance(step, str) and step in _GUIDED_STEPS else None
+    if guided:
+        lines.append("  mode: guided")
+        if step:
+            lines.append(f"  guided step: {step}")
+
     if not lines:
         return None
 
-    return "\n".join([
+    block = "\n".join([
         _UNTRUSTED_OPEN,
         "The user is currently looking at:",
         *lines,
         _UNTRUSTED_CLOSE,
     ])
+    if guided:
+        # The app's own rules for the turn: OUTSIDE the untrusted region
+        # (the block above is data the model is told never to obey). Persisted
+        # with the turn exactly as the block is.
+        block += "\n\n" + _guided_mode_addendum(step)
+    return block
 
 
 # A6 — session history soft/hard caps. Trim drops COMPLETE turn groups so a
@@ -2775,6 +2914,7 @@ def _build_system_prompt(
         # (it can check nothing), and the half that names tools is
         # unusable there.
         _ADEQUACY_GUIDE if include_tools else _ADEQUACY_GUIDE_FACTS,
+        _EH_GUIDE if include_tools else _EH_GUIDE_FACTS,
         _UNTRUSTED_DATA_CLAUSE,
     ]
     if live_meta:
@@ -3186,6 +3326,7 @@ def _dispatch_tool_uses(
     tool_results_for_next_turn: list[dict[str, Any]],
     char_budget: dict[str, int],
     offered_tool_names: set[str | None],
+    guided: bool = False,
 ) -> Generator[tuple[str, dict[str, Any]], None, "_ToolDispatchOutcome"]:
     """
     Dispatch one assistant step's tool calls, sequentially.
@@ -3340,11 +3481,12 @@ def _dispatch_tool_uses(
             continue
         yield from _dispatch_real_tool_call(
             session, tu, tool_results_for_next_turn, turn_ctx=turn_ctx,
-            result_char_budget=char_budget,
+            result_char_budget=char_budget, guided=guided,
         )
         # If the agent just dispatched a rebinding tool (activate_project /
         # load_project / save_project_as / rename_project /
-        # restore_project_snapshot), refresh the turn-project snapshot so
+        # restore_project_snapshot / create_project_from_template /
+        # import_project_bundle / save_project / the network imports), refresh the turn-project snapshot so
         # the guard recognises the new binding as legitimate. We re-read
         # from the live registry rather than guessing from the tool's args
         # because activate_project on a non-resident project takes the
@@ -4341,6 +4483,7 @@ def _run_turn_body(
             tool_results_for_next_turn=tool_results_for_next_turn,
             char_budget=tool_result_char_budget,
             offered_tool_names=offered_tool_names,
+            guided=_is_guided(ui_context),
         )
         tool_call_count = dispatch.tool_call_count
         if dispatch.stop_turn:
@@ -4387,6 +4530,7 @@ def _confirm_destructive_tool(
     args: dict[str, Any],
     tier: str,
     tool_results_collector: list[dict[str, Any]],
+    guided: bool = False,
 ) -> Generator[tuple[str, dict[str, Any]], None, bool]:
     """
     Gate a destructive tool on the user's confirmation. Returns whether to
@@ -4406,10 +4550,14 @@ def _confirm_destructive_tool(
     AUTO_APPROVE_TIERS` fails in a different direction — one blocks exempt tools
     on a prompt nobody sent, the other runs destructive tools unprompted.
 
+    In Guided mode (`guided`) the `write` tier is gated too
+    (`GUIDED_CONFIRM_TIERS`, P25 gate B1); `AUTO_APPROVE_TIERS` never contains
+    `write`, so a Guided write always asks.
+
     Phase E of `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`;
     see `tests/test_chat_confirmation_gate_seam.py`.
     """
-    if tier in DESTRUCTIVE_TIERS and tier not in AUTO_APPROVE_TIERS:
+    if tier in _confirm_tiers(guided) and tier not in AUTO_APPROVE_TIERS:
         pc = session.issue_confirmation(
             tool_name=tool_name, args=args, safety_tier=tier,
         )
@@ -4453,6 +4601,7 @@ def _dispatch_real_tool_call(
     *,
     turn_ctx: Any | None = None,
     result_char_budget: dict[str, int] | None = None,
+    guided: bool = False,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
     """
     Drive ONE Anthropic tool_use through the chat_tools dispatcher with
@@ -4526,7 +4675,7 @@ def _dispatch_real_tool_call(
     # Advisory, not a gate: a validator that raises must leave the tool exactly
     # as callable as it was. It is a courtesy check running ahead of the real
     # handler, which remains the authority on whether the call succeeds.
-    if tier in DESTRUCTIVE_TIERS:
+    if tier in _confirm_tiers(guided):
         from services.chat_tools import PRE_DISPATCH_VALIDATORS
         validator = PRE_DISPATCH_VALIDATORS.get(tool_name)
         problem: str | None = None
@@ -4571,6 +4720,7 @@ def _dispatch_real_tool_call(
         args=args,
         tier=tier,
         tool_results_collector=tool_results_collector,
+        guided=guided,
     )
     if not approved:
         return

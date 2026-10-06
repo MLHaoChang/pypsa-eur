@@ -266,6 +266,27 @@ def test_openpyxl_is_required_because_nothing_catches_its_absence():
     assert "openpyxl" in _pinned_distributions()
 
 
+def test_defusedxml_ships_because_openpyxl_only_hardens_itself_when_it_can_import_it():
+    """
+    openpyxl parses every uploaded workbook (`io.py`'s template upload, and
+    pandas' Excel engine) and guards against entity-expansion ("billion
+    laughs") and quadratic-blowup XML ONLY if `defusedxml` is importable —
+    `openpyxl.xml.DEFUSEDXML` is decided at import by trying it. Nothing in
+    this codebase imports defusedxml, so the import scan above cannot see the
+    need, and the failure is silent: an unhardened parser still parses. The
+    `test` environment happened to carry it transitively while the build venv
+    and the default environment did not — so every test ran hardened and the
+    app did not.
+    """
+    assert "defusedxml" in _pinned_distributions()
+
+
+def test_openpyxl_parses_uploads_with_defusedxml_in_this_environment():
+    import openpyxl.xml
+
+    assert openpyxl.xml.DEFUSEDXML is True
+
+
 def test_a_guard_that_does_not_catch_importerror_is_not_a_guard():
     """
     Mutation check on `_catches_import_error`. `except ValueError` must not
@@ -332,6 +353,18 @@ def test_the_spec_freezes_gridspine_from_the_repo_root_with_its_data():
     # and the one exclusion the frozen probe found necessary: without it the
     # frozen app's pandapower looks for case39.json one directory too deep
     assert '"pandapower.__init__",' in text
+
+
+def test_the_spec_ships_the_generic_defaults_pack_data():
+    """IC U1 (a): the defaults pack's loader is a module (collected by import)
+    but its versioned data files are not — the spec must list them, at the
+    path the loader resolves (`services/library/defaults_pack/versions`)."""
+    from services.library.defaults_pack.loader import VERSIONS_DIR
+
+    text = SPEC.read_text(encoding="utf-8")
+    assert '"services/library/defaults_pack/versions"' in text
+    assert VERSIONS_DIR.parts[-4:] == ("services", "library", "defaults_pack", "versions")
+    assert any(VERSIONS_DIR.iterdir())
 
 
 def test_the_build_script_builds_the_project_templates_with_gridspine_reachable():
@@ -510,3 +543,56 @@ def test_python_docx_ships_its_templates_and_renders_in_a_frozen_layout(tmp_path
 
     doc = docx.Document(str(out))
     assert any(t.rows[0].cells[0].text == "Assumption" for t in doc.tables)
+def _guarded_gridspine_modules() -> set[str]:
+    """Every `gridspine.*` module the backend's import guard names.
+
+    Read out of the source rather than listed here, so the check cannot go
+    stale the way a hand-maintained second copy of the list would — and so a
+    module ADDED to the guard later is covered without anyone remembering to
+    extend this file.
+    """
+    tree = ast.parse(
+        (BACKEND / "services" / "gridspine_service.py").read_text(encoding="utf-8"),
+        filename="gridspine_service.py",
+    )
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
+            "gridspine."
+        ):
+            found.add(node.module)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.startswith("gridspine."):
+                    found.add(alias.name)
+    assert found, "no gridspine imports found — did gridspine_service move?"
+    return found
+
+
+def test_the_spec_names_every_gridspine_module_the_backend_guard_imports():
+    """
+    The spec states this rule itself: the gridspine entry modules are spelled
+    out "so a future change to that guard cannot drop the package from the
+    bundle without a build error". Nothing was enforcing it, and it was
+    already broken once — `drivers.readback` reached the guard with the
+    PowerFactory read-back and never reached the spec.
+
+    Why it matters even though PyInstaller's analysis follows a try/except
+    import today: `gridspine` is frozen from the repo root through `pathex`,
+    not installed into the build venv, so nothing but that analysis puts it in
+    the bundle. When a module is missed the app still LAUNCHES — the guard
+    catches the ImportError — and every planning→dynamics action answers 503
+    "not available in this build". That reads as a deliberate build variant
+    rather than a packaging bug, which is why it survives a smoke test.
+    """
+    text = SPEC.read_text(encoding="utf-8")
+    missing = sorted(
+        module
+        for module in _guarded_gridspine_modules()
+        if f'"{module}"' not in text
+    )
+    assert not missing, (
+        "pypsa-gui.spec's hiddenimports does not name "
+        f"{missing} — the backend imports them inside the gridspine guard, so "
+        "a bundle built without them answers 503 on every gridspine action"
+    )

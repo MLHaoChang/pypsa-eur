@@ -1,0 +1,25 @@
+{
+ "_comment": "WP3.2 version pin: each entry is a hash of the template module and the meter-side classifier (T.code_sha()) with the builder versions at that hash. A code change appends an entry that bumps at least one version.",
+ "history": [
+  {
+   "code_sha": "70ee31121046b607",
+   "versions": {
+    "single_owner": "2",
+    "btm_ppa": "2",
+    "landlord_tenant": "2",
+    "dso_developer": "2",
+    "energy_hub": "2"
+   }
+  },
+  {
+   "code_sha": "a9c6b9872946671f",
+   "versions": {
+    "single_owner": "2",
+    "btm_ppa": "3",
+    "landlord_tenant": "2",
+    "dso_developer": "2",
+    "energy_hub": "2"
+   }
+  }
+ ]
+}

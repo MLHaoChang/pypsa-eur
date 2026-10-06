@@ -139,11 +139,11 @@ def test_partial_put_keeps_and_sets_the_demand_charge():
     from models.schemas import SolverConfigSchema
 
     _state["solver_config"] = SolverConfig()
-    update_solver_config(SolverConfigSchema(demand_charge=DC), db=None, actor=None)
+    update_solver_config(SolverConfigSchema(demand_charge=DC), db=None, user=None)
     assert _state["solver_config"].demand_charge == DC
-    update_solver_config(SolverConfigSchema(voll=5000.0), db=None, actor=None)
+    update_solver_config(SolverConfigSchema(voll=5000.0), db=None, user=None)
     assert _state["solver_config"].demand_charge == DC
-    update_solver_config(SolverConfigSchema(demand_charge=None), db=None, actor=None)
+    update_solver_config(SolverConfigSchema(demand_charge=None), db=None, user=None)
     assert _state["solver_config"].demand_charge is None
 
 

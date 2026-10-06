@@ -130,6 +130,8 @@ EXPECTED = (
     # python-docx's own template, read by `docx.Document()` for the report's
     # DOCX (gate S9 [S3]).
     "default.docx",
+    # Class-C profile packs (P15): read by `stress.py` at scenario save/run.
+    "synth_dunkelflaute.json",
 )
 
 # Info.plist usage-description keys macOS TCC requires before the app may
@@ -169,7 +171,33 @@ def scan(root: Path) -> tuple[list[str], list[str]]:
             problems.append(f"SECRET-SHAPED FILE   {rel}")
 
     missing = [want for want in EXPECTED if want not in seen]
+    missing += check_rooted(root)
     return problems, missing
+
+
+# Files a `__file__`-relative read resolves against the _MEIPASS root, so a
+# right basename in the wrong folder still 500s. Anchored on `alembic.ini`,
+# which the spec writes to "." — i.e. that same root.
+ROOTED = (
+    # `stress.PROFILE_PACK_DIR` = parents[2] of services/adequacy/stress.py.
+    "data/eh_class_c/synth_dunkelflaute.json",
+    # `services.guides.GUIDE_DIR` = parents[1] of services/guides.py (P21).
+    "data/guides/eh_fmea_guide.json",
+    # `routers.projects._PROJECT_TEMPLATES_DIR` = parents[1] of
+    # routers/projects.py; the P19 EH templates are loaded from it BY FILE
+    # PATH (merge review N8) — a basename match elsewhere is not enough.
+    "project_templates/eh_templates.py",
+    # The generic defaults pack (IC U1 a): `defaults_pack.loader.VERSIONS_DIR` =
+    # parents[0] of services/library/defaults_pack/loader.py / "versions"; one
+    # manifest per vendored version.
+    "services/library/defaults_pack/versions/2026-10-05/manifest.json",
+)
+
+
+def check_rooted(root: Path) -> list[str]:
+    roots = [p.parent for p in root.rglob("alembic.ini") if p.is_file()]
+    return [f"{rel} (beside alembic.ini)" for rel in ROOTED
+            if not any((r / rel).is_file() for r in roots)]
 
 
 def check_info_plist(root: Path) -> list[str]:

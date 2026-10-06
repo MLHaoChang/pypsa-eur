@@ -1,6 +1,11 @@
 export interface Bus {
   name: string; v_nom: number; carrier: string; x: number; y: number
   country: string; unit: string; control: string; sub_network: string
+  // Energy Hub tags (P14, custom columns — absent until first set).
+  eh_poc?: boolean | null
+  eh_critical?: boolean | null
+  eh_sk_mva?: number | null
+  eh_ibr_mva?: number | null
 }
 export interface Carrier {
   name: string; co2_emissions: number; color: string; nice_name: string; unit: string
@@ -27,6 +32,8 @@ export interface Line {
   lifetime: number | null
 }
 export interface Link {
+  // Energy Hub role (P14, custom column — absent until first set).
+  eh_role?: string | null
   // Adequacy occurrence attributes (custom GUI columns, spec §5.4).
   // null/NaN = unset → per-carrier library default at analysis time.
   outage_rate_value?: number | null
@@ -113,6 +120,10 @@ export interface Store {
 }
 export interface Load {
   name: string; bus: string; carrier: string; p_set: number; q_set: number; sign: number
+  // Read-only, from `_serialize_component`: the largest-magnitude value of
+  // `loads_t.p_set[name]` when the load has a profile, else the static p_set,
+  // else null. The Bus card's "Peak load" row reads it (bug 4).
+  p_set_peak?: number | null
 }
 export interface Transformer {
   name: string; bus0: string; bus1: string; type: string; s_nom: number
@@ -157,6 +168,9 @@ export interface SnapshotInfo {
   // True when a flat uploaded profile spans all 12 months of one year at
   // hourly resolution — gates the representative-week sampler.
   can_sample_weeks?: boolean
+  /** Why sampling is unavailable: `not_supported_for_freq` on a sub-hourly axis,
+   *  otherwise the backend's reason text; null when sampling is available. */
+  sample_weeks_reason?: string | null
   // Snapshot resolution as a pandas offset alias ("h", "3h", "D"), measured
   // from the FIRST investment period on MultiIndex networks. null when the
   // backend could not infer one. The Resolution stat card renders this —
@@ -164,7 +178,12 @@ export interface SnapshotInfo {
   // from the network.
   freq?: string | null
 }
-export interface NetworkMeta { name: string; snapshot_count: number; bus_count: number }
+export interface NetworkMeta {
+  name: string; snapshot_count: number; bus_count: number
+  /** The project the backend is bound to (`null` for an unbound draft) —
+   *  the A2 mismatch check compares it with `currentProject`. */
+  loaded_project?: string | null
+}
 export interface SolverConfig {
   solver_name: string; mode: string; transmission_losses: boolean
   multi_investment_periods: boolean; solver_options: Record<string, unknown>
@@ -298,6 +317,243 @@ export interface SolverConfig {
   // a sensible default for UC. mip_time_limit_s = 0 disables the cap.
   mip_gap: number
   mip_time_limit_s: number
+  // Edge Investment Case commercial layer (P1 WP1.3). Mirrors
+  // backend/models/commercial.py `CommercialConfig`; null = no commercial layer.
+  commercial?: CommercialConfig | null
+}
+/** A pinned Library item (backend `PriceSeriesRef`). */
+export interface LibraryRef {
+  id: string; version: number; hash: string; source: string
+  vintage_year?: number | null; provider?: string | null
+}
+export interface TariffPeriod {
+  name: string; rate: number
+  months?: number[]; weekdays?: number[]
+  start_hour?: number | null; end_hour?: number | null
+  /** Per-period tier rates on the item's thresholds (IC P2 WP2.1a-ii). */
+  tier_rates?: number[] | null
+}
+export interface TariffTier { threshold: number; rate: number }
+/** Range mode (`lookback_months`, optionally `cyclic_year`) or designated months
+ *  (`months`, year-wide) — exactly one of the two (IC P2 WP2.1a-iii). */
+export interface TariffRatchet {
+  lookback_months?: number | null; share: number
+  months?: number[] | null; cyclic_year?: boolean
+}
+export interface TariffItem {
+  id: string
+  kind: 'energy' | 'demand' | 'capacity' | 'fixed' | 'certificate' | 'tax_levy'
+  unit: 'per_kwh' | 'per_kw_month' | 'per_kw_year' | 'per_month' | 'per_kva_year' | 'per_day'
+  periods: TariffPeriod[]
+  tiers?: TariffTier[] | null
+  ratchet?: TariffRatchet | null
+  settlement?: '15min' | '30min' | 'h'
+  measured_on?: 'import' | 'export' | 'net' | 'peak_import'
+  direction?: 'cost' | 'revenue'
+}
+export interface Tariff {
+  id: string; name: string; jurisdiction: string
+  dso_or_retailer?: string | null
+  valid_from: string; valid_to?: string | null
+  items: TariffItem[]
+  pack_hash?: string | null
+  // URDB fields a partial import could not map (P2 WP2.4b-i)
+  unsupported_fields?: string[]
+}
+/** A pinned Library item version (IC P2 WP2.4a); `hash` is the item's canonical-JSON sha256. */
+export interface LibraryItemRef {
+  kind: 'tariff' | 'contract' | 'connection_agreement'
+  id: string
+  version: number
+  hash: string
+}
+
+export interface ConnectionAgreement {
+  kind: 'firm' | 'non_firm_static' | 'non_firm_dynamic' | 'fca'
+  import_cap_mw: number
+  export_cap_mw?: number | null
+  envelope?: LibraryRef | null
+  curtailment_hours_per_year?: number | null
+  curtailment_compensation_eur_per_mwh?: number | null
+  capacity_fee?: TariffItem | null
+  /** The Library template this agreement was copied from (provenance only). */
+  library_ref?: LibraryItemRef | null
+  available_from: string
+  group?: string | null
+}
+/** Fields every settled contract carries (IC P2 WP2.2). */
+interface ContractBase {
+  id: string
+  base_year?: number | null
+  library_ref?: LibraryItemRef | null
+}
+/** Mirrors backend `PpaContract` (IC P2 WP2.2a/b, WP2.2d `changes_dispatch`). */
+export interface PpaContract extends ContractBase {
+  type: 'ppa'
+  kind: 'pay_as_produced' | 'baseload' | 'as_consumed_btm' | 'sleeved'
+  price: number
+  indexation_pct_per_year?: number
+  volume_cap_mwh_per_year?: number | null
+  floor?: number | null
+  cap?: number | null
+  tenor_years: number
+  seller: string
+  buyer: string
+  asset_ids: string[]
+  reference_price?: LibraryRef | null
+  changes_dispatch?: boolean
+  pricing?: 'fixed' | 'market_plus_premium'
+  premium_eur_per_mwh?: number | null
+  baseload_mw?: number | null
+  sleeving_fee_eur_per_mwh?: number | null
+  sleeving_party?: string | null
+}
+export interface CfdContract extends ContractBase {
+  type: 'cfd'
+  strike: number
+  reference_price?: LibraryRef | null
+  tenor_years: number
+  asset_ids: string[]
+  generator_owner?: string | null
+  counterparty?: string | null
+  indexation_pct_per_year?: number
+  reference?: 'interval' | 'monthly_capture'
+  suspend_on_negative_price?: boolean
+}
+export interface DrContract extends ContractBase {
+  type: 'dr'
+  availability_eur_per_mw_year: number
+  activation_eur_per_mwh: number
+  max_events?: number | null
+  max_duration_h?: number | null
+  notice_h?: number | null
+  asset_ids?: string[]
+  load_ids?: string[]
+  counterparty?: string | null
+  contracted_mw?: number | null
+}
+export interface LeaseContract extends ContractBase {
+  type: 'lease'
+  lessor: string
+  lessee: string
+  annual_payment: number
+  tenor_years: number
+  asset_ids: string[]
+}
+export interface EaasContract extends ContractBase {
+  type: 'eaas'
+  provider: string
+  customer: string
+  fee_eur_per_mwh?: number | null
+  fee_eur_per_year?: number | null
+  tenor_years: number
+  asset_ids: string[]
+}
+export interface RetailContract extends ContractBase {
+  type: 'retail'
+  retailer: string
+  customer: string
+  tariff_id: string
+  tenor_years: number
+}
+/** A settled contract (IC P2 WP2.2), discriminated by `type` (IC P3 WP3.0 types each variant). */
+export type CommercialContract =
+  | PpaContract | CfdContract | DrContract | LeaseContract | EaasContract | RetailContract
+
+// ── Participants and value flows (IC P3 WP3.0; spec §7) ─────────────────────
+export type ParticipantRole =
+  | 'site_owner' | 'developer' | 'investor' | 'lender' | 'tax_equity' | 'dso' | 'tso'
+  | 'retailer' | 'tenant' | 'landlord' | 'hub_member' | 'offtaker' | 'other'
+export type ValueStreamKind =
+  | 'energy_import' | 'energy_export' | 'network_capacity' | 'network_energy'
+  | 'demand_charge' | 'retail_fixed' | 'ancillary' | 'dr_availability' | 'dr_activation'
+  | 'ppa_settlement' | 'cfd_settlement' | 'certificates' | 'lease' | 'eaas_fee' | 'fuel'
+  | 'fom' | 'vom' | 'capex' | 'incentive' | 'tax' | 'debt_service' | 'other'
+export interface Participant {
+  id: string; name: string; role: ParticipantRole; currency?: string
+}
+export interface AllocationKey {
+  basis: 'contracted_capacity' | 'peak_contribution' | 'energy' | 'fixed_shares'
+  /** participant id → share, for fixed_shares (sum 1) */
+  shares?: Record<string, number> | null
+}
+/** Item id wins over kind; one of the two is set. */
+export interface TariffPayeeRule {
+  kind?: TariffItem['kind'] | null; item_id?: string | null; payee: string
+}
+export interface AssetOwnership {
+  asset_id: string
+  component: 'Generator' | 'StorageUnit' | 'Store' | 'Link' | 'Line' | 'Transformer'
+  /** Must be a participant. */
+  owner: string
+}
+export interface HubMember { link: string; participant: string; contracted_mw?: number | null }
+export interface ValueFlowConfig {
+  template?: 'single_owner' | 'btm_ppa' | 'landlord_tenant' | 'dso_developer' | 'energy_hub' | 'custom'
+  template_version?: string | null
+  built_digest?: string | null
+  /** What the builder read (site assets, contracts, PoC); `template_stale` when they differ. */
+  built_inputs_digest?: string | null
+  participants?: Participant[]
+  /** Default: retailer, dso, tso, market, tax_authority, capex_supplier, om_contractor. */
+  externals?: string[]
+  tariff_payees?: TariffPayeeRule[]
+  asset_owners?: AssetOwnership[]
+  hub_members?: HubMember[]
+  allocation?: AllocationKey | null
+  export_revenue_to?: 'site_party' | 'asset_owner'
+  /** Who is paid the connection agreement's fees; null = "dso". */
+  connection_fee_payee?: string | null
+}
+/**
+ * GET/PUT /api/simulation/commercial/value_flows (IC P3 WP3.0). Send `digest` back as
+ * If-Match (always). The stored value is raw: trust `value_flows`' shape only when
+ * `status === 'ok'` (a hand-edited file can hold any JSON; the status is then
+ * `value_flows_invalid`).
+ */
+export interface ValueFlowsState {
+  value_flows: ValueFlowConfig | null
+  digest: string
+  status: 'ok' | 'not_set' | 'no_commercial_config' | 'value_flows_invalid'
+  message?: string
+}
+
+export interface CommercialConfig {
+  poc_link: string
+  import_tariff_id?: string | null
+  /** A Library tariff; PUT /solver_config resolves it into the inline import_tariff. */
+  import_tariff_ref?: LibraryItemRef | null
+  /** Contracts settled on the solved dispatch (IC P2 WP2.2). */
+  contracts?: CommercialContract[]
+  /** The grid's carbon-free share per snapshot, a Library series (IC P2 WP2.2-0). */
+  grid_cfe_share_ref?: LibraryRef | null
+  /** Who the site is in contract parties (IC P2 WP2.2c); default "site". */
+  site_party?: string
+  import_tariff?: Tariff | null
+  export_price_ref?: LibraryRef | null
+  export_link?: string | null
+  timezone?: string | null
+  connection?: ConnectionAgreement | null
+  group_contract?: string | null
+  /** Energy-hub group contract: member PoC Links, combined import ≤ group_cap_mw. */
+  group_members?: string[]
+  group_cap_mw?: number | null
+  demand_items?: string[]
+  /** Metered monthly import peaks before the horizon, {"YYYY-MM": kW} (ratchet seed). */
+  meter_history_peaks_kw?: Record<string, number>
+  /** Metered import energy per month, {"YYYY-MM": kWh}: prices a non-convex tier in the LP (P2 WP2.1c-ii). */
+  meter_history_energy_kwh?: Record<string, number>
+  /** P6 hook: a floor on a month's modelled peak, {"YYYY-MM": MW}. */
+  initial_peak_lower_bound?: Record<string, number>
+  /** Site power factor for per-kVA tariff items (IC P2 WP2.1a-i). */
+  power_factor?: number | null
+  /**
+   * Participants and value-flow assignment (IC P3 WP3.0). Stored raw and
+   * validated by the server on write (PUT /api/simulation/commercial/value_flows
+   * only — PUT /solver_config refuses a change to it); a stored value that no
+   * longer validates makes the ledger answer `value_flows_invalid`.
+   */
+  value_flows?: ValueFlowConfig | null
 }
 /**
  * Actionable failure card for a finished solve. Produced by the backend's
@@ -370,7 +626,7 @@ export interface ProjectInfo {
   // graph reconstructed by walking these pointers across the list.
   parent_project?: string | null
   scenario_description?: string | null
-  // Scenario category — 'baseline' | 'scenario' | 'stress', or null/absent
+  // Scenario category — 'baseline' | 'scenario' | 'stress' | 'sensitivity', or null/absent
   // when uncategorised. A real column since backend migration 0004; before
   // that it was a `[type]` prefix on the description, which every surface but
   // one rendered as prose. Typed as a bare string because the set is
@@ -745,4 +1001,227 @@ export interface CatalogAttribute {
 export interface CatalogPayload {
   component: string
   attributes: CatalogAttribute[]
+}
+
+// ── Edge Investment Case finance (IC P4 WP4.0; models/finance.py) ──────────
+// Mirrors the pydantic contracts field for field; `tests/test_finance_types_ts_parity.py`
+// (backend) checks names and optionality. `null` = not stated (ADR-0001), never 0.
+
+export type EscalationClass = 'opex' | 'fuel' | 'tariff' | 'ppa' | 'export' | 'capex'
+
+export interface DebtTranche {
+  kind: 'term_loan' | 'mini_perm' | 'construction' | 'mezzanine'
+  amount?: number | null
+  gearing?: number | null
+  gearing_base?: 'capex' | 'total_uses'
+  rate: number | number[]
+  tenor_years: number
+  sculpting?: 'annuity' | 'dscr_target' | 'level'
+  dscr_target?: number | null
+  max_gearing?: number | null
+  dsra_months?: number | null
+  upfront_fee?: number | null
+  commitment_fee?: number | null
+  grace_years?: number | null
+}
+
+export interface EligibilityRule {
+  begin_construction_by?: string | null
+  placed_in_service_by?: string | null
+  asset_classes?: string[]
+}
+
+export interface Incentive {
+  kind: 'itc' | 'ptc' | 'grant' | 'accelerated_depreciation' | 'cfd' | 'capacity_payment'
+  rate?: number | null
+  amount?: number | null
+  eligibility?: EligibilityRule
+  phase_out?: Array<[string, number]>
+  feoc_flag?: boolean | null
+  // A grant's tax treatment (no default): reduces the basis, or taxable when received.
+  grant_tax_treatment?: 'reduces_basis' | 'taxable' | null
+}
+
+export interface SolvePpa {
+  contract_id?: string | null
+  target_irr: number
+  target_year: number
+}
+
+export interface TerminalValueRule {
+  method?: 'none' | 'book_value' | 'multiple_of_ebitda' | 'fixed'
+  value?: number | null
+}
+
+export interface FinanceInputs {
+  currency?: string
+  /** The money year of the typed costs and rates; null = not stated (GS Q6). */
+  currency_year?: number | null
+  /** Nominal (escalated, the default) or real (constant money of `currency_year`). */
+  price_basis?: 'nominal' | 'real'
+  financial_close: string
+  cod_by_asset?: Record<string, string>
+  construction_months_by_asset?: Record<string, number>
+  capex_phasing?: number[]
+  contingency_share?: number | null
+  escalation?: Partial<Record<EscalationClass, number>>
+  degradation_by_asset?: Record<string, number | number[]>
+  analysis_years?: number | null
+  acquisition_date?: string | null
+  construction_start?: string | null
+  annualise?: boolean
+  tax_losses?: 'offset_other_income' | 'carryforward' | null
+  financing_fee_tax?: 'amortised' | 'not_deducted' | null
+  hebesatz_pct?: number | null
+  state_rate?: number | null
+  pwa_met?: boolean | null
+  small_business_163j?: boolean | null
+  reserves_rate?: number | null
+  solve_ppa?: SolvePpa | null
+  depreciation_class_by_asset?: Record<string, string>
+  replacement_capex?: Array<[number, string, number]>
+  terminal_value?: TerminalValueRule
+  wacc_nominal?: number | null
+  cost_of_equity?: number | null
+  inflation?: number | null
+  debt?: DebtTranche[]
+  tax_pack_id?: string | null
+  incentives?: Incentive[]
+  /** P7 (tax equity) — kept opaque here. */
+  tax_equity?: Record<string, unknown> | null
+  participants?: Participant[]
+}
+
+export type CashflowStream = ValueStreamKind
+  | 'corporate_tax' | 'terminal_value' | 'financing_fee' | 'reserve' | 'interest' | 'principal'
+
+export interface CashflowProvenance {
+  source: string
+  mode: 'pf' | 'realistic'
+  pack_hash?: string | null
+  seed?: number | null
+  source_id?: string | null
+  contract_id?: string | null
+  period?: string | null
+}
+
+export interface CashflowLine {
+  year: number
+  participant: string
+  counterparty: string
+  value_stream: CashflowStream
+  tariff_item?: string | null
+  asset?: string | null
+  amount: number
+  provenance: CashflowProvenance
+}
+
+// ── Investment case report (IC P4 WP4.6b/4.7b; models/finance.py) ─────────
+// `InvestmentCaseReport` mirrors the pydantic model field for field (same
+// optionality and nullability as the finance parity test checks). The HTTP
+// report route serves `export_investment_case(report)` — the IC_EXPORT_KEYS
+// with the gate flattened — possibly with `gates` / `sections` /
+// `cashflow_lines` beside it: `InvestmentCaseReportPayload` is that view, every
+// field optional and read defensively. A `null` headline is "not established"
+// (ADR-0001), never 0.
+
+export const IC_REPORT_SECTIONS = [
+  'design', 'commercial', 'dispatch_modes', 'participants', 'project',
+  'debt', 'tax', 'tax_equity', 'uncertainty', 'gates',
+] as const
+export type IcReportSection = typeof IC_REPORT_SECTIONS[number]
+
+export type IcSectionStatus = 'ok' | 'not_established' | 'skipped'
+
+export interface IcSectionState {
+  status: IcSectionStatus
+  payload?: Record<string, unknown> | null
+  note?: string | null
+}
+
+export interface GatesBlock {
+  wacc_vs_discount_rate_consistent?: boolean | null
+  billing_vs_lp_gap_pct?: Record<string, number> | null
+  conservation_ok?: boolean | null
+}
+
+export interface IcPipelineStageRecord {
+  stage: string
+  status?: 'run' | 'skipped' | 'aborted' | 'pending'
+  solves_charged?: number
+  note?: string | null
+}
+
+export interface IcStudyPipeline {
+  stages?: IcPipelineStageRecord[]
+  budget_solves?: number
+  solves_consumed?: number
+  aborted?: boolean
+}
+
+export interface InvestmentCaseReport {
+  case_id: string
+  reference_design_id?: string | null
+  assumptions_hash: string
+  packs?: Record<string, string>
+  cost_at_target_eur?: number | null
+  excludes_shed_cost?: true
+  haircut_pct?: number | null
+  project_irr_pre_tax?: number | null
+  project_irr_post_tax?: number | null
+  npv_at_wacc?: number | null
+  lcoe_finance_consistent_eur_per_mwh?: number | null
+  ppa_price_for_target_irr_eur_per_mwh?: number | null
+  min_dscr?: number | null
+  avg_dscr?: number | null
+  llcr?: number | null
+  plcr?: number | null
+  flip_year?: number | null
+  gates?: GatesBlock
+  sections?: Partial<Record<IcReportSection, IcSectionState>>
+  completeness: Record<IcReportSection, IcSectionStatus>
+  pipeline?: IcStudyPipeline
+  cashflow_lines?: CashflowLine[]
+}
+
+/** GET /results/investment_case/report: `export_investment_case(report)` and
+ *  whatever of the full report rides beside it. */
+export type InvestmentCaseReportPayload =
+  Partial<Omit<InvestmentCaseReport, 'completeness' | 'sections'>> & {
+    completeness?: Partial<Record<string, IcSectionStatus | (string & {})>>
+    sections?: Partial<Record<string, IcSectionState>>
+    /** The export view's flattened gate (`gates.*` in the model). */
+    wacc_vs_discount_rate_consistent?: boolean | null
+    conservation_ok?: boolean | null
+    stale?: boolean
+  }
+
+/** GET /simulation/finance (IC P4 WP4.6b). */
+export interface FinanceState {
+  finance: FinanceInputs | null
+  digest: string
+  status: string
+  message?: string
+}
+
+/** GET /results/investment_case: the study record (IC P4 WP4.6b); 204 when
+ *  neither a run nor a report exists. Read defensively: the progress is a
+ *  fraction / record (`progress`) or the runner's stages; the staleness is
+ *  top-level (`stale`) or the stored report's block (`report.stale`). */
+export interface InvestmentCaseStudy {
+  status: 'idle' | 'running' | 'done' | 'aborted' | 'error' | 'refused' | 'failed' | (string & {})
+  study?: string
+  /** A fraction in [0, 1], or a stage record. */
+  progress?: number | Record<string, unknown> | null
+  stage?: string | null
+  stages?: string[]
+  stages_done?: string[]
+  /** The stored report's assumptions changed since it was computed. */
+  stale?: boolean | null
+  report?: { present?: boolean; stale?: boolean | null; changed?: string[]; reason?: string | null } | null
+  code?: string | null
+  message?: string | null
+  error?: string | null
+  error_code?: string | null
+  flags?: string[]
 }

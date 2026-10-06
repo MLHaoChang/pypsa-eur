@@ -76,3 +76,15 @@ list_scenarios,ProjectInfo,project_kind,project_kind,True
 list_scenarios,ProjectInfo,study_owned,study_owned,True
 list_scenarios,ProjectInfo,owner_study_id,owner_study_id,True
 list_scenarios,ProjectInfo,owner_study_name,owner_study_name,True
+list_library_items,LibraryItemRef,kind,kind,True
+list_library_items,LibraryItemRef,id,id,True
+list_library_items,LibraryItemRef,version,version,True
+list_library_items,LibraryItemRef,hash,hash,True
+get_library_item,LibraryItemRef,kind,kind,True
+get_library_item,LibraryItemRef,id,id,True
+get_library_item,LibraryItemRef,version,version,True
+get_library_item,LibraryItemRef,hash,hash,True
+import_urdb_tariff,UrdbImportOut,ref,ref,True
+import_urdb_tariff,UrdbImportOut,notes,notes,True
+import_urdb_tariff,UrdbImportOut,refusals,refusals,True
+import_urdb_tariff,UrdbImportOut,unsupported_fields,unsupported_fields,True

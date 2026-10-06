@@ -41,10 +41,12 @@ availability is a fleet statistic, not a weather year.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import pathlib
 import re
 
+from services.adequacy.worksheet import zero_reason
 from services.atomic_io import atomic_write_text
 
 SIDECAR_NAME = "adequacy_stress_scenarios.json"
@@ -54,34 +56,51 @@ _ID_RE = re.compile(r"^[a-z0-9_\-]{1,64}$")
 VALID_KINDS = ("parametric", "profiles")
 
 # Bundled synthetic profile packs (P8a). Real climate years are NOT here —
-# they are a procurement follow-up. Paths relative to this module resolve
-# to the test fixtures tree when present; production can overlay a
-# directory later without changing the scenario schema.
-_SYNTHETIC_PACK_DIRS: tuple[pathlib.Path, ...] = (
-    pathlib.Path(__file__).resolve().parents[2]
-    / "tests" / "fixtures" / "eh_class_c",
-)
+# they are a procurement follow-up. P15: the packs ship in ``backend/data``
+# (never the tests tree, which a frozen build does not bundle); the spec
+# writes the directory to the same relative place under _MEIPASS.
+logger = logging.getLogger("pypsa_gui.adequacy.stress")
+
+PROFILE_PACK_DIR: pathlib.Path = (
+    pathlib.Path(__file__).resolve().parents[2] / "data" / "eh_class_c")
 
 
 class StressValidationError(ValueError):
-    pass
+    """A refusal authored by this module. Its message is always one of this
+    module's own sentences — never an OS or parser exception's text — so the
+    routes may show it to the caller (CodeQL py/stack-trace-exposure, PR #60).
+    """
+
+
+def _read_failure(what: str, exc: Exception) -> str:
+    """A caller-safe reason a JSON file could not be read, with the real
+    exception logged server-side.
+
+    ``OSError`` text carries the server file path, so it becomes a fixed
+    phrase; a ``JSONDecodeError`` keeps only its line and column, which is
+    what someone fixing the file needs. The "unreadable" wording is load-
+    bearing: the P15 editor and the sweep refusal key on it.
+    """
+    logger.warning("%s unreadable", what, exc_info=exc)
+    if isinstance(exc, json.JSONDecodeError):
+        return (f"{what} unreadable: not valid JSON "
+                f"(line {exc.lineno}, column {exc.colno})")
+    return f"{what} unreadable: could not be read"
 
 
 def load_synthetic_profile_pack(pack_id: str) -> dict:
     """Load a bundled synthetic profiles scenario by id (no ``.json``)."""
     sid = str(pack_id).strip()
-    if not sid or not _ID_RE.match(sid):
+    if not sid or not _ID_RE.fullmatch(sid):
         raise StressValidationError(
             f"profile_pack id '{pack_id}' must match [a-z0-9_-]{{1,64}}")
-    for root in _SYNTHETIC_PACK_DIRS:
-        path = root / f"{sid}.json"
-        if not path.is_file():
-            continue
+    path = PROFILE_PACK_DIR / f"{sid}.json"
+    if path.is_file():
         try:
             raw = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError) as exc:
             raise StressValidationError(
-                f"profile_pack '{sid}' unreadable: {exc}") from exc
+                _read_failure(f"profile_pack '{sid}'", exc)) from exc
         if not isinstance(raw, dict):
             raise StressValidationError(
                 f"profile_pack '{sid}' must be a JSON object")
@@ -91,7 +110,45 @@ def load_synthetic_profile_pack(pack_id: str) -> dict:
         return out
     raise StressValidationError(
         f"unknown synthetic profile_pack '{sid}' "
-        f"(looked in {[str(p) for p in _SYNTHETIC_PACK_DIRS]})")
+        f"(available: {[p['id'] for p in list_profile_packs()] or 'none'})")
+
+
+def list_profile_packs() -> list[dict]:
+    """Summaries of every shipped pack, sorted by id, for the editor's picker.
+
+    A pack that does not parse is LISTED with its ``error`` (and a scenario
+    naming it still fails at save) rather than silently vanishing.
+    """
+    out: list[dict] = []
+    root = PROFILE_PACK_DIR
+    if not root.is_dir():
+        return out
+    for path in sorted(root.glob("*.json")):
+        sid = path.stem
+        # is_file: a DIRECTORY named x.json would raise "unknown pack", whose
+        # message lists the packs — i.e. calls this again, forever.
+        if not path.is_file() or not _ID_RE.fullmatch(sid):
+            continue
+        try:
+            raw = load_synthetic_profile_pack(sid)
+        except StressValidationError as exc:
+            # Only our own typed refusal is shown: an OS/parser failure was
+            # already reduced to a fixed phrase by ``_read_failure``.
+            out.append({"id": sid, "error": str(exc)})
+            continue
+        loads = _series_map(raw.get("loads_p_set")) or {}
+        gens = _series_map(raw.get("generators_p_max_pu")) or {}
+        lengths = {len(v) for v in [*loads.values(), *gens.values()]}
+        out.append({
+            "id": sid,
+            "name": str(raw.get("name") or sid),
+            "frequency_per_year": raw.get("frequency_per_year"),
+            "snapshots": lengths.pop() if len(lengths) == 1 else None,
+            "loads": sorted(loads),
+            "generators": sorted(gens),
+            "provenance": raw.get("provenance"),
+        })
+    return out
 
 
 def _series_map(raw) -> dict[str, list[float]] | None:
@@ -113,37 +170,55 @@ def _series_map(raw) -> dict[str, list[float]] | None:
     return out or None
 
 
+_PROFILE_SLOTS = ("loads_p_set", "generators_p_max_pu", "links_p_max_pu")
+
+
 def _profiles_payload(scenario: dict) -> tuple[
-        dict[str, list[float]] | None, dict[str, list[float]] | None]:
-    """Resolve inline series or ``profile_pack`` into (loads, gens) maps."""
+        dict[str, list[float]] | None, dict[str, list[float]] | None,
+        dict[str, list[float]] | None]:
+    """Resolve inline series or ``profile_pack`` into (loads, gens, links) maps.
+
+    ``links_p_max_pu`` (Edge Investment Case WP1.4b) carries a Link's
+    availability — an FCA connection's curtailment hours on the PoC Link."""
     sc = scenario
-    if sc.get("profile_pack"):
-        pack = load_synthetic_profile_pack(str(sc["profile_pack"]))
-        # Inline keys on the scenario override pack fields.
-        loads = _series_map(sc.get("loads_p_set")) or _series_map(
-            pack.get("loads_p_set"))
-        gens = _series_map(sc.get("generators_p_max_pu")) or _series_map(
-            pack.get("generators_p_max_pu"))
-        return loads, gens
-    return (_series_map(sc.get("loads_p_set")),
-            _series_map(sc.get("generators_p_max_pu")))
+    pack = load_synthetic_profile_pack(str(sc["profile_pack"])) if sc.get("profile_pack") else {}
+    # Inline keys on the scenario override pack fields.
+    return tuple(_series_map(sc.get(slot)) or _series_map(pack.get(slot))
+                 for slot in _PROFILE_SLOTS)
 
 
 def _profiles_ready(scenario: dict) -> bool:
-    loads, gens = _profiles_payload(scenario)
-    if loads is None and gens is None:
+    maps = _profiles_payload(scenario)
+    if all(m is None for m in maps):
         return False
-    lengths = [len(v) for v in (loads or {}).values()]
-    lengths += [len(v) for v in (gens or {}).values()]
+    lengths = [len(v) for m in maps for v in (m or {}).values()]
     if not lengths:
         return False
     return len(set(lengths)) == 1 and lengths[0] > 0
 
 
+def _profiles_unmatched(scenario: dict, network) -> dict[str, list[str]]:
+    """Series keys with no matching Load / Generator on ``network``."""
+    loads, gens, _links = _profiles_payload(scenario)
+    out: dict[str, list[str]] = {}
+    loads_df = getattr(network, "loads", None)
+    gens_df = getattr(network, "generators", None)
+    if loads_df is None or gens_df is None:
+        return {}                 # not a network (test doubles): no check
+    have_loads = set(map(str, loads_df.index))
+    have_gens = set(map(str, gens_df.index))
+    bad_l = sorted(k for k in (loads or {}) if k not in have_loads)
+    bad_g = sorted(k for k in (gens or {}) if k not in have_gens)
+    if bad_l:
+        out["loads"] = bad_l
+    if bad_g:
+        out["generators"] = bad_g
+    return out
+
+
 def _profiles_match_horizon(scenario: dict, n_snapshots: int) -> bool:
     """True when every series length equals the live network horizon."""
-    loads, gens = _profiles_payload(scenario)
-    for series_map in (loads, gens):
+    for series_map in _profiles_payload(scenario):
         if series_map is None:
             continue
         if any(len(v) != n_snapshots for v in series_map.values()):
@@ -151,14 +226,45 @@ def _profiles_match_horizon(scenario: dict, n_snapshots: int) -> bool:
     return True
 
 
+def _multipliers(scenario: dict) -> tuple[float, float]:
+    """(load, availability) multipliers; absent/None means 1.0.
+
+    An explicit 0 is a VALUE (availability 0 = a full renewables drought),
+    never "unset" — ``x or 1.0`` used to run such a scenario unstressed.
+    """
+    sid = scenario.get("id", "")
+    out = []
+    for key in ("electrical_load_multiplier",
+                "renewable_availability_multiplier"):
+        raw = scenario.get(key)
+        if raw is None:
+            out.append(1.0)
+            continue
+        if isinstance(raw, bool):
+            raise StressValidationError(
+                f"scenario '{sid}': {key} must be a number, got {raw!r}")
+        try:
+            out.append(float(raw))
+        except (TypeError, ValueError):
+            raise StressValidationError(
+                f"scenario '{sid}': {key} must be a number, got {raw!r}"
+            ) from None
+    return out[0], out[1]
+
+
 def _validate(scenarios: list[dict]) -> None:
     if len(scenarios) > MAX_SCENARIOS:
         raise StressValidationError(
             f"too many scenarios ({len(scenarios)} > {MAX_SCENARIOS})")
     seen: set[str] = set()
-    for sc in scenarios:
-        sid = str(sc.get("id", ""))
-        if not _ID_RE.match(sid):
+    for i, sc in enumerate(scenarios):
+        if not isinstance(sc, dict):
+            raise StressValidationError(
+                f"scenario #{i + 1} must be an object, got {type(sc).__name__}")
+        raw_id = sc.get("id", "")
+        sid = str(raw_id)
+        # fullmatch: `$` also matches before a trailing newline ("abc\n").
+        if not isinstance(raw_id, str) or not _ID_RE.fullmatch(sid):
             raise StressValidationError(
                 f"scenario id '{sid}' must match [a-z0-9_-]{{1,64}}")
         if sid in seen:
@@ -167,8 +273,10 @@ def _validate(scenarios: list[dict]) -> None:
         if sc.get("kind") not in VALID_KINDS:
             raise StressValidationError(
                 f"scenario '{sid}': kind must be one of {VALID_KINDS}")
+        raw_freq = sc.get("frequency_per_year")
         try:
-            freq = float(sc.get("frequency_per_year"))
+            freq = (float("nan") if isinstance(raw_freq, bool)
+                    else float(raw_freq))
         except (TypeError, ValueError):
             freq = float("nan")
         if not (math.isfinite(freq) and 0 < freq <= 365):
@@ -176,8 +284,7 @@ def _validate(scenarios: list[dict]) -> None:
                 f"scenario '{sid}': frequency_per_year must be in (0, 365] — "
                 "it is the empirical events-per-year of the stress condition")
         if sc.get("kind") == "parametric":
-            lm = float(sc.get("electrical_load_multiplier", 1.0) or 1.0)
-            rm = float(sc.get("renewable_availability_multiplier", 1.0) or 1.0)
+            lm, rm = _multipliers(sc)
             if not (0 < lm <= 10):
                 raise StressValidationError(
                     f"scenario '{sid}': load multiplier {lm:g} outside (0, 10]")
@@ -188,18 +295,14 @@ def _validate(scenarios: list[dict]) -> None:
         elif sc.get("kind") == "profiles":
             # Incomplete is allowed in the registry (forward-compat climate
             # stub) but series that ARE present must be finite + equal length.
-            loads = _series_map(sc.get("loads_p_set"))
-            gens = _series_map(sc.get("generators_p_max_pu"))
-            if sc.get("loads_p_set") is not None and loads is None:
-                raise StressValidationError(
-                    f"scenario '{sid}': loads_p_set must be "
-                    "{{name: [finite floats, ...]}}")
-            if sc.get("generators_p_max_pu") is not None and gens is None:
-                raise StressValidationError(
-                    f"scenario '{sid}': generators_p_max_pu must be "
-                    "{{name: [finite floats, ...]}}")
-            lengths = [len(v) for v in (loads or {}).values()]
-            lengths += [len(v) for v in (gens or {}).values()]
+            lengths: list[int] = []
+            for slot in _PROFILE_SLOTS:
+                parsed = _series_map(sc.get(slot))
+                if sc.get(slot) is not None and parsed is None:
+                    raise StressValidationError(
+                        f"scenario '{sid}': {slot} must be "
+                        "{{name: [finite floats, ...]}}")
+                lengths += [len(v) for v in (parsed or {}).values()]
             if lengths and len(set(lengths)) != 1:
                 raise StressValidationError(
                     f"scenario '{sid}': profile series length mismatch "
@@ -209,17 +312,42 @@ def _validate(scenarios: list[dict]) -> None:
                 load_synthetic_profile_pack(str(sc["profile_pack"]))
 
 
-def load_scenarios(project_dir: pathlib.Path) -> list[dict]:
+def load_scenarios_checked(project_dir: pathlib.Path) -> tuple[list[dict], str | None]:
+    """(scenarios, error). ``error`` names why an EXISTING sidecar reads as
+    empty (corrupt JSON, wrong shape, another schema) so an editor can refuse
+    a whole-list save that would silently replace it (P15 gate)."""
     path = project_dir / SIDECAR_NAME
     if not path.exists():
-        return []
+        return [], None
+    try:
+        raw = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        return [], _read_failure("stress-scenario registry", exc)
+    if not isinstance(raw, dict):
+        return [], "stress-scenario registry unreadable: not a JSON object"
+    if raw.get("__schema__") != SCHEMA:
+        return [], (f"stress-scenario registry has schema "
+                    f"{raw.get('__schema__')!r}; this version reads {SCHEMA}")
+    return list(raw.get("scenarios") or []), None
+
+
+def load_scenarios(project_dir: pathlib.Path) -> list[dict]:
+    return load_scenarios_checked(project_dir)[0]
+
+
+def registry_is_empty(project_dir: pathlib.Path) -> bool:
+    """True when the sidecar is absent or a VALID registry with no scenarios;
+    False when it exists but cannot be read (so a caller never mistakes a
+    corrupt file for an empty one and overwrites it)."""
+    path = project_dir / SIDECAR_NAME
+    if not path.exists():
+        return True
     try:
         raw = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
-        return []
-    if not isinstance(raw, dict) or raw.get("__schema__") != SCHEMA:
-        return []
-    return list(raw.get("scenarios") or [])
+        return False
+    return (isinstance(raw, dict) and raw.get("__schema__") == SCHEMA
+            and not raw.get("scenarios"))
 
 
 def save_scenarios(project_dir: pathlib.Path, scenarios: list[dict]) -> list[dict]:
@@ -234,8 +362,7 @@ def save_scenarios(project_dir: pathlib.Path, scenarios: list[dict]) -> list[dic
 # ── the re-solve ──────────────────────────────────────────────────────────
 
 def _parametric_mutate(scenario: dict):
-    lm = float(scenario.get("electrical_load_multiplier", 1.0) or 1.0)
-    rm = float(scenario.get("renewable_availability_multiplier", 1.0) or 1.0)
+    lm, rm = _multipliers(scenario)
 
     def mutate(n):
         from services.adequacy.metrics import electrical_columns
@@ -328,7 +455,7 @@ def _profiles_mutate(scenario: dict):
     Series length must equal ``len(n.snapshots)`` at mutate time; otherwise
     the contingency fails closed (no partial apply).
     """
-    loads_map, gens_map = _profiles_payload(scenario)
+    loads_map, gens_map, links_map = _profiles_payload(scenario)
 
     def mutate(n):
         import pandas as pd
@@ -338,7 +465,8 @@ def _profiles_mutate(scenario: dict):
 
         h = len(n.snapshots)
         for series_map, label in ((loads_map, "loads_p_set"),
-                                  (gens_map, "generators_p_max_pu")):
+                                  (gens_map, "generators_p_max_pu"),
+                                  (links_map, "links_p_max_pu")):
             if series_map is None:
                 continue
             bad = [k for k, v in series_map.items() if len(v) != h]
@@ -445,6 +573,36 @@ def _profiles_mutate(scenario: dict):
 
                         undo_ops.append(_undo_gs)
 
+        if links_map:
+            # Link availability (WP1.4b): any named Link, time-varying p_max_pu.
+            pmp_l = n.links_t.p_max_pu
+            missing = [k for k in links_map if k not in n.links.index]
+            if missing:
+                # Fail closed: a renamed PoC Link must not solve an unmutated
+                # network and report ΔEUE 0 (WP1.4 review round 2 #6).
+                for op in reversed(undo_ops):
+                    op()
+                raise StressValidationError(
+                    f"scenario '{scenario.get('id')}': links_p_max_pu link_missing: {missing}")
+            for name, series in links_map.items():
+                if name in pmp_l.columns:
+                    orig_t = pmp_l[name].copy()
+
+                    def _undo_lt_link(n=n, col=name, orig=orig_t):
+                        live = n.links_t.p_max_pu
+                        if col in live.columns:
+                            live[col] = orig
+
+                    undo_ops.append(_undo_lt_link)
+                else:
+                    def _undo_ls_link(n=n, col=name):
+                        live = n.links_t.p_max_pu
+                        if col in live.columns:
+                            live.drop(columns=[col], inplace=True)
+
+                    undo_ops.append(_undo_ls_link)
+                pmp_l[name] = pd.Series(series, index=idx)
+
         def undo():
             for op in reversed(undo_ops):
                 op()
@@ -508,6 +666,32 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
                     "meta": {**meta, "note": "series_length_ne_snapshots"},
                 })
                 continue
+            # Same binding condition for a Link the entry names that the
+            # network no longer has (a renamed PoC Link): an incomplete row,
+            # never a mutate raise that aborts the sweep (WP1.4 round 3 #2).
+            links_map = _profiles_payload(sc)[2]
+            gone = [k for k in (links_map or {})
+                    if getattr(network, "links", None) is None or k not in network.links.index]
+            if gone:
+                rows.append({
+                    "id": sid, "status": "profiles_incomplete",
+                    "delta_eue_mwh": None, "failure_mode": None,
+                    "meta": {**meta, "note": "link_missing", "links": gone},
+                })
+                continue
+            # E2E review M1: a series keyed on a Load / Generator the
+            # network lacks used to be skipped silently, so the scenario ran
+            # UNSTRESSED and reported severity 0 as if evaluated.
+            missing = _profiles_unmatched(sc, network)
+            if missing:
+                rows.append({
+                    "id": sid, "status": "profiles_incomplete",
+                    "delta_eue_mwh": None, "failure_mode": None,
+                    "meta": {**meta, "note": (
+                        "profile series name components not on the network: "
+                        + "; ".join(f"{k} {v}" for k, v in missing.items()))},
+                })
+                continue
             contingencies.append({
                 "id": sid, "mutate": _profiles_mutate(sc), "meta": meta,
                 "occurrence_basis": "scenario:profiles",
@@ -555,6 +739,11 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
                 "in_metric_scope": True,
                 "engine": "lp_proxy",
                 "fidelity": "deterministic_scenario",
+                # P29 (B3): why a €0 row is €0 — additive.
+                "zero_reason": zero_reason(
+                    severity_eur=severity, delta_eue_mwh=delta,
+                    occurrence_per_year=freq, in_metric_scope=True,
+                    voll=voll),
             },
             "meta": meta,
         })

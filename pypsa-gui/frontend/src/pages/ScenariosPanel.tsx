@@ -95,8 +95,9 @@ export function buildScenarioForest(projects: ProjectInfo[]): ScenarioNode[] {
 // `utils/scenarioType` because this panel was not the only surface rendering
 // a description — it was just the only one that knew to strip the marker.
 // Only the tone mapping is panel-local: it names PageKit tags.
-const SCEN_TYPE_TONE: Record<ScenType, 'accent' | 'purple' | 'warn'> = {
+const SCEN_TYPE_TONE: Record<ScenType, 'accent' | 'purple' | 'warn' | 'neutral'> = {
   baseline: 'accent', scenario: 'purple', stress: 'warn',
+  sensitivity: 'neutral',
 }
 
 // ── Difference from the parent ──────────────────────────────────────────────

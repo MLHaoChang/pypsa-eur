@@ -18,6 +18,28 @@ EnergyHubArchetype = Literal["strong_grid", "weak_flexible", "off_grid"]
 
 SectionStatus = Literal["ok", "not_established", "skipped"]
 
+# ── Energy Hub network tags (P14; plan B11 / R5) ─────────────────────────────
+# ONE role vocabulary for Link `eh_role`, shared by archetypes (§6 selection),
+# redundancy and levers. Kept as separate subsets: §6 selection rule 1 is
+# `grid_import` ONLY — widening it to every import role would silently change
+# which Links each pack applies to.
+EH_IMPORT_ROLES: tuple[str, ...] = ("grid_import", "eh_import", "import")
+EH_CONVERSION_ROLES: tuple[str, ...] = (
+    "eh_conversion", "conversion", "electrolyser", "fuel_cell")
+# Written by the redundancy study on its own private copies only.
+EH_INTERNAL_ROLES: tuple[str, ...] = ("eh_n1_conversion",)
+EH_LINK_ROLES: tuple[str, ...] = (
+    ("",) + EH_IMPORT_ROLES + EH_CONVERSION_ROLES + EH_INTERNAL_ROLES)
+
+# Custom (non-PyPSA) columns the GUI may write. Each maps to a kind:
+# "bool" (flag, default False), "float_nonneg" (MVA, default NaN) or
+# "role" (one of EH_LINK_ROLES, default "").
+EH_CUSTOM_COLUMNS: dict[str, dict[str, str]] = {
+    "Bus": {"eh_poc": "bool", "eh_critical": "bool",
+            "eh_sk_mva": "float_nonneg", "eh_ibr_mva": "float_nonneg"},
+    "Link": {"eh_role": "role"},
+}
+
 # Spec decision 18 — ordered default pipeline.
 EH_PIPELINE_STAGES: tuple[str, ...] = (
     "apply_pack",
@@ -52,7 +74,9 @@ MAX_EH_BUDGET_SOLVES = 120
 # mc_certify draw budget per pack. The engine's own product cap is
 # ``services.adequacy.mc.MAX_DRAWS`` (2000); the literal here keeps this
 # contract module free of service imports and is asserted equal in tests.
-DEFAULT_EH_MC_DRAWS = 200
+# 500 = the P11/P13 study default (``eh_study.DEFAULT_MC_DRAWS``); a request's
+# ``mc.draws`` overrides the pack (merge 2026-09-28).
+DEFAULT_EH_MC_DRAWS = 500
 MAX_EH_MC_DRAWS = 2000
 
 # Frontier stage defaults (plan eh-wire-skipped-stages WP2). Factors on the
@@ -61,15 +85,18 @@ MAX_EH_MC_DRAWS = 2000
 # asserted equal in tests so this contract module stays free of services.
 DEFAULT_EH_FRONTIER_LADDER: tuple[float, ...] = (4.0, 2.0, 1.0, 0.5, 0.25)
 MAX_EH_FRONTIER_POINTS = 12
-# Ranked residual failure modes kept in ``fmea_top``.
-DEFAULT_EH_FMEA_TOP_N = 10
+# Ranked residual failure modes kept in ``fmea_top`` (spec §9 P12 amendment:
+# top-5 Class-B Link modes; the class-A COPT screening block uses the same N).
+DEFAULT_EH_FMEA_TOP_N = 5
 MAX_EH_FMEA_TOP_N = 50
 
-# Certification verdict (spec decision 2): LOLE failure fails certification
-# even when ENS is met; ``no_target`` = LOLE reported, no target to certify
-# against; ``not_established`` = the MC could not run (reason on the section).
-CertificationVerdict = Literal[
-    "certified", "failed", "no_target", "not_established"]
+# Certification verdict (spec decision 2, §4 P11 amendment Q1): ``pass`` iff
+# the LOLE 95% CI upper bound is within the target, ``fail`` iff its lower
+# bound exceeds it, else ``inconclusive`` (also below the resolution floor).
+# No target → no verdict (null); an MC that cannot run → the section is
+# ``not_established`` with the reason. LOLE failure fails certification even
+# when ENS is met.
+CertificationVerdict = Literal["pass", "fail", "inconclusive"]
 
 REPORT_SECTIONS: tuple[str, ...] = (
     "target",
@@ -97,6 +124,10 @@ class AvailabilityTarget(BaseModel):
     Planning always uses ENS when ``ens_cap_permyriad`` is set. MC LOLE is the
     acceptance metric when loops are run. If both are set, LOLE failure fails
     certification even when ENS is met.
+
+    Units: ``ens_cap_permyriad`` is ‱ of demand; ``target_lole_h`` is hours
+    per YEAR. Certification compares it with the MC's per-horizon LOLE as
+    ``target_lole_h × horizon_years`` (spec §4 amendment, P11).
     """
 
     ens_cap_permyriad: float | None = Field(default=None, gt=0)
@@ -124,28 +155,27 @@ class OptimizationLevers(BaseModel):
     redundancy: bool = False
     import_cap: bool = False
     storage_duration: bool = False
+    # P17: compare energy import budgets (weak_flexible only).
+    import_energy: bool = False
 
 
 class DtcConfig(BaseModel):
-    """
-    DtC stress sidecar (spec decision 8; plan Phase 4a).
+    """DtC stress sidecar (spec decision 8; plan Phase 4a; §10 P16 amendment).
 
-    Attribution is bus-aggregate only — today's one-VOLL-per-bus model cannot
-    honestly claim per-load shed. Reject any other attribution mode.
+    ``bus_aggregate_not_per_load`` (default): a critical Load promotes its
+    whole bus. ``per_load`` (opt-in): critical Loads are reported by Load,
+    made non-degenerate by a critical VOLL premium scoped to the DtC stress
+    re-dispatch; refused when the shed capture is not Load-keyed. No "auto".
     """
 
     critical_bus_ids: list[str] = Field(default_factory=list)
     critical_load_ids: list[str] = Field(default_factory=list)
     islanding_contingencies: list[str] = Field(default_factory=list)
-    attribution: Literal["bus_aggregate_not_per_load"] = "bus_aggregate_not_per_load"
+    attribution: Literal["bus_aggregate_not_per_load", "per_load"] = (
+        "bus_aggregate_not_per_load")
 
     @model_validator(mode="after")
-    def _refuse_per_load_attribution(self) -> DtcConfig:
-        if self.attribution != "bus_aggregate_not_per_load":
-            raise ValueError(
-                "DtC attribution must be bus_aggregate_not_per_load "
-                "(per_load shed claims are not supported on one-slack-per-bus)"
-            )
+    def _require_targets(self) -> "DtcConfig":
         if not self.critical_bus_ids and not self.critical_load_ids:
             raise ValueError("DtC config needs critical_bus_ids and/or critical_load_ids")
         if not self.islanding_contingencies:
@@ -177,6 +207,9 @@ class ArchetypePack(BaseModel):
     dtc_stress_default: bool = False
     # Opt-in P4b planning overlay (islanded + retained critical demand).
     dtc_planning_default: bool = False
+    # P12: the cost–availability frontier runs by default only where spec §3
+    # makes it the deliverable (strong_grid); elsewhere only when requested.
+    frontier_default: bool = False
     # DSR: weak_flexible may suggest opt-in; never silently global (decision 15).
     dsr_opt_in: bool = False
     # mc_certify draw budget (sequential MC solves nothing; this bounds the
@@ -213,7 +246,9 @@ class ArchetypePack(BaseModel):
 
 class PipelineStageRecord(BaseModel):
     stage: EHPipelineStage
-    status: Literal["run", "skipped", "aborted", "pending"] = "pending"
+    # ``aborted`` = the user's stop event; ``failed`` = the stage ran and did
+    # not produce evidence (e.g. an infeasible ENS solve). Never both.
+    status: Literal["run", "skipped", "aborted", "failed", "pending"] = "pending"
     solves_charged: int = 0
     note: str | None = None
 
@@ -263,7 +298,11 @@ class ReferenceDesignReport(BaseModel):
     ens_cap_permyriad: float | None = None
     achieved_ens_permyriad: float | None = None
     achieved_shed_hours: float | None = None
+    # MC LOLE in hours per YEAR (lole_hours / horizon_years), when certified.
     mc_lole_h: float | None = None
+    # Decision 2: True only on a `pass` verdict; False on fail/inconclusive;
+    # None when no LOLE target is set or certification is not established.
+    certified: bool | None = None
     cost_at_target_eur: float | None = None
     period_basis: Literal["single_period", "multi_period"] | None = None
     excludes_shed_cost: Literal[True] = True
@@ -272,6 +311,9 @@ class ReferenceDesignReport(BaseModel):
     pipeline: EHStudyPipeline = Field(default_factory=EHStudyPipeline)
     tea: TeaBlock | None = None
     gates: GatesBlock | None = None
+    # Study-level disclosures that belong to no single section (e.g. the
+    # DSR opt-in preflight, decision 15).
+    notes: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _completeness_matches_sections(self) -> ReferenceDesignReport:
@@ -303,6 +345,7 @@ def default_strong_grid_pack() -> ArchetypePack:
         ),
         levers=OptimizationLevers(sizing=True),
         mc_certify_required=False,
+        frontier_default=True,
         dtc_stress_default=False,
         dtc_planning_default=False,
         dsr_opt_in=False,

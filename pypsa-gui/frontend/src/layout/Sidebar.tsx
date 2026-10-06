@@ -8,8 +8,8 @@ import {
   MousePointer, ZoomIn, ZoomOut, AlertTriangle,
   Thermometer, Zap, Camera, LayoutDashboard,
   Sun, Moon, Rows2, Rows3,
-  GitBranch as GitBranchIcon, ListChecks, FlaskConical, Scale,
-  MessageSquare, LayoutGrid, Users, SlidersHorizontal,
+  GitBranch as GitBranchIcon, ListChecks, FlaskConical,
+  MessageSquare, LayoutGrid, Users, SlidersHorizontal, FileText, Compass, Scale,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
@@ -39,6 +39,7 @@ import { useLocalSettingsAvailable } from '../hooks/useLocalSettings'
 import { useLLMSettingsAvailable } from '../hooks/useLLMSettings'
 import { isActive } from '../api/solveQueue'
 import { evaluateMutation } from '../utils/mutationGuard'
+import { mismatchSentence } from '../utils/projectMismatch'
 import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -211,10 +212,11 @@ function SItem({
   )
 }
 
-function SectionHdr({ title, open, onToggle }: { title: string; open: boolean; onToggle: () => void }) {
+function SectionHdr({ title, open, onToggle, testId }: { title: string; open: boolean; onToggle: () => void; testId?: string }) {
   return (
     <button
       onClick={onToggle}
+      data-testid={testId}
       className="flex items-center justify-between w-full px-4 py-2 mt-1 text-left hover:bg-panel transition-colors"
     >
       <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-ink-400">{title}</span>
@@ -666,9 +668,12 @@ function ProjectHeaderCard({
 
 function ProjectSectionContent({
   onCloseModal, projectName, saveStatus, setSaveStatus,
-  openIo, handleNewProject,
+  openIo, handleNewProject, guided = false,
 }: {
   onCloseModal?: () => void
+  // Guided mode (spec §3.5): only the header card, Save, Recent and Projects
+  // home. The hidden rows stay reachable via the palette and the assistant.
+  guided?: boolean
   projectName: string
   saveStatus: 'idle' | 'saved'
   setSaveStatus: (s: 'idle' | 'saved') => void
@@ -680,7 +685,7 @@ function ProjectSectionContent({
     autosaveEnabled, setAutosaveEnabled, markProjectSaved,
     lastSavedByProject, recents,
     activeSlidePanel, setSlidePanel, setProjectSwitchInProgress,
-    readOnly, readOnlyReason,
+    readOnly, readOnlyReason, projectMismatch,
   } = useUIStore()
   const [showNameModal, setShowNameModal] = useState(false)
   // Separate flag for the "Save a Copy" flow so its modal can pre-fill a
@@ -724,6 +729,15 @@ function ProjectSectionContent({
   const networkHasBuses = (networkMeta?.bus_count ?? 0) > 0
 
   const guardProjectMutation = useCallback((opts?: { silent?: boolean }) => {
+    // A2: while this tab and the backend disagree about the open project, a
+    // save would write the backend's network under this tab's name — the
+    // banner offers Reload / Switch; saves wait for it (silent for autosave).
+    const mismatch = useUIStore.getState().projectMismatch
+    if (mismatch) {
+      if (opts?.silent) appLog('WARN', `Autosave skipped — ${mismatchSentence(mismatch)}`)
+      else toast.error(mismatchSentence(mismatch))
+      return false
+    }
     const verdict = evaluateMutation(readOnly, readOnlyReason)
     if (verdict.allowed) return true
     if (opts?.silent) appLog('INFO', `Autosave skipped — ${verdict.blockedMessage}`)
@@ -840,17 +854,30 @@ function ProjectSectionContent({
     } catch (e: unknown) {
       const status = (e as { response?: { status?: number } })?.response?.status
       if (status === 409) {
-        const detail = String(
-          (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? '',
-        )
-        // Two distinct 409s from save_project: (a) identity mismatch — the
+        const raw = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+        // A structured refusal (`study_in_flight`, `solver_in_flight`,
+        // `project_mismatch`) is a dict whose `message` is the sentence;
+        // `String(dict)` read "[object Object]" and fell through to the
+        // empty-network sentence (spec review, Sidebar 409 branch).
+        const structured = typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+        const detail = structured ? formatApiDetail(raw) : String(raw ?? '')
+        // Three distinct 409s from save_project: (a) identity mismatch — the
         // backend's in-memory network is a DIFFERENT project than `name` (it
-        // was swapped by another tab / external client); (b) empty-network
-        // refusal. Both mean "don't save", but the user-facing guidance
-        // differs. Detail text disambiguates.
+        // was swapped by another tab / external client); (b) a structured
+        // refusal with its own sentence; (c) empty-network refusal. All mean
+        // "don't save", but the user-facing guidance differs.
         if (/bound to project/i.test(detail)) {
+          // A2: the backend names its binding — raise the mismatch now (the
+          // banner, the write block) rather than wait for the meta samples.
+          const bound = /bound to project '([^']+)', not '([^']+)'/i.exec(detail)
+          if (bound && bound[2] === useUIStore.getState().currentProject) {
+            useUIStore.getState().setProjectMismatch({ tab: bound[2], backend: bound[1] })
+          }
           if (auto) appLog('WARN', `Autosave skipped — ${detail}`)
           else toast.error(`Can't save '${name}': the backend is on a different project. Reload '${name}' to resync.`)
+        } else if (structured) {
+          if (auto) appLog('WARN', `Autosave skipped — ${detail}`)
+          else toast.error(detail)
         } else {
           if (auto) appLog('WARN', `Autosave skipped: network is empty, refusing to overwrite '${name}'`)
           else toast.error('Cannot save: network is empty but project has data. Load the project first.')
@@ -1041,6 +1068,9 @@ function ProjectSectionContent({
       // the filename) and registers it as a fresh project. Importing replaces
       // the in-memory network, so the prior auto-save above is essential.
       const res = await projectsApi.importBundle(file)
+      // A bundle opened from disk is registered as a FRESH project — G4
+      // applies (guided-mode spec §10 addendum).
+      useUIStore.getState().noteNewProjectCreated('file')
       invalidateNetworkQueries(qc, res.imported)
       qc.invalidateQueries({ queryKey: nk(res.imported, 'results') })
       qc.invalidateQueries({ queryKey: ['projects'] })
@@ -1131,6 +1161,7 @@ function ProjectSectionContent({
       {currentProject && (
         <>
           <SubHdr title="Quick actions" />
+          {!guided && (
           <SItem
             icon={<LayoutDashboard size={15} />}
             label="Project info"
@@ -1140,12 +1171,15 @@ function ProjectSectionContent({
               onCloseModal?.()
             }}
           />
+          )}
           <SItem
             icon={saveStatus === 'saved' ? <Check size={15} /> : <Save size={15} />}
             label={saveStatus === 'saved' ? 'Saved ✓' : 'Save'}
             hint={dirty ? '●' : undefined}
+            title={projectMismatch ? mismatchSentence(projectMismatch) : undefined}
             onClick={handleSave}
           />
+          {!guided && (<>
           <SItem
             icon={<Camera size={15} />}
             label="Snapshots"
@@ -1177,6 +1211,7 @@ function ProjectSectionContent({
             label="Export bundle"
             onClick={() => { openIo('export'); onCloseModal?.() }}
           />
+          </>)}
         </>
       )}
 
@@ -1211,6 +1246,7 @@ function ProjectSectionContent({
         title="Browse every project you can access, resume the last one, or create / import a new one."
         onClick={() => { onCloseModal?.(); navigate('/projects') }}
       />
+      {!guided && (
       <SItem
         icon={<Users size={15} />}
         label="Workspace panel"
@@ -1221,6 +1257,7 @@ function ProjectSectionContent({
           onCloseModal?.()
         }}
       />
+      )}
     </div>
   )
 }
@@ -1353,6 +1390,11 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
         active={activeSlidePanel === 'gridspine'}
         onClick={() => { setSlidePanel(activeSlidePanel === 'gridspine' ? null : 'gridspine'); onCloseModal?.() }}
       />
+      <SItem icon={<FileText size={15} />} label="Reports"
+        title="Study reports written from the Energy Hub reference design and the adequacy study; read them here and export to Word."
+        active={activeSlidePanel === 'reports'}
+        onClick={() => { setSlidePanel(activeSlidePanel === 'reports' ? null : 'reports'); onCloseModal?.() }}
+      />
       {/* S8: the decision panel (guided investment study). It lists this
           project's decision studies, or the one last opened. */}
       <SItem icon={<Scale size={15} />} label="Decision study"
@@ -1430,6 +1472,59 @@ function AssistantNavButton({ compact = false, onCloseModal }: {
   )
 }
 
+/**
+ * Guided mode's one navigation entry for the hub-design flow (spec §3.5).
+ * Rendered only in Guided; Expert never shows it.
+ */
+function HubDesignNavButton({ compact = false, onCloseModal }: {
+  compact?: boolean
+  onCloseModal?: () => void
+}) {
+  const activeSlidePanel = useUIStore(s => s.activeSlidePanel)
+  const setSlidePanel = useUIStore(s => s.setSlidePanel)
+  const active = activeSlidePanel === 'hubDesign'
+  const title = 'Hub design — the step-by-step Energy Hub design, with the assistant doing the engineering.'
+  const onClick = () => { setSlidePanel('hubDesign'); onCloseModal?.() }
+
+  if (compact) {
+    return (
+      <button
+        onClick={onClick}
+        title={title}
+        aria-label="Hub design"
+        aria-pressed={active}
+        data-testid="sidebar-hub-design"
+        className="flex flex-col items-center justify-center gap-0.5 w-full py-2 transition-colors"
+        style={{
+          color: active ? 'var(--color-accent)' : 'var(--color-muted)',
+          background: active ? 'rgba(47,129,247,0.14)' : undefined,
+        }}
+      >
+        <Compass size={18} />
+        <span className="text-[8px] font-mono font-bold uppercase tracking-[0.06em]">Hub</span>
+      </button>
+    )
+  }
+
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-pressed={active}
+      data-testid="sidebar-hub-design"
+      className="flex items-center gap-2 w-full px-3 py-2 text-[12px] font-semibold rounded-md transition-colors"
+      style={{
+        color: active ? 'var(--color-accent)' : 'var(--color-text)',
+        background: active ? 'rgba(47,129,247,0.14)' : undefined,
+        border: `1px solid ${active ? 'rgba(47,129,247,0.5)' : 'var(--color-border)'}`,
+      }}
+    >
+      <Compass size={15} className="shrink-0" />
+      <span className="flex-1 text-left">Hub design</span>
+    </button>
+  )
+}
+
 // ── Mode buttons ───────────────────────────────────────────────────────────────
 function ModeSwitcher({ small = false }: { small?: boolean }) {
   const { canvasMode, setCanvasMode } = useUIStore()
@@ -1441,7 +1536,7 @@ function ModeSwitcher({ small = false }: { small?: boolean }) {
   )
   if (small) {
     return (
-      <div className="flex flex-col gap-1 items-center py-2">
+      <div className="flex flex-col gap-1 items-center py-2" data-testid="sidebar-mode-switcher">
         {([
           { id: 'select', Icon: MousePointer, hint: 'V' },
           { id: 'connect', Icon: ConnectIcon, hint: 'C' },
@@ -1481,7 +1576,7 @@ function ModeSwitcher({ small = false }: { small?: boolean }) {
   }
 
   return (
-    <div className="shrink-0 border-t border-border p-2">
+    <div className="shrink-0 border-t border-border p-2" data-testid="sidebar-mode-switcher">
       <p className="px-2 pb-1 text-[9px] font-bold uppercase tracking-widest text-ink-400">MODE</p>
       {([
         { id: 'select',  label: 'Select / Pan',  Icon: MousePointer, hint: 'V' },
@@ -1616,6 +1711,7 @@ function IconStripBtn({
     <button
       onClick={onClick}
       title={label}
+      data-testid={`sidebar-section-${sectionId}`}
       className="relative flex items-center justify-center transition-colors"
       style={{
         width: SIDEBAR_ICON_W, height: 44,
@@ -1633,9 +1729,10 @@ function IconStripBtn({
 
 // ── Flyout panel ───────────────────────────────────────────────────────────────
 function FlyoutPanel({
-  section, onClose, projectName, saveStatus, setSaveStatus, openIo, handleNewProject, requestBottomTab,
+  section, onClose, projectName, saveStatus, setSaveStatus, openIo, handleNewProject, requestBottomTab, guided = false,
 }: {
   section: FlyoutSection; onClose: () => void; projectName: string
+  guided?: boolean
   saveStatus: 'idle' | 'saved'; setSaveStatus: (s: 'idle' | 'saved') => void
   openIo: (tab: 'import' | 'export') => void; handleNewProject: () => void
   requestBottomTab: (tab: string) => void
@@ -1684,6 +1781,7 @@ function FlyoutPanel({
             projectName={projectName}
             saveStatus={saveStatus} setSaveStatus={setSaveStatus}
             openIo={openIo} handleNewProject={handleNewProject}
+            guided={guided}
           />
         )}
         {section === 'data' && <DataSectionContent onCloseModal={onClose} />}
@@ -1701,8 +1799,10 @@ export default function Sidebar() {
     sidebarMode, setSidebarMode, toggleSidebar, canvasMode, setCanvasMode,
     activeSlidePanel, projectName, requestBottomTab,
     setCurrentProject, setProjectName, currentProject, addTab,
-    ioModalRequest, clearIoModalRequest,
+    ioModalRequest, clearIoModalRequest, uiMode,
   } = useUIStore()
+  // Guided (spec §3.5) is a render condition only — `sections` below is untouched.
+  const guided = uiMode === 'guided'
   const [sections, setSections] = useState({ project: true, data: true, simulation: true })
   const [activeFlyout, setActiveFlyout] = useState<FlyoutSection | null>(null)
   const [ioOpen, setIoOpen] = useState(false)
@@ -1737,6 +1837,9 @@ export default function Sidebar() {
       return name
     },
     onSuccess: (name: string) => {
+      // G4 (guided-mode spec §3.4): a new project starts Guided unless the
+      // user chose a mode explicitly. First, before anything moves.
+      useUIStore.getState().noteNewProjectCreated('blank')
       invalidateNetworkQueries(qc, name)
       addTab(name)
       setCurrentProject(name)
@@ -1835,16 +1938,24 @@ export default function Sidebar() {
             <AssistantNavButton compact onCloseModal={() => setActiveFlyout(null)} />
           </div>
 
+          {guided && (
+            <div className="w-full border-b border-border shrink-0">
+              <HubDesignNavButton compact onCloseModal={() => setActiveFlyout(null)} />
+            </div>
+          )}
+
           {/* Section icons */}
           <div className="flex-1 flex flex-col w-full">
             <IconStripBtn icon={<FolderOpen size={18} />}  label="Project"    sectionId="project"    activeFlyout={activeFlyout} onClick={() => toggleFlyout('project')} />
+            {!guided && (<>
             <IconStripBtn icon={<Layers size={18} />}       label="Data"       sectionId="data"       activeFlyout={activeFlyout} onClick={() => toggleFlyout('data')} />
             <IconStripBtn icon={<Settings2 size={18} />}   label="Simulation" sectionId="simulation" activeFlyout={activeFlyout} onClick={() => toggleFlyout('simulation')} />
+            </>)}
           </div>
 
           {/* Mode switcher */}
           <div className="shrink-0 border-t border-border w-full">
-            <ModeSwitcher small />
+            {!guided && <ModeSwitcher small />}
             <PreferencesFooter small />
           </div>
         </aside>
@@ -1858,6 +1969,7 @@ export default function Sidebar() {
             openIo={openIo}
             handleNewProject={handleNewProject}
             requestBottomTab={requestBottomTab}
+            guided={guided}
           />
         )}
 
@@ -1908,26 +2020,35 @@ export default function Sidebar() {
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden py-1">
 
-          <SectionHdr title="PROJECT" open={sections.project} onToggle={() => toggleSection('project')} />
+          {guided && (
+            <div className="px-2 pt-1 pb-1">
+              <HubDesignNavButton />
+            </div>
+          )}
+
+          <SectionHdr title="PROJECT" open={sections.project} onToggle={() => toggleSection('project')} testId="sidebar-section-project" />
           {sections.project && (
             <ProjectSectionContent
               projectName={projectName}
               saveStatus={saveStatus} setSaveStatus={setSaveStatus}
               openIo={openIo}
               handleNewProject={handleNewProject}
+              guided={guided}
             />
           )}
 
-          <SectionHdr title="DATA" open={sections.data} onToggle={() => toggleSection('data')} />
+          {!guided && (<>
+          <SectionHdr title="DATA" open={sections.data} onToggle={() => toggleSection('data')} testId="sidebar-section-data" />
           {sections.data && <DataSectionContent />}
 
-          <SectionHdr title="SIMULATION" open={sections.simulation} onToggle={() => toggleSection('simulation')} />
+          <SectionHdr title="SIMULATION" open={sections.simulation} onToggle={() => toggleSection('simulation')} testId="sidebar-section-simulation" />
           {sections.simulation && (
             <SimulationSectionContent requestBottomTab={requestBottomTab} />
           )}
+          </>)}
         </div>
 
-        <ModeSwitcher />
+        {!guided && <ModeSwitcher />}
         <PreferencesFooter />
       </aside>
 

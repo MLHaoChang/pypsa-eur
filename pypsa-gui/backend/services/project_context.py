@@ -234,6 +234,12 @@ RESULT_STATE_KEYS = (
     "eh_dtc_stress",
     "eh_dtc_planning",
     "last_reserve_margin",
+    # Edge Investment Case (P0 WP0.5): the report, the billing pass's
+    # per-item frames, and the solved `ic_*` commercial terms the cost
+    # breakdown needs to reconcile after a reload (spec §5.1).
+    "investment_case_report",
+    "billing_frames",
+    "last_commercial_terms",
     "ac_pf_convergence", "ac_pf_convergence_list",
     "ac_pf_slack_bus_used", "ac_pf_stripped_voll_slacks",
     "ac_pf_converged_count", "ac_pf_total_snapshots",
@@ -254,7 +260,20 @@ RESULT_STATE_KEYS = (
 # so `pypsa_service` cannot import `study_state`, but it already imports this
 # module.
 STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
-             "eh_study", "decision_study")
+             "eh_study", "investment_case", "decision_study")
+
+# The studies that re-solve the USER'S OWN network object in place, between
+# their iterates — so an edit landing mid-study is either overwritten by the
+# study's restore or measured as if it were the user's plan (P27a, A1). These
+# refuse component edits; the others do not, and the evidence is in the code:
+# `mc` snapshots the network under the lock and never mutates it
+# (`mc_loop_runner.py`, the `network.copy()` under `lock`), and `eh_study`
+# solves a private `network.copy()` (`eh_study.py`). `decision_study` solves
+# study-owned option forks through the queue, never the base network object
+# (`services/study/runner.py`). A key added to STUDY_KEYS must be classified
+# here on purpose.
+LIVE_NETWORK_STUDIES = frozenset({"fmea_sweep", "frontier", "coupling_loop",
+                                  "margin_loop"})
 
 # What each study is called in a refusal. A user who is told "a study is
 # running" cannot act; one who is told WHICH can go and deal with it.
@@ -268,6 +287,9 @@ STUDY_LABELS = {
     # S4: the guided investment study's option runner. It solves study-owned
     # forks through the queue, and holds its BASE project while it does.
     "decision_study": "a decision study",
+    # Edge Investment Case P4 WP4.6b: the finance run reads the solved network's
+    # result tables, so it holds the mesh like any other study.
+    "investment_case": "an investment-case run",
 }
 
 # The studies a user can actually STOP.
@@ -283,7 +305,8 @@ STUDY_LABELS = {
 # Pinned by a test against the routes that actually exist, so this cannot
 # drift the day someone REMOVES an abort.
 ABORTABLE_STUDIES = ("coupling_loop", "margin_loop", "mc", "frontier",
-                     "fmea_sweep", "eh_study", "decision_study")
+                     "fmea_sweep", "eh_study", "investment_case",
+                     "decision_study")
 
 
 def record_is_running(record) -> bool:
@@ -417,6 +440,9 @@ class ProjectSolverState:
     last_lost_load: Any = None
     adequacy_report: Any = None   # minimal AdequacyReport dict (target solves)
     eh_reference_design_report: Any = None  # ReferenceDesignReport dict (EH study)
+    investment_case_report: Any = None  # InvestmentCaseReport dict (IC study)
+    billing_frames: Any = None          # {tariff_item: DataFrame} from the billing pass
+    last_commercial_terms: Any = None   # solved ic_* terms for reload-safe reconciliation
     eh_redundancy_comparison: Any = None
     eh_lever_comparison: Any = None  # Phase 3c import/storage lever table
     eh_dtc_stress: Any = None  # Phase 4a DtC stress table
@@ -457,6 +483,10 @@ class ProjectSolverState:
     coupling_loop: Any = None
     margin_loop: Any = None
     eh_study: Any = None
+    # IC P4 WP4.6b: the investment-case run's record (status, stage, refusal
+    # code). Its REPORT is result state (`investment_case_report`); the record
+    # is not persisted, like every study record above.
+    investment_case: Any = None
     decision_study: Any = None
 
     def as_dict(self) -> dict[str, Any]:

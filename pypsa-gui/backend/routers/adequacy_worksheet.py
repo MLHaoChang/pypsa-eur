@@ -32,7 +32,8 @@ from services.adequacy.asset_health import (
 )
 from services.adequacy.stress import (
     StressValidationError,
-    load_scenarios,
+    list_profile_packs,
+    load_scenarios_checked,
     save_scenarios,
 )
 from services.adequacy.worksheet import (
@@ -117,8 +118,10 @@ class StressScenariosPut(BaseModel):
 @router.get("/{name}/stress_scenarios")
 def get_stress_scenarios(project: AuthorizedProject = ProjectAccessDep) -> dict:
     """Class-C stress-scenario registry (adequacy Phase 4 Task 3) — same
-    sidecar pattern and authorization as the worksheet."""
-    return {"scenarios": load_scenarios(project.directory)}
+    sidecar pattern and authorization as the worksheet. ``error`` is set
+    when an existing file cannot be read (the list then reads empty)."""
+    scenarios, error = load_scenarios_checked(project.directory)
+    return {"scenarios": scenarios, "error": error}
 
 
 @router.put("/{name}/stress_scenarios")
@@ -137,6 +140,33 @@ def put_stress_scenarios(body: StressScenariosPut,
         return {"scenarios": save_scenarios(project.directory, body.scenarios)}
     except StressValidationError as exc:
         raise HTTPException(422, str(exc))
+
+
+@router.get("/{name}/stress_profile_packs")
+def get_stress_profile_packs(project: AuthorizedProject = ProjectAccessDep) -> dict:
+    """The shipped synthetic profile packs a ``kind="profiles"`` scenario can
+    name as ``profile_pack`` (P15 editor picker). Global data; served under
+    the project with the registry it feeds, same authorization."""
+    return {"packs": list_profile_packs()}
+
+
+@router.get("/{name}/eh_template")
+def get_eh_template(project: AuthorizedProject = ProjectAccessDep):
+    """The Energy Hub template metadata a project was created from (P19):
+    recommended archetype, pack overrides, stages, DtC attribution and study
+    notes. 204 for a project not made from an EH template."""
+    import json
+
+    from fastapi import Response
+
+    path = project.directory / "eh_template.json"
+    if not path.is_file():
+        return Response(status_code=204)
+    try:
+        raw = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return Response(status_code=204)
+    return raw if isinstance(raw, dict) else Response(status_code=204)
 
 
 class AssetHealthPut(BaseModel):

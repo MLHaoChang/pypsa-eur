@@ -328,6 +328,17 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         # sibling payload. `by_period` is a per-BLOCK roll-up, not a snapshot
         # series, so a snapshot range would have nothing to slice.
         "/mc",
+        # Edge Investment Case P2 WP2.5 — a bill, settlement lines and a gap;
+        # the CFE score's per-period totals. No per-snapshot series.
+        "/billing", "/cfe_score",
+        # P3 WP3.4 — ledger lines and totals per period, no snapshot axis.
+        "/value_flows",
+        # IC P4 WP4.6b — the finance run's status and its report: annual
+        # cashflows by year and stream, no snapshot axis.
+        "/investment_case",
+        "/investment_case/report",
+        # IC P4 WP4.6d — the report as a workbook (annual rows, no snapshot axis).
+        "/investment_case/export.xlsx",
         # The ELCC candidate list for the panel's asset picker (Phase 6) — one
         # row per eligible asset with its nameplate, no snapshot axis at all.
         "/mc/elcc_candidates",
@@ -351,6 +362,8 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         # comparison tables / study lifecycle status, no snapshot series.
         "/eh_study",
         "/eh_reference_design",
+        "/eh_readiness",
+        "/eh_review",
         "/eh_redundancy",
         "/eh_levers",
         "/eh_dtc",

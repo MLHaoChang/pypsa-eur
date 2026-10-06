@@ -232,6 +232,13 @@ def test_the_refusal_names_the_study_and_only_offers_a_real_remedy(
         r = client.post("/api/network/reset")
         assert r.status_code == 409, r.text
         detail = r.json()["detail"]
+        # P27a (A1): for a LIVE-NETWORK study (sweep, frontier, coupling /
+        # margin loop) `main.py`'s edit gate answers first, with the
+        # `study_in_flight` dict; `mc` / `eh_study` still reach the swap
+        # guard's string. Either way the sentence is what is checked.
+        if isinstance(detail, dict):
+            assert detail["error_kind"] == "study_in_flight", detail
+            detail = detail["message"]
         assert STUDY_LABELS[key] in detail, detail
         assert "abort it" in detail, detail
         assert "cannot be aborted" not in detail, detail
