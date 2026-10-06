@@ -574,34 +574,71 @@ def mint_export_series(db, org_id: UUID, *, base_uuid: UUID | str, study_id: str
 
 
 def delete_export_series(db, org_id: UUID, *, base_uuid: UUID | str, study_id: str,
-                         project_dirs: Iterable[Path] = (), root: Path | None = None
-                         ) -> dict[str, Any]:
+                         project_dirs: Iterable[Path] | None,
+                         root: Path | None = None) -> dict[str, Any]:
     """
-    WORKAROUND (adapter-side, until IC adds `series_store.delete_series(db,
-    org_id, name, *, refuse_if_pinned=True)` and `pinned_by(db, org_id, name)`
-    to the facade — engine ask, owner decision 2026-10-05): delete EVERY
-    version of the study's export series, unless a project still pins it.
+    Delete EVERY version of the study's export series (owner decision
+    2026-10-05), unless a project of the org still pins it.
 
-    A pin is read from each of `project_dirs`' `library_refs.json` sidecar
-    (`bundle_pins.read_pins`); the caller passes every project of the org but
-    the study's own forks. A pinned series is kept and the result says
-    ``export_series_kept_in_use``. A payload file is removed only when no
-    remaining Library row points at it (two studies on the same base minting
-    the same price share one content-addressed file).
+    `project_dirs` is REQUIRED (gate U2-S1 C3a): the caller enumerates every
+    project directory of the org except the study's own forks (the base
+    project is always among them). None or an empty list is refused
+    `export_series_pin_sources_missing` — never a delete that skipped the pin
+    check. A pin is read from each directory's `library_refs.json` sidecar AND
+    from its `solver_config.json` (a ref copied into a config not saved since,
+    C3b). A pinned series is kept: ``{"deleted_versions": 0, "kept":
+    "export_series_kept_in_use"}``; an unreadable config keeps it too
+    (``"export_series_pins_unreadable"``).
 
-    Returns ``{"deleted_versions": n, "kept": None | "export_series_kept_in_use"}``.
+    The Library access is the WORKAROUND :func:`_ic_internals_delete_series`
+    (the one place GS touches IC internals for it); it COMMITS `db`, as
+    `series_store.put_series` does, so the caller holds no other unsaved work
+    in that session.
     """
+    dirs = [Path(d) for d in (project_dirs or ())]
+    if not dirs:
+        raise CompileError("export_series_pin_sources_missing",
+                           "pass every project directory of the org (except the study's "
+                           "forks): a delete never skips the pin check")
+    return _ic_internals_delete_series(db, org_id, export_series_name(base_uuid, study_id),
+                                       project_dirs=dirs, root=root)
+
+
+def _ic_internals_delete_series(db, org_id: UUID, name: str, *, project_dirs: list[Path],
+                                root: Path | None) -> dict[str, Any]:
+    """
+    WORKAROUND — IC INTERNALS (gate U2-S1 C3e; owner question pending). Until
+    IC adds `series_store.delete_series(db, org_id, name, *,
+    refuse_if_pinned=True)` and `pinned_by(db, org_id, name)` to the frozen
+    facade, this reads and deletes IC's Library rows directly: `db.models.
+    LibraryItem` (kind "series", ORG-SCOPED and name-exact), the pin sidecars
+    (`library.bundle_pins`), the projects' commercial configs, and the payload
+    files (`storage_paths.library_file`). A payload file goes only when no
+    remaining row of the org points at it (two studies on the same base
+    minting the same price share one content-addressed file). Nothing else in
+    the guided study touches these names; replace this function, not its
+    callers, when the facade lands.
+    """
+    import json
+
     from sqlalchemy import select
 
     from db.models import LibraryItem
     from services.library import bundle_pins
     from services.storage_paths import library_file
 
-    name = export_series_name(base_uuid, study_id)
     for d in project_dirs:
-        pins, _issues = bundle_pins.read_pins(Path(d))
+        pins, _issues = bundle_pins.read_pins(d)
         if any(p.get("id") == name for p in pins):
             return {"deleted_versions": 0, "kept": "export_series_kept_in_use"}
+        cfg_path = d / "solver_config.json"
+        if cfg_path.exists():
+            try:
+                cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return {"deleted_versions": 0, "kept": "export_series_pins_unreadable"}
+            if any(r.id == name for r in bundle_pins.collect_refs(cfg)):
+                return {"deleted_versions": 0, "kept": "export_series_kept_in_use"}
     rows = db.scalars(select(LibraryItem).where(
         LibraryItem.org_id == org_id, LibraryItem.kind == "series",
         LibraryItem.name == name)).all()

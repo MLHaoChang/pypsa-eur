@@ -492,6 +492,13 @@ def test_the_export_series_is_minted_once_per_study_and_versioned_by_content(loc
         assert mint(_form()) is None                       # no export price: nothing minted
 
 
+def _empty_project(root):
+    """A project directory that pins nothing (the base project, say)."""
+    d = root.parent / "projects" / "base"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def test_a_copied_studys_series_survives_the_origins_delete(local_db):
     """
     Owner decision: the base uuid is in the name, so a copy's series is its
@@ -514,7 +521,8 @@ def test_a_copied_studys_series_survives_the_origins_delete(local_db):
                                 root=root)
         b1 = _C().mint_export_series(db, org, base_uuid=copy, study_id=sid, study_name="A copy",
                                      tariff=form, snapshots=JAN_FEB, root=root)
-        out = _C().delete_export_series(db, org, base_uuid=origin, study_id=sid, root=root)
+        out = _C().delete_export_series(db, org, base_uuid=origin, study_id=sid, root=root,
+                                        project_dirs=[_empty_project(root)])
         assert out == {"deleted_versions": 2, "kept": None}
         assert series_store.latest_ref(db, org, a1.id) is None
         assert np.allclose(series_store.resolve(db, org, b1, root=root).to_numpy(), 40.0)
@@ -538,6 +546,88 @@ def test_a_pinned_series_is_kept_and_reported(local_db, tmp_path):
                                         project_dirs=[other])
         assert out == {"deleted_versions": 0, "kept": "export_series_kept_in_use"}
         assert series_store.latest_ref(db, org, ref.id) is not None
+
+
+@pytest.mark.parametrize("dirs", [None, []], ids=["none", "empty"])
+def test_a_delete_without_pin_sources_is_refused(local_db, dirs):
+    """
+    Gate U2-S1 C3(a): the caller must enumerate the org's projects; no pin
+    source is a refusal, never a delete that skipped the pin check.
+    """
+    import uuid
+
+    from services.library import series_store
+
+    session_local, org, root = local_db
+    base, sid = uuid.uuid4(), "e" * 32
+    with session_local() as db:
+        ref = _C().mint_export_series(db, org, base_uuid=base, study_id=sid, study_name="A",
+                                      tariff=_form(export={"price_per_mwh": 40.0}),
+                                      snapshots=JAN_FEB, root=root)
+        with pytest.raises(_C().CompileError) as exc:
+            _C().delete_export_series(db, org, base_uuid=base, study_id=sid, root=root,
+                                      project_dirs=dirs)
+        assert exc.value.code == "export_series_pin_sources_missing"
+        assert series_store.latest_ref(db, org, ref.id) is not None
+
+
+def test_a_ref_in_a_projects_commercial_config_keeps_the_series(local_db, tmp_path):
+    """
+    Gate U2-S1 C3(b): a ref copied into a project's `solver_config.json`
+    (no `library_refs.json` sidecar written yet) pins the series too.
+    """
+    import json
+    import uuid
+
+    from services.library import series_store
+
+    session_local, org, root = local_db
+    base, sid = uuid.uuid4(), "f" * 32
+    with session_local() as db:
+        ref = _C().mint_export_series(db, org, base_uuid=base, study_id=sid, study_name="A",
+                                      tariff=_form(export={"price_per_mwh": 40.0}),
+                                      snapshots=JAN_FEB, root=root)
+        expert = tmp_path / "expert_unsaved"
+        expert.mkdir()
+        (expert / "solver_config.json").write_text(json.dumps(
+            {"commercial": {"poc_link": "grid_import",
+                            "export_price_ref": ref.model_dump(mode="json")}}))
+        out = _C().delete_export_series(db, org, base_uuid=base, study_id=sid, root=root,
+                                        project_dirs=[_empty_project(root), expert])
+        assert out == {"deleted_versions": 0, "kept": "export_series_kept_in_use"}
+        assert series_store.latest_ref(db, org, ref.id) is not None
+
+
+def test_the_delete_never_reaches_another_orgs_series(local_db):
+    """
+    Gate U2-S1 C3(c): the same name in ANOTHER org (a shared base uuid is
+    impossible, but the delete must not rely on it) survives the delete.
+    """
+    import uuid
+    from datetime import UTC, datetime
+
+    from db.models import Organization
+    from services.library import series_store
+
+    session_local, org, root = local_db
+    other = uuid.uuid4()
+    base, sid = uuid.uuid4(), "9" * 32
+    form = _form(export={"price_per_mwh": 40.0})
+    with session_local() as db:
+        db.add(Organization(id=other, name="other org", created_at=datetime.now(UTC)))
+        db.commit()
+        mine = _C().mint_export_series(db, org, base_uuid=base, study_id=sid, study_name="A",
+                                       tariff=form, snapshots=JAN_FEB, root=root)
+        theirs = _C().mint_export_series(db, other, base_uuid=base, study_id=sid,
+                                         study_name="A", tariff=form, snapshots=JAN_FEB,
+                                         root=root)
+        out = _C().delete_export_series(db, org, base_uuid=base, study_id=sid, root=root,
+                                        project_dirs=[_empty_project(root)])
+        assert out == {"deleted_versions": 1, "kept": None}
+        assert series_store.latest_ref(db, org, mine.id) is None
+        assert series_store.latest_ref(db, other, theirs.id) is not None
+        got = series_store.resolve(db, other, theirs, root=root)
+        assert np.allclose(got.to_numpy(), 40.0)
 
 
 # ── C6: bind on the fork's in-memory network; way (a) meter Links ─────────
