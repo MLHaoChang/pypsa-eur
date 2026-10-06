@@ -135,6 +135,24 @@ def test_the_review_round_trip_over_http(client, hub, monkeypatch):
     assert client.delete(f"{BASE}/drafts/tso").status_code == 200
 
 
+def test_publishing_a_draft_with_a_voltage_gap_is_422_naming_the_range(client, hub, monkeypatch):
+    doc = client.post(BASE + "/documents", files={"file": ("tso.pdf", PDF, "application/pdf")}).json()
+    band = {"kv_min": 110.0, "kv_max": 300.0, "v_min": 0.9, "v_max": 1.1, "clause": "Art. 12",
+            "page": 1, "quote": "between 0,90 pu and 1,10 pu"}
+    fake = FakeClient(response(tool_input(voltage_bands=[band])))
+    monkeypatch.setattr(chat_service, "_build_anthropic_client", lambda: (fake, None))
+    resp = client.post(f"{BASE}/documents/{doc['id']}/extract", json={"profile_id": "tso"})
+    assert resp.status_code == 200, resp.text
+    # the extraction filled 0-110 kV itself; a reviewer's edit that removes it is what publish refuses
+    yaml_text = resp.json()["yaml"]
+    import yaml
+    edited = yaml.safe_load(yaml_text)
+    edited["voltage_bands"] = [b for b in edited["voltage_bands"] if b["source"] != "assumed"]
+    assert client.put(f"{BASE}/drafts/tso", json={"yaml": yaml.safe_dump(edited, sort_keys=False)}).status_code == 200
+    resp = client.post(f"{BASE}/drafts/tso/publish", json={"allow_unconfirmed": True})
+    assert resp.status_code == 422 and "from 0 kV up to 110 kV" in resp.json()["detail"]
+
+
 def test_an_oversized_profile_edit_is_422_before_the_service(client, hub, monkeypatch):
     monkeypatch.setattr(gc, "save_draft", lambda *a: pytest.fail("the service must not be reached"))
     resp = client.put(f"{BASE}/drafts/tso", json={"yaml": "x" * (gc.MAX_PROFILE_BYTES + 1)})
