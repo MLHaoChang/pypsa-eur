@@ -9,9 +9,11 @@
 // `flushPendingLayoutToServer` for the three save flows that reach it through
 // a dynamic import.
 import { useCallback, useEffect, useRef, useState } from 'react'
+import toast from 'react-hot-toast'
 import { projectsApi } from '../api/projects'
 import { rawFetchHeaders } from '../api/csrf'
 import { useUIStore } from '../store/uiStore'
+import { appLog } from '../store/simulationStore'
 
 export type WP = { x: number; y: number }
 
@@ -87,13 +89,101 @@ export async function fetchLayoutFor(project: string | null): Promise<PersistedS
   }
 }
 
-export function persistLayoutFor(project: string | null, state: PersistedState): void {
-  if (!project) { saveDiagramState(project, state); return }
-  projectsApi.putLayout(project, state as unknown as Record<string, unknown>)
-    .catch(() => {
-      // Server write failed — keep the layout in localStorage so it isn't
-      // lost; it'll re-sync to the server on the next successful save.
+/**
+ * The server's copy alone: null when none is saved yet AND when the request
+ * fails. Unlike `fetchLayoutFor` it never substitutes localStorage, so the
+ * caller can tell "the server holds this" from "we could not ask" — the
+ * distinction `loadLayoutNewestWins` needs before it decides whether to push
+ * a local copy back.
+ */
+export async function fetchServerLayout(project: string): Promise<PersistedState | null> {
+  try {
+    return coercePersistedState(await projectsApi.getLayout(project))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The newest of several layout copies by `savedAt` (A4, OPEN-ITEMS 7). A
+ * missing or non-numeric `savedAt` counts as 0. Ties go to the EARLIEST
+ * argument, so callers list the server copy first: a copy the server already
+ * holds needs no push.
+ */
+export function newestLayout(...candidates: (PersistedState | null | undefined)[]): PersistedState | null {
+  let best: PersistedState | null = null
+  for (const c of candidates) {
+    if (!c) continue
+    if (!best || stampOf(c) > stampOf(best)) best = c
+  }
+  return best
+}
+const stampOf = (s: PersistedState): number =>
+  typeof s.savedAt === 'number' && Number.isFinite(s.savedAt) ? s.savedAt : 0
+
+// ── PUT failure notices ──────────────────────────────────────────────────────
+// A failed layout PUT used to be swallowed (`.catch(() => saveDiagramState)`):
+// the layout looked saved and the next load threw it away for the server's
+// older copy (finding 2026-07-31). Each failure kind now surfaces ONCE per
+// project — a drag-settle PUT fires on every drag, and one toast per drag
+// would be noise — and the notice resets when a later write for that project
+// succeeds, so a new failure is reported again.
+type LayoutNoticeKind = 'unsaved-project' | 'failed'
+const layoutNotices = new Set<string>()
+const noticeKey = (project: string, kind: LayoutNoticeKind) => `${project}\u0000${kind}`
+
+/** Test seam: forget which notices have been shown. */
+export function resetLayoutNotices(): void { layoutNotices.clear() }
+
+function clearLayoutNotices(project: string): void {
+  layoutNotices.delete(noticeKey(project, 'unsaved-project'))
+  layoutNotices.delete(noticeKey(project, 'failed'))
+}
+
+const httpStatusOf = (e: unknown): number | undefined =>
+  (e as { response?: { status?: number } } | undefined)?.response?.status
+
+/**
+ * Surface a failed `PUT /layout` once per project and kind. A 404 means the
+ * project has no directory on disk yet (never saved): the layout is safe in
+ * the memory cache and the save flows that order layout-after-network
+ * (`flushPendingLayoutToServer` from AppHeader / Sidebar / projectActions)
+ * will carry it. Anything else is a real failure the user should know about
+ * — the layout lives only locally until a write succeeds.
+ */
+function reportLayoutPutFailure(project: string, e: unknown): void {
+  const status = httpStatusOf(e)
+  if (status === 404) {
+    const key = noticeKey(project, 'unsaved-project')
+    if (layoutNotices.has(key)) return
+    layoutNotices.add(key)
+    toast('Layout will be saved with the project', { id: `layout-unsaved:${project}`, icon: '🗂' })
+    appLog('INFO', `Layout for '${project}' is held locally until the project is first saved`)
+    return
+  }
+  const key = noticeKey(project, 'failed')
+  if (layoutNotices.has(key)) return
+  layoutNotices.add(key)
+  const why = status != null ? `HTTP ${status}` : ((e as Error | undefined)?.message ?? 'network error')
+  toast.error(`Layout could not be saved to the server (${why}) — kept locally, retried on the next save`, { id: `layout-failed:${project}` })
+  appLog('WARN', `Layout PUT failed for '${project}' (${why}) — kept in localStorage; the next project save retries it`)
+}
+
+/**
+ * Write a layout where it belongs: localStorage with no project, layout.json
+ * otherwise. On a failed PUT the state stays in the memory cache (the save
+ * paths flush from there) and in localStorage, and the failure is reported
+ * once — see `reportLayoutPutFailure`. Resolves when the attempt is over;
+ * never rejects.
+ */
+export function persistLayoutFor(project: string | null, state: PersistedState): Promise<void> {
+  if (!project) { saveDiagramState(project, state); return Promise.resolve() }
+  return projectsApi.putLayout(project, state as unknown as Record<string, unknown>)
+    .then(() => { clearLayoutNotices(project) })
+    .catch((e: unknown) => {
       saveDiagramState(project, state)
+      layoutMemCache.set(layoutCacheKey(project), state)
+      reportLayoutPutFailure(project, e)
     })
 }
 
@@ -142,6 +232,35 @@ export function persistLayoutOnUnload(project: string | null, state: PersistedSt
 // restores it synchronously on the very first render — no flicker, no clobber.
 export const layoutMemCache = new Map<string, PersistedState>()
 export const layoutCacheKey = (project: string | null): string => project ?? '__local__'
+
+/**
+ * The layout the canvas should show for `project` before the server answers:
+ * the newer of the memory cache and localStorage. Synchronous, so the first
+ * render after a map→blank switch or a project switch is already right.
+ */
+export function localLayoutFor(project: string | null): PersistedState | null {
+  return newestLayout(layoutMemCache.get(layoutCacheKey(project)), loadDiagramState(project))
+}
+
+/**
+ * The layout to show on load — the NEWEST of the server document, the memory
+ * cache and localStorage by `savedAt` (A4, closes OPEN-ITEMS 7). The server
+ * used to win unconditionally, so a drag whose PUT had failed (404 before the
+ * first project save, a lock, a solve in flight) was discarded on the next
+ * load for an older layout.json. When a local copy is newer than what the
+ * server holds it is adopted AND pushed with one PUT, so the two converge;
+ * the push reports its own failure once (`persistLayoutFor`).
+ *
+ * With no project there is no server copy: the local sources alone decide
+ * and nothing is pushed. Whatever is chosen is pinned in the memory cache.
+ */
+export async function loadLayoutNewestWins(project: string | null): Promise<PersistedState | null> {
+  const server = project ? await fetchServerLayout(project) : null
+  const resolved = newestLayout(server, localLayoutFor(project))
+  if (resolved) layoutMemCache.set(layoutCacheKey(project), resolved)
+  if (project && resolved && resolved !== server) void persistLayoutFor(project, resolved)
+  return resolved
+}
 
 // Synchronously flush any pending diagram layout (node positions + edge
 // waypoints) to the server BEFORE a project save fires. Without this, the
@@ -199,6 +318,9 @@ export async function flushPendingLayoutToServer(project: string | null): Promis
     // Pin under the project key so subsequent flushes don't have to chase
     // the local-key fallback again.
     layoutMemCache.set(layoutCacheKey(project), state)
+    // The project now exists on disk and holds this layout: a later failure
+    // is news again.
+    clearLayoutNotices(project)
     return { status: 'server', nodes, edges }
   } catch (e) {
     saveDiagramState(project, state)

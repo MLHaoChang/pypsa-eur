@@ -17,8 +17,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { useState } from 'react'
 import { render, screen, act, fireEvent } from '@testing-library/react'
 import {
-  useLayoutPersistence, layoutMemCache, layoutCacheKey,
-  SAVE_DEBOUNCE_MS, type LayoutNodeLike, type LayoutEdgeLike, type PersistedState,
+  useLayoutPersistence, layoutMemCache, layoutCacheKey, loadDiagramState, saveDiagramState,
+  newestLayout, loadLayoutNewestWins, flushPendingLayoutToServer, resetLayoutNotices,
+  SAVE_DEBOUNCE_MS, STORAGE_VERSION, type LayoutNodeLike, type LayoutEdgeLike, type PersistedState,
 } from './topologyLayoutStore'
 import { projectsApi } from '../api/projects'
 import { useUIStore } from '../store/uiStore'
@@ -32,6 +33,12 @@ vi.mock('../api/projects', () => ({
     getLayout: vi.fn(() => Promise.resolve({})),
   },
 }))
+
+// A failed PUT surfaces once per project (A4); count the toasts.
+const { toastFn } = vi.hoisted(() => ({
+  toastFn: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn(), dismiss: vi.fn() }),
+}))
+vi.mock('react-hot-toast', () => ({ default: toastFn }))
 
 const PROJECT = 'three-bus'
 
@@ -162,5 +169,175 @@ describe('useLayoutPersistence', () => {
     vi.mocked(projectsApi.putLayout).mockClear()
     unmount()
     expect(wpOf(readPersisted())).toEqual([WP_MOVED])
+  })
+})
+
+// ── A4: positions never revert (OPEN-ITEMS 7) ────────────────────────────────
+// Finding 2026-07-31: `PUT /layout` 404s until the project directory exists,
+// and on load the server won unconditionally over anything newer held locally
+// — so a drag whose PUT failed was discarded on the next load for an older
+// layout.json, silently at both ends. `savedAt` was on every copy and nothing
+// compared it.
+
+const layoutAt = (savedAt: number, x: number, y: number): PersistedState => ({
+  version: STORAGE_VERSION, savedAt,
+  nodes: [{ id: 'bus-A', canvasX: x, canvasY: y }], edges: [],
+})
+const http = (status: number) => Object.assign(new Error(`HTTP ${status}`), { response: { status } })
+const putCalls = () => vi.mocked(projectsApi.putLayout).mock.calls
+// What `GET /layout` answers (the wire type is the opaque document).
+const serverHolds = (s: PersistedState) =>
+  vi.mocked(projectsApi.getLayout).mockResolvedValue(s as unknown as Record<string, unknown>)
+
+describe('newestLayout', () => {
+  const server = layoutAt(1000, 1, 1)
+  const memory = layoutAt(2000, 2, 2)
+  const local  = layoutAt(3000, 3, 3)
+
+  it.each([
+    ['server', [layoutAt(9000, 9, 9), memory, local], 9],
+    ['memory', [server, layoutAt(9000, 9, 9), local], 9],
+    ['localStorage', [server, memory, layoutAt(9000, 9, 9)], 9],
+  ] as const)('picks the newest by savedAt when %s is newest', (_which, candidates, x) => {
+    expect(newestLayout(...candidates)?.nodes[0].canvasX).toBe(x)
+  })
+
+  it('on a tie keeps the earliest argument — the server copy needs no push', () => {
+    const a = layoutAt(1000, 1, 1)
+    const b = layoutAt(1000, 2, 2)
+    expect(newestLayout(a, b)).toBe(a)
+  })
+
+  it('treats a missing savedAt as oldest and skips nulls', () => {
+    const undated = { ...layoutAt(0, 7, 7), savedAt: undefined } as unknown as PersistedState
+    expect(newestLayout(null, undefined, undated, server)).toBe(server)
+    expect(newestLayout(null, undefined)).toBeNull()
+  })
+})
+
+describe('loadLayoutNewestWins', () => {
+  beforeEach(() => {
+    vi.mocked(projectsApi.putLayout).mockReset().mockResolvedValue({ saved: PROJECT })
+    vi.mocked(projectsApi.getLayout).mockReset().mockResolvedValue({})
+    layoutMemCache.clear()
+    localStorage.clear()
+    resetLayoutNotices()
+    toastFn.mockClear(); toastFn.error.mockClear()
+  })
+
+  it('the server copy wins when it is newest, and nothing is pushed', async () => {
+    serverHolds(layoutAt(3000, 3, 3))
+    layoutMemCache.set(layoutCacheKey(PROJECT), layoutAt(2000, 2, 2))
+    saveDiagramState(PROJECT, layoutAt(1000, 1, 1))
+    const got = await loadLayoutNewestWins(PROJECT)
+    expect(got?.nodes[0].canvasX).toBe(3)
+    expect(putCalls()).toHaveLength(0)
+    expect(layoutMemCache.get(layoutCacheKey(PROJECT))).toBe(got)
+  })
+
+  it('a newer memory-cache copy is adopted and pushed with one PUT', async () => {
+    serverHolds(layoutAt(1000, 1, 1))
+    const dragged = layoutAt(2000, 123, 456)
+    layoutMemCache.set(layoutCacheKey(PROJECT), dragged)
+    const got = await loadLayoutNewestWins(PROJECT)
+    expect(got).toBe(dragged)
+    expect(putCalls()).toHaveLength(1)
+    expect(putCalls()[0][1]).toBe(dragged)
+  })
+
+  it('REGRESSION (finding 2026-07-31): a drag whose PUT failed survives the next load', async () => {
+    // layout.json still holds the pre-drag positions …
+    serverHolds(layoutAt(1000, 0, 0))
+    // … and the failed PUT left the dragged layout in localStorage, third in
+    // the old `ps ?? mem ?? local` chain and therefore discarded.
+    saveDiagramState(PROJECT, layoutAt(2000, 123, 456))
+    const got = await loadLayoutNewestWins(PROJECT)
+    expect(got?.nodes[0]).toEqual({ id: 'bus-A', canvasX: 123, canvasY: 456 })
+    // and the server is brought up to date, once
+    expect(putCalls()).toHaveLength(1)
+    expect((putCalls()[0][1] as unknown as PersistedState).nodes[0].canvasX).toBe(123)
+  })
+
+  it('with no server copy, a local copy is shown and pushed; with nothing anywhere, null', async () => {
+    saveDiagramState(PROJECT, layoutAt(2000, 5, 5))
+    expect((await loadLayoutNewestWins(PROJECT))?.nodes[0].canvasX).toBe(5)
+    expect(putCalls()).toHaveLength(1)
+    localStorage.clear(); layoutMemCache.clear()
+    vi.mocked(projectsApi.putLayout).mockClear()
+    expect(await loadLayoutNewestWins(PROJECT)).toBeNull()
+    expect(putCalls()).toHaveLength(0)
+  })
+
+  it('with no project there is no server copy to ask for and nothing to push', async () => {
+    saveDiagramState(null, layoutAt(2000, 8, 8))
+    expect((await loadLayoutNewestWins(null))?.nodes[0].canvasX).toBe(8)
+    expect(projectsApi.getLayout).not.toHaveBeenCalled()
+    expect(putCalls()).toHaveLength(0)
+  })
+})
+
+describe('a failed layout PUT', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.mocked(projectsApi.putLayout).mockReset()
+    layoutMemCache.clear()
+    localStorage.clear()
+    resetLayoutNotices()
+    toastFn.mockClear(); toastFn.error.mockClear()
+    useUIStore.setState({ currentProject: PROJECT })
+  })
+  afterEach(() => { vi.useRealTimers() })
+
+  const settle = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS) }) }
+
+  it('404 before the first save: one toast per project, the layout waits in the cache, and the save flushes it to the server', async () => {
+    vi.mocked(projectsApi.putLayout).mockRejectedValue(http(404))
+    render(<Harness />)
+    fireEvent.click(screen.getByText('move bus'))
+    await settle()
+    expect(toastFn).toHaveBeenCalledTimes(1)
+    expect(toastFn.mock.calls[0][0]).toBe('Layout will be saved with the project')
+    expect(toastFn.error).not.toHaveBeenCalled()
+    // a second drag before the save is not a second toast
+    fireEvent.click(screen.getByText('move waypoint'))
+    await settle()
+    expect(toastFn).toHaveBeenCalledTimes(1)
+    // the dragged layout is still what the save paths will flush
+    expect(posOf(readCache())).toEqual({ id: 'bus-A', canvasX: 123, canvasY: 456 })
+    expect(wpOf(readCache())).toEqual([WP_MOVED])
+    // … the project is saved (directory now exists) and the save flow flushes
+    vi.mocked(projectsApi.putLayout).mockReset().mockResolvedValue({ saved: PROJECT })
+    const r = await flushPendingLayoutToServer(PROJECT)
+    expect(r.status).toBe('server')
+    expect(posOf(readPersisted())).toEqual({ id: 'bus-A', canvasX: 123, canvasY: 456 })
+    expect(wpOf(readPersisted())).toEqual([WP_MOVED])
+  })
+
+  it('any other failure surfaces once as an error and keeps the layout locally', async () => {
+    vi.mocked(projectsApi.putLayout).mockRejectedValue(http(409))
+    render(<Harness />)
+    fireEvent.click(screen.getByText('move bus'))
+    await settle()
+    fireEvent.click(screen.getByText('move waypoint'))
+    await settle()
+    expect(toastFn.error).toHaveBeenCalledTimes(1)
+    expect(String(toastFn.error.mock.calls[0][0])).toContain('HTTP 409')
+    expect(toastFn).not.toHaveBeenCalled()
+    expect(posOf(loadDiagramState(PROJECT))).toEqual({ id: 'bus-A', canvasX: 123, canvasY: 456 })
+  })
+
+  it('a later successful write re-arms the notice, so a new failure is reported again', async () => {
+    vi.mocked(projectsApi.putLayout).mockRejectedValue(http(404))
+    render(<Harness />)
+    fireEvent.click(screen.getByText('move bus'))
+    await settle()
+    expect(toastFn).toHaveBeenCalledTimes(1)
+    vi.mocked(projectsApi.putLayout).mockResolvedValue({ saved: PROJECT })
+    fireEvent.click(screen.getByText('move waypoint'))
+    await settle()
+    vi.mocked(projectsApi.putLayout).mockRejectedValue(http(404))
+    fireEvent.click(screen.getByText('move bus'))
+    await settle()
+    expect(toastFn).toHaveBeenCalledTimes(2)
   })
 })

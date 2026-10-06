@@ -38,8 +38,8 @@ import type { Bus, Generator, Line, Load, StorageUnit, Store, Transformer } from
 import { safeMinMax } from '../utils/numeric'
 import { colourForCarrier } from './results/shared'
 import {
-  useLayoutPersistence, layoutMemCache, layoutCacheKey, loadDiagramState,
-  fetchLayoutFor, storageKeyFor, type WP, type PersistedState,
+  useLayoutPersistence, localLayoutFor, loadLayoutNewestWins,
+  storageKeyFor, type WP, type PersistedState,
 } from './topologyLayoutStore'
 import {
   buildLinkEdges, componentNameFromEdgeId, derivedPortFlow, getLinkColor, FALLBACK_COLORS,
@@ -1965,9 +1965,7 @@ export default function TopologyCanvas() {
   // Seed from the module-level cache first (survives a view-switch unmount),
   // falling back to localStorage for the unsaved / no-project case. This makes
   // the schematic correct on the FIRST render after a map→blank switch.
-  const savedStateRef = useRef<PersistedState | null>(
-    layoutMemCache.get(layoutCacheKey(currentProject)) ?? loadDiagramState(currentProject),
-  )
+  const savedStateRef = useRef<PersistedState | null>(localLayoutFor(currentProject))
 
   // ── Server-side latent layout load ──────────────────────────────────────
   // `layoutEpoch` is bumped whenever a fresh layout document is loaded for the
@@ -1999,34 +1997,26 @@ export default function TopologyCanvas() {
     // project's stale positions can't leak onto same-named buses if the
     // `['buses']` refetch resolves before our layout fetch does.
     posCache.current = {}
-    // Re-point savedStateRef at the NEW project SYNCHRONOUSLY: module cache →
-    // the new project's per-project localStorage → null. This is authoritative
-    // — it must NEVER leave the previous project's value in place, or the new
-    // project inherits the old one's edge waypoints (lines/links/transformers
-    // all share `EdgeData.waypoints`) until the async fetch resolves, and
-    // worse keeps them if the server has no layout. Bump the epoch so the
-    // node-sync (allRfNodes) and edge-sync effects re-apply the new state.
-    savedStateRef.current =
-      layoutMemCache.get(layoutCacheKey(currentProject))
-      ?? loadDiagramState(currentProject)
-      ?? null
+    // Re-point savedStateRef at the NEW project SYNCHRONOUSLY: the newer of
+    // the module cache and the new project's per-project localStorage, else
+    // null. This is authoritative — it must NEVER leave the previous project's
+    // value in place, or the new project inherits the old one's edge waypoints
+    // (lines/links/transformers all share `EdgeData.waypoints`) until the
+    // async fetch resolves, and worse keeps them if the server has no layout.
+    // Bump the epoch so the node-sync (allRfNodes) and edge-sync effects
+    // re-apply the new state.
+    savedStateRef.current = localLayoutFor(currentProject)
     setLayoutEpoch(e => e + 1)
     let cancelled = false
-    fetchLayoutFor(currentProject).then(ps => {
+    loadLayoutNewestWins(currentProject).then(resolved => {
       if (cancelled) return
-      // The server is authoritative for a project's layout. Apply the fetched
-      // layout when present; otherwise fall back to the new project's own
-      // sources — module cache (an in-session drag not yet round-tripped to
-      // layout.json) then per-project localStorage (offline / not-yet-synced)
-      // — else null. So a project with no/empty server layout shows ITS OWN
-      // state or none, never the previous project's. All fallbacks are keyed to
-      // `currentProject`, so none can be the prior project's value. Always
-      // re-assign + bump the epoch.
-      const resolved = ps
-        ?? layoutMemCache.get(layoutCacheKey(currentProject))
-        ?? loadDiagramState(currentProject)
-        ?? null
-      if (resolved) layoutMemCache.set(layoutCacheKey(currentProject), resolved)
+      // The NEWEST of server document, module cache (an in-session drag not
+      // yet round-tripped to layout.json) and per-project localStorage (a
+      // PUT that failed) wins by `savedAt` — not the server unconditionally,
+      // which is what let a drag revert (OPEN-ITEMS 7, closed by A4). A newer
+      // local copy is pushed back by the store. Every source is keyed to
+      // `currentProject`, so none can be the prior project's value; a project
+      // with nothing anywhere shows none. Always re-assign + bump the epoch.
       savedStateRef.current = resolved
       posCache.current = {}
       // Bumping the epoch makes `layoutSeededEpoch.current !== layoutEpoch`,
