@@ -5,8 +5,15 @@
 #               as-adopted EU text: DCC = Regulation (EU) 2016/1388,
 #               RfG = Regulation (EU) 2016/631);
 #   assumed  -- not set by the code; a stated engineering choice to revisit.
+#   extracted -- read from an uploaded grid-code document by the copilot and
+#               not yet confirmed by a person; carries page and quote. Only
+#               a project's own profiles carry it, never this file.
 # The code values below were read from legislation.gov.uk's "adopted" text
 # (the retained UK version has deleted the Continental Europe rows).
+#
+# A profile may also carry ``campus_voltage``, an optional design band for the
+# buses inside the campus ({v_min, v_max, clause, source}). Without it the
+# study holds those buses to the voltage_bands, as an assumed design limit.
 profiles:
   eu_rfg_dcc_ce:
     title: "EU RfG (2016/631) and DCC (2016/1388), Continental Europe"
@@ -43,4 +50,30 @@ profiles:
     rvc_limit_pct:
       value: 3.0
       clause: "not set by RfG/DCC; IEC TR 61000-3-7 indicative planning levels for infrequent rapid voltage changes at HV/EHV are about 3-5 % (not verified against the text here); 3 % used"
+      source: assumed
+
+  generic_assumed:
+    title: "Generic assumed limits (placeholder until a real grid code is supplied)"
+    # One band for every nominal voltage. kv_max is a large finite number, since
+    # the loader takes finite bounds only; no real system is above it.
+    voltage_bands:
+      - kv_min: 0.0
+        kv_max: 10000.0
+        v_min: 0.90
+        v_max: 1.10
+        clause: "generic placeholder until a real code is supplied: +/-10 % at every voltage"
+        source: assumed
+    # tan(acos 0.95) = 0.3287, to three decimals.
+    q_range_demand:
+      value: 0.329
+      clause: "generic placeholder until a real code is supplied: power factor 0.95 at the connection point, +/-tan(acos 0.95) of P_ref"
+      source: assumed
+    rvc_limit_pct:
+      value: 3.0
+      clause: "generic placeholder until a real code is supplied: 3 % rapid voltage change"
+      source: assumed
+    campus_voltage:
+      v_min: 0.95
+      v_max: 1.05
+      clause: "generic placeholder until a real code is supplied: 0.95-1.05 pu design band for buses inside the campus"
       source: assumed
