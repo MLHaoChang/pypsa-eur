@@ -4749,6 +4749,14 @@ def _dispatch_real_tool_call(
     if tier != "read":
         from services import dirty_state
         dirty_state.mark_dirty()
+        # ★ P33b B2: the chat seam of the edit counter. Same placement and
+        # same rationale as the mark above — before the handler, so a handler
+        # that raises part-way or outlives the per-tool deadline (the orphan
+        # may still land) cannot skip it. Only for tools that write the live
+        # network: a study, a Solve, a read or an export is not an edit.
+        from services.chat_tools_schema import tool_edits_network
+        if tool_edits_network(tool_name):
+            dirty_state.bump_revision()
 
     # Execute via the chat_tools dispatcher. `handler` was resolved above the
     # confirmation gate — see Improvement #19 there.

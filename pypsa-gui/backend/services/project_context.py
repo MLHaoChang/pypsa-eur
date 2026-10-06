@@ -159,6 +159,19 @@ class ProjectContext:
     # single attribute assignment, which is atomic under the GIL.
     results_unsaved: bool = False
 
+    # P33b 10b: a per-project EDIT counter. Bumped at the three edit seams —
+    # the HTTP undo-prefix chokepoint on a 2xx (`main.undo_snapshot_middleware`),
+    # the chat dispatch site for tools that write the live network
+    # (`chat_tools_schema.tool_edits_network`) and `set_network` — and nowhere
+    # else: a Solve, a study and the solver's transient rows never cross a
+    # seam. Captured on the EH study record when the study starts and compared
+    # at read time (`study_state.edited_since`), so it answers "has an edit
+    # happened since?", never "does the network differ?". Carried forward by
+    # reset_network / set_network like `undo` (it belongs to the project, not
+    # to one network object), persisted in metadata.json. A plain int for the
+    # same GIL reason as `results_unsaved`; owned by `services/dirty_state.py`.
+    network_revision: int = 0
+
     # LRU recency stamp (B9). `time.monotonic()` of the last time this context
     # became active, was activated, was registered, or was returned as a
     # resident path-scoped read. The eviction policy (PyPSAService._evict_if_

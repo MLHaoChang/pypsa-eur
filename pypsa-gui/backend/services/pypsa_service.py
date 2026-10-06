@@ -206,6 +206,27 @@ class PyPSAService:
         "pypsa_request_scratch", default=None
     )
 
+    # P33b: a one-element list the request middleware binds beside the ctx.
+    # A handler's `_request_ctx.set(...)` (a mid-request swap: undo, "New",
+    # import) is made in a COPY of the context (threadpool / call_next task),
+    # so the middleware cannot see it after `call_next` — but it can see a
+    # mutation of a list it shares. `_note_request_ctx` writes the swapped-in
+    # ctx into it, so the middleware's edit-counter bump lands on the ctx the
+    # request ENDED on, not on the project the user just left.
+    _request_ctx_box: ContextVar[list | None] = ContextVar(
+        "pypsa_request_ctx_box", default=None
+    )
+
+    @classmethod
+    def bind_request_box(cls, box: list | None):
+        return cls._request_ctx_box.set(box)
+
+    @classmethod
+    def _note_request_ctx(cls, ctx: ProjectContext) -> None:
+        box = cls._request_ctx_box.get()
+        if box is not None:
+            box[0] = ctx
+
     @classmethod
     def bind_request_slot(cls, key: str | None):
         return cls._request_slot.set(key)
@@ -283,6 +304,7 @@ class PyPSAService:
         """
         if cls._request_ctx.get() is not None:
             cls._request_ctx.set(ctx)
+            cls._note_request_ctx(ctx)
             # Route by the NEW context's own identity, not by the slot the
             # request arrived on. A `reset_network()` mid-request produces an
             # UNBOUND context; writing it into the previous project's registry
@@ -495,6 +517,9 @@ class PyPSAService:
                 # build_context EXCLUDED from this carry (background-solve
                 # contexts get clean chat).
                 chat_state=prev.chat_state,
+                # P33b: the edit counter belongs to the project, like `undo`;
+                # a load / restore re-hydrates it from metadata.json.
+                network_revision=prev.network_revision,
             ))
         else:
             cls._publish_active(ProjectContext(network=n))
@@ -553,6 +578,11 @@ class PyPSAService:
             # is an explicit user op the chat may have just triggered; killing
             # its session here would lose the very conversation that drove it.
             chat_state=prev.chat_state,
+            # P33b B3: replacing the network object is an edit. Its one
+            # production caller (POST /api/network/cluster) is also bumped by
+            # the HTTP or chat seam, so one clustering is +2 — harmless, the
+            # sentence ("edited since") stays true.
+            network_revision=prev.network_revision + 1,
         ))
         cls._clear_swap_caches()
 
@@ -607,6 +637,7 @@ class PyPSAService:
             ctx.last_interacted_at = time.monotonic()
             if cls._request_ctx.get() is not None:
                 cls._request_ctx.set(ctx)
+                cls._note_request_ctx(ctx)
                 cls._request_slot.set(ctx.registry_key)
             else:
                 cls._active = ctx
@@ -1082,6 +1113,7 @@ class PyPSAService:
                 # Step 0b: inside a request the switch is per SESSION. Writing
                 # `_active` here would move every other user's foreground too.
                 cls._request_ctx.set(ctx)
+                cls._note_request_ctx(ctx)
                 cls._request_slot.set(project_id)
             else:
                 cls._active = ctx

@@ -86,6 +86,10 @@ def get_undo_info():
         "memory_bytes": undo_service.memory_bytes(),
         "max_bytes": undo_service.MAX_BYTES,
         "max_steps": undo_service.MAX_STEPS,
+        # P33b: the per-project edit counter. Polled here (every 3 s by three
+        # always-mounted readers) so the Guided hub surfaces learn of an edit
+        # without a poll of their own.
+        "network_revision": dirty_state.revision(),
     }
 
 
