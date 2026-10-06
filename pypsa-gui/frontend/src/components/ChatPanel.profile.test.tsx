@@ -56,7 +56,7 @@ vi.mock('../api/chat', async (importOriginal) => {
       default_model: 'claude-sonnet-5',
       confirmation_ttl_seconds: 300,
       active_profile: { id: 'anthropic-sonnet', label: 'Claude Sonnet', wire: 'anthropic' },
-      chat_ready: false,
+      chat_ready: true,
     }),
   }
 })

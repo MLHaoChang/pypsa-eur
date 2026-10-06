@@ -15,11 +15,13 @@ from fastapi import HTTPException
 
 from services import change_log_service
 from services.pypsa_service import PyPSAService
+from services.study_state import refuse_edit_during_live_study
 
 _GC_OPTIONAL = ("carrier_attribute", "carrier", "investment_period")
 
 
 def apply_create_global_constraint(body) -> dict:
+    refuse_edit_during_live_study()  # P27a A1: not routed via _create_component
     n = PyPSAService.get_network()
     with PyPSAService.get_lock():
         if body.name in n.global_constraints.index:
@@ -45,6 +47,7 @@ def apply_create_global_constraint(body) -> dict:
 
 
 def apply_update_global_constraint(name: str, body, *, merge_partial_update) -> dict:
+    refuse_edit_during_live_study()  # P27a A1: not routed via _update_component
     n = PyPSAService.get_network()
     with PyPSAService.get_lock():
         if name not in n.global_constraints.index:
@@ -60,6 +63,9 @@ def apply_update_global_constraint(name: str, body, *, merge_partial_update) -> 
             n, "global_constraints", name, body.model_dump(exclude_unset=True)
         )
         new_name = merged.pop("name", name)
+        if new_name != name and new_name in n.global_constraints.index:
+            # remove + add would silently replace the existing constraint.
+            raise HTTPException(409, f"GlobalConstraint '{new_name}' already exists")
         n.remove("GlobalConstraint", name)
         n.add("GlobalConstraint", new_name, **merged)
     change_log_service.log(
@@ -70,6 +76,7 @@ def apply_update_global_constraint(name: str, body, *, merge_partial_update) -> 
 
 
 def apply_delete_global_constraint(name: str) -> None:
+    refuse_edit_during_live_study()  # P27a A1: not routed via _delete_component
     n = PyPSAService.get_network()
     with PyPSAService.get_lock():
         if name not in n.global_constraints.index:

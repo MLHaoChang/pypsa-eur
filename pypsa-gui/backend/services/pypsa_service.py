@@ -7,6 +7,10 @@ from contextvars import ContextVar
 
 import pypsa
 
+# Installs the PyPSA load-warning filter for the `ic:` reference frames at
+# app start (P2 WP2.2-0), before any loader runs.
+from services.commercial import settlement_inputs as _ic_settlement_inputs  # noqa: F401
+
 from services.project_context import (
     STUDY_KEYS,
     ProjectContext,
@@ -479,6 +483,23 @@ class PyPSAService:
                 # build_context EXCLUDED from this carry (background-solve
                 # contexts get clean chat).
                 chat_state=prev.chat_state,
+                # Carry the user-uploaded time-series store forward, as a COPY
+                # for the same reason `solver_state` is copied above: the old ctx
+                # must not observe writes made after the swap.
+                #
+                # Carried at all because the store used to be a module global and
+                # so survived every swap. Nothing depends on the VALUES arriving
+                # here: every caller that resets in order to LOAD something sets
+                # the store explicitly a few lines later (load_project,
+                # import_bundle, create-from-template, restore-snapshot,
+                # `POST /network/reset`, `POST /io/new`, undo), so the copy is
+                # replaced before anyone reads it. The one caller that resets and
+                # then REFUSES (load_project's queue-solve 409) keeps the
+                # caller's own profiles beside an emptied network, which is
+                # exactly what the module global left behind too.
+                # `set_network` (clustering) is the case that genuinely needs the
+                # values — see there.
+                user_ts=dict(prev.user_ts),
             ))
         else:
             cls._publish_active(ProjectContext(network=n))
@@ -514,8 +535,10 @@ class PyPSAService:
         # network-replacing path that does not go through the netCDF import
         # helper. Without it the flag is silently dropped by the swap.
         try:
+            from services.adequacy.eh_columns import normalise_eh_columns
             from services.adequacy.occurrence import normalise_flag_column
             normalise_flag_column(n)
+            normalise_eh_columns(n)
         except Exception:                                     # noqa: BLE001
             pass
         # Same project (clustering swaps the network in place): carry identity,
@@ -535,6 +558,11 @@ class PyPSAService:
             # is an explicit user op the chat may have just triggered; killing
             # its session here would lose the very conversation that drove it.
             chat_state=prev.chat_state,
+            # Same project, same uploaded profiles: clustering swaps the network
+            # object and nothing repopulates the store afterwards, so NOT carrying
+            # this would drop every uploaded profile the moment a network is
+            # re-clustered. A copy, not the object — see `reset_network`.
+            user_ts=dict(prev.user_ts),
         ))
         cls._clear_swap_caches()
 
@@ -569,6 +597,23 @@ class PyPSAService:
         # expose its in-flight conversation to background-solve agents and
         # cross-contaminate the chat.jsonl persist target. The fresh ctx gets
         # a default-factory ChatState (empty session, fresh lock).
+        #
+        # `user_ts` gets NO carry flag at all — not even an opt-in one like
+        # `carry_solver_state`. This is the builder behind every cold path
+        # (`activate_project`, `resolve_project_context`,
+        # `active_project.resolve_for_session` twice per authenticated request on
+        # every route, and the solve dispatcher), so a context built here must
+        # start with its own empty store or one session's uploaded profiles
+        # become readable — and persistable — from another session's project.
+        #
+        # The isolation is the dataclass default (`field(default_factory=dict)`),
+        # NOT the absence of a line here: `prev` above is `cls._active`, which
+        # after Step 0b is None for the whole life of a serving process (the first
+        # session adopts the foreground and clears it), so every `carry_*` in this
+        # method is already dead on a real server. A `carry_user_ts` flag would
+        # therefore look harmless AND be untestable through the request path —
+        # which is why there isn't one. Measured: a mutant that added the carry
+        # changed nothing, because `prev` is None.
         return ProjectContext(network=n, **kwargs)
 
     @classmethod
@@ -658,8 +703,10 @@ class PyPSAService:
         again would deadlock the save while the mutation lock is held — the
         app would wedge rather than error.
         """
+        from services.adequacy.eh_columns import normalise_eh_columns
         from services.adequacy.occurrence import normalise_flag_column
         normalise_flag_column(n)
+        normalise_eh_columns(n)
         n.export_to_netcdf(str(path))
 
     @staticmethod
@@ -676,9 +723,23 @@ class PyPSAService:
         Like the export helper it does NOT take ``get_netcdf_io_lock()`` —
         the lock is not reentrant and every caller already holds it.
         """
+        from services.adequacy.eh_columns import normalise_eh_columns
         from services.adequacy.occurrence import normalise_flag_column
+        from services.commercial.settlement_inputs import install_log_filter
+
+        install_log_filter()  # the `ic:` reference frames are not buses (P2 WP2.2-0)
         n.import_from_netcdf(str(path))
+        from services.commercial.settlement_inputs import reserved_bus_name
+
+        bad = [str(b) for b in n.buses.index if reserved_bus_name(b)]
+        if bad:
+            # A saved project from before the guards: loaded, but said
+            # (a bundle import refuses it before the load).
+            logging.getLogger(__name__).warning(
+                "bus names starting 'ic:' are reserved for the commercial reference "
+                "frames: %s", bad[:5])
         normalise_flag_column(n)
+        normalise_eh_columns(n)
 
     # ── Active-context solver state ──────────────────────────────────────────
     # The solver lifecycle + result state of the ACTIVE project. The simulation
@@ -697,6 +758,31 @@ class PyPSAService:
     def get_solver_state_lock(cls) -> threading.RLock:
         """RLock guarding the active project's solver_state (old `_state_lock`)."""
         return cls._ensure_active().solver_state_lock
+
+    @classmethod
+    def get_user_ts(cls) -> dict:
+        """
+        The active project's user-uploaded time-series store.
+
+        What `services/user_timeseries._user_ts` resolves through on every
+        access, so the existing call sites that read or write that name reach
+        the CALLER'S project and nobody else's. The same shape of
+        indirection as `get_solver_state()` above, for a sharper reason: the
+        store is authoritative at save/export time, so sharing it across
+        sessions moved one tenant's demand profile into another tenant's
+        `network.nc`.
+
+        ★ Resolving through `_ensure_active()` means a READ of `_user_ts` on a
+        thread with no request context ASSIGNS `_active` a fresh unbound context
+        as a side effect — the same property `get_solver_state()` has, and the
+        reason `services/shutdown._context_solves` walks the contexts itself
+        instead of asking the `_state` proxy (asking created a phantom context
+        that the flush then saved). Nothing on the shutdown path reads the store
+        today: `_save_context` only touches it under `persist_user_ts`, and a
+        phantom context has `loaded_project is None`, which the desktop saver
+        skips. A new session-less reader has to keep that true.
+        """
+        return cls._ensure_active().user_ts
 
     # ── Resident-context registry methods (B2; dormant until B6/B8) ───────────
     # These manipulate the multi-project registry. Production paths still go
@@ -936,6 +1022,7 @@ class PyPSAService:
             import pathlib
 
             from routers.projects import _save_context
+            from services.project_context import may_rewrite_user_ts
             # Save under the ctx's own NAME and its own org-scoped storage
             # directory — NOT under `victim_id`, which since Step 0a is the
             # composite `org:uuid` registry key. Passing `storage_dir` also
@@ -946,7 +1033,8 @@ class PyPSAService:
                 victim_ctx,
                 victim_ctx.loaded_project,
                 expect=victim_ctx.loaded_project,
-                persist_user_ts=False,
+                # The victim's own series; see `may_rewrite_user_ts`.
+                persist_user_ts=may_rewrite_user_ts(victim_ctx),
                 storage_dir=(
                     pathlib.Path(victim_ctx.storage_dir)
                     if victim_ctx.storage_dir

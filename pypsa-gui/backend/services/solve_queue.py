@@ -72,6 +72,11 @@ logger = logging.getLogger(__name__)
 # rather than a silent change to everyone's queue.
 MAX_CONCURRENT_SOLVES: int = int(os.environ.get("PYPSA_GUI_MAX_CONCURRENT_SOLVES", "1"))
 
+#: How long `reset_for_tests` waits for aborted jobs to unwind. A test solve
+#: aborts in well under a second; the bound only stops a job that ignores its
+#: stop event from hanging the suite.
+_RESET_JOIN_TIMEOUT_S = 30.0
+
 
 def _row_epoch(value: Any) -> float:
     """
@@ -699,11 +704,15 @@ class SolveQueue:
         thread parked on an empty queue (it is a daemon; killing it is neither
         possible nor necessary). Used by the pytest harness between tests.
 
-        Best-effort: signals the stop_event of EVERY job currently mid-solve (a
-        pool can have more than one) so each aborts (run_simulation returns
-        "aborted" -> no save) rather than bleeding its solve into the next test.
-        Doesn't join — a sub-second test solve will unwind on its own; the next
-        test's reset + reset_network() supersede it.
+        Signals the stop_event of EVERY job currently mid-solve (a pool can
+        have more than one) so each aborts (run_simulation returns "aborted" ->
+        no save) rather than bleeding its solve into the next test — and then
+        WAITS, bounded, for those jobs to unwind. Signalling alone was not
+        enough: an aborted job still runs its status write, which opens
+        `db.session.SessionLocal` at call time, and returning early let that
+        write land after the next test had patched `SessionLocal` onto its own
+        single-connection engine. On macOS it rolled back the next test's
+        seeding and surfaced as a 404 two tests away.
         """
         events = []
         with self._lock:
@@ -732,6 +741,25 @@ class SolveQueue:
                 ev.set()
             except Exception:
                 pass
+        # Every popped job ends in the dispatcher's `task_done()` (the drain
+        # above balanced its own), so the queue's counter reaching zero means
+        # every in-flight job has finished its finally-block writes. Several
+        # tests swap `_q` for a stand-in that swallows work; nothing is
+        # dispatched from one, so there is nothing to wait for.
+        all_done = getattr(self._q, "all_tasks_done", None)
+        if all_done is None:
+            return
+        deadline = time.monotonic() + _RESET_JOIN_TIMEOUT_S
+        with all_done:
+            while self._q.unfinished_tasks:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    logger.warning(
+                        "solve_queue.reset_for_tests: %d job(s) still unwinding after %ss",
+                        self._q.unfinished_tasks, _RESET_JOIN_TIMEOUT_S,
+                    )
+                    break
+                all_done.wait(remaining)
 
     def restore(self, row: dict) -> tuple[SolveJob, bool]:
         """
@@ -1032,6 +1060,7 @@ class SolveQueue:
             _safe_project_dir,
             _save_context,
         )
+        from services.project_context import may_rewrite_user_ts
         from services.pypsa_service import PyPSAService
         from services.solver_service import run_simulation
 
@@ -1234,6 +1263,10 @@ class SolveQueue:
                 # inherits the previous project's adequacy verdict.
                 last_lost_load=None, adequacy_report=None,
                 last_reserve_margin=None,
+                # Edge Investment Case keys: same rule as the foreground /run
+                # claim — a new solve invalidates the case built on the last.
+                investment_case_report=None, billing_frames=None,
+                last_commercial_terms=None,
                 lopf_results=None, ac_pf_results=None,
                 ac_pf_convergence=None, ac_pf_convergence_list=None,
                 ac_pf_slack_bus_used=None, ac_pf_stripped_voll_slacks=None,
@@ -1301,22 +1334,10 @@ class SolveQueue:
                 #    results_state.pkl carries AC-PF + lost-load (built from
                 #    ctx.solver_state). expect=project_id arms the identity guard.
                 if final_status == "completed":
-                    # persist_user_ts ONLY when this ctx IS the foreground
-                    # (resident solve-in-place): `_serialize_user_ts()` reads the
-                    # foreground's module-global `_user_ts`, so writing it for a
-                    # BACKGROUND project would clobber that project's own
-                    # user_ts.json with the foreground's profiles. The background
-                    # project's on-disk profiles + the netcdf's baked profiles are
-                    # already correct, so we leave user_ts.json untouched there.
                     _save_context(
                         ctx, project_id, expect=project_id,
-                        # `_user_ts` is still a module GLOBAL belonging to the
-                        # process foreground. Persist it only when the context
-                        # being solved IS that foreground; for anything else,
-                        # writing it would stamp one project's profiles onto
-                        # another's `user_ts.json`. Not writing it is safe — the
-                        # netcdf already carries the profiles.
-                        persist_user_ts=(ctx is PyPSAService._active),
+                        # The solved project's own series; see `may_rewrite_user_ts`.
+                        persist_user_ts=may_rewrite_user_ts(ctx),
                         storage_dir=(
                             pathlib.Path(job.storage_dir) if job.storage_dir else None
                         ),

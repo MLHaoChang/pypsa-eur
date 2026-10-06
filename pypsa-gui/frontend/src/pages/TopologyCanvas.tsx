@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useEffect, useLayoutEffect, useRef, useState, useId, createContext, useContext } from 'react'
+import { useElementWidth } from '../hooks/useElementWidth'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ReactFlow, Background, Controls, MiniMap, useNodesState, useEdgesState,
@@ -10,13 +11,12 @@ import '@xyflow/react/dist/style.css'
 import {
   Plus, Layers, Flame, BatteryCharging,
   Zap, Wind, Trash2, X as XIcon, type LucideIcon,
-  Clock, CheckCircle2, Loader2, XCircle, ExternalLink,
+  Clock, CheckCircle2, Loader2, XCircle, ExternalLink, ChevronDown, ChevronRight,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { networkApi } from '../api/network'
 import { resultsApi } from '../api/simulation'
 import { projectsApi } from '../api/projects'
-import { rawFetchHeaders } from '../api/csrf'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { updateAsset } from '../utils/assetWrite'
@@ -24,7 +24,7 @@ import type { RescalePreview } from '../utils/rescale'
 import { isRenewableCarrier } from '../utils/carriers'
 import {
   registerPendingEdgeDelete, cancelPendingEdgeDelete,
-  drainPendingEdgeDeletes, flushPendingEdgeDeletes,
+  keepaliveFlushPendingEdgeDeletes, flushPendingEdgeDeletes,
 } from '../utils/pendingEdgeDeletes'
 import { ingestRescale } from '../utils/rescaleActions'
 import { useSimulationStore } from '../store/simulationStore'
@@ -1853,6 +1853,20 @@ function ResultsPill() {
 }
 
 // ── Main canvas ────────────────────────────────────────────────────────────────
+// Q11 (UX assessment 2026-10-05): below this canvas width the minimap covers
+// the network it maps. The assessment proposed 900 px; a browser check showed
+// that hides it for good on a 1366 px laptop (the canvas is ~790 px beside the
+// sidebar and properties), where it fits. 640 px hides it only when a side
+// panel squeezes the canvas (~400 px).
+const MINIMAP_MIN_CANVAS_PX = 640
+const LEGEND_KEY = 'pypsa.canvasLegendOpen'
+function readLegendOpen(): boolean {
+  try { return localStorage.getItem(LEGEND_KEY) !== 'false' } catch { return true }
+}
+function writeLegendOpen(open: boolean) {
+  try { localStorage.setItem(LEGEND_KEY, String(open)) } catch { /* private mode: not remembered */ }
+}
+
 export default function TopologyCanvas() {
   const {
     setSelectedComponent, resultsOverlayEnabled, setResultsOverlay, canvasMode, setCanvasMode,
@@ -1914,6 +1928,12 @@ export default function TopologyCanvas() {
 
   // Cache of user-dragged positions — updated in onNodesChange, never triggers re-renders
   const posCache = useRef<Record<string, { x: number; y: number }>>({})
+  // Q11: the canvas measures itself so the minimap can step aside when narrow,
+  // and the legend remembers whether the user folded it away.
+  const [canvasEl, setCanvasEl] = useState<HTMLDivElement | null>(null)
+  const canvasWidth = useElementWidth(canvasEl)
+  const [legendOpen, setLegendOpenState] = useState<boolean>(() => readLegendOpen())
+  const setLegendOpen = (open: boolean) => { setLegendOpenState(open); writeLegendOpen(open) }
   const rfInstance = useRef<{
     fitView: (opts?: { padding?: number; duration?: number; maxZoom?: number; minZoom?: number }) => void
     flowToScreenPosition: (pos: { x: number; y: number }) => { x: number; y: number }
@@ -2095,20 +2115,10 @@ export default function TopologyCanvas() {
       // (by navigating away within the 5s window) would silently survive
       // on the backend. keepalive hands off to the browser's background
       // network slot so the DELETE completes even after the page is gone.
-      for (const { edgeId } of drainPendingEdgeDeletes()) {
-        const isLink = edgeId.startsWith('link-')
-        const name = edgeId.replace(/^(line-|link-)/, '')
-        const url = `/api/network/${isLink ? 'links' : 'lines'}/${encodeURIComponent(name)}`
-        try {
-          fetch(url, {
-            method: 'DELETE',
-            // This site had no headers object at all — raw fetch bypasses the
-            // axios CSRF interceptor, so the pending delete 403s on unload.
-            headers: { ...rawFetchHeaders('DELETE') },
-            keepalive: true,
-          }).catch(() => { /* best effort */ })
-        } catch { /* keepalive unsupported — drop on the floor */ }
-      }
+      // (utils/pendingEdgeDeletes: CSRF header; A2 — dropped with one WARN
+      // while the tab is mismatched, since this raw fetch never meets the
+      // axios mismatch block.)
+      keepaliveFlushPendingEdgeDeletes()
     }
     window.addEventListener('pagehide', onPageHide)
     // Some browsers (notably Safari) don't always fire `pagehide` on
@@ -2875,6 +2885,7 @@ export default function TopologyCanvas() {
       .highlight-edge-pulse { animation: edgePulse 1s ease-in-out 4; }
     `}</style>
     <div
+      ref={setCanvasEl}
       className="h-full w-full relative"
       onMouseMove={canvasMode === 'connect' && connectSource ? (e) => setConnectMousePos({ x: e.clientX, y: e.clientY }) : undefined}
       // Drop detection for palette drags lives in AssetPalette itself — it
@@ -2925,7 +2936,10 @@ export default function TopologyCanvas() {
         {/* Minimap — frosted card, voltage/category-coloured node dots. React
             Flow's built-in MiniMap does not render edges; nodes are given a
             matching stroke so the network shape still reads at a glance. */}
-        <MiniMap
+        {/* Hidden on a narrow canvas (a side panel open on a laptop), where
+            it covers the network it maps (UX assessment Q11). Unknown width
+            keeps it. */}
+        {(canvasWidth == null || canvasWidth >= MINIMAP_MIN_CANVAS_PX) && <MiniMap
           pannable
           zoomable
           nodeBorderRadius={3}
@@ -2939,7 +2953,7 @@ export default function TopologyCanvas() {
             if (n.type === 'assetGroup') return CATEGORY_CONFIG[(n.data as unknown as AssetGroupData).category]?.color ?? '#6b7280'
             return getLineColor((n.data as unknown as { bus?: Bus })?.bus?.v_nom ?? 1)
           }}
-        />
+        />}
 
         {canvasMode === 'connect' && (
           <Panel position="bottom-center">
@@ -2971,7 +2985,7 @@ export default function TopologyCanvas() {
                 className="flex flex-col gap-0.5 border border-border rounded-[10px] p-1 shadow-md"
                 style={{ background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)', backdropFilter: 'blur(8px)' }}
               >
-                <button
+                <button aria-label="Add bus (auto-name, rename via Properties)"
                   title="Add bus (auto-name, rename via Properties)"
                   className="flex items-center justify-center w-8 h-8 rounded-md text-ink-600 hover:bg-panel hover:text-accent transition-colors"
                   onClick={() => {
@@ -2995,7 +3009,7 @@ export default function TopologyCanvas() {
                 >
                   <Plus size={15} />
                 </button>
-                <button
+                <button aria-label="Connect buses — route a line between two buses"
                   onClick={() => setCanvasMode(canvasMode === 'connect' ? 'select' : 'connect')}
                   title="Connect buses — route a line between two buses"
                   className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors
@@ -3005,14 +3019,14 @@ export default function TopologyCanvas() {
                 >
                   <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="3.5" cy="3.5" r="1.6"/><circle cx="12.5" cy="12.5" r="1.6"/><path d="M3.5 5v3a2 2 0 0 0 2 2h5a2 2 0 0 1 2 2v-0.5"/></svg>
                 </button>
-                <button
+                <button aria-label="Fit view — centre the network in the canvas"
                   onClick={() => rfInstance.current?.fitView({ padding: 0.25, duration: 400, maxZoom: 0.85 })}
                   title="Fit view — centre the network in the canvas"
                   className="flex items-center justify-center w-8 h-8 rounded-md text-ink-600 hover:bg-panel hover:text-accent transition-colors"
                 >
                   <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M3 5V3h2M11 3h2v2M13 11v2h-2M5 13H3v-2"/><circle cx="8" cy="8" r="2"/></svg>
                 </button>
-                <button
+                <button aria-label="Auto-layout by voltage tier"
                   onClick={runAutoLayout}
                   title="Auto-layout by voltage tier"
                   className="flex items-center justify-center w-8 h-8 rounded-md text-ink-600 hover:bg-panel hover:text-accent transition-colors"
@@ -3021,7 +3035,7 @@ export default function TopologyCanvas() {
                 </button>
                 {/* "Reset to model coordinates" button removed: the blank
                     canvas is decoupled from geographic bus.x/y by design. */}
-                <button
+                <button aria-label="Reset diagram — clear saved positions and waypoints"
                   onClick={() => setShowResetConfirm(true)}
                   title="Reset diagram — clear saved positions and waypoints"
                   className="flex items-center justify-center w-8 h-8 rounded-md text-ink-600 hover:bg-panel hover:text-danger transition-colors"
@@ -3034,7 +3048,7 @@ export default function TopologyCanvas() {
                 className="flex flex-col gap-0.5 border border-border rounded-[10px] p-1 shadow-md"
                 style={{ background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)', backdropFilter: 'blur(8px)' }}
               >
-                <button
+                <button aria-label="Toggle results overlay"
                   onClick={() => setResultsOverlay(!resultsOverlayEnabled)}
                   title="Toggle results overlay"
                   className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors
@@ -3075,6 +3089,8 @@ export default function TopologyCanvas() {
                     title="Flow overlay: active power (P, MW) or reactive power (Q, MVAr)">
                     <button
                       type="button"
+                      aria-label="Show active power (P)"
+                      aria-pressed={flowOverlayKind === 'p'}
                       onClick={() => setFlowOverlayKind('p')}
                       className={`px-1.5 py-1 transition-colors ${
                         flowOverlayKind === 'p' ? 'bg-accent text-white' : 'text-muted hover:text-text'
@@ -3082,6 +3098,8 @@ export default function TopologyCanvas() {
                     >P</button>
                     <button
                       type="button"
+                      aria-label="Show reactive power (Q)"
+                      aria-pressed={flowOverlayKind === 'q'}
                       onClick={() => setFlowOverlayKind('q')}
                       className={`px-1.5 py-1 border-t border-border transition-colors ${
                         flowOverlayKind === 'q' ? 'bg-accent text-white' : 'text-muted hover:text-text'
@@ -3092,12 +3110,37 @@ export default function TopologyCanvas() {
               </div>
             </div>
 
-            {/* Voltage / asset legend — frosted card, design-system sizing. */}
+            {/* Voltage / asset legend — frosted card, design-system sizing.
+                Collapsible, remembered per browser (UX assessment Q11). */}
+            {!legendOpen ? (
+              <button
+                type="button"
+                onClick={() => setLegendOpen(true)}
+                aria-expanded={false}
+                data-testid="canvas-legend-toggle"
+                className="flex items-center gap-1 border border-border rounded-[10px] shadow-md px-2.5 py-1.5 text-[10px] font-bold text-muted uppercase tracking-[0.14em] hover:text-text"
+                style={{ background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)', backdropFilter: 'blur(8px)' }}
+              ><ChevronRight size={10} className="shrink-0" />Legend</button>
+            ) : (
             <div
               className="border border-border rounded-[10px] shadow-md w-[164px] p-3"
               style={{ background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)', backdropFilter: 'blur(8px)' }}
+              data-testid="canvas-legend"
             >
-              <p className="text-[9px] font-bold text-muted uppercase tracking-[0.14em] mb-2">Buses &amp; Lines · voltage</p>
+              {/* The fold control sits at the card's LEFT edge: on a narrow
+                  canvas the map-mode switcher overlaps the card's right side. */}
+              <button
+                type="button"
+                onClick={() => setLegendOpen(false)}
+                aria-label="Hide legend"
+                aria-expanded={true}
+                data-testid="canvas-legend-toggle"
+                title="Hide legend"
+                className="flex items-center gap-1 mb-2 -ml-0.5 text-left text-muted hover:text-text"
+              >
+                <ChevronDown size={10} className="shrink-0" />
+                <span className="text-[9px] font-bold uppercase tracking-[0.14em]">Buses &amp; Lines · voltage</span>
+              </button>
               {[['> 300 kV', '#ef4444'], ['200–300 kV', '#16a34a'], ['100–200 kV', '#2563eb'], ['< 100 kV', '#6b7280']].map(([label, color]) => (
                 <div key={label} className="flex items-center gap-2 mb-1">
                   <svg width="20" height="3" style={{ flexShrink: 0 }}><line x1="0" y1="1.5" x2="20" y2="1.5" stroke={color} strokeWidth="2.5" strokeLinecap="round" /></svg>
@@ -3136,6 +3179,7 @@ export default function TopologyCanvas() {
                 </div>
               ))}
             </div>
+            )}
           </div>
         </Panel>
       </ReactFlow>

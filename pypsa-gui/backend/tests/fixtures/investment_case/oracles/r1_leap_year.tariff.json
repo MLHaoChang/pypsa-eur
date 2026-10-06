@@ -1,0 +1,141 @@
+{
+ "id": "r1",
+ "name": "REopt leap_year (hand-translated)",
+ "jurisdiction": "US",
+ "valid_from": "2023-01-01",
+ "items": [
+  {
+   "id": "energy",
+   "kind": "energy",
+   "unit": "per_kwh",
+   "settlement": "h",
+   "periods": [
+    {
+     "name": "1",
+     "rate": 0.28,
+     "weekdays": [
+      0,
+      1,
+      2,
+      3,
+      4
+     ],
+     "start_hour": 0,
+     "end_hour": 7
+    },
+    {
+     "name": "1",
+     "rate": 0.28,
+     "weekdays": [
+      0,
+      1,
+      2,
+      3,
+      4
+     ],
+     "start_hour": 20,
+     "end_hour": 24
+    },
+    {
+     "name": "1",
+     "rate": 0.28,
+     "weekdays": [
+      5,
+      6
+     ]
+    },
+    {
+     "name": "2",
+     "rate": 0.36,
+     "weekdays": [
+      0,
+      1,
+      2,
+      3,
+      4
+     ],
+     "start_hour": 7,
+     "end_hour": 20
+    }
+   ]
+  },
+  {
+   "id": "demand_tou",
+   "kind": "demand",
+   "unit": "per_kw_month",
+   "settlement": "15min",
+   "periods": [
+    {
+     "name": "1",
+     "rate": 0.0,
+     "weekdays": [
+      0,
+      1,
+      2,
+      3,
+      4
+     ],
+     "start_hour": 0,
+     "end_hour": 14
+    },
+    {
+     "name": "1",
+     "rate": 0.0,
+     "weekdays": [
+      0,
+      1,
+      2,
+      3,
+      4
+     ],
+     "start_hour": 20,
+     "end_hour": 24
+    },
+    {
+     "name": "1",
+     "rate": 0.0,
+     "weekdays": [
+      5,
+      6
+     ]
+    },
+    {
+     "name": "2",
+     "rate": 10.0,
+     "weekdays": [
+      0,
+      1,
+      2,
+      3,
+      4
+     ],
+     "start_hour": 14,
+     "end_hour": 20
+    }
+   ]
+  },
+  {
+   "id": "demand",
+   "kind": "demand",
+   "unit": "per_kw_month",
+   "settlement": "15min",
+   "periods": [
+    {
+     "name": "facility",
+     "rate": 18.05
+    }
+   ]
+  },
+  {
+   "id": "fixed",
+   "kind": "fixed",
+   "unit": "per_day",
+   "periods": [
+    {
+     "name": "all",
+     "rate": 24.878
+    }
+   ]
+  }
+ ]
+}

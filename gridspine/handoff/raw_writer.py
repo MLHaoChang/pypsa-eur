@@ -30,7 +30,10 @@ sgen (RES / IBR machine) decisions:
 - LEDGER ASSUMPTION: MBASE falls back to installed ``p_mw`` treated as MVA
   when ``sn_mva`` is absent — the RES ledger records capacity in MW only.
   ``sn_mva`` wins when finite (it IS the machine MVA base); a non-positive
-  fallback degrades to system SBASE rather than an invalid 0 MBASE.
+  fallback degrades to system SBASE rather than an invalid 0 MBASE. The
+  fallback means "installed" only on a net no snapshot has touched: applying
+  an hour overwrites ``p_mw`` with that hour's output, so a net that will be
+  snapshotted must carry ``sn_mva`` (``load_case39_res`` does).
 - Q limits: an sgen is a PQ injection with no voltage-control duty. The v33
   convention for fixed-Q machines is QT == QB (== QG) — PSS/E and
   PowerFactory both hold such a machine at its Q value instead of letting it
@@ -81,6 +84,18 @@ def _tap_ratio(tr):
     if not (np.isfinite(pos) and np.isfinite(neutral) and np.isfinite(step)):
         return 1.0
     return 1.0 + (float(pos) - float(neutral)) * float(step) / 100.0
+
+
+def sgen_mbase(s) -> float:
+    """An sgen row's MBASE: ``sn_mva`` when finite, else installed ``p_mw`` as
+    MVA, else the system base (see the module docstring). The .dyr writer
+    calls this too, so the base its records declare cannot drift from the
+    one the RAW record states."""
+    sn = s.get("sn_mva", np.nan)
+    if sn is not None and np.isfinite(sn):
+        return float(sn)
+    p_inst = float(s["p_mw"])
+    return p_inst if p_inst > 0 else SBASE_MVA
 
 
 class _IdCounter:
@@ -156,12 +171,8 @@ def write_raw(net, path, title="gridspine export", f_hz=50.0):
     if sgen is not None:
         for _, s in sgen.iterrows():
             scal = float(s.get("scaling", 1.0))
-            sn = s.get("sn_mva", np.nan)
             p_inst = float(s["p_mw"])
-            if np.isfinite(sn):
-                mbase = float(sn)
-            else:
-                mbase = p_inst if p_inst > 0 else SBASE_MVA
+            mbase = sgen_mbase(s)
             qg = float(s.get("q_mvar", 0.0)) * scal
             qt_raw = s.get("max_q_mvar", np.nan)
             qb_raw = s.get("min_q_mvar", np.nan)

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { FailureInfo } from './api/types'
 import AppHeader from './layout/AppHeader'
@@ -29,13 +29,19 @@ import WorkspacePanel from './pages/WorkspacePanel'
 import CompareView from './pages/CompareView'
 import SolveQueuePanel from './pages/SolveQueuePanel'
 import GridspinePanel from './pages/GridspinePanel'
+import ReportsPanel from './pages/ReportsPanel'
+import CampusElectricalPanel from './pages/CampusElectricalPanel'
 import { recoveryFor } from './utils/autoRecovery'
 import LocalSettings from './pages/LocalSettings'
+import HubDesignPanel from './pages/hubDesign/HubDesignPanel'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
 import RescaleDialogHost from './components/RescaleDialogHost'
+import { GuidedTourHost } from './components/GuidedTour'
 import CrashRecoveryBanner from './components/CrashRecoveryBanner'
 import LockBanner from './components/LockBanner'
+import ProjectMismatchBanner from './components/ProjectMismatchBanner'
+import { useProjectMismatchDetection } from './hooks/useProjectMismatchDetection'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import AssistantDock from './components/AssistantDock'
 import { useUIStore, type SlidePanel } from './store/uiStore'
@@ -47,6 +53,7 @@ import { simulationApi, createLogStream } from './api/simulation'
 import { acquireProjectLock, invalidateNetworkQueries, stopLockHeartbeat, switchToProject } from './utils/projectActions'
 import { nk } from './utils/queryKeys'
 import { appLog, useSimulationStore } from './store/simulationStore'
+import { PanelChromeContext, type PanelChrome } from './components/PageKit'
 
 // Top-level boundary so any render error in the header/tabs/sidebar/etc. shows
 // a visible error screen instead of whitescreening the entire app.
@@ -114,15 +121,18 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   issues:     { eyebrow: 'SIMULATION', title: 'Issues' },
   results:    { eyebrow: 'SIMULATION', title: 'Results' },
   solveQueue: { eyebrow: 'SIMULATION', title: 'Solve queue' },
-  gridspine:  { eyebrow: 'SIMULATION', title: 'Planning → dynamics' },
+  gridspine:  { eyebrow: 'STUDIES',    title: 'Planning → dynamics' },
+  reports:    { eyebrow: 'STUDIES',    title: 'Reports' },
+  campusElectrical: { eyebrow: 'STUDIES', title: 'Campus electrical' },
   workspace:  { eyebrow: 'PROJECT',    title: 'Workspace' },
   settings:   { eyebrow: 'APPLICATION', title: 'Settings' },
+  hubDesign:  { eyebrow: 'GUIDED',     title: 'Hub design' },
 }
 
 // Tabs that take the whole main area (canvas hidden) rather than opening as a
 // half-width panel beside the canvas — their charts, tables, and two-column
 // layouts need the full width.
-const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine'])
+const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine', 'reports', 'hubDesign', 'campusElectrical'])
 
 function fullPageContent(panel: SlidePanel): React.ReactNode {
   switch (panel) {
@@ -142,17 +152,32 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'capacityBounds': return <CapacityBoundsEditor />
     case 'solveQueue': return <SolveQueuePanel />
     case 'gridspine':  return <GridspinePanel />
+    case 'reports':    return <ReportsPanel />
+    case 'campusElectrical': return <CampusElectricalPanel />
     case 'settings':   return <LocalSettings />
+    case 'hubDesign':  return <HubDesignPanel />
     default:           return null
   }
 }
 
-function FullPageTab({ panel, onClose }: { panel: SlidePanel; onClose: () => void }) {
+export function FullPageTab({ panel, onClose }: { panel: SlidePanel; onClose: () => void }) {
   const meta = PANEL_META[panel]
+  // A page that draws its own PageHeader claims the header row: it renders
+  // ONE compact row with the Close button, and this breadcrumb steps aside
+  // (UX assessment Q12; see PanelChromeContext in PageKit).
+  const [headerClaimed, setHeaderClaimed] = useState(false)
+  // onClose arrives as a fresh closure on every App render; read it through a
+  // ref so the context value (and the PageHeader's claim effect) stays stable.
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+  const chrome = useMemo<PanelChrome>(
+    () => ({ eyebrow: meta.eyebrow, onClose: () => onCloseRef.current(), claimHeader: setHeaderClaimed }),
+    [meta.eyebrow],
+  )
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-bg">
       {/* Slim breadcrumb header — eyebrow / title + Close. */}
-      <div className="flex items-center gap-2 px-5 h-9 border-b border-border bg-bg-2 shrink-0">
+      {!headerClaimed && <div className="flex items-center gap-2 px-5 h-9 border-b border-border bg-bg-2 shrink-0">
         <span className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-accent">
           {meta.eyebrow}
         </span>
@@ -167,9 +192,11 @@ function FullPageTab({ panel, onClose }: { panel: SlidePanel; onClose: () => voi
           Close
           <span className="text-[15px] leading-none">×</span>
         </button>
-      </div>
+      </div>}
       <div className="flex-1 min-h-0 overflow-hidden">
-        {fullPageContent(panel)}
+        <PanelChromeContext.Provider value={chrome}>
+          {fullPageContent(panel)}
+        </PanelChromeContext.Provider>
       </div>
     </div>
   )
@@ -179,7 +206,7 @@ export default function App() {
   const {
     activeSlidePanel, setSlidePanel, currentProject, canvasView,
     lastProjectId, lastSavedByProject, markProjectSaved, pruneRecents, recents, setLastProjectId,
-    theme, density, compareRailOpen, setCompareRailOpen,
+    theme, density, compareRailOpen, setCompareRailOpen, uiMode, guidedTourHolds,
   } = useUIStore()
   // The 3D site sidecar: load per project, persist on unload (WP1, Task 1.5).
   useSitesLifecycle(currentProject)
@@ -187,6 +214,29 @@ export default function App() {
   // Results + Time Series take the whole main area (see FULL_SCREEN_TABS);
   // every other sidebar tab opens as a half-width panel beside the canvas.
   const fullScreenTab = activeSlidePanel != null && FULL_SCREEN_TABS.has(activeSlidePanel)
+
+  // Guided default-open (guided-mode spec §3.6 + §10 addendum): with a
+  // project open and no panel showing, Guided opens the hub-design flow —
+  // once per project per session, so closing it is respected. A project
+  // counts as auto-opened as soon as ANY slide panel has been open for it in
+  // Guided (a panel reaching null afterwards is the user's or a tour's doing,
+  // not "nothing is open yet"), and while a guided tour is preparing or
+  // running the auto-open never fires — the tour always wins. A hold only
+  // SKIPS, it does not mark: a project switched to mid-tour still gets its
+  // once-per-project open when the hold is released (the tour's own project
+  // is already marked by its open panel). Expert never auto-opens anything.
+  const hubDesignAutoOpenedFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (uiMode !== 'guided' || !currentProject) return
+    if (hubDesignAutoOpenedFor.current === currentProject) return
+    if (guidedTourHolds > 0) return
+    if (activeSlidePanel != null) {
+      hubDesignAutoOpenedFor.current = currentProject
+      return
+    }
+    hubDesignAutoOpenedFor.current = currentProject
+    setSlidePanel('hubDesign')
+  }, [uiMode, currentProject, activeSlidePanel, guidedTourHolds, setSlidePanel])
 
   // Apply theme + density to <html> so CSS-var overrides in index.css kick in.
   // Done on <html> (not <body>) because the @theme block lives at :root scope —
@@ -207,12 +257,20 @@ export default function App() {
   // no longer exist on disk (after a delete from another tab), (2) seed
   // lastSavedByProject from metadata.created_at when the in-memory map has no
   // entry for a known project (typical on a fresh browser session).
-  const { data: backendProjects } = useQuery({
+  const { data: backendProjects, isPending: projectsPending } = useQuery({
     queryKey: ['projects'],
     queryFn: projectsApi.list,
     staleTime: 10_000,
     refetchInterval: 30_000,
   })
+
+  // A2 (deferred spec §2.1): the tab / backend project-mismatch check. A study
+  // (planning → dynamics) has no network, so the backend's binding is some
+  // other project by design — never a mismatch; while the project list is
+  // still loading we cannot tell, so the check waits for it.
+  const tabIsStudy = projectsPending || (!!currentProject && !!backendProjects
+    && recoveryFor(backendProjects, currentProject) === 'study')
+  useProjectMismatchDetection(tabIsStudy)
 
   useEffect(() => {
     if (!backendProjects) return
@@ -436,6 +494,10 @@ export default function App() {
       try {
         const meta = await networkApi.getMeta()
         if (cancelled) return
+        // The backend is bound to ANOTHER project: that is the A2 mismatch
+        // (ProjectMismatchBanner offers Reload / Switch), not an empty
+        // network to re-load silently over someone else's binding.
+        if (meta?.loaded_project != null && meta.loaded_project !== currentProject) return
         // Heuristic: empty in-memory network. The bus_count check is the
         // strong signal — a freshly-reset PyPSA instance has zero buses.
         if ((meta?.bus_count ?? 0) > 0) return
@@ -584,6 +646,11 @@ export default function App() {
             (auth mode). Hidden otherwise so it takes no vertical space. */}
         <LockBanner />
 
+        {/* ── Tab / backend project mismatch (A2) ───────────────────── */}
+        {/* Renders only while this tab's project and the backend's binding
+            disagree; the tab's writes are paused until Reload or Switch. */}
+        <ProjectMismatchBanner />
+
         {/* ── App header ─────────────────────────────────────────────── */}
         <AppHeader />
 
@@ -601,14 +668,13 @@ export default function App() {
               shrunk to the other half); Results takes the whole area. */}
           <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
 
-            {/* Canvas column — full width normally, half beside a tab panel,
+            {/* Canvas column — full width normally, the rest beside a tab panel,
                 hidden while a full-screen tab (Results) occupies the area. Kept
                 mounted (display:none, not unmounted) so its zoom/pan + React
                 Flow state survive a tab open/close. */}
             <div
               className={`flex flex-col min-h-0 overflow-hidden ${
                 fullScreenTab ? 'hidden'
-                  : activeSlidePanel ? 'w-1/2 min-w-0'
                   : 'flex-1 min-w-0'
               }`}
             >
@@ -634,7 +700,7 @@ export default function App() {
               <BottomPanel />
             </div>
 
-            {/* Tab panel — half-width beside the canvas, full-width for Results. */}
+            {/* Tab panel — max(560px, half) beside the canvas, full-width for Results. */}
             {activeSlidePanel && (
               <div
                 ref={panelRef}
@@ -643,7 +709,10 @@ export default function App() {
                 // never is. See App.dock.test.tsx.
                 data-testid="panel-container"
                 className={`min-w-0 flex flex-col min-h-0 overflow-hidden ${
-                  fullScreenTab ? 'flex-1' : 'w-1/2 border-l border-border'
+                  // Half the area, but never narrower than 560 px: a form
+                  // panel squeezed to half a laptop screen wraps every label
+                  // (UX assessment Q1). The canvas takes what is left.
+                  fullScreenTab ? 'flex-1' : 'shrink-0 w-[max(560px,50%)] max-w-full border-l border-border'
                 }`}
               >
                 {/* Boundary keyed on panel + project so a crash in any full-page
@@ -681,6 +750,10 @@ export default function App() {
             asks about it. See store/rescaleStore.ts for why this moved out of
             MapCanvasInner. */}
         <RescaleDialogHost />
+        {/* Tours launched with a `prepare` step (the EH tagging tour closes
+            the Results panel its button lives in, so the button cannot host
+            it). Renders nothing until such a tour starts. */}
+        <GuidedTourHost />
       </div>
       </AppErrorBoundary>
     </AuthMismatchGate>

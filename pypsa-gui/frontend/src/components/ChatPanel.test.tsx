@@ -41,7 +41,7 @@ vi.mock('../api/chat', async (importOriginal) => {
       default_model: 'claude-sonnet-5',
       confirmation_ttl_seconds: 300,
       active_profile: { id: 'anthropic-sonnet', label: 'Claude Sonnet', wire: 'anthropic' },
-      chat_ready: false,
+      chat_ready: true,
     }),
   }
 })
@@ -264,6 +264,41 @@ it('renders an approve/reject control for tool_pending_confirmation and calls po
     token: 'tok-abc',
     decision: 'approve',
   })
+})
+
+// P27b gate note 6 (fixed): approving a confirmation card runs the write on
+// the BACKEND's project. While this tab and the backend disagree about the
+// open project, Approve is disabled and the card says why; Deny writes
+// nothing and stays available.
+it('while the tab is mismatched, Approve is disabled with the banner sentence; Deny still works', async () => {
+  renderPanel()
+  await sendAndScript([
+    { event: 'session_init', data: { session_id: 'sess-mm' } },
+    {
+      event: 'tool_pending_confirmation',
+      data: {
+        tool_use_id: 'tu-mm', tool_name: 'delete_component',
+        args: { component_class: 'Generator', name: 'SmokeSolar' },
+        safety_tier: 'write', confirmation_token: 'tok-mm', ttl_seconds: 120,
+      },
+    },
+  ])
+  await screen.findByTestId('chat-confirmation-card')
+  act(() => { useUIStore.setState({ projectMismatch: { tab: 'Demo', backend: 'Other' } }) })
+  const SENTENCE = 'This tab shows Demo, but the app is now on Other. Changes from this tab are paused.'
+  try {
+    const approve = screen.getByTestId('chat-confirm-approve') as HTMLButtonElement
+    await waitFor(() => expect(approve.disabled).toBe(true))
+    expect(approve.title).toBe(SENTENCE)
+    expect(screen.getByTestId('chat-confirm-mismatch').textContent).toBe(SENTENCE)
+    const user = userEvent.setup()
+    await user.click(approve)
+    expect(postChatConfirm).not.toHaveBeenCalled()
+    await user.click(screen.getByTestId('chat-confirm-deny'))
+    expect(postChatConfirm).toHaveBeenCalledWith('sess-mm', { token: 'tok-mm', decision: 'deny' })
+  } finally {
+    act(() => { useUIStore.setState({ projectMismatch: null }) })
+  }
 })
 
 // ── An unmount mid-turn must not kill the turn ────────────────────────────

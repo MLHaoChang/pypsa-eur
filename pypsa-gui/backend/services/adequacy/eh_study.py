@@ -1,25 +1,37 @@
 """
-Energy Hub study orchestrator (Phase 1.5; stages completed 2026-09-26).
+Energy Hub study orchestrator (Phase 1.5; stage table since P11).
 
-Runs archetype pack → ENS solve → frontier → MC certify → FMEA top-N →
-redundancy → levers → DtC → assemble (spec decision 18). Optional stages may
-be skipped; required-but-missing stages surface as ``not_established`` /
-pipeline notes. The frontier / mc_certify / fmea_top stage bodies live in
-``eh_stages`` (plan docs/superpowers/plans/2026-09-26-eh-wire-skipped-stages.md).
+Runs archetype pack → ENS solve → the requested stages in spec decision-18
+order → assemble. Optional stages may be skipped; required-but-missing stages
+surface as ``not_established`` / pipeline notes.
 
 Report emission: ``assemble_reference_design_report`` only (spec decision 16).
+
+Merge of master (2026-09-28; decisions in
+docs/superpowers/qa/2026-09-28-merge-master-decisions.md): the stage bodies
+stay here (P11/P12 contract); master's PR #53/#55 capabilities come in
+through ``eh_stages`` — the sampled import Link (hourly cap), the zonal grid
+areas with grid storage and common-mode events for ``mc_certify``, the
+class-A COPT screening block of ``fmea_top``, and the pack's
+``frontier_ladder`` / ``fmea_top_n`` / ``mc_*`` fields; LCOH comes from
+``compute_tea(network=…)``.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
+import math
 import queue
 import threading
 from typing import Any, Iterable
 
 from models.energy_hub import (
     DEFAULT_EH_BUDGET_SOLVES,
+    DEFAULT_EH_FMEA_TOP_N,
+    DEFAULT_EH_FRONTIER_LADDER,
+    DEFAULT_EH_MC_DRAWS,
     EH_PIPELINE_STAGES,
     MAX_EH_BUDGET_SOLVES,
     ArchetypePack,
@@ -43,8 +55,90 @@ __all__ = [
     "DEFAULT_EH_BUDGET_SOLVES",
     "MAX_EH_BUDGET_SOLVES",
     "FMEA_TOP_LINK_PRIMARY_NOTE",
+    "REQUIRED_STAGES",
+    "SIBLING_STORE_KEYS",
+    "ZERO_SOLVE_STAGES",
+    "certification_verdict",
+    "certification_wanted",
+    "default_stages_for",
+    "frontier_targets",
     "run_eh_study",
+    "StageSelectionError",
+    "readiness_refusal_classes",
+    "validate_stages",
 ]
+
+# Spec decision 18: stages *after* ens_solve may be skipped — these two may not.
+# A report labelled with an archetype whose pack was never applied, or with no
+# ENS solve behind it, is not that archetype's reference design.
+REQUIRED_STAGES: tuple[str, ...] = ("apply_pack", "ens_solve")
+
+# Per-stage sibling tables served by GET /results/eh_* next to the report.
+# Cleared when a new study starts so a table from a previous archetype/run is
+# never shown beside a newer report.
+SIBLING_STORE_KEYS: tuple[str, ...] = (
+    "eh_redundancy_comparison",
+    "eh_lever_comparison",
+    "eh_dtc_stress",
+    "eh_dtc_planning",
+)
+
+# Pipeline stage → report section it fills (for unreached-stage notes).
+_STAGE_SECTION = {
+    "redundancy": "redundancy",
+    "levers": "levers",
+    "dtc_stress": "dtc",
+    "dtc_planning": "dtc",
+    "mc_certify": "certification",
+    "frontier": "frontier",
+    "fmea_top": "fmea_top",
+}
+
+# fmea_top: how many ranked modes the report carries by default (the pack's
+# ``fmea_top_n`` decides per study).
+FMEA_TOP_N = DEFAULT_EH_FMEA_TOP_N
+# frontier: share of the study budget it may take by default (plan B8).
+FRONTIER_BUDGET_SHARE = 0.4
+
+# Stages that charge no LP solve. Never skipped for an exhausted budget (plan
+# B5): a spent LP budget must not silently drop a required certification.
+ZERO_SOLVE_STAGES: frozenset[str] = frozenset(
+    {"apply_pack", "mc_certify", "assemble"})
+
+# MC certification defaults (the /mc study's defaults; P13 exposes them as
+# the request's ``mc`` options, which override the pack's ``mc_*`` fields).
+DEFAULT_MC_DRAWS = DEFAULT_EH_MC_DRAWS
+DEFAULT_MC_SEED = 0
+DEFAULT_MC_COV_TARGET = 0.05
+
+
+class StageSelectionError(ValueError):
+    """``validate_stages``' refusal of a caller's stage list (a ``ValueError``
+    so existing ``except ValueError`` callers keep working)."""
+
+
+def validate_stages(stages: Iterable[str] | None) -> tuple[str, ...] | None:
+    """Refuse unknown stage names and lists that drop a required stage.
+
+    ``None`` means the pack's default pipeline. Raises ``ValueError`` with a
+    message naming the offending stage(s) — HTTP maps it to 422.
+    """
+    if stages is None:
+        return None
+    requested = tuple(str(s) for s in stages)
+    if not requested:
+        raise StageSelectionError("stages, when set, must be a non-empty list")
+    unknown = [s for s in requested if s not in EH_PIPELINE_STAGES]
+    if unknown:
+        raise StageSelectionError(
+            f"unknown EH pipeline stage(s) {unknown}; expected a subset of "
+            f"{list(EH_PIPELINE_STAGES)}")
+    missing = [s for s in REQUIRED_STAGES if s not in requested]
+    if missing:
+        raise StageSelectionError(
+            f"stages must include {list(REQUIRED_STAGES)} (only stages after "
+            f"ens_solve may be skipped); missing {missing}")
+    return requested
 
 
 def _assumptions_hash(cfg) -> str:
@@ -52,9 +146,971 @@ def _assumptions_hash(cfg) -> str:
         "voll": getattr(cfg, "voll", None),
         "ens_cap_permyriad": getattr(cfg, "ens_cap_permyriad", None),
         "dsr_buses": list(getattr(cfg, "dsr_buses", None) or []),
+        "dsr_price_eur_per_mwh": getattr(cfg, "dsr_price_eur_per_mwh", None),
+        "dsr_share_of_load": getattr(cfg, "dsr_share_of_load", None),
+        "import_energy_cap_mwh_per_year": getattr(
+            cfg, "import_energy_cap_mwh_per_year", None),
+        "import_energy_links": sorted(
+            getattr(cfg, "import_energy_links", None) or []),
     }
     blob = json.dumps(raw, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def certification_wanted(pack: ArchetypePack) -> bool:
+    """Whether the pack's default pipeline certifies on MC LOLE (plan B3)."""
+    a = pack.availability
+    return bool(pack.mc_certify_required
+                or a.certification_metric == "mc_lole"
+                or a.target_lole_h is not None)
+
+
+def default_stages_for(pack: ArchetypePack) -> tuple[str, ...]:
+    """The pack's default pipeline (``stages=None``)."""
+    def _keep(s: str) -> bool:
+        if s == "redundancy":
+            return bool(pack.levers.redundancy)
+        if s == "levers":
+            return bool(pack.levers.import_cap or pack.levers.storage_duration)
+        if s == "mc_certify":
+            return certification_wanted(pack)
+        if s == "frontier":
+            return bool(getattr(pack, "frontier_default", False))
+        if s == "dtc_stress":
+            return bool(pack.dtc_stress_default)
+        if s == "dtc_planning":
+            return bool(getattr(pack, "dtc_planning_default", False))
+        return True
+    return tuple(s for s in DEFAULT_STAGES if _keep(s))
+
+
+class _Study:
+    """Mutable state of one run, shared by the stage handlers."""
+
+    def __init__(self, **kw: Any) -> None:
+        self.__dict__.update(kw)
+
+    def mark(self, stage: str, status: str, *, note: str | None = None,
+             solves_charged: int = 0) -> None:
+        for rec in self.records:
+            if rec.stage == stage:
+                rec.status = status  # type: ignore[assignment]
+                rec.note = note
+                rec.solves_charged = solves_charged
+                break
+
+    def remaining(self) -> int:
+        return max(0, self.budget_solves - self.solves)
+
+    def blocked(self, stage: str) -> bool:
+        """Skip a requested stage when ens_solve failed or (for stages that
+        solve LPs) the budget is spent."""
+        if self.failed_reason is not None:
+            reason = f"not run: {self.failed_reason}"
+        elif stage not in ZERO_SOLVE_STAGES and self.remaining() <= 0:
+            reason = (f"not run: budget_solves exhausted "
+                      f"({self.solves}/{self.budget_solves}) before this stage")
+        else:
+            return False
+        self.mark(stage, "skipped", note=reason)
+        section = _STAGE_SECTION.get(stage)
+        if section is not None:
+            self.sections.setdefault(section, ("not_established", None, reason))
+        return True
+
+
+# ── stage handlers (each runs only when requested, not blocked, not aborted) ─
+
+
+def _stage_apply_pack(st: _Study) -> None:
+    result = arch.apply_archetype_pack_detailed(st.network, st.pack)
+    st.undo = result.undo
+    st.pack_h = result.pack_hash
+    st.mark("apply_pack", "run",
+            note="; ".join(list(result.warnings) + st.pack_notes) or None)
+
+
+def _stage_ens_solve(st: _Study) -> None:
+    from services.solver_service import run_simulation
+
+    sink: dict = {}
+    status, condition = run_simulation(
+        st.cfg, st.network, st.lock, st.stop_event, st.log_queue,
+        state_update=lambda **kw: sink.update(kw),
+    )
+    st.solves += 1
+    if status not in ("ok", "optimal") and st.stop_event.is_set():
+        st.mark("ens_solve", "aborted",
+                note=f"{status}:{condition}", solves_charged=1)
+        st.aborted = True
+        return
+    if status not in ("ok", "optimal"):
+        reason = f"ens_solve {status}:{condition}"
+        if "infeasible" in str(condition):
+            reason += (" — the pack's ENS target cannot be met by this "
+                       "network under the pack overlay")
+        st.failed_reason = reason
+        st.mark("ens_solve", "failed", note=reason, solves_charged=1)
+        for sec in ("target", "cost", "sizing", "tea", "multi_energy"):
+            st.sections[sec] = ("not_established", None, reason)
+        return
+
+    st.mark("ens_solve", "run", solves_charged=1)
+    adequacy_report = sink.get("adequacy_report")
+    st.adequacy_report = adequacy_report
+    if not isinstance(adequacy_report, dict):
+        return
+    network, cfg = st.network, st.cfg
+    tgt = adequacy_report.get("target") or {}
+    system = tgt.get("system") or {}
+    metrics = adequacy_report.get("metrics") or {}
+    cost = adequacy_report.get("cost") or {}
+    st.achieved_shed_hours = system.get("achieved_shed_hours")
+    ens_mwh = system.get("achieved_ens_mwh")
+    # Invert ‱ if demand known from cap_mwh, at the cap actually solved at.
+    cap_mwh = system.get("cap_mwh")
+    st.ens_cap = getattr(cfg, "ens_cap_permyriad", st.ens_cap)
+    ens_cap = st.ens_cap
+    if (ens_cap is not None and cap_mwh
+            and float(cap_mwh) > 0 and ens_mwh is not None):
+        # achieved ‱ ≈ ens_mwh / demand * 1e4; demand = cap_mwh / (ens_cap/1e4)
+        demand = float(cap_mwh) / (float(ens_cap) / 1e4)
+        st.achieved_ens_permyriad = (
+            float(ens_mwh) / demand * 1e4 if demand else None)
+        # Planning metric met? Carried on the certification payload; never
+        # part of the verdict (decision 2). Master PR #53.
+        st.ens_met = float(ens_mwh) <= float(cap_mwh) * (1.0 + 1e-4)
+    st.sections["target"] = (
+        "ok", {"binding": tgt.get("binding"), "system": system,
+               "metrics": metrics}, None)
+    st.cost_at_target = cost.get("total_system_cost_eur")
+    st.period_basis = cost.get("period_basis")
+    st.sections["cost"] = (
+        "ok", {"total_system_cost_eur": st.cost_at_target,
+               "period_basis": st.period_basis,
+               "excludes_shed_cost": True}, None)
+    # P5: sizing from the solved network (installed p_nom).
+    st.sections["sizing"] = (
+        "ok", report_mod.sizing_summary_from_network(network), None)
+    # P5: TEA/LCOE from cost ÷ (demand − ENS).
+    ens_for_tea = float(ens_mwh) if ens_mwh is not None else None
+    served = report_mod.served_energy_mwh_from_network(
+        network, ens_mwh=ens_for_tea)
+    if served is None and isinstance(metrics, dict):
+        dem = metrics.get("demand_mwh")
+        ens = metrics.get("ens_mwh")
+        if dem is not None and ens is not None:
+            served = max(0.0, float(dem) - float(ens))
+    if served is None and ens_cap is not None \
+            and cap_mwh and float(cap_mwh) > 0 and ens_mwh is not None:
+        demand = float(cap_mwh) / (float(ens_cap) / 1e4)
+        served = max(0.0, demand - float(ens_mwh))
+    # LCOH (master PR #53): priced on the solved private copy, flagged —
+    # never zeroed — when there is no electrolyser or it never ran.
+    tea_block = report_mod.compute_tea(
+        cost_eur=st.cost_at_target, served_energy_mwh=served,
+        network=network, cfg=cfg)
+    if tea_block.lcoe_eur_per_mwh is not None:
+        st.sections["tea"] = ("ok", tea_block.model_dump(mode="json"), None)
+    else:
+        st.sections["tea"] = ("not_established",
+                              tea_block.model_dump(mode="json"),
+                              tea_block.notes)
+    # P6(a): dedicated-bus multi-energy ENS disclosure.
+    from services.adequacy import multi_energy as ME
+    capture = sink.get("last_lost_load")
+    if not isinstance(capture, dict):
+        capture = {}
+    st.sections["multi_energy"] = ME.multi_energy_section_from_capture(
+        network, capture)
+
+
+def _fixed_plan(st: _Study):
+    """The hub boundary + the fleet of the ENS plan, computed once.
+
+    Returns ``(boundary_info, FixedPlanSnapshot)``; raises
+    ``HubBoundaryError`` when the P11 boundary cannot be established. The
+    boundary (``archetypes.hub_boundary_copy``) decides the sides and which
+    import Links count (decision 6); ``eh_stages.freeze_fixed_plan`` then
+    builds the MC inputs with master's PR #55 import model — each counted
+    Link a two-state unit at its HOURLY planning cap, the grid behind it a
+    zonal area when its fleet carries occurrence data (grid storage and
+    common-mode events included) — and the class-A COPT screening of that
+    same fleet. ``st.network`` is the study's private copy and every stage
+    before this one left its plan untouched (frontier runs on its own copy).
+    """
+    cached = getattr(st, "fixed_plan", None)
+    if cached is not None:
+        return cached
+    _mc_net, boundary = arch.hub_boundary_copy(st.network, st.pack)
+    frozen = stages_mod.freeze_fixed_plan(
+        st.network, st.cfg, st.lock, overlay=st.pack.import_overlay,
+        boundary=boundary)
+    st.fixed_plan = (boundary, frozen)
+    return st.fixed_plan
+
+
+def _max_mttr(frozen) -> float:
+    """Largest repair time the MC samples: hub units, grid-area units and
+    common-mode events (a zonal area repairs on its own clock too)."""
+    mttrs: list[float] = []
+    units = list(getattr(frozen.mc_inputs, "units", None) or [])
+    zonal = frozen.zonal_inputs
+    for area in (getattr(zonal, "areas", None) or ()):
+        if area.grid is not None:
+            units += list(area.grid.units)
+        mttrs += [float(c.mttr_hours) for c in area.common_mode]
+    mttrs += [float(u.mttr_hours) for u in units]
+    mttrs = [m for m in mttrs if math.isfinite(m)]
+    return max(mttrs) if mttrs else 0.0
+
+
+def certification_verdict(*, lole_ci, target_h: float | None,
+                          resolution_floor_h: float | None = None,
+                          n_samples=None, ens_met: bool | None = None,
+                          ) -> tuple[str | None, str | None]:
+    """The P11 verdict rule (spec §4 amendment, Q1; decision 2) →
+    ``(verdict, note)``.
+
+    ``target_h`` is the target over the modelled horizon (h/yr ×
+    horizon_years). ``pass`` iff the LOLE CI upper bound ≤ target; ``fail``
+    iff its lower bound > target — even when the ENS target is met; else
+    ``inconclusive``, as is a target below the MC resolution floor. No
+    target → no verdict.
+    """
+    if lole_ci is None or len(lole_ci) != 2 or any(
+            x is None or not math.isfinite(float(x)) for x in lole_ci):
+        # The MC produced no LOLE: no verdict; the caller marks the section
+        # not_established with the MC's reason.
+        return None, "MC LOLE not established — no verdict"
+    if target_h is None:
+        return None, "no target_lole_h — LOLE reported, not certified"
+    lo, hi = (float(x) for x in lole_ci)
+    if resolution_floor_h is not None and target_h < float(resolution_floor_h):
+        return "inconclusive", (
+            f"target {target_h:g} h over the horizon is below the MC "
+            f"resolution floor {float(resolution_floor_h):g} h at "
+            f"{n_samples} draws — more draws needed")
+    if hi <= target_h:
+        return "pass", None
+    if lo > target_h:
+        return "fail", ("LOLE fails the target although the ENS target is "
+                        "met (spec decision 2)" if ens_met else None)
+    return "inconclusive", "the LOLE 95% CI straddles the target"
+
+
+def _stage_mc_certify(st: _Study) -> None:
+    """MC LOLE certification of the ENS plan (spec decisions 1–2, §4 P11).
+
+    Samples the SOLVED plan (extendables at ``p_nom_opt``) on the hub side
+    of the import boundary — the MC is copper-plate, so the far side of the
+    import Links must not count as local capacity. Charges no LP solve.
+    Verdict (Q1): pass iff CI upper ≤ target, fail iff CI lower > target,
+    else inconclusive; target below the resolution floor → inconclusive.
+    Target basis (Q2): h/yr × horizon_years, refused when the horizon is
+    shorter than the largest MTTR.
+
+    Import (merge of master PR #55, within decision 6): a counted import
+    Link is a two-state unit at its hourly cap; when the grid behind it
+    carries occurrence data the two-area engine (``mc_zonal``) bounds the
+    import by the grid's own surplus each hour, with grid storage and
+    opt-in common-mode events. ``import_model`` / ``import_firmness`` /
+    ``fleet_scope`` disclose which applied.
+    """
+    from services.adequacy import mc as mc_mod
+    from services.adequacy import mc_zonal as zonal_mod
+
+    pack = st.pack
+    target = pack.availability.target_lole_h
+
+    def _not_established(reason: str, payload: dict | None = None) -> None:
+        st.mark("mc_certify", "skipped", note=reason)
+        st.sections["certification"] = ("not_established", payload, reason)
+
+    try:
+        boundary, frozen = _fixed_plan(st)
+    except arch.HubBoundaryError as exc:
+        return _not_established(str(exc))
+    except Exception as exc:  # noqa: BLE001 — degrade like every other stage
+        logger.exception("MC hub boundary failed")
+        return _not_established(f"MC certification failed: {exc}")
+    scope = frozen.scope or {}
+    disclosure = {
+        "fleet_boundary": boundary,
+        "fleet_scope": frozen.scope,
+        "import_model": scope.get("import_model"),
+        "import_firmness": scope.get("import_firmness"),
+    }
+    if frozen.mc_inputs is None:
+        return _not_established(
+            frozen.mc_error or "MC inputs unavailable", dict(disclosure))
+    inputs = frozen.mc_inputs
+    zonal = frozen.zonal_inputs
+    sampled = list(inputs.units)
+    for area in (getattr(zonal, "areas", None) or ()):
+        if area.grid is not None:
+            sampled += list(area.grid.units)
+    for u in sampled:
+        try:
+            mc_mod.transition_probs(u.q, u.mttr_hours, name=u.name)
+        except ValueError as exc:
+            return _not_established(str(exc), dict(disclosure))
+    horizon_years = float(inputs.nyears)
+    if not horizon_years > 0:
+        return _not_established(
+            "horizon_years ≤ 0 — the modelled horizon has no length, so no "
+            "annual LOLE can be stated", dict(disclosure))
+    modelled_h = horizon_years * 8760.0
+    max_mttr = _max_mttr(frozen)
+    if modelled_h < max_mttr:
+        return _not_established(
+            f"modelled horizon {modelled_h:g} h is shorter than the largest "
+            f"unit MTTR ({max_mttr:g} h): one repair outlasts the study, so "
+            "its LOLE cannot stand for annual adequacy (decision Q2)",
+            {**disclosure, "horizon_years": horizon_years,
+             "max_mttr_hours": max_mttr})
+
+    try:
+        if zonal is not None:
+            res = zonal_mod.zonal_mc_adequacy(
+                zonal, draws=st.mc_draws, seed=st.mc_seed,
+                cov_target=st.mc_cov_target, stop_event=st.stop_event)
+        else:
+            res = mc_mod.mc_adequacy(
+                inputs, draws=st.mc_draws, seed=st.mc_seed,
+                cov_target=st.mc_cov_target, stop_event=st.stop_event)
+    except Exception as exc:  # noqa: BLE001 — degrade like every other stage
+        logger.exception("MC certification failed")
+        return _not_established(f"MC certification failed: {exc}",
+                                dict(disclosure))
+    if st.stop_event.is_set():
+        st.aborted = True
+        st.mark("mc_certify", "aborted", note="MC stopped by abort — no verdict")
+        st.sections["certification"] = (
+            "not_established", None, "MC aborted — no verdict")
+        return
+
+    lole = float(res["lole_hours"])
+    lo, hi = (float(x) for x in res["lole_ci"])
+    floor = res.get("resolution_floor_h")
+    met = confident = target_h = None
+    if target is not None:
+        target_h = float(target) * horizon_years
+        met = lole <= target_h
+        confident = hi <= target_h
+    verdict, note = certification_verdict(
+        lole_ci=(lo, hi), target_h=target_h, resolution_floor_h=floor,
+        n_samples=res.get("n_samples"), ens_met=st.ens_met)
+    dsr_on = bool(getattr(st.cfg, "dsr_buses", None)) and float(
+        getattr(st.cfg, "dsr_price_eur_per_mwh", 0.0) or 0.0) > 0
+    payload = {
+        "metric": "mc_lole",
+        "certification_metric": pack.availability.certification_metric,
+        "target_lole_h": target,
+        "target_basis": "h_per_year",
+        "target_lole_h_per_horizon": target_h,
+        "horizon_years": horizon_years,
+        "lole_h_per_horizon": lole,
+        "lole_h_per_year": lole / horizon_years,
+        # Report headline (h/yr) — the same number as ``report.mc_lole_h``.
+        "mc_lole_h": lole / horizon_years,
+        "lole_ci": [lo, hi],
+        "eue_mwh": res.get("eue_mwh"),
+        "eue_ci": list(res.get("eue_ci") or []),
+        "by_period": res.get("by_period"),
+        "n_samples": res.get("n_samples"),
+        "converged": res.get("converged"),
+        "draws": st.mc_draws,
+        "draws_requested": st.mc_draws,
+        "seed": st.mc_seed,
+        "cov_target": st.mc_cov_target,
+        "resolution_floor_h": floor,
+        "time_basis": res.get("time_basis"),
+        "warning": res.get("warning") or mc_mod.MC_WARNING_V1,
+        "engine": "mc_zonal" if zonal is not None else "mc",
+        "fidelity": ("sequential_mc_two_area" if zonal is not None
+                     else "sequential_mc"),
+        **disclosure,
+        "verdict": verdict,
+        "met_on_mean": met,
+        "confident": confident,
+        "ens_met": st.ens_met,
+        "dsr_note": (
+            "the LP plan uses demand response but the MC does not model it — "
+            "this LOLE is pessimistic relative to the plan" if dsr_on else None),
+        "solves_charged": 0,
+    }
+    st.mc_lole_h = lole / horizon_years
+    st.certified = (verdict == "pass") if verdict is not None else None
+    st.sections["certification"] = ("ok", payload, note)
+    st.mark("mc_certify", "run", solves_charged=0,
+            note=f"verdict {verdict}" if verdict else note)
+
+
+def _private_copy(network):
+    """A disposable copy of the (possibly solved) study network."""
+    from services.adequacy.redundancy import _detach_solver_model
+    _detach_solver_model(network)
+    return network.copy()
+
+
+def _vintage_bounds_active(network) -> bool:
+    """Multi-period vintage bounds re-expand extendables after a capacity
+    freeze (plan P10 known limitation) — disclosed where a freeze is used."""
+    import pandas as pd
+    meta = getattr(network, "meta", None)
+    bucket = meta.get("vintage_bounds") if isinstance(meta, dict) else None
+    return bool(bucket) and isinstance(network.snapshots, pd.MultiIndex)
+
+
+def frontier_targets(pack_cap: float, n_points: int, *,
+                     ladder: Iterable[float] = DEFAULT_EH_FRONTIER_LADDER,
+                     ) -> list[float]:
+    """The pack cap, then the ladder points nearest to it (log distance,
+    ties towards the looser side), ``n_points`` in total —
+    ``run_frontier_sweep`` orders them loosest first.
+
+    ``ladder`` is the pack's ``frontier_ladder`` (master PR #53): factors on
+    the pack cap, so the curve is always AROUND the report's own target. The
+    pack cap itself is always a point (×1), whether or not the ladder lists
+    it. The budget rule stays the P12 one (``frontier_point_count``).
+    """
+    cap = float(pack_cap)
+    points = {cap * float(f) for f in ladder}
+    others = sorted((t for t in points if not math.isclose(t, cap)),
+                    key=lambda t: (abs(math.log(t / cap)), -t))
+    return [cap] + others[:max(0, n_points - 1)]
+
+
+def _stage_frontier(st: _Study) -> None:
+    """Cost vs availability ε-sweep around the pack target (spec §3 / P12a).
+
+    Runs on its OWN copy: each point re-optimises capacity, and later stages
+    (mc_certify, fmea_top) must read the ens_solve plan. The closing restore
+    is skipped on that disposable copy (decision Q4).
+    """
+    from services.adequacy import frontier as fr
+
+    def _not_established(reason: str, status: str = "skipped") -> None:
+        st.mark("frontier", status, note=reason)
+        st.sections["frontier"] = ("not_established", None, reason)
+
+    if st.ens_cap is None:
+        return _not_established("frontier needs the pack's ENS target")
+    n_points = frontier_point_count(st.remaining(), st.budget_solves)
+    if n_points < 2:
+        return _not_established(
+            f"not run: budget_solves leaves {st.remaining()} solve(s) — a "
+            "frontier needs at least two points")
+    targets = frontier_targets(st.ens_cap, n_points,
+                               ladder=tuple(st.pack.frontier_ladder))
+    try:
+        result = fr.run_frontier_sweep(
+            _private_copy(st.network), st.lock, st.cfg, targets,
+            log_queue=st.log_queue, stop_event=st.stop_event,
+            restore_base=False)
+    except (fr.FrontierConfigError, fr.FrontierBudgetError) as exc:
+        return _not_established(str(exc))
+    except Exception as exc:  # noqa: BLE001 — degrade like every other stage
+        logger.exception("frontier failed")
+        partial = getattr(exc, "frontier_result", None) or {}
+        charged = len(partial.get("points") or [])
+        st.solves += charged
+        st.mark("frontier", "failed", note=f"frontier failed: {exc}",
+                solves_charged=charged)
+        st.sections["frontier"] = ("not_established", None,
+                                   f"frontier failed: {exc}")
+        return
+    # Decision 3: every cost field states that it excludes shed (master PR #53).
+    points = [{**pt, "excludes_shed_cost": True} for pt in result["points"]]
+    st.solves += len(points)
+    ok_points = [pt for pt in points if pt.get("status") == "ok"]
+    # Owner's Q3 rule: the knee needs three solved points (merge review B2).
+    voll = float(st.cfg.voll or 0.0)
+    n_ok = len([pt for pt in ok_points if pt.get("point")])
+    if n_ok >= stages_mod.MIN_EH_FRONTIER_KNEE_POINTS:
+        knee = fr.knee_index(points, voll)
+        knee_status, knee_note = (("ok", None) if knee is not None else (
+            "not_established",
+            "no VOLL crossing inside the swept range — the knee lies outside it"))
+    else:
+        knee, knee_status = None, "not_established"
+        knee_note = (f"a knee needs at least "
+                     f"{stages_mod.MIN_EH_FRONTIER_KNEE_POINTS} solved points; "
+                     f"{n_ok} solved")
+    payload = {
+        "targets_permyriad": sorted(targets, reverse=True),
+        "pack_target_permyriad": float(st.ens_cap),
+        "points": points,
+        # Index into the OK points (loosest first), not into `points`.
+        "knee_index": knee,
+        "knee_status": knee_status,
+        "knee_note": knee_note,
+        "knee_index_basis": "ok_points",
+        "warning": result.get("warning"),
+        "aborted": bool(result.get("aborted")),
+        "restore_skipped_on_private_copy": True,
+        "voll_eur_per_mwh": float(st.cfg.voll or 0.0),
+        "ladder": [float(f) for f in st.pack.frontier_ladder],
+        "n_ok": len(ok_points),
+        "engine": "lp_proxy",
+        "excludes_shed_cost": True,
+        "period_basis": next((pt.get("period_basis") for pt in ok_points), None),
+        "solves_charged": len(points),
+    }
+    if result.get("aborted"):
+        status, note = "not_established", "frontier aborted mid-sweep"
+    elif len(ok_points) < 2:
+        status, note = "not_established", "fewer than two frontier points solved"
+    else:
+        status, note = "ok", None
+    if result.get("aborted"):
+        st.aborted = True
+        st.mark("frontier", "aborted", solves_charged=len(points), note=note)
+    else:
+        st.mark("frontier", "run", solves_charged=len(points),
+                note=note or f"{len(ok_points)} points")
+    st.sections["frontier"] = (status, payload, note)
+
+
+def _closed_import_links(network, pack) -> list[str]:
+    """Import Links the pack closed (p_*_pu → 0, e.g. off_grid)."""
+    out = []
+    for link in arch.select_import_links(network, pack.import_overlay):
+        row = network.links.loc[link]
+        pmax = [float(row.get("p_max_pu", 1.0))]
+        pmin = [float(row.get("p_min_pu", 0.0))]
+        for attr, acc in (("p_max_pu", pmax), ("p_min_pu", pmin)):
+            ts = getattr(network.links_t, attr, None)
+            if ts is not None and link in getattr(ts, "columns", []):
+                acc.extend(float(v) for v in ts[link])
+        if max(pmax) <= 0 and min(pmin) >= 0:
+            out.append(str(link))
+    return out
+
+
+def _class_a_block(st: _Study, class_b_rows: list[dict], top_n: int) -> dict:
+    """Class-A (unit forced-outage) screening of the same fixed plan.
+
+    Master PR #53/#55, added to ``fmea_top`` ALONGSIDE the P12 Class-B
+    ranking (merge 2026-09-28): the COPT screening of the hub-side fleet
+    ``mc_certify`` samples (zero LP solves). A sampled import Link is ranked
+    ONCE — dropped here when the Class-B sweep ranked it, otherwise relabelled
+    as the Link (``eh_stages.IMPORT_LINK_RANKING_NOTE``). Never part of the
+    section's status: the Link-primary Class-B ranking (decision 14) is.
+    """
+    def _no(reason: str) -> dict:
+        return {"status": "not_established", "reason": reason, "rows": [],
+                "top_n": int(top_n), "n_modes": 0, "engine": "copt",
+                "solves_charged": 0}
+
+    try:
+        _boundary, frozen = _fixed_plan(st)
+    except arch.HubBoundaryError as exc:
+        return _no(str(exc))
+    except Exception as exc:  # noqa: BLE001 — a disclosure, never fatal
+        logger.exception("fmea_top class-A screening failed")
+        return _no(f"class-A screening failed: {exc}")
+    modes = [dict(r) for r in frozen.copt_rows if r.get("failure_mode")]
+    b_modes = [{"failure_mode": {**r, "failure_class": "B"}}
+               for r in class_b_rows]
+    ranked, link_ranking = stages_mod._rank_import_links_once(
+        modes + b_modes, frozen.scope)
+    modes = [r for r in ranked
+             if (r.get("failure_mode") or {}).get("failure_class") != "B"]
+    modes.sort(key=lambda r: (
+        -float((r.get("failure_mode") or {}).get(
+            "criticality_eur_per_year", 0.0) or 0.0),
+        str((r.get("failure_mode") or {}).get("mode_id", ""))))
+    block = {
+        "status": "ok" if modes else "not_established",
+        "reason": None if modes else (
+            frozen.copt_error or "no class-A mode could be ranked"),
+        "rows": [stages_mod._flatten_mode(r, rank=i + 1)
+                 for i, r in enumerate(modes[:int(top_n)])],
+        "top_n": int(top_n),
+        "n_modes": len(modes),
+        "engine": "copt",
+        "copt_metrics": frozen.copt_metrics,
+        "copt_error": frozen.copt_error,
+        "copt_fidelity_note": frozen.copt_fidelity_note,
+        "fleet_scope": frozen.scope,
+        "import_link_ranking": link_ranking,
+        "import_link_ranking_note": (stages_mod.IMPORT_LINK_RANKING_NOTE
+                                     if link_ranking else None),
+        "solves_charged": 0,
+    }
+    return block
+
+
+def _stage_fmea_top(st: _Study) -> None:
+    """Top-N Class-B Link failure modes on the pack-applied ENS plan (P12b).
+
+    Frozen at the ens_solve plan on a disposable copy (closing restore
+    skipped, Q4). No partial sweep: a partial ranking is misleading, so a
+    sweep that does not fit the remaining budget is skipped, not truncated.
+    Every frontier point getting its own ranking is deferred (spec §9).
+
+    ``top_n`` is the pack's ``fmea_top_n``. The payload also carries the
+    class-A COPT screening of the same plan (``class_a``, zero solves; see
+    ``_class_a_block``) — it never decides the section's status.
+    """
+    from services.adequacy import sweep as sw
+
+    top_n = int(getattr(st.pack, "fmea_top_n", FMEA_TOP_N) or FMEA_TOP_N)
+
+    def _not_established(reason: str, status: str = "skipped") -> None:
+        note = f"{FMEA_TOP_LINK_PRIMARY_NOTE}; {reason}"
+        st.mark("fmea_top", status, note=note)
+        st.sections["fmea_top"] = (
+            "not_established",
+            {"rows": [], "top_n": top_n, "class_a": _class_a_block(
+                st, [], top_n)}, note)
+
+    fcopy = _private_copy(st.network)
+    closed = _closed_import_links(fcopy, st.pack)
+    if closed:
+        fcopy.remove("Link", closed)
+    try:
+        k = len(sw.class_b_contingencies(fcopy))
+    except sw.SweepBudgetError as exc:
+        return _not_established(str(exc))
+    if k == 0:
+        return _not_established(
+            "no Class-B-eligible Links (no Link carries occurrence data)")
+    cost = fmea_solve_cost(k)          # frozen base + K; restore skipped
+    if cost > st.remaining():
+        return _not_established(
+            f"not run: the sweep needs {cost} solves and budget_solves leaves "
+            f"{st.remaining()} — a partial ranking would mislead")
+    try:
+        rows, restore = sw.run_class_b_sweep(
+            fcopy, st.lock, st.cfg, log_queue=st.log_queue,
+            stop_event=st.stop_event, restore_base=False)
+    except Exception as exc:  # noqa: BLE001 — degrade like every other stage
+        logger.exception("fmea_top sweep failed")
+        # A failed frozen base solve is a real LP solve; charge it.
+        charged = 1 if "base operational solve failed" in str(exc) else 0
+        st.solves += charged
+        note = f"{FMEA_TOP_LINK_PRIMARY_NOTE}; sweep failed: {exc}"
+        st.mark("fmea_top", "failed", note=note, solves_charged=charged)
+        # The zero-solve class-A screening does not depend on the sweep
+        # (merge review N2): keep it.
+        st.sections["fmea_top"] = (
+            "not_established",
+            {"rows": [], "top_n": top_n,
+             "class_a": _class_a_block(st, [], top_n)}, note)
+        return
+    charged = 1 + len(rows)
+    st.solves += charged
+    if restore.get("aborted"):
+        st.aborted = True
+        st.mark("fmea_top", "aborted", solves_charged=charged,
+                note="aborted mid-sweep — partial ranking withheld")
+        st.sections["fmea_top"] = (
+            "not_established",
+            {"rows": [], "top_n": top_n,
+             "class_a": _class_a_block(st, [], top_n)},
+            f"{FMEA_TOP_LINK_PRIMARY_NOTE}; aborted mid-sweep — partial "
+            "ranking withheld")
+        return
+    ranked = sorted(
+        (r for r in rows if r.get("failure_mode")),
+        key=lambda r: (-float(r["failure_mode"]["criticality_eur_per_year"]),
+                       str(r["failure_mode"]["mode_id"])))
+    unsolved = [{"id": r["id"], "status": r["status"]}
+                for r in rows if not r.get("failure_mode")]
+    notes = [FMEA_TOP_LINK_PRIMARY_NOTE]
+    if closed:
+        notes.append(f"import Link(s) closed by the pack excluded: {closed}")
+    if _vintage_bounds_active(st.network):
+        notes.append(
+            "multi-period vintage bounds re-expand extendables after the "
+            "capacity freeze — this ranking may understate severity")
+    class_b_rows = [r["failure_mode"] | {"delta_eue_mwh": r["delta_eue_mwh"]}
+                    for r in ranked]
+    payload = {
+        "rows": class_b_rows[:top_n],
+        "top_n": top_n,
+        "k_links": k,
+        "ranked": len(ranked),
+        "unsolved": unsolved,
+        "in_metric_scope_counts": {
+            "in": sum(1 for r in ranked if r["failure_mode"]["in_metric_scope"]),
+            "out": sum(1 for r in ranked
+                       if not r["failure_mode"]["in_metric_scope"]),
+        },
+        "excluded_closed_import_links": closed,
+        "basis": "pack_applied_ens_plan",
+        "solves_charged": charged,
+        "class_a": _class_a_block(st, class_b_rows, top_n),
+    }
+    note = "; ".join(notes)
+    status = "ok" if ranked else "not_established"
+    if not ranked:
+        note += "; no contingency re-solve came back optimal"
+    st.mark("fmea_top", "run", solves_charged=charged,
+            note=f"{len(ranked)} ranked of {k}")
+    st.sections["fmea_top"] = (status, payload, note)
+
+
+def critical_buses(network) -> list[str]:
+    """Buses tagged ``eh_critical``."""
+    if network.buses is None or "eh_critical" not in getattr(
+            network.buses, "columns", []):
+        return []
+    return [str(b) for b in network.buses.index
+            if arch._flag(network.buses.at[b, "eh_critical"])]
+
+
+def derive_dtc_config(network, pack: ArchetypePack, *,
+                      attribution: str = "bus_aggregate_not_per_load"):
+    """Minimal DtcConfig from import Links + ``eh_critical`` bus tags, or
+    None when either is missing (shared by the driver and readiness).
+    ``attribution`` (P18) lets a caller choose ``per_load`` without writing
+    a whole dtc_config."""
+    from models.energy_hub import DtcConfig
+
+    links = arch.select_import_links(network, pack.import_overlay)
+    crit = critical_buses(network)
+    if not links or not crit:
+        return None
+    return DtcConfig(critical_bus_ids=crit, islanding_contingencies=list(links),
+                     attribution=attribution)
+
+
+def frontier_point_count(remaining: int, budget_solves: int) -> int:
+    """Frontier points the stage may take (plan B8 / R4), before the cap on
+    available targets."""
+    from services.adequacy.frontier import MAX_FRONTIER_POINTS
+    return min(remaining, max(2, math.floor(FRONTIER_BUDGET_SHARE * budget_solves)),
+               MAX_FRONTIER_POINTS)
+
+
+def fmea_solve_cost(k_links: int) -> int:
+    """Frozen base + K contingencies; the closing restore is skipped on the
+    private copy (Q4). Nothing runs when K = 0."""
+    return k_links + 1 if k_links else 0
+
+
+def _derive_dtc_config(st: _Study, error_cls, stage: str):
+    """The caller's DtcConfig, else one derived from the network tags."""
+    if st.dtc_config is not None:
+        return st.dtc_config
+    derived = derive_dtc_config(
+        st.network, st.pack,
+        attribution=st.dtc_attribution or "bus_aggregate_not_per_load")
+    if derived is None:
+        raise error_cls(
+            f"{stage} requested but no import Links / critical buses "
+            "resolved; pass dtc_config")
+    return derived
+
+
+def _refusal_classes() -> tuple[type[Exception], ...]:
+    """The engines' OWN config refusals (P19–P22 gate): anything else —
+    including a numpy/pandas ValueError — is a real error, not a skip."""
+    from services.adequacy import archetypes as a
+    from services.adequacy import dtc, levers, redundancy
+    return (levers.LeverScenarioError, redundancy.RedundancyScenarioError,
+            dtc.DtcStressError, dtc.DtcPlanningError, dtc.DtcConfigError,
+            a.ArchetypePackError, a.HubBoundaryError)
+
+
+def readiness_refusal_classes() -> tuple[type[Exception], ...]:
+    """The typed refusals whose message ``/results/eh_readiness`` may show:
+    the engines' config refusals plus a bad stage list. Any other
+    ``ValueError`` is an internal failure and is not echoed."""
+    return (*_refusal_classes(), StageSelectionError)
+
+
+def _stage_exception(st: _Study, stage: str, section: str,
+                     exc: Exception) -> None:
+    """E2E review m1: ``aborted`` means the user's stop event only.
+
+    An engine's own config refusal (``_refusal_classes``) is ``skipped``
+    with its reason; anything else ran and produced no evidence — ``failed``.
+    """
+    refusal = isinstance(exc, _refusal_classes())
+    note = str(exc) if refusal else f"{stage} failed: {exc}"
+    st.mark(stage, "skipped" if refusal else "failed", note=note)
+    if stage == "dtc_planning" and section in st.sections:
+        return          # keep the stress evidence already in the dtc section
+    st.sections[section] = ("not_established", None, note)
+
+
+def _stage_redundancy(st: _Study) -> None:
+    from services.adequacy import redundancy as red
+    try:
+        table = red.compare_redundancy_scenarios(
+            st.network, st.cfg, lock=st.lock, stop_event=st.stop_event,
+            log_queue=st.log_queue, scenarios=None,
+            availability=st.pack.availability, store=st.store,
+            pack_hash=st.pack_h, assumptions_hash=_assumptions_hash(st.cfg),
+            max_solves=st.remaining(),
+        )
+        n_attempted = int(table.get("solves_attempted") or 0)
+        sec_status, sec_note = red.redundancy_section_status(table)
+        st.mark("redundancy", "run", solves_charged=n_attempted,
+                note=sec_note or f"{n_attempted} solves")
+        st.sections["redundancy"] = (sec_status, table, sec_note)
+        st.solves += n_attempted
+    except Exception as exc:
+        logger.exception("redundancy compare failed")
+        _stage_exception(st, "redundancy", "redundancy", exc)
+
+
+def _stage_levers(st: _Study) -> None:
+    from services.adequacy import levers as lev
+    pack = st.pack
+    try:
+        kinds = []
+        if pack.levers.storage_duration:
+            kinds.append("storage_duration")
+        if pack.levers.import_cap:
+            kinds.append("import_cap")
+        if getattr(pack.levers, "import_energy", False):
+            kinds.append("import_energy")
+        if not kinds:
+            kinds = ["storage_duration"]
+        # Primary kind first; merge options if both enabled.
+        merged = None
+        attempted = 0
+        skipped_kinds: list[str] = []
+        applicable_kinds: list[str] = []
+        budget_exhausted = False
+        for kind in kinds:
+            if st.budget_solves - st.solves - attempted <= 0:
+                budget_exhausted = True
+                break
+            try:
+                table = lev.compare_lever_scenarios(
+                    st.network, st.cfg, lock=st.lock, stop_event=st.stop_event,
+                    log_queue=st.log_queue, kind=kind, values=None,
+                    availability=pack.availability, store=None,
+                    pack_hash=st.pack_h,
+                    assumptions_hash=_assumptions_hash(st.cfg),
+                    max_solves=st.budget_solves - st.solves - attempted,
+                )
+            except lev.LeverScenarioError as exc:
+                msg = str(exc)
+                # Soft-skip only asset-absence — config/unknown-kind errors
+                # must fail closed with the original message.
+                if not ("no StorageUnits" in msg or "no import Links" in msg
+                        or "no metered import Links" in msg):
+                    raise
+                skipped_kinds.append(f"{kind}:{exc}")
+                logger.info("lever kind %s not applicable: %s", kind, exc)
+                continue
+            applicable_kinds.append(kind)
+            attempted += int(table.get("solves_attempted") or 0)
+            budget_exhausted = (budget_exhausted
+                                or bool(table.get("budget_exhausted")))
+            if merged is None:
+                merged = table
+            else:
+                merged = {
+                    **table,
+                    "kind": "+".join(applicable_kinds),
+                    "options": list(merged.get("options") or [])
+                    + list(table.get("options") or []),
+                    "solves_attempted": attempted,
+                    "comparable_solved": int(merged.get("comparable_solved") or 0)
+                    + int(table.get("comparable_solved") or 0),
+                }
+        # Always surface soft-skips on the payload (even if store is None or
+        # every kind was inapplicable).
+        if merged is None:
+            merged = {"kind": "+".join(kinds), "options": [],
+                      "solves_attempted": 0, "comparable_solved": 0,
+                      "aborted": False}
+        merged = {**merged, "budget_exhausted": budget_exhausted}
+        if skipped_kinds:
+            merged = {**merged, "skipped_kinds": list(skipped_kinds)}
+        if st.store is not None:
+            st.store["eh_lever_comparison"] = merged
+        sec_status, sec_note = lev.levers_section_status(merged)
+        if skipped_kinds and not applicable_kinds:
+            skip_note = "all lever kinds inapplicable: " + "; ".join(skipped_kinds)
+            sec_status, sec_note = "not_established", skip_note
+            st.mark("levers", "skipped", note=skip_note)
+        else:
+            note = sec_note or f"{attempted} solves"
+            if skipped_kinds:
+                note = f"{note}; soft-skipped " + ", ".join(skipped_kinds)
+            st.mark("levers", "run", solves_charged=attempted, note=note)
+        st.sections["levers"] = (sec_status, merged, sec_note)
+        st.solves += attempted
+    except Exception as exc:
+        logger.exception("lever compare failed")
+        _stage_exception(st, "levers", "levers", exc)
+
+
+def _stage_dtc_stress(st: _Study) -> None:
+    from services.adequacy import dtc as dtc_mod
+    try:
+        cfg_dtc = _derive_dtc_config(st, dtc_mod.DtcStressError, "dtc_stress")
+        table = dtc_mod.run_dtc_stress(
+            st.network, st.cfg, lock=st.lock, stop_event=st.stop_event,
+            log_queue=st.log_queue, dtc=cfg_dtc, store=st.store,
+            pack_hash=st.pack_h, assumptions_hash=_assumptions_hash(st.cfg),
+            max_solves=st.remaining(),
+        )
+        n_attempted = int(table.get("solves_attempted") or 0)
+        sec_status, sec_note = dtc_mod.dtc_section_status(table)
+        st.mark("dtc_stress", "run", solves_charged=n_attempted,
+                note=sec_note or f"{n_attempted} solves")
+        st.sections["dtc"] = (sec_status, table, sec_note)
+        st.solves += n_attempted
+    except Exception as exc:
+        logger.exception("DtC stress failed")
+        _stage_exception(st, "dtc_stress", "dtc", exc)
+
+
+def _stage_dtc_planning(st: _Study) -> None:
+    from services.adequacy import dtc as dtc_mod
+    try:
+        cfg_dtc = _derive_dtc_config(st, dtc_mod.DtcPlanningError,
+                                     "dtc_planning")
+        table = dtc_mod.run_dtc_planning(
+            st.network, st.cfg, lock=st.lock, stop_event=st.stop_event,
+            log_queue=st.log_queue, dtc=cfg_dtc, store=st.store,
+            pack_hash=st.pack_h, assumptions_hash=_assumptions_hash(st.cfg),
+            max_solves=st.remaining(),
+        )
+        n_attempted = int(table.get("solves_attempted") or 0)
+        sec_status, sec_note = dtc_mod.dtc_planning_section_status(table)
+        st.mark("dtc_planning", "run", solves_charged=n_attempted,
+                note=sec_note or f"{n_attempted} solves")
+        # Merge with an existing dtc stress payload when present.
+        prev = st.sections.get("dtc")
+        if prev and isinstance(prev[1], dict) \
+                and prev[1].get("mode") in ("stress", "stress_fixed_plan"):
+            merged = {"mode": "stress+planning", "stress": prev[1],
+                      "planning": table,
+                      "attribution": table.get("attribution",
+                                               "bus_aggregate_not_per_load")}
+            st.sections["dtc"] = (sec_status, merged, sec_note)
+        else:
+            st.sections["dtc"] = (sec_status, table, sec_note)
+        st.solves += n_attempted
+    except Exception as exc:
+        logger.exception("DtC planning failed")
+        _stage_exception(st, "dtc_planning", "dtc", exc)
+
+
+# Executable stages, looked up at call time.
+_STAGE_HANDLERS = {
+    "apply_pack": _stage_apply_pack,
+    "ens_solve": _stage_ens_solve,
+    "frontier": _stage_frontier,
+    "mc_certify": _stage_mc_certify,
+    "fmea_top": _stage_fmea_top,
+    "redundancy": _stage_redundancy,
+    "levers": _stage_levers,
+    "dtc_stress": _stage_dtc_stress,
+    "dtc_planning": _stage_dtc_planning,
+}
 
 
 def run_eh_study(
@@ -70,17 +1126,40 @@ def run_eh_study(
     state_update=None,
     store: dict | None = None,
     dtc_config=None,
+    dtc_attribution: str | None = None,
+    dsr_buses: list[str] | None = None,
+    mc_draws: int | None = None,
+    mc_seed: int | None = None,
+    mc_cov_target: float | None = None,
 ) -> ReferenceDesignReport:
     """Synchronous EH study driver (HTTP worker: ``eh_study_runner``).
+
+    Stages execute in spec decision-18 order (``EH_PIPELINE_STAGES``) from
+    the stage table ``_STAGE_HANDLERS``.
 
     If ``store`` is provided, the finished report is persisted under
     ``eh_reference_design_report`` for ``GET /results/eh_reference_design``,
     and a redundancy stage also writes ``eh_redundancy_comparison`` for
-    ``GET /results/eh_redundancy``.
+    ``GET /results/eh_redundancy``. Sibling tables from a previous study are
+    cleared at start.
 
-    ``frontier`` / ``mc_certify`` / ``fmea_top`` run in decision-18 order
-    (bodies in ``eh_stages``); ``mc_certify`` and the class-A half of
-    ``fmea_top`` read the plan FROZEN at the end of ``ens_solve``.
+    Isolation: the study runs on a private copy of ``network`` and of ``cfg``.
+    The pack's ENS target is authoritative for every stage (the report header
+    states it), the caller's ``cfg`` is never mutated, and solve side-results
+    are never published through ``state_update`` — the foreground results keep
+    describing the user's own solve (same rule as frontier ``_restore_base``).
+    ``state_update`` is accepted for runner symmetry only.
+
+    ``dsr_buses`` opts buses into the DSR tier for packs with
+    ``dsr_opt_in`` (decision 15) through the double-count preflight; the
+    preflight's warnings land on the ``apply_pack`` note and ``notes``.
+
+    ``budget_solves`` is a ceiling on LP solves: multi-solve stages receive
+    the remaining budget and a stage that would start with none left is
+    skipped. Zero-solve stages (``mc_certify``) are never budget-skipped.
+
+    ``mc_draws`` / ``mc_seed`` / ``mc_cov_target`` configure the
+    ``mc_certify`` stage (the MC's own draw cap applies).
 
     Stage list vs ``pack.levers.redundancy`` (P3a binding condition):
     - Explicit ``stages=...`` wins: including ``\"redundancy\"`` runs the
@@ -89,661 +1168,197 @@ def run_eh_study(
       ``pack.levers.redundancy`` is True. MVP-A packs ship False and therefore
       skip redundancy unless the caller opts in via levers or stages.
     """
-    from services.solver_service import run_simulation
+    from services.adequacy.redundancy import _detach_solver_model
+    from services.solver_service import SolverConfig
 
-    if stages is not None:
-        requested = tuple(stages)
-    else:
-        def _keep(s: str) -> bool:
-            if s == "redundancy":
-                return bool(pack.levers.redundancy)
-            if s == "levers":
-                return bool(pack.levers.import_cap or pack.levers.storage_duration)
-            if s == "dtc_stress":
-                return bool(pack.dtc_stress_default)
-            if s == "dtc_planning":
-                return bool(getattr(pack, "dtc_planning_default", False))
-            return True
-        requested = tuple(s for s in DEFAULT_STAGES if _keep(s))
+    requested_explicit = validate_stages(stages)
+    requested = (requested_explicit if requested_explicit is not None
+                 else default_stages_for(pack))
     budget_solves = max(1, min(int(budget_solves), MAX_EH_BUDGET_SOLVES))
     log_queue = log_queue or queue.SimpleQueue()
-    state_update = state_update or (lambda **kw: None)
 
-    # Every default stage is executable; a stage is ``skipped`` only when not
-    # requested (or when the budget cannot afford it — noted on the record).
+    if store is not None:
+        for key in SIBLING_STORE_KEYS + (report_mod.EH_REPORT_STORE_KEY,):
+            store.pop(key, None)
+
+    # Private network: pack overlay + ENS solve never touch the shared one.
+    # Copied under the network's lock so an edit in flight cannot tear it;
+    # every later read (including the DSR preflight) is of the copy.
+    with lock:
+        _detach_solver_model(network)
+        network = network.copy()
+    # Private cfg: the pack target wins for every stage, the session config
+    # is left exactly as the user set it.
+    cfg = copy.copy(cfg) if cfg is not None else SolverConfig()
+    patch, pack_notes = arch.solver_config_patch_with_preflight(
+        pack, network=network, dsr_buses=dsr_buses)
+    for k, v in patch.items():
+        try:
+            setattr(cfg, k, v)
+        except Exception:
+            pass
+
     records: list[PipelineStageRecord] = []
     for name in DEFAULT_STAGES:
         if name not in requested:
             note = None
-            if name == "mc_certify" and pack.mc_certify_required:
+            if name == "mc_certify" and certification_wanted(pack):
                 note = "required by pack but not requested — not_established"
-            elif name == "fmea_top":
-                note = FMEA_TOP_LINK_PRIMARY_NOTE + "; stage not requested"
             records.append(PipelineStageRecord(
                 stage=name, status="skipped", note=note))  # type: ignore[arg-type]
         else:
             records.append(PipelineStageRecord(stage=name, status="pending"))  # type: ignore[arg-type]
 
-    section_payloads: dict[str, tuple] = {}
-    solves = 0
-    aborted = False
-    undo = lambda: None  # noqa: E731
-    pack_h = arch.pack_hash(pack)
-    ens_cap = pack.availability.ens_cap_permyriad
-    achieved_ens_permyriad = None
-    achieved_shed_hours = None
-    cost_at_target = None
-    period_basis = None
-    adequacy_report: dict[str, Any] | None = None
-    tea_obj = None
+    st = _Study(
+        network=network, pack=pack, cfg=cfg, lock=lock, stop_event=stop_event,
+        log_queue=log_queue, store=store, dtc_config=dtc_config,
+        dtc_attribution=dtc_attribution,
+        requested=requested, records=records, budget_solves=budget_solves,
+        pack_notes=pack_notes,
+        # The request's ``mc`` options win; else the pack's ``mc_*`` fields
+        # (master PR #53), whose defaults are the P13 study defaults.
+        mc_draws=int(mc_draws if mc_draws is not None
+                     else getattr(pack, "mc_draws", DEFAULT_MC_DRAWS)),
+        mc_seed=int(mc_seed if mc_seed is not None
+                    else getattr(pack, "mc_seed", DEFAULT_MC_SEED)),
+        mc_cov_target=float(mc_cov_target if mc_cov_target is not None
+                            else getattr(pack, "mc_cov_target",
+                                         DEFAULT_MC_COV_TARGET)),
+        sections={}, solves=0, aborted=False, failed_reason=None,
+        undo=lambda: None, pack_h=arch.pack_hash(pack),
+        ens_cap=pack.availability.ens_cap_permyriad,
+        achieved_ens_permyriad=None, achieved_shed_hours=None,
+        cost_at_target=None, period_basis=None, adequacy_report=None,
+        mc_lole_h=None, certified=None, executed=[], ens_met=None,
+        fixed_plan=None,
+    )
+    sections = st.sections
     gates_obj = None
-    mc_lole_h: float | None = None
-    ens_met: bool | None = None
-    # The fixed plan mc_certify / fmea_top read (frozen at the end of a
-    # successful ens_solve, BEFORE the frontier re-solves the network).
-    frozen: stages_mod.FixedPlanSnapshot | None = None
-
-    def _mark(stage: str, status: str, *, note: str | None = None,
-              solves_charged: int = 0) -> None:
-        for rec in records:
-            if rec.stage == stage:
-                rec.status = status  # type: ignore[assignment]
-                rec.note = note
-                rec.solves_charged = solves_charged
-                break
-
-    def _remaining() -> int:
-        return int(budget_solves) - int(solves)
-
-    def _budget_gate(stage: str) -> bool:
-        """False (and the stage recorded ``skipped``) when no LP solve is
-        left — spec decision 17: never run over the budget silently."""
-        if _remaining() > 0:
-            return True
-        _mark(stage, "skipped",
-              note=f"budget exhausted ({solves}/{budget_solves} solves)")
-        return False
 
     try:
-        if "apply_pack" in requested:
+        for stage in EH_PIPELINE_STAGES:
+            if stage == "assemble" or st.aborted:
+                break
+            if stage not in requested:
+                continue
+            handler = _STAGE_HANDLERS.get(stage)
+            if handler is None:
+                continue                      # recorded skipped above
+            if stage not in REQUIRED_STAGES and st.blocked(stage):
+                continue
             if stop_event.is_set():
-                aborted = True
-                _mark("apply_pack", "aborted")
-            else:
-                result = arch.apply_archetype_pack_detailed(network, pack)
-                undo = result.undo
-                pack_h = result.pack_hash
-                _mark("apply_pack", "run",
-                      note="; ".join(result.warnings) or None)
-
-        if not aborted and "ens_solve" in requested:
-            if stop_event.is_set():
-                aborted = True
-                _mark("ens_solve", "aborted")
-            else:
-                # Merge pack solver patch onto cfg fields we care about.
-                patch = arch.solver_config_patch(pack)
-                for k, v in patch.items():
-                    if getattr(cfg, k, None) is None:
-                        try:
-                            setattr(cfg, k, v)
-                        except Exception:
-                            pass
-                sink: dict = {}
-                status, condition = run_simulation(
-                    cfg, network, lock, stop_event, log_queue,
-                    state_update=lambda **kw: (sink.update(kw),
-                                               state_update(**kw)),
-                )
-                solves += 1
-                if status not in ("ok", "optimal"):
-                    _mark("ens_solve", "aborted",
-                          note=f"{status}:{condition}", solves_charged=1)
-                    aborted = True
-                else:
-                    _mark("ens_solve", "run", solves_charged=1)
-                    adequacy_report = sink.get("adequacy_report")
-                    if isinstance(adequacy_report, dict):
-                        tgt = adequacy_report.get("target") or {}
-                        system = tgt.get("system") or {}
-                        metrics = adequacy_report.get("metrics") or {}
-                        cost = adequacy_report.get("cost") or {}
-                        achieved_shed_hours = system.get("achieved_shed_hours")
-                        ens_mwh = system.get("achieved_ens_mwh")
-                        # Invert ‱ if demand known from cap_mwh.
-                        cap_mwh = system.get("cap_mwh")
-                        if (ens_cap is not None and cap_mwh
-                                and float(cap_mwh) > 0 and ens_mwh is not None):
-                            # achieved ‱ ≈ ens_mwh / demand * 1e4;
-                            # demand = cap_mwh / (ens_cap/1e4)
-                            demand = float(cap_mwh) / (float(ens_cap) / 1e4)
-                            achieved_ens_permyriad = (
-                                float(ens_mwh) / demand * 1e4 if demand else None)
-                            # Planning metric met? (feeds the certification
-                            # payload; never the verdict — decision 2.)
-                            ens_met = float(ens_mwh) <= float(cap_mwh) * (1.0 + 1e-4)
-                        section_payloads["target"] = (
-                            "ok",
-                            {"binding": tgt.get("binding"),
-                             "system": system, "metrics": metrics},
-                            None,
-                        )
-                        cost_at_target = cost.get("total_system_cost_eur")
-                        period_basis = cost.get("period_basis")
-                        section_payloads["cost"] = (
-                            "ok",
-                            {"total_system_cost_eur": cost_at_target,
-                             "period_basis": period_basis,
-                             "excludes_shed_cost": True},
-                            None,
-                        )
-                        # P5: sizing from the solved network (installed p_nom).
-                        sizing = report_mod.sizing_summary_from_network(network)
-                        section_payloads["sizing"] = (
-                            "ok", sizing, None)
-                        # P5: TEA/LCOE from cost ÷ (demand − ENS).
-                        ens_for_tea = float(ens_mwh) if ens_mwh is not None else None
-                        served = report_mod.served_energy_mwh_from_network(
-                            network, ens_mwh=ens_for_tea)
-                        if served is None and isinstance(metrics, dict):
-                            dem = metrics.get("demand_mwh")
-                            ens = metrics.get("ens_mwh")
-                            if dem is not None and ens is not None:
-                                served = max(0.0, float(dem) - float(ens))
-                        if served is None and ens_cap is not None \
-                                and cap_mwh and float(cap_mwh) > 0 \
-                                and ens_mwh is not None:
-                            demand = float(cap_mwh) / (float(ens_cap) / 1e4)
-                            served = max(0.0, demand - float(ens_mwh))
-                        tea_block = report_mod.compute_tea(
-                            cost_eur=cost_at_target,
-                            served_energy_mwh=served,
-                            network=network, cfg=cfg)
-                        if tea_block.lcoe_eur_per_mwh is not None:
-                            section_payloads["tea"] = (
-                                "ok",
-                                tea_block.model_dump(mode="json"),
-                                None,
-                            )
-                        else:
-                            section_payloads["tea"] = (
-                                "not_established",
-                                tea_block.model_dump(mode="json"),
-                                tea_block.notes,
-                            )
-                        # P6(a): dedicated-bus multi-energy ENS disclosure.
-                        from services.adequacy import multi_energy as ME
-                        capture = sink.get("last_lost_load")
-                        if not isinstance(capture, dict):
-                            capture = {}
-                        me_status, me_payload, me_note = (
-                            ME.multi_energy_section_from_capture(
-                                network, capture))
-                        section_payloads["multi_energy"] = (
-                            me_status, me_payload, me_note)
-                    # Freeze the plan the report describes for the stages
-                    # that certify / screen it (see eh_stages docstring).
-                    if "mc_certify" in requested or "fmea_top" in requested:
-                        frozen = stages_mod.freeze_fixed_plan(
-                            network, cfg, lock, overlay=pack.import_overlay)
-        elif "ens_solve" not in requested:
-            section_payloads.setdefault(
-                "target", ("not_established", None, "ens_solve not run"))
-            section_payloads.setdefault(
-                "cost", ("not_established", None, "ens_solve not run"))
-            section_payloads.setdefault(
-                "multi_energy",
-                ("not_established", None, "ens_solve not run"),
-            )
-
-        # ── frontier (WP2) ─────────────────────────────────────────────
-        if not aborted and "frontier" in requested:
-            if stop_event.is_set():
-                aborted = True
-                _mark("frontier", "aborted")
-            elif adequacy_report is None:
-                _mark("frontier", "skipped", note="ens_solve did not run")
-                section_payloads["frontier"] = (
-                    "not_established", None, "ens_solve did not run")
-            else:
-                fr_status, fr_payload, fr_note, fr_solves = (
-                    stages_mod.run_frontier_stage(
-                        network, lock, cfg,
-                        ens_cap_permyriad=ens_cap,
-                        remaining_solves=_remaining(),
-                        stop_event=stop_event,
-                        log_queue=log_queue,
-                        final_state_update=state_update,
-                        ladder=tuple(pack.frontier_ladder),
-                    ))
-                solves += fr_solves
-                section_payloads["frontier"] = (fr_status, fr_payload, fr_note)
-                if fr_status == "skipped" or (
-                        fr_status != "ok" and fr_solves == 0):
-                    # Not requested-but-unaffordable, or refused before any
-                    # solve (e.g. VOLL ≤ 0): nothing ran, nothing charged.
-                    _mark("frontier", "skipped", note=fr_note)
-                elif fr_payload is not None and fr_payload.get("aborted"):
-                    aborted = True
-                    _mark("frontier", "aborted", note=fr_note,
-                          solves_charged=fr_solves)
-                else:
-                    _mark("frontier", "run", note=fr_note,
-                          solves_charged=fr_solves)
-
-        # ── mc_certify (WP1) ───────────────────────────────────────────
-        if not aborted and "mc_certify" in requested:
-            if stop_event.is_set():
-                aborted = True
-                _mark("mc_certify", "aborted")
-            elif frozen is None:
-                note = "ens_solve did not run — no fixed plan to certify"
-                _mark("mc_certify", "skipped", note=note)
-                section_payloads["certification"] = (
-                    "not_established", None, note)
-            else:
-                c_status, c_payload, c_note, mc_lole_h = (
-                    stages_mod.run_mc_certify_stage(
-                        frozen, pack, stop_event=stop_event, ens_met=ens_met))
-                section_payloads["certification"] = (c_status, c_payload, c_note)
-                if stop_event.is_set():
-                    aborted = True
-                    _mark("mc_certify", "aborted", note=c_note)
-                elif c_status == "ok":
-                    _mark("mc_certify", "run", note=c_note)
-                else:
-                    _mark("mc_certify", "skipped", note=c_note)
-
-        # ── fmea_top (WP3) ─────────────────────────────────────────────
-        if not aborted and "fmea_top" in requested:
-            if stop_event.is_set():
-                aborted = True
-                _mark("fmea_top", "aborted")
-            elif frozen is None:
-                note = FMEA_TOP_LINK_PRIMARY_NOTE + "; ens_solve did not run"
-                _mark("fmea_top", "skipped", note=note)
-                section_payloads["fmea_top"] = ("not_established", None, note)
-            else:
-                f_status, f_payload, f_note, f_solves = (
-                    stages_mod.run_fmea_top_stage(
-                        network, lock, cfg, frozen,
-                        remaining_solves=_remaining(),
-                        stop_event=stop_event,
-                        log_queue=log_queue,
-                        final_state_update=state_update,
-                        top_n=int(pack.fmea_top_n),
-                    ))
-                solves += f_solves
-                section_payloads["fmea_top"] = (f_status, f_payload, f_note)
-                if f_status == "ok":
-                    _mark("fmea_top", "run", note=f_note,
-                          solves_charged=f_solves)
-                else:
-                    _mark("fmea_top", "skipped", note=f_note,
-                          solves_charged=f_solves)
-
-        if not aborted and "redundancy" in requested and _budget_gate("redundancy"):
-            if stop_event.is_set():
-                aborted = True
-                _mark("redundancy", "aborted")
-            else:
-                from services.adequacy import redundancy as red
-                try:
-                    table = red.compare_redundancy_scenarios(
-                        network, cfg,
-                        lock=lock,
-                        stop_event=stop_event,
-                        log_queue=log_queue,
-                        scenarios=None,
-                        availability=pack.availability,
-                        store=store,
-                        pack_hash=pack_h,
-                        assumptions_hash=_assumptions_hash(cfg),
-                    )
-                    n_attempted = int(table.get("solves_attempted") or 0)
-                    sec_status, sec_note = red.redundancy_section_status(table)
-                    _mark("redundancy", "run",
-                          solves_charged=n_attempted,
-                          note=sec_note or f"{n_attempted} solves")
-                    section_payloads["redundancy"] = (
-                        sec_status, table, sec_note)
-                    solves += n_attempted
-                except Exception as exc:
-                    logger.exception("redundancy compare failed")
-                    _mark("redundancy", "aborted", note=str(exc))
-                    section_payloads["redundancy"] = (
-                        "not_established", None, str(exc))
-
-
-        if not aborted and "levers" in requested and _budget_gate("levers"):
-            if stop_event.is_set():
-                aborted = True
-                _mark("levers", "aborted")
-            else:
-                from services.adequacy import levers as lev
-                try:
-                    kinds = []
-                    if pack.levers.storage_duration:
-                        kinds.append("storage_duration")
-                    if pack.levers.import_cap:
-                        kinds.append("import_cap")
-                    if not kinds:
-                        kinds = ["storage_duration"]
-                    # Primary kind first; merge options if both enabled.
-                    merged = None
-                    attempted = 0
-                    skipped_kinds: list[str] = []
-                    applicable_kinds: list[str] = []
-                    for kind in kinds:
-                        try:
-                            table = lev.compare_lever_scenarios(
-                                network, cfg,
-                                lock=lock,
-                                stop_event=stop_event,
-                                log_queue=log_queue,
-                                kind=kind,
-                                values=None,
-                                availability=pack.availability,
-                                store=None,
-                                pack_hash=pack_h,
-                                assumptions_hash=_assumptions_hash(cfg),
-                            )
-                        except lev.LeverScenarioError as exc:
-                            msg = str(exc)
-                            # Soft-skip only asset-absence — config/unknown-kind
-                            # errors must fail closed with the original message.
-                            asset_absent = (
-                                "no StorageUnits" in msg
-                                or "no import Links" in msg
-                            )
-                            if not asset_absent:
-                                raise
-                            skipped_kinds.append(f"{kind}:{exc}")
-                            logger.info(
-                                "lever kind %s not applicable: %s", kind, exc)
-                            continue
-                        applicable_kinds.append(kind)
-                        attempted += int(table.get("solves_attempted") or 0)
-                        if merged is None:
-                            merged = table
-                        else:
-                            merged = {
-                                **table,
-                                "kind": "+".join(applicable_kinds),
-                                "options": list(merged.get("options") or [])
-                                + list(table.get("options") or []),
-                                "solves_attempted": attempted,
-                                "comparable_solved": int(
-                                    merged.get("comparable_solved") or 0)
-                                + int(table.get("comparable_solved") or 0),
-                            }
-                    # Always surface soft-skips on the payload (even if store
-                    # is None or every kind was inapplicable).
-                    if merged is None:
-                        merged = {
-                            "kind": "+".join(kinds),
-                            "options": [],
-                            "solves_attempted": 0,
-                            "comparable_solved": 0,
-                            "aborted": False,
-                        }
-                    if skipped_kinds:
-                        merged = {**merged, "skipped_kinds": list(skipped_kinds)}
-                    if store is not None:
-                        store["eh_lever_comparison"] = merged
-                    sec_status, sec_note = lev.levers_section_status(merged)
-                    if skipped_kinds and not applicable_kinds:
-                        skip_note = (
-                            "all lever kinds inapplicable: "
-                            + "; ".join(skipped_kinds)
-                        )
-                        sec_status = "not_established"
-                        sec_note = skip_note
-                        _mark("levers", "skipped",
-                              note=skip_note)
-                    else:
-                        note = sec_note or f"{attempted} solves"
-                        if skipped_kinds:
-                            note = (
-                                f"{note}; soft-skipped "
-                                + ", ".join(skipped_kinds)
-                            )
-                        _mark("levers", "run",
-                              solves_charged=attempted,
-                              note=note)
-                    section_payloads["levers"] = (sec_status, merged, sec_note)
-                    solves += attempted
-                except Exception as exc:
-                    logger.exception("lever compare failed")
-                    _mark("levers", "aborted", note=str(exc))
-                    section_payloads["levers"] = (
-                        "not_established", None, str(exc))
-
-
-        if not aborted and "dtc_stress" in requested and _budget_gate("dtc_stress"):
-            if stop_event.is_set():
-                aborted = True
-                _mark("dtc_stress", "aborted")
-            else:
-                from services.adequacy import dtc as dtc_mod
-                from models.energy_hub import DtcConfig
-                try:
-                    cfg_dtc = dtc_config
-                    if cfg_dtc is None:
-                        # Derive a minimal config from import Links + critical tags.
-                        from services.adequacy.archetypes import select_import_links
-                        links = select_import_links(network, pack.import_overlay)
-                        crit_buses = []
-                        if network.buses is not None and "eh_critical" in getattr(
-                                network.buses, "columns", []):
-                            crit_buses = [
-                                str(b) for b in network.buses.index
-                                if network.buses.at[b, "eh_critical"] is True
-                                or str(network.buses.at[b, "eh_critical"]).lower()
-                                in ("true", "1", "yes")
-                            ]
-                        if not links or not crit_buses:
-                            raise dtc_mod.DtcStressError(
-                                "dtc_stress requested but no import Links / "
-                                "critical buses resolved; pass dtc_config"
-                            )
-                        cfg_dtc = DtcConfig(
-                            critical_bus_ids=crit_buses,
-                            islanding_contingencies=list(links),
-                        )
-                    table = dtc_mod.run_dtc_stress(
-                        network, cfg,
-                        lock=lock,
-                        stop_event=stop_event,
-                        log_queue=log_queue,
-                        dtc=cfg_dtc,
-                        store=store,
-                        pack_hash=pack_h,
-                        assumptions_hash=_assumptions_hash(cfg),
-                    )
-                    n_attempted = int(table.get("solves_attempted") or 0)
-                    sec_status, sec_note = dtc_mod.dtc_section_status(table)
-                    _mark("dtc_stress", "run",
-                          solves_charged=n_attempted,
-                          note=sec_note or f"{n_attempted} solves")
-                    section_payloads["dtc"] = (sec_status, table, sec_note)
-                    solves += n_attempted
-                except Exception as exc:
-                    logger.exception("DtC stress failed")
-                    _mark("dtc_stress", "aborted", note=str(exc))
-                    section_payloads["dtc"] = (
-                        "not_established", None, str(exc))
-
-
-        # Stages that did not get to run → section skipped / not_established
-        # (never pending). A stage that was requested but aborted before it
-        # ran is ``not_established`` — it was expected and produced nothing.
-        if "frontier" not in requested:
-            section_payloads.setdefault(
-                "frontier", ("skipped", None, "frontier not requested"))
-        else:
-            section_payloads.setdefault(
-                "frontier", ("not_established", None,
-                             "frontier did not run (aborted earlier)"))
-        if "fmea_top" not in requested:
-            section_payloads.setdefault(
-                "fmea_top", ("skipped", None,
-                             FMEA_TOP_LINK_PRIMARY_NOTE + "; stage not requested"))
-        else:
-            section_payloads.setdefault(
-                "fmea_top", ("not_established", None,
-                             FMEA_TOP_LINK_PRIMARY_NOTE
-                             + "; stage did not run (aborted earlier)"))
-        if "mc_certify" not in requested:
-            if pack.mc_certify_required:
-                section_payloads.setdefault(
-                    "certification", (
+                st.aborted = True
+                st.mark(stage, "aborted", note="study aborted before this stage")
+                section = _STAGE_SECTION.get(stage)
+                if section is not None:
+                    sections.setdefault(section, (
                         "not_established", None,
-                        "mc_certify required by pack but not requested"))
-            else:
-                section_payloads.setdefault(
-                    "certification", ("skipped", None, "mc_certify not requested"))
-        else:
-            section_payloads.setdefault(
-                "certification", ("not_established", None,
-                                  "mc_certify did not run (aborted earlier)"))
+                        "not reached: study aborted"))
+                break
+            st.executed.append(stage)
+            handler(st)
 
-        if not aborted and "dtc_planning" in requested and _budget_gate("dtc_planning"):
-            if stop_event.is_set():
-                aborted = True
-                _mark("dtc_planning", "aborted")
-            else:
-                from services.adequacy import dtc as dtc_mod
-                from models.energy_hub import DtcConfig
-                try:
-                    cfg_dtc = dtc_config
-                    if cfg_dtc is None:
-                        from services.adequacy.archetypes import select_import_links
-                        links = select_import_links(network, pack.import_overlay)
-                        crit_buses = []
-                        if network.buses is not None and "eh_critical" in getattr(
-                                network.buses, "columns", []):
-                            crit_buses = [
-                                str(b) for b in network.buses.index
-                                if network.buses.at[b, "eh_critical"] is True
-                                or str(network.buses.at[b, "eh_critical"]).lower()
-                                in ("true", "1", "yes")
-                            ]
-                        if not links or not crit_buses:
-                            raise dtc_mod.DtcPlanningError(
-                                "dtc_planning requested but no import Links / "
-                                "critical buses resolved; pass dtc_config"
-                            )
-                        cfg_dtc = DtcConfig(
-                            critical_bus_ids=crit_buses,
-                            islanding_contingencies=list(links),
-                        )
-                    table = dtc_mod.run_dtc_planning(
-                        network, cfg,
-                        lock=lock,
-                        stop_event=stop_event,
-                        log_queue=log_queue,
-                        dtc=cfg_dtc,
-                        store=store,
-                        pack_hash=pack_h,
-                        assumptions_hash=_assumptions_hash(cfg),
-                    )
-                    n_attempted = int(table.get("solves_attempted") or 0)
-                    sec_status, sec_note = dtc_mod.dtc_planning_section_status(table)
-                    _mark("dtc_planning", "run",
-                          solves_charged=n_attempted,
-                          note=sec_note or f"{n_attempted} solves")
-                    # Merge with existing dtc stress payload when present.
-                    prev = section_payloads.get("dtc")
-                    if prev and isinstance(prev[1], dict) and prev[1].get("mode") in ("stress", "stress_fixed_plan"):
-                        merged = {
-                            "mode": "stress+planning",
-                            "stress": prev[1],
-                            "planning": table,
-                            "attribution": "bus_aggregate_not_per_load",
-                        }
-                        section_payloads["dtc"] = (sec_status, merged, sec_note)
-                    else:
-                        section_payloads["dtc"] = (sec_status, table, sec_note)
-                    solves += n_attempted
-                except Exception as exc:
-                    logger.exception("DtC planning failed")
-                    _mark("dtc_planning", "aborted", note=str(exc))
-                    section_payloads.setdefault(
-                        "dtc", ("not_established", None, str(exc)))
+        if "ens_solve" not in requested:  # unreachable via validate_stages
+            for sec in ("target", "cost", "multi_energy"):
+                sections.setdefault(sec, ("not_established", None,
+                                          "ens_solve not run"))
+
+        if "frontier" not in requested:
+            sections.setdefault("frontier", (
+                "skipped", None,
+                "frontier not requested (default only for strong_grid)"))
+        if "fmea_top" not in requested:
+            sections.setdefault("fmea_top", (
+                "skipped", None,
+                FMEA_TOP_LINK_PRIMARY_NOTE + "; stage not requested"))
 
         if "redundancy" not in requested:
-            section_payloads.setdefault(
+            sections.setdefault(
                 "redundancy", ("skipped", None, "redundancy not requested"))
         if "levers" not in requested:
-            section_payloads.setdefault(
-                "levers", ("skipped", None, "levers not requested"))
+            sections.setdefault("levers", ("skipped", None, "levers not requested"))
         if "dtc_stress" not in requested and "dtc_planning" not in requested:
-            section_payloads.setdefault(
+            sections.setdefault(
                 "dtc", ("skipped", None, "dtc_stress/dtc_planning not requested"))
+        if "mc_certify" not in requested:
+            if certification_wanted(pack):
+                sections.setdefault("certification", (
+                    "not_established", None,
+                    "MC certification required by the pack but not requested"))
+            else:
+                sections.setdefault("certification", (
+                    "skipped", None, "no LOLE target — certification not requested"))
 
         if pack.archetype == "weak_flexible":
             # P9 thin SCR warn-only gate (feasibility flag, not co-opt).
-            # Orthogonal to mc_certify: missing MC stays on the pipeline stage;
-            # gates.scr / emt_recommended are the dynamics product fields.
+            # Orthogonal to mc_certify: certification has its own section.
             from services.adequacy import scr_gate as scr_gate_mod
             gate_block, gate_status, gate_payload, gate_note = (
                 scr_gate_mod.evaluate_network_scr_gate(network))
-            section_payloads["gates"] = (gate_status, gate_payload, gate_note)
+            sections["gates"] = (gate_status, gate_payload, gate_note)
             if gate_block is not None:
                 gates_obj = gate_block
         else:
-            # A required-but-unrequested mc_certify is reported on the
-            # ``certification`` section (and the pipeline stage), not here —
-            # gates is the dynamics product field only (P9).
-            section_payloads.setdefault(
-                "gates", (
-                    "skipped", None,
-                    "SCR gate not required for this archetype (P9 thin slice "
-                    "is weak_flexible only)",
-                ))
+            sections.setdefault("gates", (
+                "skipped", None,
+                "SCR gate not required for this archetype (P9 thin slice "
+                "is weak_flexible only)"))
 
-        section_payloads.setdefault(
+        sections.setdefault(
             "tea", ("skipped", None, "TEA not produced (ens_solve did not run)"))
-        section_payloads.setdefault(
-            "multi_energy",
-            ("skipped", None, "multi_energy not produced (ens_solve did not run)"),
-        )
-        tea_obj = None
-        tea_sec = section_payloads.get("tea")
-        if tea_sec and tea_sec[0] == "ok" and isinstance(tea_sec[1], dict):
-            from models.energy_hub import TeaBlock
-            tea_obj = TeaBlock.model_validate(tea_sec[1])
+        sections.setdefault("multi_energy", (
+            "skipped", None, "multi_energy not produced (ens_solve did not run)"))
 
-        if "assemble" in requested and not (aborted and adequacy_report is None):
-            _mark("assemble", "run")
+        for rec in records:
+            if rec.status == "pending" and rec.stage != "assemble":
+                reason = (
+                    "not reached: study aborted" if st.aborted
+                    else f"not run: {st.failed_reason}" if st.failed_reason
+                    else "not reached")
+                rec.status = "skipped"  # type: ignore[assignment]
+                rec.note = reason
+                section = _STAGE_SECTION.get(rec.stage)
+                if section is not None:
+                    sections.setdefault(section, ("not_established", None, reason))
+
+        if "assemble" in requested and not (
+                st.aborted and st.adequacy_report is None):
+            st.mark("assemble", "run")
         elif "assemble" in requested:
-            _mark("assemble", "aborted", note="no fragments to assemble")
+            st.mark("assemble", "aborted", note="no fragments to assemble")
 
     finally:
         try:
-            undo()
+            st.undo()
         except Exception:
             logger.exception("EH pack undo failed")
 
+    tea_obj = None
+    tea_sec = sections.get("tea")
+    if tea_sec and tea_sec[0] == "ok" and isinstance(tea_sec[1], dict):
+        from models.energy_hub import TeaBlock
+        tea_obj = TeaBlock.model_validate(tea_sec[1])
+
     pipeline = report_mod.pipeline_from_records(
-        records, budget_solves=budget_solves, solves_consumed=solves,
-        aborted=aborted)
+        records, budget_solves=budget_solves, solves_consumed=st.solves,
+        aborted=st.aborted)
 
     report = report_mod.assemble_reference_design_report(
         archetype=pack.archetype,
-        pack_hash=pack_h,
+        pack_hash=st.pack_h,
         assumptions_hash=_assumptions_hash(cfg),
-        section_payloads=section_payloads,
+        section_payloads=sections,
         pipeline=pipeline,
-        ens_cap_permyriad=ens_cap,
-        achieved_ens_permyriad=achieved_ens_permyriad,
-        achieved_shed_hours=achieved_shed_hours,
-        mc_lole_h=mc_lole_h,
-        cost_at_target_eur=cost_at_target,
-        period_basis=period_basis,
+        ens_cap_permyriad=st.ens_cap,
+        achieved_ens_permyriad=st.achieved_ens_permyriad,
+        achieved_shed_hours=st.achieved_shed_hours,
+        mc_lole_h=st.mc_lole_h,
+        certified=st.certified,
+        cost_at_target_eur=st.cost_at_target,
+        period_basis=st.period_basis,
         tea=tea_obj,
         gates=gates_obj,
+        notes=pack_notes,
     )
     if store is not None:
         report_mod.store_eh_report(store, report)

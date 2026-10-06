@@ -16,9 +16,18 @@ from fastapi import HTTPException
 
 from services import attribute_catalog, change_log_service, vintage_service
 from services.adequacy.occurrence import BLANK_SPELLINGS as _BLANK_SPELLINGS
+from services.asset_schema.derive import (
+    apply_parts,
+    derive_composite,
+    effective_discount_rate,
+    has_parts,
+    split_parts,
+)
+from services.asset_schema.schema import CLASS_ATTR
 from services.carrier_catalog import ensure_carrier
 from services.pypsa_service import PyPSAService
 from services.serialization import df_to_json
+from services.study_state import refuse_edit_during_live_study
 from services.user_timeseries import (
     _user_ts_delete_asset,
     _user_ts_rename_asset,
@@ -58,7 +67,38 @@ def _serialize_component(
             v = row.get("outage_rate_basis")
             if isinstance(v, str) and v.strip() in _BLANK_SPELLINGS:
                 row["outage_rate_basis"] = None
+    if attr == "loads":
+        _add_load_peak(n, rows)
     return rows
+
+
+def _add_load_peak(n: Any, rows: list[dict]) -> None:
+    """
+    Additive ``p_set_peak`` on Load rows (P22.9 bug 4): the value of
+    ``loads_t.p_set[name]`` with the largest MAGNITUDE when the load has a
+    time series, else the static ``p_set``, else ``None``. The sign is kept
+    (a generation-like load's peak is its most negative value — plain ``max``
+    would report its smallest injection, and the panel sums magnitudes). A load whose demand lives only in the series has
+    a static ``p_set`` of 0, so a panel summing the static column showed a
+    loaded bus as "0 MW". Computed here so the shim and the path-scoped route
+    serve the same number.
+    """
+    try:
+        ts = n.loads_t.p_set
+    except AttributeError:
+        ts = pd.DataFrame()
+    for row in rows:
+        name = row.get("name")
+        peak = None
+        if name in ts.columns:
+            series = ts[name].dropna()
+            if not series.empty:
+                peak = float(series.iloc[series.abs().to_numpy().argmax()])
+        if peak is None:
+            v = row.get("p_set")
+            if isinstance(v, (int, float)) and math.isfinite(v):
+                peak = float(v)
+        row["p_set_peak"] = peak
 
 
 def _get_component(component_class: str, attr: str) -> list[dict]:
@@ -122,12 +162,24 @@ def _drop_unknown_extras(component_class: str, attr: str, kwargs: dict) -> dict:
     behaviour for fields a Create model declares but PyPSA marks Output —
     narrowing to catalog-Input alone would be a silent behaviour change.
     """
+    from services.adequacy.eh_columns import coerce_eh_value, eh_columns_for
+
     n = PyPSAService.get_network()
+    # P14: whitelisted Energy Hub tags pass even before their column exists,
+    # coerced to their typed value (a bad value is a 422 naming the rule).
+    eh = eh_columns_for(component_class)
+    out_eh = {}
+    for k in [k for k in kwargs if k in eh]:
+        try:
+            out_eh[k] = coerce_eh_value(component_class, k, kwargs.pop(k))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
     allowed = attribute_catalog.input_attributes(n, component_class)
     if not allowed:
-        return kwargs
+        return {**kwargs, **out_eh}
     columns = set(getattr(n, attr).columns)
-    return {k: v for k, v in kwargs.items() if k in allowed or k in columns}
+    kept = {k: v for k, v in kwargs.items() if k in allowed or k in columns}
+    return {**kept, **out_eh}
 
 
 def _normalise_flag_column(n, attr: str) -> None:
@@ -140,6 +192,15 @@ def _normalise_flag_column(n, attr: str) -> None:
     boundary that can add a row or replace a frame; a no-op on anything but
     generators, and 0.17 ms on a 300-row frame.
     """
+    if attr in ("buses", "links"):
+        # P14: a first write of an eh_* tag creates the column with NaN for
+        # every other row — make it typed (False / "") before anything saves.
+        try:
+            from services.adequacy.eh_columns import normalise_eh_columns
+            normalise_eh_columns(n)
+        except Exception:                                     # noqa: BLE001
+            pass
+        return
     if attr != "generators":
         return
     try:
@@ -149,13 +210,64 @@ def _normalise_flag_column(n, attr: str) -> None:
         pass
 
 
+def _global_discount_rate() -> float:
+    cfg = PyPSAService.get_solver_state().get("solver_config")
+    rate = cfg.get("discount_rate") if isinstance(cfg, dict) else getattr(cfg, "discount_rate", None)
+    return 0.07 if rate is None else float(rate)
+
+
+def _check_investment_parts(component_class: str, parts: dict, *, max_hours: Any) -> None:
+    """Refuse a priced part without a lifetime BEFORE anything is mutated (422)."""
+    if not has_parts(component_class, parts):
+        return
+    try:
+        derive_composite(component_class, parts,
+                         max_hours=1.0 if max_hours is None else float(max_hours),
+                         discount_rate=_global_discount_rate())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+def _apply_investment_parts(n, component_class: str, name: str, parts: dict) -> None:
+    """
+    Write a composite asset's investment parts and derive its PyPSA cost columns (`services/asset_schema`).
+    The parts bypass the catalog whitelist because they are GUI columns, not PyPSA attributes; an asset with no
+    priced part is left exactly as `n.add` wrote it. Callers run `_check_investment_parts` first.
+    """
+    if not parts:
+        return
+    df = getattr(n, CLASS_ATTR[component_class])
+    own_rate = df.at[name, "discount_rate"] if "discount_rate" in df.columns else None
+    apply_parts(n, component_class, name, parts,
+                discount_rate=effective_discount_rate(own_rate, _global_discount_rate()))
+
+
+def _refuse_edit_during_live_study() -> None:
+    """P27a (A1): the chat path's chokepoint. The chat tools reach these
+    handlers in process, never through `main.py`'s middleware, so a
+    live-network study (sweep, frontier, coupling / margin loop) refuses the
+    edit here with the same `study_in_flight` dict. The bus cascade / rename,
+    bulk and global-constraint handlers do not route through the three below
+    and call `study_state.refuse_edit_during_live_study` themselves."""
+    refuse_edit_during_live_study()
+
+
 def _create_component(component_class: str, attr: str, name: str, kwargs: dict) -> dict:
+    _refuse_edit_during_live_study()
     # Dispatch invalidation lives in the undo middleware (main.py) — it runs
     # after every successful /api/network/* mutation, so cascade-delete,
     # /bulk writes, rename, and global-constraint mutations all benefit
     # without each having to call an invalidation helper here.
     n = PyPSAService.get_network()
+    if component_class == "Bus":
+        from services.commercial.settlement_inputs import reserved_bus_name
+
+        if reserved_bus_name(name):
+            # `ic:` names the commercial reference frames' columns (P2 WP2.2-0).
+            raise HTTPException(422, f"bus names starting 'ic:' are reserved (got {name!r})")
+    kwargs, parts = split_parts(component_class, kwargs)
     kwargs = _drop_unknown_extras(component_class, attr, kwargs)
+    _check_investment_parts(component_class, parts, max_hours=kwargs.get("max_hours"))
     with PyPSAService.get_lock():
         df = getattr(n, attr)
         if name in df.index:
@@ -163,6 +275,7 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
         if component_class != "Carrier":
             ensure_carrier(n, kwargs.get("carrier", ""))
         n.add(component_class, name, **kwargs)
+        _apply_investment_parts(n, component_class, name, parts)
         _normalise_flag_column(n, attr)
     change_log_service.log("add", component_class, name, f"Added {component_class.lower()} '{name}'")
     return {"name": name}
@@ -275,6 +388,17 @@ def _reattach_component_series(n, attr: str, name: str,
 
 
 def _rename_component_safely(n, component_class: str, old: str, new: str) -> None:
+    if component_class == "Bus":
+        from services.commercial.settlement_inputs import reserved_bus_name
+
+        if reserved_bus_name(new):
+            # `ic:` names the commercial reference frames' columns (P2
+            # WP2.2-0; the PUT rename path, review 0b #1).
+            raise HTTPException(422, f"bus names starting 'ic:' are reserved (got {new!r})")
+    _rename_component_safely_impl(n, component_class, old, new)
+
+
+def _rename_component_safely_impl(n, component_class: str, old: str, new: str) -> None:
     """Rename a component, re-pointing whatever refers to it — without the
     ``KeyError`` PyPSA raises for every class but ``Bus``.
 
@@ -330,7 +454,9 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
     "PV"}` PUT would otherwise wipe `marginal_cost`, `p_nom`, etc. to schema
     defaults via the destructive remove+add cycle.
     """
+    _refuse_edit_during_live_study()
     n = PyPSAService.get_network()
+    kwargs, submitted_parts = split_parts(component_class, kwargs)
     kwargs = _drop_unknown_extras(component_class, attr, kwargs)
     with PyPSAService.get_lock():
         df = getattr(n, attr)
@@ -338,9 +464,19 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
             raise HTTPException(404, f"{component_class} '{name}' not found")
         # Read current row + overlay the user's partial dict (shared helper).
         merged = _merge_partial_update(n, attr, name, kwargs)
+        merged, current_parts = split_parts(component_class, merged)
+        parts = {**current_parts, **submitted_parts}
+        _check_investment_parts(component_class, parts, max_hours=merged.get("max_hours"))
         if component_class != "Carrier":
             ensure_carrier(n, merged.get("carrier", ""))
         new_name = merged.pop("name", name)
+        if component_class == "Bus" and new_name != name:
+            from services.commercial.settlement_inputs import reserved_bus_name
+
+            if reserved_bus_name(new_name):
+                # Before any mutation (review 0b #1): nothing half-applied.
+                raise HTTPException(422, f"bus names starting 'ic:' are reserved "
+                                         f"(got {new_name!r})")
         # Refuse to rename onto an occupied name. Without this the remove+add
         # below silently destroyed the source component and (once the rename
         # goes through PyPSA) would drag its dependents onto the target — a
@@ -366,6 +502,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         # already used it; this path is the one the Properties panel's edit
         # cards take, and it did not.
         n.add(component_class, name, **merged)
+        _apply_investment_parts(n, component_class, name, parts)
         _reattach_component_series(n, attr, name, saved_series)
         # Re-key any saved per-period bounds so the modal data follows the
         # rename instead of stranding under the old key.
@@ -389,6 +526,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
 
 
 def _delete_component(component_class: str, attr: str, name: str) -> None:
+    _refuse_edit_during_live_study()
     n = PyPSAService.get_network()
     with PyPSAService.get_lock():
         df = getattr(n, attr)

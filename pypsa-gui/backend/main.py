@@ -79,11 +79,16 @@ from routers import (
     adequacy_worksheet,
     compare,
     gridspine,
+    campus_electrical,
+    guides,
     io,
+    library,
     local_settings,
     network,
     project_network,
     projects,
+    report_jobs,
+    reports,
     results,
     simulation,
     snapshots,
@@ -308,6 +313,15 @@ _SOLVER_BLOCKING_EXEMPT: set[str] = set()
 # middleware 409 fires first and the user can't leave a solving project — the
 # whole point of the resident multi-project work.
 _SOLVER_BLOCKING_EXEMPT_SUFFIXES = ("/activate",)
+# P27a (A1): the prefixes whose writes a LIVE-NETWORK study refuses (the
+# component, profile, time-axis, cluster, vintage and import routes). A
+# separate tuple, and deliberately NOT `/api/projects/`: the project routes
+# keep their own endpoint-level guards, so a save still says "Cannot save the
+# project …" (`_refuse_save_during_study`) and a rename / delete / layout /
+# snapshot of ANOTHER project is not refused with a sentence about editing
+# this network. Pinned by
+# `test_live_network_untouched.py::test_save_during_a_sweep_still_gets_the_save_sentence`.
+_STUDY_EDIT_PREFIXES = ("/api/network/", "/api/io/")
 
 # Exempt from the SHUTTING-DOWN gate. `/api/simulation/abort` is step 4's own
 # mechanism, and step 1 closes the gate before step 4 runs — so without this
@@ -820,6 +834,26 @@ async def undo_snapshot_middleware(request: Request, call_next):
                     "code": "solver_in_flight",
                 },
             )
+        # ── Live-network study gate (P27a, A1) ─────────────────────────
+        # A sweep / frontier / coupling or margin loop re-solves the user's
+        # OWN network object between its iterates and puts its tables back at
+        # the end — so an edit landing mid-study is either measured as if it
+        # were the plan or overwritten by the restore. The request's context
+        # was bound above (`bind_request_context`), so `get_solver_state()`
+        # is THIS project's state. `eh_study` (a private copy) and `mc` (never
+        # mutates) are not in LIVE_NETWORK_STUDIES and do not block edits.
+        if any(path.startswith(p) for p in _STUDY_EDIT_PREFIXES):
+            from services.project_context import LIVE_NETWORK_STUDIES
+            from services.pypsa_service import PyPSAService
+            from services.study_state import study_in_flight_detail
+            detail = study_in_flight_detail(
+                PyPSAService.get_solver_state(), "edit the network",
+                keys=LIVE_NETWORK_STUDIES)
+            if detail:
+                return JSONResponse(
+                    status_code=409,
+                    content={"detail": detail, "code": "study_in_flight"},
+                )
 
     # ── Foreign-lock gate (project-write-safety Task 6) ────────────────
     # The resident ProjectContext is shared per (org, project): both a lock
@@ -1097,6 +1131,8 @@ app.include_router(
     tags=["admin"],
     dependencies=[Depends(local_mode.reject_in_local_mode)],
 )
+# Edge Investment Case (P1 WP1.1b): the org-scoped Library.
+app.include_router(library.router, prefix="/api/library", tags=["library"])
 app.include_router(network.router, prefix="/api/network", tags=["network"])
 # Mount /api/network/cluster from the dedicated clustering router. Sharing the
 # /api/network prefix keeps the endpoint adjacent to other network mutations.
@@ -1144,6 +1180,21 @@ app.include_router(
     adequacy_worksheet.router, prefix="/api/projects", tags=["adequacy"],
     dependencies=_projects_router_guard,
 )
+# Study reports (WP1): `/{name}/reports…` — same posture as the worksheet
+# (ProjectAccessDep on every route, lock-checked delete, paths joined only from
+# `AuthorizedProject.directory` + a regex-validated id). Registered BEFORE
+# projects.router for the same reason. The `reports/` directory is in
+# `projects._BUNDLE_DIRS`, so it travels with save-as, copy and snapshots.
+app.include_router(
+    reports.router, prefix="/api/projects", tags=["reports"],
+    dependencies=_projects_router_guard,
+)
+# Report generation (WP3): `/{name}/reports/generate…` and the per-section
+# regenerate — the LLM job over the same evidence, same guard, same lock check.
+app.include_router(
+    report_jobs.router, prefix="/api/projects", tags=["reports"],
+    dependencies=_projects_router_guard,
+)
 app.include_router(
     projects.router, prefix="/api/projects", tags=["projects"],
     dependencies=_projects_router_guard,
@@ -1154,6 +1205,9 @@ app.include_router(snapshots.router, prefix="/api/projects", tags=["snapshots"])
 # bundles, not the project's network, and every handler is a thin wrapper over
 # services/gridspine_service.py — the same functions the copilot's tools call.
 app.include_router(gridspine.router, prefix="/api/gridspine", tags=["gridspine"])
+# The campus electrical study of a hub project (gridspine campus engine, plan
+# C6): its own prefix, like gridspine's, for the same reason.
+app.include_router(campus_electrical.router, prefix="/api/campus-electrical", tags=["campus-electrical"])
 # Chatbot file uploads (Phase A) — per-project file storage at
 # `projects/<name>/uploads/`. Mounted under the same /api/projects prefix
 # so its routes (`/{name}/uploads`, `/{name}/uploads/{file_id}/...`) follow
@@ -1164,6 +1218,8 @@ app.include_router(uploads.router, prefix="/api/projects", tags=["uploads"])
 # confirmation card lifecycle + abort endpoint. The router is mounted under
 # /api/chat; Phase 3 wires the real LLM call without changing route shapes.
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+# In-app guides (P21): static tour / field-help catalogue, read-only.
+app.include_router(guides.router, prefix="/api/guides", tags=["guides"])
 # Desktop-only. Every route 404s in web mode; see routers/local_settings.py.
 app.include_router(
     local_settings.router, prefix="/api/local-settings", tags=["local-settings"],

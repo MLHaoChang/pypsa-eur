@@ -4,6 +4,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
+from models.commercial import CommercialConfig
+
 # Frontend Edit-card UX sends `null` for blanked optional bounds (so the
 # spread-then-override idiom can actually un-set a previously-typed value).
 # PyPSA's native sentinel for "no bound" on `_max` / `lifetime` is +inf,
@@ -343,6 +345,18 @@ class StorageUnitCreate(BaseModel):
     discount_rate: float | None = None
     build_year: int = 0
     lifetime: _NoneToPosInf = Field(default=float("inf"))
+    # ── Investment parts (asset parameter schema, services/asset_schema) ──
+    # A battery's power part (inverter, EUR/MW) and energy part (storage
+    # block, EUR/MWh) with their own lifetimes and FOM shares. When either is
+    # priced, `capital_cost`, `fom_cost` and `lifetime` are DERIVED from them
+    # and `overnight_cost` stays empty (PyPSA would otherwise ignore
+    # `capital_cost`). Custom columns, netCDF round-trip for free.
+    inv_power_overnight: float | None = None
+    inv_power_lifetime: float | None = None
+    inv_power_fom_share: float | None = None
+    inv_energy_overnight: float | None = None
+    inv_energy_lifetime: float | None = None
+    inv_energy_fom_share: float | None = None
 
 
 class StoreCreate(BaseModel):
@@ -679,6 +693,15 @@ class SolverConfigSchema(BaseModel):
     # 0.01 = stop within 1 % of optimal. mip_time_limit_s = 0 disables the cap.
     mip_gap: float = 0.01
     mip_time_limit_s: float = 0
+    # Edge Investment Case commercial layer (P1 WP1.3): typed here, a plain
+    # dict on the `SolverConfig` dataclass (`update_solver_config` dumps it).
+    # Explicit null clears it.
+    commercial: CommercialConfig | None = None
+    # IC P4 WP4.6b: the finance inputs are owned by `PUT /api/simulation/finance`.
+    # Here only so a client echoing the whole config is accepted: an unchanged
+    # echo is ignored, a change is refused (422 `finance_via_dedicated_route`).
+    # A plain dict, compared as stored (the dedicated route validates it).
+    finance: dict[str, Any] | None = None
 
 
 class ImportSummary(BaseModel):
@@ -746,7 +769,7 @@ class ProjectInfo(BaseModel):
     # Free-form one-line label describing the scenario's purpose. Only
     # populated for scenarios (set at creation); root projects leave it None.
     scenario_description: str | None = None
-    # Scenario category: 'baseline' | 'scenario' | 'stress', or None when the
+    # Scenario category: 'baseline' | 'scenario' | 'stress' | 'sensitivity', or None when the
     # project has never been categorised. Was a `[type]` prefix on the
     # description until migration 0004; see `Project.scenario_type`.
     scenario_type: str | None = None

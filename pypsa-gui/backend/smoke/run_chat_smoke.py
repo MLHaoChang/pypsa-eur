@@ -143,6 +143,11 @@ class PromptResult:
     seconds: float = 0.0
     tool_errors: list[dict[str, Any]] = field(default_factory=list)
     tool_calls: list[str] = field(default_factory=list)
+    # Chat harness (issue 09): the frame kinds seen, and the two harness
+    # frames' payloads, so a workflow prompt can assert on them.
+    frame_kinds: set[str] = field(default_factory=set)
+    choice_requests: list[dict[str, Any]] = field(default_factory=list)
+    workflow_states: list[dict[str, Any]] = field(default_factory=list)
     # In the real run_turn flow, `turn_done` is the success terminator. The
     # stream is closed by the backend right after - iter_lines() returns
     # cleanly. `session_done` is only emitted on error paths (abort, cap
@@ -181,6 +186,8 @@ class SmokePrompt:
     # smoke-{uuid} for each, giving them one continuous chat.session_id
     # for multi-turn continuity testing (P8a/P8b).
     session_id: str | None = None
+    # Chat harness (issue 09): frame kinds that must appear in the turn.
+    expected_frames: set[str] = field(default_factory=set)
 
 
 # ── Smoke runner ────────────────────────────────────────────────────────────
@@ -260,6 +267,11 @@ def _run_one_prompt(prompt: SmokePrompt, ctx: SmokeContext) -> PromptResult:
     deadline = start + TURN_TIMEOUT_SECONDS
     for frame in _iter_sse(resp):
         result.raw_frames_seen += 1
+        result.frame_kinds.add(frame.event)
+        if frame.event == "choice_request":
+            result.choice_requests.append(dict(frame.data))
+        elif frame.event == "workflow_state":
+            result.workflow_states.append(dict(frame.data))
         _print_frame_compact(frame, ctx.verbose)
         if time.monotonic() > deadline:
             result.extra_failure = "turn exceeded TURN_TIMEOUT_SECONDS"
@@ -346,6 +358,14 @@ def _run_one_prompt(prompt: SmokePrompt, ctx: SmokeContext) -> PromptResult:
             return result
 
     # Post-run on-disk assertion (optional).
+    if prompt.expected_frames:
+        missing = sorted(prompt.expected_frames - result.frame_kinds)
+        if missing:
+            result.extra_failure = (
+                f"expected frame(s) never arrived: {missing} "
+                f"(seen: {sorted(result.frame_kinds)})"
+            )
+            return result
     if prompt.post_assertion is not None:
         try:
             fail = prompt.post_assertion(ctx)
@@ -648,6 +668,86 @@ def build_prompts(smoke_project: str) -> list[SmokePrompt]:
 # ── Top-level ───────────────────────────────────────────────────────────────
 
 
+# ── Chat harness parity probe (issue 09) ────────────────────────────────────
+#
+# The same battery on every provider: the start menu, one `ask_user` round,
+# and a workflow started and ended through its tools. Every prompt is a
+# phrase the smoke stub (`stub_openai_endpoint.py`) scripts, so the run is
+# deterministic on the stub and meaningful on a live wire; `--workflow`
+# selects it instead of the default battery. Nothing here writes a project.
+
+WORKFLOW_SESSION_PREFIX = "smoke-wf-"
+
+
+def check_start_menu(base_url: str, session: requests.Session) -> str | None:
+    """`GET /api/chat/workflows` for the three contexts; None when sound."""
+    try:
+        for context, must_have in (("unbound", "open-project"),
+                                   ("expert", "build-network"),
+                                   ("guided", "hub-design")):
+            r = session.get(f"{base_url}/api/chat/workflows",
+                            params={"context": context}, timeout=10)
+            if r.status_code != 200:
+                return f"workflows?context={context} -> {r.status_code}"
+            ids = [w["id"] for w in r.json().get("workflows", [])]
+            if must_have not in ids:
+                return f"workflows?context={context} lacks {must_have!r}: {ids}"
+    except requests.RequestException as exc:
+        return f"workflows fetch failed: {exc}"
+    return None
+
+
+def build_workflow_prompts() -> list[SmokePrompt]:
+    session_id = WORKFLOW_SESSION_PREFIX + uuid.uuid4().hex[:12]
+    return [
+        SmokePrompt(
+            name="W1_ask_user_card",
+            message=("I want to open or create a project. List my projects and "
+                     "the available templates, then ask me which to open."),
+            expected_tools={"ask_user"},
+            expected_frames={"choice_request"},
+            session_id=session_id,
+        ),
+        SmokePrompt(
+            name="W2_start_workflow",
+            message="Start the build-network workflow and tell me the first step.",
+            expected_tools={"start_workflow"},
+            expected_frames={"workflow_state"},
+            session_id=session_id,
+        ),
+        SmokePrompt(
+            name="W3_end_workflow",
+            message="Please end the current workflow.",
+            expected_tools={"end_workflow"},
+            expected_frames={"workflow_state"},
+            session_id=session_id,
+        ),
+    ]
+
+
+def check_workflow_results(results: list[PromptResult]) -> list[str]:
+    """Cross-prompt assertions on the harness frames' payloads."""
+    problems: list[str] = []
+    by = {r.name: r for r in results}
+    w1 = by.get("W1_ask_user_card")
+    if w1 and w1.choice_requests:
+        opts = w1.choice_requests[0].get("options") or []
+        if not opts:
+            problems.append("W1: the Choice card carried no options")
+        elif sum(1 for o in opts if o.get("recommended")) != 1:
+            problems.append("W1: the Choice card must mark exactly one option recommended")
+    w2 = by.get("W2_start_workflow")
+    if w2 and w2.workflow_states:
+        wf = (w2.workflow_states[-1] or {}).get("workflow") or {}
+        if wf.get("id") != "build-network" or wf.get("step") != "orient":
+            problems.append(f"W2: workflow_state is {wf!r}, expected build-network/orient")
+    w3 = by.get("W3_end_workflow")
+    if w3 and w3.workflow_states:
+        if (w3.workflow_states[-1] or {}).get("workflow") is not None:
+            problems.append("W3: workflow_state after end_workflow is not null")
+    return problems
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--prompts", type=int, default=None,
@@ -663,6 +763,11 @@ def main() -> int:
                              "Legacy selector — the backend translates an "
                              "unrecognised value to the ACTIVE profile with a "
                              "warning rather than refusing it.")
+    parser.add_argument("--workflow", action="store_true",
+                        help="Run the chat-harness parity battery (start menu, "
+                             "one ask_user round, a workflow started and ended) "
+                             "instead of the default prompts. Same battery on "
+                             "every provider (chat harness issue 09).")
     parser.add_argument("--profile", default=None, dest="profile_id",
                         help="Run the smoke against a configured LLM profile "
                              "id (e.g. anthropic-opus, or a custom "
@@ -702,7 +807,14 @@ def main() -> int:
         profile_id=args.profile_id,
     )
 
-    prompts = build_prompts(smoke_project)
+    if args.workflow:
+        menu_problem = check_start_menu(args.base_url, session)
+        print(f"  start menu: {'ok' if menu_problem is None else _red(menu_problem)}")
+        if menu_problem is not None:
+            return 1
+        prompts = build_workflow_prompts()
+    else:
+        prompts = build_prompts(smoke_project)
     if args.prompts is not None:
         prompts = prompts[: args.prompts]
 
@@ -736,6 +848,10 @@ def main() -> int:
 
     overall = time.monotonic() - overall_start
     passes = sum(1 for r in results if r.passed)
+    if args.workflow:
+        for problem in check_workflow_results(results):
+            print(f"  {_red('harness:')} {problem}")
+            passes = -1  # any cross-prompt problem fails the run
     print()
     print(_dim("==== Summary ===="))
     print(f"  {passes}/{len(results)} passed  in  {overall:.1f}s total")

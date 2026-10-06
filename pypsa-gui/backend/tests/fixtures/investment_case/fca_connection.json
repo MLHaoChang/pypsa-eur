@@ -1,0 +1,18 @@
+{
+  "kind": "fca",
+  "import_cap_mw": 60.0,
+  "export_cap_mw": 20.0,
+  "envelope": {
+    "id": "fca_envelope_2027",
+    "version": 1,
+    "hash": "abcdefabcdefabcd",
+    "source": "dso",
+    "vintage_year": 2027,
+    "provider": "illustrative DSO"
+  },
+  "curtailment_hours_per_year": 150.0,
+  "curtailment_compensation_eur_per_mwh": null,
+  "capacity_fee": null,
+  "available_from": "2027-07-01",
+  "group": null
+}

@@ -48,8 +48,8 @@ const genFields = (carrier: string): FieldSpec[] => [
   // extendable generator at zero.
   { key: 'p_nom_min',        label: 'P nom min',      type: 'number',   defaultValue: '0',    unit: 'MW',     half: true },
   { key: 'p_nom_max',        label: 'P nom max',      type: 'number',                         unit: 'MW',     half: true },
-  { key: 'marginal_cost',    label: 'Marginal cost',  type: 'number',   defaultValue: '0',    unit: '$/MWh',  half: true },
-  { key: 'capital_cost',     label: 'Capital cost',   type: 'number',   defaultValue: '0',    unit: '$/MW',   half: true },
+  { key: 'marginal_cost',    label: 'Marginal cost',  type: 'number',   defaultValue: '0',    unit: '€/MWh',  half: true },
+  { key: 'capital_cost',     label: 'Capital cost',   type: 'number',   defaultValue: '0',    unit: '€/MW',   half: true },
 ]
 
 const storFields = (carrier: string, hours = '4'): FieldSpec[] => [
@@ -60,6 +60,14 @@ const storFields = (carrier: string, hours = '4'): FieldSpec[] => [
   { key: 'max_hours',           label: 'Max hours',       type: 'number', defaultValue: hours,  unit: 'h',     half: true },
   { key: 'efficiency_store',    label: 'η store',         type: 'number', defaultValue: '0.95',                half: true },
   { key: 'efficiency_dispatch', label: 'η dispatch',      type: 'number', defaultValue: '0.95',                half: true },
+  // Sizing and cost under the edit card's keys (StorageCard), so a battery
+  // no longer needs an edit straight after creation. The bounds are revealed
+  // by Extendable, and p_nom_max has no default, as for generators above.
+  { key: 'p_nom_extendable',    label: 'Extendable',      type: 'checkbox', defaultValue: 'false' },
+  { key: 'p_nom_min',           label: 'P nom min',       type: 'number', defaultValue: '0',    unit: 'MW',    half: true },
+  { key: 'p_nom_max',           label: 'P nom max',       type: 'number',                       unit: 'MW',    half: true },
+  { key: 'marginal_cost',       label: 'Marginal cost',   type: 'number', defaultValue: '0',    unit: '€/MWh', half: true },
+  { key: 'capital_cost',        label: 'Capital cost',    type: 'number', defaultValue: '0',    unit: '€/MW',  half: true },
 ]
 
 // Bus-picker fields carry metadata so the renderer can restrict by carrier.

@@ -38,32 +38,72 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { networkApi } from '../api/network'
-import { simulationApi } from '../api/simulation'
+import { resultsApi, simulationApi } from '../api/simulation'
 import { getApiKeySettings, type ApiKeySettings } from '../api/chat'
 import { useUIStore } from '../store/uiStore'
+import { useChatReadiness } from '../hooks/useChatProfiles'
 import { nk } from '../utils/queryKeys'
+import { ehStudyRefetchInterval } from '../pages/results/ehStudyPoll'
 import ApiKeySetup, { API_KEY_SETTINGS_KEY } from './ApiKeySetup'
 import type { SimulationStatus } from '../api/types'
 
-/** One sentence about the solve, or null while we do not yet know. */
-function solveLine(status: SimulationStatus | undefined): string | null {
+/** One sentence about the solve, or null while we do not yet know.
+ *  `hubStudy` (Guided only) is the hub study record's status: the EH study
+ *  solves a copy, so the live network's dispatch stays `none` after it, and a
+ *  sweep started from the Improve card is not polled by any mounted panel —
+ *  without it a Guided user with a finished study read "Not solved yet."
+ *  (P26). `reviewStale` (Guided, once the study is done) is the review's
+ *  `stale` boolean: a later solve cleared the stored report (P28 A4). A
+ *  finished study decides the Guided line on its own record — dispatch does
+ *  not (deferred spec 2026-09-28 §3.2). */
+function solveLine(status: SimulationStatus | undefined, guided = false,
+  hubStudy: string | null = null, reviewStale = false): string | null {
   if (!status) return null
   if (status.running) return 'A solve is running right now.'
+  if (guided && hubStudy === 'running') return 'The hub study is running — follow it in Hub design.'
+  if (guided && (hubStudy === 'failed' || hubStudy === 'aborted')) {
+    return 'The last hub study did not finish — see Hub design.'
+  }
+  if (guided && hubStudy === 'done' && status.dispatch !== 'stale') {
+    // Stale when a later solve cleared the stored report (the review's
+    // `stale`). Otherwise the sentence says where the last study's results
+    // are and claims nothing about the current network: an edit after a
+    // study is not tracked yet (the planned `network_changed` marker on the
+    // study record). Live dispatch the backend marks stale means the network
+    // was edited since its last solve, so it falls through to the pre-P28
+    // stale-dispatch sentence below (O1 precedence; gate R-1 wording).
+    return reviewStale
+      ? 'A study has run, but the network was solved since — run it again in Hub design.'
+      : 'The last study’s results are in Hub design.'
+  }
   switch (status.dispatch) {
     case 'fresh':
-      return 'Solved — the results match the network as it stands.'
+      // One signal with the canvas footer and SnapshotPicker (`hasResults`):
+      // a study's closing re-solve (FMEA sweep) leaves fresh dispatch on the
+      // network but records no foreground solve, so "Solved" there would
+      // contradict "Run a simulation to enable" next to it.
+      if (status.condition != null && status.solve_time != null) {
+        return 'Solved — the results match the network as it stands.'
+      }
+      // Guided hides the header Run (P24-FE gate). With no hub study this is
+      // not a hub result (an Expert-run sweep, say): point to Results, where
+      // Guided keeps two tabs (P28 A4; it used to send this to Hub design).
+      if (guided) return 'A calculation has updated this network — see Results.'
+      return 'The network carries dispatch from a study re-solve, but no foreground solve is recorded — run a simulation for results you can read here.'
     case 'stale':
       // The most useful thing the greeting can say, and the reason staleness
       // is in the spec at all: results that exist but no longer describe the
       // network are the state most likely to be misread as current.
       return 'Solved earlier, but the results are stale — the network changed since.'
     default:
-      return 'Not solved yet.'
+      // P28 C6: Guided says where to start; Expert keeps its sentence.
+      return guided ? 'No study has run yet — start in Hub design.' : 'Not solved yet.'
   }
 }
 
 export default function ChatLaunchGreeting() {
   const currentProject = useUIStore((s) => s.currentProject)
+  const guided = useUIStore((s) => s.uiMode) === 'guided'
   const [showKeyForm, setShowKeyForm] = useState(false)
 
   // Same keys OverviewPanel uses, so on the common path these resolve from
@@ -99,8 +139,36 @@ export default function ChatLaunchGreeting() {
     window.dispatchEvent(new CustomEvent('chat:open-new-project-wizard'))
   }
 
-  const solve = solveLine(status)
-  const needsKey = keySettings?.configured === false
+  // Guided only: the hub study record, on the key and fetcher the hub panel
+  // uses (useHubStudy), so it is usually already cached. Expert never reads it.
+  const { data: hubStudy } = useQuery({
+    queryKey: nk(currentProject, 'results', 'eh_study'),
+    queryFn: () => resultsApi.getEhStudy({ quiet: true }),
+    // P26 gate B1: poll like the hub does, so a study that finishes while the
+    // hub panel is closed does not leave the greeting on "running".
+    refetchInterval: ehStudyRefetchInterval,
+    enabled: guided && !!currentProject,
+  })
+  // The key offer follows the Send gate's profile rule (ChatPanel,
+  // `useChatReadiness`): the turn runs on `profileId ?? boundProfileId ??
+  // active`, and that profile's own readiness decides. While it is known to
+  // be ready the assistant works, so offering an Anthropic key is noise
+  // (P26; P28 A3 closes P26 note 5 — a picked or bound ready profile).
+  const effectiveReady = useChatReadiness().ready === true
+
+  const hubStatus = (hubStudy as { status?: string } | null | undefined)?.status ?? null
+  // P28 A4: once the hub study is done, its review says whether a later solve
+  // cleared the report (`stale`). Guided only, on the hub's key (usually
+  // cached by the Results card); no poll — a solve's completion invalidates
+  // the project's `results` queries.
+  const { data: review } = useQuery({
+    queryKey: nk(currentProject, 'results', 'eh_review'),
+    queryFn: () => resultsApi.getEhReview(),
+    enabled: guided && !!currentProject && hubStatus === 'done',
+  })
+  const reviewStale = (review as { status?: string; stale?: boolean } | null | undefined)?.stale === true
+  const solve = solveLine(status, guided, hubStatus, reviewStale)
+  const needsKey = keySettings?.configured === false && !effectiveReady
 
   return (
     <div

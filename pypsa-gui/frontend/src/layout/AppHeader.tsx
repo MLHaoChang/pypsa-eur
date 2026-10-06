@@ -9,10 +9,12 @@ import { downloadProjectBundle, saveProjectQuietly, type BundleSaveResult } from
 import { useSolveQueue, useEnqueueSolve, useAbortJob, activeJobForProject } from '../hooks/useSolveQueue'
 import { nk } from '../utils/queryKeys'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { useUIStore } from '../store/uiStore'
+import { useUIStore, type UiMode } from '../store/uiStore'
+import { UI_MODE_TITLES, uiModeToast } from '../utils/uiMode'
 import { evaluateMutation, readOnlyMessage, READ_ONLY_MUTATION_MESSAGE } from '../utils/mutationGuard'
 import { useAuthMode } from '../auth/AuthModeProvider'
 import UserMenu from './UserMenu'
+import SettingsButton from './SettingsButton'
 import type { Bus, FailureInfo, Generator, Line, Link, Load, StorageUnit } from '../api/types'
 import toast from 'react-hot-toast'
 import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
@@ -25,6 +27,24 @@ const STATUS_DOT: Record<string, string> = {
 }
 const STATUS_LABEL: Record<string, string> = {
   idle: 'Idle', running: 'Running…', completed: 'Optimal', aborted: 'Aborted', failed: 'Failed',
+}
+
+/** €1.24 M · €830 k · €12 — the solve toast's objective, compact. */
+export function formatObjective(v: number | null | undefined): string | null {
+  if (v == null || !Number.isFinite(v)) return null
+  const a = Math.abs(v)
+  if (a >= 1e9) return `€${(v / 1e9).toFixed(2)} bn`
+  if (a >= 1e6) return `€${(v / 1e6).toFixed(2)} M`
+  if (a >= 1e3) return `€${(v / 1e3).toFixed(0)} k`
+  return `€${v.toFixed(0)}`
+}
+
+/** Open Results after a solve: on Economics in Expert (Guided has no
+ *  Economics tab and keeps its own default). */
+function openResultsAfterSolve() {
+  const ui = useUIStore.getState()
+  if (ui.uiMode !== 'guided') ui.requestResultsTab('economics')
+  ui.setSlidePanel('results')
 }
 
 // ── Search types ───────────────────────────────────────────────────────────────
@@ -102,6 +122,7 @@ export function undoErrorMessage(e: unknown): string | null {
 
 export default function AppHeader() {
   const { status, setStatus, clearLog, appendLog } = useSimulationStore()
+  const uiMode = useUIStore(s => s.uiMode)
   const {
     projectName, setProjectName,
     rightPanelOpen, toggleRightPanel, openRightPanel,
@@ -580,6 +601,11 @@ export default function AppHeader() {
   // fast double-click can't stack two jobs before enqueue.isPending flips.
   const enqueuingRef = useRef(false)
   const qcRef = useQueryClient()
+  // The queue job whose `done` event has arrived. The queue poll can still
+  // report it 'running' for up to one poll after that, which used to show
+  // Abort beside an Optimal pill (UX assessment D-4 / Q6). Run state is
+  // derived from both: a job that has said `done` is not running.
+  const [finishedJobId, setFinishedJobId] = useState<string | null>(null)
 
   // ── Solve queue wiring ───────────────────────────────────────────────────
   // Run now ENQUEUES the foreground project: the FIFO dispatcher solves it
@@ -618,6 +644,7 @@ export default function AppHeader() {
           : d.status === 'aborted' ? 'aborted'
           : 'failed'
         setStatus(finalStatus)
+        if (jobId != null) setFinishedJobId(jobId)
         if (finalStatus === 'completed') {
           appLog('INFO',
             `${label} completed: objective=${d.objective ?? 'n/a'}, solve_time=${d.solve_time ?? 'n/a'} s`,
@@ -629,6 +656,21 @@ export default function AppHeader() {
           const proj = useUIStore.getState().currentProject
           qcRef.invalidateQueries({ queryKey: nk(proj, 'results') })
           qcRef.invalidateQueries({ queryKey: nk(proj, 'simulationStatus') })
+          // Say it finished and where the answer is (UX assessment Q6). Open
+          // Results only when nothing else is showing — the same rule the
+          // failure branch uses, so a deliberately opened panel stays put.
+          const objective = formatObjective(d.objective)
+          toast.success((t) => (
+            <span className="flex items-center gap-2" data-testid="solve-done-toast">
+              <span>Solved{objective ? ` · ${objective}` : ''}</span>
+              <button
+                type="button"
+                className="underline font-medium"
+                onClick={() => { toast.dismiss(t.id); openResultsAfterSolve() }}
+              >Open Results</button>
+            </span>
+          ), { duration: 6000 })
+          if (useUIStore.getState().activeSlidePanel == null) openResultsAfterSolve()
         } else if (finalStatus === 'failed') {
           // Surface the actionable failure card from the backend taxonomy:
           // store it (drives the IssuesPanel banner), auto-open the Issues
@@ -705,7 +747,7 @@ export default function AppHeader() {
 
   // The current project is actively solving (its job runs, or a legacy direct
   // /run set status='running'). Drives the Abort affordance.
-  const jobRunning = myJob?.status === 'running'
+  const jobRunning = myJob?.status === 'running' && myJob.id !== finishedJobId
   const jobQueued = myJob?.status === 'queued'
   const busy = jobRunning || jobQueued || isRunning
 
@@ -913,7 +955,7 @@ export default function AppHeader() {
       </button>
 
       {/* Undo */}
-      <button
+      <button aria-label="Undo"
         onClick={handleUndo}
         disabled={undoDepth === 0 || undoMut.isPending || busy || readOnly}
         title={readOnly ? (readOnlyMessage(readOnlyReason) ?? READ_ONLY_MUTATION_MESSAGE) : undoDepth > 0 ? `Undo last action (Ctrl+Z) · ${undoDepth} step${undoDepth !== 1 ? 's' : ''} available` : 'Nothing to undo'}
@@ -933,7 +975,7 @@ export default function AppHeader() {
           When no project exists yet (currentProject is null), the button
           prompts for a name on click instead of being disabled — same path
           Ctrl+S already takes. Only disable for in-flight save / running solve. */}
-      <button
+      <button aria-label="Save project"
         onClick={handleQuickSave}
         disabled={saveMut.isPending || busy || readOnly}
         title={readOnly
@@ -962,6 +1004,10 @@ export default function AppHeader() {
       {(() => {
         // amber for both queued + running; brand red only at idle.
         const amber = jobQueued || jobRunning || isRunning
+        // Guided (P24-FE gate decision): the hub design has its own Run, so
+        // the idle solve button is hidden; a queued / running solve still
+        // shows here so it can be cancelled or aborted.
+        if (uiMode === 'guided' && !amber) return null
         const queuedLabel = `Queued${myJob?.position != null ? ` #${myJob.position}` : ''}`
         return (
           <button
@@ -1003,6 +1049,8 @@ export default function AppHeader() {
         )
       })()}
 
+      <UiModeSwitch />
+
       {/* Status indicator — bordered pill with a glowing LED (design system).
           A queued (not-yet-running) job shows "Queued #N" instead of "Idle"
           without disturbing the simulationStore `status` semantics. */}
@@ -1021,7 +1069,7 @@ export default function AppHeader() {
       })()}
 
       {/* Right panel toggle */}
-      <button
+      <button aria-label={rightPanelOpen ? 'Hide properties panel' : 'Show properties panel'}
         onClick={toggleRightPanel}
         className="ml-1 p-1.5 text-muted hover:text-text border border-transparent hover:border-border rounded transition-colors"
         title={rightPanelOpen ? 'Hide properties panel' : 'Show properties panel'}
@@ -1029,9 +1077,55 @@ export default function AppHeader() {
         {rightPanelOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
       </button>
 
+      <SettingsButton />
+
       {/* User menu — identity + assign members / back to projects / sign out.
           Auth mode only; the legacy single-user workbench has no account. */}
       {authEnabled && <UserMenu />}
     </header>
+  )
+}
+
+// Guided / Expert segmented control (guided-mode spec §3.3). Rendered in both
+// modes so the user can always switch back; a click is an explicit choice,
+// which the new-project rule never overrides.
+function UiModeSwitch() {
+  const uiMode = useUIStore(s => s.uiMode)
+  const setUiMode = useUIStore(s => s.setUiMode)
+  const pick = (m: UiMode) => {
+    setUiMode(m, { explicit: true })
+    toast.success(uiModeToast(m))
+  }
+  return (
+    <div
+      data-testid="ui-mode-switch"
+      role="group"
+      aria-label="Interface mode"
+      className="flex items-center h-7 p-0.5 rounded-md border border-border bg-bg-2"
+    >
+      {(['guided', 'expert'] as const).map(m => {
+        const on = uiMode === m
+        return (
+          <button
+            key={m}
+            type="button"
+            data-testid={`ui-mode-${m}`}
+            aria-pressed={on}
+            aria-describedby={`ui-mode-${m}-desc`}
+            title={UI_MODE_TITLES[m]}
+            onClick={() => pick(m)}
+            className={`h-full px-2 rounded text-[10px] font-semibold transition-colors ${
+              on ? 'bg-accent text-white' : 'text-muted hover:text-text'
+            }`}
+          >
+            {m === 'guided' ? 'Guided' : 'Expert'}
+          </button>
+        )
+      })}
+      {/* P30 (B9): the hover title as a sentence screen readers announce. */}
+      {(['guided', 'expert'] as const).map(m => (
+        <span key={m} id={`ui-mode-${m}-desc`} className="sr-only">{UI_MODE_TITLES[m]}</span>
+      ))}
+    </div>
   )
 }

@@ -69,7 +69,50 @@ def _infer_snapshot_freq(n) -> str | None:
         return "h"
     if float(hours).is_integer():
         return f"{int(hours)}h"
+    # Sub-hourly modal steps (a 15-minute axis with gaps, where infer_freq
+    # gives up): name them in minutes, so callers that gate on sub-hourly
+    # resolution (sample-weeks) cannot mistake a gappy 15-min axis for
+    # "irregular" (Edge Investment Case WP1.0 review).
+    minutes = hours * 60.0
+    if float(minutes).is_integer():
+        return f"{int(minutes)}min"
     return None
+
+
+def hours_per_step(freq) -> float | None:
+    """
+    Length of one snapshot step in HOURS for a fixed pandas frequency
+    ("15min" → 0.25, "h" → 1.0, "3h" → 3.0, "D" → 24.0).
+
+    Snapshot weightings are hours (Edge Investment Case spec decision 18):
+    that is what makes Σ p × w an energy in MWh at any resolution. Calendar
+    frequencies with no fixed length ("MS", "W-MON" …) return None, and the
+    caller keeps PyPSA's default rather than inventing a length.
+    """
+    if freq is None:
+        return None
+    try:
+        from pandas.tseries.frequencies import to_offset
+        from pandas.tseries.offsets import Tick
+
+        off = to_offset(freq)
+    except (ValueError, TypeError):
+        return None
+    from pandas.tseries.offsets import Day
+
+    # pandas 3 makes `Day` a calendar offset rather than a Tick; a model day is
+    # still 24 hours (WP1.0 review).
+    if isinstance(off, Day):
+        return 24.0 * off.n if off.n > 0 else None
+    if not isinstance(off, Tick):
+        return None
+    hours = off.nanos / 3_600_000_000_000
+    return hours if hours > 0 else None
+
+
+def is_sub_hourly(freq) -> bool:
+    h = hours_per_step(freq)
+    return h is not None and h < 1.0
 
 
 def _build_period_multiindex(periods, blocks) -> pd.MultiIndex:

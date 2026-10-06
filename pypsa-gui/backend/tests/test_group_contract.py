@@ -1,0 +1,277 @@
+"""
+Energy-hub group contract (Edge Investment Case P1 WP1.6).
+
+Plan: docs/superpowers/plans/2026-09-26-edge-investment-case-p0-p1.md WP1.6
+Spec §5 table "Energy-hub group contract | Σ member PoC Links ≤ group cap per
+snapshot".
+
+Members share one grid contract: their PoC Links' combined import is capped at
+`group_cap_mw` in every snapshot. It is a pure constraint with no objective term,
+so the gap stays 0. Each member's share of the group's import energy is reported
+(cost allocation is P3), and nothing on the network changes outside the solve.
+"""
+from __future__ import annotations
+
+import queue
+import threading
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from services.commercial import lp_bindings as L
+from tests.fixtures.investment_case.edge_15min import build_edge_15min
+
+
+def _two_members():
+    n = build_edge_15min()
+    n.add("Bus", "poc_b", carrier="AC")
+    n.add("Bus", "site_b", carrier="AC")
+    n.add("Link", "import_b", bus0="grid", bus1="poc_b", p_nom=80.0, carrier="AC")
+    n.add("Link", "poc_site_b", bus0="poc_b", bus1="site_b", p_nom=200.0, carrier="AC")
+    n.add("Load", "site_b_load", bus="site_b", p_set=n.loads_t.p_set["site_load"] * 0.8)
+    for site in ("site", "site_b"):
+        n.add("Generator", f"backup_{site}", bus=site, p_nom=100.0, marginal_cost=500.0,
+              carrier="grid")
+    return n
+
+
+def _commercial(cap=60.0, members=("import", "import_b")):
+    return {"poc_link": "import", "group_contract": "hub", "group_members": list(members),
+            "group_cap_mw": cap}
+
+
+def test_the_group_spec_is_set_for_the_solve_and_undone():
+    n = _two_members()
+    applied = L.materialise_poc_prices(n, _commercial())
+    spec = getattr(n, L.GROUP_SPEC_ATTR)
+    assert spec == {"name": "hub", "members": ["import", "import_b"], "cap_mw": 60.0}
+    applied.undo()
+    assert not hasattr(n, L.GROUP_SPEC_ATTR)
+
+
+@pytest.mark.parametrize("bad", [
+    {"group_members": ["import", "ghost"], "group_cap_mw": 10.0},
+    {"group_members": ["import"], "group_cap_mw": None},
+])
+def test_a_bad_group_is_refused(bad):
+    n = _two_members()
+    with pytest.raises(Exception):
+        L.materialise_poc_prices(n, {"poc_link": "import", "group_contract": "hub", **bad})
+
+
+def _solve(n, commercial):
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig, run_simulation
+
+    PyPSAService.set_network(n)
+    cfg = SolverConfig(commercial=commercial)
+    sink: dict = {}
+    status, condition = run_simulation(cfg, n, PyPSAService.get_lock(), threading.Event(),
+                                       queue.SimpleQueue(),
+                                       state_update=lambda **kw: sink.update(kw))
+    assert status in ("ok", "optimal"), (status, condition)
+    return cfg, sink
+
+
+@pytest.mark.live_solve
+def test_the_group_cap_binds_when_the_members_would_exceed_it():
+    free = _two_members()
+    _solve(free, None)
+    combined_free = (free.links_t.p0["import"] + free.links_t.p0["import_b"]).max()
+    assert combined_free > 60.0  # the cap is binding in this fixture
+    n = _two_members()
+    cfg, sink = _solve(n, _commercial(cap=60.0))
+    combined = n.links_t.p0["import"] + n.links_t.p0["import_b"]
+    assert combined.max() <= 60.0 + 1e-6
+    assert combined.max() >= 60.0 - 1e-3  # it binds
+    shares = n.meta[L.META_GROUP]["energy_share"]
+    assert set(shares) == {"import", "import_b"}
+    assert sum(shares.values()) == pytest.approx(1.0)
+    assert sink["last_commercial_terms"]["group"]["energy_share"] == shares
+
+
+@pytest.mark.live_solve
+def test_the_group_adds_no_objective_term():
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.results.objective_decomposition import compute_objective_decomposition
+
+    n = _two_members()
+    cfg, _ = _solve(n, _commercial(cap=60.0))
+    cb = compute_cost_breakdown(n, cfg)
+    assert abs(compute_objective_decomposition(n, cb)["gap_pct"]) < 1e-6
+
+
+# ── review conditions (WP1.6 round 2) ──────────────────────────────────────
+# A group contract is ONE customer under ONE tariff: every member pays the
+# per-kWh import adders, and demand charges and tiers are measured on the
+# members' combined import (the group meter), so no member is a free route.
+
+TOU = {"id": "energy", "kind": "energy", "unit": "per_kwh", "periods": [
+    {"name": "night", "rate": 0.05, "start_hour": 0, "end_hour": 6},
+    {"name": "day", "rate": 0.20}]}
+DEMAND = {"id": "demand", "kind": "demand", "unit": "per_kw_month",
+          "periods": [{"name": "all", "rate": 12.0}], "measured_on": "import"}
+
+
+def _tariff(*items):
+    return {"id": "t", "name": "t", "jurisdiction": "DE", "valid_from": "2029-01-01",
+            "items": list(items)}
+
+
+def test_every_member_carries_the_import_price():
+    n = _two_members()
+    applied = L.materialise_poc_prices(n, {**_commercial(), "import_tariff": _tariff(TOU)})
+    mc = n.links_t.marginal_cost
+    assert {"import", "import_b"} <= set(mc.columns)
+    assert np.allclose(mc["import"], mc["import_b"])
+    assert applied.facts["import_links"] == ["import", "import_b"]
+    applied.undo()
+    assert "import_b" not in n.links_t.marginal_cost.columns
+
+
+def test_demand_is_measured_on_the_group_meter():
+    n = _two_members()
+    L.materialise_poc_prices(n, {**_commercial(), "import_tariff": _tariff(DEMAND)})
+    assert getattr(n, L.DEMAND_SPEC_ATTR)["import_links"] == ["import", "import_b"]
+
+
+@pytest.mark.parametrize("members,msg", [
+    (["import_b"], "poc_link"),               # the tariffed PoC must be a member
+    (["import", "export"], "export_link"),    # export is not an import member
+    (["import", "poc_site_b"], "bus0"),       # a member on the site side
+])
+def test_a_member_that_is_not_an_import_connection_is_refused(members, msg):
+    n = _two_members()
+    n.add("Link", "export", bus0="poc", bus1="grid", p_nom=80.0, carrier="AC")
+    with pytest.raises(L.CommercialBindingError, match=msg):
+        L.materialise_poc_prices(n, {**_commercial(members=members), "export_link": "export"})
+
+
+def test_a_named_group_without_members_is_refused():
+    from models.commercial import CommercialConfig
+
+    with pytest.raises(ValueError, match="group_contract"):
+        CommercialConfig.model_validate({"poc_link": "import", "group_contract": "hub"})
+    with pytest.raises(ValueError, match="group_contract"):
+        CommercialConfig.model_validate({"poc_link": "import", "group_members": ["import"],
+                                         "group_cap_mw": 10.0})
+
+
+@pytest.mark.live_solve
+def test_no_member_is_a_free_route_and_the_bill_matches_the_engine():
+    from models.commercial import Tariff
+    from services.commercial.tariff_engine import rate
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.results.objective_decomposition import compute_objective_decomposition
+
+    n = _two_members()
+    commercial = {**_commercial(cap=60.0), "import_tariff": _tariff(TOU, DEMAND)}
+    cfg, sink = _solve(n, commercial)
+    p0 = n.links_t.p0
+    billed = rate(pd.DataFrame({"import_mw": (p0["import"] + p0["import_b"]).to_numpy(),
+                                "export_mw": 0.0}, index=n.snapshots),
+                  Tariff.model_validate(_tariff(TOU, DEMAND)), step_hours=0.25, timezone=None)
+    cb = compute_cost_breakdown(n, cfg)
+    rows = cb["commercial"]
+    assert rows["energy_import"] == pytest.approx(billed.per_item["energy"], rel=1e-6)
+    assert rows["demand_charge"] == pytest.approx(billed.per_item["demand"], rel=1e-6)
+    assert abs(compute_objective_decomposition(n, cb)["gap_pct"]) < 1e-6
+    assert sink["last_commercial_terms"]["import_links"] == ["import", "import_b"]
+
+
+@pytest.mark.live_solve
+def test_a_changed_group_is_flagged_as_drift():
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.solver_service import SolverConfig
+
+    n = _two_members()
+    _solve(n, _commercial(cap=60.0))
+    cb = compute_cost_breakdown(n, SolverConfig(commercial=_commercial(cap=50.0)))
+    assert "config_changed_since_solve" in cb["commercial"]["flags"]
+    cb = compute_cost_breakdown(n, SolverConfig(commercial=_commercial(cap=60.0)))
+    assert "config_changed_since_solve" not in (cb["commercial"] or {}).get("flags", [])
+
+
+# ── review round 2 ─────────────────────────────────────────────────────────
+
+
+def test_a_member_with_vintage_bounds_is_refused():
+    """#1: vintage clones of a member would sit outside the cap sum and the
+    group meter."""
+    n = _two_members()
+    n.meta["vintage_bounds"] = {"Link": {"import_b": {"2030": 50.0}}}
+    with pytest.raises(L.CommercialBindingError, match="import_b"):
+        L.materialise_poc_prices(n, _commercial())
+
+
+def test_a_net_energy_item_on_a_group_with_export_is_priced_on_net_import():
+    """#2: the bill nets a group's import against its export on the group
+    meter; per-member adders cannot, so P1 refused it. P3 WP3.3b prices a
+    net COST item once on the group's net import (`ic_group_net_*`, see
+    `test_group_net_import.py`) — never on the member adders — and still
+    refuses a negative rate."""
+    n = _two_members()
+    n.add("Link", "export", bus0="poc", bus1="grid", p_nom=80.0, carrier="AC")
+    net = {**TOU, "measured_on": "net"}
+    applied = L.materialise_poc_prices(n, {**_commercial(), "export_link": "export",
+                                           "import_tariff": _tariff(net)})
+    assert getattr(n, L.GROUP_NET_SPEC_ATTR)["items"] == ["energy"]
+    assert "import_b" not in n.links_t.marginal_cost.columns
+    applied.undo()
+    neg = {**net, "periods": [{"name": "all", "rate": -0.01}]}
+    with pytest.raises(L.CommercialBindingError, match="net"):
+        L.materialise_poc_prices(n, {**_commercial(), "export_link": "export",
+                                     "import_tariff": _tariff(neg)})
+
+
+def test_reordered_members_are_not_drift():
+    """#4: the same group in another order binds the same terms."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = _two_members()
+    applied = L.materialise_poc_prices(n, {**_commercial(), "import_tariff": _tariff(TOU)})
+    applied.undo()
+    applied.commit()
+    swapped = {**_commercial(members=("import_b", "import")), "import_tariff": _tariff(TOU)}
+    assert "config_changed_since_solve" not in commercial_cost_terms(n, swapped)["flags"]
+
+
+def test_a_group_added_after_the_solve_is_flagged():
+    """#3: a group the solve did not bind is not reported silently."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = _two_members()
+    plain = {"poc_link": "import", "import_tariff": _tariff(TOU)}
+    applied = L.materialise_poc_prices(n, plain)
+    applied.undo()
+    applied.commit()
+    grouped = {**_commercial(members=("import",)), "import_tariff": _tariff(TOU)}
+    assert "config_changed_since_solve" in commercial_cost_terms(n, grouped)["flags"]
+
+
+def test_shares_that_cannot_be_computed_are_flagged():
+    """#5: a None share says why (ADR-0001)."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = _two_members()
+    n.meta[L.META_GROUP] = {"name": "hub", "members": ["import", "import_b"], "cap_mw": 60.0,
+                            "energy_share": {"import": None, "import_b": None}}
+    flags = commercial_cost_terms(n, _commercial())["flags"]
+    assert "group_energy_share_not_established" in flags
+
+
+def test_a_fee_the_other_members_can_bypass_warns():
+    """#6: the capacity fee sits on poc_link; an extendable member takes
+    capacity without it."""
+    from services.solver_service import SolverConfig
+    from services.validation_service import validate_for_run
+
+    n = _two_members()
+    n.links.loc["import_b", "p_nom_extendable"] = True
+    fee = {"kind": "firm", "import_cap_mw": 70.0, "available_from": "2030-01-01",
+           "capacity_fee": {"id": "fee", "kind": "capacity", "unit": "per_kw_year",
+                            "periods": [{"name": "all", "rate": 60.0}]}}
+    issues = validate_for_run(n, SolverConfig(commercial={**_commercial(), "connection": fee}))
+    codes = {i.code for i in issues}
+    assert "commercial.group_fee_bypass" in codes

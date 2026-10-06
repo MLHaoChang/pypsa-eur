@@ -18,11 +18,22 @@ import queue
 import threading
 from typing import Any, Callable, Iterable
 
-from models.energy_hub import AvailabilityTarget, ImportOverlaySpec
+from models.energy_hub import (
+    EH_IMPORT_ROLES,
+    AvailabilityTarget,
+    ImportOverlaySpec,
+)
+
+IMPORT_ROLES = EH_IMPORT_ROLES
 
 logger = logging.getLogger("pypsa_gui.levers")
 
-DEFAULT_LEVER_KINDS: tuple[str, ...] = ("import_cap", "storage_duration")
+DEFAULT_LEVER_KINDS: tuple[str, ...] = (
+    "import_cap", "storage_duration", "import_energy")
+# P17: energy budgets as fractions of what the metered import Links can
+# deliver in a year (an absolute MWh ladder cannot fit every network's
+# scale; whole-network demand would include grid-side Loads — P17 gate).
+DEFAULT_IMPORT_ENERGY_FRACTIONS: tuple[float, ...] = (0.0, 0.25, 0.5)
 DEFAULT_IMPORT_CAPS_MW: tuple[float, ...] = (0.0, 25.0, 50.0)
 DEFAULT_STORAGE_HOURS: tuple[float, ...] = (4.0, 24.0, 72.0)
 
@@ -54,7 +65,7 @@ def _import_link_ids(n) -> list[str]:
     if "eh_role" in n.links.columns:
         return [
             str(i) for i in n.links.index
-            if str(n.links.at[i, "eh_role"]) in ("grid_import", "eh_import", "import")
+            if str(n.links.at[i, "eh_role"]) in IMPORT_ROLES
         ]
     return []
 
@@ -89,25 +100,120 @@ def _import_links_flow_blocked(n, link_ids: list[str]) -> bool:
     return True
 
 
+def annual_electrical_demand_mwh(n) -> float:
+    """Σ electrical demand, weighted and annualised per year of horizon."""
+    from services.adequacy.metrics import electrical_columns
+
+    if n.loads is None or n.loads.empty:
+        return 0.0
+    w = n.snapshot_weightings
+    w = w["generators"] if "generators" in w.columns else w.iloc[:, 0]
+    hours = float(w.sum())
+    if hours <= 0:
+        return 0.0
+    loads = electrical_columns(n, [str(i) for i in n.loads.index])
+    p_set_t = getattr(getattr(n, "loads_t", None), "p_set", None)
+    total = 0.0
+    for l in loads:
+        if p_set_t is not None and l in getattr(p_set_t, "columns", []):
+            total += float((p_set_t[l].fillna(0.0) * w).sum())
+        else:
+            total += float(n.loads.at[l, "p_set"] or 0.0) * hours
+    return total * 8760.0 / hours
+
+
+def import_energy_capability_mwh(n, links: list[str]) -> float:
+    """MWh/yr the metered Links could deliver to the hub at full power."""
+    import math
+
+    total = 0.0
+    for l in links:
+        if l not in n.links.index:
+            continue
+        p_nom = float(n.links.at[l, "p_nom"])
+        eff = float(n.links.at[l, "efficiency"]) if "efficiency" in n.links.columns else 1.0
+        pu = 1.0
+        if "p_max_pu" in n.links.columns:
+            v = float(n.links.at[l, "p_max_pu"])
+            pu = min(max(v, 0.0), 1.0) if math.isfinite(v) else 1.0
+        total += max(p_nom, 0.0) * pu * max(eff, 0.0) * 8760.0
+    return total
+
+
+def default_import_energy_values(n, cfg=None) -> tuple[float, ...]:
+    links = [str(x) for x in (getattr(cfg, "import_energy_links", None) or [])]
+    base = (import_energy_capability_mwh(n, links) if links
+            else annual_electrical_demand_mwh(n))
+    return tuple(round(f * base, 3) for f in DEFAULT_IMPORT_ENERGY_FRACTIONS)
+
+
 def apply_lever_scenario(
-    n, kind: str, *, value: float,
+    n, kind: str, *, value: float, cfg=None,
 ) -> tuple[Callable[[], None], dict[str, Any]]:
-    """Mutate ``n`` for one lever setting; return ``(undo, mutation)``."""
+    """Mutate ``n`` for one lever setting; return ``(undo, mutation)``.
+
+    ``import_energy`` (P17) mutates no network: its ``mutation["cfg_patch"]``
+    is applied to the per-option solver config by the caller.
+    """
+    if kind == "import_energy":
+        links = [str(x) for x in (getattr(cfg, "import_energy_links", None) or [])]
+        links = [l for l in links if l in n.links.index]
+        if not links:
+            raise LeverScenarioError(
+                "no metered import Links for import_energy (the weak_flexible "
+                "pack orients them)")
+        cap = float(value)
+        if cap < 0:
+            raise LeverScenarioError("import_energy must be >= 0")
+        return (lambda: None), {
+            "kind": kind,
+            "value": cap,
+            "unit": "MWh/yr",
+            "applied_links": links,
+            "cfg_patch": {"import_energy_cap_mwh_per_year": cap,
+                          "import_energy_links": links},
+            "firmness": "planning_limit_only",
+            "autonomy_note": None,
+        }
     if kind == "import_cap":
         links = _import_link_ids(n)
         if not links:
             raise LeverScenarioError("no import Links to apply import_cap")
         snap = n.links.copy(deep=True)
         cap = float(value)
+        ts_snap: dict[str, object] = {}
         for name in links:
-            if "p_nom_max" in n.links.columns:
-                n.links.at[name, "p_nom_max"] = cap
-            if "p_nom" in n.links.columns:
-                n.links.at[name, "p_nom"] = cap
+            if cap <= 0:
+                # E2E review M2: p_nom = 0 is refused by preflight
+                # (link_p_nom_invalid). A "no import" rung closes the Link
+                # the off_grid way — p_*_pu → 0, p_nom kept.
+                n.links.at[name, "p_max_pu"] = 0.0
+                n.links.at[name, "p_min_pu"] = 0.0
+                for attr in ("p_max_pu", "p_min_pu"):
+                    ts = getattr(getattr(n, "links_t", None), attr, None)
+                    if ts is not None and name in getattr(ts, "columns", []):
+                        ts_snap[(attr, name)] = ts[name].copy()
+                        ts[name] = 0.0
+            else:
+                if "p_nom_max" in n.links.columns:
+                    n.links.at[name, "p_nom_max"] = cap
+                if "p_nom" in n.links.columns:
+                    n.links.at[name, "p_nom"] = cap
             if "p_nom_extendable" in n.links.columns:
                 n.links.at[name, "p_nom_extendable"] = False
+        # Edge Investment Case: a connection agreement re-applied inside the
+        # solve must not lift this planning limit (WP1.4 round 3 #3).
+        prior_limits = getattr(n, "_ic_link_limits", None)
+        n._ic_link_limits = {**(prior_limits or {}), **{name: cap for name in links}}
         def undo() -> None:
             n.links = snap
+            if prior_limits is None:
+                if hasattr(n, "_ic_link_limits"):
+                    del n._ic_link_limits
+            else:
+                n._ic_link_limits = prior_limits
+            for (attr, name), series in ts_snap.items():
+                getattr(n.links_t, attr)[name] = series
         return undo, {
             "kind": kind,
             "value": cap,
@@ -161,8 +267,13 @@ def compare_lever_scenarios(
     store: dict | None = None,
     pack_hash: str | None = None,
     assumptions_hash: str | None = None,
+    max_solves: int | None = None,
 ) -> dict[str, Any]:
-    """Solve each lever value at a fixed ENS target; return comparison table."""
+    """Solve each lever value at a fixed ENS target; return comparison table.
+
+    ``max_solves`` caps the LPs attempted (EH study budget); the loop stops
+    before exceeding it and flags ``budget_exhausted``.
+    """
     from services.solver_service import SolverConfig, run_simulation
 
     if kind not in DEFAULT_LEVER_KINDS:
@@ -170,6 +281,8 @@ def compare_lever_scenarios(
     if values is None:
         values = (
             DEFAULT_STORAGE_HOURS if kind == "storage_duration"
+            else default_import_energy_values(network, cfg)
+            if kind == "import_energy"
             else DEFAULT_IMPORT_CAPS_MW
         )
     values = tuple(float(v) for v in values)
@@ -186,30 +299,46 @@ def compare_lever_scenarios(
         raise LeverScenarioError(
             "lever compare requires ens_cap_permyriad > 0")
 
+    # import_cap rungs above what the Links are rated for NOW (the pack's cap
+    # / the physical connection) are plans the pack does not permit.
+    rated = None
+    if kind == "import_cap":
+        links_now = [l for l in _import_link_ids(network)
+                     if l in network.links.index]
+        if links_now:
+            rated = float(max(network.links.loc[links_now, "p_nom"]))
     options: list[dict[str, Any]] = []
     solves_attempted = 0
     aborted = False
+    budget_exhausted = False
     for val in values:
         if stop_event.is_set():
             aborted = True
             break
+        if max_solves is not None and solves_attempted >= max_solves:
+            budget_exhausted = True
+            break
         _detach_solver_model(network)
         nn = network.copy()
-        undo, mutation = apply_lever_scenario(nn, kind, value=val)
+        undo, mutation = apply_lever_scenario(nn, kind, value=val, cfg=cfg)
         sink: dict = {}
         try:
             cfg_i = copy.copy(cfg) if cfg is not None else SolverConfig()
+            for key, v in (mutation.get("cfg_patch") or {}).items():
+                setattr(cfg_i, key, v)
             try:
                 cfg_i.ens_cap_permyriad = float(ens_cap)
             except Exception:
                 pass
             if float(getattr(cfg_i, "voll", 0.0) or 0.0) <= 0:
                 cfg_i.voll = 150.0
-            solves_attempted += 1
             status, condition = run_simulation(
                 cfg_i, nn, lock, stop_event, log_queue,
                 state_update=lambda **kw: sink.update(kw),
             )
+            # A preflight refusal builds no LP: not a solve (E2E review M2).
+            if condition != "validation_failed":
+                solves_attempted += 1
             rep = sink.get("adequacy_report") if isinstance(
                 sink.get("adequacy_report"), dict) else {}
             tgt = (rep or {}).get("target") or {}
@@ -224,18 +353,37 @@ def compare_lever_scenarios(
                 meets = None
             ineffective = False
             ineffective_reason = None
-            if kind == "import_cap":
+            if kind in ("import_cap", "import_energy"):
                 applied_links = list(mutation.get("applied_links") or [])
-                if _import_links_flow_blocked(nn, applied_links):
+                # Blocked BEFORE the lever (Class-B islanding) — a 0 MW rung
+                # blocks the Links itself and is a real option.
+                if _import_links_flow_blocked(network, applied_links):
                     ineffective = True
                     ineffective_reason = (
-                        "import_cap no-op under Class-B islanding "
+                        f"{kind} no-op under Class-B islanding "
                         "(applied Links have p_max_pu≈0)"
                     )
+            exceeds_pack_cap = None
+            autonomy_note = mutation.get("autonomy_note")
+            if kind == "import_cap" and rated is not None:
+                exceeds_pack_cap = float(val) > rated + 1e-9
+                if exceeds_pack_cap:
+                    autonomy_note = (
+                        f"above the connection's current {rated:g} MW rating "
+                        "— a plan the pack does not permit")
+            if kind == "import_energy":
+                pack_cap = getattr(cfg, "import_energy_cap_mwh_per_year", None)
+                exceeds_pack_cap = (pack_cap is not None
+                                    and float(val) > float(pack_cap) + 1e-9)
+                if exceeds_pack_cap:
+                    autonomy_note = (
+                        f"looser than the pack's own cap of {float(pack_cap):,.0f} "
+                        "MWh/yr — a plan the pack does not permit")
             options.append({
                 "kind": kind,
                 "value": val,
                 "unit": mutation["unit"],
+                "exceeds_pack_cap": exceeds_pack_cap,
                 "status": status,
                 "condition": condition,
                 "cost_at_target_eur": cost.get("total_system_cost_eur"),
@@ -246,7 +394,7 @@ def compare_lever_scenarios(
                     bool(meets) and status in ("ok", "optimal")
                     if meets is not None else None),
                 "firmness": mutation["firmness"],
-                "autonomy_note": mutation.get("autonomy_note"),
+                "autonomy_note": autonomy_note,
                 "applied": mutation,
                 "ineffective": ineffective,
                 "ineffective_reason": ineffective_reason,
@@ -279,6 +427,7 @@ def compare_lever_scenarios(
         "options": options,
         "solves_attempted": solves_attempted,
         "aborted": aborted,
+        "budget_exhausted": budget_exhausted,
         "comparable_solved": len(solved),
         "distinct_costs": len(costs),
     }
@@ -295,6 +444,9 @@ def levers_section_status(table: dict[str, Any]) -> tuple[str, str | None]:
     """
     if table.get("aborted"):
         return "not_established", "lever compare aborted mid-loop"
+    if table.get("budget_exhausted"):
+        return ("not_established",
+                "budget_solves exhausted mid-compare; options are partial")
     solved = [
         o for o in (table.get("options") or [])
         if o.get("status") in ("ok", "optimal") and not o.get("ineffective")

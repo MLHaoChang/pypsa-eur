@@ -45,7 +45,7 @@ import logging
 import math
 import uuid
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, NoReturn
 
 from fastapi import HTTPException, params as fastapi_params
 
@@ -147,8 +147,12 @@ def _validated_update_payload(
     schema_name = _COMPONENT_CREATE_SCHEMAS[component_class]
     Schema = _get_schema(schema_name)
     prefill = _identity_prefill(component_class, name)
-    # Prefill first; agent attrs win on conflict.
-    instance = Schema(name=name, **{**prefill, **attrs})
+    # Prefill first; agent attrs win on conflict. A `name` among the attrs is
+    # a rename (as in the PUT body): it replaces the schema's `name` rather
+    # than being passed a second time, and stays in the payload so
+    # `_update_component` pops it and renames.
+    fields = {**prefill, **attrs}
+    instance = Schema(name=fields.pop("name", name), **fields)
     dumped = instance.model_dump()
     return {k: dumped[k] for k in attrs if k in dumped}
 
@@ -541,7 +545,7 @@ _RESULTS_ENUM = (
     "losses", "carrier_kpis", "emissions", "transformers", "unit_commitment",
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
-    "asset_economics",
+    "asset_economics", "billing", "cfe_score", "value_flows",
 )
 
 
@@ -575,6 +579,11 @@ _RESULTS_HANDLER_NAMES: dict[str, str] = {
     "lost_load": "get_lost_load",
     "loads": "get_load_results",
     "asset_economics": "get_asset_economics",
+    # Edge Investment Case P2 WP2.5.
+    "billing": "get_billing",
+    "cfe_score": "get_cfe_score",
+    # Edge Investment Case P3 WP3.4.
+    "value_flows": "get_value_flows",
 }
 
 
@@ -632,11 +641,14 @@ _RESULTS_NO_DATA_MESSAGE = (
 )
 
 
-def get_results(result_kind: str, source: str = "lopf") -> Any:
+def get_results(result_kind: str, source: str = "lopf", detail: str | None = None,
+                offset: int = 0, limit: int | None = None) -> Any:
     """
     v4-MAJOR-4 dispatcher: every results enum routes through the named
     handler, with ac_pf_status mapped to a distinct path via the lookup dict.
     `source` ('lopf' | 'ac_pf') is forwarded where the handler supports it.
+    `detail` ('summary' | 'lines') with `offset` / `limit` shapes the kinds
+    that have a summary (value_flows, IC P3 WP3.4) and is ignored elsewhere.
     """
     handler = _resolve_results_handler(result_kind)
     # Some handlers take `source` as a query param; pass via kwargs if the
@@ -645,7 +657,131 @@ def get_results(result_kind: str, source: str = "lopf") -> Any:
         result = handler(source=source)
     else:
         result = handler()
-    return _payload_or_no_data(result_kind, result, _RESULTS_NO_DATA_MESSAGE)
+    result = _payload_or_no_data(result_kind, result, _RESULTS_NO_DATA_MESSAGE)
+    if result_kind == "value_flows" and isinstance(result, dict) and result.get("status") == "ok":
+        if detail == "lines":
+            return _value_flow_lines_page(result, offset, limit)
+        return _value_flows_summary(result)
+    return result
+
+
+# ── value flows for the model (IC P3 WP3.4) ────────────────────────────────
+# The ledger is long (a line per bill item, fee, contract and asset cost per
+# period): the default answer is a SUMMARY per participant and stream under
+# the result cap; `detail="lines"` pages the lines.
+
+_VF_SUMMARY_CHARS = 3500
+
+
+def _eur(v):
+    return None if v is None else round(float(v), 2)
+
+
+def _value_flows_summary(payload: dict) -> dict:
+    ids = [x["id"] for x in payload.get("participants") or []]
+    # A flag can carry a long reason (a contract naming every missing asset):
+    # each is shortened, so none can outgrow the cap (WP3.4 review R2-1).
+    flags = [str(f)[:160] for f in payload.get("flags") or []]
+    periods = {}
+    for p, per in (payload.get("periods") or {}).items():
+        lines = per.get("lines") or []
+        parts = {pid: {"paid": _eur(t["paid"]), "received": _eur(t["received"]),
+                       "net": _eur(t["net"]),
+                       "by_stream": {k: _eur(v) for k, v in sorted(t["by_stream"].items())}}
+                 for pid, t in (per.get("by_participant") or {}).items()}
+        checks = (per.get("conservation") or {}).get("checks") or []
+        periods[p] = {"conservation_ok": (per.get("conservation") or {}).get("ok"),
+                      "checks_not_true": [c["name"] for c in checks if c.get("ok") is not True],
+                      "lines": len(lines),
+                      "unknown_lines": sum(1 for ln in lines if ln.get("amount") is None),
+                      "by_participant": parts}
+    out = {"status": "ok", "template": payload.get("template"), "participants": ids,
+           "conservation_ok": payload.get("conservation_ok"), "periods": periods,
+           "flags_total": len(flags), "flags": flags[:15],
+           "basis": "EUR per period-year, unweighted; + received, - paid; null = unknown",
+           "hint": "get_results(result_kind='value_flows', detail='lines', offset, limit) "
+                   "pages the ledger lines"}
+
+    def size() -> int:
+        return len(json.dumps(out, default=str))
+
+    # Fit the cap: drop the stream split first, then the externals' rows, then
+    # the flags — the participants' own totals are the last thing to go.
+    if size() > _VF_SUMMARY_CHARS:
+        for per in periods.values():
+            for row in per["by_participant"].values():
+                row.pop("by_stream", None)
+        out["omitted"] = ["by_stream"]
+    if size() > _VF_SUMMARY_CHARS:
+        for per in periods.values():
+            per["by_participant"] = {k: v for k, v in per["by_participant"].items()
+                                     if any(k.strip().casefold() == i.strip().casefold()
+                                            for i in ids)}
+        out["omitted"].append("externals")
+    if size() > _VF_SUMMARY_CHARS:
+        out["flags"] = flags[:3]
+        out["omitted"].append("flags")
+    # Many participants (WP3.4 review #1): keep only `net`, then the largest
+    # rows by |net| per period, then fewer ids — until it fits, always.
+    if size() > _VF_SUMMARY_CHARS:
+        for per in periods.values():
+            per["by_participant"] = {k: {"net": v.get("net")}
+                                     for k, v in per["by_participant"].items()}
+        out["omitted"].append("paid_received")
+    keep = max((len(per["by_participant"]) for per in periods.values()), default=0)
+    while size() > _VF_SUMMARY_CHARS and keep > 1:
+        keep = max(1, keep // 2)
+        for per in periods.values():
+            # Unknown nets first — the rows ADR-0001 most wants seen (R2-2).
+            rows = sorted(per["by_participant"].items(),
+                          key=lambda kv: (kv[1].get("net") is not None,
+                                          -abs(kv[1].get("net") or 0.0)))
+            if len(rows) > keep:
+                per["participants_omitted"] = len(rows) - keep + per.get(
+                    "participants_omitted", 0)
+                per["by_participant"] = dict(rows[:keep])
+    while size() > _VF_SUMMARY_CHARS and out["participants"]:
+        out["participants_total"] = len(ids)
+        out["participants"] = out["participants"][:len(out["participants"]) // 2]
+        for per in periods.values():
+            per["by_participant"] = {k[:60]: v for k, v in per["by_participant"].items()}
+    # Last resorts: no flags, then only as many periods as fit.
+    if size() > _VF_SUMMARY_CHARS:
+        out["flags"] = []
+        out["omitted"].append("flags_all")
+    if size() > _VF_SUMMARY_CHARS:
+        keys = list(periods)
+        out["periods_total"] = len(keys)
+        while size() > _VF_SUMMARY_CHARS and len(out["periods"]) > 1:
+            out["periods"].pop(keys.pop())
+    return out
+
+
+def _value_flow_lines_page(payload: dict, offset: int, limit: int | None) -> dict:
+    # Party ids, asset / contract names and flags are user text of any length:
+    # cut so one row always fits a page (the summary's 160-character rule;
+    # IC P3 gate note).
+    def cut(v, n: int = 80):
+        return None if v is None else str(v)[:n]
+
+    rows = []
+    for p, per in (payload.get("periods") or {}).items():
+        for ln in per.get("lines") or []:
+            row = {"period": p, "payer": cut(ln.get("payer")), "payee": cut(ln.get("payee")),
+                   "stream": ln.get("value_stream"), "amount": _eur(ln.get("amount")),
+                   "source": cut(f"{ln.get('source')}:{ln.get('source_id')}", 120)}
+            for key in ("contract_id", "tariff_item", "asset"):
+                if ln.get(key):
+                    row[key] = cut(ln[key])
+            if ln.get("basis") and ln["basis"] != "cash":
+                row["basis"] = ln["basis"]
+            if ln.get("flags"):
+                row["flags"] = [cut(f, 160) for f in ln["flags"][:4]]
+            rows.append(row)
+    page = _paginate(rows, offset, limit)
+    page["status"] = "ok"
+    page["kind"] = "value_flows_lines"
+    return page
 
 
 def results_path_for(result_kind: str) -> str:
@@ -704,38 +840,63 @@ def update_component(
     """
     v6 F1/F2/F3 dispatcher with EXPLICIT routing:
 
-      Bus + new_name → rename_bus  (n.rename_component_names preserves dependent
-                                    bus0/bus1 refs on lines/links/transformers)
-      Bus, no new_name → update_bus  (coord-change line-length recompute)
+      Bus + new_name, no attrs → rename_bus  (n.rename_component_names
+                                    preserves dependent bus0/bus1 refs)
+      Bus otherwise → update_bus  (coord-change line-length recompute; a
+                                   rename via attrs["name"] or new_name goes
+                                   through the PUT rename path)
       Transformer → update_transformer  (voltage validation + type sanitise)
       GlobalConstraint → update_global_constraint  (partial-PUT mitigation;
                                                    NOT in _COMPONENT_ATTRS)
       Other 7 classes (Carrier/Line/Link/Generator/StorageUnit/Store/Load/
                        ShuntImpedance) → _update_component direct
+
+    On every class, attrs["name"] (or new_name) renames, as the PUT body does.
     """
     attrs = dict(attrs or {})
 
-    # F1: Bus rename has its own endpoint
-    if component_class == "Bus" and new_name:
+    # F1: a bare Bus rename has its own endpoint
+    if component_class == "Bus" and new_name and not attrs:
         from routers.network import rename_bus
         return rename_bus(name, {"new_name": new_name})
 
-    # Bus non-rename: dedicated handler preserves coord-change recompute
+    # A rename can also arrive as attrs["name"], exactly as in the PUT body.
+    # Every path below builds the Create schema with the TARGET name and never
+    # passes `name` a second time (`Schema(name=name, **attrs)` with a `name`
+    # among the attrs was a TypeError on every class); the PUT handler then
+    # pops it from the merged row and renames under its own guards (404, 409
+    # on an occupied name, the reserved `ic:` bus prefix) and re-points
+    # dependents via `_rename_component_safely`.
+    if new_name:
+        if "name" in attrs and attrs["name"] != new_name:
+            raise HTTPException(
+                400,
+                f"new_name {new_name!r} and attrs.name {attrs['name']!r} "
+                "name different targets",
+            )
+        attrs["name"] = new_name
+    if "name" in attrs and not str(attrs["name"] or "").strip():
+        raise HTTPException(400, "new name cannot be empty")
+
+    # Bus: dedicated handler preserves coord-change recompute
     if component_class == "Bus":
         from routers.network import update_bus
-        bus = _get_schema("BusCreate")(name=name, **attrs)
+        target = attrs.pop("name", name)
+        bus = _get_schema("BusCreate")(name=target, **attrs)
         return update_bus(name, bus)
 
     # F2: Transformer needs voltage validation
     if component_class == "Transformer":
         from routers.network import update_transformer
-        tr = _get_schema("TransformerCreate")(name=name, **attrs)
+        target = attrs.pop("name", name)
+        tr = _get_schema("TransformerCreate")(name=target, **attrs)
         return update_transformer(name, tr)
 
     # F3: GlobalConstraint dedicated CRUD
     if component_class == "GlobalConstraint":
         from routers.network import update_global_constraint
-        gc = _get_schema("GlobalConstraintCreate")(name=name, **attrs)
+        target = attrs.pop("name", name)
+        gc = _get_schema("GlobalConstraintCreate")(name=target, **attrs)
         return update_global_constraint(name, gc)
 
     # Bare passthrough classes — direct _update_component
@@ -1282,7 +1443,1184 @@ def update_solver_config(partial: dict) -> dict:
     from routers.simulation import update_solver_config as _h
     from models.schemas import SolverConfigSchema
     body = SolverConfigSchema(**partial)
-    return _h(body)
+    # The handler's user-code admin gate needs `db` + `user` (83d50f049; renamed from `actor` in 3e9f17d).
+    # Called bare they were `Depends` sentinels (merge review N6). With no
+    # acting identity bound, pass None: the gate then refuses user code
+    # (fail closed) and every other knob works as before.
+    if acting_user_id() is None:
+        return _h(body, db=None, user=None)
+    return _route(_h, body)
+
+
+# ── Library (4) — Edge Investment Case P2 WP2.4c ────────────────────────────
+# Router handlers called through `_route`, so the acting user's org and the
+# Library ACL apply exactly as over HTTP. Results stay compact (the chat's
+# per-result cap): a paged list, a tariff SUMMARY unless asked for the full
+# payload or one item, a small attach receipt (review M3).
+
+# The chat forwards at most ~1000 characters of an error: the listings are
+# compact strings, as many as fit, with the totals stated first (round 2 N2).
+_LIBRARY_ERROR_BUDGET = 700
+# Route / binding refusals carry `{"code": …}`; the chat's forwarder reads
+# `error_kind`. Library tools re-raise them under their code (review L1).
+# Written as `error_kind` literals so the manifest guard sees every kind
+# (round 2 N1).
+_LIBRARY_ERROR_KINDS = (
+    {"error_kind": "urdb_refused"}, {"error_kind": "urdb_invalid"},
+    {"error_kind": "library_ref_stale"}, {"error_kind": "import_tariff_ref_conflict"},
+    {"error_kind": "commercial_binding_invalid"}, {"error_kind": "solver_in_flight"},
+)
+_LIBRARY_CODES = {d["error_kind"]: d["error_kind"] for d in _LIBRARY_ERROR_KINDS}
+
+
+def _safe_text(value, limit: int = 60) -> str:
+    """Free text from an uploaded file (a rate's name) as the model may see it
+    in an error: printable word characters and spaces only (round 3)."""
+    import re as _re
+
+    return _re.sub(r"[^\w .,()/-]", "_", str(value))[:limit]
+
+
+def _fit(entries: list[str], budget: int = _LIBRARY_ERROR_BUDGET) -> list[str]:
+    out, used = [], 0
+    for e in entries:
+        e = e[:budget]   # the first entry is always admitted: never oversized (P2 gate)
+        if out and used + len(e) + 4 > budget:
+            break
+        out.append(e)
+        used += len(e) + 4
+    return out
+
+
+def _safe_field(name) -> str:
+    """A refused URDB field name as the model may see it: it comes from an
+    uploaded file, so it is reduced to an identifier (review L1)."""
+    import re as _re
+
+    return _re.sub(r"[^A-Za-z0-9_./]", "_", str(name))[:64]
+
+
+def _library_call(handler, *args, **kwargs):
+    try:
+        return _route(handler, *args, **kwargs)
+    except HTTPException as exc:
+        d = exc.detail
+        if isinstance(d, dict) and d.get("code") in _LIBRARY_CODES:
+            detail = {"error_kind": _LIBRARY_CODES[d["code"]],
+                      "message": str(d.get("message", ""))[:500]}
+            if isinstance(d.get("refusals"), list):
+                refusals = [r for r in d["refusals"] if isinstance(r, dict)]
+                shown = _fit([f"{_safe_field(r.get('field'))}: {str(r.get('reason'))[:60]}"
+                              for r in refusals])
+                detail = {"error_kind": detail["error_kind"],
+                          "refusals_total": len(refusals), "refusals_shown": len(shown),
+                          "refusals": shown,
+                          "message": detail["message"][:200]}
+            raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+        raise
+
+
+def _library_kind(kind: str):
+    from routers.library import ItemKind
+
+    try:
+        return ItemKind(kind)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "unknown_library_kind",
+            "message": f"kind is one of {[k.value for k in ItemKind]}, got {kind!r}"}) from exc
+
+
+def list_library_items(kind: str, offset: int = 0, limit: int | None = None) -> dict:
+    from routers.library import list_items as _h
+    rows = [r.model_dump(mode="json") for r in _library_call(_h, _library_kind(kind))]
+    return _paginate(rows, offset, limit)
+
+
+def _tariff_summary(payload: dict) -> dict:
+    items = []
+    for it in payload.get("items") or []:
+        periods = it.get("periods") or []
+        rates = [float(p.get("rate", 0.0)) for p in periods]
+        rates += [float(r) for p in periods for r in (p.get("tier_rates") or [])]
+        rates += [float(t.get("rate", 0.0)) for t in it.get("tiers") or []]
+        items.append({"id": it.get("id"), "kind": it.get("kind"), "unit": it.get("unit"),
+                      "direction": it.get("direction", "cost"),
+                      "periods": len(periods),
+                      "windows": sorted({str(p.get("name")) for p in periods}),
+                      "tiers": len(it.get("tiers") or []),
+                      "ratchet": it.get("ratchet") is not None,
+                      "rate_min": min(rates) if rates else None,
+                      "rate_max": max(rates) if rates else None})
+    return {"id": payload.get("id"), "name": payload.get("name"),
+            "jurisdiction": payload.get("jurisdiction"), "valid_from": payload.get("valid_from"),
+            "valid_to": payload.get("valid_to"),
+            "unsupported_fields": payload.get("unsupported_fields") or [], "items": items}
+
+
+def get_library_item(kind: str, name: str, version: int | None = None,
+                     detail: str = "summary", item_id: str | None = None) -> dict:
+    from routers.library import get_item as _h
+    out = _library_call(_h, _library_kind(kind), name, version=version).model_dump(mode="json")
+    payload = out["payload"]
+    if item_id is not None:
+        if kind != "tariff":
+            raise HTTPException(status_code=422, detail={
+                "error_kind": "unknown_library_kind",
+                "message": "item_id selects one item of a TARIFF"})
+        match = [i for i in payload.get("items") or [] if i.get("id") == item_id]
+        if not match:
+            raise HTTPException(status_code=404, detail=f"tariff {name!r} has no item {item_id!r}")
+        return {"ref": out["ref"], "meta": out["meta"], "item": match[0]}
+    if kind == "tariff" and detail != "full":
+        return {"ref": out["ref"], "meta": out["meta"], "summary": _tariff_summary(payload)}
+    return out
+
+
+def _urdb_rate(data, item_index: int | None = None):
+    """The rate object of an uploaded URDB file: the object itself, one item
+    of an OpenEI response, or a REopt scenario's `urdb_response`."""
+    def unreadable(message: str):
+        return HTTPException(status_code=422, detail={"error_kind": "urdb_upload_unreadable",
+                                                      "message": message})
+
+    if isinstance(data, dict) and isinstance(data.get("items"), list):
+        items = data["items"]
+        if not items:
+            raise unreadable("the OpenEI response lists no rates")
+        if item_index is None and len(items) > 1:
+            # A utility query returns many rates (superseded versions too):
+            # never pick one silently (review M4).
+            listing = _fit([f"{i}: {_safe_text(r.get('name') or r.get('label'))} "
+                            f"({_safe_text(r.get('startdate'), 24)})"
+                            for i, r in enumerate(items) if isinstance(r, dict)])
+            raise HTTPException(status_code=422, detail={
+                "error_kind": "urdb_multiple_rates", "rates_total": len(items),
+                "rates_shown": len(listing), "rates": listing,
+                "message": f"the upload holds {len(items)} rates; pass item_index"})
+        i = item_index or 0
+        if not 0 <= i < len(items):
+            raise unreadable(f"item_index {i} is outside the {len(items)} rates")
+        return items[i]
+    if item_index not in (None, 0):
+        raise unreadable("item_index applies to an OpenEI response with several rates")
+    if isinstance(data, dict) and isinstance(data.get("ElectricTariff"), dict):
+        et = data["ElectricTariff"]
+        if isinstance(et.get("urdb_response"), dict):
+            return et["urdb_response"]
+        label = et.get("urdb_label")
+        raise unreadable(f"the REopt scenario names URDB rate {_safe_text(label, 40)!r} "
+                         "but carries no "
+                         "urdb_response; upload the OpenEI rate itself" if label else
+                         "the REopt scenario carries no urdb_response")
+    return data
+
+
+def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
+                       accept_partial: bool = False, valid_from: str | None = None,
+                       item_index: int | None = None, tariff_id: str | None = None,
+                       jurisdiction: str | None = None) -> dict:
+    """An UPLOADED URDB JSON file (never an LLM-emitted blob) → a Library tariff."""
+    from routers.library import UrdbImportIn, import_urdb as _h
+    from services import upload_service
+
+    with _acting():   # identity before the file is read (review L4)
+        pass
+    project = _require_active_project()
+    blob = upload_service.get_upload_path(project, file_id)
+    try:
+        data = json.loads(blob.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "urdb_upload_unreadable",
+            "message": f"upload {file_id!r} is not a JSON file: {type(exc).__name__}"}) from exc
+    rate = _urdb_rate(data, item_index)
+    if not isinstance(rate, dict):
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "urdb_upload_unreadable",
+            "message": "the upload holds no URDB rate object"})
+    try:
+        body = UrdbImportIn(urdb_response=rate, name=name, cyclic_year=cyclic_year,
+                            accept_partial=accept_partial, valid_from=valid_from,
+                            tariff_id=tariff_id, jurisdiction=jurisdiction)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "urdb_invalid", "message": _safe_text(exc, 300)}) from exc
+    out = _library_call(_h, body).model_dump(mode="json")
+    refusals = out.get("refusals") or []
+    out["refusals_total"] = len(refusals)
+    out["refusals"] = _fit([f"{_safe_field(r.get('field'))}: {_safe_text(r.get('reason'))}"
+                            for r in refusals])
+    fields = out.get("unsupported_fields") or []
+    out["unsupported_fields"] = _fit([_safe_field(f) for f in fields])
+    out["unsupported_fields_total"] = len(fields)
+    return out
+
+
+def attach_tariff(name: str, version: int | None = None, replace_inline: bool = False) -> dict:
+    """Set `commercial.import_tariff_ref` to a Library tariff through the
+    solver-config route (which resolves and pins it). An inline tariff that is
+    not this item is never replaced silently (review M2)."""
+    from models.schemas import SolverConfigSchema
+    from routers.library import ItemKind, get_item as _get
+    from routers.simulation import get_solver_config as _cfg, update_solver_config as _put
+
+    ref = _library_call(_get, ItemKind.tariff, name, version=version).ref.model_dump(mode="json")
+    commercial = dict((_cfg() or {}).get("commercial") or {})
+    # The value-flow config is owned by its own route: omit it so the solver-config
+    # route keeps whatever is stored when this PUT lands (IC P3 WP3.0, plan C7).
+    commercial.pop("value_flows", None)
+    if not commercial.get("poc_link"):
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "no_commercial_config",
+            "message": "set the commercial config's poc_link first "
+                       "(update_solver_config), then attach the tariff"})
+    inline = commercial.get("import_tariff")
+    old_ref = commercial.get("import_tariff_ref")
+    replaced = None
+    if inline is not None or commercial.get("import_tariff_id"):
+        same = isinstance(old_ref, dict) and old_ref.get("hash") == ref["hash"]
+        if not same and isinstance(old_ref, dict) and inline is not None:
+            # The inline copy IS the old Library item (unedited): a plain
+            # switch between Library tariffs, nothing hand-made is lost (L5).
+            from models.commercial import Tariff
+            from services.commercial import hashing as _H
+
+            try:
+                same = _H.library_item_digest(Tariff.model_validate(inline)) == \
+                    old_ref.get("hash")
+            except ValueError:
+                same = False
+        replaced = {"id": (inline or {}).get("id") or commercial.get("import_tariff_id"),
+                    "name": (inline or {}).get("name"), "had_ref": old_ref is not None}
+        if not same and not replace_inline:
+            raise HTTPException(status_code=409, detail={
+                "error_kind": "inline_tariff_would_be_replaced",
+                "message": (f"the project's import tariff {replaced['id']!r} would be "
+                            f"replaced by Library tariff {name!r}; confirm with the user, "
+                            "then call again with replace_inline=true"),
+                "current": replaced})
+    commercial.pop("import_tariff", None)
+    commercial.pop("import_tariff_id", None)
+    commercial["import_tariff_ref"] = ref
+    out = _library_call(_put, SolverConfigSchema(commercial=commercial))
+    bound = (out.get("commercial") or {}).get("import_tariff") or {}
+    return {"import_tariff_ref": ref,
+            "import_tariff": {"id": bound.get("id"), "name": bound.get("name"),
+                              "items": len(bound.get("items") or [])},
+            "replaced": replaced}
+
+
+# ── Site connection (IC U1 follow-up, item b) ──────────────────────────────
+# The commercial root: the meter Links and the site clock. Written through the
+# solver-config route (which binds the whole config); refusals as literals for
+# the manifest guard.
+_SITE_CONNECTION_ERROR_KINDS = (
+    {"error_kind": "site_connection_link_missing"},
+    {"error_kind": "site_connection_wrong_direction"},
+    {"error_kind": "site_connection_invalid"},
+)
+
+
+class _Unset:
+    """An omitted argument (distinct from an explicit null, which clears)."""
+
+    def __repr__(self) -> str:
+        return "<unset>"
+
+
+_UNSET = _Unset()
+
+
+def set_site_connection(poc_link: str, export_link: str | None | _Unset = _UNSET,
+                        timezone: str | None | _Unset = _UNSET) -> dict:
+    """Set the commercial root (`poc_link`, `export_link`, `timezone`) through
+    the solver-config route, keeping every other key of a stored commercial
+    config (the route keeps the value flows itself). An OMITTED `export_link`
+    or `timezone` keeps the stored value; an explicit null clears it. The
+    Links are checked first (`binding.check_site_connection`): they exist, are
+    one-way and point grid → site (PoC) and site → grid (export)."""
+    from pydantic import ValidationError
+
+    from models.schemas import SolverConfigSchema
+    from routers.simulation import get_solver_config as _cfg, update_solver_config as _put
+    from services.commercial import binding
+
+    with _acting():   # identity before the network is read
+        pass
+    stored = (_cfg() or {}).get("commercial")
+    created = not (isinstance(stored, dict) and stored.get("poc_link"))
+    commercial = dict(stored) if isinstance(stored, dict) else {}
+    commercial.pop("value_flows", None)   # owned by its own route (plan C7)
+    commercial["poc_link"] = poc_link
+    if not isinstance(export_link, _Unset):
+        commercial["export_link"] = export_link
+    if not isinstance(timezone, _Unset):
+        commercial["timezone"] = timezone
+    try:
+        binding.check_site_connection(PyPSAService.get_network(), poc_link,
+                                      commercial.get("export_link"),
+                                      group_members=commercial.get("group_members"))
+        body = SolverConfigSchema(commercial=commercial)
+    except binding.BindingRefusal as exc:
+        raise HTTPException(status_code=exc.status, detail={
+            "error_kind": exc.code, "message": exc.message[:500]}) from exc
+    except (ValidationError, ValueError) as exc:
+        errors = exc.errors() if isinstance(exc, ValidationError) else []
+        message = str(errors[0].get("msg")) if errors else str(exc)
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "site_connection_invalid", "message": message[:300]}) from exc
+    try:
+        out = _library_call(_put, body)
+    except HTTPException as exc:
+        d = exc.detail if isinstance(exc.detail, dict) else {}
+        if "error_kind" in d or "code" not in d:
+            raise
+        # A refusal of the kept config (a tariff, a contract, a connection
+        # agreement) with no chat kind of its own (e.g. `fca_needs_saved_project`;
+        # `_library_call` already gave `commercial_binding_invalid`,
+        # `library_ref_stale` and `solver_in_flight` theirs): say which code.
+        raise HTTPException(status_code=exc.status_code, detail={
+            "error_kind": "site_connection_invalid", "code": str(d["code"])[:80],
+            "message": str(d.get("message", ""))[:500]}) from exc
+    bound = out.get("commercial") or {}
+    root = {k: bound.get(k) for k in binding.SITE_CONNECTION_KEYS}
+    notes = []
+    if root["export_link"] is None:
+        notes.append("no export_link: export is not priced or billed")
+    if root["timezone"] is None:
+        notes.append("no timezone: the snapshots are read as the site clock")
+    return {"commercial": root, "created": created, "notes": notes}
+
+
+# ── Participants (IC P3 WP3.4) ─────────────────────────────────────────────
+# `define_participants` drives the template and value-flows routes. Their
+# refusals carry `{"code": …}`; the forwarder reads `error_kind`, so each is
+# re-raised under a fixed kind (written as literals for the manifest guard).
+_VALUE_FLOW_ERROR_KINDS = (
+    {"error_kind": "value_flows_invalid"}, {"error_kind": "value_flows_changed"},
+    {"error_kind": "no_commercial_config"}, {"error_kind": "commercial_config_invalid"},
+    {"error_kind": "solver_in_flight"},
+)
+_VALUE_FLOW_CODES = {d["error_kind"]: d["error_kind"] for d in _VALUE_FLOW_ERROR_KINDS}
+
+
+def _value_flow_call(handler, *args, **kwargs):
+    try:
+        return handler(*args, **kwargs)
+    except HTTPException as exc:
+        d = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+        code = str(d.get("code") or "")
+        message = str(d.get("message", ""))[:500]
+        if code in _VALUE_FLOW_CODES:
+            detail = {"error_kind": _VALUE_FLOW_CODES[code], "message": message}
+            if isinstance(d.get("problems"), list):
+                shown = _fit([str(x)[:200] for x in d["problems"]])
+                detail.update(problems_total=len(d["problems"]), problems=shown)
+        elif code.startswith("template_"):
+            detail = {"error_kind": "template_refused", "code": code, "message": message}
+        else:
+            raise
+        raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+
+
+def define_participants(template: str | None = None, config: dict | None = None,
+                        clear: bool = False, replace: bool = False) -> dict:
+    """Set the project's participants and value-flow assignment. Exactly one
+    of `template` (build it through the template route), `config` (a full
+    value-flow config) or `clear`. A template that needs contracts the project
+    does not have is NOT saved: its unpriced drafts come back for the user to
+    price and save first (never saved silently). A stored config that differs
+    is not replaced (or cleared) until the user confirms and `replace=true`
+    (the `attach_tariff` guard). Every write sends the digest it read as
+    If-Match."""
+    from routers.simulation import (
+        TemplateIn, ValueFlowsIn, build_value_flow_template, get_value_flows as _get,
+        put_value_flows as _put,
+    )
+
+    if sum((template is not None, config is not None, bool(clear))) != 1:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "value_flows_invalid",
+            "message": "pass exactly one of template, config or clear=true"})
+    notes: list[str] = []
+    if template is not None:
+        built = _value_flow_call(build_value_flow_template, TemplateIn(template=template))
+        notes = list(built.get("notes") or [])
+        if built.get("draft_contracts"):
+            # Compact (WP3.4 review #2): the model re-calls with the template,
+            # so the config itself is not needed — its parties and sizes are.
+            cfg = built["config"]
+            return {"saved": False, "status": "drafts_need_pricing", "template": template,
+                    "draft_contracts": [_compact_draft(d) for d in built["draft_contracts"]],
+                    "participants": _fit([f"{x.get('id')} ({x.get('role')})"
+                                          for x in cfg.get("participants") or []]),
+                    "asset_owners_total": len(cfg.get("asset_owners") or []),
+                    "notes": _fit(notes),
+                    "message": ("the template needs these contracts, which the project does "
+                                "not have: ask the user for the null fields, save them with "
+                                "update_solver_config, then call define_participants again")}
+        value = built["config"]
+    else:
+        value = None if clear else config
+    state = _value_flow_call(_get)
+    current = state.get("value_flows")
+    if current is not None and _vf_normal(current) != _vf_normal(value) and not replace:
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "value_flows_would_be_replaced",
+            "message": ((f"the project already has a value-flow config (template "
+                         f"{str(current.get('template'))!r}); "
+                         if state.get("status") == "ok" and isinstance(current, dict) else
+                         "the project holds a stored value-flow config that does not "
+                         "validate; ")
+                        + "confirm with the user, then call again with replace=true"),
+            "current_participants": [str(x.get("id"))[:60] for x in
+                                     (current.get("participants") or [])
+                                     if isinstance(x, dict)][:10]
+            if isinstance(current, dict) else []})
+    out = _value_flow_call(_put, ValueFlowsIn(value_flows=value), if_match=state["digest"])
+    stored = out.get("value_flows") or {}
+    parts = stored.get("participants") or []
+    return {"saved": True, "status": out.get("status"), "digest": out.get("digest"),
+            "template": stored.get("template"), "participants_total": len(parts),
+            "participants": _fit([f"{x.get('id')} ({x.get('role')})" for x in parts]),
+            "notes": _fit(notes)}
+
+
+def _vf_normal(value):
+    """A value-flow config as the server stores it (so the same config sent
+    twice is not a replacement, WP3.4 review #5); the raw value when it does
+    not validate."""
+    from services.commercial import participants as P
+
+    try:
+        parsed = P.parse_value_flows(value)
+    except P.ValueFlowsInvalid:
+        return value
+    return None if parsed is None else parsed.model_dump(mode="json")
+
+
+def _compact_draft(d: dict) -> dict:
+    """A draft contract with its id lists fitted (a site with many assets)."""
+    out = dict(d)
+    for key in ("asset_ids", "load_ids"):
+        ids = out.get(key)
+        if isinstance(ids, list) and len(ids) > 10:
+            out[key] = ids[:10]
+            out[f"{key}_total"] = len(ids)
+    return out
+
+
+# ── Investment case (IC P4 WP4.6c) ─────────────────────────────────────────
+# The single-owner finance run for the model: start it (campaign-gated like
+# the studies; it solves no LP, so it is charged 0 solves), read its status and
+# report (a summary under the result cap, or the cashflow lines paged), solve
+# an owner-sold PPA price for a target post-tax equity IRR WITHOUT touching the
+# stored inputs, and explain the equity IRR and the min-DSCR year by stream and
+# year. The routes' refusals carry `{"code": …}`; each is re-raised under a
+# fixed kind (written as literals for the manifest guard). An unknown number is
+# never written as 0: it reads "not established" (plan C12, ADR-0001).
+
+_IC_ERROR_KINDS = (
+    {"error_kind": "investment_case_busy"}, {"error_kind": "investment_case_not_solved"},
+    {"error_kind": "finance_inputs_missing"}, {"error_kind": "finance_inputs_invalid"},
+    {"error_kind": "tax_pack_not_found"}, {"error_kind": "investment_case_request_invalid"},
+)
+# Route code → kind (the `start_investment_case` 422 set and the POST's 409).
+_IC_CODES = {
+    "not_solved": "investment_case_not_solved",
+    "finance_inputs_missing": "finance_inputs_missing",
+    "finance_inputs_invalid": "finance_inputs_invalid",
+    "tax_pack_not_found": "tax_pack_not_found",
+    "request_invalid": "investment_case_request_invalid",
+}
+assert set(_IC_CODES.values()) <= {d["error_kind"] for d in _IC_ERROR_KINDS}
+
+# The C9 solve-for-PPA refusals (`engine.solve_ppa`'s `solve_ppa_status`), and
+# an adapter refusal (`FinanceRefused`) while building the case to solve on.
+_SOLVE_PPA_ERROR_KINDS = (
+    {"error_kind": "solve_ppa_contract_not_found"}, {"error_kind": "solve_ppa_ambiguous_contract"},
+    {"error_kind": "solve_ppa_not_owner_sold"}, {"error_kind": "solve_ppa_not_linear"},
+    {"error_kind": "solve_ppa_needs_redispatch"}, {"error_kind": "solve_ppa_price_unknown"},
+    {"error_kind": "solve_ppa_cash_not_established"}, {"error_kind": "solve_ppa_no_root"},
+    {"error_kind": "solve_ppa_irr_ambiguous"},
+    {"error_kind": "investment_case_refused"},
+)
+_SOLVE_PPA_MESSAGES = {
+    "solve_ppa_contract_not_found": "no owner-sold PPA settlement line matches: name the "
+                                    "contract with contract_id, or add a PPA the owner sells",
+    "solve_ppa_ambiguous_contract": "several PPA contracts: name one with contract_id",
+    "solve_ppa_not_owner_sold": "the contract is not sold by the owner (its settlement is not "
+                                "cash in): only an owner-sold PPA can be solved",
+    "solve_ppa_not_linear": "the contract's settlement is not linear in its price (not a PPA "
+                            "settlement at its own indexation), so a price cannot be solved",
+    "solve_ppa_needs_redispatch": "the contract changes the dispatch: a finance-only solve cannot "
+                                  "re-dispatch, so its price cannot be solved here",
+    "solve_ppa_price_unknown": "the contract's price is not established in the case",
+    "solve_ppa_cash_not_established": "the post-tax equity cash is not established at a zero "
+                                      "price (see get_investment_case for the reasons)",
+    "solve_ppa_irr_ambiguous": "a price makes the equity NPV zero at the target rate, but the "
+                               "equity cash to the target year has several IRRs and the case's "
+                               "own IRR at that price is another one (see `code`): the price "
+                               "does not give the target IRR as reported, so it is not "
+                               "established",
+    "solve_ppa_no_root": "no price in the search range reaches the target IRR in the target "
+                         "year (see `code` for why)",
+}
+
+_NE = "not established"
+_IC_SUMMARY_CHARS = 3500
+_IC_PAGE_CHARS = 3000
+_IC_P4_SECTIONS = ("project", "debt", "tax", "participants", "gates")
+
+
+def _cut(v, n: int = 80):
+    """User text (party ids, contract / asset names, flags) cut so one row or
+    entry can never outgrow the cap (the P3 rule: ids 80, flags 160)."""
+    return None if v is None else str(v)[:n]
+
+
+def _ne(v, nd: int | None = None):
+    """A number as the model reads it: None / NaN / inf → "not established",
+    never 0 (plan C12)."""
+    if v is None or isinstance(v, bool):
+        return _NE if v is None else v
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return _NE
+    if not math.isfinite(f):
+        return _NE
+    return round(f, nd) if nd is not None else f
+
+
+def _json_len(obj) -> int:
+    return len(json.dumps(obj, default=str))
+
+
+def _ic_raise(status: int, kind: str, message: str, **extra) -> NoReturn:
+    raise HTTPException(status_code=status,
+                        detail={"error_kind": kind, "message": str(message)[:500], **extra})
+
+
+@contextlib.contextmanager
+def _ic_errors():
+    """Re-raise the investment-case routes' refusals under a fixed kind. A 409
+    without a code is the study mesh (a solve or another study running)."""
+    try:
+        yield
+    except HTTPException as exc:
+        d = exc.detail
+        if isinstance(d, dict) and "error_kind" in d:
+            raise
+        code = str(d.get("code") or "") if isinstance(d, dict) else ""
+        message = str(d.get("message", "") if isinstance(d, dict) else d)[:500]
+        if code in _IC_CODES:
+            kind = _IC_CODES[code]
+        elif exc.status_code == 409:
+            kind = "investment_case_busy"
+        else:
+            raise
+        detail = {"error_kind": kind, "message": message}
+        if code:
+            detail["code"] = code
+        if isinstance(d, dict) and isinstance(d.get("errors"), list):
+            detail["errors_total"] = len(d["errors"])
+            detail["errors"] = _fit([str(e)[:200] for e in d["errors"]])
+        raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+
+
+def run_investment_case(owner: str | None = None) -> dict:
+    """Start the single-owner investment-case run (IC P4): build the finance
+    case from the solved network and the stored finance inputs, run the
+    finance engine and store the report. Campaign-gated like the studies (0
+    solves: it solves no LP). Poll `get_investment_case`."""
+    from pydantic import ValidationError
+
+    from routers.results import post_investment_case as _h
+    from services.finance.investment_case_runner import InvestmentCaseRequest
+
+    try:
+        body = InvestmentCaseRequest(owner=owner)
+    except ValidationError as exc:
+        _ic_raise(422, "investment_case_request_invalid",
+                  str(exc.errors()[0].get("msg")) if exc.errors() else str(exc))
+
+    def start():
+        with _ic_errors():
+            return _h(body)
+
+    out = _campaign_gated("investment_case", start)
+    out = {k: (_cut(v) if k in ("owner", "case_id") else v) for k, v in out.items()}
+    out["hint"] = ("poll get_investment_case() until status is done / refused / failed; "
+                   "then get_investment_case(detail='cashflows') pages the cash lines and "
+                   "explain_cashflow() explains the equity IRR and the min-DSCR year")
+    return out
+
+
+def _ic_read() -> tuple[dict | None, dict | None]:
+    """(status body, full report) — each None when the route answers 204."""
+    from routers.results import get_investment_case as _status, \
+        get_investment_case_report as _report
+
+    status = _status()
+    report = _report(detail="full")
+    status = None if getattr(status, "status_code", None) == 204 else status
+    report = None if getattr(report, "status_code", None) == 204 else report
+    return status, report
+
+
+_IC_NO_DATA = ("no investment-case run and no stored report: the finance inputs are set "
+               "with PUT /api/simulation/finance (the Investment tab), then call "
+               "run_investment_case — do NOT report this as a zero")
+
+
+def _section(report: dict, name: str) -> dict:
+    return ((report.get("sections") or {}).get(name) or {})
+
+
+def _ic_headlines(report: dict) -> dict:
+    p = _section(report, "project").get("payload") or {}
+    d = _section(report, "debt").get("payload") or {}
+
+    def pick(key, fallback=None, nd=6):
+        v = p.get(key)
+        if v is None and fallback is not None:
+            v = report.get(fallback)
+        return _ne(v, nd)
+
+    return {
+        "equity_post_tax_irr": pick("equity_post_tax_irr"),
+        "equity_pre_tax_irr": pick("equity_pre_tax_irr"),
+        "equity_post_tax_npv_at_cost_of_equity": pick("equity_post_tax_npv", nd=2),
+        "project_post_tax_irr": pick("project_post_tax_irr", "project_irr_post_tax"),
+        "project_pre_tax_irr": pick("project_pre_tax_irr", "project_irr_pre_tax"),
+        "project_post_tax_npv_at_wacc": pick("project_post_tax_npv", "npv_at_wacc", nd=2),
+        "lifecycle_npv": pick("lifecycle_npv", nd=2),
+        "payback_years": pick("payback_years", nd=2),
+        "lcoe_nominal_per_mwh": pick("lcoe_nominal_per_mwh",
+                                     "lcoe_finance_consistent_eur_per_mwh", nd=4),
+        "lcoe_real_per_mwh": pick("lcoe_real_per_mwh", nd=4),
+        "min_dscr": _ne(d.get("min_dscr", report.get("min_dscr")), 4),
+        "avg_dscr": _ne(d.get("avg_dscr", report.get("avg_dscr")), 4),
+        "llcr": _ne(d.get("llcr", report.get("llcr")), 4),
+        "plcr": _ne(d.get("plcr", report.get("plcr")), 4),
+        "debt_amount": _ne(d.get("amount"), 2),
+    }
+
+
+def _ic_summary(status: dict | None, report: dict | None) -> dict:
+    st = status or {}
+    rep_state = st.get("report") or {}
+    out: dict[str, Any] = {
+        "status": "ok",
+        "run": {"status": st.get("status", "idle"), "stage": st.get("stage"),
+                "stages_done": list(st.get("stages_done") or []),
+                "error_code": _cut(st.get("error_code"), 120),
+                "error": _cut(st.get("error"), 300)},
+    }
+    if report is None:
+        out["report"] = {"present": False}
+        out["flags"] = _fit([str(f)[:160] for f in st.get("flags") or []])
+        out["hint"] = "no stored report yet: poll get_investment_case() while the run is running"
+        return out
+    stale = rep_state.get("stale")
+    out["report"] = {"present": True, "stale": _NE if stale is None else stale,
+                     "changed": list(rep_state.get("changed") or [])[:8],
+                     "reason": _cut(rep_state.get("reason"), 120)}
+    p = _section(report, "project").get("payload") or {}
+    out.update(case_id=_cut(report.get("case_id")), owner=_cut(p.get("owner")),
+               currency=p.get("currency"), cod_year=p.get("cod_year"),
+               analysis_years=p.get("analysis_years"))
+    refusal = p.get("refusal")
+    if isinstance(refusal, dict):
+        out["refusal"] = {"code": _cut(refusal.get("code"), 120),
+                          "detail": _cut(refusal.get("detail"), 300)}
+    out["headlines"] = _ic_headlines(report)
+    if p.get("solve_ppa_status") is not None:
+        out["solve_ppa"] = {"status": _cut(p.get("solve_ppa_status"), 120),
+                            "price_per_mwh": _ne(p.get("solved_ppa_price"), 4),
+                            "money_year": p.get("solved_ppa_price_money_year")}
+    gate = _section(report, "gates").get("payload") or {}
+    consistent = gate.get("wacc_vs_discount_rate_consistent",
+                          (report.get("gates") or {}).get("wacc_vs_discount_rate_consistent"))
+    out["wacc_gate"] = {
+        "wacc_vs_discount_rate_consistent": _NE if consistent is None else consistent,
+        "legs": {k: (_NE if v is None else v) for k, v in (gate.get("legs") or {}).items()},
+        "assets_with_other_rates": [_cut(a) for a in (gate.get("assets_with_other_rates")
+                                                      or [])[:5]],
+        "values": {k: _ne(v, 6) for k, v in (gate.get("values") or {}).items()
+                   if not isinstance(v, dict)},
+    }
+    completeness = report.get("completeness") or {}
+    out["completeness"] = {k: completeness.get(k) for k in _IC_P4_SECTIONS if k in completeness}
+    out["skipped"] = sorted(k for k, v in completeness.items()
+                            if v == "skipped" and k not in _IC_P4_SECTIONS)
+    out["reasons"] = {k: str(_section(report, k).get("note") or "")[:300]
+                      for k in _IC_P4_SECTIONS if completeness.get(k) == "not_established"}
+    flags = [str(f)[:160] for f in p.get("flags") or []]
+    out["flags_total"] = len(flags)
+    out["flags"] = _fit(flags)
+    out["cashflow_lines"] = len(report.get("cashflow_lines") or [])
+    out["basis"] = ("IRRs as fractions; money in the case currency (NPVs at financial "
+                    "close); returns and DSCR on the incremental cash against the "
+                    "counterfactual supply cost; the lifecycle NPV on the owner's total cash")
+    out["hint"] = ("get_investment_case(detail='cashflows', page) pages the cash lines; "
+                   "explain_cashflow() attributes the equity IRR and the min-DSCR year")
+
+    # Fit the cap: the gate's values first, then shorter reasons, fewer flags.
+    if _json_len(out) > _IC_SUMMARY_CHARS:
+        out["wacc_gate"].pop("values", None)
+        out["omitted"] = ["wacc_gate.values"]
+    if _json_len(out) > _IC_SUMMARY_CHARS:
+        out["reasons"] = {k: v[:120] for k, v in out["reasons"].items()}
+        out["omitted"].append("reasons_long")
+    if _json_len(out) > _IC_SUMMARY_CHARS:
+        out["flags"] = flags[:3]
+        out["omitted"].append("flags")
+    if _json_len(out) > _IC_SUMMARY_CHARS:
+        out.pop("basis", None)
+        out["run"]["error"] = _cut(out["run"]["error"], 100)
+        out["reasons"] = {k: v[:60] for k, v in out["reasons"].items()}
+        out["flags"] = []
+        out["omitted"].append("flags_all")
+    return out
+
+
+def _ic_cashflow_rows(report: dict) -> list[dict]:
+    rows = []
+    for ln in sorted(report.get("cashflow_lines") or [], key=lambda x: x.get("year") or 0):
+        prov = ln.get("provenance") or {}
+        src = prov.get("source")
+        sid = prov.get("source_id")
+        row = {"year": ln.get("year"), "stream": _cut(ln.get("value_stream"), 40),
+               "counterparty": _cut(ln.get("counterparty")), "amount": _ne(ln.get("amount"), 2),
+               "source": _cut(f"{src}:{sid}" if sid else src, 120)}
+        if prov.get("contract_id"):
+            row["contract"] = _cut(prov["contract_id"])
+        for key in ("asset", "tariff_item"):
+            if ln.get(key):
+                row[key] = _cut(ln[key])
+        if prov.get("period"):
+            row["period"] = _cut(prov["period"], 40)
+        rows.append(row)
+    return rows
+
+
+def _pack_pages(rows: list[dict], budget: int) -> list[list[dict]]:
+    """Deterministic pages packed by serialised size (the `_paginate` rule: a
+    page always takes its first row), so page N is the same page every call."""
+    pages: list[list[dict]] = []
+    cur: list[dict] = []
+    used = 0
+    for row in rows:
+        cost = _json_len(row) + 2
+        if cur and used + cost > budget:
+            pages.append(cur)
+            cur, used = [], 0
+        cur.append(row)
+        used += cost
+    if cur:
+        pages.append(cur)
+    return pages
+
+
+def _ic_equity_cash_state(report: dict) -> tuple[bool, list[str]]:
+    """(the post-tax equity cash is established, what is not): a None line is
+    left out of the lines, so the pages must say so — never sum to a total
+    that reads as established (C12; WP4.6c review F1)."""
+    proj = _section(report, "project")
+    p = proj.get("payload") or {}
+    eq = (p.get("cash") or {}).get("equity_post_tax")
+    ok = isinstance(eq, list) and bool(eq) and all(_ne(v) != _NE for v in eq)
+    missing: list[str] = []
+    if proj.get("status") not in (None, "ok") and proj.get("note"):
+        missing.append(str(proj["note"]))
+    missing += [f"operating:{k}" for k, v in (p.get("operating_status") or {}).items()
+                if v != "ok"]
+    missing += [f"counterfactual:{k}" for k in
+                ((p.get("counterfactual") or {}).get("lines_not_established") or [])]
+    if not ok and not missing:
+        tax = _section(report, "tax")
+        missing.append(f"tax:{tax.get('note') or tax.get('status') or 'not established'}")
+    return ok, [_cut(m, 160) for m in missing[:10]]
+
+
+def _ic_cashflow_page(status: dict | None, report: dict, page: int) -> dict:
+    rows = _ic_cashflow_rows(report)
+    cash_ok, not_established = _ic_equity_cash_state(report)
+    pages = _pack_pages(rows, _IC_PAGE_CHARS)
+    items = pages[page - 1] if page <= len(pages) else []
+    before = sum(len(pg) for pg in pages[:page - 1])
+    p = _section(report, "project").get("payload") or {}
+    stale = ((status or {}).get("report") or {}).get("stale")
+    out = {"status": "ok", "kind": "investment_case_cashflows", "page": page,
+           "pages": len(pages), "total_count": len(rows), "returned": len(items),
+           "has_more": before + len(items) < len(rows), "items": items,
+           "currency": p.get("currency"), "stale": _NE if stale is None else stale,
+           "equity_post_tax_cash": "established" if cash_ok else _NE,
+           "basis": ("one line per (year, stream line), + = cash in to the owner: the "
+                     "owner's total operating lines plus the counterfactual supply cost's "
+                     "lines NEGATED (source counterfactual:*) — do not subtract the "
+                     "counterfactual again. " + (
+                         "Each year's lines sum to the post-tax equity cash." if cash_ok else
+                         "The post-tax equity cash is NOT established: a line that is not "
+                         "established is left out, so these lines must not be summed into a "
+                         "total (see lines_not_established)."))}
+    if not cash_ok:
+        out["lines_not_established"] = not_established
+    if page > len(pages):
+        out["note"] = f"past the last page ({len(pages)})"
+    return out
+
+
+def get_investment_case(detail: str = "summary", page: int = 1) -> dict:
+    """The investment-case run and its stored report (IC P4). `summary`: the
+    run status, staleness, headlines, the WACC gate, completeness, the top
+    flags and reasons, under the result cap. `cashflows`: the cashflow lines,
+    paged (1-based)."""
+    if detail not in ("summary", "cashflows"):
+        _ic_raise(422, "investment_case_request_invalid",
+                  f"detail must be 'summary' or 'cashflows', got {_cut(detail, 40)!r}")
+    if not isinstance(page, int) or isinstance(page, bool) or page < 1:
+        _ic_raise(422, "investment_case_request_invalid", "page must be an integer >= 1")
+    status, report = _ic_read()
+    if status is None and report is None:
+        return _no_data("investment_case", _IC_NO_DATA)
+    if detail == "cashflows":
+        if report is None:
+            return _no_data("investment_case_cashflows",
+                            "no stored report yet: the run has not finished")
+        return _ic_cashflow_page(status, report, page)
+    return _ic_summary(status, report)
+
+
+def _ic_solve_layers(case):
+    """Tests only (the runner's `layers` hook): the tax layers `solve_ppa`
+    uses instead of the pack's. None in production — the pack decides."""
+    return None
+
+
+def _ic_default_owner(sim_state) -> str | None:
+    """The owner the last run used (its record, else the stored report's
+    provenance): `solve_ppa_price` solves the SAME case (WP4.6c review F2)."""
+    rec = sim_state.get("investment_case")
+    if isinstance(rec, dict) and rec.get("owner"):
+        return str(rec["owner"])
+    rep = sim_state.get("investment_case_report")
+    prov = ((_section(rep, "project").get("payload") or {}).get("provenance") or {}) \
+        if isinstance(rep, dict) else {}
+    return str(prov["owner"]) if prov.get("owner") else None
+
+
+def solve_ppa_price(target_irr: float, target_year: int,
+                    contract_id: str | None = None, owner: str | None = None) -> dict:
+    """The price of an owner-sold PPA for a target post-tax equity IRR in a
+    target operating year (IC P4 C9), from the stored finance inputs and the
+    current solved network. Builds the case through the router's adapter seam
+    and solves on a COPY whose `inputs.solve_ppa` is set: the stored inputs and
+    the stored report are never touched."""
+    import dataclasses
+
+    from pydantic import ValidationError
+
+    from models.finance import SolvePpa
+    from routers.results import _dispatch_ready, _ic_build_case, _study_mesh_blocker
+    from routers.simulation import _state as sim_state
+    from services.finance.case import FinanceRefused
+    from services.finance.engine import solve_ppa
+    from services.finance.investment_case_runner import finance_inputs_or_422
+    from services.finance.packs.base import PackNotFound, load_pack
+
+    try:
+        sp = SolvePpa(contract_id=contract_id, target_irr=target_irr, target_year=target_year)
+    except ValidationError as exc:
+        _ic_raise(422, "investment_case_request_invalid",
+                  "; ".join(f"{'.'.join(map(str, e.get('loc', ())))}: {e.get('msg')}"
+                            for e in exc.errors()[:3]))
+    blocked = _study_mesh_blocker("solve_ppa_price")
+    if blocked:
+        _ic_raise(409, "investment_case_busy", blocked)
+    n = PyPSAService.get_network()
+    if not _dispatch_ready(n):
+        _ic_raise(409, "investment_case_not_solved",
+                  "solve the network first: the PPA price is solved on the solved dispatch")
+    cfg = sim_state["solver_config"]
+    raw = getattr(cfg, "finance", None)
+    if raw is None:
+        _ic_raise(422, "finance_inputs_missing",
+                  "set the finance inputs first (PUT /api/simulation/finance)")
+    with _ic_errors():
+        finance_inputs_or_422(raw)
+    if owner is not None and (not isinstance(owner, str) or not owner.strip()):
+        _ic_raise(422, "investment_case_request_invalid", "owner must be a non-empty string")
+    owner = owner if owner is not None else _ic_default_owner(sim_state)
+    build = _ic_build_case(n, cfg, owner=owner, lost_load=sim_state.get("last_lost_load"))
+    try:
+        case = build()
+    except FinanceRefused as exc:
+        _ic_raise(422, "investment_case_refused", exc.detail or exc.code,
+                  code=_cut(exc.code, 120))
+    pack = None
+    if case.inputs.tax_pack_id:
+        try:
+            pack = load_pack(case.inputs.tax_pack_id, as_of=case.inputs.financial_close)
+        except PackNotFound as exc:
+            _ic_raise(422, "tax_pack_not_found", str(exc))
+    trial = dataclasses.replace(case, inputs=case.inputs.model_copy(update={"solve_ppa": sp}))
+    try:
+        out = solve_ppa(trial, pack, layers=_ic_solve_layers(trial))
+    except FinanceRefused as exc:
+        _ic_raise(422, "investment_case_refused", exc.detail or exc.code,
+                  code=_cut(exc.code, 120))
+    code = str(out.get("solve_ppa_status") or "")
+    if code != "ok":
+        kind = code.split(":", 1)[0]
+        if kind not in _SOLVE_PPA_MESSAGES:      # an unknown status is not "no root"
+            _ic_raise(422, "investment_case_refused",
+                      "the PPA price solve did not complete (see `code`)", code=_cut(code, 120),
+                      contract_id=_cut(contract_id))
+        _ic_raise(422, kind, _SOLVE_PPA_MESSAGES[kind], code=_cut(code, 120),
+                  contract_id=_cut(contract_id))
+    # The contract the engine priced and its price in the stored inputs (the
+    # earliest template's, in its money year — the engine's reference).
+    first = min(case.templates, key=lambda t: t.first_year)
+    ref = next((ln for ln in first.lines if ln.price is not None and (
+        ln.contract_id == contract_id if contract_id is not None
+        else ln.stream == "ppa_settlement")), None)
+    result = {
+        "status": "ok",
+        "solved_ppa_price_per_mwh": _ne(out.get("solved_ppa_price"), 4),
+        "currency": case.inputs.currency,
+        "money_year": out.get("solved_ppa_price_money_year"),
+        "contract_id": _cut(ref.contract_id if ref is not None else contract_id),
+        "price_in_stored_inputs_per_mwh": _ne(None if ref is None else ref.price, 4),
+        "target_irr": target_irr, "target_year": target_year,
+        "equity_post_tax_irr_at_target_year": _ne(out.get("solved_equity_irr_at_target_year"), 6),
+        "owner": _cut(case.owner),
+        "flags": [_cut(f, 160) for f in out.get("solve_ppa_flags") or []],
+        "basis": ("post-tax equity IRR on the incremental cash against the counterfactual "
+                  "supply cost, over operating years 1..target_year (SAM ppa_soln_mode=0)"),
+        "stored_inputs_changed": False,
+        "note": ("nothing was saved: the stored finance inputs and report are unchanged. To "
+                 "use this price, change the contract price and re-run the solve and "
+                 "run_investment_case"),
+    }
+    return result
+
+
+# The engine's own sources in the report's cashflow lines (report.py
+# `_cashflow_lines`); every other source is an operating line.
+_IC_FINANCE_SOURCES = frozenset({"capex", "replacement_capex", "terminal_value", "itc", "ptc",
+                                 "grant", "debt", "debt_draws", "dsra", "reserve_interest"})
+_IC_AVOIDED = "avoided_supply_cost (counterfactual)"
+
+
+def _ic_is_finance_source(src) -> bool:
+    return src in _IC_FINANCE_SOURCES or str(src or "").startswith("tax:")
+
+
+def _ic_is_counterfactual(ln: dict) -> bool:
+    return str((ln.get("provenance") or {}).get("source") or "").startswith("counterfactual:")
+
+
+def _ic_cf_lines_present(report: dict) -> bool:
+    """The report's lines carry the counterfactual (negated) themselves
+    (WP4.6b review B2) — then `counterfactual_net` must not be added again."""
+    return any(_ic_is_counterfactual(ln) for ln in report.get("cashflow_lines") or [])
+
+
+def _ic_label(ln: dict) -> str:
+    if _ic_is_counterfactual(ln):
+        return _IC_AVOIDED
+    stream = str(ln.get("value_stream"))
+    src = (ln.get("provenance") or {}).get("source")
+    if not _ic_is_finance_source(src) or src in ("debt", stream):
+        return _cut(stream, 80)
+    src = str(src)
+    return _cut(f"{stream}:{src[4:] if src.startswith('tax:') else src}", 80)
+
+
+def _money(v):
+    """Money rounded to the cent, -0.0 written as 0.0; None / NaN / inf → "not
+    established" (WP4.6c review F4)."""
+    f = _ne(v)
+    return _NE if f == _NE else round(float(f), 2) + 0.0
+
+
+def _ic_rate(report: dict, sim_state) -> tuple[float, str]:
+    """The discount rate of the attribution: the cost of equity of the finance
+    inputs the report was built from (their digest matches the report's
+    provenance), else the equity post-tax IRR, else 0 (undiscounted)."""
+    from services.finance.investment_case_runner import finance_digest
+
+    p = _section(report, "project").get("payload") or {}
+    coe = _ne(p.get("cost_of_equity"))              # recorded in the report itself
+    if coe != _NE and coe > -1.0:
+        return coe, "cost_of_equity"
+    stored = ((p.get("provenance") or {}).get("inputs") or {}).get("finance")
+    raw = getattr(sim_state.get("solver_config"), "finance", None)
+    if stored and isinstance(raw, dict) and finance_digest(raw) == stored:
+        coe = _ne(raw.get("cost_of_equity"))
+        if coe != _NE and coe > -1.0:
+            return coe, "cost_of_equity"
+    irr = _ne(p.get("equity_post_tax_irr"))
+    if irr != _NE and irr > -1.0:
+        return irr, "equity_post_tax_irr (the report's finance inputs are no longer stored, " \
+                    "so the cost of equity is not established; at the IRR the streams sum to 0)"
+    return 0.0, "undiscounted (neither the cost of equity nor the IRR is established)"
+
+
+def _ic_equity_attribution(report: dict, rate: float, top: int) -> dict:
+    p = _section(report, "project").get("payload") or {}
+    years = [int(y) for y in p.get("years") or []]
+    eq = ((p.get("cash") or {}).get("equity_post_tax"))
+    if not years or eq is None or any(_ne(v) == _NE for v in eq):
+        note = _section(report, "project").get("note") or \
+            "the post-tax equity cash is not established"
+        return {"status": "not_established", "reason": str(note)[:300]}
+    idx = {y: i for i, y in enumerate(years)}
+    disc = [(1.0 + rate) ** -i for i in range(len(years))]
+    by_label: dict[str, list[float]] = {}
+    for ln in report.get("cashflow_lines") or []:
+        i = idx.get(ln.get("year"))
+        amt = ln.get("amount")
+        if i is None or amt is None:
+            continue
+        if _ne(amt) == _NE:                       # NaN / inf in a stored report (review F4)
+            return {"status": "not_established",
+                    "reason": f"a cashflow line amount is not finite ({_cut(_ic_label(ln))})"}
+        by_label.setdefault(_ic_label(ln), [0.0] * len(years))[i] += float(amt)
+    cf = p.get("counterfactual_net")
+    if p.get("has_counterfactual") and cf and all(v is not None for v in cf) and \
+            not _ic_cf_lines_present(report):
+        by_label[_IC_AVOIDED] = [-float(v) for v in cf]
+    total = [sum(v[i] for v in by_label.values()) for i in range(len(years))]
+    residual = max((abs(total[i] - float(eq[i])) for i in range(len(years))), default=0.0)
+    pv = {k: sum(a * d for a, d in zip(v, disc)) for k, v in by_label.items()}
+    streams = sorted(pv, key=lambda k: -abs(pv[k]))
+    cells = sorted(((k, i, by_label[k][i] * disc[i]) for k in by_label
+                    for i in range(len(years)) if by_label[k][i] != 0.0),
+                   key=lambda c: -abs(c[2]))
+    return {
+        "status": "ok",
+        "equity_post_tax_irr": _ne(p.get("equity_post_tax_irr"), 6),
+        "equity_post_tax_npv_at_rate": _money(sum(float(c) * d for c, d in zip(eq, disc))),
+        "sum_of_stream_pvs": _money(sum(pv.values())),
+        "reconciles": residual <= 0.01 + 1e-9 * max(1.0, max(abs(float(v)) for v in eq)),
+        "max_yearly_residual": _money(residual),
+        "streams_total": len(streams),
+        "by_stream": [{"stream": k, "pv": _money(pv[k]),
+                       "undiscounted": _money(sum(by_label[k])),
+                       "effect_on_irr": ("raises" if pv[k] > 0 else
+                                         "lowers" if pv[k] < 0 else "none")}
+                      for k in streams[:top]],
+        "largest_cells": [{"stream": k, "year": years[i], "pv": _money(v),
+                           "amount": _money(by_label[k][i])} for k, i, v in cells[:top]],
+    }
+
+
+def _ic_min_dscr_year(report: dict, top: int) -> dict:
+    d = _section(report, "debt")
+    dp = d.get("payload") or {}
+    p = _section(report, "project").get("payload") or {}
+    years = [int(y) for y in p.get("years") or []]
+    dscr = dp.get("dscr") or []
+    cands = [(float(v), i) for i, v in enumerate(dscr) if _ne(v) != _NE]   # NaN-safe
+    if d.get("status") != "ok" or not cands or not years:
+        return {"status": "not_established",
+                "reason": str(d.get("note") or "no debt service, so no DSCR")[:300]}
+    vmin = min(v for v, _ in cands)
+    v, i = next((w, j) for w, j in cands                # a tie: the earliest year
+                if abs(w - vmin) <= 1e-9 * max(1.0, abs(vmin)))
+    year = years[i]
+    tied = sum(1 for w, _ in cands if abs(w - v) <= 1e-9 * max(1.0, abs(v)))
+
+    def at(key):
+        s = dp.get(key) or []
+        return _ne(s[i] if i < len(s) else None, 2)
+
+    parts: dict[str, float] = {}
+    for ln in report.get("cashflow_lines") or []:
+        if ln.get("year") != year or ln.get("amount") is None:
+            continue
+        src = (ln.get("provenance") or {}).get("source")
+        if _ic_is_finance_source(src) and src != "replacement_capex":
+            continue
+        label = _ic_label(ln)
+        parts[label] = parts.get(label, 0.0) + float(ln["amount"])
+    cf = p.get("counterfactual_net") or []
+    if p.get("has_counterfactual") and i < len(cf) and cf[i] is not None and \
+            not _ic_cf_lines_present(report):
+        parts[_IC_AVOIDED] = -float(cf[i])
+    cfads = at("cfads")
+    comp = sorted(parts.items(), key=lambda kv: -abs(kv[1]))
+    out = {"status": "ok", "year": year, "dscr": _ne(v, 4), "years_at_min": tied,
+           "cfads": cfads,
+           "cfads_parts_total": len(comp),
+           "cfads_by_stream": [{"stream": k, "amount": _money(a)} for k, a in comp[:top]],
+           "cfads_reconciles": (cfads != _NE and
+                                abs(sum(parts.values()) - cfads) <= 0.01 + 1e-9 * abs(cfads)),
+           "service": {"interest": at("interest"), "principal": at("principal"),
+                       "total": at("service")},
+           "by_tranche": []}
+    for t in (dp.get("tranches") or [])[:4]:
+        def ts(key, t=t):
+            s = t.get(key) or []
+            return _ne(s[i] if i < len(s) else None, 2)
+        out["by_tranche"].append({"index": t.get("index"), "kind": _cut(t.get("kind"), 40),
+                                  "interest": ts("interest"), "principal": ts("principal")})
+    return out
+
+
+_IC_EXPLAIN_METHOD = (
+    "Equity IRR: each stream's post-tax equity cash lines (the report's cashflow lines, "
+    "per year) discounted at `rate` to the financial close (end-of-year, year 0 "
+    "undiscounted); the operating lines are the owner's TOTAL cash, so the avoided supply "
+    "cost (the counterfactual, returns are on the incremental cash) is its own stream; the "
+    "stream PVs sum to the post-tax equity NPV at that rate. A stream with a positive PV "
+    "raises the IRR, a negative one lowers it. Min-DSCR year (the earliest on a tie; "
+    "`years_at_min` counts the tied years): CFADS = incremental operating "
+    "cash - replacement capex (terminal value excluded), split by stream; debt service = "
+    "interest + principal, per tranche.")
+
+
+def explain_cashflow(detail: str = "summary") -> dict:
+    """Explain the stored investment-case report (IC P4): the largest
+    contributions to the post-tax equity IRR by stream and by (stream, year),
+    and the min-DSCR year's CFADS and debt-service composition. Not
+    `explain_investment` (which explains one asset's LP sizing)."""
+    from routers.simulation import _state as sim_state
+
+    if detail not in ("summary", "full"):
+        _ic_raise(422, "investment_case_request_invalid",
+                  f"detail must be 'summary' or 'full', got {_cut(detail, 40)!r}")
+    status, report = _ic_read()
+    if report is None:
+        return _no_data("investment_case", _IC_NO_DATA if status is None else
+                        "no stored report yet: the run has not finished")
+    top = 8 if detail == "summary" else 20
+    rate, basis = _ic_rate(report, sim_state)
+    stale = ((status or {}).get("report") or {}).get("stale")
+    p = _section(report, "project").get("payload") or {}
+    out: dict[str, Any] = {
+        "status": "ok", "method": _IC_EXPLAIN_METHOD,
+        "rate": {"value": round(rate, 6), "basis": basis},
+        "currency": p.get("currency"), "stale": _NE if stale is None else stale,
+        "equity_irr": _ic_equity_attribution(report, rate, top),
+        "min_dscr_year": _ic_min_dscr_year(report, top),
+    }
+    # Fit the cap: fewer rows, then the method's long form.
+    while _json_len(out) > _IC_SUMMARY_CHARS and top > 2:
+        top = max(2, top // 2)
+        out["equity_irr"] = _ic_equity_attribution(report, rate, top)
+        out["min_dscr_year"] = _ic_min_dscr_year(report, top)
+        out["rows_limited_to"] = top
+    if _json_len(out) > _IC_SUMMARY_CHARS:
+        out["method"] = ("stream PVs of the post-tax equity cash at `rate` (sum = equity NPV; "
+                         "positive raises the IRR); min-DSCR year: CFADS by stream, service "
+                         "by tranche")
+    return out
 
 
 # ── Validation (3) ──────────────────────────────────────────────────────────
@@ -1383,6 +2721,12 @@ _ADEQUACY_HANDLER_NAMES: dict[str, str] = {
     "reserve_margin": "get_reserve_margin",
     "eh_study": "get_eh_study",
     "eh_reference_design": "get_eh_reference_design",
+    # EH sibling tables (E2E review m5): the report summarises them; these
+    # are the per-option / per-contingency rows behind each section.
+    "eh_redundancy": "get_eh_redundancy",
+    "eh_levers": "get_eh_levers",
+    "eh_dtc": "get_eh_dtc",
+    "eh_dtc_planning": "get_eh_dtc_planning",
 }
 
 # Why each kind can be empty. Surfaced verbatim on the no_data result so the
@@ -1415,6 +2759,10 @@ _ADEQUACY_NO_DATA_HINTS: dict[str, str] = {
         "no Energy Hub ReferenceDesignReport has been stored — run "
         "run_eh_study first"
     ),
+    "eh_redundancy": "no EH study with the redundancy stage has run",
+    "eh_levers": "no EH study with the levers stage has run",
+    "eh_dtc": "no EH study with the dtc_stress stage has run",
+    "eh_dtc_planning": "no EH study with the dtc_planning stage has run",
 }
 
 # Path outlier, same shape as get_results' ac_pf_status (v4-MAJOR-4): eleven of
@@ -1500,6 +2848,82 @@ def get_stress_scenarios(name: str) -> dict:
     """The per-project class-C stress-scenario registry."""
     from routers.adequacy_worksheet import get_stress_scenarios as _h
     return _h(project=_authorized_project(name))
+
+
+def put_stress_scenarios(name: str, scenarios: list) -> dict:
+    """Replace the per-project class-C registry (whole list; 422 names the
+    rule a scenario breaks). P22: lets the assistant apply a recommended
+    scenario — read the registry first and send it back with the change."""
+    from routers.adequacy_worksheet import (
+        StressScenariosPut,
+    )
+    from routers.adequacy_worksheet import put_stress_scenarios as _h
+    # Through `_route`: master's sidecar lock gate (68e5f62c3) declares `db`
+    # and `user`; called bare they arrived as `Depends` sentinels and every
+    # real (uuid-bearing) project crashed in server mode (merge review B1).
+    return _route(_h, body=StressScenariosPut(scenarios=scenarios),
+                  project=_authorized_project(name))
+
+
+def get_eh_template(name: str) -> dict:
+    """The Energy Hub template a project was created from (P19): recommended
+    archetype, pack overrides, stages, DtC attribution and study notes."""
+    from routers.adequacy_worksheet import get_eh_template as _h
+    out = _h(project=_authorized_project(name))
+    if not isinstance(out, dict):
+        return {"status": "no_data",
+                "message": f"project {name!r} was not created from an Energy "
+                           "Hub template"}
+    return out
+
+
+def get_feature_guide(tour: str | None = None, field: str | None = None) -> dict:
+    """The in-app guide (P21) the GUI's tours and hover tips show — the same
+    wording, so explanations match the screen. ``tour`` returns one tour's
+    steps; ``field`` one field's help; neither returns the index."""
+    from services.guides import load_guide
+    guide = load_guide("eh_fmea")
+    if field is not None:
+        text = guide["fields"].get(field)
+        if text is None:
+            raise HTTPException(
+                404, f"no guide entry for field {field!r}; known: "
+                f"{sorted(guide['fields'])}")
+        return {"field": field, "help": text}
+    if tour is not None:
+        t = guide["tours"].get(tour)
+        if t is None:
+            raise HTTPException(
+                404, f"no tour {tour!r}; known: {sorted(guide['tours'])}")
+        return {"tour": tour, **t}
+    return {"tours": {k: {"title": v["title"], "intro": v.get("intro"),
+                          "steps": len(v["steps"])}
+                      for k, v in guide["tours"].items()},
+            "fields": sorted(guide["fields"])}
+
+
+def review_eh_study() -> dict:
+    """Analyse the latest Energy Hub study (P22): findings with evidence,
+    recommendations and exact tool actions the user may choose to apply.
+    One source with ``GET /api/results/eh_review`` (P24):
+    ``eh_review.review_latest``."""
+    from routers import results as R
+    from services.adequacy.eh_review import review_latest
+
+    record = R.get_eh_study()
+    return review_latest(
+        R._state, record if isinstance(record, dict) else None,
+        no_data_message=_ADEQUACY_NO_DATA_HINTS["eh_reference_design"])
+
+
+def suggest_eh_setup(archetype: str | None = None) -> dict:
+    """Suggested Energy Hub tags for the live network (P25): the grid import
+    Link, the point-of-connection bus, critical buses, and units without
+    outage data — each with a reason and a ready update_component /
+    bulk_update_components action. READ: nothing is applied; the write tools
+    confirm whatever the user picks."""
+    from services.adequacy.eh_setup import suggest_eh_setup as _suggest
+    return _suggest(PyPSAService.get_network(), archetype=archetype)
 
 
 def _campaign_gated(study: str, start, **estimate_kwargs):
@@ -1667,6 +3091,11 @@ def run_eh_study(
     archetype: str,
     stages: list | None = None,
     budget_solves: int | None = None,
+    pack_overrides: dict | None = None,
+    dtc_config: dict | None = None,
+    dsr_buses: list | None = None,
+    mc: dict | None = None,
+    dtc_attribution: str | None = None,
 ) -> dict:
     """
     Start the Energy Hub reference-design study for one archetype pack.
@@ -1682,6 +3111,11 @@ def run_eh_study(
             archetype=archetype,
             stages=stages,
             budget_solves=budget_solves,
+            pack_overrides=pack_overrides,
+            dtc_config=dtc_config,
+            dtc_attribution=dtc_attribution,
+            dsr_buses=dsr_buses,
+            mc=mc,
         )),
         budget_solves=budget_solves)
 
@@ -1900,6 +3334,74 @@ def gridspine_fetch_result_figure(project_id: str, hour: int, name: str) -> dict
         return _h(_gridspine_project(db, user, project_id), name, hour)
 
 
+def gridspine_get_capacity(project_id: str, bus: str | None = None, kind: str | None = None,
+                           hour: int | None = None) -> dict:
+    from services.gridspine_service import get_capacity as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), bus=bus, kind=kind, hour=hour)
+
+
+def gridspine_compute_capacity(project_id: str, bus: str, kind: str) -> dict:
+    from services.gridspine_service import compute_capacity as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), bus, kind)
+
+
+def gridspine_get_connection_assessments(project_id: str, assessment_id: str | None = None,
+                                         hour: int | None = None) -> dict:
+    from services.gridspine_service import get_connection as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), assessment_id=assessment_id, hour=hour)
+
+
+def campus_get_study(project_id: str) -> dict:
+    from services.campus_electrical_service import get_state as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def campus_draft_campus(project_id: str, overwrite: bool = False) -> dict:
+    from services.campus_electrical_service import draft as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), bool(overwrite))
+
+
+def campus_run_study(project_id: str, k: int | None = None, pf: float | None = None,
+                     profile: str | None = None, margin: float | None = None,
+                     n_minus_1: bool | None = None) -> dict:
+    from services.campus_electrical_service import run as _h
+    settings = {key: v for key, v in (("k", k), ("profile", profile), ("margin", margin),
+                                       ("n_minus_1", n_minus_1)) if v is not None}
+    settings["pf"] = pf
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), settings)
+
+
+def campus_list_grid_codes(project_id: str) -> dict:
+    from services.campus_grid_code_service import list_grid_codes as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def campus_extract_grid_code(project_id: str, document_id: str) -> dict:
+    # No publish or confirm tool exists, on purpose: the copilot drafts, a
+    # person confirms each limit and publishes, in the panel (plan C10).
+    from services.campus_grid_code_service import extract as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), document_id)
+
+
+def gridspine_assess_connection(project_id: str, bus: str, load_mw: float, load_pf: float = 0.98,
+                                onsite_mw: float = 0.0, onsite_converter: bool = True,
+                                profile: str = "eu_rfg_dcc_ce") -> dict:
+    from services.gridspine_service import assess_facility as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), {
+            "bus": bus, "load_mw": float(load_mw), "load_pf": float(load_pf),
+            "onsite_mw": float(onsite_mw), "onsite_converter": bool(onsite_converter), "profile": profile,
+        })
+
+
 def gridspine_export_handoff_bundle(project_id: str, hour: int) -> dict:
     from services.gridspine_service import export_handoff_bundle as _h
     with _acting() as (db, user):
@@ -1990,7 +3492,8 @@ def _route(handler, *args, **kwargs):
         # signature because handlers reached here declare different subsets and
         # would raise TypeError on an unexpected keyword — `reset_network`
         # (`routers/network.py:1898`) declares `db` and `session` but no `user`.
-        injected = {n: v for n, v in (("db", db), ("user", user)) if n in params}
+        injected = {n: v for n, v in (("db", db), ("user", user),
+                                      ("actor", user)) if n in params}
         if "session" in params and "session" not in kwargs:
             injected["session"] = _acting_session(db)
         # `_route`'s contract is "resolve whatever the target declares", and
@@ -2007,7 +3510,7 @@ def _route(handler, *args, **kwargs):
                     f"_route() cannot satisfy dependency {name!r} of "
                     f"{getattr(handler, '__module__', '?')}."
                     f"{getattr(handler, '__qualname__', handler)}: it supplies only "
-                    f"db/user/session. Resolve it at the call site or extend _route()."
+                    f"db/user/actor/session. Resolve it at the call site or extend _route()."
                 )
         return handler(*args, **{**injected, **kwargs})
 
@@ -2670,6 +4173,177 @@ def ui_open_panel(
 def ui_set_snapshot(snapshot_iso: str, period: int | None = None) -> dict:
     return {"_ui_event": True, "kind": "set_snapshot",
             "snapshot_iso": snapshot_iso, "period": period}
+
+
+# ── Harness: ask the user (chat harness issue 04) ──────────────────────────
+
+ASK_USER_MAX_OPTIONS = 8
+
+
+def ask_user(
+    title: str,
+    question: str,
+    options: list[dict],
+    allow_free_text: bool = True,
+) -> dict:
+    """
+    Present a structured question. Non-blocking by design (owner decision
+    Q4): the loop turns this marker into a `choice_request` frame, the panel
+    renders a Choice card, and the pick comes back as the next user message.
+    The model gets `{status: "presented"}` and is told to end its turn.
+
+    Validation is strict and typed (`invalid_tool_args`) because a half-built
+    card — no options, two recommendations — is worse than none.
+    """
+    def bad(message: str) -> HTTPException:
+        return HTTPException(status_code=422, detail={
+            "error_kind": "invalid_tool_args", "message": f"ask_user: {message}",
+        })
+
+    if not isinstance(title, str) or not title.strip():
+        raise bad("title must be a non-empty string")
+    if not isinstance(question, str) or not question.strip():
+        raise bad("question must be a non-empty string")
+    if not isinstance(options, list) or not options:
+        raise bad("options must be a non-empty list")
+    if len(options) > ASK_USER_MAX_OPTIONS:
+        raise bad(f"at most {ASK_USER_MAX_OPTIONS} options")
+    clean: list[dict] = []
+    seen: set[str] = set()
+    for i, opt in enumerate(options):
+        if not isinstance(opt, dict):
+            raise bad(f"option {i} must be an object")
+        label = str(opt.get("label") or "").strip()
+        if not label:
+            raise bad(f"option {i} needs a label")
+        if label.lower() in seen:
+            raise bad(f"option labels must be distinct ({label!r} repeats)")
+        seen.add(label.lower())
+        entry: dict[str, Any] = {"label": label[:120]}
+        desc = opt.get("description")
+        if isinstance(desc, str) and desc.strip():
+            entry["description"] = " ".join(desc.split())[:400]
+        if opt.get("recommended"):
+            entry["recommended"] = True
+        clean.append(entry)
+    if sum(1 for o in clean if o.get("recommended")) > 1:
+        raise bad("mark at most one option as recommended")
+    return {
+        "_ui_event": True,
+        "kind": "choice",
+        "title": " ".join(title.split())[:160],
+        "question": " ".join(question.split())[:800],
+        "options": clean,
+        "allow_free_text": bool(allow_free_text),
+    }
+
+
+_CHAT_SESSION: ContextVar[Any] = ContextVar("chat_session", default=None)
+
+
+def set_chat_session(session: Any) -> None:
+    """Bind the ChatSession whose workflow state this turn's tools may move
+    (chat harness issue 06). Set by run_turn beside set_turn_profile; the
+    executor copies the context, so the tool thread sees it."""
+    _CHAT_SESSION.set(session)
+
+
+def chat_session() -> Any:
+    return _CHAT_SESSION.get()
+
+
+def use_skill(name: str) -> dict:
+    """The body of a harness skill (issue 05). The catalogue (names and
+    descriptions) is in the system prompt; the body only travels on
+    request, so the prompt stays stable while procedures change."""
+    from harness import skills
+    key = str(name or "").strip().lower()
+    try:
+        skill = skills.get(key)
+    except KeyError:
+        raise HTTPException(status_code=404, detail={
+            "error_kind": "unknown_skill",
+            "message": f"no skill named {key!r}; the available skills are listed in your instructions",
+        }) from None
+    return {"name": skill.name, "description": skill.description, "instructions": skill.body}
+
+
+def _workflow_session():
+    sess = chat_session()
+    if sess is None:
+        raise HTTPException(status_code=500, detail={
+            "error_kind": "internal_error",
+            "message": "workflow tools need a chat session bound to the turn",
+        })
+    return sess
+
+
+def _describe_step(wf, step) -> dict:
+    ids = [s.id for s in wf.steps]
+    return {
+        "workflow": wf.id,
+        "title": wf.title,
+        "step": step.id,
+        "step_title": step.title,
+        "step_index": ids.index(step.id) + 1,
+        "step_count": len(ids),
+        "done_when": step.done_when,
+        "instructions": step.body,
+        "steps": [{"id": s.id, "title": s.title} for s in wf.steps],
+        "note": ("These instructions are also attached to each of your turns "
+                 "while this workflow is active; call advance_workflow when the "
+                 "step is done, end_workflow to leave."),
+    }
+
+
+def start_workflow(workflow_id: str) -> dict:
+    """Start a workflow on this session (issue 06): state is (id, step) on
+    the ChatSession; the per-turn addendum carries the step from the next
+    turn on, and this result carries it for the current one."""
+    from harness import workflows
+    key = str(workflow_id or "").strip().lower()
+    wf = workflows.registry().get(key)
+    if wf is None or wf.status != "active":
+        raise HTTPException(status_code=404, detail={
+            "error_kind": "unknown_workflow",
+            "message": f"no active workflow {key!r}; the ids are "
+                       + ", ".join(sorted(w.id for w in workflows.registry().values()
+                                          if w.status == "active")),
+        })
+    sess = _workflow_session()
+    step = wf.steps[0]
+    sess.workflow = {"id": wf.id, "step": step.id}
+    return _describe_step(wf, step)
+
+
+def advance_workflow(step: str) -> dict:
+    from harness import workflows
+    sess = _workflow_session()
+    state = getattr(sess, "workflow", None)
+    if not state:
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "no_active_workflow",
+            "message": "no workflow is active on this session; call start_workflow first",
+        })
+    wf = workflows.get(state["id"])
+    key = str(step or "").strip().lower()
+    try:
+        target = wf.step(key)
+    except KeyError:
+        raise HTTPException(status_code=404, detail={
+            "error_kind": "unknown_workflow_step",
+            "message": f"{wf.id!r} has no step {key!r}; its steps are "
+                       + ", ".join(s.id for s in wf.steps),
+        }) from None
+    sess.workflow = {"id": wf.id, "step": target.id}
+    return _describe_step(wf, target)
+
+
+def end_workflow() -> dict:
+    sess = _workflow_session()
+    state = getattr(sess, "workflow", None)
+    sess.workflow = None
+    return {"ended": state["id"] if state else None}
 
 
 # ── Conversation (2) ────────────────────────────────────────────────────────
@@ -3369,8 +5043,8 @@ def reconstruct_network_from_image(
         for b in buses_in:
             try:
                 bname = str(b.get("name") or "").strip()
-                if not bname or bname in existing_bus_names:
-                    continue
+                if not bname or bname in existing_bus_names or bname.startswith("ic:"):
+                    continue  # `ic:` is reserved (P2 WP2.2-0)
                 px = float(b.get("px") or 0.0)
                 py = float(b.get("py") or 0.0)
                 gx = (px - origin_x) * scale_x
@@ -3916,6 +5590,599 @@ def export_chat_summary(
     return _save_agent_export(
         payload, target, "text/markdown" if fmt == "md" else "text/plain",
     )
+
+
+def export_eh_report_docx(filename: str | None = None) -> dict:
+    """
+    The stored Energy Hub ``ReferenceDesignReport`` as a Word document in
+    the active project's uploads/ dir (an ``agent_export`` chip).
+
+    WP0 of the report-generation plan: no language model is involved —
+    every cell is the assembler's own number, formatted so that a missing
+    figure reads "not established" and never 0, and every report section is
+    present even when the study did not establish it.
+    """
+    import time as _time
+
+    from routers import results as results_router
+    from services.reports.docx_writer import (
+        DOCX_MIME,
+        render_reference_design_docx,
+    )
+    from services.reports.figures import fmea_pareto_png
+    from services.reports.evidence import fmea_top_modes
+
+    name = _require_active_project()
+    body = results_router.get_eh_reference_design()
+    if getattr(body, "status_code", None) == 204:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_kind": "eh_report_not_found",
+                "message": _ADEQUACY_NO_DATA_HINTS["eh_reference_design"],
+            },
+        )
+    # The analyst's class-D rows are part of the deliverable; a project that
+    # has no worksheet yet is the common case, not an error.
+    try:
+        worksheet = get_fmea_worksheet(name)
+    except HTTPException:
+        worksheet = None
+    figures: dict[str, bytes] = {}
+    fmea_section = (body.get("sections") or {}).get("fmea_top") or {}
+    png = fmea_pareto_png(fmea_top_modes(fmea_section.get("payload")))
+    if png:
+        figures["fmea_top"] = png
+    data = render_reference_design_docx(
+        body, fmea_worksheet=worksheet, figures=figures)
+    target = filename or f"eh_reference_design_{int(_time.time())}.docx"
+    if not target.lower().endswith(".docx"):
+        target += ".docx"
+    return _save_agent_export(data, target, DOCX_MIME)
+
+
+# ── Reports (WP6) — the generated study report ──────────────────────────────
+#
+# Thin wrappers over WP1/WP3/WP5's routes (`routers/reports.py`,
+# `routers/report_jobs.py`), called in-process for the ACTIVE project through
+# `_route(...)` exactly as `run_eh_study` wraps `post_eh_study`. Every refusal
+# the routes raise passes through unchanged (`detail["error_kind"]`), so the
+# manifest's `report_*` kinds are the tools' too. Not campaign-gated: a report
+# solves nothing — it narrates what the studies established.
+#
+# The one thing added here is SHAPE: `get_report` must fit the chat harness's
+# 4000-char result cap (`chat_service._truncate_result`), which a document
+# with its tables inline never would, so tables collapse to their id, columns
+# and row count (`get_report_table` pages the rows), figures to their id and
+# caption, and a document whose PROSE alone would not fit degrades to a
+# per-section outline with a hint to read one section at a time.
+
+# Under `_truncate_result`'s 4000, measured the same way it measures
+# (`len(json.dumps(result, default=str))`) on the very dict it measures.
+REPORT_RESULT_BUDGET = 3900
+_REPORT_HEADER_KEYS = ("report_id", "version", "title", "language", "created_at",
+                       "mode", "profile_id", "model", "evidence_hash")
+_PROSE_SOURCES = ("llm", "user_edit")
+
+
+def _report_project():
+    """The active project as the report routes take it (authorized, with its directory)."""
+    return _authorized_project(_require_active_project())
+
+
+def _newest_report_id(project) -> str:
+    """The newest report of the project, or the 404 that names the remedy."""
+    from services.reports import store
+
+    metas = store.list_reports(project.directory)
+    if not metas:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_kind": "report_not_found",
+                "message": (
+                    "This project has no study report yet — generate_report "
+                    "writes one from the session's results."
+                ),
+            },
+        )
+    return metas[0].report_id
+
+
+def _load_report_document(project, report_id: str, version: int | None) -> dict:
+    """One version of a report as the GET route serves it (a plain dict)."""
+    from routers.reports import get_report as _h
+    return _route(_h, report_id, version, project=project)
+
+
+def _json_len(payload: Any) -> int:
+    return len(json.dumps(payload, default=str))
+
+
+def _compact_block(block: dict, tables: dict, figures: dict) -> dict:
+    """A table reference becomes its shape, a figure its caption; prose stays."""
+    kind = block.get("type")
+    if kind == "table_ref":
+        table = tables.get(block.get("table_id")) or {}
+        out = {
+            "type": "table",
+            "table_id": block.get("table_id"),
+            "columns": list(table.get("columns") or []),
+            "n_rows": len(table.get("rows") or []),
+        }
+        caption = block.get("caption") or table.get("caption")
+        if caption:
+            out["caption"] = caption
+        return out
+    if kind == "figure_ref":
+        figure = figures.get(block.get("figure_id")) or {}
+        out = {"type": "figure", "figure_id": block.get("figure_id")}
+        caption = block.get("caption") or figure.get("caption")
+        if caption:
+            out["caption"] = caption
+        return out
+    return dict(block)
+
+
+def _compact_section(section: dict, tables: dict, figures: dict) -> dict:
+    """The section with its prose intact; an empty audit is left out."""
+    out = {
+        "section_id": section.get("section_id"),
+        "heading": section.get("heading"),
+        "source": section.get("source"),
+        "status": section.get("status"),
+        "blocks": [_compact_block(b, tables, figures) for b in section.get("blocks") or []],
+    }
+    if section.get("note"):
+        out["note"] = section["note"]
+    audit = section.get("audit") or {}
+    if audit.get("unverified") or audit.get("verified"):
+        # `unverified` intact — those are the numbers to check. `verified`
+        # as the texts alone: the evidence path each matched is the viewer's
+        # citation, and nothing in chat can dereference a JSON pointer.
+        out["audit"] = {
+            "unverified": list(audit.get("unverified") or []),
+            "verified": [v.get("text") if isinstance(v, dict) else v
+                         for v in audit.get("verified") or []],
+        }
+    return out
+
+
+def _outline_section(section: dict) -> dict:
+    """
+    One row per section: what is there, not what it says. Empty counts are
+    left out, and so is the heading — the id names the section and a
+    per-section read carries the heading — because a dozen such rows must
+    leave room for the sections that carry prose.
+    """
+    blocks = section.get("blocks") or []
+    audit = section.get("audit") or {}
+    out = {
+        "section_id": section.get("section_id"),
+        "source": section.get("source"),
+        "status": section.get("status"),
+    }
+    counts = {
+        "paragraphs": sum(1 for b in blocks if b.get("type") == "paragraph"),
+        "bullets": sum(len(b.get("items") or []) for b in blocks if b.get("type") == "bullets"),
+        "callouts": sum(1 for b in blocks if b.get("type") == "callout"),
+        "tables": [b.get("table_id") for b in blocks if b.get("type") == "table_ref"],
+        "figures": [b.get("figure_id") for b in blocks if b.get("type") == "figure_ref"],
+        "unverified": list(audit.get("unverified") or []),
+    }
+    out.update({k: v for k, v in counts.items() if v})
+    if section.get("note"):
+        out["note"] = section["note"]
+    return out
+
+
+def generate_report(
+    title: str | None = None,
+    language: str | None = None,
+    sections: list | None = None,
+    instruction: str | None = None,
+    template_file_id: str | None = None,
+) -> dict:
+    """
+    Start the report job for the active project on the active LLM profile.
+
+    The route collects the evidence and renders the figures in this call;
+    the prose is written on a daemon thread. An empty `sections` list means
+    the default target set, not a 422 — a model that passes `[]` means "all".
+    `language` left None is the template's detected language when
+    `template_file_id` names one (WP11), else "en" — the route's own rule.
+    """
+    from routers.report_jobs import GenerateReportBody, generate_report as _h
+
+    project = _report_project()
+    body = GenerateReportBody(
+        title=title, language=language or None,
+        sections=[str(s) for s in sections] if sections else None,
+        instruction=instruction, template_file_id=template_file_id or None,
+    )
+    result = _route(_h, body, project=project)
+    return {
+        **result,
+        "message": (
+            "Report generation started — poll get_report_status until it is "
+            "done, aborted or failed, then read the report with "
+            f"get_report('{result.get('report_id')}')."
+        ),
+    }
+
+
+def get_report_status() -> Any:
+    """The job record of this session; `no_data` when nothing has run yet."""
+    from routers.report_jobs import get_generate_status as _h
+
+    project = _report_project()
+    return _payload_or_no_data(
+        "report_job", _route(_h, project=project),
+        "no report generation has been run in this session — generate_report "
+        "starts one",
+    )
+
+
+def abort_report_generation() -> dict:
+    """Ask the running job to stop after its current section. Idempotent."""
+    from routers.report_jobs import abort_generate as _h
+
+    project = _report_project()
+    return _route(_h, project=project)
+
+
+def list_reports() -> list[dict]:
+    from routers.reports import list_reports as _h
+
+    project = _report_project()
+    return _route(_h, project=project)
+
+
+def get_report(
+    report_id: str | None = None,
+    version: int | None = None,
+    section_id: str | None = None,
+) -> dict:
+    """
+    One report version for the model, under the result cap by construction.
+
+    Prose blocks (paragraphs, bullets, callouts, fields) are intact; tables
+    are their shape, figures their caption; `audit` is the section's own.
+    When even that does not fit, the whole document comes back as an outline
+    and `section_id` reads one section in full.
+    """
+    project = _report_project()
+    rid = report_id if report_id is not None else _newest_report_id(project)
+    raw = _load_report_document(project, rid, version)
+    tables = raw.get("tables") or {}
+    figures = raw.get("figures") or {}
+    sections = list(raw.get("sections") or [])
+    if section_id is not None:
+        sections = [s for s in sections if s.get("section_id") == section_id]
+        if not sections:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error_kind": "report_section_not_found",
+                    "message": (
+                        f"Report {rid} has no section {section_id!r}; it has: "
+                        + ", ".join(s.get("section_id") for s in raw.get("sections") or [])
+                    ),
+                },
+            )
+    head = {k: raw.get(k) for k in _REPORT_HEADER_KEYS}
+    full = {
+        **head,
+        "sections": [_compact_section(s, tables, figures) for s in sections],
+        "message": (
+            "Tables are summarised as {table_id, columns, n_rows}: "
+            "get_report_table(report_id, table_id) pages the rows."
+        ),
+    }
+    if section_id is not None or _json_len(full) <= REPORT_RESULT_BUDGET:
+        return full
+    # Too big with everything in full: every section becomes a row, then the
+    # sections that carry PROSE are put back in full, in document order, as
+    # long as the budget allows — the most of the report one result can
+    # carry, and always under the cap. A row has no `blocks`.
+    rows = [_outline_section(s) for s in sections]
+    out = {
+        **head,
+        "outline": True,
+        "sections": rows,
+        "message": (
+            "Not everything fits one result: sections with `blocks` are in "
+            "full, the rest are rows. get_report(report_id, section_id=...) "
+            "reads any one in full; get_report_table pages a table."
+        ),
+    }
+    used = _json_len(out)
+    for i, section in enumerate(sections):
+        if section.get("source") not in _PROSE_SOURCES:
+            continue
+        whole = _compact_section(section, tables, figures)
+        delta = _json_len(whole) - _json_len(rows[i])
+        if used + delta <= REPORT_RESULT_BUDGET:
+            out["sections"][i] = whole
+            used += delta
+    return out
+
+
+def get_report_table(
+    report_id: str,
+    table_id: str,
+    version: int | None = None,
+    offset: int = 0,
+    limit: int | None = None,
+) -> dict:
+    """The rows of one table of a report version, in the shared page envelope."""
+    project = _report_project()
+    raw = _load_report_document(project, report_id, version)
+    tables = raw.get("tables") or {}
+    table = tables.get(table_id)
+    if table is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_kind": "report_table_not_found",
+                "message": (
+                    f"Report {report_id} (version {raw.get('version')}) has no "
+                    f"table {table_id!r}; it has: "
+                    + (", ".join(sorted(tables)) or "none")
+                ),
+            },
+        )
+    page = _paginate(list(table.get("rows") or []), offset, limit)
+    return {
+        "table_id": table_id,
+        "columns": list(table.get("columns") or []),
+        "caption": table.get("caption"),
+        "source_path": table.get("source_path"),
+        **page,
+    }
+
+
+def regenerate_report_section(
+    report_id: str,
+    section_id: str,
+    instruction: str | None = None,
+    language: str | None = None,
+) -> dict:
+    """One section again, from the latest version, saved as the next one."""
+    from routers.report_jobs import RegenerateSectionBody, regenerate_section as _h
+
+    project = _report_project()
+    body = RegenerateSectionBody(instruction=instruction, language=language)
+    result = _route(_h, report_id, section_id, body, project=project)
+    return {
+        **result,
+        "message": (
+            "Section rewrite started — poll get_report_status; when it is done, "
+            f"get_report('{report_id}') returns the new version and the "
+            "earlier versions stay readable."
+        ),
+    }
+
+
+def export_report_docx(
+    report_id: str | None = None,
+    version: int | None = None,
+    filename: str | None = None,
+) -> dict:
+    """
+    One report version as a Word document in the active project's uploads/
+    dir. The route renders and saves it as an `agent_export`; this returns
+    the chip in the same shape `_save_agent_export` gives the other exports.
+    """
+    from routers.reports import ExportReportBody, export_report as _h
+
+    project = _report_project()
+    rid = report_id if report_id is not None else _newest_report_id(project)
+    meta = _route(_h, rid, ExportReportBody(version=version, filename=filename),
+                  project=project)
+    return {
+        "file_id": meta["file_id"],
+        "filename": meta["filename"],
+        "mime": meta["mime"],
+        "size": meta["size"],
+        "kind": meta["kind"],
+        "report_id": rid,
+        "message": (
+            f"Exported '{meta['filename']}' ({meta['size']} bytes). It's "
+            "available as a downloadable file in the chat panel's file strip."
+        ),
+    }
+
+
+def delete_report(report_id: str) -> dict:
+    """Remove one report and every version of it (edit-lock checked by the route)."""
+    from routers.reports import delete_report as _h
+
+    project = _report_project()
+    return _route(_h, report_id, project=project)
+
+
+# ── WP11: user templates ────────────────────────────────────────────────────
+#
+# Thin wrappers over the template routes (`routers/reports.py`,
+# `routers/report_jobs.py`), called in-process for the active project. A
+# template is DATA: the mapping job shows its outline to the model inside the
+# untrusted-data fence, and nothing found in a template is ever followed.
+
+
+def list_report_templates() -> list[dict]:
+    """The active project's uploads of kind `report_template`, newest first."""
+    from services import upload_service
+
+    name = _require_active_project()
+    return [
+        {
+            "file_id": m.file_id,
+            "filename": m.filename,
+            "mime": m.mime,
+            "kind": m.kind,
+            "size_kb": round(m.size / 1024, 1),
+            "uploaded_at": m.uploaded_at,
+        }
+        for m in upload_service.list_uploads(name, kind="report_template")
+    ]
+
+
+def set_report_template(report_id: str, file_id: str | None = None) -> dict:
+    """Bind an upload as the report's template (null unbinds); the route's outline back."""
+    from routers.reports import BindTemplateBody, bind_template as _h
+
+    project = _report_project()
+    result = _route(_h, report_id, BindTemplateBody(file_id=file_id or None), project=project)
+    if result.get("template_file_id") is None:
+        message = (f"Report {report_id} now uses the default document layout; "
+                   "export_report_docx renders it with the bundled writer.")
+    elif result.get("mode") == "tagged":
+        message = (f"Report {report_id} is bound to a TAGGED template: its {{ }} tags "
+                   "are filled on export_report_docx; no mapping plan is needed.")
+    else:
+        message = (f"Report {report_id} is bound to an UNTAGGED template "
+                   f"(language {result.get('language') or 'undetected'}): "
+                   "propose_report_mapping proposes how its headings map onto the "
+                   "report, set_report_mapping edits the plan, export_report_docx "
+                   "rebuilds the body into it.")
+    return {**result, "message": message}
+
+
+def get_report_template(report_id: str | None = None) -> dict:
+    """The bound template's outline and stored plan (the newest report when omitted)."""
+    from routers.reports import get_template as _h
+
+    project = _report_project()
+    rid = report_id if report_id is not None else _newest_report_id(project)
+    return _route(_h, rid, project=project)
+
+
+def propose_report_mapping(report_id: str, language: str | None = None) -> dict:
+    """Start the mapping job for the report's untagged template (same slot as generate)."""
+    from routers.report_jobs import ProposeMappingBody, propose_template_plan as _h
+
+    project = _report_project()
+    result = _route(_h, report_id, ProposeMappingBody(language=language or None),
+                    project=project)
+    return {
+        **result,
+        "message": (
+            "Mapping proposal started — poll get_report_status until it is done "
+            f"(mode 'mapping'), then read the plan with get_report_template('{report_id}')."
+        ),
+    }
+
+
+def set_report_mapping(report_id: str, plan: dict, strict: bool = False) -> dict:
+    """Store a (user- or model-edited) mapping plan; the sanitised plan back."""
+    from routers.reports import put_template_plan as _h
+
+    project = _report_project()
+    body = dict(plan) if isinstance(plan, dict) else plan
+    if isinstance(body, dict) and strict:
+        body["strict"] = True
+    return _route(_h, report_id, body, project=project)
+
+
+# ── WP13: the round trip ────────────────────────────────────────────────────
+#
+# Thin wrappers over the round-trip routes (`routers/reports.py`), called
+# in-process for the active project. An edited copy is DATA: its text becomes
+# the report's `user_edit` sections and its comments become pending
+# instructions the user chooses to apply; nothing found in it is followed by
+# the assistant.
+
+
+def list_report_roundtrips() -> list[dict]:
+    """The active project's uploads of kind `report_roundtrip`, newest first."""
+    from services import upload_service
+
+    name = _require_active_project()
+    return [
+        {
+            "file_id": m.file_id,
+            "filename": m.filename,
+            "mime": m.mime,
+            "kind": m.kind,
+            "size_kb": round(m.size / 1024, 1),
+            "uploaded_at": m.uploaded_at,
+        }
+        for m in upload_service.list_uploads(name, kind="report_roundtrip")
+    ]
+
+
+def import_edited_report(report_id: str, file_id: str, bind_as_template: bool = True) -> dict:
+    """Merge an edited Word copy back as the report's next version; the route's answer plus a summary."""
+    from routers.reports import RoundTripBody, roundtrip_report as _h
+
+    project = _report_project()
+    result = _route(_h, report_id, RoundTripBody(file_id=file_id, bind_as_template=bool(bind_as_template)),
+                    project=project)
+    rt = result.get("result") or {}
+    sections = rt.get("sections") or []
+    changed = [s.get("section_id") for s in sections if s.get("changed") and s.get("section_id")]
+    commented = [s.get("section_id") for s in sections if s.get("comments") and s.get("section_id")]
+    unmatched = rt.get("unmatched") or []
+    parts = [f"Report {report_id} is now version {result.get('version')}: "
+             f"{len(changed)} section(s) edited by the user ({', '.join(changed) or 'none'}), "
+             f"{rt.get('accepted_tracked_changes', 0)} tracked change(s) accepted."]
+    if commented:
+        parts.append(f"Comments became pending instructions on: {', '.join(commented)} — "
+                     "regenerate_report_section(report_id, section_id) with no instruction "
+                     "applies each.")
+    if unmatched:
+        parts.append(f"{len(unmatched)} piece(s) of content could not be placed in any "
+                     "section and were NOT merged; relay them to the user.")
+    if result.get("template_file_id") == file_id:
+        parts.append("The edited file is now the report's template, so its styling "
+                     "survives the next export.")
+    return {**result, "changed": changed, "commented": commented, "message": " ".join(parts)}
+
+
+def diff_report_versions(report_id: str, a: int, b: int) -> dict:
+    """Per-section change between two versions, with the changed/added/removed ids summarised."""
+    from routers.reports import diff_report_versions as _h
+
+    project = _report_project()
+    out = _route(_h, report_id, int(a), int(b), project=project)
+    rows = out.get("sections") or []
+    return {
+        **out,
+        "changed": [r["section_id"] for r in rows if r.get("change") == "changed"],
+        "added": [r["section_id"] for r in rows if r.get("change") == "added"],
+        "removed": [r["section_id"] for r in rows if r.get("change") == "removed"],
+    }
+
+
+def export_report_pdf(
+    report_id: str | None = None,
+    version: int | None = None,
+    filename: str | None = None,
+) -> dict:
+    """
+    One report version as a PDF in the active project's uploads/ dir, when
+    this host has LibreOffice (501 `pdf_not_available` otherwise; the .docx
+    export always works).
+    """
+    from routers.reports import ExportReportBody, export_report as _h
+
+    project = _report_project()
+    rid = report_id if report_id is not None else _newest_report_id(project)
+    meta = _route(_h, rid, ExportReportBody(version=version, filename=filename, format="pdf"),
+                  project=project)
+    return {
+        "file_id": meta["file_id"],
+        "filename": meta["filename"],
+        "mime": meta["mime"],
+        "size": meta["size"],
+        "kind": meta["kind"],
+        "report_id": rid,
+        "message": (
+            f"Exported '{meta['filename']}' ({meta['size']} bytes) as PDF. It's "
+            "available as a downloadable file in the chat panel's file strip."
+        ),
+    }
 
 
 def build_study_report(project: str | None = None) -> dict:
@@ -4572,6 +6839,11 @@ DISPATCHERS: dict[str, Any] = {
     "get_asset_health": get_asset_health,
     "record_asset_health": record_asset_health,
     "get_stress_scenarios": get_stress_scenarios,
+    "put_stress_scenarios": put_stress_scenarios,
+    "get_eh_template": get_eh_template,
+    "get_feature_guide": get_feature_guide,
+    "review_eh_study": review_eh_study,
+    "suggest_eh_setup": suggest_eh_setup,
     "run_fmea_sweep": run_fmea_sweep,
     "run_frontier_study": run_frontier_study,
     "run_mc_study": run_mc_study,
@@ -4590,7 +6862,7 @@ DISPATCHERS: dict[str, Any] = {
     "solve_queue_list": solve_queue_list,
     "solve_queue_abort": solve_queue_abort,
     "solve_queue_clear_finished": solve_queue_clear_finished,
-    # gridspine (12)
+    # gridspine (16)
     "gridspine_create_study": gridspine_create_study,
     "gridspine_set_dispatch_source": gridspine_set_dispatch_source,
     "gridspine_get_config": gridspine_get_config,
@@ -4603,6 +6875,29 @@ DISPATCHERS: dict[str, Any] = {
     "gridspine_export_handoff_bundle": gridspine_export_handoff_bundle,
     "gridspine_get_readback": gridspine_get_readback,
     "gridspine_fetch_result_figure": gridspine_fetch_result_figure,
+    "gridspine_get_capacity": gridspine_get_capacity,
+    "gridspine_compute_capacity": gridspine_compute_capacity,
+    "gridspine_get_connection_assessments": gridspine_get_connection_assessments,
+    "gridspine_assess_connection": gridspine_assess_connection,
+    # campus electrical (3)
+    "campus_get_study": campus_get_study,
+    "campus_draft_campus": campus_draft_campus,
+    "campus_run_study": campus_run_study,
+    # campus grid codes (2): no publish tool, by design (plan C10)
+    "campus_list_grid_codes": campus_list_grid_codes,
+    "campus_extract_grid_code": campus_extract_grid_code,
+    # library (4)
+    "list_library_items": list_library_items,
+    "get_library_item": get_library_item,
+    "import_urdb_tariff": import_urdb_tariff,
+    "attach_tariff": attach_tariff,
+    "set_site_connection": set_site_connection,
+    "define_participants": define_participants,
+    # investment case (4) — IC P4 WP4.6c
+    "run_investment_case": run_investment_case,
+    "get_investment_case": get_investment_case,
+    "solve_ppa_price": solve_ppa_price,
+    "explain_cashflow": explain_cashflow,
     # project_mgmt (21)
     "list_projects": list_projects,
     "load_project": load_project,
@@ -4649,6 +6944,11 @@ DISPATCHERS: dict[str, Any] = {
     "ui_select_component": ui_select_component,
     "ui_open_panel": ui_open_panel,
     "ui_set_snapshot": ui_set_snapshot,
+    "ask_user": ask_user,
+    "use_skill": use_skill,
+    "start_workflow": start_workflow,
+    "advance_workflow": advance_workflow,
+    "end_workflow": end_workflow,
     # conversation (2)
     "list_chat_history": list_chat_history,
     "clear_chat_history": clear_chat_history,
@@ -4665,6 +6965,29 @@ DISPATCHERS: dict[str, Any] = {
     "export_to_csv": export_to_csv,
     "export_preview_png": export_preview_png,
     "export_chat_summary": export_chat_summary,
+    # reports (WP0 spike) — the EH ReferenceDesignReport as a .docx chip
+    "export_eh_report_docx": export_eh_report_docx,
+    # reports (WP6) — the generated study report over the WP1/WP3/WP5 routes
+    "generate_report": generate_report,
+    "get_report_status": get_report_status,
+    "abort_report_generation": abort_report_generation,
+    "list_reports": list_reports,
+    "get_report": get_report,
+    "get_report_table": get_report_table,
+    "regenerate_report_section": regenerate_report_section,
+    "export_report_docx": export_report_docx,
+    "delete_report": delete_report,
+    # reports (WP11) — user templates over the template routes
+    "list_report_templates": list_report_templates,
+    "set_report_template": set_report_template,
+    "get_report_template": get_report_template,
+    "propose_report_mapping": propose_report_mapping,
+    "set_report_mapping": set_report_mapping,
+    # reports (WP13) — the round trip over the round-trip routes
+    "list_report_roundtrips": list_report_roundtrips,
+    "import_edited_report": import_edited_report,
+    "diff_report_versions": diff_report_versions,
+    "export_report_pdf": export_report_pdf,
     # uploads — bulk delete (1, locked decision row 7: independent of chat history)
     "clear_uploads": clear_uploads,
     # asset_results (3) — Task 14: per-asset results chat surface
@@ -4881,4 +7204,68 @@ def _lock_gated(tool_name: str, handler):
 DISPATCHERS.update({
     name: _lock_gated(name, DISPATCHERS[name])
     for name in _lock_gated_tool_names()
+})
+
+
+# ── Live-network study gate at the same seam (P27a, gate B1) ────────────────
+#
+# `main.py` refuses every `/api/network/*` and `/api/io/*` write while a
+# live-network study (sweep, frontier, coupling / margin loop) runs, because
+# the study re-solves the user's own network between its iterates. The chat
+# tools call their handlers in process and never meet that middleware, so the
+# same refusal is applied here, to the same DERIVED set the foreign-lock gate
+# uses, narrowed to those two prefixes (plus the routeless mutators). A tool
+# added later against an `/api/network/*` route is gated the day it lands.
+#
+# Left out on purpose: the tools that REPLACE the whole network. The imports
+# go through `reset_network` and the re-cluster through its own swap path,
+# both of which refuse over every study with the swap sentence (Phase 11) —
+# the stricter guard, since a swap detaches even an `mc` / `eh_study` run.
+# Read tools are never gated (`_lock_gated_tool_names` skips them).
+_STUDY_GATE_PREFIXES = ("/api/network/", "/api/io/")
+_STUDY_GATE_SWAP_TOOLS = frozenset({
+    "import_network_nc", "import_csv_bundle", "import_excel", "import_matpower",
+    "cluster_network",
+})
+
+
+def _study_gated_tool_names() -> frozenset[str]:
+    """The chat tools a running live-network study refuses (derived)."""
+    from services.chat_tools_schema import TOOL_ROUTES
+
+    gated: set[str] = set()
+    for name in _lock_gated_tool_names():
+        if name in _STUDY_GATE_SWAP_TOOLS:
+            continue
+        if name in _LOCK_GATE_SERVICE_CALL_MUTATORS:
+            gated.add(name)
+            continue
+        for route in TOOL_ROUTES.get(name, ()):
+            if not isinstance(route, tuple):
+                continue
+            method, path = route
+            if (method.upper() in _LOCK_GATE_WRITE_METHODS
+                    and any(path.startswith(p) for p in _STUDY_GATE_PREFIXES)):
+                gated.add(name)
+                break
+    return frozenset(gated)
+
+
+def _study_gated(tool_name: str, handler):
+    """Wrap one dispatcher with the live-network study refusal."""
+    import functools
+
+    from services.study_state import refuse_edit_during_live_study
+
+    @functools.wraps(handler)
+    def _wrapped(*args, **kwargs):
+        refuse_edit_during_live_study()
+        return handler(*args, **kwargs)
+
+    return _wrapped
+
+
+DISPATCHERS.update({
+    name: _study_gated(name, DISPATCHERS[name])
+    for name in _study_gated_tool_names()
 })

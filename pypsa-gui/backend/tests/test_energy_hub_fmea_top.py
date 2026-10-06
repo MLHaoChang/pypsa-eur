@@ -48,48 +48,58 @@ def _pack(cap: float):
 
 
 def test_note_is_owned_by_eh_stages_and_reexported_by_the_driver():
+    from models.energy_hub import DEFAULT_EH_FMEA_TOP_N
+
     assert S.FMEA_TOP_LINK_PRIMARY_NOTE is ST.FMEA_TOP_LINK_PRIMARY_NOTE
     assert "Link-primary" in ST.FMEA_TOP_LINK_PRIMARY_NOTE
     assert "SCLOPF" in ST.FMEA_TOP_LINK_PRIMARY_NOTE
-    assert ST.FMEA_TOP_N == 10
+    # Merge 2026-09-28: the default N is the P12 spec amendment's top-5.
+    assert ST.FMEA_TOP_N == S.FMEA_TOP_N == DEFAULT_EH_FMEA_TOP_N == 5
 
 
-def _assert_ranked(top: list[dict]) -> None:
+def _assert_ranked(top: list[dict], *, ranked: bool = True) -> None:
     crits = [float(m["criticality_eur_per_year"]) for m in top]
     assert crits == sorted(crits, reverse=True)
-    assert [m["rank"] for m in top] == list(range(1, len(top) + 1))
+    if ranked:
+        assert [m["rank"] for m in top] == list(range(1, len(top) + 1))
     for m in top:
         assert m["failure_class"] in ("A", "B")
         assert m["mode_id"] and m["name"] and m["component_class"]
         assert m["engine"] in ("copt", "lp_proxy")
 
 
+# Merge 2026-09-28: fmea_top keeps the P12 contract — the Class-B Link
+# ranking in ``rows`` (private copy, no closing restore, no partial sweep)
+# decides the section — and carries master's class-A COPT screening of the
+# same plan in ``class_a`` (zero solves). The cases below are master's,
+# on that shape.
+
+
 @pytest.mark.live_solve
 def test_fmea_top_ranks_class_a_and_class_b_on_the_fixed_plan():
     """
     The fixture's import Link carries occurrence data → one Class-B
-    contingency; budget 30 affords base + 1 + restore.
+    contingency; budget 30 affords the frozen base + 1 (no restore, Q4).
     """
     n = certifiable_weak_network()
     report = _run(n, _pack(10.0),
                   stages=("apply_pack", "ens_solve", "fmea_top", "assemble"))
     assert report.completeness["fmea_top"] == "ok"
     sec = report.sections["fmea_top"]
-    top = sec.payload["top"]
-    assert top
-    _assert_ranked(top)
-    assert set(sec.payload["classes_included"]) == {"A", "B"}
+    rows = sec.payload["rows"]
+    class_a = sec.payload["class_a"]
+    assert rows and class_a["rows"]
+    _assert_ranked(rows, ranked=False)
+    _assert_ranked(class_a["rows"])
     assert any(m["component_class"] == "Link" and m["failure_class"] == "B"
-               for m in top)
+               for m in rows)
     assert any(m["component_class"] == "Generator" and m["failure_class"] == "A"
-               for m in top)
-    assert sec.payload["class_b"]["status"] == "run"
-    assert sec.payload["class_b"]["base_restored"] is True
-    assert sec.payload["note"] == ST.FMEA_TOP_LINK_PRIMARY_NOTE
+               for m in class_a["rows"])
+    assert class_a["status"] == "ok" and class_a["solves_charged"] == 0
     assert "Link-primary" in (sec.note or "") and "SCLOPF" in (sec.note or "")
     rec = next(s for s in report.pipeline.stages if s.stage == "fmea_top")
     assert rec.status == "run"
-    assert rec.solves_charged == 1 + 1 + 1  # base + one Link + restore
+    assert rec.solves_charged == 1 + 1  # frozen base + one Link, no restore
     assert report.pipeline.solves_consumed == 1 + rec.solves_charged
 
 
@@ -98,15 +108,17 @@ def test_fmea_top_falls_back_to_class_a_when_budget_cannot_afford_class_b():
     n = certifiable_weak_network()
     report = _run(n, _pack(10.0),
                   stages=("apply_pack", "ens_solve", "fmea_top", "assemble"),
-                  budget=2)  # 1 left after ens_solve; Class B needs 3
-    assert report.completeness["fmea_top"] == "ok"
+                  budget=2)  # 1 left after ens_solve; Class B needs 2
+    # P12: no partial Link ranking — the section is not established …
+    assert report.completeness["fmea_top"] == "not_established"
     sec = report.sections["fmea_top"]
-    assert sec.payload["classes_included"] == ["A"]
-    assert all(m["failure_class"] == "A" for m in sec.payload["top"])
-    assert sec.payload["class_b"]["status"] == "skipped"
-    assert "budget" in sec.payload["class_b"]["reason"]
+    assert "budget" in (sec.note or "")
+    # … but the zero-solve class-A screening still reports.
+    class_a = sec.payload["class_a"]
+    assert class_a["status"] == "ok"
+    assert class_a["rows"] and all(m["failure_class"] == "A"
+                                   for m in class_a["rows"])
     rec = next(s for s in report.pipeline.stages if s.stage == "fmea_top")
-    assert rec.status == "run"
     assert rec.solves_charged == 0
     assert report.pipeline.solves_consumed == 1 <= report.pipeline.budget_solves
 
@@ -116,11 +128,11 @@ def test_fmea_top_class_a_only_when_no_link_carries_occurrence_data():
     n = islanded_certify_network()  # its PoC Link has no occurrence data
     report = _run(n, _pack(2000.0),
                   stages=("apply_pack", "ens_solve", "fmea_top", "assemble"))
-    assert report.completeness["fmea_top"] == "ok"
+    assert report.completeness["fmea_top"] == "not_established"
     sec = report.sections["fmea_top"]
-    assert sec.payload["classes_included"] == ["A"]
-    assert "no Link carries" in sec.payload["class_b"]["reason"]
-    assert len(sec.payload["top"]) == 2  # base + peaker
+    assert "no Class-B-eligible Links" in (sec.note or "")
+    assert sec.payload["rows"] == []
+    assert len(sec.payload["class_a"]["rows"]) == 2  # base + peaker
 
 
 @pytest.mark.live_solve
@@ -152,5 +164,6 @@ def test_the_pack_top_n_bounds_the_ranking():
     report = _run(n, pack, stages=("apply_pack", "ens_solve", "fmea_top", "assemble"))
     payload = report.sections["fmea_top"].payload
     assert payload["top_n"] == 1
-    assert len(payload["top"]) == 1
-    assert payload["n_total_modes"] > 1
+    assert len(payload["rows"]) == 1
+    assert len(payload["class_a"]["rows"]) == 1
+    assert payload["class_a"]["n_modes"] > 1

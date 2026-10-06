@@ -156,46 +156,15 @@ export default function SolverSettings() {
 
   const save = useMutation({
     mutationFn: async (next: SolverConfig) => {
-      const baseline = baselineRef.current
-      if (!baseline) {
-        // No baseline (shouldn't happen post-hydration) — fall back to
-        // full-payload save. Preserves old behaviour.
-        await simulationApi.updateSolverConfig(next)
-        return { savedNext: next, noOp: false }
-      }
-      // Diff: include only fields the user actually changed in this form.
-      // JSON-equality handles nested objects (dicts of dicts, dicts of
-      // floats) consistently because we cloned via JSON at hydration, so
-      // key insertion order is preserved across the comparison.
-      //
-      // CAUTION: nested-object fields (`solver_options`,
-      // `load_scalers_by_carrier`, `capex_budget_per_period`) are
-      // diffed at the top level — if ANY sub-key changes here, the
-      // entire object is sent and replaces whatever was on the
-      // backend. Today this is safe because each nested object has a
-      // single editor (solver_options only here, the others only in
-      // ModelHorizon), so there's no overlap. If a future feature
-      // lets two pages edit sub-keys of the SAME nested object, this
-      // whole-replace semantics will silently wipe one side's edits.
-      const diff: Partial<SolverConfig> = {}
-      const nextAsRec = next as unknown as Record<string, unknown>
-      const baselineAsRec = baseline as unknown as Record<string, unknown>
-      const diffAsRec = diff as unknown as Record<string, unknown>
-      for (const key of Object.keys(next)) {
-        const a = nextAsRec[key]
-        const b = baselineAsRec[key]
-        if (JSON.stringify(a) !== JSON.stringify(b)) {
-          diffAsRec[key] = a
-        }
-      }
+      const body = solverSettingsSaveBody(next, baselineRef.current)
       // Nothing changed in this form — skip the PUT entirely. The
       // onSuccess handler renders a distinct "no changes" toast so
       // the user isn't misled into thinking unmodified fields were
       // re-persisted.
-      if (Object.keys(diff).length === 0) {
+      if (body === null) {
         return { savedNext: next, noOp: true }
       }
-      await simulationApi.updateSolverConfig(diff)
+      await simulationApi.updateSolverConfig(body)
       return { savedNext: next, noOp: false }
     },
     onSuccess: ({ savedNext, noOp }) => {
@@ -1565,7 +1534,7 @@ function Co2PricePerPeriod({
         and at least one investment period is defined.{' '}
         {draft.multi_investment_periods
           ? <>Add periods under <span className="font-medium text-text">Model Horizon</span>.</>
-          : <>Toggle <span className="font-medium text-text">Multi-investment periods</span> in General.</>}
+          : <>Set <span className="font-medium text-text">Model Horizon → Mode</span> to Multi-period.</>}
       </div>
     )
   }
@@ -1679,7 +1648,7 @@ export function ReliabilityAssumptions({
           hint="When > 0, a slack 'load_shedding' generator is added on every bus at this marginal_cost. Lets the LP drop demand instead of failing when supply is tight. Typical 3 000–10 000 €/MWh."
         />
         <p className="text-[10px] text-muted mt-2">
-          Lost-load energy + cost surface in the Results → LoadFlow tab when
+          Lost-load energy + cost surface in the Results → Lost load tab when
           this is set and the LP actually sheds.
         </p>
 
@@ -2599,4 +2568,44 @@ function ClusteringSection() {
       </div>
     </section>
   )
+}
+
+/**
+ * The body this form PUTs to /simulation/solver_config: only the fields the
+ * user changed against `baseline` (null = nothing changed), or — with no
+ * baseline (shouldn't happen post-hydration) — the full payload.
+ *
+ * `commercial` is NEVER sent: this form has no commercial controls, and the
+ * commercial config has its own editors and routes (the value-flow config its
+ * own If-Match route). Sending a stale copy would replace their edits
+ * (IC P3 WP3.5, plan C7).
+ *
+ * CAUTION: nested-object fields (`solver_options`, `load_scalers_by_carrier`,
+ * `capex_budget_per_period`) are diffed at the top level — if ANY sub-key
+ * changes here, the entire object is sent and replaces whatever was on the
+ * backend. Today each nested object has a single editor (solver_options only
+ * here, the others only in ModelHorizon), so there's no overlap. If a future
+ * feature lets two pages edit sub-keys of the SAME nested object, this
+ * whole-replace semantics will silently wipe one side's edits.
+ */
+export function solverSettingsSaveBody(
+  next: SolverConfig, baseline: SolverConfig | null,
+): Partial<SolverConfig> | null {
+  const nextAsRec = next as unknown as Record<string, unknown>
+  if (!baseline) {
+    const { commercial: _omit, ...rest } = next
+    void _omit
+    return rest
+  }
+  // JSON-equality handles nested objects consistently because the baseline
+  // was cloned via JSON at hydration (key order preserved).
+  const baselineAsRec = baseline as unknown as Record<string, unknown>
+  const diff: Record<string, unknown> = {}
+  for (const key of Object.keys(next)) {
+    if (key === 'commercial') continue
+    if (JSON.stringify(nextAsRec[key]) !== JSON.stringify(baselineAsRec[key])) {
+      diff[key] = nextAsRec[key]
+    }
+  }
+  return Object.keys(diff).length === 0 ? null : diff as Partial<SolverConfig>
 }

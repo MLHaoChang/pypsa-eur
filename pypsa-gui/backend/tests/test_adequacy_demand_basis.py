@@ -17,6 +17,7 @@ Every ★ names its bite; D1 is a regression ANCHOR (its "bite" — multiplying 
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import threading
 import time
@@ -43,6 +44,41 @@ def _h(a) -> str:
         np.ascontiguousarray(a, dtype=np.float64).tobytes()).hexdigest()
 
 
+# The fixture's two profiles, as the exact float64 bits the D1 hashes were
+# pinned against (little-endian, base64). They were generated as
+#   load  = 120 + 60 * sin(linspace(0, 2*pi, 2*H))**2
+#   wind  = clip(0.5 + 0.5 * cos(linspace(0, 4*pi, 2*H)), 0, 1)
+# and are stored rather than computed because float64 sin/cos come from the
+# platform's libm, which need not round correctly: Apple's differs from glibc
+# in the last bit, and one ULP changes a SHA-256. On macOS every D1 hash failed
+# for that reason alone, the engines being bit-identical. Data keeps the pinned
+# constants valid everywhere.
+_LOAD_PROFILE_B64 = (
+    "AAAAAAAAXkBmj28cOEReQNNhb2oHDF9AJSpMgp0kYEAoElQ6pPJgQEYtP+Fz4WFA"
+    "xmqTEBTgYkDpZs+vbNxjQMA3fh6PxGRA0GDma/yHZUDljtlt0RhmQPU9fWPDbGZA"
+    "tbEmMNt9ZkAefj7g4UpmQNS9A8J212VAh140gM0rZUAQ7F3tGFRkQFyfKBqtX2NA"
+    "1oOae+hfYkBMgRzy92ZhQEcEXCWMhmBA6035Zy+dX0CTcO4qWpheQOpM0JchEV5A"
+    "6kzQlyERXkCTcO4qWpheQOpN+WcvnV9ASARcJYyGYEBMgRzy92ZhQNaDmnvoX2JA"
+    "W58oGq1fY0AP7F3tGFRkQIdeNIDNK2VA1L0DwnbXZUAefj7g4UpmQLWxJjDbfWZA"
+    "9T19Y8NsZkDljtlt0RhmQNBg5mv8h2VAwDd+Ho/EZEDpZs+vbNxjQMdqkxAU4GJA"
+    "Ry0/4XPhYUApElQ6pPJgQCUqTIKdJGBA02FvagcMX0Bmj28cOEReQAAAAAAAAF5A"
+)
+_WIND_PROFILE_B64 = (
+    "AAAAAAAA8D8Evc06d27vP7aVRXI0xO0/hqFUGIIf6z8gTJl+drDnP9Q+vwuJteM/"
+    "N8bRtkPu3j8Exa8S6YTWPy7zpggPkM0/CuFOm8WIwD8Y9uq04oOrPwBQJDbrhIQ/"
+    "AIEC6TFLUj8AAQE0VVScPwg5b+6yeLY/zMMKhQiuxj9c3TPSs4fSP+Frtg9urdo/"
+    "ou+f8P2Z4T+8PmRdIsDlPwMyRAuqfek/ghXbzImO7D8+diVg+7ruP2LTdhF02+8/"
+    "Y9N2EXTb7z8+diVg+7ruP4QV28yJjuw/AjJEC6p96T++PmRdIsDlP6Tvn/D9meE/"
+    "5Wu2D26t2j9g3TPSs4fSP9LDCoUIrsY/FDlv7rJ4tj8AAQE0VVScPwCBAukxS1I/"
+    "AFAkNuuEhD8o9uq04oOrPxDhTpvFiMA/NPOmCA+QzT8Ixa8S6YTWPyzG0bZD7t4/"
+    "0D6/C4m14z8cTJl+drDnP4OhVBiCH+s/tJVFcjTE7T8Evc06d27vPwAAAAAAAPA/"
+)
+
+
+def _profile(b64: str) -> np.ndarray:
+    return np.frombuffer(base64.b64decode(b64), dtype="<f8").copy()
+
+
 def two_period_network(*, static_load: bool = False,
                        wind_build_year: int | None = None) -> pypsa.Network:
     """The v3 review's fixture: two 24 h periods, one series load (or one
@@ -60,7 +96,7 @@ def two_period_network(*, static_load: bool = False,
     if static_load:
         n.add("Load", "l", bus="b", p_set=150.0)
     else:
-        prof = 120.0 + 60.0 * np.sin(np.linspace(0, 2 * np.pi, 2 * H)) ** 2
+        prof = _profile(_LOAD_PROFILE_B64)
         n.add("Load", "l", bus="b", p_set=prof)
     n.add("Generator", "base", bus="b", carrier="gas", p_nom=200.0,
           marginal_cost=10.0, build_year=2000, lifetime=100,
@@ -68,7 +104,7 @@ def two_period_network(*, static_load: bool = False,
     n.add("Generator", "wind", bus="b", carrier="wind", p_nom=100.0,
           marginal_cost=0.0, lifetime=100,
           build_year=2000 if wind_build_year is None else int(wind_build_year))
-    wp = np.clip(0.5 + 0.5 * np.cos(np.linspace(0, 4 * np.pi, 2 * H)), 0, 1)
+    wp = _profile(_WIND_PROFILE_B64)
     n.generators_t.p_max_pu["wind"] = wp
     n.add("Generator", "peaker", bus="b", carrier="gas", p_nom=0.0,
           p_nom_extendable=True, p_nom_max=500.0, capital_cost=5e6,

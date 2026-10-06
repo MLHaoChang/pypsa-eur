@@ -28,6 +28,8 @@ import json
 import pytest
 
 from services import chat_service
+from harness import budget as harness_budget
+from harness import session as harness_session
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -379,9 +381,9 @@ def test_a8_fallback_uses_profile_fallback_model(appdata, monkeypatch):
 
     # Small + zero-delay retry budget so the fallback fires on the first
     # rate_limited without any real backoff sleep.
-    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRIES", 0)
-    monkeypatch.setattr(chat_service, "BASE_STREAM_RETRY_DELAY", 0.0)
-    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(harness_budget, "MAX_STREAM_RETRIES", 0)
+    monkeypatch.setattr(harness_budget, "BASE_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(harness_budget, "MAX_STREAM_RETRY_DELAY", 0.0)
 
     session = chat_service.ChatSession(model="primary-model")
     session.profile_id = "custom-fb"
@@ -651,9 +653,9 @@ def test_a8_fallback_is_turn_scoped_across_multiple_rounds(
 
     # Small + zero-delay retry budget, same as the single-round A8 test
     # above, so both rate_limited failures resolve without real backoff.
-    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRIES", 0)
-    monkeypatch.setattr(chat_service, "BASE_STREAM_RETRY_DELAY", 0.0)
-    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(harness_budget, "MAX_STREAM_RETRIES", 0)
+    monkeypatch.setattr(harness_budget, "BASE_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(harness_budget, "MAX_STREAM_RETRY_DELAY", 0.0)
 
     session = chat_service.ChatSession(model="primary-model")
     session.profile_id = "custom-fb-multi"
@@ -1336,7 +1338,7 @@ def test_set_active_profile_refused_for_a_non_super_admin(appdata, monkeypatch):
     from services.llm_fake import FakeProvider
     from services.llm_provider import LLMEvent
 
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 1.0)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 1.0)
     assert llm_config.resolve_active().id == "anthropic-sonnet"
 
     session = chat_service.ChatSession(model=llm_config.DEFAULT_MODEL)
@@ -1373,7 +1375,7 @@ def test_set_active_profile_approve_switches_active(
     from services.llm_fake import FakeProvider
     from services.llm_provider import LLMEvent
 
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 1.0)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 1.0)
     assert llm_config.resolve_active().id == "anthropic-sonnet"
 
     session = chat_service.ChatSession()
@@ -1415,7 +1417,7 @@ def test_set_active_profile_deny_leaves_active_unchanged(appdata, monkeypatch):
     from services.llm_fake import FakeProvider
     from services.llm_provider import LLMEvent
 
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 1.0)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 1.0)
     assert llm_config.resolve_active().id == "anthropic-sonnet"
 
     session = chat_service.ChatSession()
@@ -1460,7 +1462,7 @@ def test_set_active_profile_unknown_id_is_structured_tool_error(
     from services.llm_fake import FakeProvider
     from services.llm_provider import LLMEvent
 
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 1.0)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 1.0)
     assert llm_config.resolve_active().id == "anthropic-sonnet"
 
     session = chat_service.ChatSession()
@@ -1743,9 +1745,9 @@ def test_stream_with_no_profile_id_still_runs_normally(appdata, client):
 
 @pytest.fixture()
 def _fast_retries(monkeypatch):
-    monkeypatch.setattr(chat_service, "BASE_STREAM_RETRY_DELAY", 0.0)
-    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRY_DELAY", 0.0)
-    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRIES", 2)
+    monkeypatch.setattr(harness_budget, "BASE_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(harness_budget, "MAX_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(harness_budget, "MAX_STREAM_RETRIES", 2)
 
 
 def _ok_turn(text="ok"):
@@ -2196,7 +2198,7 @@ def test_an_endpoint_that_reports_no_usage_still_hits_a_session_ceiling(
         base_url=None, model="claude-sonnet-5", tools=False, vision=True,
         auth="none", fallback_model=None, max_output_tokens=None)
     llm_config.save_profiles([profile], "anthropic-sonnet")
-    monkeypatch.setattr(chat_service, "MAX_TURNS_PER_SESSION", 5)
+    monkeypatch.setattr(harness_budget, "MAX_TURNS_PER_SESSION", 5)
 
     session = chat_service.ChatSession(model="claude-sonnet-5")
     session.profile_id = "nousage"
@@ -2239,7 +2241,7 @@ def test_the_turn_ceiling_does_not_fire_when_usage_IS_reported(appdata, monkeypa
         base_url=None, model="claude-sonnet-5", tools=False, vision=True,
         auth="none", fallback_model=None, max_output_tokens=None)
     llm_config.save_profiles([profile], "anthropic-sonnet")
-    monkeypatch.setattr(chat_service, "MAX_TURNS_PER_SESSION", 5)
+    monkeypatch.setattr(harness_budget, "MAX_TURNS_PER_SESSION", 5)
 
     session = chat_service.ChatSession(model="claude-sonnet-5")
     session.profile_id = "withusage"
@@ -2490,3 +2492,131 @@ def test_others_that_sort_but_cannot_be_joined_still_leave_the_block_intact(
     block = chat_service._profile_awareness_block()  # must not raise
     assert "The Active One" in block
     assert "set_active_profile" in block
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# P28 A3 (deferred spec 2026-09-28 §3.1, D-3) — `/history` carries
+# `bound_profile_id`: the profile the session a reload resumes is bound to,
+# so the panel gates Send on the profile the next turn actually runs on
+# (`/stream` keeps a bound session's binding when the request names none).
+# Null with no turns, and null when the recorded profile has been deleted
+# (the C-4 path: the FE falls back to the active profile).
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _one_turn(session_id: str, profile_id: str | None, model: str) -> dict:
+    rec = {
+        "ts": 1.0, "session_id": session_id, "model": model,
+        "user": "hi", "assistant": [{"type": "text", "text": "hello"}],
+        "usage": {},
+    }
+    if profile_id is not None:
+        rec["profile_id"] = profile_id
+    return rec
+
+
+def test_history_reports_bound_profile(
+    appdata, openai_profile, tmp_projects_dir, install_network, client, monkeypatch,
+):
+    from routers import projects as projects_router
+    monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
+    import pypsa
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name="BoundProfProj")
+    _write_chat_jsonl(tmp_projects_dir, "BoundProfProj",
+                      [_one_turn("sess-bound", openai_profile.id, openai_profile.model)])
+
+    body = client.get("/api/chat/history").json()
+    assert body["bound_profile_id"] == openai_profile.id
+    # Read-only w.r.t. the binding: the freshly minted session adopted it.
+    assert chat_service.get_session("sess-bound").profile_id == openai_profile.id
+
+
+def test_history_bound_profile_is_null_with_no_turns(
+    appdata, tmp_projects_dir, install_network, client, monkeypatch,
+):
+    from routers import projects as projects_router
+    monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
+    import pypsa
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name="NoTurnsProj")
+    body = client.get("/api/chat/history").json()
+    assert body["turns"] == []
+    assert body["bound_profile_id"] is None
+
+
+def test_history_reports_the_fallback_binding_when_the_recorded_profile_was_deleted(
+    appdata, openai_profile, tmp_projects_dir, install_network, client, monkeypatch,
+):
+    """C-4 (P28 gate N-c, adopted from the reviewer's repro): the profile the
+    last turn ran under was deleted. `/history` still binds the freshly
+    minted session — to the legacy translation of the turn's `model` — and a
+    `/stream` naming no profile keeps that binding. So `bound_profile_id`
+    reports THAT profile (configured by construction), not null: null made
+    the panel follow the ACTIVE profile while the next turn ran on another."""
+    from services import llm_config
+    from routers import projects as projects_router
+    monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
+    import pypsa
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name="GoneProfProj")
+    # Active: the local openai profile. The transcript's profile is gone and
+    # its model is the Sonnet literal, so the legacy translation is Sonnet.
+    llm_config.set_active(openai_profile.id)
+    _write_chat_jsonl(tmp_projects_dir, "GoneProfProj",
+                      [_one_turn("sess-gone", "deleted-profile", chat_service.DEFAULT_MODEL)])
+    body = client.get("/api/chat/history").json()
+    sess = chat_service.get_session("sess-gone")
+    assert body["last_session_id"] == "sess-gone"
+    assert sess.profile_id == llm_config.BUILTIN_SONNET_ID
+    assert sess.profile_id != llm_config.resolve_active().id
+    assert body["bound_profile_id"] == sess.profile_id
+
+
+def test_history_bound_profile_is_null_when_a_live_binding_names_a_deleted_profile(
+    appdata, openai_profile, tmp_projects_dir, install_network, client, monkeypatch,
+):
+    """A LIVE session still bound to a profile deleted since: `/stream` refuses
+    it (`unknown_profile_id`), so there is no usable binding to report."""
+    from routers import projects as projects_router
+    monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
+    import pypsa
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name="LiveGoneProj")
+    _write_chat_jsonl(tmp_projects_dir, "LiveGoneProj",
+                      [_one_turn("sess-live-gone", openai_profile.id, openai_profile.model)])
+    live = chat_service.get_or_create_session("sess-live-gone")
+    live.profile_id = "deleted-since"
+    live.bound_wire = "openai"
+    body = client.get("/api/chat/history").json()
+    assert body["bound_profile_id"] is None
+    assert chat_service.get_session("sess-live-gone").profile_id == "deleted-since"
+
+
+def test_history_reports_a_live_sessions_own_binding(
+    appdata, openai_profile, tmp_projects_dir, install_network, client, monkeypatch,
+):
+    """An already-live session keeps the binding `/stream` gave it (the
+    round-1 rule); `bound_profile_id` reports THAT binding, not the older
+    profile the transcript names."""
+    from services import llm_config
+    from routers import projects as projects_router
+    monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
+    import pypsa
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name="LiveBoundProj")
+    _write_chat_jsonl(tmp_projects_dir, "LiveBoundProj", [_one_turn(
+        "sess-live-bound", llm_config.BUILTIN_SONNET_ID, chat_service.DEFAULT_MODEL)])
+    live = chat_service.get_or_create_session("sess-live-bound")
+    live.profile_id = llm_config.BUILTIN_OPUS_ID
+    live.bound_wire = "anthropic"
+    live.model = chat_service.OPUS_MODEL
+
+    body = client.get("/api/chat/history").json()
+    assert body["bound_profile_id"] == llm_config.BUILTIN_OPUS_ID
+    assert chat_service.get_session("sess-live-bound").profile_id == llm_config.BUILTIN_OPUS_ID

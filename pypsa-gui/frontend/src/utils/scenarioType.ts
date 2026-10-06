@@ -13,7 +13,7 @@
 // see. Nothing here WRITES the prefix any more — `tagScenType` is gone, and
 // the create/edit calls send `scenario_type` as its own field.
 
-export const SCEN_TYPES = ['baseline', 'scenario', 'stress'] as const
+export const SCEN_TYPES = ['baseline', 'scenario', 'stress', 'sensitivity'] as const
 export type ScenType = typeof SCEN_TYPES[number]
 
 /** Human labels for the picker. Keep in step with the backend's set. */
@@ -21,12 +21,13 @@ export const SCEN_TYPE_LABEL: Record<ScenType, string> = {
   baseline: 'Baseline — canonical reference run',
   scenario: 'Scenario — a named variant',
   stress: 'Stress test',
+  sensitivity: 'Sensitivity — one axis of the investment-case matrix',
 }
 
 // Anchored, and the alternatives are spelled out rather than `\w+`: a
 // description that legitimately opens with a bracketed word ("[draft] cut the
 // gas fleet") must survive intact, not lose its first word to the parser.
-const TAG_RE = /^\[(baseline|scenario|stress)\]\s*([\s\S]*)$/
+const TAG_RE = /^\[(baseline|scenario|stress|sensitivity)\]\s*([\s\S]*)$/
 
 function isScenType(v: unknown): v is ScenType {
   return typeof v === 'string' && (SCEN_TYPES as readonly string[]).includes(v)

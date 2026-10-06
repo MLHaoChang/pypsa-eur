@@ -163,15 +163,38 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     # EH reference-design fragments (report / tables). No economics SURFACES —
     # same adequacy-style € derivation as get_adequacy / get_frontier above.
     ("routers/results.py", "get_eh_reference_design"):         frozenset(),
+    ("routers/results.py", "get_eh_readiness"):                frozenset(),  # P14 preflight: no economics
+    ("routers/results.py", "get_eh_review"):                   frozenset(),  # P24 review of the stored report: quotes it, derives no €
     ("routers/results.py", "get_eh_redundancy"):               frozenset(),
     ("routers/results.py", "get_eh_levers"):                   frozenset(),
     ("routers/results.py", "get_eh_dtc"):                      frozenset(),
     ("routers/results.py", "get_eh_dtc_planning"):             frozenset(),
     ("routers/results.py", "get_load_results"):                frozenset(),
     ("routers/results.py", "get_asset_economics"):             frozenset({"asset_economics"}),
+    # P2 WP2.5 — commercial results; the golden network has no commercial
+    # config (204), covered by tests/test_results_billing.py instead.
+    ("routers/results.py", "get_billing"):                     frozenset(),
+    ("routers/results.py", "get_cfe_score"):                   frozenset(),
+    ("routers/results.py", "get_value_flows"):                 frozenset(),   # P3 WP3.4
+    ("routers/results.py", "preview_billing"):                 frozenset(),   # P3 WP3.7b
+    # IC P4 WP4.6b — the finance run and its report: its own oracle gate
+    # (tests/qa_investment_case.py, the SAM parity cases), not a coverage SURFACE.
+    ("routers/results.py", "get_investment_case"):             frozenset(),
+    ("routers/results.py", "post_investment_case"):            frozenset(),
+    ("routers/results.py", "post_investment_case_abort"):      frozenset(),
+    ("routers/results.py", "get_investment_case_report"):      frozenset(),
+    ("routers/results.py", "get_investment_case_export"):      frozenset(),
     # ── routers/simulation.py ───────────────────────────────────────────
     ("routers/simulation.py", "get_solver_config"):    frozenset(),
     ("routers/simulation.py", "update_solver_config"):  frozenset(),
+    # IC P3 WP3.0: participants and value-flow assignment; config, reports no figures.
+    ("routers/simulation.py", "get_value_flows"):       frozenset(),
+    ("routers/simulation.py", "get_value_flow_designer"): frozenset(),   # P3 WP3.6
+    ("routers/simulation.py", "put_value_flows"):       frozenset(),
+    ("routers/simulation.py", "build_value_flow_template"): frozenset(),
+    # IC P4 WP4.6b: the finance inputs; config, reports no figures.
+    ("routers/simulation.py", "get_finance"):           frozenset(),
+    ("routers/simulation.py", "put_finance"):           frozenset(),
     ("routers/simulation.py", "check_solvers"):         frozenset(),
     ("routers/simulation.py", "capabilities"):          frozenset(),
     ("routers/simulation.py", "asset_costs"):           frozenset({"asset_costs"}),

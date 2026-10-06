@@ -102,3 +102,161 @@ shown was fetched after that solve and not invalidated since
 (`site3d/useDispatchFresh.ts`). Otherwise the site shows no results rather
 than stale ones.
 _Avoid_: overlay (the canvases' per-bus aggregation), playback
+
+## Assistant language
+
+The in-app assistant's own vocabulary. The code lives in
+`pypsa-gui/backend/harness/` (its README is the contract); the spec is
+`.scratch/harness/spec.md`.
+
+**Harness**:
+Everything the assistant needs that is not a language model: the provider
+seam (`harness/protocol.py`), the tool catalogue (`harness/catalogue.py`),
+the frame vocabulary, the workflows, the skills, and (as the loop moves) the
+session, confirmation, budget and history machinery. A provider plugs in
+underneath it. The word comes from the provider-seam spec of 2026-08-05; the
+folder makes the tree match the word.
+_Avoid_: agent layer, chatbot core, orchestrator
+
+**Provider** / **Wire**:
+A Provider is one implementation of the seam (Anthropic, OpenAI-compatible,
+the fake); the Wire is its message format (`anthropic` or `openai`), named
+only inside the provider layer and in the profile store.
+_Avoid_: backend (overloaded), vendor, model (that is the id a profile names)
+
+**Workflow**:
+A step-by-step flow the assistant leads, defined as one Markdown file in
+`harness/workflows/` with front matter (where it is offered, its steps and
+their completion criteria) and one body section per step. Runtime state is
+the pair (workflow id, step) on the chat session; the current step's body
+travels as per-turn user content, never in the system prompt. The hub-design
+Guided flow is the first workflow.
+_Avoid_: playbook, recipe, flow (unqualified), wizard (that is a dialog)
+
+**Start menu**:
+The list of workflows offered when a chat opens in a given context (no
+project, Expert, Guided). Served by the harness; the panel renders it as
+chips. Replaces the hardcoded "Try asking" prompt arrays.
+_Avoid_: starter prompts, suggestions, quick actions
+
+**Skill**:
+A reusable procedure the assistant loads on demand: `harness/skills/<name>/SKILL.md`
+with `name` and `description` front matter, the same layout as the developer
+agents' `.claude/skills/`. The prompt carries only the catalogue line; the
+body arrives through the `use_skill` tool. `grill` is the first skill.
+_Avoid_: prompt template, macro, plugin
+
+**Choice card**:
+The card the panel renders when the assistant calls `ask_user`: a title, a
+question, options with one marked recommended, and a free-text field. A pick
+is sent as the next user message; the turn does not block on it. Distinct
+from the Confirmation card, which gates a write or run and does block.
+_Avoid_: prompt, dialog, confirmation (that is the other card)
+
+## Investment language
+
+Shared by the expert workbench and the guided investment path, which run on one
+engine ([ADR-0004](docs/adr/0004-one-investment-engine-guided-mode-compiles-onto-it.md)).
+
+**Expert mode** / **Guided mode**:
+The two ways one Project is worked on. Expert mode exposes every parameter;
+Guided mode asks only for Key parameters, fills the rest with Generic defaults
+and lets the chat assistant lead each step. Both read and write the same
+project state; neither holds a copy.
+_Avoid_: face, simple UI, novice view, pro view
+
+**Decision study**:
+A question-led evaluation above a Project ("Do I need a battery at my site?"):
+it owns a Decision question, an Assumptions ledger, a Baseline, a few Options
+and a Verdict. Always qualify it; bare "study" already names the running
+analyses on a Project (the Energy Hub study, adequacy studies).
+_Avoid_: study (unqualified), investment study, scenario
+
+**Decision question**:
+The template a Decision study starts from; it fixes which Options are offered
+and which Key parameters are asked.
+_Avoid_: question pack, use case
+
+**Baseline**:
+The "do nothing" Option of a Decision study, against which every headline
+figure is a delta.
+_Avoid_: reference case, counterfactual (that word is the engine's own,
+narrower: the bill the owner would pay without its assets)
+
+**Option**:
+One candidate design in a Decision study, solved on its own fork of the
+Project.
+_Avoid_: alternative, variant (a variant is a throw-away fork for one
+sensitivity bound)
+
+**Verdict**:
+The Decision study's answer for its question: recommended, marginal or not
+recommended, with the drivers that could flip it.
+_Avoid_: result, recommendation (as a noun for the whole answer)
+
+**Key parameter**:
+An input Guided mode asks the user for because it moves the Verdict. Every
+other input is a Generic default.
+_Avoid_: main input, basic setting
+
+**Driver**:
+A Key parameter whose range is tested for robustness; a Verdict is marginal
+when one driver's bound flips its sign.
+_Avoid_: sensitivity, lever
+
+**Generic default**:
+An illustrative value from the Library (value, unit, range, source, year) used
+when the user has not supplied one. It is always listed in the report, and it
+is never an engine default: the engine still treats an unsupplied value as
+Unavailable.
+_Avoid_: default (unqualified), assumption (that is any ledger row), preset
+
+**Assumptions ledger**:
+The list of every input a Decision study uses, each with value, unit, range,
+provenance (library, user, imported, measured) and whether the user changed it.
+Always say "assumptions ledger"; the engine's own ledger is the Value-flow
+ledger.
+_Avoid_: ledger (unqualified), parameter list, inputs table
+
+**Value-flow ledger**:
+The engine's per-participant cash-flow lines (who pays whom, for which value
+stream and tariff item).
+_Avoid_: ledger (unqualified), cashflow table
+
+**Investment case**:
+The financial evaluation of one solved Project for one owner over its life:
+cash flows, NPV, IRR, payback and debt metrics, with every figure that could
+not be established marked Unavailable.
+_Avoid_: pro forma, business case, finance run
+
+**Bill**:
+What a site is charged at its point of connection for one billing period,
+rated item by item from its Tariff.
+_Avoid_: energy cost, invoice
+
+**Library**:
+The org-scoped store of reusable inputs: tariffs, contracts, connection
+agreements, price and meter series, and the Generic defaults.
+_Avoid_: catalogue, database, study library
+
+**Pack**:
+Overloaded; always qualify it.
+
+- **Archetype pack**: an Energy Hub site archetype's settings (strong grid,
+  weak flexible, off grid).
+- **Jurisdiction pack**: dated, cited tax and incentive rules for one
+  jurisdiction (DE, NL, US federal, CA federal).
+- **Generic defaults pack**: the versioned set of Generic defaults in the
+  Library.
+
+**Overnight cost**:
+The upfront investment per unit of capacity, as if built overnight.
+_Avoid_: CAPEX (ambiguous between this and Capital cost), investment cost
+
+**Capital cost**:
+PyPSA's periodic cost per unit of capacity, charged once per modelled horizon
+(a year when the time steps span one year), derived from the Overnight cost
+parts, their lifetimes and the discount rate. When an asset carries an Overnight
+cost, PyPSA uses it and ignores any Capital cost. Always labelled with its
+period.
+_Avoid_: CC (unlabelled), annual CAPEX

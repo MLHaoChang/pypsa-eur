@@ -983,8 +983,8 @@ def _check_myopic_foresight(n, cfg) -> list[Issue]:
     if not network_periods and not cfg_periods:
         out.append(_err("myopic_no_periods", "", "",
             "Myopic foresight needs at least one investment period. The "
-            "network's snapshot MultiIndex is empty at level 0 — promote "
-            "snapshots to multi-period under Snapshots → Multi-period first, "
+            "network's snapshot MultiIndex is empty at level 0 — set "
+            "Model Horizon → Mode to Multi-period first, "
             "or switch solve_strategy back to 'full'."))
     # Flat snapshots on a multi-period config are auto-promoted by
     # _apply_modelling_assumptions step 4 when cfg.investment_periods is
@@ -1695,6 +1695,28 @@ _nonfinite_bound_hits = _nonfinite_input_hits
 _check_nonfinite_bounds = _check_nonfinite_inputs
 
 
+def _zero_cost_generators(n) -> list[str]:
+    """Generators the `gen_zero_costs` warning counts.
+
+    All three static costs are 0 (`overnight_cost > 0` also feeds
+    `capital_cost` at solve time via the annuity recompute, so a unit with
+    it set is not cost-less). Exempt (P30, B5): a unit whose marginal cost
+    is a TIME SERIES (`generators_t.marginal_cost` column — the static 0 is
+    a placeholder) and a unit with a `generators_t.p_max_pu` PROFILE (a
+    variable renewable, whose output the weather fixes). A fixed
+    dispatchable unit at zero cost still counts: its dispatch is
+    indeterminate.
+    """
+    g = n.generators
+    if g.empty or "capital_cost" not in g.columns or "marginal_cost" not in g.columns:
+        return []
+    oc = g["overnight_cost"].fillna(0) if "overnight_cost" in g.columns \
+        else pd.Series(0.0, index=g.index)
+    mask = (g["capital_cost"].fillna(0) == 0) & (g["marginal_cost"].fillna(0) == 0) & (oc == 0)
+    series = set(n.generators_t.marginal_cost.columns) | set(n.generators_t.p_max_pu.columns)
+    return [str(name) for name in g.index[mask] if name not in series]
+
+
 def _check_lopf(n, solver_config) -> list[Issue]:
     out: list[Issue] = []
 
@@ -1745,23 +1767,12 @@ def _check_lopf(n, solver_config) -> list[Issue]:
         # Cost sanity: zero capital + zero marginal cost in LOPF means the
         # solver has no preference between gens — solvable but probably not
         # what the user meant. Warning only.
-        if "capital_cost" in n.generators.columns and "marginal_cost" in n.generators.columns:
-            # overnight_cost > 0 also feeds into capital_cost at solve time via
-            # the annuity recompute, so a generator with overnight_cost set
-            # isn't actually cost-less — only flag rows where all three are 0.
-            oc = n.generators["overnight_cost"].fillna(0) \
-                if "overnight_cost" in n.generators.columns \
-                else pd.Series(0.0, index=n.generators.index)
-            zero_cost = n.generators[
-                (n.generators["capital_cost"].fillna(0) == 0)
-                & (n.generators["marginal_cost"].fillna(0) == 0)
-                & (oc == 0)
-            ]
-            if len(zero_cost) > 0:
-                out.append(_warn("gen_zero_costs", "Generator",
-                    f"{len(zero_cost)} item(s)",
-                    f"{len(zero_cost)} generator(s) have capital_cost, "
-                    "overnight_cost, and marginal_cost all == 0. Result will be indeterminate."))
+        zero_cost = _zero_cost_generators(n)
+        if len(zero_cost) > 0:
+            out.append(_warn("gen_zero_costs", "Generator",
+                f"{len(zero_cost)} item(s)",
+                f"{len(zero_cost)} generator(s) have capital_cost, "
+                "overnight_cost, and marginal_cost all == 0. Result will be indeterminate."))
 
     # Loads
     out += _check_loads_p_set(n)
@@ -1794,7 +1805,14 @@ def _check_lopf(n, solver_config) -> list[Issue]:
     # routinely sit at COP 3-5; electric trains, regenerative drives, and
     # H2-from-electrolysis-then-back-to-power chains can also push beyond
     # 1 on some legs. Allow any positive value on the primary efficiency.
-    out += _check_extendable_bounds(n.links, "Link", "p_nom", True)
+    link_issues = _check_extendable_bounds(n.links, "Link", "p_nom", True)
+    priced_poc = _capacity_priced_poc(solver_config)
+    if priced_poc is not None:
+        # A tariff capacity item prices the PoC's size in the LP (IC P2
+        # WP2.1c-iii): it is not "built free up to the max".
+        link_issues = [i for i in link_issues
+                       if not (i.code == "link_no_capital_cost" and i.name == priced_poc)]
+    out += link_issues
     out += _check_efficiency(n.links, "Link", "efficiency", upper=None)
     # Multi-link efficiency2 / efficiency3 / efficiency4 are validated only
     # on rows where the target bus_n is populated — PyPSA ignores eff_n
@@ -2004,6 +2022,40 @@ def _check_ens_cap_coherence(solver_config) -> list[Issue]:
             "standard the target promises. Use the full strategy, or unset "
             "the target.",
         ))
+    return issues
+
+
+def _check_import_energy_cap(n, solver_config) -> list[Issue]:
+    """EH P17 energy import cap: refuse what the per-period constraint cannot
+    honestly express (spec §6 amendment)."""
+    issues: list[Issue] = []
+    cap = getattr(solver_config, "import_energy_cap_mwh_per_year", None)
+    links = [str(x) for x in
+             (getattr(solver_config, "import_energy_links", None) or [])]
+    if cap is None or not links:
+        return issues
+    strategy = str(getattr(solver_config, "solve_strategy", "full") or "full")
+    if strategy in ("rolling", "myopic"):
+        issues.append(_err(
+            "import_energy_cap_unsupported_strategy", "", "",
+            f"The energy import cap is not supported with the '{strategy}' "
+            "solve strategy: each LP window would need its own share of the "
+            "annual budget. Use the full strategy.",
+        ))
+    from services.adequacy.archetypes import min_p_min_pu
+
+    links_df = getattr(n, "links", None)
+    for lid in links:
+        if links_df is None or lid not in links_df.index:
+            continue
+        lo = min_p_min_pu(n, lid)
+        if lo < 0:
+            issues.append(_err(
+                "import_energy_link_bidirectional", "Link", lid,
+                f"Link '{lid}' is metered by the energy import cap but can run "
+                f"backwards (p_min_pu {lo:g} < 0); capping only its import "
+                "direction is not supported in v1.",
+            ))
     return issues
 
 
@@ -2407,6 +2459,7 @@ def validate_for_run(n, solver_config) -> list[Issue]:
     issues += _check_profiled_occurrence_units(n)
     # Reliability-target coherence — pure config checks.
     issues += _check_ens_cap_coherence(solver_config)
+    issues += _check_import_energy_cap(n, solver_config)
     # Demand-response tier coherence (spec §4.4).
     issues += _check_dsr_coherence(n, solver_config)
 
@@ -2439,11 +2492,57 @@ def validate_for_run(n, solver_config) -> list[Issue]:
         # margin left in the config cannot make an AC power flow wrong, and
         # blocking one on it would be a refusal with no standard behind it.
         issues += _check_reserve_margin(n, solver_config)
+        # Edge Investment Case commercial layer (P1 WP1.8): the solve's own
+        # binding refusals, stated at preflight, plus the warnings that bind
+        # but mislead (arbitrage loop, demand resolution / partial months,
+        # tariff validity).
+        issues += _check_commercial(n, solver_config)
     else:
         issues.append(_err("unknown_mode", "", "",
             f"Solver mode '{mode}' not recognised (expected lopf/pf)."))
 
     return issues
+
+
+def _capacity_priced_poc(solver_config) -> str | None:
+    """The PoC Link a contracted tariff capacity item prices (rate > 0), or None."""
+    commercial = getattr(solver_config, "commercial", None)
+    if not commercial:
+        return None
+    try:
+        from services.commercial.lp_bindings import _parse, capacity_lp_items
+
+        cfg = _parse(commercial)
+    except Exception:  # noqa: BLE001 — the commercial check reports a bad config
+        return None
+    priced = [i for i in capacity_lp_items(cfg)
+              if i.measured_on != "peak_import" and i.periods[0].rate > 0]
+    return cfg.poc_link if priced else None
+
+
+def _check_commercial(n, solver_config) -> list[Issue]:
+    from services.commercial.preflight import commercial_findings
+
+    from services.commercial.lp_bindings import effective_strategy
+
+    if not getattr(solver_config, "commercial", None):
+        # No commercial config (IC U1 f, owner decision 10): the import-to-export
+        # cycling check on the Links' own marginal costs.
+        from services.commercial.preflight import network_findings
+
+        return [Issue(severity=sev, code=code, component_class=cls, name=name, message=msg)
+                for sev, code, cls, name, msg in network_findings(n)]
+    multi = bool(getattr(solver_config, "multi_investment_periods", False))
+    strategy = effective_strategy(getattr(solver_config, "solve_strategy", "full"),
+                                  sclopf=bool(getattr(solver_config, "sclopf", False)),
+                                  multi_period=multi)
+    return [Issue(severity=sev, code=code, component_class=cls, name=name, message=msg)
+            for sev, code, cls, name, msg in commercial_findings(
+                n, getattr(solver_config, "commercial", None), solve_strategy=strategy,
+                multi_period=multi,
+                dsr={"buses": list(getattr(solver_config, "dsr_buses", None) or []),
+                     "price": float(getattr(solver_config, "dsr_price_eur_per_mwh", 0.0) or 0.0),
+                     "share": float(getattr(solver_config, "dsr_share_of_load", 0.0) or 0.0)})]
 
 
 def has_errors(issues: list[Issue]) -> bool:

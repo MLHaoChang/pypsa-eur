@@ -21,7 +21,7 @@ import { useUIStore } from '../store/uiStore'
 // dock is on this page.
 //
 // ChatPanel is stubbed: the subject here is placement, and the panel's own
-// no-project behaviour (CHAT_STARTER_PROMPTS_UNBOUND, the `!currentProject`
+// no-project behaviour (the `unbound` start menu, the `!currentProject`
 // guards on the history and uploads effects) is covered by its own suite.
 
 const authState = { user: localAdminUser(), logout: vi.fn() }

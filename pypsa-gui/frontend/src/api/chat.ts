@@ -217,6 +217,69 @@ export async function getChatHealth(): Promise<ChatHealth> {
   return r.data
 }
 
+// ── The start menu (chat harness issue 03) ──────────────────────────────────
+//
+// `GET /chat/workflows?context=…` is the harness's workflow registry filtered
+// for where the user is: `unbound` (no project), `expert` or `guided`. The
+// panel renders it as the greeting chips. It is one source of truth for every
+// LLM provider, so switching the profile never changes what the chips offer,
+// and it needs no API key.
+export type WorkflowContext = 'unbound' | 'expert' | 'guided'
+
+export interface WorkflowMenuEntry {
+  id: string
+  /** The chip label. */
+  title: string
+  /** One sentence; the chip tooltip. */
+  intent: string
+  /** The message the chip sends (owner decision Q10: sent, not prefilled). */
+  opening_request: string
+  steps: { id: string; title: string }[]
+}
+
+export interface WorkflowMenu {
+  context: WorkflowContext
+  workflows: WorkflowMenuEntry[]
+}
+
+export async function getWorkflowMenu(context: WorkflowContext): Promise<WorkflowMenu> {
+  const r = await client.get('/chat/workflows', { params: { context } })
+  return r.data
+}
+
+// ── `ask_user` → the Choice card (chat harness issue 04) ────────────────────
+//
+// The `choice_request` frame carries the structured question the assistant
+// asked through `ask_user`. The panel renders it as a card; the pick is sent
+// as the NEXT user message (owner decision Q4: the turn does not block).
+export interface ChoiceOption {
+  label: string
+  description?: string
+  recommended?: boolean
+}
+
+export interface ChoiceRequestFrame {
+  tool_use_id?: string
+  title: string
+  question: string
+  options: ChoiceOption[]
+  allow_free_text: boolean
+}
+
+// ── The session's workflow step (chat harness issue 06) ─────────────────────
+//
+// `workflow_state` arrives after start_workflow / advance_workflow /
+// end_workflow, and `GET /chat/history` carries the same shape, so a reload
+// shows the strip again while the server session is resident.
+export interface WorkflowState {
+  id: string
+  title: string
+  step: string
+  step_title: string
+  step_index: number
+  step_count: number
+}
+
 // ── U-1 — supplying the Anthropic API key from inside the app ──────────────
 //
 // The packaged app ships no `backend/.env` (it would carry a real key and the
@@ -294,12 +357,18 @@ export interface InterruptedTurn {
 export interface ChatHistory {
   turns: ChatTurn[]
   last_session_id: string | null
+  /** The bound session's workflow step (chat harness issue 06), or null. */
+  workflow?: WorkflowState | null
   bound_project: string | null
   // How many on-disk records were unreadable. Non-zero means `turns` is
   // INCOMPLETE — say so rather than rendering a quietly shorter conversation.
   history_gap: number
   // Reported once, then cleared server-side; null on a clean reload.
   pending_turn: InterruptedTurn | null
+  // P28 A3 — the profile the resumed session is bound to (its next turn runs
+  // on it when the request names none); null with no turns or when that
+  // profile is no longer configured. Optional: older backends omit it.
+  bound_profile_id?: string | null
 }
 
 export async function getChatHistory(limit = 200): Promise<ChatHistory> {

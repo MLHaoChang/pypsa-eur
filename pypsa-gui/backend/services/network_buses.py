@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from services import change_log_service
 from services.network_geometry import _recompute_lengths_for_bus
 from services.pypsa_service import PyPSAService
+from services.study_state import refuse_edit_during_live_study
 
 
 def apply_update_bus(name: str, bus, *, update_component):
@@ -73,6 +74,7 @@ def apply_update_bus(name: str, bus, *, update_component):
 
 
 def apply_delete_bus_cascade(name: str) -> None:
+    refuse_edit_during_live_study()  # P27a A1: not routed via _delete_component
     n = PyPSAService.get_network()
     with PyPSAService.get_lock():
         if name not in n.buses.index:
@@ -100,9 +102,15 @@ def apply_delete_bus_cascade(name: str) -> None:
 
 
 def apply_rename_bus(name: str, body: dict):
+    refuse_edit_during_live_study()  # P27a A1: not routed via _update_component
     new_name = (body.get("new_name") or "").strip()
     if not new_name:
         raise HTTPException(400, "new_name cannot be empty")
+    from services.commercial.settlement_inputs import reserved_bus_name
+
+    if reserved_bus_name(new_name):
+        # `ic:` names the commercial reference frames' columns (P2 WP2.2-0).
+        raise HTTPException(422, f"bus names starting 'ic:' are reserved (got {new_name!r})")
     n = PyPSAService.get_network()
     with PyPSAService.get_lock():
         if name not in n.buses.index:

@@ -9,11 +9,15 @@ anywhere else in this decomposition: `services/chat_tools.py`,
 chat_tools guards its import with a comment reading "only fails if
 routers/network refactor breaks paths".
 
-`_user_ts` is a module-level dict and `_user_ts_lock` the RLock guarding it.
-Both are shared MUTABLE state: importers take them by value and mutate in
-place, so the re-export is only sound while nothing ever rebinds them.
+`_user_ts` is a per-ProjectContext VIEW of that context's `user_ts` dict (see
+`_ActiveUserTsStore` below and the finding it cites) and `_user_ts_lock` the
+process-wide RLock guarding whichever dict a caller resolved. Both are shared
+MUTABLE state: importers take them by value and mutate in place, so the
+re-export is only sound while nothing ever rebinds them.
 `tests/test_network_facade_surface.py::test_the_user_ts_store_is_never_rebound`
-enforces that statically, here and in the router.
+enforces that statically, here and in the router — and it is the view's identity
+that has to hold, not the storage's, which is precisely why the storage could
+move per-context without touching a single one of them.
 
 Depends on `services/snapshot_index.py` and `PyPSAService` — both services.
 Nothing here imports a router.
@@ -36,9 +40,114 @@ from services.snapshot_index import _build_period_multiindex
 # pandas index-alignment pitfall: uploading a column with 2024 timestamps will
 # never corrupt another column that was uploaded with 2026 timestamps, and a
 # re-upload of any column simply overwrites its own entry.
-_user_ts: dict[tuple[str, str, str], pd.Series] = {}
+#
+# The key says nothing about WHOSE column it is, and that is on purpose: the
+# tenancy dimension is not in the key, it is in WHICH DICT the key lives in.
+# The actual storage is `ProjectContext.user_ts` — one dict per resident project
+# context — and `_user_ts` below is a stable VIEW that resolves to the context
+# the caller is on, exactly as `routers.simulation._state` resolves to that
+# context's `solver_state`.
+#
+# ★ WHY IT IS NOT ONE DICT. It used to be, and the store is authoritative
+# rather than a cache: `GET /api/network/timeseries/{component}/{attribute}`
+# prefers it over the network's own `_t` tables, every foreground save
+# serialises it into that project's `user_ts.json`, and
+# `_reapply_user_ts_to_network` writes it back onto the network immediately
+# before the netCDF export. On one process serving many signed-in sessions all
+# of that was shared: org A's uploaded demand profile was readable from org B's
+# OWN project, was persisted into B's `user_ts.json`, and from there into B's
+# `network.nc` and its solve results — while `GET /api/network/loads` still
+# showed B's own static `p_set`, so the two surfaces disagreed and the leaked
+# one won at export time. Symmetrically, A opening a project wiped B's
+# in-flight uploads. Reproduced cross-org and written up in
+# `docs/superpowers/findings/2026-09-12-user-ts-is-a-process-global-shared-across-tenants.md`;
+# `tests/test_user_ts_tenancy.py` pins the four properties it requires.
+# The desktop build had the same defect as a multi-project data-integrity bug.
+class _ActiveUserTsStore:
+    """
+    Mapping view of the ACTIVE project context's user time-series store.
+
+    A view rather than a dict so the ~50 sites that read or write `_user_ts`
+    — four production modules and six test modules, several of which import the
+    name BY VALUE inside a function body — did not have to change to become
+    tenant-scoped. Every operation resolves through
+    `PyPSAService.get_user_ts()`, i.e. through the request-scoped context when
+    there is one and the process foreground otherwise, so a stale binding
+    captured at import time still reaches whichever project is current NOW.
+
+    The object is bound ONCE and never rebound (enforced statically by
+    `tests/test_network_facade_surface.py::test_the_user_ts_store_is_never_rebound`,
+    which is what keeps the by-value importers pointing at this view rather than
+    at a detached dict of their own).
+    """
+
+    __slots__ = ()
+
+    @staticmethod
+    def _t() -> dict:
+        return PyPSAService.get_user_ts()
+
+    def __getitem__(self, key):
+        return self._t()[key]
+
+    def __setitem__(self, key, value):
+        self._t()[key] = value
+
+    def __delitem__(self, key):
+        del self._t()[key]
+
+    def __contains__(self, key):
+        return key in self._t()
+
+    def __iter__(self):
+        return iter(self._t())
+
+    def __len__(self):
+        return len(self._t())
+
+    def __repr__(self):
+        return f"_ActiveUserTsStore({self._t()!r})"
+
+    def get(self, key, default=None):
+        return self._t().get(key, default)
+
+    def update(self, *args, **kwargs):
+        self._t().update(*args, **kwargs)
+
+    def clear(self):
+        self._t().clear()
+
+    def keys(self):
+        return self._t().keys()
+
+    def items(self):
+        return self._t().items()
+
+    def values(self):
+        return self._t().values()
+
+    def setdefault(self, key, default=None):
+        return self._t().setdefault(key, default)
+
+    def pop(self, key, *args):
+        return self._t().pop(key, *args)
+
+    def copy(self):
+        return self._t().copy()
 
 
+_user_ts = _ActiveUserTsStore()
+
+
+# Guards multi-step reads/writes of whichever context's store the caller
+# resolved. Deliberately still ONE process-wide RLock and not a per-context one:
+# it protects dict-level atomicity (serialise-while-uploading, the
+# clear-then-update in `_restore_user_ts`), and one lock over N dicts is coarser
+# than necessary and never wrong — whereas a lock that MOVES when the active
+# context moves would be acquired on one object and released on another across
+# the reset/set swaps that `load_project` performs inside a held critical
+# section. Same argument the netCDF I/O lock and `solver_state_lock` already
+# make in their own places.
 _user_ts_lock = _ts_threading.RLock()
 
 
@@ -168,9 +277,15 @@ def _annual_hourly_reference():
     return idx, None
 
 
-def _serialize_user_ts() -> dict:
+def _serialize_user_ts(store: dict | None = None) -> dict:
     """
-    Return _user_ts as a JSON-serialisable nested dict.
+    Return a user time-series store as a JSON-serialisable nested dict.
+
+    ``store`` names WHICH context's store to read; ``None`` means the active
+    one (`_user_ts`), which is what every route wants. A caller holding a
+    ProjectContext passes `ctx.user_ts` instead, so a save writes the profiles
+    of the project it is saving rather than the profiles of whichever project
+    happens to be active on the calling thread — see `_save_context`.
 
     Format: ``{component: {attribute: {column: {index: [...], values: [...]}}}}``
     The index entries are:
@@ -187,8 +302,10 @@ def _serialize_user_ts() -> dict:
     # `dictionary changed size during iteration`. Snapshot keys first so a
     # writer waiting on the lock isn't blocked for the JSON-serialisation
     # cost (just the dict-snapshot cost).
+    if store is None:
+        store = _user_ts
     with _user_ts_lock:
-        items = list(_user_ts.items())
+        items = list(store.items())
     for (comp, attr, col), series in items:
         if isinstance(series.index, pd.MultiIndex):
             idx = [
@@ -205,9 +322,14 @@ def _serialize_user_ts() -> dict:
     return result
 
 
-def _restore_user_ts(data: dict) -> None:
+def _restore_user_ts(data: dict, store: dict | None = None) -> None:
     """
-    Restore _user_ts from the format produced by _serialize_user_ts.
+    Restore a user time-series store from the format `_serialize_user_ts` writes.
+
+    ``store`` names WHICH context's store to replace; ``None`` means the active
+    one. This REPLACES the store wholesale, which is why the parameter matters:
+    aimed at the wrong dict it discards a project's profiles rather than merely
+    reading the wrong ones.
     Supports both the current nested format and the legacy pipe-separated format
     for backwards compatibility with old user_ts.json files.
     All-NaN series are silently skipped — they represent corrupt/empty data.
@@ -264,9 +386,10 @@ def _restore_user_ts(data: dict) -> None:
 
     # Replace the store atomically under the lock — readers in
     # _serialize_user_ts / _user_ts.items() never see a half-populated state.
+    target = _user_ts if store is None else store
     with _user_ts_lock:
-        _user_ts.clear()
-        _user_ts.update(new_store)
+        target.clear()
+        target.update(new_store)
 
 
 # Components whose `_t` tables we walk for time-series backup. Every non-empty
@@ -286,9 +409,15 @@ _TS_COMPONENTS: list[str] = [
 ]
 
 
-def _backup_network_ts_to_user_ts(n=None) -> None:
+def _backup_network_ts_to_user_ts(n=None, store: dict | None = None) -> None:
     """
-    Copy time series from the network's _t tables into _user_ts.
+    Copy time series from the network's _t tables into a user time-series store.
+
+    ``n`` and ``store`` are a PAIR and must describe the same project: this
+    reads one and writes the other. Both default to the active context's, which
+    is right for every route; a caller that passes a non-active ``n`` (a save of
+    a background context) must pass that context's ``store`` with it, or it
+    ingests one project's profiles into another project's store.
 
     Walks every non-empty (component, attribute) pair. Only copies a column when:
       - it is not already in _user_ts, OR
@@ -310,6 +439,8 @@ def _backup_network_ts_to_user_ts(n=None) -> None:
     """
     if n is None:
         n = PyPSAService.get_network()
+    if store is None:
+        store = _user_ts
     for comp in _TS_COMPONENTS:
         ts_store = getattr(n, f"{comp}_t", None)
         if ts_store is None:
@@ -355,9 +486,9 @@ def _backup_network_ts_to_user_ts(n=None) -> None:
                 # for the per-key get-or-insert keeps `_serialize_user_ts`'s
                 # snapshot-then-iterate path safe.
                 with _user_ts_lock:
-                    existing = _user_ts.get(key)
+                    existing = store.get(key)
                     if existing is None or existing.isna().all():
-                        _user_ts[key] = series.copy()
+                        store[key] = series.copy()
 
 
 def _rebase_flat_user_ts(new_idx: pd.DatetimeIndex) -> int:
@@ -493,11 +624,60 @@ def _ensure_snapshots_cover_user_ts(n=None) -> bool:
     return True
 
 
-def _reapply_user_ts_to_network(n=None) -> None:
+def _hold_positions(src_index, target) -> "_np.ndarray":
     """
-    Re-apply _user_ts profiles to the network's _t tables, aligned to the
-    current snapshot index.  Call this after n.set_snapshots() or after a
-    project load so that the network uses the correct time series for simulation.
+    Positions of `target` timestamps in `src_index`, holding a COARSER source
+    step across the finer target steps inside it.
+
+    Every time-varying input the GUI writes (p_set, p_max_pu, marginal_cost,
+    efficiency …) is an intensive quantity — MW, per-unit, €/MWh — so an
+    hourly value is the right value for each of its four quarter-hours. Exact
+    matches win; a target inside a source step (target − source < source step)
+    takes that step's value; anything else stays unmatched (-1). Without this,
+    an hourly upload on a 15-minute axis left 72 of 96 rows NaN — three
+    quarters of the demand silently missing (Edge Investment Case WP1.0 review).
+    """
+    import numpy as _np
+
+    try:
+        src = pd.DatetimeIndex(src_index)
+        tgt = pd.DatetimeIndex(target)
+    except (TypeError, ValueError):
+        return pd.Index(src_index).get_indexer(target)  # not a time axis: exact only
+    pos = src.get_indexer(tgt)
+    if (pos >= 0).all() or len(src) < 2 or not src.is_monotonic_increasing \
+            or src.has_duplicates:
+        return pos
+    src_step = pd.Series(src[1:] - src[:-1]).median()
+    if len(tgt) > 1:
+        tgt_step = pd.Series(pd.DatetimeIndex(sorted(set(tgt)))[1:]
+                             - pd.DatetimeIndex(sorted(set(tgt)))[:-1]).median()
+        if not (src_step > tgt_step):
+            return pos
+    try:
+        held = src.get_indexer(tgt, method="ffill")
+    except TypeError:  # tz-aware vs naive: exact matches only (re-review C2)
+        return pos
+    ok = held >= 0
+    within = _np.zeros(len(tgt), dtype=bool)
+    within[ok] = (tgt[ok] - src[held[ok]]) < src_step
+    return _np.where(pos >= 0, pos, _np.where(ok & within, held, -1))
+
+
+def _reapply_user_ts_to_network(n=None, store: dict | None = None) -> None:
+    """
+    Re-apply a store's profiles to the network's _t tables, aligned to the
+    current snapshot index.
+
+    ``n`` and ``store`` are a PAIR and must describe the same project — this
+    writes the store's series onto that network. Both default to the active
+    context's. Passing a non-active ``n`` without its own ``store`` overlays one
+    project's uploaded profiles onto another project's network wherever an asset
+    name collides, which corrupts its LP and its exported netCDF; that is the
+    mismatch `_save_context` and `solver_service` used to have to gate around.
+
+    Call this after n.set_snapshots() or after a project load so that the network
+    uses the correct time series for simulation.
 
     If a stored series has zero overlap with the current snapshots (e.g. the
     user uploaded 2024 hourly data but the network still uses 2013 daily
@@ -518,6 +698,8 @@ def _reapply_user_ts_to_network(n=None) -> None:
     _log = _logging.getLogger(__name__)
     if n is None:
         n = PyPSAService.get_network()
+    if store is None:
+        store = _user_ts
 
     # Three cases for aligning a stored _user_ts series with n.snapshots:
     #   1) series.index is MultiIndex (per-period upload) AND n.snapshots is
@@ -597,7 +779,7 @@ def _reapply_user_ts_to_network(n=None) -> None:
         return cached is None or attr_name in cached
 
     grouped: dict[tuple[str, str], dict[str, pd.Series]] = defaultdict(dict)
-    for (comp, attr, col), series in _user_ts.items():
+    for (comp, attr, col), series in store.items():
         ts_store = getattr(n, f"{comp}_t", None)
         if ts_store is None:
             continue
@@ -622,15 +804,20 @@ def _reapply_user_ts_to_network(n=None) -> None:
             )
             continue
         elif is_multi:
-            # Case 3 — DatetimeIndex series + MultiIndex snapshots: broadcast.
-            positions = series.index.get_indexer(target_lookup)
+            # Case 3 — DatetimeIndex series + MultiIndex snapshots: broadcast
+            # (holding a coarser series across finer steps — _hold_positions).
+            positions = _hold_positions(series.index, target_lookup)
             out = _np.full(len(target_lookup), _np.nan, dtype=float)
             mask = positions >= 0
             out[mask] = series.values[positions[mask]]
             aligned = pd.Series(out, index=n.snapshots)
         else:
-            # Case 4 — plain reindex.
-            aligned = series.reindex(n.snapshots)
+            # Case 4 — reindex, holding a coarser series across finer steps.
+            positions = _hold_positions(series.index, n.snapshots)
+            out = _np.full(len(n.snapshots), _np.nan, dtype=float)
+            mask = positions >= 0
+            out[mask] = series.values[positions[mask]]
+            aligned = pd.Series(out, index=n.snapshots)
         if aligned.isna().all() and not series.isna().all():
             _log.warning(
                 "_reapply: %s/%s/%s has no overlap with current snapshots "
@@ -737,7 +924,7 @@ def _capture_snapshot_weights_per_timestep(n):
     return sw
 
 
-def _reapply_snapshot_weights(n, captured) -> None:
+def _reapply_snapshot_weights(n, captured, fill=1.0) -> None:
     """
     Write captured weights back onto ``n.snapshot_weightings`` after
     ``set_snapshots`` has rebuilt the index. Must run AFTER the reshape. Holds
@@ -748,7 +935,8 @@ def _reapply_snapshot_weights(n, captured) -> None:
       2. genuinely new period → reindex the FIRST captured period's frame as a
          template, matching how ``set_investment_periods`` templates a new
          period's operational range from the first existing one
-      3. anything still unmatched → 1.0
+      3. anything still unmatched → ``fill`` (a float, or a Series aligned to
+         ``n.snapshots`` — the per-row step length in hours; default 1.0)
 
     Accepts either capture shape: ``{period: frame}`` from a MultiIndex source
     or a single frame from a flat one.
@@ -770,15 +958,25 @@ def _reapply_snapshot_weights(n, captured) -> None:
             mask = idx.get_level_values(0) == p
             ts_slice = idx[mask].get_level_values(1)
             source = captured.get(int(p), template)
-            aligned = source.reindex(ts_slice).fillna(1.0)
+            aligned = source.reindex(ts_slice)
             aligned.index = idx[mask]
             chunks.append(aligned)
         new_sw = pd.concat(chunks)
     else:
         # MultiIndex source demoted to flat: use the first captured period.
         flat_source = captured[sorted(captured)[0]] if isinstance(captured, dict) else captured
-        new_sw = flat_source.reindex(idx).fillna(1.0)
+        new_sw = flat_source.reindex(idx)
         new_sw.index = idx
+    if isinstance(fill, pd.Series):
+        fill_vals = fill.reindex(idx).fillna(1.0).to_numpy(dtype=float)
+        for col in new_sw.columns:
+            miss = new_sw[col].isna().to_numpy()
+            if miss.any():
+                vals = new_sw[col].to_numpy(dtype=float).copy()
+                vals[miss] = fill_vals[miss]
+                new_sw[col] = vals
+    else:
+        new_sw = new_sw.fillna(float(fill))
     # The setter validates df.index.equals(n.snapshots); we built new_sw against
     # n.snapshots so it passes. Assign per column in case a future PyPSA adds a
     # weight column we did not capture.

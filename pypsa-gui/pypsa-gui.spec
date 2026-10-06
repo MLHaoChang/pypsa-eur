@@ -75,6 +75,26 @@ datas = [
     # below puts `services/llm_config.py` at _MEIPASS-root/`services/`, so its
     # `parent.parent` is _MEIPASS root itself).
     (str(BACKEND / "presets.json"), "."),
+    # Class-C synthetic profile packs (P15): `services/adequacy/stress.py`
+    # resolves `parents[2] / "data" / "eh_class_c"`, i.e. _MEIPASS root.
+    (str(BACKEND / "data" / "eh_class_c"), "data/eh_class_c"),
+    # In-app guide catalogue (P21): `services/guides.py` resolves
+    # `parents[1] / "data" / "guides"`, i.e. _MEIPASS root.
+    (str(BACKEND / "data" / "guides"), "data/guides"),
+    # The chat harness's Markdown (prompts, workflows, skills; chat harness
+    # issue 10). Each loader resolves `Path(__file__).resolve().parent` of
+    # `harness/<part>/__init__.py`, which under _MEIPASS is
+    # `harness/<part>/`, so the data must keep that exact layout. The prompt
+    # fragments are not optional: `harness/loop.py` reads them at
+    # import, so a bundle without them does not start.
+    (str(BACKEND / "harness" / "prompts"), "harness/prompts"),
+    (str(BACKEND / "harness" / "workflows"), "harness/workflows"),
+    (str(BACKEND / "harness" / "skills"), "harness/skills"),
+    # The generic defaults pack (IC U1 a): `services/library/defaults_pack/
+    # loader.py` resolves `Path(__file__).parent / "versions"`; the loader is a
+    # module (collected by import), its data files are not.
+    (str(BACKEND / "services" / "library" / "defaults_pack" / "versions"),
+     "services/library/defaults_pack/versions"),
     # The SPA the backend serves in local mode. `settings.frontend_dist`
     # resolves `<backend>/../frontend/dist`, which under _MEIPASS means this
     # exact layout.
@@ -103,6 +123,10 @@ for dist in ("pypsa", "linopy", "xarray", "fastapi", "uvicorn", "starlette",
 # xarray and pypsa both resolve backends through entry points at first use.
 datas += collect_data_files("xarray", includes=["**/*.yaml", "**/*.yml"])
 datas += collect_data_files("pypsa", includes=["**/*.csv", "**/*.yaml"])
+# python-docx opens its bundled `templates/default.docx` (and the part
+# templates beside it) on every `Document()`; the report writer
+# (`services/reports/`) does that for the built-in report template.
+datas += collect_data_files("docx", includes=["templates/*"])
 
 # ── the planning → dynamics pipeline (gridspine; increment 6) ───────────────
 #
@@ -168,6 +192,10 @@ hiddenimports = [
     # from the bundle without a build error.
     "cloudpickle",
     "gridspine.drivers.study", "gridspine.drivers.status",
+    # `gridspine_service` imports `check_external` from it inside the gridspine
+    # guard; the packaging test derives the guarded imports and this was the
+    # one it named (red on master since #58).
+    "gridspine.drivers.year_study",
     # `drivers.readback` reached that guard with the PowerFactory read-back
     # (increment 6) and never reached this list. Analysis follows a try/except
     # import today, so this is not a fix for a broken build — it is the rule
@@ -175,6 +203,12 @@ hiddenimports = [
     # by `test_the_spec_names_every_gridspine_module_the_backend_guard_imports`,
     # which derives the list from the guard instead of trusting this one.
     "gridspine.drivers.readback",
+    "gridspine.drivers.capacity",
+    "gridspine.drivers.connection",
+    "gridspine.drivers.campus_study",
+    # `drivers.year_study` (check_external, increment 7) reached the guard on
+    # master and missed this list; the guard test caught it at the merge.
+    "gridspine.drivers.year_study",
     "gridspine.schema.contracts", "gridspine.templates.unit_params",
 ]
 

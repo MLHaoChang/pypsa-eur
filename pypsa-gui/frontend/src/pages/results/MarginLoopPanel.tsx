@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Gauge, ShieldCheck, Square } from 'lucide-react'
-import { resultsApi } from '../../api/simulation'
+import { MAX_LOOP_SOLVES, resultsApi } from '../../api/simulation'
 import type {
   McStatus, MarginIteration, MarginLoopPayload, MarginLoopRequestBody,
 } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
+import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { nk } from '../../utils/queryKeys'
 import { basisSuffix, type CoptPayload } from './adequacy'
 import { blockerMessage, trim } from './McPanel'
@@ -158,6 +159,7 @@ export function MarginLoopPanel() {
         ? 2000 : false,
   })
   const payload = (data ?? null) as MarginLoopPayload | null
+  useStudyFinishedInvalidation(data === undefined ? undefined : payload?.status ?? null)
   const running = payload?.status === 'running'
 
   // The same query keys the rest of the tab uses, so this reads the cache the
@@ -344,7 +346,7 @@ export function MarginLoopPanel() {
             <p className="text-[10px] text-muted" data-testid="margin-loop-not-run">
               No reserve-margin loop has been run in this session. Nothing below
               is a result of zero: there is no result. A run costs one probing
-              solve plus up to {'max_solves'} full capacity expansions with a
+              solve plus up to {MAX_LOOP_SOLVES} full capacity expansions with a
               sampling study each, and it holds the network throughout.
             </p>
           )}

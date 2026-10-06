@@ -33,30 +33,39 @@ def _run(n, pack, *, stages, budget=30, cfg=None):
     )
 
 
+# Merge 2026-09-28: the ladder (master PR #53) feeds the P12 frontier stage
+# (``eh_study.frontier_targets`` + ``frontier_point_count``): at most ~40 % of
+# the budget, at least TWO points, on a private copy with no closing restore
+# (decision Q4) — so no "+ restore" solve and no three-point minimum.
+
+
 def test_ladder_is_around_the_target_and_passes_through_it():
-    targets, why = ST.frontier_targets_for(10.0, remaining_solves=29)
-    assert why is None
-    assert targets == [40.0, 20.0, 10.0, 5.0, 2.5]
+    n = S.frontier_point_count(remaining=29, budget_solves=30)
+    targets = sorted(S.frontier_targets(10.0, n), reverse=True)
+    assert targets == pytest.approx([40.0, 20.0, 10.0, 5.0, 2.5])
     assert 10.0 in targets
 
 
 def test_ladder_trims_to_budget_keeping_the_target_point():
-    targets, why = ST.frontier_targets_for(10.0, remaining_solves=4)  # 3 pts + restore
-    assert why is None
-    assert len(targets) == 3
+    n = S.frontier_point_count(remaining=3, budget_solves=4)
+    targets = S.frontier_targets(10.0, n)
+    assert len(targets) == n == 2
     assert 10.0 in targets
 
 
-@pytest.mark.parametrize("remaining", [0, 1, 2, 3])
+@pytest.mark.parametrize("remaining", [0, 1])
 def test_ladder_skips_below_minimum_points(remaining):
-    targets, why = ST.frontier_targets_for(10.0, remaining_solves=remaining)
-    assert targets == []
-    assert why and "budget" in why
+    assert S.frontier_point_count(remaining=remaining, budget_solves=30) \
+        < ST.MIN_EH_FRONTIER_POINTS
 
 
 def test_ladder_needs_a_positive_cap():
-    assert ST.frontier_targets_for(None, remaining_solves=29)[0] == []
-    assert ST.frontier_targets_for(0.0, remaining_solves=29)[0] == []
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        AvailabilityTarget(ens_cap_permyriad=0.0)
+    # A pack without an ENS cap: the stage is not_established (see
+    # test_energy_hub_frontier_fmea::test_frontier_without_a_pack_ens_target_…).
 
 
 def _pack(cap: float):
@@ -90,20 +99,23 @@ def test_frontier_stage_fills_points_with_shed_exclusion_and_period_basis():
     assert any(abs(p["target_permyriad"] - 10.0) < 1e-9 for p in pts)
     rec = next(s for s in report.pipeline.stages if s.stage == "frontier")
     assert rec.status == "run"
-    assert rec.solves_charged == len(pts) + 1  # + closing restore
+    assert rec.solves_charged == len(pts)  # private copy: no closing restore
     assert report.pipeline.solves_consumed == 1 + rec.solves_charged
     assert report.pipeline.solves_consumed <= report.pipeline.budget_solves
-    assert sec.payload["base_restored"] is True
+    assert sec.payload["restore_skipped_on_private_copy"] is True
 
 
 @pytest.mark.live_solve
-def test_frontier_skipped_when_budget_cannot_afford_three_points():
+def test_frontier_skipped_when_budget_cannot_afford_two_points():
+    # P12 rule: two points make the minimum curve, so the budget that
+    # cannot afford one is 2 (ens_solve takes 1 → 1 left). A requested stage
+    # that produced nothing is not_established (spec §4), its record skipped.
     n = certifiable_weak_network()
     report = _run(n, _pack(10.0),
                   stages=("apply_pack", "ens_solve", "frontier", "assemble"),
-                  budget=3)  # ens_solve takes 1 → 2 left → below 3 + restore
+                  budget=2)
     assert report.completeness["cost"] == "ok"
-    assert report.completeness["frontier"] == "skipped"
+    assert report.completeness["frontier"] == "not_established"
     rec = next(s for s in report.pipeline.stages if s.stage == "frontier")
     assert rec.status == "skipped"
     assert rec.note and "budget" in rec.note
@@ -169,16 +181,17 @@ def test_pack_refuses_an_out_of_range_top_n():
 
 
 def test_trim_keeps_the_points_nearest_the_target_on_both_sides():
-    targets, why = ST.frontier_targets_for(10.0, remaining_solves=4)
-    assert why is None
-    assert targets == [20.0, 10.0, 5.0]
+    targets = sorted(S.frontier_targets(10.0, 3), reverse=True)
+    assert targets == pytest.approx([20.0, 10.0, 5.0])
 
 
-def test_a_custom_ladder_is_used_and_needs_three_factors():
-    targets, _ = ST.frontier_targets_for(10.0, 29, ladder=(3.0, 1.0, 0.3))
+def test_a_custom_ladder_is_used_and_needs_two_points():
+    targets = sorted(S.frontier_targets(10.0, 5, ladder=(3.0, 1.0, 0.3)),
+                     reverse=True)
     assert targets == pytest.approx([30.0, 10.0, 3.0])
-    targets, why = ST.frontier_targets_for(10.0, 29, ladder=(2.0, 1.0))
-    assert targets == [] and "at least" in why
+    # Two points (×1 is always one) are the P12 minimum curve.
+    assert S.frontier_targets(10.0, 5, ladder=(2.0, 1.0)) == pytest.approx(
+        [10.0, 20.0])
 
 
 @pytest.mark.live_solve
@@ -189,4 +202,62 @@ def test_the_pack_ladder_drives_the_study_frontier():
     payload = report.sections["frontier"].payload
     assert payload["targets_permyriad"] == pytest.approx([30.0, 10.0, 5.0])
     rec = next(s for s in report.pipeline.stages if s.stage == "frontier")
-    assert rec.solves_charged == 3 + 1
+    assert rec.solves_charged == 3                  # no closing restore
+
+
+# ── owner's Q3 rule (2026-09-29): a curve from 2 points, a knee from 3 ─────
+# Merge review B2. Stubbed sweeps put a VOLL crossing at the FIRST step, so
+# the engine's ``knee_index`` returns 0 whenever it is asked; the stage must
+# not ask (and must say why) below three solved points.
+
+def _ok_points_with_a_crossing(targets, n_ok):
+    t = sorted(targets, reverse=True)[:n_ok]
+    costs = [100.0, 1e9, 2e9][:n_ok]
+    ens = [10.0, 9.0, 8.0][:n_ok]
+    return {
+        "points": [
+            {"target_permyriad": t[i], "status": "ok",
+             "period_basis": "single_period",
+             "point": {"total_system_cost_eur": costs[i],
+                       "achieved_ens_mwh": ens[i]}}
+            for i in range(n_ok)],
+        "warning": None, "aborted": False,
+    }
+
+
+@pytest.mark.live_solve
+def test_frontier_with_two_points_reports_the_curve_but_no_knee(monkeypatch):
+    from services.adequacy import frontier as fr
+
+    monkeypatch.setattr(
+        fr, "run_frontier_sweep",
+        lambda net, lock, cfg, targets, **kw: _ok_points_with_a_crossing(targets, 2))
+    report = _run(certifiable_weak_network(), _pack(10.0),
+                  stages=("apply_pack", "ens_solve", "frontier", "assemble"))
+    sec = report.sections["frontier"]
+    assert report.completeness["frontier"] == "ok"          # curve from 2 points
+    assert len([p for p in sec.payload["points"] if p["status"] == "ok"]) == 2
+    assert sec.payload["knee_index"] is None                # the knee needs 3
+    assert sec.payload["knee_status"] == "not_established"
+    assert "3" in sec.payload["knee_note"]
+
+
+@pytest.mark.live_solve
+def test_frontier_with_three_points_reports_the_knee(monkeypatch):
+    """Positive control: three solved points with a crossing give a knee."""
+    from services.adequacy import frontier as fr
+
+    monkeypatch.setattr(
+        fr, "run_frontier_sweep",
+        lambda net, lock, cfg, targets, **kw: _ok_points_with_a_crossing(targets, 3))
+    report = _run(certifiable_weak_network(), _pack(10.0),
+                  stages=("apply_pack", "ens_solve", "frontier", "assemble"))
+    p = report.sections["frontier"].payload
+    assert p["knee_index"] == 0
+    assert p["knee_status"] == "ok"
+    assert p["knee_note"] is None
+
+
+def test_the_knee_floor_is_three_and_the_curve_floor_two():
+    assert ST.MIN_EH_FRONTIER_KNEE_POINTS == 3
+    assert ST.MIN_EH_FRONTIER_POINTS == 2

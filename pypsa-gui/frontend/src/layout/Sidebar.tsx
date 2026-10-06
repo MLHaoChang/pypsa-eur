@@ -8,7 +8,7 @@ import {
   Camera, LayoutDashboard,
   Sun, Moon, Rows2, Rows3,
   GitBranch as GitBranchIcon, ListChecks, FlaskConical,
-  MessageSquare, LayoutGrid, Users, SlidersHorizontal,
+  MessageSquare, LayoutGrid, Users, FileText, Compass, Cable,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
@@ -33,10 +33,9 @@ import { nk } from '../utils/queryKeys'
 import NewProjectWizard from './NewProjectWizard'
 import ProjectPicker from '../components/ProjectPicker'
 import { useSolveQueue } from '../hooks/useSolveQueue'
-import { useLocalSettingsAvailable } from '../hooks/useLocalSettings'
-import { useLLMSettingsAvailable } from '../hooks/useLLMSettings'
 import { isActive } from '../api/solveQueue'
 import { evaluateMutation } from '../utils/mutationGuard'
+import { mismatchSentence } from '../utils/projectMismatch'
 import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
 import { flushPendingSitesToServer } from '../site3d/sitesStore'
 import { PALETTE_SECTIONS_DATA } from './paletteData'
@@ -90,10 +89,11 @@ function SItem({
   )
 }
 
-function SectionHdr({ title, open, onToggle }: { title: string; open: boolean; onToggle: () => void }) {
+function SectionHdr({ title, open, onToggle, testId }: { title: string; open: boolean; onToggle: () => void; testId?: string }) {
   return (
     <button
       onClick={onToggle}
+      data-testid={testId}
       className="flex items-center justify-between w-full px-4 py-2 mt-1 text-left hover:bg-panel transition-colors"
     >
       <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-ink-400">{title}</span>
@@ -261,7 +261,7 @@ function IoModal({ onClose, initialTab = 'import', projectName }: {
             <p className="text-[9px] font-bold text-accent uppercase tracking-widest">NETWORK</p>
             <p className="text-sm font-semibold text-text">Project Data</p>
           </div>
-          <button onClick={onClose} className="p-1 text-muted hover:text-text transition-colors"><X size={16} /></button>
+          <button onClick={onClose} aria-label="Close" className="p-1 text-muted hover:text-text transition-colors"><X size={16} /></button>
         </div>
         <div className="flex border-b border-border px-5">
           {(['import', 'export'] as const).map(t => (
@@ -365,7 +365,7 @@ function OpenProjectModal({
       <div className="bg-bg rounded-xl shadow-2xl w-[480px] max-h-[80vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
           <span className="text-sm font-semibold text-text">Open project</span>
-          <button onClick={onClose} className="p-1 text-muted hover:text-text"><X size={15} /></button>
+          <button onClick={onClose} aria-label="Close" className="p-1 text-muted hover:text-text"><X size={15} /></button>
         </div>
         {/* Browse from disk — works for projects exported as .pypsaproj.zip
             from another machine or backed up outside the projects folder. */}
@@ -421,7 +421,7 @@ function SaveNameModal({
       <div className="bg-bg rounded-xl shadow-2xl w-80 overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <span className="text-sm font-semibold text-text">Save project</span>
-          <button onClick={onClose} className="p-1 text-muted hover:text-text"><X size={15} /></button>
+          <button onClick={onClose} aria-label="Close" className="p-1 text-muted hover:text-text"><X size={15} /></button>
         </div>
         <div className="p-4 space-y-3">
           <label className="flex flex-col gap-1">
@@ -545,9 +545,12 @@ function ProjectHeaderCard({
 
 function ProjectSectionContent({
   onCloseModal, projectName, saveStatus, setSaveStatus,
-  openIo, handleNewProject,
+  openIo, handleNewProject, guided = false,
 }: {
   onCloseModal?: () => void
+  // Guided mode (spec §3.5): only the header card, Save, Recent and Projects
+  // home. The hidden rows stay reachable via the palette and the assistant.
+  guided?: boolean
   projectName: string
   saveStatus: 'idle' | 'saved'
   setSaveStatus: (s: 'idle' | 'saved') => void
@@ -559,7 +562,7 @@ function ProjectSectionContent({
     autosaveEnabled, setAutosaveEnabled, markProjectSaved,
     lastSavedByProject, recents,
     activeSlidePanel, setSlidePanel, setProjectSwitchInProgress,
-    readOnly, readOnlyReason,
+    readOnly, readOnlyReason, projectMismatch,
   } = useUIStore()
   const [showNameModal, setShowNameModal] = useState(false)
   // Separate flag for the "Save a Copy" flow so its modal can pre-fill a
@@ -603,6 +606,15 @@ function ProjectSectionContent({
   const networkHasBuses = (networkMeta?.bus_count ?? 0) > 0
 
   const guardProjectMutation = useCallback((opts?: { silent?: boolean }) => {
+    // A2: while this tab and the backend disagree about the open project, a
+    // save would write the backend's network under this tab's name — the
+    // banner offers Reload / Switch; saves wait for it (silent for autosave).
+    const mismatch = useUIStore.getState().projectMismatch
+    if (mismatch) {
+      if (opts?.silent) appLog('WARN', `Autosave skipped — ${mismatchSentence(mismatch)}`)
+      else toast.error(mismatchSentence(mismatch))
+      return false
+    }
     const verdict = evaluateMutation(readOnly, readOnlyReason)
     if (verdict.allowed) return true
     if (opts?.silent) appLog('INFO', `Autosave skipped — ${verdict.blockedMessage}`)
@@ -728,17 +740,30 @@ function ProjectSectionContent({
     } catch (e: unknown) {
       const status = (e as { response?: { status?: number } })?.response?.status
       if (status === 409) {
-        const detail = String(
-          (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? '',
-        )
-        // Two distinct 409s from save_project: (a) identity mismatch — the
+        const raw = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+        // A structured refusal (`study_in_flight`, `solver_in_flight`,
+        // `project_mismatch`) is a dict whose `message` is the sentence;
+        // `String(dict)` read "[object Object]" and fell through to the
+        // empty-network sentence (spec review, Sidebar 409 branch).
+        const structured = typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+        const detail = structured ? formatApiDetail(raw) : String(raw ?? '')
+        // Three distinct 409s from save_project: (a) identity mismatch — the
         // backend's in-memory network is a DIFFERENT project than `name` (it
-        // was swapped by another tab / external client); (b) empty-network
-        // refusal. Both mean "don't save", but the user-facing guidance
-        // differs. Detail text disambiguates.
+        // was swapped by another tab / external client); (b) a structured
+        // refusal with its own sentence; (c) empty-network refusal. All mean
+        // "don't save", but the user-facing guidance differs.
         if (/bound to project/i.test(detail)) {
+          // A2: the backend names its binding — raise the mismatch now (the
+          // banner, the write block) rather than wait for the meta samples.
+          const bound = /bound to project '([^']+)', not '([^']+)'/i.exec(detail)
+          if (bound && bound[2] === useUIStore.getState().currentProject) {
+            useUIStore.getState().setProjectMismatch({ tab: bound[2], backend: bound[1] })
+          }
           if (auto) appLog('WARN', `Autosave skipped — ${detail}`)
           else toast.error(`Can't save '${name}': the backend is on a different project. Reload '${name}' to resync.`)
+        } else if (structured) {
+          if (auto) appLog('WARN', `Autosave skipped — ${detail}`)
+          else toast.error(detail)
         } else {
           if (auto) appLog('WARN', `Autosave skipped: network is empty, refusing to overwrite '${name}'`)
           else toast.error('Cannot save: network is empty but project has data. Load the project first.')
@@ -929,6 +954,9 @@ function ProjectSectionContent({
       // the filename) and registers it as a fresh project. Importing replaces
       // the in-memory network, so the prior auto-save above is essential.
       const res = await projectsApi.importBundle(file)
+      // A bundle opened from disk is registered as a FRESH project — G4
+      // applies (guided-mode spec §10 addendum).
+      useUIStore.getState().noteNewProjectCreated('file')
       invalidateNetworkQueries(qc, res.imported)
       qc.invalidateQueries({ queryKey: nk(res.imported, 'results') })
       qc.invalidateQueries({ queryKey: ['projects'] })
@@ -1019,6 +1047,7 @@ function ProjectSectionContent({
       {currentProject && (
         <>
           <SubHdr title="Quick actions" />
+          {!guided && (
           <SItem
             icon={<LayoutDashboard size={15} />}
             label="Project info"
@@ -1028,12 +1057,15 @@ function ProjectSectionContent({
               onCloseModal?.()
             }}
           />
+          )}
           <SItem
             icon={saveStatus === 'saved' ? <Check size={15} /> : <Save size={15} />}
             label={saveStatus === 'saved' ? 'Saved ✓' : 'Save'}
             hint={dirty ? '●' : undefined}
+            title={projectMismatch ? mismatchSentence(projectMismatch) : undefined}
             onClick={handleSave}
           />
+          {!guided && (<>
           <SItem
             icon={<Camera size={15} />}
             label="Snapshots"
@@ -1065,6 +1097,7 @@ function ProjectSectionContent({
             label="Export bundle"
             onClick={() => { openIo('export'); onCloseModal?.() }}
           />
+          </>)}
         </>
       )}
 
@@ -1099,6 +1132,7 @@ function ProjectSectionContent({
         title="Browse every project you can access, resume the last one, or create / import a new one."
         onClick={() => { onCloseModal?.(); navigate('/projects') }}
       />
+      {!guided && (
       <SItem
         icon={<Users size={15} />}
         label="Workspace panel"
@@ -1109,6 +1143,7 @@ function ProjectSectionContent({
           onCloseModal?.()
         }}
       />
+      )}
     </div>
   )
 }
@@ -1131,6 +1166,47 @@ function DataSectionContent({ onCloseModal }: { onCloseModal?: () => void }) {
       <SItem icon={<BarChart2 size={15} />} label="Time Series"
         active={activeSlidePanel === 'timeseries'}
         onClick={() => { setSlidePanel(activeSlidePanel === 'timeseries' ? null : 'timeseries'); onCloseModal?.() }}
+      />
+    </div>
+  )
+}
+
+// ── Studies ────────────────────────────────────────────────────────────────────
+// The study tools that take a solved model further: the planning → dynamics
+// pipeline, the campus electrical design of a hub, and the written reports.
+// Grouped here rather than spread through Simulation, which is about setting
+// up and solving the model itself.
+function StudiesSectionContent({ onCloseModal }: { onCloseModal?: () => void }) {
+  const { setSlidePanel, activeSlidePanel, currentProject } = useUIStore()
+  // Planning → dynamics only works in a study project; in any other project
+  // its panel is a "not a study" dead end (UX assessment Q10). Hidden only
+  // when the project list says so: while the list is loading, or the open
+  // project is not in it, the row stays (unknown is not "not a study").
+  const { data: projects } = useQuery({
+    queryKey: ['projects'],
+    queryFn: projectsApi.list,
+    staleTime: 10_000,
+  })
+  const openProject = projects?.find(p => p.id === currentProject || p.name === currentProject)
+  const knownNotAStudy = !!openProject && openProject.project_kind !== 'planning_dynamics'
+  return (
+    <div className="pb-1">
+      {!knownNotAStudy && (
+        <SItem icon={<FlaskConical size={15} />} label="Planning → dynamics"
+          title="Rank a year's extreme hours, screen N-1/N-2 and fault levels, and export PowerFactory handoff bundles (gridspine)."
+          active={activeSlidePanel === 'gridspine'}
+          onClick={() => { setSlidePanel(activeSlidePanel === 'gridspine' ? null : 'gridspine'); onCloseModal?.() }}
+        />
+      )}
+      <SItem icon={<Cable size={15} />} label="Campus electrical"
+        title="Take a solved hub to its electrical design: transformers, reactive compensation, short circuit and PCC grid-code compliance at the critical hours (AC load flow)."
+        active={activeSlidePanel === 'campusElectrical'}
+        onClick={() => { setSlidePanel(activeSlidePanel === 'campusElectrical' ? null : 'campusElectrical'); onCloseModal?.() }}
+      />
+      <SItem icon={<FileText size={15} />} label="Reports"
+        title="Study reports written from the Energy Hub reference design and the adequacy study; read them here and export to Word."
+        active={activeSlidePanel === 'reports'}
+        onClick={() => { setSlidePanel(activeSlidePanel === 'reports' ? null : 'reports'); onCloseModal?.() }}
       />
     </div>
   )
@@ -1165,17 +1241,6 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
   // are active (see useSolveQueue), so this idle-mounted consumer is cheap.
   const { data: solveQueue } = useSolveQueue()
   const activeQueueCount = (solveQueue?.jobs ?? []).filter(isActive).length
-  // The Settings pane hosts two independently-gated surfaces (Task 15): the
-  // desktop-only Anthropic key + log (routes 404 on a web deployment) and
-  // AssistantModelSettings (super-admin-gated, meaningful on a server too).
-  // The row shows when EITHER is reachable — hiding on local-settings alone
-  // would take the row away from a web super-admin who can still reach the
-  // assistant-model section. A nav entry that opens a genuinely empty panel
-  // is still worse than no nav entry, which is why this stays an OR rather
-  // than always-on. Both hooks share their pane's own react-query fetch.
-  const localSettingsAvailable = useLocalSettingsAvailable()
-  const llmSettingsAvailable = useLLMSettingsAvailable()
-  const settingsAvailable = localSettingsAvailable || llmSettingsAvailable
   return (
     <div>
       <SItem icon={<Settings2 size={15} />} label="Solver Settings"
@@ -1183,13 +1248,6 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
         active={activeSlidePanel === 'simparams'}
         onClick={() => { setSlidePanel(activeSlidePanel === 'simparams' ? null : 'simparams'); onCloseModal?.() }}
       />
-      {settingsAvailable && (
-        <SItem icon={<SlidersHorizontal size={15} />} label="Settings"
-          title="Choose the assistant model and, on desktop, store your Anthropic API key and find the application log."
-          active={activeSlidePanel === 'settings'}
-          onClick={() => { setSlidePanel(activeSlidePanel === 'settings' ? null : 'settings'); onCloseModal?.() }}
-        />
-      )}
       <SItem icon={<Clock size={15} />} label="Model Horizon"
         title="Define the snapshots (time steps) and investment periods/years the optimisation plans over."
         active={activeSlidePanel === 'horizon'}
@@ -1212,11 +1270,10 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
           >?</span>
         ) : issueCount > 0 ? (
           <span
-            className="shrink-0 ml-1 text-[10px] font-mono font-semibold px-1.5 py-px rounded"
-            style={{
-              background: hasErrors ? 'rgba(239,68,68,0.18)' : 'rgba(217,119,6,0.18)',
-              color:      hasErrors ? '#f87171'             : '#f59e0b',
-            }}
+            className={`shrink-0 ml-1 text-[10px] font-mono font-semibold px-1.5 py-px rounded ${
+              hasErrors ? 'bg-danger/15 text-danger' : 'bg-warn/15 text-warn'}`}
+            data-severity={hasErrors ? 'error' : 'warning'}
+            title={issueBadgeTitle(preflight?.errors ?? 0, preflight?.warnings ?? 0)}
           >{issueCount}</span>
         ) : undefined}
         onClick={() => { setSlidePanel(activeSlidePanel === 'issues' ? null : 'issues'); onCloseModal?.() }}
@@ -1235,11 +1292,6 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
           >{activeQueueCount}</span>
         ) : undefined}
         onClick={() => { setSlidePanel(activeSlidePanel === 'solveQueue' ? null : 'solveQueue'); onCloseModal?.() }}
-      />
-      <SItem icon={<FlaskConical size={15} />} label="Planning → dynamics"
-        title="Rank a year's extreme hours, screen N-1/N-2 and fault levels, and export PowerFactory handoff bundles (gridspine)."
-        active={activeSlidePanel === 'gridspine'}
-        onClick={() => { setSlidePanel(activeSlidePanel === 'gridspine' ? null : 'gridspine'); onCloseModal?.() }}
       />
       {/* The Assistant row used to live here, as the last of seven. It is not
           a simulation feature — it answers questions about the network and
@@ -1311,6 +1363,59 @@ function AssistantNavButton({ compact = false, onCloseModal }: {
   )
 }
 
+/**
+ * Guided mode's one navigation entry for the hub-design flow (spec §3.5).
+ * Rendered only in Guided; Expert never shows it.
+ */
+function HubDesignNavButton({ compact = false, onCloseModal }: {
+  compact?: boolean
+  onCloseModal?: () => void
+}) {
+  const activeSlidePanel = useUIStore(s => s.activeSlidePanel)
+  const setSlidePanel = useUIStore(s => s.setSlidePanel)
+  const active = activeSlidePanel === 'hubDesign'
+  const title = 'Hub design — the step-by-step Energy Hub design, with the assistant doing the engineering.'
+  const onClick = () => { setSlidePanel('hubDesign'); onCloseModal?.() }
+
+  if (compact) {
+    return (
+      <button
+        onClick={onClick}
+        title={title}
+        aria-label="Hub design"
+        aria-pressed={active}
+        data-testid="sidebar-hub-design"
+        className="flex flex-col items-center justify-center gap-0.5 w-full py-2 transition-colors"
+        style={{
+          color: active ? 'var(--color-accent)' : 'var(--color-muted)',
+          background: active ? 'rgba(47,129,247,0.14)' : undefined,
+        }}
+      >
+        <Compass size={18} />
+        <span className="text-[8px] font-mono font-bold uppercase tracking-[0.06em]">Hub</span>
+      </button>
+    )
+  }
+
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-pressed={active}
+      data-testid="sidebar-hub-design"
+      className="flex items-center gap-2 w-full px-3 py-2 text-[12px] font-semibold rounded-md transition-colors"
+      style={{
+        color: active ? 'var(--color-accent)' : 'var(--color-text)',
+        background: active ? 'rgba(47,129,247,0.14)' : undefined,
+        border: `1px solid ${active ? 'rgba(47,129,247,0.5)' : 'var(--color-border)'}`,
+      }}
+    >
+      <Compass size={15} className="shrink-0" />
+      <span className="flex-1 text-left">Hub design</span>
+    </button>
+  )
+}
+
 // ── Mode buttons ───────────────────────────────────────────────────────────────
 function ModeSwitcher({ small = false }: { small?: boolean }) {
   const { canvasMode, setCanvasMode } = useUIStore()
@@ -1322,7 +1427,7 @@ function ModeSwitcher({ small = false }: { small?: boolean }) {
   )
   if (small) {
     return (
-      <div className="flex flex-col gap-1 items-center py-2">
+      <div className="flex flex-col gap-1 items-center py-2" data-testid="sidebar-mode-switcher">
         {([
           { id: 'select', Icon: MousePointer, hint: 'V' },
           { id: 'connect', Icon: ConnectIcon, hint: 'C' },
@@ -1343,14 +1448,14 @@ function ModeSwitcher({ small = false }: { small?: boolean }) {
             <Icon size={13} {...({} as any)} />
           </button>
         ))}
-        <button title="Zoom in"
+        <button aria-label="Zoom in" title="Zoom in"
           className="flex items-center justify-center rounded transition-colors" style={{ width: 32, height: 28, color: 'var(--color-ink-400)', border: '1px solid transparent' }}
           onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-text)' }}
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-ink-400)' }}
           onClick={() => (window as unknown as { rfInstance?: { zoomIn: () => void } }).rfInstance?.zoomIn?.()}>
           <ZoomIn size={12} />
         </button>
-        <button title="Zoom out"
+        <button aria-label="Zoom out" title="Zoom out"
           className="flex items-center justify-center rounded transition-colors" style={{ width: 32, height: 28, color: 'var(--color-ink-400)', border: '1px solid transparent' }}
           onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-text)' }}
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-ink-400)' }}
@@ -1362,7 +1467,7 @@ function ModeSwitcher({ small = false }: { small?: boolean }) {
   }
 
   return (
-    <div className="shrink-0 border-t border-border p-2">
+    <div className="shrink-0 border-t border-border p-2" data-testid="sidebar-mode-switcher">
       <p className="px-2 pb-1 text-[9px] font-bold uppercase tracking-widest text-ink-400">MODE</p>
       {([
         { id: 'select',  label: 'Select / Pan',  Icon: MousePointer, hint: 'V' },
@@ -1423,7 +1528,7 @@ function PreferencesFooter({ small = false }: { small?: boolean }) {
   if (small) {
     return (
       <div className="flex flex-col gap-1 items-center py-2 border-t border-border">
-        <button
+        <button aria-label={themeTitle}
           onClick={toggleTheme} title={themeTitle}
           className="flex items-center justify-center rounded transition-colors"
           style={{
@@ -1436,7 +1541,7 @@ function PreferencesFooter({ small = false }: { small?: boolean }) {
         >
           <ThemeIcon size={13} />
         </button>
-        <button
+        <button aria-label={densityTitle}
           onClick={toggleDensity} title={densityTitle}
           className="flex items-center justify-center rounded transition-colors"
           style={{
@@ -1483,7 +1588,7 @@ function PreferencesFooter({ small = false }: { small?: boolean }) {
 }
 
 // ── Icon strip section button ──────────────────────────────────────────────────
-type FlyoutSection = 'project' | 'data' | 'simulation'
+type FlyoutSection = 'project' | 'data' | 'simulation' | 'studies'
 
 function IconStripBtn({
   icon, label, sectionId, activeFlyout, onClick,
@@ -1494,9 +1599,10 @@ function IconStripBtn({
 }) {
   const active = activeFlyout === sectionId
   return (
-    <button
+    <button aria-label={label}
       onClick={onClick}
       title={label}
+      data-testid={`sidebar-section-${sectionId}`}
       className="relative flex items-center justify-center transition-colors"
       style={{
         width: SIDEBAR_ICON_W, height: 44,
@@ -1514,9 +1620,10 @@ function IconStripBtn({
 
 // ── Flyout panel ───────────────────────────────────────────────────────────────
 function FlyoutPanel({
-  section, onClose, projectName, saveStatus, setSaveStatus, openIo, handleNewProject, requestBottomTab,
+  section, onClose, projectName, saveStatus, setSaveStatus, openIo, handleNewProject, requestBottomTab, guided = false,
 }: {
   section: FlyoutSection; onClose: () => void; projectName: string
+  guided?: boolean
   saveStatus: 'idle' | 'saved'; setSaveStatus: (s: 'idle' | 'saved') => void
   openIo: (tab: 'import' | 'export') => void; handleNewProject: () => void
   requestBottomTab: (tab: string) => void
@@ -1524,7 +1631,7 @@ function FlyoutPanel({
   const ref = useRef<HTMLDivElement>(null)
 
   const SECTION_LABELS: Record<FlyoutSection, string> = {
-    project: 'PROJECT', data: 'DATA', simulation: 'SIMULATION',
+    project: 'PROJECT', data: 'DATA', simulation: 'SIMULATION', studies: 'STUDIES',
   }
 
   // Close on outside click
@@ -1554,7 +1661,7 @@ function FlyoutPanel({
         <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-ink-400">
           {SECTION_LABELS[section]}
         </span>
-        <button onClick={onClose} className="text-ink-400 hover:text-text transition-colors">
+        <button onClick={onClose} aria-label="Close" className="text-ink-400 hover:text-text transition-colors">
           <X size={12} />
         </button>
       </div>
@@ -1565,26 +1672,37 @@ function FlyoutPanel({
             projectName={projectName}
             saveStatus={saveStatus} setSaveStatus={setSaveStatus}
             openIo={openIo} handleNewProject={handleNewProject}
+            guided={guided}
           />
         )}
         {section === 'data' && <DataSectionContent onCloseModal={onClose} />}
         {section === 'simulation' && (
           <SimulationSectionContent onCloseModal={onClose} requestBottomTab={requestBottomTab} />
         )}
+        {section === 'studies' && <StudiesSectionContent onCloseModal={onClose} />}
       </div>
     </div>
   )
 }
 
 // ── Main Sidebar ───────────────────────────────────────────────────────────────
+/** "2 errors · 1 warning": the Issues badge says what its number counts. */
+function issueBadgeTitle(errors: number, warnings: number): string {
+  const part = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+  return [errors > 0 && part(errors, 'error'), warnings > 0 && part(warnings, 'warning')]
+    .filter(Boolean).join(' · ')
+}
+
 export default function Sidebar() {
   const {
     sidebarMode, setSidebarMode, toggleSidebar, canvasMode, setCanvasMode,
     activeSlidePanel, projectName, requestBottomTab,
     setCurrentProject, setProjectName, currentProject, addTab,
-    ioModalRequest, clearIoModalRequest,
+    ioModalRequest, clearIoModalRequest, uiMode,
   } = useUIStore()
-  const [sections, setSections] = useState({ project: true, data: true, simulation: true })
+  // Guided (spec §3.5) is a render condition only — `sections` below is untouched.
+  const guided = uiMode === 'guided'
+  const [sections, setSections] = useState({ project: true, data: true, simulation: true, studies: true })
   const [activeFlyout, setActiveFlyout] = useState<FlyoutSection | null>(null)
   const [ioOpen, setIoOpen] = useState(false)
   const [ioTab, setIoTab] = useState<'import' | 'export'>('import')
@@ -1618,6 +1736,9 @@ export default function Sidebar() {
       return name
     },
     onSuccess: (name: string) => {
+      // G4 (guided-mode spec §3.4): a new project starts Guided unless the
+      // user chose a mode explicitly. First, before anything moves.
+      useUIStore.getState().noteNewProjectCreated('blank')
       invalidateNetworkQueries(qc, name)
       addTab(name)
       setCurrentProject(name)
@@ -1673,7 +1794,7 @@ export default function Sidebar() {
   // ── Hidden → floating tab ──────────────────────────────────────────────────
   if (sidebarMode === 'hidden') {
     return (
-      <button
+      <button aria-label="Show sidebar"
         onClick={() => setSidebarMode('icon')}
         title="Show sidebar  ["
         className="flex items-center justify-center transition-colors"
@@ -1700,7 +1821,7 @@ export default function Sidebar() {
           {/* Brand icon + expand */}
           <div className="flex flex-col items-center w-full border-b border-border shrink-0 py-2 gap-0.5"
             style={{ height: 44, justifyContent: 'center' }}>
-            <button
+            <button aria-label="Expand sidebar"
               onClick={() => setSidebarMode('expanded')}
               title="Expand sidebar"
               className="flex items-center justify-center text-muted hover:text-text transition-colors"
@@ -1716,16 +1837,25 @@ export default function Sidebar() {
             <AssistantNavButton compact onCloseModal={() => setActiveFlyout(null)} />
           </div>
 
+          {guided && (
+            <div className="w-full border-b border-border shrink-0">
+              <HubDesignNavButton compact onCloseModal={() => setActiveFlyout(null)} />
+            </div>
+          )}
+
           {/* Section icons */}
           <div className="flex-1 flex flex-col w-full">
             <IconStripBtn icon={<FolderOpen size={18} />}  label="Project"    sectionId="project"    activeFlyout={activeFlyout} onClick={() => toggleFlyout('project')} />
+            {!guided && (<>
             <IconStripBtn icon={<Layers size={18} />}       label="Data"       sectionId="data"       activeFlyout={activeFlyout} onClick={() => toggleFlyout('data')} />
             <IconStripBtn icon={<Settings2 size={18} />}   label="Simulation" sectionId="simulation" activeFlyout={activeFlyout} onClick={() => toggleFlyout('simulation')} />
+            <IconStripBtn icon={<FlaskConical size={18} />} label="Studies"    sectionId="studies"    activeFlyout={activeFlyout} onClick={() => toggleFlyout('studies')} />
+            </>)}
           </div>
 
           {/* Mode switcher */}
           <div className="shrink-0 border-t border-border w-full">
-            <ModeSwitcher small />
+            {!guided && <ModeSwitcher small />}
             <PreferencesFooter small />
           </div>
         </aside>
@@ -1739,6 +1869,7 @@ export default function Sidebar() {
             openIo={openIo}
             handleNewProject={handleNewProject}
             requestBottomTab={requestBottomTab}
+            guided={guided}
           />
         )}
 
@@ -1769,7 +1900,7 @@ export default function Sidebar() {
             <span className="text-[18px] leading-none">⚡</span>
             <span className="text-text font-bold text-[13px] tracking-tight">PyPSA Studio</span>
           </div>
-          <button
+          <button aria-label="Collapse to icon strip"
             onClick={() => setSidebarMode('icon')}
             title="Collapse to icon strip  ["
             className="flex items-center justify-center text-ink-400 hover:text-text transition-colors rounded"
@@ -1789,26 +1920,38 @@ export default function Sidebar() {
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden py-1">
 
-          <SectionHdr title="PROJECT" open={sections.project} onToggle={() => toggleSection('project')} />
+          {guided && (
+            <div className="px-2 pt-1 pb-1">
+              <HubDesignNavButton />
+            </div>
+          )}
+
+          <SectionHdr title="PROJECT" open={sections.project} onToggle={() => toggleSection('project')} testId="sidebar-section-project" />
           {sections.project && (
             <ProjectSectionContent
               projectName={projectName}
               saveStatus={saveStatus} setSaveStatus={setSaveStatus}
               openIo={openIo}
               handleNewProject={handleNewProject}
+              guided={guided}
             />
           )}
 
-          <SectionHdr title="DATA" open={sections.data} onToggle={() => toggleSection('data')} />
+          {!guided && (<>
+          <SectionHdr title="DATA" open={sections.data} onToggle={() => toggleSection('data')} testId="sidebar-section-data" />
           {sections.data && <DataSectionContent />}
 
-          <SectionHdr title="SIMULATION" open={sections.simulation} onToggle={() => toggleSection('simulation')} />
+          <SectionHdr title="SIMULATION" open={sections.simulation} onToggle={() => toggleSection('simulation')} testId="sidebar-section-simulation" />
           {sections.simulation && (
             <SimulationSectionContent requestBottomTab={requestBottomTab} />
           )}
+
+          <SectionHdr title="STUDIES" open={sections.studies} onToggle={() => toggleSection('studies')} testId="sidebar-section-studies" />
+          {sections.studies && <StudiesSectionContent />}
+          </>)}
         </div>
 
-        <ModeSwitcher />
+        {!guided && <ModeSwitcher />}
         <PreferencesFooter />
       </aside>
 

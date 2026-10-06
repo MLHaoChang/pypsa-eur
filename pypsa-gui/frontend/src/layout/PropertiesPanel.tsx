@@ -12,6 +12,9 @@ import { useUIStore } from '../store/uiStore'
 import { editScope, loadExtras } from '../utils/extrasStore'
 import { nk } from '../utils/queryKeys'
 import { updateAsset } from '../utils/assetWrite'
+// A1-FE: a refused edit (`study_in_flight`, quiet in the interceptor) toasts
+// the backend's sentence, not axios' "Request failed with status code 409".
+import { blockerMessage } from '../utils/blockerMessage'
 import { isRenewableCarrier } from '../utils/carriers'
 import { ingestRescale } from '../utils/rescaleActions'
 import type { RescalePreview } from '../utils/rescale'
@@ -26,6 +29,7 @@ import { tip as docTip } from '../utils/propertyDocs'
 import { CARRIER_CATALOG_NAMES } from '../utils/carrierCatalog'
 import { vintageCloneToast } from '../utils/toasts'
 import VintagePeriodBoundsModal from '../components/VintagePeriodBoundsModal'
+import { GuideButton } from '../components/GuidedTour'
 
 import {
   TOOLTIP_VIEWPORT_MARGIN,
@@ -44,6 +48,11 @@ import {
   SetFS,
   NumInput,
   OutageInputs,
+  EhBusInputs,
+  EhLinkInputs,
+  ehBusFS,
+  ehBusPayload,
+  ehLinkPayload,
   IncludesOutagesInput,
   outagePayload,
   useGlobalDiscountRate,
@@ -89,7 +98,7 @@ function showDeleteUndoToast(label: string, qc: QueryClient) {
               const proj = useUIStore.getState().currentProject
               ALL_NETWORK_KEYS.forEach(k => qc.invalidateQueries({ queryKey: nk(proj, k) }))
               toast.success('Undone')
-            }).catch((e: Error) => toast.error(e.message))
+            }).catch((e: Error) => toast.error(blockerMessage(e)))
           }}
           className="ml-1 text-accent font-semibold text-xs hover:underline whitespace-nowrap"
         >
@@ -138,7 +147,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteGenerator(gen.name),
     onSuccess: () => { qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'generators') }); showDeleteUndoToast(gen.name, qc) },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
   const saveMut = useMutation({
@@ -221,7 +230,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
       const newName = form.name?.trim() || gen.name
       if (newName !== gen.name) onRename?.(newName)
     },
-    onError: (e: Error) => toast.error(`Save failed: ${e.message}`),
+    onError: (e: Error) => toast.error(`Save failed: ${blockerMessage(e)}`),
   })
 
   const startEdit = () => {
@@ -485,7 +494,7 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteStorageUnit(su.name),
     onSuccess: () => { qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'storage_units') }); showDeleteUndoToast(su.name, qc) },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
   const saveMut = useMutation({
@@ -541,7 +550,7 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       const newName = form.name?.trim() || su.name
       if (newName !== su.name) onRename?.(newName)
     },
-    onError: (e: Error) => toast.error(`Save failed: ${e.message}`),
+    onError: (e: Error) => toast.error(`Save failed: ${blockerMessage(e)}`),
   })
 
   const startEdit = () => {
@@ -712,7 +721,7 @@ function StoreCard({ store, onRename, mode = 'card', title }: {
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteStore(store.name),
     onSuccess: () => { qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'stores') }); showDeleteUndoToast(store.name, qc) },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
   const saveMut = useMutation({
@@ -762,7 +771,7 @@ function StoreCard({ store, onRename, mode = 'card', title }: {
       const newName = form.name?.trim() || store.name
       if (newName !== store.name) onRename?.(newName)
     },
-    onError: (e: Error) => toast.error(`Save failed: ${e.message}`),
+    onError: (e: Error) => toast.error(`Save failed: ${blockerMessage(e)}`),
   })
 
   const startEdit = () => {
@@ -919,7 +928,7 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteLoad(load.name),
     onSuccess: () => { qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'loads') }); showDeleteUndoToast(load.name, qc) },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
   const saveMut = useMutation({
@@ -948,7 +957,7 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
       const newName = form.name?.trim() || load.name
       if (newName !== load.name) onRename?.(newName)
     },
-    onError: (e: Error) => toast.error(`Save failed: ${e.message}`),
+    onError: (e: Error) => toast.error(`Save failed: ${blockerMessage(e)}`),
   })
 
   const startEdit = () => {
@@ -1118,7 +1127,7 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteLink(link.name),
     onSuccess: () => { qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'links') }); showDeleteUndoToast(link.name, qc) },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
   const saveMut = useMutation({
@@ -1156,6 +1165,7 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
       payload.discount_rate = drPct === null ? null : drPct / 100
       // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
       Object.assign(payload, outagePayload(form))
+      Object.assign(payload, ehLinkPayload(form, current))
       // Extras last: the ...current spread and the explicit payload.X = no(...)
       // lines above would otherwise overwrite a value the user just typed.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Link'))))
@@ -1167,7 +1177,7 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
       const newName = form.name?.trim() || link.name
       if (newName !== link.name) onRename?.(newName)
     },
-    onError: (e: Error) => toast.error(`Save failed: ${e.message}`),
+    onError: (e: Error) => toast.error(`Save failed: ${blockerMessage(e)}`),
   })
 
   const startEdit = () => {
@@ -1178,9 +1188,20 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
     setForm(seedExtras(link, {
       ...base,
       discount_rate_pct: discountRatePct(link.discount_rate),
+      eh_role: link.eh_role ?? '',
     }, loadExtras(editScope('Link'))))
     setOpen(true)
   }
+
+  // Same request as the Bus card; only the selected Link's detail view takes
+  // it (card mode stacks several Links in one asset group).
+  const editRequest = useUIStore(s => s.propertiesEditRequest)
+  useEffect(() => {
+    if (editRequest?.type !== 'Link' || editRequest.name !== link.name || mode !== 'detail') return
+    if (!open) startEdit()
+    useUIStore.getState().clearPropertiesEditRequest()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRequest, mode, link.name])
 
   const isExt = form.p_nom_extendable === 'true'
 
@@ -1231,6 +1252,7 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
         )}
         <DetailFooter
           editLabel="Edit Link"
+          testId="props-edit-link"
           assetName={link.name}
           onEdit={startEdit}
           // Link delete is exposed in the panel header (canDelete === true)
@@ -1354,6 +1376,8 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
       <DiscountRateInput fs={form} set={setForm} tip="Discount rate used to annuitize overnight_cost for this asset. Leave blank to use the global rate from Solver Settings." />
       <SectionHdr title="Adequacy" />
       <OutageInputs fs={form} set={setForm} />
+      <SectionHdr title="Energy Hub" />
+      <EhLinkInputs fs={form} set={setForm} />
       <SectionHdr title="Lifecycle" />
       <BuildYearSelect fs={form} set={setForm} tip={docTip('link.build_year')} />
       <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip={docTip('link.lifetime')} />
@@ -1517,7 +1541,7 @@ function AddForm({ bus, type, onClose }: { bus: string; type: AddType; onClose: 
       }
     },
     onSuccess: () => { toast.success(`${type} added`); onClose() },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
   const inp = (label: string, key: string, placeholder?: string, type_?: string) => (
@@ -1601,16 +1625,32 @@ function BusPanel({ name }: { name: string }) {
   const busLinks  = (links as Link[]).filter((l: Link) => l.bus0 === name)
 
   const totalGen  = busGens.reduce((s: number, g: Generator) => s + (g.p_nom ?? 0), 0)
-  const totalLoad = busLoads.reduce((s: number, l: Load) => s + Math.abs(l.p_set ?? 0), 0)
+  // `p_set_peak` covers loads whose demand lives in `loads_t.p_set` — summing
+  // the static p_set alone showed "0 MW" on a time-series-loaded bus.
+  const totalLoad = busLoads.reduce((s: number, l: Load) => s + Math.abs(l.p_set_peak ?? l.p_set ?? 0), 0)
 
   const thermalGens   = busGens.filter(g => !isRenewableCarrier(g.carrier))
   const renewableGens = busGens.filter(g => isRenewableCarrier(g.carrier))
 
   const startEdit = () => {
     if (!bus) return
-    setForm(seedExtras(bus, toFS(bus, ['name', 'v_nom', 'carrier', 'control', 'country', 'sub_network', 'x', 'y']), loadExtras(editScope('Bus'))))
+    setForm(seedExtras(bus, {
+      ...toFS(bus, ['name', 'v_nom', 'carrier', 'control', 'country', 'sub_network', 'x', 'y']),
+      ...ehBusFS(bus),
+    }, loadExtras(editScope('Bus'))))
     setEditing(true)
   }
+
+  // The EH tagging tour (prepareTaggingTour / the `props-edit-bus` reveal)
+  // asks for Edit before the bus row may have loaded: wait for it, then
+  // consume the request.
+  const editRequest = useUIStore(s => s.propertiesEditRequest)
+  useEffect(() => {
+    if (editRequest?.type !== 'Bus' || !bus || editRequest.name !== bus.name) return
+    if (!editing) startEdit()
+    useUIStore.getState().clearPropertiesEditRequest()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRequest, bus])
 
   const updateMut = useMutation({
     // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate.
@@ -1634,6 +1674,7 @@ function BusPanel({ name }: { name: string }) {
           sub_network: form.sub_network ?? current.sub_network,
           x: nf(form, 'x', current.x),
           y: nf(form, 'y', current.y),
+          ...ehBusPayload(form, current),
         }))
       // updateBus's typed response — the chokepoint is row-agnostic, so the
       // shape is reasserted where it is consumed.
@@ -1653,7 +1694,7 @@ function BusPanel({ name }: { name: string }) {
       // preview.
       ingestRescale(qc, data.rescale)
     },
-    onError: (e: Error) => toast.error(`Update failed: ${e.message}`),
+    onError: (e: Error) => toast.error(`Update failed: ${blockerMessage(e)}`),
   })
 
   const CATEGORY_GROUPS: { cat: AssetCategory; count: number }[] = (
@@ -1694,7 +1735,7 @@ function BusPanel({ name }: { name: string }) {
               lat, lng pair into its properties"), so showing Null Island
               here undermines that guidance. */}
           <Row label="Coordinates" value={isPlaced(bus) ? `${bus.x?.toFixed(3)}, ${bus.y?.toFixed(3)}` : 'not set'} tip={docTip('bus.coordinates')} />
-          <button onClick={startEdit}
+          <button onClick={startEdit} data-testid="props-edit-bus"
             className="w-full mt-2 py-1.5 border border-border rounded text-xs text-muted hover:border-accent hover:text-accent transition-colors flex items-center justify-center gap-1.5">
             <Pencil size={11} /> Edit Bus
           </button>
@@ -1711,6 +1752,11 @@ function BusPanel({ name }: { name: string }) {
           <CoordPairInput fs={form} set={setForm} tip={docTip('bus.coordinates')} />
           <NumInput label="Longitude (x)" k="x" fs={form} set={setForm} tip={docTip('bus.x')} />
           <NumInput label="Latitude (y)" k="y" fs={form} set={setForm} tip={docTip('bus.y')} />
+          <div className="col-span-2 flex items-end justify-between gap-2">
+            <div className="flex-1"><SectionHdr title="Energy Hub" /></div>
+            <GuideButton tourId="eh_tagging" testId="eh-bus-guide-button" label="How to tag" />
+          </div>
+          <EhBusInputs fs={form} set={setForm} />
           <ExtrasSection
             componentClass="Bus"
             fs={form}
@@ -1722,7 +1768,7 @@ function BusPanel({ name }: { name: string }) {
 
       <Section title="Capacity Summary">
         <Row label="Total generation" value={totalGen}  unit=" MW" />
-        <Row label="Total load"       value={totalLoad} unit=" MW" />
+        <Row label="Peak load"        value={totalLoad} unit=" MW" tip="Largest hourly load across the horizon (time-series aware)" />
         <Row label="Generators"       value={busGens.length} />
         <Row label="Loads"            value={busLoads.length} />
         <Row label="Storage units"    value={busSus.length} />
@@ -1874,7 +1920,7 @@ function LinePanel({ name }: { name: string }) {
       const newName = form.name?.trim() || name
       if (newName !== name) setSelectedComponent({ type: 'Line', name: newName })
     },
-    onError: (e: Error) => toast.error(`Update failed: ${e.message}`),
+    onError: (e: Error) => toast.error(`Update failed: ${blockerMessage(e)}`),
   })
 
   if (!line) return <p className="p-3 text-xs text-muted">Loading…</p>
@@ -2198,7 +2244,7 @@ function TransformerPanel({ name }: { name: string }) {
       const newName = form.name?.trim() || name
       if (newName !== name) setSelectedComponent({ type: 'Transformer', name: newName })
     },
-    onError: (e: Error) => toast.error(`Update failed: ${e.message}`),
+    onError: (e: Error) => toast.error(`Update failed: ${blockerMessage(e)}`),
   })
 
   if (!tr) return <p className="p-3 text-xs text-muted">Loading…</p>
@@ -2470,7 +2516,7 @@ export default function PropertiesPanel() {
       showDeleteUndoToast(label, qc)
       setSelectedComponent(null)
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
   const handleDelete = () => {
