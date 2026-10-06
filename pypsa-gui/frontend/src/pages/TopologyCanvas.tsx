@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useEffect, useLayoutEffect, useRef, useState, useId, createContext, useContext } from 'react'
+import { useElementWidth } from '../hooks/useElementWidth'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ReactFlow, Background, Controls, MiniMap, useNodesState, useEdgesState,
@@ -1855,6 +1856,17 @@ function ResultsPill() {
 }
 
 // ── Main canvas ────────────────────────────────────────────────────────────────
+// Q11 (UX assessment 2026-10-05): below this canvas width the minimap covers
+// the network it maps.
+const MINIMAP_MIN_CANVAS_PX = 900
+const LEGEND_KEY = 'pypsa.canvasLegendOpen'
+function readLegendOpen(): boolean {
+  try { return localStorage.getItem(LEGEND_KEY) !== 'false' } catch { return true }
+}
+function writeLegendOpen(open: boolean) {
+  try { localStorage.setItem(LEGEND_KEY, String(open)) } catch { /* private mode: not remembered */ }
+}
+
 export default function TopologyCanvas() {
   const {
     setSelectedComponent, resultsOverlayEnabled, setResultsOverlay, canvasMode, setCanvasMode,
@@ -1916,6 +1928,12 @@ export default function TopologyCanvas() {
 
   // Cache of user-dragged positions — updated in onNodesChange, never triggers re-renders
   const posCache = useRef<Record<string, { x: number; y: number }>>({})
+  // Q11: the canvas measures itself so the minimap can step aside when narrow,
+  // and the legend remembers whether the user folded it away.
+  const [canvasEl, setCanvasEl] = useState<HTMLDivElement | null>(null)
+  const canvasWidth = useElementWidth(canvasEl)
+  const [legendOpen, setLegendOpenState] = useState<boolean>(() => readLegendOpen())
+  const setLegendOpen = (open: boolean) => { setLegendOpenState(open); writeLegendOpen(open) }
   const rfInstance = useRef<{
     fitView: (opts?: { padding?: number; duration?: number; maxZoom?: number; minZoom?: number }) => void
     flowToScreenPosition: (pos: { x: number; y: number }) => { x: number; y: number }
@@ -2867,6 +2885,7 @@ export default function TopologyCanvas() {
       .highlight-edge-pulse { animation: edgePulse 1s ease-in-out 4; }
     `}</style>
     <div
+      ref={setCanvasEl}
       className="h-full w-full relative"
       onMouseMove={canvasMode === 'connect' && connectSource ? (e) => setConnectMousePos({ x: e.clientX, y: e.clientY }) : undefined}
       // Drop detection for palette drags lives in AssetPalette itself — it
@@ -2917,7 +2936,10 @@ export default function TopologyCanvas() {
         {/* Minimap — frosted card, voltage/category-coloured node dots. React
             Flow's built-in MiniMap does not render edges; nodes are given a
             matching stroke so the network shape still reads at a glance. */}
-        <MiniMap
+        {/* Hidden on a narrow canvas (a side panel open on a laptop), where
+            it covers the network it maps (UX assessment Q11). Unknown width
+            keeps it. */}
+        {(canvasWidth == null || canvasWidth >= MINIMAP_MIN_CANVAS_PX) && <MiniMap
           pannable
           zoomable
           nodeBorderRadius={3}
@@ -2931,7 +2953,7 @@ export default function TopologyCanvas() {
             if (n.type === 'assetGroup') return CATEGORY_CONFIG[(n.data as unknown as AssetGroupData).category]?.color ?? '#6b7280'
             return getLineColor((n.data as unknown as { bus?: Bus })?.bus?.v_nom ?? 1)
           }}
-        />
+        />}
 
         {canvasMode === 'connect' && (
           <Panel position="bottom-center">
@@ -3088,12 +3110,34 @@ export default function TopologyCanvas() {
               </div>
             </div>
 
-            {/* Voltage / asset legend — frosted card, design-system sizing. */}
+            {/* Voltage / asset legend — frosted card, design-system sizing.
+                Collapsible, remembered per browser (UX assessment Q11). */}
+            {!legendOpen ? (
+              <button
+                type="button"
+                onClick={() => setLegendOpen(true)}
+                aria-expanded={false}
+                data-testid="canvas-legend-toggle"
+                className="border border-border rounded-[10px] shadow-md px-3 py-1.5 text-[10px] font-bold text-muted uppercase tracking-[0.14em] hover:text-text"
+                style={{ background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)', backdropFilter: 'blur(8px)' }}
+              >Legend</button>
+            ) : (
             <div
               className="border border-border rounded-[10px] shadow-md w-[164px] p-3"
               style={{ background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)', backdropFilter: 'blur(8px)' }}
+              data-testid="canvas-legend"
             >
-              <p className="text-[9px] font-bold text-muted uppercase tracking-[0.14em] mb-2">Buses &amp; Lines · voltage</p>
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <p className="text-[9px] font-bold text-muted uppercase tracking-[0.14em]">Buses &amp; Lines · voltage</p>
+                <button
+                  type="button"
+                  onClick={() => setLegendOpen(false)}
+                  aria-label="Hide legend"
+                  aria-expanded={true}
+                  data-testid="canvas-legend-toggle"
+                  className="-mt-0.5 text-muted hover:text-text text-[13px] leading-none"
+                >×</button>
+              </div>
               {[['> 300 kV', '#ef4444'], ['200–300 kV', '#16a34a'], ['100–200 kV', '#2563eb'], ['< 100 kV', '#6b7280']].map(([label, color]) => (
                 <div key={label} className="flex items-center gap-2 mb-1">
                   <svg width="20" height="3" style={{ flexShrink: 0 }}><line x1="0" y1="1.5" x2="20" y2="1.5" stroke={color} strokeWidth="2.5" strokeLinecap="round" /></svg>
@@ -3132,6 +3176,7 @@ export default function TopologyCanvas() {
                 </div>
               ))}
             </div>
+            )}
           </div>
         </Panel>
       </ReactFlow>
