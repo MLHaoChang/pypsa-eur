@@ -1275,5 +1275,5 @@ No processes are left running.
 - **RS-1:** the "project left keeps its undo history and unsaved flag" rule now has load, another project's restore, bundle import and io import variants in `tests/test_project_switch_isolation.py`. The reviewer's G5 (restore clears before the swap) and G5b (load) are killed, as is the same mutant in `import_bundle` (G5c).
 - **RN-1** (pre-existing: re-loading the open project with unsaved edits writes the displaced edited copy to disk while memory holds the disk copy) is recorded as OPEN-ITEMS 13.
 - **RN-2:** "New" and an io import still push the middleware's pre-request capture onto the outgoing project's own stack (the push runs before the swap). It restores that project's own pre-request network: redundant but valid, and harmless. The io-import variant asserts that depth (edit + capture = 2).
-- Rows run: the touched file and row 2 (below). The full backend suite on `1b6be6311` is the coordinator's run (`scratchpad/p33b/row1-final.log`).
+- Rows run: `tests/test_project_switch_isolation.py tests/test_undo_per_project.py` 20 passed; row 2 (the 14-file set + additions + `test_project_switch_isolation.py`, `pypsa-gui/backend`, HEAD `ce36e9ca6`) **1272 passed, 17 skipped** (`scratchpad/p33b/row2r.log`). The full backend suite on `1b6be6311` is the coordinator's run (`scratchpad/p33b/row1-final.log`).
 
