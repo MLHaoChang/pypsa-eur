@@ -29,7 +29,7 @@ harness/
   metrics.py      the process-wide chat metrics behind GET /api/chat/metrics
 ```
 
-Spec: `.scratch/harness/spec.md`. Plan:
+Borrowed designs under consideration: `docs/superpowers/assessments/2026-10-06-deepseek-harness-adoption-assessment.md` (issues 13–20). Spec: `.scratch/harness/spec.md`. Plan:
 `docs/superpowers/plans/2026-10-05-chat-harness.md`. Vocabulary:
 `pypsa-gui/CONTEXT.md` (Harness, Workflow, Skill, Choice card, Start menu).
 

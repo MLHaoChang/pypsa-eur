@@ -277,3 +277,35 @@ The questions as asked, with the recommendations:
 
 ❓ **Q9 — Provider adapters**: move `llm_anthropic`, `llm_openai_compat`, `llm_fake`, `llm_config` under `harness/providers/` in phase 1, or leave them in `services/`?
 ➡️ Move in phase 1 with shims, so the layering is visible; `llm_config` (the profile store) stays in `services/` because it is settings, not a provider.
+
+## §9. Open owner questions (2026-10-06, from the DeepSeek Harness assessment)
+
+Raised by `docs/superpowers/assessments/2026-10-06-deepseek-harness-adoption-assessment.md`.
+Not decisions yet: each gates one of issues 13–19. Ask in the grilling format
+with these recommendations.
+
+❓ **Q15 — The session event log (issue 13)**: adopt an append-only event log as
+the source of truth, with `chat.jsonl` kept as a projection for one release,
+or keep the turn-record format (decision Q7) and add replay some other way?
+➡️ Adopt it, keeping `chat.jsonl` as a projection so `/history`, the lineage
+rules and every test see no change. It is what makes "switching models
+shouldn't feel different" measurable: fork a session at a point and replay
+the next turn on another provider.
+
+❓ **Q16 — User-authored skills (issue 14)**: allow one extra skill root under
+the app data directory, or keep D12's "package only"?
+➡️ Allow the app-data root only, never a project folder or bundle; same-name
+shadowing refused; provenance shown in the panel, never in the prompt.
+
+❓ **Q17 — Goals with a round budget (issue 17)**: may the assistant start
+turns on its own toward a stated goal, within a round cap and the existing
+token budgets, with every card still blocking?
+➡️ Yes, default 5 rounds, ceiling 20, no tier changes; only a human resumes
+a paused or blocked goal. Deferred until the event log exists (the goal is
+log state).
+
+❓ **Q18 — External tools over MCP (issue 19)**: let admins configure MCP
+servers whose tools join the catalogue for every provider?
+➡️ Later, own spec with issue 11: admin only, zero servers by default,
+write tier unless the server marks a tool read-only, descriptions capped and
+results fenced.

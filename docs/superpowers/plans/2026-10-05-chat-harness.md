@@ -1,6 +1,6 @@
 # Plan: the chat harness — one folder for everything a model-agnostic assistant needs
 
-**Status:** v1.2, 2026-10-05. Phases 0, 1 and 2 landed on `claude/amazing-mendel-m087zw`; owner decisions Q1–Q14 taken (spec §8). The issue-06 follow-up and the parity probe (issue 09) are in. Issue 08 is in (`harness/loop.py` with the alias; `sse`, `fence`, `results`, `history`, `metrics`, `ratelimit`, `session`, `confirm`, `providers/wiring`, `stub`, `budget`, `compose`, `solver_bridge` extracted under the patch-surface rule, moved tunables forwarded live; the turn body itself stays in `loop.py` by design). PR: MLHaoChang/pypsa-eur#86. Still owed: the live OpenAI run.
+**Status:** v1.3, 2026-10-06. Phases 0, 1 and 2 landed on `claude/amazing-mendel-m087zw`; owner decisions Q1–Q14 taken (spec §8). The issue-06 follow-up and the parity probe (issue 09) are in. Issue 08 is in (`harness/loop.py` with the alias; `sse`, `fence`, `results`, `history`, `metrics`, `ratelimit`, `session`, `confirm`, `providers/wiring`, `stub`, `budget`, `compose`, `solver_bridge` extracted under the patch-surface rule, moved tunables forwarded live; the turn body itself stays in `loop.py` by design). PR: MLHaoChang/pypsa-eur#86. Still owed: the live OpenAI run. Phase 5 (designs borrowed from DeepSeek Harness, §8) is specified as issues 13–20 and waits for #86 to merge.
 **Spec (contract-level):** [`.scratch/harness/spec.md`](../../../.scratch/harness/spec.md); issues under `.scratch/harness/issues/`.
 **Requested:** 2026-10-05. The assistant should connect to Claude, OpenAI/Codex, Kimi or any other model and not feel different: one harness of functions, workflows and skills that any model drives the same way; a chat opens with a menu of what the user can do; the assistant can run a grill-style interview with recommendations the user picks from; and all of it grouped in one folder instead of spread over files.
 **Builds on:** [`specs/2026-08-05-llm-provider-seam-design.md`](../specs/2026-08-05-llm-provider-seam-design.md) (the harness/provider split and the word "harness"), [`plans/2026-09-09-chat-turn-loop-decomposition.md`](2026-09-09-chat-turn-loop-decomposition.md) (how the loop is cut), [`specs/2026-09-27-guided-mode.md`](../specs/2026-09-27-guided-mode.md) (the Guided addendum and delegation texts), [`plans/2026-10-05-one-investment-engine-two-faces.md`](2026-10-05-one-investment-engine-two-faces.md) §5 U3 and §8 (the investment workflow's steps and tools).
@@ -56,7 +56,8 @@ Dependency arrow: `services/* ← harness ← harness/providers`. A test greps
 | **1 — the text** (done) | 02, 07, 10 | prompts in Markdown (byte-identical, hash-pinned), adapters under `harness/providers/`, bundle `datas` | pinned hashes unchanged; `test_llm_provider_seam.py` unchanged; both live probes run (ADR-0002) |
 | **2 — the behaviour** (done) | 03, 04, 05, 06 | start menu endpoint + chips from it; `ask_user` + Choice card; `use_skill` + skill block; `start_workflow` + per-turn addendum; Guided mode consumes the `hub-design` workflow | Guided tests unchanged; Expert turns byte-identical; `FakeProvider` frame sequences for each new tool; vitest + tsc clean |
 | **3 — the loop** (done) | 08, 09 | session, confirmation, budget, history, loop, sse moved under the harness; parity probe on stub + two live wires | the recorded frame sequence unchanged; manifest test scans the new paths; runbook names the runs |
-| **4 — the outside** | 11 | MCP exposure (if Q8 is yes) | its own spec |
+| **4 — the outside** | 11, 19 | MCP exposure (if Q8 is yes) and MCP client (if Q18 is yes) | its own spec |
+| **5 — borrowed designs** (specified 2026-10-06) | 13–18, 20 | the session event log with replay and fork; user skill roots; richer `ask_user`; the spill store; goals with a round budget; approval audit events; parity gaps on the OpenAI wire | per issue; the frame recording unchanged throughout; the replay tool reproduces the parity battery |
 
 Phases 1 and 2 are independent of each other after phase 0; run them on
 separate branches. Phase 3 waits for both.
@@ -112,3 +113,37 @@ now scans `harness/` too and pins the moved catalogue at its new path.
 - Issue 08 (step 7): the solver bridge → `solver_bridge.py`; nothing patched, nothing forwarded. The extraction is complete; the turn body is the loop.
 - Merge with master (PRs #78, #79, #85): the three campus tools and `set_site_connection` ported onto the catalogue; bundle probes and datas keep both sides.
   Gate after step 7 and the merge: 3556 passed, 5 skipped, 0 failed; frontend 281 files / 3288 passed, tsc clean.
+
+## 8. Phase 5 pick-up: designs borrowed from DeepSeek Harness (2026-10-06)
+
+The assessment `docs/superpowers/assessments/2026-10-06-deepseek-harness-adoption-assessment.md`
+answers "integrate DeepSeek Harness or write our own?": keep our harness
+(theirs is a Node coding-agent runtime; our tools run in-process against
+the loaded network) and borrow seven designs. Each is an issue under
+`.scratch/harness/issues/`:
+
+| Issue | Design | Status | Why not now |
+|---|---|---|---|
+| 13 | session event log, replay, fork | needs-info (Q15) | changes the history format decision Q7 kept |
+| 14 | user skill roots, invocation policy | needs-info (Q16) | D12 says package only |
+| 15 | `ask_user` multi-select, detail, intents | ready-for-agent | frontend + catalogue change; small |
+| 16 | spill store and `read_result` | ready-for-agent | new tool; small-medium |
+| 17 | goal with a round budget | needs-info (Q17) | autonomy; needs 13 |
+| 18 | approval audit events | ready after 13 | log state |
+| 19 | MCP client | needs-info (Q18) | security surface; own spec with 11 |
+| 20 | cache accounting and reasoning on the OpenAI wire | ready-for-agent | small |
+
+**Pilot decision.** None of it goes into PR #86: the PR is a 119-file,
+behaviour-preserving move under review, and the two highest-value items
+(13, 17) overturn owner decisions (Q7) or add autonomy (Q17). Phase 5 runs
+after #86 merges, on its own branch, in this order: 20 and 15 (small, no
+decisions, prove the path), 16, then 13 once Q15 is answered, then 18 and 17.
+Rules in §4 apply unchanged; rule 2 (byte-identical system prompt) holds for
+every item here because each adds per-turn content, tools or log state.
+
+**For the session that picks this up.** Read the assessment, then the issue
+file, then `harness/README.md` ("The contract" and "Splitting the loop").
+Each issue names what exists today by path, the red-first tests, the gate
+(the full chat regression as in issue 08, plus both parity runs where the
+loop is touched), and the docs to update (README module table, CONTEXT.md
+glossary for new user-facing words, the runbook for new probe steps).
