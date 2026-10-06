@@ -6,7 +6,7 @@
 import { render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { CanvasResultsProvider, useCanvasResults, type AssetOverlay } from './CanvasResultsContext'
+import { CanvasResultsProvider, useCanvasResults, type AssetOverlay, type OverlayData } from './CanvasResultsContext'
 import { networkApi } from '../api/network'
 import { resultsApi } from '../api/simulation'
 import { useUIStore } from '../store/uiStore'
@@ -18,7 +18,13 @@ const chunk = (columns: string[], row: number[]) =>
   ({ index: ['2026-01-01 00:00'], columns, data: [row], range: { from: 0, to: 0, total: 1 } })
 
 let seen: Map<string, AssetOverlay> | null = null
-function Probe() { const r = useCanvasResults(); seen = r.enabled ? r.byAsset : null; return null }
+let seenTr: OverlayData['byTransformer'] | null = null
+function Probe() {
+  const r = useCanvasResults()
+  seen = r.enabled ? r.byAsset : null
+  seenTr = r.enabled ? r.byTransformer : null
+  return null
+}
 
 function renderOverlay() {
   useUIStore.setState({ resultsOverlayEnabled: true, resultsSnapshotIdx: 0, resultSource: 'lopf', currentProject: 'p' })
@@ -35,16 +41,34 @@ beforeEach(() => {
   vi.mocked(resultsApi.getStoreDispatchResults).mockResolvedValue(chunk(['Tank'], [1]) as never)
   vi.mocked(resultsApi.getStoreEnergyResults).mockResolvedValue(chunk(['Tank'], [100]) as never)      // 100 MWh of 500
   vi.mocked(resultsApi.getLinkResults).mockResolvedValue(chunk(['Ely'], [3]) as never)
-  for (const f of ['getLineResults', 'getLineReactive', 'getTransformerResults'] as const) {
+  for (const f of ['getLineResults', 'getLineReactive'] as const) {
     vi.mocked(resultsApi[f]).mockResolvedValue(null as never)
   }
+  // A3: transformers have their own series; the Lines map never held them.
+  vi.mocked(resultsApi.getTransformerResults).mockResolvedValue(chunk(['T1'], [-45]) as never)
+  vi.mocked(networkApi.getTransformers).mockResolvedValue([{ name: 'T1', bus0: 'B', bus1: 'B2', s_nom: 100, s_nom_opt: 150 }] as never)
   vi.mocked(networkApi.getGenerators).mockResolvedValue([{ name: 'PV', bus: 'B', carrier: 'solar', p_nom: 12 }] as never)
   vi.mocked(networkApi.getLoads).mockResolvedValue([{ name: 'Hall', bus: 'B', carrier: 'AC', p_set: 8 }] as never)
   vi.mocked(networkApi.getStorageUnits).mockResolvedValue([{ name: 'BESS', bus: 'B', carrier: 'battery', p_nom: 10, max_hours: 4 }] as never)
   vi.mocked(networkApi.getStores).mockResolvedValue([{ name: 'Tank', bus: 'H', carrier: 'H2', e_nom: 500 }] as never)
   vi.mocked(networkApi.getLinks).mockResolvedValue([{ name: 'Ely', bus0: 'B', bus1: 'H', carrier: 'H2', p_nom: 5, p_nom_opt: 6 }] as never)
-  for (const f of ['getLines', 'getTransformers'] as const) vi.mocked(networkApi[f]).mockResolvedValue([] as never)
+  vi.mocked(networkApi.getLines).mockResolvedValue([] as never)
   vi.mocked(networkApi.listVintageResults).mockResolvedValue({ results: {} } as never)
+})
+
+describe('CanvasResultsProvider byTransformer (A3)', () => {
+  it('is populated from the transformers chunk, loading against s_nom_opt', async () => {
+    renderOverlay()
+    await waitFor(() => expect(seenTr?.size).toBe(1))
+    expect(seenTr!.get('T1')).toEqual({ p0: -45, q0: null, loadingPct: 30, sNom: 150 })
+  })
+
+  it('is empty when the series is not served', async () => {
+    vi.mocked(resultsApi.getTransformerResults).mockResolvedValue(null as never)
+    renderOverlay()
+    await waitFor(() => expect(seen?.size).toBe(5))
+    expect(seenTr?.size).toBe(0)
+  })
 })
 
 describe('CanvasResultsProvider byAsset', () => {

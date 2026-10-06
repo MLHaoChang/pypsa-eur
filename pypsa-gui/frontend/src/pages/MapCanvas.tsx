@@ -1184,6 +1184,9 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
             (path[midIdx][1] + path[midIdx + 1][1]) / 2,
           ]
           const trColor = '#16a34a'
+          // Results overlay (plan 1 A3): the same loading band, flow and
+          // label the lines carry, from the provider's transformer map.
+          const trFlow = results.enabled ? results.byTransformer.get(tr.name) : undefined
           return (
             <Fragment key={edgeId}>
               <EditableLine
@@ -1193,9 +1196,14 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
                 waypoints={wps}
                 onUpdate={(next) => updateWaypoints(edgeId, next)}
                 onSelect={() => setSelectedComponent({ type: 'Transformer', name: tr.name })}
-                color={trColor}
-                weight={2.5}
-                tooltip={`${tr.name} · ${tr.v_nom_0 ?? '?'}/${tr.v_nom_1 ?? '?'} kV · ${tr.s_nom?.toFixed(0) ?? '—'} MVA`}
+                color={trFlow ? loadingColor(trFlow.loadingPct) : trColor}
+                weight={trFlow ? 4 : 2.5}
+                tooltip={trFlow
+                  ? `${tr.name} · ${tr.v_nom_0 ?? '?'}/${tr.v_nom_1 ?? '?'} kV · ${fmtMW(trFlow.p0)} · ${trFlow.loadingPct.toFixed(0)}% of ${trFlow.sNom.toFixed(0)} MVA`
+                  : `${tr.name} · ${tr.v_nom_0 ?? '?'}/${tr.v_nom_1 ?? '?'} kV · ${tr.s_nom?.toFixed(0) ?? '—'} MVA`}
+                permanentLabel={trFlow
+                  ? `${fmtMW(Math.abs(trFlow.p0))} (${trFlow.loadingPct.toFixed(0)}%)`
+                  : undefined}
               />
               <Marker
                 position={mid}

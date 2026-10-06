@@ -957,17 +957,19 @@ export function EditableEdge({ id, sourceX, sourceY, targetX, targetY, data, sel
   // active-power flow is a defined concept. Asset edges (gen→bus, load→bus
   // etc.) are excluded because they don't have a time-series counterpart.
   //
-  // Two lookups: `lineOverlay` covers Line + Transformer (both via
-  // `byLine`), `linkOverlay` covers Link (via `byLink` — populated by V1
-  // of the multi-carrier video work). The two are mutually exclusive per
-  // edge (an edge is either a Line/Transformer or a Link), so the colour
-  // + badge code branches on which lookup hit.
+  // Two lookups: `lineOverlay` covers Line (via `byLine`) and Transformer
+  // (via `byTransformer` — the same shape, from `/results/transformers`; a
+  // transformer used to be looked up in the Lines map and never showed its
+  // flow, plan 1 A3), `linkOverlay` covers Link (via `byLink`). The two are
+  // mutually exclusive per edge, so the colour + badge code branches on
+  // which lookup hit.
   const results = useCanvasResults()
   // `link-<name>#<port>` is an extra port of Link <name>: same component, same
   // overlay row (`byLink` is keyed by Link name).
   const edgeName = componentNameFromEdgeId(id)
-  const lineOverlay = results.enabled && (ed.type === 'line' || ed.type === 'transformer')
-    ? results.byLine.get(edgeName)
+  const lineOverlay = !results.enabled ? undefined
+    : ed.type === 'line' ? results.byLine.get(edgeName)
+    : ed.type === 'transformer' ? results.byTransformer.get(edgeName)
     : undefined
   const linkOverlay = results.enabled && ed.type === 'link'
     ? results.byLink.get(edgeName)

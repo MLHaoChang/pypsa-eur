@@ -11,10 +11,12 @@ import { ReactFlowProvider, type EdgeProps } from '@xyflow/react'
 import { EditableEdge } from './TopologyCanvas'
 import { CanvasResultsContext, loadingColor, type OverlayData } from '../components/CanvasResultsContext'
 
-const results = (byLine: Record<string, { p0: number; loadingPct: number; sNom: number }>): OverlayData => ({
+type Flow = { p0: number; loadingPct: number; sNom: number }
+const results = (byLine: Record<string, Flow>, byTransformer: Record<string, Flow> = {}): OverlayData => ({
   enabled: true, idx: 0, iso: '', kind: 'p',
   byBus: new Map(), byLink: new Map(), byAssetGroup: new Map(), byAssetGroupSoC: new Map(), byAssetGroupCapacity: new Map(), byAsset: new Map(),
   byLine: new Map(Object.entries(byLine).map(([k, v]) => [k, { ...v, q0: null }])),
+  byTransformer: new Map(Object.entries(byTransformer).map(([k, v]) => [k, { ...v, q0: null }])),
 } as OverlayData)
 
 function renderEdge(id: string, type: 'line' | 'transformer' | 'asset', value: OverlayData | null) {
@@ -70,5 +72,19 @@ describe('EditableEdge flow animation', () => {
     expect(movingDash(container)).toBeNull()
     const paths = Array.from(container.querySelectorAll('path'))
     expect(paths.some(p => (p.getAttribute('stroke') ?? '').startsWith(loadingColor(60)))).toBe(true)
+  })
+
+  it('a transformer edge takes its flow from the transformer map, not the Lines map (plan 1, the known bug)', () => {
+    const { container } = renderEdge('tr-T1', 'transformer', results({ T1: { p0: 999, loadingPct: 99, sNom: 100 } }, { T1: { p0: 30, loadingPct: 30, sNom: 100 } }))
+    const dash = movingDash(container)!
+    expect(dash).not.toBeNull()
+    expect(dash.classList.contains('flow-b2')).toBe(true)
+    const paths = Array.from(container.querySelectorAll('path'))
+    expect(paths.some(p => (p.getAttribute('stroke') ?? '').startsWith(loadingColor(30)))).toBe(true)
+  })
+
+  it('a transformer with no row in the transformer map shows no flow, whatever a same-named line carries', () => {
+    const { container } = renderEdge('tr-T1', 'transformer', results({ T1: { p0: 999, loadingPct: 99, sNom: 100 } }))
+    expect(movingDash(container)).toBeNull()
   })
 })
