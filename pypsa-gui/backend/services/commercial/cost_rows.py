@@ -6,8 +6,9 @@ The commercial layer is transient: the PoC prices and the connection agreement
 are applied for the solve and undone, so their money is NOT in
 `n.statistics()`. `commercial_cost_terms` recomputes it from what the solve
 committed (`links_t["ic_energy_price"]`, `n.meta["ic_poc_links"]`,
-`n.meta["ic_connection_fee"]`, `n.meta["ic_connection_fixed_fee"]`) and the
-dispatch. The rows are therefore identical after a reload, and every total
+`n.meta["ic_connection_fee"]`, `n.meta["ic_connection_fixed_fee"]`, the group
+net-import record `n.meta["ic_group_net"]` with `links_t["ic_group_net_price"]`)
+and the dispatch. The rows are therefore identical after a reload, and every total
 built on `n.statistics()` adds the same items:
 
   * `cost_breakdown` feeds each item through its `_accumulate` as the
@@ -257,6 +258,30 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
             flags.append("ppa_recipe_changed")  # the solve's recipe bound no dispatch PPA
         elif rec:
             drifted()  # this recipe binds it, so the PPA came after the solve (review #7)
+
+    # A net cost energy item on a multi-member group (P3 WP3.3b): priced once
+    # on the group's net import — Σ w × price × max(0, Σ members − export)
+    # from the dispatch, per period (never the LP's degenerate split).
+    net = n.meta.get(_lp.META_GROUP_NET)
+    wanted_net = _lp.group_net_hash(cfg_now) if cfg_now is not None else None
+    if net:
+        amounts = _lp.group_net_amounts(n)
+        if amounts is None:
+            block["energy_net_group"] = None
+            flags.append("energy_net_group_not_established")
+        else:
+            for period, v in amounts.items():
+                if v:
+                    items.append(("energy_net_group", period, 0.0, v))
+            block["energy_net_group"] = weighted("energy_net_group")
+        if net.get("items_hash") != (_lp.group_net_hash(cfg_now, _H.version_of(net))
+                                     if cfg_now is not None else None):
+            drifted()
+    elif wanted_net is not None:
+        block["energy_net_group"] = None
+        flags.append("energy_net_group_not_established")
+        if n.meta.get(_lp.META_LINKS):
+            drifted()   # no solve before recipe 6 could carry it: it came after the solve
 
     # Energy-hub group contract (WP1.6): no money of its own; the members'
     # shares of the group's import energy are reported (allocation is P3).

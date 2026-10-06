@@ -528,8 +528,8 @@ export default function Results() {
   return (
     <div className="flex flex-col h-full text-sm">
       <PageHeader
-        eyebrow="SIMULATION · RESULTS"
-        title="Optimization results"
+        eyebrow={uiMode === 'guided' ? 'HUB DESIGN · RESULTS' : 'SIMULATION · RESULTS'}
+        title={uiMode === 'guided' ? 'Reliability results' : 'Optimization results'}
         subtitle={uiMode === 'guided'
           ? 'Adequacy and failure-mode (FMEA) risk results for the hub design.'
           : 'Capacity expansion, dispatch, load flow, prices, and emissions from the last solve.'}

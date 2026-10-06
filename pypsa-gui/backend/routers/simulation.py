@@ -516,6 +516,17 @@ def update_solver_config(
     # silently overwrite live state (e.g. "PUT run_ac_pf_after_lopf=true"
     # used to reset voll/discount_rate/sclopf back to defaults).
     submitted = cfg.model_dump(exclude_unset=True)
+    if "finance" in submitted:
+        # The finance inputs are owned by `PUT /finance` (validation, If-Match;
+        # IC P4 WP4.6b — the value-flows guard). An unchanged echo is dropped;
+        # a change is refused. Either way the merge below keeps what is stored
+        # NOW (read under the lock), so a concurrent finance edit is never lost.
+        if submitted["finance"] != getattr(_state["solver_config"], "finance", None):
+            raise HTTPException(422, {
+                "code": "finance_via_dedicated_route",
+                "message": "change the finance inputs through PUT /api/simulation/finance (it "
+                           "validates them and checks If-Match); omit the key here"})
+        submitted.pop("finance")
     stored_commercial = getattr(_state["solver_config"], "commercial", None)
     rebound = False
     if "commercial" in submitted and (cfg.commercial is not None
@@ -653,6 +664,143 @@ def put_value_flows(body: ValueFlowsIn, if_match: str | None = Header(default=No
         merged["commercial"] = {**commercial, "value_flows": new}
         _state["solver_config"] = SolverConfig(**merged)
         return _value_flows_state(merged["commercial"])
+
+
+class FinanceIn(BaseModel):
+    # Required and closed, like `ValueFlowsIn`: an unwrapped body or an empty
+    # one is a 422, never a default null that clears the stored inputs.
+    model_config = ConfigDict(extra="forbid")
+    finance: dict[str, Any] | None = Field(...)
+
+
+def _finance_state(raw) -> dict:
+    from services.finance.investment_case_runner import finance_digest
+
+    out = {"finance": raw, "digest": finance_digest(raw),
+           "status": "not_set" if raw is None else "ok"}
+    if raw is not None:
+        from models.finance import FinanceInputs
+
+        try:
+            FinanceInputs.model_validate(raw)
+        except ValidationError as exc:
+            # A stored value the current model refuses (it tightened since the
+            # save): shown, never silently dropped; the run refuses it (422).
+            out.update(status="finance_inputs_invalid", message=str(exc.errors()[0]["msg"]))
+    return out
+
+
+@router.get("/finance")
+def get_finance():
+    """The stored finance inputs (`FinanceInputs` JSON) and their `If-Match`
+    digest (IC P4 WP4.6b). `status`: `not_set`, `ok` or
+    `finance_inputs_invalid`."""
+    return _finance_state(getattr(_state["solver_config"], "finance", None))
+
+
+@router.put("/finance")
+def put_finance(body: FinanceIn, if_match: str | None = Header(default=None)):
+    """Set (or clear, with null) the finance inputs (IC P4 WP4.6b). Validated
+    through `FinanceInputs` (422 with the field paths); `If-Match` (the GET's
+    digest) refuses a stale edit (412); 409 while a solve runs. Not part of any
+    solve fingerprint: a finance edit never marks the dispatch stale, only a
+    stored investment-case report (its assumptions hash)."""
+    from services.finance.investment_case_runner import finance_digest, finance_inputs_or_422
+
+    if _solver_in_flight_ctx(PyPSAService.get_active_context()):
+        raise HTTPException(409, {"code": "solver_in_flight",
+                                  "message": "a solve is running on this project; change the "
+                                             "finance inputs after it finishes"})
+    new = None
+    if body.finance is not None:
+        new = finance_inputs_or_422(body.finance).model_dump(mode="json")
+    with PyPSAService.get_solver_state_lock():
+        current = getattr(_state["solver_config"], "finance", None)
+        tag = _entity_tag(if_match)
+        if tag is not None and tag != "*" and tag != finance_digest(current):
+            raise HTTPException(412, {"code": "finance_changed",
+                                      "message": "the finance inputs changed since they were "
+                                                 "read; reload and re-apply the edit"})
+        merged = asdict(_state["solver_config"])
+        merged["finance"] = new
+        _state["solver_config"] = SolverConfig(**merged)
+        return _finance_state(new)
+
+
+@router.get("/value_flows/designer")
+def get_value_flow_designer():
+    """What the participants designer offers (IC P3 WP3.6): the assets with
+    their meter side (grid-side ones are not ownable), the tariff items with
+    their default payee, the contracts' parties and the group members.
+    Read-only; 409 like the template route when there is no valid commercial
+    config or a solve is running (its slacks are on the network)."""
+    from models.commercial import CommercialConfig
+    from services.commercial import participants as P
+
+    if _solver_in_flight_ctx(PyPSAService.get_active_context()):
+        raise HTTPException(409, {"code": "solver_in_flight",
+                                  "message": "a solve is running on this project"})
+    commercial = getattr(_state["solver_config"], "commercial", None)
+    if not isinstance(commercial, dict):
+        raise HTTPException(409, {"code": "no_commercial_config",
+                                  "message": "set the commercial config (poc_link) first"})
+    try:
+        bound = CommercialConfig.model_validate(commercial)
+    except ValidationError as exc:
+        raise HTTPException(409, {"code": "commercial_config_invalid",
+                                  "message": exc.errors()[0]["msg"]}) from exc
+    return P.designer_context(PyPSAService.get_network(), bound)
+
+
+class TemplateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    template: str = Field(min_length=1)
+
+
+@router.post("/value_flows/template")
+def build_value_flow_template(body: TemplateIn):
+    """Build a participants template for the current network and commercial
+    config (IC P3 WP3.2). Nothing is saved: the answer is the config, the
+    unsaved draft contracts it needs and notes; the client saves them through
+    the value-flows and solver-config routes.
+
+    Refused while a solve runs (409 `solver_in_flight`, as the value-flows
+    PUT): a solve adds its VoLL and DSR slack generators to the live network
+    for the whole optimisation, and a build then would own them and draft
+    contracts on them (WP3.2 review round 2 #10). It writes nothing, so it
+    takes no lock. The DSR buses passed are those the solve actually enables
+    (price > 0, share > 0), as DR activation settles on them."""
+    from dataclasses import asdict as _asdict
+
+    from models.commercial import CommercialConfig
+    from services.commercial import value_flow_templates as T
+
+    if _solver_in_flight_ctx(PyPSAService.get_active_context()):
+        raise HTTPException(409, {"code": "solver_in_flight",
+                                  "message": "a solve is running on this project; build the "
+                                             "template after it finishes"})
+
+    commercial = getattr(_state["solver_config"], "commercial", None)
+    if not isinstance(commercial, dict):
+        raise HTTPException(409, {"code": "no_commercial_config",
+                                  "message": "set the commercial config (poc_link) first"})
+    try:
+        bound = CommercialConfig.model_validate(commercial)
+    except ValidationError as exc:
+        raise HTTPException(409, {"code": "commercial_config_invalid",
+                                  "message": exc.errors()[0]["msg"]}) from exc
+    try:
+        cfg = _state["solver_config"]
+        dsr_on = (float(getattr(cfg, "dsr_price_eur_per_mwh", 0.0) or 0.0) > 0
+                  and float(getattr(cfg, "dsr_share_of_load", 0.0) or 0.0) > 0)
+        result = T.build(body.template, PyPSAService.get_network(), bound,
+                         dsr_buses=tuple(getattr(cfg, "dsr_buses", None) or ()) if dsr_on else ())
+    except T.TemplateRefused as exc:
+        raise HTTPException(422 if exc.code == "template_unknown" else 409,
+                            {"code": exc.code, "message": str(exc)}) from exc
+    out = _asdict(result)
+    out["config"] = result.config.model_dump(mode="json")
+    return out
 
 
 @router.get("/check_solvers")

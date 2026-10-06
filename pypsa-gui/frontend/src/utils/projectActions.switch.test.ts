@@ -20,8 +20,16 @@ vi.mock('../api/projects', () => ({
     list: (...a: unknown[]) => list(...a),
   },
 }))
+const getEhStudy = vi.fn()
+const getEhReview = vi.fn()
+const getFmeaModes = vi.fn()
 vi.mock('../api/simulation', () => ({
   simulationApi: { getLockStatus: (...a: unknown[]) => getLockStatus(...a) },
+  resultsApi: {
+    getEhStudy: (...a: unknown[]) => getEhStudy(...a),
+    getEhReview: (...a: unknown[]) => getEhReview(...a),
+    getFmeaModes: (...a: unknown[]) => getFmeaModes(...a),
+  },
 }))
 vi.mock('../api/network', () => ({ networkApi: {} }))
 vi.mock('./pendingEdgeDeletes', () => ({
@@ -187,5 +195,59 @@ describe('switchToProject with a planning → dynamics study', () => {
     const r = await switchToProject('B', qc)
     expect(activate).toHaveBeenCalledWith('B')
     expect(r).toEqual({ status: 'switched' })
+  })
+})
+
+
+// ── A6 (deferred spec 2026-09-28 §2.3): the hub's queries follow a switch ────
+//
+// A mid-study project switch must not leave project A's study, review or risk
+// rows on project B's cards. Every hub query is keyed by project (`nk`), so
+// after `switchToProject` A's queries have no observer left and B's are
+// fetched — once each.
+describe('switchToProject and the hub-design queries (A6)', () => {
+  it("A's eh_study / eh_review / fmea_modes go inactive; B's are fetched once each", async () => {
+    const { createElement } = await import('react')
+    const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query')
+    const { renderHook, waitFor } = await import('@testing-library/react')
+    const { useHubStudy, useHubReview } = await import('../pages/hubDesign/useHubData')
+    const { useLiveStudyRunning } = await import('../hooks/useLiveStudyRunning')
+    const { nk } = await import('./queryKeys')
+
+    useUIStore.setState({ currentProject: 'A' })
+    const per = (p: string | null) => p === 'A'
+      ? { study: { status: 'running' }, review: { status: 'ok', findings: [{ id: 'a-only' }] }, modes: { per_mode: [{ name: 'a_gen' }], sweep_status: null } }
+      : { study: null, review: null, modes: { per_mode: [{ name: 'b_gen' }], sweep_status: null } }
+    getEhStudy.mockImplementation(async () => per(useUIStore.getState().currentProject).study)
+    getEhReview.mockImplementation(async () => per(useUIStore.getState().currentProject).review)
+    getFmeaModes.mockImplementation(async () => per(useUIStore.getState().currentProject).modes)
+    activate.mockResolvedValue({ activated: 'B', evicted: [] })
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const wrapper = ({ children }: { children: React.ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children)
+    renderHook(() => ({ study: useHubStudy(), review: useHubReview(true), live: useLiveStudyRunning() }),
+      { wrapper })
+    await waitFor(() => expect(client.getQueryData(nk('A', 'results', 'fmea_modes'))).toBeTruthy())
+    await waitFor(() => expect(client.getQueryData(nk('A', 'results', 'eh_review'))).toBeTruthy())
+    getEhStudy.mockClear(); getEhReview.mockClear(); getFmeaModes.mockClear()
+
+    const r = await switchToProject('B', client as never)
+    expect(r).toEqual({ status: 'switched' })
+
+    await waitFor(() => expect(getFmeaModes).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(getEhStudy).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(getEhReview).toHaveBeenCalledTimes(1))
+    for (const root of ['eh_study', 'eh_review', 'fmea_modes']) {
+      const old = client.getQueryCache().find({ queryKey: nk('A', 'results', root), exact: true })
+      expect(old?.isActive(), `A's ${root} still observed`).toBe(false)
+      const cur = client.getQueryCache().find({ queryKey: nk('B', 'results', root), exact: true })
+      expect(cur?.isActive(), `B's ${root} observed`).toBe(true)
+    }
+    // No cross-project rows: B's modes are B's.
+    expect(JSON.stringify(client.getQueryData(nk('B', 'results', 'fmea_modes')))).not.toContain('a_gen')
+    await new Promise(res => setTimeout(res, 50))
+    expect(getFmeaModes).toHaveBeenCalledTimes(1)
+    expect(getEhStudy).toHaveBeenCalledTimes(1)
   })
 })

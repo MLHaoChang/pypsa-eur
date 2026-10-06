@@ -239,6 +239,7 @@ GET     /api/results/asset/{component_class}/{name}                             
 GET     /api/results/asset/{component_class}/{name}/export.xlsx                    -> export_asset_results_xlsx
 GET     /api/results/asset_economics                                               -> get_asset_economics_api_results_asset_economics_get
 GET     /api/results/billing                                                       -> get_billing_api_results_billing_get
+POST    /api/results/billing/preview                                               -> preview_billing_api_results_billing_preview_post
 GET     /api/results/carrier_kpis                                                  -> get_carrier_kpis_api_results_carrier_kpis_get
 GET     /api/results/cfe_score                                                     -> get_cfe_score_api_results_cfe_score_get
 GET     /api/results/copt                                                          -> get_copt_api_results_copt_get
@@ -267,6 +268,11 @@ GET     /api/results/frontier                                                   
 POST    /api/results/frontier                                                      -> post_frontier_api_results_frontier_post
 POST    /api/results/frontier/abort                                                -> post_frontier_abort_api_results_frontier_abort_post
 GET     /api/results/generators                                                    -> get_generator_results_api_results_generators_get
+GET     /api/results/investment_case                                               -> get_investment_case_api_results_investment_case_get
+POST    /api/results/investment_case                                               -> post_investment_case_api_results_investment_case_post
+POST    /api/results/investment_case/abort                                         -> post_investment_case_abort_api_results_investment_case_abort_post
+GET     /api/results/investment_case/export.xlsx                                   -> get_investment_case_export_api_results_investment_case_export_xlsx_get
+GET     /api/results/investment_case/report                                        -> get_investment_case_report_api_results_investment_case_report_get
 GET     /api/results/lcoh                                                          -> get_lcoh_api_results_lcoh_get
 GET     /api/results/line_duals                                                    -> get_line_duals_api_results_line_duals_get
 GET     /api/results/line_reactive                                                 -> get_line_reactive_api_results_line_reactive_get
@@ -294,6 +300,7 @@ GET     /api/results/store_energy                                               
 GET     /api/results/transformer_reactive                                          -> get_transformer_reactive_api_results_transformer_reactive_get
 GET     /api/results/transformers                                                  -> get_transformer_results_api_results_transformers_get
 GET     /api/results/unit_commitment                                               -> get_unit_commitment_api_results_unit_commitment_get
+GET     /api/results/value_flows                                                   -> get_value_flows_api_results_value_flows_get
 GET     /api/results/voltages                                                      -> get_voltages_api_results_voltages_get
 POST    /api/simulation/abort                                                      -> abort_api_simulation_abort_post
 GET     /api/simulation/asset_costs                                                -> asset_costs_api_simulation_asset_costs_get
@@ -301,6 +308,8 @@ GET     /api/simulation/capabilities                                            
 GET     /api/simulation/check_solvers                                              -> check_solvers_api_simulation_check_solvers_get
 GET     /api/simulation/commercial/value_flows                                     -> get_value_flows_api_simulation_commercial_value_flows_get
 PUT     /api/simulation/commercial/value_flows                                     -> put_value_flows_api_simulation_commercial_value_flows_put
+GET     /api/simulation/finance                                                    -> get_finance_api_simulation_finance_get
+PUT     /api/simulation/finance                                                    -> put_finance_api_simulation_finance_put
 POST    /api/simulation/force_reset                                                -> force_reset_api_simulation_force_reset_post
 GET     /api/simulation/lock_status                                                -> lock_status_api_simulation_lock_status_get
 GET     /api/simulation/log_history                                                -> get_log_history_api_simulation_log_history_get
@@ -322,3 +331,5 @@ POST    /api/simulation/run_ac_pf                                               
 GET     /api/simulation/solver_config                                              -> get_solver_config_api_simulation_solver_config_get
 PUT     /api/simulation/solver_config                                              -> update_solver_config_api_simulation_solver_config_put
 GET     /api/simulation/status                                                     -> get_status_api_simulation_status_get
+GET     /api/simulation/value_flows/designer                                       -> get_value_flow_designer_api_simulation_value_flows_designer_get
+POST    /api/simulation/value_flows/template                                       -> build_value_flow_template_api_simulation_value_flows_template_post

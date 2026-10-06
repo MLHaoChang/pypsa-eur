@@ -127,7 +127,7 @@ class JurisdictionPack:
 
 _REGISTRY: dict[str, list[Callable[[], JurisdictionPack]]] = {}
 # One source of truth for the built-in packs; the tripwire test iterates it.
-BUILTIN_PACK_MODULES: tuple[str, ...] = ("eu_de", "us_federal")
+BUILTIN_PACK_MODULES: tuple[str, ...] = ("ca_federal", "eu_de", "eu_nl", "us_federal")
 _loaded = False
 
 
