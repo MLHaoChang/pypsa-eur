@@ -17,6 +17,7 @@ import zipfile
 import pytest
 
 import main
+import settings as settings_module
 from routers.projects import _BUNDLE_DIRS, _BUNDLE_FILES
 from services import site_service as ss
 
@@ -379,8 +380,34 @@ def test_context_unknown_site_404(client, api_project, monkeypatch):
     assert calls == []
 
 
+@pytest.fixture
+def stub_dist(monkeypatch, tmp_path):
+    """
+    A built frontend, as far as the SPA catch-all can tell.
+
+    An id whose decoded form carries a slash matches no API route and falls
+    through to `main.serve_spa`, which treats every `/api/` path as a static
+    asset and answers 404 — but only after checking that the dist directory
+    exists; without a build it answers 503 ("Frontend not built") for every
+    unknown path. CI runs the backend suite without `npm run build`, so this
+    test supplies a stub dist and asserts the shipped behaviour rather than
+    the build's absence. Same setenv-then-cache_clear ordering contract as
+    `test_serve_spa.local_spa_client`.
+    """
+    d = tmp_path / "dist"
+    (d / "assets").mkdir(parents=True)
+    for name in ("index.html", "login.html", "spa.html"):
+        (d / name).write_text("<html></html>", encoding="utf-8")
+    monkeypatch.setenv("FRONTEND_DIST", str(d))
+    settings_module.get_settings.cache_clear()
+    try:
+        yield d
+    finally:
+        settings_module.get_settings.cache_clear()
+
+
 @pytest.mark.parametrize("bad", ["%2E%2E", "..%2F..%2Fetc", "a%2Fb", "x" * 65, "sp%20ace", "a.b"])
-def test_context_route_rejects_traversal_id(client, api_project, project_storage_dir, monkeypatch, bad):
+def test_context_route_rejects_traversal_id(client, stub_dist, api_project, project_storage_dir, monkeypatch, bad):
     """
     Refused before any I/O: nothing appears on disk and the wire is never
     called. An id whose decoded form carries a slash never reaches the

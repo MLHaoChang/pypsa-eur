@@ -87,8 +87,13 @@ A user-drawn boundary on the map around one or more member Buses, drawn in
 3D by the site view (`frontend/src/pages/SiteCanvas.tsx`). Sites and the
 user's placements of objects inside them live in the project's `sites.json`
 sidecar (`GET/PUT /api/projects/{name}/sites`), never in the network, so
-moving an object is not an Asset write and does not touch results.
-_Avoid_: campus, plant, zone (a zone is the packer's placement band)
+moving an object is not an Asset write and does not touch results. A
+**campus study** (gridspine's electrical analysis of a solved hub project,
+`backend/routers/campus_electrical.py`) *runs on* a Site's member Buses; it
+holds no geometry of its own, and a Site holds no electrical result. Neither
+word replaces the other: Site for the drawn plot and placements, campus study
+for the transformer, compensation, short-circuit and grid-code analysis.
+_Avoid_: campus (unqualified), plant, zone (a zone is the packer's placement band)
 
 **Site results**:
 The 3D site view's per-object values at the selected time step — output,
