@@ -327,6 +327,12 @@ class LedgerRow(_FigureBlock):
     # S2 (gate BC-S2-3): the value's physical domain; a value outside it is
     # refused here and, with the row named, by `ledger.apply_user_row`.
     domain: LedgerDomain | None = None
+    # U2 (plan §1, §6.2): the engine field the row compiles to (`compile.py`
+    # is its only reader; None for a row that only shapes the network or is
+    # not compiled), and the defaults pack's `illustrative` flag (None on a
+    # ledger seeded from the legacy library). Neither is hashed.
+    engine_path: str | None = None
+    illustrative: bool | None = None
 
     @model_validator(mode="after")
     def _value_in_domain(self):

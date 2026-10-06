@@ -46,9 +46,11 @@ from models.study import (
 )
 
 __all__ = [
-    "BESS_KEY_DRIVERS", "DERIVED", "LIBRARY_DIR", "LIBRARY_VERSION", "Library",
-    "LibraryError", "TechnologyRow", "UnknownLibraryVersion",
-    "horizon_and_replacements", "key_drivers_of", "load_library", "seed_ledger",
+    "BESS_KEY_DRIVERS", "DEFAULTS_VERSION_PREFIX", "DERIVED", "ENGINE_PATHS",
+    "ENGINE_ROWS", "INTAKE_DERIVED_ROWS", "LIBRARY_DIR", "LIBRARY_VERSION", "Library",
+    "LibraryError", "RULE_DESCRIPTOR", "TechnologyRow", "UnknownLibraryVersion",
+    "horizon_and_replacements", "key_drivers_of", "load_defaults", "load_library",
+    "seed_ledger",
 ]
 
 LIBRARY_VERSION = "technology-data v0.14.0"
@@ -188,6 +190,8 @@ class TechnologyRow:
     # projected the cost for (BC-S2-5; `costs_2030.csv` rows are 2030).
     domain: LedgerDomain | None = None
     projection_year: int | None = None
+    # U2 WP3: the defaults pack's flag (None from the legacy CSV).
+    illustrative: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -198,6 +202,10 @@ class Library:
     finance: Mapping[str, Any]
     default_tariff_id: str
     directory: pathlib.Path = field(default=LIBRARY_DIR, compare=False)
+    # U2 WP3: the generic defaults pack this view was read from (None for the
+    # legacy `study_library/` files), and each pack tariff's `illustrative`.
+    pack: Any = field(default=None, compare=False)
+    tariff_illustrative: Mapping[str, bool] = field(default_factory=dict, compare=False)
 
 
 # ── parsing ───────────────────────────────────────────────────────────────
@@ -394,6 +402,343 @@ def load_library(version: str = LIBRARY_VERSION) -> Library:
     return _load(version, LIBRARY_DIR)
 
 
+# ── the generic defaults pack (U2 WP3) ────────────────────────────────────
+#
+# Plan: docs/superpowers/plans/2026-10-05-guided-study-u2-engine-rewire.md §1,
+# §6. IC's generic defaults pack (U1 follow-up a, `services/library/
+# defaults_pack/`) is the source of every default; `load_defaults` reads it
+# into the same `Library` view the ledger, the pack builder and the routes
+# take, so seeding is one code path. The pack states values in its own units
+# (EUR/MW, share/year) and keeps each catalogue figure as `original_value` /
+# `original_unit`: the guided ledger keeps the catalogue's (EUR/kW, %/year),
+# the units its users type, converting the range and the domain back through
+# the row's own `conversion_factor`.
+
+DEFAULTS_VERSION_PREFIX = "generic-defaults"
+
+# Pack value key -> the GS identity in `_TECH_KEYS`, in the ledger's row order
+# (the order of the legacy `technology_costs.csv`, so a seeded ledger lists
+# its rows as WP0's did).
+_PACK_TECH_ROWS: tuple[tuple[str, tuple[str, str]], ...] = (
+    ("battery.power.overnight", ("battery inverter", "investment")),
+    ("battery.power.fom_share", ("battery inverter", "FOM")),
+    ("battery.power.efficiency", ("battery inverter", "efficiency")),
+    ("battery.power.lifetime", ("battery inverter", "lifetime")),
+    ("battery.energy.overnight", ("battery storage", "investment")),
+    ("battery.energy.lifetime", ("battery storage", "lifetime")),
+    ("solar-utility.investment.overnight", ("solar-utility", "investment")),
+    ("solar-utility.investment.fom_share", ("solar-utility", "FOM")),
+    ("solar-utility.investment.lifetime", ("solar-utility", "lifetime")),
+    ("solar-rooftop.investment.overnight", ("solar-rooftop", "investment")),
+    ("solar-rooftop.investment.fom_share", ("solar-rooftop", "FOM")),
+    ("solar-rooftop.investment.lifetime", ("solar-rooftop", "lifetime")),
+    ("battery.round_trip_efficiency", ("battery", "round-trip efficiency")),
+    ("battery.energy.degradation_calendar", ("battery storage", "degradation calendar")),
+    ("battery.energy.degradation_cycling", ("battery storage", "degradation cycling")),
+)
+# Pack rows the guided ledger does not seed, each with the reason. Any other
+# unmapped pack technology row is refused at load (a key is a contract).
+_PACK_ROWS_NOT_SEEDED = {
+    # The guided pack books the battery's FOM on the inverter (power) part only.
+    "battery.energy.fom_share": "fom_booked_on_power_part",
+}
+_PACK_FINANCE_KEYS = {"finance.discount_rate": "discount_rate",
+                      "finance.sizing_limit_connection_multiple":
+                          "sizing_limit_connection_multiple"}
+
+# The engine field each guided ledger row compiles to (plan §1.1 and §1.2;
+# `compile.py` is the only reader). Rows that only feed another row or are
+# not compiled carry None. Not hashed (`packs.ledger_hash`).
+ENGINE_PATHS: Mapping[str, str | None] = MappingProxyType({
+    "battery_inverter_eur_per_kw": "network.StorageUnit.battery.inv_power_overnight",
+    "battery_inverter_fom_pct_per_year": "network.StorageUnit.battery.fom_cost",
+    "battery_inverter_efficiency": None,
+    "battery_inverter_lifetime_years": "network.StorageUnit.battery.inv_power_lifetime",
+    "battery_storage_eur_per_kwh": "network.StorageUnit.battery.inv_energy_overnight",
+    "battery_storage_lifetime_years": "network.StorageUnit.battery.inv_energy_lifetime",
+    "pv_utility_eur_per_kw": "network.Generator.pv.overnight_cost",
+    "pv_utility_fom_pct_per_year": "network.Generator.pv.fom_cost",
+    "pv_utility_lifetime_years": "network.Generator.pv.lifetime",
+    "pv_rooftop_eur_per_kw": "network.Generator.pv.overnight_cost",
+    "pv_rooftop_fom_pct_per_year": "network.Generator.pv.fom_cost",
+    "pv_rooftop_lifetime_years": "network.Generator.pv.lifetime",
+    "battery_round_trip_efficiency": "network.StorageUnit.battery.efficiency_store",
+    "battery_storage_degradation_calendar_pct_per_year": None,
+    "battery_storage_degradation_cycling_pct_per_cycle": None,
+    "tariff": "commercial.import_tariff",
+    "demand_charge_price": "commercial.import_tariff.items[demand].periods[0].rate",
+    "energy_price_level": "commercial.import_tariff.items[energy].periods[*].rate",
+    "sizing_limit_connection_multiple": "network.p_nom_max",
+    "discount_rate": "solver_config.discount_rate",
+    "financial_close_year": "finance.financial_close",
+    "cod_year": "finance.cod_by_asset",
+    "contingency_share": "finance.contingency_share",
+    **{f"escalation_{c}": f"finance.escalation.{c}"
+       for c in ("tariff", "export", "opex", "capex", "fuel", "ppa")},
+    "inflation": "finance.inflation",
+    "cost_of_equity_rule": "finance.cost_of_equity",
+    "analysis_years_rule": "finance.analysis_years",
+    "value_flows_template": "commercial.value_flows",
+    "salvage_rule": "finance.terminal_value",
+    "pv_degradation_pct_per_year": "finance.degradation_by_asset.pv",
+    "tax_pack": "finance.tax_pack_id",
+    "incentives_rule": "finance.incentives",
+    "export_series": "commercial.export_price_ref",
+    "export_cap_mw": "commercial.connection.export_cap_mw",
+})
+
+# A descriptor row: no number, a rule the pack states (`apply_user_row`
+# refuses it, as it refuses the tariff descriptor).
+RULE_DESCRIPTOR = "rule_descriptor"
+# Rows 21-22 and 34 carry a number set by a pack rule from the intake (the
+# modelled year, the tariff's export cap): shown, never typed over.
+INTAKE_DERIVED_ROWS = frozenset({"financial_close_year", "cod_year", "export_cap_mw"})
+_ESCALATION_CLASSES = ("tariff", "export", "opex", "capex", "fuel", "ppa")
+# Rows 21-34 in ledger order (row 34 only when the tariff states a cap).
+ENGINE_ROWS: tuple[str, ...] = (
+    "financial_close_year", "cod_year", "contingency_share",
+    *(f"escalation_{c}" for c in _ESCALATION_CLASSES), "inflation", "cost_of_equity_rule",
+    "analysis_years_rule", "value_flows_template", "salvage_rule",
+    "pv_degradation_pct_per_year", "tax_pack", "incentives_rule", "export_series",
+    "export_cap_mw")
+
+
+def _scaled(x: float | None, factor: float) -> float | None:
+    """
+    A pack-unit figure back in the catalogue's unit (rounded off the float
+    noise of the division, far below any stated digit).
+    """
+    return None if x is None else round(float(x) / factor, 9)
+
+
+def _domain_in(text: str | None, factor: float) -> LedgerDomain | None:
+    if not text:
+        return None
+    d = LedgerDomain.parse(text)
+    return d.model_copy(update={"low": _scaled(d.low, factor),
+                                "high": _scaled(d.high, factor)})
+
+
+def _pack_technology(pack, finance_year: int) -> tuple[TechnologyRow, ...]:
+    by_key = {v.key: v for v in pack.cost_values}
+    mapped = {k for k, _ in _PACK_TECH_ROWS} | set(_PACK_ROWS_NOT_SEEDED)
+    stray = sorted(set(by_key) - mapped)
+    if stray:
+        raise LibraryError(f"defaults pack {pack.version}: no ledger key for {stray}")
+    out: list[TechnologyRow] = []
+    for pack_key, ident in _PACK_TECH_ROWS:
+        v = by_key.get(pack_key)
+        if v is None:
+            raise LibraryError(f"defaults pack {pack.version} has no {pack_key!r} row")
+        key, label, technical = _TECH_KEYS[ident]
+        f = float(v.conversion_factor) or 1.0
+        value = v.original_value
+        out.append(TechnologyRow(
+            key=key, label=label, technical_name=technical, technology=ident[0],
+            parameter=ident[1], value=value, unit=v.original_unit,
+            basis=v.price_basis or "real",
+            # The legacy files stated the study's currency year on every valued
+            # technology row; the pack states it on money rows only.
+            currency_year=(v.currency_year if v.currency_year is not None
+                           else (finance_year if value is not None else None)),
+            source="derived" if v.derived is not None else v.source,
+            source_year=v.source_year if value is not None or v.source_url else None,
+            source_url=v.source_url,
+            range_low=_scaled(v.range.low, f) if v.range else None,
+            range_high=_scaled(v.range.high, f) if v.range else None,
+            range_source=v.range.source if v.range else None,
+            note=v.note or "", domain=_domain_in(v.domain, f),
+            projection_year=v.projection_year, illustrative=v.illustrative))
+    return tuple(out)
+
+
+def _gs_tariff_from_pack(pt) -> Tariff:
+    """
+    The guided form (`models.study.Tariff`) of a pack tariff, from the
+    pack's seed rows (each item keeps the seed's own price and unit) and the IC
+    periods they name. The form is what the guided tariff step shows (owner
+    decision 8); `compile.py` turns it back into the engine's `Tariff`.
+    """
+    meta, items = pt.meta, {i.id: i for i in pt.tariff.items}
+    data: dict[str, Any] = {
+        "tariff_id": pt.tariff.id, "name": pt.tariff.name,
+        # GS's convention for a seed: the string `illustrative` (the maturity
+        # badge and the report read it); the pack's prose source is kept in
+        # the descriptor row's help.
+        "source": "illustrative" if meta.illustrative else meta.source,
+        "source_year": meta.source_year, "currency": meta.currency,
+        "currency_year": meta.currency_year, "billing_period": meta.billing_period,
+        "energy_bands": [], "network_charges": [],
+        "honesty_notes": [h.code for h in meta.honesty],
+        "honesty_help": {h.code: h.help for h in meta.honesty},
+        "export": {"price_per_mwh": meta.export.price_per_mwh,
+                   "series_ref": meta.export.series, "cap_mw": meta.export.cap_mw},
+    }
+    for item_id, rows in meta.items.items():
+        item = items[item_id]
+        for row in rows:
+            if row.component == "energy_band":
+                periods = [p for p in item.periods if p.name in row.periods]
+                hours = sorted({h for p in periods if p.start_hour is not None
+                                for h in range(p.start_hour, p.end_hour)})
+                data["energy_bands"].append({"label": row.label,
+                                             "price_per_mwh": row.original_price,
+                                             "applies": {"months": list(periods[0].months),
+                                                         "weekdays": list(periods[0].weekdays),
+                                                         "hours": hours}})
+            elif row.component == "network_charge":
+                data["network_charges"].append({"label": row.label,
+                                                "price": row.original_price,
+                                                "basis": row.basis})
+            elif row.component == "demand_charge":
+                data["demand_charge"] = {"price_per_mw_per_period": row.original_price,
+                                         "basis": row.basis or "billing_period_peak"}
+            elif row.component == "capacity_charge":
+                data["capacity_charge"] = {"price_per_mw_per_year": row.original_price,
+                                           "basis": row.basis or "contracted"}
+            elif row.component == "fixed_charge":
+                data["fixed_charge_per_period"] = row.original_price
+            else:
+                raise LibraryError(f"pack tariff {pt.tariff.id}: unknown seed component "
+                                   f"{row.component!r}")
+    try:
+        return Tariff.model_validate(data)
+    except ValueError as exc:
+        raise LibraryError(f"pack tariff {pt.tariff.id}: {exc}") from exc
+
+
+def _pack_key_to_gs(pack_key: str) -> str:
+    for k, ident in _PACK_TECH_ROWS:
+        if k == pack_key:
+            return _TECH_KEYS[ident][0]
+    raise LibraryError(f"pack rule names {pack_key!r}, which the guided ledger does not seed")
+
+
+def _finance_spec(v) -> dict[str, Any]:
+    return {"key": _PACK_FINANCE_KEYS[v.key], "value": v.value, "unit": v.unit,
+            "basis": v.price_basis or "real", "source": v.source,
+            "source_year": v.source_year, "source_url": v.source_url,
+            "range": ({"low": v.range.low, "high": v.range.high, "source": v.range.source}
+                      if v.range else {}),
+            "domain": v.domain, "illustrative": v.illustrative}
+
+
+@functools.lru_cache(maxsize=4)
+def _load_defaults(version: str | None) -> Library:
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    pack = load_defaults_pack(version)
+    fin = pack.finance
+    label = f"{DEFAULTS_VERSION_PREFIX} {pack.version} {pack.hash[:12]}"
+    [rule] = fin.replacement_rules
+    finance = {
+        "library_version": label, "pack_stamp": pack.stamp, "seed_library": fin.seed_library,
+        "currency": fin.currency, "currency_year": fin.currency_year,
+        "currency_year_source": fin.currency_year_source,
+        "basis": fin.basis.model_dump(), "basis_source": fin.basis_source,
+        "perspective": fin.perspective, "perspective_source": fin.perspective_source,
+        "discount_rate": _finance_spec(fin.discount_rate),
+        "horizon_rule": {"horizon_years": _pack_key_to_gs(fin.horizon_rule.horizon_years),
+                         "source": fin.horizon_rule.source},
+        "replacement_rules": [{"key": rule.key, "component": "battery inverter",
+                               "every_years": _pack_key_to_gs(rule.every_years),
+                               "within": rule.within, "cost": _pack_key_to_gs(rule.cost),
+                               "source": rule.source}],
+        "degradation": fin.degradation,
+        "sizing_limit": _finance_spec(fin.sizing_limit),
+    }
+    tariffs = {tid: _gs_tariff_from_pack(pt) for tid, pt in pack.tariffs.items()}
+    return Library(
+        version=label, technology=_pack_technology(pack, fin.currency_year),
+        tariffs=MappingProxyType(tariffs), finance=MappingProxyType(finance),
+        default_tariff_id=pack.default_tariff_id, pack=pack,
+        tariff_illustrative=MappingProxyType(
+            {tid: pt.meta.illustrative for tid, pt in pack.tariffs.items()}))
+
+
+def load_defaults(version: str | None = None) -> Library:
+    """
+    The guided defaults read from IC's generic defaults pack (U2 WP3), as the
+    `Library` view `seed_ledger` / `reseed_ledger` / `reset_rows` and
+    `packs.build_site_network` take. `version` None is the newest shipped
+    pack; an unknown one is refused by the pack loader (nothing is fetched).
+    Its `version` (and a seeded ledger's `ledger_version`) reads
+    ``"generic-defaults <pack version> <pack hash[:12]>"``.
+    """
+    return _load_defaults(version)
+
+
+def _engine_rows(intake: Mapping[str, Any], tariff: Tariff, tariff_provenance: str,
+                 library: Library) -> list[dict[str, Any]]:
+    """
+    Plan §1.2 rows 21-34: what a minimal single-owner finance case needs and
+    GS had no row for, each from a pack rule (`provenance=library`, the rule
+    as `source`, `status=default`) with its `engine_path`. Non-numeric rules
+    are descriptors (value null, `rule_descriptor`) so the report's
+    assumptions appendix still lists them.
+    """
+    fin = library.finance
+    stamp = fin.get("pack_stamp", library.version)
+    source_year = int(library.pack.version[:4]) if library.pack is not None else None
+    site = intake.get("site") if isinstance(intake, Mapping) else None
+    try:
+        year = int((site or {}).get("year", 2025))
+    except (TypeError, ValueError):
+        year = 2025
+    basis = fin.get("basis", {})
+
+    def row(key, label, value, unit, rule, *, domain=None, help_=None, currency_year=None,
+            source=None):
+        r: dict[str, Any] = dict(
+            key=key, label=label, technical_name=ENGINE_PATHS[key], value=value, unit=unit,
+            source=source or f"{rule} ({stamp})", source_year=source_year,
+            currency_year=currency_year, domain=domain, help=help_)
+        if value is None:
+            r["unavailable"] = {"value": RULE_DESCRIPTOR}
+        return r
+
+    out = [
+        row("financial_close_year", "Financial close (one construction year)", float(year - 1),
+            "year", "guided.financial_close.one_year_before_model_year",
+            help_="One construction year: the year before the modelled year, so the "
+                  "engine's year 0 is the study's capex year."),
+        row("cod_year", "Commercial operation of every owner asset", float(year), "year",
+            "guided.cod.model_year"),
+        row("contingency_share", "Capex contingency", 0.0, "share of capex",
+            "guided.finance.no_contingency", domain=LedgerDomain.parse("[0, 1]")),
+        *(row(f"escalation_{c}", f"Escalation of {c} prices (real basis)", 0.0,
+              "per unit per year", "guided.basis.real" if basis.get("terms") == "real"
+              else "guided.basis.nominal", domain=LedgerDomain.parse("(-1, 1)"))
+          for c in _ESCALATION_CLASSES),
+        row("inflation", "Inflation (not stated on the real basis)", None, "per unit per year",
+            "guided.basis.real"),
+        row("cost_of_equity_rule", "Cost of equity = the discount rate (all equity)", None,
+            "rule", "guided.finance.all_equity"),
+        row("analysis_years_rule", "Analysis years = the storage lifetime", None, "rule",
+            "guided.horizon.storage_lifetime"),
+        row("value_flows_template", "Value flows: one owner (the site)", None, "rule",
+            "guided.value_flows.single_owner"),
+        row("salvage_rule", "Salvage: present value of the remaining annuities", None, "rule",
+            "guided.salvage.annuity_pv_remaining_life"),
+        row("pv_degradation_pct_per_year", "Solar PV degradation (not modelled)", 0.0,
+            "%/year", "guided.degradation.none", domain=LedgerDomain.parse("[0, 100]"),
+            help_="mvp_basis_no_degradation"),
+        row("tax_pack", "Tax pack: off (pre-tax basis)", None, "rule",
+            "guided.basis.pre_tax" if basis.get("tax") == "pre" else "guided.basis.post_tax"),
+        row("incentives_rule", "Incentives: none (excluding subsidies)", None, "rule",
+            "guided.basis.excl_subsidy" if basis.get("subsidy") == "excl"
+            else "guided.basis.incl_subsidy"),
+        row("export_series", "Export price series (minted per study)", None, "series",
+            "", source=f"Tariff {tariff.name!r} ({tariff.source})"),
+    ]
+    if tariff.export.cap_mw is not None:
+        out.append(row("export_cap_mw", "Export cap of the connection",
+                       float(tariff.export.cap_mw), "MW", "",
+                       source=f"Tariff {tariff.name!r} ({tariff.source})",
+                       domain=LedgerDomain.parse("[0, inf)")))
+    return out
+
+
 # ── seeding ───────────────────────────────────────────────────────────────
 
 def key_drivers_of(question: DecisionQuestion | Iterable[str]) -> tuple[str, ...]:
@@ -580,8 +925,16 @@ def seed_ledger(question: DecisionQuestion | Iterable[str],
     tariff, tariff_provenance = _intake_tariff(intake or {}, library)
     raw = ([_tech_row(r) for r in library.technology]
            + _tariff_rows(tariff, tariff_provenance) + _finance_rows(library))
+    if library.pack is not None:
+        # U2 WP3: rows 21-34 from the pack's rules (plan §1.2).
+        raw += _engine_rows(intake or {}, tariff, tariff_provenance, library)
     rows = [LedgerRow(**{"provenance": "library", "status": "default", **r},
                       sensitivity_flag=r["key"] in drivers) for r in raw]
+    if library.pack is not None:
+        rows = [r.model_copy(update={"engine_path": ENGINE_PATHS.get(r.key),
+                                     "illustrative": _illustrative(r.key, tariff,
+                                                                   tariff_provenance, library)})
+                for r in rows]
     notes: list[str] = []
     # BC-S2-5: the vintage of the technology costs, so a reader in 2026 is
     # not told these are current prices.
@@ -597,6 +950,26 @@ def seed_ledger(question: DecisionQuestion | Iterable[str],
                      f"from_study_{study_year}")
     return AssumptionsLedger(ledger_version=library.version, rows=rows,
                              honesty_notes=tuple(notes))
+
+
+def _illustrative(key: str, tariff: Tariff, tariff_provenance: str,
+                  library: Library) -> bool | None:
+    """
+    The pack's `illustrative` flag a seeded row carries (None: not a pack
+    figure — a rule row, or a tariff the user supplied).
+    """
+    if key in ("tariff", "demand_charge_price", "energy_price_level"):
+        if tariff_provenance != "library":
+            return None
+        return library.tariff_illustrative.get(tariff.tariff_id)
+    for r in library.technology:
+        if r.key == key:
+            return r.illustrative
+    for spec_key in ("discount_rate", "sizing_limit"):
+        spec = library.finance.get(spec_key) or {}
+        if spec.get("key", spec_key) == key:
+            return spec.get("illustrative")
+    return None
 
 
 def horizon_and_replacements(ledger: AssumptionsLedger,

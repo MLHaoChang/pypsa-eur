@@ -39,7 +39,13 @@ from models.study import (
     LedgerRow,
     StudyMaturity,
 )
-from services.study.library import DERIVED, Library, key_drivers_of, seed_ledger
+from services.study.library import (
+    DERIVED,
+    INTAKE_DERIVED_ROWS,
+    Library,
+    key_drivers_of,
+    seed_ledger,
+)
 
 __all__ = [
     "CSV_COLUMNS", "LedgerEditError", "LedgerImportError", "LoadProvenance",
@@ -68,6 +74,8 @@ _NOT_EDITABLE = {
     "not_applicable": "not applicable under the chosen tariff (not_applicable)",
     "tariff_descriptor": ("the tariff is chosen or supplied at the tariff step, "
                           "not typed into the ledger"),
+    # U2 WP3 (plan §1.2): a rule of the defaults pack, listed, never typed.
+    "rule_descriptor": "a rule of the defaults pack, not a number (rule_descriptor)",
 }
 _NOT_APPLICABLE_WHY = {
     "demand_charge_price": "the chosen tariff has no demand charge",
@@ -151,6 +159,10 @@ def apply_user_row(ledger: AssumptionsLedger, key: str, value: float, *,
         if code == "not_applicable" and key in _NOT_APPLICABLE_WHY:
             why = f"{_NOT_APPLICABLE_WHY[key]} ({code})"
         raise LedgerEditError(f"{key}: cannot be edited: {why}")
+    if key in INTAKE_DERIVED_ROWS:
+        raise LedgerEditError(
+            f"{key}: cannot be edited: set by a defaults-pack rule from the intake "
+            "(the modelled year, the tariff's export cap)")
     flagged = _attention_notes(ledger, key)
     if flagged:
         reason = flagged[0][len(f"{_ATTENTION}{key}:"):]
@@ -396,7 +408,9 @@ def maturity_from_ledger(ledger: AssumptionsLedger,
     if not tariffs:
         reasons.append("tariff: the ledger names no tariff (re-seed it)")
     for t in tariffs:
-        if t.provenance == "library" or t.source.strip().lower() == "illustrative":
+        # U2 WP3 (§6.2): the defaults pack's `illustrative` flag holds it too.
+        if (t.provenance == "library" or t.source.strip().lower() == "illustrative"
+                or t.illustrative):
             reasons.append(f"tariff: {t.technical_name} ({t.source}, {t.provenance})")
     if load != "uploaded":
         reasons.append(f"load: {load} (upload metered load to raise maturity)")
