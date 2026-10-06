@@ -266,6 +266,30 @@ band by `save_draft` before publishing.
 * or let `campus_compliance` fall back to an `assumed` design band for
   interior buses.
 
+**Fixed on fix/campus-gridcode-probe-findings.** The first two options were
+taken, and the engine is unchanged:
+
+* *At extraction* (`_draft_from`): every voltage range from 0 kV up to the
+  highest extracted band's `kv_max` that no extracted band covers gets a
+  band with the `generic_assumed` template's `v_min`/`v_max`, tagged
+  `assumed`, with the clause `not stated in the document; <template clause>`
+  and no page or quote. Each is listed in `review.filled_from_template` as
+  its own `voltage_bands[i]`, indexed after the bands are sorted by
+  `kv_min`. Nothing is filled above the top band. The draft from the real
+  DCC now gets one 0-110 kV `assumed` band at `voltage_bands[0]`.
+* *At publish*: a profile whose voltage bands leave any voltage from 0 kV
+  up to the top band uncovered is refused with 422, naming each range and
+  the fix (add a band, tagged `assumed` if the code does not state it).
+  `allow_unconfirmed` does not waive it. It guards hand-made and
+  hand-edited drafts too.
+* The coverage rule is `gridspine.templates.grid_codes.uncovered_kv_ranges`,
+  which follows `band_for`'s edge rules (`kv_min` inclusive, `kv_max`
+  exclusive unless `kv_max_inclusive`). The backend reaches it through
+  `drivers.campus_study`. `validate_profile` and the loader do not require
+  coverage, so shipped and test profiles may stay partial.
+* The review form marks a filled band by its own index. It used to match
+  only the key before the `[`, which a per-index path never hits.
+
 ### Bug 2: wrong page for the Article 15 quote (extraction quality; the guard worked)
 
 In both runs the model gave `page: 21` for the Article 15(1)(a) quote. The
@@ -288,6 +312,16 @@ Two consequences for the campus session:
   The probe confirmed blindly, as a script does; a person would be warned
   by the flag. Whether `confirm` should refuse or warn on
   `quote_found: false` is a design choice to make deliberately.
+
+**Fixed on fix/campus-gridcode-probe-findings.** `_check_quotes` now
+searches every page when the quote is not on the stated page or either side.
+A quote found elsewhere stays `quote_found: false` (the stated page is
+wrong) and `found_on_page` is the first page that has it; a quote no page
+has keeps `found_on_page: null`. The result has the same keys. The review
+form says "quote found on page N, not on page P (as stated)" for the first
+case and "quote not found in the document" for the second. `confirm` is
+unchanged: a person confirms with the warning in view, and it does not
+block.
 
 ## What this does and does not establish
 
