@@ -23,12 +23,11 @@ import pypsa
 import pytest
 
 from models.study import Tariff
-from tests.u2_targets import FAKE_REF, SEEDS, pending, series_resolver
+from tests.u2_targets import FAKE_REF, SEEDS, series_resolver
 
 SAME = "commercial.arbitrage_loop"
 CROSS = "commercial.arbitrage_loop_via_storage"
 
-pytestmark = pending("WP4", "compile.commercial_from_form / bind_on_network not built")  # WP2: removed when WP4 lands
 
 
 def _C():

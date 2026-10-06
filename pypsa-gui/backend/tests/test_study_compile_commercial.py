@@ -22,13 +22,12 @@ import pytest
 
 from models.study import Tariff
 from tests.golden import site_fixture as SF
-from tests.u2_targets import DE, FAKE_REF, TOU, flat_resolver, golden_copy, pending
+from tests.u2_targets import DE, FAKE_REF, TOU, flat_resolver, golden_copy
 
 JAN_FEB = pd.date_range("2030-01-01", "2030-02-28 23:00", freq="h")
 YEAR = pd.date_range("2025-01-01", periods=8760, freq="h")
 SEVEN = {"energy", "demand", "capacity", "fixed", "network", "export_credit", "taxes_levies"}
 
-pytestmark = pending("WP4", "compile.commercial_from_ledger not built")  # WP2: removed when WP4 lands
 
 
 def _form(**over) -> Tariff:
