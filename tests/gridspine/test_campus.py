@@ -241,3 +241,115 @@ def _broken(mutate):
 def test_an_impossible_or_untagged_campus_is_refused(mutate, match):
     with pytest.raises(ContractError, match=match):
         build_campus(_broken(mutate))
+
+
+# --------------------------------------------------------------------------
+# compensation and sunk assets (C8)
+# --------------------------------------------------------------------------
+
+def _with_comp(*entries):
+    spec = campus_spec()
+    spec["campus"]["compensation"] = list(entries)
+    return spec
+
+
+def _pcc_q(net):
+    pp.runpp(net)
+    return float(net.res_ext_grid["q_mvar"].iloc[0])
+
+
+def test_a_capacitor_bank_is_a_switched_shunt_that_supplies_reactive_power():
+    """pandapower's shunt is in the load convention: a negative q_mvar is
+    capacitive. The bank's rating is split into its steps and starts off."""
+    spec = _with_comp({"name": "CAP1", "bus": "MV1", "kind": "capacitor_bank", "q_mvar": t(10.0), "steps": 4,
+                       "library_id": "CAP_20_10M"})
+    net = build_campus(spec).net
+    assert len(net.shunt) == 1 and len(net.sgen) == 3
+    sh = net.shunt.iloc[0]
+    assert sh["name"] == "CAP1" and sh["q_mvar"] == pytest.approx(-2.5) and sh["max_step"] == 4 and sh["step"] == 0
+    ref = direct_net()
+    mv1 = ref.bus.index[ref.bus["name"] == "MV1"][0]
+    i = pp.create_shunt(ref, mv1, q_mvar=-2.5, p_mw=0.0, step=0, max_step=4)
+    assert _pcc_q(net) == pytest.approx(_pcc_q(direct_net()), abs=1e-9)      # off: no effect
+    for k in (1, 4):
+        net.shunt.at[net.shunt.index[0], "step"] = k
+        ref.shunt.at[i, "step"] = k
+        assert _pcc_q(net) == pytest.approx(_pcc_q(ref), abs=1e-9)
+    assert _pcc_q(net) < _pcc_q(direct_net()) - 9.0          # 4 steps on: ~10 Mvar less from the grid
+
+
+def test_a_shunt_reactor_is_one_inductive_step():
+    net = build_campus(_with_comp({"name": "SR1", "bus": "MV2", "kind": "shunt_reactor", "q_mvar": t(5.0)})).net
+    sh = net.shunt.iloc[0]
+    assert sh["q_mvar"] == pytest.approx(5.0) and sh["max_step"] == 1 and sh["step"] == 0
+    ref = direct_net()
+    i = pp.create_shunt(ref, ref.bus.index[ref.bus["name"] == "MV2"][0], q_mvar=5.0, step=1, max_step=1)
+    net.shunt.at[net.shunt.index[0], "step"] = 1
+    assert _pcc_q(net) == pytest.approx(_pcc_q(ref), abs=1e-9)
+    assert _pcc_q(ref) > _pcc_q(direct_net()) + 4.0           # it absorbs: more from the grid
+    del i
+
+
+def test_a_statcom_is_a_controllable_sgen_at_zero_active_power():
+    net = build_campus(_with_comp({"name": "ST1", "bus": "MV1", "kind": "statcom", "q_mvar": t(8.0)})).net
+    st = net.sgen.set_index("name").loc["ST1"]
+    assert st["p_mw"] == 0.0 and st["q_mvar"] == 0.0 and st["sn_mva"] == 8.0
+    assert bool(st["controllable"]) and st["max_q_mvar"] == 8.0 and st["min_q_mvar"] == -8.0
+    ref = direct_net()
+    j = pp.create_sgen(ref, ref.bus.index[ref.bus["name"] == "MV1"][0], p_mw=0.0, q_mvar=6.0, sn_mva=8.0)
+    net.sgen.loc[net.sgen["name"] == "ST1", "q_mvar"] = 6.0
+    assert _pcc_q(net) == pytest.approx(_pcc_q(ref), abs=1e-9)
+    del j
+
+
+def test_the_compensation_table_lists_each_entry_and_keeps_its_tag():
+    camp = build_campus(_with_comp(
+        {"name": "CAP1", "bus": "MV1", "kind": "capacitor_bank", "q_mvar": t(10.0, "datasheet"), "steps": 2},
+        {"name": "ST1", "bus": "MV1", "kind": "statcom", "q_mvar": t(4.0), "pypsa_name": "statcom"}))
+    c = camp.compensation
+    assert list(c.index) == ["CAP1", "ST1"]
+    assert c.at["CAP1", "kind"] == "capacitor_bank" and c.at["CAP1", "steps"] == 2 and c.at["CAP1", "q_mvar"] == 10.0
+    assert c.at["ST1", "steps"] == 1 and c.at["ST1", "bus"] == "MV1"
+    assert camp.params.set_index(["element", "param"]).at[("CAP1", "q_mvar"), "source"] == "datasheet"
+    assert "CAP1" not in camp.units.index and "ST1" not in camp.units.index    # not dispatched by the hour
+
+
+def test_a_campus_without_compensation_has_an_empty_table_and_no_shunt():
+    camp = build_campus(campus_spec())
+    assert camp.compensation.empty and len(camp.net.shunt) == 0
+
+
+def test_existing_assets_parallel_runs_and_library_ids_are_accepted():
+    spec = campus_spec()
+    spec["campus"]["transformers"]["TR1"].update(existing=True, library_id="TR_110_20_40")
+    spec["campus"]["cables"]["CB1"].update(existing=False, parallel=2, library_id="CB_20_AL240")
+    camp = build_campus(spec)
+    ref = direct_net()
+    ref.line.at[0, "parallel"] = 2
+    assert _pcc_q(camp.net) == pytest.approx(_pcc_q(ref), abs=1e-9)
+    assert camp.net.line.at[0, "parallel"] == 2
+
+
+@pytest.mark.parametrize("mutate, match", [
+    (lambda c: c.update(compensation=[{"name": "C1", "bus": "MV1", "kind": "svc", "q_mvar": t(1.0)}]), "unknown kind"),
+    (lambda c: c.update(compensation=[{"name": "C1", "bus": "MV9", "kind": "statcom", "q_mvar": t(1.0)}]), "unknown bus"),
+    (lambda c: c.update(compensation=[{"name": "C1", "bus": "MV1", "kind": "statcom", "q_mvar": t(1.0), "x": 1}]), "unknown field"),
+    (lambda c: c.update(compensation=[{"name": "C1", "bus": "MV1", "kind": "statcom", "q_mvar": t(0.0)}]), "positive"),
+    (lambda c: c.update(compensation=[{"name": "C1", "bus": "MV1", "kind": "statcom", "q_mvar": t(-3.0)}]), "positive"),
+    (lambda c: c.update(compensation=[{"name": "C1", "bus": "MV1", "kind": "statcom", "q_mvar": 3.0}]), "value.*source"),
+    (lambda c: c.update(compensation=[{"name": "C1", "bus": "MV1", "kind": "statcom"}]), "q_mvar"),
+    (lambda c: c.update(compensation=[{"name": "C1", "bus": "MV1", "kind": "capacitor_bank", "q_mvar": t(1.0)}]), "steps"),
+    (lambda c: c.update(compensation=[{"name": "C1", "bus": "MV1", "kind": "capacitor_bank", "q_mvar": t(1.0), "steps": 0}]), "steps"),
+    (lambda c: c.update(compensation=[{"name": "C1", "bus": "MV1", "kind": "capacitor_bank", "q_mvar": t(1.0), "steps": 2.5}]), "steps"),
+    (lambda c: c.update(compensation=[{"name": "C1", "bus": "MV1", "kind": "capacitor_bank", "q_mvar": t(1.0), "steps": True}]), "steps"),
+    (lambda c: c.update(compensation=[{"name": "C1", "bus": "MV1", "kind": "shunt_reactor", "q_mvar": t(1.0), "steps": 2}]), "unknown field"),
+    (lambda c: c.update(compensation=[{"name": "TR1", "bus": "MV1", "kind": "statcom", "q_mvar": t(1.0)}]), "duplicate"),
+    (lambda c: c.update(compensation=[{"bus": "MV1", "kind": "statcom", "q_mvar": t(1.0)}]), "name"),
+    (lambda c: c.update(compensation={"C1": {"bus": "MV1", "kind": "statcom", "q_mvar": t(1.0)}}), "list"),
+    (lambda c: c["transformers"]["TR1"].update(existing="yes"), "existing"),
+    (lambda c: c["cables"]["CB1"].update(parallel=0), "parallel"),
+    (lambda c: c["cables"]["CB1"].update(parallel=1.5), "parallel"),
+])
+def test_an_impossible_compensation_or_sunk_flag_is_refused(mutate, match):
+    with pytest.raises(ContractError, match=match):
+        build_campus(_broken(mutate))
