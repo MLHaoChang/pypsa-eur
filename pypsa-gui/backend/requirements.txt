@@ -27,3 +27,8 @@ pydantic-settings>=2.0
 pwdlib[argon2]>=0.2
 emails>=0.6
 httpx>=0.27
+
+# Chat harness (backend/harness/). The workflow and skill registries read
+# Markdown front matter with PyYAML; the pixi env carries it transitively, and
+# this line keeps a pure-pip deployment honest.
+pyyaml>=6.0

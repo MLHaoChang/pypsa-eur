@@ -210,6 +210,8 @@ describe('IssuesPanel — preflight fetch failure vs. a genuine clean result (AD
 
     await screen.findByText('bus_ref_unknown')
     expect(screen.getByText(/does not match any bus/)).toBeTruthy()
+    // Q8: the finding leads with a plain title; the code stays beside it.
+    expect(screen.getByTestId('issue-title').textContent).toBe('Connected bus does not exist')
     expect(screen.queryByText('Could not run the validation check')).toBeNull()
     expect(screen.queryByText('All checks passed')).toBeNull()
   })

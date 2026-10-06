@@ -30,6 +30,7 @@ import pytest
 from fastapi import HTTPException
 
 from db.models import User
+from harness.providers import wiring as harness_wiring  # the patch surface of _build_anthropic_client (harness/README.md, "Splitting the loop")
 from services import campus_electrical_service as ce
 from services import campus_grid_code_service as gc
 from services import chat_service, project_registry
@@ -124,7 +125,7 @@ def test_live_probe_grid_code_extraction(user_and_db, monkeypatch):
         client, err = real_builder()
         return (_Observed(client, calls) if client is not None else None), err
 
-    monkeypatch.setattr(chat_service, "_build_anthropic_client", observed_builder)
+    monkeypatch.setattr(harness_wiring, "_build_anthropic_client", observed_builder)
     hub = _solved_hub(user_and_db, f"Live Grid Code Hub {uuid.uuid4().hex[:6]}")
     record = {"pdf": Path(_PDF).name}
     doc = gc.upload_document(hub, Path(_PDF).read_bytes(), Path(_PDF).name, "application/pdf")

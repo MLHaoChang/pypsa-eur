@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Repeat, ShieldCheck, Square } from 'lucide-react'
-import { resultsApi } from '../../api/simulation'
+import { MAX_LOOP_SOLVES, resultsApi } from '../../api/simulation'
 import type {
   CouplingIteration, CouplingLoopPayload, CouplingLoopRequestBody,
   CouplingMcBlock, McStatus,
@@ -492,7 +492,7 @@ export function LoopPanel() {
             <p className="text-[10px] text-muted" data-testid="loop-not-run">
               No coupling loop has been run in this session. Nothing below is a
               result of zero: there is no result. A run costs up to{' '}
-              {'max_solves'} full capacity expansions plus one sampling study
+              {MAX_LOOP_SOLVES} full capacity expansions plus one sampling study
               each, and it holds the network for its whole duration.
             </p>
           )}

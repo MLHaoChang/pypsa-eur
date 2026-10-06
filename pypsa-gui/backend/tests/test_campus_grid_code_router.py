@@ -16,7 +16,8 @@ import pytest
 
 from db.models import Project, User
 from services import campus_grid_code_service as gc
-from services import chat_service, project_registry
+from harness.providers import wiring as harness_wiring  # the patch surface of _build_anthropic_client (harness/README.md, "Splitting the loop")
+from services import project_registry
 from tests.test_campus_grid_code_service import PDF, FakeClient, response, tool_input
 from tests.test_worksheet_foreign_lock import _is_lock_refusal, same_org_other_user  # noqa: F401
 
@@ -107,11 +108,11 @@ def test_an_upload_without_a_file_is_422(client, hub):
 
 def test_the_review_round_trip_over_http(client, hub, monkeypatch):
     doc = client.post(BASE + "/documents", files={"file": ("tso.pdf", PDF, "application/pdf")}).json()
-    monkeypatch.setattr(chat_service, "_build_anthropic_client", lambda: (None, "missing_api_key"))
+    monkeypatch.setattr(harness_wiring, "_build_anthropic_client", lambda: (None, "missing_api_key"))
     resp = client.post(f"{BASE}/documents/{doc['id']}/extract", json={"profile_id": "tso"})
     assert resp.status_code == 503 and "ANTHROPIC_API_KEY" in resp.json()["detail"]
     fake = FakeClient(response(tool_input()))
-    monkeypatch.setattr(chat_service, "_build_anthropic_client", lambda: (fake, None))
+    monkeypatch.setattr(harness_wiring, "_build_anthropic_client", lambda: (fake, None))
     resp = client.post(f"{BASE}/documents/{doc['id']}/extract", json={"profile_id": "tso"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["unconfirmed"] == ["voltage_bands[0]", "q_range_demand"]
@@ -140,7 +141,7 @@ def test_publishing_a_draft_with_a_voltage_gap_is_422_naming_the_range(client, h
     band = {"kv_min": 110.0, "kv_max": 300.0, "v_min": 0.9, "v_max": 1.1, "clause": "Art. 12",
             "page": 1, "quote": "between 0,90 pu and 1,10 pu"}
     fake = FakeClient(response(tool_input(voltage_bands=[band])))
-    monkeypatch.setattr(chat_service, "_build_anthropic_client", lambda: (fake, None))
+    monkeypatch.setattr(harness_wiring, "_build_anthropic_client", lambda: (fake, None))
     resp = client.post(f"{BASE}/documents/{doc['id']}/extract", json={"profile_id": "tso"})
     assert resp.status_code == 200, resp.text
     # the extraction filled 0-110 kV itself; a reviewer's edit that removes it is what publish refuses

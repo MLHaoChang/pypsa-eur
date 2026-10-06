@@ -29,7 +29,7 @@ from pypdf.generic import DictionaryObject, NameObject, StreamObject
 from db.models import Project, User
 from services import campus_electrical_service as ce
 from services import campus_grid_code_service as gc
-from services import chat_service
+from harness.providers import wiring as harness_wiring  # the patch surface of _build_anthropic_client (harness/README.md, "Splitting the loop")
 from services import gridspine_service as gs
 from services import project_registry
 from tests.test_campus_electrical_service import hub_network
@@ -116,10 +116,10 @@ def fake_api(monkeypatch):
 
     def install(resp=None, error=None):
         holder["client"] = FakeClient(resp, error)
-        monkeypatch.setattr(chat_service, "_build_anthropic_client", lambda: (holder["client"], None))
+        monkeypatch.setattr(harness_wiring, "_build_anthropic_client", lambda: (holder["client"], None))
         return holder["client"]
 
-    monkeypatch.setattr(chat_service, "_build_anthropic_client",
+    monkeypatch.setattr(harness_wiring, "_build_anthropic_client",
                         lambda: pytest.fail("the client must not be built in this test"))
     return install
 
@@ -349,7 +349,7 @@ def test_every_model_is_asked_with_the_tool_forced_first(hub, fake_api, monkeypa
 def test_a_400_to_the_forced_tool_is_retried_once_with_the_prompt_asking(hub, monkeypatch):
     doc = _upload(hub)
     client = ForcedRefusingClient(response(tool_input()))
-    monkeypatch.setattr(chat_service, "_build_anthropic_client", lambda: (client, None))
+    monkeypatch.setattr(harness_wiring, "_build_anthropic_client", lambda: (client, None))
     out = gc.extract(hub, doc["id"], "tso")
     assert [c["tool_choice"]["type"] for c in client.calls] == ["tool", "auto"]
     assert out["id"] == "tso"
@@ -587,7 +587,7 @@ def test_a_response_without_a_whole_profile_is_502_and_saves_nothing(hub, fake_a
 @pytest.mark.parametrize("kind", ["missing_api_key", "sdk_not_installed", "unauthorized"])
 def test_without_a_key_the_extraction_is_503_and_points_at_the_manual_path(hub, monkeypatch, kind):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value-123")
-    monkeypatch.setattr(chat_service, "_build_anthropic_client", lambda: (None, kind))
+    monkeypatch.setattr(harness_wiring, "_build_anthropic_client", lambda: (None, kind))
     doc = _upload(hub)
     with pytest.raises(HTTPException) as exc:
         gc.extract(hub, doc["id"], "tso")
@@ -976,7 +976,7 @@ def test_a_blank_draft_does_not_replace_one_unless_asked(hub):
 
 def test_a_blank_draft_needs_no_key(hub, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setattr(chat_service, "_build_anthropic_client", lambda: pytest.fail("no client for a blank draft"))
+    monkeypatch.setattr(harness_wiring, "_build_anthropic_client", lambda: pytest.fail("no client for a blank draft"))
     assert gc.new_draft(hub, "by_hand")["id"] == "by_hand"
     assert gc.list_grid_codes(hub)["extraction_available"] is False
 
