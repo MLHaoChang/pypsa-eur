@@ -50,6 +50,10 @@ import {
   INDIVIDUAL_MAX_COMPONENTS, type AssetMode, type AssetNodeDescriptor,
 } from './topologyAssets'
 import { formatSizing, type MatchContext } from '../utils/assetTypes'
+import {
+  buildPathD, insertWaypoint, middleSegmentIndex, midpoint as segMidpoint, moveWaypoint, pathMidpoint as pathMidpointOf,
+  pushHistory, removeWaypoint,
+} from './edgeWaypoints'
 import { assetIcon } from '../utils/assetTypeIcon'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -1012,42 +1016,15 @@ function EditableEdge({ id, sourceX, sourceY, targetX, targetY, data, selected }
   ], [sourceX, sourceY, targetX, targetY, waypoints])
 
   const midPoint = useMemo(() => {
-    const mid = Math.floor((allPoints.length - 1) / 2)
-    return { x: (allPoints[mid].x + allPoints[mid + 1].x) / 2, y: (allPoints[mid].y + allPoints[mid + 1].y) / 2 }
+    const mid = middleSegmentIndex(allPoints.length)
+    return segMidpoint(allPoints[mid], allPoints[mid + 1])
   }, [allPoints])
 
   // True geometric midpoint along the drawn polyline — at exactly half the
-  // total path length, including any waypoints. Used by the transformer IEC
-  // symbol so it always sits on the visible line, halfway between the two
-  // buses regardless of routing. Also returns the local angle (radians) of
-  // the segment containing that midpoint so consumers can rotate aligned
-  // glyphs to match the line direction.
-  const pathMidpoint = useMemo(() => {
-    if (allPoints.length < 2) return { x: 0, y: 0, angleRad: 0 }
-    const dist = (a: { x: number; y: number }, b: { x: number; y: number }) =>
-      Math.hypot(b.x - a.x, b.y - a.y)
-    let total = 0
-    for (let i = 0; i < allPoints.length - 1; i++) total += dist(allPoints[i], allPoints[i + 1])
-    if (total === 0) return { x: allPoints[0].x, y: allPoints[0].y, angleRad: 0 }
-    const half = total / 2
-    let acc = 0
-    for (let i = 0; i < allPoints.length - 1; i++) {
-      const a = allPoints[i]
-      const b = allPoints[i + 1]
-      const seg = dist(a, b)
-      if (acc + seg >= half) {
-        const t = (half - acc) / seg
-        return {
-          x: a.x + t * (b.x - a.x),
-          y: a.y + t * (b.y - a.y),
-          angleRad: Math.atan2(b.y - a.y, b.x - a.x),
-        }
-      }
-      acc += seg
-    }
-    const last = allPoints[allPoints.length - 1]
-    return { x: last.x, y: last.y, angleRad: 0 }
-  }, [allPoints])
+  // total path length, including any waypoints — and the local direction of
+  // the segment it lies on. The transformer IEC symbol sits here, so it stays
+  // between the two buses however the route bends (./edgeWaypoints, tested).
+  const pathMidpoint = useMemo(() => pathMidpointOf(allPoints), [allPoints])
 
   const pathRef    = useRef<SVGPathElement | null>(null)
   const hitRef     = useRef<SVGPathElement | null>(null)
@@ -1085,9 +1062,7 @@ function EditableEdge({ id, sourceX, sourceY, targetX, targetY, data, selected }
     hitRef.current?.setAttribute('d', d)
   })
 
-  const buildD = (wps: WP[]) =>
-    [{ x: sourceX, y: sourceY }, ...wps, { x: targetX, y: targetY }]
-      .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
+  const buildD = (wps: WP[]) => buildPathD({ x: sourceX, y: sourceY }, wps, { x: targetX, y: targetY })
 
   const pathD = buildD(waypoints)
 
@@ -1102,12 +1077,7 @@ function EditableEdge({ id, sourceX, sourceY, targetX, targetY, data, selected }
       const el = e.currentTarget
       el.setPointerCapture(e.pointerId)
       if (segIdx !== null) {
-        const p0 = allPoints[segIdx], p1 = allPoints[segIdx + 1]
-        liveWps.current = [
-          ...liveWps.current.slice(0, segIdx),
-          { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 },
-          ...liveWps.current.slice(segIdx),
-        ]
+        liveWps.current = insertWaypoint(liveWps.current, segIdx, segMidpoint(allPoints[segIdx], allPoints[segIdx + 1]))
         // Immediately paint new path so the pre-drag straight segment can't ghost
         const d0 = buildD(liveWps.current)
         pathRef.current?.setAttribute('d', d0)
@@ -1115,7 +1085,7 @@ function EditableEdge({ id, sourceX, sourceY, targetX, targetY, data, selected }
       }
       const onMove = (pe: PointerEvent) => {
         const pos = screenToFlowPosition({ x: pe.clientX, y: pe.clientY })
-        liveWps.current = liveWps.current.map((wp, i) => i === wpIdx ? pos : wp)
+        liveWps.current = moveWaypoint(liveWps.current, wpIdx, pos)
         const d = buildD(liveWps.current)
         pathRef.current?.setAttribute('d', d)
         hitRef.current?.setAttribute('d', d)
@@ -1131,9 +1101,7 @@ function EditableEdge({ id, sourceX, sourceY, targetX, targetY, data, selected }
         const finalWps = [...liveWps.current]
         setEdges(eds => eds.map(edge => {
           if (edge.id !== id) return edge
-          const hist: WP[][] = [...((edge.data as unknown as EdgeData).history ?? [[]])]
-          if (hist.length >= 50) hist.shift()
-          hist.push(JSON.parse(JSON.stringify(finalWps)))
+          const hist = pushHistory((edge.data as unknown as EdgeData).history ?? [[]], finalWps)
           return { ...edge, data: { ...edge.data, waypoints: finalWps, history: hist } }
         }))
         edgeMenu.scheduleSave()
@@ -1146,11 +1114,8 @@ function EditableEdge({ id, sourceX, sourceY, targetX, targetY, data, selected }
     e.stopPropagation()
     setEdges(eds => eds.map(edge => {
       if (edge.id !== id) return edge
-      const newWps = ((edge.data as unknown as EdgeData).waypoints ?? [])
-        .filter((_: WP, i: number) => i !== wpIdx)
-      const hist: WP[][] = [...((edge.data as unknown as EdgeData).history ?? [[]])]
-      if (hist.length >= 50) hist.shift()
-      hist.push(JSON.parse(JSON.stringify(newWps)))
+      const newWps = removeWaypoint((edge.data as unknown as EdgeData).waypoints ?? [], wpIdx)
+      const hist = pushHistory((edge.data as unknown as EdgeData).history ?? [[]], newWps)
       return { ...edge, data: { ...edge.data, waypoints: newWps, history: hist } }
     }))
     edgeMenu.scheduleSave()
@@ -1189,7 +1154,7 @@ function EditableEdge({ id, sourceX, sourceY, targetX, targetY, data, selected }
         />
         {allPoints.slice(0, -1).map((p, i) => {
           const q = allPoints[i + 1]
-          const isBadgeSeg = isLink && i === Math.floor((allPoints.length - 1) / 2)
+          const isBadgeSeg = isLink && i === middleSegmentIndex(allPoints.length)
           if (isBadgeSeg) return null
           const mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2
           return (
@@ -1253,7 +1218,7 @@ function EditableEdge({ id, sourceX, sourceY, targetX, targetY, data, selected }
         // direction. With straight lines this is just (target - source); with
         // waypoints it's the middle segment that the label sits on, so the
         // arrow stays parallel to the line under the chip.
-        const mid = Math.floor((allPoints.length - 1) / 2)
+        const mid = middleSegmentIndex(allPoints.length)
         const a = allPoints[mid]
         const b = allPoints[mid + 1]
         // Decide whether we're displaying active (P) or reactive (Q) power.
@@ -1316,7 +1281,7 @@ function EditableEdge({ id, sourceX, sourceY, targetX, targetY, data, selected }
           receiving bus, loading %, and a carrier suffix so the user can
           tell H2 / heat / DC flows apart at a glance during playback. */}
       {linkOverlay && isLink && (() => {
-        const mid = Math.floor((allPoints.length - 1) / 2)
+        const mid = middleSegmentIndex(allPoints.length)
         const a = allPoints[mid]
         const b = allPoints[mid + 1]
         // An extra-port edge (bus0 → bus<port>) has no served series:
