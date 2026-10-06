@@ -27,6 +27,15 @@ describe('SiteOverlay', () => {
     expect(onReset).toHaveBeenCalledTimes(1)
   })
 
+  it('says in words when the library drew a component generically, and nothing when every type is specific (S4)', () => {
+    const base = { sites: [site], site, onPickSite: () => {}, assetCount: 1, fit: { ...fit, over: false, outside: [] }, unplacedMembers: [], selectedPlacedKey: null, canArrange: true, onArrange: () => {}, onResetPlacement: () => {} }
+    const { rerender } = render(<SiteOverlay {...base} libraryGaps="'tidal' Generator drawn as a generic block" />)
+    expect(screen.getByTestId('library-gaps').textContent).toContain("'tidal' Generator drawn as a generic block")
+    expect(screen.getByTestId('library-gaps').title).toMatch(/library/)
+    rerender(<SiteOverlay {...base} libraryGaps={null} />)
+    expect(screen.queryByTestId('library-gaps')).toBeNull()
+  })
+
   it('Reset is disabled without a placed selection', () => {
     render(<SiteOverlay sites={[site]} site={site} onPickSite={() => {}} assetCount={1} fit={{ ...fit, over: false, outside: [] }} unplacedMembers={['B2']} selectedPlacedKey={null} canArrange onArrange={() => {}} onResetPlacement={() => {}} />)
     expect((screen.getByRole('button', { name: 'Reset placement' }) as HTMLButtonElement).disabled).toBe(true)

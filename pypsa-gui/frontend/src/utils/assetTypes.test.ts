@@ -3,10 +3,43 @@
 // site3d/assetLibrary.test.ts so a palette change is seen from both sides.
 import { describe, it, expect } from 'vitest'
 import {
-  ASSET_ICON_NAMES, ASSET_TYPES, ASSET_TYPE_IDS, PYPSA_CLASSES, assetTypeOf, iconNameOf, isFallbackRule, labelOf, legendFor, matchType, validateAssetTypes,
+  ASSET_ICON_NAMES, ASSET_TYPES, ASSET_TYPE_IDS, PYPSA_CLASSES, assetTypeOf, iconNameOf, isFallbackRule, isGenericMatch, labelOf, legendFor, matchType, validateAssetTypes,
   type AssetTypeSpec, type MatchComponent, type MatchContext,
 } from './assetTypes'
 import { PALETTE_ITEM_IDS, paletteDefaults, type PortFilter } from '../layout/paletteData'
+
+describe('isGenericMatch (plan 3 S4)', () => {
+  const rule = (cls: string) => ASSET_TYPES.flatMap(t => t.match).find(m => m.cls === cls && isFallbackRule(m))!
+  it('a fallback that names its own carriers is generic for any other carrier', () => {
+    expect(isGenericMatch(rule('Generator'), 'diesel')).toBe(false)
+    expect(isGenericMatch(rule('Generator'), 'tidal')).toBe(true)
+    expect(isGenericMatch(rule('StorageUnit'), 'battery')).toBe(false)
+    expect(isGenericMatch(rule('StorageUnit'), 'gravity')).toBe(true)
+    expect(isGenericMatch(rule('Load'), '')).toBe(false)       // PyPSA's default carrier is electricity
+    expect(isGenericMatch(rule('Load'), 'water')).toBe(true)
+    expect(isGenericMatch(rule('Bus'), 'AC')).toBe(false)
+    expect(isGenericMatch(rule('Bus'), 'water')).toBe(true)
+  })
+  it('a fallback without genericUnless is never generic; a non-fallback rule never is', () => {
+    expect(isGenericMatch(rule('Transformer'), 'anything')).toBe(false)
+    expect(isGenericMatch(rule('Line'), 'anything')).toBe(false)
+    expect(isGenericMatch({ cls: 'Generator', carrier: /wind/i }, 'wind')).toBe(false)
+  })
+  it('the Store fallback is a generic stand-in for everything; the Link fallback only for non-electrical links', () => {
+    expect(isGenericMatch(rule('Store'), 'gas')).toBe(true)
+    expect(isGenericMatch(rule('Store'), '')).toBe(true)
+    const linkFallback = ASSET_TYPES.find(t => t.id === 'feeder')!.match.find(m => m.cls === 'Link')!
+    expect(isGenericMatch(linkFallback, 'DC')).toBe(false)
+    expect(isGenericMatch(linkFallback, 'water pipeline')).toBe(true)
+  })
+  it('matchType reports the rule it matched', () => {
+    const ctx: MatchContext = { members: ['B'], busCarrier: () => 'AC' }
+    const m = matchType('Generator', { name: 'g', bus: 'B', carrier: 'tidal' }, ctx)!
+    expect(m.type.id).toBe('thermal')
+    expect(isFallbackRule(m.rule)).toBe(true)
+    expect(isGenericMatch(m.rule, 'tidal')).toBe(true)
+  })
+})
 
 const clone = (types: readonly AssetTypeSpec[]): AssetTypeSpec[] => types.map(t => ({ ...t, match: t.match.map(m => ({ ...m })) }))
 
@@ -68,6 +101,10 @@ describe('ASSET_TYPES', () => {
 
 describe('validateAssetTypes', () => {
   const bad = (edit: (types: AssetTypeSpec[]) => void) => { const types = clone(ASSET_TYPES); edit(types); return () => validateAssetTypes(types) }
+  it('rejects genericUnless on a rule that is not a fallback, and a stateful genericUnless (plan 3 S4)', () => {
+    expect(bad(types => { types.find(t => t.id === 'wind')!.match = [{ cls: 'Generator', carrier: /wind/i, genericUnless: /x/ }] })).toThrow(/genericUnless/)
+    expect(bad(types => { types.find(t => t.id === 'store')!.match = [{ cls: 'Store', genericUnless: /x/g }] })).toThrow(/flag/)
+  })
   it('rejects a duplicate id', () => {
     expect(bad(types => { types.push({ ...types[0] }) })).toThrow(/duplicate id/)
   })

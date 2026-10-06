@@ -63,6 +63,7 @@ import { boundaryToLocal } from '../site3d/boundary'
 import { busOffsets, siteBounds } from '../site3d/siteModel'
 import { fitReport, type FitObject } from '../site3d/fit'
 import { placementFindings, findingKeys } from '../site3d/placementCheck'
+import { libraryGaps, libraryGapLine } from '../site3d/libraryGaps'
 import { usePlacementFindings } from '../site3d/placementFindingsStore'
 import SiteLayoutFindings from '../components/SiteLayoutFindings'
 import SiteEmptyState from '../components/SiteEmptyState'
@@ -853,6 +854,8 @@ function SiteCanvas() {
   }
 
   const legend = legendFor(objects)
+  // Where the library, not the model, is the limit (S4): one line in the overlay.
+  const gapLine = libraryGapLine(libraryGaps(objects))
   const selectedName = selectedComponent?.name ?? null
   const selectedType = selectedComponent?.type ?? null
   const selectedKey = selectedType && selectedName ? `${selectedType}:${selectedName}` : null
@@ -978,6 +981,7 @@ function SiteCanvas() {
           fit={fit}
           unplacedMembers={unplacedMembers}
           dispatchFresh={solved}
+          libraryGaps={gapLine}
           selectedPlacedKey={selectedPlacedKey}
           canArrange={allLoaded}
           onArrange={() => arrangeAll(currentProject, site.id, objects.filter(o => !o.elevation).map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading })), layout.orphans)}
