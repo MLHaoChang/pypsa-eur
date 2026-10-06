@@ -10,6 +10,11 @@ its project's `user_ts.json`, and an adequacy-sweep test that could not fail for
 its own regression). Their findings carry the detail. Nothing else was re-verified
 on that date, so the entries below still date from 2026-09-12.
 
+**2026-10-06:** items 12–14 added from the 3D site view branch's full-product
+browser E2E (`notes/2026-09-29-3d-site-view-phase2-qa.md` §7), re-verified in
+source on master that day. Its defect D (a second project from the same
+template → 409) is not listed: master's `_unique_project_name` already fixes it.
+
 This file exists because GitHub Issues is **disabled** on this repository, so
 there is nowhere else to keep a queue. It is deliberately thin: one entry per
 open item, with the anchor and the source document. The analysis lives in
@@ -227,3 +232,45 @@ suite carries **124 pre-existing failures**, all from `No module named
 'gridspine'`. "The suite is green" is false locally; the only sound gate is
 *the failing set is unchanged*. Source: gap 6 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
+
+### 12. A network reset while a project is open lands in the session's scratch slot
+
+**Undo reports success and changes nothing; a raw import is silently lost or
+ignored.** `PyPSAService.reset_network()` publishes the new, unbound network
+context into `scratch:<sid>`, but while `sessions.active_project_id` is set the
+next request re-resolves the *project's* registry slot
+(`services/active_project.resolve_for_session`) and never sees it. Affected: raw
+imports (`.nc`, CSV, Excel, MATPOWER in `routers/io.py`), undo
+(`services/network_undo.apply_undo`), snapshot restore (`routers/snapshots.py`),
+and template create / bundle import (`routers/projects.py`), which re-bind but
+leave a stale bound copy in scratch that is written back over the project's
+saved edits when evicted. Reproduces through the API alone. The backend tests
+miss it because `install_network` (`tests/conftest.py`) clears
+`active_project_id`, so every test runs with the pointer unset. **Data-loss
+class.** A proposed fix (clear the pointer after a raw import; `rekey_context`
+after re-binding; pass the acting session through the chat import wrappers) and
+five regression tests sit unapplied in `notes/2026-09-30-full-e2e/`; the diff
+targets the 2026-09-30 tree and needs porting to today's `routers/io.py`.
+Source: `notes/2026-09-29-3d-site-view-phase2-qa.md` §7, defects A–C.
+
+### 13. `login.html` prefills and prints a review credential
+
+`frontend/public/login.html:391-402` ships `admin@example.com` /
+`admin-pass-123` as the input values and in a visible "Review account" line, and
+auth mode serves that page (`static_gate.decide_route` passes `/login.html`
+through). Fine for a review build; a credential in a shipped page otherwise. One
+decision (strip before release, or gate the prefill on a build flag) and a test
+that the served page carries no password value. Source: the same E2E, "Other
+findings".
+
+### 14. Creating a three-port Link drops `bus2` and `efficiency2`
+
+`services/network_crud._drop_unknown_extras` keeps only catalog Input
+attributes, and PyPSA's catalog does not list the multi-port columns, so the
+palette's CHP item creates a plain gas → electricity Link with no heat output
+unless some Link in the network already carries a `bus2` column. Neither canvas
+draws `bus2`/`bus3` either. Fix: admit `bus\d+` / `efficiency\d+` (and the
+per-port `p_min_pu`/`p_max_pu` forms) for Links, with a test that a CHP created
+from the palette keeps both. Planned as increment A1 of
+`plans/2026-10-06-visual-layers-1-abstract-canvas.md`. Source: the 3D branch's
+Phase 2 WP1 smoke (`specs/2026-09-29-3d-site-view-phase2-design.md` §8).
