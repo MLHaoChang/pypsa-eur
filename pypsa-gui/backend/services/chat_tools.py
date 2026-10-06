@@ -6087,7 +6087,10 @@ def _study_gated_tool_names() -> frozenset[str]:
     for name in _lock_gated_tool_names():
         if name in _STUDY_GATE_SWAP_TOOLS:
             continue
-        if name in _LOCK_GATE_SERVICE_CALL_MUTATORS:
+        # The NETWORK mutators, not the whole lock-gate set: that set also
+        # holds project-folder writes (uploads, chat history, campaigns) that
+        # never touch the network a study re-solves.
+        if name in _NETWORK_SERVICE_CALL_MUTATORS:
             gated.add(name)
             continue
         for route in TOOL_ROUTES.get(name, ()):
