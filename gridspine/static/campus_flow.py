@@ -18,6 +18,13 @@ solves the intact case, then, for every group of parallel transformers
 converge is kept, flagged ``converged=False``; it is reported and never
 sized from.
 
+``solve_cases(..., setpoints=...)`` first puts a reactive dispatch on the
+hour: ``{"sgen_q": {name: Q}, "shunt_step": {name: step}}``, the form
+``ReactiveResult.setpoints`` gives (plan C8). The same dispatch is held in
+every N-1 case: the case is the steady state right after the outage,
+before any controller has re-dispatched. Every ``HourFlow`` also carries
+each cable's loading (``line``: ``cable``, ``i_ka``, ``loading_pct``).
+
 ``size_transformers(flows, campus, criteria)`` gives, per transformer
 group, the unit rating that carries every selected hour:
 
@@ -68,6 +75,8 @@ class HourFlow:
     losses_mw: float
     trafo: pd.DataFrame          # trafo, s_mva, loading_pct
     bus: pd.DataFrame            # bus, vm_pu
+    line: pd.DataFrame = dataclasses.field(
+        default_factory=lambda: pd.DataFrame(columns=["cable", "i_ka", "loading_pct"]))   # cable loading
 
 
 def trafo_groups(campus) -> dict:
@@ -126,26 +135,52 @@ def _solve(net) -> HourFlow:
     })
     bus = pd.DataFrame({"bus": net.bus["name"].astype(str).to_numpy(),
                         "vm_pu": net.res_bus["vm_pu"].to_numpy()})
+    line = pd.DataFrame({"cable": net.line["name"].astype(str).to_numpy(),
+                         "i_ka": net.res_line["i_ka"].to_numpy(),
+                         "loading_pct": net.res_line["loading_percent"].to_numpy()})
     p_grid = float(net.res_ext_grid["p_mw"].sum())
     injected = float(net.res_sgen["p_mw"].sum()) - float(net.res_load["p_mw"].sum())
-    return HourFlow(True, p_grid, float(net.res_ext_grid["q_mvar"].sum()), p_grid + injected, trafo, bus)
+    return HourFlow(True, p_grid, float(net.res_ext_grid["q_mvar"].sum()), p_grid + injected, trafo, bus, line)
 
 
-def solve_cases(campus, rows: pd.DataFrame) -> dict:
-    """``{"intact": HourFlow, "N-1:<trafo>": HourFlow, ...}`` for one hour.
-    Works on a copy; ``campus.net`` is not changed."""
+def apply_setpoints(net, setpoints) -> None:
+    """Put a reactive dispatch on ``net`` (mutates it): Q on named sgens and
+    steps on named shunts. A name the net does not have is refused."""
+    for table, col, key in (("sgen", "q_mvar", "sgen_q"), ("shunt", "step", "shunt_step")):
+        idx = dict(zip(net[table]["name"].astype(str), net[table].index))
+        for name, v in (setpoints.get(key) or {}).items():
+            if name not in idx:
+                raise ContractError(f"the dispatch names {name!r}, which is not a {table} of the campus")
+            net[table].at[idx[name], col] = v
+
+
+def solve_cases(campus, rows: pd.DataFrame, setpoints=None, inspect=None) -> dict:
+    """``{"intact": HourFlow, "N-1:<trafo>": HourFlow, ...}`` for one hour,
+    with an optional reactive dispatch in place (module docstring). Works on
+    a copy; ``campus.net`` is not changed. ``inspect(case, net)``, if given,
+    is called on the solved net of every converged case (the MILP reads its
+    Jacobian there, ``campus_milp``)."""
     work = copy.copy(campus)
     work.net = copy.deepcopy(campus.net)
     apply_hour(work, rows)
     net = work.net
-    out = {"intact": _solve(net)}
+    if setpoints:
+        apply_setpoints(net, setpoints)
+
+    def run(case):
+        out[case] = _solve(net)
+        if inspect is not None and out[case].converged:
+            inspect(case, net)
+
+    out = {}
+    run("intact")
     idx = dict(zip(net.trafo["name"].astype(str), net.trafo.index))
     for members in trafo_groups(work).values():
         if len(members) < 2:
             continue
         for name in members:
             net.trafo.at[idx[name], "in_service"] = False
-            out[f"N-1:{name}"] = _solve(net)
+            run(f"N-1:{name}")
             net.trafo.at[idx[name], "in_service"] = True
     return out
 

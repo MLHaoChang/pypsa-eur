@@ -8,6 +8,7 @@ import { useSimulationStore } from '../store/simulationStore'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { parseSuggestedCo2Value } from '../utils/carrierZeroCo2'
+import { issueTitle } from '../utils/issueTitles'
 import type { Carrier, ValidationIssue } from '../api/types'
 import { PageBody, PageSection, RowGrid, StatCard, Btn } from '../components/PageKit'
 
@@ -310,13 +311,19 @@ function IssueRow({ issue, onJumpTo, carriers }: {
         <Icon size={13} />
       </span>
       <div className="flex-1 min-w-0">
-        <div className="flex items-baseline gap-2 mb-0.5">
-          <span className="text-[11px] font-mono font-semibold text-accent">{issue.code}</span>
+        <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
+          <span className="text-[12px] font-semibold text-text" data-testid="issue-title">
+            {issueTitle(issue.code)}
+          </span>
           {issue.component_class && issue.name && (
             <span className="text-[10px] text-muted truncate">
               {issue.component_class} <span className="font-mono text-ink-700">{issue.name}</span>
             </span>
           )}
+          {/* The engine code stays for support and search, but no longer leads. */}
+          <span className="ml-auto shrink-0 text-[9.5px] font-mono text-ink-400" title="Issue code">
+            {issue.code}
+          </span>
         </div>
         <div className="text-[11.5px] text-ink-700 leading-relaxed whitespace-pre-wrap">
           {issue.message}

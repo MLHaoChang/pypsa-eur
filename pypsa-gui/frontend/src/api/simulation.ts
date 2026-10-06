@@ -492,6 +492,11 @@ export interface CouplingLoopPayload {
   finished_at?: number | null
 }
 
+/** Default solve budget of the coupling and reserve-margin loops when the
+ *  request omits `max_solves`. Mirrors backend `services/adequacy/coupling.py`
+ *  MAX_LOOP_SOLVES (also the upper bound the runners accept). */
+export const MAX_LOOP_SOLVES = 8
+
 export interface CouplingLoopRequestBody {
   /** REQUIRED and horizon-basis. The h/yr → horizon conversion is the
    *  panel's job (plan [S12]); the wire stays unit-safe. */

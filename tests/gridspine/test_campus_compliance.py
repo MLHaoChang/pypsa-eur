@@ -136,3 +136,46 @@ def test_switchgear_with_a_rating_is_judged_and_without_one_is_not_rated():
 def test_the_profiles_a_study_can_choose_from_are_listed_with_titles():
     codes = list_grid_codes()
     assert "eu_rfg_dcc_ce" in codes and codes["eu_rfg_dcc_ce"].startswith("EU RfG")
+
+
+def _mv_bus(vm):
+    return pd.DataFrame([
+        {"period": 2030, "hour": 1, "case": "intact", "bus": "PCC", "vm_pu": 1.0},
+        {"period": 2030, "hour": 1, "case": "intact", "bus": "MV1", "vm_pu": vm},
+    ])
+
+
+def test_a_profile_campus_voltage_band_replaces_the_code_bands_inside_the_campus():
+    # 0.97 pu at 20 kV: inside the +/-10 % band of eu_rfg_dcc_ce ...
+    assert report(bus=_mv_bus(0.97)).loc["campus_voltage", "status_as_is"] == "pass"
+    # ... and 0.94 pu fails the generic profile's 0.95-1.05 design band, though it is inside 0.90-1.10
+    generic = load_grid_code("generic_assumed")
+    row = report(bus=_mv_bus(0.94), profile=generic).loc["campus_voltage"]
+    assert row["status_as_is"] == "fail" and row["value"] == 0.94 and row["limit"] == 0.95
+    assert row["source"] == "assumed" and "generic placeholder" in row["clause"]
+    assert "0.95-1.05" in row["detail"]
+    # 1.06 fails on the high side
+    row = report(bus=_mv_bus(1.06), profile=generic).loc["campus_voltage"]
+    assert row["status_as_is"] == "fail" and row["limit"] == 1.05
+    # the same 0.97 pu passes under it
+    assert report(bus=_mv_bus(0.97), profile=generic).loc["campus_voltage", "status_as_is"] == "pass"
+
+
+def test_the_pcc_voltage_still_uses_the_voltage_bands_when_campus_voltage_is_given():
+    generic = load_grid_code("generic_assumed")
+    bus = _mv_bus(1.0)
+    bus.loc[bus["bus"] == "PCC", "vm_pu"] = 0.92          # outside 0.95, inside the 0.90 PCC band
+    row = report(bus=bus, profile=generic).loc["pcc_voltage"]
+    assert row["status_as_is"] == "pass" and row["limit"] == 0.90
+
+
+def test_without_campus_voltage_the_code_bands_apply_as_before():
+    assert "campus_voltage" not in PROFILE
+    row = report(bus=_mv_bus(0.94)).loc["campus_voltage"]
+    assert row["status_as_is"] == "pass" and row["source"] == "assumed" and "design" in row["detail"]
+
+
+def test_the_campus_band_carries_its_own_tag_not_a_fixed_one():
+    profile = load_grid_code("generic_assumed")
+    profile["campus_voltage"]["source"] = "code"
+    assert report(bus=_mv_bus(0.94), profile=profile).loc["campus_voltage", "source"] == "code"

@@ -7,8 +7,10 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  commercialApi, SolverInFlightError, type BillingPayload, type ValueFlowsPayload,
+  commercialApi, NoCommercialConfigError, SolverInFlightError, type BillingPayload,
+  type ValueFlowsPayload,
 } from '../../api/commercial'
+import type { CommercialConfig } from '../../api/types'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { CompletenessChips, type CompletenessRow } from '../../components/CompletenessChips'
@@ -21,6 +23,7 @@ import ContractsEditor from './investment/ContractsEditor'
 import FinanceInputsEditor from './investment/FinanceInputsEditor'
 import InvestmentCaseView from './investment/InvestmentCaseView'
 import { blankTariff } from './investment/tariffModel'
+import SiteConnectionForm from './SiteConnectionForm'
 
 const SECTIONS = [
   { id: 'participants', label: 'Participants' },
@@ -39,7 +42,45 @@ export { fmtAmount }
 export function loadFailure(error: unknown): string {
   return error instanceof SolverInFlightError
     ? 'A solve is running; the result follows when it finishes.'
-    : 'It could not be loaded.'
+    : error instanceof NoCommercialConfigError
+      ? 'Set the site connection first.'
+      : 'It could not be loaded.'
+}
+
+/** The commercial root (IC U1 follow-up b): the form when it is missing (or a
+ *  result says the config is), else a summary line that opens it. */
+function SiteConnectionSection({ config, needed }: { config: CommercialConfig | null | undefined
+                                                     needed: boolean }) {
+  const [editing, setEditing] = useState(false)
+  const root = config?.poc_link
+    ? { poc_link: config.poc_link, export_link: config.export_link ?? null,
+        timezone: config.timezone ?? null }
+    : null
+  if (needed || !root) {
+    return (
+      <section className="space-y-2 border border-border rounded p-2" data-testid="ic-site-connection"
+               aria-labelledby="ic-site-connection-title">
+        <h3 id="ic-site-connection-title" className="text-[12px] font-semibold">Site connection</h3>
+        <p className="text-[11px] text-muted">
+          Set the site's connection to the grid first: the bill, the participants and the
+          investment case are all read at the point of connection.</p>
+        <SiteConnectionForm initial={root} />
+      </section>
+    )
+  }
+  return (
+    <div className="space-y-2" data-testid="ic-site-connection">
+      <p className="text-[11px] text-muted" data-testid="ic-site-connection-summary">
+        Site connection: imports through {root.poc_link}
+        {root.export_link ? `, exports through ${root.export_link}` : ', no export link'}
+        {root.timezone ? `, site time ${root.timezone}` : ', snapshots in site time'}.{' '}
+        <button type="button" className="underline" aria-expanded={editing}
+                onClick={() => setEditing(e => !e)}>Edit site connection</button>
+      </p>
+      {editing && <SiteConnectionForm initial={root} onSaved={() => setEditing(false)}
+                                      onCancel={() => setEditing(false)} />}
+    </div>
+  )
 }
 
 export function completeness(billing: BillingPayload | null | undefined,
@@ -141,6 +182,8 @@ export default function InvestmentTab() {
                              queryFn: () => commercialApi.getBilling() })
   const flows = useQuery({ queryKey: nk(project, 'results', 'value_flows'),
                            queryFn: () => commercialApi.getValueFlowsResult() })
+  const commercial = useQuery({ queryKey: nk(project, 'commercial', 'config'),
+                                queryFn: () => commercialApi.getCommercial() })
   const [section, setSection] = useState<SectionId>('participants')
   const [designing, setDesigning] = useState(false)
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
@@ -166,8 +209,16 @@ export default function InvestmentTab() {
           ? `The stored participants do not validate${flows.data.reason ? `: ${flows.data.reason}` : '.'}`
           : (flows.data.reason ?? 'No participants are set for this project.')
 
+  // A result that says there is no (valid) commercial config is not a dead end:
+  // the Site connection form is shown in its place.
+  const rootMissing = [billing.error, flows.error].some(e => e instanceof NoCommercialConfigError)
+    || (commercial.isSuccess && !commercial.data?.poc_link)
+
   return (
     <div className="space-y-3" data-testid="investment-tab">
+      {(commercial.isSuccess || rootMissing) && (
+        <SiteConnectionSection config={commercial.data} needed={rootMissing} />
+      )}
       <CompletenessChips rows={completeness(billing.data, flows.data,
                                             billing.isError ? billing.error : undefined)}
                          testId="ic-completeness"

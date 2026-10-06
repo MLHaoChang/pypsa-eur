@@ -62,7 +62,7 @@ probabilistic adequacy, N-1 redundancy, grid-strength gates and sector coupling 
 | 17 | **Series store.** Price curves, forecast-vs-actual pairs, meter history and market series live in a **Library series store** (org-scoped, versioned, persisted beside the project), not in the component-bound `_user_ts` store; `lp_bindings` materialises them into component `_t` attributes at solve time. | Review F4 |
 | 18 | **15-minute settlement requires weightings from frequency.** `set_snapshots` and profile templates derive `snapshot_weightings` from `freq` (0.25 h for `15min`) instead of defaulting to 1.0; hourly-hardcoded paths (`_annual_hourly_reference`, sample weeks, `HOURS_PER_YEAR` uses) are audited in P1. | Review F3 |
 | 19 | **Sensitivity scenarios** add `"sensitivity"` to `_SCENARIO_TYPES` (backend) and `SCEN_TYPES`/`SCEN_TYPE_LABEL`/`TAG_RE` (frontend); no DB migration (plain string column). | Review F6 |
-| 20 | **No external data curated in-tree.** Tariff databases, price forecasts and interconnection data arrive through import schemas (§11.4); the Library stores what the user brings plus the shipped packs. | Research §5.4 |
+| 20 | **No external data curated in-tree.** Tariff databases, price forecasts and interconnection data arrive through import schemas (§11.4); the Library stores what the user brings plus the shipped packs. **Amended 2026-10-05 (owner):** one exception — a versioned, sourced, hash-pinned **generic defaults pack** (`services/library/defaults_pack/`: technology costs, finance defaults, two illustrative tariffs, two synthetic load profiles; every row carries an `illustrative` flag, true where a figure is not cited from a source) ships in-tree and is always listed in the report; see the amendment below. | Research §5.4; owner 2026-10-05 |
 
 ---
 
@@ -603,3 +603,14 @@ above is unchanged; where it and these lines differ, these lines hold.
    `dscr_target` tranche is sized by its DSCR alone: `amount` / `gearing` are refused on it, and
    `max_gearing` (new) caps it. Every sizing is the debt **at COD**, IDC inside. `gearing_base` (new) is
    `capex` or `total_uses`. `rate` may be a list with one entry per tenor year. Fees are shares ≤ 1.
+
+**2026-10-05 (owner decision; `docs/superpowers/plans/2026-10-05-ic-u1-engine-landing.md` D2–D4).**
+Decision 20 is amended for one pack only: the **generic defaults pack**, which the guided study (one
+engine, two faces) seeds its ledger from. It holds technology costs (technology-data v0.14.0, in the asset
+schema's part vocabulary), finance defaults, two illustrative tariffs and two synthetic load profiles. It is
+versioned in-tree (a new version is a new file set; old ones stay), hash-pinned like the tax packs, and
+every row carries its source, year and an `illustrative` flag (true where the figure is not cited from a
+source: the seed tariffs, the synthetic profiles). A pack tariff is copied inline into a
+project's commercial config with the pack's id, version and hash, never resolved by a Library ref. The
+report's assumptions appendix lists every pack row a case used. Tariffs and market data the user brings
+still go through the import schemas (§11.4).

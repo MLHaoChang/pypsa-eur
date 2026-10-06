@@ -178,6 +178,17 @@ ROOTED = (
     # routers/projects.py; the P19 EH templates are loaded from it BY FILE
     # PATH (merge review N8) — a basename match elsewhere is not enough.
     "project_templates/eh_templates.py",
+    # The chat harness's Markdown (issue 10): `harness.prompts._DIR` is the
+    # parent of `harness/prompts/__init__.py`, i.e. `harness/prompts/` under
+    # the root; `chat_service` reads these at import, so the frozen app does
+    # not start without them. One probe per folder.
+    "harness/prompts/base_identity.md",
+    "harness/workflows/hub-design.md",
+    "harness/skills/grill/SKILL.md",
+    # The generic defaults pack (IC U1 a): `defaults_pack.loader.VERSIONS_DIR` =
+    # parents[0] of services/library/defaults_pack/loader.py / "versions"; one
+    # manifest per vendored version.
+    "services/library/defaults_pack/versions/2026-10-05/manifest.json",
 )
 
 

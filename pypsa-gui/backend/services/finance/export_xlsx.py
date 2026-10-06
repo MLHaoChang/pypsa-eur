@@ -107,6 +107,15 @@ def _counterfactual_summary(block: Any) -> str | None:
     return (f"{block.get('basis')}; {block.get('n_lines')} lines from {sources}; {state}")
 
 
+def _currency_year(payload: dict) -> Any:
+    """A stated year; "not stated" when the inputs leave it None; None
+    (`not_established`) when the report carries no basis (a refusal)."""
+    if "currency_year" not in payload:
+        return None
+    v = payload.get("currency_year")
+    return "not stated" if v is None else v
+
+
 def build_workbook(report: InvestmentCaseReport, *, project: str | None = None) -> bytes:
     from openpyxl import Workbook
 
@@ -127,6 +136,10 @@ def build_workbook(report: InvestmentCaseReport, *, project: str | None = None) 
         ["WACC vs discount rate consistent", report.gates.wacc_vs_discount_rate_consistent],
         ["Value-flow conservation", report.gates.conservation_ok],
         ["Counterfactual", _counterfactual_summary(project_payload.get("counterfactual"))],
+        # The price basis (GS Q6): a currency year not stated says so, never a guess.
+        ["Price basis", project_payload.get("price_basis")],
+        ["Currency year", _currency_year(project_payload)],
+        ["Basis", project_payload.get("basis_statement")],
     ]
     for jur, h in sorted(report.packs.items()):
         rows.append([f"Pack {jur}", h])

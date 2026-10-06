@@ -253,3 +253,32 @@ def test_rows_reconcile_before_and_after_a_save_and_load(case, client, install_n
     assert cb2["total"] == pytest.approx(cb["total"], rel=1e-9)
     assert dec2["gap_pct"] is not None, (case, dec2)
     assert abs(dec2["gap_pct"]) < 1e-6, (case, dec2)
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("case", ["demand", "tariff_capacity_peak"])
+def test_the_bridge_residual_closes_with_commercial_opex_terms(case, reset_backend):
+    """GS Q12b (IC U1 follow-up): `objective_decomposition._bridge` closes with
+    the "Commercial" component for commercial OPEX terms — energy, a monthly
+    demand charge, a measured-peak capacity item: `residual_gap_eur` ≈ 0 (the
+    research probe read −3.1e-7 €). Capex-like terms (a firm-connection fee, a
+    contracted capacity on an extendable PoC) are not in the bridge's LP basis
+    and land in the residual — a known gap, not pinned here."""
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig, run_simulation
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.results.objective_decomposition import compute_objective_decomposition
+
+    build, extra = CASES[case]
+    n = build()
+    PyPSAService.set_network(n)
+    cfg = SolverConfig(commercial={"poc_link": "import", **extra})
+    status, condition = run_simulation(cfg, n, PyPSAService.get_lock(), threading.Event(),
+                                       queue.SimpleQueue(), state_update=lambda **kw: None)
+    assert status in ("ok", "optimal"), (status, condition)
+    cb = compute_cost_breakdown(n, cfg)
+    dec = compute_objective_decomposition(n, cb, cfg)
+    assert abs(dec["gap_pct"]) < 1e-6, dec
+    assert dec["residual_gap_eur"] is not None, dec
+    assert abs(dec["residual_gap_eur"]) <= max(0.01, 1e-9 * abs(dec["lp_total"])), dec
+    assert cb["commercial"]["demand_charge" if case == "demand" else "tariff_capacity"] > 0

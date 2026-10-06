@@ -334,3 +334,287 @@ lists the profiles a study can use.
 - Backend routes: draft from the project; save and edit the campus file;
   prepare, rank and size.
 - A browser run.
+
+## C6 as built (2026-10-05)
+
+**Backend.** `services/campus_electrical_service.py` keeps a hub project's
+study in `<project dir>/campus_electrical/`: the editable
+`campus_input.yaml`, the draft notes, the settings and the engine's run.
+It offers:
+- `get_state`, including a `stale` flag from the engine manifest's hashes;
+- `draft`, which will not overwrite the user's edits unless asked;
+- `save_campus`, which validates by building the campus;
+- `run`, which prepares, ranks and sizes.
+
+It refuses with these codes:
+
+| case | code |
+|---|---|
+| a project of another kind | 409 |
+| no saved network, an unsolved network, or bad settings | 422 |
+| a campus file over 1 MB | 413 |
+| a build without the engine | 503 |
+
+The gridspine imports are guarded, like `gridspine_service`'s.
+`routers/campus_electrical.py` serves `/api/campus-electrical` with
+GET, `/draft`, `PUT /campus` and `/run`. Drafting and running go to the
+threadpool, and writes check the edit lock.
+
+**Frontend.** `CampusElectricalPanel` covers:
+- the campus file: draft from project, edit, save, draft again (with a
+  confirm);
+- the settings: hours per criterion, connection-agreement power factor,
+  grid code, margin, N-1;
+- the results: compliance as is and with measures, transformers,
+  compensation, short circuit, critical hours, and a stale warning.
+
+It states that the study is steady-state and not a certificate.
+
+**Copilot.** Three tools:
+- `campus_get_study` (read);
+- `campus_draft_campus` (write);
+- `campus_run_study` (write).
+
+**Owner request: a Studies group.** Planning → dynamics, Campus electrical
+and Reports moved out of Simulation into their own STUDIES sidebar section,
+with its own icon in the collapsed strip.
+
+**Browser run** (Data Center template, solved with HiGHS):
+- open the project, then Studies → Campus electrical;
+- draft from the project, and run at power factor 0.95, which takes 2.9 s;
+- every table renders, and match the engine's numbers;
+- a campus with sk_min above sk_max is refused inline, naming the field.
+
+One cosmetic fix came from the run: a cut name no longer ends in `_`.
+
+## Part two: investing in the electrical assets (owner, 2026-10-05)
+
+Written before the code. Part one *recommends* a transformer size and a
+compensation rating. Part two makes the electrical assets an **investment
+decision**, with the same economics the capacity expansion uses:
+
+- capex, fixed opex and lifetime, annualised;
+- chosen from a library;
+- re-checked by AC load flow at every critical hour, so that voltages, flows
+  and the grid code all hold with the chosen assets in place.
+
+### Owner decisions (2026-10-05, second round)
+
+| question | decision |
+|---|---|
+| How the assets are chosen | **Both.** A least-cost pick, AC-checked, comes first. A MILP follows, run in a loop with adaptive convergence to absorb the linearisation error. |
+| Whether electrical cost feeds back into the hub's capacity expansion | **Report alongside**, as electrical capex, opex and annualised cost per period, next to the hub's system cost and as a total. The PyPSA project is not changed. |
+| How a grid code is given | **Upload the document.** The copilot drafts a profile, the user reviews and saves it, and nothing is used before then. Until a real code is supplied, a **generic `assumed` profile** is used. |
+| Where the asset library lives | A **shipped default**, plus a **per-project copy** editable in the panel. |
+| Agents | Coordination by the session model; implementation is delegated to subagents, with the model chosen per task. |
+
+### How a grid code reaches the study (recommendation, accepted)
+
+The easiest route is to **upload the PDF**. The copilot drafts a profile from it:
+
+1. **The upload.** It goes to the project (`campus_electrical/grid_codes/`), never to the repository. Licensed texts such as VDE stay with their licensee.
+2. **The draft.** The copilot reads the document and drafts a profile in the same schema as `grid_codes.yaml`:
+   - each limit carries the clause, the page and a verbatim quote;
+   - each value is tagged `extracted`, a new tag.
+3. **Validation.** The draft passes the same loader as a shipped profile, so an impossible band or a missing clause is refused with the field named.
+4. **Review.** The user reviews it in a form, side by side with the quote, and confirms each limit; a confirmed limit becomes `code`. A limit left unconfirmed stays `extracted` and is shown as such on every report row.
+5. **Without a key.** The extraction needs `ANTHROPIC_API_KEY` (or `PROBE_ANTHROPIC_KEY` mapped onto it at launch) in the environment settings. A session sees a new environment variable only when it starts. Without one, the form alone works: the user types the limits in.
+
+### C7: the asset library and the generic grid code
+
+- `gridspine/templates/data/campus_assets.yaml` is the shipped default. Every value is `{value, source}`, as in a campus file. The catalogue:
+
+  | kind | entries |
+  |---|---|
+  | transformers | hv/lv kV, MVA, vk %, vkr %, no-load losses kW, i0 %, in R10 sizes at 132/33, 110/20, 33/11, 20/0.4 kV |
+  | cables | kV, cross-section, R, X and C per km, rated kA; capex per km |
+  | capacitor banks | kV, Mvar, number of switched steps |
+  | shunt reactors | kV, Mvar |
+  | STATCOMs | kV, ±Mvar, losses % |
+  | switchgear | kV, rated Ik'' and peak kA; capex per bay |
+
+  Each entry carries `capex_eur`, `opex_frac` (fixed opex per year as a fraction of capex) and `lifetime_a`. The library has one `discount_rate`, plus its currency and price year.
+- **Costs.** Every cost is tagged `assumed`, with a note saying it is an order of magnitude to be replaced by quotes. No price is presented as sourced unless it was checked against a text.
+- `gridspine/templates/campus_assets.py` holds:
+  - `load_asset_library(path=None)`, which validates units, tags, positive ratings and unique ids, and refuses unknown fields;
+  - `annuity(r, n)`, the same formula as pypsa-gui's `solver_service._annuity`, which a test checks;
+  - `annualised_cost(entry, library)`.
+- **`generic_assumed` profile** in `grid_codes.yaml`, every limit tagged `assumed`:
+  - PCC voltage 0.90–1.10 pu at every kV;
+  - PCC reactive band ±tan(acos 0.95) = 0.329 × P_ref;
+  - RVC 3 %;
+  - an optional `campus_voltage` band of 0.95–1.05 pu.
+
+  A profile may now carry `campus_voltage`. Without it, the existing behaviour holds: the code bands are used as an `assumed` design limit.
+
+### C8: least-cost selection, AC-checked
+
+For each **need** the study finds, the candidates come from the library, at the right voltages, and are ranked by annualised cost (capex annuity + opex):
+
+| need | candidates |
+|---|---|
+| a transformer group | n units × size; with N-1, the survivors must carry the group |
+| the reactive gap, capacitive and inductive | capacitor banks (steps), shunt reactors, STATCOMs, and combinations that cover both directions |
+| an overloaded cable | the next cross-section up, or a parallel run (a new `cable_loading` check) |
+| an under-rated bus | a switchgear bay rating, × the number of bays at that bus |
+
+**The loop:**
+1. Take the cheapest combination.
+2. Apply it to the campus net.
+3. **Re-solve AC at every critical hour and case.**
+4. Escalate a need to its next-cheapest candidate while any check fails.
+
+This closes part one's "voltages not re-checked": the *with measures* column is now a real AC result.
+
+**Timing.** An asset is invested in the first period that needs it, and carried to the end of its life.
+
+**Outputs:**
+- `campus_investment.csv`: asset, need, period, units, capex, opex, annualised cost;
+- `campus_cost.csv`: the annualised electrical cost per period;
+- the compliance table, re-solved with the chosen assets.
+
+### C8 as built (2026-10-05)
+
+**The campus file** (`ingest/campus.py`).
+- An optional `compensation` list: `name`, `bus`, `kind` (`capacitor_bank`, `shunt_reactor`, `statcom`), a tagged `q_mvar`, `steps` for a bank, optional `library_id` and `pypsa_name`.
+  - A capacitor bank is a pandapower `shunt` with a **negative** `q_mvar` per step (pandapower's load convention, checked by solving), `max_step = steps`, starting at step 0.
+  - A reactor is a one-step positive shunt, also starting off.
+  - A STATCOM is a controllable `sgen` at 0 MW, ±`q_mvar`; for IEC 60909 a current source of 1.2× its rating (the drafted inverter figure, ledgered). Shunts feed no fault current.
+- `existing: true` and `library_id` on a transformer or cable; `parallel` runs on a cable.
+- A file without these builds as before.
+
+**The dispatch** (`static/campus_reactive.py`). Inverters, then STATCOMs (continuous), then the fewest bank or reactor steps that bring the PCC into the band (the closest count when none does); the continuous sources then back off onto the band edge, never past zero. What is still missing is part one's residual, or, with `residual=False`, nothing: the PCC is where the real equipment puts it. `solve_cases(setpoints=...)` holds the dispatch in every case, N-1 included; every case reports the cable loading.
+
+**The selector** (`static/campus_invest.py`, `select_assets`). The choices the plan left open:
+- **Needs.** Every transformer group; the reactive gap (with the sizing margin); every cable over 100 %; every bus over its switchgear rating **and every unrated bus with library switchgear at its voltage**. A cable or bus first failing in a re-check becomes a need then.
+- **Candidates.** Transformers: n = 1..3 units of one size; intact share and (n ≥ 2, N-1 on) the survivors' share within the rating with the margin; a redundant group stays n ≥ 2; existing adequate units are a zero-cost "keep". Reactive: at most one entry of each kind, 1..3 units each, in the five combinations of the brief (under 200 with the shipped library). Cables: 1..3 runs of one section carrying the worst current with the margin. Switchgear: every rating that passes `judge`, times the **bays**: each transformer unit and cable run at the bus, each unit and compensation entry there, and the grid at the PCC.
+- **Check → need.** Transformer loading over 100 % **or the sizing rule on the re-solved flow** → that group; cable loading → that cable; PCC reactive → the reactive need, to the next candidate that adds Mvar in the short direction; a voltage → the reactive need, but if that does not shrink the excursion the need is unresolved, naming the tap change (out of scope); switchgear → that bus. A re-solve that does not converge stops the loop as an unresolved "load flow".
+- **Stop.** All checks pass; a need runs out (the state with its last candidate is re-checked once more, so the report is an AC result); non-convergence; 25 iterations.
+- **Timing.** Transformers from the first period; a compensation item from the first period the final re-check dispatches it; a cable from the first period it is overloaded; switchgear from the first period its rating fails, or the first period if it had none. Costed while `invest <= period < invest + lifetime`; no replacement. Unresolved needs are priced but not summed.
+- Fault levels in the re-check energise every STATCOM in every period (conservative).
+- **Who buys the PCC switchgear** (owner decision, 2026-10-05): a study setting, `pcc_switchgear`, costed to the campus by default. Set to the grid operator, the PCC bus is never a need, a failing PCC rating is reported and not bought, and the choice is written to `campus_invest_scope.json`.
+
+**The driver.** `invest_campus(run_dir, library=None, ...)` needs a prepared and ranked run, recomputes part one with the same profile and power factor, and writes `campus_investment.csv`, `campus_cost.csv`, `campus_invested.yaml`, `campus_compliance_invested.csv`, `campus_invest_history.csv` and (added) `campus_invest_dispatch.csv`. `size_campus` is unchanged.
+
+**On the solved Data Center Energy Hub template** (one period, pf 0.95 agreement, shipped library): 1 × 63 MVA 132/33 kV, 3 × 25 MVA 33/11 kV. With N-1 on, a multi-unit group must survive one unit out: one survivor would carry 38.9 MVA × 1.2 = 46.7 MVA, which a 40 MVA unit cannot. The library (extended to 31.5 and 40 MVA at 33/11 kV) has no single 33/11 kV unit that large, so three units of 25 MVA are the cheapest that pass, switchgear 31.5 kA at 132 kV (2 bays), 25 kA at 33 kV (11 bays) and 11 kV (5 bays), no compensation: €6.89 M capex, €610 k a year. Every check with measures passes, re-solved; no escalation was needed.
+
+**Mutations.** 39 by hand across the campus file, the dispatch and the selector. 26 were caught at once and one, mistyped in the first run, when re-run; tests were added for the 10 survivors (the trim back onto the edge, a saturated STATCOM, the intact margin, an existing pair short of the margin, the grid's bay, the sizing-rule escalation, the directional reactive escalation, the dispatch held in the re-solve, the reactive margin, the STATCOM's fault current), and all are caught now. Two are equivalent: `<` against `<=` on two equal non-zero step distances (an exact float tie), and the early break once the PCC is in the band (the scan cannot then find a better count).
+
+### C9: panel
+
+- **The library editor.** It edits the per-project copy, starting from the shipped default, with a reset.
+- **The investment table and cost summary.** The electrical cost per period is shown next to the hub's system cost from the solved project, and as a total.
+- **Chat tools**, which read and edit the library and read the investment.
+- **The bundle** carries the library used and the investment table.
+
+### C10: grid-code upload and extraction
+
+- **The upload route.** It takes a PDF only, with a size budget, and stores the file in the project.
+- **The extraction.** A service function calls the Anthropic API with the document and a strict output schema; the copilot tool calls the same function.
+- **The draft.** It is validated by the profile loader and saved as a *draft* profile.
+- **The review form.** Limits are confirmed one by one, with the quote shown beside each.
+- **Profiles listed.** Project profiles appear next to the shipped ones in the grid-code picker.
+- **Tests.** They mock the API. A live run happens in a session that has the key.
+
+### C11: MILP with successive linearisation
+
+- **Variables:**
+  - binaries for each discrete option (transformer n × size, STATCOM size, cable size, switchgear rating);
+  - integers for capacitor and reactor steps;
+  - continuous inverter Q per hour and case, inside a polygon of its capability circle.
+- **Linearisation**, per hour and case, around the current AC point:
+  - for continuous Q: sensitivities of bus voltage, PCC Q and branch loading, from the load-flow Jacobian;
+  - for each discrete option: its effect, by finite difference. One AC solve per option and hour is affordable, because options are few.
+- **Objective:** minimum annualised cost, built in linopy and solved with HiGHS (both already in the environment).
+- **The loop**, with an adaptive convergence rate:
+  1. Solve the MILP.
+  2. Apply the result, and re-solve AC at every hour and case.
+  3. Measure, per constraint, the **linearisation error**: AC minus linear.
+  4. **Tighten each limit** by a back-off β × that error. β grows while a violation persists and relaxes when there is ample slack.
+  5. **Bound the change in continuous Q** by a trust region Δ:
+     - Δ doubles when the predicted and actual changes agree (ratio ρ near 1);
+     - Δ halves when they disagree.
+  6. Re-linearise, and go back to 1.
+- **When it stops.** It stops when the AC check passes and the cost changes by less than a tolerance, or after a maximum number of iterations.
+- **The least-cost result (C8)** is the warm start and the upper bound.
+- **What is reported:** the iteration history (cost, worst violation, worst linearisation error, Δ, β), and MILP against least-cost.
+
+### C11 as built (2026-10-05, margin rule 2026-10-06)
+
+**Where.** `gridspine/static/campus_milp.py` (`select_assets_milp`), and `invest_campus(..., method="least_cost" | "milp")`, default `least_cost`. The MILP path writes C8's investment files from its own result, plus `campus_milp_history.csv` and `campus_milp_comparison.csv`. C8 gained `open_candidates`, `study_from`, `with_measures`, an `inspect` hook on `solve_cases`, and returns its final `state`, the warm start; its behaviour is unchanged.
+
+**The choices the plan left open:**
+- **Candidates.** C8's generators with a requirement of zero: "none" and every combination for the reactive need, every transformer size in 1..3 units (a redundant group stays redundant), every cable section in 1..3 runs, every switchgear rating. When C8's point is AC-feasible, a candidate dearer on its own than C8's whole set is pruned. Rated buses and cables that are not needs are held, not bought.
+- **Dispatch.** Per hour, held in every case, as in C8's re-check. Inverters as C8's dispatch would use them; capability an **inscribed** octagon with vertices on the axes (a hard limit the AC check cannot repair; at most 7.6 % of S lost, none at P = 0). C8's inverter Q is clipped into it for the warm start. STATCOM Q per hour within the chosen units; integer steps per bank and reactor candidate and hour.
+- **Constraints**, per hour and case class (intact; the worst outage of each group): voltages against the profile's bands, the PCC band (intact), transformer loading and the sizing rule with the margin (ratings inside `g`, so a candidate's rating is exact), cable current, Ik'' and ip per period. Each scaled to 1 % of its limit (0.01 pu for voltages), with a slack at a penalty ten times a bound on any set's cost.
+- **Sensitivities: the Jacobian**, rebuilt at the converged point from pandapower's internal `Ybus` (`dSbus_dV`; the stored `J` is from the last Newton iterate). One sparse solve per hour and case gives every quantity per Mvar at each control bus; checked against a finite-difference AC re-solve to 1e-4. A bank step enters as `q x V^2`.
+- **Discrete candidates: finite differences**, one AC solve per transformer or cable candidate, hour and case at the current dispatch, with IEC 60909 per period; compensation changes no load flow at zero dispatch, so it enters through its dispatch (and, with a STATCOM, its fault level, cached). Switchgear ratings enter exactly; its cost is per bay, the bays a linear function of the other choices, with exact products of binaries.
+- **The loop.** beta x1.5 when violated in AC (cap 8), x0.7 with more than 5 scale units of slack (floor 0.25). rho > 0.75 doubles Delta (cap 4 x Q_ref), rho < 0.25 halves it and rejects, keeping the point and its linearisation. Delta starts at 2 x Q_ref (a full swing), floor Delta_0 / 64. A tie-break of 1e-3 per Mvar moved keeps the dispatch put. Stop: an accepted AC-feasible point whose cost moved less than 1 a year; the MILP returning the current point; Delta at its floor; 20 iterations. A trial whose campus does not converge gets a no-good cut.
+- **A deviation, flagged.** The trust region binds only while every need keeps its current candidate. Literally applied, a rejected step that changed a candidate halves Delta around the old point, and the cheaper candidate can become unreachable. That was shown on a case the margin rule below has since closed; on every case tried after it, the literal and the relaxed trust region give the same result and count, so this is now a precaution without a demonstrating test (its mutation survives). **Owner decision (2026-10-06): C11 confirmed as built, this relaxed trust region included.** The surviving mutation is recorded here as a known, accepted gap rather than dead code.
+- **The result** is the best AC-feasible point seen; C8's own re-check (`_failures`) is the judge. If none is cheaper than C8 by more than 1 a year, C8's result is returned, flagged.
+- **The sizing margin is judged on C8's dispatch** (owner, 2026-10-06: no, keep the 20 % margin; it may not be met with dispatched inverter Q). Every point the loop solves is also re-solved with the dispatch C8's re-check gives the same assets (`reactive_need(residual=False)`: inverters, STATCOMs, steps, only as far as the PCC band needs). The margin constraint reads those flows, with no coefficient on the MILP's Q, and the AC judge sizes the transformers from them (`size_transformers`; `_failures` itself sizes from whatever flows it is given, so before this the MILP's own dispatch was used). The MILP's extra Q still serves the 100 % loading, the PCC band and the voltages. A candidate's effect on the margin is a finite difference with that dispatch re-run (a compensation candidate's only at hours where C8's dispatch reaches the compensation). The sizing the margin was judged by is returned (`sizing`), and the linearisation error per trial and constraint (`lin_errors`).
+
+**What it finds.**
+- **The joint optimum** (test campus, one dark hour, 25 MW at pf 0.85): C8 takes the cheapest transformer, 40 MVA at 14 %, whose reactive loss puts the PCC out of its band, then a 4 Mvar bank: 95.6 k a year. The MILP takes the 50 MVA, 10 % unit alone: 75.1 k, the brute-force minimum over all 24 combinations, solved independently in the test. Two iterations. It does not lean on Q for the margin (dark hour; C8's dispatch with T_B alone needs nothing).
+- **No margin from inverter Q** (38 MW, pf 0.85): a 50 MVA unit holds the margin only with about 15 Mvar from the battery; C8's dispatch gives none, so the MILP keeps C8's 63 MVA (flagged fallback, one iteration, the 50 MVA never proposed). Before the owner's rule it bought the 50 MVA.
+- **Adaptive against fixed rate.** On an outage relieved by the battery's Q (two 40 MVA units, N-1 sizing off, 38 MW: the margin holds on the intact share with C8's dispatch, the survivor needs Q to stay within 100 %), both rates reach the pair (81.9 k against C8's 88.8 k) in **4 iterations each**; beta grows on the survivor's loading. In a scan of 33 more cases (outage cases at 30-44 MW, voltage cases on 300-3000 MVA grids with 2-10 km cables; many end at C8's choice in one or two iterations) the counts were equal in 31, and adaptation took one iteration more in 2. **With the margin loophole closed, no case was found where adaptation saves an iteration.** The earlier 5 against 9 depended on the margin being met with the battery's Q.
+- **The Data Center hub** (one period, 14 hours, pf 0.95 agreement, shipped library): **1 x 63 MVA 132/33 kV, as C8**, everything else as C8: 610.3 k a year, flagged fallback, 1 iteration, 500 s (the reference dispatch is re-run for every candidate). Before the owner's rule the MILP took 50 MVA (574.3 k) on 1.8-3.8 Mvar of inverter Q.
+
+**Mutations.** 30 by hand. The first 28 (beta and Delta directions, caps and the rho thresholds, the best-point choice, three sensitivity signs, the polygon, the one-per-need constraint, the fallback, the back-off sign, the rejected point, the free switch, the step sign, the bay products, the PCC scope, the margin, the feasibility judge): 24 caught at once, tests added for 4. After the margin rule, two more: **the margin using dispatched Q** (both the constraint and the judge on the MILP's flows, with Q coefficients: caught) and the judge alone on the MILP's flows (caught once the sizing used is returned). Re-run on the new code, the tests written for the closed loophole no longer caught rho inverted, the margin dropped and the polygon; rho now has a unit test, the 38 MW test asserts the 50 MVA is never proposed, and the polygon test moved to the outage case. The free switch survives (above).
+
+### Order, PRs and agents
+
+| PR | increments | implementer |
+|---|---|---|
+| 1 | C7 + C8 (engine) | C7: Sonnet (patterned data and loader); C8: Opus (engineering judgement) |
+| 2 | C9 (panel, routes, chat tools) | Sonnet; Haiku for mechanical updates (snapshots, route inventory, packaging list) |
+| 3 | C10 (upload and extraction) | Opus for the schema, prompt and upload safety; Sonnet for the form |
+| 4 | C11 (MILP loop) | Opus |
+
+The coordinator writes each brief from this plan and reviews every diff. It also runs the gates and mutation checks before anything is pushed.
+
+## Part three: joining the one investment engine (plan note, 2026-10-06, no code yet)
+
+The coordinating session passed on a request, which it says the owner approved on 2026-10-06: there should be **one investment implementation** in pypsa-gui. The references are:
+- `docs/superpowers/plans/2026-10-05-one-investment-engine-two-faces.md`;
+- ADR-0004;
+- "Investment language" in `pypsa-gui/CONTEXT.md`.
+
+The campus asset library (C7), the least-cost pick (C8) and the MILP (C11) join it as a third participant. Nothing here changes the open PRs (#74, #79, #83, #84).
+
+**No code for D1 or D2 until** the engine's PRs #81 and #85 and the asset-schema PR #78 have merged. Words follow CONTEXT.md: *Overnight cost* (not capex), *Generic default* and *illustrative*.
+
+### D1: one source for equipment cost data
+
+- **gridspine stays free of pypsa-gui imports.** `campus_assets.yaml` remains the engine's input format and the test fixture library.
+- **On the pypsa-gui side**, `campus_electrical_service` seeds a project's campus library from the **generic defaults pack** (`services/library/defaults_pack`, PR #85), not from the shipped YAML. The fields map one to one:
+
+  | campus library | defaults pack |
+  |---|---|
+  | `capex_eur` | Overnight cost, lump per unit |
+  | `capex_eur_per_km` | Overnight cost, per km |
+  | switchgear `capex_eur` | Overnight cost, per bay |
+  | `opex_frac` | FOM share |
+  | `lifetime_a` | lifetime |
+  | `measured` / `datasheet` / `assumed` | provenance; `assumed` = illustrative |
+
+- **The rows themselves** (transformers, cables, capacitor banks, shunt reactors, STATCOMs, switchgear) are added to the pack. The engine session owns the pack, so the rows are agreed with it and it adds them, or approves a PR that does.
+- **The discount rate and price year** come from the project (its solver config or FinanceInputs `currency_year`), not from a library-level 0.07. The engine API is unchanged: `select_assets` already receives the library as data, and the service writes the project's rate into the library it hands over. The library's own `discount_rate` remains as a stand-alone default for gridspine-only use.
+- **Ratings and impedances stay in the campus library.** They are electrical data, not cost, and the pack has no field for them.
+
+### D2: the picks feed the investment case
+
+- **What is produced.** A solved campus study produces **extra owner assets**. Each item chosen by C8 (or C11) becomes one owner asset with its upfront parts, in the asset-schema `UpfrontPart` shape:
+  - name;
+  - Overnight cost × units (× km for a cable, × bays for switchgear);
+  - lifetime;
+  - FOM share.
+
+  Each asset also carries its investment period, its need (for example "transformer GRID_IMPORT") and its provenance. Existing (sunk) items are left out, and unresolved needs are never emitted.
+- **Who does what.** The engine session adds the input hook: a list of extra owner assets read by `results/finance_case.build_finance_case`. This side only produces the list, from the run directory (`campus_investment.csv` with `campus_invest_scope.json`), through one function in `campus_electrical_service`. **Do not edit `services/finance` or `results/finance_case.py`.** The shape is agreed with the engine session before any code.
+- **Consistent with the owner's decision of 2026-10-05.** Electrical cost is still not fed back into the capacity expansion. The PyPSA project is untouched; the equipment only joins the cash flows, NPV and report, next to the batteries and PV.
+
+### File ownership (one-engine plan §5)
+
+- **Ours:** `gridspine/*` and `campus_electrical_*`.
+- **Shared hot files:** `App.tsx`, `layout/*`, `uiStore.ts`, `chat_tools*.py`, `main.py`, `pypsa-gui.spec`, `tool-error-kinds.json`. Additive edits only, and merge master before each PR.

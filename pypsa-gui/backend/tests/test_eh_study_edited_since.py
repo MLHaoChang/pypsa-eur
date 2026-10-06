@@ -132,9 +132,10 @@ def _chat(client, _auth_db, name, args):
 
 def test_chat_edit_tools_bump_and_execution_and_read_tools_do_not(
         client, install_network, monkeypatch, _auth_db):
-    from services import chat_service
+    from harness import confirm as harness_confirm
 
-    monkeypatch.setattr(chat_service, "AUTO_APPROVE_TIERS",
+    # The tunable lives in `harness.confirm` since the chat harness (issue 08).
+    monkeypatch.setattr(harness_confirm, "AUTO_APPROVE_TIERS",
                         frozenset({"destructive", "execution",
                                    "execution_long_running"}))
     fake_done(monkeypatch)
@@ -172,7 +173,8 @@ def test_a_chat_edit_tool_that_raises_or_times_out_still_bumps(
         client, install_network, monkeypatch, _auth_db):
     import threading
 
-    from services import chat_service, chat_tools
+    from harness import budget as harness_budget
+    from services import chat_tools
 
     hub_project(client, install_network, "chat-raise")
     r0 = _rev(client)
@@ -193,7 +195,7 @@ def test_a_chat_edit_tool_that_raises_or_times_out_still_bumps(
         return {}
 
     monkeypatch.setitem(chat_tools.DISPATCHERS, "update_component", hang)
-    monkeypatch.setattr(chat_service, "PER_TOOL_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(harness_budget, "PER_TOOL_TIMEOUT_SECONDS", 0.2)
     try:
         with _as_session(client, _auth_db):
             frames, _ = _dispatch("update_component", {

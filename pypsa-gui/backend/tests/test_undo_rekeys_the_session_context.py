@@ -101,11 +101,12 @@ def test_an_http_undo_is_read_by_the_next_request(
 def test_a_chat_undo_is_read_by_the_next_request(
     client, api_project, registry_key_for, session_ctx, _auth_db, monkeypatch
 ):
-    from services import chat_service
+    from harness import confirm as harness_confirm
     from tests.test_chat_edits_are_captured import _dispatch
 
-    # `undo_last` is destructive: approve it without a human round-trip.
-    monkeypatch.setattr(chat_service, "AUTO_APPROVE_TIERS", frozenset({"destructive"}))
+    # `undo_last` is destructive: approve it without a human round-trip. The
+    # tunable lives in `harness.confirm` since the chat harness (issue 08).
+    monkeypatch.setattr(harness_confirm, "AUTO_APPROVE_TIERS", frozenset({"destructive"}))
 
     name = api_project("chat-undo-probe")
     key = registry_key_for(name)

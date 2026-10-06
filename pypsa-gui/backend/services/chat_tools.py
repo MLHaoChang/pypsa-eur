@@ -1711,6 +1711,88 @@ def attach_tariff(name: str, version: int | None = None, replace_inline: bool = 
             "replaced": replaced}
 
 
+# ── Site connection (IC U1 follow-up, item b) ──────────────────────────────
+# The commercial root: the meter Links and the site clock. Written through the
+# solver-config route (which binds the whole config); refusals as literals for
+# the manifest guard.
+_SITE_CONNECTION_ERROR_KINDS = (
+    {"error_kind": "site_connection_link_missing"},
+    {"error_kind": "site_connection_wrong_direction"},
+    {"error_kind": "site_connection_invalid"},
+)
+
+
+class _Unset:
+    """An omitted argument (distinct from an explicit null, which clears)."""
+
+    def __repr__(self) -> str:
+        return "<unset>"
+
+
+_UNSET = _Unset()
+
+
+def set_site_connection(poc_link: str, export_link: str | None | _Unset = _UNSET,
+                        timezone: str | None | _Unset = _UNSET) -> dict:
+    """Set the commercial root (`poc_link`, `export_link`, `timezone`) through
+    the solver-config route, keeping every other key of a stored commercial
+    config (the route keeps the value flows itself). An OMITTED `export_link`
+    or `timezone` keeps the stored value; an explicit null clears it. The
+    Links are checked first (`binding.check_site_connection`): they exist, are
+    one-way and point grid → site (PoC) and site → grid (export)."""
+    from pydantic import ValidationError
+
+    from models.schemas import SolverConfigSchema
+    from routers.simulation import get_solver_config as _cfg, update_solver_config as _put
+    from services.commercial import binding
+
+    with _acting():   # identity before the network is read
+        pass
+    stored = (_cfg() or {}).get("commercial")
+    created = not (isinstance(stored, dict) and stored.get("poc_link"))
+    commercial = dict(stored) if isinstance(stored, dict) else {}
+    commercial.pop("value_flows", None)   # owned by its own route (plan C7)
+    commercial["poc_link"] = poc_link
+    if not isinstance(export_link, _Unset):
+        commercial["export_link"] = export_link
+    if not isinstance(timezone, _Unset):
+        commercial["timezone"] = timezone
+    try:
+        binding.check_site_connection(PyPSAService.get_network(), poc_link,
+                                      commercial.get("export_link"),
+                                      group_members=commercial.get("group_members"))
+        body = SolverConfigSchema(commercial=commercial)
+    except binding.BindingRefusal as exc:
+        raise HTTPException(status_code=exc.status, detail={
+            "error_kind": exc.code, "message": exc.message[:500]}) from exc
+    except (ValidationError, ValueError) as exc:
+        errors = exc.errors() if isinstance(exc, ValidationError) else []
+        message = str(errors[0].get("msg")) if errors else str(exc)
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "site_connection_invalid", "message": message[:300]}) from exc
+    try:
+        out = _library_call(_put, body)
+    except HTTPException as exc:
+        d = exc.detail if isinstance(exc.detail, dict) else {}
+        if "error_kind" in d or "code" not in d:
+            raise
+        # A refusal of the kept config (a tariff, a contract, a connection
+        # agreement) with no chat kind of its own (e.g. `fca_needs_saved_project`;
+        # `_library_call` already gave `commercial_binding_invalid`,
+        # `library_ref_stale` and `solver_in_flight` theirs): say which code.
+        raise HTTPException(status_code=exc.status_code, detail={
+            "error_kind": "site_connection_invalid", "code": str(d["code"])[:80],
+            "message": str(d.get("message", ""))[:500]}) from exc
+    bound = out.get("commercial") or {}
+    root = {k: bound.get(k) for k in binding.SITE_CONNECTION_KEYS}
+    notes = []
+    if root["export_link"] is None:
+        notes.append("no export_link: export is not priced or billed")
+    if root["timezone"] is None:
+        notes.append("no timezone: the snapshots are read as the site clock")
+    return {"commercial": root, "created": created, "notes": notes}
+
+
 # ── Participants (IC P3 WP3.4) ─────────────────────────────────────────────
 # `define_participants` drives the template and value-flows routes. Their
 # refusals carry `{"code": …}`; the forwarder reads `error_kind`, so each is
@@ -3272,6 +3354,64 @@ def gridspine_get_connection_assessments(project_id: str, assessment_id: str | N
         return _h(_gridspine_project(db, user, project_id), assessment_id=assessment_id, hour=hour)
 
 
+def campus_get_study(project_id: str) -> dict:
+    from services.campus_electrical_service import get_state as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def campus_draft_campus(project_id: str, overwrite: bool = False) -> dict:
+    from services.campus_electrical_service import draft as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), bool(overwrite))
+
+
+def campus_run_study(project_id: str, k: int | None = None, pf: float | None = None,
+                     profile: str | None = None, margin: float | None = None,
+                     n_minus_1: bool | None = None, invest: bool | None = None,
+                     pcc_switchgear_by_operator: bool | None = None) -> dict:
+    from services.campus_electrical_service import run as _h
+    settings = {key: v for key, v in (("k", k), ("profile", profile), ("margin", margin),
+                                       ("n_minus_1", n_minus_1), ("invest", invest),
+                                       ("pcc_switchgear_by_operator", pcc_switchgear_by_operator))
+                if v is not None}
+    settings["pf"] = pf
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), settings)
+
+
+def campus_get_library(project_id: str) -> dict:
+    from services.campus_electrical_service import get_library as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def campus_set_library(project_id: str, yaml: str) -> dict:
+    from services.campus_electrical_service import save_library as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), yaml)
+
+
+def campus_get_investment(project_id: str) -> dict:
+    from services.campus_electrical_service import get_investment as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def campus_list_grid_codes(project_id: str) -> dict:
+    from services.campus_grid_code_service import list_grid_codes as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def campus_extract_grid_code(project_id: str, document_id: str) -> dict:
+    # No publish or confirm tool exists, on purpose: the copilot drafts, a
+    # person confirms each limit and publishes, in the panel (plan C10).
+    from services.campus_grid_code_service import extract as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), document_id)
+
+
 def gridspine_assess_connection(project_id: str, bus: str, load_mw: float, load_pf: float = 0.98,
                                 onsite_mw: float = 0.0, onsite_converter: bool = True,
                                 profile: str = "eu_rfg_dcc_ce") -> dict:
@@ -4054,6 +4194,177 @@ def ui_open_panel(
 def ui_set_snapshot(snapshot_iso: str, period: int | None = None) -> dict:
     return {"_ui_event": True, "kind": "set_snapshot",
             "snapshot_iso": snapshot_iso, "period": period}
+
+
+# ── Harness: ask the user (chat harness issue 04) ──────────────────────────
+
+ASK_USER_MAX_OPTIONS = 8
+
+
+def ask_user(
+    title: str,
+    question: str,
+    options: list[dict],
+    allow_free_text: bool = True,
+) -> dict:
+    """
+    Present a structured question. Non-blocking by design (owner decision
+    Q4): the loop turns this marker into a `choice_request` frame, the panel
+    renders a Choice card, and the pick comes back as the next user message.
+    The model gets `{status: "presented"}` and is told to end its turn.
+
+    Validation is strict and typed (`invalid_tool_args`) because a half-built
+    card — no options, two recommendations — is worse than none.
+    """
+    def bad(message: str) -> HTTPException:
+        return HTTPException(status_code=422, detail={
+            "error_kind": "invalid_tool_args", "message": f"ask_user: {message}",
+        })
+
+    if not isinstance(title, str) or not title.strip():
+        raise bad("title must be a non-empty string")
+    if not isinstance(question, str) or not question.strip():
+        raise bad("question must be a non-empty string")
+    if not isinstance(options, list) or not options:
+        raise bad("options must be a non-empty list")
+    if len(options) > ASK_USER_MAX_OPTIONS:
+        raise bad(f"at most {ASK_USER_MAX_OPTIONS} options")
+    clean: list[dict] = []
+    seen: set[str] = set()
+    for i, opt in enumerate(options):
+        if not isinstance(opt, dict):
+            raise bad(f"option {i} must be an object")
+        label = str(opt.get("label") or "").strip()
+        if not label:
+            raise bad(f"option {i} needs a label")
+        if label.lower() in seen:
+            raise bad(f"option labels must be distinct ({label!r} repeats)")
+        seen.add(label.lower())
+        entry: dict[str, Any] = {"label": label[:120]}
+        desc = opt.get("description")
+        if isinstance(desc, str) and desc.strip():
+            entry["description"] = " ".join(desc.split())[:400]
+        if opt.get("recommended"):
+            entry["recommended"] = True
+        clean.append(entry)
+    if sum(1 for o in clean if o.get("recommended")) > 1:
+        raise bad("mark at most one option as recommended")
+    return {
+        "_ui_event": True,
+        "kind": "choice",
+        "title": " ".join(title.split())[:160],
+        "question": " ".join(question.split())[:800],
+        "options": clean,
+        "allow_free_text": bool(allow_free_text),
+    }
+
+
+_CHAT_SESSION: ContextVar[Any] = ContextVar("chat_session", default=None)
+
+
+def set_chat_session(session: Any) -> None:
+    """Bind the ChatSession whose workflow state this turn's tools may move
+    (chat harness issue 06). Set by run_turn beside set_turn_profile; the
+    executor copies the context, so the tool thread sees it."""
+    _CHAT_SESSION.set(session)
+
+
+def chat_session() -> Any:
+    return _CHAT_SESSION.get()
+
+
+def use_skill(name: str) -> dict:
+    """The body of a harness skill (issue 05). The catalogue (names and
+    descriptions) is in the system prompt; the body only travels on
+    request, so the prompt stays stable while procedures change."""
+    from harness import skills
+    key = str(name or "").strip().lower()
+    try:
+        skill = skills.get(key)
+    except KeyError:
+        raise HTTPException(status_code=404, detail={
+            "error_kind": "unknown_skill",
+            "message": f"no skill named {key!r}; the available skills are listed in your instructions",
+        }) from None
+    return {"name": skill.name, "description": skill.description, "instructions": skill.body}
+
+
+def _workflow_session():
+    sess = chat_session()
+    if sess is None:
+        raise HTTPException(status_code=500, detail={
+            "error_kind": "internal_error",
+            "message": "workflow tools need a chat session bound to the turn",
+        })
+    return sess
+
+
+def _describe_step(wf, step) -> dict:
+    ids = [s.id for s in wf.steps]
+    return {
+        "workflow": wf.id,
+        "title": wf.title,
+        "step": step.id,
+        "step_title": step.title,
+        "step_index": ids.index(step.id) + 1,
+        "step_count": len(ids),
+        "done_when": step.done_when,
+        "instructions": step.body,
+        "steps": [{"id": s.id, "title": s.title} for s in wf.steps],
+        "note": ("These instructions are also attached to each of your turns "
+                 "while this workflow is active; call advance_workflow when the "
+                 "step is done, end_workflow to leave."),
+    }
+
+
+def start_workflow(workflow_id: str) -> dict:
+    """Start a workflow on this session (issue 06): state is (id, step) on
+    the ChatSession; the per-turn addendum carries the step from the next
+    turn on, and this result carries it for the current one."""
+    from harness import workflows
+    key = str(workflow_id or "").strip().lower()
+    wf = workflows.registry().get(key)
+    if wf is None or wf.status != "active":
+        raise HTTPException(status_code=404, detail={
+            "error_kind": "unknown_workflow",
+            "message": f"no active workflow {key!r}; the ids are "
+                       + ", ".join(sorted(w.id for w in workflows.registry().values()
+                                          if w.status == "active")),
+        })
+    sess = _workflow_session()
+    step = wf.steps[0]
+    sess.workflow = {"id": wf.id, "step": step.id}
+    return _describe_step(wf, step)
+
+
+def advance_workflow(step: str) -> dict:
+    from harness import workflows
+    sess = _workflow_session()
+    state = getattr(sess, "workflow", None)
+    if not state:
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "no_active_workflow",
+            "message": "no workflow is active on this session; call start_workflow first",
+        })
+    wf = workflows.get(state["id"])
+    key = str(step or "").strip().lower()
+    try:
+        target = wf.step(key)
+    except KeyError:
+        raise HTTPException(status_code=404, detail={
+            "error_kind": "unknown_workflow_step",
+            "message": f"{wf.id!r} has no step {key!r}; its steps are "
+                       + ", ".join(s.id for s in wf.steps),
+        }) from None
+    sess.workflow = {"id": wf.id, "step": target.id}
+    return _describe_step(wf, target)
+
+
+def end_workflow() -> dict:
+    sess = _workflow_session()
+    state = getattr(sess, "workflow", None)
+    sess.workflow = None
+    return {"ended": state["id"] if state else None}
 
 
 # ── Conversation (2) ────────────────────────────────────────────────────────
@@ -6589,11 +6900,23 @@ DISPATCHERS: dict[str, Any] = {
     "gridspine_compute_capacity": gridspine_compute_capacity,
     "gridspine_get_connection_assessments": gridspine_get_connection_assessments,
     "gridspine_assess_connection": gridspine_assess_connection,
+    # campus electrical (3)
+    "campus_get_study": campus_get_study,
+    "campus_draft_campus": campus_draft_campus,
+    "campus_run_study": campus_run_study,
+    # campus asset library and investment (3, plan C9)
+    "campus_get_library": campus_get_library,
+    "campus_set_library": campus_set_library,
+    "campus_get_investment": campus_get_investment,
+    # campus grid codes (2): no publish tool, by design (plan C10)
+    "campus_list_grid_codes": campus_list_grid_codes,
+    "campus_extract_grid_code": campus_extract_grid_code,
     # library (4)
     "list_library_items": list_library_items,
     "get_library_item": get_library_item,
     "import_urdb_tariff": import_urdb_tariff,
     "attach_tariff": attach_tariff,
+    "set_site_connection": set_site_connection,
     "define_participants": define_participants,
     # investment case (4) — IC P4 WP4.6c
     "run_investment_case": run_investment_case,
@@ -6646,6 +6969,11 @@ DISPATCHERS: dict[str, Any] = {
     "ui_select_component": ui_select_component,
     "ui_open_panel": ui_open_panel,
     "ui_set_snapshot": ui_set_snapshot,
+    "ask_user": ask_user,
+    "use_skill": use_skill,
+    "start_workflow": start_workflow,
+    "advance_workflow": advance_workflow,
+    "end_workflow": end_workflow,
     # conversation (2)
     "list_chat_history": list_chat_history,
     "clear_chat_history": clear_chat_history,
