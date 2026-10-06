@@ -19,6 +19,7 @@ import type { Bus, FailureInfo, Generator, Line, Link, Load, StorageUnit } from 
 import toast from 'react-hot-toast'
 import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
 import { flushPendingSitesToServer } from '../site3d/sitesStore'
+import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
 
 // ── Status indicators ──────────────────────────────────────────────────────────
 const STATUS_DOT: Record<string, string> = {
@@ -435,6 +436,15 @@ export default function AppHeader() {
         if (sr.status === 'local') appLog('WARN', 'Sites server write failed — kept the site document in localStorage')
       } catch (e) {
         appLog('WARN', `Sites flush failed: ${e instanceof Error ? e.message : String(e)}`)
+      }
+      // The map's sidecar (routes + bubbles) flushes beside the layout, same
+      // reasons, same debounce: a Save-As re-homes the pending document to
+      // the new name.
+      try {
+        const mr = await flushPendingMapLayoutToServer(result.saved, { previousProject: currentProject })
+        if (mr.status === 'local') appLog('WARN', 'Map layout server write failed — kept the routes in localStorage')
+      } catch (e) {
+        appLog('WARN', `Map layout flush failed: ${e instanceof Error ? e.message : String(e)}`)
       }
       // Bundle download happens immediately after the backend write so a
       // hardware/network failure during download still leaves a valid project
