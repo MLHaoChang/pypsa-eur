@@ -175,20 +175,27 @@ own cookie policy through configuration. The CSRF double-submit check
 
 Added 2026-09-30 (P28 gate, owner decision O1). The EH review's `stale`
 flag is true only when a later foreground solve cleared the stored report
-(`services/adequacy/eh_review.py:455-460`). An edit to the network after a
+(`services/adequacy/eh_review.py:455-466`). An edit to the network after a
 finished study leaves the Guided greeting and the Hub design Results card
 unaware. P28 softened the greeting's wording so that it claims nothing about
-the current network. The fix is a backend network-revision marker on the
-study record (e.g. `network_changed`), read by both surfaces. It is scheduled
-as P33b in `plans/2026-09-28-guided-mode-deferred.md` §3.
+the current network.
+
+**Specified 2026-10-06:** `specs/2026-10-06-guided-p33b-study-freshness.md`
+§1 — a per-ctx revision counter bumped at the edit seams, captured on the
+study record and read as `edited_since_study` on `/eh_study` and `/eh_review`;
+both surfaces say "edited since", which is all the signal carries. Plan:
+`plans/2026-09-28-guided-mode-deferred.md` §"P33b plan (2026-10-06)". Owner
+decisions D-2 / D-3 / D-4 are listed in the spec's §8.
 
 ### 10c. Two narrow project-lock races have correct guards but no test
 
 Added 2026-09-30 (P28 re-gate, mutants R4 and R7). In `moveProjectLock`, a
 stale 409 re-acquire that fails after a fresh acquire of the same project
 (R4), and a stale failed acquire in an X→Y→Z switch (R7), are both ignored
-by the generation guard. Removing either check leaves every test green. Add
-one test for each so the guard stays pinned.
+by the generation guard. Removing either check leaves every test green.
+
+**Specified 2026-10-06:** the two tests, step by step, in
+`specs/2026-10-06-guided-p33b-study-freshness.md` §3 (P33b step 6).
 
 ### 10a. Re-activating a project does not restore its hub study record
 
@@ -196,13 +203,19 @@ Added 2026-09-30, from the P28 smoke. A project whose Energy Hub study
 finished, and which is then left and re-activated
 (`POST /api/projects/<p>/activate`), answers `GET /api/results/eh_study`
 with no study. The Guided hub rail opens at Site again, and the greeting says
-"No study has run yet". The Guided "study done" state is lost for a user who
-re-opens a project. Where the record is stored was not traced. The P28 smoke
-part (C) works around it by re-running the study. Sources: the plan's "P28
-phase note" (contract drift 3) and
-`qa/2026-09-30-guided-mode-deferred-gate-P28.md`.
+"No study has run yet".
 
----
+**Traced and specified 2026-10-06** (`specs/2026-10-06-guided-p33b-study-freshness.md`
+§2): the record is in-memory only, and `PyPSAService.reset_network`
+(`services/pypsa_service.py:443-445`) nulls the finished study records **on
+the resident outgoing ctx** before copying its state for the new one — so
+creating or loading another project wipes the first project's record, and
+re-activation (a pointer swap) finds nothing. Undo (`services/network_undo.py:129`)
+and eviction / restart lose it the same way. Fix: clear on the copy, not the
+resident; undo captures and restores finished records; and (owner decision
+D-1) persist the finished EH record with the project, compared against the
+P33b counter on restore so a study from before a later saved edit reads as
+edited.
 
 ## Verification / CI
 
