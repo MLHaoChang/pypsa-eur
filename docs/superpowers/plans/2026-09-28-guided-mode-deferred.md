@@ -1213,3 +1213,60 @@ No `chat_tools_schema.TOOLS` entry, tool description or system-prompt change (ro
 - **The screenshots:** `p33b-c3-edited-greeting-and-card.png` shows both sentences side by side on one screen (the B1 lesson). The header breadcrumb "Unnamed Network" is visible there and is pre-existing (also in `p28-c-guided-stale.png`).
 
 No processes are left running.
+
+**P33b gate fixes** (gate record `qa/2026-10-06-guided-p33b-gate.md`, NO-GO on B-1; fixes in `9f34e0e81`, test-first; the gate's probes `qa33b/test_qa_bleed*.py` and `test_qa_restore_collision.py` are now suite tests).
+
+- **B-1 (blocker): no per-project state crosses a project switch.**
+  - *Cause:* `reset_network` handed the outgoing project's `_UndoState` **object** to the next project's ctx. With steps 4b and 0, Undo in A applied B's network, and a save wrote it into A's files.
+  - *Fix:* `reset_network(carry=…)` in `services/pypsa_service.py`:
+    - `"same"` for undo (shared stack, counter and results kept);
+    - `"copy"` for an io import into the open workspace (a copy of the stack, so the import stays undoable, plus the counter);
+    - `"fresh"` (the default) for load, template, bundle import, Saved-snapshot restore, "New" and the load refusal (own empty stack, counter 0, and `RESULT_STATE_KEYS` nulled, so a template project no longer inherits the previous project's stored report).
+  - *Audit:*
+    - The `undo_service.clear()` / `dirty_state.clear()` that load, template, import and restore ran **before** the swap acted on the project being left: a resident A with unsaved edits read clean and lost its own undo history. They now run after the swap, on the new ctx.
+    - `chat_state` stays carried, by design.
+    - `mutation_lock` / `solver_state_lock` stay shared (coarse, never wrong).
+    - `rekey_context` / `_register_created_context` build nothing from `prev`.
+  - *Tests (`tests/test_project_switch_isolation.py`):* local-mode template, and sessions via template / load / another project's restore / bundle import. Each checks depth 0 on A, undo 409, A unchanged in memory **and on disk** after save and a cold activate. Also: the project left keeps its own undo history and unsaved flag; an io import copies, rather than shares, the stack (coalescing disabled for exact depths).
+- **S-1:** a restore of a snapshot without `results_state.pkl` now deletes the project's later pkl (`routers/snapshots.py`), so its study record is not mapped onto a network it does not describe. Test `test_a_snapshot_without_results_does_not_bring_back_a_later_study` (the gate's collision sequence) now reads 204.
+- **S-2:** three pins, green on arrival; the gate's surviving mutants now die:
+  - `test_load_and_import_restore_the_projects_own_counter` (Q4a: a cross-project load / import compares against that project's saved counter);
+  - `test_a_counter_below_the_captured_one_reads_edited` (Q3a: `!=` over `>`; metadata without the counter beside a record captured at N > 0);
+  - `test_an_io_import_is_an_edit` (Q2a).
+  - The hook already invalidated on a backwards move (`!==`). This is intended: a restore moves the counter back. It is now pinned (F5a killed).
+- **S-3:** `useNetworkRevisionInvalidation.test.tsx` "a project switch…" answers B's fetch with the planted value and awaits it. 30 / 30 isolated runs green; the project-switch mutant is still killed.
+- **S-4:** a template project starts at counter 0 (`"fresh"`), and `create_from_template` writes `network_revision` into `metadata.json` at creation.
+- **N-3 (fixed):** `_register_created_context` now re-keys before it registers, so the cap check no longer counts the ctx twice. Test `test_template_create_does_not_evict_early` (cap 3, three creates, no eviction).
+- **N-2 (claim corrected, window left open):** the chat seam bumps before the handler, so a study whose worker captures and copies inside that window under-reports. The spec §1.3 now says so. Closing it with a second bump after the handler would make every chat edit +2 and still miss a timed-out orphan. Added to the known limitations.
+- **N-6** (the B4 smoke oracle is self-referential) is accepted as noted: 10a is pinned by P26 / P28 (C0) and the backend tests.
+- **Unchanged and noted:** a "New" draft starts at counter 0 and is bumped to 1 by the request (fresh), so saving that draft as a new project starts it at a small counter. That is harmless: there is no record to compare.
+
+**Changed assertion (gate fixes):** `tests/test_undo_per_project.py::test_undo_carried_forward_across_reset_network` → `test_undo_across_reset_network_follows_the_carry_mode`. The old test pinned "the undo stack survives every swap", which is the B-1 defect. It now pins `same` (the same object), `copy` (an independent copy) and the default (empty), and checks that neither earlier stack was touched.
+
+**Mutants (gate fixes):**
+- Killed, 14 of 14:
+  - B-1 fresh swap shares `prev.undo`;
+  - copy mode shares `prev.undo`, killed once the io-import test existed (it survived the first batch, see below);
+  - the fresh swap carries the counter;
+  - the fresh swap carries result state;
+  - template clears undo / dirty before the swap;
+  - S-1 restore keeps the later pkl;
+  - N-3 register before rekey;
+  - S-4 template metadata without the counter;
+  - the gate's Q2a, Q3a, Q4a;
+  - F5a (hook fires only on an increasing revision);
+  - the hook project-switch mutant after the de-flake.
+- Survived in the first batch: copy mode shares `prev.undo` (no io-import isolation test). The test was added, and the re-run killed it.
+- Log: `scratchpad/p33b/mutations.log` (lines starting `gate`).
+
+**Rows after the fixes** (HEAD `9f34e0e81`):
+
+| Row | Command (cwd) | Result |
+|---|---|---|
+| 1 | the row-1 command (`pypsa-gui/backend`) | **9516 passed, 1 failed, 31 skipped, 11 deselected** in 1 h 51 min (`row1g.log`, HEAD `9f34e0e81`). The one failure was `test_undo_per_project.py::test_undo_carried_forward_across_reset_network`, which pinned the B-1 defect itself (every reset carries the stack forward). It was rewritten as a changed assertion in the follow-up commit and the file then passed 7 / 7; no other test changed, so row 1 was not re-run in full |
+| 2 | the row-2 command plus `tests/test_project_switch_isolation.py` (`pypsa-gui/backend`) | **1268 passed, 17 skipped** (`row2g.log`) |
+| 3 | `npx tsc --noEmit -p .` (`pypsa-gui/frontend`) | 0 errors |
+| 4 | `npx vitest run` (`pypsa-gui/frontend`) | **278 files / 3264 passed** (`row4g.log`) |
+| 4s | the four touched suites ×10 (`pypsa-gui/frontend`) | **10 / 10**, 226 tests each (`row4sg.log`); the hook file alone 30 / 30 (`hook30.log`) |
+| 5 | `--phase P33b` / `P28` / `P30`, one at a time (`pypsa-gui/frontend`) | **PASS** 47 / PASS 43 / PASS 61 screenshots (`smokeg-*.log`). P33b: (C0) done, (C3) both surfaces 2.1 s after the edit, (C4) rev0 + 2, (E2) done + edited after the restart |
+| 7 | unchanged: no frontend `src` product change in the fixes (only the hook test) | 11, as before |
