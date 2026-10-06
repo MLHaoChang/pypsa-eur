@@ -192,6 +192,15 @@ def test_a_contracted_capacity_without_a_stated_limit_rates_on_the_poc_size():
     bill = _meter(t, _ones(3.0), _ones(0.0), p_nom=10.0)
     assert bill.by_component.capacity == pytest.approx(10.0 * len(JAN_FEB))
     assert bill.total is not None
+    # Gate U2-S1 C2: the assumed MW is disclosed, with a HELP sentence.
+    assert "capacity_charge_assumed_connection_size" in bill.honesty_notes
+    from services.study import report
+
+    assert "capacity_charge_assumed_connection_size" in report.HELP
+    stated = _form(capacity_charge={"price_per_mw_per_year": 8760.0, "basis": "contracted"},
+                   connection_limit_mw=10.0)
+    assert "capacity_charge_assumed_connection_size" not in _meter(
+        stated, _ones(3.0), _ones(0.0), connection_mw=10.0, p_nom=10.0).honesty_notes
 
 
 # ── export (ports) ────────────────────────────────────────────────────────

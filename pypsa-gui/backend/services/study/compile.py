@@ -63,7 +63,7 @@ from models.commercial import Tariff as EngineTariffModel
 from models.study import AssumptionsLedger, Tariff
 
 __all__ = [
-    "BILL_COMPONENT_KEYS", "CompileError", "CompiledCommercial", "EXPORT_LINK",
+    "BILL_COMPONENT_KEYS", "CAPACITY_ASSUMED_CONNECTION", "CompileError", "CompiledCommercial", "EXPORT_LINK",
     "EXPORT_SERIES_SOURCE", "EngineTariff", "NETWORK_PREFIX", "POC_LINK", "SETTLEMENT",
     "SITE_PARTY", "apply_ledger", "bind_on_network", "commercial_from_form",
     "commercial_from_ledger", "delete_export_series", "export_series_name",
@@ -75,6 +75,8 @@ EXPORT_LINK = "grid_export"
 SITE_PARTY = "site"
 SETTLEMENT = "h"
 NETWORK_PREFIX = "network:"
+#: A contracted capacity charge with no stated MW, rated on the PoC size.
+CAPACITY_ASSUMED_CONNECTION = "capacity_charge_assumed_connection_size"
 EXPORT_SERIES_SOURCE = "decision_study"
 #: The guided bill's seven components (owner decision 7 adds `taxes_levies`);
 #: `engine_adapter.BILL_COMPONENTS` carries their labels.
@@ -317,6 +319,9 @@ def tariff_to_engine(form: Tariff, *, snapshots=None, connection_mw: float | Non
         items.append(_item("capacity", "capacity", "per_kw_year",
                            float(cc.price_per_mw_per_year) / _KW_PER_MW))
         comp["capacity"] = "capacity"
+        if limit is None:
+            # Gate U2-S1 C2: IC rates it on the PoC size; the bill says so.
+            notes.append(CAPACITY_ASSUMED_CONNECTION)
 
     if form.fixed_charge_per_period:
         monthly = float(form.fixed_charge_per_period) / (12.0 if year_billed else 1.0)

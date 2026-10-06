@@ -301,6 +301,11 @@ HELP: dict[str, str] = {
         "import price, so the model charges the battery from the grid to export later. "
         "Unless the contract pays export of grid-charged energy, the battery's value is "
         "overstated."),
+    # U2 gate C2: the engine rates a contracted capacity charge on the PoC size.
+    "capacity_charge_assumed_connection_size": (
+        "The tariff's capacity charge states no contracted capacity, so it is billed on "
+        "the site's connection size. Enter the contracted capacity from the contract if "
+        "it differs."),
 }
 
 # (prefix, sentence) for codes that carry a qualifier.

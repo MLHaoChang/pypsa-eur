@@ -471,7 +471,8 @@ export const HELP: Record<string, string> = {
   "intake_changed_during_run": "The study's answers changed while the study was running.",
   "copied_record_findings_computed_on_the_origin_forks": "This study was copied from another project; its findings and report were computed on the origin's option networks.",
   "tariff_export_exceeds_import": "In some hours the tariff credits export above the import price, so the model sends energy out and back through the connection for profit. Check the export price: unless the contract really pays this, the battery's value is overstated.",
-  "tariff_export_exceeds_import_via_storage": "The tariff's best export credit, after the battery's losses, is above its cheapest import price, so the model charges the battery from the grid to export later. Unless the contract pays export of grid-charged energy, the battery's value is overstated."
+  "tariff_export_exceeds_import_via_storage": "The tariff's best export credit, after the battery's losses, is above its cheapest import price, so the model charges the battery from the grid to export later. Unless the contract pays export of grid-charged energy, the battery's value is overstated.",
+  "capacity_charge_assumed_connection_size": "The tariff's capacity charge states no contracted capacity, so it is billed on the site's connection size. Enter the contracted capacity from the contract if it differs."
 }
 // END HELP MIRROR
 

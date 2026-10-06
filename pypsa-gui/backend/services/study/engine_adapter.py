@@ -133,6 +133,18 @@ def _notes(res, partial: list[str], has_fixed: bool) -> tuple[str, ...]:
     return tuple(sorted(dict.fromkeys(out)))
 
 
+def _bill_notes(compiled: C.CompiledCommercial, res, partial: list[str],
+                has_fixed: bool) -> tuple[str, ...]:
+    """
+    The engine's notes as codes, plus the compile notes a bill must carry
+    (gate U2-S1 C2: a capacity charge billed on the assumed connection size).
+    """
+    out = list(_notes(res, partial, has_fixed)) if res is not None else []
+    if C.CAPACITY_ASSUMED_CONNECTION in compiled.notes:
+        out.append(C.CAPACITY_ASSUMED_CONNECTION)
+    return tuple(sorted(dict.fromkeys(out)))
+
+
 def _flag_codes(flags) -> str:
     """`SiteBill.flags` as one `unavailable["total"]` value (digit-free heads)."""
     heads = []
@@ -230,7 +242,7 @@ def _bill(n, compiled: C.CompiledCommercial, site_bill, *, export_credit: float 
         currency=meta.get("currency") or "EUR", currency_year=meta.get("currency_year"),
         engine="tariff_engine", unavailable=bill_flags,
         fidelity=None if fidelity is None else Fidelity(fidelity),
-        honesty_notes=_notes(res, partial, has_fixed) if res is not None else (),
+        honesty_notes=_bill_notes(compiled, res, partial, has_fixed),
         partial_billing_periods=partial)
 
 
