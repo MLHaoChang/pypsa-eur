@@ -45,7 +45,7 @@ USAGE
     pixi run -e test python pypsa-gui/backend/smoke/run_chat_smoke.py \
       --profile stub-openai --prompts 1 --verbose
 
-Two branches are scripted, deliberately few — the stub being wrong is the
+The branches below are scripted, deliberately few — the stub being wrong is the
 one failure mode this harness cannot self-detect:
 
   1. "Save the current network" -> `save_project` (P1 of run_chat_smoke). It
@@ -83,6 +83,13 @@ one failure mode this harness cannot self-detect:
      prompt's "Working with <project>: …" line), then `put_stress_scenarios`
      with the whole list plus one parametric scenario (`call_stub_6b`), then
      one closing sentence. "No project is open." without a project.
+  7. A template create from chat (P27a, deferred spec §1.3): "Create a
+     project from the <template id> template called <name>" -> TWO tool
+     calls in ONE response, `create_project_from_template {"template_id",
+     "new_name"}` (`call_stub_7a`) then `list_components {"component_class":
+     "Bus"}` (`call_stub_7b`; the tool requires the class) — the second is what shows a tool after the rebind
+     still dispatches in the same turn — and only after BOTH results the
+     closing sentence of branch 2 for the create.
 
 Every other prompt gets "Saved.".
 
@@ -156,6 +163,10 @@ _SITE_ALL = "fix every gap you can, one confirmation at a time"
 _VOLL = "Set VOLL to 5000 €/MWh"
 _STRESS = "Add a stress scenario to this project's registry"
 _PROJECT = re.compile(r"Working with (.+?): \d+ buses")
+# Branch 7. The name stops at whitespace or the end, and a sentence's closing
+# full stop is not part of it.
+_TEMPLATE_CREATE = re.compile(
+    r"Create a project from the ([\w-]+) template called ([\w.-]+?)\.?(?=\s|$)")
 
 
 def _project_name(messages) -> str | None:
@@ -272,6 +283,7 @@ class Handler(BaseHTTPRequestHandler):
         critical_fix = _SITE_CRITICAL in text
         site_grid = (_SITE_GRID in text or critical_fix) and not scripted
         site_tools = _tools_after_last_user(messages) if site_grid else []
+        template = _TEMPLATE_CREATE.search(text) if not scripted else None
 
         if REPLY_DELAY_S:
             time.sleep(REPLY_DELAY_S)
@@ -297,6 +309,25 @@ class Handler(BaseHTTPRequestHandler):
                 "function": {"name": "save_project",
                              "arguments": json.dumps({"name": name})},
             }]}}]}))
+        elif template and not turn_tools:
+            tid, new_name = template.group(1), template.group(2)
+            emit(_sse({"choices": [{"delta": {"tool_calls": [
+                {"index": 0, "id": "call_stub_7a", "type": "function",
+                 "function": {"name": "create_project_from_template",
+                              "arguments": json.dumps({"template_id": tid,
+                                                       "new_name": new_name})}},
+                {"index": 1, "id": "call_stub_7b", "type": "function",
+                 "function": {"name": "list_components",
+                              "arguments": json.dumps({"component_class": "Bus"})}},
+            ]}}]}))
+        elif template and len(turn_tools) < 2:
+            # Both calls went out in one response; wait for both results.
+            emit(_sse({"choices": [{"delta": {"content": ""}}]}))
+        elif template:
+            first = next((t for t in turn_tools
+                          if t.get("tool_call_id") == "call_stub_7a"), turn_tools[0])
+            emit(_sse({"choices": [{"delta": {"content":
+                _closing("create_project_from_template", first)}}]}))
         elif voll and not turn_tools:
             emit(_sse(_call("call_stub_5", "update_solver_config", {"partial": {"voll": 5000}})))
         elif voll:

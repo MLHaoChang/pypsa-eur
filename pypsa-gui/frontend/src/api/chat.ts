@@ -365,6 +365,10 @@ export interface ChatHistory {
   history_gap: number
   // Reported once, then cleared server-side; null on a clean reload.
   pending_turn: InterruptedTurn | null
+  // P28 A3 — the profile the resumed session is bound to (its next turn runs
+  // on it when the request names none); null with no turns or when that
+  // profile is no longer configured. Optional: older backends omit it.
+  bound_profile_id?: string | null
 }
 
 export async function getChatHistory(limit = 200): Promise<ChatHistory> {

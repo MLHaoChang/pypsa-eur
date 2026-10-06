@@ -20,15 +20,16 @@ from services.finance.packs import base as P
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "investment_case"
 
 
-def test_v1_pack_registry_is_exactly_eu_de_and_us_federal():
-    assert set(P.available_jurisdictions()) == {"eu_de", "us_federal"}
+def test_the_p4_pack_registry():
+    # IC P4 WP4.3b: {eu_de, eu_nl, us_federal, ca_federal}.
+    assert set(P.available_jurisdictions()) == {"ca_federal", "eu_de", "eu_nl", "us_federal"}
 
 
 def test_unknown_jurisdiction_raises_pack_not_found():
     with pytest.raises(P.PackNotFound):
-        P.load_pack("eu_nl", as_of=date(2026, 1, 1))
+        P.load_pack("eu_fr", as_of=date(2026, 1, 1))
     with pytest.raises(P.PackNotFound):
-        P.load_pack("ca_federal", as_of=date(2026, 1, 1))
+        P.load_pack("eu_de", as_of=date(2025, 1, 1))         # before the first version
 
 
 def test_loaded_pack_carries_provenance_fields():
@@ -135,9 +136,19 @@ def test_packs_carry_the_country_join_key_tariffs_use():
 
 
 def test_hash_is_stable_across_processes_fixture_pin():
+    """Pinned per VERSION (IC P4 plan C11): {jurisdiction: {valid_from: hash}}.
+    Every registered version is pinned, so a new version cannot slip in; a
+    changed rule changes its version's hash and the diff is reviewed."""
     pinned = json.loads((FIXTURES / "pack_hashes.json").read_text())
-    for jur, h in pinned.items():
-        assert P.load_pack(jur, as_of=date(2026, 6, 1)).pack_hash == h, jur
+    for jur in P.available_jurisdictions():
+        P.load_pack(jur, as_of=date(2026, 6, 1))           # registers the built-in module
+    registered = {jur: {f().valid_from.isoformat() for f in facs}
+                  for jur, facs in P._REGISTRY.items()}
+    assert {j: set(v) for j, v in pinned.items()} == registered
+    for jur, versions in pinned.items():
+        for valid_from, h in versions.items():
+            assert P.load_pack(jur, as_of=date.fromisoformat(valid_from)).pack_hash == h, (jur,
+                                                                                          valid_from)
 
 
 def test_packs_import_nothing_from_routers_or_solver_service():

@@ -133,6 +133,14 @@ interface ChatState {
   // re-asserts a stale choice over an admin's `set_active_profile` or an A8
   // fallback. See `ChatStreamRequest.profile_id` in `api/chat.ts`.
   profileId: string | null
+  // P28 A3 (deferred spec 2026-09-28 §3.1) — the profile the RESUMED session
+  // is bound to, from `GET /chat/history.bound_profile_id` on hydrate (and a
+  // turn's `session_init.profile_id`). A turn that names no profile runs on
+  // it (`/stream` keeps a bound session's binding), so the Send gate and the
+  // greeting's key offer read `profileId ?? boundProfileId ?? active`. Never
+  // sent: it is a fact about the session, not a choice. Cleared with the
+  // session (project switch, New chat).
+  boundProfileId: string | null
   // Task 13 — one-shot flag set by `startNewChat`. The chat.jsonl hydration
   // effect in ChatPanel consumes (reads + clears) it via
   // `consumeSuppressHydrationOnce` before deciding whether to replay
@@ -288,6 +296,7 @@ interface ChatState {
 
   // Lifecycle: clear UI-side conversation state on a project switch.
   resetForProjectSwitch: () => void
+  setBoundProfileId: (id: string | null) => void
   /**
    * Task 13 — begin a fresh conversation WITHOUT a project switch (the
    * cross-wire profile-switch confirm, and any future explicit "New chat"
@@ -355,6 +364,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   lastRequest: null,
   activeRequest: null,
   profileId: null,
+  boundProfileId: null,
   suppressHydrationOnce: false,
   newChatSeq: 0,
   messages: [],
@@ -408,6 +418,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     requestQueue: s.requestQueue.filter(r => r.group !== group),
   })),
   setProfileId: (id) => set({ profileId: id }),
+  setBoundProfileId: (id) => set({ boundProfileId: id }),
   appendMessage: (msg) => set((s) => ({
     messages: [...s.messages, { ...msg, id: newMessageId(), ts: Date.now() }],
   })),
@@ -552,6 +563,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try { cleanup?.() } catch { /* idempotent */ }
     set({
       sessionId: null,
+      boundProfileId: null,
       messages: [],
       pending: null,
       choice: null,
@@ -579,6 +591,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // disabled while streaming, so there is no live turn to interrupt here.
     set((s) => ({
       sessionId: null,
+      boundProfileId: null,
       messages: [],
       pending: null,
       choice: null,

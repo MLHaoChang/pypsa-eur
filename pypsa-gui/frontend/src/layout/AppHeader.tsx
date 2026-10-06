@@ -1059,6 +1059,7 @@ function UiModeSwitch() {
             type="button"
             data-testid={`ui-mode-${m}`}
             aria-pressed={on}
+            aria-describedby={`ui-mode-${m}-desc`}
             title={UI_MODE_TITLES[m]}
             onClick={() => pick(m)}
             className={`h-full px-2 rounded text-[10px] font-semibold transition-colors ${
@@ -1069,6 +1070,10 @@ function UiModeSwitch() {
           </button>
         )
       })}
+      {/* P30 (B9): the hover title as a sentence screen readers announce. */}
+      {(['guided', 'expert'] as const).map(m => (
+        <span key={m} id={`ui-mode-${m}-desc`} className="sr-only">{UI_MODE_TITLES[m]}</span>
+      ))}
     </div>
   )
 }

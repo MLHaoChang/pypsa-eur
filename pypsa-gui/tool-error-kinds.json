@@ -55,6 +55,10 @@
       "surface": "inline",
       "why": "The commercial config cannot bind to this network (a missing Link, an unrated snapshot, ...). The model reads the message and fixes the config within the turn."
     },
+    "commercial_config_invalid": {
+      "surface": "inline",
+      "why": "define_participants: the stored commercial config no longer validates. The model re-saves it with update_solver_config first."
+    },
     "confirmation_denied": {
       "surface": "inline",
       "why": "The user denied the card. Their own decision, already visible on the card."
@@ -82,6 +86,14 @@
     "file_too_large": {
       "surface": "banner",
       "why": "Upload rejected against the 25 MB cap. The user must act."
+    },
+    "finance_inputs_invalid": {
+      "surface": "inline",
+      "why": "The stored finance inputs do not validate (the route's 422 lists the errors). The model tells the user which fields; they are corrected in the Investment tab."
+    },
+    "finance_inputs_missing": {
+      "surface": "inline",
+      "why": "run_investment_case / solve_ppa_price with no stored finance inputs. The model asks the user to fill in the Investment tab; there is no chat tool that writes them."
     },
     "eh_report_not_found": {
       "surface": "inline",
@@ -150,6 +162,22 @@
     "invalid_transcript": {
       "surface": "inline",
       "why": "Raised by POST /chat/import validating a pasted transcript. Route-only — no tool imports transcripts."
+    },
+    "investment_case_busy": {
+      "surface": "inline",
+      "why": "run_investment_case / solve_ppa_price: a solve or a study is running (the study mesh's 409). A standing condition the model reports; the user waits for it or aborts it."
+    },
+    "investment_case_not_solved": {
+      "surface": "inline",
+      "why": "run_investment_case / solve_ppa_price before a solve (or on a stale dispatch). The model says the network must be solved first; the run needs the solved dispatch."
+    },
+    "investment_case_refused": {
+      "surface": "inline",
+      "why": "solve_ppa_price: the finance adapter refused to build the case (FinanceRefused; its `code` says why, e.g. template_not_annual). The model explains the code in prose; get_investment_case shows the same refusal for a run."
+    },
+    "investment_case_request_invalid": {
+      "surface": "inline",
+      "why": "An investment-case tool got an argument out of range (an empty owner, a page < 1, a target IRR or year outside the SolvePpa bounds). The model corrects the argument and retries, like invalid_tool_args."
     },
     "library_ref_stale": {
       "surface": "inline",
@@ -283,6 +311,42 @@
       "surface": "banner",
       "why": "Supplied time range does not match the network's snapshots."
     },
+    "solve_ppa_ambiguous_contract": {
+      "surface": "inline",
+      "why": "solve_ppa_price without contract_id on a case with several PPAs. The model asks which contract, then retries with contract_id."
+    },
+    "solve_ppa_cash_not_established": {
+      "surface": "inline",
+      "why": "solve_ppa_price: the post-tax equity cash is not established even at a zero price (a missing input). The model points to get_investment_case's reasons."
+    },
+    "solve_ppa_contract_not_found": {
+      "surface": "inline",
+      "why": "solve_ppa_price: no owner-sold PPA settlement line matches contract_id (or the case has none). The model names the contracts it knows or asks which one — within the turn."
+    },
+    "solve_ppa_needs_redispatch": {
+      "surface": "inline",
+      "why": "solve_ppa_price on a contract that changes the dispatch: a finance-only solve cannot re-dispatch (plan C9). The model explains the limit in prose."
+    },
+    "solve_ppa_irr_ambiguous": {
+      "surface": "inline",
+      "why": "solve_ppa_price: a price makes the NPV zero at the target, but the truncated equity cash has several IRRs and the engine's own (the root closest to 0) is not the target, so the price does not give the target IRR as reported (P4 gate). Its `code` carries that IRR; the model explains, nothing to fix in the UI."
+    },
+    "solve_ppa_no_root": {
+      "surface": "inline",
+      "why": "solve_ppa_price: no price in the search range reaches the target (its `code` says why, e.g. the target is met at a zero price). A finding the model reports, not a failure to route."
+    },
+    "solve_ppa_not_linear": {
+      "surface": "inline",
+      "why": "solve_ppa_price on a contract whose settlement is not linear in its price (plan C9). An answer the model explains; there is nothing for the user to fix in the UI."
+    },
+    "solve_ppa_not_owner_sold": {
+      "surface": "inline",
+      "why": "solve_ppa_price on a contract the owner buys, not sells (plan C9). The model explains that only an owner-sold PPA can be solved."
+    },
+    "solve_ppa_price_unknown": {
+      "surface": "inline",
+      "why": "solve_ppa_price on a contract whose price is not established in the case. The model says the contract needs a price first."
+    },
     "solver_in_flight": {
       "surface": "banner",
       "why": "A foreground solve is running and the operation was refused. The user waits or aborts."
@@ -290,6 +354,14 @@
     "study_in_flight": {
       "surface": "inline",
       "why": "An adequacy study is running and a save/queue was refused. Deliberately QUIET on the client (`QUIET_TOAST_CODES` in api/client.ts): it is a standing condition the caller handles, and one toast per autosave tick would bury the workbench."
+    },
+    "tax_pack_not_found": {
+      "surface": "inline",
+      "why": "The finance inputs name a tax pack with no version covering the financial close. The model reports it and asks for another pack or date — a question in prose."
+    },
+    "template_refused": {
+      "surface": "inline",
+      "why": "define_participants: the template cannot be built for this site (its code says why, e.g. template_needs_group_contract). The model tells the user or picks another template."
     },
     "tagged_render_error": {
       "surface": "inline",
@@ -418,6 +490,18 @@
     "value_column_parse_error": {
       "surface": "banner",
       "why": "The value column holds non-numeric data; the user must fix the input."
+    },
+    "value_flows_changed": {
+      "surface": "inline",
+      "why": "define_participants: the value-flow config changed between its read and its write (If-Match). The model reads it again and retries."
+    },
+    "value_flows_invalid": {
+      "surface": "inline",
+      "why": "define_participants: the value-flow config names a party, asset or item the project does not have (the problems are listed). The model corrects the config and retries."
+    },
+    "value_flows_would_be_replaced": {
+      "surface": "inline",
+      "why": "define_participants refused to replace (or clear) an existing, different value-flow config. The model asks the user and calls again with replace=true."
     },
     "vision_call_failed": {
       "surface": "banner",

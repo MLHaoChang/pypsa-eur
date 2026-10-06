@@ -1,10 +1,12 @@
-import axios from 'axios'
+import axios, { AxiosError, AxiosHeaders, type InternalAxiosRequestConfig } from 'axios'
 import toast from 'react-hot-toast'
 import { appLog } from '../store/simulationStore'
 import { getAuthEnabled, setAuthEnabled } from '../auth/config'
 import { shouldRearmAuth, shouldRedirectWhenAuthDisabled } from '../auth/localMode'
 import { CSRF_HEADER, needsCsrfHeader, readCsrfToken } from './csrf'
 import { lockRefusalCode } from '../utils/lockState'
+import { useUIStore } from '../store/uiStore'
+import { PROJECT_MISMATCH, mismatchAllows, mismatchSentence } from '../utils/projectMismatch'
 
 declare module 'axios' {
   interface AxiosRequestConfig {
@@ -80,7 +82,13 @@ const QUIET_MUTATION_URLS = ['/simulation/preflight']
 // `study_in_flight` — a save refused because an adequacy study is running is a
 // structured 409 the caller handles; the project switch toasts its own
 // 'busy-study' sentence, and autosave must not repeat it every interval.
-const QUIET_TOAST_CODES = new Set(['solver_in_flight', 'project_locked', 'study_in_flight'])
+//
+// `project_mismatch` — the client-side refusal below, while this tab's project
+// and the backend's binding disagree. ProjectMismatchBanner names both
+// projects and offers the way out; a toast per refused write would bury it.
+const QUIET_TOAST_CODES = new Set([
+  'solver_in_flight', 'project_locked', 'study_in_flight', PROJECT_MISMATCH,
+])
 
 const AUTH_API_PREFIX = '/auth/'
 const AUTH_PAGES = new Set(['/login', '/set-password', '/reset-password'])
@@ -132,6 +140,28 @@ client.interceptors.request.use((config) => {
   const token = readCsrfToken()
   if (token) config.headers.set(CSRF_HEADER, token)
   return config
+})
+
+// ── Tab / backend project mismatch (A2, deferred spec 2026-09-28 §2.1) ────
+// While `projectMismatch` is set, a write from this tab would land in the
+// OTHER project's live network. Refuse it here, before it leaves, with the
+// same shape a backend 409 has, so every caller's existing error path (and
+// the response interceptor below, which logs it quietly) handles it. Reads
+// always pass; `mismatchAllows` keeps Switch, chat, settings and auth open.
+client.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  const m = useUIStore.getState().projectMismatch
+  if (!m || mismatchAllows(config.method, config.url, m)) return config
+  const message = mismatchSentence(m)
+  console.warn(`[${PROJECT_MISMATCH}] ${(config.method ?? '').toUpperCase()} ${config.url} refused: ${message}`)
+  const response = {
+    status: 409,
+    statusText: 'Conflict',
+    headers: new AxiosHeaders(),
+    config,
+    data: { detail: { error_kind: PROJECT_MISMATCH, message } },
+  }
+  return Promise.reject(new AxiosError(
+    message, AxiosError.ERR_BAD_REQUEST, config, undefined, response))
 })
 
 client.interceptors.response.use(
@@ -209,6 +239,10 @@ client.interceptors.response.use(
       if (!quietKey || !QUIET_TOAST_CODES.has(quietKey)) {
         toast.error(msg)
       }
+    } else if (!isQuietPoll(url, method)) {
+      // P30 (B8): the caller shows this failure itself (`skipErrorToast`),
+      // but it still leaves a line in the app log — at INFO, never ERROR.
+      appLog('INFO', `${method} ${url} — ${msg} [no toast]`)
     }
     return Promise.reject(err)
   },

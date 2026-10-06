@@ -59,6 +59,9 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "legacy_import.py": (1, "prose describing a legacy fixture"),
     "profile_shapes.py": (2, "168 h week template used ONLY when there are no snapshots "
                              "to follow; with snapshots the template follows the axis"),
+    "results/finance_case.py": (2, "IC P4 C3: a period is a year when its represented hours "
+                                   "(Σ snapshot weights, any resolution) are 8760 h (8784 in a leap "
+                                   "year); `annualise` scales by 8760 / those hours — units"),
     "results/asset_economics.py": (1, "capacity factor = energy / (8760 × p_nom × years) — a unit"),
     "serialization.py": (1, "prose about payload size"),
     "solver/myopic.py": (1, "prose: nyears = Σ hours / 8760"),
@@ -92,6 +95,6 @@ def test_every_hourly_assumption_site_is_listed_with_a_reason():
 
 
 def test_the_inventory_is_pinned():
-    assert sum(c for c, _ in ALLOWED.values()) == 59
-    assert len(ALLOWED) == 29
+    assert sum(c for c, _ in ALLOWED.values()) == 61
+    assert len(ALLOWED) == 30
     assert all(reason for _, reason in ALLOWED.values())
