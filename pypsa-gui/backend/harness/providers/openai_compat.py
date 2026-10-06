@@ -56,6 +56,49 @@ logger = logging.getLogger("pypsa_gui.chat")
 _REASONING_KEYS = ("reasoning_content", "reasoning")  # passive passthrough
 
 
+def _count(value: Any) -> int:
+    """A token count from a vendor field; anything not a non-negative int is 0."""
+    if isinstance(value, bool):
+        return 0
+    try:
+        n = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return n if n > 0 else 0
+
+
+def _usage_from(u: dict[str, Any]) -> dict[str, int]:
+    """
+    A chat-completions `usage` object in the harness's usage vocabulary
+    (`LLMEvent.usage`), with the ANTHROPIC meaning: `input_tokens` is the
+    uncached input only, cache reads and writes are reported beside it.
+
+    Every OpenAI-compatible vendor folds cached input into `prompt_tokens`,
+    each under its own name (chat harness issue 20):
+      OpenAI    prompt_tokens_details.cached_tokens
+      Kimi      prompt_tokens_details.cached_tokens / .cache_write_tokens,
+                and a top-level cached_tokens
+      DeepSeek  prompt_cache_hit_tokens (prompt = hit + miss)
+    so they are subtracted back out. Without this the daily cap and the
+    metrics counted every cached token as fresh input on this wire only.
+    An inconsistent report (cached > prompt) clamps at zero rather than
+    reporting negative input.
+    """
+    details = u.get("prompt_tokens_details")
+    details = details if isinstance(details, dict) else {}
+    cache_read = (_count(details.get("cached_tokens"))
+                  or _count(u.get("cached_tokens"))
+                  or _count(u.get("prompt_cache_hit_tokens")))
+    cache_create = _count(details.get("cache_write_tokens"))
+    prompt = _count(u.get("prompt_tokens"))
+    return {
+        "input_tokens": max(prompt - cache_read - cache_create, 0),
+        "output_tokens": _count(u.get("completion_tokens")),
+        "cache_read_tokens": cache_read,
+        "cache_create_tokens": cache_create,
+    }
+
+
 def _to_openai_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{"type": "function",
              "function": {"name": t["name"],
@@ -354,12 +397,7 @@ class OpenAICompatProvider:
                         yield LLMEvent(type="ping")
                         continue
                     if isinstance(chunk.get("usage"), dict):
-                        u = chunk["usage"]
-                        usage = {
-                            "input_tokens": int(u.get("prompt_tokens", 0) or 0),
-                            "output_tokens": int(
-                                u.get("completion_tokens", 0) or 0),
-                        }
+                        usage = _usage_from(chunk["usage"])
                     for choice in chunk.get("choices", []):
                         delta = choice.get("delta") or {}
                         for rk in _REASONING_KEYS:

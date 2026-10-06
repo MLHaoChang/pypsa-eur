@@ -91,7 +91,19 @@ one failure mode this harness cannot self-detect:
      still dispatches in the same turn — and only after BOTH results the
      closing sentence of branch 2 for the create.
 
+  8. The parity battery's workflow prompts (chat harness issue 09): "ask me
+     which" -> `ask_user`, "Start the build-network workflow" ->
+     `start_workflow`, "Please end the current workflow" -> `end_workflow`,
+     each followed by one closing sentence.
+  9. "Think it through" (chat harness issue 20): two `reasoning_content`
+     deltas, then the answer, so the panel's thinking display and the
+     probe's `thinking` frame are exercised on this wire.
+
 Every other prompt gets "Saved.".
+
+Every reply's final usage chunk reports `prompt_tokens_details.cached_tokens`
+(8 of 11 prompt tokens), the OpenAI shape, so the probe shows a cache read
+on this wire the way it does on the Anthropic one.
 
 Test-only extra: `GET /_stub/requests` returns what was received — for each
 request its `last_user_text` and the raw payload — so a smoke can assert on
@@ -157,6 +169,7 @@ _ASK = "ask me which"
 # Chat harness issue 09: the parity battery's workflow prompts.
 _START_WF = "Start the build-network workflow"
 _END_WF = "Please end the current workflow"
+_THINK = "Think it through"
 _SITE_GRID = "Run suggest_eh_setup, then tag the import Link"
 _SITE_CRITICAL = "no critical load is tagged"
 _SITE_ALL = "fix every gap you can, one confirmation at a time"
@@ -403,6 +416,10 @@ class Handler(BaseHTTPRequestHandler):
             said = (f"Understood — {name} was not applied." if _DECLINED.search(result)
                     else f"Done — {name} applied.")
             emit(_sse({"choices": [{"delta": {"content": said}}]}))
+        elif _THINK in text and not scripted and not turn_tools:
+            emit(_sse({"choices": [{"delta": {"reasoning_content": "The user wants a reasoned answer; "}}]}))
+            emit(_sse({"choices": [{"delta": {"reasoning_content": "nothing to look up first."}}]}))
+            emit(_sse({"choices": [{"delta": {"content": "Thought it through: nothing to change."}}]}))
         elif _START_WF in text and not scripted and not turn_tools:
             emit(_sse(_call("call_stub_8", "start_workflow", {"workflow_id": "build-network"})))
         elif _START_WF in text and not scripted:
@@ -440,7 +457,8 @@ class Handler(BaseHTTPRequestHandler):
             emit(_sse({"choices": [{"delta": {"content": "Saved."}}]}))
 
         emit(_sse({"choices": [], "usage": {"prompt_tokens": 11,
-                                            "completion_tokens": 3}}))
+                                            "completion_tokens": 3,
+                                            "prompt_tokens_details": {"cached_tokens": 8}}}))
         emit(b"data: [DONE]\n\n")
         emit(b"")  # terminating chunk
 

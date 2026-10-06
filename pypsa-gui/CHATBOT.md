@@ -223,6 +223,14 @@ Cache-read tokens are shown because on a long session they dominate the
 input count, and an in/out pair that ignores them under-reports the work
 by the widest margin exactly when the session is longest.
 
+"In" means the same thing on every wire: input that was NOT served from the
+provider's cache. Anthropic reports it that way; the OpenAI-compatible
+vendors fold cached input into `prompt_tokens` (OpenAI and Kimi under
+`prompt_tokens_details.cached_tokens`, DeepSeek as `prompt_cache_hit_tokens`),
+so the adapter subtracts it back out and reports it as cached (chat harness
+issue 20). The daily token cap and `GET /api/chat/metrics` count the same
+"in", so a cached prefix is not charged as fresh input on one wire only.
+
 ## Cost caps
 
 The server enforces hard ceilings — once a cap is hit the stream emits

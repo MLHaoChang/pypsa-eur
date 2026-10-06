@@ -108,9 +108,11 @@ the budget through `harness_budget.<NAME>`).
 ## Measuring parity
 
 `backend/smoke/run_chat_smoke.py --workflow --profile <id>` drives the same
-battery (start menu, one Choice card, a workflow started and ended) on any
-profile; `docs/superpowers/runbooks/harness-parity-probe.md` has the recipe
-and the runs. Run it on every wire you can reach before calling a harness
+battery (start menu, one Choice card, a workflow started and ended, one
+reasoning prompt) on any profile and prints each turn's usage, with the same
+meaning on every wire, and whether it showed reasoning;
+`docs/superpowers/runbooks/harness-parity-probe.md` has the recipe and the
+runs. Run it on every wire you can reach before calling a harness
 change done.
 
 ## Adding a workflow

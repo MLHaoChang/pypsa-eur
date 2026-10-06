@@ -148,6 +148,9 @@ class PromptResult:
     frame_kinds: set[str] = field(default_factory=set)
     choice_requests: list[dict[str, Any]] = field(default_factory=list)
     workflow_states: list[dict[str, Any]] = field(default_factory=list)
+    # Chat harness issue 20: the `turn_done` usage (the SESSION's running
+    # total, so per-turn figures are differences; see per_turn_usage).
+    usage: dict[str, Any] | None = None
     # In the real run_turn flow, `turn_done` is the success terminator. The
     # stream is closed by the backend right after - iter_lines() returns
     # cleanly. `session_done` is only emitted on error paths (abort, cap
@@ -304,6 +307,7 @@ def _run_one_prompt(prompt: SmokePrompt, ctx: SmokeContext) -> PromptResult:
             # the next iteration; we don't break here so we still see any
             # trailing session_done (e.g. stub path) for diagnostics.
             result.turn_done_seen = True
+            result.usage = frame.data.get("usage")
         elif frame.event == "session_done":
             result.session_done_reason = frame.data.get("reason")
             break
@@ -722,7 +726,43 @@ def build_workflow_prompts() -> list[SmokePrompt]:
             expected_frames={"workflow_state"},
             session_id=session_id,
         ),
+        # Issue 20: a reasoning prompt. No frame is required (whether a live
+        # model shows thinking depends on the profile); the summary prints
+        # whether `thinking` arrived, and the stub always sends it.
+        SmokePrompt(
+            name="W4_reasoning",
+            message=("Think it through before you answer: is there anything "
+                     "in this chat I should change? Answer in one sentence."),
+            session_id=session_id,
+        ),
     ]
+
+
+_USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_create_tokens")
+
+
+def per_turn_usage(results: list[PromptResult]) -> list[dict[str, int] | None]:
+    """What each turn added: `turn_done.usage` is the session's running total,
+    so a turn's own figures are the difference from the previous prompt's
+    (the battery runs every prompt in one session)."""
+    out: list[dict[str, int] | None] = []
+    prev = {k: 0 for k in _USAGE_KEYS}
+    for r in results:
+        u = r.usage if isinstance(r.usage, dict) else None
+        if u is None or not u.get("reported", True):
+            out.append(None)
+            continue
+        cur = {k: int(u.get(k, 0) or 0) for k in _USAGE_KEYS}
+        out.append({k: cur[k] - prev[k] for k in _USAGE_KEYS})
+        prev = cur
+    return out
+
+
+def format_usage(delta: dict[str, int] | None) -> str:
+    if delta is None:
+        return "usage not reported"
+    return (f"in={delta['input_tokens']} cached={delta['cache_read_tokens']} "
+            f"written={delta['cache_create_tokens']} out={delta['output_tokens']}")
 
 
 def check_workflow_results(results: list[PromptResult]) -> list[str]:
@@ -745,6 +785,12 @@ def check_workflow_results(results: list[PromptResult]) -> list[str]:
     if w3 and w3.workflow_states:
         if (w3.workflow_states[-1] or {}).get("workflow") is not None:
             problems.append("W3: workflow_state after end_workflow is not null")
+    # Issue 20: every wire reports usage. A turn without it means the daily
+    # cap and the metrics are blind on that provider.
+    for r in results:
+        u = r.usage if isinstance(r.usage, dict) else None
+        if u is None or u.get("reported") is False:
+            problems.append(f"{r.name}: turn_done carried no usage report")
     return problems
 
 
@@ -855,9 +901,12 @@ def main() -> int:
     print()
     print(_dim("==== Summary ===="))
     print(f"  {passes}/{len(results)} passed  in  {overall:.1f}s total")
-    for r in results:
+    usage = per_turn_usage(results)
+    for r, u in zip(results, usage):
         tag = _green("PASS") if r.passed else _red("FAIL")
-        print(f"    {tag}  {r.name:<28}  {r.seconds:>5.1f}s  tools={len(r.tool_calls)}  errors={len(r.tool_errors)}")
+        thinking = "  thinking" if "thinking" in r.frame_kinds else ""
+        print(f"    {tag}  {r.name:<28}  {r.seconds:>5.1f}s  tools={len(r.tool_calls)}  "
+              f"errors={len(r.tool_errors)}  {format_usage(u)}{thinking}")
     return 0 if passes == len(results) else 1
 
 

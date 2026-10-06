@@ -20,6 +20,17 @@ reads the same on each.
    `build-network` / `orient`.
 3. **W3** — "Please end the current workflow." Expects `end_workflow` and
    `workflow_state` with `workflow: null`.
+4. **W4** — "Think it through before you answer: …" (issue 20). No tool and
+   no frame is required: whether a live model shows its reasoning depends on
+   the profile. The stub always answers it with `reasoning_content`, so on
+   the OpenAI wire it proves reasoning reaches the panel as `thinking`.
+
+Every prompt must also report usage on `turn_done`; a wire that does not
+fails the battery (the daily cap and the metrics would be blind there). The
+summary prints each turn's own usage (the difference of the session totals)
+as `in= cached= written= out=`, with the same meaning on every wire (see
+`pypsa-gui/CHATBOT.md`, "Usage meter"), and `thinking` when the turn showed
+reasoning.
 
 Nothing in it writes a project. Every phrase is scripted by
 `backend/smoke/stub_openai_endpoint.py`, so on the stub a red result means
@@ -61,6 +72,8 @@ frame payloads held.
 | 2026-10-05 | the fix | `anthropic-sonnet` (live, `claude-sonnet-5`) | **3/3**; after `start_workflow` the model followed the `orient` step on its own: `get_meta`, `list_components` ×5, then an `ask_user` card |
 | 2026-10-06 | 9d856fa (issue 08 complete: `budget`, `compose`, `solver_bridge` extracted; master #78/#79/#85 merged) | `stub-openai` | **3/3** |
 | 2026-10-06 | same | `anthropic-sonnet` (live) | **3/3** in 19 s; W1 two tools, W2 three (the model started the workflow and took its first step) |
+| 2026-10-06 | issue 20 (W4 and usage added) | `stub-openai` | **4/4**; per turn `in=6 cached=16 written=0 out=6` on W1–W3 (two model calls each), W4 `in=3 cached=8` with `thinking` |
+| 2026-10-06 | same | `anthropic-sonnet` (live) | **4/4** in 31 s; W1 `in=1359 cached=95062 written=47531`, W4 `in=34 cached=50612`; thinking shown on W1–W3, not on W4 |
 
 **What the first run found.** The workflow tools read the chat session from
 a ContextVar that `run_turn` set at turn start. The route drives `run_turn`

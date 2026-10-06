@@ -131,7 +131,7 @@ the loaded network) and borrow seven designs. Each is an issue under
 | 17 | goal with a round budget | ready-for-agent after 13 (Q17: yes, 5 default, 20 max) | needs 13 |
 | 18 | approval audit events | ready after 13 | log state |
 | 19 | MCP client | deferred (Q18: later, one spec with 11) | security surface |
-| 20 | cache accounting and reasoning on the OpenAI wire | ready-for-agent | small |
+| 20 | cache accounting and reasoning on the OpenAI wire | done 2026-10-06 | — |
 
 **Pilot decision.** None of it goes into PR #86: the PR is a 119-file,
 behaviour-preserving move under review, and the two highest-value items
