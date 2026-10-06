@@ -208,3 +208,11 @@ One PR, owner-merged.
   after it: the `__post_init__` check runs only with parts, uses `math.isclose` and the None rule both ways;
   `scale_capex` also scales fixed replacement entries; L < 1 y refused; the `asset_lifetime_short` wording; the
   identity's whole-year scope; §5 aligned with S8.
+- **Code round 1 (a4dd7f2): PASS WITH CONDITIONS.** The identity holds through `run_case` on 400 cases (H 1–40,
+  lifetimes 1 … 40, rates 0–15 %; worst relative error 9.7e-14); GS salvage parity on 630 cases. B1 a lifetime of 0
+  under `fixed` + `remaining_life_annuity` divided by zero. The implementer's three readings (a governed asset is
+  one with a finite part; the capital-cost reason read from the case flags; a fixed entry valued as a full
+  re-purchase) accepted. Also taken: `build_year` bounded to 1900..2200, a NaN part lifetime read as missing, the
+  terminal basis wording, the editor clearing `value`. Fixed in d5899b8.
+- **Code round 2 (d5899b8): PASS.** 1,046 backend tests, `qa_investment_case.py` 251/251, vitest 144, tsc clean.
+  Open, non-binding: an infinite and a missing part lifetime hash alike (`_canon` maps non-finite floats to None).
