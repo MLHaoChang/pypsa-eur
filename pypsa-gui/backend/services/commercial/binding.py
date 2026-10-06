@@ -220,3 +220,252 @@ def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
 
         stress.save_scenarios(project_dir, planned)
     return commercial.model_dump(mode="json")
+
+
+# ── Binding on a project context (IC U1 follow-up, GS Q15) ─────────────────
+
+SOLVER_IN_FLIGHT_MESSAGE = ("a solve is running on this project; change the commercial "
+                            "config after it finishes")
+
+
+def _solve_running(ctx) -> bool:
+    """A live solve worker on `ctx` (the router's `_solver_in_flight_ctx`,
+    restated here so a service needs no router import)."""
+    with ctx.solver_state_lock:
+        t = ctx.solver_state.get("thread")
+    return t is not None and t.is_alive()
+
+
+def context_resolvers(ctx, user=None) -> tuple[Callable[[object], pd.Series],
+                                               Callable[[object], dict]]:
+    """(series resolver, item resolver) for the Library refs of `ctx`'s config.
+
+    WHICH ORG. A ref resolves in the PROJECT's org, `ctx.org_id` (stamped on
+    every loaded context by `project_registry.bind_context`); `user`'s org only
+    when the context has none (an unsaved network). A fork (a study-owned
+    project) inherits `org_id` from its base project
+    (`project_registry.create_scenario`),
+    so a study's fork resolves, and mints, its series in its base project's
+    org. In local mode that is always `local_mode.LOCAL_ORG_ID`: the desktop
+    build seeds one org, and every project row takes the local user's org.
+    No org at all is `library_org_unknown` (409), raised only when a ref is
+    actually resolved, so a config with no refs binds on an unsaved network."""
+    from uuid import UUID
+
+    from services.library import items as library_items
+    from services.library import series_store
+
+    def resolver(read):
+        def resolve(ref):
+            from db.models import User
+            from db.session import SessionLocal
+            from services import library_acl
+
+            # The context carries the org id as a string (`org:uuid` registry key).
+            org = UUID(str(ctx.org_id)) if ctx.org_id else None
+            with SessionLocal() as db:
+                if org is None and isinstance(user, User):
+                    org = library_acl.org_of(db, user)
+                if org is None:
+                    raise BindingRefusal(
+                        409, "library_org_unknown",
+                        "save the project first: a Library ref resolves in the project's "
+                        "organization")
+                try:
+                    return read(db, org, ref)
+                except (series_store.LibraryRefNotFound, series_store.LibraryRefStale) as exc:
+                    raise BindingRefusal(409, "library_ref_stale", str(exc)) from exc
+        return resolve
+
+    # Looked up at call time, so a patched store is the one used.
+    return (resolver(lambda db, org, ref: series_store.resolve(db, org, ref)),
+            resolver(lambda db, org, ref: library_items.resolve(db, org, ref)))
+
+
+def bind_commercial_on_context(ctx, commercial, *, user=None,
+                               in_flight: Callable[[object], bool] | None = None
+                               ) -> dict | None:
+    """`bind_commercial` on ANY project context: the active one (the
+    solver-config route) or a context off the foreground (a study-owned fork,
+    GS U2 `compile.bind_on_fork`). It supplies what the route used to:
+
+      * the in-flight guard: a solve running on `ctx` refuses
+        (`BindingRefusal(409, "solver_in_flight")`); `in_flight` replaces the
+        check (the route passes its own `_solver_in_flight_ctx`);
+      * `project_dir` from `ctx.storage_dir` (None for an unsaved context: an
+        FCA agreement is then `fca_needs_saved_project`);
+      * the Library resolvers in `ctx`'s org (`context_resolvers`);
+      * `ctx.network`, written under `ctx.mutation_lock`.
+
+    Nothing here touches the active context, so a fork's bind never writes a
+    column into the foreground network. Returns the plain dict to store on
+    `SolverConfig.commercial` (None when `commercial` is None, clearing);
+    storing it is the caller's job."""
+    check = in_flight if in_flight is not None else _solve_running
+    if check(ctx):
+        raise BindingRefusal(409, "solver_in_flight", SOLVER_IN_FLIGHT_MESSAGE)
+    project_dir = pathlib.Path(ctx.storage_dir) if ctx.storage_dir else None
+    resolve, resolve_item = context_resolvers(ctx, user)
+    return bind_commercial(ctx.network, commercial, project_dir=project_dir,
+                           resolve_ref=resolve, lock=ctx.mutation_lock,
+                           resolve_item=resolve_item)
+
+
+# ── The commercial root: the site connection (IC U1 follow-up, item b) ─────
+
+SITE_CONNECTION_KEYS = ("poc_link", "export_link", "timezone")
+
+
+def _grid_like(n, bus: str) -> bool:
+    """A bus that looks like the grid side of a meter: named or carried
+    `grid`, or the bus of a Generator tagged `eh_role=grid_supply`. A hint
+    for the direction check and the candidates, never a refusal on its own."""
+    if "grid" in str(bus).casefold():
+        return True
+    carrier = n.buses["carrier"].get(bus, "") if "carrier" in n.buses.columns else ""
+    if "grid" in str(carrier).casefold():
+        return True
+    g = n.generators
+    if "eh_role" in g.columns and len(g):
+        supply = g[g["eh_role"].astype(str) == "grid_supply"]
+        return bool((supply["bus"].astype(str) == str(bus)).any())
+    return False
+
+
+def _two_way(n, name: str) -> bool:
+    if float(n.links.at[name, "p_min_pu"]) < 0:
+        return True
+    dyn = n.links_t.p_min_pu
+    return name in dyn.columns and bool((dyn[name] < 0).any())
+
+
+def _role(n, name: str) -> str:
+    """The Link's `eh_role` tag, "" when untagged (absent, NaN or blank)."""
+    if "eh_role" not in n.links.columns:
+        return ""
+    raw = n.links.at[name, "eh_role"]
+    if raw is None or (isinstance(raw, float) and raw != raw):
+        return ""
+    tag = str(raw).strip()
+    return "" if tag.casefold() in ("", "nan", "none") else tag
+
+
+def site_connection_candidates(n) -> dict[str, list[str]]:
+    """One-way Links that could be the meter, most likely first:
+    `poc_link` from a grid-like bus (or tagged `eh_role=grid_import`) into a
+    bus that is not, `export_link` the other way (or tagged `grid_export`).
+    A Link tagged for the other side is never listed; two-way Links never
+    are (the binding refuses them). Mirrored in the frontend's
+    `pages/results/siteConnection.ts`."""
+    one_way = [str(l) for l in n.links.index if not _two_way(n, l)]
+
+    def score(link: str, into_site: bool) -> int:
+        b0, b1 = str(n.links.at[link, "bus0"]), str(n.links.at[link, "bus1"])
+        src, dst = (b0, b1) if into_site else (b1, b0)
+        tag, other = (("grid_import", "grid_export") if into_site
+                      else ("grid_export", "grid_import"))
+        role = _role(n, link)
+        if role == other:
+            return 0    # a tag beats the name: never offered for the other side
+        return (4 if role == tag else 0) + \
+            (2 if _grid_like(n, src) and not _grid_like(n, dst) else 0)
+
+    def ranked(into_site: bool) -> list[str]:
+        scored = [(score(l, into_site), l) for l in one_way]
+        return [l for s, l in sorted(scored, key=lambda t: (-t[0], t[1])) if s > 0]
+
+    return {"poc_link": ranked(True), "export_link": ranked(False)}
+
+
+def check_site_connection(n, poc_link: str, export_link: str | None, *,
+                          direction_only: bool = False, check_poc: bool = True,
+                          check_export: bool = True,
+                          group_members: list[str] | None = None) -> None:
+    """Refuse a meter this network cannot be: `BindingRefusal(422, code, …)`.
+
+      * `site_connection_link_missing`: a name that is not a Link (the
+        message lists the likely candidates);
+      * `site_connection_invalid`: a two-way Link (the binding refuses reverse
+        flow), or one Link named as both;
+      * `site_connection_wrong_direction`: the PoC tagged `grid_export` or
+        flowing from a site bus into a grid-like one; an export Link whose
+        `bus0` is not on the site side of the PoC (it starts on the grid side)
+        or whose `bus1` is (it never reaches the grid).
+
+    The site side is what `lp_bindings._meter_sides` reaches from the PoC's
+    `bus1` (a group contract's: every member's, `group_members`) without
+    crossing the meter. An explicit `eh_role` tag beats the
+    name heuristic: a Link tagged `grid_import` is a PoC whatever its buses
+    are called (a site bus named `microgrid_ac`); the name check runs only on
+    an untagged Link, and a refusal caused by a tag says so.
+
+    `direction_only` (the solver-config route): a missing or two-way Link is
+    left to the binding, which refuses it with its own code
+    (`commercial_binding_invalid`); only the direction and the one-Link-as-both
+    checks run. `check_poc` / `check_export` False skip that side's own
+    checks (the route re-checks only the Link that changed, so a config saved
+    before the route check is not refused for a Link the user did not touch);
+    the pair checks always run: one Link as both, and the export Link on the
+    site side of the PoC (a new PoC moves the site side). Pure: no write."""
+    from models.commercial import CommercialConfig
+
+    def missing(name, what):
+        cand = site_connection_candidates(n)[what]
+        hint = f"; likely: {cand[:5]}" if cand else ""
+        raise BindingRefusal(422, "site_connection_link_missing",
+                             f"{what} {name!r} is not a Link in this network{hint}")
+
+    if export_link is not None and export_link == poc_link:
+        raise BindingRefusal(422, "site_connection_invalid",
+                             f"{poc_link!r} cannot be both the import (poc_link) and the "
+                             "export Link: model export with a second, one-way Link")
+    if poc_link not in n.links.index:
+        if direction_only:
+            return
+        missing(poc_link, "poc_link")
+    if export_link is not None and export_link not in n.links.index:
+        if direction_only:
+            export_link = None
+        else:
+            missing(export_link, "export_link")
+    sides = [(poc_link, "poc_link")] if check_poc else []
+    if check_export:
+        sides.append((export_link, "export_link"))
+    for name, what in sides:
+        if name is not None and _two_way(n, name):
+            if direction_only:
+                return
+            raise BindingRefusal(422, "site_connection_invalid",
+                                 f"{what} {name!r} allows reverse flow (p_min_pu < 0); the "
+                                 "meter Links must be one-way (model export with a separate "
+                                 "export_link)")
+    b0, b1 = str(n.links.at[poc_link, "bus0"]), str(n.links.at[poc_link, "bus1"])
+    role = _role(n, poc_link) if check_poc else ""
+    if role == "grid_export":
+        raise BindingRefusal(422, "site_connection_wrong_direction",
+                             f"poc_link {poc_link!r} is tagged eh_role=grid_export: it is "
+                             "tagged as the export Link, not the point of connection; name "
+                             "the import Link (or retag it)")
+    if check_poc and not role and _grid_like(n, b1) and not _grid_like(n, b0):
+        raise BindingRefusal(422, "site_connection_wrong_direction",
+                             f"poc_link {poc_link!r} runs {b0} → {b1}, into the grid: the "
+                             "point of connection imports from the grid side (bus0) to the "
+                             "site (bus1); name the Link that runs the other way, or tag it "
+                             f"eh_role=grid_import if {b1!r} is the site")
+    if export_link is None or not (check_poc or check_export):
+        return
+    if check_export and _role(n, export_link) == "grid_import":
+        raise BindingRefusal(422, "site_connection_wrong_direction",
+                             f"export_link {export_link!r} is tagged eh_role=grid_import: it "
+                             "is tagged as an import Link, not the export Link; name the "
+                             "export Link (or retag it)")
+    # Unvalidated on purpose: only the meter Links are read, and a group's other
+    # fields (cap, contract) are the binding's to check.
+    site, _bypass = lp_bindings._meter_sides(n, CommercialConfig.model_construct(
+        poc_link=poc_link, export_link=export_link, group_members=list(group_members or [])))
+    e0, e1 = str(n.links.at[export_link, "bus0"]), str(n.links.at[export_link, "bus1"])
+    if e0 not in site or e1 in site:
+        raise BindingRefusal(422, "site_connection_wrong_direction",
+                             f"export_link {export_link!r} runs {e0} → {e1}: an export Link "
+                             f"runs from the site side of {poc_link!r} ({sorted(site)[:5]}) to "
+                             "the grid side")
