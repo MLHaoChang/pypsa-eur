@@ -3,6 +3,13 @@
 **Verified against the tree on 2026-09-12.** Every entry below was reproduced or
 re-read in source on that date, not carried forward on trust.
 
+**2026-09-29:** four items closed and removed per the convention below — the
+user-timeseries tenancy item, and the three follow-ups fixing it uncovered (an
+obsolete `persist_user_ts` predicate at three call sites, a hydrate that ignored
+its project's `user_ts.json`, and an adequacy-sweep test that could not fail for
+its own regression). Their findings carry the detail. Nothing else was re-verified
+on that date, so the entries below still date from 2026-09-12.
+
 This file exists because GitHub Issues is **disabled** on this repository, so
 there is nowhere else to keep a queue. It is deliberately thin: one entry per
 open item, with the anchor and the source document. The analysis lives in
@@ -14,34 +21,6 @@ fixed weeks earlier; see the 2026-09-12 triage commit).
 Closed items are not listed. Each finding in `findings/` now carries its own
 truthful status line, so a file that is not named here is either closed or a
 verification record.
-
----
-
-## Critical
-
-### 1. The user-timeseries store is a process global shared across tenants
-
-`services/user_timeseries.py:39` — `_user_ts` is keyed `(component, attribute,
-column)` with no org, project or session. It is authoritative, not a cache: the
-timeseries GET prefers it over the network's own data, and every foreground save
-serialises it into that project's `user_ts.json` and reapplies it onto the
-network before the netCDF export.
-
-Reproduced: org A uploads a profile for `L1`; org B activates its OWN project and
-reads A's values, then saves them into B's storage. Cross-tenant read AND
-cross-tenant write. The desktop build is affected too, as a multi-project
-data-integrity bug.
-
-The code mitigated only the BACKGROUND case, on the stated basis that the store
-"belongs to the FOREGROUND ctx" — true for one desktop user, false once one
-process serves many signed-in sessions, where every session is a foreground.
-
-NOT patched: ~230 references across 13 modules; per-`ProjectContext` isolation is
-the real fix and needs its own plan. A narrow containment exists (restore-or-clear
-on activate, as `load_project` already does) but closes only the demonstrated
-path, not the class — two concurrent sessions on different projects still share
-one dict. Full analysis, reproduction and fix criteria:
-`findings/2026-09-12-user-ts-is-a-process-global-shared-across-tenants.md`.
 
 ---
 
@@ -115,7 +94,8 @@ used by `compare`, `adequacy_worksheet`, `uploads`, `snapshots`, `gridspine` and
 routes), `results` (48), `chat` (20), `simulation` (14), `io` (8) — 171 of 267.
 Those rely on the path-prefix middleware instead.
 
-This is the structural cause of item 1, and it is a shape rather than a one-off:
+This is the structural cause of the route-scoping defects above, and it is a
+shape rather than a one-off:
 a prefix list denies by omission, so a new router under a new prefix is ungated
 by default, silently, with nothing failing. A dependency declared on the route
 has the opposite default. Worth a test that fails when a route is mounted under

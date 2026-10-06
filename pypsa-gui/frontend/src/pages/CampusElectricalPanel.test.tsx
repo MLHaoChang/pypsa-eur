@@ -17,7 +17,7 @@ vi.mock('../store/uiStore', () => ({
   useUIStore: (sel: (s: { currentProject: string | null }) => unknown) => sel({ currentProject: store.currentProject }),
 }))
 
-const api = vi.hoisted(() => ({ state: vi.fn(), draft: vi.fn(), save: vi.fn(), run: vi.fn() }))
+const api = vi.hoisted(() => ({ state: vi.fn(), draft: vi.fn(), save: vi.fn(), run: vi.fn(), gridCodes: vi.fn() }))
 vi.mock('../api/campusElectrical', async () => {
   const real = await vi.importActual<typeof import('../api/campusElectrical')>('../api/campusElectrical')
   return { ...real, campusApi: api }
@@ -69,6 +69,7 @@ beforeEach(() => {
   store.currentProject = 'Hub A'
   vi.clearAllMocks()
   api.state.mockResolvedValue(empty)
+  api.gridCodes.mockResolvedValue({ shipped: {}, published: [], drafts: [], documents: [], extraction_available: false })
 })
 afterEach(() => cleanup())
 

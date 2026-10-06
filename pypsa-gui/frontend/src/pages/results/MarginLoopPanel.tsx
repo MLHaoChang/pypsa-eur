@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Gauge, ShieldCheck, Square } from 'lucide-react'
-import { resultsApi } from '../../api/simulation'
+import { MAX_LOOP_SOLVES, resultsApi } from '../../api/simulation'
 import type {
   McStatus, MarginIteration, MarginLoopPayload, MarginLoopRequestBody,
 } from '../../api/simulation'
@@ -12,7 +12,7 @@ import { basisSuffix, type CoptPayload } from './adequacy'
 import { blockerMessage, trim } from './McPanel'
 import {
   compact, entryHorizonYears, eur, leverSpelling, loleCell, restoreSentence,
-  MAX_LOOP_SOLVES, targetEcho, wireTarget, type LeverCopy,
+  targetEcho, wireTarget, type LeverCopy,
 } from './LoopPanel'
 
 // ── The margin-driven planning loop (Phase 9, margin-loop spec §3) ──────────

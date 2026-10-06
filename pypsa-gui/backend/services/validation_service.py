@@ -983,8 +983,8 @@ def _check_myopic_foresight(n, cfg) -> list[Issue]:
     if not network_periods and not cfg_periods:
         out.append(_err("myopic_no_periods", "", "",
             "Myopic foresight needs at least one investment period. The "
-            "network's snapshot MultiIndex is empty at level 0 — promote "
-            "snapshots to multi-period under Snapshots → Multi-period first, "
+            "network's snapshot MultiIndex is empty at level 0 — set "
+            "Model Horizon → Mode to Multi-period first, "
             "or switch solve_strategy back to 'full'."))
     # Flat snapshots on a multi-period config are auto-promoted by
     # _apply_modelling_assumptions step 4 when cfg.investment_periods is

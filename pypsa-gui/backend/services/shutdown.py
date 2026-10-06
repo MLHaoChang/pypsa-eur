@@ -262,7 +262,6 @@ def _holds_work(ctx: Any) -> bool:
 def flush_all(
     *,
     contexts: list[Any],
-    active: Any,
     save: Callable[[Any, bool], None],
     flush_chat: Callable[[], None],
     safe: bool,
@@ -270,10 +269,10 @@ def flush_all(
     """
     Persist every resident context. Returns the ones that could NOT be saved.
 
-    `persist_user_ts` is `ctx is active`, and the asymmetry is required:
-    `_serialize_user_ts` reads a process-global store belonging to the
-    foreground. True for everything stamps the foreground's series onto every
-    project; False for everything loses the active project's.
+    `persist_user_ts` is `may_rewrite_user_ts(ctx)`, judged per context. There
+    is deliberately no `active` parameter any more: it was read from
+    `PyPSAService._active`, a bootstrap slot that is None at quit time, and so
+    left every `user_ts.json` stale (see the 2026-09-28 shutdown-flush finding).
 
     `safe=False` means the abort did not finish, so a 409 is expected rather
     than surprising — it is still reported, because the point is to tell the
@@ -281,12 +280,14 @@ def flush_all(
     """
     from fastapi import HTTPException
 
+    from services.project_context import may_rewrite_user_ts
+
     problems: list[str] = []
 
     for ctx in contexts:
         name = _context_label(ctx)
         try:
-            save(ctx, ctx is active)
+            save(ctx, may_rewrite_user_ts(ctx))
         except HTTPException as exc:
             # Caught SPECIFICALLY. A 409 means the write was REFUSED rather
             # than failed, which the user needs to hear about — but the cause

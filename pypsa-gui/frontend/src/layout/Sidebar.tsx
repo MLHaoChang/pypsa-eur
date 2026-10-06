@@ -9,7 +9,7 @@ import {
   Thermometer, Zap, Camera, LayoutDashboard,
   Sun, Moon, Rows2, Rows3,
   GitBranch as GitBranchIcon, ListChecks, FlaskConical,
-  MessageSquare, LayoutGrid, Users, SlidersHorizontal, FileText, Compass, Cable, Scale,
+  MessageSquare, LayoutGrid, Users, FileText, Compass, Cable, Scale,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
@@ -35,8 +35,6 @@ import NewProjectWizard from './NewProjectWizard'
 import { H2Icon } from '../components/AssetIcons'
 import ProjectPicker from '../components/ProjectPicker'
 import { useSolveQueue } from '../hooks/useSolveQueue'
-import { useLocalSettingsAvailable } from '../hooks/useLocalSettings'
-import { useLLMSettingsAvailable } from '../hooks/useLLMSettings'
 import { isActive } from '../api/solveQueue'
 import { evaluateMutation } from '../utils/mutationGuard'
 import { mismatchSentence } from '../utils/projectMismatch'
@@ -384,7 +382,7 @@ function IoModal({ onClose, initialTab = 'import', projectName }: {
             <p className="text-[9px] font-bold text-accent uppercase tracking-widest">NETWORK</p>
             <p className="text-sm font-semibold text-text">Project Data</p>
           </div>
-          <button onClick={onClose} className="p-1 text-muted hover:text-text transition-colors"><X size={16} /></button>
+          <button onClick={onClose} aria-label="Close" className="p-1 text-muted hover:text-text transition-colors"><X size={16} /></button>
         </div>
         <div className="flex border-b border-border px-5">
           {(['import', 'export'] as const).map(t => (
@@ -488,7 +486,7 @@ function OpenProjectModal({
       <div className="bg-bg rounded-xl shadow-2xl w-[480px] max-h-[80vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
           <span className="text-sm font-semibold text-text">Open project</span>
-          <button onClick={onClose} className="p-1 text-muted hover:text-text"><X size={15} /></button>
+          <button onClick={onClose} aria-label="Close" className="p-1 text-muted hover:text-text"><X size={15} /></button>
         </div>
         {/* Browse from disk — works for projects exported as .pypsaproj.zip
             from another machine or backed up outside the projects folder. */}
@@ -544,7 +542,7 @@ function SaveNameModal({
       <div className="bg-bg rounded-xl shadow-2xl w-80 overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <span className="text-sm font-semibold text-text">Save project</span>
-          <button onClick={onClose} className="p-1 text-muted hover:text-text"><X size={15} /></button>
+          <button onClick={onClose} aria-label="Close" className="p-1 text-muted hover:text-text"><X size={15} /></button>
         </div>
         <div className="p-4 space-y-3">
           <label className="flex flex-col gap-1">
@@ -1291,14 +1289,27 @@ function DataSectionContent({ onCloseModal }: { onCloseModal?: () => void }) {
 // Grouped here rather than spread through Simulation, which is about setting
 // up and solving the model itself.
 function StudiesSectionContent({ onCloseModal }: { onCloseModal?: () => void }) {
-  const { setSlidePanel, activeSlidePanel } = useUIStore()
+  const { setSlidePanel, activeSlidePanel, currentProject } = useUIStore()
+  // Planning → dynamics only works in a study project; in any other project
+  // its panel is a "not a study" dead end (UX assessment Q10). Hidden only
+  // when the project list says so: while the list is loading, or the open
+  // project is not in it, the row stays (unknown is not "not a study").
+  const { data: projects } = useQuery({
+    queryKey: ['projects'],
+    queryFn: projectsApi.list,
+    staleTime: 10_000,
+  })
+  const openProject = projects?.find(p => p.id === currentProject || p.name === currentProject)
+  const knownNotAStudy = !!openProject && openProject.project_kind !== 'planning_dynamics'
   return (
     <div className="pb-1">
-      <SItem icon={<FlaskConical size={15} />} label="Planning → dynamics"
-        title="Rank a year's extreme hours, screen N-1/N-2 and fault levels, and export PowerFactory handoff bundles (gridspine)."
-        active={activeSlidePanel === 'gridspine'}
-        onClick={() => { setSlidePanel(activeSlidePanel === 'gridspine' ? null : 'gridspine'); onCloseModal?.() }}
-      />
+      {!knownNotAStudy && (
+        <SItem icon={<FlaskConical size={15} />} label="Planning → dynamics"
+          title="Rank a year's extreme hours, screen N-1/N-2 and fault levels, and export PowerFactory handoff bundles (gridspine)."
+          active={activeSlidePanel === 'gridspine'}
+          onClick={() => { setSlidePanel(activeSlidePanel === 'gridspine' ? null : 'gridspine'); onCloseModal?.() }}
+        />
+      )}
       <SItem icon={<Cable size={15} />} label="Campus electrical"
         title="Take a solved hub to its electrical design: transformers, reactive compensation, short circuit and PCC grid-code compliance at the critical hours (AC load flow)."
         active={activeSlidePanel === 'campusElectrical'}
@@ -1349,17 +1360,6 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
   // are active (see useSolveQueue), so this idle-mounted consumer is cheap.
   const { data: solveQueue } = useSolveQueue()
   const activeQueueCount = (solveQueue?.jobs ?? []).filter(isActive).length
-  // The Settings pane hosts two independently-gated surfaces (Task 15): the
-  // desktop-only Anthropic key + log (routes 404 on a web deployment) and
-  // AssistantModelSettings (super-admin-gated, meaningful on a server too).
-  // The row shows when EITHER is reachable — hiding on local-settings alone
-  // would take the row away from a web super-admin who can still reach the
-  // assistant-model section. A nav entry that opens a genuinely empty panel
-  // is still worse than no nav entry, which is why this stays an OR rather
-  // than always-on. Both hooks share their pane's own react-query fetch.
-  const localSettingsAvailable = useLocalSettingsAvailable()
-  const llmSettingsAvailable = useLLMSettingsAvailable()
-  const settingsAvailable = localSettingsAvailable || llmSettingsAvailable
   return (
     <div>
       <SItem icon={<Settings2 size={15} />} label="Solver Settings"
@@ -1367,13 +1367,6 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
         active={activeSlidePanel === 'simparams'}
         onClick={() => { setSlidePanel(activeSlidePanel === 'simparams' ? null : 'simparams'); onCloseModal?.() }}
       />
-      {settingsAvailable && (
-        <SItem icon={<SlidersHorizontal size={15} />} label="Settings"
-          title="Choose the assistant model and, on desktop, store your Anthropic API key and find the application log."
-          active={activeSlidePanel === 'settings'}
-          onClick={() => { setSlidePanel(activeSlidePanel === 'settings' ? null : 'settings'); onCloseModal?.() }}
-        />
-      )}
       <SItem icon={<Clock size={15} />} label="Model Horizon"
         title="Define the snapshots (time steps) and investment periods/years the optimisation plans over."
         active={activeSlidePanel === 'horizon'}
@@ -1396,11 +1389,10 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
           >?</span>
         ) : issueCount > 0 ? (
           <span
-            className="shrink-0 ml-1 text-[10px] font-mono font-semibold px-1.5 py-px rounded"
-            style={{
-              background: hasErrors ? 'rgba(239,68,68,0.18)' : 'rgba(217,119,6,0.18)',
-              color:      hasErrors ? '#f87171'             : '#f59e0b',
-            }}
+            className={`shrink-0 ml-1 text-[10px] font-mono font-semibold px-1.5 py-px rounded ${
+              hasErrors ? 'bg-danger/15 text-danger' : 'bg-warn/15 text-warn'}`}
+            data-severity={hasErrors ? 'error' : 'warning'}
+            title={issueBadgeTitle(preflight?.errors ?? 0, preflight?.warnings ?? 0)}
           >{issueCount}</span>
         ) : undefined}
         onClick={() => { setSlidePanel(activeSlidePanel === 'issues' ? null : 'issues'); onCloseModal?.() }}
@@ -1575,14 +1567,14 @@ function ModeSwitcher({ small = false }: { small?: boolean }) {
             <Icon size={13} {...({} as any)} />
           </button>
         ))}
-        <button title="Zoom in"
+        <button aria-label="Zoom in" title="Zoom in"
           className="flex items-center justify-center rounded transition-colors" style={{ width: 32, height: 28, color: 'var(--color-ink-400)', border: '1px solid transparent' }}
           onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-text)' }}
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-ink-400)' }}
           onClick={() => (window as unknown as { rfInstance?: { zoomIn: () => void } }).rfInstance?.zoomIn?.()}>
           <ZoomIn size={12} />
         </button>
-        <button title="Zoom out"
+        <button aria-label="Zoom out" title="Zoom out"
           className="flex items-center justify-center rounded transition-colors" style={{ width: 32, height: 28, color: 'var(--color-ink-400)', border: '1px solid transparent' }}
           onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-text)' }}
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-ink-400)' }}
@@ -1655,7 +1647,7 @@ function PreferencesFooter({ small = false }: { small?: boolean }) {
   if (small) {
     return (
       <div className="flex flex-col gap-1 items-center py-2 border-t border-border">
-        <button
+        <button aria-label={themeTitle}
           onClick={toggleTheme} title={themeTitle}
           className="flex items-center justify-center rounded transition-colors"
           style={{
@@ -1668,7 +1660,7 @@ function PreferencesFooter({ small = false }: { small?: boolean }) {
         >
           <ThemeIcon size={13} />
         </button>
-        <button
+        <button aria-label={densityTitle}
           onClick={toggleDensity} title={densityTitle}
           className="flex items-center justify-center rounded transition-colors"
           style={{
@@ -1726,7 +1718,7 @@ function IconStripBtn({
 }) {
   const active = activeFlyout === sectionId
   return (
-    <button
+    <button aria-label={label}
       onClick={onClick}
       title={label}
       data-testid={`sidebar-section-${sectionId}`}
@@ -1788,7 +1780,7 @@ function FlyoutPanel({
         <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-ink-400">
           {SECTION_LABELS[section]}
         </span>
-        <button onClick={onClose} className="text-ink-400 hover:text-text transition-colors">
+        <button onClick={onClose} aria-label="Close" className="text-ink-400 hover:text-text transition-colors">
           <X size={12} />
         </button>
       </div>
@@ -1813,6 +1805,13 @@ function FlyoutPanel({
 }
 
 // ── Main Sidebar ───────────────────────────────────────────────────────────────
+/** "2 errors · 1 warning": the Issues badge says what its number counts. */
+function issueBadgeTitle(errors: number, warnings: number): string {
+  const part = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+  return [errors > 0 && part(errors, 'error'), warnings > 0 && part(warnings, 'warning')]
+    .filter(Boolean).join(' · ')
+}
+
 export default function Sidebar() {
   const {
     sidebarMode, setSidebarMode, toggleSidebar, canvasMode, setCanvasMode,
@@ -1914,7 +1913,7 @@ export default function Sidebar() {
   // ── Hidden → floating tab ──────────────────────────────────────────────────
   if (sidebarMode === 'hidden') {
     return (
-      <button
+      <button aria-label="Show sidebar"
         onClick={() => setSidebarMode('icon')}
         title="Show sidebar  ["
         className="flex items-center justify-center transition-colors"
@@ -1941,7 +1940,7 @@ export default function Sidebar() {
           {/* Brand icon + expand */}
           <div className="flex flex-col items-center w-full border-b border-border shrink-0 py-2 gap-0.5"
             style={{ height: 44, justifyContent: 'center' }}>
-            <button
+            <button aria-label="Expand sidebar"
               onClick={() => setSidebarMode('expanded')}
               title="Expand sidebar"
               className="flex items-center justify-center text-muted hover:text-text transition-colors"
@@ -2020,7 +2019,7 @@ export default function Sidebar() {
             <span className="text-[18px] leading-none">⚡</span>
             <span className="text-text font-bold text-[13px] tracking-tight">PyPSA Studio</span>
           </div>
-          <button
+          <button aria-label="Collapse to icon strip"
             onClick={() => setSidebarMode('icon')}
             title="Collapse to icon strip  ["
             className="flex items-center justify-center text-ink-400 hover:text-text transition-colors rounded"

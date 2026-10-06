@@ -113,5 +113,15 @@ describe('Sidebar Issues badge — preflight failure vs. clean vs. findings (ADR
       expect(issuesButton().textContent).toBe('Issues3')
     })
     expect(screen.queryByTitle(/Could not check for issues/)).toBeNull()
+    // Q8: the badge says what its number counts and takes the error colour.
+    const badge = screen.getByTitle('2 errors · 1 warning')
+    expect(badge.getAttribute('data-severity')).toBe('error')
+  })
+
+  it('takes the warning colour when there are only warnings', async () => {
+    vi.mocked(simulationApi.preflight).mockResolvedValue({ ok: true, errors: 0, warnings: 1, issues: [] })
+    renderSidebar()
+    const badge = await screen.findByTitle('1 warning')
+    expect(badge.getAttribute('data-severity')).toBe('warning')
   })
 })

@@ -13,7 +13,9 @@ check (``CHECKS``):
     Every other bus. If the profile carries a ``campus_voltage`` band, that
     band and its clause and tag are used. Otherwise the buses are held to the
     same banded limits as the PCC. Inside the campus these are a **design**
-    limit, not a code requirement, so that fallback is tagged ``assumed``.
+    limit, not a code requirement, so that fallback is tagged ``assumed``,
+    unless the band is still ``extracted`` (read from a document and not yet
+    confirmed), which it then stays.
 ``transformer_loading``
     The highest loading of any transformer, intact or N-1, against 100 % of
     its rating (equipment).
@@ -28,7 +30,8 @@ Every row carries:
   measure is recommended, because those measures move voltages and the
   study did not re-solve with them in place.
 - ``value``, ``limit``, ``unit``, the worst ``(period, hour)``, ``clause``,
-  ``source`` and ``detail``.
+  ``source`` and ``detail``. ``source`` is the limit's own tag, so a limit
+  read from an uploaded grid code and not yet confirmed says ``extracted``.
 
 pandas only, plus the profile's band lookup.
 """
@@ -105,7 +108,10 @@ def campus_compliance(bus, trafo, reactive, sizing, compensation, short_circuit,
             continue
         status, value, limit, where, band, b, case = v
         after = "not_rechecked" if measures else status
-        source = band["source"] if own or not design else "assumed"
+        # The code band applied inside the campus is a design choice, so
+        # assumed; but a band nobody has confirmed stays extracted, so an
+        # unconfirmed number is never laundered into an engineering choice.
+        source = band["source"] if own or not design or band["source"] == "extracted" else "assumed"
         what = ("code band at the connection point" if not design else
                 "the profile's campus design band" if own else
                 "design limit inside the campus, the code band applied as one")

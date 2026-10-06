@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Repeat, ShieldCheck, Square } from 'lucide-react'
-import { resultsApi } from '../../api/simulation'
+import { MAX_LOOP_SOLVES, resultsApi } from '../../api/simulation'
 import type {
   CouplingIteration, CouplingLoopPayload, CouplingLoopRequestBody,
   CouplingMcBlock, McStatus,
@@ -11,11 +11,6 @@ import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvali
 import { nk } from '../../utils/queryKeys'
 import { basisSuffix, type CoptPayload } from './adequacy'
 import { blockerMessage, ciRange, trim } from './McPanel'
-
-/** The loops' solve ceiling — mirrors `MAX_LOOP_SOLVES` in
- *  backend/services/adequacy/coupling.py, the cap the routes enforce;
- *  tests/test_loop_solve_ceiling_parity.py pins the two equal. */
-export const MAX_LOOP_SOLVES = 8
 
 // ── The adequacy-coupled planning loop (Phase 7, plan §3 / spec §4) ──────────
 //
