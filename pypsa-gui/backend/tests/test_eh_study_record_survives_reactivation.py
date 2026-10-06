@@ -447,3 +447,61 @@ def test_the_mirror_round_trips_through_the_restricted_unpickler(
     mirror = _pkl_data(project_storage_dir, a)["eh_study_record"]
     assert isinstance(mirror["report"], dict)
     assert mirror["status"] == "done"
+
+
+# ── The smoke's exact path, in local mode (no session) ────────────────────
+# The desktop build has no session cookie, so every request uses the process
+# foreground. A project created from a template (or imported from a bundle)
+# was bound but never REGISTERED, so the next project switch dropped its whole
+# context — the finished study with it — and re-activation hydrated a copy
+# from disk. 10a holds only if the created project's ctx is resident, as
+# `load_project` already makes it (`PyPSAService.register`).
+from tests.test_local_mode_api import local_client  # noqa: E402,F401 — fixture
+
+
+def test_local_mode_template_project_keeps_its_study_across_a_switch(
+        local_client, monkeypatch):
+    c = local_client
+    fake_done(monkeypatch)
+    assert c.post("/api/projects/from_template/eh_h2_hub",
+                  params={"name": "LM H2"}).status_code == 200
+    r = c.post(STUDY_URL, json={"archetype": "weak_flexible"})
+    assert r.status_code == 200, r.text
+    rec = poll(c)
+    assert rec.get("status") == "done", rec
+    assert c.post("/api/projects/from_template/eh_microgrid",
+                  params={"name": "LM MG"}).status_code == 200
+    assert c.get(STUDY_URL).status_code == 204
+    assert c.post("/api/projects/LM%20MG/activate").status_code == 200
+    assert c.post("/api/projects/LM%20H2/activate").status_code == 200
+    r = c.get(STUDY_URL)
+    assert r.status_code == 200, (
+        "local mode: leaving a template-created project dropped its context "
+        "and the finished study with it")
+    assert r.json()["started_at"] == rec["started_at"]
+
+
+def test_a_created_project_is_resident_under_its_own_key(
+        client, registry_key_for, session_ctx, api_project):
+    a = api_project("bundle-src")
+    r = client.post("/api/projects/from_template/eh_h2_hub", params={"name": "res-tpl"})
+    assert r.status_code == 200, r.text
+    key = registry_key_for("res-tpl")
+    with PyPSAService._registry_lock:
+        held = PyPSAService._contexts.get(key)
+        bound = [k for k, c in PyPSAService._contexts.items() if c.loaded_project == "res-tpl"]
+    assert held is not None, "the created project's ctx is not resident"
+    assert held is session_ctx(client)
+    assert bound == [key]
+
+    bundle = client.get(f"/api/projects/{a}/bundle").content
+    r = client.post("/api/projects/import_bundle",
+                    files={"file": ("b.zip", bundle, "application/zip")},
+                    params={"name": "res-imported"})
+    assert r.status_code == 200, r.text
+    key2 = registry_key_for("res-imported")
+    with PyPSAService._registry_lock:
+        held2 = PyPSAService._contexts.get(key2)
+        bound2 = [k for k, c in PyPSAService._contexts.items() if c.loaded_project == "res-imported"]
+    assert held2 is not None and held2 is session_ctx(client)
+    assert bound2 == [key2]

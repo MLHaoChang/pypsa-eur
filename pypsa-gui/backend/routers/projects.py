@@ -440,6 +440,29 @@ def _restore_network_revision(ctx, project_dir: pathlib.Path) -> None:
         ctx.network_revision = 0
 
 
+def _register_created_context() -> None:
+    """
+    P33b 10a: make a just-created project's ctx RESIDENT under its own key.
+
+    Template create and bundle import bind the fresh ctx but never registered
+    it. Under a session the next request then hydrated a SECOND copy from the
+    files the handler had just written (the first was orphaned in the scratch
+    slot); with no session at all (local mode — the desktop build) the ctx
+    lived only in the process foreground, so the next project switch dropped
+    it, with every unsaved edit and the finished study record it held, and a
+    re-activation hydrated a stale copy from disk. `load_project` registers
+    (`PyPSAService.register`); this does the same, then moves the ctx out of
+    the session's scratch slot (`rekey_context`, as undo and restore do).
+    A fresh project row has no prior resident context, so no write-back runs.
+    """
+    ctx = PyPSAService.get_active_context()
+    key = ctx.registry_key
+    if key is None:
+        return
+    PyPSAService.register(key, ctx)
+    PyPSAService.rekey_context(ctx)
+
+
 def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None:
     """
     Reset and (if present) restore `_state` side-results from
@@ -1120,6 +1143,7 @@ async def import_bundle(
         project_registry.bind_context(
             PyPSAService.get_active_context(), _imported_project
         )
+    _register_created_context()
 
     # Persist the pointer, mirroring activate_project. Written AFTER the swap
     # succeeds so a failed import does not leave the session pointing at a
@@ -1438,6 +1462,7 @@ def create_from_template(
         project_registry.bind_context(
             PyPSAService.get_active_context(), _created_project
         )
+    _register_created_context()
 
     # Persist the pointer, mirroring activate_project. Written AFTER the swap
     # succeeds so a failed create does not leave the session pointing at a
