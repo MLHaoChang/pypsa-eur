@@ -280,7 +280,7 @@ CYCLING_CODES = ("tariff_export_exceeds_import", "tariff_export_exceeds_import_v
                  "commercial.arbitrage_loop", "commercial.arbitrage_loop_via_storage")
 _GAIN_EPS = 1e-9
 #: Pairs per (snapshots × pairs) gain array in `network_findings` (≈ 18 MB per
-#: array at 8760 h).
+#: array for a year of hourly snapshots).
 _PAIR_CHUNK = 256
 
 
@@ -591,7 +591,7 @@ def _network_findings(n) -> list[tuple[str, str, str, str, str]]:
     eff = (links["efficiency"] if "efficiency" in links.columns
            else pd.Series(1.0, index=links.index)).astype(float).fillna(1.0)
     # The pairs in chunks of `_PAIR_CHUNK` (review rounds 1–2, B4): a
-    # (snapshots × chunk) gain at a time, so 6,000 pairs at 8760 h stay well
+    # (snapshots × chunk) gain at a time, so 6,000 pairs over an hourly year stay well
     # below a gigabyte. Per pair: snapshots that pay, the first, the largest.
     m = mc.to_numpy(dtype=float)
     at = {name: i for i, name in enumerate(mc.columns)}
