@@ -39,7 +39,15 @@ The branch's own two phases measured +4.53 kB (Phase 1) and +0.77 kB (Phase 2) a
 
 ## 3. Backend
 
-Full `pytest` on the merged tree, frontend built: PENDING.
+Full `pytest` on the merged tree, frontend built, one process (no xdist in this container):
+
+| Result | Count |
+|---|---|
+| passed | 9,880 |
+| skipped | 29 |
+| failed | 1 |
+
+The one failure is `tests/test_packaging_requirements.py::test_openpyxl_parses_uploads_with_defusedxml_in_this_environment`: `defusedxml` is pinned in `gui-requirements.txt` (line 102) but is not installed in this container's venv, so `openpyxl.xml.DEFUSEDXML` is False here. The test exists to catch exactly that gap in an environment; it says nothing about this branch (no file it touches is near XML parsing) and passes wherever the pins are installed, as in CI's pixi `test` environment. Not fixed here.
 
 Two failures found and fixed before the full run: `test_sites_routes.py::test_context_route_rejects_traversal_id[..%2F..%2Fetc]` and `[a%2Fb]` answered **503** instead of 404. An id whose decoded form carries a slash matches no API route and falls to `main.serve_spa`, which treats every `/api/` path as a static asset (`static_gate._ASSET_PREFIXES`) and answers 404 — after first answering 503 when `dist/` is absent. The branch's QA ran with the frontend built; CI's backend job (`pixi run gui-tests`) does not build it, so the two cases would have failed there. The test now supplies a stub dist for its duration (`stub_dist` fixture, same contract as `test_serve_spa.local_spa_client`) and passes with `FRONTEND_DIST` pointing at nothing. Not a product change; whether an unknown `/api/` path should 404 regardless of the build is a separate question, not taken here.
 
