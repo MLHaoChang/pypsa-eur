@@ -102,13 +102,18 @@ def _reset_backend_state() -> None:
     # into the next test and the failure surfaced far from its cause.
     PyPSAService.reset_network(allow_during_study=True)
     PyPSAService._contexts.clear()  # B2 registry: no resident ctxs bleed across tests
-    # `_user_ts` is a PROCESS-GLOBAL time-series store in routers.network (keyed
-    # by (component, attr, name)), NOT a per-context field — so reset_network()
-    # doesn't touch it. Only POST /network/reset clears it (which tests don't
-    # hit). Without this, a profile captured by one test (e.g. test_solve_queue's
-    # Load "L1" p_set) reapplies into the next test's same-named component and
-    # silently overrides its static value — making an intended-infeasible/shed
-    # network feasible. Mirror the route handler's clear.
+    # `_user_ts` is the user time-series store, keyed by (component, attr, name).
+    # It is per-ProjectContext now, and `reset_network()` CARRIES IT FORWARD as a
+    # copy (see ProjectContext.user_ts) — so a profile captured by one test (e.g.
+    # test_solve_queue's Load "L1" p_set) would otherwise ride the carry into the
+    # next test's same-named component and silently override its static value,
+    # making an intended-infeasible/shed network feasible.
+    #
+    # Two lines do the work between them, and BOTH are needed: `_contexts.clear()`
+    # above drops every resident context (a test that drove the app over HTTP left
+    # its store on the session's adopted scratch context, not on the process
+    # foreground), and the clear below empties the foreground store `reset_network`
+    # just carried into — mirroring the `POST /network/reset` handler.
     with net_router._user_ts_lock:
         net_router._user_ts.clear()
     # The campaign budget lives in the context's `solver_state`, beside the

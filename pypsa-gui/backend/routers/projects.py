@@ -1928,21 +1928,29 @@ def _save_context(
             nc_path=nc_path, dest=dest,
         )
 
-        # Ensure time series round-trip correctly — FOREGROUND only (gated on
-        # persist_user_ts). For a BACKGROUND ctx these two would corrupt state:
-        # (1) `_backup_network_ts_to_user_ts` writes THIS project's `_t` profiles
-        # into the module-global `_user_ts`, which belongs to the FOREGROUND
-        # project; (2) `_reapply_user_ts_to_network` overwrites THIS network's own
-        # baked profiles with the foreground's `_user_ts`. The background network
-        # already carries solve-ready baked profiles (from
-        # `_hydrate_context_from_disk`), so export it as-is and never touch the
-        # foreground's `_user_ts`. Steps when foreground:
-        # 1. Backup any imported-network ts into _user_ts (skips all-NaN/existing)
-        # 2. Reapply _user_ts so the .nc captures current profiles
+        # Ensure time series round-trip correctly:
+        # 1. Backup any imported-network ts into the store (skips all-NaN/existing)
+        # 2. Reapply the store so the .nc captures current profiles
         # 3. THEN export — the .nc now contains correct data
+        #
+        # `store=ctx.user_ts` names the store EXPLICITLY, and it is `ctx`'s own —
+        # the project being saved. Both helpers pair a network with a store, and
+        # feeding them a network from one project and a store from another is what
+        # (1) ingested this project's `_t` profiles into someone else's store and
+        # (2) overwrote this network's baked profiles with someone else's uploads.
+        # Passing the pair removes the mismatch instead of gating around it: for a
+        # foreground save `ctx.user_ts` IS what the bare `_user_ts` view resolves
+        # to, so this is the same call it always made, and for a background ctx it
+        # is now the right store rather than a reason to skip.
+        #
+        # `persist_user_ts` is therefore no longer what PREVENTS a cross-project
+        # clobber — it is now only a caller's choice about whether this save
+        # rewrites `user_ts.json` at all. The unattended callers (shutdown
+        # flush, resident-cap eviction, solve queue) answer it with
+        # `project_context.may_rewrite_user_ts`.
         if persist_user_ts:
-            _backup_network_ts_to_user_ts(n)
-            _reapply_user_ts_to_network(n)
+            _backup_network_ts_to_user_ts(n, store=ctx.user_ts)
+            _reapply_user_ts_to_network(n, store=ctx.user_ts)
 
         # Atomic replace so a crash mid-save leaves the previous file intact.
         with PyPSAService.get_netcdf_io_lock():
@@ -2022,26 +2030,26 @@ def _save_context(
             pass
 
     # Save all time series (user-uploaded + captured from network) alongside the
-    # network. GATED on `persist_user_ts`: `_serialize_user_ts()` reads the
-    # module-global `_user_ts`, which belongs to the FOREGROUND project. For a
-    # foreground save (the `save_project` wrapper, or the dispatcher solving the
-    # resident foreground in-place) that's correct. For a BACKGROUND ctx save
-    # (dispatcher solving a non-foreground project) it would clobber that
-    # project's own `user_ts.json` with the foreground's profiles — so we skip
-    # it and leave the background project's on-disk profiles intact (the netcdf
-    # already carries baked, solve-ready profiles; `_user_ts` is per-project only
-    # after a later phase wires it onto the context).
+    # network, reading THIS ctx's own store — never "whatever is active on the
+    # calling thread", which is how a background save used to be able to write
+    # the foreground's profiles into another project's `user_ts.json`.
+    #
+    # Still gated on `persist_user_ts`, but the gate now means only "does this
+    # caller want `user_ts.json` rewritten"; it is no longer the thing that keeps
+    # one project's profiles out of another's directory (`store=` is). See the
+    # note beside the backup/reapply pair above.
     # `user_ts_data` is read below by the metadata build (`user_ts_count`,
     # `ts_columns_saved`) REGARDLESS of persist_user_ts, so it must always be
-    # bound — default to {} (a background save reports 0 ts columns, correct).
+    # bound — default to {} (a skipped save reports 0 ts columns, correct).
     user_ts_data: dict = {}
     if persist_user_ts:
-        user_ts_data = _serialize_user_ts()
+        user_ts_data = _serialize_user_ts(store=ctx.user_ts)
         user_ts_path = dest / "user_ts.json"
         if user_ts_data:
             _atomic_write_text(user_ts_path, json.dumps(user_ts_data, indent=2))
         elif user_ts_path.exists():
             user_ts_path.unlink()
+        ctx.user_ts_unreadable = False
 
     # Cache metadata. The netcdf export already captures every PyPSA `*_t`
     # result table (generators_t.p, lines_t.p0, buses_t.marginal_price, etc.) —
@@ -2298,15 +2306,34 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
       * restore the ``results_state.pkl`` side-results into ``ctx.solver_state``;
       * set ``ctx.network.name`` + ``ctx.loaded_project`` to ``name``.
 
-    Deliberately does NOT touch the module-global ``_user_ts`` store: that store
-    belongs to the FOREGROUND ctx, and ``_restore_user_ts`` REPLACES it wholesale
-    — hydrating a background project's profiles into it would clobber the
-    foreground's. The netcdf already carries every ``*_t`` profile (the save path
-    reapplies ``_user_ts`` onto the network BEFORE export), so the imported
-    network is solve-ready as-is; the only thing a ``user_ts.json`` reapply would
-    add is re-expanding a series the saved netcdf truncated — a rare edge case
-    not worth a cross-project clobber. (When per-ctx ``_user_ts`` lands in a later
-    phase this can reapply safely; today the netcdf-baked profiles are correct.)
+      * restore ``user_ts.json`` into ``ctx.user_ts``.
+
+    That last one used to be the documented exception: the store was a module
+    global belonging to the foreground and ``_restore_user_ts`` REPLACES a store
+    wholesale, so hydrating a background project's profiles into it would clobber
+    the foreground's. The store is per-``ProjectContext`` now and
+    ``_restore_user_ts`` takes ``store=``, so it writes only into the context
+    being hydrated — which is what this comment used to promise for "a later
+    phase".
+
+    It is not cosmetic, because the sidecar can hold MORE than the netcdf does.
+    ``network.nc`` carries each ``_t`` table at exactly ``n.snapshots``, while
+    ``user_ts.json`` carries the uploaded series at its own length; the two
+    diverge the moment snapshots are narrowed, which is exactly what
+    ``sample_weeks`` does (upload a year, sample a few representative weeks — the
+    store keeps the full year, and ``_annual_hourly_reference`` later reads it).
+    With an empty store the next save ran ``_backup_network_ts_to_user_ts``,
+    ingested the NARROW ``_t`` columns and serialised them over the wider series
+    on disk: opening a project and saving it destroyed data nobody touched.
+
+    RESTORE-OR-CLEAR, mirroring ``load_project``: a project with no sidecar
+    leaves the store EMPTY rather than whatever the caller happened to pass in,
+    so a hydrated context always describes the project on disk and nothing else.
+
+    Does NOT reapply onto the network. The netcdf is already solve-ready (the
+    save path reapplies before exporting), and the reapply would align the
+    restored series down to the current snapshots — throwing away the very rows
+    this restore exists to preserve. The save path reapplies when it matters.
     """
     from services.solver_service import SolverConfig
 
@@ -2315,6 +2342,33 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
         with PyPSAService.get_netcdf_io_lock():
             PyPSAService.import_network_from_netcdf(ctx.network, nc_path)
         ctx.loaded_project = name
+
+    # User-uploaded series for THIS project, into THIS context's store.
+    #
+    # Tolerant of a broken sidecar rather than fatal: this function runs on the
+    # per-session resolver, i.e. TWICE per authenticated request on every route,
+    # so a corrupt `user_ts.json` that raised here would 500 the whole app rather
+    # than one project. The netcdf still carries the baked profiles, so an empty
+    # store degrades to exactly the old behaviour. Same tolerance, and the same
+    # changelog channel, as the `results_state.pkl` restore below.
+    from routers.network import _restore_user_ts
+
+    user_ts_path = src / "user_ts.json"
+    user_ts_data: dict = {}
+    ctx.user_ts_unreadable = False
+    if user_ts_path.exists():
+        try:
+            user_ts_data = json.loads(user_ts_path.read_text())
+        except Exception as exc:  # noqa: BLE001 — a corrupt sidecar is not fatal
+            ctx.user_ts_unreadable = True
+            change_log_service.log(
+                "warn", "Project", name,
+                f"Couldn't read user_ts.json ({type(exc).__name__}: {exc}). The "
+                f"netcdf still carries the profiles; only series longer than the "
+                f"saved snapshot range are affected.",
+            )
+            user_ts_data = {}
+    _restore_user_ts(user_ts_data, store=ctx.user_ts)
 
     # Solver config (legacy-tolerant; default when absent).
     #
