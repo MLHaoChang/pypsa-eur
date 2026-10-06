@@ -42,7 +42,10 @@ installed in that period energised, against any switchgear ratings
 assembles the PCC compliance report (``campus_compliance.csv``,
 ``gridspine.static.campus_compliance``) against the chosen profile.
 
-``draft_from_project`` is the "generate" step. It drafts a campus from the
+``draft_from_project`` is the "generate" step. ``check_campus``,
+``grid_code_profiles`` and ``SizingCriteria`` complete the seam the backend
+uses, since pypsa-gui reaches gridspine through ``drivers`` and ``schema``
+only. It drafts a campus from the
 saved project, for the user to edit before ``prepare_campus``.
 
 Everything is validated before anything is written: the campus is built,
@@ -59,7 +62,7 @@ import pandas as pd
 import yaml
 
 from gridspine.ingest.campus import Campus, build_campus
-from gridspine.producers.campus import CampusDraft, campus_hourly, draft_campus
+from gridspine.producers.campus import CampusDraft, campus_hourly, draft_campus, is_solved
 from gridspine.producers.pypsa_nodal import load_solved_network
 from gridspine.ranking.campus import campus_metrics, select_campus_hours
 from gridspine.schema.campus import HOURLY_CSV, PCC_CSV, validate_hourly, validate_pcc
@@ -68,7 +71,7 @@ from gridspine.static.campus_flow import SizingCriteria, size_transformers, solv
 from gridspine.static.campus_reactive import reactive_need, requirement_from, size_compensation
 from gridspine.static.campus_compliance import campus_compliance
 from gridspine.static.campus_sc import campus_fault_levels
-from gridspine.templates.grid_codes import load_grid_code
+from gridspine.templates.grid_codes import list_grid_codes, load_grid_code
 
 CAMPUS_YAML = "campus.yaml"
 CAMPUS_MANIFEST = "campus_manifest.json"
@@ -107,8 +110,24 @@ def _write_text_atomic(path: Path, text: str) -> None:
 
 
 def draft_from_project(network_path) -> CampusDraft:
-    """A campus draft from the saved, solved project at ``network_path``."""
-    return draft_campus(load_solved_network(network_path))
+    """A campus draft from the saved, solved project at ``network_path``.
+    An unsolved project is refused here. The draft itself needs no dispatch,
+    but the study does, and the user should hear it now rather than at run
+    time."""
+    n = load_solved_network(network_path)
+    if not is_solved(n):
+        raise ContractError("the project is not solved; solve it and save, then draft the campus")
+    return draft_campus(n)
+
+
+def check_campus(spec: dict) -> None:
+    """Refuse a campus description that does not build (ContractError)."""
+    build_campus(spec)
+
+
+def grid_code_profiles() -> dict:
+    """``{profile: title}`` a campus study can be held to."""
+    return list_grid_codes()
 
 
 def prepare_campus(run_dir, campus: dict, network_path) -> dict:

@@ -1,0 +1,40 @@
+{
+  "pack_id": "generic_defaults",
+  "version": "2026-10-05",
+  "title": "Generic defaults pack (technology costs, finance defaults, illustrative tariffs, synthetic load profiles)",
+  "seeded_from": {
+    "branch": "claude/edge-tool-ux-research-n0n2l6",
+    "path": "pypsa-gui/backend/study_library/",
+    "files": ["technology_costs.csv", "finance_defaults.yaml", "tariffs.csv",
+              "load_profiles/index.csv", "load_profiles/commercial_office.csv",
+              "load_profiles/industrial_two_shift.csv"],
+    "library_version": "technology-data v0.14.0"
+  },
+  "files": {"values": "values.csv", "finance": "finance.yaml", "tariffs": "tariffs.json"},
+  "load_profiles": [
+    {
+      "id": "commercial_office",
+      "label": "Commercial office (synthetic shape)",
+      "file": "load_profiles/commercial_office.csv",
+      "sha256": "7b593fc3fa4a6f61a666021ec4a1e4707d17bab94b0ed26d434d670f0ab88c2a",
+      "source": "synthetic: guided investment study S4, a stated shape (weekday 08-18 plateau, night and weekend base, summer cooling uplift), not a measurement",
+      "source_year": 2026,
+      "synthetic": true,
+      "illustrative": true,
+      "unit": "shape, scaled to annual MWh",
+      "note": "Scaled to the intake's annual MWh; replace with a metered load to leave screening maturity."
+    },
+    {
+      "id": "industrial_two_shift",
+      "label": "Industrial, two shifts (synthetic shape)",
+      "file": "load_profiles/industrial_two_shift.csv",
+      "sha256": "5fc6e09b43b6133d3645f69866d8f5d639844cac8e84e691526b33901f7f14bf",
+      "source": "synthetic: guided investment study S4, a stated shape (weekday 06-22 two shifts, night and weekend base, August and December shutdown dips), not a measurement",
+      "source_year": 2026,
+      "synthetic": true,
+      "illustrative": true,
+      "unit": "shape, scaled to annual MWh",
+      "note": "Scaled to the intake's annual MWh; replace with a metered load to leave screening maturity."
+    }
+  ]
+}

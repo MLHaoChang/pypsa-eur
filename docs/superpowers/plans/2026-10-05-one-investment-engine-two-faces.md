@@ -1,6 +1,6 @@
 # Plan: one investment engine, two faces (expert workbench and guided study)
 
-**Date:** 2026-10-05. **Status:** v1.4. Owner decisions in §8 taken 2026-10-05; independent review PASS WITH CONDITIONS, all conditions applied (§9); C1 corrected after the asset-parameterisation assessment (§9 R12, §10).
+**Date:** 2026-10-05. **Status:** v1.7. Owner decisions in §8 taken 2026-10-05; independent review PASS WITH CONDITIONS, all conditions applied (§9); C1 corrected after the asset-parameterisation assessment (§9 R12, §10).
 **Replaces nothing yet.** It sequences two existing efforts so they converge instead of colliding:
 
 - **Edge Investment Case (IC)**: spec `docs/superpowers/specs/2026-09-26-edge-investment-case-design.md`.
@@ -196,7 +196,7 @@ loader and the flat export series helper (new in U1), `commercial.cost_rows.comm
   drivers of both efforts (`qa_investment_case.py`, `qa_value_flows.py`, `qa_decision_study.py`).
 - No session merges to master; the owner does.
 
-## 8. Owner decisions (taken 2026-10-05)
+## 8. Owner decisions (taken 2026-10-05; 6-10 from the U2 sub-plan's owner questions)
 
 | # | Decision | Answer |
 |---|---|---|
@@ -205,6 +205,11 @@ loader and the flat export series helper (new in U1), `commercial.cost_rows.comm
 | 3 | Guided question order | **Battery at site** first (exists), **data-centre power** before and after grid connection second (U4), then waste heat, hydrogen, off-grid. |
 | 4 | Key parameters, battery question | **All four groups:** site zone, connection MW, load (upload or sector profile); tariff and PV on/off; battery storage cost and inverter cost; demand-charge price, energy price level, discount rate. Everything else from the defaults pack. |
 | 5 | Guided start screen | **Both paths** side by side: "Is my site reliable?" (Energy Hub) and "Is this investment worth it?" (decision study). |
+| 6 | Storage LCOS (GS Q8) | **IC adds a storage LCOS metric** to the finance engine (charging cost included); the guided battery report keeps showing it. One definition for both modes. |
+| 7 | Tax / levy and certificate items in the guided bill (GS Q10) | **A seventh bill line, "Taxes & levies"**, rather than folding them into network or energy. |
+| 8 | Guided tariff step (GS Q11) | **A simple guided tariff form that compiles** into the engine's `Tariff`; experts edit the full items in the Tariff builder. One tariff stored. |
+| 9 | Guided Excel (GS Q13) | **Keep the live-formula cash-flow workbook** as a view over the engine's numbers, so consultants can audit and edit it. |
+| 10 | Import-to-export cycling check (GS Q16) | **Port it into the engine's preflight** (`commercial/preflight.py`, U1 f), also for networks without a commercial setup. |
 
 ## 9. Independent review (2026-10-05)
 
@@ -256,7 +261,7 @@ keep their parts in custom columns and leave PyPSA's `overnight_cost` empty.
 | S3 Seeds | Templates and Energy Hub placeholders derived from the generic defaults pack | to decide | After U1 a, before U4 |
 | S4 Later | Store+Link batteries, HVDC, degradation in the LP | later | After U4 |
 
-## 11. UX/UI roadmap (proposed, owner decisions pending)
+## 11. UX/UI roadmap (owners set by the owner 2026-10-05)
 
 Source: `docs/superpowers/assessments/2026-10-05-ux-ui-overall-assessment.md` (app launched and walked
 in a browser at 1440 and 390 px wide). Direction: **one shell, two layouts**. A right-hand inspector
@@ -269,8 +274,23 @@ shared by both modes.
 | Batch | Items (assessment §5) | Owner | When |
 |---|---|---|---|
 | Engine-side fixes | Q2 Investment tab calls `/results/value_flows`, which exists only on the IC branch (503 toasts on master); Q7 plain labels for the completeness chips | IC session | With the U1 PR |
-| Shell polish PR | Q1 panel width policy, Q3 `$` to `€`, Q5 battery size and cost at creation, Q6 solve feedback and Abort/Optimal overlap, Q10 Settings out of SIMULATION, Q12 one header row; plus the free items Q4, Q8, Q9, Q11 | to decide | Between U1's follow-up PR and U2 (touches shared `App.tsx` / `layout/*`) |
-| Shell change | M1 right inspector, M2 task-ordered sidebar | to decide | Right after U2, before U3, so U3 builds on the new shell |
+| Shell polish PR | Q1 panel width policy, Q3 `$` to `€`, Q5 battery size and cost at creation, Q6 solve feedback and Abort/Optimal overlap, Q10 Settings out of SIMULATION, Q12 one header row; plus the free items Q4, Q8, Q9, Q11 | Coordinating session (after S0) | Between U1's follow-up PR and U2 (touches shared `App.tsx` / `layout/*`) |
+| Shell change | M1 right inspector, M2 task-ordered sidebar | Coordinating session | Right after U2, before U3, so U3 builds on the new shell |
 | Economics in Expert | M4 cost-mode control becomes the S1 asset cards of §10; S2 Economics section hosting IC's editors | IC (editors) + whoever owns S1 | After U1 follow-up and S0 |
 | Guided shell | M7 hide expert chrome in Guided, M8 Guided without an API key, S1 question-first rail | GS session | Inside U3 |
 | Later | M3 Summary tab, M5 catalogue-driven forms, M6 type scale (quiet window, both sessions merged), M9 responsive, M10 validation catalogue, S3 table view, S4 report page, S5 deep links | to decide | After U3 |
+
+## 12. Third participant: the gridspine campus session (owner approved 2026-10-06)
+
+The campus electrical study (gridspine; session "Gridspine design spec review"; PRs #74, #79, #83, #84)
+sizes transformers, compensation, switchgear and cables for a solved hub, and from PR #83 on it carries
+its own equipment cost catalogue (`gridspine/templates/data/campus_assets.yaml`: capex, `opex_frac`,
+`lifetime_a`, provenance tags, one discount rate and price year) and a least-cost investment step
+(C8, C11). Its open PRs are not blocked. Two follow-ups, after #81, #85 and #78 merge:
+
+| # | Item | Owner |
+|---|---|---|
+| G1 | One source for equipment cost data: the campus library is seeded on the pypsa-gui side from the generic defaults pack (rows in the asset-schema part vocabulary: lump / per km / per bay, overnight cost, lifetime, FOM share, provenance); the discount rate and price year come from the project, not a library-level 0.07. gridspine stays free of pypsa-gui imports. | IC accepts the rows into the pack; campus session seeds from it |
+| G2 | The chosen equipment is owner capex in the same investment case: a solved campus study emits owner assets with upfront parts (`UpfrontPart` plus quantity and build year); `results/finance_case.build_finance_case` takes them through a new input hook. | IC adds the hook; campus session produces the list; shape agreed between them |
+
+Ownership adds: `gridspine/*` and `services/campus_electrical_*` stay with the campus session.

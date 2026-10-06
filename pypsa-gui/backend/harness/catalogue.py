@@ -2615,6 +2615,62 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id", "bus", "kind"],
     ),
     _t(
+        "campus_get_study",
+        "The campus electrical study of a capacity-expansion (hub) project: the "
+        "solved hub taken to its electrical design by AC load flow at its "
+        "critical hours. Returns {campus_yaml (the campus description, every "
+        "value tagged measured|datasheet|assumed, or null before a draft), "
+        "skipped (what the draft left out), profiles (grid codes a study can use), "
+        "settings, results, stale}. results is null before a run, else "
+        "{selection (critical hours per investment period with their reasons), "
+        "transformers (per group: unit rating now, peak S intact and N-1, "
+        "required and recommended unit MVA, adequate), compensation "
+        "(capacitive and inductive Mvar after the inverters' own headroom), "
+        "short_circuit (IEC 60909 per bus and period against the switchgear "
+        "rating), compliance (per check: status_as_is, status_with_measures, "
+        "value, limit, worst hour, clause and its code|assumed tag), "
+        "requirement (the PCC reactive band applied and where P_ref came from)}. "
+        "When stale is true the campus or the project changed since the run: say "
+        "so before quoting numbers. It is a steady-state study, not a compliance "
+        "certificate. 409 for a project of another kind. Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "campus_draft_campus",
+        "Draft the campus description of a capacity-expansion (hub) project from "
+        "its saved, solved network: the PCC (the eh_poc bus) with a fault level, "
+        "transformers sized from the optimised MW to the next standard MVA, and "
+        "every built asset typed by carrier; every value it supplies is tagged "
+        "assumed for the engineer to replace. Refuses (409) to replace an "
+        "existing campus file unless overwrite is true, because that discards "
+        "the user's edits: ask before passing it. 422 when the project is not "
+        "saved or not solved. Returns {campus_yaml, skipped}. Safety: write.",
+        {"project_id": {"type": "string"}, "overwrite": {"type": "boolean"}},
+        ["project_id"],
+    ),
+    _t(
+        "campus_run_study",
+        "Run the campus electrical study of a capacity-expansion (hub) project: "
+        "hourly results per investment period, the critical hours (k per "
+        "criterion), AC load flow intact and transformer N-1, transformer and "
+        "compensation sizing with the design margin, IEC 60909 short circuit, "
+        "and the PCC compliance report against the grid-code profile. pf is "
+        "the connection agreement's power factor; omit it to use the code's "
+        "widest range (EU DCC 0.48 Q/Pmax). Seconds of CPU. Returns the "
+        "campus_get_study shape. 422 without a campus file or for a bad "
+        "setting. Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "k": {"type": "integer"},
+            "pf": {"type": "number"},
+            "profile": {"type": "string"},
+            "margin": {"type": "number"},
+            "n_minus_1": {"type": "boolean"},
+        },
+        ["project_id"],
+    ),
+    _t(
         "gridspine_assess_connection",
         "Connection-point assessment of one facility (a load plus an optional "
         "on-site unit such as a BESS, at one bus) at every selected hour of the "
@@ -2746,6 +2802,28 @@ TOOLS: list[dict[str, Any]] = [
         {"name": {"type": "string"}, "version": {"type": "integer"},
          "replace_inline": {"type": "boolean"}},
         ["name"],
+    ),
+    # ── Site connection (1) — IC U1 follow-up, item b ─────────────────────
+    _t(
+        "set_site_connection",
+        "Set the project's commercial root, the site's connection to the grid: "
+        "`poc_link` (the one-way Link importing grid → site, the point of "
+        "connection), optional `export_link` (the one-way Link site → grid that "
+        "carries export) and optional `timezone` (the site's IANA zone; set, naive "
+        "snapshots are UTC). Every other key of a stored commercial config (tariff, "
+        "contracts, participants) is kept. An omitted export_link or timezone keeps "
+        "the stored value; an explicit null clears it (no export link; snapshots "
+        "already in site time). The Links are checked first: a name that is not a "
+        "Link is refused (site_connection_link_missing, with likely candidates), "
+        "a Link the wrong way round (site_connection_wrong_direction), a two-way "
+        "Link, an unknown timezone, or a refusal of the kept config with no kind of "
+        "its own, `code` naming it (site_connection_invalid). Call it before "
+        "attach_tariff or define_participants when they report no_commercial_config. "
+        "Returns {commercial: {poc_link, export_link, timezone}, created, notes}. "
+        "Safety: write.",
+        {"poc_link": {"type": "string"}, "export_link": {"type": ["string", "null"]},
+         "timezone": {"type": ["string", "null"]}},
+        ["poc_link"],
     ),
     # ── Participants (1) — Edge Investment Case P3 WP3.4 ──────────────────
     _t(
@@ -3184,6 +3262,10 @@ TOOL_ROUTES: dict[str, list] = {
     "gridspine_compute_capacity": _SERVICE_CALL,
     "gridspine_get_connection_assessments": _SERVICE_CALL,
     "gridspine_assess_connection": _SERVICE_CALL,
+    # campus electrical (3) — service calls, like gridspine's
+    "campus_get_study": _SERVICE_CALL,
+    "campus_draft_campus": _SERVICE_CALL,
+    "campus_run_study": _SERVICE_CALL,
     # Library (4) — P2 WP2.4c: router handlers, called in process with the
     # acting user (the Library ACL is the org's).
     "list_library_items": [("GET", "/api/library/items/{kind}")],
@@ -3191,6 +3273,8 @@ TOOL_ROUTES: dict[str, list] = {
     "import_urdb_tariff": [("POST", "/api/library/items/tariff/import_urdb")],
     "attach_tariff": [("GET", "/api/library/items/{kind}/{name}"),
                       ("PUT", "/api/simulation/solver_config")],
+    "set_site_connection": [("GET", "/api/simulation/solver_config"),
+                            ("PUT", "/api/simulation/solver_config")],
     "define_participants": [("POST", "/api/simulation/value_flows/template"),
                             ("GET", "/api/simulation/commercial/value_flows"),
                             ("PUT", "/api/simulation/commercial/value_flows")],

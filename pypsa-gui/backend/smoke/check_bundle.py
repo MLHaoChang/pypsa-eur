@@ -185,6 +185,10 @@ ROOTED = (
     "harness/prompts/base_identity.md",
     "harness/workflows/hub-design.md",
     "harness/skills/grill/SKILL.md",
+    # The generic defaults pack (IC U1 a): `defaults_pack.loader.VERSIONS_DIR` =
+    # parents[0] of services/library/defaults_pack/loader.py / "versions"; one
+    # manifest per vendored version.
+    "services/library/defaults_pack/versions/2026-10-05/manifest.json",
 )
 
 

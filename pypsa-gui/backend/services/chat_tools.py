@@ -1711,6 +1711,88 @@ def attach_tariff(name: str, version: int | None = None, replace_inline: bool = 
             "replaced": replaced}
 
 
+# ── Site connection (IC U1 follow-up, item b) ──────────────────────────────
+# The commercial root: the meter Links and the site clock. Written through the
+# solver-config route (which binds the whole config); refusals as literals for
+# the manifest guard.
+_SITE_CONNECTION_ERROR_KINDS = (
+    {"error_kind": "site_connection_link_missing"},
+    {"error_kind": "site_connection_wrong_direction"},
+    {"error_kind": "site_connection_invalid"},
+)
+
+
+class _Unset:
+    """An omitted argument (distinct from an explicit null, which clears)."""
+
+    def __repr__(self) -> str:
+        return "<unset>"
+
+
+_UNSET = _Unset()
+
+
+def set_site_connection(poc_link: str, export_link: str | None | _Unset = _UNSET,
+                        timezone: str | None | _Unset = _UNSET) -> dict:
+    """Set the commercial root (`poc_link`, `export_link`, `timezone`) through
+    the solver-config route, keeping every other key of a stored commercial
+    config (the route keeps the value flows itself). An OMITTED `export_link`
+    or `timezone` keeps the stored value; an explicit null clears it. The
+    Links are checked first (`binding.check_site_connection`): they exist, are
+    one-way and point grid → site (PoC) and site → grid (export)."""
+    from pydantic import ValidationError
+
+    from models.schemas import SolverConfigSchema
+    from routers.simulation import get_solver_config as _cfg, update_solver_config as _put
+    from services.commercial import binding
+
+    with _acting():   # identity before the network is read
+        pass
+    stored = (_cfg() or {}).get("commercial")
+    created = not (isinstance(stored, dict) and stored.get("poc_link"))
+    commercial = dict(stored) if isinstance(stored, dict) else {}
+    commercial.pop("value_flows", None)   # owned by its own route (plan C7)
+    commercial["poc_link"] = poc_link
+    if not isinstance(export_link, _Unset):
+        commercial["export_link"] = export_link
+    if not isinstance(timezone, _Unset):
+        commercial["timezone"] = timezone
+    try:
+        binding.check_site_connection(PyPSAService.get_network(), poc_link,
+                                      commercial.get("export_link"),
+                                      group_members=commercial.get("group_members"))
+        body = SolverConfigSchema(commercial=commercial)
+    except binding.BindingRefusal as exc:
+        raise HTTPException(status_code=exc.status, detail={
+            "error_kind": exc.code, "message": exc.message[:500]}) from exc
+    except (ValidationError, ValueError) as exc:
+        errors = exc.errors() if isinstance(exc, ValidationError) else []
+        message = str(errors[0].get("msg")) if errors else str(exc)
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "site_connection_invalid", "message": message[:300]}) from exc
+    try:
+        out = _library_call(_put, body)
+    except HTTPException as exc:
+        d = exc.detail if isinstance(exc.detail, dict) else {}
+        if "error_kind" in d or "code" not in d:
+            raise
+        # A refusal of the kept config (a tariff, a contract, a connection
+        # agreement) with no chat kind of its own (e.g. `fca_needs_saved_project`;
+        # `_library_call` already gave `commercial_binding_invalid`,
+        # `library_ref_stale` and `solver_in_flight` theirs): say which code.
+        raise HTTPException(status_code=exc.status_code, detail={
+            "error_kind": "site_connection_invalid", "code": str(d["code"])[:80],
+            "message": str(d.get("message", ""))[:500]}) from exc
+    bound = out.get("commercial") or {}
+    root = {k: bound.get(k) for k in binding.SITE_CONNECTION_KEYS}
+    notes = []
+    if root["export_link"] is None:
+        notes.append("no export_link: export is not priced or billed")
+    if root["timezone"] is None:
+        notes.append("no timezone: the snapshots are read as the site clock")
+    return {"commercial": root, "created": created, "notes": notes}
+
+
 # ── Participants (IC P3 WP3.4) ─────────────────────────────────────────────
 # `define_participants` drives the template and value-flows routes. Their
 # refusals carry `{"code": …}`; the forwarder reads `error_kind`, so each is
@@ -3270,6 +3352,29 @@ def gridspine_get_connection_assessments(project_id: str, assessment_id: str | N
     from services.gridspine_service import get_connection as _h
     with _acting() as (db, user):
         return _h(_gridspine_project(db, user, project_id), assessment_id=assessment_id, hour=hour)
+
+
+def campus_get_study(project_id: str) -> dict:
+    from services.campus_electrical_service import get_state as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def campus_draft_campus(project_id: str, overwrite: bool = False) -> dict:
+    from services.campus_electrical_service import draft as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), bool(overwrite))
+
+
+def campus_run_study(project_id: str, k: int | None = None, pf: float | None = None,
+                     profile: str | None = None, margin: float | None = None,
+                     n_minus_1: bool | None = None) -> dict:
+    from services.campus_electrical_service import run as _h
+    settings = {key: v for key, v in (("k", k), ("profile", profile), ("margin", margin),
+                                       ("n_minus_1", n_minus_1)) if v is not None}
+    settings["pf"] = pf
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), settings)
 
 
 def gridspine_assess_connection(project_id: str, bus: str, load_mw: float, load_pf: float = 0.98,
@@ -6760,11 +6865,16 @@ DISPATCHERS: dict[str, Any] = {
     "gridspine_compute_capacity": gridspine_compute_capacity,
     "gridspine_get_connection_assessments": gridspine_get_connection_assessments,
     "gridspine_assess_connection": gridspine_assess_connection,
+    # campus electrical (3)
+    "campus_get_study": campus_get_study,
+    "campus_draft_campus": campus_draft_campus,
+    "campus_run_study": campus_run_study,
     # library (4)
     "list_library_items": list_library_items,
     "get_library_item": get_library_item,
     "import_urdb_tariff": import_urdb_tariff,
     "attach_tariff": attach_tariff,
+    "set_site_connection": set_site_connection,
     "define_participants": define_participants,
     # investment case (4) — IC P4 WP4.6c
     "run_investment_case": run_investment_case,
