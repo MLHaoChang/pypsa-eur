@@ -141,6 +141,12 @@ class AssetPart:
     lifetime_years: float | None
     fom_share: float | None = None
 
+    def __post_init__(self):
+        # A NaN lifetime is not stated (None: `part_lifetime_missing`), never
+        # read as infinite (review r1 note 2).
+        if self.lifetime_years is not None and math.isnan(self.lifetime_years):
+            object.__setattr__(self, "lifetime_years", None)
+
 
 @dataclass(frozen=True)
 class AssetFinance:

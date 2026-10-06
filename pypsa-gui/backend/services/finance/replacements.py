@@ -180,9 +180,12 @@ def on_axis(tl: Timeline, year: int) -> bool:
 
 # ── the remaining-life terminal value (S6, decision D10) ────────────────────
 
-def annuity(r: float, life: float) -> float:
+def annuity(r: float, life: float) -> float | None:
     """The capital recovery factor r / (1 − (1 + r)^−L); 1/L at r = 0 (the
-    LP's annuity, `periodized_costs._annuity`)."""
+    LP's annuity, `periodized_costs._annuity`). None for L ≤ 0, which has no
+    annuity (review r1 B1: never a division by zero)."""
+    if life <= 0:
+        return None
     return 1.0 / life if r == 0 else r / (1.0 - (1.0 + r) ** -life)
 
 
@@ -219,8 +222,8 @@ def remaining_life_terms(case: FinanceCase, tl: Timeline
                          ) -> tuple[tuple[TerminalTerm, ...], list[str]]:
     """The `remaining_life_annuity` terms and the reasons it is not
     established (S6): `terminal_needs_lp_rate` (no `lp_basis` or no rate),
-    `terminal_part_unknown:<asset>:<part>` (no cost, or a missing or infinite
-    lifetime — GS's `salvage_not_computed`), `terminal_needs_part_lifetimes:<asset>`
+    `terminal_part_unknown:<asset>:<part>` (no cost, or a missing, infinite or
+    below-a-year lifetime — GS's `salvage_not_computed`), `terminal_needs_part_lifetimes:<asset>`
     (under `fixed`, `replacement_capex` entries for an asset with more than one
     part: an entry names an asset, not a part), `escalation_missing:capex` (a
     replacement's base cannot be stated). `r_a` is the asset's own discount
@@ -246,7 +249,9 @@ def remaining_life_terms(case: FinanceCase, tl: Timeline
         r_a = r if own is None else float(own)
         for p in parts:
             life = p.lifetime_years
-            if p.overnight_cost is None or not _finite(life):
+            # No cost, no lifetime, an infinite one (GS's `salvage_not_computed`) or
+            # one below a year (S5's floor; review r1 B1: a typed 0 crashed the annuity).
+            if p.overnight_cost is None or not _finite(life) or life < 1.0:
                 reasons.append(f"terminal_part_unknown:{a.name}:{p.name}")
                 continue
             start: float = tl.cod_year

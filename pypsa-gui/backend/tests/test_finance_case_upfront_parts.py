@@ -186,6 +186,13 @@ def test_post_init_refuses_parts_that_disagree_with_the_overnight_cost():
         dataclasses.replace(a, overnight_cost=1_760_000.0)
 
 
+def test_a_nan_part_lifetime_reads_as_not_stated():
+    """Review r1 note 2: a hand-built part with a NaN lifetime is None (not stated), never infinite."""
+    p = AssetPart("power", 400_000.0, float("nan"), None)
+    assert p.lifetime_years is None
+    assert AssetPart("energy", 1.0, math.inf).lifetime_years == math.inf
+
+
 def test_effective_parts():
     from services.finance.case import effective_parts
 
@@ -232,13 +239,21 @@ def test_a_typed_cod_wins_over_build_year():
     assert cod == date(2031, 7, 1) and flags == []
 
 
-@pytest.mark.parametrize("by", [0, float("nan"), -2030, 2030.5])
+@pytest.mark.parametrize("by", [0, float("nan"), -2030, 2030.5, 1899, 2201, 10_000])
 def test_an_absent_build_year_is_cod_missing(by):
     n = _net()
     n.storage_units.loc["bess", "build_year"] = by                     # PyPSA's default is 0
     with pytest.raises(FinanceRefused) as exc:
         _cod(n, _fin(), [("StorageUnit", "bess")])
     assert exc.value.code == "cod_missing"
+
+
+@pytest.mark.parametrize("by", [1900, 2200])
+def test_a_build_year_at_the_bounds_is_a_cod(by):
+    n = _net()
+    n.storage_units.loc["bess", "build_year"] = by
+    cod, _flags = _cod(n, _fin(), [("StorageUnit", "bess")])
+    assert cod == date(by, 1, 1)
 
 
 def test_different_build_years_are_cod_mismatch():

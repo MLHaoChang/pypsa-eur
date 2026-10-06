@@ -158,6 +158,7 @@ ANNUAL_TOL = 0.005                      # plan C3: within 0.5 % of a year
 COMMODITY_TOL = 0.01                    # plan C13: the ledger cross-check, a cent …
 COMMODITY_REL_TOL = 1e-9                # … or relative, for a large ledger (review round 1)
 _EPS_MW = 1e-6
+BUILD_YEAR_MIN, BUILD_YEAR_MAX = 1900, 2200     # a COD from build_year (S3): `currency_year`'s bounds
 
 _CAPACITY_COLS = {"Generator": "p_nom", "StorageUnit": "p_nom", "Store": "e_nom", "Link": "p_nom",
                   "Line": "s_nom", "Transformer": "s_nom"}
@@ -1056,12 +1057,14 @@ def _assets(n, owned_list, *, discount_rate: float | None = None
 
 def _build_year(n, comp: str, name: str) -> int | None:
     """An asset's `build_year` as a year, or None when absent (S3, review B2):
-    PyPSA's default 0, NaN, a negative or a non-integer value is absent."""
+    PyPSA's default 0, NaN, a non-integer value or one outside 1900..2200 (the
+    bounds of `currency_year`; review r1 note 1 — `date()` refuses above 9999)
+    is absent."""
     df = getattr(n, _frame_of(comp) or "", None)
     if df is None or name not in df.index or "build_year" not in df.columns:
         return None
     by = _fin(df.at[name, "build_year"])
-    if by is None or by <= 0 or not float(by).is_integer():
+    if by is None or not float(by).is_integer() or not BUILD_YEAR_MIN <= by <= BUILD_YEAR_MAX:
         return None
     return int(by)
 

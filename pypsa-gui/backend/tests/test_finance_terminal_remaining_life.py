@@ -206,6 +206,26 @@ def test_fixed_rule_single_part_values_its_last_entry():
     assert t.value == pytest.approx(900_000.0 * crf(0.07, 10) * apf(0.07, 5), rel=1e-12)
 
 
+@pytest.mark.parametrize("life", [0.0, 0.5])
+def test_a_lifetime_below_a_year_is_terminal_part_unknown_never_a_crash(life):
+    """Review r1 B1: a typed lifetime of 0 (reachable from the adapter) under `fixed` with a
+    `replacement_capex` entry divided by zero in the annuity."""
+    a = AssetFinance("gen", "Generator", 1_000_000.0, life)
+    case = _case(_fin(replacement_rule="fixed", analysis_years=15,
+                      replacement_capex=[(2035, "gen", 900_000.0)]), assets=(a,))
+    r = run_case(case, layers=NO_TAX)
+    assert r.op.terminal is None
+    assert {"terminal_value_missing", "terminal_part_unknown:gen:investment"} <= \
+        set(r.op.reasons["terminal"])
+
+
+def test_the_annuity_is_none_for_a_lifetime_of_zero_or_less():
+    from services.finance.replacements import annuity
+
+    assert annuity(0.07, 0.0) is None and annuity(0.0, 0.0) is None and annuity(0.07, -1.0) is None
+    assert annuity(0.0, 10.0) == pytest.approx(0.1)
+
+
 def test_the_method_takes_no_value():
     assert TerminalValueRule(method="remaining_life_annuity").value is None
     with pytest.raises(ValidationError):
@@ -246,6 +266,11 @@ def test_the_report_lists_the_terms_and_the_workbook_carries_the_method():
     power = next(t for t in block["terms"] if t["part"] == "power")
     assert power["value"] == pytest.approx(400_000.0 * crf(0.07, 10) * apf(0.07, 5), rel=1e-12)
     assert "LP" in block["rate_basis"] and "escalated" in block["base_basis"]
+    # Review r1 notes 3, 4: the base basis names the rates as the code uses them, and says that
+    # under `fixed` the last entry is a full re-purchase.
+    assert "annuitised at the LP rate" not in block["base_basis"]
+    assert "the asset's own discount rate, else the LP's" in block["base_basis"]
+    assert "full re-purchase" in block["base_basis"]
     ws = load_workbook(io.BytesIO(build_workbook(rep)))["About"]
     rows = {ws.cell(i, 1).value: ws.cell(i, 2).value for i in range(1, ws.max_row + 1)}
     assert rows["Terminal value method"] == "remaining_life_annuity"

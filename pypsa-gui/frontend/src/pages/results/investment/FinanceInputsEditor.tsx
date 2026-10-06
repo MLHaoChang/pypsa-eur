@@ -496,7 +496,10 @@ function Form({ d, set, errors, report, assets }: {
                      options={[['none', 'none'], ['book_value', 'book value'],
                                ['multiple_of_ebitda', 'a multiple of EBITDA'], ['fixed', 'a fixed amount'],
                                ['remaining_life_annuity', "the parts' remaining life (LP annuity)"]]}
-                     onChange={v => set('terminal_value', withKey(tv, 'method', v ?? undefined))} />
+                     onChange={v => set('terminal_value', v === 'remaining_life_annuity'
+                       // The remaining life takes no value: a kept one would be refused (422).
+                       ? { ...withKey(tv, 'method', v), value: null }
+                       : withKey(tv, 'method', v ?? undefined))} />
         <NumField label="Terminal value" hint="(the multiple, or the amount; none for the remaining life)"
                   value={tv.value}
                   errors={e('terminal_value.value')}

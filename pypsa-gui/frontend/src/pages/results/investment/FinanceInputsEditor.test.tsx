@@ -185,6 +185,20 @@ describe('FinanceInputsEditor', () => {
     expect(putBody().terminal_value).toEqual({ method: 'remaining_life_annuity', value: null })
   })
 
+  it('switching the terminal value to the remaining life clears its value (no 422)', async () => {
+    api.getFinance.mockResolvedValue({ finance: { ...structuredClone(FINANCE),
+      terminal_value: { method: 'fixed', value: 50000 } }, digest: 'digest-1', status: 'ok' })
+    renderEditor()
+    await screen.findByTestId('fi-tranche-1')
+    expect((screen.getByLabelText('Terminal value') as HTMLInputElement).value).toBe('50000')
+    fireEvent.change(screen.getByLabelText('Terminal value method'),
+      { target: { value: 'remaining_life_annuity' } })
+    expect((screen.getByLabelText('Terminal value') as HTMLInputElement).value).toBe('')
+    fireEvent.click(screen.getByRole('button', { name: 'Save the finance inputs' }))
+    await waitFor(() => expect(api.putFinance).toHaveBeenCalled())
+    expect(putBody().terminal_value).toEqual({ method: 'remaining_life_annuity', value: null })
+  })
+
   it('an emptied currency year is null, never 0', async () => {
     api.getFinance.mockResolvedValue({ finance: { ...structuredClone(FINANCE), currency_year: 2024,
       price_basis: 'nominal' }, digest: 'digest-1', status: 'ok' })

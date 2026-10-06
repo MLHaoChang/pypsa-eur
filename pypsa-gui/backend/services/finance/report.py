@@ -332,7 +332,10 @@ TERMINAL_RATE_BASIS = ("each part's remaining life is valued on the annuity the 
                        "at the LP's discount rate — the LP basis, not the WACC")
 TERMINAL_BASE_BASIS = ("a part's base is what its last purchase cost: the part's overnight cost "
                        "for the initial purchase (no contingency), a replacement's escalated "
-                       "(nominal) cost, annuitised at the LP rate")
+                       "(nominal) cost, annuitised at the asset's own discount rate, else the "
+                       "LP's. Under replacement_rule fixed, a single-part asset's last "
+                       "replacement_capex entry is valued as a full re-purchase, so a partial "
+                       "overhaul replaces the initial purchase's remaining value")
 
 
 def _terminal_block(result, case) -> dict[str, Any]:

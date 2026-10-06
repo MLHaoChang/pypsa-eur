@@ -171,6 +171,13 @@ def test_a_part_without_a_lifetime_is_not_established():
     assert r.op.capex is None and r.cash["project_pre_tax"] is None
 
 
+def test_a_nan_part_lifetime_is_part_lifetime_missing():
+    bess = AssetFinance("bess", "StorageUnit", 1_600_000.0, 15.0, "battery",
+                        (AssetPart("power", 400_000.0, float("nan"), None), ENERGY))
+    r = run_case(_case(_fin(analysis_years=15), assets=(bess,)), layers=LAYER)
+    assert "part_lifetime_missing:bess:power" in r.op.reasons["capex"]
+
+
 def test_a_non_whole_lifetime_rounds_half_up_and_is_flagged():
     a = AssetFinance("gen", "Generator", 1_000_000.0, 12.5)       # k·L = 12.5 → 13 → 2042
     case = _case(assets=(a,), storage=False)
