@@ -59,6 +59,8 @@ frame payloads held.
 | 2026-10-05 | same | `anthropic-sonnet` (live) | 1/3 — the same two failures |
 | 2026-10-05 | the fix | `stub-openai` | **3/3** |
 | 2026-10-05 | the fix | `anthropic-sonnet` (live, `claude-sonnet-5`) | **3/3**; after `start_workflow` the model followed the `orient` step on its own: `get_meta`, `list_components` ×5, then an `ask_user` card |
+| 2026-10-06 | 9d856fa (issue 08 complete: `budget`, `compose`, `solver_bridge` extracted; master #78/#79/#85 merged) | `stub-openai` | **3/3** |
+| 2026-10-06 | same | `anthropic-sonnet` (live) | **3/3** in 19 s; W1 two tools, W2 three (the model started the workflow and took its first step) |
 
 **What the first run found.** The workflow tools read the chat session from
 a ContextVar that `run_turn` set at turn start. The route drives `run_turn`
