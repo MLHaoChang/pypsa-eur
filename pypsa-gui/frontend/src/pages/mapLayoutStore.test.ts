@@ -10,8 +10,10 @@ vi.mock('../api/mapLayout', async importOriginal => {
   const real = await importOriginal<typeof import('../api/mapLayout')>()
   return { ...real, mapLayoutApi: { getMapLayout: vi.fn(), putMapLayout: vi.fn() } }
 })
+vi.mock('../api/network', () => ({ networkApi: { lengthsFromGeometry: vi.fn() } }))
 
 import { emptyMapLayoutDocument, mapLayoutApi, type MapLayoutDocument } from '../api/mapLayout'
+import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
 import {
   MAP_LAYOUT_SAVE_DEBOUNCE_MS,
@@ -22,7 +24,10 @@ import {
   legacyWaypointsKey,
   localMapLayoutKey,
   persistMapLayoutOnUnload,
+  queueLengthFromGeometry,
+  queuedLengthKeys,
   routeWaypoints,
+  setLengthsDerivedSink,
   toLatLng,
   toLngLat,
   useMapLayoutStore,
@@ -30,6 +35,7 @@ import {
 
 const getMapLayout = vi.mocked(mapLayoutApi.getMapLayout)
 const putMapLayout = vi.mocked(mapLayoutApi.putMapLayout)
+const lengthsFromGeometry = vi.mocked(networkApi.lengthsFromGeometry)
 
 const doc = (over: Partial<MapLayoutDocument> = {}): MapLayoutDocument => ({
   version: 1,
@@ -45,6 +51,8 @@ beforeEach(() => {
   getMapLayout.mockReset()
   putMapLayout.mockReset()
   putMapLayout.mockResolvedValue({ saved: 'p', routes: 1, bubbles: 1 })
+  lengthsFromGeometry.mockReset()
+  lengthsFromGeometry.mockResolvedValue({ updated: 0, skipped: [], rescale: [], sources: {} })
 })
 afterEach(() => {
   vi.useRealTimers()
@@ -246,6 +254,32 @@ describe('writes', () => {
     expect(s.renameRoute('p', 'Transformer', 'nope', 'Y')).toBe(false)
   })
 
+  it('renameRoute re-keys the length provenance with the route, and alone', () => {
+    const s = useMapLayoutStore.getState()
+    s.applyLengthSources('p', { 'line:L1': 'route', 'link:K': 'chord' })
+    expect(s.renameRoute('p', 'Line', 'L1', 'L9')).toBe(true)
+    const d = s.docFor('p')
+    expect(Object.keys(d.routes)).toEqual(['line:L9'])
+    expect(d.lengths).toEqual({ 'link:K': { source: 'chord' }, 'line:L9': { source: 'route' } })
+    // A branch with provenance but no bend still re-keys (and reports true).
+    expect(s.renameRoute('p', 'Link', 'K', 'K2')).toBe(true)
+    expect(s.docFor('p').lengths).toEqual({ 'line:L9': { source: 'route' }, 'link:K2': { source: 'chord' } })
+  })
+
+  it('applyLengthSources records provenance and is a no-op when nothing changes', async () => {
+    const s = useMapLayoutStore.getState()
+    s.applyLengthSources('p', { 'line:L1': 'route' })
+    expect(s.docFor('p').lengths).toEqual({ 'line:L1': { source: 'route' } })
+    await vi.advanceTimersByTimeAsync(MAP_LAYOUT_SAVE_DEBOUNCE_MS + 1)
+    expect(putMapLayout).toHaveBeenCalledTimes(1)
+    expect(putMapLayout.mock.calls[0][1].lengths).toEqual({ 'line:L1': { source: 'route' } })
+    s.applyLengthSources('p', { 'line:L1': 'route' })
+    s.applyLengthSources('p', {})
+    s.applyLengthSources('p', undefined)
+    await vi.advanceTimersByTimeAsync(MAP_LAYOUT_SAVE_DEBOUNCE_MS + 1)
+    expect(putMapLayout).toHaveBeenCalledTimes(1)
+  })
+
   it('subscribers see every write', () => {
     const seen: number[] = []
     const unsub = useMapLayoutStore.subscribe(st => seen.push(Object.keys(st.docFor('p').routes).length))
@@ -253,6 +287,81 @@ describe('writes', () => {
     useMapLayoutStore.getState().setRouteWaypoints('p', 'link:B', [[0, 0]])
     unsub()
     expect(seen).toEqual([2, 3])
+  })
+})
+
+describe('lengths from geometry after a route edit (M2)', () => {
+  beforeEach(async () => {
+    getMapLayout.mockResolvedValue(doc())
+    await useMapLayoutStore.getState().ensureLoaded('p')
+  })
+
+  it('calls the endpoint with the queued keys only after the PUT has landed, once', async () => {
+    const sink = vi.fn()
+    setLengthsDerivedSink(sink)
+    const result = { updated: 2, skipped: [], rescale: [], sources: { 'line:L1': 'route' as const, 'link:K': 'chord' as const } }
+    lengthsFromGeometry.mockResolvedValue(result)
+    const s = useMapLayoutStore.getState()
+    s.setRouteWaypoints('p', 'line:L1', [[1, 1]])
+    queueLengthFromGeometry('p', 'line:L1')
+    s.setRouteWaypoints('p', 'link:K', [[2, 2]])
+    queueLengthFromGeometry('p', 'link:K')
+    queueLengthFromGeometry('p', 'link:K')                       // a repeat is one key
+    expect(queuedLengthKeys('p')).toEqual(['line:L1', 'link:K'])
+    expect(lengthsFromGeometry).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(MAP_LAYOUT_SAVE_DEBOUNCE_MS + 1)
+    expect(putMapLayout).toHaveBeenCalledTimes(1)
+    expect(lengthsFromGeometry).toHaveBeenCalledTimes(1)
+    expect(lengthsFromGeometry).toHaveBeenCalledWith(['line:L1', 'link:K'])
+    // The PUT is the earlier call: the server derives from map_layout.json.
+    expect(putMapLayout.mock.invocationCallOrder[0]).toBeLessThan(lengthsFromGeometry.mock.invocationCallOrder[0])
+    expect(queuedLengthKeys('p')).toEqual([])
+    expect(sink).toHaveBeenCalledWith('p', result)
+    // Provenance mirrored into the cached document.
+    expect(useMapLayoutStore.getState().docFor('p').lengths).toEqual({
+      'line:L1': { source: 'route' }, 'link:K': { source: 'chord' },
+    })
+    // …and that mirror's own PUT does not derive again (the queue is empty).
+    await vi.advanceTimersByTimeAsync(MAP_LAYOUT_SAVE_DEBOUNCE_MS + 1)
+    expect(lengthsFromGeometry).toHaveBeenCalledTimes(1)
+  })
+
+  it('a PUT that fell back to localStorage keeps the keys for the retry', async () => {
+    putMapLayout.mockRejectedValueOnce(new Error('offline'))
+    useMapLayoutStore.getState().setRouteWaypoints('p', 'line:L1', [[3, 3]])
+    queueLengthFromGeometry('p', 'line:L1')
+    await vi.advanceTimersByTimeAsync(MAP_LAYOUT_SAVE_DEBOUNCE_MS + 1)
+    expect(lengthsFromGeometry).not.toHaveBeenCalled()
+    expect(queuedLengthKeys('p')).toEqual(['line:L1'])
+    await flushPendingMapLayoutToServer('p')
+    expect(lengthsFromGeometry).toHaveBeenCalledWith(['line:L1'])
+  })
+
+  it('a flush drives the derivation too', async () => {
+    useMapLayoutStore.getState().setRouteWaypoints('p', 'line:L1', [[4, 4]])
+    queueLengthFromGeometry('p', 'line:L1')
+    await flushPendingMapLayoutToServer('p')
+    expect(lengthsFromGeometry).toHaveBeenCalledWith(['line:L1'])
+  })
+
+  it('a scratch network has no server routes to derive from', async () => {
+    useMapLayoutStore.getState().setRouteWaypoints(null, 'line:L1', [[1, 1]])
+    queueLengthFromGeometry(null, 'line:L1')
+    expect(queuedLengthKeys(null)).toEqual([])
+    await vi.advanceTimersByTimeAsync(MAP_LAYOUT_SAVE_DEBOUNCE_MS + 1)
+    expect(lengthsFromGeometry).not.toHaveBeenCalled()
+  })
+
+  it('a failed derivation is logged, never thrown, and leaves the document alone', async () => {
+    lengthsFromGeometry.mockRejectedValue(new Error('409 locked'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    useMapLayoutStore.getState().setRouteWaypoints('p', 'line:L1', [[5, 5]])
+    queueLengthFromGeometry('p', 'line:L1')
+    await vi.advanceTimersByTimeAsync(MAP_LAYOUT_SAVE_DEBOUNCE_MS + 1)
+    expect(warn).toHaveBeenCalled()
+    expect(useMapLayoutStore.getState().docFor('p').lengths).toBeUndefined()
+    warn.mockRestore()
   })
 })
 
@@ -268,9 +377,13 @@ describe('read-only', () => {
     s.setRouteWaypoints('p', 'line:L1', [[1, 1]])
     s.setBubble('p', 'B1|Load', { dx: 1, dy: 1 })
     s.renameRoute('p', 'Line', 'L1', 'L2')
+    s.applyLengthSources('p', { 'line:L1': 'route' })
+    queueLengthFromGeometry('p', 'line:L1')
     expect(s.docFor('p')).toEqual(doc())
+    expect(queuedLengthKeys('p')).toEqual([])
     await vi.advanceTimersByTimeAsync(MAP_LAYOUT_SAVE_DEBOUNCE_MS * 3)
     expect(putMapLayout).not.toHaveBeenCalled()
+    expect(lengthsFromGeometry).not.toHaveBeenCalled()
   })
 
   it('a debounce armed before the lock does not fire after it', async () => {

@@ -14,10 +14,21 @@ import { client } from './client'
 
 export type LngLatTuple = [number, number]
 export type RouteSource = 'user' | 'import' | 'osm'
+/**
+ * Where a branch's PyPSA `length` came from (plan M2): a number the user or
+ * an import typed, the bus0→bus1 chord, or the geodesic length of its route.
+ * PyPSA has no column for this, so the document carries it. A branch with no
+ * entry is `typed` — unknown, and nothing was ever derived for it.
+ */
+export type LengthSource = 'typed' | 'chord' | 'route'
 
 export interface MapRoute {
   points: LngLatTuple[]
   source: RouteSource
+}
+
+export interface MapLengthProvenance {
+  source: LengthSource
 }
 
 export interface MapBubble {
@@ -31,7 +42,13 @@ export interface MapLayoutDocument {
   version: 1
   routes: Record<string, MapRoute>
   bubbles: Record<string, MapBubble>
+  /** Optional: absent on every pre-M2 document; keyed like `routes`. */
+  lengths?: Record<string, MapLengthProvenance>
 }
+
+/** The provenance of one branch's length; `typed` when the document has no entry. */
+export const lengthSourceOf = (doc: MapLayoutDocument, edgeId: string): LengthSource =>
+  doc.lengths?.[edgeId]?.source ?? 'typed'
 
 export const emptyMapLayoutDocument = (): MapLayoutDocument => ({ version: 1, routes: {}, bubbles: {} })
 

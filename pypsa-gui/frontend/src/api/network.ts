@@ -1,6 +1,14 @@
 import client from './client'
 import type { Bus, Carrier, CatalogPayload, Generator, GeneratorProfileMeta, Line, Link, LinkProfileMeta, Load, LoadProfileMeta, LoadAggregate, LoadSection, StorageUnit, Store, Transformer, TransformerType, SnapshotInfo, NetworkMeta, TimeseriesData, TimeseriesInfo } from './types'
 import type { RescalePreview } from '../utils/rescale'
+import type { LengthSource } from './mapLayout'
+
+export interface LengthsFromGeometryResult {
+  updated: number
+  skipped: Array<{ key: string; reason: 'unknown' | 'no-length' | 'unplaced' | string }>
+  rescale: RescalePreview[]
+  sources: Record<string, LengthSource>
+}
 
 export const networkApi = {
   // Buses
@@ -11,8 +19,11 @@ export const networkApi = {
   // rescale triggered by a coordinate change (empty when x/y didn't change).
   // Unwrapped to the body (not the raw AxiosResponse) so callers — MapCanvas's
   // drag handler in particular — can read `.rescale` straight off the result.
+  // `length_sources` (plan M2) names the branches whose length the move
+  // rewrote and whether each followed its route or the chord — the map
+  // store mirrors it into the map document's provenance table.
   updateBus: (name: string, b: Partial<Bus>) =>
-    client.put<{ name: string; rescale: RescalePreview[] }>(
+    client.put<{ name: string; rescale: RescalePreview[]; length_sources?: Record<string, LengthSource> }>(
       `/network/buses/${encodeURIComponent(name)}`, b,
     ).then(r => r.data),
   deleteBus: (name: string) => client.delete(`/network/buses/${encodeURIComponent(name)}`),
@@ -47,6 +58,16 @@ export const networkApi = {
   rescaleImpedances: (lines: Array<{ name: string; r: number; x: number; b: number }>) =>
     client.post<{ updated: number; skipped: Array<{ name: string; reason: string }> }>(
       '/network/lines/rescale_impedances', { lines },
+    ).then(r => r.data),
+  // Plan M2: rewrite the named branches' lengths (`line:<name>` / `link:<name>`,
+  // every Line and Link when omitted) from the project's map geometry — the
+  // route when the branch has one, else the chord. Links get a length and no
+  // preview (no r/x/b); `rescale` previews the lines' per-km-preserving
+  // rescale exactly as a bus drag does, and `sources` is the provenance per
+  // rewritten key for the map document. 409 for an unsaved (scratch) network.
+  lengthsFromGeometry: (keys?: string[]) =>
+    client.post<LengthsFromGeometryResult>(
+      '/network/lengths/from_geometry', { keys: keys ?? null },
     ).then(r => r.data),
 
   // Links

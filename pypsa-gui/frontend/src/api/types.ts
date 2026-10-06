@@ -42,6 +42,8 @@ export interface Link {
   outage_rate_basis?: 'FOR' | 'EFORd' | null
   mttr_hours?: number | null
   name: string; bus0: string; bus1: string; carrier: string; efficiency: number
+  /** km. PyPSA's default is 0 ("not measured"); plan M2 derives it from the map like a line's. */
+  length: number
   /** Third port (CHP heat output, …). PyPSA's default for an unused port is ''. */
   bus2?: string
   p_nom_opt?: number
@@ -647,6 +649,18 @@ export interface ProjectInfo {
   // column NULL for every pre-existing row). Bare string for the same reason
   // as `scenario_type`: an unknown kind shows no badge, it does not break.
   project_kind?: string | null
+  // Per-project settings from metadata.json (plan M2). Absent on an older
+  // backend; every field defaults off, so read through `projectSetting`.
+  settings?: ProjectSettings
+}
+
+export interface ProjectSettings {
+  /**
+   * When on, a bus drag, a route edit or an import rewrites the length of
+   * the affected lines and links from the map geometry and offers the
+   * impedance rescale, as a bus drag does for lines today.
+   */
+  derive_lengths_from_geometry?: boolean
 }
 
 // Compact summary returned by GET /api/projects/{name}/compare-state.

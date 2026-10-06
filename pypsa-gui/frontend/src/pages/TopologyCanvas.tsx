@@ -41,6 +41,7 @@ import {
   useLayoutPersistence, layoutMemCache, layoutCacheKey, loadDiagramState,
   fetchLayoutFor, storageKeyFor, type WP, type PersistedState,
 } from './topologyLayoutStore'
+import { useSitesStore } from '../site3d/sitesStore'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type AssetCategory = 'Thermal' | 'Renewables' | 'Storage' | 'Load'
@@ -2714,6 +2715,10 @@ export default function TopologyCanvas() {
         ;['buses', 'lines', 'links', 'generators', 'loads', 'storage_units', 'stores', 'transformers'].forEach(k =>
           queryClient.invalidateQueries({ queryKey: [k] })
         )
+        // The server re-keyed the bus's `sites.json` placement inside the
+        // rename; the cached document must follow or its next PUT writes
+        // the old key back (the same seam `updateAsset` closes for a PUT).
+        useSitesStore.getState().renamePlacement(useUIStore.getState().currentProject, 'Bus', oldName, newName)
         // Update React Flow nodes: rename id + bus data
         setNodes(prev => prev.map(n => {
           if (n.id === oldName) {
