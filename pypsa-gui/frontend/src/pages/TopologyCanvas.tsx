@@ -38,9 +38,12 @@ import type { Bus, Generator, Line, Load, StorageUnit, Store, Transformer } from
 import { safeMinMax } from '../utils/numeric'
 import { colourForCarrier } from './results/shared'
 import {
-  useLayoutPersistence, layoutMemCache, layoutCacheKey, loadDiagramState,
-  fetchLayoutFor, storageKeyFor, type WP, type PersistedState,
+  useLayoutPersistence, localLayoutFor, loadLayoutNewestWins,
+  storageKeyFor, type WP, type PersistedState,
 } from './topologyLayoutStore'
+import {
+  buildLinkEdges, componentNameFromEdgeId, derivedPortFlow, getLinkColor, FALLBACK_COLORS,
+} from './topologyEdges'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type AssetCategory = 'Thermal' | 'Renewables' | 'Storage' | 'Load'
@@ -51,6 +54,9 @@ interface EdgeData extends Record<string, unknown> {
   type: 'line' | 'link' | 'transformer' | 'asset'
   carrier?: string
   color: string
+  /** Extra-port link edge (`link-<name>#<port>`, see ./topologyEdges): the port and its efficiency. */
+  port?: number
+  efficiency?: number
   waypoints: WP[]
   history: WP[][]  // [0] = straight-line state; push on every committed change (cap 50)
 }
@@ -236,23 +242,8 @@ const CARRIER_BUS_COLORS: Record<string, string> = {
   AC: '#e60012', DC: '#d97706', heat: '#ea580c', H2: '#7c3aed', gas: '#0369a1',
 }
 
-const CARRIER_LINK_COLORS: Record<string, string> = {
-  H2: '#7c3aed', electrolysis: '#7c3aed', 'H2 electrolysis': '#7c3aed',
-  heat: '#ea580c', heat_pump: '#f97316',
-  gas: '#0369a1', CCGT: '#0369a1', OCGT: '#0891b2',
-  battery: '#16a34a', BEV: '#16a34a',
-  DC: '#d97706', HVDC: '#d97706',
-  AC: '#e60012',
-}
-const FALLBACK_COLORS = ['#7c3aed', '#ea580c', '#0369a1', '#16a34a', '#d97706', '#ec4899', '#06b6d4', '#84cc16', '#f43f5e']
-
-function getLinkColor(carrier: string, fallbackIdx: number): string {
-  if (CARRIER_LINK_COLORS[carrier]) return CARRIER_LINK_COLORS[carrier]
-  for (const [key, col] of Object.entries(CARRIER_LINK_COLORS)) {
-    if (carrier.toLowerCase().includes(key.toLowerCase())) return col
-  }
-  return FALLBACK_COLORS[fallbackIdx % FALLBACK_COLORS.length]
-}
+// Link carrier colours (`CARRIER_LINK_COLORS`, `FALLBACK_COLORS`, `getLinkColor`)
+// live in ./topologyEdges so MapCanvas colours an extra port by the same table.
 
 // ── Asset category helpers ─────────────────────────────────────────────────────
 // isRenewableCarrier imported from utils/carriers (single null-safe source).
@@ -925,7 +916,9 @@ function EditableEdge({ id, sourceX, sourceY, targetX, targetY, data, selected }
   // edge (an edge is either a Line/Transformer or a Link), so the colour
   // + badge code branches on which lookup hit.
   const results = useCanvasResults()
-  const edgeName = id.replace(/^(line-|link-|tr-)/, '')
+  // `link-<name>#<port>` is an extra port of Link <name>: same component, same
+  // overlay row (`byLink` is keyed by Link name).
+  const edgeName = componentNameFromEdgeId(id)
   const lineOverlay = results.enabled && (ed.type === 'line' || ed.type === 'transformer')
     ? results.byLine.get(edgeName)
     : undefined
@@ -1292,7 +1285,18 @@ function EditableEdge({ id, sourceX, sourceY, targetX, targetY, data, selected }
         const mid = Math.floor((allPoints.length - 1) / 2)
         const a = allPoints[mid]
         const b = allPoints[mid + 1]
-        const value = linkOverlay.p0
+        // An extra-port edge (bus0 → bus<port>) has no served series:
+        // `/results/links` is p0 only. Its flow is PyPSA's own definition
+        // p_i = -p0 × efficiency_i, shown as a DERIVED value. The arrow
+        // convention stays "positive = source → target", so the value drawn
+        // is the flow TOWARD the far bus, -p_i.
+        const port = ed.port
+        const pPort = port != null ? derivedPortFlow(linkOverlay.p0, ed.efficiency) : null
+        const value = pPort != null ? -pPort : linkOverlay.p0
+        const chipCarrier = port != null ? (ed.carrier ?? '') : linkOverlay.carrier
+        const title = pPort != null
+          ? `p${port} ≈ -p0 × efficiency${port} = ${pPort.toFixed(2)} MW (signed, derived — /results/links serves p0 only; p0 = ${linkOverlay.p0.toFixed(2)} MW, efficiency${port} = ${(ed.efficiency ?? 1).toFixed(3)}) · loading ${linkOverlay.loadingPct.toFixed(1)}% (by p0) · far bus carrier ${chipCarrier || 'unspecified'}`
+          : `p0 = ${value.toFixed(2)} MW (signed) · loading ${linkOverlay.loadingPct.toFixed(1)}% · carrier ${linkOverlay.carrier || 'unspecified'}`
         let dx = b.x - a.x
         let dy = b.y - a.y
         if (value < 0) { dx = -dx; dy = -dy }  // arrow points downstream
@@ -1322,7 +1326,7 @@ function EditableEdge({ id, sourceX, sourceY, targetX, targetY, data, selected }
                 boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
                 whiteSpace: 'nowrap',
               }}
-              title={`p0 = ${value.toFixed(2)} MW (signed) · loading ${linkOverlay.loadingPct.toFixed(1)}% · carrier ${linkOverlay.carrier || 'unspecified'}`}
+              title={title}
             >
               <svg width="11" height="11" viewBox="0 0 11 11" style={{ display: 'block' }}>
                 <g transform={`rotate(${angleDeg} 5.5 5.5)`}>
@@ -1330,10 +1334,10 @@ function EditableEdge({ id, sourceX, sourceY, targetX, targetY, data, selected }
                   <polyline points="6.5,2.5 9.5,5.5 6.5,8.5" fill="none" stroke={bandColor} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
                 </g>
               </svg>
-              <span>{fmtMW(Math.abs(value))}</span>
+              <span>{pPort != null ? '≈ ' : ''}{fmtMW(Math.abs(value))}</span>
               <span style={{ opacity: 0.65 }}>· {linkOverlay.loadingPct.toFixed(0)}%</span>
-              {linkOverlay.carrier && (
-                <span style={{ opacity: 0.45, fontWeight: 500 }}>· {linkOverlay.carrier}</span>
+              {chipCarrier && (
+                <span style={{ opacity: 0.45, fontWeight: 500 }}>· {chipCarrier}</span>
               )}
             </div>
           </EdgeLabelRenderer>
@@ -1961,9 +1965,7 @@ export default function TopologyCanvas() {
   // Seed from the module-level cache first (survives a view-switch unmount),
   // falling back to localStorage for the unsaved / no-project case. This makes
   // the schematic correct on the FIRST render after a map→blank switch.
-  const savedStateRef = useRef<PersistedState | null>(
-    layoutMemCache.get(layoutCacheKey(currentProject)) ?? loadDiagramState(currentProject),
-  )
+  const savedStateRef = useRef<PersistedState | null>(localLayoutFor(currentProject))
 
   // ── Server-side latent layout load ──────────────────────────────────────
   // `layoutEpoch` is bumped whenever a fresh layout document is loaded for the
@@ -1995,34 +1997,26 @@ export default function TopologyCanvas() {
     // project's stale positions can't leak onto same-named buses if the
     // `['buses']` refetch resolves before our layout fetch does.
     posCache.current = {}
-    // Re-point savedStateRef at the NEW project SYNCHRONOUSLY: module cache →
-    // the new project's per-project localStorage → null. This is authoritative
-    // — it must NEVER leave the previous project's value in place, or the new
-    // project inherits the old one's edge waypoints (lines/links/transformers
-    // all share `EdgeData.waypoints`) until the async fetch resolves, and
-    // worse keeps them if the server has no layout. Bump the epoch so the
-    // node-sync (allRfNodes) and edge-sync effects re-apply the new state.
-    savedStateRef.current =
-      layoutMemCache.get(layoutCacheKey(currentProject))
-      ?? loadDiagramState(currentProject)
-      ?? null
+    // Re-point savedStateRef at the NEW project SYNCHRONOUSLY: the newer of
+    // the module cache and the new project's per-project localStorage, else
+    // null. This is authoritative — it must NEVER leave the previous project's
+    // value in place, or the new project inherits the old one's edge waypoints
+    // (lines/links/transformers all share `EdgeData.waypoints`) until the
+    // async fetch resolves, and worse keeps them if the server has no layout.
+    // Bump the epoch so the node-sync (allRfNodes) and edge-sync effects
+    // re-apply the new state.
+    savedStateRef.current = localLayoutFor(currentProject)
     setLayoutEpoch(e => e + 1)
     let cancelled = false
-    fetchLayoutFor(currentProject).then(ps => {
+    loadLayoutNewestWins(currentProject).then(resolved => {
       if (cancelled) return
-      // The server is authoritative for a project's layout. Apply the fetched
-      // layout when present; otherwise fall back to the new project's own
-      // sources — module cache (an in-session drag not yet round-tripped to
-      // layout.json) then per-project localStorage (offline / not-yet-synced)
-      // — else null. So a project with no/empty server layout shows ITS OWN
-      // state or none, never the previous project's. All fallbacks are keyed to
-      // `currentProject`, so none can be the prior project's value. Always
-      // re-assign + bump the epoch.
-      const resolved = ps
-        ?? layoutMemCache.get(layoutCacheKey(currentProject))
-        ?? loadDiagramState(currentProject)
-        ?? null
-      if (resolved) layoutMemCache.set(layoutCacheKey(currentProject), resolved)
+      // The NEWEST of server document, module cache (an in-session drag not
+      // yet round-tripped to layout.json) and per-project localStorage (a
+      // PUT that failed) wins by `savedAt` — not the server unconditionally,
+      // which is what let a drag revert (OPEN-ITEMS 7, closed by A4). A newer
+      // local copy is pushed back by the store. Every source is keyed to
+      // `currentProject`, so none can be the prior project's value; a project
+      // with nothing anywhere shows none. Always re-assign + bump the epoch.
       savedStateRef.current = resolved
       posCache.current = {}
       // Bumping the epoch makes `layoutSeededEpoch.current !== layoutEpoch`,
@@ -2190,6 +2184,9 @@ export default function TopologyCanvas() {
   const busVNom = useMemo(() =>
     Object.fromEntries(buses.map(b => [b.name, b.v_nom ?? 1])),
     [buses])
+  const busCarrier = useMemo<Record<string, string>>(() =>
+    Object.fromEntries(buses.map(b => [b.name, b.carrier ?? ''])),
+    [buses])
 
   // ── Build all React Flow nodes (buses + asset group nodes) ─────────────────
   const allRfNodes = useMemo<Node[]>(() => {
@@ -2286,15 +2283,19 @@ export default function TopologyCanvas() {
       id: `line-${l.name}`, source: l.bus0, target: l.bus1, type: 'network',
       data: { s_nom: l.s_nom, v_nom: busVNom[l.bus0] ?? 1, type: 'line' as const, color: getLineColor(busVNom[l.bus0] ?? 1), waypoints: [] as WP[], history: [[]] as WP[][] } satisfies EdgeData,
     })),
-    ...links.map(l => ({
-      id: `link-${l.name}`, source: l.bus0, target: l.bus1, type: 'network',
-      data: { s_nom: l.p_nom, type: 'link' as const, carrier: l.carrier, color: linkColorMap[l.carrier] ?? FALLBACK_COLORS[0], waypoints: [] as WP[], history: [[]] as WP[][] } satisfies EdgeData,
-    })),
+    // One edge per Link (bus0 → bus1) plus one per set extra port
+    // (`link-<name>#<port>`, bus0 → bus<port>), coloured by the far bus's
+    // carrier — the pure builder in ./topologyEdges, tested over the palette.
+    ...buildLinkEdges(links, {
+      linkColor: c => linkColorMap[c] ?? FALLBACK_COLORS[0],
+      busCarrier: b => busCarrier[b],
+      portColor: c => getLinkColor(c, 0),
+    }),
     ...transformers.map(t => ({
       id: `tr-${t.name}`, source: t.bus0, target: t.bus1, type: 'network',
       data: { type: 'transformer' as const, color: '#16a34a', waypoints: [] as WP[], history: [[]] as WP[][] } satisfies EdgeData,
     })),
-  ], [lines, links, transformers, busVNom, linkColorMap])
+  ], [lines, links, transformers, busVNom, busCarrier, linkColorMap])
 
   // ── Dashed connector edges from bus → asset group nodes ────────────────────
   const rfAssetEdges = useMemo<Edge[]>(() => {
@@ -2596,7 +2597,8 @@ export default function TopologyCanvas() {
   const onEdgeClick = useCallback((_: React.MouseEvent, edge: { id: string }) => {
     if (edge.id.startsWith('assetedge-')) return
     const type = edge.id.startsWith('link-') ? 'Link' : edge.id.startsWith('tr-') ? 'Transformer' : 'Line'
-    setSelectedComponent({ type, name: edge.id.replace(/^(line-|link-|tr-)/, '') })
+    // An extra-port edge (`link-<name>#<port>`) selects the same Link.
+    setSelectedComponent({ type, name: componentNameFromEdgeId(edge.id) })
   }, [setSelectedComponent])
 
   const onNodeDrag = useCallback((_: React.MouseEvent, draggedNode: { id: string; position: { x: number; y: number } }) => {
@@ -2800,7 +2802,7 @@ export default function TopologyCanvas() {
     const edge = edgesRef.current.find(e => e.id === edgeId)
     if (!edge) return
     const isLink = edgeId.startsWith('link-')
-    const name = edgeId.replace(/^(line-|link-)/, '')
+    const name = componentNameFromEdgeId(edgeId)
     const savedEdge = { ...edge, data: { ...(edge.data as object) } as unknown as EdgeData }
     setEdges(prev => prev.filter(e => e.id !== edgeId))
     setEdgeCtxMenu(null)
@@ -3321,7 +3323,7 @@ export default function TopologyCanvas() {
         const hasWaypoints = (ed?.waypoints?.length ?? 0) > 0
         const isAssetEdge = edgeCtxMenu.edgeId.startsWith('assetedge-')
         const isLink = edgeCtxMenu.edgeId.startsWith('link-')
-        const edgeName = edgeCtxMenu.edgeId.replace(/^(line-|link-)/, '')
+        const edgeName = componentNameFromEdgeId(edgeCtxMenu.edgeId)
         const MENU_W = 248, MENU_H = isAssetEdge ? 88 : 130
         const left = edgeCtxMenu.x + MENU_W > window.innerWidth  ? edgeCtxMenu.x - MENU_W : edgeCtxMenu.x
         const top  = edgeCtxMenu.y + MENU_H > window.innerHeight ? edgeCtxMenu.y - MENU_H : edgeCtxMenu.y

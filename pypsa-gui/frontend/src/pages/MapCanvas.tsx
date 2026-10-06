@@ -17,6 +17,7 @@ import { networkApi } from '../api/network'
 import { appLog } from '../store/simulationStore'
 import type { Bus, Generator, Line as LineT, Link as LinkT, Load, StorageUnit, Store, Transformer } from '../api/types'
 import { CanvasResultsProvider, useCanvasResults, fmtMW, loadingColor } from '../components/CanvasResultsContext'
+import { derivedPortFlow, getLinkColor, linkPorts } from './topologyEdges'
 import { busLatLng, unplacedBusNames } from '../utils/geo'
 import { nextBusToPlace, canSkip } from '../utils/placement'
 import { ingestRescale } from '../utils/rescaleActions'
@@ -1119,6 +1120,47 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
                 : undefined}
             />
           )
+        })}
+
+        {/* Extra Link ports (bus2, bus3 …; a CHP's heat output) — one dashed
+            chord per set port, bus0 → bus<port>, coloured by the FAR bus's
+            carrier so the heat leg of a CHP reads as heat. Selecting one
+            selects the Link. Waypoints key `link:<name>#<port>`, the same
+            shape the schematic uses (pages/topologyEdges). The flow shown is
+            PyPSA's p_i = -p0 × efficiency_i — `/results/links` serves p0
+            only — and is labelled as derived. */}
+        {(links as LinkT[]).flatMap(link => {
+          const b0 = busByName.get(link.bus0)
+          const c0 = b0 ? busLatLng(b0) : null
+          if (!c0) return []
+          return linkPorts(link as unknown as Record<string, unknown>).flatMap(p => {
+            const far = busByName.get(p.bus)
+            const cFar = far ? busLatLng(far) : null
+            if (!far || !cFar) return []
+            const edgeId = `link:${link.name}#${p.port}`
+            const linkFlow = results.enabled ? results.byLink.get(link.name) : undefined
+            const pPort = linkFlow ? derivedPortFlow(linkFlow.p0, p.efficiency) : null
+            const farCarrier = far.carrier ?? ''
+            const effLabel = `η${p.port} ${(p.efficiency ?? 1).toFixed(2)}`
+            return [(
+              <EditableLine
+                key={edgeId}
+                id={edgeId}
+                source={c0}
+                target={cFar}
+                waypoints={lineWaypoints[edgeId] ?? []}
+                onUpdate={(wps) => updateWaypoints(edgeId, wps)}
+                onSelect={() => setSelectedComponent({ type: 'Link', name: link.name })}
+                color={linkFlow ? loadingColor(linkFlow.loadingPct) : getLinkColor(farCarrier, 0)}
+                weight={linkFlow ? 3 : 2}
+                dashArray="6 4"
+                tooltip={pPort != null && linkFlow
+                  ? `${link.name} · port ${p.port} → ${p.bus} (${farCarrier || 'unspecified'}) · p${p.port} ≈ ${fmtMW(pPort)} (derived: -p0 × ${effLabel}; p0 = ${fmtMW(linkFlow.p0)})`
+                  : `${link.name} · port ${p.port} → ${p.bus} (${farCarrier || 'unspecified'}) · ${effLabel}`}
+                permanentLabel={pPort != null ? `≈ ${fmtMW(Math.abs(pPort))}` : undefined}
+              />
+            )]
+          })
         })}
 
         {/* Transformers — routable polyline + IEC two-circle pictogram at

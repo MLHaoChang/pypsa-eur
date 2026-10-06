@@ -15,6 +15,14 @@ browser E2E (`notes/2026-09-29-3d-site-view-phase2-qa.md` §7), re-verified in
 source on master that day. Its defect D (a second project from the same
 template → 409) is not listed: master's `_unique_project_name` already fixes it.
 
+**2026-10-06 (later):** two items closed and removed per the convention —
+item 7 (blank-canvas node positions reverting; the load now takes the newest
+of server / memory / localStorage by `savedAt` and a failed `PUT /layout`
+surfaces once, `findings/2026-07-31-blank-canvas-node-drags-revert.md` carries
+the detail) and item 14 (a three-port Link dropping `bus2` / `efficiency2`;
+`_drop_unknown_extras` admits PyPSA's per-port columns by regex). Both are
+increments A1 and A4 of `plans/2026-10-06-visual-layers-1-abstract-canvas.md`.
+
 This file exists because GitHub Issues is **disabled** on this repository, so
 there is nowhere else to keep a queue. It is deliberately thin: one entry per
 open item, with the anchor and the source document. The analysis lives in
@@ -106,21 +114,6 @@ by default, silently, with nothing failing. A dependency declared on the route
 has the opposite default. Worth a test that fails when a route is mounted under
 a prefix no mechanism covers — the omission is what needs to become loud.
 Source: finding 3 of the same audit.
-
-### 7. Node positions revert on the blank canvas
-
-User-reported 2026-07-31; diagnosed, never fixed. Two facts still hold:
-`PUT /layout` 404s until the project directory exists on disk, and on load the
-server wins unconditionally — `TopologyCanvas.tsx:2004` still resolves
-`ps ?? layoutMemCache.get(...) ?? loadDiagramState(...) ?? null`. `persistLayoutFor`'s
-`.catch()` falls back to localStorage, which is *third* in that chain, so a
-failed PUT leaves a newer local layout that the next load discards for an older
-`layout.json`. Both ends are silent. `PersistedState` carries `savedAt` and
-nothing compares it.
-
-The user's exact sequence was never reproduced, so the trigger for the failing
-PUT is still unidentified — the finding lists the candidates in the order worth
-testing. Source: `findings/2026-07-31-blank-canvas-node-drags-revert.md`.
 
 ### 8. Component names are not validated at the edge
 
@@ -262,15 +255,3 @@ through). Fine for a review build; a credential in a shipped page otherwise. One
 decision (strip before release, or gate the prefill on a build flag) and a test
 that the served page carries no password value. Source: the same E2E, "Other
 findings".
-
-### 14. Creating a three-port Link drops `bus2` and `efficiency2`
-
-`services/network_crud._drop_unknown_extras` keeps only catalog Input
-attributes, and PyPSA's catalog does not list the multi-port columns, so the
-palette's CHP item creates a plain gas → electricity Link with no heat output
-unless some Link in the network already carries a `bus2` column. Neither canvas
-draws `bus2`/`bus3` either. Fix: admit `bus\d+` / `efficiency\d+` (and the
-per-port `p_min_pu`/`p_max_pu` forms) for Links, with a test that a CHP created
-from the palette keeps both. Planned as increment A1 of
-`plans/2026-10-06-visual-layers-1-abstract-canvas.md`. Source: the 3D branch's
-Phase 2 WP1 smoke (`specs/2026-09-29-3d-site-view-phase2-design.md` §8).
