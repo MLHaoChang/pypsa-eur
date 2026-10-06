@@ -152,6 +152,37 @@ own cookie policy through configuration. The CSRF double-submit check
 (`main.py:645`) currently carries the load for those sessions. Source: gap 5 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
 
+### 10b. An edit after a hub study is not tracked (owner-approved: P33b)
+
+Added 2026-09-30 (P28 gate, owner decision O1). The EH review's `stale`
+flag is true only when a later foreground solve cleared the stored report
+(`services/adequacy/eh_review.py:455-460`). An edit to the network after a
+finished study leaves the Guided greeting and the Hub design Results card
+unaware. P28 softened the greeting's wording so that it claims nothing about
+the current network. The fix is a backend network-revision marker on the
+study record (e.g. `network_changed`), read by both surfaces. It is scheduled
+as P33b in `plans/2026-09-28-guided-mode-deferred.md` §3.
+
+### 10c. Two narrow project-lock races have correct guards but no test
+
+Added 2026-09-30 (P28 re-gate, mutants R4 and R7). In `moveProjectLock`, a
+stale 409 re-acquire that fails after a fresh acquire of the same project
+(R4), and a stale failed acquire in an X→Y→Z switch (R7), are both ignored
+by the generation guard. Removing either check leaves every test green. Add
+one test for each so the guard stays pinned.
+
+### 10a. Re-activating a project does not restore its hub study record
+
+Added 2026-09-30, from the P28 smoke. A project whose Energy Hub study
+finished, and which is then left and re-activated
+(`POST /api/projects/<p>/activate`), answers `GET /api/results/eh_study`
+with no study. The Guided hub rail opens at Site again, and the greeting says
+"No study has run yet". The Guided "study done" state is lost for a user who
+re-opens a project. Where the record is stored was not traced. The P28 smoke
+part (C) works around it by re-running the study. Sources: the plan's "P28
+phase note" (contract drift 3) and
+`qa/2026-09-30-guided-mode-deferred-gate-P28.md`.
+
 ---
 
 ## Closed since the 2026-09-12 pass

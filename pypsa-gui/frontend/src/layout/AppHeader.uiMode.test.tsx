@@ -8,6 +8,7 @@ import { useUIStore } from '../store/uiStore'
 import { WRITABLE } from '../utils/lockState'
 import { activeJobForProject } from '../hooks/useSolveQueue'
 import { useSimulationStore } from '../store/simulationStore'
+import { UI_MODE_TITLES } from '../utils/uiMode'
 
 // Guided-mode spec §3.3 — the header's Guided / Expert segmented control.
 
@@ -86,6 +87,23 @@ describe('AppHeader — Guided / Expert switch', () => {
     expect(screen.getByTestId('ui-mode-expert').getAttribute('title')).toBe('Every panel and tab, as today.')
   })
 
+  // P30 (B9): the hover title is not read by screen readers on focus; each
+  // button points at a visually hidden sentence carrying the same words.
+  it('each mode button has an accessible description equal to its title', () => {
+    renderHeader()
+    for (const m of ['guided', 'expert'] as const) {
+      const btn = screen.getByTestId(`ui-mode-${m}`)
+      const id = btn.getAttribute('aria-describedby')
+      expect(id).toBe(`ui-mode-${m}-desc`)
+      const desc = document.getElementById(id!)
+      expect(desc).not.toBeNull()
+      expect(desc!.textContent).toBe(UI_MODE_TITLES[m])
+      expect(desc!.className).toContain('sr-only')
+      expect(btn.getAttribute('title')).toBe(UI_MODE_TITLES[m])
+      expect(btn.textContent).toBe(m === 'guided' ? 'Guided' : 'Expert')   // name unchanged
+    }
+  })
+
   it('sits immediately left of the status pill', () => {
     renderHeader()
     const sw = screen.getByTestId('ui-mode-switch')
@@ -146,6 +164,21 @@ describe('AppHeader — the Run button per mode', () => {
       renderHeader()
       expect(screen.getByTitle('Cancel this queued solve').textContent).toContain('Queued #2')
     } finally { vi.mocked(activeJobForProject).mockReturnValue(undefined) }
+  })
+
+  // P30 (C11, R15): a solve the queue reports as running (the store starts
+  // idle; the header follows the queue) keeps the Abort control in Guided.
+  it('Guided: a running queue job still shows Abort', () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(activeJobForProject).mockReturnValue(
+      { project_id: 'demo', status: 'running', position: null } as never)
+    try {
+      renderHeader()
+      expect(screen.getByTitle('Abort the running simulation').textContent).toContain('Abort')
+    } finally {
+      vi.mocked(activeJobForProject).mockReturnValue(undefined)
+      useSimulationStore.setState({ status: 'idle' })
+    }
   })
 
   it('Expert: the Run button is there', () => {

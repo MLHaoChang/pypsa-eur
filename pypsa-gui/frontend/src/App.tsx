@@ -25,6 +25,7 @@ import CompareView from './pages/CompareView'
 import SolveQueuePanel from './pages/SolveQueuePanel'
 import GridspinePanel from './pages/GridspinePanel'
 import ReportsPanel from './pages/ReportsPanel'
+import CampusElectricalPanel from './pages/CampusElectricalPanel'
 import { recoveryFor } from './utils/autoRecovery'
 import LocalSettings from './pages/LocalSettings'
 import HubDesignPanel from './pages/hubDesign/HubDesignPanel'
@@ -34,6 +35,8 @@ import RescaleDialogHost from './components/RescaleDialogHost'
 import { GuidedTourHost } from './components/GuidedTour'
 import CrashRecoveryBanner from './components/CrashRecoveryBanner'
 import LockBanner from './components/LockBanner'
+import ProjectMismatchBanner from './components/ProjectMismatchBanner'
+import { useProjectMismatchDetection } from './hooks/useProjectMismatchDetection'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import AssistantDock from './components/AssistantDock'
 import { useUIStore, type SlidePanel } from './store/uiStore'
@@ -112,8 +115,9 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   issues:     { eyebrow: 'SIMULATION', title: 'Issues' },
   results:    { eyebrow: 'SIMULATION', title: 'Results' },
   solveQueue: { eyebrow: 'SIMULATION', title: 'Solve queue' },
-  gridspine:  { eyebrow: 'SIMULATION', title: 'Planning → dynamics' },
-  reports:    { eyebrow: 'SIMULATION', title: 'Reports' },
+  gridspine:  { eyebrow: 'STUDIES',    title: 'Planning → dynamics' },
+  reports:    { eyebrow: 'STUDIES',    title: 'Reports' },
+  campusElectrical: { eyebrow: 'STUDIES', title: 'Campus electrical' },
   workspace:  { eyebrow: 'PROJECT',    title: 'Workspace' },
   settings:   { eyebrow: 'APPLICATION', title: 'Settings' },
   hubDesign:  { eyebrow: 'GUIDED',     title: 'Hub design' },
@@ -122,7 +126,7 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
 // Tabs that take the whole main area (canvas hidden) rather than opening as a
 // half-width panel beside the canvas — their charts, tables, and two-column
 // layouts need the full width.
-const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine', 'reports', 'hubDesign'])
+const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine', 'reports', 'hubDesign', 'campusElectrical'])
 
 function fullPageContent(panel: SlidePanel): React.ReactNode {
   switch (panel) {
@@ -143,6 +147,7 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'solveQueue': return <SolveQueuePanel />
     case 'gridspine':  return <GridspinePanel />
     case 'reports':    return <ReportsPanel />
+    case 'campusElectrical': return <CampusElectricalPanel />
     case 'settings':   return <LocalSettings />
     case 'hubDesign':  return <HubDesignPanel />
     default:           return null
@@ -230,12 +235,20 @@ export default function App() {
   // no longer exist on disk (after a delete from another tab), (2) seed
   // lastSavedByProject from metadata.created_at when the in-memory map has no
   // entry for a known project (typical on a fresh browser session).
-  const { data: backendProjects } = useQuery({
+  const { data: backendProjects, isPending: projectsPending } = useQuery({
     queryKey: ['projects'],
     queryFn: projectsApi.list,
     staleTime: 10_000,
     refetchInterval: 30_000,
   })
+
+  // A2 (deferred spec §2.1): the tab / backend project-mismatch check. A study
+  // (planning → dynamics) has no network, so the backend's binding is some
+  // other project by design — never a mismatch; while the project list is
+  // still loading we cannot tell, so the check waits for it.
+  const tabIsStudy = projectsPending || (!!currentProject && !!backendProjects
+    && recoveryFor(backendProjects, currentProject) === 'study')
+  useProjectMismatchDetection(tabIsStudy)
 
   useEffect(() => {
     if (!backendProjects) return
@@ -459,6 +472,10 @@ export default function App() {
       try {
         const meta = await networkApi.getMeta()
         if (cancelled) return
+        // The backend is bound to ANOTHER project: that is the A2 mismatch
+        // (ProjectMismatchBanner offers Reload / Switch), not an empty
+        // network to re-load silently over someone else's binding.
+        if (meta?.loaded_project != null && meta.loaded_project !== currentProject) return
         // Heuristic: empty in-memory network. The bus_count check is the
         // strong signal — a freshly-reset PyPSA instance has zero buses.
         if ((meta?.bus_count ?? 0) > 0) return
@@ -606,6 +623,11 @@ export default function App() {
         {/* Renders only when another user holds this project's edit lock
             (auth mode). Hidden otherwise so it takes no vertical space. */}
         <LockBanner />
+
+        {/* ── Tab / backend project mismatch (A2) ───────────────────── */}
+        {/* Renders only while this tab's project and the backend's binding
+            disagree; the tab's writes are paused until Reload or Switch. */}
+        <ProjectMismatchBanner />
 
         {/* ── App header ─────────────────────────────────────────────── */}
         <AppHeader />

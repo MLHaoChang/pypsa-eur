@@ -99,3 +99,13 @@ def band_for(profile: dict, kv: float) -> dict:
     raise ContractError(
         f"grid-code profile {profile.get('name', '?')!r} sets no voltage band for {kv:g} kV"
     )
+
+
+def list_grid_codes(path=None) -> dict:
+    """``{profile name: title}`` of every profile in the file. This is what
+    a study chooses from."""
+    data = yaml.safe_load(Path(path or _DEFAULT).read_text())
+    profiles = data.get("profiles") if isinstance(data, dict) else None
+    if not isinstance(profiles, dict):
+        raise ContractError("the grid-code file has no 'profiles' mapping")
+    return {name: str(p.get("title", name)) for name, p in profiles.items()}

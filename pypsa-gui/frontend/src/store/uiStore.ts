@@ -6,8 +6,10 @@ import { effectiveLockState, type LockState, type ReadOnlyReason } from '../util
 // Results.tsx enforcing the same number independently is how they can drift.
 import { RAIL_MIN_W } from '../pages/results/railWidth'
 import { appLog } from './simulationStore'
+import type { ProjectMismatch } from '../utils/projectMismatch'
 
 interface SelectedComponent { type: string; name: string }
+export interface PropertiesEditRequest { type: 'Bus' | 'Link'; name: string }
 // CreationRequest is set when the user wants to add a new asset to the network.
 // Two entry points:
 //   • Click in AssetPalette → setCreationItem({id, label}) → renders as
@@ -40,7 +42,7 @@ export type CanvasMode = 'select' | 'connect'
 // deliberately NOT among them: `activeSlidePanel` holds ONE value, so while
 // `'chat'` was a member the assistant was mutually exclusive with every view
 // it exists to explain. It lives in `assistantDockOpen` below instead.
-export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings' | 'gridspine' | 'hubDesign' | 'reports'
+export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings' | 'gridspine' | 'hubDesign' | 'reports' | 'campusElectrical'
 // Command-palette open mode. `null` = closed. `'all'` = full surface (⌘K).
 // `'projects'` = focused project switcher (⌘P).
 export type PaletteMode = 'all' | 'projects' | null
@@ -406,6 +408,17 @@ interface UIStore {
   // newly-loaded network under the OLD project's name (silent cross-project
   // overwrite). In-memory only; defaults false.
   projectSwitchInProgress: boolean
+  // How many switches are in flight (P27b gate note 8): overlapping switches
+  // must not drop the fence when the first one finishes. The boolean above
+  // mirrors `projectSwitchDepth > 0` and is what every reader uses.
+  projectSwitchDepth: number
+  // A2 (deferred spec §2.1): the tab's `currentProject` and the backend's
+  // binding (`/network/meta.loaded_project`) disagree — after a backend
+  // restart another tab's project was resumed, or an external client swapped
+  // it. While set, the axios interceptor refuses the tab's writes, autosave
+  // is suspended, chat Send is gated and ProjectMismatchBanner offers Reload
+  // or Switch. In-memory only; cleared by an agreeing sample or a switch.
+  projectMismatch: ProjectMismatch | null
   // Docked comparison rail (lives inside the Results view). Independent of
   // activeSlidePanel so the A-vs-B CompareView can coexist with the live
   // Results tabs and persist across result-tab switches until explicitly
@@ -427,8 +440,9 @@ interface UIStore {
   reportGenerateRequest: boolean
   // Ask the Properties panel's Bus / Link card to open its Edit form (the EH
   // tagging tour's targets only render in Edit). Consumed then cleared by the
-  // card, like resultsTabRequest.
-  propertiesEditRequest: 'Bus' | 'Link' | null
+  // card showing exactly that component (P30 B10); a selection change to any
+  // other component clears it, so a request never replays on a later card.
+  propertiesEditRequest: PropertiesEditRequest | null
   // Ask the Energy Hub reference-design panel (Results → Adequacy) to open
   // and bring its report into view — the hub-design Results card's "Open
   // full report" (guided-mode P24). Consumed then cleared by the panel.
@@ -523,6 +537,7 @@ interface UIStore {
   constrainDockWidth: (desired: number, available: number) => number
   readStoredDockOpen: () => boolean
   setProjectSwitchInProgress: (v: boolean) => void
+  setProjectMismatch: (v: ProjectMismatch | null) => void
   setCompareRailOpen: (v: boolean) => void
   toggleCompareRail: () => void
   setCompareRailWidth: (px: number) => void
@@ -534,7 +549,7 @@ interface UIStore {
   clearSettingsSectionRequest: () => void
   requestReportGenerate: () => void
   clearReportGenerateRequest: () => void
-  requestPropertiesEdit: (c: 'Bus' | 'Link') => void
+  requestPropertiesEdit: (c: PropertiesEditRequest) => void
   clearPropertiesEditRequest: () => void
   requestEhReport: () => void
   clearEhReportRequest: () => void
@@ -594,6 +609,8 @@ export const useUIStore = create<UIStore>((set) => ({
   assistantDockWidth: storedAssistantDockWidth(),
   assistantSpeakEnabled: storedAssistantSpeak(),
   projectSwitchInProgress: false,
+  projectSwitchDepth: 0,
+  projectMismatch: null,
   compareRailOpen: storedCompareRailOpen(),
   compareRailWidth: storedCompareRailWidth(),
   bottomTabRequest: null,
@@ -701,7 +718,14 @@ export const useUIStore = create<UIStore>((set) => ({
   },
   toggleRightPanel: () => set(s => ({ rightPanelOpen: !s.rightPanelOpen })),
   openRightPanel: () => set({ rightPanelOpen: true }),
-  setSelectedComponent: (c) => set({ selectedComponent: c }),
+  setSelectedComponent: (c) => set(s => ({
+    selectedComponent: c,
+    // P30 (B10): an edit request belongs to one component; moving the
+    // selection anywhere else drops it.
+    propertiesEditRequest: s.propertiesEditRequest && c
+      && c.type === s.propertiesEditRequest.type && c.name === s.propertiesEditRequest.name
+      ? s.propertiesEditRequest : null,
+  })),
   setHighlightedComponent: (c) => set({ highlightedComponent: c }),
   setProjectName: (name) => {
     try { localStorage.setItem(PROJECT_NAME_KEY, name) } catch { /* noop */ }
@@ -741,7 +765,13 @@ export const useUIStore = create<UIStore>((set) => ({
     persistAssistantDockOpen(next)
     return { assistantDockOpen: next }
   }),
-  setProjectSwitchInProgress: (v) => set({ projectSwitchInProgress: v }),
+  setProjectSwitchInProgress: (v) => set(s => {
+    // A counter under the boolean (gate note 8). A test or caller that set
+    // the boolean directly (depth 0) still gets `false` from a finish.
+    const depth = Math.max(0, (s.projectSwitchDepth ?? 0) + (v ? 1 : -1))
+    return { projectSwitchDepth: depth, projectSwitchInProgress: depth > 0 }
+  }),
+  setProjectMismatch: (v) => set({ projectMismatch: v }),
   setCompareRailOpen: (v) => {
     try { localStorage.setItem(COMPARE_RAIL_KEY, v ? 'true' : 'false') } catch { /* noop */ }
     set({ compareRailOpen: v })
@@ -790,6 +820,8 @@ export const useUIStore = create<UIStore>((set) => ({
   requestAssetDetail: (req) => set({
     assetDetailRequest: req,
     selectedComponent: { type: req.componentClass, name: req.name },
+    // P30 gate S-2: the selection moved, so a pending edit request goes.
+    propertiesEditRequest: null,
     activeSlidePanel: 'results',
     resultsTabRequest: 'asset',
   }),
@@ -838,6 +870,9 @@ export const useUIStore = create<UIStore>((set) => ({
         selectedComponent: null,
         highlightedComponent: null,
         assetDetailRequest: null,
+        // P30 gate S-2: the same hazard for a pending Edit request — it must
+        // not open project B's same-named bus in Edit.
+        propertiesEditRequest: null,
         // Per-project result-source (B8): restore the new project's choice so
         // an instant switch lands on the source the user last picked there.
         // Defaults to 'lopf' for a never-visited / fresh project.
@@ -967,3 +1002,26 @@ export const useUIStore = create<UIStore>((set) => ({
   }),
   setPaletteMode: (m) => set({ paletteMode: m }),
 }))
+
+// ── P28 C10 (deferred spec 2026-09-28 §3.3): multi-tab mode choice ──────────
+// A `storage` event carries another tab's write (never this tab's own). When
+// the other tab's user CHOSE a mode (the explicit flag is set in storage) and
+// this tab has made no choice of its own, adopt it — explicitly, through
+// setUiMode, so §3.7 pruning applies as for any switch. An implicit change
+// elsewhere (a G4 flip, a first-run default) is ignored: it is that tab's
+// default, not the user's choice. An explicit choice made here is kept.
+function onUiModeStorage(e: StorageEvent): void {
+  if (e.key !== UI_MODE_KEY && e.key !== UI_MODE_EXPLICIT_KEY) return
+  const s = useUIStore.getState()
+  if (s.uiModeExplicit || !readUiModeExplicit()) return
+  const stored = readUiMode()
+  if (stored) s.setUiMode(stored, { explicit: true })
+}
+if (typeof window !== 'undefined') {
+  // One listener per window: a module re-evaluated by HMR (or a test's
+  // `vi.resetModules()`) replaces the previous one instead of stacking.
+  const w = window as unknown as { __uiModeStorageListener?: (e: StorageEvent) => void }
+  if (w.__uiModeStorageListener) window.removeEventListener('storage', w.__uiModeStorageListener)
+  w.__uiModeStorageListener = onUiModeStorage
+  window.addEventListener('storage', onUiModeStorage)
+}
