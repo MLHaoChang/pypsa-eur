@@ -162,6 +162,16 @@ class ImpedanceRescaleRequest(BaseModel):
     lines: list[ImpedanceRescaleEntry]
 
 
+class LengthsFromGeometryRequest(BaseModel):
+    """
+    Body for POST /api/network/lengths/from_geometry (plan M2). `keys` are the
+    map's branch ids, `line:<name>` / `link:<name>`; None means every Line and
+    Link. A key of another kind, or an unknown name, is reported as skipped.
+    """
+
+    keys: list[str] | None = None
+
+
 class LinkCreate(BaseModel):
     # extra='allow' lets an attribute the model does not declare survive
     # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog

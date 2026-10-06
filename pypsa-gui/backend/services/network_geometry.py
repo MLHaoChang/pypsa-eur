@@ -161,38 +161,59 @@ class _RecomputeResult(NamedTuple):
     `_impedance_preview` omits for an all-zero-impedance line even though its
     length WAS rewritten. A changelog that reports `len(previews)` undercounts
     whenever a zero-impedance line is among the ones touched.
+
+    `sources` is the length PROVENANCE per rewritten branch, keyed by the
+    map's `<kind>:<name>` — `"route"` when the length followed a routed
+    polyline, `"chord"` when it is the bus0→bus1 great circle — for the
+    caller to record in `map_layout.json` (plan M2).
     """
 
     updated: int
     previews: list[dict]
+    sources: dict[str, str]
 
 
-def _recompute_lengths_for_bus(n, bus_name: str) -> _RecomputeResult:
+def _recompute_lengths_for_bus(
+    n, bus_name: str, *, routes: dict[str, list] | None = None, include_links: bool = False,
+) -> _RecomputeResult:
     """
-    Rewrite line.length for every line touching `bus_name`, and return both
-    the rewrite count and one preview per line whose impedance a
-    per-km-preserving rescale would change.
+    Rewrite `length` for every branch touching `bus_name`, and return the
+    rewrite count, one preview per LINE whose impedance a per-km-preserving
+    rescale would change, and the provenance of each length.
+
+    By default this is the pre-M2 behaviour: Lines only, by chord. With the
+    project setting "Derive lengths from geometry" on, the caller passes the
+    document's interior `routes` (`<kind>:<name>` → `[[lng, lat], ...]`), so
+    a routed branch gets its route length, and `include_links=True`, so Links
+    (which carry `length` in PyPSA but no impedance) follow too.
 
     Length is rewritten here because it follows from geometry. Impedance is a
     modelling choice and is only PREVIEWED — see _impedance_preview and
     POST /lines/rescale_impedances. The caller must hold PyPSAService.get_lock().
     """
-    if n.lines.empty:
-        return _RecomputeResult(0, [])
-    mask = (n.lines["bus0"] == bus_name) | (n.lines["bus1"] == bus_name)
+    routes = routes or {}
+    kinds = (("line", "lines"), ("link", "links")) if include_links else (("line", "lines"),)
     updated = 0
     previews: list[dict] = []
-    for line_name in n.lines.index[mask]:
-        b0 = str(n.lines.at[line_name, "bus0"])
-        b1 = str(n.lines.at[line_name, "bus1"])
-        d = _line_haversine_km(n, b0, b1)
-        if d is None:
+    sources: dict[str, str] = {}
+    for kind, attr in kinds:
+        df = getattr(n, attr, None)
+        if df is None or df.empty:
             continue
-        old_length = float(n.lines.at[line_name, "length"])
-        old = {k: float(n.lines.at[line_name, k]) for k in _IMPEDANCE_FIELDS}
-        n.lines.at[line_name, "length"] = float(d)
-        updated += 1
-        p = _impedance_preview(str(line_name), old_length, float(d), old)
-        if p is not None:
-            previews.append(p)
-    return _RecomputeResult(updated, previews)
+        mask = (df["bus0"] == bus_name) | (df["bus1"] == bus_name)
+        for name in df.index[mask]:
+            key = f"{kind}:{name}"
+            geo = _branch_geometry_km(n, str(df.at[name, "bus0"]), str(df.at[name, "bus1"]), routes.get(key))
+            if geo is None:
+                continue
+            d, source = geo
+            old_length = float(df.at[name, "length"])
+            old = {k: float(df.at[name, k]) for k in _IMPEDANCE_FIELDS} if kind == "line" else None
+            df.at[name, "length"] = float(d)
+            updated += 1
+            sources[key] = source
+            if old is not None:
+                p = _impedance_preview(str(name), old_length, float(d), old)
+                if p is not None:
+                    previews.append(p)
+    return _RecomputeResult(updated, previews, sources)

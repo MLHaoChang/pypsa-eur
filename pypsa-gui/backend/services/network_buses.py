@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from services import change_log_service
+from services import change_log_service, network_lengths
 from services.network_geometry import _recompute_lengths_for_bus
 from services.pypsa_service import PyPSAService
 from services.study_state import refuse_edit_during_live_study
@@ -54,22 +54,32 @@ def apply_update_bus(name: str, bus, *, update_component):
     # can still override later via PUT /lines/{name}. Use the post-update name
     # (rename-aware) so we hit the renamed bus, not its ghost.
     rescale: list[dict] = []
+    length_sources: dict[str, str] = {}
     if coord_changed:
         new_name = result.get("name", name)
+        # Plan M2: with the project setting "Derive lengths from geometry" on,
+        # a routed branch follows its route rather than the chord, and Links
+        # follow too. Off (the default) is exactly the pre-M2 rewrite.
+        project_dir, routes, derive = network_lengths.geometry_context()
         with PyPSAService.get_lock():
-            recompute = _recompute_lengths_for_bus(n, new_name)
+            recompute = _recompute_lengths_for_bus(
+                n, new_name, routes=routes if derive else None, include_links=derive,
+            )
         rescale = recompute.previews
+        length_sources = recompute.sources
         # Log the true rewrite count, not len(rescale): a zero-impedance line
         # still has its length rewritten but _impedance_preview omits it (no
         # rescale to offer), so len(rescale) alone would undercount whenever
         # such a line is among the ones touched.
         if recompute.updated:
+            what = "line/link length(s) from geometry" if derive else "line length(s)"
             change_log_service.log(
                 "update", "Lines", "(auto)",
-                f"Auto-rewrote {recompute.updated} line length(s) after bus '{new_name}' moved",
+                f"Auto-rewrote {recompute.updated} {what} after bus '{new_name}' moved",
             )
+            network_lengths.record_length_sources(project_dir, length_sources)
     if isinstance(result, dict):
-        result = {**result, "rescale": rescale}
+        result = {**result, "rescale": rescale, "length_sources": length_sources}
     return result
 
 
