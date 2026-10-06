@@ -512,6 +512,15 @@ def test_a_quote_the_stated_page_has_wins_over_an_earlier_page_that_repeats_it(h
     assert draft["review"]["limits"]["voltage_bands[0]"] == {"quote_found": True, "found_on_page": 5}
 
 
+def test_a_quote_on_the_stated_page_and_the_page_before_it_names_the_stated_page(hub, fake_api):
+    """The stated page is tried first, then the page before, then the one after."""
+    repeated = make_pdf(("filler", "filler", PAGE_1, PAGE_1, "filler", "filler"))
+    inp = tool_input()
+    inp["voltage_bands"][0]["page"] = 4
+    _, draft = _extracted_in(hub, fake_api, inp, pdf=repeated)
+    assert draft["review"]["limits"]["voltage_bands[0]"] == {"quote_found": True, "found_on_page": 4}
+
+
 def test_editing_the_page_rechecks_the_quote_across_the_document(hub, fake_api):
     _extracted_in(hub, fake_api, tool_input())
     text = gc.get_draft(hub, "tso")["yaml"]

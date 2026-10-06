@@ -471,6 +471,13 @@ def test_an_inclusive_edge_met_by_the_next_band_is_not_a_gap():
     assert uncovered_kv_ranges(_bands((0, 110, True), (110, 400))) == []
 
 
+def test_an_inclusive_edge_counts_even_when_another_band_ends_at_the_same_voltage_first():
+    """Two bands end at 110 kV, the later-starting one inclusive: 110 kV is covered
+    whichever the order, so the gap above starts open."""
+    assert uncovered_kv_ranges(_bands((0, 110), (10, 110, True), (110.5, 400))) == [(110.0, 110.5, False)]
+    assert uncovered_kv_ranges(_bands((10, 110, True), (0, 110), (110.5, 400))) == [(110.0, 110.5, False)]
+
+
 def test_a_first_band_above_zero_leaves_zero_up_to_it_uncovered():
     assert uncovered_kv_ranges(_bands((0.4, 110))) == [(0.0, 0.4, True)]
 
