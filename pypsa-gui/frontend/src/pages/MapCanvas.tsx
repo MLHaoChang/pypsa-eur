@@ -29,6 +29,10 @@ import { useSiteDraw, newSiteButtonVisible } from '../site3d/useSiteDraw'
 import { useSitesStore } from '../site3d/sitesStore'
 import { readActiveSite, writeActiveSite } from '../site3d/activeSite'
 import type { LngLatTuple, Site } from '../site3d/types'
+import type { MapBubble } from '../api/mapLayout'
+import {
+  bubbleKey, routeWaypoints, useMapLayoutLifecycle, useMapLayoutStore, type LatLngTuple,
+} from './mapLayoutStore'
 
 /**
  * HTML-attribute escaping for the divIcon's `html` string. The marker markup
@@ -110,44 +114,23 @@ const CATEGORY_LABELS: Record<AssetCategory, string> = {
 // case the bubble falls back to the category's generic icon.
 interface CategoryEntry { count: number; badge: BadgeDef | null }
 
-// localStorage keys for the map's user layout — asset-group bubble offsets and
-// line waypoints. Keyed PER PROJECT (the `default` slot is the unsaved /
-// no-project network) so each project keeps its own map layout instead of one
-// global blob shared across every project. localStorage already makes the
-// layout survive reloads + canvas view switches; persisting it into the
-// project bundle server-side (like the blank canvas's layout.json) is a
-// deferred follow-up.
-type AssetOffsets = Record<string, { dx: number; dy: number }>
-type LatLngTuple = [number, number]
-type LineWaypoints = Record<string, LatLngTuple[]>
-
-// Resolve the active project for keying; reads the store imperatively so the
-// load/save helpers below can stay plain module functions.
-function mapLayoutSlot(): string {
-  return useUIStore.getState().currentProject ?? 'default'
-}
-
-// Asset-group bubble positions — pixel offsets from the bus so a bus drag still
-// sweeps its bubbles along, preserving the user's *relative* layout choice.
-function loadAssetOffsets(): AssetOffsets {
-  try { return JSON.parse(localStorage.getItem(`pypsa-gui:map:asset-offsets:${mapLayoutSlot()}`) ?? '{}') ?? {} }
-  catch { return {} }
-}
-function saveAssetOffsets(offsets: AssetOffsets) {
-  try { localStorage.setItem(`pypsa-gui:map:asset-offsets:${mapLayoutSlot()}`, JSON.stringify(offsets)) } catch { /* quota: ignore */ }
-}
-
-// User-routed line waypoints, keyed by "<edgeKind>:<name>" e.g. "line:L1",
-// "link:L2", "tr:T1". Stored as raw lat/lng so they survive bus drags and
-// zoom/pan without recomputation. PURELY VISUAL — never touch line.length /
-// link.length, those stay haversine bus0→bus1 (or whatever the user typed).
-function loadLineWaypoints(): LineWaypoints {
-  try { return JSON.parse(localStorage.getItem(`pypsa-gui:map:line-waypoints:${mapLayoutSlot()}`) ?? '{}') ?? {} }
-  catch { return {} }
-}
-function saveLineWaypoints(wps: LineWaypoints) {
-  try { localStorage.setItem(`pypsa-gui:map:line-waypoints:${mapLayoutSlot()}`, JSON.stringify(wps)) } catch { /* quota: ignore */ }
-}
+// The map's user layout — asset-group bubble offsets and line waypoints — is
+// the project's `map_layout.json` sidecar, owned by `pages/mapLayoutStore.ts`:
+// memory-first, a debounced PUT, flushed on the save paths, localStorage only
+// as the fallback for a failed write. It travels with the project bundle like
+// the blank canvas's layout.json, so a routed line survives a reload on
+// another machine, a scenario fork, a snapshot and an export.
+//
+// Bubble offsets are pixel offsets from the bus (keyed `<bus>|<category>`), so
+// a bus drag still sweeps its bubbles along, preserving the user's *relative*
+// layout choice. Waypoints are keyed by edge id — "line:L1", "link:L2",
+// "tr:T1" — and are the INTERIOR vertices of the route, so a bus drag keeps
+// the bend and only the chord's ends move. The store speaks the map's
+// `[lat, lng]` tuples and converts to the document's `[lng, lat]` at its
+// boundary. Routing is PURELY VISUAL today — it never touches line.length /
+// link.length, those stay haversine bus0→bus1 (or whatever the user typed);
+// plan 2's M2 makes lengths follow geometry, by consent.
+type AssetOffsets = Record<string, MapBubble>
 
 // Small handle markers used by EditableLine. Waypoint dots use the *inverse*
 // of the bus marker palette (solid fill + white ring) so a routing waypoint
@@ -329,17 +312,19 @@ function SiteDrawLayer({
 // snaps. No map-event listener / forced re-render is needed.
 //
 // Drag → on dragend we recover the drag delta in pixels, fold it into the
-// stored offset, and persist it. bus.x / bus.y are NEVER touched.
+// stored offset, and hand it to the map layout store. bus.x / bus.y are NEVER
+// touched.
 interface AssetGroupLayerProps {
   busByName: Map<string, Bus>
   visibleGroups: Set<string>
   categoryCountsByBus: Map<string, Record<AssetCategory, CategoryEntry>>
   onSelect: (busName: string, cat: AssetCategory) => void
+  /** Keyed `bubbleKey(bus, category)`. */
   offsets: AssetOffsets
-  setOffsets: (o: AssetOffsets) => void
+  onOffsetChange: (key: string, offset: MapBubble) => void
 }
 function AssetGroupLayer({
-  busByName, visibleGroups, categoryCountsByBus, onSelect, offsets, setOffsets,
+  busByName, visibleGroups, categoryCountsByBus, onSelect, offsets, onOffsetChange,
 }: AssetGroupLayerProps) {
   const map = useMap()
   // Per-snapshot results overlay — populated only while the overlay is on.
@@ -359,7 +344,8 @@ function AssetGroupLayer({
         const count = entry?.count ?? 0
         if (count === 0) return null
 
-        const offset = offsets[id] ?? CATEGORY_STYLE[cat]
+        const offsetKey = bubbleKey(busName, cat)
+        const offset = offsets[offsetKey] ?? CATEGORY_STYLE[cat]
         const dispatchMw = results.enabled
           ? results.byAssetGroup.get(`${busName}|${cat}`)
           : undefined
@@ -379,13 +365,10 @@ function AssetGroupLayer({
                 // lat/lng with the new offset baked into iconAnchor.
                 const dropPx = map.latLngToContainerPoint((e.target as L.Marker).getLatLng())
                 const busPx = map.latLngToContainerPoint(c)
-                const newOffset = {
+                onOffsetChange(offsetKey, {
                   dx: offset.dx + (dropPx.x - busPx.x),
                   dy: offset.dy + (dropPx.y - busPx.y),
-                }
-                const next = { ...offsets, [id]: newOffset }
-                setOffsets(next)
-                saveAssetOffsets(next)
+                })
               },
             }}
           >
@@ -416,8 +399,9 @@ function AssetGroupLayer({
 // Right-click clears all waypoints for that line.
 //
 // During drag the polyline is updated imperatively via setLatLngs() for 60
-// fps smoothness; on dragend we commit the new waypoints to React state +
-// localStorage. The line's underlying length / r / x are NEVER touched.
+// fps smoothness; on dragend we commit the new waypoints to the map layout
+// store (`map_layout.json`). The line's underlying length / r / x are NEVER
+// touched.
 interface EditableLineProps {
   id: string                            // "line:NAME" / "link:NAME" / "tr:NAME"
   source: LatLngTuple
@@ -918,48 +902,42 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   // on the map. Independent from the blank canvas's set — same UX, separate
   // state, mirroring the layout-decoupling we did earlier.
   const [visibleGroups, setVisibleGroups] = useState<Set<string>>(new Set())
-  // User-overridden bubble offsets, keyed by "bus::category". Lazy-init from
-  // localStorage so dragged positions persist across reloads. Bus drags do
-  // NOT change these (the offset is relative to bus pixel position, so the
-  // bubble follows the bus visually).
-  const [assetOffsets, setAssetOffsets] = useState<AssetOffsets>(loadAssetOffsets)
+  // The per-project map layout (bubble offsets + line waypoints) lives in the
+  // map layout store, which loads the project's `map_layout.json` here and
+  // flushes a pending write on unmount / project change / pagehide. The
+  // document is selected by project, so a project switch re-renders with the
+  // new project's routes without this component remounting.
+  useMapLayoutLifecycle(currentProject)
+  const mapLayoutDoc = useMapLayoutStore(s => s.docFor(currentProject))
+  const setRouteWaypoints = useMapLayoutStore(s => s.setRouteWaypoints)
+  const setBubble = useMapLayoutStore(s => s.setBubble)
+  // User-overridden bubble offsets, keyed `bubbleKey(bus, category)`. Bus
+  // drags do NOT change these (the offset is relative to bus pixel position,
+  // so the bubble follows the bus visually).
+  const assetOffsets: AssetOffsets = mapLayoutDoc.bubbles
+  // Per-line/link/transformer interior waypoints in the map's [lat, lng],
+  // keyed by edgeKind:name. Visual only: the line's `length` field on the
+  // backend stays untouched.
+  const lineWaypoints = useMemo(() => routeWaypoints(mapLayoutDoc), [mapLayoutDoc])
 
-  // Per-line/link/transformer waypoints (lat/lng), keyed by edgeKind:name.
-  // Updated on every waypoint drag + persisted to localStorage. Visual only:
-  // the line's `length` field on the backend stays untouched.
-  const [lineWaypoints, setLineWaypoints] = useState<LineWaypoints>(loadLineWaypoints)
-
-  // Reload the per-project map layout (bubble offsets + line waypoints) when
-  // the active project changes — this component isn't remounted on a project
-  // switch, so the lazy-init useState above wouldn't pick up the new project.
-  //
-  // Defensive ordering (matches the StrictMode-safe pattern in TopologyCanvas's
-  // layout-fetch effect): set the "loaded for" marker AFTER the work completes,
-  // not before. The work here is synchronous (localStorage reads + setState),
-  // so it doesn't actually race in dev under StrictMode — but keeping the same
-  // shape across both canvases avoids "why is this one different?" confusion
-  // when the next maintainer reads the two files side by side.
+  // Clear open asset-group bubbles when the active project changes — their
+  // `bus::category` keys are project-specific, so a stale pinned bubble from
+  // the previous project would otherwise linger (and mis-render if the two
+  // projects share a bus name).
   const mapLayoutLoadedFor = useRef<string | null>(currentProject)
   useEffect(() => {
     if (mapLayoutLoadedFor.current === currentProject) return
-    setAssetOffsets(loadAssetOffsets())
-    setLineWaypoints(loadLineWaypoints())
-    // Clear open asset-group bubbles too — their `bus::category` keys are
-    // project-specific, so a stale pinned bubble from the previous project
-    // would otherwise linger (and mis-render if the two projects share a bus
-    // name, since its saved offset key no longer matches).
     setVisibleGroups(new Set())
     mapLayoutLoadedFor.current = currentProject
   }, [currentProject])
+  // Read currentProject FRESH from the store — a project switch since the
+  // last render would otherwise write under the previous project's key.
   const updateWaypoints = useCallback((edgeId: string, wps: LatLngTuple[]) => {
-    setLineWaypoints(prev => {
-      const next = { ...prev }
-      if (wps.length === 0) delete next[edgeId]
-      else next[edgeId] = wps
-      saveLineWaypoints(next)
-      return next
-    })
-  }, [])
+    setRouteWaypoints(useUIStore.getState().currentProject, edgeId, wps)
+  }, [setRouteWaypoints])
+  const updateBubble = useCallback((key: string, offset: MapBubble) => {
+    setBubble(useUIStore.getState().currentProject, key, offset)
+  }, [setBubble])
 
   const toggleGroup = useCallback((busName: string, cat: AssetCategory) => {
     const id = `${busName}::${cat}`
@@ -1196,7 +1174,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
           visibleGroups={visibleGroups}
           categoryCountsByBus={categoryCountsByBus}
           offsets={assetOffsets}
-          setOffsets={setAssetOffsets}
+          onOffsetChange={updateBubble}
           onSelect={(busName, cat) =>
             setSelectedComponent({ type: 'AssetGroup', name: `${busName}::${cat}` })}
         />

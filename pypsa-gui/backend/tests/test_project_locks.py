@@ -474,6 +474,52 @@ def test_put_layout_409s_under_a_foreign_lock(session_local):
         assert "lock" in exc.value.detail
 
 
+# `put_map_layout` (visual layers plan 2, M1) is the map view's twin of
+# `put_layout`: the map PUTs on every waypoint drag-settle, so it is a CHECK
+# for the same reason. Same two properties, same style.
+
+_EMPTY_MAP_LAYOUT = {"version": 1, "routes": {}, "bubbles": {}}
+
+
+def test_put_map_layout_checks_the_lock_without_acquiring_it(session_local):
+    from routers.projects import put_map_layout
+    from services import project_locks
+
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+
+    with session_local() as db:
+        assert project_locks.get_lock(db, project.id) is None
+        put_map_layout(project.name, dict(_EMPTY_MAP_LAYOUT), db=db, user=db.get(User, user_a.id))
+        assert project_locks.get_lock(db, project.id) is None, (
+            "put_map_layout must not become the lock holder"
+        )
+
+
+def test_put_map_layout_409s_under_a_foreign_lock(session_local):
+    from fastapi import HTTPException
+
+    from routers.projects import put_map_layout
+    from services import project_locks
+
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+
+    with session_local() as db:
+        assert project_locks.acquire_lock(db, project.id, user_b.id) is not None
+        with pytest.raises(HTTPException) as exc:
+            put_map_layout(project.name, dict(_EMPTY_MAP_LAYOUT), db=db, user=db.get(User, user_a.id))
+        assert exc.value.status_code == 409
+        assert exc.value.detail["error_kind"] == "project_locked"
+        assert "lock" in exc.value.detail
+
+
 def test_empty_scenario_metadata_patch_does_not_take_the_lock(session_local):
     from models.schemas import UpdateScenarioRequest
     from routers.projects import update_scenario_metadata
