@@ -47,16 +47,24 @@ data: the prompt says so, every value the model returns is tagged
 ``extracted`` whatever it asked for, unknown keys are dropped, and the
 ``document`` block is built here, not by the model. A limit the document
 does not state is left out by the model and filled from the generic
-template, tagged ``assumed`` with a clause that says so. The result passes
+template, tagged ``assumed`` with a clause that says so. That includes a
+voltage range below the highest extracted band that no band covers (a code
+that starts at 110 kV states nothing below it, and the campus study needs a
+band at its MV buses): each such range gets its own ``assumed`` band, listed
+as ``voltage_bands[i]`` in ``filled_from_template``, and nothing is filled
+above the top band. The result passes
 ``validate_profile`` or nothing is saved (422, the loader's message). Each
 quote is then looked up in the PDF's own text (pypdf, per page, whitespace
-and case normalised, on its page or one either side); a quote not found is
-flagged for the reviewer, not refused.
+and case normalised, on its page or one either side, else on any page); a
+quote not found on its stated page is flagged for the reviewer, not refused,
+and when it is verbatim on another page ``found_on_page`` says which.
 
 **Review.** Read, edit (validated; quotes checked again), confirm one limit
 (``extracted`` -> ``code``), publish. Publishing refuses with 409 while a
 limit is unconfirmed, unless ``allow_unconfirmed``; then the tags stay, and
-every report row on such a limit says ``extracted``.
+every report row on such a limit says ``extracted``. It refuses with 422,
+whatever ``allow_unconfirmed`` says, a profile whose voltage bands leave a
+voltage uncovered below the highest band, naming the range.
 
 Every function refuses a project of another kind with 409, like the rest of
 the campus study. A profile id is ``[a-z0-9_]{1,64}`` and never a shipped
@@ -415,8 +423,11 @@ def _limits(profile: dict):
 
 def _check_quotes(profile: dict, pages) -> dict:
     """``{limit path: {quote_found, found_on_page}}`` for every quoted limit.
-    A quote counts as found on its page or one either side; ``pages`` None
-    (the document is gone) leaves both unknown."""
+    A quote counts as found on its page or one either side. Failing that,
+    every page is searched: a quote found elsewhere is still ``quote_found:
+    false``, because the stated page is wrong, and ``found_on_page`` is the
+    first page that has it (None when no page does). ``pages`` None (the
+    document is gone) leaves both unknown."""
     out = {}
     for path, lim in _limits(profile):
         if not isinstance(lim, dict) or "quote" not in lim:
@@ -425,13 +436,20 @@ def _check_quotes(profile: dict, pages) -> dict:
             out[path] = {"quote_found": None, "found_on_page": None}
             continue
         quote, page = _normalise(str(lim["quote"])), lim.get("page")
-        found = None
+        near = None
         if quote and isinstance(page, int):
             for p in (page, page - 1, page + 1):
                 if 1 <= p <= len(pages) and quote in pages[p - 1]:
-                    found = p
+                    near = p
                     break
-        out[path] = {"quote_found": found is not None, "found_on_page": found}
+        if near is not None:
+            out[path] = {"quote_found": True, "found_on_page": near}
+            continue
+        # Not on the stated page or beside it: the page is wrong, or the quote is. Look at
+        # every page, so the reviewer is told where the text is. It stays "not found"
+        # (the stated page is wrong); only found_on_page says where it really is.
+        elsewhere = next((i + 1 for i, text in enumerate(pages) if quote and quote in text), None)
+        out[path] = {"quote_found": False, "found_on_page": elsewhere}
     return out
 
 
@@ -543,6 +561,34 @@ def _not_stated(lim: dict) -> dict:
     return lim
 
 
+def _is_band_range(b) -> bool:
+    return (isinstance(b, dict) and all(isinstance(b.get(k), (int, float)) and not isinstance(b.get(k), bool)
+                                        for k in ("kv_min", "kv_max")))
+
+
+def _fill_voltage_gaps(bands: list, template: dict) -> tuple:
+    """``(bands sorted by kv_min with each gap filled, indices of the fills)``.
+    A gap is a voltage from 0 kV up to the highest band's ``kv_max`` that no
+    band covers (a code that starts at 110 kV leaves 0-110 kV). Each is filled
+    with the template's values, ``assumed`` and uncited, saying the document
+    did not state it. Nothing is added above the top band. The campus study
+    looks a band up for every bus inside the campus, so a gap fails the run."""
+    gaps = ce.cs.uncovered_kv_ranges({"voltage_bands": bands})
+    ordered = sorted(bands, key=lambda b: b["kv_min"])
+    if not gaps:
+        return ordered, []
+    fills = []
+    for kv_from, kv_to, _ in gaps:
+        fill = _not_stated(template["voltage_bands"][0])
+        fill.update(kv_min=kv_from, kv_max=kv_to)
+        fill.pop("kv_max_inclusive", None)
+        fills.append(fill)
+    # A fill that starts at an inclusive edge shares that one point with the band below,
+    # which sorts first; band_for takes the first band that matches.
+    merged = sorted([*ordered, *fills], key=lambda b: b["kv_min"])
+    return merged, [i for i, b in enumerate(merged) if any(b is f for f in fills)]
+
+
 def _draft_from(inp: dict, doc: dict):
     """The profile from the tool's input, and the limits the template filled."""
     template, filled = _template(), []
@@ -550,7 +596,11 @@ def _draft_from(inp: dict, doc: dict):
     profile = {"title": title[:200]}
     bands = inp.get("voltage_bands")
     if isinstance(bands, list) and bands:
-        profile["voltage_bands"] = [_pick(b, _BAND_KEYS) for b in bands]
+        picked = [_pick(b, _BAND_KEYS) for b in bands]
+        profile["voltage_bands"] = picked
+        if all(_is_band_range(b) for b in picked):
+            profile["voltage_bands"], band_fills = _fill_voltage_gaps(picked, template)
+            filled.extend(f"voltage_bands[{i}]" for i in band_fills)
     elif bands is None or bands == []:
         profile["voltage_bands"] = [_not_stated(b) for b in template["voltage_bands"]]
         filled.append("voltage_bands")
@@ -699,14 +749,31 @@ def new_draft(project, profile_id: str, title: str | None = None, overwrite: boo
     return get_draft(project, profile_id)
 
 
+def _ranges(gaps: list) -> str:
+    """``from 0 kV up to 110 kV`` per uncovered range; the upper end is the next
+    band's own start, so it is not part of the range."""
+    return "; ".join(f"{'from' if inclusive else 'above'} {lo:g} kV up to {hi:g} kV (not included)"
+                     for lo, hi, inclusive in gaps)
+
+
 def publish(project, profile_id: str, allow_unconfirmed: bool = False) -> dict:
-    """Make a draft a profile the study can use. Refused (409) while a limit
-    is unconfirmed, unless ``allow_unconfirmed``; then those limits stay
-    ``extracted`` and every report row on them says so."""
+    """Make a draft a profile the study can use. Refused (422) while the voltage
+    bands leave a voltage uncovered below their highest band (``allow_unconfirmed``
+    does not waive it: the study would fail at its first bus there). Refused (409)
+    while a limit is unconfirmed, unless ``allow_unconfirmed``; then those limits
+    stay ``extracted`` and every report row on them says so."""
     _require(project)
     profile_id = _profile_id(profile_id)
     _, profile = _read_profile(_inside(_drafts(project), f"{profile_id}.yaml"), "draft", profile_id)
     validated = _validate(profile_id, profile)
+    gaps = ce.cs.uncovered_kv_ranges(validated)
+    if gaps:
+        raise HTTPException(
+            status_code=422,
+            detail=f"grid-code profile {profile_id!r} leaves voltages without a band: {_ranges(gaps)}. The campus "
+                   "study needs a band at every voltage up to the profile's highest band, so add a voltage band "
+                   "for each range (tag it assumed if the code does not state it), then publish again",
+        )
     open_limits = ce.cs.unconfirmed(validated)
     if open_limits and not allow_unconfirmed:
         raise HTTPException(
