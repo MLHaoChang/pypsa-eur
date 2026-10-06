@@ -84,7 +84,7 @@ from services.study import proforma
 from services.study import questions as Q
 from services.study import run_hashes
 from services.study import tariff as study_tariff
-from services.study.proforma import BILL_COMPONENTS
+from services.study.engine_adapter import BILL_COMPONENTS
 
 __all__ = [
     "BY_CONSTRUCTION", "DISPATCH_ROWS", "EPSILON_MW", "FindingsRefused", "NPV_TOL_EUR",
@@ -106,17 +106,19 @@ def is_zero_size(p_mw: float | None) -> bool:
     """The ONE size rule (``proforma.is_zero_size``)."""
     return proforma.is_zero_size(p_mw)
 
-# The bill's six components (`proforma.BILL_COMPONENTS`) in the question's
-# streams (gate S3 N8): the per-MWh network charge travels with the energy it
-# is levied on; the contracted capacity charge with the demand charge.
+# The bill's seven components (`engine_adapter.BILL_COMPONENTS`; U2 owner
+# decision 7 adds "Taxes & levies") in the question's streams (gate S3 N8):
+# the per-MWh network charge travels with the energy it is levied on; the
+# contracted capacity charge with the demand charge.
 STREAMS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("demand_charge_reduction", "Demand-charge reduction", ("demand", "capacity")),
     ("energy_shift", "Energy time-shift", ("energy", "network")),
     ("export_credit", "Export credit", ("export_credit",)),
     ("fixed", "Fixed charges", ("fixed",)),
+    ("taxes_levies", "Taxes & levies", ("taxes_levies",)),
 )
 if sorted(c for _k, _l, cs in STREAMS for c in cs) != sorted(k for k, _ in BILL_COMPONENTS):
-    raise ImportError("findings.STREAMS must cover the bill's six components exactly")
+    raise ImportError("findings.STREAMS must cover the bill's seven components exactly")
 
 # The key drivers the tornado re-dispatches; the rest need no solve.
 DISPATCH_ROWS = ("energy_price_level", "demand_charge_price")

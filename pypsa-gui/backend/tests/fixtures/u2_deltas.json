@@ -1,0 +1,364 @@
+{
+ "schema": "u2_deltas/1",
+ "plan": "docs/superpowers/plans/2026-10-05-guided-study-u2-engine-rewire.md WP2 (deltas), \u00a74",
+ "rule": "{test, figure, pre, post, abs, rel, cause}: pre = GS (BillCalculator or the WP0 record), post = the engine through the U2 seam. A cause is a stable code; WP10's assessor gates every row outside tolerance.",
+ "stage": "U2 stage 1 (WP1-WP5)",
+ "deltas": [
+  {
+   "test": "test_engine_adapter_bill.py::test_a_year_billed_peak_is_prorated_by_the_hours_it_represents",
+   "figure": "by_component.demand",
+   "pre": 95000.0,
+   "post": 15356.164383561645,
+   "abs": -79643.83561643836,
+   "rel": -0.8383561643835616,
+   "cause": "annual_peak_prorated_by_represented_hours"
+  },
+  {
+   "test": "test_engine_adapter_bill.py::test_a_year_billed_peak_is_prorated_by_the_hours_it_represents",
+   "figure": "peak_mw_by_billing_period",
+   "pre": {
+    "2030": 10.0
+   },
+   "post": {},
+   "cause": "annual_peak_not_in_demand_lines"
+  },
+  {
+   "test": "test_engine_adapter_bill.py::test_a_contracted_capacity_without_a_stated_limit_rates_on_the_poc_size",
+   "figure": "by_component.capacity",
+   "pre": null,
+   "post": 14160.0,
+   "cause": "capacity_rated_on_poc_size"
+  },
+  {
+   "test": "test_engine_adapter_bill.py::test_honesty_notes_are_codes_without_digits_and_partial_periods_are_named",
+   "figure": "by_component.fixed",
+   "pre": 200.0,
+   "post": 90.55299539170507,
+   "abs": -109.44700460829493,
+   "rel": -0.5472350230414746,
+   "cause": "fixed_prorated_by_covered_hours"
+  },
+  {
+   "test": "test_engine_adapter_bill.py::test_honesty_notes_are_codes_without_digits_and_partial_periods_are_named",
+   "figure": "honesty_notes",
+   "pre": [
+    "partial_billing_period_charged_in_full",
+    "capacity_charge_prorated_by_hours"
+   ],
+   "post": [
+    "capacity_charge_prorated_by_hours",
+    "demand_on_partial_month",
+    "fixed_charge_prorated_on_partial_period"
+   ],
+   "cause": "fixed_prorated_by_covered_hours"
+  },
+  {
+   "test": "test_engine_adapter_bill.py::test_a_metered_export_is_not_priced_without_a_dispatch",
+   "figure": "by_component.export_credit",
+   "pre": -56640.0,
+   "post": null,
+   "cause": "export_line_needs_the_dispatch"
+  },
+  {
+   "test": "test_study_compile_commercial.py::test_an_export_link_without_any_price_is_unpriced_not_refused",
+   "figure": "outcome",
+   "pre": "ExportPricingError (write_tariff_prices)",
+   "post": "compiled, export_unpriced",
+   "cause": "export_priced_only_through_a_series"
+  },
+  {
+   "test": "test_engine_adapter_bill.py::test_a_bill_is_the_tariff_engines_with_seven_components",
+   "figure": "Bill.engine",
+   "pre": "bill_calculator",
+   "post": "tariff_engine",
+   "cause": "one_engine_rename"
+  },
+  {
+   "test": "test_engine_adapter_bill.py::test_a_bill_is_the_tariff_engines_with_seven_components",
+   "figure": "BillComponents fields",
+   "pre": [
+    "energy",
+    "demand",
+    "capacity",
+    "fixed",
+    "network",
+    "export_credit"
+   ],
+   "post": [
+    "energy",
+    "demand",
+    "capacity",
+    "fixed",
+    "network",
+    "export_credit",
+    "taxes_levies"
+   ],
+   "cause": "owner_decision_7_taxes_levies"
+  },
+  {
+   "test": "test_engine_adapter_bill.py::test_every_seed_component_equals_wp0_on_the_golden_dispatch[de_industrial_illustrative-none]",
+   "figure": "total",
+   "pre": 866424.0,
+   "post": null,
+   "cause": "dispatch_not_solved_by_engine:solve_provenance_unknown+config_changed_since_solve"
+  },
+  {
+   "test": "test_engine_adapter_bill.py::test_every_seed_component_equals_wp0_on_the_golden_dispatch[de_industrial_illustrative-bess_2h]",
+   "figure": "total",
+   "pre": 785306.1841104208,
+   "post": null,
+   "cause": "dispatch_not_solved_by_engine:solve_provenance_unknown+config_changed_since_solve"
+  },
+  {
+   "test": "test_engine_adapter_bill.py::test_every_seed_component_equals_wp0_on_the_golden_dispatch[de_industrial_illustrative-bess_pv_2h]",
+   "figure": "total",
+   "pre": 500907.7207784771,
+   "post": null,
+   "cause": "dispatch_not_solved_by_engine:solve_provenance_unknown+config_changed_since_solve"
+  },
+  {
+   "test": "test_engine_adapter_bill.py::test_every_seed_component_equals_wp0_on_the_golden_dispatch[tou_reference_illustrative-none]",
+   "figure": "total",
+   "pre": 638592.0,
+   "post": null,
+   "cause": "dispatch_not_solved_by_engine:solve_provenance_unknown"
+  },
+  {
+   "test": "test_engine_adapter_bill.py::test_every_seed_component_equals_wp0_on_the_golden_dispatch[tou_reference_illustrative-bess_2h]",
+   "figure": "total",
+   "pre": 631583.6956579019,
+   "post": null,
+   "cause": "dispatch_not_solved_by_engine:solve_provenance_unknown"
+  },
+  {
+   "test": "test_engine_adapter_bill.py::test_every_seed_component_equals_wp0_on_the_golden_dispatch[tou_reference_illustrative-bess_pv_2h]",
+   "figure": "total",
+   "pre": 367640.14850753173,
+   "post": null,
+   "cause": "dispatch_not_solved_by_engine:solve_provenance_unknown"
+  },
+  {
+   "test": "test_engine_adapter_bill.py::test_every_seed_component_equals_wp0_on_the_golden_dispatch",
+   "figure": "max relative component difference, both seeds x 3 options",
+   "pre": 0.0,
+   "post": 2.6545220612012017e-16,
+   "cause": "none (within 1e-9)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-none]",
+   "figure": "by_component.energy",
+   "pre": 601128.0,
+   "post": 601128.0,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-none]",
+   "figure": "by_component.demand",
+   "pre": 151199.99999999997,
+   "post": 151200.0,
+   "abs": 2.9103830456733704e-11,
+   "rel": 1.9248565116887373e-16,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-none]",
+   "figure": "by_component.capacity",
+   "pre": 0.0,
+   "post": 0.0,
+   "abs": 0.0,
+   "rel": null,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-none]",
+   "figure": "by_component.fixed",
+   "pre": 4800.0,
+   "post": 4800.0,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-none]",
+   "figure": "by_component.network",
+   "pre": 109296.0,
+   "post": 109296.0,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-none]",
+   "figure": "by_component.export_credit",
+   "pre": 0.0,
+   "post": 0.0,
+   "abs": 0.0,
+   "rel": null,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-none]",
+   "figure": "total",
+   "pre": 866424.0,
+   "post": 866424.0,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-none]",
+   "figure": "objective",
+   "pre": 861624.0,
+   "post": 861624.0,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-bess_2h]",
+   "figure": "by_component.energy",
+   "pre": 603012.7601938307,
+   "post": 603012.7601938308,
+   "abs": 1.1641532182693481e-10,
+   "rel": 1.9305614990554197e-16,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-bess_2h]",
+   "figure": "by_component.demand",
+   "pre": 67854.74024498441,
+   "post": 67854.7402449844,
+   "abs": -1.4551915228366852e-11,
+   "rel": -2.1445687030601343e-16,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-bess_2h]",
+   "figure": "by_component.capacity",
+   "pre": 0.0,
+   "post": 0.0,
+   "abs": 0.0,
+   "rel": null,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-bess_2h]",
+   "figure": "by_component.fixed",
+   "pre": 4800.0,
+   "post": 4800.0,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-bess_2h]",
+   "figure": "by_component.network",
+   "pre": 109638.6836716056,
+   "post": 109638.68367160561,
+   "abs": 1.4551915228366852e-11,
+   "rel": 1.3272610306006008e-16,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-bess_2h]",
+   "figure": "by_component.export_credit",
+   "pre": 0.0,
+   "post": 0.0,
+   "abs": 0.0,
+   "rel": null,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-bess_2h]",
+   "figure": "total",
+   "pre": 785306.1841104208,
+   "post": 785306.1841104209,
+   "abs": 1.1641532182693481e-10,
+   "rel": 1.482419522250519e-16,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-bess_2h]",
+   "figure": "objective",
+   "pre": 829729.809424455,
+   "post": 829729.809424455,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-bess_pv_2h]",
+   "figure": "by_component.energy",
+   "pre": 381852.50873233454,
+   "post": 381852.5087323346,
+   "abs": 5.820766091346741e-11,
+   "rel": 1.524349312427039e-16,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-bess_pv_2h]",
+   "figure": "by_component.demand",
+   "pre": 59271.46668448687,
+   "post": 59271.46668448687,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-bess_pv_2h]",
+   "figure": "by_component.capacity",
+   "pre": 0.0,
+   "post": 0.0,
+   "abs": 0.0,
+   "rel": null,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-bess_pv_2h]",
+   "figure": "by_component.fixed",
+   "pre": 4800.0,
+   "post": 4800.0,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-bess_pv_2h]",
+   "figure": "by_component.network",
+   "pre": 69427.72886042447,
+   "post": 69427.72886042448,
+   "abs": 1.4551915228366852e-11,
+   "rel": 2.0959803045871784e-16,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-bess_pv_2h]",
+   "figure": "by_component.export_credit",
+   "pre": -14443.983498768808,
+   "post": -14443.983498768808,
+   "abs": 0.0,
+   "rel": -0.0,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-bess_pv_2h]",
+   "figure": "total",
+   "pre": 500907.7207784771,
+   "post": 500907.72077847715,
+   "abs": 5.820766091346741e-11,
+   "rel": 1.1620435960341154e-16,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "ic_solved_fork[de_industrial_illustrative-bess_pv_2h]",
+   "figure": "objective",
+   "pre": 727163.144684475,
+   "post": 727163.1446844751,
+   "abs": 1.1641532182693481e-10,
+   "rel": 1.6009519002430856e-16,
+   "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  }
+ ]
+}

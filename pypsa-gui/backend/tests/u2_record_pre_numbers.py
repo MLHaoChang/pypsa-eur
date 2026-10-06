@@ -172,9 +172,21 @@ def toy_3month() -> dict:
 
 # ── the S5 golden table and the seed bills ───────────────────────────────
 
+def _wp0_components(by_component: dict) -> dict:
+    """
+    The six components WP0 recorded. U2 WP5 adds a seventh, `taxes_levies`
+    (owner decision 7), which a GS bill carries as a real 0.0: dropped here
+    only when it is 0.0, so a non-zero one still fails the re-derivation.
+    """
+    out = dict(by_component)
+    if out.get("taxes_levies", None) == 0.0:
+        out.pop("taxes_levies")
+    return out
+
+
 def _bill_dict(bill) -> dict:
     return {"total": bill.total, "annual_bill": bill.annual_bill,
-            "by_component": bill.by_component.model_dump(mode="json")}
+            "by_component": _wp0_components(bill.by_component.model_dump(mode="json"))}
 
 
 def _sizes(n) -> dict:
@@ -279,7 +291,9 @@ def driver_section(ev: dict) -> dict:
         "fom": ev["fom"],
         "upfront_cost_series_eur_per_mw": ev["upfront_cost_series_eur_per_mw"],
         "case_kpis": ev["case_kpis"],
-        "bills": ev["bills"],
+        "bills": {o: {**b, "by_component": _wp0_components(b["by_component"])}
+                  if isinstance(b, dict) and isinstance(b.get("by_component"), dict) else b
+                  for o, b in ev["bills"].items()},
     }
 
 

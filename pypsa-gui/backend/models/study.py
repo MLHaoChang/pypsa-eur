@@ -470,10 +470,16 @@ class BillComponents(_FigureBlock):
     tariff's currency: charges are positive, `export_credit` is negative (a
     credit), and the bill is their sum. `capacity` is the tariff's
     `CapacityCharge`, pro-rated by horizon hours / 8760.
+
+    U2 (owner decision 7): a seventh component, `taxes_levies` ("Taxes &
+    levies"), the engine's `tax_levy` and `certificate` items. The guided
+    form compiles none, so it is a real 0.0 unless an Expert adds one; a bill
+    stored before U2 reads 0.0.
     """
 
     _figure_fields: ClassVar[tuple[str, ...]] = (
-        "energy", "demand", "capacity", "fixed", "network", "export_credit")
+        "energy", "demand", "capacity", "fixed", "network", "export_credit",
+        "taxes_levies")
 
     energy: float | None
     demand: float | None
@@ -481,6 +487,7 @@ class BillComponents(_FigureBlock):
     fixed: float | None
     network: float | None
     export_credit: float | None
+    taxes_levies: float | None = 0.0
 
 
 class Bill(_FigureBlock):
@@ -506,7 +513,9 @@ class Bill(_FigureBlock):
     basis: FinancialBasis = Field(default_factory=FinancialBasis)
     currency: str = "EUR"
     currency_year: int | None = None
-    engine: Literal["bill_calculator"] = "bill_calculator"
+    # U2 WP5: `tariff_engine` is the IC engine's bill (`engine_adapter`); the
+    # vocabulary rename of the GS literal with read-compat is WP8 (§5.4).
+    engine: Literal["bill_calculator", "tariff_engine"] = "bill_calculator"
     # Gate S3 N3 (carried to S5): which run the dispatch came from; the
     # calculator itself does not know, the runner stamps it.
     fidelity: Fidelity | None = None

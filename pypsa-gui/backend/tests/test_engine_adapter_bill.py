@@ -26,12 +26,11 @@ import pytest
 
 from models.study import Tariff
 from tests.golden import site_fixture as SF
-from tests.u2_targets import DE, FAKE_REF, SEEDS, SIX, WP0, close, flat_resolver, golden_copy, pending
+from tests.u2_targets import DE, FAKE_REF, SEEDS, SIX, WP0, close, flat_resolver, golden_copy
 
 JAN_FEB = pd.date_range("2030-01-01", "2030-02-28 23:00", freq="h")
 SEVEN = (*SIX, "taxes_levies")
 
-pytestmark = pending("WP5", "engine_adapter.bill / bill_meter not built")  # WP2: removed when WP5 lands
 
 
 def _A():
@@ -388,6 +387,20 @@ def test_every_seed_component_equals_wp0_on_the_golden_dispatch(tid, option):
     assert bill.by_component.taxes_levies == 0.0
     assert bill.total is None and "solve_provenance_unknown" in bill.unavailable["total"]
     assert close(sum(getattr(bill.by_component, k) for k in SEVEN), want["total"])
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("tid", SEEDS)
+def test_every_seed_bill_totals_wp0(tid):
+    """
+    The totals alone (the bill as a whole, whatever the component map): Σ of
+    the seven components on each golden dispatch equals WP0's total to 1e-9.
+    """
+    for option in SF.SITE_OPTIONS:
+        n, c = _bound_golden(option, tid)
+        bill = _A().bill(n, c)
+        got = sum(getattr(bill.by_component, k) for k in SEVEN)
+        assert close(got, WP0["seed_bills"][tid][option]["total"]), (option, got)
 
 
 @pytest.mark.parametrize("tid", SEEDS)

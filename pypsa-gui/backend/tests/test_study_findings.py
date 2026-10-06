@@ -51,12 +51,17 @@ def _toy_bills():
     return base, opt
 
 
-def test_streams_cover_the_six_components_and_sum_to_the_savings_on_the_toy():
+def test_streams_cover_the_seven_components_and_sum_to_the_savings_on_the_toy():
+    """
+    U2 WP5 (owner decision 7): a fifth stream, "Taxes & levies", carries
+    the seventh bill component (0 on a GS bill: no tax item).
+    """
     base, opt = _toy_bills()
     streams = F.value_streams(base, opt)
     savings = base.annual_bill - opt.annual_bill
     assert [s.key for s in streams] == [
-        "demand_charge_reduction", "energy_shift", "export_credit", "fixed"]
+        "demand_charge_reduction", "energy_shift", "export_credit", "fixed", "taxes_levies"]
+    assert streams[-1].annual_value == 0.0
     assert sum(s.annual_value for s in streams) == pytest.approx(savings, rel=1e-12)
     by = {s.key: s for s in streams}
     # More export is MORE value: the credit stream is positive.
@@ -77,11 +82,13 @@ def test_zero_savings_leave_the_shares_null_with_a_flag():
     assert all(s.share is None and s.unavailable == {"share": "zero_savings"} for s in streams)
 
 
-def test_the_stream_map_reuses_the_proformas_six_components():
-    from services.study.proforma import BILL_COMPONENTS
+def test_the_stream_map_reuses_the_adapters_seven_components():
+    """U2 WP5: the components moved to `engine_adapter.BILL_COMPONENTS` (seven)."""
+    from services.study.engine_adapter import BILL_COMPONENTS
 
     mapped = [c for _k, _l, comps in F.STREAMS for c in comps]
     assert sorted(mapped) == sorted(k for k, _ in BILL_COMPONENTS)
+    assert len(BILL_COMPONENTS) == 7
 
 
 # ── range semantics (gate S2 [S5]) ────────────────────────────────────────

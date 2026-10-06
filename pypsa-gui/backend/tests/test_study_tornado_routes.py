@@ -135,7 +135,7 @@ def test_two_dispatch_drivers_charge_four_solves_on_forks_that_are_gone_afterwar
     # S8 (gate S6 carry): the waterfall's label is typed, not read from a note.
     assert body["value_streams_basis"] == "baseline"
     assert {s["key"] for s in body["value_streams"]} == {
-        "demand_charge_reduction", "energy_shift", "export_credit", "fixed"}
+        "demand_charge_reduction", "energy_shift", "export_credit", "fixed", "taxes_levies"}
     assert body["hashes"]["ledger_hash"] and body["hashes"]["base_network_hash"]
     assert len(body["hashes"]["option_network_hashes"]) == 4
     assert {e["name"] for e in body["explain"]} == {"battery"}
