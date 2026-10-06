@@ -9,7 +9,7 @@ import {
   Thermometer, Zap, Camera, LayoutDashboard,
   Sun, Moon, Rows2, Rows3,
   GitBranch as GitBranchIcon, ListChecks, FlaskConical,
-  MessageSquare, LayoutGrid, Users, SlidersHorizontal, FileText, Compass,
+  MessageSquare, LayoutGrid, Users, SlidersHorizontal, FileText, Compass, Cable,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
@@ -39,6 +39,7 @@ import { useLocalSettingsAvailable } from '../hooks/useLocalSettings'
 import { useLLMSettingsAvailable } from '../hooks/useLLMSettings'
 import { isActive } from '../api/solveQueue'
 import { evaluateMutation } from '../utils/mutationGuard'
+import { mismatchSentence } from '../utils/projectMismatch'
 import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -684,7 +685,7 @@ function ProjectSectionContent({
     autosaveEnabled, setAutosaveEnabled, markProjectSaved,
     lastSavedByProject, recents,
     activeSlidePanel, setSlidePanel, setProjectSwitchInProgress,
-    readOnly, readOnlyReason,
+    readOnly, readOnlyReason, projectMismatch,
   } = useUIStore()
   const [showNameModal, setShowNameModal] = useState(false)
   // Separate flag for the "Save a Copy" flow so its modal can pre-fill a
@@ -728,6 +729,15 @@ function ProjectSectionContent({
   const networkHasBuses = (networkMeta?.bus_count ?? 0) > 0
 
   const guardProjectMutation = useCallback((opts?: { silent?: boolean }) => {
+    // A2: while this tab and the backend disagree about the open project, a
+    // save would write the backend's network under this tab's name — the
+    // banner offers Reload / Switch; saves wait for it (silent for autosave).
+    const mismatch = useUIStore.getState().projectMismatch
+    if (mismatch) {
+      if (opts?.silent) appLog('WARN', `Autosave skipped — ${mismatchSentence(mismatch)}`)
+      else toast.error(mismatchSentence(mismatch))
+      return false
+    }
     const verdict = evaluateMutation(readOnly, readOnlyReason)
     if (verdict.allowed) return true
     if (opts?.silent) appLog('INFO', `Autosave skipped — ${verdict.blockedMessage}`)
@@ -844,17 +854,30 @@ function ProjectSectionContent({
     } catch (e: unknown) {
       const status = (e as { response?: { status?: number } })?.response?.status
       if (status === 409) {
-        const detail = String(
-          (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? '',
-        )
-        // Two distinct 409s from save_project: (a) identity mismatch — the
+        const raw = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+        // A structured refusal (`study_in_flight`, `solver_in_flight`,
+        // `project_mismatch`) is a dict whose `message` is the sentence;
+        // `String(dict)` read "[object Object]" and fell through to the
+        // empty-network sentence (spec review, Sidebar 409 branch).
+        const structured = typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+        const detail = structured ? formatApiDetail(raw) : String(raw ?? '')
+        // Three distinct 409s from save_project: (a) identity mismatch — the
         // backend's in-memory network is a DIFFERENT project than `name` (it
-        // was swapped by another tab / external client); (b) empty-network
-        // refusal. Both mean "don't save", but the user-facing guidance
-        // differs. Detail text disambiguates.
+        // was swapped by another tab / external client); (b) a structured
+        // refusal with its own sentence; (c) empty-network refusal. All mean
+        // "don't save", but the user-facing guidance differs.
         if (/bound to project/i.test(detail)) {
+          // A2: the backend names its binding — raise the mismatch now (the
+          // banner, the write block) rather than wait for the meta samples.
+          const bound = /bound to project '([^']+)', not '([^']+)'/i.exec(detail)
+          if (bound && bound[2] === useUIStore.getState().currentProject) {
+            useUIStore.getState().setProjectMismatch({ tab: bound[2], backend: bound[1] })
+          }
           if (auto) appLog('WARN', `Autosave skipped — ${detail}`)
           else toast.error(`Can't save '${name}': the backend is on a different project. Reload '${name}' to resync.`)
+        } else if (structured) {
+          if (auto) appLog('WARN', `Autosave skipped — ${detail}`)
+          else toast.error(detail)
         } else {
           if (auto) appLog('WARN', `Autosave skipped: network is empty, refusing to overwrite '${name}'`)
           else toast.error('Cannot save: network is empty but project has data. Load the project first.')
@@ -1153,6 +1176,7 @@ function ProjectSectionContent({
             icon={saveStatus === 'saved' ? <Check size={15} /> : <Save size={15} />}
             label={saveStatus === 'saved' ? 'Saved ✓' : 'Save'}
             hint={dirty ? '●' : undefined}
+            title={projectMismatch ? mismatchSentence(projectMismatch) : undefined}
             onClick={handleSave}
           />
           {!guided && (<>
@@ -1261,6 +1285,34 @@ function DataSectionContent({ onCloseModal }: { onCloseModal?: () => void }) {
   )
 }
 
+// ── Studies ────────────────────────────────────────────────────────────────────
+// The study tools that take a solved model further: the planning → dynamics
+// pipeline, the campus electrical design of a hub, and the written reports.
+// Grouped here rather than spread through Simulation, which is about setting
+// up and solving the model itself.
+function StudiesSectionContent({ onCloseModal }: { onCloseModal?: () => void }) {
+  const { setSlidePanel, activeSlidePanel } = useUIStore()
+  return (
+    <div className="pb-1">
+      <SItem icon={<FlaskConical size={15} />} label="Planning → dynamics"
+        title="Rank a year's extreme hours, screen N-1/N-2 and fault levels, and export PowerFactory handoff bundles (gridspine)."
+        active={activeSlidePanel === 'gridspine'}
+        onClick={() => { setSlidePanel(activeSlidePanel === 'gridspine' ? null : 'gridspine'); onCloseModal?.() }}
+      />
+      <SItem icon={<Cable size={15} />} label="Campus electrical"
+        title="Take a solved hub to its electrical design: transformers, reactive compensation, short circuit and PCC grid-code compliance at the critical hours (AC load flow)."
+        active={activeSlidePanel === 'campusElectrical'}
+        onClick={() => { setSlidePanel(activeSlidePanel === 'campusElectrical' ? null : 'campusElectrical'); onCloseModal?.() }}
+      />
+      <SItem icon={<FileText size={15} />} label="Reports"
+        title="Study reports written from the Energy Hub reference design and the adequacy study; read them here and export to Word."
+        active={activeSlidePanel === 'reports'}
+        onClick={() => { setSlidePanel(activeSlidePanel === 'reports' ? null : 'reports'); onCloseModal?.() }}
+      />
+    </div>
+  )
+}
+
 function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
   onCloseModal?: () => void
   requestBottomTab: (tab: string) => void
@@ -1360,16 +1412,6 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
           >{activeQueueCount}</span>
         ) : undefined}
         onClick={() => { setSlidePanel(activeSlidePanel === 'solveQueue' ? null : 'solveQueue'); onCloseModal?.() }}
-      />
-      <SItem icon={<FlaskConical size={15} />} label="Planning → dynamics"
-        title="Rank a year's extreme hours, screen N-1/N-2 and fault levels, and export PowerFactory handoff bundles (gridspine)."
-        active={activeSlidePanel === 'gridspine'}
-        onClick={() => { setSlidePanel(activeSlidePanel === 'gridspine' ? null : 'gridspine'); onCloseModal?.() }}
-      />
-      <SItem icon={<FileText size={15} />} label="Reports"
-        title="Study reports written from the Energy Hub reference design and the adequacy study; read them here and export to Word."
-        active={activeSlidePanel === 'reports'}
-        onClick={() => { setSlidePanel(activeSlidePanel === 'reports' ? null : 'reports'); onCloseModal?.() }}
       />
       {/* The Assistant row used to live here, as the last of seven. It is not
           a simulation feature — it answers questions about the network and
@@ -1666,7 +1708,7 @@ function PreferencesFooter({ small = false }: { small?: boolean }) {
 }
 
 // ── Icon strip section button ──────────────────────────────────────────────────
-type FlyoutSection = 'project' | 'data' | 'simulation'
+type FlyoutSection = 'project' | 'data' | 'simulation' | 'studies'
 
 function IconStripBtn({
   icon, label, sectionId, activeFlyout, onClick,
@@ -1709,7 +1751,7 @@ function FlyoutPanel({
   const ref = useRef<HTMLDivElement>(null)
 
   const SECTION_LABELS: Record<FlyoutSection, string> = {
-    project: 'PROJECT', data: 'DATA', simulation: 'SIMULATION',
+    project: 'PROJECT', data: 'DATA', simulation: 'SIMULATION', studies: 'STUDIES',
   }
 
   // Close on outside click
@@ -1757,6 +1799,7 @@ function FlyoutPanel({
         {section === 'simulation' && (
           <SimulationSectionContent onCloseModal={onClose} requestBottomTab={requestBottomTab} />
         )}
+        {section === 'studies' && <StudiesSectionContent onCloseModal={onClose} />}
       </div>
     </div>
   )
@@ -1772,7 +1815,7 @@ export default function Sidebar() {
   } = useUIStore()
   // Guided (spec §3.5) is a render condition only — `sections` below is untouched.
   const guided = uiMode === 'guided'
-  const [sections, setSections] = useState({ project: true, data: true, simulation: true })
+  const [sections, setSections] = useState({ project: true, data: true, simulation: true, studies: true })
   const [activeFlyout, setActiveFlyout] = useState<FlyoutSection | null>(null)
   const [ioOpen, setIoOpen] = useState(false)
   const [ioTab, setIoTab] = useState<'import' | 'export'>('import')
@@ -1919,6 +1962,7 @@ export default function Sidebar() {
             {!guided && (<>
             <IconStripBtn icon={<Layers size={18} />}       label="Data"       sectionId="data"       activeFlyout={activeFlyout} onClick={() => toggleFlyout('data')} />
             <IconStripBtn icon={<Settings2 size={18} />}   label="Simulation" sectionId="simulation" activeFlyout={activeFlyout} onClick={() => toggleFlyout('simulation')} />
+            <IconStripBtn icon={<FlaskConical size={18} />} label="Studies"    sectionId="studies"    activeFlyout={activeFlyout} onClick={() => toggleFlyout('studies')} />
             </>)}
           </div>
 
@@ -2014,6 +2058,9 @@ export default function Sidebar() {
           {sections.simulation && (
             <SimulationSectionContent requestBottomTab={requestBottomTab} />
           )}
+
+          <SectionHdr title="STUDIES" open={sections.studies} onToggle={() => toggleSection('studies')} testId="sidebar-section-studies" />
+          {sections.studies && <StudiesSectionContent />}
           </>)}
         </div>
 

@@ -14,7 +14,7 @@ import { ImproveCard } from './cards/ImproveCard'
 import { ResultsCard } from './cards/ResultsCard'
 import { SiteCard } from './cards/SiteCard'
 import { StartCard } from './cards/StartCard'
-import { useHubReview, useHubStudy, useHubTemplate } from './useHubData'
+import { useHubReadiness, useHubReview, useHubStudy, useHubTemplate } from './useHubData'
 
 const CARDS: Record<HubStep, ComponentType> = {
   start: StartCard, site: SiteCard, goal: GoalCard, results: ResultsCard, improve: ImproveCard,
@@ -27,6 +27,10 @@ export default function HubDesignPanel() {
   const templateQ = useHubTemplate()
   const { template } = templateQ
   const { review } = useHubReview(studyHasResults(study))
+  // The Site / Goal cards' readiness read, observed (never fetched) here so
+  // the error line can name it (P30 B8).
+  const readinessQ = useHubReadiness(template, studyQ.running,
+    !studyQ.isPending && !templateQ.isPending, { observeOnly: true })
   const flow = flowState(project, study, review)
   const isTemplate = template != null
 
@@ -72,9 +76,13 @@ export default function HubDesignPanel() {
     if (resetWhileFailed.current === project && readNow && !failed) reset()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readNow, failed, project])
+  // What the error line names: the first read in error, in this order.
+  const loadError = studyQ.isError ? 'study state' : templateQ.isError ? 'template'
+    : readinessQ.isError ? 'readiness check' : null
   const retry = () => {
     if (studyQ.isError) void studyQ.refetch()
     if (templateQ.isError) void templateQ.refetch()
+    if (readinessQ.isError) void readinessQ.refetch()
   }
 
   // Auto-advance (§5.6): running → done opens Results unless the user moved
@@ -108,10 +116,10 @@ export default function HubDesignPanel() {
             onPick={s => setStep(s, { user: useUIStore.getState().guidedTourHolds === 0 })} />
           <GuideButton tourId="hub_design" testId="hub-guide-button" label="Guide" />
         </div>
-        {project !== null && failed && (
+        {project !== null && loadError !== null && (
           <div data-testid="hub-load-error" role="alert"
             className="flex flex-wrap items-center gap-2 rounded border border-warn/50 bg-warn/10 px-3 py-2 text-[12px] text-warn">
-            This project's study state could not be read from the server, so the steps below
+            This project's {loadError} could not be read from the server, so the steps below
             may be incomplete.
             <button type="button" data-testid="hub-load-retry" onClick={retry}
               className="rounded border border-warn/60 px-2 py-0.5 text-[11px] hover:bg-warn/10">

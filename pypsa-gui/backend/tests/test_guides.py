@@ -104,12 +104,17 @@ HUB_FIELDS = (
     "outage_data", "shortfall_hours", "energy_strictness", "verdict",
     "cost_at_target", "top_risks", "not_established", "stress_scenario",
     "fmea_check", "template_provenance", "voll_plain",
+    # P29 (B2): the Guided FMEA tab's hovers.
+    "fmea_class_a", "fmea_class_b", "fmea_class_c", "fmea_class_d",
+    "fmea_engine", "fmea_severity", "fmea_occurrence", "fmea_criticality",
+    # P30 (C12): the unit on the Goal card's price line.
+    "mwh",
 )
 
 
 def test_hub_fields_present():
     fields = G.load_guide("eh_fmea")["fields"]
-    assert len(set(HUB_FIELDS)) == 20
+    assert len(set(HUB_FIELDS)) == 29
     missing = [k for k in HUB_FIELDS if not (fields.get(k) or "").strip()]
     assert not missing, missing
 
@@ -180,3 +185,14 @@ def test_hub_design_tour_matches_the_spec():
         text = f"{s['title']} {s['body']} {s.get('enter', '')}"
         bad = [w for w in _JARGON + _HUB_JARGON if w.lower() in text.lower()]
         assert not bad, (s["target"], bad)
+
+
+def test_tagging_tour_says_when_the_link_step_appears():
+    """P30 (B7): an optional step is judged when it is reached, so the Link
+    step shows as soon as a Link's Edit form is open — not only when the tour
+    was started with one open (the pre-P30 sentence, no longer true)."""
+    steps = G.load_guide("eh_fmea")["tours"]["eh_tagging"]["steps"]
+    enter = steps[0]["enter"]
+    assert "only when it is started" not in enter
+    assert "as soon as a Link's Edit form is open" in enter
+    assert steps[1]["target"] == "eh-link-role" and steps[1].get("optional") is True

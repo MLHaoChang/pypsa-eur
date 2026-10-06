@@ -76,6 +76,7 @@ SAFETY_PANEL_ENUM = [
 RESULTS_TAB_ENUM = [
     "overview", "capex", "dispatch", "loadflow", "prices", "economics",
     "emissions", "curtailment", "lostload", "storage", "asset",
+    "investment",   # IC P3 WP3.4 (the Investment tab, WP3.5)
 ]
 BOTTOM_TAB_ENUM = [
     "Log", "History", "Buses", "Lines", "Transformers", "Generators",
@@ -96,7 +97,7 @@ RESULTS_ENUM = [
     "losses", "carrier_kpis", "emissions", "transformers", "unit_commitment",
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
-    "asset_economics", "billing", "cfe_score",
+    "asset_economics", "billing", "cfe_score", "value_flows",
 ]
 RESULTS_SOURCE_ENUM = ["lopf", "ac_pf"]
 # Task 14 — per-asset results chat tools (get_asset_results /
@@ -369,8 +370,15 @@ TOOLS: list[dict[str, Any]] = [
         "[{period, contract_id, payer, payee, value_stream, quantity_mwh, amount, "
         "flags}], flags}, gap: {periods, gates, ...}, provenance}; "
         "(cfe_score): {per_period: {'_'|period: {score, load_mwh, clean_mwh, "
-        "matched_mwh, ...}}, flags, notes}. A null amount or total is unknown, "
-        "never zero. "
+        "matched_mwh, ...}}, flags, notes}; "
+        "(value_flows): {status: 'ok'|'not_established'|'value_flows_invalid', "
+        "participants, externals, template, periods: {'_'|period: {lines: [{payer, payee, "
+        "value_stream, source, amount, ...}], by_participant: {id: {paid, received, net, "
+        "by_stream}}, sankey, conservation: {ok, checks}}}, conservation_ok, flags, notes}. "
+        "A null amount or total is unknown, never zero. "
+        "value_flows answers a SUMMARY per period and participant (paid, received, "
+        "net, by_stream; conservation) by default; detail='lines' pages the ledger "
+        "lines with offset/limit. detail is ignored by the other kinds. "
         "Returns {status:'no_data', kind, message} when the underlying endpoint "
         "has nothing to serve — an unsolved or stale network, or a solve that "
         "produced none of this kind (lost_load on a run that shed nothing). "
@@ -379,6 +387,9 @@ TOOLS: list[dict[str, Any]] = [
         {
             "result_kind": {"type": "string", "enum": RESULTS_ENUM},
             "source": {"type": "string", "enum": RESULTS_SOURCE_ENUM},
+            "detail": {"type": "string", "enum": ["summary", "lines"]},
+            "offset": {"type": "integer", "minimum": 0},
+            "limit": {"type": "integer", "minimum": 1},
         },
         ["result_kind"],
     ),
@@ -2524,6 +2535,62 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id", "bus", "kind"],
     ),
     _t(
+        "campus_get_study",
+        "The campus electrical study of a capacity-expansion (hub) project: the "
+        "solved hub taken to its electrical design by AC load flow at its "
+        "critical hours. Returns {campus_yaml (the campus description, every "
+        "value tagged measured|datasheet|assumed, or null before a draft), "
+        "skipped (what the draft left out), profiles (grid codes a study can use), "
+        "settings, results, stale}. results is null before a run, else "
+        "{selection (critical hours per investment period with their reasons), "
+        "transformers (per group: unit rating now, peak S intact and N-1, "
+        "required and recommended unit MVA, adequate), compensation "
+        "(capacitive and inductive Mvar after the inverters' own headroom), "
+        "short_circuit (IEC 60909 per bus and period against the switchgear "
+        "rating), compliance (per check: status_as_is, status_with_measures, "
+        "value, limit, worst hour, clause and its code|assumed tag), "
+        "requirement (the PCC reactive band applied and where P_ref came from)}. "
+        "When stale is true the campus or the project changed since the run: say "
+        "so before quoting numbers. It is a steady-state study, not a compliance "
+        "certificate. 409 for a project of another kind. Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "campus_draft_campus",
+        "Draft the campus description of a capacity-expansion (hub) project from "
+        "its saved, solved network: the PCC (the eh_poc bus) with a fault level, "
+        "transformers sized from the optimised MW to the next standard MVA, and "
+        "every built asset typed by carrier; every value it supplies is tagged "
+        "assumed for the engineer to replace. Refuses (409) to replace an "
+        "existing campus file unless overwrite is true, because that discards "
+        "the user's edits: ask before passing it. 422 when the project is not "
+        "saved or not solved. Returns {campus_yaml, skipped}. Safety: write.",
+        {"project_id": {"type": "string"}, "overwrite": {"type": "boolean"}},
+        ["project_id"],
+    ),
+    _t(
+        "campus_run_study",
+        "Run the campus electrical study of a capacity-expansion (hub) project: "
+        "hourly results per investment period, the critical hours (k per "
+        "criterion), AC load flow intact and transformer N-1, transformer and "
+        "compensation sizing with the design margin, IEC 60909 short circuit, "
+        "and the PCC compliance report against the grid-code profile. pf is "
+        "the connection agreement's power factor; omit it to use the code's "
+        "widest range (EU DCC 0.48 Q/Pmax). Seconds of CPU. Returns the "
+        "campus_get_study shape. 422 without a campus file or for a bad "
+        "setting. Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "k": {"type": "integer"},
+            "pf": {"type": "number"},
+            "profile": {"type": "string"},
+            "margin": {"type": "number"},
+            "n_minus_1": {"type": "boolean"},
+        },
+        ["project_id"],
+    ),
+    _t(
         "gridspine_assess_connection",
         "Connection-point assessment of one facility (a load plus an optional "
         "on-site unit such as a BESS, at one bus) at every selected hour of the "
@@ -2655,6 +2722,122 @@ TOOLS: list[dict[str, Any]] = [
         {"name": {"type": "string"}, "version": {"type": "integer"},
          "replace_inline": {"type": "boolean"}},
         ["name"],
+    ),
+    # ── Site connection (1) — IC U1 follow-up, item b ─────────────────────
+    _t(
+        "set_site_connection",
+        "Set the project's commercial root, the site's connection to the grid: "
+        "`poc_link` (the one-way Link importing grid → site, the point of "
+        "connection), optional `export_link` (the one-way Link site → grid that "
+        "carries export) and optional `timezone` (the site's IANA zone; set, naive "
+        "snapshots are UTC). Every other key of a stored commercial config (tariff, "
+        "contracts, participants) is kept. An omitted export_link or timezone keeps "
+        "the stored value; an explicit null clears it (no export link; snapshots "
+        "already in site time). The Links are checked first: a name that is not a "
+        "Link is refused (site_connection_link_missing, with likely candidates), "
+        "a Link the wrong way round (site_connection_wrong_direction), a two-way "
+        "Link, an unknown timezone, or a refusal of the kept config with no kind of "
+        "its own, `code` naming it (site_connection_invalid). Call it before "
+        "attach_tariff or define_participants when they report no_commercial_config. "
+        "Returns {commercial: {poc_link, export_link, timezone}, created, notes}. "
+        "Safety: write.",
+        {"poc_link": {"type": "string"}, "export_link": {"type": ["string", "null"]},
+         "timezone": {"type": ["string", "null"]}},
+        ["poc_link"],
+    ),
+    # ── Participants (1) — Edge Investment Case P3 WP3.4 ──────────────────
+    _t(
+        "define_participants",
+        "Set who takes part in the site's money flows and who pays whom: pass "
+        "exactly one of `template` (single_owner, btm_ppa, landlord_tenant, "
+        "dso_developer, energy_hub — built from the network and the contracts), "
+        "`config` (a full value-flow config: participants [{id, name, role}] with "
+        "role one of site_owner, developer, investor, lender, tax_equity, dso, tso, "
+        "retailer, tenant, landlord, hub_member, offtaker, other; externals; "
+        "tariff_payees [{item_id | kind, payee}]; asset_owners [{asset_id, component, "
+        "owner}]; hub_members [{link, participant, contracted_mw}]; allocation {basis}; "
+        "export_revenue_to) "
+        "or clear=true. A template that needs a contract the project lacks is NOT "
+        "saved: it returns {saved: false, status: 'drafts_need_pricing', "
+        "draft_contracts, participants, asset_owners_total} with null money fields — "
+        "ask the user for them, save the "
+        "contracts with update_solver_config, then call again. An existing, "
+        "different config is refused (value_flows_would_be_replaced) until the "
+        "user confirms and you pass replace=true. Read the result with "
+        "get_results(result_kind='value_flows'). Returns {saved, status, digest, "
+        "template, participants, notes}. Safety: write.",
+        {"template": {"type": "string", "enum": ["single_owner", "btm_ppa",
+                                                 "landlord_tenant", "dso_developer",
+                                                 "energy_hub"]},
+         "config": {"type": "object"}, "clear": {"type": "boolean"},
+         "replace": {"type": "boolean"}},
+        [],
+    ),
+    # ── Investment case (4) — Edge Investment Case P4 WP4.6c ──────────────
+    _t(
+        "run_investment_case",
+        "Start the single-owner investment-case run: builds the finance case from the "
+        "SOLVED network and the stored finance inputs (set in the Investment tab), runs "
+        "the finance engine (cash, debt, tax, returns, DSCR, the WACC gate) and stores "
+        "the report. Runs no LP (a campaign logs it at 0 solves). `owner` = the "
+        "participant whose case it is (omit: the value-flow config's single owner). "
+        "Returns {status: 'running', study, case_id, owner, tax_pack_id, hint}; poll "
+        "get_investment_case. Refusals: investment_case_not_solved (solve first), "
+        "investment_case_busy (a solve or a study is running), finance_inputs_missing, "
+        "finance_inputs_invalid, tax_pack_not_found, investment_case_request_invalid. "
+        "Safety: execution_long_running.",
+        {"owner": {"type": "string"}},
+        [],
+    ),
+    _t(
+        "get_investment_case",
+        "Read the investment-case run and its stored report. detail='summary' (default): "
+        "{run: {status, stage, error_code}, report: {present, stale, changed}, headlines "
+        "(equity and project IRRs as fractions, NPVs, lifecycle NPV, payback, LCOE, "
+        "min/avg DSCR, LLCR, PLCR), solve_ppa, wacc_gate, completeness, reasons, flags} — "
+        "an unknown number reads 'not established': NEVER report it as 0. A stale report "
+        "(an input changed since the run) must be called stale. detail='cashflows': the "
+        "cashflow lines (year, stream, counterparty, amount, source, contract), one "
+        "`page` (1-based) at a time: {items, page, pages, total_count, has_more}. "
+        "Safety: read.",
+        {"detail": {"type": "string", "enum": ["summary", "cashflows"]},
+         "page": {"type": "integer", "minimum": 1}},
+        [],
+    ),
+    _t(
+        "solve_ppa_price",
+        "Solve the price of an owner-sold PPA (currency/MWh, in the contract's money "
+        "year) that gives the target post-tax equity IRR (`target_irr`, a fraction, e.g. "
+        "0.1) at operating year `target_year` (1 = the first year after COD), on the "
+        "stored finance inputs and the current solve. `contract_id` picks the contract "
+        "(omit when the case has one PPA); `owner` the participant whose case is solved "
+        "(default: the owner of the last run). A what-if: NOTHING is saved — the stored "
+        "inputs and report are unchanged. Returns {solved_ppa_price_per_mwh, currency, "
+        "money_year, contract_id, price_in_stored_inputs_per_mwh, "
+        "equity_post_tax_irr_at_target_year, flags}. Refusals: solve_ppa_contract_not_found, "
+        "solve_ppa_ambiguous_contract, solve_ppa_not_owner_sold, solve_ppa_not_linear, "
+        "solve_ppa_needs_redispatch (the contract changes the dispatch), "
+        "solve_ppa_price_unknown, solve_ppa_cash_not_established, solve_ppa_irr_ambiguous (the "
+        "price zeroes the NPV but the case has several IRRs), solve_ppa_no_root (its "
+        "`code` says why), investment_case_refused, investment_case_not_solved, "
+        "investment_case_busy, investment_case_request_invalid, finance_inputs_missing, "
+        "finance_inputs_invalid, tax_pack_not_found. Safety: read.",
+        {"target_irr": {"type": "number"},
+         "target_year": {"type": "integer", "minimum": 1},
+         "contract_id": {"type": "string"},
+         "owner": {"type": "string"}},
+        ["target_irr", "target_year"],
+    ),
+    _t(
+        "explain_cashflow",
+        "Explain the stored investment-case report: the largest contributions to the "
+        "post-tax equity IRR by stream and by (stream, year) — each stream's equity cash "
+        "discounted at the cost of equity (the stream PVs sum to the equity NPV; `rate` "
+        "states the basis used) — and the min-DSCR year's CFADS by stream and its debt "
+        "service by tranche. The output states its method; quote it. detail='full' "
+        "lists more rows. Not explain_investment (one asset's LP sizing). Safety: read.",
+        {"detail": {"type": "string", "enum": ["summary", "full"]}},
+        [],
     ),
 ]
 
@@ -2994,6 +3177,10 @@ TOOL_ROUTES: dict[str, list] = {
     "gridspine_compute_capacity": _SERVICE_CALL,
     "gridspine_get_connection_assessments": _SERVICE_CALL,
     "gridspine_assess_connection": _SERVICE_CALL,
+    # campus electrical (3) — service calls, like gridspine's
+    "campus_get_study": _SERVICE_CALL,
+    "campus_draft_campus": _SERVICE_CALL,
+    "campus_run_study": _SERVICE_CALL,
     # Library (4) — P2 WP2.4c: router handlers, called in process with the
     # acting user (the Library ACL is the org's).
     "list_library_items": [("GET", "/api/library/items/{kind}")],
@@ -3001,6 +3188,20 @@ TOOL_ROUTES: dict[str, list] = {
     "import_urdb_tariff": [("POST", "/api/library/items/tariff/import_urdb")],
     "attach_tariff": [("GET", "/api/library/items/{kind}/{name}"),
                       ("PUT", "/api/simulation/solver_config")],
+    "set_site_connection": [("GET", "/api/simulation/solver_config"),
+                            ("PUT", "/api/simulation/solver_config")],
+    "define_participants": [("POST", "/api/simulation/value_flows/template"),
+                            ("GET", "/api/simulation/commercial/value_flows"),
+                            ("PUT", "/api/simulation/commercial/value_flows")],
+    # investment case (4) — IC P4 WP4.6c. solve_ppa_price reads the stored
+    # finance inputs and builds the case through the router's adapter seam
+    # (`routers.results._ic_build_case`, no route); the engine runs in process.
+    "run_investment_case": [("POST", "/api/results/investment_case")],
+    "get_investment_case": [("GET", "/api/results/investment_case"),
+                            ("GET", "/api/results/investment_case/report")],
+    "solve_ppa_price": [("GET", "/api/simulation/finance")],
+    "explain_cashflow": [("GET", "/api/results/investment_case"),
+                         ("GET", "/api/results/investment_case/report")],
 }
 
 

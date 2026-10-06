@@ -52,6 +52,21 @@ one dict. Full analysis, reproduction and fix criteria:
 
 ## High
 
+### 14. The campus-electrical chat tools bypass the edit-lock check
+
+`services/chat_tools.py`, added by #79 (merged 2026-10-06). The HTTP routes in
+`routers/campus_electrical.py` call `_check_lock` before the service. The chat
+tools `campus_draft_campus` and `campus_run_study` call the service directly,
+and `_gridspine_project` resolves access but not the lock. Reproduced on
+`af69613`: the HTTP draft returned 409 for a non-holder, while
+`campus_draft_campus(overwrite=True)` and `campus_run_study` both reached the
+write path. This is the fifth instance of the "a second caller skips the
+handler" shape. `tests/test_write_surface_lock_policy.py` caught it on the day
+it landed, by going red on #80 merged with the new master. Note for the fix:
+these tools take a `project_id`, so the seam's active-project predicate would
+test the wrong lock. Check the lock of the resolved project. Full analysis:
+`findings/2026-10-06-campus-chat-tools-bypass-the-lock-check.md`. Server only.
+
 ### 13. Chat tools that write a project's upload store bypass its lock check
 
 **Fixed independently in #76 (`e36c041`), not yet on master.** Do not fix
@@ -130,6 +145,37 @@ preview environment, not as a permanent rule — the deployment should decide it
 own cookie policy through configuration. The CSRF double-submit check
 (`main.py:645`) currently carries the load for those sessions. Source: gap 5 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
+
+### 10b. An edit after a hub study is not tracked (owner-approved: P33b)
+
+Added 2026-09-30 (P28 gate, owner decision O1). The EH review's `stale`
+flag is true only when a later foreground solve cleared the stored report
+(`services/adequacy/eh_review.py:455-460`). An edit to the network after a
+finished study leaves the Guided greeting and the Hub design Results card
+unaware. P28 softened the greeting's wording so that it claims nothing about
+the current network. The fix is a backend network-revision marker on the
+study record (e.g. `network_changed`), read by both surfaces. It is scheduled
+as P33b in `plans/2026-09-28-guided-mode-deferred.md` §3.
+
+### 10c. Two narrow project-lock races have correct guards but no test
+
+Added 2026-09-30 (P28 re-gate, mutants R4 and R7). In `moveProjectLock`, a
+stale 409 re-acquire that fails after a fresh acquire of the same project
+(R4), and a stale failed acquire in an X→Y→Z switch (R7), are both ignored
+by the generation guard. Removing either check leaves every test green. Add
+one test for each so the guard stays pinned.
+
+### 10a. Re-activating a project does not restore its hub study record
+
+Added 2026-09-30, from the P28 smoke. A project whose Energy Hub study
+finished, and which is then left and re-activated
+(`POST /api/projects/<p>/activate`), answers `GET /api/results/eh_study`
+with no study. The Guided hub rail opens at Site again, and the greeting says
+"No study has run yet". The Guided "study done" state is lost for a user who
+re-opens a project. Where the record is stored was not traced. The P28 smoke
+part (C) works around it by re-running the study. Sources: the plan's "P28
+phase note" (contract drift 3) and
+`qa/2026-09-30-guided-mode-deferred-gate-P28.md`.
 
 ---
 

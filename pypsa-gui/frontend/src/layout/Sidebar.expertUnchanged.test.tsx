@@ -16,6 +16,8 @@ import Sidebar from './Sidebar'
 // pins that Guided mode changes nothing in Expert, not that Expert never
 // changes. Re-record with `npx vitest run src/layout/Sidebar.expertUnchanged.test.tsx -u`
 // and check the diff is exactly the entry that was added.
+// The Studies group (2026-10-05) moved Planning → dynamics, Campus electrical
+// and Reports out of Simulation under their own header: owner's request.
 const NEW_TEST_IDS = /\s?data-testid="(sidebar-section-(project|data|simulation)|sidebar-mode-switcher)"/g
 function normalise(html: string): string {
   return html.replace(NEW_TEST_IDS, '')

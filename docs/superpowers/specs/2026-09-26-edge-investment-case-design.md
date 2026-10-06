@@ -62,7 +62,7 @@ probabilistic adequacy, N-1 redundancy, grid-strength gates and sector coupling 
 | 17 | **Series store.** Price curves, forecast-vs-actual pairs, meter history and market series live in a **Library series store** (org-scoped, versioned, persisted beside the project), not in the component-bound `_user_ts` store; `lp_bindings` materialises them into component `_t` attributes at solve time. | Review F4 |
 | 18 | **15-minute settlement requires weightings from frequency.** `set_snapshots` and profile templates derive `snapshot_weightings` from `freq` (0.25 h for `15min`) instead of defaulting to 1.0; hourly-hardcoded paths (`_annual_hourly_reference`, sample weeks, `HOURS_PER_YEAR` uses) are audited in P1. | Review F3 |
 | 19 | **Sensitivity scenarios** add `"sensitivity"` to `_SCENARIO_TYPES` (backend) and `SCEN_TYPES`/`SCEN_TYPE_LABEL`/`TAG_RE` (frontend); no DB migration (plain string column). | Review F6 |
-| 20 | **No external data curated in-tree.** Tariff databases, price forecasts and interconnection data arrive through import schemas (§11.4); the Library stores what the user brings plus the shipped packs. | Research §5.4 |
+| 20 | **No external data curated in-tree.** Tariff databases, price forecasts and interconnection data arrive through import schemas (§11.4); the Library stores what the user brings plus the shipped packs. **Amended 2026-10-05 (owner):** one exception — a versioned, sourced, hash-pinned **generic defaults pack** (`services/library/defaults_pack/`: technology costs, finance defaults, two illustrative tariffs, two synthetic load profiles; every row carries an `illustrative` flag, true where a figure is not cited from a source) ships in-tree and is always listed in the report; see the amendment below. | Research §5.4; owner 2026-10-05 |
 
 ---
 
@@ -573,3 +573,44 @@ hand-built; `eu_nl`/`ca_federal` follow in WP4.3b). **MVP-B** = + P5 + P6. **v1*
 7. Review conditions carried into plans: F10 (gap attribution) → P2; F13 (flip fields, oracle) → P7;
    F16 (billing core before LP bindings) → P1 order above; F17 (migration, series store,
    `RESULT_STATE_KEYS`, cost-breakdown rows, weightings, tab/route, chat + facade tests) → P0/P1/P2.
+
+---
+
+## Errata
+
+**2026-09-30 (IC P4 plan v1.0, `docs/superpowers/plans/2026-09-30-edge-investment-case-p4.md`).** The text
+above is unchanged; where it and these lines differ, these lines hold.
+
+1. **§6.3 CFADS.** "CFADS is defined post-tax, pre-financing (SAM's convention)" is wrong about SAM: SAM
+   Single Owner's `cf_cash_for_ds` = EBITDA − major-equipment reserve funding, **pre-tax**, with DSRA funding
+   / releases and reserve interest below it (checked with PySAM 7.1.1.post1). The finance engine follows SAM
+   and prints the definition in the report (P4 plan C8).
+2. **§6.6 line reference.** "`services/solver/assumptions.py` L641–698" has drifted: the Fisher real rate
+   for cross-period PV is block 4b (`# 4b) Auto period discount …`, about L676–732 at P4).
+3. **§6.6 WACC gate.** The gate also fails when an owner asset's own `discount_rate` (the overnight-cost
+   annuity override) differs from `wacc_nominal`; the inflation leg applies only under
+   `auto_discount_periods` (otherwise `n/a` — the LP never used it) (P4 plan C10).
+4. **§4.2 `escalation`.** Six nominal classes: `opex`, `fuel`, `tariff`, `ppa`, **`export`**, **`capex`**; a
+   class with cashflows and no rate is `not_established` (P4 plan C4).
+5. **§6.1 time axis.** The axis runs `financial_close` … COD + **`analysis_years`** (a required input; the
+   default proposed from the assets' lifetimes, never an implicit truncation); the case dates
+   `acquisition_date` and `construction_start` drive eligibility and dated pack rules (P4 plan C2, C11).
+6. **§6.6 returns.** Returns (IRR, NPV, payback, solve-for-PPA) are on the **incremental** cash of the
+   investment against a counterfactual — the same site's supply cost (bill, grid commodity, connection)
+   without the owner's investable assets, on the served load — and a lifecycle-cost NPV is reported
+   alongside (P4 plan C13). SAM's "project" return is the levered equity return (P4 plan, output mapping).
+7. **§4.2 `DebtTranche` sizing (P4 WP4.2).** `amount | gearing` sizes an `annuity` / `level` tranche. A
+   `dscr_target` tranche is sized by its DSCR alone: `amount` / `gearing` are refused on it, and
+   `max_gearing` (new) caps it. Every sizing is the debt **at COD**, IDC inside. `gearing_base` (new) is
+   `capex` or `total_uses`. `rate` may be a list with one entry per tenor year. Fees are shares ≤ 1.
+
+**2026-10-05 (owner decision; `docs/superpowers/plans/2026-10-05-ic-u1-engine-landing.md` D2–D4).**
+Decision 20 is amended for one pack only: the **generic defaults pack**, which the guided study (one
+engine, two faces) seeds its ledger from. It holds technology costs (technology-data v0.14.0, in the asset
+schema's part vocabulary), finance defaults, two illustrative tariffs and two synthetic load profiles. It is
+versioned in-tree (a new version is a new file set; old ones stay), hash-pinned like the tax packs, and
+every row carries its source, year and an `illustrative` flag (true where the figure is not cited from a
+source: the seed tariffs, the synthetic profiles). A pack tariff is copied inline into a
+project's commercial config with the pack's id, version and hash, never resolved by a Library ref. The
+report's assumptions appendix lists every pack row a case used. Tariffs and market data the user brings
+still go through the import schemas (§11.4).

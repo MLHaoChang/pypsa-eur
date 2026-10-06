@@ -39,6 +39,7 @@ import local_settings
 import os
 
 from services import app_secrets
+from settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,11 @@ def _state() -> dict:
         "key_hint": local_settings.api_key_hint(key),
         "key_redactable": status["redactable"],
         "log_path": str(app_paths.app_data_dir() / LOG_FILENAME),
+        # P30 (B6): where a new project is saved — the New-project dialog
+        # shows it. Local mode stores `<projects_root>/<name>/` (no org
+        # segment, `storage_paths.use_org_segment`); NOT `flat_projects_root`,
+        # the auth-disabled legacy store a local-mode project never uses.
+        "projects_root": str(get_settings().projects_root),
     }
 
 

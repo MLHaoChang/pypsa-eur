@@ -26,6 +26,7 @@ vi.mock('./results/AdequacyTab', () => stub('adequacy-stub'))
 vi.mock('./results/FmeaTab', () => stub('fmea-stub'))
 vi.mock('./results/StorageCycling', () => stub('storage-stub'))
 vi.mock('./results/asset/AssetDetail', () => stub('asset-stub'))
+vi.mock('./results/InvestmentTab', () => stub('investment-stub'))
 vi.mock('./CompareView', () => ({ default: () => <div data-testid="compare-stub" /> }))
 
 vi.mock('../api/simulation', () => ({
@@ -168,5 +169,26 @@ describe('picking a tab clears requestedTab (Guided → Expert → Guided)', () 
     act(() => { useUIStore.setState({ uiMode: 'guided' }) })
     expect(screen.getByTestId('results-tab-economics').getAttribute('data-advanced')).toBe('true')
     expect(screen.getByTestId('economics-stub')).toBeTruthy()
+  })
+})
+
+
+// IC P3 WP3.5: the Investment tab is reachable from a results-tab request
+// (the assistant's navigation) — directly in Expert, as a temporary advanced
+// tab in Guided.
+describe('the Investment tab from a results-tab request', () => {
+  it('Expert: the request opens it', async () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    useUIStore.getState().requestResultsTab('investment')
+    await renderResults()
+    expect(screen.queryByTestId('investment-stub')).toBeTruthy()
+  })
+
+  it('Guided: it joins the strip as an advanced tab', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    useUIStore.getState().requestResultsTab('investment')
+    await renderResults()
+    expect(screen.queryByTestId('investment-stub')).toBeTruthy()
+    expect(screen.getByTestId('results-tab-investment').getAttribute('data-advanced')).toBe('true')
   })
 })
