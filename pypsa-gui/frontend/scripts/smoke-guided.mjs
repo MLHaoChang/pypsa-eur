@@ -1339,8 +1339,15 @@ async function b4StudyReadFailure(browser, project, consoleLines, { selfTest = f
     await p2.unroute('**/api/results/eh_study', fail)
     await by2('hub-load-retry').click()
     await by2('hub-load-error').waitFor({ state: 'detached', timeout: 30_000 })
-    await by2('hub-card-site').waitFor({ state: 'visible', timeout: 15_000 })
-    ok('Retry recovers once the 500 is lifted: error line gone, Site card shown')
+    // P33b (changed assertion): once the read recovers, the hub opens on the
+    // step the flow names for the record it now reads (§5.4). Before P33b a
+    // re-activated project had lost its study record (OPEN-ITEMS 10a), so
+    // this was always Site; a project whose study survives opens at Results.
+    const rec = (await rawApi('GET', '/api/results/eh_study')).json
+    const hasResults = rec?.status === 'done' || (rec?.status === 'aborted' && !!rec?.report)
+    const card = hasResults ? 'hub-card-results' : 'hub-card-site'
+    await by2(card).waitFor({ state: 'visible', timeout: 15_000 })
+    ok(`Retry recovers once the 500 is lifted: error line gone, ${card} shown (study record: ${rec?.status ?? 'none'})`)
     watching = true
     if (selfTest) {
       info('--self-test: one 500 route is installed again AFTER recovery; this run must FAIL (exit 1) by design')
