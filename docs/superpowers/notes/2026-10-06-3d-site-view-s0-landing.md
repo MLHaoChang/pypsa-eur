@@ -27,7 +27,15 @@ Scope: increment S0 of `docs/superpowers/plans/2026-10-06-visual-layers-3-3d-sit
 
 ### 2a. Main-chunk budget
 
-The branch's rule was +5 kB gzipped over its base for the main chunk. After the merge the main chunk carries master's growth as well, so the comparison is against a build of `origin/master` at the same commit with the same `node_modules`: PENDING.
+The branch's rule was +5 kB gzipped over its base for the main chunk. After the merge the main chunk carries master's growth as well, so the comparison is against a build of `origin/master` at the same commit with the same `node_modules`:
+
+| Build | `spa` main chunk, gzipped |
+|---|---|
+| `origin/master` at `8c23cea` | 985.75 kB |
+| merged tree | 993.76 kB |
+| difference | **+8.0 kB** |
+
+The branch's own two phases measured +4.53 kB (Phase 1) and +0.77 kB (Phase 2) against their bases, +5.3 kB together; the merged difference is 2.7 kB above that sum. The 3D code itself is still outside the main chunk (the `three`-import bundle guard passes; `SiteCanvas` is the only chunk that grows), so the extra is main-bundle code the branch added that now sits beside master's (map polygons and drawing, the sites store, the palette data and icons module, the creation form's site-bus checks, `resultStyle`). Recorded, not acted on: it is under 1 % of the main chunk and the per-phase budget was a rule for the branch's own increments, but S1 (moving the type module out of the library) should re-measure it.
 
 ## 3. Backend
 
