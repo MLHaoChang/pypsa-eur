@@ -693,6 +693,11 @@ def restore_snapshot(
             project_uuid=project.uuid,
             storage_dir=str(project_dir),
         )
+        # ★ P33b step 0 (D-5): `reset_network()` put the restored ctx in the
+        # session's scratch slot and `bind_project` does not re-key, so the
+        # project's `org:uuid` slot still held the PRE-restore ctx and the
+        # next request read it. Move the restored ctx under its own key.
+        PyPSAService.rekey_context(PyPSAService.get_active_context())
 
     cfg_path = project_dir / "solver_config.json"
     if cfg_path.exists():

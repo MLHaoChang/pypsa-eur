@@ -131,6 +131,15 @@ def apply_undo():
             with PyPSAService.get_netcdf_io_lock():
                 PyPSAService.import_network_from_netcdf(n, tmp)
             PyPSAService.set_binding(prev_binding)
+            # ★ P33b step 0 (D-5): under session routing `reset_network()`
+            # published the re-imported ctx into the session's SCRATCH slot
+            # (`_publish_active` routes an unbound ctx there) and
+            # `set_binding` stamps identity without re-keying — so the
+            # project's `org:uuid` slot kept the PRE-undo ctx and the next
+            # request read the edit back. Move the ctx to the slot its
+            # identity implies, inside the lock. An unbound draft has no key
+            # and stays in scratch (`rekey_context` is a no-op).
+            PyPSAService.rekey_context(PyPSAService.get_active_context())
             if prev_loaded:
                 try:
                     n.name = prev_loaded
