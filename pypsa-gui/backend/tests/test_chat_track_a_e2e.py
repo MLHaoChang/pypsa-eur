@@ -13,6 +13,8 @@ import pypsa
 import pytest
 
 from services import chat_service, chat_tools
+from harness import results as harness_results
+from harness import history as harness_history
 from services.project_context import ProjectContext
 from tests.test_chat_e2e import (
     FakeAnthropicClient,
@@ -103,7 +105,7 @@ def test_e2e_a7_per_turn_tool_result_budget_omits_later_tools(
     n.add("Bus", "B1")
     install_network(n, name="E2EBudget")
 
-    monkeypatch.setattr(chat_service, "MAX_TOOL_RESULT_CHARS_PER_TURN", 80)
+    monkeypatch.setattr(harness_results, "MAX_TOOL_RESULT_CHARS_PER_TURN", 80)
     monkeypatch.setitem(
         chat_tools.DISPATCHERS,
         "get_meta",
@@ -157,7 +159,7 @@ def test_e2e_a6_pairing_trim_then_run_turn_completes(
     n.add("Bus", "B1")
     install_network(n, name="E2ETrim")
 
-    monkeypatch.setattr(chat_service, "SESSION_MESSAGES_MAX", 10)
+    monkeypatch.setattr(harness_history, "SESSION_MESSAGES_MAX", 10)
     session = chat_service.ChatSession()
     for i in range(30):
         session.append_history_message({"role": "user", "content": f"u{i}"})

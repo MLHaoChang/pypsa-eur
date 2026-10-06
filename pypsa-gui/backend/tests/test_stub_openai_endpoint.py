@@ -368,6 +368,46 @@ def test_branch_6_without_an_open_project_says_so(stub):
     assert calls == [] and said == "No project is open."
 
 
+# ── chat harness (issues 04, 09): the parity battery's phrases ──────────────
+
+def test_ask_me_which_yields_an_ask_user_card_then_closes(stub):
+    _mod, base = stub
+    text = ("I want to open or create a project. List my projects and the "
+            "available templates, then ask me which to open.")
+    calls, said = _chat(base, [{"role": "user", "content": text}])
+    assert [c["name"] for c in calls] == ["ask_user"]
+    args = json.loads(calls[0]["arguments"])
+    assert sum(1 for o in args["options"] if o.get("recommended")) == 1
+    calls, said = _chat(base, [
+        {"role": "user", "content": text},
+        {"role": "assistant", "content": None, "tool_calls": [{
+            "id": "call_stub_7", "type": "function",
+            "function": {"name": "ask_user", "arguments": json.dumps(args)}}]},
+        {"role": "tool", "tool_call_id": "call_stub_7", "content": '{"status": "presented"}'},
+    ])
+    assert calls == [] and said == "Pick one above."
+
+
+@pytest.mark.parametrize("text,tool,args,closing", [
+    ("Start the build-network workflow and tell me the first step.",
+     "start_workflow", {"workflow_id": "build-network"}, "Started: first, see what is there."),
+    ("Please end the current workflow.", "end_workflow", {}, "Workflow ended."),
+])
+def test_workflow_phrases_call_the_tool_then_close(stub, text, tool, args, closing):
+    _mod, base = stub
+    calls, _ = _chat(base, [{"role": "user", "content": text}])
+    assert [c["name"] for c in calls] == [tool]
+    assert json.loads(calls[0]["arguments"]) == args
+    calls, said = _chat(base, [
+        {"role": "user", "content": text},
+        {"role": "assistant", "content": None, "tool_calls": [{
+            "id": "call_x", "type": "function",
+            "function": {"name": tool, "arguments": json.dumps(args)}}]},
+        {"role": "tool", "tool_call_id": "call_x", "content": '{"ok": true}'},
+    ])
+    assert calls == [] and said == closing
+
+
 # ── Branch 7 (P27a, deferred spec §1.3): a template create from chat, then a
 # second tool in the SAME response — what shows the same-turn dispatch works.
 TEMPLATE_TEXT = "Create a project from the eh_datacenter template called probe-a8"

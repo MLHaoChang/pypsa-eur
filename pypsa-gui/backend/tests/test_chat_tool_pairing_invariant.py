@@ -27,6 +27,7 @@ the invariant on the collected results rather than only on the cap path.
 import pytest
 
 from services import chat_service
+from harness import budget as harness_budget
 
 
 def _pairing_problems(messages) -> list[str]:
@@ -62,7 +63,7 @@ def test_the_cap_path_pairs_every_tool_use_it_refuses(monkeypatch):
     Two tool_use blocks with the cap set to 1: the first is dispatched, the
     second trips the cap. BOTH must end up with a tool_result.
     """
-    monkeypatch.setattr(chat_service, "MAX_TOOL_CALLS_PER_TURN", 1)
+    monkeypatch.setattr(harness_budget, "MAX_TOOL_CALLS_PER_TURN", 1)
 
     collected: list[dict] = []
     tool_uses = [
@@ -159,7 +160,7 @@ def test_a_capped_turn_leaves_a_replayable_history(install_network, monkeypatch)
     n = pypsa.Network()
     n.add("Bus", "B1")
     install_network(n, name=None)
-    monkeypatch.setattr(chat_service, "MAX_TOOL_CALLS_PER_TURN", 2)
+    monkeypatch.setattr(harness_budget, "MAX_TOOL_CALLS_PER_TURN", 2)
 
     session = chat_service.ChatSession()
     events = [_tool_use_event(f"tu-{i}", "get_meta", {}) for i in range(3)]

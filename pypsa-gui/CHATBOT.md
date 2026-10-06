@@ -143,6 +143,33 @@ ever echoing the key value, so you can probe the backend's view safely.
 `GET /api/chat/settings/api-key` (super-admin only) additionally reports where
 the live key came from and its last four characters — never more.
 
+## The harness
+
+Everything the assistant needs that is not a language model lives in
+`backend/harness/` — the provider seam, the tool catalogue, the frame
+vocabulary, the workflows the assistant leads and the skills it can load.
+Its README is the contract (layering, how to add a tool, a workflow or a
+skill); the spec is `.scratch/harness/spec.md` and the plan
+`docs/superpowers/plans/2026-10-05-chat-harness.md`. The system-prompt text
+is `backend/harness/prompts/*.md` (byte-identical to the old constants and
+pinned by hash); the adapters are `backend/harness/providers/`; the turn
+loop itself is `backend/harness/loop.py`. The old `services.chat_service`,
+`services.llm_provider`, `services.chat_tools_schema`, `services.llm_anthropic`,
+`services.llm_openai_compat` and `services.llm_fake` paths are aliases and
+keep working.
+
+What the harness adds to the assistant (all read tier, see the README):
+
+- **The start menu.** An empty chat shows the workflows for where you are
+  (`GET /api/chat/workflows`); a chip sends the workflow's opening request.
+- **Workflows.** `start_workflow` / `advance_workflow` / `end_workflow` keep
+  the session on a step; the step's instructions ride every turn. Guided
+  mode's rules are the `hub-design` workflow's preamble.
+- **Choice cards.** `ask_user` renders a question with options and a
+  recommendation; your pick is sent as your next message.
+- **Skills.** `use_skill` loads a procedure (`grill` first); the prompt
+  carries only the catalogue.
+
 ## Voice input
 
 The composer mic button uses the browser **Web Speech API** (English,
@@ -210,7 +237,8 @@ The server enforces hard ceilings — once a cap is hit the stream emits
 | Output tokens / session | 200,000 | `MAX_OUTPUT_TOKENS_PER_SESSION` |
 
 All four live as module-level constants in
-[backend/services/chat_service.py](backend/services/chat_service.py); tune
+[backend/harness/budget.py](backend/harness/budget.py) (moved out of the
+turn loop; still readable as `services.chat_service.<NAME>`); tune
 them per deployment.
 
 ## Interrupted turns and damaged history
