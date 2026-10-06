@@ -42,6 +42,30 @@ installed in that period energised, against any switchgear ratings
 assembles the PCC compliance report (``campus_compliance.csv``,
 ``gridspine.static.campus_compliance``) against the chosen profile.
 
+``invest_campus`` then buys the electrical assets (plan C8,
+``gridspine.static.campus_invest``): least cost from the asset library (the
+shipped one, or a project's copy), every choice re-checked by AC load flow at
+every selected hour and case. It recomputes part one's sizing from the
+prepared and ranked run, with the same profile and power factor as
+``size_campus``, so it needs ``campus_selected.csv`` but not the sizing
+files. It writes:
+
+``campus_investment.csv``
+    One row per need and asset: library id, kind, units, length, the period
+    it is invested in, capex, opex and annualised cost, existing, status
+    (``chosen``, ``kept``, ``not_needed``, ``unresolved``) and the reason.
+``campus_cost.csv``
+    The capex invested and the annualised electrical cost, per period.
+``campus_invested.yaml``
+    The campus file with the chosen assets, valid for ``load_campus``.
+``campus_compliance_invested.csv``
+    The compliance as is and with the assets, the latter a re-solved AC
+    result, plus the cable loading.
+``campus_invest_history.csv``
+    Every escalation: iteration, need, from, to, the failing check.
+``campus_invest_dispatch.csv``
+    The reactive dispatch per selected hour: inverters, STATCOMs, steps.
+
 ``draft_from_project`` is the "generate" step. ``check_campus``,
 ``grid_code_profiles`` and ``SizingCriteria`` complete the seam the backend
 uses, since pypsa-gui reaches gridspine through ``drivers`` and ``schema``
@@ -70,7 +94,9 @@ from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
 from gridspine.static.campus_reactive import reactive_need, requirement_from, size_compensation
 from gridspine.static.campus_compliance import campus_compliance
+from gridspine.static.campus_invest import select_assets
 from gridspine.static.campus_sc import campus_fault_levels
+from gridspine.templates.campus_assets import load_asset_library
 from gridspine.templates.grid_codes import list_grid_codes, load_grid_code
 
 CAMPUS_YAML = "campus.yaml"
@@ -87,6 +113,13 @@ SIZING_COMP_CSV = "campus_sizing_compensation.csv"
 REQUIREMENT_JSON = "campus_requirement.json"
 SHORT_CIRCUIT_CSV = "campus_short_circuit.csv"
 COMPLIANCE_CSV = "campus_compliance.csv"
+INVESTMENT_CSV = "campus_investment.csv"
+COST_CSV = "campus_cost.csv"
+INVESTED_YAML = "campus_invested.yaml"
+COMPLIANCE_INVESTED_CSV = "campus_compliance_invested.csv"
+INVEST_HISTORY_CSV = "campus_invest_history.csv"
+INVEST_DISPATCH_CSV = "campus_invest_dispatch.csv"
+INVEST_SCOPE_JSON = "campus_invest_scope.json"
 DEFAULT_PROFILE = "eu_rfg_dcc_ce"
 
 
@@ -262,3 +295,31 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
     _write_text_atomic(run_dir / COMPLIANCE_CSV, compliance.to_csv(index=False))
     return {"transformers": sizing, "compensation": comp, "requirement": requirement,
             "short_circuit": short_circuit, "compliance": compliance}
+
+
+def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,
+                  pf: float | None = None, pcc_switchgear: bool = True) -> dict:
+    """Least-cost electrical assets for a ranked run, AC-checked (module
+    docstring). ``library`` is a path, or None for the shipped library.
+    ``pcc_switchgear`` False leaves the PCC's switchgear to the grid
+    operator (``select_assets``); the choice is written with the results.
+    Writes the investment files and returns ``{"investment", "cost",
+    "compliance", "history", "dispatch", "spec", "unresolved", "scope"}``."""
+    run_dir = Path(run_dir)
+    hourly, pcc = campus_tables(run_dir)
+    selection = selected_hours(run_dir)
+    spec = yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text())
+    lib = load_asset_library(library)
+    p_ref, _ = _p_ref(build_campus(spec), pcc)
+    grid_code = load_grid_code(profile)
+    out = select_assets(spec, hourly, selection, lib, requirement_from(grid_code, p_ref, pf=pf), grid_code, criteria,
+                        pcc_switchgear=pcc_switchgear)
+    build_campus(out["spec"])                                # the invested file must build before it is written
+    _write_text_atomic(run_dir / INVESTMENT_CSV, out["investment"].to_csv(index=False))
+    _write_text_atomic(run_dir / COST_CSV, out["cost"].to_csv(index=False))
+    _write_text_atomic(run_dir / INVESTED_YAML, yaml.safe_dump(out["spec"], sort_keys=False))
+    _write_text_atomic(run_dir / COMPLIANCE_INVESTED_CSV, out["compliance"].to_csv(index=False))
+    _write_text_atomic(run_dir / INVEST_HISTORY_CSV, out["history"].to_csv(index=False))
+    _write_text_atomic(run_dir / INVEST_DISPATCH_CSV, out["dispatch"].to_csv(index=False))
+    _write_text_atomic(run_dir / INVEST_SCOPE_JSON, json.dumps(out["scope"], indent=2))
+    return out
