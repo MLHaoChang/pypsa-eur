@@ -42,11 +42,43 @@ installed in that period energised, against any switchgear ratings
 assembles the PCC compliance report (``campus_compliance.csv``,
 ``gridspine.static.campus_compliance``) against the chosen profile.
 
+``invest_campus`` then buys the electrical assets (plan C8,
+``gridspine.static.campus_invest``): least cost from the asset library (the
+shipped one, or a project's copy), every choice re-checked by AC load flow at
+every selected hour and case. It recomputes part one's sizing from the
+prepared and ranked run, with the same profile and power factor as
+``size_campus``, so it needs ``campus_selected.csv`` but not the sizing
+files. It writes:
+
+``campus_investment.csv``
+    One row per need and asset: library id, kind, units, length, the period
+    it is invested in, capex, opex and annualised cost, existing, status
+    (``chosen``, ``kept``, ``not_needed``, ``unresolved``) and the reason.
+``campus_cost.csv``
+    The capex invested and the annualised electrical cost, per period.
+``campus_invested.yaml``
+    The campus file with the chosen assets, valid for ``load_campus``.
+``campus_compliance_invested.csv``
+    The compliance as is and with the assets, the latter a re-solved AC
+    result, plus the cable loading.
+``campus_invest_history.csv``
+    Every escalation: iteration, need, from, to, the failing check.
+``campus_invest_dispatch.csv``
+    The reactive dispatch per selected hour: inverters, STATCOMs, steps.
+
 ``draft_from_project`` is the "generate" step. ``check_campus``,
 ``grid_code_profiles`` and ``SizingCriteria`` complete the seam the backend
 uses, since pypsa-gui reaches gridspine through ``drivers`` and ``schema``
 only. It drafts a campus from the
 saved project, for the user to edit before ``prepare_campus``.
+
+A study may be held to a project's own grid-code profile (plan C10): one
+YAML file per profile in a directory, passed as ``extra_dirs`` to
+``grid_code_profiles`` and as ``profile_dirs`` to ``size_campus``. The
+grid-code functions the backend needs for its drafts (``validate_profile``,
+``confirm_limit``, ``unconfirmed``, ``uncovered_kv_ranges``, ``load_grid_code``,
+``PROFILE_ID``) are
+re-exported here for the same reason.
 
 Everything is validated before anything is written: the campus is built,
 the tables are made and checked, and only then do the files land. Each file
@@ -70,8 +102,19 @@ from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
 from gridspine.static.campus_reactive import reactive_need, requirement_from, size_compensation
 from gridspine.static.campus_compliance import campus_compliance
+from gridspine.static.campus_invest import select_assets
 from gridspine.static.campus_sc import campus_fault_levels
-from gridspine.templates.grid_codes import list_grid_codes, load_grid_code
+from gridspine.templates.campus_assets import load_asset_library
+from gridspine.templates.grid_codes import (  # noqa: F401  (re-exported: the backend's seam)
+    PROFILE_ID,
+    SOURCES as GRID_CODE_SOURCES,
+    confirm_limit,
+    list_grid_codes,
+    load_grid_code,
+    uncovered_kv_ranges,
+    unconfirmed,
+    validate_profile,
+)
 
 CAMPUS_YAML = "campus.yaml"
 CAMPUS_MANIFEST = "campus_manifest.json"
@@ -87,6 +130,13 @@ SIZING_COMP_CSV = "campus_sizing_compensation.csv"
 REQUIREMENT_JSON = "campus_requirement.json"
 SHORT_CIRCUIT_CSV = "campus_short_circuit.csv"
 COMPLIANCE_CSV = "campus_compliance.csv"
+INVESTMENT_CSV = "campus_investment.csv"
+COST_CSV = "campus_cost.csv"
+INVESTED_YAML = "campus_invested.yaml"
+COMPLIANCE_INVESTED_CSV = "campus_compliance_invested.csv"
+INVEST_HISTORY_CSV = "campus_invest_history.csv"
+INVEST_DISPATCH_CSV = "campus_invest_dispatch.csv"
+INVEST_SCOPE_JSON = "campus_invest_scope.json"
 DEFAULT_PROFILE = "eu_rfg_dcc_ce"
 
 
@@ -125,9 +175,10 @@ def check_campus(spec: dict) -> None:
     build_campus(spec)
 
 
-def grid_code_profiles() -> dict:
-    """``{profile: title}`` a campus study can be held to."""
-    return list_grid_codes()
+def grid_code_profiles(extra_dirs=()) -> dict:
+    """``{profile: title}`` a campus study can be held to: the shipped
+    profiles, then the project's own in ``extra_dirs``."""
+    return list_grid_codes(extra_dirs=extra_dirs)
 
 
 def prepare_campus(run_dir, campus: dict, network_path) -> dict:
@@ -207,17 +258,20 @@ def _p_ref(campus, pcc: pd.DataFrame):
 
 
 def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,
-                pf: float | None = None) -> dict:
+                pf: float | None = None, profile_dirs=()) -> dict:
     """Solve the selected hours, size the transformers, and correct each hour
     into the PCC reactive band. Writes the per-hour tables, the two sizing
     tables and the requirement. Returns ``{"transformers", "compensation",
-    "requirement"}``."""
+    "requirement"}``. ``profile`` may name a project profile in
+    ``profile_dirs``; its unconfirmed limits reach the report as
+    ``extracted``."""
     run_dir = Path(run_dir)
+    code = load_grid_code(profile, extra_dirs=profile_dirs)
     hourly, pcc = campus_tables(run_dir)
     selection = selected_hours(run_dir)
     campus = load_run_campus(run_dir)
     p_ref, p_ref_from = _p_ref(campus, pcc)
-    req = requirement_from(load_grid_code(profile), p_ref, pf=pf)
+    req = requirement_from(code, p_ref, pf=pf)
     flows, reactive, trafo_rows, bus_rows, pcc_rows, q_rows = {}, {}, [], [], [], []
     for period, hour in selection[["period", "hour"]].itertuples(index=False):
         period, hour = int(period), int(hour)
@@ -256,9 +310,39 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
     compliance = campus_compliance(
         bus=pd.DataFrame(bus_rows), trafo=pd.DataFrame(trafo_rows), reactive=pd.DataFrame(q_rows),
         sizing=sizing, compensation=comp, short_circuit=short_circuit, requirement=requirement,
-        profile=load_grid_code(profile), pcc_bus=str(net.bus.at[int(net.ext_grid["bus"].iloc[0]), "name"]),
+        profile=code, pcc_bus=str(net.bus.at[int(net.ext_grid["bus"].iloc[0]), "name"]),
         bus_kv=dict(zip(net.bus["name"].astype(str), net.bus["vn_kv"].astype(float))),
     )
     _write_text_atomic(run_dir / COMPLIANCE_CSV, compliance.to_csv(index=False))
     return {"transformers": sizing, "compensation": comp, "requirement": requirement,
             "short_circuit": short_circuit, "compliance": compliance}
+
+
+def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,
+                  pf: float | None = None, profile_dirs=(), pcc_switchgear: bool = True) -> dict:
+    """Least-cost electrical assets for a ranked run, AC-checked (module
+    docstring). ``library`` is a path, or None for the shipped library;
+    ``profile`` may be a project profile in ``profile_dirs``, as for
+    ``size_campus``. ``pcc_switchgear`` False leaves the PCC's switchgear to
+    the grid operator (``select_assets``); the choice is written with the
+    results.
+    Writes the investment files and returns ``{"investment", "cost",
+    "compliance", "history", "dispatch", "spec", "unresolved", "scope"}``."""
+    run_dir = Path(run_dir)
+    hourly, pcc = campus_tables(run_dir)
+    selection = selected_hours(run_dir)
+    spec = yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text())
+    lib = load_asset_library(library)
+    p_ref, _ = _p_ref(build_campus(spec), pcc)
+    grid_code = load_grid_code(profile, extra_dirs=profile_dirs)
+    out = select_assets(spec, hourly, selection, lib, requirement_from(grid_code, p_ref, pf=pf), grid_code, criteria,
+                        pcc_switchgear=pcc_switchgear)
+    build_campus(out["spec"])                                # the invested file must build before it is written
+    _write_text_atomic(run_dir / INVESTMENT_CSV, out["investment"].to_csv(index=False))
+    _write_text_atomic(run_dir / COST_CSV, out["cost"].to_csv(index=False))
+    _write_text_atomic(run_dir / INVESTED_YAML, yaml.safe_dump(out["spec"], sort_keys=False))
+    _write_text_atomic(run_dir / COMPLIANCE_INVESTED_CSV, out["compliance"].to_csv(index=False))
+    _write_text_atomic(run_dir / INVEST_HISTORY_CSV, out["history"].to_csv(index=False))
+    _write_text_atomic(run_dir / INVEST_DISPATCH_CSV, out["dispatch"].to_csv(index=False))
+    _write_text_atomic(run_dir / INVEST_SCOPE_JSON, json.dumps(out["scope"], indent=2))
+    return out

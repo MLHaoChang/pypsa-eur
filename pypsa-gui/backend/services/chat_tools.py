@@ -3377,6 +3377,20 @@ def campus_run_study(project_id: str, k: int | None = None, pf: float | None = N
         return _h(_gridspine_project(db, user, project_id), settings)
 
 
+def campus_list_grid_codes(project_id: str) -> dict:
+    from services.campus_grid_code_service import list_grid_codes as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def campus_extract_grid_code(project_id: str, document_id: str) -> dict:
+    # No publish or confirm tool exists, on purpose: the copilot drafts, a
+    # person confirms each limit and publishes, in the panel (plan C10).
+    from services.campus_grid_code_service import extract as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), document_id)
+
+
 def gridspine_assess_connection(project_id: str, bus: str, load_mw: float, load_pf: float = 0.98,
                                 onsite_mw: float = 0.0, onsite_converter: bool = True,
                                 profile: str = "eu_rfg_dcc_ce") -> dict:
@@ -6705,6 +6719,9 @@ DISPATCHERS: dict[str, Any] = {
     "campus_get_study": campus_get_study,
     "campus_draft_campus": campus_draft_campus,
     "campus_run_study": campus_run_study,
+    # campus grid codes (2): no publish tool, by design (plan C10)
+    "campus_list_grid_codes": campus_list_grid_codes,
+    "campus_extract_grid_code": campus_extract_grid_code,
     # library (4)
     "list_library_items": list_library_items,
     "get_library_item": get_library_item,

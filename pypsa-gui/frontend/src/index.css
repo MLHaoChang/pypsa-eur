@@ -328,6 +328,18 @@ html {
    Leaflet polylines / markers (renders as a black bounding-box around the
    path's SVG, which looks like a selection frame). Leaflet manages its own
    selection cues; the default outline is just visual noise. */
+/* One visible keyboard-focus ring for every interactive element (UX
+   assessment Q9). :focus-visible leaves mouse clicks unringed. Kept in the
+   base layer, so a component that draws its own focus style with a utility
+   (focus:outline-none + a ring) still wins. */
+@layer base {
+  :where(a[href], button, input, select, textarea, summary, [role="button"],
+    [role="switch"], [role="tab"], [tabindex]:not([tabindex="-1"])):focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}
+
 .leaflet-interactive:focus,
 .leaflet-interactive:focus-visible,
 .leaflet-container svg path:focus { outline: none; }

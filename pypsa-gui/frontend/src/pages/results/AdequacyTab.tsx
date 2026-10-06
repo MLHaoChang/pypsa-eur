@@ -101,8 +101,8 @@ export default function AdequacyTab() {
         <p className="text-[11px] text-muted" data-testid="adequacy-no-target">
           No reliability target was applied to the last solve, so there is no
           achieved-vs-target readout yet. Set{' '}
-          <code className="font-mono">ens_cap_permyriad</code> in solver
-          settings and re-solve to get one — or run the screening, the frontier
+          <span className="font-medium text-text">ENS target</span> in Solver
+          Settings and re-solve to get one — or run the screening, the frontier
           or the loop below, none of which needs a target to say something
           useful about this network.
         </p>
