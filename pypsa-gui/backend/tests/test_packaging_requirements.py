@@ -355,6 +355,18 @@ def test_the_spec_freezes_gridspine_from_the_repo_root_with_its_data():
     assert '"pandapower.__init__",' in text
 
 
+def test_the_spec_ships_the_generic_defaults_pack_data():
+    """IC U1 (a): the defaults pack's loader is a module (collected by import)
+    but its versioned data files are not — the spec must list them, at the
+    path the loader resolves (`services/library/defaults_pack/versions`)."""
+    from services.library.defaults_pack.loader import VERSIONS_DIR
+
+    text = SPEC.read_text(encoding="utf-8")
+    assert '"services/library/defaults_pack/versions"' in text
+    assert VERSIONS_DIR.parts[-4:] == ("services", "library", "defaults_pack", "versions")
+    assert any(VERSIONS_DIR.iterdir())
+
+
 def test_the_build_script_builds_the_project_templates_with_gridspine_reachable():
     """A fresh checkout ships no `network.nc` templates unless the build makes
     them, and the IEEE 39-bus one needs gridspine on the path to be built

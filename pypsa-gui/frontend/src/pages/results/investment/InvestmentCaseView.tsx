@@ -14,7 +14,7 @@ import { nk } from '../../../utils/queryKeys'
 import { blockerMessage } from '../../../utils/blockerMessage'
 import { downloadCSV } from '../shared'
 import {
-  AVOIDED_PREFIX, cashflowPivot, cashTotals, completenessRows, missingLines, counterfactualStatement, fmtCell, fmtHeadline, gateLegs,
+  AVOIDED_PREFIX, basisStatement, cashflowPivot, cashTotals, completenessRows, missingLines, counterfactualStatement, fmtCell, fmtHeadline, gateLegs,
   HEADLINE_KEYS, headlines, label, NOT_ESTABLISHED, perYearLists, progressFraction, progressText,
   reportFlags, reportYears, sectionOf, studyFailure, studyProgress, studyStale, toTable,
   uncheckableReason, waccGate,
@@ -262,6 +262,8 @@ function Report({ report }: { report: InvestmentCaseReportPayload }) {
       </div>
       <section className="space-y-1">
         <h3 className="text-[11px] font-semibold">Headline returns</h3>
+        <p className={basisStatement(report) ? '' : 'text-muted'} data-testid="ic-basis">
+          Price basis: {basisStatement(report) ?? 'not stated'}</p>
         <Headlines report={report} />
       </section>
       <Counterfactual report={report} />

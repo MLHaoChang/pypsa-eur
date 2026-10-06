@@ -14,8 +14,8 @@ vi.mock('./client', () => ({
     (typeof d === 'string' ? d : d == null ? fallback : JSON.stringify(d)),
 }))
 
-const { libraryApi, commercialApi, StaleEditError, SolverInFlightError, NoCommercialConfigError } =
-  await import('./commercial')
+const { libraryApi, commercialApi, StaleEditError, SolverInFlightError, NoCommercialConfigError,
+        SaveRefusedError } = await import('./commercial')
 
 beforeEach(() => { get.mockReset(); post.mockReset(); put.mockReset() })
 
@@ -190,5 +190,46 @@ describe('commercialApi results', () => {
     await commercialApi.buildTemplate('btm_ppa')
     expect(post).toHaveBeenCalledWith('/simulation/value_flows/template', { template: 'btm_ppa' },
                                       { skipErrorToast: true })
+  })
+})
+
+
+describe('commercialApi.saveSiteConnection (IC U1 follow-up b)', () => {
+  const ROOT = { poc_link: 'import', export_link: 'export', timezone: 'Europe/Berlin' }
+
+  it('creates the commercial root on a project with no commercial config', async () => {
+    get.mockResolvedValue({ status: 200, data: { commercial: null } })
+    put.mockResolvedValue({ status: 200, data: {} })
+    await commercialApi.saveSiteConnection(ROOT)
+    expect(get).toHaveBeenCalledWith('/simulation/solver_config')
+    expect(put).toHaveBeenCalledWith('/simulation/solver_config', { commercial: ROOT },
+                                     { skipErrorToast: true })
+  })
+
+  it('keeps every other stored key and never sends value_flows', async () => {
+    get.mockResolvedValue({ status: 200, data: { commercial: {
+      poc_link: 'old', timezone: 'UTC', import_tariff: { id: 't' }, contracts: [{ id: 'c' }],
+      value_flows: { participants: [] } } } })
+    put.mockResolvedValue({ status: 200, data: {} })
+    await commercialApi.saveSiteConnection({ ...ROOT, export_link: null })
+    const body = put.mock.calls[0][1] as { commercial: Record<string, unknown> }
+    expect(body.commercial).toEqual({ poc_link: 'import', export_link: null,
+                                      timezone: 'Europe/Berlin', import_tariff: { id: 't' },
+                                      contracts: [{ id: 'c' }] })
+  })
+
+  it('turns a 422 into SaveRefusedError with the server message and code', async () => {
+    get.mockResolvedValue({ status: 200, data: { commercial: null } })
+    put.mockRejectedValue(axiosError(422, { code: 'commercial_binding_invalid',
+                                            message: "poc_link 'x' is not a Link" }))
+    const err = await commercialApi.saveSiteConnection(ROOT).catch(e => e)
+    expect(err).toBeInstanceOf(SaveRefusedError)
+    expect(err.message).toBe("poc_link 'x' is not a Link")
+    expect(err.code).toBe('commercial_binding_invalid')
+    // FastAPI's validation list (an unknown zone) is a refusal too.
+    put.mockRejectedValue(axiosError(422, [{ loc: ['body', 'commercial'], msg: 'unknown timezone' }]))
+    await expect(commercialApi.saveSiteConnection(ROOT)).rejects.toBeInstanceOf(SaveRefusedError)
+    put.mockRejectedValue(axiosError(409, { code: 'solver_in_flight', message: 'busy' }))
+    await expect(commercialApi.saveSiteConnection(ROOT)).rejects.toBeInstanceOf(SolverInFlightError)
   })
 })

@@ -299,6 +299,18 @@
       "surface": "inline",
       "why": "The SDK the active profile's wire needs is missing from this build, surfaced as a 400 by the report generation routes (WP3); the chat turn reports it on its own error frame. Per-call; the message says so and the model relays it."
     },
+    "site_connection_invalid": {
+      "surface": "inline",
+      "why": "set_site_connection: a two-way meter Link, one Link named as both import and export, an unknown timezone, or a refusal of the kept commercial config that has no kind of its own (its `code` names it, e.g. fca_needs_saved_project; commercial_binding_invalid, library_ref_stale and solver_in_flight keep their own kinds). The model explains and asks for the right Link or zone within the turn."
+    },
+    "site_connection_link_missing": {
+      "surface": "inline",
+      "why": "set_site_connection named a Link that is not in the network; the message lists the likely candidates. The model picks one with the user and retries."
+    },
+    "site_connection_wrong_direction": {
+      "surface": "inline",
+      "why": "set_site_connection: the PoC Link runs into the grid, or the export Link does not run from the site side to the grid. The model names the Link that runs the other way and retries."
+    },
     "snapshot_count_mismatch": {
       "surface": "banner",
       "why": "Supplied rows do not match the network's snapshots. The data must be corrected."
