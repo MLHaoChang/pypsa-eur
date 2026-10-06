@@ -1,6 +1,6 @@
 # Plan: one investment engine, two faces (expert workbench and guided study)
 
-**Date:** 2026-10-05. **Status:** v1.6. Owner decisions in §8 taken 2026-10-05; independent review PASS WITH CONDITIONS, all conditions applied (§9); C1 corrected after the asset-parameterisation assessment (§9 R12, §10).
+**Date:** 2026-10-05. **Status:** v1.7. Owner decisions in §8 taken 2026-10-05; independent review PASS WITH CONDITIONS, all conditions applied (§9); C1 corrected after the asset-parameterisation assessment (§9 R12, §10).
 **Replaces nothing yet.** It sequences two existing efforts so they converge instead of colliding:
 
 - **Edge Investment Case (IC)**: spec `docs/superpowers/specs/2026-09-26-edge-investment-case-design.md`.
@@ -279,3 +279,18 @@ shared by both modes.
 | Economics in Expert | M4 cost-mode control becomes the S1 asset cards of §10; S2 Economics section hosting IC's editors | IC (editors) + whoever owns S1 | After U1 follow-up and S0 |
 | Guided shell | M7 hide expert chrome in Guided, M8 Guided without an API key, S1 question-first rail | GS session | Inside U3 |
 | Later | M3 Summary tab, M5 catalogue-driven forms, M6 type scale (quiet window, both sessions merged), M9 responsive, M10 validation catalogue, S3 table view, S4 report page, S5 deep links | to decide | After U3 |
+
+## 12. Third participant: the gridspine campus session (owner approved 2026-10-06)
+
+The campus electrical study (gridspine; session "Gridspine design spec review"; PRs #74, #79, #83, #84)
+sizes transformers, compensation, switchgear and cables for a solved hub, and from PR #83 on it carries
+its own equipment cost catalogue (`gridspine/templates/data/campus_assets.yaml`: capex, `opex_frac`,
+`lifetime_a`, provenance tags, one discount rate and price year) and a least-cost investment step
+(C8, C11). Its open PRs are not blocked. Two follow-ups, after #81, #85 and #78 merge:
+
+| # | Item | Owner |
+|---|---|---|
+| G1 | One source for equipment cost data: the campus library is seeded on the pypsa-gui side from the generic defaults pack (rows in the asset-schema part vocabulary: lump / per km / per bay, overnight cost, lifetime, FOM share, provenance); the discount rate and price year come from the project, not a library-level 0.07. gridspine stays free of pypsa-gui imports. | IC accepts the rows into the pack; campus session seeds from it |
+| G2 | The chosen equipment is owner capex in the same investment case: a solved campus study emits owner assets with upfront parts (`UpfrontPart` plus quantity and build year); `results/finance_case.build_finance_case` takes them through a new input hook. | IC adds the hook; campus session produces the list; shape agreed between them |
+
+Ownership adds: `gridspine/*` and `services/campus_electrical_*` stay with the campus session.
