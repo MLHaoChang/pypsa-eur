@@ -13,8 +13,9 @@ harness/
   workflows/      the start menu and the step-by-step flows (Markdown + front matter)
   skills/         procedures the model loads on demand (<name>/SKILL.md)
   prompts/        the system-prompt fragments as Markdown, byte-identical to the old constants
-  providers/      anthropic, openai_compat, fake — the only place a wire is named
-  loop.py         the turn loop and its budget gates, the stub loop, the provider wiring (the former services/chat_service.py)
+  providers/      anthropic, openai_compat, fake, and wiring (profile → provider, tools payload, history portability) — the only place a wire is named
+  loop.py         the turn loop and its budget gates, prompt assembly and ui-context formatting (the former services/chat_service.py)
+  stub.py         the scripted stub loop behind StreamRequest.script
   session.py      ChatSession, PendingConfirmation, the session registry with its TTL and cap
   confirm.py      the confirmation gate: tiers, the Guided write rule, auto-approve, parallel-destructive
   ratelimit.py    the /stream token bucket
@@ -58,9 +59,11 @@ Spec: `.scratch/harness/spec.md`. Plan:
    `services.llm_fake` are `sys.modules` aliases of the harness modules:
    same objects, same monkeypatches. New code imports from `harness.*`.
 8. **The loop's provider words only go down.** `loop.py` arrived carrying
-   the seam spec's known leaks (wire branches for history portability, the
-   vision sub-call's client, capability refusals); the layout test pins
-   their count. A new one goes into `providers/`, not into the loop.
+   the seam spec's known leaks; the wiring (profile resolution, the
+   provider factory, the history-portability filter) now lives in
+   `providers/wiring.py`, and the layout test pins what is left in the loop
+   (the capability refusals in the turn body). A new one goes into
+   `providers/`, not into the loop.
 
 ## The harness tools
 
@@ -83,17 +86,18 @@ tests that patch it move their target to the new module in the same
 commit**, with the frame-recording gate
 (`tests/test_chat_turn_frame_contract.py`, re-recorded only by
 `tests/record_chat_turn_frames.py`) unchanged. Done so far: `sse`, `fence`, `results`, `history`, `metrics`, `ratelimit`,
-`session`, `confirm`. Nine tunables have moved with their readers
+`session`, `confirm`, `providers/wiring`, `stub`. Nine tunables have moved with their readers
 (`MOVED_TUNABLES` in the layout test lists them with their homes); a
 reader that stays in the loop goes through the home's attribute
 (`harness_session.CONFIRMATION_TTL_SECONDS`), the loop forwards every
 moved tunable through `__getattr__` so a read via the alias is live, and
 three tripwires hold it: no test patches a moved tunable through the alias,
 the forwarded set equals the moved set, and the loop has no bare read of
-one. Still in `loop.py`: the budget gates (`MAX_TOOL_CALLS_PER_TURN` and
-friends are read by the turn body), the stub loop, the provider wiring (its
-provider-word sites belong in `providers/`), the prompt assembly and
-ui-context formatting, and the turn body itself.
+one. The same rule covers a patched FUNCTION whose readers move
+(`_build_anthropic_client`, intercepted by three tests, is forwarded and
+patched on `providers/wiring`). Still in `loop.py`: the budget and retry
+tunables the turn body reads, the prompt assembly and ui-context
+formatting, the solver bridge, and the turn body itself.
 
 ## Measuring parity
 

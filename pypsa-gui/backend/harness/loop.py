@@ -70,7 +70,6 @@ from collections.abc import Callable, Generator
 from fastapi import HTTPException
 from services.llm_config import DEFAULT_MODEL, OPUS_MODEL  # noqa: F401 — OPUS_MODEL re-exported for tests (chat_service.OPUS_MODEL)
 from services.project_context import ProjectContext
-from harness import session as harness_session  # noqa: E402 — moved tunables are read live (issue 08)
 
 logger = logging.getLogger("pypsa_gui.chat")
 
@@ -392,235 +391,12 @@ def solver_log_bridge(
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def agent_loop_stub(
-    session: ChatSession,
-    script: list[dict[str, Any]],
-    *,
-    confirmation_wait_seconds: float | None = None,
-    is_disconnected: Callable[[], bool] | None = None,
-) -> Generator[tuple[str, dict[str, Any]], None, None]:
-    """
-    Drive a scripted sequence of SSE frames. The stub stands in for the
-    Phase 3 Anthropic agent loop so Phase 2 can exercise:
-
-      * session_init frame
-      * token / thinking frames
-      * tool_request → tool_pending_confirmation → wait → tool_result loop
-      * M7 parallel-destructive pre-scan (>1 destructive in a `tool_batch`
-        emits TWO `tool_error` frames AND no confirmation card)
-      * M8 abort-on-disconnect (polls `is_disconnected` between steps)
-
-    Each `script` entry is a dict with a `type` key:
-      * `{"type": "token", "text": ...}` → yields ("token", {"delta": ...}).
-      * `{"type": "thinking", "text": ...}` → yields ("thinking", ...).
-      * `{"type": "tool_call", "tool_use_id", "name", "args", "safety_tier",
-         "result"}` → for read/write tier, immediately emit tool_request +
-         tool_result. For destructive/execution tier, emit tool_request +
-         tool_pending_confirmation, BLOCK on wait_for_decision; emit
-         tool_running + tool_result on approve, tool_error on
-         deny/expired/aborted.
-      * `{"type": "tool_batch", "calls": [...]}` → M7 pre-scan. If >1
-         destructive, emit a tool_error per call. Otherwise dispatch each
-         in sequence as a single `tool_call`.
-      * `{"type": "turn_done"}` → final frame with usage rollup.
-      * `{"type": "session_done"}` → final session_done frame.
-      * `{"type": "error", "error_kind", "message"}` → emit an error frame.
-
-    Yields `(event_name, payload)` tuples; the SSE writer turns them into
-    `sse_frame(...)` bytes.
-    """
-    # Phase 4 QA fix: clear any abort state from a previous turn so /abort
-    # is one-shot. Mirrors run_turn (E2E QA: INT-004).
-    session.abort_event.clear()
-
-    # session_init: tools + replay (Phase 4 polish) + model identity
-    from harness.catalogue import TOOLS  # local: avoid cycle at module load
-    # Task 7 — the stub is driven by `routers/chat.py`'s script path, which
-    # binds `session.profile_id`/`bound_wire` the SAME way the real run_turn
-    # path does, before branching on `has_explicit_script`. Reported here too
-    # so a script-driven SSE test can assert the binding without needing a
-    # live/fake provider at all.
-    stub_profile = _resolve_turn_profile(session)
-    yield "session_init", {
-        "session_id": session.session_id,
-        "session6": session.session6(),
-        "model": session.model,
-        "tool_count": len(TOOLS),
-        "profile_id": stub_profile.id,
-        "profile_label": stub_profile.label,
-    }
-
-    for step in script:
-        if session.abort_event.is_set():
-            yield "session_done", {"reason": "aborted"}
-            return
-        if is_disconnected is not None and is_disconnected():
-            # M8: client closed mid-stream. Set abort and exit cleanly.
-            session.abort_event.set()
-            yield "session_done", {"reason": "disconnected"}
-            return
-
-        kind = step.get("type")
-
-        if kind == "token":
-            yield "token", {"delta": step.get("text", "")}
-            continue
-
-        if kind == "thinking":
-            yield "thinking", {"delta": step.get("text", "")}
-            continue
-
-        if kind == "tool_batch":
-            calls = step.get("calls") or []
-            offenders = find_parallel_destructive(calls)
-            if offenders:
-                # M7: emit one tool_error per destructive call, NO
-                # confirmation cards. The agent must re-issue these one at
-                # a time in a future turn.
-                for call in offenders:
-                    yield "tool_error", {
-                        "tool_use_id": call.get("tool_use_id"),
-                        "tool_name": call.get("name"),
-                        "error_kind": "parallel_destructive_not_allowed",
-                        "message": (
-                            "two or more destructive / execution tool calls "
-                            "were issued in a single turn — confirmation "
-                            "cards are only available one at a time. "
-                            "Re-issue each tool in its own turn."
-                        ),
-                    }
-                continue
-            # No parallel-destructive — dispatch each call in sequence.
-            for call in calls:
-                yield from _dispatch_stub_call(
-                    session, call,
-                    confirmation_wait_seconds=confirmation_wait_seconds,
-                )
-            continue
-
-        if kind == "tool_call":
-            yield from _dispatch_stub_call(
-                session, step,
-                confirmation_wait_seconds=confirmation_wait_seconds,
-            )
-            continue
-
-        if kind == "turn_done":
-            with session._lock:
-                usage_snapshot = dict(session.usage_acc)
-                # W-3 — ships alongside the totals so the client can
-                # tell "nothing used" from "never reported".
-                usage_snapshot["reported"] = session.usage_reported
-            yield "turn_done", {
-                "turn_id": step.get("turn_id"),
-                "usage": usage_snapshot,
-            }
-            continue
-
-        if kind == "session_done":
-            yield "session_done", {"reason": step.get("reason", "complete")}
-            return
-
-        if kind == "error":
-            yield "error", {
-                "error_kind": step.get("error_kind", "unspecified"),
-                "message": step.get("message", ""),
-            }
-            continue
-
-        # Unknown step kind — emit a clear error so tests catch typos.
-        yield "error", {
-            "error_kind": "unknown_step_kind",
-            "message": f"agent_loop_stub: unknown step kind {kind!r}",
-        }
+from harness.stub import (  # noqa: E402, F401 — moved (issue 08); re-exported
+    agent_loop_stub, _dispatch_stub_call,
+)
 
 
-def _dispatch_stub_call(
-    session: ChatSession,
-    call: dict[str, Any],
-    *,
-    confirmation_wait_seconds: float | None,
-) -> Generator[tuple[str, dict[str, Any]], None, None]:
-    """
-    Phase 2 stub: handle one tool_call entry from the script. Read/write
-    tiers run immediately; destructive/execution tiers go through the
-    confirmation card lifecycle.
-    """
-    tool_use_id = call.get("tool_use_id") or uuid.uuid4().hex
-    tool_name = call.get("name") or "<missing-name>"
-    args = call.get("args") or {}
-    tier = (call.get("safety_tier") or "read").lower()
-    stub_result = call.get("result")
 
-    # Always tell the client the agent wants to call this tool.
-    yield "tool_request", {
-        "tool_use_id": tool_use_id,
-        "tool_name": tool_name,
-        "args": args,
-        "safety_tier": tier,
-    }
-
-    if tier in DESTRUCTIVE_TIERS:
-        pc = session.issue_confirmation(
-            tool_name=tool_name, args=args, safety_tier=tier,
-        )
-        yield "tool_pending_confirmation", {
-            "tool_use_id": tool_use_id,
-            "tool_name": tool_name,
-            "args": args,
-            "safety_tier": tier,
-            "confirmation_token": pc.token,
-            "ttl_seconds": harness_session.CONFIRMATION_TTL_SECONDS,
-        }
-
-        decision = session.wait_for_decision(
-            pc.token, timeout=confirmation_wait_seconds,
-        )
-
-        if decision == "approve":
-            yield "tool_running", {"tool_use_id": tool_use_id, "tool_name": tool_name}
-            ref = {"tool_use_id": tool_use_id, "tool_name": tool_name,
-                   "summary": stub_result}
-            session.push_result_ref(ref)
-            yield "tool_result", {
-                "tool_use_id": tool_use_id, "tool_name": tool_name,
-                "result": stub_result,
-            }
-            return
-        if decision == "deny":
-            yield "tool_error", {
-                "tool_use_id": tool_use_id, "tool_name": tool_name,
-                "error_kind": "confirmation_denied",
-                "message": f"user denied confirmation for {tool_name!r}",
-            }
-            return
-        if decision == "expired":
-            yield "tool_error", {
-                "tool_use_id": tool_use_id, "tool_name": tool_name,
-                "error_kind": "confirmation_expired",
-                "message": (
-                    f"confirmation TTL elapsed without user action for "
-                    f"{tool_name!r}"
-                ),
-            }
-            return
-        # aborted
-        yield "tool_error", {
-            "tool_use_id": tool_use_id, "tool_name": tool_name,
-            "error_kind": "aborted",
-            "message": "session aborted before confirmation",
-        }
-        return
-
-    # Non-destructive tier — execute immediately (stubbed).
-    yield "tool_running", {"tool_use_id": tool_use_id, "tool_name": tool_name}
-    ref = {"tool_use_id": tool_use_id, "tool_name": tool_name,
-           "summary": stub_result}
-    session.push_result_ref(ref)
-    yield "tool_result", {
-        "tool_use_id": tool_use_id, "tool_name": tool_name,
-        "result": stub_result,
-    }
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -639,7 +415,6 @@ from harness.providers.anthropic import (  # moved 2026-08-13 (provider seam)
     # app_secrets.py documents it as the call-time surface that picks up a
     # freshly-saved API key without a restart. This alias — and the compat
     # surface below — is a caller/patch indirection, not dead re-export.
-    build_client as _build_anthropic_client,
     # Task 5: no longer called from this module (translation now lives in
     # AnthropicProvider.stream) — these three aliases are kept as a
     # backward-compat re-export surface for test_chat_thinking_blocks.py
@@ -657,275 +432,32 @@ from harness.providers.anthropic import (  # moved 2026-08-13 (provider seam)
 # `chat_service._build_anthropic_client` alias above, which is the actual
 # patch surface tests pin, not `llm_anthropic.build_client`.
 from harness import protocol as llm_provider
-from harness.providers import anthropic as llm_anthropic
-from harness.providers import openai_compat as llm_openai_compat
+from harness.providers import anthropic as llm_anthropic  # noqa: F401 — re-exported: tests patch chat_service.llm_anthropic.AnthropicProvider
+from harness.providers import openai_compat as llm_openai_compat  # noqa: F401 — re-exported for the same reason
 
 
-def llm_config_module():
-    """The `llm_config` module, imported lazily like every other use here."""
-    from services import llm_config  # noqa: PLC0415
-    return llm_config
-
-
-def _resolve_turn_profile(session: ChatSession) -> Any:
-    """
-    The `LLMProfile` this turn should use for provider construction, the
-    per-turn token cap, and the A8 fallback (Task 7).
-
-    `session.profile_id` wins when the router has bound one. Otherwise falls
-    back to `llm_config.resolve_legacy_model(session.model)` — the SAME
-    translation `resolve_legacy_model` documents for a pre-profile session,
-    so a `ChatSession` built directly (every existing e2e test does this —
-    `ChatSession()` / `ChatSession(model=OPUS_MODEL)` — with no profile_id)
-    keeps resolving exactly the profile its `model` string always implied:
-    `DEFAULT_MODEL` -> the built-in sonnet profile, `OPUS_MODEL` -> the
-    built-in opus profile (fallback_model=DEFAULT_MODEL — this is what keeps
-    the pre-Task-7 A8 test, which sets `model=OPUS_MODEL` and never touches
-    `profile_id`, passing unmodified). Deliberately NOT
-    `llm_config.resolve_profile(None)` (-> the ACTIVE profile) — that would
-    let a user's active-profile choice silently override what an unbound
-    session's own `model` field says, which is a behaviour change zero-config
-    must not have.
-    """
-    from services import llm_config
-    if session.profile_id is not None:
-        return llm_config.resolve_profile(session.profile_id)
-    return llm_config.resolve_legacy_model(session.model)
-
-
-# Block types that only make sense on the wire that produced them: Anthropic
-# extended-thinking's signed `thinking`/`redacted_thinking` blocks, and
-# Anthropic's own `image`/`document` content-block shapes. None of the four
-# has an openai-wire equivalent the translation layer can replay.
-_NON_PORTABLE_BLOCK_TYPES: frozenset[str] = frozenset(
-    ["thinking", "redacted_thinking", "image", "document"]
+from harness.providers.wiring import (  # noqa: E402, F401 — moved (issue 08); re-exported
+    llm_config_module, _resolve_turn_profile, _NON_PORTABLE_BLOCK_TYPES, _filter_non_portable_blocks, _anthropic_client_for_profile, _provider_for_profile, _GRIDSPINE_ALWAYS, _bound_project_kind, _tools_payload, _tools_payload_for_profile,
 )
 
 
-def _filter_non_portable_blocks(content: Any, wire: str) -> Any:
-    """
-    Drop content blocks `wire` cannot replay (Task 7 history rehydration).
-
-    A chat.jsonl transcript can carry turns recorded under a DIFFERENT
-    profile than the one GET /history resolves the minted session to (the
-    user switched wires by starting a new chat — Task 7's cross-wire guard
-    is what makes that the only way). Replaying an anthropic-shaped thinking
-    block into an openai-wire session's history is not merely wasted
-    context; the openai-compat translation has no shape for it at all.
-
-    Only `wire == "openai"` filters anything, and only when `content` is a
-    list of blocks — a plain string (an ordinary text-only turn, the common
-    case) or an anthropic-wire replay passes through unchanged, same object.
-    """
-    if wire != "openai" or not isinstance(content, list):
-        return content
-    return [
-        b for b in content
-        if not (isinstance(b, dict) and b.get("type") in _NON_PORTABLE_BLOCK_TYPES)
-    ]
 
 
-def _anthropic_client_for_profile(profile: Any | None) -> tuple[Any, str | None]:
-    """
-    `(anthropic SDK client, error_kind|None)` for an anthropic-wire profile.
-
-    Extracted from `_provider_for_profile` (C-3) so the vision sub-call in
-    `chat_tools.reconstruct_network_from_image` resolves its credentials the
-    SAME way a turn does, instead of always reaching for the ambient
-    `ANTHROPIC_API_KEY`. One source of truth, so the two cannot drift.
-
-    `profile is None` means "no profile bound" — a direct call outside a turn —
-    and takes the plain `_build_anthropic_client()` path, i.e. exactly the
-    pre-profile behaviour.
-
-      * the built-in `ANTHROPIC_API_KEY` slot -> the EXISTING
-        `_build_anthropic_client()` call, reached through the module attribute
-        so a test that monkeypatches `chat_service._build_anthropic_client`
-        still sees its double. Byte-identical zero-config behaviour, including
-        `missing_api_key` and `sdk_not_installed`.
-      * any OTHER key slot -> `anthropic.Anthropic(api_key=<slot value>)`.
-        The ONE sanctioned explicit `api_key=` kwarg in this codebase:
-        `llm_anthropic.build_client` never passes the key explicitly (so a
-        literal value cannot land in a repr or a log) because the SDK reads the
-        one blessed env var itself; a custom slot has no SDK-known name, so
-        passing it explicitly is the only way to honour it.
-      * `auth == "bearer"` with an empty/unset slot -> `(None, "missing_api_key")`.
-    """
-    if profile is None or profile.key_env == "ANTHROPIC_API_KEY":
-        return _build_anthropic_client()
-    key_value = os.environ.get(profile.key_env) if profile.key_env else None
-    if profile.auth == "bearer" and not key_value:
-        return None, "missing_api_key"
-    try:
-        import anthropic  # noqa: PLC0415
-    except ImportError:
-        return None, "sdk_not_installed"
-    try:
-        # Sanctioned explicit api_key= kwarg — see docstring above.
-        built = anthropic.Anthropic(api_key=key_value)
-    except Exception as exc:  # noqa: BLE001 — surface as typed error kind
-        logger.warning(
-            "chat: anthropic client init failed for profile %r: %s",
-            profile.id, _redact_for_log(exc),
-        )
-        return None, "unauthorized"
-    return built, None
 
 
-def _provider_for_profile(
-    profile: Any, client: Any | None = None
-) -> tuple[Any, str | None]:
-    """
-    `(provider, error_kind|None)` for an `LLMProfile` (Task 6).
-
-    Generalizes the inline construction `_run_turn_body` used to do
-    (`llm_anthropic.AnthropicProvider(client)`) across both wires, keyed off
-    the profile rather than a hardcoded Anthropic assumption. Kept in
-    `chat_service` — not `llm_anthropic` — so the existing `client=`/
-    `provider=` injection seams the whole chat test suite pins stay exactly
-    where they are.
-
-    Wiring:
-      * anthropic wire + the built-in `ANTHROPIC_API_KEY` slot → the
-        EXISTING `_build_anthropic_client()` path, reached through the
-        module attribute (so a test that monkeypatches
-        `chat_service._build_anthropic_client` sees its double here too) —
-        byte-identical zero-config behaviour, including `missing_api_key`
-        and `sdk_not_installed`.
-      * anthropic wire + any OTHER key slot (a custom profile whose preset
-        is not the built-in Anthropic one) → `anthropic.Anthropic(api_key=
-        <slot value>)`. This is the ONE sanctioned explicit `api_key=` kwarg
-        use in this codebase — `llm_anthropic.build_client` never passes the
-        key explicitly (so a literal value can't land in a repr/log) because
-        the SDK can read the one blessed `ANTHROPIC_API_KEY` env var on its
-        own; a custom slot has no such SDK-known name, so passing it
-        explicitly is the only way to honour it.
-      * openai wire → `OpenAICompatProvider(<resolved base_url>, api_key=
-        <slot value or None>)`. `llm_config` documents `base_url=None` on a
-        profile as "use the preset's own endpoint" and "always fine, always
-        the normal case" for a catalogued preset — so a `None` base_url is
-        RESOLVED here (via `llm_config.load_presets()`), never passed
-        through as-is (`OpenAICompatProvider` would crash on
-        `None.rstrip("/")`, fix round 1). A `"custom"` preset, or any preset
-        id not in the catalogue, has no endpoint to resolve `None` against —
-        that is a genuinely unusable profile, so it returns `(None,
-        "invalid_request")` rather than crashing or guessing.
-      * `auth == "bearer"` with an empty/unset key slot → `(None,
-        "missing_api_key")`, on either wire.
-
-    `client`, when given, is an already-built Anthropic SDK client (or test
-    double) — the production/test injection seam — and wins over building
-    one, on the anthropic wire only.
-    """
-    if profile.wire == "anthropic":
-        if client is not None:
-            return llm_anthropic.AnthropicProvider(client), None
-        built, err = _anthropic_client_for_profile(profile)
-        if built is None:
-            return None, err
-        return llm_anthropic.AnthropicProvider(built), None
-
-    if profile.wire == "openai":
-        base_url = profile.base_url
-        if base_url is None:
-            # Resolution, not a guard (fix round 1, finding 1): None means
-            # "use the preset's declared endpoint" for a catalogued preset,
-            # never "pass None through and let the provider crash".
-            base_url = None
-            if profile.preset != "custom":
-                from services import llm_config
-                entry = next(
-                    (e for e in llm_config.load_presets()
-                     if isinstance(e, dict) and e.get("id") == profile.preset),
-                    None,
-                )
-                if entry is not None:
-                    base_url = entry.get("base_url")
-            if not base_url:
-                # "custom" (no catalogue entry to resolve against) or an
-                # unrecognised/incomplete preset — genuinely unusable, not
-                # something to guess at.
-                return None, "invalid_request"
-        key_value = (
-            os.environ.get(profile.key_env) if profile.key_env else None
-        )
-        if profile.auth == "bearer" and not key_value:
-            return None, "missing_api_key"
-        return (
-            llm_openai_compat.OpenAICompatProvider(
-                base_url, api_key=key_value,
-                # C-2 — server-derived from the preset, like `key_env`.
-                # Exactly one completion-length parameter goes on the wire;
-                # the provider retries once under the other spelling if this
-                # endpoint refuses it by name.
-                token_param=profile.token_param,
-            ),
-            None,
-        )
-
-    return None, "internal_error"
 
 
-#: The one gridspine tool a session may use whatever project it is bound to:
-#: creating a study is how a user gets a planning → dynamics project at all.
-_GRIDSPINE_ALWAYS = frozenset({"gridspine_create_study"})
 
 
-def _bound_project_kind(turn_ctx) -> str | None:
-    """The kind of the project this turn is bound to, or None when unbound or
-    unknowable. Never raises — tool selection must not fail a turn."""
-    project_uuid = getattr(turn_ctx, "project_uuid", None)
-    if not project_uuid:
-        return None
-    try:
-        import uuid as _uuid
-
-        from db.models import Project
-        from db.session import SessionLocal
-        from services.gridspine_service import kind_of
-
-        with SessionLocal() as db:
-            row = db.get(Project, _uuid.UUID(str(project_uuid)))
-            return kind_of(row) if row is not None else None
-    except Exception:  # noqa: BLE001 - selection must degrade, not abort the turn
-        return None
 
 
-def _tools_payload(turn_ctx=None) -> list[dict[str, Any]]:
-    """The `tools` field of the neutral `LLMRequest`: chat_tools_schema.TOOLS,
-    minus the project-scoped gridspine tools unless the bound project is a
-    planning → dynamics one.
-
-    The spec's "the agent gets the toolset matching the open study", done as a
-    filter over ONE registry rather than a registry per kind: the registry
-    invariants (`len(TOOLS) == len(DISPATCHERS)`, every tool routed) keep
-    holding, and a study project still sees every ordinary tool — its
-    capacity-expansion tools simply find no network to act on, which they
-    already report. Only the gridspine tools are gated, because on any other
-    project every one of them would 409 before doing anything.
-    """
-    from harness.catalogue import TOOLS
-    tools = list(TOOLS)
-    if _bound_project_kind(turn_ctx) != "planning_dynamics":
-        tools = [
-            t for t in tools
-            if not t["name"].startswith("gridspine_") or t["name"] in _GRIDSPINE_ALWAYS
-        ]
-    return tools
 
 
-def _tools_payload_for_profile(profile: Any) -> list[dict[str, Any]]:
-    """
-    The `tools` field of the neutral `LLMRequest`, honouring the profile's
-    `tools` capability (Task 8).
 
-    `profile.tools is False` -> `[]`, matching what the request actually
-    carries — NOT `_tools_payload()` filtered after the fact, which would
-    leave `session_init.tool_count` reporting a catalogue size nothing was
-    sent. Single source of truth for both the `session_init` frame and the
-    `LLMRequest.tools` field below, so they can never disagree.
-    """
-    return _tools_payload() if profile.tools else []
+
+
+
+
 
 
 # System-prompt fragments (chat harness issue 02). The TEXT lives in
@@ -3327,6 +2859,8 @@ _FORWARDED_TUNABLES: dict[str, str] = {
     "AUTO_APPROVE_TIERS": "harness.confirm",
     "STREAM_RATE_CAPACITY": "harness.ratelimit",
     "STREAM_RATE_REFILL_PER_SEC": "harness.ratelimit",
+    # A patched FUNCTION whose only reader moved: the same rule applies.
+    "_build_anthropic_client": "harness.providers.wiring",
 }
 
 

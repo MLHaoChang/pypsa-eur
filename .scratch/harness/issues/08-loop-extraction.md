@@ -1,6 +1,6 @@
 # 08 — The turn loop, session, confirmation and persistence move into the harness
 
-Status: ready-for-agent (in progress 2026-10-05: the loop moved whole to `harness/loop.py`; `sse`, `fence`, `results`, `history`, `metrics`, `ratelimit`, `session`, `confirm` extracted under the README's splitting rule; budget gates, the stub loop, provider wiring, prompt assembly and the turn body remain)
+Status: ready-for-agent (in progress 2026-10-05: the loop moved whole to `harness/loop.py`; `sse`, `fence`, `results`, `history`, `metrics`, `ratelimit`, `session`, `confirm`, `providers/wiring`, `stub` extracted under the README's splitting rule; the budget and retry tunables, prompt assembly and the turn body remain)
 Type: task
 Blocked by: 02, 06, 07
 
@@ -56,3 +56,11 @@ reads the home's live value; the one loop reader left
 sse and guided_write_confirmation. loop.py: 4,040 → 3,342 lines.
 
 2026-10-05 (gate for step 3, 5180c4c): 2912 passed, 5 skipped, 0 failed.
+
+2026-10-06 (step 4): the provider wiring (`llm_config_module`,
+`_resolve_turn_profile`, the portability filter, `_anthropic_client_for_profile`,
+`_provider_for_profile`, the tools payload) moved to `harness/providers/wiring.py`
+— where a wire may be named — and the scripted stub loop to `harness/stub.py`.
+`_build_anthropic_client` (a function three tests intercept) is forwarded and
+patched on wiring; the loop's vendor-word pin came down accordingly.
+loop.py: 3,342 → 2,872 lines.

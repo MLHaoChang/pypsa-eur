@@ -36,6 +36,7 @@ import inspect
 import pytest
 
 from services import chat_service
+from harness.providers import wiring as harness_wiring
 
 
 class _Ctx:
@@ -149,7 +150,7 @@ def test_neither_cap_builds_an_sdk_client(monkeypatch, tmp_projects_dir):
     """
     chat_service._reset_sessions_for_tests()
     built = []
-    monkeypatch.setattr(chat_service, "_build_anthropic_client",
+    monkeypatch.setattr(harness_wiring, "_build_anthropic_client",
                         lambda: (built.append(1), (None, "x"))[1])
     session = chat_service.ChatSession()
     session.usage_acc["output_tokens"] = chat_service.MAX_OUTPUT_TOKENS_PER_SESSION

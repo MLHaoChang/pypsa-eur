@@ -56,6 +56,7 @@ import re
 import pytest
 
 from services import chat_service
+from harness.providers import wiring as harness_wiring
 from tests.test_chat_e2e import (
     FakeAnthropicClient,
     _FakeFinalMessage,
@@ -168,7 +169,7 @@ def _scenarios(install_network):
 
     def no_client():
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(chat_service, "_build_anthropic_client",
+            mp.setattr(harness_wiring, "_build_anthropic_client",
                        lambda: (None, "missing_api_key"))
             session = chat_service.ChatSession()
             return list(chat_service.run_turn(session, "hi", client=None))

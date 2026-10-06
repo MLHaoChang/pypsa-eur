@@ -67,7 +67,7 @@ def test_a_monkeypatch_on_the_old_name_is_seen_through_the_new_one(monkeypatch):
 _PROVIDER_WORDS = re.compile(r"\b(anthropic|openai|cache_control)\b", re.I)
 
 # The loop's known provider-word code sites on the day it moved (issue 08).
-LOOP_VENDOR_WORD_SITES = 12
+LOOP_VENDOR_WORD_SITES = 7
 
 
 def _vendor_word_code_sites(path: pathlib.Path) -> int:
@@ -164,11 +164,21 @@ def _yielded_frame_names(source: str) -> set[str]:
     return names
 
 
+def _harness_yielded_frames() -> set[str]:
+    """Every frame name yielded anywhere in the harness (the loop, the
+    confirmation gate, the stub loop, …) — the set the route can frame."""
+    names: set[str] = set()
+    for path in sorted(HARNESS.rglob("*.py")):
+        if "providers" in path.relative_to(HARNESS).parts:
+            continue
+        names |= _yielded_frame_names(path.read_text(encoding="utf-8"))
+    return names
+
+
 def test_every_frame_the_loop_yields_is_in_the_vocabulary():
     from harness.events import FRAMES
 
-    source = (HARNESS / "loop.py").read_text(encoding="utf-8")
-    yielded = _yielded_frame_names(source)
+    yielded = _harness_yielded_frames()
     assert yielded, "the scan found no yields — the loop moved; update the path"
     assert yielded <= FRAMES, sorted(yielded - FRAMES)
 
@@ -177,8 +187,7 @@ def test_the_vocabulary_has_no_frame_the_loop_never_yields():
     """Both directions: a frame nobody yields is sediment."""
     from harness.events import FRAMES
 
-    source = (HARNESS / "loop.py").read_text(encoding="utf-8")
-    assert FRAMES <= _yielded_frame_names(source)
+    assert FRAMES <= _harness_yielded_frames()
 
 
 def test_the_tripwire_is_red_on_a_planted_frame():
@@ -324,6 +333,7 @@ MOVED_TUNABLES = {
     "AUTO_APPROVE_TIERS": "harness.confirm",
     "STREAM_RATE_CAPACITY": "harness.ratelimit",
     "STREAM_RATE_REFILL_PER_SEC": "harness.ratelimit",
+    "_build_anthropic_client": "harness.providers.wiring",
 }
 
 
