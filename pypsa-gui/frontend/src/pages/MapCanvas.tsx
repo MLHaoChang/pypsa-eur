@@ -12,12 +12,12 @@ import ReactDOMServer from 'react-dom/server'
 import { useUIStore, type CanvasView } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { updateAsset } from '../utils/assetWrite'
-import type { RescalePreview } from '../utils/rescale'
-import { networkApi } from '../api/network'
+import { networkApi, type LengthsFromGeometryResult } from '../api/network'
+import { projectsApi } from '../api/projects'
 import { appLog } from '../store/simulationStore'
-import type { Bus, Generator, Line as LineT, Link as LinkT, Load, StorageUnit, Store, Transformer } from '../api/types'
+import type { Bus, Generator, Line as LineT, Link as LinkT, Load, ProjectInfo, StorageUnit, Store, Transformer } from '../api/types'
 import { CanvasResultsProvider, useCanvasResults, fmtMW, loadingColor } from '../components/CanvasResultsContext'
-import { busLatLng, unplacedBusNames } from '../utils/geo'
+import { busLatLng, fmtKm, lengthDisagrees, routeLengthKm, unplacedBusNames } from '../utils/geo'
 import { nextBusToPlace, canSkip } from '../utils/placement'
 import { ingestRescale } from '../utils/rescaleActions'
 import { useRescaleStore } from '../store/rescaleStore'
@@ -31,7 +31,8 @@ import { readActiveSite, writeActiveSite } from '../site3d/activeSite'
 import type { LngLatTuple, Site } from '../site3d/types'
 import type { MapBubble } from '../api/mapLayout'
 import {
-  bubbleKey, routeWaypoints, useMapLayoutLifecycle, useMapLayoutStore, type LatLngTuple,
+  bubbleKey, queueLengthFromGeometry, routeWaypoints, setLengthsDerivedSink, useMapLayoutLifecycle,
+  useMapLayoutStore, type LatLngTuple,
 } from './mapLayoutStore'
 
 /**
@@ -127,9 +128,12 @@ interface CategoryEntry { count: number; badge: BadgeDef | null }
 // "tr:T1" — and are the INTERIOR vertices of the route, so a bus drag keeps
 // the bend and only the chord's ends move. The store speaks the map's
 // `[lat, lng]` tuples and converts to the document's `[lng, lat]` at its
-// boundary. Routing is PURELY VISUAL today — it never touches line.length /
-// link.length, those stay haversine bus0→bus1 (or whatever the user typed);
-// plan 2's M2 makes lengths follow geometry, by consent.
+// boundary. Lengths follow geometry only by consent (plan 2, M2): with the
+// project setting "Derive lengths from geometry" on, a route edit or a bus
+// drag rewrites the affected Line/Link lengths server-side and offers the
+// impedance rescale; off, nothing is written and a discrepancy badge flags a
+// stored length that disagrees with its geometry, with "Use geometry" per
+// branch.
 type AssetOffsets = Record<string, MapBubble>
 
 // Small handle markers used by EditableLine. Waypoint dots use the *inverse*
@@ -400,8 +404,22 @@ function AssetGroupLayer({
 //
 // During drag the polyline is updated imperatively via setLatLngs() for 60
 // fps smoothness; on dragend we commit the new waypoints to the map layout
-// store (`map_layout.json`). The line's underlying length / r / x are NEVER
-// touched.
+// store (`map_layout.json`). This component never writes length / r / x:
+// with the project setting "Derive lengths from geometry" on, the STORE asks
+// the server to rewrite the length once the route has landed (plan M2), and
+// the rescale stays a preview the user accepts.
+//
+// `lengthBadge` is the discrepancy badge: shown when the stored length
+// disagrees with the geometry (`lengthDisagrees`), with a one-click "Use
+// geometry" that derives this one branch — an explicit act, allowed whatever
+// the setting says.
+export interface LengthBadge {
+  stored: number
+  geometry: number
+  /** Absent when the project is read-only: the badge still informs. */
+  onUseGeometry?: () => void
+}
+
 interface EditableLineProps {
   id: string                            // "line:NAME" / "link:NAME" / "tr:NAME"
   source: LatLngTuple
@@ -417,10 +435,11 @@ interface EditableLineProps {
   // results overlay to surface flow magnitude + loading % on the edge itself
   // so the user doesn't have to hover every line to read the numbers.
   permanentLabel?: string
+  lengthBadge?: LengthBadge
 }
 
 function EditableLine({
-  id, source, target, waypoints, onUpdate, onSelect, color, weight, dashArray, tooltip, permanentLabel,
+  id, source, target, waypoints, onUpdate, onSelect, color, weight, dashArray, tooltip, permanentLabel, lengthBadge,
 }: EditableLineProps) {
   const [hovered, setHovered] = useState(false)
   const [ctxAt, setCtxAt] = useState<{ x: number; y: number } | null>(null)
@@ -502,6 +521,30 @@ function EditableLine({
         {permanentLabel && (
           <Tooltip permanent direction="center" className="map-edge-label">
             {permanentLabel}
+          </Tooltip>
+        )}
+        {/* Discrepancy badge (plan M2) — the same permanent-tooltip plumbing
+            as the flow label, anchored below the line's centre so the two
+            never overlap, and `interactive` so its button takes the click
+            instead of the map. */}
+        {lengthBadge && (
+          <Tooltip permanent interactive direction="bottom" offset={[0, 6]} className="map-length-badge">
+            <span
+              className="map-length-badge__text"
+              title={`stored ${fmtKm(lengthBadge.stored)}, geometry ${fmtKm(lengthBadge.geometry)}`}
+            >
+              ⚠ {fmtKm(lengthBadge.stored)} stored · {fmtKm(lengthBadge.geometry)} geometry
+            </span>
+            {lengthBadge.onUseGeometry && (
+              <button
+                type="button"
+                className="map-length-badge__use"
+                title={`Set ${id} length to its geometry (${fmtKm(lengthBadge.geometry)}) and preview the impedance rescale`}
+                onClick={(e) => { e.stopPropagation(); lengthBadge.onUseGeometry?.() }}
+              >
+                Use geometry
+              </button>
+            )}
           </Tooltip>
         )}
       </Polyline>
@@ -811,14 +854,19 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
     mutationFn: async ({ name, lat, lng }: { name: string; lat: number; lng: number }) => {
       const resp = await updateAsset<Bus>(
         qc, useUIStore.getState().currentProject, 'buses', name, { x: lng, y: lat })
-      return resp as { name: string; rescale: RescalePreview[] }
+      return resp as Awaited<ReturnType<typeof networkApi.updateBus>>
     },
     onSuccess: (data, vars) => {
       // The backend's update_bus already recomputed the lengths of THIS bus's
-      // connected lines (_recompute_lengths_for_bus, scoped to the moved bus)
-      // and logged a changelog entry; the chokepoint's blanket invalidation
-      // covers the buses AND lines refetch that used to be done here.
-      appLog('INFO', `Bus '${vars.name}' moved · connected line lengths recalculated.`)
+      // connected branches (_recompute_lengths_for_bus, scoped to the moved
+      // bus — lines by chord, or lines AND links from their geometry with the
+      // project setting on) and logged a changelog entry; the chokepoint's
+      // blanket invalidation covers the buses, lines and links refetch.
+      const sources = data.length_sources ?? {}
+      const n = Object.keys(sources).length
+      appLog('INFO', `Bus '${vars.name}' moved · ${n} connected branch length${n === 1 ? '' : 's'} recalculated${
+        Object.values(sources).includes('route') ? ' (routes followed)' : ''}.`)
+      useMapLayoutStore.getState().applyLengthSources(useUIStore.getState().currentProject, data.length_sources)
       ingestRescale(qc, data.rescale)
     },
     onError: (e: Error) => toast.error(`Move failed: ${e.message}`),
@@ -916,8 +964,8 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   // so the bubble follows the bus visually).
   const assetOffsets: AssetOffsets = mapLayoutDoc.bubbles
   // Per-line/link/transformer interior waypoints in the map's [lat, lng],
-  // keyed by edgeKind:name. Visual only: the line's `length` field on the
-  // backend stays untouched.
+  // keyed by edgeKind:name. Lengths follow them only through the server and
+  // only by consent — see `updateWaypoints` below.
   const lineWaypoints = useMemo(() => routeWaypoints(mapLayoutDoc), [mapLayoutDoc])
 
   // Clear open asset-group bubbles when the active project changes — their
@@ -930,10 +978,49 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
     setVisibleGroups(new Set())
     mapLayoutLoadedFor.current = currentProject
   }, [currentProject])
+  // ── Lengths from geometry (plan M2) ──────────────────────────────────────
+  // The project setting lives in ProjectInfo (metadata.json); the list query
+  // is the one every project surface already shares.
+  const { data: projects = [] } = useQuery({
+    queryKey: ['projects'], queryFn: () => projectsApi.list(), staleTime: 30_000, enabled: !!currentProject,
+  })
+  const deriveLengths = (projects as ProjectInfo[]).find(p => p.name === currentProject)
+    ?.settings?.derive_lengths_from_geometry ?? false
+  // A ref so `updateWaypoints` stays referentially stable across toggles.
+  const deriveLengthsRef = useRef(deriveLengths)
+  deriveLengthsRef.current = deriveLengths
+  // What every derivation's result gets: the store's queued call after a
+  // route edit (through the sink), and the badge's explicit "Use geometry".
+  const onLengthsDerived = useCallback((r: LengthsFromGeometryResult) => {
+    const project = useUIStore.getState().currentProject
+    qc.invalidateQueries({ queryKey: nk(project, 'lines') })
+    qc.invalidateQueries({ queryKey: nk(project, 'links') })
+    useMapLayoutStore.getState().applyLengthSources(project, r.sources)
+    if (r.updated) {
+      appLog('INFO', `${r.updated} branch length${r.updated === 1 ? '' : 's'} derived from map geometry (${
+        Object.values(r.sources).filter(s => s === 'route').length} routed).`)
+    }
+    ingestRescale(qc, r.rescale)
+  }, [qc])
+  useEffect(() => {
+    setLengthsDerivedSink((_project, r) => onLengthsDerived(r))
+    return () => setLengthsDerivedSink(null)
+  }, [onLengthsDerived])
+  const useGeometryMut = useMutation({
+    mutationFn: (keys: string[]) => networkApi.lengthsFromGeometry(keys),
+    onSuccess: onLengthsDerived,
+    onError: () => toast.error('Could not derive the length from the map geometry'),
+  })
   // Read currentProject FRESH from the store — a project switch since the
   // last render would otherwise write under the previous project's key.
+  // With the setting on, a Line/Link route edit also queues the branch for a
+  // length rewrite that the store issues once the route's PUT has landed
+  // (the server measures the route it holds, not this cache). Transformers
+  // have a route but no length.
   const updateWaypoints = useCallback((edgeId: string, wps: LatLngTuple[]) => {
-    setRouteWaypoints(useUIStore.getState().currentProject, edgeId, wps)
+    const project = useUIStore.getState().currentProject
+    setRouteWaypoints(project, edgeId, wps)
+    if (deriveLengthsRef.current && project && !edgeId.startsWith('tr:')) queueLengthFromGeometry(project, edgeId)
   }, [setRouteWaypoints])
   const updateBubble = useCallback((key: string, offset: MapBubble) => {
     setBubble(useUIStore.getState().currentProject, key, offset)
@@ -1062,23 +1149,29 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
           // Results overlay: recolour by loading band + surface flow in the
           // tooltip. Falls back to the voltage-class colour when off.
           const flow = results.enabled ? results.byLine.get(line.name) : undefined
+          const wps = lineWaypoints[edgeId] ?? []
+          const geometryKm = routeLengthKm([c0, ...wps, c1])
           return (
             <EditableLine
               key={edgeId}
               id={edgeId}
               source={c0}
               target={c1}
-              waypoints={lineWaypoints[edgeId] ?? []}
-              onUpdate={(wps) => updateWaypoints(edgeId, wps)}
+              waypoints={wps}
+              onUpdate={(next) => updateWaypoints(edgeId, next)}
               onSelect={() => setSelectedComponent({ type: 'Line', name: line.name })}
               color={flow ? loadingColor(flow.loadingPct) : lineColor(v)}
               weight={flow ? 4 : 3}
               tooltip={flow
-                ? `${line.name} · ${fmtMW(flow.p0)} · ${flow.loadingPct.toFixed(0)}% of ${flow.sNom.toFixed(0)} MVA`
-                : `${line.name} · ${line.s_nom?.toFixed(0) ?? '—'} MVA`}
+                ? `${line.name} · ${fmtMW(flow.p0)} · ${flow.loadingPct.toFixed(0)}% of ${flow.sNom.toFixed(0)} MVA · ${fmtKm(line.length)}`
+                : `${line.name} · ${line.s_nom?.toFixed(0) ?? '—'} MVA · ${fmtKm(line.length)}`}
               permanentLabel={flow
                 ? `${fmtMW(Math.abs(flow.p0))} (${flow.loadingPct.toFixed(0)}%)`
                 : undefined}
+              lengthBadge={lengthDisagrees(line.length, geometryKm) ? {
+                stored: line.length, geometry: geometryKm,
+                onUseGeometry: readOnly ? undefined : () => useGeometryMut.mutate([edgeId]),
+              } : undefined}
             />
           )
         })}
@@ -1099,24 +1192,33 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
           if (!c0 || !c1) return null
           const edgeId = `link:${link.name}`
           const linkFlow = results.enabled ? results.byLink.get(link.name) : undefined
+          const wps = lineWaypoints[edgeId] ?? []
+          const geometryKm = routeLengthKm([c0, ...wps, c1])
+          // A link's length shows like a line's (plan M2); PyPSA's default 0
+          // reads as "not measured" rather than "0 m".
+          const linkLength = link.length > 0 ? ` · ${fmtKm(link.length)}` : ''
           return (
             <EditableLine
               key={edgeId}
               id={edgeId}
               source={c0}
               target={c1}
-              waypoints={lineWaypoints[edgeId] ?? []}
-              onUpdate={(wps) => updateWaypoints(edgeId, wps)}
+              waypoints={wps}
+              onUpdate={(next) => updateWaypoints(edgeId, next)}
               onSelect={() => setSelectedComponent({ type: 'Link', name: link.name })}
               color={linkFlow ? loadingColor(linkFlow.loadingPct) : '#a16207'}
               weight={linkFlow ? 3 : 2}
               dashArray="6 4"
               tooltip={linkFlow
-                ? `${link.name} · ${link.carrier || 'Link'} · ${fmtMW(linkFlow.p0)} · ${linkFlow.loadingPct.toFixed(0)}% of ${linkFlow.pNom.toFixed(0)} MW`
-                : `${link.name} · ${link.carrier || 'Link'} · ${link.p_nom?.toFixed(0) ?? '—'} MW`}
+                ? `${link.name} · ${link.carrier || 'Link'} · ${fmtMW(linkFlow.p0)} · ${linkFlow.loadingPct.toFixed(0)}% of ${linkFlow.pNom.toFixed(0)} MW${linkLength}`
+                : `${link.name} · ${link.carrier || 'Link'} · ${link.p_nom?.toFixed(0) ?? '—'} MW${linkLength}`}
               permanentLabel={linkFlow
                 ? `${fmtMW(Math.abs(linkFlow.p0))} (${linkFlow.loadingPct.toFixed(0)}%)`
                 : undefined}
+              lengthBadge={link.length > 0 && lengthDisagrees(link.length, geometryKm) ? {
+                stored: link.length, geometry: geometryKm,
+                onUseGeometry: readOnly ? undefined : () => useGeometryMut.mutate([edgeId]),
+              } : undefined}
             />
           )
         })}
