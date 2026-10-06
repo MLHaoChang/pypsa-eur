@@ -1,6 +1,6 @@
 # 08 — The turn loop, session, confirmation and persistence move into the harness
 
-Status: ready-for-agent (in progress 2026-10-05: the loop moved whole to `harness/loop.py`; `sse`, `fence`, `results`, `history`, `metrics`, `ratelimit`, `session`, `confirm`, `providers/wiring`, `stub`, `budget` extracted under the README's splitting rule; prompt assembly and the turn body remain)
+Status: ready-for-agent (in progress 2026-10-05: the loop moved whole to `harness/loop.py`; `sse`, `fence`, `results`, `history`, `metrics`, `ratelimit`, `session`, `confirm`, `providers/wiring`, `stub`, `budget`, `compose` extracted under the README's splitting rule; the solver bridge and the turn body remain)
 Type: task
 Blocked by: 02, 06, 07
 
@@ -69,4 +69,18 @@ loop.py: 3,342 → 2,872 lines.
 `_turn_budget_block` moved to `harness/budget.py`; the turn body, the stream
 seam and the dispatch read them as `harness_budget.<NAME>` (rewritten by AST
 position), ten more names are forwarded, 33 test sites repointed across
-seven files.
+seven files. Gate: the full chat regression, 3407 passed, 5 skipped, 1 failed
+— a test patching `chat_service.os.fsync` once the loop's unused `import os`
+went; repointed to `harness_history.os`, pushed as b5564df.
+
+2026-10-06 (step 6): the prompt assembly and ui-context formatting (the
+bound prompt fragments, `_build_system_prompt`, the profile and skill blocks,
+`_format_live_network_meta`, `_sanitise_ui_value`, `_format_ui_context`, the
+Guided and workflow-step addenda, `_workflow_state_payload`) moved to
+`harness/compose.py` as one contiguous range (the `_p = …` reassignments
+defeat the node extractor). `_profile_awareness_block` and `_skills_block`
+(patched by the pre-P25 snapshot test) are forwarded and patched on compose;
+`_neutralise_untrusted_delimiters` (patched by the fence-integrity suite) is
+forwarded to fence now that its last loop reader moved, and compose, results
+and the loop read it as `harness_fence.<name>`. loop.py: 2,872 → 2,288 lines.
+Gate: the full chat regression, 3408 passed, 5 skipped, 0 failed.

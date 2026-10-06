@@ -14,7 +14,8 @@ from services.redaction import (  # moved 2026-08-13 (provider seam, Task 1)
     redact_secrets_in_str as _redact_secrets_in_str,
 )
 from typing import Any
-from harness.fence import _UNTRUSTED_CLOSE, _UNTRUSTED_OPEN, _neutralise_untrusted_delimiters
+from harness import fence as harness_fence
+from harness.fence import _UNTRUSTED_CLOSE, _UNTRUSTED_OPEN
 
 
 # Cap on a single tool result's serialized size handed to the model. Oversized
@@ -187,7 +188,7 @@ def _error_result_content(detail: Any, exc: BaseException, error_kind: str) -> s
         return error_kind
 
     free_text = _redact_secrets_in_str(free_text[:_ERROR_DETAIL_CAP])
-    free_text = _neutralise_untrusted_delimiters(free_text)
+    free_text = harness_fence._neutralise_untrusted_delimiters(free_text)
     return f"{error_kind}\n{_UNTRUSTED_OPEN}\n{free_text}\n{_UNTRUSTED_CLOSE}"
 
 
@@ -252,5 +253,5 @@ def _result_to_anthropic_content(result: Any) -> Any:
     # relative to the truncation cut is not load-bearing for safety -- a cut
     # only removes characters, so it cannot form a delimiter out of text that
     # no longer contains one.
-    body = _neutralise_untrusted_delimiters(body)
+    body = harness_fence._neutralise_untrusted_delimiters(body)
     return f"{_UNTRUSTED_OPEN}\n{body}\n{_UNTRUSTED_CLOSE}"

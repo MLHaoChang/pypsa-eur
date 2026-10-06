@@ -237,8 +237,8 @@ The server enforces hard ceilings — once a cap is hit the stream emits
 | Output tokens / session | 200,000 | `MAX_OUTPUT_TOKENS_PER_SESSION` |
 
 All four live as module-level constants in
-[backend/harness/loop.py](backend/harness/loop.py) (the former
-`services/chat_service.py`, still importable under that name); tune
+[backend/harness/budget.py](backend/harness/budget.py) (moved out of the
+turn loop; still readable as `services.chat_service.<NAME>`); tune
 them per deployment.
 
 ## Interrupted turns and damaged history

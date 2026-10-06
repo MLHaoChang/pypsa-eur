@@ -30,6 +30,7 @@ from pathlib import Path
 
 import pytest
 
+from harness import compose as harness_compose
 from services import chat_service
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -154,11 +155,11 @@ def test_unknown_guided_step_is_dropped(step):
 
 @pytest.mark.parametrize("include_tools,name", [(True, "tools"), (False, "notools")])
 def test_build_system_prompt_matches_the_pre_p25_snapshot(monkeypatch, include_tools, name):
-    monkeypatch.setattr(chat_service, "_profile_awareness_block", lambda: "")
+    monkeypatch.setattr(harness_compose, "_profile_awareness_block", lambda: "")
     # Chat harness issue 05 added the skill catalogue as a NEW part (the
     # sanctioned way past the pins); stubbed like the profile block so this
     # test keeps saying "P25 changed nothing else".
-    monkeypatch.setattr(chat_service, "_skills_block", lambda: "")
+    monkeypatch.setattr(harness_compose, "_skills_block", lambda: "")
     session = chat_service.ChatSession(session_id="0123456789abcdef0123456789abcdef")
     now = chat_service._build_system_prompt(session, live_meta="LIVE META",
                                             include_tools=include_tools)

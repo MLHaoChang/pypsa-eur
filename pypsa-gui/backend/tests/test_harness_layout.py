@@ -345,6 +345,9 @@ MOVED_TUNABLES = {
     "MAX_STREAM_RETRY_DELAY": "harness.budget",
     "_RETRYABLE_SDK_KINDS": "harness.budget",
     "PER_TOOL_TIMEOUT_SECONDS": "harness.budget",
+    "_profile_awareness_block": "harness.compose",
+    "_skills_block": "harness.compose",
+    "_neutralise_untrusted_delimiters": "harness.fence",
 }
 
 

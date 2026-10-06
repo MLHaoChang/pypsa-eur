@@ -14,7 +14,8 @@ harness/
   skills/         procedures the model loads on demand (<name>/SKILL.md)
   prompts/        the system-prompt fragments as Markdown, byte-identical to the old constants
   providers/      anthropic, openai_compat, fake, and wiring (profile → provider, tools payload, history portability) — the only place a wire is named
-  loop.py         the turn loop, prompt assembly and ui-context formatting (the former services/chat_service.py)
+  loop.py         the turn loop: the stream seam, tool dispatch, the solver bridge (the former services/chat_service.py)
+  compose.py      the system prompt for a turn, the live network line, and the per-turn ui-context / Guided / workflow-step blocks
   budget.py       the per-turn / per-session / daily caps, the retry schedule, the per-tool timeout, the budget gate
   stub.py         the scripted stub loop behind StreamRequest.script
   session.py      ChatSession, PendingConfirmation, the session registry with its TTL and cap
@@ -87,7 +88,7 @@ tests that patch it move their target to the new module in the same
 commit**, with the frame-recording gate
 (`tests/test_chat_turn_frame_contract.py`, re-recorded only by
 `tests/record_chat_turn_frames.py`) unchanged. Done so far: `sse`, `fence`, `results`, `history`, `metrics`, `ratelimit`,
-`session`, `confirm`, `providers/wiring`, `stub`, `budget`. Nine tunables have moved with their readers
+`session`, `confirm`, `providers/wiring`, `stub`, `budget`, `compose`. Nine tunables have moved with their readers
 (`MOVED_TUNABLES` in the layout test lists them with their homes); a
 reader that stays in the loop goes through the home's attribute
 (`harness_session.CONFIRMATION_TTL_SECONDS`), the loop forwards every
@@ -96,9 +97,11 @@ three tripwires hold it: no test patches a moved tunable through the alias,
 the forwarded set equals the moved set, and the loop has no bare read of
 one. The same rule covers a patched FUNCTION whose readers move
 (`_build_anthropic_client`, intercepted by three tests, is forwarded and
-patched on `providers/wiring`). Still in `loop.py`: the prompt assembly and ui-context formatting, the
-solver bridge, and the turn body itself (which reads the budget through
-`harness_budget.<NAME>`).
+patched on `providers/wiring`; `_profile_awareness_block` and `_skills_block`
+on `compose`; `_neutralise_untrusted_delimiters`, whose readers all left the
+loop, on `fence`, and every reader goes through `harness_fence.`). Still in
+`loop.py`: the solver bridge and the turn body itself (which reads the budget
+through `harness_budget.<NAME>`).
 
 ## Measuring parity
 
