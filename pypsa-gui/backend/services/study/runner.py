@@ -27,16 +27,23 @@ otherwise the run opens its own with ``budget_solves`` (default the study's
 before anything starts; a refusal names the shortfall and spends nothing.
 
 **Forks and the queue.** Each option's network is the pack
-(``packs.build_site_network``) with an explicit ``SolverConfig``
-(``packs.option_solver_config``); the fork is enqueued with its own
+(``packs.build_site_network``, no tariff price on its Links) with an explicit
+``SolverConfig`` (``packs.option_solver_config`` = ``compile.solver_config``)
+carrying the study's compiled commercial config (U2 WP6, C6): the run mints
+the study's export price series in the base project's org under the owner's
+name (``compile.mint_export_series``, idempotent on content) and binds the
+config on each option's in-memory network (``compile.bind_on_network``)
+BEFORE the fork is written, so the Investment Case engine prices the PoC and
+carries the demand charge when the queue solves it. The fork is enqueued with its own
 ``project_key``, ``storage_dir`` and ``enqueued_by_user_id`` and waited on,
 one at a time. After an option is read its fork context is dropped from the
 resident registry (it is saved on disk by the queue).
 
 **Results** are read from the fork's live frames with the fork's OWN config
-(``eh_report._live_result_df``; the objective bridge gets that config, so its
-``demand_charge_eur`` is the charge the solve carried), and the bill from the
-ledger-applied tariff (``packs.effective_tariff``).
+(``eh_report._live_result_df``), the demand charge from what the engine's
+solve committed (``engine_adapter.demand_charge_eur``), and the bill from the
+ledger-applied tariff (``packs.effective_tariff``) on the engine-solved
+dispatch (the bill's own switch to the engine is WP8).
 
 **Abort** stops before the next option (the running job is aborted in the
 queue); unsolved forks are removed, ``options_status`` is
@@ -234,9 +241,16 @@ def _opt_value(value) -> float | None:
     return v if v == v and abs(v) != float("inf") else None
 
 
-def _read_option(n, cfg, tariff, opt, fidelity: Fidelity, currency_year) -> dict:
-    """One option's outcome, from the fork's live frames and its own config."""
+def _read_option(n, cfg, tariff, opt, fidelity: Fidelity, currency_year, *,
+                 compiled=None) -> dict:
+    """
+    One option's outcome, from the fork's live frames and its own config.
+    `compiled` is the commercial config the fork was solved with; the run's
+    demand charge is the amount that solve committed (null with a flag
+    without it, ADR-0001).
+    """
     from services.adequacy.eh_report import _live_result_df
+    from services.study import engine_adapter
 
     detail: dict[str, Any] = {"option_id": opt.option_id, "caveats": []}
     p0 = getattr(n.links_t, "p0", None)
@@ -251,12 +265,22 @@ def _read_option(n, cfg, tariff, opt, fidelity: Fidelity, currency_year) -> dict
         from services.results.objective_decomposition import compute_objective_decomposition
 
         dec = compute_objective_decomposition(n, compute_cost_breakdown(n, cfg), cfg)
-        detail["demand_charge_eur"] = dec.get("demand_charge_eur")
         detail["lp_total_eur"] = dec.get("lp_total")
         detail["residual_gap_pct"] = dec.get("residual_gap_pct")
     except Exception as exc:  # noqa: BLE001 — a figure the bridge cannot give is null
-        detail["demand_charge_eur"] = None
         detail["bridge_unavailable"] = f"{type(exc).__name__}: {exc}"
+    # U2 WP6 (plan §2 C3, §5.2): the demand charge the engine's solve
+    # committed, never GS's bridge term.
+    detail["demand_charge_eur"] = None
+    if compiled is None:
+        detail["demand_charge_unavailable"] = "commercial_config_not_given"
+    else:
+        try:
+            detail["demand_charge_eur"] = engine_adapter.demand_charge_eur(n, compiled)
+            if detail["demand_charge_eur"] is None:
+                detail["demand_charge_unavailable"] = "demand_charge_not_established"
+        except Exception as exc:  # noqa: BLE001 — null with a flag (ADR-0001)
+            detail["demand_charge_unavailable"] = f"{type(exc).__name__}: {exc}"
     try:
         from services.results.asset_economics import compute_asset_economics
 
@@ -379,6 +403,7 @@ def start_study_run(study_id: str, fidelity: Fidelity | str, *, base_row,
             raise packs.PackError("intake_incomplete",
                                   f"mandatory input(s) not answered: {', '.join(missing)}")
         packs.effective_tariff(study.intake, ledger, library)  # stale tariff → refused
+        packs.option_commercial(study.intake, ledger, library)  # the engine's tariff (WP6)
     except packs.PackError as exc:
         status = 409 if exc.code in ("ledger_needs_attention", "ledger_tariff_stale") else 422
         raise RunRefused(status, exc.code, exc.message) from None
@@ -429,6 +454,9 @@ def start_study_run(study_id: str, fidelity: Fidelity | str, *, base_row,
         # intake moved during the run.
         "ledger_hash": packs.ledger_hash(ledger), "registered_base": registered,
         "error": None, "started_at": time.time(), "finished_at": None,
+        # U2 WP6: the minted export series the forks are bound to and the
+        # compiled commercial config's digest (set by the worker).
+        "export_series": None, "commercial_digest": None,
         "thread": None, "stop_event": stop_event,
     }
     worker_args = dict(study_id=study_id, base_row_id=base_uuid,
@@ -579,7 +607,8 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
     from services import project_registry
     from services.adequacy import campaign
     from services.solve_queue import solve_queue
-    from services.validation_service import export_cycling_flags, validate_for_run
+    from services.study.engine_adapter import cycling_flags as export_cycling_flags
+    from services.validation_service import validate_for_run
 
     PyPSAService.bind_request_context(ctx)
     db = SessionLocal()
@@ -588,6 +617,7 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
     # Gate F1 BC-F1-1: the export-cycling WARNINGS are kept per option (the
     # study keeps no other preflight warning) and disclosed by the findings.
     preflight_flags: dict[str, list[str]] = {}
+    bound_by_option: dict[str, Any] = {}
     status, error = "failed", None
     study = None
     try:
@@ -606,6 +636,23 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
             return upload_service.get_upload_bytes(base_row.name, file_id,
                                                    project_dir=base_dir)
 
+        # 0. The engine's commercial config (U2 WP6, C3/C6): the study's
+        # export price minted in the base project's org under the owner's
+        # name (re-used when unchanged), compiled with the ledger applied.
+        from services.study import compile as study_compile
+
+        idx = packs.snapshots_for(intake)
+        try:
+            ref = study_compile.mint_export_series(
+                db, base_row.org_id, base_uuid=base_row_id, study_id=study_id,
+                study_name=study.name, tariff=tariff, snapshots=idx)
+        except study_compile.CompileError as exc:
+            raise packs.PackError(exc.code, exc.message) from None
+        compiled = packs.option_commercial(intake, ledger, library, idx, export_series=ref)
+        resolve_ref = study_compile.library_series_resolver(db, base_row.org_id)
+        _set(ctx, record, export_series=None if ref is None else ref.model_dump(mode="json"),
+             commercial_digest=compiled.digest)
+
         # 1. The forks: one per option, replacing a previous run's.
         for opt in options:
             if stop_event.is_set():
@@ -613,7 +660,10 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
             net = packs.build_site_network(intake, ledger, opt.option_id,
                                            library=library, question=question,
                                            resolve_upload=resolve_upload)
-            cfg = packs.option_solver_config(ledger, tariff)
+            # C6: bound on the in-memory network before the fork is written.
+            bound = packs.bind_option(net, compiled, resolve_ref=resolve_ref)
+            bound_by_option[opt.option_id] = bound
+            cfg = packs.option_solver_config(ledger, bound)
             issues = validate_for_run(net, cfg)
             errors = [i for i in issues if i.severity == "error"]
             if errors:
@@ -654,7 +704,8 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
                 timed_out = exc
             if job.status == "completed" and timed_out is None:
                 n = _solved_network(row)
-                outcome = _read_option(n, cfg, tariff, opt, fidelity, currency_year)
+                outcome = _read_option(n, cfg, tariff, opt, fidelity, currency_year,
+                                       compiled=bound_by_option.get(opt.option_id))
                 outcome["result"] = outcome["result"].model_copy(
                     update={"project_ref": str(row.id)})
                 outcome["network_hash"] = _network_hash(

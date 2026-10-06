@@ -63,3 +63,59 @@ def golden_copy(option: str):
     if model is not None and getattr(model, "solver_model", None) is not None:
         model.solver_model = None
     return n.copy()
+
+
+# ── WP6: the guided option on the engine's LP, in process ────────────────
+
+def ic_solve(net, cfg, _variant_id=None):
+    """
+    Solve `net` with `cfg` through `run_simulation` in process (the chain the
+    queue runs: IC's commercial bindings price the PoC and carry the demand
+    charge). The tornado's `solve` signature; returns the solved network.
+    """
+    import queue
+    import threading
+
+    from services.solver_service import run_simulation
+
+    status, condition = run_simulation(cfg, net, threading.RLock(), threading.Event(),
+                                       queue.SimpleQueue())
+    assert (status, condition) == ("ok", "optimal"), (status, condition)
+    return net
+
+
+def bound_option(intake, ledger, option_id: str, library, *, question=None):
+    """
+    (network, compiled) of one option as the runner builds it (U2 WP6): the
+    pack (no Link prices), the commercial config compiled with the study's
+    export series (`FAKE_REF`, resolved as the tariff's flat price) and bound
+    on the in-memory network.
+    """
+    from services.study import packs
+
+    kw = {} if question is None else {"question": question}
+    n = packs.build_site_network(intake, ledger, option_id, library=library, **kw)
+    c = packs.option_commercial(intake, ledger, library, n.snapshots, export_series=FAKE_REF)
+    price = float(c.tariff_meta["export_price_per_mwh"])
+    return n, packs.bind_option(n, c, resolve_ref=flat_resolver(price, n.snapshots))
+
+
+_IC_SOLVED: dict = {}
+
+
+def ic_site_option(option_id: str, ledger=None):
+    """
+    (solved network, its SolverConfig) of a site golden option on the
+    engine's LP — the production path since WP6 — cached per process and
+    ledger. `site_fixture.solve_site_option` stays the GS oracle (WP0).
+    """
+    from services.study import packs
+    from tests.golden import site_fixture as SF
+
+    ledger = ledger or SF.site_ledger()
+    key = (option_id, packs.ledger_hash(ledger))
+    if key not in _IC_SOLVED:
+        n, c = bound_option(SF.site_intake(), ledger, option_id, SF.site_library())
+        cfg = packs.option_solver_config(ledger, c)
+        _IC_SOLVED[key] = (ic_solve(n, cfg), cfg)
+    return _IC_SOLVED[key]

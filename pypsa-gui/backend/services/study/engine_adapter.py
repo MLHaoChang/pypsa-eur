@@ -14,7 +14,8 @@ The adapter only MAPS the engine's figures onto GS's `Bill` view shape; it
 prices nothing itself, and a figure the engine cannot give is null with a
 flag (ADR-0001).
 
-Stage 1 (WP5): `bill` / `bill_meter`. The GS `BillCalculator` path keeps
+Stage 1 (WP5): `bill` / `bill_meter`. WP6: `demand_charge_eur`, the demand
+charge the solve COMMITTED (IC's `add_demand_terms`), for the run record. The GS `BillCalculator` path keeps
 running in parallel until the switch-over (WP6 LP, WP8 findings / runner /
 routes); the case (`option_case`, WP7) and the workbook (WP9) follow.
 """
@@ -34,7 +35,7 @@ from services.study import compile as C
 
 __all__ = [
     "BILL_COMPONENTS", "BILL_COMPONENT_KEYS", "KIND_COMPONENT", "bill", "bill_meter",
-    "component_of",
+    "component_of", "cycling_flags", "demand_charge_eur",
 ]
 
 #: The guided bill's seven components and their labels (moved from
@@ -369,3 +370,67 @@ def bill_meter(n, compiled: C.CompiledCommercial, import_mw, export_mw, *,
         credit, flag = None, "export_line_needs_the_dispatch"
     return _bill(n, compiled, sb, export_credit=credit, export_flag=flag,
                  import_missing=import_mw is None, fidelity=fidelity)
+
+
+def demand_charge_eur(n, compiled: C.CompiledCommercial) -> float | None:
+    """
+    The demand charge the engine's solve COMMITTED on `n` (plan §2 C3, §5.2;
+    replaces the F1-B4 `demand_charge_eur` bridge term): the sum, over the
+    compiled items the bill maps to `demand`, of `commercial_cost_terms`'s
+    per-item amounts (`block["by_item"]`, GS Q12a) — a monthly peak's
+    `demand_charge`, a year-billed peak's `tariff_capacity` (IC's annual
+    measured peak). Read from the solve's records (`ic_demand_peaks`,
+    `ic_tariff_capacity`), so a config changed after the solve still reads
+    what the LP carried (the bill flags the drift). 0.0 when the tariff has
+    no demand item; None when the solve did not record one the config names
+    (`demand_charge_not_established`, or a not-established capacity term).
+    """
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    cfg = compiled.config
+    items = list(cfg.import_tariff.items) if cfg.import_tariff is not None else []
+    ids = [i.id for i in items if component_of(i, compiled.item_component) == "demand"]
+    if not ids:
+        return 0.0
+    terms = commercial_cost_terms(n, compiled.commercial())
+    by_item = terms["block"].get("by_item") or {}
+    total, found = 0.0, set()
+    for label in ("demand_charge", "tariff_capacity"):
+        per = by_item.get(label)
+        if per is None:
+            if label in by_item:
+                return None           # a partly unknown term is unknown
+            continue
+        for item_id in ids:
+            amounts = per.get(item_id)
+            if amounts is None:
+                continue
+            found.add(item_id)
+            total += float(sum(float(v) for v in amounts.values()))
+    if set(ids) - found:
+        return None
+    return float(total) + 0.0
+
+
+#: The engine preflight's cycling warnings (IC U1 f, the port of GS's F1-B6
+#: check, owner decision 10) → the study's disclosure codes (gate F1
+#: BC-F1-1: the report, the findings and the HELP mirror name these).
+CYCLING_CODES: Mapping[str, str] = {
+    "commercial.arbitrage_loop": "tariff_export_exceeds_import",
+    "commercial.arbitrage_loop_via_storage": "tariff_export_exceeds_import_via_storage",
+    # GS's own check (`validation_service._check_export_cycling`), read until
+    # WP10 removes it: since WP6 the Links carry no price, so it finds none.
+    "tariff_export_exceeds_import": "tariff_export_exceeds_import",
+    "tariff_export_exceeds_import_via_storage": "tariff_export_exceeds_import_via_storage",
+}
+_CYCLING_ORDER = ("tariff_export_exceeds_import", "tariff_export_exceeds_import_via_storage")
+
+
+def cycling_flags(issues) -> list[str]:
+    """
+    The export-cycling disclosure codes among preflight `issues` (U2 WP6):
+    the engine's `commercial.arbitrage_loop*` warnings read as the study's
+    codes, once each, in a stable order.
+    """
+    found = {CYCLING_CODES[i.code] for i in issues if i.code in CYCLING_CODES}
+    return [c for c in _CYCLING_ORDER if c in found]

@@ -14,8 +14,9 @@ site golden fixture's production pack:
   reference solved for real.
 
 The pipeline is the production one, in process: `packs.build_site_network`,
-the LP pieces `run_simulation` composes (the periodized-cost fill and
-`_wrap_with_demand_charge`), `runner._read_option` (the bill, the asset
+the commercial config compiled and bound as the runner does (U2 WP6), the
+LP through `run_simulation` (IC's commercial chain prices the PoC and carries
+the demand charge), `runner._read_option` (the bill, the asset
 economics, the shared sizing classifier), `findings.run_tornado`,
 `findings.assemble_findings`, `findings.centre_attributions`,
 `report.build_decision_report` and the three renderers. Only the disk reads
@@ -51,14 +52,9 @@ QUESTION = Q.BESS_AT_SITE.model_copy(update={"key_drivers": [
 
 
 def _lp(net, cfg, _variant_id=None):
-    from services.solver.objective import _wrap_with_demand_charge
-    from services.solver_service import with_periodized_cost_defaults
+    from tests.u2_targets import ic_solve
 
-    with with_periodized_cost_defaults(net, cfg):
-        status = net.optimize(solver_name="highs",
-                              extra_functionality=_wrap_with_demand_charge(net, None, cfg))
-    assert status == ("ok", "optimal"), status
-    return net
+    return ic_solve(net, cfg)
 
 
 @pytest.fixture(scope="module")
@@ -70,14 +66,16 @@ def live(tmp_path_factory):
                                unit="EUR/kWh", changed_by="test")
     ledger = LG.apply_user_row(ledger, "sizing_limit_connection_multiple", 1.0,
                                unit="multiple of connection limit", changed_by="test")
+    from tests.u2_targets import FAKE_REF, bound_option
+
     tariff = packs.effective_tariff(intake, ledger, library)
-    cfg = packs.option_solver_config(ledger, tariff)
     nets, details, results = {}, {}, {}
     for oid in OPTIONS:
-        n = packs.build_site_network(intake, ledger, oid, library=library)
+        n, compiled = bound_option(intake, ledger, oid, library)
+        cfg = packs.option_solver_config(ledger, compiled)
         _lp(n, cfg)
         d = RN._read_option(n, cfg, tariff, Q.option(QUESTION, oid), "full_study",
-                            tariff.currency_year)
+                            tariff.currency_year, compiled=compiled)
         res = d.pop("result").model_copy(update={"project_ref": f"fork-{oid}"})
         nets[oid], details[oid], results[oid] = n, d, res
     ctx = F.TornadoContext(
@@ -87,7 +85,8 @@ def live(tmp_path_factory):
         options={oid: F.OptionInput(oid, nets[oid], F._bill_of(nets[oid], tariff),
                                     details[oid]["asset_economics"],
                                     tuple(details[oid]["caveats"]))
-                 for oid in OPTIONS if oid != "none"})
+                 for oid in OPTIONS if oid != "none"},
+        export_series=FAKE_REF)
     ref_calls: list[str] = []
     outcome = F.run_tornado(ctx, lambda net, c, vid: ref_calls.append(vid) or _lp(net, c, vid))
 

@@ -58,6 +58,30 @@ def _crf(r, n):
     return r * (1 + r) ** n / ((1 + r) ** n - 1)
 
 
+def _bound(intake, led, option_id, library=None):
+    """The option as the runner builds it since U2 WP6: compiled and bound."""
+    from tests.u2_targets import bound_option
+
+    return bound_option(intake, led, option_id, library or lib.load_library())
+
+
+def _prices(intake, led, option_id="none"):
+    """
+    The Link prices the engine materialises at solve time (U2 WP6, plan §2
+    C2: the pack writes none): (import, export) EUR/MWh series.
+    """
+    from services.commercial.lp_bindings import materialise_poc_prices
+
+    n, c = _bound(intake, led, option_id)
+    assert "grid_import" not in n.links_t.marginal_cost.columns
+    applied = materialise_poc_prices(n, c.config)
+    try:
+        mc = n.links_t.marginal_cost[["grid_import", "grid_export"]].copy()
+    finally:
+        applied.undo()
+    return mc["grid_import"], mc["grid_export"]
+
+
 # ── the battery: two annuities, RTE, upfront ─────────────────────────────
 
 @pytest.mark.parametrize("option_id,hours", [("bess_1h", 1), ("bess_2h", 2),
@@ -164,22 +188,23 @@ def test_the_import_link_is_selected_by_role_and_the_site_bus_is_not_a_poc(ledge
 def test_export_price_below_import_price_every_hour(library, tariff_id):
     intake = _intake(tariff={"tariff_id": tariff_id})
     led = lib.seed_ledger(Q.BESS_AT_SITE, intake, library)
-    n = P.build_site_network(intake, led, "bess_2h")
-    mc = n.links_t.marginal_cost
-    assert ((-mc["grid_export"]) < mc["grid_import"]).all()
+    imp, exp = _prices(intake, led, "bess_2h")
+    assert ((-exp) < imp).all()
     # Gate S3 [S2]: cross-hour cycling through the battery does not pay either.
     rte = _v(led, "battery_round_trip_efficiency")
-    assert (-mc["grid_export"]).max() * rte < mc["grid_import"].min()
-    # F1 B6: and the preflight that checks it on any tariff stays silent here.
-    from services.validation_service import _check_export_cycling
-
-    assert len(n.storage_units) and _check_export_cycling(n) == []
+    assert (-exp).max() * rte < imp.min()
+    # F1 B6 (moved to the engine's preflight, plan §5.3): it stays silent here.
+    n, c = _bound(intake, led, "bess_2h")
+    issues = validate_for_run(n, P.option_solver_config(led, c))
+    assert len(n.storage_units) and not [
+        i for i in issues if "arbitrage" in i.code or "cycling" in i.code
+        or "cross_interval" in i.code]
 
 
 @pytest.mark.parametrize("option_id", ["none", "bess_1h", "bess_2h", "bess_4h", "bess_pv_2h"])
 def test_validate_for_run_has_no_errors_for_every_option(library, ledger, option_id):
-    n = P.build_site_network(_intake(), ledger, option_id)
-    cfg = P.option_solver_config(ledger, P.effective_tariff(_intake(), ledger, library))
+    n, c = _bound(_intake(), ledger, option_id, library)
+    cfg = P.option_solver_config(ledger, c)
     issues = validate_for_run(n, cfg)
     errors = [i for i in issues if i.severity == "error"]
     assert errors == [], errors
@@ -187,16 +212,18 @@ def test_validate_for_run_has_no_errors_for_every_option(library, ledger, option
 
 
 def test_option_solver_config_is_explicit_and_from_the_ledger(library, ledger):
-    tariff = P.effective_tariff(_intake(), ledger, library)
-    cfg = P.option_solver_config(ledger, tariff)
+    _n, c = _bound(_intake(), ledger, "none", library)
+    cfg = P.option_solver_config(ledger, c)
     assert cfg.mode == "lopf" and cfg.solve_strategy == "full"
     assert cfg.sclopf is False and cfg.multi_investment_periods is False
     assert cfg.discount_rate == _v(ledger, "discount_rate")
     assert cfg.default_lifetime == _v(ledger, "battery_storage_lifetime_years")
-    assert cfg.demand_charge == {
-        "price_per_mw_per_period": _v(ledger, "demand_charge_price"),
-        "basis": "billing_period_peak", "billing_period": tariff.billing_period,
-        "import_links": ["grid_import"]}
+    # U2 WP6: the demand charge is the engine's monthly demand item, not GS's.
+    assert cfg.demand_charge is None
+    [d] = [i for i in cfg.commercial["import_tariff"]["items"] if i["id"] == "demand"]
+    assert (d["kind"], d["unit"], d["settlement"]) == ("demand", "per_kw_month", "h")
+    assert d["periods"][0]["rate"] * 1000.0 == pytest.approx(_v(ledger, "demand_charge_price"))
+    assert cfg.commercial["poc_link"] == "grid_import"
 
 
 def test_the_demand_charge_price_is_the_ledgers(library, ledger):
@@ -204,7 +231,10 @@ def test_the_demand_charge_price_is_the_ledgers(library, ledger):
                               unit="EUR/MW/month", changed_by="u", changed_at=NOW)
     t = P.effective_tariff(_intake(), edited, library)
     assert t.demand_charge.price_per_mw_per_period == 7000.0
-    assert P.option_solver_config(edited, t).demand_charge["price_per_mw_per_period"] == 7000.0
+    c = P.option_commercial(_intake(), edited, library)
+    [d] = [i for i in P.option_solver_config(edited, c).commercial["import_tariff"]["items"]
+           if i["id"] == "demand"]
+    assert d["periods"][0]["rate"] == pytest.approx(7.0)
 
 
 # ── energy_price_level: one meaning ──────────────────────────────────────
@@ -215,10 +245,10 @@ def test_energy_price_level_scales_bands_around_their_time_weighted_mean(library
     [row] = [r for r in led.rows if r.key == "energy_price_level"]
     assert "time-weighted mean" in row.label and "time-weighted mean" in row.help
     assert "mean + value x (band - mean)" in row.technical_name
-    base = P.build_site_network(intake, led, "none").links_t.marginal_cost["grid_import"]
+    base, _e = _prices(intake, led)
     led2 = L.apply_user_row(led, "energy_price_level", 2.0, unit="multiplier",
                             changed_by="u", changed_at=NOW)
-    scaled = P.build_site_network(intake, led2, "none").links_t.marginal_cost["grid_import"]
+    scaled, _e = _prices(intake, led2)
     assert scaled.mean() == pytest.approx(base.mean())            # level kept
     assert scaled.std() == pytest.approx(2.0 * base.std())        # spread doubled
 
@@ -234,8 +264,8 @@ def test_energy_price_level_is_not_applicable_on_a_flat_tariff(ledger):
         L.apply_user_row(ledger, "energy_price_level", 1.5, unit="multiplier",
                          changed_by="u", changed_at=NOW)
     assert "single energy band" in str(exc.value)
-    mc = P.build_site_network(_intake(), ledger, "none").links_t.marginal_cost
-    assert (mc["grid_import"] == 110.0 + 20.0).all()
+    imp, _e = _prices(_intake(), ledger)
+    assert np.allclose(imp.to_numpy(), 110.0 + 20.0)
 
 
 # ── refusals ─────────────────────────────────────────────────────────────
@@ -287,14 +317,19 @@ def test_an_uploaded_load_is_used_as_given(library):
 
 
 def test_an_inactive_import_link_is_a_typed_refusal_not_a_traceback(library, ledger):
-    from services.solver.objective import DemandChargeRefused, _wrap_with_demand_charge
+    """
+    U2 WP6: the engine (not GS's wrapper) prices the PoC; an inactive one is
+    refused, typed, when the option is bound — before a fork is written (IC
+    itself fails the solve with a raw KeyError: engine ask).
+    """
+    from tests.u2_targets import FAKE_REF, flat_resolver
 
     n = P.build_site_network(_intake(), ledger, "bess_1h")
     n.links.loc["grid_import", "active"] = False
-    cfg = P.option_solver_config(ledger, P.effective_tariff(_intake(), ledger, library))
-    with pytest.raises(DemandChargeRefused) as exc:
-        _wrap_with_demand_charge(n, None, cfg)
-    assert exc.value.code == "demand_charge_inactive_import_link"
+    c = P.option_commercial(_intake(), ledger, library, n.snapshots, export_series=FAKE_REF)
+    with pytest.raises(P.PackError) as exc:
+        P.bind_option(n, c, resolve_ref=flat_resolver(40.0, n.snapshots))
+    assert exc.value.code == "import_link_inactive"
 
 
 # ── one billing-period source: the bill's charge IS the bridge's ─────────
@@ -309,19 +344,31 @@ def test_the_bills_demand_charge_equals_the_bridges_on_a_solved_pack(library, le
     from services.results.objective_decomposition import compute_objective_decomposition
     from services.solver_service import run_simulation
 
+    from services.study import engine_adapter
+    from tests.u2_targets import FAKE_REF, flat_resolver
+
     n = P.build_site_network(_intake(), ledger, "bess_1h")
     n.set_snapshots(n.snapshots[: 24 * 59])          # Jan + Feb, for speed
     n.snapshot_weightings.loc[:, :] = 1.0
     tariff = P.effective_tariff(_intake(), ledger, library)
-    cfg = P.option_solver_config(ledger, tariff)
+    # U2 WP6: the engine's demand item, compiled and bound on the axis solved.
+    c = P.option_commercial(_intake(), ledger, library, n.snapshots, export_series=FAKE_REF)
+    c = P.bind_option(n, c, resolve_ref=flat_resolver(40.0, n.snapshots))
+    cfg = P.option_solver_config(ledger, c)
     status, _cond = run_simulation(cfg, n, threading.RLock(), threading.Event(),
                                    queue.SimpleQueue())
     assert status in ("ok", "optimal"), status
     bill = T.BillCalculator().bill(n.links_t.p0["grid_import"], n.links_t.p0["grid_export"],
                                    tariff, n.snapshot_weightings)
     assert bill.billing_periods == ["2025-01", "2025-02"]
-    decomposition = compute_objective_decomposition(n, compute_cost_breakdown(n, cfg), cfg)
-    assert decomposition["demand_charge_eur"] == pytest.approx(bill.by_component.demand, rel=1e-9)
+    # The charge the solve committed (the run record's figure) is the bill's,
+    # and the bridge closes with it inside the Commercial component (§5.2).
+    assert engine_adapter.demand_charge_eur(n, c) == pytest.approx(
+        bill.by_component.demand, rel=1e-9)
+    breakdown = compute_cost_breakdown(n, cfg)
+    assert breakdown["commercial"]["demand_charge"] == pytest.approx(
+        bill.by_component.demand, rel=1e-9)
+    decomposition = compute_objective_decomposition(n, breakdown, cfg)
     assert abs(decomposition["residual_gap_pct"]) < 1e-3
 
 

@@ -391,8 +391,10 @@ def _reconcile(sid: str, ledger: dict, run: dict, findings: dict) -> None:
     opex_fixed = sum(y["opex_fixed"] for y in case["years"])
     fork_dir = qa_support.project_dir(f"{BASE}-opt-{oid}")
     n = pypsa.Network(str(fork_dir / "network.nc"))
-    tariff = packs.effective_tariff(run["intake"], led, _library())
-    cfg = packs.option_solver_config(led, tariff)
+    # U2 WP6: the config the fork was solved with (the engine's commercial
+    # block, bound to the study's minted export series).
+    cfg = packs.option_solver_config(led, packs.option_commercial(
+        run["intake"], led, _library(), n.snapshots, export_series=run.get("export_series")))
     bd = compute_cost_breakdown(n, cfg)
     su_fom = next((float(row["fom"]) for row in bd.get("by_component") or []
                    if row.get("component") == "StorageUnit"), None)

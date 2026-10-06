@@ -136,7 +136,11 @@ def test_a_solve_that_outlives_the_deadline_fails_the_run_with_a_typed_error(
 
     solver = _HangsOnFirstBattery()
     monkeypatch.setattr(solver_service, "run_simulation", solver)
-    monkeypatch.setattr(R, "SOLVE_WAIT_DEADLINE_S", 1.0)
+    # 5 s, not 1 s: since U2 WP6 an option fork also carries the engine's
+    # bound export price and each fake solve materialises the PoC price, so
+    # the baseline's queue round trip alone exceeded 1 s in a suite run; the hang is
+    # 20 s, so the deadline still decides.
+    monkeypatch.setattr(R, "SOLVE_WAIT_DEADLINE_S", 5.0)
     api_project("dl-src")
     r = create_pack_study(client, "dl-src", "dl")
     sid = r.json()["study_id"]

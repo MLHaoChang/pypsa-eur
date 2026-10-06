@@ -45,7 +45,9 @@ def test_creating_a_study_changes_no_existing_project_and_builds_its_own_base(
     api_project("m0-other")
     before = {k: dir_hash(d) for k, d in all_project_dirs(session_local).items()}
     slot_before = session_ctx(client).loaded_project
-    user_ts_before = copy.deepcopy(network_router._user_ts)
+    # `_user_ts` is a VIEW of the active context's store since #71 (no
+    # `__eq__`: a deep copy of the view never equals it); compare contents.
+    user_ts_before = copy.deepcopy(dict(network_router._user_ts.items()))
 
     r = create_pack_study(client, "m0-src", "m0-base")
     assert r.status_code == 201, r.text
@@ -56,7 +58,10 @@ def test_creating_a_study_changes_no_existing_project_and_builds_its_own_base(
     for key, digest in before.items():
         assert dir_hash(after[key]) == digest, f"project {key} changed on disk"
     assert session_ctx(client).loaded_project == slot_before
-    assert network_router._user_ts == user_ts_before
+    after_ts = dict(network_router._user_ts.items())
+    assert sorted(after_ts) == sorted(user_ts_before)
+    assert all(after_ts[k] is v or getattr(after_ts[k], "equals", lambda o: after_ts[k] == o)(v)
+               for k, v in user_ts_before.items())
 
     base_dir = project_storage_dir("m0-base")
     assert str(base_dir) not in {str(d) for d in before}

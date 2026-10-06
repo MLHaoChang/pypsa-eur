@@ -250,6 +250,22 @@ class TornadoContext:
     options: dict[str, OptionInput]
     fidelity: Fidelity | None = None
     study_currency_year: int | None = None
+    # U2 WP6: the study's minted export price series the run bound its forks
+    # to (`PriceSeriesRef` or its dict; None on a run recorded before WP6).
+    export_series: Any = None
+
+
+def _compiled(ctx: TornadoContext, ledger: AssumptionsLedger, snapshots=None):
+    """
+    The engine's commercial config at `ledger` (U2 WP6): the variant's
+    tariff compiled with the run's export series.
+    """
+    return packs.option_commercial(ctx.intake, ledger, ctx.library, snapshots,
+                                   export_series=ctx.export_series)
+
+
+def _solver_config(ctx: TornadoContext, ledger: AssumptionsLedger, snapshots=None):
+    return packs.option_solver_config(ledger, _compiled(ctx, ledger, snapshots))
 
 
 SolveFn = Callable[[Any, Any, str], Any]
@@ -523,9 +539,10 @@ def _price_bound(ctx: TornadoContext, n_centre, option_id: str, key: str, value:
     """A dispatch-sensitive bound: re-dispatch the fixed sizes at the tariff."""
     vl = _with_value(ctx.ledger, key, value)
     vt = packs.effective_tariff(ctx.intake, vl, ctx.library, n_centre.snapshots)
-    cfg = packs.option_solver_config(vl, vt)
+    # U2 WP6: the variant tariff goes to the engine through the solver config;
+    # the fixed-size copy keeps the centre fork's bound export price.
+    cfg = _solver_config(ctx, vl, n_centre.snapshots)
     net = fixed_size_network(n_centre, drop_battery=reference)
-    study_tariff.write_tariff_prices(net, vt, packs.IMPORT_LINK, packs.EXPORT_LINK)
     solved = _solved(solve, net, cfg, variant_id)
     # BC-7: the baseline bill at the SAME perturbed tariff (no solve).
     bills = {"baseline": _bill_of(ctx.baseline_network, vt, ctx.fidelity),
@@ -552,7 +569,7 @@ def _capex_bound(ctx: TornadoContext, n_centre, option_id: str, key: str, value:
         net.storage_units.loc[packs.BATTERY_NAME, "capital_cost"] = (
             packs.battery_capital_cost_eur_per_mw(vl, hours))
         net.storage_units.loc[packs.BATTERY_NAME, "fom_cost"] = packs.battery_fom_eur_per_mw(vl)
-    cfg = packs.option_solver_config(vl, ctx.tariff)
+    cfg = _solver_config(ctx, vl, n_centre.snapshots)
     return _case(ctx, net, cfg, vl, ctx.tariff, {"baseline": ctx.baseline_bill, "option": bill},
                  option_id)
 
@@ -574,7 +591,7 @@ def _rate_bound(ctx: TornadoContext, n_centre, option_id: str, key: str, value: 
         net.storage_units.loc[packs.BATTERY_NAME, "discount_rate"] = float(value)
     if packs.PV_NAME in net.generators.index:
         net.generators.loc[packs.PV_NAME, "discount_rate"] = float(value)
-    cfg = packs.option_solver_config(vl, ctx.tariff)
+    cfg = _solver_config(ctx, vl, n_centre.snapshots)
     return _case(ctx, net, cfg, vl, ctx.tariff, {"baseline": ctx.baseline_bill, "option": bill},
                  option_id)
 
@@ -628,7 +645,7 @@ def _centre(ctx: TornadoContext, solve: SolveFn | None):
     ref_nets: dict[str, tuple[Any, Bill | None, bool]] = {}
     attributions: list[BatteryAttribution] = []
     stopped = False
-    centre_cfg = packs.option_solver_config(ctx.ledger, ctx.tariff)
+    centre_cfg = _solver_config(ctx, ctx.ledger, ctx.baseline_network.snapshots)
     for oid, opt in ctx.options.items():
         spec = Q.option(ctx.question, oid)
         if not spec.free_assets:
@@ -1145,7 +1162,8 @@ def context_from_disk(inp: StudyInputs) -> TornadoContext:
         ledger=inp.ledger, library=inp.library, tariff=inp.tariff,
         baseline_network=nets["none"], baseline_bill=bill("none"), options=options,
         fidelity=Fidelity(fidelity) if fidelity else None,
-        study_currency_year=inp.study.currency_year)
+        study_currency_year=inp.study.currency_year,
+        export_series=inp.run.get("export_series"))
 
 
 _CODE = re.compile(r"^[a-z]+(_[a-z]+)*(:[a-z0-9_,]+)?$")

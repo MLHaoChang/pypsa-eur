@@ -115,7 +115,8 @@ class ForkSolver:
         from services import project_registry
         from services.adequacy import campaign
         from services.solve_queue import solve_queue
-        from services.validation_service import export_cycling_flags, validate_for_run
+        from services.study.engine_adapter import cycling_flags as export_cycling_flags
+        from services.validation_service import validate_for_run
 
         if self.stop_event.is_set() or self.record.get("deadline_exceeded"):
             # Gate S9 [N2]: after a solve outlived the deadline the solver is
@@ -210,6 +211,13 @@ def start_tornado(study_id: str, *, base_row, db, user_id,
     if "none" not in inp.rows:
         raise R.RunRefused(409, "baseline_not_solved",
                            "the last run did not solve the baseline; re-run the study")
+    if not inp.run.get("export_series"):
+        # U2 WP6: a run recorded before the LP switch solved its forks with
+        # the tariff written into the Links; re-dispatching them on the
+        # engine's commercial config would price the tariff twice.
+        raise R.RunRefused(409, "engine_inputs_changed_since_run", (
+            "the last run was solved before the study moved onto the investment-case "
+            "engine; re-run the study before the sensitivity analysis"))
     solves = F.estimate_tornado_solves(inp.question, inp.ledger, inp.tariff, inp.sizes())
     budget = max(1, solves) if budget_solves is None else int(budget_solves)
 

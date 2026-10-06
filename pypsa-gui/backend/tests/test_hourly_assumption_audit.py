@@ -77,6 +77,14 @@ ALLOWED: dict[str, tuple[int, str]] = {
                           "leap year refused, and prose — a declared hourly model, not an "
                           "assumption about someone else's axis"),
     "study/runner.py": (2, "prose: each option is one 8760 h LP (deadline sizing, fidelity)"),
+    "study/compile.py": (1, "with no snapshot axis given, an hourly calendar of one non-leap "
+                            "year enumerates every (month, weekday, hour) a tariff band can "
+                            "key on, to refuse unpriced hours; band rules read the hour of day "
+                            "only, so the check is complete at any resolution — an enumeration, "
+                            "not a step (U2 WP4)"),
+    "study/engine_adapter.py": (1, "a bill is annual when Σ objective weights (hours at any "
+                                   "resolution) is a 365- or 366-day year, 8760 or 8784 h — a "
+                                   "unit, not a step (GS's annual-bill rule, U2 WP5)"),
     "study/tariff.py": (3, "a calendar period's length in hours (end − start) / 1 h and a "
                            "year as 8760 or 8784 h; weights are hours at any resolution — "
                            "units, not a step (GS bill, removed in U2 WP10)"),
@@ -101,6 +109,6 @@ def test_every_hourly_assumption_site_is_listed_with_a_reason():
 
 
 def test_the_inventory_is_pinned():
-    assert sum(c for c, _ in ALLOWED.values()) == 73
-    assert len(ALLOWED) == 33
+    assert sum(c for c, _ in ALLOWED.values()) == 75
+    assert len(ALLOWED) == 35
     assert all(reason for _, reason in ALLOWED.values())

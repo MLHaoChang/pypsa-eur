@@ -41,6 +41,12 @@ What it compiles (WP4):
   IN-MEMORY network (`binding.bind_commercial`) before the runner writes it.
 * :func:`type_meter_links` — row 28 way (a) (WORKAROUND, Q5).
 * :func:`with_value_flows` — row 28: `single_owner` on the option's network.
+* :func:`solver_config` (WP6, C6) — the option fork's explicit `SolverConfig`:
+  the compiled `CommercialConfig` on `commercial`, so IC prices the LP
+  (`materialise_poc_prices`) and carries the demand charge
+  (`add_demand_terms`); no GS `demand_charge`.
+* :func:`library_series_resolver` (WP6, WORKAROUND) — resolves the minted
+  export series in the base project's org for :func:`bind_on_network`.
 """
 from __future__ import annotations
 
@@ -67,7 +73,8 @@ __all__ = [
     "EXPORT_SERIES_SOURCE", "EngineTariff", "NETWORK_PREFIX", "POC_LINK", "SETTLEMENT",
     "SITE_PARTY", "apply_ledger", "bind_on_network", "commercial_from_form",
     "commercial_from_ledger", "delete_export_series", "export_series_name",
-    "mint_export_series", "tariff_to_engine", "type_meter_links", "with_value_flows",
+    "library_series_resolver", "mint_export_series", "solver_config", "tariff_to_engine",
+    "type_meter_links", "with_value_flows",
 ]
 
 POC_LINK = "grid_import"
@@ -675,6 +682,7 @@ def bind_on_network(n, compiled: CompiledCommercial, *,
         raise CompileError("export_series_not_minted",
                            "the tariff prices export but no export series was minted for "
                            "the study; mint it before binding")
+    _refuse_inactive_meter_links(n, compiled.config)
     from services.commercial import binding
 
     try:
@@ -684,6 +692,22 @@ def bind_on_network(n, compiled: CompiledCommercial, *,
         raise CompileError(exc.code, str(exc)) from exc
     config = CommercialConfig.model_validate(bound) if bound is not None else compiled.config
     return _finish(config, compiled.item_component, compiled.tariff_meta, compiled.notes)
+
+
+def _refuse_inactive_meter_links(n, config: CommercialConfig) -> None:
+    """
+    WORKAROUND (engine ask, U2 WP6): IC's `validate_for_network` accepts an
+    INACTIVE PoC or export Link, and the solve then fails with a raw KeyError
+    from the linopy model (no typed refusal). GS's demand wrapper refused it
+    (`demand_charge_inactive_import_link`); the study keeps a typed refusal,
+    with the pack's code, until the engine refuses it itself.
+    """
+    for link in (config.poc_link, config.export_link):
+        if link and link in n.links.index and "active" in n.links.columns \
+                and not bool(n.links.at[link, "active"]):
+            raise CompileError("import_link_inactive",
+                               f"{link} is inactive; the engine prices and meters the "
+                               "site through it")
 
 
 def type_meter_links(n, *, horizon_years: float) -> None:
@@ -711,3 +735,68 @@ def with_value_flows(compiled: CompiledCommercial, n) -> CompiledCommercial:
     vf = VFT.build("single_owner", n, compiled.config).config.model_dump(mode="json")
     config = compiled.config.model_copy(update={"value_flows": vf})
     return _finish(config, compiled.item_component, compiled.tariff_meta, compiled.notes)
+
+
+# ── C6 / WP6: the option fork's solver config ─────────────────────────────
+
+def solver_config(ledger: AssumptionsLedger | None, compiled: CompiledCommercial, *,
+                  discount_rate: float | None = None, default_lifetime: float | None = None,
+                  finance: Mapping[str, Any] | None = None, **overrides):
+    """
+    The explicit `SolverConfig` of an option fork (plan §2 C3, WP6): lopf on
+    HiGHS, one flat horizon, the full strategy, no SCLOPF, no AC power flow,
+    no user code; `discount_rate` and the fallback lifetime from the ledger
+    (rows 20 and 6) unless given; `commercial` = the compiled config (C6), so
+    the engine prices the PoC at solve time and carries the demand charge in
+    the LP; GS's `demand_charge` is never set. `finance` is WP7's
+    (`compile.finance_from_ledger`). Nothing is inherited from the base
+    project. `overrides` set any other `SolverConfig` field (a test's
+    objective scale, an Expert's strategy).
+    """
+    from services.solver_service import SolverConfig
+
+    def row(key: str) -> float | None:
+        if ledger is None:
+            return None
+        v = _ledger_value(ledger, key)
+        return None if v is None else float(v)
+
+    rate = discount_rate if discount_rate is not None else row("discount_rate")
+    if rate is None:
+        raise CompileError("ledger_row_missing",
+                           "the solver config needs a discount rate (ledger row "
+                           "discount_rate)")
+    life = default_lifetime if default_lifetime is not None else \
+        row("battery_storage_lifetime_years")
+    fields: dict[str, Any] = dict(
+        solver_name="highs", mode="lopf", multi_investment_periods=False,
+        solve_strategy="full", sclopf=False, run_ac_pf_after_lopf=False,
+        extra_functionality_code="", discount_rate=float(rate),
+        commercial=compiled.commercial(), demand_charge=None,
+        finance=None if finance is None else dict(finance))
+    if life is not None:
+        fields["default_lifetime"] = float(life)
+    fields.update(overrides)
+    return SolverConfig(**fields)
+
+
+def library_series_resolver(db, org_id: UUID, *, root: Path | None = None
+                            ) -> Callable[[object], pd.Series]:
+    """
+    WORKAROUND (engine ask Q15: `series_store.resolve` is outside the frozen
+    facade): the resolver :func:`bind_on_network` takes, reading a minted
+    series back from the org's Library — the study's fork lives in its base
+    project's org (`project_registry.create_scenario`), so this is the org
+    `binding.context_resolvers` would use for a loaded fork. A ref the
+    Library cannot give is `CompileError("library_ref_stale")`.
+    """
+    from services.library import series_store
+
+    def resolve(ref) -> pd.Series:
+        ref = _as_ref(ref)
+        try:
+            return series_store.resolve(db, org_id, ref, root=root)
+        except (series_store.LibraryRefNotFound, series_store.LibraryRefStale) as exc:
+            raise CompileError("library_ref_stale", str(exc)) from exc
+
+    return resolve

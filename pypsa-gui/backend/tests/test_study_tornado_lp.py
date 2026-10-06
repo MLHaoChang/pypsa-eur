@@ -13,9 +13,12 @@ review v1 B5; gate S5 carries). Few solves, each 10-15 s:
 * the discount-rate bar (no solve), which must reach the ledger AND the
   solver config.
 
-The solves go through the production LP pieces in process (the periodized
-cost fill and `_wrap_with_demand_charge`), injected as the tornado's `solve`;
-the queue and the throw-away forks are `test_study_tornado_routes.py`'s.
+The solves go through the production LP in process (`run_simulation`, whose
+Investment Case commercial chain prices the PoC and carries the demand charge
+since U2 WP6; `tests/u2_targets.ic_solve`), injected as the tornado's
+`solve`; the centre networks are the engine-solved site options
+(`u2_targets.ic_site_option`). The queue and the throw-away forks are
+`test_study_tornado_routes.py`'s.
 """
 from __future__ import annotations
 
@@ -26,17 +29,8 @@ from services.study import packs, proforma
 from services.study import ledger as L
 from services.study import questions as Q
 from tests.golden import site_fixture as sf
-
-
-def lp_solve(net, cfg, _variant_id):
-    from services.solver.objective import _wrap_with_demand_charge
-    from services.solver_service import with_periodized_cost_defaults
-
-    with with_periodized_cost_defaults(net, cfg):
-        status = net.optimize(solver_name="highs",
-                              extra_functionality=_wrap_with_demand_charge(net, None, cfg))
-    assert status == ("ok", "optimal"), status
-    return net
+from tests.u2_targets import FAKE_REF, bound_option, ic_site_option
+from tests.u2_targets import ic_solve as lp_solve
 
 
 def _question(*drivers):
@@ -45,13 +39,14 @@ def _question(*drivers):
 
 def _ctx(ledger, options: dict, question) -> F.TornadoContext:
     tariff = sf.site_tariff(ledger)
-    nb, _ = sf.solve_site_option("none")
+    nb, _ = ic_site_option("none", ledger)
     return F.TornadoContext(
         study_id=sf.SITE_STUDY_ID, question=question, intake=sf.site_intake(),
         ledger=ledger, library=sf.site_library(), tariff=tariff, baseline_network=nb,
         baseline_bill=F._bill_of(nb, tariff), fidelity="full_study",
         options={oid: F.OptionInput(oid, n, F._bill_of(n, tariff))
-                 for oid, n in options.items()})
+                 for oid, n in options.items()},
+        export_series=FAKE_REF)
 
 
 @pytest.fixture(scope="module")
@@ -59,9 +54,8 @@ def dear_storage():
     """The 2-hour battery solved at a user's storage quote of 400 EUR/kWh."""
     ledger = L.apply_user_row(sf.site_ledger(), "battery_storage_eur_per_kwh", 400.0,
                               unit="EUR/kWh", changed_by="test")
-    tariff = sf.site_tariff(ledger)
-    n = packs.build_site_network(sf.site_intake(), ledger, "bess_2h", library=sf.site_library())
-    lp_solve(n, packs.option_solver_config(ledger, tariff), "centre")
+    n, c = bound_option(sf.site_intake(), ledger, "bess_2h", sf.site_library())
+    lp_solve(n, packs.option_solver_config(ledger, c), "centre")
     return ledger, n
 
 
@@ -101,7 +95,7 @@ def test_a_centre_bound_reproduces_the_centre_npv(dear_storage):
 
 
 def test_the_bess_pv_battery_is_valued_against_a_pv_only_reference():
-    n, _cfg = sf.solve_site_option("bess_pv_2h")
+    n, _cfg = ic_site_option("bess_pv_2h")
     ledger = sf.site_ledger()
     ctx = _ctx(ledger, {"bess_pv_2h": n}, _question())
     calls = []
@@ -138,7 +132,7 @@ def test_the_bess_pv_battery_is_valued_against_a_pv_only_reference():
 
 
 def test_the_discount_rate_bar_reaches_the_ledger_and_the_solver_config():
-    n, cfg = sf.solve_site_option("bess_2h")
+    n, cfg = ic_site_option("bess_2h")
     ledger = sf.site_ledger()
     ctx = _ctx(ledger, {"bess_2h": n}, _question("discount_rate"))
     out = F.run_tornado(ctx, lambda *_a: pytest.fail("a rate bar solves nothing"))
@@ -164,7 +158,7 @@ def test_a_price_bound_recomputes_the_baseline_bill_at_the_perturbed_tariff():
     savings is the demand stream scaled by the price ratio, so the battery NPV
     at each bound is known in closed form.
     """
-    n, _cfg = sf.solve_site_option("bess_2h")
+    n, _cfg = ic_site_option("bess_2h")
     ledger = sf.site_ledger()
     ctx = _ctx(ledger, {"bess_2h": n}, _question("demand_charge_price"))
     calls = []
@@ -186,8 +180,14 @@ def test_a_price_bound_recomputes_the_baseline_bill_at_the_perturbed_tariff():
     [row] = out.robustness.tornado
     assert row.evaluation == "redispatch"
     assert len(calls) == 2 and out.robustness.solves_charged == 2
-    # Each re-dispatch carries the perturbed price in its own SolverConfig.
-    assert sorted(c.demand_charge["price_per_mw_per_period"] for c in calls) == pytest.approx(
+    # Each re-dispatch carries the perturbed price in its own SolverConfig:
+    # the engine's demand item (EUR/kW-month = EUR/MW-month / 1000, U2 WP6).
+    def demand_rate(c):
+        [item] = [i for i in c.commercial["import_tariff"]["items"] if i["id"] == "demand"]
+        return item["periods"][0]["rate"] * 1000.0
+
+    assert all(c.demand_charge is None for c in calls)
+    assert sorted(demand_rate(c) for c in calls) == pytest.approx(
         [row.low_value, row.high_value])
     centre = next(r.value for r in ledger.rows if r.key == "demand_charge_price")
     streams = {s.key: s.annual_value for s in F.value_streams(
@@ -207,7 +207,7 @@ def test_a_zero_size_battery_is_judged_by_its_size_not_its_npv_sign():
     naively is large and POSITIVE; judged by size, the option is never
     re-dispatched, its NPV is not read, and nothing is recommended.
     """
-    n, _cfg = sf.solve_site_option("bess_2h")
+    n, _cfg = ic_site_option("bess_2h")
     tiny = F.copy_network(n)
     tiny.storage_units.loc["battery", "p_nom_opt"] = 0.5 * F.EPSILON_MW
     ctx = _ctx(sf.site_ledger(), {"bess_2h": tiny}, _question("demand_charge_price"))

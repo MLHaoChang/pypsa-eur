@@ -5,8 +5,7 @@ add_demand_terms` through `run_simulation`), replacing GS's
 
 Plan: docs/superpowers/plans/2026-10-05-guided-study-u2-engine-rewire.md
 §4.7, §5.2, WP2 (port of `test_tariff_demand_charge.py`), WP6. Every target
-goes through `compile.solver_config` (the LP switch), so all are
-`pending("WP6")` until stage 2.
+goes through `compile.solver_config` (the LP switch, WP6).
 
 The toy is WP0's 3-month network (`tests/u2_record_pre_numbers.py::
 toy_network(gs_prices=False)`: no prices on the Links), priced by the
@@ -22,9 +21,8 @@ import pandas as pd
 import pytest
 
 from tests import u2_record_pre_numbers as REC
-from tests.u2_targets import FAKE_REF, WP0, flat_resolver, pending
+from tests.u2_targets import FAKE_REF, WP0, flat_resolver
 
-pytestmark = pending("WP6", "the LP switch (compile.solver_config, adapter demand amount)")
 TOY = WP0["toy_3month"]
 
 
@@ -134,15 +132,24 @@ def test_the_objective_equals_the_gs_wrappers_wp0_record(solved):
 
 
 def test_objective_delta_is_the_charge_plus_the_cost_delta(solved):
+    """
+    GS's cost breakdown left the demand charge out (the bridge added it);
+    IC's carries the committed commercial terms in its total (the
+    "Commercial" component, `commercial_cost_terms`). So the objective delta
+    is the breakdown's delta, and its commercial demand line is the charge.
+    """
     from services.results.cost_breakdown import compute_cost_breakdown
 
     (base, base_cfg, _), (charged, charged_cfg, c) = solved
     dc = _A().demand_charge_eur(charged, c)
     assert dc == pytest.approx(TOY["demand_charge_eur"], rel=1e-6)
+    bd_charged = compute_cost_breakdown(charged, charged_cfg)
+    bd_base = compute_cost_breakdown(base, base_cfg)
+    assert bd_charged["commercial"]["demand_charge"] == pytest.approx(dc, rel=1e-9)
+    assert bd_base["commercial"].get("demand_charge") is None
     d_obj = float(charged.objective) - float(base.objective)
-    d_cost = (compute_cost_breakdown(charged, charged_cfg)["total"]
-              - compute_cost_breakdown(base, base_cfg)["total"])
-    assert d_obj == pytest.approx(dc + d_cost, rel=1e-6)
+    d_cost_without_charge = (bd_charged["total"] - dc) - bd_base["total"]
+    assert d_obj == pytest.approx(dc + d_cost_without_charge, rel=1e-6)
 
 
 def test_objective_scale_leaves_sizes_and_the_charge_unchanged(solved):
@@ -194,8 +201,13 @@ def test_a_failed_solve_leaves_the_previous_record_beside_the_previous_dispatch(
 
 
 @pytest.mark.parametrize("over, code", [
-    ({"solve_strategy": "myopic"}, "commercial_strategy_myopic"),
-    ({"solve_strategy": "rolling"}, "commercial_strategy_rolling"),
+    # A flat single-period network: the solver's own preflight refuses
+    # myopic before any commercial term (IC's `refuse_windowed_terms` does
+    # not window a single-period myopic solve).
+    ({"solve_strategy": "myopic"}, "myopic_no_periods"),
+    # Rolling windows: IC refuses the demand term (`refuse_windowed_terms`),
+    # surfaced by the commercial preflight.
+    ({"solve_strategy": "rolling"}, "commercial.binding_invalid"),
 ], ids=["myopic", "rolling"])
 def test_refused_modes(over, code):
     n = REC.toy_network(gs_prices=False)

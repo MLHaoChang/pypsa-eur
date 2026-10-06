@@ -648,10 +648,10 @@ def _create_pack_study(body: StudyCreate, project: AuthorizedProject,
                                            library=library, question=question,
                                            resolve_upload=resolve_upload)
         tariff = packs.effective_tariff(body.intake, ledger, library, network.snapshots)
-        cfg = packs.option_solver_config(ledger, tariff)
     except (packs.PackError, study_library.LibraryError) as exc:
         code = getattr(exc, "code", "intake_invalid")
         raise HTTPException(422, detail={"error_kind": code, "message": str(exc)}) from None
+    study_id = store.new_study_id()
     options = study_questions.options_for(question, body.intake)
     solves = campaign.estimate_solves(None, study_runner.STUDY_KEY,
                                       options=[o.option_id for o in options])
@@ -660,6 +660,23 @@ def _create_pack_study(body: StudyCreate, project: AuthorizedProject,
     base_dir = project_registry.ensure_project_dir(row)
     key = project_registry.registry_key(row)
     try:
+        # U2 WP6: the base project carries the engine's commercial config,
+        # bound to the study's export series (minted in the base's org under
+        # the owner's name; the run re-uses it), like every option fork.
+        from services.study import compile as study_compile
+
+        try:
+            ref = study_compile.mint_export_series(
+                db, row.org_id, base_uuid=row.id, study_id=study_id, study_name=body.name,
+                tariff=tariff, snapshots=network.snapshots)
+            bound = packs.bind_option(
+                network, packs.option_commercial(body.intake, ledger, library,
+                                                 network.snapshots, export_series=ref),
+                resolve_ref=study_compile.library_series_resolver(db, row.org_id))
+            cfg = packs.option_solver_config(ledger, bound)
+        except (study_compile.CompileError, packs.PackError) as exc:
+            raise HTTPException(422, detail={"error_kind": exc.code,
+                                             "message": exc.message}) from None
         with PyPSAService.hydrate_or_adopt(key) as resident:
             if resident is not None:  # a fresh uuid cannot be resident
                 raise HTTPException(409, f"Project '{base_name}' is already open")
@@ -689,7 +706,7 @@ def _create_pack_study(body: StudyCreate, project: AuthorizedProject,
             _copy_upload(project, base_dir, str(load["upload_id"]))
         now = _now()
         study = DecisionStudy(
-            study_id=store.new_study_id(), name=body.name,
+            study_id=study_id, name=body.name,
             question_id=body.question_id, base_project=str(row.id),
             pack_project=str(row.id), intake=intake,
             ledger=ledger, ledger_version=ledger.ledger_version,
@@ -1035,7 +1052,10 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
              "option": (details.get(option_id) or {}).get("bill")}
     try:
         tariff = packs.effective_tariff(study.intake, ledger, library, network.snapshots)
-        cfg = packs.option_solver_config(ledger, tariff)
+        # U2 WP6: the config the fork was solved with (the run's export series).
+        cfg = packs.option_solver_config(ledger, packs.option_commercial(
+            study.intake, ledger, library, network.snapshots,
+            export_series=run.get("export_series")))
         case = proforma.build_investment_case(
             network, cfg, None, ledger, bills, option_id, study_id=study_id,
             tariff=tariff, fidelity=result.get("fidelity"),

@@ -19,10 +19,14 @@ never a literal; every rule below is a plan or gate condition:
   connection limit, active) and ``grid_export`` (``eh_role = grid_export``).
   An inactive import link is refused (``PackError``, code
   ``import_link_inactive``).
-* **Prices** are permanent network data written by
-  ``tariff.write_tariff_prices`` from ``tariff.tariff_from_ledger`` — the
-  ledger's demand-charge price and energy-price level applied to the chosen
-  tariff's structure, the same object the LP config and the bill read.
+* **Prices** are NOT network data (U2 WP6, plan §2 C2): the Links carry no
+  tariff price. The tariff (the ledger's demand-charge price and energy-price
+  level applied to the chosen tariff's structure) is compiled into the fork's
+  ``SolverConfig.commercial`` (:func:`option_commercial`,
+  :func:`option_solver_config`) and the Investment Case engine prices the PoC
+  at solve time (``lp_bindings.materialise_poc_prices``) and carries the
+  demand charge in the LP (``add_demand_terms``). The tariff is still
+  validated here, so an unpriceable one refuses the build.
 * **Load** from the intake: an upload (``series_mw`` or an ``upload_id``
   resolved by the caller) or a synthetic sector profile from
   ``study_library/load_profiles/`` scaled to the stated annual MWh (marked
@@ -86,8 +90,8 @@ from services.study import tariff as study_tariff
 
 __all__ = [
     "HOURS", "LOAD_UNITS", "LoadUpload", "PackError", "PACK_META_KEY", "battery_capital_cost_eur_per_mw",
-    "battery_fom_eur_per_mw", "battery_upfront_eur_per_mw", "build_site_network",
-    "effective_tariff", "intake_tariff", "ledger_hash", "ledger_values",
+    "battery_fom_eur_per_mw", "battery_upfront_eur_per_mw", "bind_option", "build_site_network",
+    "effective_tariff", "option_commercial", "intake_tariff", "ledger_hash", "ledger_values",
     "load_profile_ids", "load_profiles", "needs_attention_rows", "read_intake_load", "snapshots_for", "option_solver_config", "parse_load_upload",
     "refuse_unrunnable_ledger", "round_trip_efficiency",
 ]
@@ -582,6 +586,9 @@ def build_site_network(intake: Mapping[str, Any] | None,
     idx = _snapshots(intake)
     tariff = effective_tariff(intake, ledger, library, idx)
     _t, tariff_notes = intake_tariff(intake, library)
+    # The tariff the engine will price must compile (U2 WP6): its refusals
+    # (an unpriced export, an unsupported basis) still refuse the build.
+    option_commercial(intake, ledger, library, idx)
     values = ledger_values(ledger)
     site = _site(intake)
     conn = _connection_mw(intake)
@@ -605,10 +612,6 @@ def build_site_network(intake: Mapping[str, Any] | None,
           p_nom=conn, efficiency=1.0, active=True, eh_role="grid_import")
     n.add("Link", EXPORT_LINK, bus0="site", bus1="grid", carrier="grid_export",
           p_nom=conn, efficiency=1.0, active=True, eh_role="grid_export")
-    try:
-        study_tariff.write_tariff_prices(n, tariff, IMPORT_LINK, EXPORT_LINK)
-    except study_tariff.TariffError as exc:
-        raise PackError(exc.code, str(exc)) from None
 
     load, load_notes = _load_series(intake, idx, resolve_upload)
     notes += load_notes
@@ -681,23 +684,53 @@ def build_site_network(intake: Mapping[str, Any] | None,
     return n
 
 
-def option_solver_config(ledger: AssumptionsLedger, tariff: Tariff):
+def option_commercial(intake: Mapping[str, Any] | None, ledger: AssumptionsLedger,
+                      library, snapshots: pd.DatetimeIndex | None = None, *,
+                      export_series=None):
     """
-    The explicit `SolverConfig` of an option fork (plan S4 M1): lopf, one
-    flat year, the full strategy (no rolling, no myopic), no SCLOPF, no AC
-    power flow, no user code, the demand charge from the ledger-applied
-    tariff (one billing-period source), and the discount rate and the
-    fallback lifetime from the ledger. Nothing is inherited from the base
-    project's config.
+    The study's compiled commercial config (U2 WP6; `compile.
+    commercial_from_ledger`): the intake's tariff with the ledger applied, on
+    the study year's axis, its export price as the study's minted series
+    (`export_series`, a `PriceSeriesRef` or its dict; None leaves it
+    unminted, which refuses a bind). A compile refusal is a `PackError` with
+    the compiler's code.
     """
-    from services.solver_service import SolverConfig
+    from services.study import compile as study_compile
 
-    v = ledger_values(ledger)
-    return SolverConfig(
-        solver_name="highs", mode="lopf", multi_investment_periods=False,
-        solve_strategy="full", sclopf=False, run_ac_pf_after_lopf=False,
-        extra_functionality_code="",
-        discount_rate=_need(v, "discount_rate"),
-        default_lifetime=_need(v, "battery_storage_lifetime_years"),
-        demand_charge=study_tariff.demand_charge_config(tariff, [IMPORT_LINK]),
-    )
+    idx = snapshots if snapshots is not None else _snapshots(intake or {})
+    try:
+        return study_compile.commercial_from_ledger(intake, ledger, library, idx,
+                                                    export_series=export_series)
+    except study_compile.CompileError as exc:
+        raise PackError(exc.code, exc.message) from None
+
+
+def bind_option(n: pypsa.Network, compiled, *, resolve_ref):
+    """
+    C6: the compiled config bound on an option's in-memory network
+    (`compile.bind_on_network`) before its fork is written; `PackError` on a
+    refusal.
+    """
+    from services.study import compile as study_compile
+
+    try:
+        return study_compile.bind_on_network(n, compiled, resolve_ref=resolve_ref)
+    except study_compile.CompileError as exc:
+        raise PackError(exc.code, exc.message) from None
+
+
+def option_solver_config(ledger: AssumptionsLedger, compiled):
+    """
+    The explicit `SolverConfig` of an option fork (plan S4 M1; U2 WP6 C6):
+    `compile.solver_config` — lopf, one flat year, the full strategy, no
+    SCLOPF, no AC power flow, no user code, the discount rate and the
+    fallback lifetime from the ledger, and the compiled commercial config
+    (`option_commercial`) that prices the LP. Nothing is inherited from the
+    base project's config.
+    """
+    from services.study import compile as study_compile
+
+    try:
+        return study_compile.solver_config(ledger, compiled)
+    except study_compile.CompileError as exc:
+        raise PackError(exc.code, exc.message) from None

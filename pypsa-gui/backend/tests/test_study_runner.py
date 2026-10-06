@@ -47,9 +47,17 @@ class FakeSolver:
                                      "grid_export": 0.0}, index=n.snapshots)
         # What a real solve leaves behind that the result reads need: the
         # storage dispatch and the site bus price (asset economics reads both).
+        # U2 WP6: the pack writes no Link price; the import price is the one
+        # the engine materialises from the fork's commercial config.
+        from services.commercial.lp_bindings import materialise_poc_prices
+
+        applied = materialise_poc_prices(n, config.commercial)
+        try:
+            site_price = n.links_t.marginal_cost["grid_import"].copy()
+        finally:
+            applied.undo()
         n.buses_t.marginal_price = pd.DataFrame(
-            {"site": n.links_t.marginal_cost["grid_import"], "grid": 0.0},
-            index=n.snapshots)
+            {"site": site_price, "grid": 0.0}, index=n.snapshots)
         gen_p = {"grid": n.links_t.p0["grid_import"]}
         if "pv" in n.generators.index:
             gen_p["pv"] = 0.2 * n.generators_t.p_max_pu["pv"]
@@ -113,8 +121,11 @@ def test_five_options_five_forks_five_solves_charged_on_the_base_context(
     assert sorted(c[0] for c in fake.calls) == sorted(f"run-five-opt-{o}" for o in OPTIONS)
     for _name, cfg, _storage in fake.calls:
         assert cfg.solve_strategy == "full" and cfg.sclopf is False
-        assert cfg.demand_charge["import_links"] == ["grid_import"]
-        assert cfg.demand_charge["billing_period"] == "month"
+        # U2 WP6 (C6): the engine's commercial config, no GS demand charge.
+        assert cfg.demand_charge is None
+        assert cfg.commercial["poc_link"] == "grid_import"
+        assert [i["unit"] for i in cfg.commercial["import_tariff"]["items"]
+                if i["id"] == "demand"] == ["per_kw_month"]
         assert cfg.discount_rate == 0.07
     storage_by_fork = {c[0]: c[2] for c in fake.calls}
     assert storage_by_fork["run-five-opt-none"] == 0          # omitted, not zeroed
@@ -148,16 +159,22 @@ def test_five_options_five_forks_five_solves_charged_on_the_base_context(
 def test_the_bridge_reads_the_forks_config_and_equals_the_bill(
         client, api_project, studies_on, fake):
     """
-    Gate S3 [S4]/N4: `demand_charge_eur` from the objective bridge, computed
-    with the config the fork solved under, equals the bill's demand charge.
+    Gate S3 [S4]/N4, U2 WP6: the run's `demand_charge_eur` is the amount the
+    ENGINE's solve committed (`engine_adapter.demand_charge_eur`), never GS's
+    bridge term. The fake solver commits none, so every option records null
+    with the reason (ADR-0001, never 0). The equality with the bill on a real
+    engine solve is `test_u2_wp6_lp_switch.py::
+    test_the_run_records_the_engines_committed_demand_charge`.
     """
     sid = _setup(client, api_project, "run-bridge")
     assert client.post(f"/api/projects/run-bridge/studies/{sid}/run", json={}).status_code == 202
     rec = wait_run(client, "run-bridge", sid)
+    assert rec["export_series"]["id"].endswith(f":{sid}:export")
     for o in OPTIONS:
         d = rec["details"][o]
-        assert d["demand_charge_eur"] is not None and d["demand_charge_eur"] > 0, o
-        assert d["demand_charge_eur"] == pytest.approx(d["bill"]["by_component"]["demand"]), o
+        assert d["demand_charge_eur"] is None, o
+        assert d["demand_charge_unavailable"] == "demand_charge_not_established", o
+        assert d["bill"]["by_component"]["demand"] > 0, o
 
 
 def test_an_open_agent_campaign_is_charged_not_replaced(
