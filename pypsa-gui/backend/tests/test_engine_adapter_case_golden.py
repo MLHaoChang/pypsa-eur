@@ -297,14 +297,19 @@ def test_the_tariffs_notes_reach_the_case_as_codes(bundles):
 
 
 def test_a_supplied_tariffs_prose_note_is_flagged_never_dropped():
-    from services.study import compile as C
-    from services.study import library as L
+    """
+    The case carries `tariff_has_uncoded_notes` for a tariff's prose note
+    (the compile half is green in `test_study_compile_commercial.py`).
+    """
+    import dataclasses
 
-    form = L.load_defaults().tariffs["de_industrial_illustrative"].model_copy(
-        update={"honesty_notes": ["Prose with 2 digits."]})
-    c = C.commercial_from_form(form, sf.solve_site_option("none")[0].snapshots,
-                               export_series=FAKE_REF)
-    assert "tariff_has_uncoded_notes" in c.tariff_meta["honesty_notes"]
+    n, cfg, compiled, ledger = _solved_ic("bess_2h")
+    meta = {**compiled.tariff_meta,
+            "honesty_notes": [*compiled.tariff_meta["honesty_notes"], "tariff_has_uncoded_notes"]}
+    view = _A().option_case(n, cfg, ledger, compiled=dataclasses.replace(compiled, tariff_meta=meta),
+                            option_id="bess_2h", study_id=sf.SITE_STUDY_ID,
+                            fidelity="full_study").view
+    assert "tariff_has_uncoded_notes" in view.honesty_notes
 
 
 def test_bill_lives_in_the_models_with_a_fidelity(bundles):

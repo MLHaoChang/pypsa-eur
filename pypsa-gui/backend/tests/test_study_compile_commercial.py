@@ -346,6 +346,17 @@ def test_the_compiled_config_names_the_fixed_constants_and_the_pack_validity(tar
     assert set(c.item_component.values()) <= SEVEN
 
 
+def test_a_supplied_tariffs_prose_note_is_flagged_never_dropped():
+    """
+    Compile half of the `test_proforma_golden` port (the case half is WP7):
+    a prose note in the form becomes the code `tariff_has_uncoded_notes`.
+    """
+    form = _defaults().tariffs[DE].model_copy(update={"honesty_notes": ["Prose with 2 digits."]})
+    c = _C().commercial_from_form(form, YEAR, export_series=FAKE_REF)
+    assert "tariff_has_uncoded_notes" in c.tariff_meta["honesty_notes"]
+    assert all(" " not in code for code in c.tariff_meta["honesty_notes"])
+
+
 def test_the_digest_is_stable_and_moves_with_the_inputs():
     from services.study import ledger as LG
 
