@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, AlertCircle, CheckCircle2, RefreshCw, ArrowRight, XCircle, X, Lightbulb, Wrench } from 'lucide-react'
+import { AlertTriangle, AlertCircle, CheckCircle2, RefreshCw, ArrowRight, XCircle, X, Lightbulb, Wrench, Info } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { simulationApi } from '../api/simulation'
 import { networkApi } from '../api/network'
@@ -11,6 +11,8 @@ import { parseSuggestedCo2Value } from '../utils/carrierZeroCo2'
 import { issueTitle } from '../utils/issueTitles'
 import type { Carrier, ValidationIssue } from '../api/types'
 import { PageBody, PageSection, RowGrid, StatCard, Btn } from '../components/PageKit'
+import { componentOfKey, usePlacementFindings } from '../site3d/placementFindingsStore'
+import type { FindingKind, PlacementFinding } from '../site3d/placementCheck'
 
 // IssuesPanel — surfaces the backend's preflight validation findings as a
 // browsable list. Reuses /api/simulation/preflight, which is the same gate
@@ -87,6 +89,12 @@ export default function IssuesPanel() {
 
   const allOk = data && data.errors === 0 && data.warnings === 0
   const total = (data?.issues?.length ?? 0)
+
+  // The open 3D site's layout findings (visual-layers plan 3 S2), published
+  // by the site view: advisory, with the same deep link as the preflight
+  // rows. Absent until a site view has been opened this session.
+  const layoutSite = usePlacementFindings(s => s.site)
+  const layoutFindings = usePlacementFindings(s => s.findings)
 
   // Jump straight to the offending asset's edit form. The Issues view is
   // itself a slide panel, and PropertiesPanel only mounts when no slide panel
@@ -250,7 +258,64 @@ export default function IssuesPanel() {
             </div>
           )}
         </PageSection>
+
+        {layoutSite && layoutFindings.length > 0 && (
+          <PageSection
+            title="Site layout"
+            count={layoutFindings.length}
+            hint={`${layoutSite.name} · from the 3D site view; advisory, nothing blocks a save`}
+            bodyClassName=""
+          >
+            <div className="flex flex-col" data-testid="site-layout-group">
+              {layoutFindings.map((f, i) => (
+                <LayoutFindingRow key={`${f.key}-${f.kind}-${f.other ?? ''}-${i}`} finding={f} onJumpTo={jumpTo} />
+              ))}
+            </div>
+          </PageSection>
+        )}
       </PageBody>
+    </div>
+  )
+}
+
+const LAYOUT_FINDING_TITLES: Record<FindingKind, string> = {
+  outsideBoundary: 'Outside the site boundary',
+  overlap: 'Overlaps another asset',
+  keepOut: 'Inside a keep-out distance',
+  clearance: 'Short of its clearance',
+  notBetweenBuses: 'Not between its two buses',
+  notFacingFar: 'Not facing its far bus',
+}
+
+// One layout finding: the message the check wrote for the user, and the
+// same View deep link the preflight rows offer (setSelectedComponent via
+// jumpTo). `warn` findings wear the warning tile, `info` a quiet one.
+function LayoutFindingRow({ finding, onJumpTo }: { finding: PlacementFinding; onJumpTo: (type: string, name: string) => void }) {
+  const { type, name } = componentOfKey(finding.key)
+  const warn = finding.severity === 'warn'
+  const Icon = warn ? AlertTriangle : Info
+  return (
+    <div className="flex items-start gap-3 px-4 py-3 border-t border-border first:border-t-0 hover:bg-bg-2 transition-colors">
+      <span className={`mt-0.5 shrink-0 w-6 h-6 grid place-items-center rounded-md border ${warn ? 'bg-warn/10 text-warn border-warn/20' : 'bg-bg-2 text-muted border-border'}`}>
+        <Icon size={13} />
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
+          <span className="text-[12px] font-semibold text-text" data-testid="issue-title">{LAYOUT_FINDING_TITLES[finding.kind]}</span>
+          <span className="text-[10px] text-muted truncate">{type} <span className="font-mono text-ink-700">{name}</span></span>
+          <span className="ml-auto shrink-0 text-[9.5px] font-mono text-ink-400" title="Finding kind">{finding.kind}</span>
+        </div>
+        <div className="text-[11.5px] text-ink-700 leading-relaxed whitespace-pre-wrap">{finding.message}</div>
+      </div>
+      {type && COMPONENT_TYPE_MAP[type] && (
+        <button
+          onClick={() => onJumpTo(COMPONENT_TYPE_MAP[type], name)}
+          title={`Open ${type} "${name}" in the editor`}
+          className="shrink-0 flex items-center gap-1 self-center rounded-md border border-accent/30 bg-accent/5 px-2 py-1 text-[10.5px] font-medium text-accent hover:bg-accent/10 hover:border-accent/50 transition-colors"
+        >
+          View <ArrowRight size={11} />
+        </button>
+      )}
     </div>
   )
 }

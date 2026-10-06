@@ -2,7 +2,7 @@
 // decides it, with a fixed precedence: selected > outside the boundary >
 // hovered > outside the boundary > a result.
 import { describe, it, expect } from 'vitest'
-import { emissiveFor, visualFor, siteVisuals, OUTSIDE_COLOR, HOVER_COLOR, type AssetState } from './resultStyle'
+import { emissiveFor, visualFor, siteVisuals, OUTSIDE_COLOR, HOVER_COLOR, WARN_COLOR, type AssetState } from './resultStyle'
 import { DEFAULT_LIBRARY } from './assetLibrary'
 import { loadingColor, socColor } from '../components/CanvasResultsContext'
 
@@ -18,6 +18,11 @@ describe('emissiveFor', () => {
   })
   it('outside the boundary glows red, over a result', () => {
     expect(emissiveFor({ selected: false, hovered: false, outside: true }, '#7c3aed', 0.9)).toEqual({ color: OUTSIDE_COLOR, intensity: 0.45 })
+  })
+  it('a layout warning glows amber, under the red warning and over a result (S2)', () => {
+    expect(emissiveFor({ selected: false, hovered: false, outside: false, warn: true }, '#7c3aed', 0.9)).toEqual({ color: WARN_COLOR, intensity: 0.45 })
+    expect(emissiveFor({ selected: false, hovered: false, outside: true, warn: true }, '#7c3aed')).toEqual({ color: OUTSIDE_COLOR, intensity: 0.45 })
+    expect(emissiveFor({ selected: false, hovered: true, outside: false, warn: true }, '#7c3aed').color).toBe(HOVER_COLOR)
   })
   it('a result glows in the object\'s colour, scaled and clamped', () => {
     expect(emissiveFor({ selected: false, hovered: false, outside: false }, '#16a34a', 0.5)).toEqual({ color: '#16a34a', intensity: 0.25 })

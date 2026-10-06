@@ -210,3 +210,41 @@ A `ResultsLayer` inside the Canvas reads the map for the current snapshot and dr
 - The vintage breakdown is not invalidated by a finished solve (`useJobTerminalInvalidation` covers results, status, meta and the bundle); the 3D view refetches it itself, the schematic's asset-group capacities do not.
 - A component whose name contains "/" cannot be updated: `PUT /api/network/transformers/TR2%20110%2F33` answers 405 (the encoded slash splits the route), and the app's `updateTransformer` encodes names the same way (found at the WP6 gate).
 - `tests/test_chat_sse.py::test_invalid_decision_returns_400_and_preserves_token` fails only in the full backend run (409 on the retry; passes alone and with the chat modules): order-dependent state from another module (Phase 2 QA).
+
+## S2 amendment (2026-10-06) — placement rules and the placement check
+
+*Visual-layers plan 3 (`docs/superpowers/plans/2026-10-06-visual-layers-3-3d-site-view.md`) S2; owner decision O1 of 2026-10-06 ("placement carries meaning") supersedes decision 6 of 2026-09-28 ("positions cosmetic in v1"). This amends §4.1 and §6.4; everything above stands.*
+
+### The rule, on the library entry
+
+A `SiteAppearance` (§4.1's 3D half of a type; the match rules live in `utils/assetTypes.ts` since S1) gains an optional `placement`:
+
+```ts
+placement?: {
+  anchor?: 'yard' | 'between' | 'far'          // the object's origin: in its owner's yard zone (default), on the segment between its owner yard and its far bus's yard (branches), or just beyond the far yard
+  adjacentTo?: string[]                          // library type ids it should sit next to, in order of preference (greedy nearest free slot around them)
+  clearanceM?: number                            // minimum distance from any other object's footprint
+  keepOutM?: Array<{ from: string[]; m: number }> // minimum distance from the named types ('*' = every type)
+  orientation?: 'faceFar' | 'north' | 'any'      // which way the object's front (+north in its frame, the flow anchor's "to" side) turns
+}
+```
+
+Defaults (placeholders, each with a one-line source comment in `assetLibrary.ts`): **transformer** `between` + `faceFar`; **feeder** `yard` + `faceFar`; **bess** `adjacentTo: ['transformer', 'switchyard']`; **thermal** (engine gensets) and **gasTurbine** `keepOutM: [{ from: ['load'], m: 30 }]`; **h2store** `keepOutM: [{ from: ['*'], m: 50 }]`; **pv** `clearanceM: 10`; **load** (the data hall) no rule — it is what the others arrange around. `validateLibrary` refuses an id in `adjacentTo` or `from` the library does not define (except `'*'`), a negative or non-finite distance, and an unknown anchor or orientation. The packer's own numbers (gap 8 m, yard margin 12 m, shift step 4 m, reach 150 steps, the `between` tolerance 10 m and the facing tolerance 15°) are `PACKING` in the library, so `layout.ts` holds none; `templates.test.ts`'s guard (no type names, no colours, no module state in `layout.ts`) still holds.
+
+### The packer (`layout.ts`)
+
+Yards first, at their bus offset or placement. Then every unplaced object in three passes over the whole site: **anchored** objects — a `between` object at the midpoint of the segment from its owner yard's edge to its far yard's edge along their centre line, turned towards the far yard; several on one segment straddle it; when the far bus is not a member or the yards touch it falls back to its zone — then **neighbour-seeking** objects at the nearest free slot (one gap away, on any side, sliding along it) around a fixed object of a listed type that belongs to their bus, then the **rest** shelf-packed into their zones as in Phase 1. Overlap, clearance and keep-out are hard constraints against everything already standing (the pair requirement is symmetric: either object's rule naming the other counts); an object that would breach one is shifted outwards, smallest shift first (along its row, then away from the yard; across the segment for anchored objects), within a bounded reach; past it the object stays and is named in `SiteLayout.unresolved`. Placed objects are drawn verbatim and are obstacles. Rooftop PV is unchanged (the rooftop pass). Deterministic.
+
+**Arrange** writes the packed positions as placements, as before (the packed positions now follow the rules). **Arrange all** (new, after a confirm) rebuilds the layout with no placements and replaces every placement with it (`sitesStore.rearrangeAll`).
+
+Known limits, by design: `faceFar` faces the far bus, which for a transformer owned by its HV bus (PyPSA's `bus0` convention) is the LV bus; a transformer owned by its LV side faces the HV side. A `faceFar` object whose far bus is not a member faces north (no bearing is known). A BESS whose transformer connects to an off-site bus finds no fixed transformer when it looks (the transformer is zone-packed after it) and sits by the yard instead.
+
+### The check (`placementCheck.ts`), never a block
+
+`placementFindings(objects, library, { outside })` returns findings `{ key, kind, severity: 'warn' | 'info', message, other?, distanceM? }` with the message written for a user. Kinds: `outsideBoundary` (the fit check's keys; warn), `overlap` (warn), `keepOut` (warn; names the neighbour and the distance: "GEN is 10 m from HALL; it should keep 30 m away"), `clearance` (info), `notBetweenBuses` (info; a `between` object whose footprint is further than the tolerance from the line between its yards: "TR1 is 143 m from the line between the HV and MV yards; it should sit between its two buses"), `notFacingFar` (info; "TR1 faces 90° away from the MV yard; it should face it"). A pair is reported once, on the object whose rule it is; rooftop objects are exempt. `findingColor`: red for `outsideBoundary` and `keepOut`, amber for the rest.
+
+They show three ways, none of them blocking: the per-object emissive outline (red, then amber, under selection and hover — `emissiveFor` gains `warn`), the overlay's **Layout** section under the legend (count and list, collapsed when there are none, each line selecting its object, plus the packer's `unresolved` names), and a **Site layout** group in the Issues panel with the same View deep link as the preflight rows, fed by a small store (`placementFindingsStore`) the site view publishes to; the preflight counts and the sidebar badge are untouched. The user may leave an implausible layout and save it.
+
+### Still open from S2
+
+The owner check on the first real campus (a screenshot in the QA note) before the numbers are tuned; the rule numbers themselves (placeholders, sourced in the comments); the sidebar's Issues badge does not count layout findings.
