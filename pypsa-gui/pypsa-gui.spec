@@ -196,6 +196,7 @@ hiddenimports = [
     "gridspine.drivers.readback",
     "gridspine.drivers.capacity",
     "gridspine.drivers.connection",
+    "gridspine.drivers.campus_study",
     # `drivers.year_study` (check_external, increment 7) reached the guard on
     # master and missed this list; the guard test caught it at the merge.
     "gridspine.drivers.year_study",
