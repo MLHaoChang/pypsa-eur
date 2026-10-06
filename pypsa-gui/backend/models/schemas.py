@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictBool, field_validator
 
 from models.commercial import CommercialConfig
 
@@ -729,6 +729,28 @@ class ImportFolderRequest(BaseModel):
     apply: bool = False
 
 
+class ProjectSettings(BaseModel):
+    """
+    The per-project settings table of `metadata.json` (`settings`), read by
+    `services/project_settings.py`. Every field has a default so a pre-M2
+    metadata file (no `settings` key) is the default, not an error.
+    """
+
+    # Plan M2: when on, a bus drag, a route edit or an import rewrites the
+    # length of the affected Lines and Links from the map geometry (the route
+    # when one exists, else the chord) and offers the impedance rescale.
+    derive_lengths_from_geometry: bool = False
+
+
+class UpdateProjectSettingsRequest(BaseModel):
+    """
+    Body for PATCH /api/projects/{name}/settings. Partial, like the scenario
+    PATCH: only the keys present are written, read via `exclude_unset`.
+    """
+
+    derive_lengths_from_geometry: StrictBool | None = None
+
+
 class ProjectInfo(BaseModel):
     name: str
     # Stable project identifier. Populated with the DB-registry UUID (as a
@@ -779,6 +801,9 @@ class ProjectInfo(BaseModel):
     # 0006): the DTO carries the raw column and the client resolves the default,
     # so an old row and a row that chose the default look the same, as they are.
     project_kind: str | None = None
+    # Per-project settings from `metadata.json` (plan M2). Defaults when the
+    # project has never been saved or its metadata predates the table.
+    settings: ProjectSettings = Field(default_factory=ProjectSettings)
 
     @field_validator("parent_project", "scenario_description", "scenario_type", "project_kind", mode="before")
     @classmethod
