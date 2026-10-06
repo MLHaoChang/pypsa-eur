@@ -324,8 +324,14 @@ export interface FlushMapLayoutResult {
 /**
  * Force the pending write for `project` now. After a Save-As the caller
  * passes `previousProject` (the name the edits were made under): the
- * pending document is re-homed to the new name and PUT there — the twin of
+ * document is re-homed to the new name and PUT there — the twin of
  * `flushPendingLayoutToServer` chasing the `__local__` slot.
+ *
+ * The re-home is not limited to a DIRTY document. The server copies no
+ * sidecar on a Save-As (`_carry_sidecars_on_move` moves `chat.jsonl` and
+ * copies `uploads/` only); `layout.json` follows because its memory cache
+ * is flushed whenever it holds anything, and routes loaded but untouched
+ * this session must follow the same way or the saved-as project loses them.
  */
 export async function flushPendingMapLayoutToServer(
   project: string | null,
@@ -337,14 +343,14 @@ export async function flushPendingMapLayoutToServer(
   let movedFromScratch = false
   if (!dirtyKey && opts.previousProject !== undefined && opts.previousProject !== project) {
     const pk = keyOf(opts.previousProject)
-    if (store.dirty[pk]) {
-      // Re-home: the new project owns a COPY of the edited document. The
-      // previous project's own pending write is left armed — a Save-a-Copy
+    const doc = store.docFor(opts.previousProject)
+    if (store.dirty[pk] || (store.loaded[pk] && !isEmptyDoc(doc))) {
+      // Re-home: the new project owns a COPY of the document. The previous
+      // project's own pending write (if any) is left armed — a Save-a-Copy
       // keeps the user on the original, and its edits must still reach it.
       // Only a scratch network (no project) is a MOVE: it has nowhere else
       // to go, and its localStorage slot must not resurrect on the next
       // scratch network.
-      const doc = store.docFor(opts.previousProject)
       movedFromScratch = opts.previousProject === null
       useMapLayoutStore.setState(s => {
         const dirty = { ...s.dirty, [k]: true as const }

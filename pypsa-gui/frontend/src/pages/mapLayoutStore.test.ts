@@ -178,6 +178,27 @@ describe('writes', () => {
     expect(putMapLayout.mock.calls.map(c => c[0]).sort()).toEqual(['p', 'p-copy'])
   })
 
+  it('after a Save-As an UNCHANGED document still follows to the new name, like layout.json\'s memory cache', async () => {
+    // Loaded in `beforeEach`, never edited: nothing is dirty, but the routes
+    // are part of the project and a Save-As must not drop them.
+    const r = await flushPendingMapLayoutToServer('p-saved-as', { previousProject: 'p' })
+    expect(r).toEqual({ status: 'server', routes: 1, bubbles: 1 })
+    expect(putMapLayout.mock.calls[0]).toEqual(['p-saved-as', doc()])
+    expect(useMapLayoutStore.getState().docFor('p-saved-as')).toEqual(doc())
+    // The original is untouched and owes the server nothing.
+    expect(useMapLayoutStore.getState().dirty['p']).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(MAP_LAYOUT_SAVE_DEBOUNCE_MS + 1)
+    expect(putMapLayout).toHaveBeenCalledTimes(1)
+  })
+
+  it('an unchanged EMPTY document has nothing to carry on a Save-As', async () => {
+    useMapLayoutStore.getState().resetForTests()
+    getMapLayout.mockResolvedValue(emptyMapLayoutDocument())
+    await useMapLayoutStore.getState().ensureLoaded('p')
+    expect(await flushPendingMapLayoutToServer('p-saved-as', { previousProject: 'p' })).toEqual({ status: 'nothing', routes: 0, bubbles: 0 })
+    expect(putMapLayout).not.toHaveBeenCalled()
+  })
+
   it('a scratch network\'s document MOVES to the first-saved project and its local slot is cleared', async () => {
     useMapLayoutStore.getState().resetForTests()
     useMapLayoutStore.getState().setRouteWaypoints(null, 'line:L1', [[1, 1]])
