@@ -219,3 +219,23 @@ def test_billing_and_cfe_score_without_a_commercial_config(golden):
                  label="billing")
     _assert_seam(R.get_cfe_score(), compute_cfe_score(golden, _cfg(), result_df=R._result_df),
                  label="cfe_score")
+
+
+def test_value_flows_without_a_commercial_config(golden):
+    """P3 WP3.4: no commercial config — 204 / None on both sides."""
+    from services.results.value_flows import compute_value_flows
+
+    _assert_seam(R.get_value_flows(),
+                 compute_value_flows(golden, _cfg(), result_df=R._result_df),
+                 label="value_flows")
+
+
+def test_investment_case_report_before_a_run(golden):
+    """IC P4 WP4.6b: no run yet — the route and `ic_report_http_payload` both
+    say so (204 / None). The after-a-run view is in
+    tests/test_investment_case_routes.py."""
+    from services.finance.report import ic_report_http_payload
+
+    body, status = ic_report_http_payload(sim_router._state)
+    assert status == 204
+    _assert_seam(R.get_investment_case_report(), body, label="investment_case_report")

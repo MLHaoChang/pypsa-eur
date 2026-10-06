@@ -64,7 +64,9 @@ describe('tagging tour prepare (obstacle 3)', () => {
     renderPanel(new QueryClient({ defaultOptions: { queries: { retry: false } } }))
     await user.click(screen.getByTestId('eh-reference-design-toggle'))
     await user.click(screen.getByTestId('eh-tagging-guide-button'))
-    await waitFor(() => expect(useUIStore.getState().propertiesEditRequest).toBe('Bus'))
+    // P30 (B10): the request names the bus prepare selected.
+    await waitFor(() => expect(useUIStore.getState().propertiesEditRequest)
+      .toEqual({ type: 'Bus', name: 'grid' }))
     const s = useUIStore.getState()
     expect(s.activeSlidePanel).toBeNull()
     expect(s.selectedComponent).toEqual({ type: 'Bus', name: 'grid' })

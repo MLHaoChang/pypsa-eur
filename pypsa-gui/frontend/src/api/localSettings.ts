@@ -42,6 +42,8 @@ export interface LocalSettingsState {
    */
   key_redactable: boolean | null
   log_path: string
+  /** P30 (B6): the directory a new project is saved in (`<root>/<name>/`). */
+  projects_root: string
 }
 
 export interface PutKeyResponse extends LocalSettingsState {
