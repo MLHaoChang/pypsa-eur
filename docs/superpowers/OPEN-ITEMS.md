@@ -185,7 +185,14 @@ the current network.
 study record and read as `edited_since_study` on `/eh_study` and `/eh_review`;
 both surfaces say "edited since", which is all the signal carries. Plan:
 `plans/2026-09-28-guided-mode-deferred.md` §"P33b plan (2026-10-06)". Owner
-decisions D-2 / D-3 / D-4 are listed in the spec's §8.
+decisions D-1 … D-5 were decided 2026-10-06 and are recorded in the spec's §8.
+
+**Amended 2026-10-06** after the spec review
+(`qa/2026-10-06-guided-p33b-spec-review.md`): the chat predicate also covers
+the five `_SERVICE_CALL` tools that write the live network (B-1); the P33b undo
+claims build on a new step 0 (see 10a and item 12); the greeting's
+solved-since arm now sits above the dispatch-stale arm for a finished hub
+study, an owner-approved change from O1 (D-3).
 
 ### 10c. Two narrow project-lock races have correct guards but no test
 
@@ -216,6 +223,37 @@ resident; undo captures and restores finished records; and (owner decision
 D-1) persist the finished EH record with the project, compared against the
 P33b counter on restore so a study from before a later saved edit reads as
 edited.
+
+**Amended 2026-10-06** (spec review B-2, owner decision D-5): under session
+routing an HTTP undo re-imports into a ctx that `_publish_active`
+(`services/pypsa_service.py:287-298`) files under `scratch:<session>` and
+`set_binding` never re-keys, so the next request reads the **pre-undo** ctx
+from the project's `org:uuid` slot (`services/active_project.py:103`).
+Reproduced on `bb8b2e7b8`: `PUT` x → x+2.5, undo 200, `GET` still x+2.5.
+Saved-snapshot restore (`routers/snapshots.py:681-695`) has the same defect.
+P33b step 0 (spec §0a) adds `rekey_context` at both sites with HTTP read-back
+tests; the undo-keeps-the-record rule above is only meaningful on top of it.
+
+### 12. `/api/io/import/*` under a session pointer imports into a context the next request never reads
+
+Added 2026-10-06, found while scoping P33b step 0 (spec §0a). The four io
+imports (`routers/io.py:191` `_reset_with_ts_clear` → `reset_network`) run
+inside a session-bound request, so the fresh **unbound** ctx they import into
+lands in `scratch:<session>`; unlike `POST /api/network/reset`
+(`routers/network.py:633-635`) they never clear the session's active-project
+pointer, so `resolve_for_session` hands the next request the project's
+resident ctx again. Reproduced on `bb8b2e7b8` with the suite's fixtures: with
+a 1-bus project active, `POST /api/io/import/netcdf` of a 7-bus file returns
+200 `{"buses": 7, …}` and the next `GET /api/network/buses` returns 1 bus; the
+registry holds `org:uuid → (project, 1 bus)` and `scratch:<session> → (None,
+7 buses)`. The user sees an import that appears not to happen. The fix is the
+"New" rule (clear the pointer, as `/api/network/reset` does), not P33b's
+re-keying, so it is outside step 0. Related and not lossy: `import_bundle`
+(`routers/projects.py:1083`) and `create_from_template` (`:1402`) bind the new
+ctx and move the pointer but never register it, so the next request hydrates a
+second copy from the files the handler just wrote; the scratch copy is
+orphaned. Severity: High (a write that is silently not read back). Server
+only.
 
 ## Verification / CI
 
