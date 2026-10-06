@@ -26,6 +26,7 @@ import SolveQueuePanel from './pages/SolveQueuePanel'
 import GridspinePanel from './pages/GridspinePanel'
 import DecisionPanel from './pages/decision/DecisionPanel'
 import ReportsPanel from './pages/ReportsPanel'
+import CampusElectricalPanel from './pages/CampusElectricalPanel'
 import { recoveryFor } from './utils/autoRecovery'
 import LocalSettings from './pages/LocalSettings'
 import HubDesignPanel from './pages/hubDesign/HubDesignPanel'
@@ -115,9 +116,10 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   issues:     { eyebrow: 'SIMULATION', title: 'Issues' },
   results:    { eyebrow: 'SIMULATION', title: 'Results' },
   solveQueue: { eyebrow: 'SIMULATION', title: 'Solve queue' },
-  gridspine:  { eyebrow: 'SIMULATION', title: 'Planning → dynamics' },
-  decision:   { eyebrow: 'STUDY',      title: 'Decision study' },
-  reports:    { eyebrow: 'SIMULATION', title: 'Reports' },
+  gridspine:  { eyebrow: 'STUDIES',    title: 'Planning → dynamics' },
+  reports:    { eyebrow: 'STUDIES',    title: 'Reports' },
+  campusElectrical: { eyebrow: 'STUDIES', title: 'Campus electrical' },
+  decision:   { eyebrow: 'STUDIES',    title: 'Decision study' },
   workspace:  { eyebrow: 'PROJECT',    title: 'Workspace' },
   settings:   { eyebrow: 'APPLICATION', title: 'Settings' },
   hubDesign:  { eyebrow: 'GUIDED',     title: 'Hub design' },
@@ -126,7 +128,7 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
 // Tabs that take the whole main area (canvas hidden) rather than opening as a
 // half-width panel beside the canvas — their charts, tables, and two-column
 // layouts need the full width.
-const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine', 'reports', 'hubDesign', 'decision'])
+const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine', 'reports', 'hubDesign', 'campusElectrical', 'decision'])
 
 function fullPageContent(panel: SlidePanel): React.ReactNode {
   switch (panel) {
@@ -148,6 +150,7 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'gridspine':  return <GridspinePanel />
     case 'decision':   return <DecisionPanel />
     case 'reports':    return <ReportsPanel />
+    case 'campusElectrical': return <CampusElectricalPanel />
     case 'settings':   return <LocalSettings />
     case 'hubDesign':  return <HubDesignPanel />
     default:           return null

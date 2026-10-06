@@ -188,6 +188,9 @@ def test_names_are_canonical_unique_and_keep_the_project_name():
     assert all(len(nm) <= 12 for nm in names)
     assert {s["pypsa_name"] for s in c["transformers"].values()} == {"grid_import", "site_transformer"}
     assert short_names(["site_transformer", "site_transformer_2"]) == ["SITE_TRANSFO", "SITE_TRANS_2"]
+    # a cut that ends on a separator does not keep it
+    assert short_names(["Data Center Energy Hub"]) == ["DATA_CENTER"]
+    assert short_names(["Data Center Energy Hub", "Data Center Energy Hub"]) == ["DATA_CENTER", "DATA_CENTE_2"]
 
 
 def test_the_draft_round_trips_through_yaml(tmp_path):

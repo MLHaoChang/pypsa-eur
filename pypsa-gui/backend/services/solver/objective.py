@@ -19,6 +19,26 @@ import pypsa  # noqa: F401 — resolves the `"pypsa.Network"` annotations below
 from services.solver.runtime import ValidationRefused, _safe_log
 
 
+def budget_coefficient(n, comp_class: str, name: str, discount_rate: float) -> tuple[float | None, bool]:
+    """
+    Upfront EUR per unit of capacity for the capex budget, and whether it was back-calculated from an
+    annualised `capital_cost`. Runs inside the solve-time fill, where `capital_cost` has been scaled to the
+    modelled horizon, so a back-calculated value is unscaled first.
+    """
+    from services.asset_schema.access import upfront_parts
+    from services.solver.periodized_costs import fom_horizon_factor, fom_is_scaled
+
+    parts = upfront_parts(n, comp_class, name, discount_rate=discount_rate)
+    if not parts:
+        return None, False
+    total = sum(p.upfront_per_unit for p in parts)
+    derived = any(p.derived_from_capital_cost for p in parts)
+    if derived and fom_is_scaled(n):
+        factor = fom_horizon_factor(n)
+        total = total / factor if factor else total
+    return total, derived
+
+
 def _wrap_with_capex_budget(network: "pypsa.Network", user_fn, cfg, log_queue=None):
     """
     Compose the extra_functionality callback with a per-period CAPEX
@@ -118,20 +138,17 @@ def _wrap_with_capex_budget(network: "pypsa.Network", user_fn, cfg, log_queue=No
                 if var_name not in n.model.variables:
                     continue
                 p_nom_var = n.model.variables[var_name]
-                # Effective per-MW cost: overnight_cost first, fall back to
-                # capital_cost when overnight_cost is missing. Both are
-                # in EUR per MW (overnight_cost is upfront, capital_cost is
-                # annualised — for a budget cap we want upfront, but this is
-                # a defensive fallback for incomplete data).
+                # Upfront EUR per unit of capacity (asset_schema.access): a
+                # battery's parts, a typed overnight_cost, or an annualised
+                # capital_cost back-calculated to upfront and logged. Never an
+                # annualised figure used as if it were upfront.
                 for name in df.index[mask]:
-                    oc = df.at[name, "overnight_cost"] if "overnight_cost" in df.columns else float("nan")
-                    cc = df.at[name, "capital_cost"] if "capital_cost" in df.columns else float("nan")
-                    try:
-                        coef = float(oc) if (oc is not None and math.isfinite(float(oc)) and float(oc) > 0) else float(cc or 0.0)
-                    except (TypeError, ValueError):
-                        coef = 0.0
-                    if coef <= 0 or not math.isfinite(coef):
+                    coef, derived = budget_coefficient(n, comp_class, name, cfg.discount_rate)
+                    if coef is None or coef <= 0 or not math.isfinite(coef):
                         continue
+                    if derived:
+                        _emit(f"Period {period}: {comp_class} '{name}' has no upfront cost; its "
+                              f"annualised capital_cost was converted to upfront for the budget.")
                     p_nom_existing = float(df.at[name, pnom] or 0.0)
                     terms.append((name, coef, p_nom_var.sel(name=name), p_nom_existing))
             if not terms:

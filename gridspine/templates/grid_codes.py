@@ -9,6 +9,10 @@ engineering choice the code leaves open. The same rule as the unit templates
 applies: a report must be able to say which rule it applied and how sure that
 rule is, so a limit without a clause or tag is refused at load, not defaulted.
 
+A profile may carry one optional key, ``campus_voltage``: a design band
+(``v_min``, ``v_max``, clause, tag) for the buses inside the campus. Without
+it a study holds those buses to the ``voltage_bands``.
+
 yaml/pandas only, like the rest of ``templates/``; never the unsafe full
 ``yaml.load``.
 """
@@ -64,6 +68,8 @@ def _check_profile(name, p):
             )
         if not b["kv_min"] < b["kv_max"]:
             raise ContractError(f"{where}: voltage_bands[{i}] kv_min must be below kv_max")
+    if "campus_voltage" in p:
+        _check_campus_voltage(p["campus_voltage"], where)
     ordered = sorted(bands, key=lambda b: b["kv_min"])
     for a, b in zip(ordered, ordered[1:]):
         if b["kv_min"] < a["kv_max"]:
@@ -71,6 +77,17 @@ def _check_profile(name, p):
                 f"{where}: voltage bands overlap ({a['kv_min']}-{a['kv_max']} kV and "
                 f"{b['kv_min']}-{b['kv_max']} kV)"
             )
+
+
+def _check_campus_voltage(cv, where):
+    _check_limit("campus_voltage", cv, where)
+    for key in ("v_min", "v_max"):
+        if not _is_number(cv.get(key)):
+            raise ContractError(f"{where}: campus_voltage.{key} must be a number")
+    if not 0 < cv["v_min"] < cv["v_max"]:
+        raise ContractError(
+            f"{where}: campus_voltage needs 0 < v_min < v_max, got v_min={cv['v_min']} v_max={cv['v_max']}"
+        )
 
 
 def load_grid_code(name: str, path=None, raw: bool = False) -> dict:

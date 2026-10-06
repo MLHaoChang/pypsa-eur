@@ -14,6 +14,10 @@ GET     /api/auth/me                                             -> me_api_auth_
 GET     /api/auth/org-members                                    -> org_members_api_auth_org_members_get
 POST    /api/auth/reset-password                                 -> reset_password_api_auth_reset_password_post
 POST    /api/auth/set-password                                   -> set_password_api_auth_set_password_post
+GET     /api/campus-electrical/{name}                            -> get_state_api_campus_electrical__name__get
+PUT     /api/campus-electrical/{name}/campus                     -> save_campus_api_campus_electrical__name__campus_put
+POST    /api/campus-electrical/{name}/draft                      -> draft_api_campus_electrical__name__draft_post
+POST    /api/campus-electrical/{name}/run                        -> run_api_campus_electrical__name__run_post
 DELETE  /api/changelog/                                          -> clear_changelog_api_changelog__delete
 GET     /api/changelog/                                          -> get_changelog_api_changelog__get
 GET     /api/chat/export                                         -> chat_export_api_chat_export_get
