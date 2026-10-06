@@ -487,6 +487,11 @@ ENGINE_PATHS: Mapping[str, str | None] = MappingProxyType({
     "export_cap_mw": "commercial.connection.export_cap_mw",
 })
 
+# Rows 21-34's source until IC's pack carries the rules (Q7; gate U2-S1 C4),
+# and the year the U2 sub-plan stated them.
+GUIDED_RULE_SOURCE = "guided study (pending pack rule, Q7)"
+GUIDED_RULES_YEAR = 2026
+
 # A descriptor row: no number, a rule the pack states (`apply_user_row`
 # refuses it, as it refuses the tariff descriptor).
 RULE_DESCRIPTOR = "rule_descriptor"
@@ -672,14 +677,13 @@ def _engine_rows(intake: Mapping[str, Any], tariff: Tariff, tariff_provenance: s
                  library: Library) -> list[dict[str, Any]]:
     """
     Plan §1.2 rows 21-34: what a minimal single-owner finance case needs and
-    GS had no row for, each from a pack rule (`provenance=library`, the rule
-    as `source`, `status=default`) with its `engine_path`. Non-numeric rules
+    GS had no row for, each a guided-study rule (`provenance=library`,
+    `status=default`, source :data:`GUIDED_RULE_SOURCE` until the pack
+    carries the rules, Q7; the rule id in `help`) with its `engine_path`. Non-numeric rules
     are descriptors (value null, `rule_descriptor`) so the report's
     assumptions appendix still lists them.
     """
     fin = library.finance
-    stamp = fin.get("pack_stamp", library.version)
-    source_year = int(library.pack.version[:4]) if library.pack is not None else None
     site = intake.get("site") if isinstance(intake, Mapping) else None
     try:
         year = int((site or {}).get("year", 2025))
@@ -689,9 +693,17 @@ def _engine_rows(intake: Mapping[str, Any], tariff: Tariff, tariff_provenance: s
 
     def row(key, label, value, unit, rule, *, domain=None, help_=None, currency_year=None,
             source=None):
+        # Gate U2-S1 C4: the pack carries none of these rules (Q7), so they are
+        # the guided study's own and are never attributed to the pack; the rule
+        # id stays in the help. A row from the tariff cites the tariff.
+        if source is None:
+            source, year_of_source = GUIDED_RULE_SOURCE, GUIDED_RULES_YEAR
+            help_ = " ".join(x for x in (help_, f"Guided-study rule {rule}.") if x)
+        else:
+            year_of_source = tariff.source_year
         r: dict[str, Any] = dict(
             key=key, label=label, technical_name=ENGINE_PATHS[key], value=value, unit=unit,
-            source=source or f"{rule} ({stamp})", source_year=source_year,
+            source=source, source_year=year_of_source,
             currency_year=currency_year, domain=domain, help=help_)
         if value is None:
             r["unavailable"] = {"value": RULE_DESCRIPTOR}
@@ -722,7 +734,7 @@ def _engine_rows(intake: Mapping[str, Any], tariff: Tariff, tariff_provenance: s
             "guided.salvage.annuity_pv_remaining_life"),
         row("pv_degradation_pct_per_year", "Solar PV degradation (not modelled)", 0.0,
             "%/year", "guided.degradation.none", domain=LedgerDomain.parse("[0, 100]"),
-            help_="mvp_basis_no_degradation"),
+            help_="Degradation is not modelled (mvp_basis_no_degradation)."),
         row("tax_pack", "Tax pack: off (pre-tax basis)", None, "rule",
             "guided.basis.pre_tax" if basis.get("tax") == "pre" else "guided.basis.post_tax"),
         row("incentives_rule", "Incentives: none (excluding subsidies)", None, "rule",

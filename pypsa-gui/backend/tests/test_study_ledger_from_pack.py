@@ -118,7 +118,18 @@ def test_rows_21_to_34_follow_with_engine_paths_and_the_pack_rule_as_provenance(
                ("tariff", "export", "opex", "capex", "fuel", "ppa"))
     assert rows["escalation_tariff"].engine_path == "finance.escalation.tariff"
     assert rows["pv_degradation_pct_per_year"].value == 0.0
-    assert rows["salvage_rule"].source.startswith("guided.salvage.")
+    # Gate U2-S1 C4: the pack carries none of these rules (Q7), so they are the
+    # guided study's own, never attributed to the pack; the rule id is kept.
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    stamp = load_defaults_pack().stamp
+    for key in ROWS_21_34:
+        if key == "export_series":
+            continue                                   # the tariff's own source
+        assert rows[key].source == "guided study (pending pack rule, Q7)", key
+        assert stamp not in rows[key].source and "generic_defaults" not in rows[key].source
+    assert "guided.salvage.annuity_pv_remaining_life" in rows["salvage_rule"].help
+    assert rows["export_series"].source.startswith("Tariff ")
     assert rows["export_series"].engine_path == "commercial.export_price_ref"
     for key in DESCRIPTORS:
         assert rows[key].value is None and rows[key].unavailable == {"value": "rule_descriptor"}
