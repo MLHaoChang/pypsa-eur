@@ -268,6 +268,34 @@ def band_for(profile: dict, kv: float) -> dict:
     )
 
 
+def uncovered_kv_ranges(profile: dict) -> list:
+    """The nominal voltages from 0 kV up to the profile's highest band that no
+    band covers, as ``[(kv_from, kv_to, from_inclusive), ...]`` in ascending
+    order. A range is ``[kv_from, kv_to)`` when ``from_inclusive`` and
+    ``(kv_from, kv_to)`` when not. It never extends past the highest
+    ``kv_max``, so a profile is not asked for bands above its top one.
+
+    This follows ``band_for``'s rules: ``kv_min`` is inclusive and ``kv_max``
+    exclusive unless ``kv_max_inclusive``. A gap always ends where a band
+    starts, and that band covers its own ``kv_min``, so the end is exclusive.
+    It reads the bands as they are and does not validate them; a profile with
+    no bands has no top and so no ranges. The campus study looks a band up for
+    every bus inside the campus, so a gap there fails the run; the backend
+    checks this where a profile is published, since a partial profile is
+    legitimate for the engine's own tests.
+    """
+    bands = profile.get("voltage_bands") or []
+    reach, reach_covered = 0.0, False      # voltages below `reach` are covered; `reach` itself iff reach_covered
+    gaps = []
+    for b in sorted(bands, key=lambda b: b["kv_min"]):
+        if b["kv_min"] > reach:
+            gaps.append((float(reach), float(b["kv_min"]), not reach_covered))
+        top, top_covered = b["kv_max"], bool(b.get("kv_max_inclusive"))
+        if top > reach or (top == reach and top_covered):
+            reach, reach_covered = top, top_covered
+    return gaps
+
+
 def list_grid_codes(path=None, extra_dirs=()) -> dict:
     """``{profile name: title}`` of every shipped profile, then every project
     profile in ``extra_dirs``. This is what a study chooses from."""

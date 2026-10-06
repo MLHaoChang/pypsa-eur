@@ -76,7 +76,8 @@ A study may be held to a project's own grid-code profile (plan C10): one
 YAML file per profile in a directory, passed as ``extra_dirs`` to
 ``grid_code_profiles`` and as ``profile_dirs`` to ``size_campus``. The
 grid-code functions the backend needs for its drafts (``validate_profile``,
-``confirm_limit``, ``unconfirmed``, ``load_grid_code``, ``PROFILE_ID``) are
+``confirm_limit``, ``unconfirmed``, ``uncovered_kv_ranges``, ``load_grid_code``,
+``PROFILE_ID``) are
 re-exported here for the same reason.
 
 Everything is validated before anything is written: the campus is built,
@@ -110,6 +111,7 @@ from gridspine.templates.grid_codes import (  # noqa: F401  (re-exported: the ba
     confirm_limit,
     list_grid_codes,
     load_grid_code,
+    uncovered_kv_ranges,
     unconfirmed,
     validate_profile,
 )

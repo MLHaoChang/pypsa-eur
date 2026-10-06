@@ -417,7 +417,9 @@ function DraftReview({ name, id, onDraft, onPublished, onDelete }: {
             const lim = limitAt(draft.profile, path)
             if (!lim) return null
             const check = review?.limits[path]
-            const notStated = filled.has(path.split('[')[0])
+            // `voltage_bands` (the model returned none) marks every band; `voltage_bands[i]`
+            // (a gap the extraction filled) marks that band only.
+            const notStated = filled.has(path) || filled.has(path.split('[')[0])
             return (
               <tr key={path} data-testid={`limit-${path}`} className="border-t border-border first:border-0 align-top">
                 <td className="py-2 pr-3 whitespace-nowrap">
@@ -437,8 +439,13 @@ function DraftReview({ name, id, onDraft, onPublished, onDelete }: {
                       {lim.page != null && <span className="text-muted"> — page {lim.page}</span>}
                     </blockquote>
                   )}
-                  {check?.quote_found === false && (
-                    <div className="text-[11px] text-danger mt-1">Quote not found on its page. Check it against the document before confirming.</div>
+                  {check?.quote_found === false && typeof check.found_on_page === 'number' && (
+                    <div className="text-[11px] text-danger mt-1">
+                      Quote found on page {check.found_on_page}, not on page {lim.page} (as stated). Check it against the document before confirming.
+                    </div>
+                  )}
+                  {check?.quote_found === false && typeof check.found_on_page !== 'number' && (
+                    <div className="text-[11px] text-danger mt-1">Quote not found in the document. Check it against the document before confirming.</div>
                   )}
                   {check?.quote_found === null && (
                     <div className="text-[11px] text-muted mt-1">The document is no longer in the project, so the quote was not checked.</div>
