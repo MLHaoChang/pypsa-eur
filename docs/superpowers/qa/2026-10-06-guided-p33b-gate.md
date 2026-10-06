@@ -193,3 +193,115 @@ The implementer's own log (`scratchpad/p33b/mutations.log`) shows 47/47 killed. 
 
 1. **B-1:** a cross-project swap (load, template, import, restore of another project) must not share `_UndoState` with the context it replaces. Add red tests for local-mode template and the sessions template / load / restore sequences (`qa33b/test_qa_bleed*.py` are ready-made).
 2. S-1 … S-4 are recommended in the same pass. S-3 is required by the row-4s rule.
+
+---
+
+## Re-gate (2026-10-06, HEAD `1b6be6311`)
+
+**Scope:** `git diff 0e282f652..1b6be6311`. Commit `9f34e0e81` holds the fixes, the tests and the spec §1.3 N-2 correction. Commit `1b6be6311` holds the changed assertion in `test_undo_per_project.py` and the "P33b gate fixes" phase-note paragraph.
+
+**Method:**
+- Probes and mutants ran in scratch worktrees `qa33b/wt2` (HEAD) and `qa33b/wtb2` (`240b2a00e`). Both are removed now.
+- Mutation runner: `qa33b/qamut2.py`, log `qa33b/qamut2.log`.
+- Row 1 was not run, as the coordinator asked (the coordinator is running it).
+- The coordinator's full suite was running alongside. Every timing failure got a quiet rerun.
+
+### Verdict: **GO**
+
+B-1 is fixed and pinned, in memory and on disk. S-1, S-3, S-4 and N-3 are fixed and pinned. S-2's three surviving mutants now die. The N-2 correction is acceptable.
+
+One new should-fix remains: **RS-1**, a test gap. It is not a defect, and it does not hold the gate.
+
+### 1. The QA probes against HEAD
+
+| Probe | Before (`5ea5d05ff`) | HEAD |
+|---|---|---|
+| `test_qa_bleed_local.py` (local mode, template) | A became B, also on disk | depth 0 on A (pass) |
+| `test_qa_bleed.py` (sessions: template / load / another project's restore) | A became B on all three | depth 0 on all three (pass) |
+| `test_qa_restore_collision.py` (S-1) | `/eh_study` 200, `edited_since_study: false` | `/eh_study` **204**, `/eh_review` 204 (pass) |
+| `test_qa_cap.py` (N-3, cap 3) | 2 resident after 3 creates, `cap-0` evicted early | 3 resident; the first eviction comes at the 4th create (pass) |
+
+`tests/test_project_switch_isolation.py` covers every one of these cases, plus bundle import. Its `_assert_no_bleed` checks:
+- depth 0 on A;
+- undo returns 409;
+- A is unchanged in memory;
+- after a save, `_drop_resident` and a cold `activate`, A's files still hold A's network.
+
+The cold step is the on-disk half of my original repro. The S-1 sequence is now `test_a_snapshot_without_results_does_not_bring_back_a_later_study`.
+
+### 2. Carry-mode audit (each caller of `reset_network`)
+
+| Caller | Mode | Verdict |
+|---|---|---|
+| `network_undo.apply_undo` | `same` | right: an in-place replace of the same project. It shares the stack (the popped entry is gone, the rest stay) and keeps the counter, which B1 then bumps |
+| `io._reset_with_ts_clear` (`/api/io/import/*`) | `copy` | right. The middleware's pre-import capture and the earlier history stay undoable in the new workspace, and the context being left keeps its own stack untouched. Undoing past the import walks back through the previous workspace's history into an unbound draft. That is the pre-existing semantics, and nothing is written to the project's files (the session pointer, OPEN-ITEMS 12, is unchanged) |
+| `load_project`, `create_from_template`, `import_bundle`, `restore_snapshot`, `POST /api/network/reset`, the load refusal branch | `fresh` | right. Each route re-reads its own counter and result state (`_restore_results_state` / hydrate), or has none (template, New) |
+
+"New" was never undoable: the route has always cleared undo after the swap. Before the fix that clear emptied the **shared** stack, so "New" also wiped the project being left. Probe `test_new_then_back`: base gives A depth 0 and `unsaved: false`; HEAD gives A depth 1 and `unsaved: true`.
+
+The moved clears (`undo_service.clear()` / `dirty_state.clear()` now run after the swap, inside the lock) act only on the new context:
+- that context starts with an empty `_UndoState`;
+- its `results_unsaved` defaults to false;
+- load, import and restore then restore their own result state afterwards;
+- so they drop nothing the new project legitimately owns.
+
+The project being left now keeps its state. Probe `test_load_other_keeps_left_state`: base gives A depth 0 and `unsaved: false` (so a resident A with unsaved edits read **clean**); HEAD gives depth 1 and `unsaved: true`.
+
+**Re-loading the project you are on** (`test_reload_same_project`) behaves identically on base and HEAD, so this is not a regression of this phase. The load reads the disk (x = 0), and the undo stack is empty. `register` then writes the displaced in-memory context, which holds the unsaved edit (x = 1), back to disk, so memory and disk disagree afterwards. This is pre-existing (the implementer's "rejected fix" in deviation 1 names the same mechanism) and is recorded as **RN-1** for a follow-up.
+
+### 3. S-1 … S-4, N-3 and the surviving mutants
+
+- **S-1:** the snapshot without a pkl now deletes the project's later pkl (`routers/snapshots.py`). The pre-restore safety snapshot keeps that file. Pinned (G6 killed).
+- **S-2:** Q2a is killed by `test_an_io_import_is_an_edit`, Q3a by `test_a_counter_below_the_captured_one_reads_edited`, and Q4a by `test_the_revision_survives_save_and_reload` (cross-project now).
+- **S-3:** the hook file passed 10 / 10 isolated runs. The project-switch mutant (`before.project !== project` dropped) is killed 3 / 3, and F5a (only an increasing revision fires) is now killed.
+- **S-4:** a `fresh` swap starts the counter at 0, and the template writes `network_revision` into `metadata.json`. G4 and G8 are killed.
+- **N-3:** re-key before register. G7 is killed by `test_template_create_does_not_evict_early`.
+
+### 4. The N-2 spec correction
+
+Acceptable. Spec §1.3 now states the chat-seam under-report: the window, its precondition (an HTTP-started study during a chat edit), and why it is left open. A second bump would make every chat edit +2 and would still miss a timed-out orphan. The phase note lists it under known limitations. This is the honest form of the claim; a fix is not required for this phase.
+
+### 5. Rows
+
+| # | Command (cwd) | Result |
+|---|---|---|
+| 1 | not run (the coordinator is running it: `scratchpad/p33b/row1-final.log`) | — |
+| 2 | row-2 command + `tests/test_project_switch_isolation.py tests/test_undo_per_project.py` (`pypsa-gui/backend`, `1b6be6311`; list in `qa33b/row2r.files`) | **1275 passed, 17 skipped**; `--collect-only` 1292 (`qa33b/row2r.log`) |
+| 3 | `npx tsc --noEmit -p .` (`pypsa-gui/frontend`) | 0 errors |
+| 4 | `npx vitest run` (`pypsa-gui/frontend`) | 3257 / 3264 under load. The 7 failures are all `src/layout/BottomPanel.test.tsx` 5 s timeouts (that file is untouched); its quiet rerun is **79 / 79**. The implementer's `row4g.log`: 3264 passed |
+| 4s | the four suites ×3 (`pypsa-gui/frontend`) | **3 / 3 green**, 226 each (`qa33b/row4sr-*.log`); the hook file alone 10 / 10 |
+| 5 | `--phase P33b --out qa33b/smoke-p33b-r` (`pypsa-gui/frontend`) | **PASS**, 47 screenshots. (C0) done, no re-run; (C3) both surfaces 2.0 s after the edit; (C4) rev0 + 2; (E2) done + edited after the restart. In `42-p33b-c3-edited-greeting-and-card.png` the greeting and the card agree, with one banner |
+| 7 | no frontend `src` product change in the fixes (only the hook test) | unchanged (11) |
+
+### 6. Mutants on the fixes (`qa33b/qamut2.log`)
+
+| Id | Fix | Mutant | Result |
+|---|---|---|---|
+| G1 | B-1 | the `fresh` swap shares `prev.undo` | KILLED — `test_local_mode_template_switch_does_not_share_the_undo_stack` |
+| G2 | B-1 | `copy` mode shares `prev.undo` | KILLED — `test_an_io_import_copies_the_undo_stack_rather_than_sharing_it` |
+| G3 | B-1 | the `fresh` swap carries `RESULT_STATE_KEYS` | KILLED — `test_a_template_project_starts_with_no_results_and_a_zero_counter` |
+| G4 | S-4 | the `fresh` swap carries the counter | KILLED — same |
+| G5 | B-1 | `restore_snapshot` clears undo / dirty **before** the swap (on the project being left) | **SURVIVED** → RS-1 |
+| G5b | B-1 | `load_project` clears before the swap | **SURVIVED** → RS-1 |
+| G6 | S-1 | the restore keeps the later pkl | KILLED — `test_a_snapshot_without_results_does_not_bring_back_a_later_study` |
+| G7 | N-3 | register before rekey | KILLED — `test_template_create_does_not_evict_early` |
+| G8 | S-4 | template metadata without the counter | KILLED — `test_a_template_project_starts_with_no_results_and_a_zero_counter` |
+| G9 | B-1 | undo uses `fresh` | KILLED — `test_an_io_import_copies…` (the `-x` first failure; the undo tests depend on it too) |
+| G10 | B-1 | io import uses `same` | KILLED — `test_an_io_import_copies…` |
+| Q2a / Q3a / Q4a | S-2 | as in the first gate | all KILLED (see §3) |
+| H1 | S-3 | hook: a project switch counts as a transition | KILLED 3 / 3 |
+| F5a | S-3 | hook: only an increasing revision fires | KILLED |
+
+16 mutants: 14 killed, 2 survived.
+
+### Findings
+
+- **RS-1 (should-fix, test gap): the "project being left keeps its undo history and unsaved flag" rule is pinned for template create only.** `test_the_project_left_keeps_its_own_undo_history_and_unsaved_flag` uses two templates. Moving the clears back before the swap in `load_project` (G5b) or in `restore_snapshot` (G5) passes the whole suite. My probe shows what that mutant breaks: on the base, loading B from an A with unsaved edits left A reading **clean** with no undo history (`test_qa_regate.py::test_load_other_keeps_left_state`). HEAD is correct. Add the load and restore variants (`import_bundle` too) to that test.
+- **RN-1 (note, pre-existing, unchanged): re-loading the open project with unsaved edits leaves memory and disk disagreeing.** Memory holds the disk copy, while `register`'s displacement write-back puts the edited copy on disk. Identical on base and HEAD. It belongs in OPEN-ITEMS, not this phase.
+- **RN-2 (note):** "New" and an io import still get a middleware capture pushed onto the outgoing project's own stack, because the push runs before the swap. That entry restores that project's own pre-request network, so it is a valid but redundant undo step. Harmless.
+
+### What is left
+
+- Nothing blocks.
+- RS-1 is a test addition for the next commit.
+- RN-1 should be recorded in OPEN-ITEMS.
