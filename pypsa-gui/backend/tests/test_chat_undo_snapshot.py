@@ -20,6 +20,9 @@ import pytest
 
 import main
 from services import chat_service, chat_tools, undo_service
+# AUTO_APPROVE_TIERS lives in harness.confirm; patch it there, not via the
+# chat_service alias (tests/test_harness_layout.py's tripwire).
+from harness import confirm as harness_confirm
 from services.pypsa_service import PyPSAService
 from tests.test_chat_e2e import (
     FakeAnthropicClient, _FakeFinalMessage, _FakeUsage, _text_block,
@@ -35,7 +38,7 @@ def g1_at_100(tmp_projects_dir, install_network, monkeypatch):
     install_network(n)
     undo_service.clear()
     chat_service._reset_sessions_for_tests()
-    monkeypatch.setattr(chat_service, "AUTO_APPROVE_TIERS",
+    monkeypatch.setattr(harness_confirm, "AUTO_APPROVE_TIERS",
                         frozenset({"write", "destructive"}))
 
 
@@ -126,7 +129,7 @@ def test_a_read_tool_pushes_no_snapshot(g1_at_100):
 def test_an_unconfirmed_destructive_tool_pushes_no_snapshot(g1_at_100, monkeypatch):
     """Placement: after the confirmation gate, so a card nobody answers costs
     nothing — the same rule the dirty mark beside it follows."""
-    monkeypatch.setattr(chat_service, "AUTO_APPROVE_TIERS", frozenset())
+    monkeypatch.setattr(harness_confirm, "AUTO_APPROVE_TIERS", frozenset())
     gen = chat_service._dispatch_real_tool_call(
         chat_service.ChatSession(),
         {"id": "tu-del", "name": "delete_component",

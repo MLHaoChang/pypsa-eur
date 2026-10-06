@@ -203,6 +203,10 @@
       "surface": "inline",
       "why": "Most tools need a project; the model recovers by asking which one, in prose, inside the same turn. Promoting it would banner a question the assistant is already asking."
     },
+    "no_active_workflow": {
+      "surface": "inline",
+      "why": "advance_workflow was called with no workflow started on the session. The model reads the message and calls start_workflow within the turn (chat harness issue 06)."
+    },
     "no_commercial_config": {
       "surface": "inline",
       "why": "attach_tariff needs a commercial config with a poc_link first. The model sets it (update_solver_config) and retries within the turn."
@@ -435,6 +439,10 @@
       "surface": "inline",
       "why": "Raised by the chat route for a session id it does not hold. Route-only; a turn cannot be running under a session that does not exist."
     },
+    "unknown_skill": {
+      "surface": "inline",
+      "why": "use_skill named a skill that is not in harness/skills. The model reads the message (it lists nothing; the catalogue is in its instructions) and corrects within the turn (chat harness issue 05)."
+    },
     "unknown_step_kind": {
       "surface": "inline",
       "why": "An internal script/step vocabulary mismatch — a bug in the caller, not a user-actionable state, and never yielded at a tool_error site."
@@ -442,6 +450,14 @@
     "unknown_tool": {
       "surface": "inline",
       "why": "The model named a tool that does not exist. It sees the error and corrects within the turn, like invalid_tool_args."
+    },
+    "unknown_workflow": {
+      "surface": "inline",
+      "why": "start_workflow named a workflow that is not active in harness/workflows. The message lists the active ids; the model corrects within the turn (chat harness issue 06)."
+    },
+    "unknown_workflow_step": {
+      "surface": "inline",
+      "why": "advance_workflow named a step the active workflow does not have. The message lists the steps; the model corrects within the turn (chat harness issue 06)."
     },
     "unsupported_mime": {
       "surface": "banner",

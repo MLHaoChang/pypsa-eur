@@ -27,7 +27,7 @@ import yaml
 from gridspine.schema.contracts import ContractError
 from gridspine.static.connection import CHECKS, Facility, assess_connection
 from gridspine.static.contingency_set import branch_contingencies
-from gridspine.templates.grid_codes import band_for, load_grid_code
+from gridspine.templates.grid_codes import band_for, list_grid_codes, load_grid_code
 
 KV = 110.0
 
@@ -124,6 +124,57 @@ def test_an_incomplete_or_impossible_profile_is_refused(tmp_path, mutate, match)
 def test_an_unknown_profile_is_refused():
     with pytest.raises(ContractError, match="no_such"):
         load_grid_code("no_such")
+
+
+# --------------------------------------------------------------------------
+# the generic assumed profile and the optional campus_voltage band (C7)
+# --------------------------------------------------------------------------
+
+GENERIC = load_grid_code("generic_assumed")
+
+
+def test_the_generic_profile_is_every_limit_assumed_with_a_placeholder_clause():
+    for lim in [*GENERIC["voltage_bands"], GENERIC["q_range_demand"], GENERIC["rvc_limit_pct"],
+                GENERIC["campus_voltage"]]:
+        assert lim["source"] == "assumed"
+        assert "generic placeholder" in lim["clause"]
+    # tan(acos 0.95) = 0.3287, written to three decimals
+    assert GENERIC["q_range_demand"]["value"] == round(math.tan(math.acos(0.95)), 3) == 0.329
+    assert GENERIC["rvc_limit_pct"]["value"] == 3.0
+    assert (GENERIC["campus_voltage"]["v_min"], GENERIC["campus_voltage"]["v_max"]) == (0.95, 1.05)
+
+
+@pytest.mark.parametrize("kv", [0.4, 20.0, 110.0, 380.0, 765.0])
+def test_the_generic_band_applies_at_every_voltage(kv):
+    b = band_for(GENERIC, kv)
+    assert (b["v_min"], b["v_max"]) == (0.90, 1.10) and b["source"] == "assumed"
+
+
+def test_both_profiles_are_listed():
+    codes = list_grid_codes()
+    assert set(codes) == {"eu_rfg_dcc_ce", "generic_assumed"}
+    assert "generic" in codes["generic_assumed"].lower()
+
+
+def test_campus_voltage_is_optional_and_absent_from_the_eu_profile():
+    assert "campus_voltage" not in PROFILE
+
+
+@pytest.mark.parametrize("mutate, match", [
+    (lambda p: p["campus_voltage"].update(v_min=1.05), "campus_voltage"),
+    (lambda p: p["campus_voltage"].update(v_min=0.0), "campus_voltage"),
+    (lambda p: p["campus_voltage"].pop("v_max"), "campus_voltage.v_max"),
+    (lambda p: p["campus_voltage"].update(v_min="low"), "campus_voltage.v_min"),
+    (lambda p: p["campus_voltage"].pop("clause"), "campus_voltage has no clause"),
+    (lambda p: p["campus_voltage"].update(source="guessed"), "campus_voltage has unknown source"),
+    (lambda p: p["campus_voltage"].pop("source"), "campus_voltage has no source"),
+    (lambda p: p.update(campus_voltage=[0.95, 1.05]), "campus_voltage must be a mapping"),
+])
+def test_an_impossible_campus_voltage_band_is_refused(tmp_path, mutate, match):
+    profile = load_grid_code("generic_assumed", raw=True)
+    mutate(profile)
+    with pytest.raises(ContractError, match=match):
+        load_grid_code("p", path=_write_profiles(tmp_path, profile))
 
 
 # --------------------------------------------------------------------------

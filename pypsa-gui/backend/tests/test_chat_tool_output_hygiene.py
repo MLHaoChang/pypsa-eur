@@ -29,6 +29,9 @@ import pytest
 from openpyxl import load_workbook
 
 from services import chat_service, chat_tools, undo_service
+# AUTO_APPROVE_TIERS lives in harness.confirm; patch it there, not via the
+# chat_service alias (tests/test_harness_layout.py's tripwire).
+from harness import confirm as harness_confirm
 from services.pypsa_service import PyPSAService
 
 HYPERLINK = '=HYPERLINK("https://example.invalid","open")'
@@ -142,7 +145,7 @@ def test_a_tool_refused_by_a_live_study_costs_no_undo_step(
     n.add("Generator", "G1", bus="B1", p_nom=100.0)
     install_network(n)
     undo_service.clear()
-    monkeypatch.setattr(chat_service, "AUTO_APPROVE_TIERS",
+    monkeypatch.setattr(harness_confirm, "AUTO_APPROVE_TIERS",
                         frozenset({"write", "destructive"}))
     exported: list[int] = []
     from services import network_undo

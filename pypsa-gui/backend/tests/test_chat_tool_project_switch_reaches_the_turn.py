@@ -46,6 +46,9 @@ from fastapi.testclient import TestClient
 from starlette.responses import StreamingResponse
 
 from services import chat_service, chat_tools
+# AUTO_APPROVE_TIERS lives in harness.confirm; patch it there, not via the
+# chat_service alias (tests/test_harness_layout.py's tripwire).
+from harness import confirm as harness_confirm
 from services.pypsa_service import PyPSAService
 
 
@@ -54,7 +57,7 @@ def _no_confirmation_cards(monkeypatch):
     """The confirmation card is not under test, and an unanswered one for a
     destructive tool (`import_network_nc`) blocks for the full TTL and then
     never runs the tool at all."""
-    monkeypatch.setattr(chat_service, "AUTO_APPROVE_TIERS",
+    monkeypatch.setattr(harness_confirm, "AUTO_APPROVE_TIERS",
                         frozenset({"write", "destructive"}))
 
 

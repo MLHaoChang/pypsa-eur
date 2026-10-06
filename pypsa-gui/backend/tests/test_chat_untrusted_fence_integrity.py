@@ -21,6 +21,7 @@ it asserts `startswith(_UNTRUSTED_OPEN)` and `endswith(_UNTRUSTED_CLOSE)`, and
 BOTH still hold when the body has closed the fence in the middle. Counting is
 the assertion that bites; position is not.
 """
+from harness import fence as harness_fence
 from services import chat_service
 
 
@@ -284,13 +285,13 @@ def test_the_ui_context_path_clamps_before_it_neutralises(monkeypatch):
     passed a timing test while leaving the caller in control of the input size.
     """
     seen: list[int] = []
-    real = chat_service._neutralise_untrusted_delimiters
+    real = harness_fence._neutralise_untrusted_delimiters
 
     def recording(text):
         seen.append(len(text))
         return real(text)
 
-    monkeypatch.setattr(chat_service, "_neutralise_untrusted_delimiters", recording)
+    monkeypatch.setattr(harness_fence, "_neutralise_untrusted_delimiters", recording)
     chat_service._sanitise_ui_value(_pathological(_COST_HOSTILE_K))
 
     assert seen, "_sanitise_ui_value did not reach the neutraliser at all"

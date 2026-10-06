@@ -15,11 +15,11 @@ compare bodies did, so `routers.network` re-exports the identical objects and
 not one call site changes.
 
 The one hazard this file exists to pin is `_user_ts`. It is a module-level
-mutable dict that `services/chat_tools.py` imports BY VALUE inside a function
+mutable object that `services/chat_tools.py` imports BY VALUE inside a function
 body — and that module even carries the comment "only fails if routers/network
-refactor breaks paths". Re-exporting a dict is safe only while nothing rebinds
-it; `test_the_user_ts_store_is_never_rebound` checks that statically, in both
-the router and the service, so a future `_user_ts = {}` fails here rather than
+refactor breaks paths". Re-exporting it is safe only while nothing rebinds it;
+`test_the_user_ts_store_is_never_rebound` checks that statically, in both the
+router and the service, so a future `_user_ts = {}` fails here rather than
 silently splitting the store in two.
 """
 import ast
@@ -201,13 +201,22 @@ def test_the_crud_and_http_helpers_stay_in_the_router(name):
 def test_the_user_ts_store_is_never_rebound():
     """
     `services/chat_tools.py` does `from routers.network import _user_ts,
-    _user_ts_lock` inside a function and then mutates the dict. That works
-    across the re-export only because the store is MUTATED in place and never
-    reassigned — a single `_user_ts = {}` anywhere would leave the router
-    holding one dict and every by-value importer holding another.
+    _user_ts_lock` inside a function and then mutates it. That works across the
+    re-export only because the name is bound ONCE and never reassigned — a single
+    `_user_ts = {}` anywhere would leave the router holding one object and every
+    by-value importer holding another.
 
     chat_tools even guards its import with "only fails if routers/network
     refactor breaks paths". This is that check, made mechanical.
+
+    ★ WHAT THIS ASSERTS AND WHAT IT DOES NOT. It is about the NAME, not about the
+    storage. `_user_ts` is now `_ActiveUserTsStore()` — a view that resolves to
+    the ACTIVE project context's own dict on every operation — so the storage is
+    deliberately per-context and there is no longer one dict to split. The
+    single-binding rule is what keeps every by-value importer pointing at that
+    view instead of at a detached dict, so this check got MORE load-bearing, not
+    less, when the store moved onto the context
+    (`tests/test_user_ts_tenancy.py` covers the tenancy property itself).
     """
     backend = pathlib.Path(__file__).resolve().parent.parent
     targets = {"_user_ts", "_user_ts_lock"}

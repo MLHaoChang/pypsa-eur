@@ -32,6 +32,9 @@ import pypsa
 import pytest
 
 from services import chat_service, chat_tools
+# AUTO_APPROVE_TIERS lives in harness.confirm; patch it there, not via the
+# chat_service alias (tests/test_harness_layout.py's tripwire).
+from harness import confirm as harness_confirm
 from services.pypsa_service import PyPSAService
 from tests.test_chat_e2e import (
     FakeAnthropicClient, _FakeFinalMessage, _FakeUsage, _text_block,
@@ -61,7 +64,7 @@ def _three_bus():
 
 @pytest.fixture
 def auto_approve(monkeypatch):
-    monkeypatch.setattr(chat_service, "AUTO_APPROVE_TIERS",
+    monkeypatch.setattr(harness_confirm, "AUTO_APPROVE_TIERS",
                         frozenset({"write", "destructive"}))
 
 

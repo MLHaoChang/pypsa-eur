@@ -40,7 +40,7 @@ def rows(hour=HOUR, status=None, period=2030, h=7):
                           "status": status.get(u, 1)} for u, p in hour.items()])
 
 
-def oracle(hour=HOUR, out=()):
+def oracle(hour=HOUR, out=(), run=True):
     net = direct_net()
     load = net.load.index[net.load["name"] == "DC_LOAD"][0]
     net.load.at[load, "p_mw"] = -hour["DC_LOAD"]
@@ -50,7 +50,8 @@ def oracle(hour=HOUR, out=()):
         net.sgen.at[i, "p_mw"] = hour[name]
     for name in out:
         net.trafo.loc[net.trafo["name"] == name, "in_service"] = False
-    pp.runpp(net)
+    if run:
+        pp.runpp(net)
     return net
 
 
@@ -157,3 +158,29 @@ def test_without_n_minus_1_each_unit_is_sized_for_its_share_of_the_intact_flow()
     total = cases["intact"].trafo["s_mva"].sum()
     assert sizing["max_s_n1_mva"] == 0.0 and not sizing["n_minus_1"]
     assert sizing["required_unit_mva"] == pytest.approx(total / 2 * 1.1)
+
+
+def test_the_hour_reports_each_cable_loading():
+    cases = solve_cases(build_campus(campus_spec()), rows())
+    ref = oracle()
+    line = cases["intact"].line.set_index("cable")
+    assert line.at["CB1", "loading_pct"] == pytest.approx(float(ref.res_line.at[0, "loading_percent"]), abs=1e-7)
+    assert line.at["CB1", "i_ka"] == pytest.approx(float(ref.res_line.at[0, "i_ka"]), abs=1e-9)
+
+
+def test_an_hour_can_be_solved_with_a_reactive_dispatch_in_place():
+    """The setpoints put Q on named sgens and steps on named shunts before
+    every case is solved; the oracle is the hand-built net with the same."""
+    spec = campus_spec()
+    spec["campus"]["compensation"] = [
+        {"name": "CAP1", "bus": "MV1", "kind": "capacitor_bank", "q_mvar": {"value": 9.0, "source": "assumed"}, "steps": 3},
+        {"name": "ST1", "bus": "MV2", "kind": "statcom", "q_mvar": {"value": 5.0, "source": "assumed"}}]
+    cases = solve_cases(build_campus(spec), rows(),
+                        setpoints={"sgen_q": {"BESS1": 4.0, "ST1": -2.0}, "shunt_step": {"CAP1": 2}})
+    for case, out in (("intact", ()), ("N-1:TR1", ("TR1",))):
+        ref = oracle(out=out, run=False)
+        ref.sgen.at[ref.sgen.index[ref.sgen["name"] == "BESS1"][0], "q_mvar"] = 4.0
+        pp.create_sgen(ref, ref.bus.index[ref.bus["name"] == "MV2"][0], p_mw=0.0, q_mvar=-2.0)
+        pp.create_shunt(ref, ref.bus.index[ref.bus["name"] == "MV1"][0], q_mvar=-3.0, step=2, max_step=3)
+        pp.runpp(ref)
+        assert cases[case].pcc_q_mvar == pytest.approx(float(ref.res_ext_grid["q_mvar"].iloc[0]), abs=1e-7)
