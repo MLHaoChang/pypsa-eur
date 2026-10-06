@@ -187,6 +187,29 @@ Totals, excluding Phase 3: roughly 2.5–4 engineer-months to bring all three la
 6. **AI's role.** Generate meshes (not recommended) or drive classification, arrangement and boundaries (recommended, §4.4).
 7. **Where the plot-fit and length checks should surface.** In 3D only, or also on the 2D map and in the campus study's compliance tables. Recommendation: wherever the number is used; the 3D view is one consumer.
 
+## 7a. Owner decisions (2026-10-06)
+
+Taken the same day, after reading §7. They are inputs to the three plans that follow this assessment, not open items.
+
+| # | Question (§7) | Decision |
+|---|---|---|
+| 1 | Land the 3D branch? | **Yes.** The aim for every layer is `master`. |
+| 3 | Should placement carry meaning? | **Yes.** The 3D arrangement must be physically and electrically plausible and roughly represent the real thing: a transformer stands where a transformer stands, not behind the hall; two transformers are two objects. This supersedes decision 6 of 2026-09-28 ("positions cosmetic in v1"). Deriving lengths from geometry follows as an opt-in per project. |
+| 6 | AI's role | Models come from **a library, generated on the fly from the assets**; no generative meshes. |
+| — | When is the 3D site generated? | **On demand, never at project or template creation.** The user builds connections and coordinates first, then asks for the 3D site. |
+| — | Purpose | **Visualisation and user experience first**; additional value is welcome where it falls out (fit check, lengths into the campus study, figures for reports). |
+| — | Scope of planning | **One improvement plan per layer**, based on the current implementation. |
+
+Decisions 2 (Site vs campus vocabulary), 4 (portal, not continuous zoom), 5 (model style) and 7 (where the checks surface) were not re-opened; the plans carry the §7 recommendations for them and flag the model-style check as an owner review after the first real-GPU look.
+
+### The plans
+
+- `docs/superpowers/plans/2026-10-06-visual-layers-1-abstract-canvas.md` — multi-port links, every asset as a node, moving flow, the position-revert fix.
+- `docs/superpowers/plans/2026-10-06-visual-layers-2-map-view.md` — a persisted map-geometry sidecar, lengths from geometry by consent, GeoJSON/KML/OSM adoption, building on the map, a topology check.
+- `docs/superpowers/plans/2026-10-06-visual-layers-3-3d-site-view.md` — landing the branch, placement rules as library data with validation, distances into the model and the campus study, on-demand generation with a readiness checklist, visual and UX extras.
+
+Order across the three: 3D S0 (land the branch) → map M1–M2 (geometry sidecar, lengths) → canvas A1 and A4 (multi-port links, revert fix) → 3D S2–S3 (plausible placement, distances) → canvas A2–A3 → map M3–M5 → 3D S4–S5.
+
 ## 8. Sources
 
 - Master code: `pypsa-gui/frontend/src/pages/TopologyCanvas.tsx`, `pages/MapCanvas.tsx`, `pages/topologyLayoutStore.ts`, `components/CanvasResultsContext.tsx`, `hooks/useAssetDrag.ts`, `utils/geo.ts`, `pypsa-gui/backend/routers/projects.py`, `services/network_geometry.py`, `services/network_buses.py`, `routers/io.py`, `gridspine/ingest/campus.py`, `gridspine/producers/campus.py`, `pypsa-gui/backend/project_templates/eh_templates.py`.
