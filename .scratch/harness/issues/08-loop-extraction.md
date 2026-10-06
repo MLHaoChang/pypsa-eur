@@ -1,6 +1,6 @@
 # 08 — The turn loop, session, confirmation and persistence move into the harness
 
-Status: ready-for-agent (in progress 2026-10-05: the loop moved whole to `harness/loop.py`; `sse`, `fence`, `results`, `history`, `metrics`, `ratelimit`, `session`, `confirm`, `providers/wiring`, `stub`, `budget`, `compose`, `solver_bridge` extracted under the README's splitting rule; the turn body remains)
+Status: ready-for-agent (done 2026-10-06: the loop moved whole to `harness/loop.py`; `sse`, `fence`, `results`, `history`, `metrics`, `ratelimit`, `session`, `confirm`, `providers/wiring`, `stub`, `budget`, `compose`, `solver_bridge` extracted under the README's splitting rule; the turn body itself stays in `loop.py` by design)
 Type: task
 Blocked by: 02, 06, 07
 
@@ -88,4 +88,8 @@ Gate: the full chat regression, 3408 passed, 5 skipped, 0 failed.
 2026-10-06 (step 7): `_classify_solver_line` and `solver_log_bridge` moved to
 `harness/solver_bridge.py` by the node extractor; nothing patches them, so
 nothing is forwarded. loop.py: 2,288 → 2,224 lines. What remains is the turn
-body itself.
+body itself, which is the loop by design (`run_turn`, `_run_turn_body`, the
+stream seam, `_build_user_content`, dispatch, the real tool call); the
+extraction is complete. Gate (with master PRs #78, #79, #85 merged in): the
+full chat regression, 3556 passed, 5 skipped, 0 failed; frontend 281 files /
+3288 passed, tsc clean.

@@ -8,7 +8,7 @@ assistant behave the same whichever one is active.
 ```
 harness/
   protocol.py     the provider seam: LLMProvider, LLMRequest, LLMEvent, ERROR_KINDS
-  catalogue.py    the 182 tool declarations, their Safety tiers, TOOL_ROUTES
+  catalogue.py    the tool declarations (196 today), their Safety tiers, TOOL_ROUTES
   events.py       the closed vocabulary of frames the turn loop yields to the UI
   workflows/      the start menu and the step-by-step flows (Markdown + front matter)
   skills/         procedures the model loads on demand (<name>/SKILL.md)
