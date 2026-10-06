@@ -5,7 +5,7 @@
  *
  *   cd pypsa-gui/frontend
  *   PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs \
- *     --phase P22.9|P23|P24-BE|P24|P25|P26|P27a|P27b|P28|P29|P30|P31|P32 [--template eh_datacenter] [--out <dir>] [--keep]
+ *     --phase P22.9|P23|P24-BE|P24|P25|P26|P27a|P27b|P28|P29|P30|P31|P32|P33b [--template eh_datacenter] [--out <dir>] [--keep]
  *     [--self-test]   (P31 only: must FAIL with exit 1, by design — see P31 below)
  *
  * P24 walks the Guided hub design (spec §5) as a first-time user: the
@@ -174,7 +174,7 @@ const TEMPLATE_NAMES = {
   eh_h2_hub: 'Industrial Hydrogen Hub',
   eh_microgrid: 'Island Microgrid',
 }
-const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25', 'P26', 'P27a', 'P27b', 'P28', 'P29', 'P30', 'P31', 'P32'])
+const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25', 'P26', 'P27a', 'P27b', 'P28', 'P29', 'P30', 'P31', 'P32', 'P33b'])
 
 // ── args ────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
@@ -2650,6 +2650,9 @@ const ANTHROPIC_PROFILE = 'anthropic-sonnet'
 const P28_STALE = 'A study has run, but the network was solved since — run it again in Hub design.'
 const P28_DONE = 'The last study’s results are in Hub design.'
 const P28_C6 = 'No study has run yet — start in Hub design.'
+// P33b (spec 2026-10-06 §5): the two sentences of D-2.
+const P33B_EDITED = 'The network has been edited since the last study — run it again in Hub design.'
+const P33B_EDITED_CARD = 'The network has been edited since this study, so these results describe the design as it was. Run again to refresh.'
 
 async function p28Context(browser, project, mode) {
   const consoleLines = []
@@ -2953,7 +2956,18 @@ async function phaseP29(browser) {
   return p26
 }
 
-async function phaseP28(browser) {
+// ── the P33b extension (spec 2026-10-06 §5) ────────────────────────────────
+// Base: P28 (which carries P26). Inside P28 (C): the H2 study survives the
+// template creations and activations (10a, no re-run); after one bus edit the
+// greeting and the Results card both say "edited since" without a reload; an
+// undo is read back by the next request (step 0) and keeps the record; Expert
+// shows nothing new; after save + backend restart + activate the study is
+// still known and still reads edited (D-1).
+async function phaseP33b(browser) {
+  return phaseP28(browser, { p33b: true })
+}
+
+async function phaseP28(browser, { p33b = false } = {}) {
   const p26 = await phaseP26(browser)
   const mg = p26.find(r => r.id === 'eh_microgrid')?.project
   const h2 = p26.find(r => r.id === 'eh_h2_hub')?.project
@@ -3038,18 +3052,31 @@ async function phaseP28(browser) {
     } catch (e) { await t.fail('b', e) } finally { await t.context.close() }
   }
 
-  // (C) Guided: the finished study, then staleness
-  step('P28 (C) Guided on the H2 project after its study: results in Hub design; a later solve → the stale sentence')
+  // (C) Guided: the finished study, then staleness. The foreground Solve runs
+  // BEFORE any edit (P33b reorder): once edits are tracked, the P28_STALE
+  // sentence is true only while no edit has happened since the study.
+  step(`P28 (C) Guided on the H2 project after its study: results in Hub design; a later solve → the stale sentence${p33b ? '; P33b: an edit → "edited since" on both surfaces, undo, Expert, restart' : ''}`)
   {
-    const t = await p28Context(browser, h2, 'guided')
-    const { page, byId } = t
+    let t = await p28Context(browser, h2, 'guided')
+    let { page, byId } = t
     const solveText = () => page.evaluate(() => document.querySelector('[data-testid="chat-launch-solve"]')?.textContent ?? '')
+    const waitSolve = (w, timeout) => page.waitForFunction(
+      x => document.querySelector('[data-testid="chat-launch-solve"]')?.textContent === x, w, { timeout })
+    const toResults = async () => {
+      if (!(await byId('hub-card-results').isVisible().catch(() => false))) await byId('hub-rail-step-results').click()
+      await byId('hub-card-results').waitFor({ state: 'visible', timeout: 30_000 })
+    }
     try {
       await byId('hub-design-panel').waitFor({ state: 'visible', timeout: 60_000 })
       await t.openDock()
-      // Re-activating the project does not bring P26's study record back (the
-      // hub rail is at Site again): run the study here, from the Goal card.
-      if ((await rawApi('GET', '/api/results/eh_study')).json?.status !== 'done') {
+      const st0 = (await rawApi('GET', '/api/results/eh_study')).json
+      if (p33b) {
+        // (C0, 10a): P26 studied H2, then two template creations and two
+        // activations left it behind — the record is still there, no re-run.
+        check(st0?.status === 'done', `(C0) re-activated H2: eh_study.status=${st0?.status} without a re-run (10a)`)
+      } else if (st0?.status !== 'done') {
+        // Before P33b re-activating the project did not bring P26's study
+        // record back (the hub rail was at Site again): run the study here.
         await byId('hub-card-site').waitFor({ state: 'visible', timeout: 60_000 })
         await byId('hub-next-site').click()
         await page.waitForFunction(() => !document.querySelector('[data-testid="hub-goal-run"]')?.disabled,
@@ -3057,22 +3084,21 @@ async function phaseP28(browser) {
         await byId('hub-goal-run').click()
         await byId('hub-card-results').waitFor({ state: 'visible', timeout: 10 * 60_000 })
         check((await api('GET', '/api/results/eh_study'))?.status === 'done', 'the hub study ran from the Goal card: done')
+      } else {
+        info('(C) the H2 study record survived re-activation (P33b 10a in the tree)')
       }
-      await page.waitForFunction(w => document.querySelector('[data-testid="chat-launch-solve"]')?.textContent === w,
-        P28_DONE, { timeout: 30_000 })
+      await waitSolve(P28_DONE, 30_000)
       ok(`greeting: "${P28_DONE}"`)
       const review0 = await api('GET', '/api/results/eh_review')
       check(review0?.stale === false, `eh_review.stale=${review0?.stale} before`)
-      const bus = (await api('GET', '/api/network/buses'))[0]
-      const r = await rawApi('PUT', `/api/network/buses/${encodeURIComponent(bus.name)}`,
-        { name: bus.name, x: Number(bus.x ?? 0) + 0.001 })
-      check(r.status === 200, `edited bus ${bus.name} (PUT ${r.status})`)
-      await page.reload({ waitUntil: 'domcontentloaded' })
-      await t.openDock()
-      await sleep(3000)
-      const review1 = await api('GET', '/api/results/eh_review')
-      info(`after the bus edit: eh_review.stale=${review1?.stale}; greeting "${await solveText()}" (the review flags a later solve, not an edit)`)
-      await rawApi('PUT', `/api/network/buses/${encodeURIComponent(bus.name)}`, { name: bus.name, x: bus.x })
+      const rev0 = (await api('GET', '/api/network/undo/info')).network_revision
+      if (p33b) {
+        const s1 = await api('GET', '/api/results/eh_study')
+        check(s1?.edited_since_study === false, `(C1) eh_study.edited_since_study=${s1?.edited_since_study}`)
+        check(Number.isInteger(rev0), `(C1) /undo/info.network_revision=${rev0}`)
+      }
+
+      // (C2) the foreground Solve, before any edit
       const run = await rawApi('POST', '/api/simulation/run')
       check(run.status < 300, `POST /api/simulation/run → ${run.status}`)
       const until = Date.now() + 5 * 60_000
@@ -3086,14 +3112,126 @@ async function phaseP28(browser) {
       check(st && !st.running && st.dispatch === 'fresh', `foreground solve finished: status=${st?.status}, dispatch=${st?.dispatch}`)
       const review2 = await api('GET', '/api/results/eh_review')
       check(review2?.stale === true, `eh_review.stale=${review2?.stale} after the solve`)
+      if (p33b) {
+        check(review2?.edited_since_study === false, `(C2) a Solve is not an edit: eh_review.edited_since_study=${review2?.edited_since_study}`)
+        const revS = (await api('GET', '/api/network/undo/info')).network_revision
+        check(revS === rev0, `(C2) the Solve did not bump the revision (${revS} === ${rev0})`)
+      }
       await page.reload({ waitUntil: 'domcontentloaded' })
       await t.openDock()
       const t0 = Date.now()
-      await page.waitForFunction(w => document.querySelector('[data-testid="chat-launch-solve"]')?.textContent === w,
-        P28_STALE, { timeout: 5_000 })
+      await waitSolve(P28_STALE, 5_000)
       ok(`greeting after the solve (${((Date.now() - t0) / 1000).toFixed(1)} s): "${P28_STALE}"`)
       await shot(page, 'p28-c-guided-stale')
-    } catch (e) { await t.fail('c', e) } finally { await t.context.close() }
+
+      if (p33b) {
+        // (C3) one bus edit — a full-row Asset write — and no reload
+        step('P33b (C3) one bus edit, no reload: greeting and Results card both say "edited since" within 5 s')
+        await toResults()
+        await byId('hub-results-stale').waitFor({ state: 'visible', timeout: 15_000 })
+        const bus = (await api('GET', '/api/network/buses'))[0]
+        const x0 = Number(bus.x ?? 0)
+        const r = await rawApi('PUT', `/api/network/buses/${encodeURIComponent(bus.name)}`, { ...bus, x: x0 + 0.001 })
+        check(r.status === 200, `edited bus ${bus.name} (PUT ${r.status})`)
+        const t1 = Date.now()
+        await waitSolve(P33B_EDITED, 5_000)
+        await byId('hub-results-edited').waitFor({ state: 'visible', timeout: Math.max(500, 5_000 - (Date.now() - t1)) })
+        ok(`(C3) both surfaces say "edited since" ${((Date.now() - t1) / 1000).toFixed(1)} s after the edit, no reload`)
+        check((await byId('hub-results-edited').textContent()) === P33B_EDITED_CARD, `(C3) card: "${P33B_EDITED_CARD}"`)
+        check((await byId('hub-results-stale').count()) === 0, '(C3) one banner: hub-results-stale is gone')
+        const s3 = await api('GET', '/api/results/eh_study')
+        const r3 = await api('GET', '/api/results/eh_review')
+        const u3 = await api('GET', '/api/network/undo/info')
+        check(s3?.edited_since_study === true, `(C3) eh_study.edited_since_study=${s3?.edited_since_study}`)
+        check(r3?.stale === true && r3?.edited_since_study === true,
+          `(C3) eh_review.stale=${r3?.stale}, edited_since_study=${r3?.edited_since_study}`)
+        check(u3.network_revision === rev0 + 1, `(C3) /undo/info.network_revision=${u3.network_revision} === ${rev0} + 1`)
+        await shot(page, 'p33b-c3-edited-greeting-and-card')
+
+        // (C4) undo: read back by the next request (step 0), the record kept
+        step('P33b (C4) undo: the next request reads the pre-edit value; the record is kept; still "edited since"')
+        const u = await rawApi('POST', '/api/network/undo')
+        check(u.status === 200, `POST /api/network/undo → ${u.status}`)
+        const back = (await api('GET', '/api/network/buses')).find(b => b.name === bus.name)
+        check(Number(back?.x) === x0, `(C4) GET buses after the undo: x=${back?.x} (pre-edit ${x0})`)
+        const s4 = await api('GET', '/api/results/eh_study')
+        check(s4?.status === 'done' && s4?.edited_since_study === true,
+          `(C4) eh_study.status=${s4?.status}, edited_since_study=${s4?.edited_since_study} (monotonic: an undo is an edit)`)
+        const rev4 = (await api('GET', '/api/network/undo/info')).network_revision
+        check(rev4 === rev0 + 2, `(C4) /undo/info.network_revision=${rev4} === ${rev0} + 2`)
+        await sleep(3500)
+        info(`(C4) greeting after the undo: "${await solveText()}" (the counter is monotonic — the known limitation)`)
+        check(await solveText() === P33B_EDITED, '(C4) the greeting still reads the edited sentence')
+
+        // (C5) Expert shows nothing new (D-4)
+        step('P33b (C5) Expert: the EH reference-design panel shows no "edited since"')
+        await byId('hub-results-open-report').click()
+        await byId('results-tab-adequacy').waitFor({ state: 'visible', timeout: 30_000 })
+        await byId('ui-mode-expert').click()
+        await page.waitForFunction(() =>
+          document.querySelector('[data-testid="ui-mode-expert"]')?.getAttribute('aria-pressed') === 'true',
+        null, { timeout: 15_000 })
+        await byId('results-tab-adequacy').waitFor({ state: 'visible', timeout: 30_000 })
+        await sleep(1500)
+        check((await byId('hub-results-edited').count()) === 0, '(C5) Expert: no hub-results-edited')
+        const bodyText = await page.evaluate(() => document.body.innerText)
+        check(!/edited since/i.test(bodyText), '(C5) Expert: no text containing "edited since"')
+        await shot(page, 'p33b-c5-expert-unchanged')
+        await byId('ui-mode-guided').click()
+        await page.waitForFunction(() =>
+          document.querySelector('[data-testid="ui-mode-guided"]')?.getAttribute('aria-pressed') === 'true',
+        null, { timeout: 15_000 })
+
+        // (E2, D-1) save, restart the backend, activate: still known, still edited
+        step('P33b (E2) save → backend restart → activate: the study is still known and still reads edited (D-1)')
+        await api('POST', `/api/projects/${encodeURIComponent(h2)}`)
+        await t.context.close()
+        await stop('uvicorn')
+        startBackend()
+        await waitFor(`${API}/api/health`, 'uvicorn (restarted)', 180_000)
+        ok('uvicorn restarted on the same RUN dirs; /api/health 200')
+        await api('POST', `/api/projects/${encodeURIComponent(h2)}/activate`)
+        const s5 = (await rawApi('GET', '/api/results/eh_study'))
+        check(s5.status === 200 && s5.json?.status === 'done' && s5.json?.edited_since_study === true,
+          `(E2) eh_study ${s5.status}: status=${s5.json?.status}, edited_since_study=${s5.json?.edited_since_study}`)
+        const rev5 = (await api('GET', '/api/network/undo/info')).network_revision
+        check(rev5 === rev0 + 2, `(E2) /undo/info.network_revision=${rev5} === ${rev0} + 2 after the restart`)
+        t = await p28Context(browser, h2, 'guided');
+        ({ page, byId } = t)
+        await byId('hub-design-panel').waitFor({ state: 'visible', timeout: 60_000 })
+        await t.openDock()
+        await byId('hub-card-results').waitFor({ state: 'visible', timeout: 30_000 })
+        ok('(E2) the hub rail opens at Results after the restart')
+        await waitSolve(P33B_EDITED, 30_000)
+        await byId('hub-results-edited').waitFor({ state: 'visible', timeout: 15_000 })
+        ok('(E2) after the restart: the greeting and the card read "edited since"')
+        await shot(page, 'p33b-e2-after-restart-edited')
+
+        // …then a fresh study from the Goal card clears it
+        const before = (await api('GET', '/api/results/eh_study')).started_at
+        await byId('hub-rail-step-goal').click()
+        await page.waitForFunction(() => !document.querySelector('[data-testid="hub-goal-run"]')?.disabled,
+          null, { timeout: 30_000 })
+        await byId('hub-goal-run').click()
+        const untilS = Date.now() + 10 * 60_000
+        let s6 = null
+        while (Date.now() < untilS) {
+          s6 = await api('GET', '/api/results/eh_study')
+          if (s6?.started_at !== before && s6?.status !== 'running') break
+          await sleep(1000)
+        }
+        check(s6?.status === 'done' && s6?.edited_since_study === false,
+          `(E2) a new study from the Goal card: status=${s6?.status}, edited_since_study=${s6?.edited_since_study}`)
+        await toResults()
+        await sleep(1500)
+        check((await byId('hub-results-edited').count()) === 0, '(E2) after the new study: no edited banner')
+        const g6 = await solveText()
+        info(`(E2) greeting after the new study: "${g6}"`)
+        await waitSolve(P28_DONE, 15_000)
+        ok(`(E2) greeting after the new study: "${P28_DONE}"`)
+        await shot(page, 'p33b-e2-rerun-clean')
+      }
+    } catch (e) { await t.fail('c', e) } finally { await t.context.close().catch(() => {}) }
   }
 
   // (D) C6 on a fresh project; Expert keeps its sentence
@@ -3177,6 +3315,7 @@ try {
   else if (args.phase === 'P30') await phaseP30(browser)
   else if (args.phase === 'P31') await phaseP31(browser)
   else if (args.phase === 'P32') await phaseP32(browser)
+  else if (args.phase === 'P33b') await phaseP33b(browser)
   console.log(`\nPASS — ${shots.length} screenshots in ${args.out}`)
 } catch (e) {
   code = e instanceof ToolingError ? 3 : 1
