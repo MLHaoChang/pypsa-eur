@@ -61,6 +61,9 @@ import { writeActiveSite } from '../site3d/activeSite'
 import { boundaryToLocal } from '../site3d/boundary'
 import { busOffsets, siteBounds } from '../site3d/siteModel'
 import { fitReport, type FitObject } from '../site3d/fit'
+import { placementFindings, findingKeys } from '../site3d/placementCheck'
+import { usePlacementFindings } from '../site3d/placementFindingsStore'
+import SiteLayoutFindings from '../components/SiteLayoutFindings'
 import SiteEmptyState from '../components/SiteEmptyState'
 import type { Bus } from '../api/types'
 import type { Site, SiteContext } from '../site3d/types'
@@ -93,12 +96,14 @@ function geometrySignature(o: SiteObject): string {
  * outside-the-boundary warning glow through the emissive channel only
  * (`emissiveFor`); vertex colours keep each part's own colour.
  */
-const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hovered, outside, pivot, onHover, onSelect }: {
+const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hovered, outside, warn, pivot, onHover, onSelect }: {
   obj: SiteObject
   selected: boolean
   hovered: boolean
-  /** Sticks out of the site boundary (fit check, D9). */
+  /** The red outline: sticks out of the site boundary (fit check, D9) or stands inside a keep-out (S2). */
   outside: boolean
+  /** The amber outline: any other layout finding (S2). */
+  warn: boolean
   /** Wrapped in a PivotControls whose matrix carries position and heading — render at identity. */
   pivot?: boolean
   /** Called with the object's key (`Class:name`) on pointer-over, null on pointer-out. */
@@ -121,12 +126,12 @@ const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hover
   /* eslint-enable react-hooks/exhaustive-deps */
   useEffect(() => () => { all.body?.dispose(); for (const r of all.rotors) r.geometry.dispose() }, [all])
   useEffect(() => () => { rest?.body?.dispose(); for (const r of rest?.rotors ?? []) r.geometry.dispose() }, [rest])
-  const glow = emissiveFor({ selected, hovered, outside }, obj.color)
+  const glow = emissiveFor({ selected, hovered, outside, warn }, obj.color)
   // The results layer drives this group per frame (gauge, glow, spin, flow).
   const groupRef = useRef<THREE.Group>(null)
   const registered = useMemo(() => ({ type: obj.type, name: obj.name, kind: obj.kind, bus: obj.bus, color: obj.color, anchors: obj.anchors }),
     [obj.type, obj.name, obj.kind, obj.bus, obj.color, obj.anchors])
-  useRegisterObject(objectKey(obj), groupRef, registered, selected || hovered || outside)
+  useRegisterObject(objectKey(obj), groupRef, registered, selected || hovered || outside || warn)
   const material = (
     <meshStandardMaterial vertexColors emissive={glow.color} emissiveIntensity={glow.intensity} roughness={0.7} metalness={0.1} />
   )
@@ -162,7 +167,7 @@ const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hover
     </group>
   )
 }, (a, b) =>
-  a.selected === b.selected && a.hovered === b.hovered && a.outside === b.outside && a.pivot === b.pivot &&
+  a.selected === b.selected && a.hovered === b.hovered && a.outside === b.outside && a.warn === b.warn && a.pivot === b.pivot &&
   a.onHover === b.onHover && a.onSelect === b.onSelect &&
   // The same object if the layout rebuilt it with the same content and place.
   (a.obj === b.obj || (objectKey(a.obj) === objectKey(b.obj) && a.obj.origin[0] === b.obj.origin[0] && a.obj.origin[1] === b.obj.origin[1] &&
@@ -519,6 +524,7 @@ function SiteCanvas() {
   const setPlacement = useSitesStore(s => s.setPlacement)
   const removePlacement = useSitesStore(s => s.removePlacement)
   const arrangeAll = useSitesStore(s => s.arrangeAll)
+  const rearrangeAll = useSitesStore(s => s.rearrangeAll)
   const readOnly = useUIStore(s => s.readOnly)
 
   const qBuses = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
@@ -685,7 +691,21 @@ function SiteCanvas() {
     const fo: FitObject[] = objects.map(o => ({ key: `${o.type}:${o.name}`, origin: o.origin, footprint: o.footprint, heading: o.heading, areaM2: o.areaM2 }))
     return fitReport(fo, site)
   }, [objects, site])
-  const outsideSet = useMemo(() => new Set(fit?.outside ?? []), [fit])
+  // The placement check (S2): outside the plot, overlapping, inside a
+  // keep-out, short of a clearance, off its segment, turned away. Red for
+  // the first and third, amber for the rest; the overlay lists them and the
+  // Issues panel reads them from the store. Advisory: nothing blocks a save.
+  const findings = useMemo(() => placementFindings(objects, DEFAULT_LIBRARY, { outside: fit?.outside ?? [] }), [objects, fit])
+  const redSet = useMemo(() => findingKeys(findings, 'red'), [findings])
+  const amberSet = useMemo(() => findingKeys(findings, 'amber'), [findings])
+  const publishFindings = usePlacementFindings(s => s.publish)
+  const clearFindings = usePlacementFindings(s => s.clear)
+  const siteName = site?.name ?? null
+  useEffect(() => {
+    if (siteId && siteName) publishFindings({ id: siteId, name: siteName }, findings)
+    else clearFindings()
+  }, [siteId, siteName, findings, publishFindings, clearFindings])
+  useEffect(() => () => clearFindings(), [clearFindings])
 
   // Ground: tile range around the SITE origin sized to the extent, stitched
   // once per (site, size). Keyed on the quantised half-size, not the layout
@@ -836,7 +856,8 @@ function SiteCanvas() {
               obj={o}
               selected={isSelected}
               hovered={key === hovered}
-              outside={outsideSet.has(key)}
+              outside={redSet.has(key)}
+              warn={amberSet.has(key)}
               pivot={isSelected}
               onHover={setHovered}
               onSelect={onSelectObject}
@@ -883,8 +904,12 @@ function SiteCanvas() {
             <div key={key} ref={el => { labelRefs.current[key] = el }} data-testid="site-label"
               className="absolute left-0 top-0 whitespace-nowrap rounded bg-bg/95 border border-border px-2 py-1 text-[11px] text-text shadow"
               style={{ visibility: 'hidden' }}>
-              <div className="font-semibold">{o.name}{outsideSet.has(key) ? <span className="ml-2 text-[10px] text-accent">outside the boundary</span> : null}</div>
+              <div className="font-semibold">{o.name}{fit.outside.includes(key) ? <span className="ml-2 text-[10px] text-accent">outside the boundary</span> : null}</div>
               <div className="text-muted">{o.summary}</div>
+              {/* The layout findings about this object, in words (S2: never outline-only). */}
+              {findings.filter(f => f.key === key && f.kind !== 'outsideBoundary').map(f => (
+                <div key={`${f.kind}:${f.other ?? ''}`} className="text-[10px] text-accent">{f.message}</div>
+              ))}
               {/* The result at this snapshot (LabelTracker writes it every frame). */}
               <div data-result-line className="text-text empty:hidden" />
             </div>
@@ -906,11 +931,20 @@ function SiteCanvas() {
           selectedPlacedKey={selectedPlacedKey}
           canArrange={allLoaded}
           onArrange={() => arrangeAll(currentProject, site.id, objects.filter(o => !o.elevation).map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading })), layout.orphans)}
+          placedCount={layout.placed.length}
+          onArrangeAll={() => {
+            // Everything by the rules, as if nothing had ever been moved: the
+            // layout rebuilt with no placements, written as the new placements.
+            const fresh = buildSiteLayout({ buses: memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, busCarrier, sizing })
+            rearrangeAll(currentProject, site.id, fresh.objects.filter(o => !o.elevation).map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading })))
+          }}
           onResetPlacement={() => { if (selectedPlacedKey) removePlacement(currentProject, site.id, selectedPlacedKey) }}
         />
 
         {/* Legend — under the picker; the result bands only while results show. */}
         <SiteLegend entries={legend} results={resultsStore} />
+        {/* The placement check's findings, in words, each a deep link (S2). */}
+        <SiteLayoutFindings findings={findings} unresolved={layout.unresolved} />
         {/* Results readout under the legend, only while results show (spec §6.4:
             not hover-only). In this column it never covers the control strip;
             collapsed by default in a narrow pane so it does not cover the scene. */}

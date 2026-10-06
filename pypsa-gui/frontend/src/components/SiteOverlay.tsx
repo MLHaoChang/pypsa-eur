@@ -5,6 +5,7 @@
 // app's read-only vocabulary: `disabled` + `title={readOnlyMessage(...)}`.
 import { useUIStore } from '../store/uiStore'
 import { readOnlyMessage, READ_ONLY_MUTATION_MESSAGE } from '../utils/mutationGuard'
+import { confirmToast } from '../utils/toasts'
 import { formatHa, type FitReport } from '../site3d/fit'
 import type { Site } from '../site3d/types'
 import { effectiveSizing } from '../site3d/sizing'
@@ -21,12 +22,16 @@ interface Props {
   /** False while a component list is still loading: Arrange would write a partial site. */
   canArrange: boolean
   onArrange: () => void
+  /** Arrange all (S2): every object re-placed by the rules, moved ones included — runs only after the user confirms. */
+  onArrangeAll?: () => void
+  /** How many objects have a placement (what Arrange all would discard). */
+  placedCount?: number
   onResetPlacement: () => void
   /** The solver's dispatch matches the network: the as built / optimised switch is offered only then (spec E6). */
   dispatchFresh?: boolean
 }
 
-export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, unplacedMembers, selectedPlacedKey, canArrange, onArrange, onResetPlacement, dispatchFresh = false }: Props) {
+export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, unplacedMembers, selectedPlacedKey, canArrange, onArrange, onArrangeAll, placedCount = 0, onResetPlacement, dispatchFresh = false }: Props) {
   const readOnly = useUIStore(s => s.readOnly)
   const siteSizing = useUIStore(s => s.siteSizing)
   const setSiteSizing = useUIStore(s => s.setSiteSizing)
@@ -81,6 +86,21 @@ export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, 
       >
         Arrange
       </button>
+      {onArrangeAll && (
+        <button
+          type="button"
+          onClick={() => confirmToast(
+            `Arrange every asset by the placement rules? ${placedCount === 1 ? 'The 1 position you moved' : `The ${placedCount} positions you moved`} will be replaced.`,
+            onArrangeAll,
+            { confirmLabel: 'Arrange all', danger: true },
+          )}
+          disabled={readOnly || !canArrange}
+          title={blocked ?? (canArrange ? 'Re-place everything by the placement rules, moved assets included (asks first)' : 'Waiting for the network to load')}
+          className="px-1.5 py-0.5 rounded border border-border text-text hover:bg-accent/5 disabled:opacity-50"
+        >
+          Arrange all
+        </button>
+      )}
       <button
         type="button"
         onClick={onResetPlacement}

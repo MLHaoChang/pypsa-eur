@@ -3,6 +3,11 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import SiteOverlay from './SiteOverlay'
 import { useUIStore } from '../store/uiStore'
 import type { Site } from '../site3d/types'
+import { confirmToast } from '../utils/toasts'
+
+// `<Toaster/>` lives in App.tsx, so a confirmToast never renders under this
+// harness — the assertion is on the call (as BottomPanel.test does).
+vi.mock('../utils/toasts', () => ({ confirmToast: vi.fn() }))
 
 const site: Site = { id: 'a', name: 'Campus', buses: ['B1'], boundary: [[0, 0], [0.01, 0], [0.01, 0.01]], origin: { lng: 0.005, lat: 0.003 }, placements: {} }
 const fit = { landM2: 178_000, plotM2: 113_000, over: true, outside: ['Generator:PV field'] }
@@ -46,6 +51,33 @@ describe('SiteOverlay', () => {
     render(<SiteOverlay sites={[site, other]} site={site} onPickSite={onPick} assetCount={0} fit={{ ...fit, over: false, outside: [] }} unplacedMembers={[]} selectedPlacedKey={null} canArrange onArrange={() => {}} onResetPlacement={() => {}} />)
     fireEvent.change(screen.getByRole('combobox', { name: 'Site' }), { target: { value: 'b' } })
     expect(onPick).toHaveBeenCalledWith('b')
+  })
+})
+
+describe('SiteOverlay — Arrange all (S2)', () => {
+  beforeEach(() => { vi.mocked(confirmToast).mockReset() })
+  it('is offered only when the canvas provides it, asks first naming the moved positions, and runs on confirm', () => {
+    const onArrangeAll = vi.fn()
+    const { unmount } = render(<SiteOverlay sites={[site]} site={site} onPickSite={() => {}} assetCount={1} fit={fit} unplacedMembers={[]} selectedPlacedKey={null} canArrange onArrange={() => {}} onResetPlacement={() => {}} />)
+    expect(screen.queryByRole('button', { name: 'Arrange all' })).toBeNull()
+    unmount()
+    render(<SiteOverlay sites={[site]} site={site} onPickSite={() => {}} assetCount={1} fit={fit} unplacedMembers={[]} selectedPlacedKey={null} canArrange onArrange={() => {}} onArrangeAll={onArrangeAll} placedCount={3} onResetPlacement={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange all' }))
+    expect(onArrangeAll).not.toHaveBeenCalled()
+    expect(confirmToast).toHaveBeenCalledTimes(1)
+    const [message, onConfirm, opts] = vi.mocked(confirmToast).mock.calls[0]
+    expect(message).toMatch(/3 positions you moved/)
+    expect(opts).toMatchObject({ confirmLabel: 'Arrange all', danger: true })
+    onConfirm()
+    expect(onArrangeAll).toHaveBeenCalledTimes(1)
+  })
+  it('is disabled while read-only and while the network loads', () => {
+    useUIStore.setState({ readOnly: true, readOnlyReason: 'locked-by-user' })
+    render(<SiteOverlay sites={[site]} site={site} onPickSite={() => {}} assetCount={1} fit={fit} unplacedMembers={[]} selectedPlacedKey={null} canArrange onArrange={() => {}} onArrangeAll={() => {}} onResetPlacement={() => {}} />)
+    const b = screen.getByRole('button', { name: 'Arrange all' }) as HTMLButtonElement
+    expect(b.disabled).toBe(true)
+    fireEvent.click(b)
+    expect(confirmToast).not.toHaveBeenCalled()
   })
 })
 
