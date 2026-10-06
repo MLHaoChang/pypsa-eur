@@ -101,6 +101,11 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
                  # services/site_service.py owns it; its cached context lives
                  # under the `sites/` dir below.
                  "sites.json",
+                 # The map view's user geometry: routed branches and dragged
+                 # asset bubbles (visual layers plan 2, M1).
+                 # services/map_layout_service.py owns it; `test_map_layout_routes`
+                 # pins it equal to MAP_LAYOUT_FILE.
+                 "map_layout.json",
                  # Edge Investment Case WP1.1c: the (id, version, hash) of every
                  # Library series the project references, re-checked on open.
                  # `test_library_bundle_pins` pins it equal to SIDECAR_NAME.
@@ -3712,6 +3717,60 @@ def delete_site_context(
     _check_project_lock(db, lock_project, user)
     target, _site = _site_context_dir(dest, site_id)
     return {"cleared": site_context.clear_cached(target)}
+
+
+@router.get("/{name}/map_layout")
+def get_map_layout(
+    name: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    The project's map document (`map_layout.json`): routed branches and
+    dragged asset bubbles. Same degrade rules as `/layout`: missing or
+    corrupt → the empty document; a permission denial is surfaced, never
+    reported as "no routes". See services/map_layout_service.py.
+    """
+    from services import map_layout_service
+
+    src, name = _resolve_project_src(name, db, user)
+    if not src.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    try:
+        return map_layout_service.read_map_layout(src)
+    except PermissionError as exc:
+        raise _access_denied(src / map_layout_service.MAP_LAYOUT_FILE) from exc
+
+
+@router.put("/{name}/map_layout")
+def put_map_layout(
+    name: str,
+    layout: dict,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    Persist the map document. Unlike `/layout` the shape is validated (422
+    names the field; unknown keys are kept), capped like the layout (413,
+    the same `_MAX_LAYOUT_BYTES`), lock-CHECKED like the layout (409, never
+    acquiring — the map writes on every waypoint drag-settle).
+    """
+    from services import map_layout_service, project_registry
+
+    dest, name = _resolve_project_src(name, db, user)
+    if not dest.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    lock_project = project_registry.find_project(db, user, name)
+    _check_project_lock(db, lock_project, user)
+    try:
+        map_layout_service.validate_map_layout(layout)
+    except map_layout_service.MapLayoutInvalid as exc:
+        raise HTTPException(422, str(exc)) from exc
+    try:
+        map_layout_service.write_map_layout(dest, layout, max_bytes=_MAX_LAYOUT_BYTES)
+    except map_layout_service.MapLayoutTooLarge as exc:
+        raise HTTPException(413, str(exc)) from exc
+    return {"saved": name, "routes": len(layout["routes"]), "bubbles": len(layout["bubbles"])}
 
 
 def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:

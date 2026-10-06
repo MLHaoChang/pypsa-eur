@@ -518,11 +518,27 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
             # sidecar so the asset keeps its position (D14). Best-effort: a
             # sidecar problem never fails a rename the model already did.
             _rename_site_placement(component_class, name, new_name)
+            # The map view keys a branch's route by "<kind>:<name>" in the
+            # `map_layout.json` sidecar; re-key it so a renamed Line / Link /
+            # Transformer keeps its route. Best-effort: a sidecar problem
+            # never fails a rename the model already did.
+            _rename_map_route(component_class, name, new_name)
         _normalise_flag_column(n, attr)
     desc = (f"Renamed {component_class.lower()} '{name}' → '{new_name}'"
             if new_name != name else f"Updated {component_class.lower()} '{name}'")
     change_log_service.log("update", component_class, new_name, desc)
     return {"name": new_name}
+
+
+def _rename_map_route(component_class: str, old: str, new: str) -> None:
+    """Re-key the active project's `map_layout.json` route; no-op for a scratch network."""
+    from services import map_layout_service
+
+    try:
+        storage_dir = getattr(PyPSAService.get_active_context(), "storage_dir", None)
+    except Exception:  # noqa: BLE001 — no active context is a no-op, not an error
+        storage_dir = None
+    map_layout_service.rename_component_on_disk(storage_dir, component_class, old, new)
 
 
 def _delete_component(component_class: str, attr: str, name: str) -> None:
