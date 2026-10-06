@@ -57,15 +57,31 @@ key            g <= limit                                  scale
 ``q``          PCC Q within +- the band, intact only        1 % of it
 ``tl``         worst unit of each group: loading x rating   1 % of
                minus rating (MVA), every class              rating
-``ts``         worst unit: S x (1 + margin) minus rating:   1 % of
-               intact; and the survivors in the group's     rating
-               own N-1 class when N-1 is on
+``ts``         worst unit: S x (1 + margin) minus rating,   1 % of
+               on C8's dispatch (below): intact; and the    rating
+               survivors in the group's own N-1 class when
+               N-1 is on
 ``cl``         every cable: current minus its capacity      1 % of it
                (runs x rating), every class
 ``ik``/``ip``  per period, every rated bus (or switchgear   1 % of
                need): Ik'' and ip against the rating and    rating
                ``PEAK_FACTOR`` x rating
 =============  ==========================================  =========
+
+**The sizing margin is judged on C8's dispatch** (owner, 2026-10-06: the
+margin may not be met with dispatched inverter Q). For every point the
+loop solves, the hours are also re-solved with the dispatch C8's re-check
+would give the same assets (``reactive_need(residual=False)``: inverters,
+then STATCOMs, then steps, only as far as the PCC band needs), and ``ts``
+is read from those flows. In the MILP the continuous Q has no coefficient
+in ``ts``: it enters at its reference value. The AC judge sizes the
+transformers from the same flows (``size_transformers``), so a point
+whose margin holds only with the MILP's extra Q is not feasible. The extra
+Q may still serve the 100 % loading (``tl``), the PCC band and the
+voltages. A candidate's effect on ``ts`` is a finite difference with that
+dispatch re-run; a compensation candidate's only at the hours where C8's
+dispatch reaches the compensation or still misses the band (elsewhere the
+inverters alone hold the band and the compensation stays off).
 
 A rating is part of ``g``, so a candidate's rating enters exactly. A rated
 bus that is not a need keeps its rating, and a cable that is not a need its
@@ -157,7 +173,6 @@ candidate and no ``ik``/``ip`` constraint either.
 Steady state only: no dynamics, no harmonics, no tap-changer optimisation.
 Allowed to import pandapower, linopy and highspy (``static/``); never pypsa.
 """
-import copy
 import dataclasses
 import math
 
@@ -172,12 +187,12 @@ from scipy.sparse.linalg import spsolve
 from gridspine.ingest.campus import build_campus
 from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_compliance import Q_TOL
-from gridspine.static.campus_flow import SizingCriteria, solve_cases, trafo_groups
+from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
 from gridspine.static.campus_invest import (
     _apply, _bays, _compliance, _dispatch_table, _failures, _investment, _pcc_table, open_candidates, select_assets,
     study_from, with_measures,
 )
-from gridspine.static.campus_reactive import _SUPPLIERS, ALWAYS_ON, ReactiveResult, compensation_bus
+from gridspine.static.campus_reactive import _SUPPLIERS, ALWAYS_ON, ReactiveResult, compensation_bus, reactive_need
 from gridspine.static.campus_sc import PEAK_FACTOR, campus_fault_levels
 from gridspine.templates.campus_assets import value
 from gridspine.templates.grid_codes import band_for
@@ -388,6 +403,7 @@ class _Eval:
     compliance: object
     feasible: bool
     fails: list
+    ref_r: dict = dataclasses.field(default_factory=dict)      # C8's dispatch per hour, for the margin
 
 
 class _Problem:
@@ -505,16 +521,34 @@ class _Problem:
             flows[key] = solve_cases(campus, rows_of[key], setpoints=sp[key], inspect=inspect)
             reactive[key] = self._reactive(campus, flows[key]["intact"], sp[key], point, key)
         study = study_from(campus, reactive, flows, self.st.installed, self.req, self.criteria, recheck=True)
-        converged = bool(study.converged)
-        g = self._constraints(campus, study, sens if linearise else None) if converged else {}
+        ref, ref_ok = self.reference(campus)
+        # the sizing margin is judged on C8's own dispatch (owner, 2026-10-06)
+        study.sizing = size_transformers(ref, campus, self.criteria)
+        converged = bool(study.converged) and ref_ok
+        g = self._constraints(campus, study, sens if linearise else None, ref) if converged else {}
+        ref_r = self._ref_r
         if flows_only:
-            return _Eval(point, spec, added, study, converged, g, {}, math.nan, None, False, [])
+            return _Eval(point, spec, added, study, converged, g, {}, math.nan, None, False, [], ref_r)
         compliance = _compliance(study, self.req, self.profile) if converged else None
         fails = ([f for f in _failures(study, compliance, needs, self.req, self.criteria)
                   if f[1] != "switchgear" or f[0].split(" ", 1)[1] not in self.skip] if converged
                  else [(None, "load_flow", "the re-solve did not converge", 0)])
         return _Eval(point, spec, added, study, converged, g, self._sens if linearise else {},
-                     self.cost(point, spec), compliance, converged and not fails, fails)
+                     self.cost(point, spec), compliance, converged and not fails, fails, ref_r)
+
+    def reference(self, campus, hours=None):
+        """C8's dispatch for these assets (``reactive_need(residual=False)``:
+        inverters, then STATCOMs, then steps, only as far as the PCC band
+        needs) and every case solved with it: ``({hour: solve_cases},
+        converged)``. The sizing margin is judged on these flows."""
+        flows, rs, ok = {}, {}, True
+        for key in hours or self.hours:
+            rows = self.st.rows_of[key]
+            r = reactive_need(campus, rows, self.req, residual=False)
+            flows[key], rs[key] = solve_cases(campus, rows, setpoints=r.setpoints), r
+            ok &= r.converged and all(f.converged for f in flows[key].values())
+        self._ref_r = rs
+        return flows, ok
 
     def _reactive(self, campus, intact, sp, point, key):
         vm = dict(zip(intact.bus["bus"], intact.bus["vm_pu"])) if intact.converged else {}
@@ -550,9 +584,11 @@ class _Problem:
     # the constraints of a solved point
     # ------------------------------------------------------------------
 
-    def _constraints(self, campus, study, sens):
+    def _constraints(self, campus, study, sens, ref):
         """``{key: g}`` with ``self._sens[key] = (hour, {bus: dg/dQ}, V^2 at
-        the compensation bus)`` when ``sens`` is given."""
+        the compensation bus)`` when ``sens`` is given. ``ref`` are the
+        flows with C8's dispatch, on which the sizing margin (``ts``) is
+        judged: there the MILP's own Q has no coefficient."""
         net = campus.net
         name_bus = dict(zip(net.bus.index, net.bus["name"].astype(str)))
         group_of, rating = {}, {}
@@ -608,16 +644,14 @@ class _Problem:
                         put(("q", key, cls, "PCC", 1), q, self.req.q_limit_mvar, key, case, [(("pcc_q",), 1.0)], sc_q)
                         put(("q", key, cls, "PCC", -1), -q, self.req.q_limit_mvar, key, case, [(("pcc_q",), -1.0)],
                             sc_q)
-                    for t, s_mva, load in zip(f.trafo["trafo"], f.trafo["s_mva"], f.trafo["loading_pct"]):
+                    for t, load in zip(f.trafo["trafo"], f.trafo["loading_pct"]):
                         gk, r = group_of[t], rating[t]
                         put(("tl", key, cls, gk, 1), (float(load) / 100.0 - 1.0) * r, 0.0, key, case,
                             [(("trafo_load", t), 1.0)], 0.01 * r)
-                        if cls == "intact" or (n1 and cls[4:] == gk):
-                            put(("ts", key, cls, gk, 1), float(s_mva) * (1 + m) - r, 0.0, key, case,
-                                [(("trafo_s", t), 1 + m)], 0.01 * r)
                     for cb, ika in zip(f.line["cable"], f.line["i_ka"]):
                         put(("cl", key, cls, cb, 1), float(ika) - cap[cb], 0.0, key, case, [(("line_i", cb), 1.0)],
                             0.01 * cap[cb])
+        g.update(self.ts_values(campus, ref))
         pf = PEAK_FACTOR[self.f_hz]
         sw_buses = {n.target["bus"] for n in self.needs if n.kind == "switchgear"}
         for r in study.short_circuit.itertuples(index=False):
@@ -628,6 +662,38 @@ class _Problem:
             put(("ik", key, "sc", str(r.bus), 1), float(r.ikss_max_ka) - rated, 0.0, scale=0.01 * rated)
             put(("ip", key, "sc", str(r.bus), 1), float(r.ip_max_ka) - pf * rated, 0.0, scale=0.01 * pf * rated)
         return g
+
+    def ts_values(self, campus, ref):
+        """The sizing-margin constraints (``ts``) on the flows ``ref`` with
+        C8's dispatch: worst unit, S x (1 + margin) minus its rating, in the
+        intact class and (N-1 on) in its own group's outage class."""
+        net = campus.net
+        name_bus = dict(zip(net.bus.index, net.bus["name"].astype(str)))
+        group_of, rating = {}, {}
+        for i in net.trafo.index:
+            group_of[str(net.trafo.at[i, "name"])] = \
+                f"{name_bus[int(net.trafo.at[i, 'hv_bus'])]}/{name_bus[int(net.trafo.at[i, 'lv_bus'])]}"
+            rating[str(net.trafo.at[i, "name"])] = float(net.trafo.at[i, "sn_mva"])
+        m, n1 = self.criteria.margin, self.criteria.n_minus_1
+        out = {}
+        for key, cases in ref.items():
+            by_cls = {}
+            for case in cases:
+                cls = "intact" if case == "intact" else f"N-1:{group_of.get(case[4:], '?')}"
+                by_cls.setdefault(cls, []).append(case)
+            for cls in ["intact", *(f"N-1:{gk}" for gk in sorted(self.groups))]:
+                for case in by_cls.get(cls) or ["intact"]:
+                    f = cases[case]
+                    for t, s_mva in zip(f.trafo["trafo"], f.trafo["s_mva"]):
+                        gk, r = group_of[t], rating[t]
+                        if not (cls == "intact" or (n1 and cls[4:] == gk)):
+                            continue
+                        k = ("ts", key, cls, gk, 1)
+                        val = float(s_mva) * (1 + m) - r
+                        if k not in out or val > out[k]:
+                            out[k] = val
+                        self.limit.setdefault(k, (0.0, 0.01 * r))
+        return out
 
     def fault_only(self, point):
         """``{key: g}`` of the fault-level constraints alone (one IEC 60909
@@ -679,6 +745,11 @@ def _linearise(prob, ev):
     disabled, solves = set(), 0
     cur = ev.point.choice
     cur_stat = any(prob.options[k].q_stat > 0 for k in cur)
+    # hours where C8's dispatch reaches the compensation (or still misses the
+    # band): only there can a compensation choice move the margin's flow
+    lim = prob.req.q_limit_mvar
+    reach = [h for h, r in ev.ref_r.items()
+             if abs(r.q_final_mvar) > lim + Q_TOL or abs(r.q_installed_mvar) > 1e-9]
     n_cases = sum(len(c) for c in ev.study.flows.values())
     for j, idx in enumerate(prob.by_need):
         kind = prob.needs[j].kind
@@ -701,6 +772,15 @@ def _linearise(prob, ev):
                     for key, val in prob.fault_only(trial).items():
                         if key in row:
                             D[row[key], k] = val - ev.g[key]
+                if reach:
+                    _, spec, _ = prob.realise(trial)
+                    campus = build_campus(spec)
+                    flows, ok = prob.reference(campus, reach)
+                    solves += sum(len(c) for c in flows.values())
+                    if ok:
+                        for key, val in prob.ts_values(campus, flows).items():
+                            if key in row:
+                                D[row[key], k] = val - ev.g[key]
             else:                                              # a switchgear rating: exact
                 now = prob.options[cur[j]]
                 bus = prob.needs[j].target["bus"]
@@ -989,8 +1069,10 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
     Returns C8's shapes (``investment``, ``cost``, ``compliance``,
     ``dispatch``, ``spec``, ``history`` (C8's escalations), ``unresolved``,
     ``pcc``, ``short_circuit``, ``scope``), plus ``milp_history`` (one row
-    per iteration), ``comparison`` (per need, C8 against the MILP),
-    ``summary`` and ``fallback`` (None, or why C8's result is returned)."""
+    per iteration), ``lin_errors`` (per trial and constraint, AC minus the
+    linear prediction, in scale units), ``comparison`` (per need, C8
+    against the MILP), ``summary`` and ``fallback`` (None, or why C8's
+    result is returned)."""
     if c8 is None:
         c8 = select_assets(campus_spec, hourly, selection, library, req, profile, criteria,
                            pcc_switchgear=pcc_switchgear)
@@ -1018,7 +1100,7 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
                 "worst_lin_error": 0.0, "delta": delta, "beta_mean": 1.0, "beta_max": 1.0, "beta_up": "",
                 "rho": math.nan, "accepted": True, "point_cost": cur.cost, "slack": 0.0, "slack_on": "", "choice": _label(prob, point),
                 "fd_solves": lin.fd_solves, "note": "C8's result, the warm start"}]
-    stop, cuts = "max_iter", []
+    stop, cuts, lin_rows = "max_iter", [], []
     for it in range(1, max_iter + 1):
         backoff = np.array([beta.setdefault(k, BETA0) * abs(err.get(k, 0.0)) for k in lin.keys])
         trial_pt, pred, sigma = _solve_milp(prob, lin, cur.point, backoff, delta, penalty, cuts)
@@ -1066,6 +1148,8 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
             new_delta, accepted = delta, rho >= RHO_BAD
         err.update(errs)
         worst_err = max((abs(e) / prob.limit[k][1] for k, e in errs.items()), default=math.nan)
+        lin_rows += [{"iteration": it, "constraint": _key_label(k), "error": e / prob.limit[k][1]}
+                     for k, e in errs.items() if abs(e) > 1e-9]
         if trial.feasible and (best is None or trial.cost < best.cost - 1e-9):
             best = trial
         row.update(cost=trial.cost, feasible=trial.feasible, worst_violation=t_worst, worst_lin_error=worst_err,
@@ -1094,8 +1178,11 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
     if best is None or (state.feasible and best.cost >= c8_cost - COST_TOL):
         why = ("no AC-feasible point was found" if best is None else
                f"no AC-feasible point is cheaper than C8's ({best.cost:,.0f} against {c8_cost:,.0f} per year)")
-        return _fallback(c8, prob, hist, why, c8_cost, stop)
-    return _result(c8, prob, best, hist, c8_cost, stop)
+        out = _fallback(c8, prob, hist, why, c8_cost, stop)
+    else:
+        out = _result(c8, prob, best, hist, c8_cost, stop)
+    out["lin_errors"] = pd.DataFrame(lin_rows, columns=["iteration", "constraint", "error"])
+    return out
 
 
 def _key_label(key):

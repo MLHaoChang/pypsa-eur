@@ -271,8 +271,12 @@ def test_the_milp_finds_the_joint_optimum_that_c8s_greedy_choice_misses(tmp_path
     assert h.iloc[0]["note"].startswith("C8") and h.iloc[0]["cost"] == pytest.approx(c8_cost)
     assert bool(h["feasible"].iloc[-1]) and h["cost"].iloc[-1] == pytest.approx(best[0])
     # one discrete change (the transformer) and one switched step out: the
-    # linear model predicted the AC result to within a scale unit
-    assert h.iloc[1]["worst_lin_error"] < 1.0
+    # linear model predicted the AC flows to within a scale unit. Not the
+    # margin, judged on C8's dispatch: there T_B's and the bank's effects
+    # are added, and C8 would switch the bank off with T_B anyway.
+    e = out["lin_errors"]
+    first = e[e["iteration"] == 1]
+    assert len(first) and first.loc[~first["constraint"].str.startswith("ts"), "error"].abs().max() < 1.0
 
 
 # --------------------------------------------------------------------------
@@ -329,39 +333,90 @@ def s_t50(net):
     return math.hypot(net.res_trafo.at[0, "p_hv_mw"], net.res_trafo.at[0, "q_hv_mvar"])
 
 
-def test_adaptation_reaches_the_joint_optimum_in_fewer_iterations_than_a_fixed_rate(tmp_path):
+def test_the_margin_is_judged_on_c8s_dispatch_not_on_the_milps_extra_q(tmp_path):
+    """Owner, 2026-10-06: the sizing margin may not be met with dispatched
+    inverter Q. A 50 MVA unit would carry the hour with the margin only with
+    about 15 Mvar from the battery (solved here); C8's dispatch gives none,
+    the PCC being inside its (wide) band. So the MILP keeps C8's 63 MVA."""
     from gridspine.static.campus_milp import select_assets_milp
     spec, table, sel, lib = transformer_case(tmp_path)
-    # the oracle: T50 fails the margin without the battery, passes with 15 Mvar
-    assert s_t50(t50_net(38.0, 0.0)) * 1.2 > 50.0 > s_t50(t50_net(38.0, 15.0)) * 1.2
+    assert s_t50(t50_net(38.0, 0.0)) * 1.2 > 50.0 > s_t50(t50_net(38.0, 15.0)) * 1.2       # the oracle
     c8 = select_assets(spec, table, sel, lib, WIDE, PROFILE)
     assert c8["investment"].set_index("need").at["transformer TR1", "library_id"] == "T63"
-    fast = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE, c8=c8)
-    slow = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE, adaptive=False, c8=c8)
-    t50 = 1.0e6 * (crf(RATE, 40) + 0.01)
+    assert abs(float(c8["dispatch"].loc[c8["dispatch"]["element"] == "inverters", "q_mvar"].iloc[0])) < 1e-9
+    out = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE, c8=c8)
+    assert out["investment"].set_index("need").at["transformer TR1", "library_id"] == "T63"
+    assert out["fallback"] is not None and out["summary"]["fallback"] is True
+    h = out["milp_history"]
+    assert not h.loc[h["choice"].str.contains("T50"), "feasible"].any()
+
+
+def outage_case(tmp_path):
+    """Two units, N-1 off, 38 MW at pf 0.85, the battery idle but connected.
+    Two 40 MVA units hold the margin on their intact share with C8's
+    dispatch (none: the band is wide). With one out, the survivor carries
+    the whole hour, over 100 %, unless the battery supplies Q: the owner's
+    rule lets the extra Q serve the 100 % loading, not the margin. C8 tries
+    the pair, finds the survivor overloaded and moves to one 63 MVA unit."""
+    lib = library(tmp_path, transformers=[tr("TS", 40.0, 0.6e6), tr("T63", 63.0, 1.3e6)])
+    table, sel = hourly((2030, 1, {"DC_LOAD": -38.0, "BESS1": 0.0, "PV1": 0.0, "GEN1": 0.0}, {"PV1": 0, "GEN1": 0}))
+    return lowpf_spec(existing=False), table, sel, lib, SizingCriteria(n_minus_1=False)
+
+
+def pair_net(q_bess, out=None):
+    """The pair of 40 MVA units, 38 MW at pf 0.85, the battery at ``q_bess``."""
+    from tests.gridspine.test_campus import direct_net
+    net = direct_net()
+    net.trafo.drop(net.trafo.index, inplace=True)
+    for _ in range(2):
+        pp.create_transformer_from_parameters(net, 0, 1, sn_mva=40.0, vn_hv_kv=110.0, vn_lv_kv=20.0, vkr_percent=0.4,
+                                              vk_percent=12.0, pfe_kw=25.0, i0_percent=0.05)
+    if out is not None:
+        net.trafo.at[out, "in_service"] = False
+    net.line.at[0, "max_i_ka"] = 3.0
+    net.load.at[0, "p_mw"], net.load.at[0, "q_mvar"] = 38.0, 38.0 * math.tan(math.acos(0.85))
+    net.sgen["in_service"] = False
+    net.sgen.loc[net.sgen["name"] == "BESS1", ["in_service", "p_mw", "q_mvar"]] = (True, 0.0, q_bess)
+    pp.runpp(net)
+    return net
+
+
+def test_adaptive_and_fixed_rates_on_an_outage_relieved_by_inverter_q(tmp_path):
+    """Both rates reach the pair (cheaper than C8's 63 MVA unit). Adaptation
+    grows beta on the survivor's loading, violated in AC at the first
+    trial; the fixed rate keeps beta at 1 and Delta where it started.
+    Measured, not tuned: 4 iterations each. With the margin judged on C8's
+    dispatch, no case was found where adaptation saves an iteration."""
+    from gridspine.static.campus_milp import select_assets_milp
+    spec, table, sel, lib, crit = outage_case(tmp_path)
+    # the oracle: the margin holds on the intact share without Q; the survivor needs Q
+    s = lambda net: ((net.res_trafo["p_hv_mw"] ** 2 + net.res_trafo["q_hv_mvar"] ** 2) ** 0.5)[net.trafo["in_service"]]
+    assert s(pair_net(0.0)).max() * 1.2 < 40.0
+    assert pair_net(0.0, out=0).res_trafo.at[1, "loading_percent"] > 100.0
+    assert pair_net(22.0, out=0).res_trafo.at[1, "loading_percent"] < 100.0
+    c8 = select_assets(spec, table, sel, lib, WIDE, PROFILE, crit)
+    assert c8["investment"].set_index("need").at["transformer TR1+TR2", "library_id"] == "T63"
+    fast = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE, crit, c8=c8)
+    slow = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE, crit, adaptive=False, c8=c8)
+    pair = 2 * 0.6e6 * (crf(RATE, 40) + 0.01)
     for out in (fast, slow):
-        assert out["fallback"] is None
-        assert out["summary"]["milp_cost"] == pytest.approx(t50)
-        assert out["investment"].set_index("need").at["transformer TR1", "library_id"] == "T50"
+        assert out["fallback"] is None and out["summary"]["milp_cost"] == pytest.approx(pair)
+        got = out["investment"].set_index("need").loc["transformer TR1+TR2"]
+        assert (got["library_id"], got["units"]) == ("TS", 2)
+    assert (fast["summary"]["iterations"], slow["summary"]["iterations"]) == (4, 4)      # reported, measured
     hf, hs = fast["milp_history"], slow["milp_history"]
-    n_fast, n_slow = fast["summary"]["iterations"], slow["summary"]["iterations"]
-    assert (n_fast, n_slow) == (5, 9)                              # reported; measured, not tuned
-    assert n_fast < n_slow
-    # adaptation: beta grows on the transformer's margin, violated in AC ...
     first = hf.iloc[1]
     assert not first["feasible"] and not first["accepted"] and first["rho"] < 0.25
-    assert first["beta_max"] == pytest.approx(1.5) and "ts+ PCC/MV1 intact 2030/1" in first["beta_up"]
-    assert hf.iloc[2]["beta_max"] == pytest.approx(2.25)
-    # ... and fixed: beta stays at 1 and delta where it started
+    assert first["beta_max"] == pytest.approx(1.5) and "tl+ PCC/MV1 N-1:PCC/MV1 2030/1" in first["beta_up"]
     assert set(hs["beta_max"]) == {1.0} and hs["delta"].nunique() == 1 and (hs["beta_up"] == "").all()
 
 
 def test_a_rejected_step_halves_delta_and_keeps_the_previous_point(tmp_path):
     from gridspine.static.campus_milp import select_assets_milp
-    spec, table, sel, lib = transformer_case(tmp_path)
-    h = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE)["milp_history"]
+    spec, table, sel, lib, crit = outage_case(tmp_path)
+    h = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE, crit)["milp_history"]
     rejected = h[(h["iteration"] > 0) & (h["rho"] < 0.25) & ~h["accepted"]]
-    assert len(rejected) >= 2
+    assert len(rejected) >= 1
     for i in rejected.index:
         assert h.at[i + 1, "delta"] == pytest.approx(h.at[i, "delta"] / 2)
         assert h.at[i, "point_cost"] == pytest.approx(h.at[i - 1, "point_cost"])      # the previous point kept
@@ -376,25 +431,26 @@ def test_a_rejected_step_halves_delta_and_keeps_the_previous_point(tmp_path):
 def test_the_returned_compliance_is_an_ac_re_solve_not_the_linear_prediction(tmp_path):
     """The winning point was predicted with a linearisation error (history),
     yet every value reported is the AC one: solved here, in pandapower,
-    with the returned battery dispatch on the returned transformer."""
+    with the returned battery dispatch on the returned pair, intact and
+    with each unit out."""
     from gridspine.static.campus_milp import select_assets_milp
-    spec, table, sel, lib = transformer_case(tmp_path)
-    out = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE)
+    spec, table, sel, lib, crit = outage_case(tmp_path)
+    out = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE, crit)
     h = out["milp_history"]
     win = h[h["feasible"] & (h["cost"] == out["summary"]["milp_cost"])].iloc[0]
     assert win["worst_lin_error"] > 0.1                             # the linear model was off there
     d = out["dispatch"]
     q_bess = float(d.loc[d["element"] == "inverters", "q_mvar"].iloc[0])
-    assert 10.0 < q_bess <= 22.0
-    net = t50_net(38.0, q_bess)
+    assert 5.0 < q_bess <= 22.0
+    cases = [pair_net(q_bess), pair_net(q_bess, out=0), pair_net(q_bess, out=1)]
     comp_ = out["compliance"].set_index("check")
-    assert comp_.at["transformer_loading", "value_with_measures"] == pytest.approx(
-        float(net.res_trafo.at[0, "loading_percent"]), abs=1e-6)
+    peak = max(float(c.res_trafo.loc[c.trafo["in_service"], "loading_percent"].max()) for c in cases)
+    assert comp_.at["transformer_loading", "value_with_measures"] == pytest.approx(peak, abs=1e-6)
+    assert 99.0 < peak <= 100.0                                       # the survivor at its limit, in AC
     assert comp_.at["campus_voltage", "value_with_measures"] == pytest.approx(
-        float(net.res_bus["vm_pu"].iloc[1:].min()), abs=1e-6)
+        min(float(c.res_bus["vm_pu"].iloc[1:].min()) for c in cases), abs=1e-6)
     assert out["pcc"].set_index("case").at["intact", "q_mvar"] == pytest.approx(
-        float(net.res_ext_grid["q_mvar"].sum()), abs=1e-6)
-    assert s_t50(net) * 1.2 <= 50.0                                 # the sizing rule holds in AC
+        float(cases[0].res_ext_grid["q_mvar"].sum()), abs=1e-6)
     assert set(comp_["status_with_measures"]) <= {"pass", "not_rated"}
 
 
