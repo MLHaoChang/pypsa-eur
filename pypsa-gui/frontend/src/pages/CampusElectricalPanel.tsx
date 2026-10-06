@@ -16,12 +16,12 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, RefreshCw, Save, Wand2 } from 'lucide-react'
 import {
-  campusApi, isOtherKind,
+  campusApi, errorText, isOtherKind,
   type CampusSettings, type CampusState, type CheckStatus, type ComplianceRow,
 } from '../api/campusElectrical'
-import { formatApiDetail } from '../api/client'
 import { useUIStore } from '../store/uiStore'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
+import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
 
 export const CAMPUS_KEY = (name: string) => ['campusElectrical', 'state', name] as const
 
@@ -40,11 +40,6 @@ const STATUS_TEXT: Record<CheckStatus, string> = {
 }
 const STATUS_TONE: Record<CheckStatus, 'ok' | 'err' | 'neutral' | 'warn'> = {
   pass: 'ok', fail: 'err', not_rated: 'neutral', not_rechecked: 'warn',
-}
-
-function errorText(e: unknown): string {
-  const detail = (e as { response?: { data?: { detail?: unknown } } } | null)?.response?.data?.detail
-  return formatApiDetail(detail, (e as Error)?.message ?? 'Request failed')
 }
 
 function num(v: number | null | undefined, digits = 2): string {
@@ -111,6 +106,10 @@ function CampusView({ name }: { name: string }) {
         </PageSection>
       </div>
       <CampusFileSection name={name} state={state.data} onChange={refresh} />
+      <CampusGridCodeSection
+        name={name}
+        onProfilesChanged={() => qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })}
+      />
       {state.data.campus_yaml && <RunSection name={name} state={state.data} onChange={refresh} />}
       {state.data.results && <ResultsSection state={state.data} />}
     </PageBody>
@@ -189,6 +188,10 @@ function RunSection({ name, state, onChange }: {
   const [margin, setMargin] = useState(String(Math.round(initial.margin * 100)))
   const [n1, setN1] = useState(initial.n_minus_1)
   const [refusal, setRefusal] = useState<string | null>(null)
+  // The grid-codes listing says which published profiles still carry
+  // unconfirmed limits; the picker names them so a run is never held to one unawares.
+  const codes = useQuery({ queryKey: GRID_CODES_KEY(name), queryFn: () => campusApi.gridCodes(name), retry: false })
+  const unconfirmed = new Set((codes.data?.published ?? []).filter(p => p.unconfirmed.length > 0).map(p => p.id))
 
   const settings = (): CampusSettings => ({
     k: Number(k), pf: pf.trim() === '' ? null : Number(pf), profile, margin: Number(margin) / 100, n_minus_1: n1,
@@ -213,7 +216,9 @@ function RunSection({ name, state, onChange }: {
         <Field label="Grid code">
           <select aria-label="Grid code" className={`${INPUT} w-[320px]`} value={profile}
                   onChange={e => setProfile(e.target.value)}>
-            {Object.entries(state.profiles).map(([key, title]) => <option key={key} value={key}>{title}</option>)}
+            {Object.entries(state.profiles).map(([key, title]) => (
+              <option key={key} value={key}>{unconfirmed.has(key) ? `${title} (unconfirmed limits)` : title}</option>
+            ))}
           </select>
         </Field>
         <Field label="Design margin (%)">
