@@ -337,3 +337,41 @@ describe('tour anchors', () => {
     expect(screen.getByTestId('hub-design-panel')).toBeTruthy()
   })
 })
+
+// P33b 10b: the panel watches the polled edit counter and re-reads the study
+// record and the review when it moves, so the Results card's edited banner
+// appears without a reload.
+describe('HubDesignPanel re-reads the study after an edit (P33b)', () => {
+  it('a polled network_revision change invalidates the two hub queries once', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    const { networkApi } = await import('../../api/network')
+    vi.spyOn(networkApi, 'undoInfo').mockResolvedValue({ depth: 0, unsaved: false, network_revision: 2 })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(DONE as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
+    mount()
+    await screen.findByTestId('hub-card-results')
+    await waitFor(() => expect(networkApi.undoInfo).toHaveBeenCalled())
+    const spy = vi.spyOn(client, 'invalidateQueries')
+    await act(async () => {
+      client.setQueryData(nk('Demo', 'undoInfo'), { depth: 1, unsaved: true, network_revision: 3 })
+      await new Promise(r => setTimeout(r, 5))
+    })
+    const keys = spy.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))
+    expect(keys.filter(k => k === JSON.stringify(nk('Demo', 'results', 'eh_study')))).toHaveLength(1)
+    expect(keys.filter(k => k === JSON.stringify(nk('Demo', 'results', 'eh_review')))).toHaveLength(1)
+  })
+})
+
+describe('HubDesignPanel in Expert never watches the edit counter (P33b, D-4)', () => {
+  it('no undo/info read and no hub invalidation from the hook', async () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    const { networkApi } = await import('../../api/network')
+    vi.spyOn(networkApi, 'undoInfo').mockResolvedValue({ depth: 0, unsaved: false, network_revision: 2 })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(DONE as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
+    mount()
+    await screen.findByTestId('hub-card-results')
+    await new Promise(r => setTimeout(r, 30))
+    expect(networkApi.undoInfo).not.toHaveBeenCalled()
+  })
+})

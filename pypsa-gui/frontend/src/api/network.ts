@@ -248,7 +248,10 @@ export const networkApi = {
 
   // Undo. /undo/info is a high-frequency poll — keep its timeout tight so a
   // wedged backend doesn't tie up axios sockets for 30s and bring down the UI.
-  undoInfo: () => client.get<{ depth: number; unsaved: boolean }>('/network/undo/info', { timeout: 5000 }).then(r => r.data),
+  // `network_revision` (P33b): the project's edit counter — bumped by every
+  // accepted network edit, never by a Solve or a study. The Guided hub
+  // surfaces watch it (useNetworkRevisionInvalidation) to re-read the study.
+  undoInfo: () => client.get<{ depth: number; unsaved: boolean; network_revision?: number }>('/network/undo/info', { timeout: 5000 }).then(r => r.data),
   undo: () => client.post<{ undone: boolean; remaining: number }>('/network/undo').then(r => r.data),
 
   // Attribute catalog (spec D3/D24). Class-level metadata; cached forever by

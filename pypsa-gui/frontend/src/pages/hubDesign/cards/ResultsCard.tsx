@@ -19,6 +19,11 @@ import { SECTION_LABEL } from '../sectionLabels'
 export const STALE_TEXT =
   'These results are from an earlier study; the network was solved since. Run again to refresh.'
 
+/** P33b (D-2): an edit seam was crossed since the study started. Says
+ *  "edited", never "changed" — that is all the counter carries. */
+export const EDITED_TEXT =
+  'The network has been edited since this study, so these results describe the design as it was. Run again to refresh.'
+
 export function openFullReport(): void {
   const ui = useUIStore.getState()
   ui.setSlidePanel('results')
@@ -38,7 +43,14 @@ export function ResultsCard() {
 
   return (
     <CardShell step="results" next="improve" testId="hub-card-results" title="Results">
-      {review?.stale === true && (
+      {/* One amber line (D-3): the edited fact subsumes solved-since. */}
+      {study?.edited_since_study === true && (
+        <p data-testid="hub-results-edited"
+          className="rounded border border-warn/50 bg-warn/10 px-3 py-2 text-[12px] text-warn">
+          {EDITED_TEXT}
+        </p>
+      )}
+      {review?.stale === true && study?.edited_since_study !== true && (
         <p data-testid="hub-results-stale"
           className="rounded border border-warn/50 bg-warn/10 px-3 py-2 text-[12px] text-warn">
           {STALE_TEXT}

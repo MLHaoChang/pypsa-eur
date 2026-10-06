@@ -980,6 +980,9 @@ export type EhReview =
       status: 'ok'
       source: string
       stale: boolean
+      /** P33b: the network was edited since the study started (independent
+       *  of `stale`); null when the record cannot say (Unavailable). */
+      edited_since_study?: boolean | null
       summary: {
         archetype?: EhArchetype | null
         certified?: boolean | null
@@ -1010,6 +1013,11 @@ export interface EhStudyPayload {
   error?: string | null
   started_at?: number
   finished_at?: number | null
+  /** P33b: the project's edit counter when the study started. */
+  network_revision?: number | null
+  /** P33b: true when the network was edited since the study started; null
+   *  while running or for a record that cannot say (Unavailable). */
+  edited_since_study?: boolean | null
 }
 
 export interface EhRedundancyOption {
