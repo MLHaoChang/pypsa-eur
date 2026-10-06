@@ -229,6 +229,81 @@ describe('updateAsset returns the PUT response', () => {
   })
 })
 
+// ── A rename re-keys the sidecar caches (plan M2, closing the M1 ledger's
+// stale-document gap). The server re-keys `map_layout.json` and `sites.json`
+// inside the PUT; the stores' cached documents must follow, or their next
+// debounced PUT writes the OLD key back over the server's re-keyed entry.
+describe('updateAsset re-keys the map route and the site placement after a rename', () => {
+  const api = () => (globalThis as never as { __awMock: Record<string, ReturnType<typeof vi.fn>> }).__awMock
+
+  async function stores() {
+    const { useMapLayoutStore } = await import('../pages/mapLayoutStore')
+    const { useSitesStore } = await import('../site3d/sitesStore')
+    const { useUIStore } = await import('../store/uiStore')
+    useUIStore.setState({ readOnly: false, readOnlyReason: 'writable' })
+    useMapLayoutStore.getState().resetForTests()
+    useSitesStore.getState().resetForTests()
+    useMapLayoutStore.getState().setRouteWaypoints('p1', 'line:L1', [[53.4, 6.8]])
+    useMapLayoutStore.getState().applyLengthSources('p1', { 'line:L1': 'route' })
+    useSitesStore.getState().upsertSite('p1', {
+      id: 'site_a', name: 'Campus', buses: ['A'], boundary: [[6.83, 53.44], [6.84, 53.44], [6.84, 53.43]],
+      origin: { lng: 6.835, lat: 53.435 }, placements: { 'Line:L1': { x: 1, y: 2, heading: 0 } },
+    })
+    return { useMapLayoutStore, useSitesStore }
+  }
+
+  beforeEach(() => vi.clearAllMocks())
+
+  it('moves the route, its length provenance and the placement to the new name', async () => {
+    const { updateAsset } = await import('./assetWrite')
+    const { useMapLayoutStore, useSitesStore } = await stores()
+    const qc = new QueryClient()
+    qc.setQueryData(nk('p1', 'lines'), [{ name: 'L1', bus0: 'A', bus1: 'B', length: 1 }])
+    api().updateLine.mockResolvedValue({ name: 'L9' })
+
+    await updateAsset(qc, 'p1', 'lines', 'L1', { name: 'L9' })
+
+    const map = useMapLayoutStore.getState().docFor('p1')
+    expect(Object.keys(map.routes)).toEqual(['line:L9'])
+    expect(map.lengths).toEqual({ 'line:L9': { source: 'route' } })
+    expect(Object.keys(useSitesStore.getState().docFor('p1').sites[0].placements)).toEqual(['Line:L9'])
+    useMapLayoutStore.getState().resetForTests()
+    useSitesStore.getState().resetForTests()
+  })
+
+  it('an edit that keeps the name touches neither cache', async () => {
+    const { updateAsset } = await import('./assetWrite')
+    const { useMapLayoutStore, useSitesStore } = await stores()
+    const before = useMapLayoutStore.getState().docFor('p1')
+    const qc = new QueryClient()
+    qc.setQueryData(nk('p1', 'lines'), [{ name: 'L1', bus0: 'A', bus1: 'B', length: 1 }])
+    api().updateLine.mockResolvedValue({ name: 'L1' })
+
+    await updateAsset(qc, 'p1', 'lines', 'L1', { length: 2 })
+
+    expect(useMapLayoutStore.getState().docFor('p1')).toBe(before)
+    expect(Object.keys(useSitesStore.getState().docFor('p1').sites[0].placements)).toEqual(['Line:L1'])
+    useMapLayoutStore.getState().resetForTests()
+    useSitesStore.getState().resetForTests()
+  })
+
+  it('a bus rename re-keys its placement (buses have no route)', async () => {
+    const { updateAsset } = await import('./assetWrite')
+    const { useMapLayoutStore, useSitesStore } = await stores()
+    useSitesStore.getState().setPlacement('p1', 'site_a', 'Bus:A', { x: 0, y: 0, heading: 0 })
+    const qc = new QueryClient()
+    qc.setQueryData(nk('p1', 'buses'), [{ name: 'A', v_nom: 20 }])
+    api().updateBus.mockResolvedValue({ name: 'A2', rescale: [] })
+
+    await updateAsset(qc, 'p1', 'buses', 'A', { name: 'A2' })
+
+    expect(Object.keys(useSitesStore.getState().docFor('p1').sites[0].placements).sort()).toEqual(['Bus:A2', 'Line:L1'])
+    expect(Object.keys(useMapLayoutStore.getState().docFor('p1').routes)).toEqual(['line:L1'])
+    useMapLayoutStore.getState().resetForTests()
+    useSitesStore.getState().resetForTests()
+  })
+})
+
 // ── The sibling-path check (CLAUDE.md: "a green suite is not a correctness
 // claim"). COMPONENT_QUERY_ROOTS is a hand-written allowlist, so it can only
 // contain classes someone already thought of — it is structurally blind to a

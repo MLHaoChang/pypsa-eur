@@ -324,6 +324,39 @@ html {
 }
 .leaflet-tooltip.map-edge-label::before { display: none; }
 
+/* Length discrepancy badge (plan M2) — an amber chip below the polyline's
+   centre: the stored length disagrees with the geometry beyond 10 % / 100 m.
+   Interactive, unlike the flow label, because it carries the one-click
+   "Use geometry". */
+.leaflet-tooltip.map-length-badge {
+  background: var(--color-bg);
+  color: var(--color-warn);
+  border: 1px solid var(--color-warn);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: var(--font-family-mono);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.4;
+  box-shadow: var(--shadow-sm);
+  white-space: nowrap;
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.leaflet-tooltip.map-length-badge::before { display: none; }
+.map-length-badge__use {
+  color: var(--color-text);
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  padding: 0 4px;
+  font: inherit;
+  cursor: pointer;
+}
+.map-length-badge__use:hover { border-color: var(--color-warn); }
+
 /* Suppress the browser's default focus outline that appears on clicked
    Leaflet polylines / markers (renders as a black bounding-box around the
    path's SVG, which looks like a selection frame). Leaflet manages its own

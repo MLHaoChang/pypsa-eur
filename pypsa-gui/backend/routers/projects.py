@@ -27,7 +27,9 @@ from models.schemas import (
     ImportFolderRequest,
     ImportSummary,
     ProjectInfo,
+    ProjectSettings,
     RenameProjectRequest,
+    UpdateProjectSettingsRequest,
     UpdateScenarioRequest,
 )
 from services import active_project, change_log_service
@@ -628,8 +630,24 @@ def _project_info(project_dir: pathlib.Path) -> ProjectInfo:
         objective=meta.get("objective"),
         has_orphan_tmp=has_orphan,
         parent_project=meta.get("parent_project"),
+        settings=_settings_from_meta(meta),
         **_scenario_fields_from_meta(meta),
     )
+
+
+def _settings_from_meta(meta: dict) -> ProjectSettings:
+    """
+    The `settings` table of a metadata.json as the DTO, defaults for anything
+    missing or malformed — the same tolerance `services/project_settings.py`
+    applies on the read side the network routes use.
+    """
+    from services import project_settings
+
+    table = meta.get(project_settings.SETTINGS_KEY)
+    if not isinstance(table, dict):
+        return ProjectSettings()
+    known = {k: v for k, v in table.items() if k in ProjectSettings.model_fields and isinstance(v, bool)}
+    return ProjectSettings(**known)
 
 
 def _project_info_db(db, project) -> ProjectInfo:
@@ -2175,6 +2193,11 @@ def _save_context(
             "parent_project": new_parent,
             "scenario_description": new_desc,
             "scenario_type": new_type,
+            # Per-project settings (plan M2) round-trip from the existing file:
+            # `PATCH /{name}/settings` is their only writer, and a save that
+            # dropped the key would silently reset the user's choice.
+            **({"settings": existing_meta["settings"]}
+               if isinstance(existing_meta.get("settings"), dict) else {}),
         })
     ts_columns_saved = len(user_ts_data) if isinstance(user_ts_data, dict) else 0
     # Flat-count the leaves of the nested {comp: {attr: {col: ...}}} structure.
@@ -3113,6 +3136,66 @@ def update_scenario_metadata(
         f"Scenario metadata updated on '{project.name}'"
         + (f" · type={project.scenario_type}" if project.scenario_type else "")
         + (f" · {project.scenario_description[:60]}" if project.scenario_description else ""),
+    )
+    return _project_info_db(db, project)
+
+
+@router.patch("/{name}/settings")
+def update_project_settings(
+    name: str,
+    req: UpdateProjectSettingsRequest,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> ProjectInfo:
+    """
+    Edit the project's settings table in `metadata.json` (plan M2: "Derive
+    lengths from geometry"). PARTIAL like `/scenario`: only the keys present
+    are written, so a one-flag PATCH cannot reset its future siblings.
+
+    The file is the only store — there is no DB column — so the project must
+    have a storage directory (it has been saved at least once; 409 otherwise).
+    A metadata.json that is missing or unreadable is NOT invented here: the
+    save path owns the dozen other keys, and writing `{"settings": …}` alone
+    over a lost file would hide the loss `save_project` warns about. The
+    setting changes how edits behave, so it is a write edge: the lock is
+    ENFORCED (acquired) as for the scenario labels.
+
+    Errors: 404 no such project (or not yours); 409 locked by another user,
+    or never saved; 422 a non-boolean flag.
+    """
+    from services import project_registry, project_settings
+
+    project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, name)
+    submitted = req.model_dump(exclude_unset=True)
+    if not submitted:
+        return _project_info_db(db, project)
+    _enforce_project_lock(db, project, user)
+
+    project_dir = project_registry.project_dir(project)
+    if not project_dir.is_dir():
+        raise HTTPException(409, f"Save '{project.name}' before changing its settings.")
+    meta = _read_meta(project_dir)
+    if not meta:
+        raise HTTPException(
+            409,
+            f"metadata.json for '{project.name}' is missing or unreadable; save the project and retry.",
+        )
+    table = meta.get(project_settings.SETTINGS_KEY)
+    if not isinstance(table, dict):
+        table = {}
+    for key, value in submitted.items():
+        if value is None:
+            table.pop(key, None)       # null = back to the default
+        else:
+            table[key] = value
+    meta[project_settings.SETTINGS_KEY] = table
+    _write_meta(project_dir, meta)
+
+    changed = ", ".join(f"{k}={v}" for k, v in submitted.items())
+    change_log_service.log(
+        "update_settings", "Project", project.name,
+        f"Project settings updated on '{project.name}' · {changed}",
     )
     return _project_info_db(db, project)
 

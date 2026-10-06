@@ -31,8 +31,9 @@ import { useEffect } from 'react'
 import { create } from 'zustand'
 import {
   emptyMapLayoutDocument, mapLayoutApi,
-  type LngLatTuple, type MapBubble, type MapLayoutDocument, type MapRoute, type RouteSource,
+  type LengthSource, type LngLatTuple, type MapBubble, type MapLayoutDocument, type MapRoute, type RouteSource,
 } from '../api/mapLayout'
+import { networkApi, type LengthsFromGeometryResult } from '../api/network'
 import { rawFetchHeaders } from '../api/csrf'
 import { useUIStore } from '../store/uiStore'
 import { evaluateMutation } from '../utils/mutationGuard'
@@ -166,8 +167,18 @@ interface MapLayoutState {
    */
   setRouteWaypoints: (project: string | null, edgeId: string, wps: readonly LatLngTuple[], source?: RouteSource) => void
   setBubble: (project: string | null, key: string, bubble: MapBubble) => void
-  /** Re-key `<kind>:old` → `<kind>:new` for a renamed Line / Link / Transformer; false when there was no route. */
+  /**
+   * Re-key `<kind>:old` → `<kind>:new` (route AND length provenance) for a
+   * renamed Line / Link / Transformer; false when neither table had the key.
+   */
   renameRoute: (project: string | null, cls: string, oldName: string, newName: string) => boolean
+  /**
+   * Mirror the provenance the server just recorded (`sources` of a
+   * lengths-from-geometry call, `length_sources` of a bus move) into the
+   * cached document, so the next PUT of this document carries it instead of
+   * overwriting the server's copy with a table that lacks it.
+   */
+  applyLengthSources: (project: string | null, sources: Record<string, LengthSource> | undefined) => void
   /** Replace a project's document wholesale. */
   replaceDocument: (project: string | null, doc: MapLayoutDocument) => void
   resetForTests: () => void
@@ -253,17 +264,40 @@ export const useMapLayoutStore = create<MapLayoutState>((set, get) => {
       const kind = edgeKindForClass(cls)
       if (!kind) return false
       const oldKey = edgeKey(kind, oldName), newKey = edgeKey(kind, newName)
-      if (!(oldKey in get().docFor(project).routes)) return false
+      const current = get().docFor(project)
+      const hasRoute = oldKey in current.routes
+      const hasLength = oldKey in (current.lengths ?? {})
+      if (!hasRoute && !hasLength) return false
       write(project, doc => {
-        const { [oldKey]: moved, ...rest } = doc.routes
-        return { ...doc, routes: { ...rest, [newKey]: moved } }
+        const next = { ...doc }
+        if (hasRoute) {
+          const { [oldKey]: moved, ...rest } = doc.routes
+          next.routes = { ...rest, [newKey]: moved }
+        }
+        if (hasLength && doc.lengths) {
+          const { [oldKey]: moved, ...rest } = doc.lengths
+          next.lengths = { ...rest, [newKey]: moved }
+        }
+        return next
       })
       return true
+    },
+    applyLengthSources: (project, sources) => {
+      if (!sources || Object.keys(sources).length === 0) return
+      const current = get().docFor(project).lengths ?? {}
+      if (Object.entries(sources).every(([k, s]) => current[k]?.source === s)) return
+      write(project, doc => {
+        const lengths = { ...doc.lengths }
+        for (const [k, source] of Object.entries(sources)) lengths[k] = { ...lengths[k], source }
+        return { ...doc, lengths }
+      })
     },
     replaceDocument: (project, doc) => write(project, () => doc),
     resetForTests: () => {
       for (const t of timers.values()) clearTimeout(t)
       timers.clear()
+      pendingLengthKeys.clear()
+      lengthsDerivedSink = null
       set({ docs: {}, loaded: {}, dirty: {} })
     },
   }
@@ -282,7 +316,7 @@ function scheduleSave(project: string | null): void {
 }
 
 async function persist(project: string | null): Promise<'server' | 'local' | 'refused'> {
-  if (!canWrite()) return 'refused'
+  if (!canWrite()) { pendingLengthKeys.delete(keyOf(project)); return 'refused' }
   const doc = useMapLayoutStore.getState().docFor(project)
   if (!project) { writeLocal(null, doc); return 'local' }
   try {
@@ -293,11 +327,65 @@ async function persist(project: string | null): Promise<'server' | 'local' | 're
       delete dirty[keyOf(project)]
       return { dirty }
     })
+    // The document is on the server: the lengths queued against it can now
+    // be derived from the routes the server holds (never before — the call
+    // reads `map_layout.json`, not this cache).
+    void deriveQueuedLengths(project)
     return 'server'
   } catch (e) {
     writeLocal(project, doc)
     console.warn('[map-layout] PUT failed → wrote to localStorage instead', { project, error: e })
     return 'local'
+  }
+}
+
+// ── lengths from geometry (plan M2) ─────────────────────────────────────────
+// With the project setting "Derive lengths from geometry" on, a route edit
+// must rewrite the branch's length — but the server computes that from the
+// routes in `map_layout.json`, so the call can only go out once the debounced
+// PUT has landed. MapCanvas queues the edited branch here right after
+// `setRouteWaypoints`; `persist` drains the queue after a successful PUT, one
+// call per project with every key that settled in that window. A PUT that
+// fell back to localStorage keeps the queue for the retry; a refused write
+// (read-only) drops it, because nothing was written to follow.
+//
+// The result (rescale previews, provenance) is handed to a sink the map
+// registers, so this store stays free of React Query and toasts — the same
+// division `utils/rescaleActions.ts` keeps.
+
+const pendingLengthKeys = new Map<string, Set<string>>()
+let lengthsDerivedSink: ((project: string, result: LengthsFromGeometryResult) => void) | null = null
+
+/** Ask for `edgeId`'s length to follow its geometry once the pending PUT lands. Scratch networks have no server routes: no-op. */
+export function queueLengthFromGeometry(project: string | null, edgeId: string): void {
+  if (!project || !canWrite()) return
+  const k = keyOf(project)
+  const set = pendingLengthKeys.get(k) ?? new Set<string>()
+  set.add(edgeId)
+  pendingLengthKeys.set(k, set)
+}
+
+/** MapCanvas registers what to do with a derivation's result; null unregisters. */
+export function setLengthsDerivedSink(sink: ((project: string, result: LengthsFromGeometryResult) => void) | null): void {
+  lengthsDerivedSink = sink
+}
+
+/** Test seam: the keys still waiting for a PUT to land. */
+export function queuedLengthKeys(project: string | null): string[] {
+  return [...(pendingLengthKeys.get(keyOf(project)) ?? [])]
+}
+
+async function deriveQueuedLengths(project: string): Promise<void> {
+  const k = keyOf(project)
+  const keys = pendingLengthKeys.get(k)
+  if (!keys || keys.size === 0) return
+  pendingLengthKeys.delete(k)
+  try {
+    const result = await networkApi.lengthsFromGeometry([...keys])
+    useMapLayoutStore.getState().applyLengthSources(project, result.sources)
+    lengthsDerivedSink?.(project, result)
+  } catch (e) {
+    console.warn('[map-layout] lengths from geometry failed', { project, keys: [...keys], error: e })
   }
 }
 

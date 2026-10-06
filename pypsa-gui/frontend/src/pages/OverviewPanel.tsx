@@ -11,8 +11,9 @@ import { bundleErrorMessage, projectsApi } from '../api/projects'
 import { changelogApi, type ChangeLogEntry } from '../api/changelog'
 import { downloadProjectBundle, formatRelativeTime, saveProjectQuietly } from '../utils/projectActions'
 import { isRenewableCarrier } from './results/shared'
-import { PageHeader, PageBody, PageSection, RowGrid, StatCard, Btn, BarList } from '../components/PageKit'
-import type { Bus, Generator, StorageUnit, Load, Link } from '../api/types'
+import { PageHeader, PageBody, PageSection, RowGrid, StatCard, Btn, BarList, Toggle } from '../components/PageKit'
+import { errorText } from '../api/campusElectrical'
+import type { Bus, Generator, StorageUnit, Load, Link, ProjectInfo } from '../api/types'
 
 // OverviewPanel — the design's "Project info" page: a PageHeader, a row of four
 // StatCards (buses / lines+transformers / installed capacity / last solve), and
@@ -291,8 +292,57 @@ export default function OverviewPanel() {
             )}
           </PageSection>
         </RowGrid>
+
+        {/* ── Project settings (plan M2) ──────────────────────────── */}
+        <ProjectSettingsSection currentProject={currentProject} />
       </PageBody>
     </div>
+  )
+}
+
+// ── Project settings ────────────────────────────────────────────────────────
+// The per-project settings table of metadata.json, read from the shared
+// `['projects']` list and written through `PATCH /projects/{name}/settings`.
+// One setting today: "Derive lengths from geometry" (map plan 2, M2). Off by
+// default — rewriting a modelled quantity from a drawing is a choice the
+// project makes once, not a surprise the map springs.
+export const DERIVE_LENGTHS_HELP =
+  'When on, a bus drag, a route edit or an import rewrites the length of the affected lines and links '
+  + 'from the geometry and offers the impedance rescale, as a bus drag does for lines today.'
+
+function ProjectSettingsSection({ currentProject }: { currentProject: string }) {
+  const qc = useQueryClient()
+  const readOnly = useUIStore(s => s.readOnly)
+  const { data: projects = [] } = useQuery({
+    queryKey: ['projects'], queryFn: () => projectsApi.list(), staleTime: 30_000,
+  })
+  const info = (projects as ProjectInfo[]).find(p => p.name === currentProject)
+  const derive = info?.settings?.derive_lengths_from_geometry ?? false
+  const mut = useMutation({
+    mutationFn: (on: boolean) => projectsApi.updateSettings(currentProject, { derive_lengths_from_geometry: on }),
+    onSuccess: (updated) => {
+      // Patch the cached list in place so the toggle (and the map, which
+      // reads the same query) settles without a refetch round trip.
+      qc.setQueryData<ProjectInfo[]>(['projects'], prev =>
+        prev?.map(p => (p.name === updated.name ? { ...p, settings: updated.settings } : p)) ?? prev)
+      qc.invalidateQueries({ queryKey: ['projects'] })
+      toast.success(`Derive lengths from geometry ${updated.settings?.derive_lengths_from_geometry ? 'on' : 'off'}`)
+    },
+    onError: (e: unknown) => toast.error(`Could not change the setting: ${errorText(e)}`),
+  })
+  return (
+    <PageSection title="Settings" hint="Stored with the project">
+      <Toggle
+        on={derive}
+        onChange={readOnly || mut.isPending ? undefined : (v) => mut.mutate(v)}
+        label={
+          <span className="flex flex-col gap-0.5">
+            <span className="font-medium text-text">Derive lengths from geometry</span>
+            <span className="text-[11px] text-muted leading-snug">{DERIVE_LENGTHS_HELP}</span>
+          </span>
+        }
+      />
+    </PageSection>
   )
 }
 
