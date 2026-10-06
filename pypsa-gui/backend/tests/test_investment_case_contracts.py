@@ -313,7 +313,7 @@ def test_commercial_config_validates_and_dumps_to_plain_dict():
     (C.DrContract, dict(id="dr1", availability_eur_per_mw_year=20000.0,
                         activation_eur_per_mwh=300.0, max_events=20,
                         max_duration_h=4.0, notice_h=2.0, load_ids=["dc"])),
-    (F.DebtTranche, dict(kind="term_loan", gearing=0.6, rate=0.055,
+    (F.DebtTranche, dict(kind="term_loan", max_gearing=0.6, rate=0.055,
                          tenor_years=15, sculpting="dscr_target",
                          dscr_target=1.3)),
     (F.DepreciationSchedule, dict(method="straight_line", years=20)),
@@ -342,8 +342,16 @@ def test_debt_tranche_needs_amount_or_gearing():
         F.DebtTranche(kind="term_loan", rate=0.05, tenor_years=10,
                       sculpting="annuity")
     with pytest.raises(pydantic.ValidationError):
-        F.DebtTranche(kind="term_loan", gearing=0.6, rate=0.05, tenor_years=10,
+        F.DebtTranche(kind="term_loan", rate=0.05, tenor_years=10,
                       sculpting="dscr_target")  # dscr_target missing
+    with pytest.raises(pydantic.ValidationError):   # sized by its DSCR (IC P4 WP4.2)
+        F.DebtTranche(kind="term_loan", gearing=0.6, rate=0.05, tenor_years=10,
+                      sculpting="dscr_target", dscr_target=1.3)
+    with pytest.raises(pydantic.ValidationError):   # the cap is for sculpted tranches
+        F.DebtTranche(kind="term_loan", gearing=0.6, rate=0.05, tenor_years=10,
+                      max_gearing=0.5)
+    F.DebtTranche(kind="term_loan", rate=0.05, tenor_years=10, sculpting="dscr_target",
+                  dscr_target=1.3)
 
 
 def test_flex_spec_shares_bounded():

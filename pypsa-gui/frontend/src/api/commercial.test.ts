@@ -14,7 +14,7 @@ vi.mock('./client', () => ({
     (typeof d === 'string' ? d : d == null ? fallback : JSON.stringify(d)),
 }))
 
-const { libraryApi, commercialApi, StaleEditError, SolverInFlightError } =
+const { libraryApi, commercialApi, StaleEditError, SolverInFlightError, NoCommercialConfigError } =
   await import('./commercial')
 
 beforeEach(() => { get.mockReset(); post.mockReset(); put.mockReset() })
@@ -35,14 +35,15 @@ describe('libraryApi', () => {
     expect(get).toHaveBeenLastCalledWith('/library/items/contract/ppa%20one', { params: { version: 3 } })
     put.mockResolvedValue({ status: 200, data: { kind: 'tariff', id: 't', version: 2, hash: 'h2' } })
     await libraryApi.putItem('tariff', 't', { id: 't' }, { source: 'builder' })
-    expect(put).toHaveBeenCalledWith('/library/items/tariff/t', { payload: { id: 't' }, meta: { source: 'builder' } })
+    expect(put).toHaveBeenCalledWith('/library/items/tariff/t', { payload: { id: 't' }, meta: { source: 'builder' } },
+                                { skipErrorToast: true })
   })
 
   it('imports a URDB rate with its options', async () => {
     post.mockResolvedValue({ status: 200, data: { ref: {}, notes: [], refusals: [], unsupported_fields: [] } })
     await libraryApi.importUrdb({ urdb_response: { name: 'r' }, name: 'r1', accept_partial: true })
     expect(post).toHaveBeenCalledWith('/library/items/tariff/import_urdb',
-      { urdb_response: { name: 'r' }, name: 'r1', accept_partial: true })
+      { urdb_response: { name: 'r' }, name: 'r1', accept_partial: true }, { skipErrorToast: true })
   })
 
   it('uploads series and meter data as multipart forms', async () => {
@@ -58,6 +59,8 @@ describe('libraryApi', () => {
     expect(url2).toBe('/library/meter_data')
     expect((form2 as FormData).get('unit')).toBe('kW')
     expect((form2 as FormData).get('timezone')).toBeNull()
+    // The browser shows these errors itself (no second toast).
+    expect(post.mock.calls.map(c => c[2])).toEqual([{ skipErrorToast: true }, { skipErrorToast: true }])
   })
 })
 
@@ -65,7 +68,7 @@ describe('commercialApi value flows', () => {
   it('reads the config and its digest', async () => {
     get.mockResolvedValue({ status: 200, data: { value_flows: null, digest: 'd0', status: 'not_set' } })
     await expect(commercialApi.getValueFlows()).resolves.toMatchObject({ digest: 'd0' })
-    expect(get).toHaveBeenCalledWith('/simulation/commercial/value_flows')
+    expect(get).toHaveBeenCalledWith('/simulation/commercial/value_flows', { skipErrorToast: true })
   })
 
   it('always sends If-Match and wraps the body', async () => {
@@ -108,8 +111,30 @@ describe('commercialApi commercial sub-tree writes', () => {
 
   it('refuses a sub-tree write when there is no commercial config and no poc_link', async () => {
     get.mockResolvedValue({ status: 200, data: { commercial: null } })
-    await expect(commercialApi.saveCommercial({ contracts: [] })).rejects.toThrow(/poc_link/)
+    await expect(commercialApi.saveCommercial({ contracts: [] }))
+      .rejects.toBeInstanceOf(NoCommercialConfigError)
     expect(put).not.toHaveBeenCalled()
+  })
+
+  it('two editors saving different sub-trees in sequence keep both', async () => {
+    let stored: Record<string, unknown> = { poc_link: 'import', contracts: [],
+                                            value_flows: { template: 'custom' } }
+    get.mockImplementation(async () => ({ status: 200, data: { commercial: stored } }))
+    put.mockImplementation(async (_url: string, body: { commercial: Record<string, unknown> }) => {
+      stored = { ...body.commercial, value_flows: stored.value_flows }   // the server keeps it
+      return { status: 200, data: { commercial: stored } }
+    })
+    await commercialApi.saveCommercial({ contracts: [{ type: 'lease', id: 'l1' } as never] })
+    await commercialApi.saveCommercial({ timezone: 'Europe/Berlin' })
+    const last = put.mock.calls[1][1].commercial
+    expect(last.contracts).toEqual([{ type: 'lease', id: 'l1' }])
+    expect(last.timezone).toBe('Europe/Berlin')
+    expect(stored.value_flows).toEqual({ template: 'custom' })
+  })
+
+  it('maps the value-flows route\'s no-commercial-config 409 to its error', async () => {
+    put.mockRejectedValue(axiosError(409, { code: 'no_commercial_config', message: 'no' }))
+    await expect(commercialApi.putValueFlows({}, 'd')).rejects.toBeInstanceOf(NoCommercialConfigError)
   })
 })
 
@@ -118,22 +143,52 @@ describe('commercialApi results', () => {
     ['getBilling', '/results/billing'],
     ['getCfeScore', '/results/cfe_score'],
     ['getValueFlowsResult', '/results/value_flows'],
-  ] as const)('%s maps 204 to null', async (fn, path) => {
+  ] as const)('%s maps 204 to null, quietly', async (fn, path) => {
     get.mockResolvedValue({ status: 204, data: '' })
     await expect(commercialApi[fn]()).resolves.toBeNull()
-    expect(get).toHaveBeenCalledWith(path)
+    expect(get).toHaveBeenCalledWith(path, { skipErrorToast: true })
+  })
+
+  it.each(['getBilling', 'getCfeScore', 'getValueFlowsResult'] as const)(
+    '%s turns a solve-in-flight 409 into its error', async (fn) => {
+      get.mockRejectedValue(axiosError(409, { code: 'solver_in_flight', message: 'busy' }))
+      await expect(commercialApi[fn]()).rejects.toBeInstanceOf(SolverInFlightError)
+    })
+
+  it('a 404 is a real fault on every deployed result route', async () => {
+    const notFound = axiosError(404, 'Not Found')
+    get.mockRejectedValue(notFound)
+    await expect(commercialApi.getValueFlowsResult()).rejects.toBe(notFound)   // WP3.4 shipped
+    await expect(commercialApi.getBilling()).rejects.toBe(notFound)
+    await expect(commercialApi.getCfeScore()).rejects.toBe(notFound)
+  })
+
+  it('reads the designer context quietly and types its 409s', async () => {
+    get.mockResolvedValue({ status: 200, data: { site_party: 'site', assets: [] } })
+    await expect(commercialApi.getDesigner()).resolves.toMatchObject({ site_party: 'site' })
+    expect(get).toHaveBeenCalledWith('/simulation/value_flows/designer', { skipErrorToast: true })
+    get.mockRejectedValue(axiosError(409, { code: 'no_commercial_config', message: 'x' }))
+    await expect(commercialApi.getDesigner()).rejects.toBeInstanceOf(NoCommercialConfigError)
+  })
+
+  it('previewBilling types its errors too', async () => {
+    post.mockRejectedValue(axiosError(409, { code: 'solver_in_flight', message: 'busy' }))
+    await expect(commercialApi.previewBilling({ id: 't', name: 't', jurisdiction: 'US',
+      valid_from: '2030-01-01', items: [] })).rejects.toBeInstanceOf(SolverInFlightError)
   })
 
   it('previews a draft tariff\'s bill', async () => {
     post.mockResolvedValue({ status: 200, data: { summary: {} } })
     await commercialApi.previewBilling({ id: 't', name: 't', jurisdiction: 'US', valid_from: '2030-01-01', items: [] })
     expect(post).toHaveBeenCalledWith('/results/billing/preview',
-      { tariff: { id: 't', name: 't', jurisdiction: 'US', valid_from: '2030-01-01', items: [] } })
+      { tariff: { id: 't', name: 't', jurisdiction: 'US', valid_from: '2030-01-01', items: [] } },
+      { skipErrorToast: true })
   })
 
   it('builds a template without saving it', async () => {
     post.mockResolvedValue({ status: 200, data: { config: {}, draft_contracts: [], notes: [] } })
     await commercialApi.buildTemplate('btm_ppa')
-    expect(post).toHaveBeenCalledWith('/simulation/value_flows/template', { template: 'btm_ppa' })
+    expect(post).toHaveBeenCalledWith('/simulation/value_flows/template', { template: 'btm_ppa' },
+                                      { skipErrorToast: true })
   })
 })

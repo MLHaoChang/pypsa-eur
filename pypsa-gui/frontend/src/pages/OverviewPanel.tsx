@@ -182,11 +182,10 @@ export default function OverviewPanel() {
                   }
                 } catch (e) {
                   const why = await bundleErrorMessage(e)
-                  // `skipErrorToast` suppresses the interceptor's appLog line
-                  // as well as its toast — one flag gates both. Without this
-                  // the export is the only one of the three bundle-export
-                  // paths with no entry in the Log tab, and toasts dismiss
-                  // themselves.
+                  // `skipErrorToast` suppresses the interceptor's toast and
+                  // its ERROR line; since P30 (B8) the interceptor logs the
+                  // raw failure at INFO only. This line is the readable ERROR
+                  // entry in the Log tab (toasts dismiss themselves).
                   appLog('ERROR', `Export bundle '${currentProject}' failed: ${why}`)
                   toast.error(`Export failed: ${why}`)
                 } finally {

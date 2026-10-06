@@ -337,3 +337,36 @@ it('offers the FMEA walkthrough and anchors its targets (P21)', async () => {
   expect(screen.getByTestId('fmea-expert-form')).toBeTruthy()
   expect(await screen.findByTestId('fmea-table')).toBeTruthy()
 })
+
+// A5 (deferred spec 2026-09-28 §2.2): the tab polls `fmea_modes` with the
+// helper it shares with the Improve card — 2 s while the sweep runs and one
+// read more after it leaves `running` (the first non-running sample could
+// still carry the partial rows: the transient stale tab after a sweep).
+it('A5: polls with the shared fmeaModesRefetchInterval (import identity)', async () => {
+  const hook = await import('../../hooks/useStartFmeaSweep')
+  const spy = vi.spyOn(hook, 'fmeaModesRefetchInterval')
+  renderTab()
+  await waitFor(() => expect(resultsApi.getFmeaModes).toHaveBeenCalled())
+  await waitFor(() => expect(spy).toHaveBeenCalled())
+  spy.mockRestore()
+})
+
+it('A5: one extra read after the sweep ends (running → done: 3 reads, not 2)', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  try {
+    vi.mocked(resultsApi.getFmeaModes)
+      .mockResolvedValueOnce({ per_mode: [COMPUTED], sweep_status: 'running', sweep_error: null })
+      .mockResolvedValue({ per_mode: [COMPUTED], sweep_status: 'done', sweep_error: null })
+    renderTab()
+    const n = () => vi.mocked(resultsApi.getFmeaModes).mock.calls.length
+    await vi.waitFor(() => expect(n()).toBe(1))
+    await vi.advanceTimersByTimeAsync(2100)
+    await vi.waitFor(() => expect(n()).toBe(2))
+    await vi.advanceTimersByTimeAsync(2100)
+    await vi.waitFor(() => expect(n()).toBe(3))
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(n()).toBe(3)
+  } finally {
+    vi.useRealTimers()
+  }
+})
