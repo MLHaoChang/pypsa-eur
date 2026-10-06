@@ -6,7 +6,23 @@
 // design tokens in index.css. Translate the design's raw CSS classes
 // (.page-head / .page-sec / .stat-card / .btn …) into these components.
 
+import { createContext, useContext, useLayoutEffect } from 'react'
 import type { ReactNode, CSSProperties, ButtonHTMLAttributes } from 'react'
+
+// ── Panel chrome ─────────────────────────────────────────────────────────────
+// A panel opened from the sidebar sits in App's FullPageTab, which draws a
+// breadcrumb row (eyebrow / title / Close). A page that also draws a
+// PageHeader used to stack the two, ~60 px of chrome before any content (UX
+// assessment Q12). Inside a FullPageTab the PageHeader takes over: it draws
+// ONE compact row carrying the Close button and tells the frame to drop its
+// breadcrumb. Outside one (the admin pages) nothing changes.
+export interface PanelChrome {
+  eyebrow: ReactNode
+  onClose: () => void
+  /** A PageHeader calls this on mount (true) and unmount (false). */
+  claimHeader: (claimed: boolean) => void
+}
+export const PanelChromeContext = createContext<PanelChrome | null>(null)
 
 // ── PageHeader ───────────────────────────────────────────────────────────────
 // Red mono eyebrow → 22px display title → subtitle → right-aligned actions,
@@ -19,6 +35,52 @@ export function PageHeader({
   subtitle?: ReactNode
   actions?: ReactNode
 }) {
+  const chrome = useContext(PanelChromeContext)
+  // Layout effect, so the frame drops its breadcrumb before the first paint.
+  useLayoutEffect(() => {
+    if (!chrome) return
+    chrome.claimHeader(true)
+    return () => chrome.claimHeader(false)
+  }, [chrome])
+  if (chrome) {
+    return (
+      <header
+        className="relative flex items-center gap-4 px-6 py-2.5 border-b border-border shrink-0"
+        style={{ background: 'linear-gradient(180deg, var(--color-bg) 0%, var(--color-bg-2) 100%)' }}
+        data-testid="page-header-compact"
+      >
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-2 min-w-0">
+            <span className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-accent shrink-0">
+              {eyebrow ?? chrome.eyebrow}
+            </span>
+            <span className="text-border-3 shrink-0">/</span>
+            <h1 className="text-[16px] font-semibold text-text tracking-[-0.01em] leading-tight m-0 truncate">
+              {title}
+            </h1>
+          </div>
+          {subtitle && (
+            <p className="text-[12px] text-muted leading-snug max-w-[720px] m-0 mt-0.5">{subtitle}</p>
+          )}
+        </div>
+        {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+        <button
+          type="button"
+          onClick={chrome.onClose}
+          title="Close (Esc)"
+          className="shrink-0 flex items-center gap-1.5 text-[11px] text-muted hover:text-text px-2 py-1 rounded hover:bg-panel transition-colors"
+        >
+          Close
+          <span aria-hidden className="text-[15px] leading-none">×</span>
+        </button>
+        <span
+          aria-hidden
+          className="absolute left-6 right-6 -bottom-px h-px pointer-events-none"
+          style={{ background: 'linear-gradient(90deg, var(--color-accent) 0%, transparent 32%)' }}
+        />
+      </header>
+    )
+  }
   return (
     <header
       className="relative flex items-start gap-6 px-8 pt-7 pb-5 border-b border-border shrink-0"
