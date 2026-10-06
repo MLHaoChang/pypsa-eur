@@ -7,7 +7,7 @@
 - PR #78 at `dec1e5f`, merged in without conflicts;
 - the GS study modules, checked out from `f3f2ba5`.
 
-The only shim is a copy of GS's `_wrap_with_demand_charge` inside the test file. The test is kept beside this note as `test_u2_wp1_spike.py`. It does not run on this branch, which lacks the IC engine; it moves into `tests/` at WP1 proper, after the master merge.
+The only shim was a copy of GS's `_wrap_with_demand_charge` inside the test file. **Moved (2026-10-06, WP1 proper):** the test now lives at `pypsa-gui/backend/tests/test_u2_wp1_spike.py`, adapted to master's real APIs (defaults pack, flat export series helper, public `export_revenue`, the branch's own demand wrapper; D11 changes the Q5 facts). The combined-copy version is in this file's git history (`2935fe4`).
 
 **Result.** `20 passed in 67.21s`.
 

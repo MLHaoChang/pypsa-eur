@@ -1,15 +1,26 @@
 """
-U2 WP1 — facade spike (tests only; THROWAWAY combined copy: IC branch + PR #78
-+ GS study modules checked out by path).
+U2 WP1 — the facade spike, on master's real engine (tests only).
 
-Plan: docs/superpowers/plans/2026-10-05-guided-study-u2-engine-rewire.md
-(GS branch, 760579c), WP1. Every test names, in its docstring, the plan item
-or open question it settles. Nothing here is GS production code: the tariff
-compile below is a HAND compile of §3.1 for the two seeds, and the GS demand
-wrapper is a verbatim copy of `services/solver/objective.py::_wrap_with_demand_charge`
-from the GS branch (the combined copy has IC's `objective.py`, which does not
-carry it) — the only shim in this spike.
+Plan: docs/superpowers/plans/2026-10-05-guided-study-u2-engine-rewire.md, WP1.
+The spike first ran on a throwaway combined copy (IC 9b3f65a + PR #78 + the GS
+study modules; record in docs/superpowers/notes/u2-wp1-spike/). This is the
+same spike moved into `tests/` after WP0's master merge (IC engine #81, IC's
+U1 follow-up #85, asset schema S0 #78) and adapted to what master ships:
 
+* the tariffs are the GENERIC DEFAULTS PACK's (`defaults_pack.loader
+  .load_defaults_pack().pack_tariff`), copied inline (owner decision D3) with
+  `settlement="h"` on every item (§3.1), instead of the spike's hand compile;
+* the export series is minted by IC's flat export series helper
+  (`library.export_series.put_flat_export_series`) under the owner-decided name
+  `decision-study:<base_uuid>:<study_id>:export`;
+* the export line is the facade's public `results.value_flows.export_revenue`;
+* the GS demand wrapper is the branch's own
+  `services/solver/objective.py::_wrap_with_demand_charge` (no copy);
+* the finance adapter's D11 rule (uncosted meter Links are not investments)
+  changes the Q5 facts: the meter Links are skipped with
+  `meter_link_not_investment:*` unless a cost is typed on them (way a).
+
+Every test names, in its docstring, the plan item or open question it settles.
 Facts are asserted; numbers that are only reported are printed with `-s`.
 """
 from __future__ import annotations
@@ -35,59 +46,29 @@ IMPORT, EXPORT = "grid_import", "grid_export"
 DE, TOU = "de_industrial_illustrative", "tou_reference_illustrative"
 
 
-# ── the hand compile of plan §3.1 (what WP4's compile.py will own) ───────────
+# ── the defaults pack's seed tariffs (WP4's compile owns the GS form path) ──
 
 
-def _runs(hours: list[int]) -> list[tuple[int, int]]:
-    """Contiguous [start, end) runs of a GS band's hour-starting list."""
-    out, start, prev = [], None, None
-    for h in sorted(hours):
-        if start is None:
-            start = prev = h
-        elif h == prev + 1:
-            prev = h
-        else:
-            out.append((start, prev + 1))
-            start = prev = h
-    if start is not None:
-        out.append((start, prev + 1))
-    return out
+def _pack():
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    return load_defaults_pack()
 
 
-def compile_tariff(gs, *, settlement: str = "h", valid_from: str | None = None,
-                   jurisdiction: str | None = None) -> dict:
-    """GS `Tariff` → IC `Tariff` dict, plan §3.1 rows used by the two seeds:
-    bands → item `energy` (one period per band and contiguous hour run, band
-    order kept), `per_mwh` network charges → `network:energy:<i>`, a monthly
-    peak demand charge → item `demand` (`settlement="h"`), the per-period
-    fixed charge → item `fixed` (`per_month`). Export is NOT an item (C3)."""
-    items: list[dict] = []
-    periods = []
-    for b in gs.energy_bands:
-        base = {"name": b.label, "rate": b.price_per_mwh / 1000.0,
-                "months": list(b.applies.months), "weekdays": list(b.applies.weekdays)}
-        runs = _runs(b.applies.hours) if b.applies.hours else [None]
-        for r in runs:
-            periods.append({**base} if r is None else {**base, "start_hour": r[0],
-                                                       "end_hour": r[1]})
-    items.append({"id": "energy", "kind": "energy", "unit": "per_kwh", "periods": periods})
-    for i, nc in enumerate(gs.network_charges):
-        assert nc.basis == "per_mwh"
-        items.append({"id": f"network:energy:{i}", "kind": "energy", "unit": "per_kwh",
-                      "periods": [{"name": nc.label, "rate": nc.price / 1000.0}]})
-    if gs.demand_charge is not None:
-        assert gs.billing_period == "month" and gs.demand_charge.basis == "billing_period_peak"
-        items.append({"id": "demand", "kind": "demand", "unit": "per_kw_month",
-                      "settlement": settlement, "measured_on": "import",
-                      "periods": [{"name": "all",
-                                   "rate": gs.demand_charge.price_per_mw_per_period / 1000.0}]})
-    if gs.fixed_charge_per_period:
-        items.append({"id": "fixed", "kind": "fixed", "unit": "per_month",
-                      "periods": [{"name": "all", "rate": float(gs.fixed_charge_per_period)}]})
-    return {"id": gs.tariff_id, "name": gs.name,
-            "jurisdiction": jurisdiction or ("DE" if gs.tariff_id.startswith("de_") else "generic"),
-            "valid_from": valid_from or f"{gs.currency_year}-01-01", "valid_to": None,
-            "items": items}
+def pack_tariff(tariff_id: str, *, settlement: str | None = "h", valid_from: str | None = None
+                ) -> dict:
+    """
+    The pack's IC `Tariff` (a stamped inline copy, D3) as a dict, with
+    `settlement` set on every item (§3.1: "h" on EVERY compiled item; None
+    keeps the pack's own) and optionally another `valid_from`.
+    """
+    t = _pack().pack_tariff(tariff_id).model_dump(mode="json")
+    for it in t["items"]:
+        if settlement is not None:
+            it["settlement"] = settlement
+    if valid_from is not None:
+        t["valid_from"] = valid_from
+    return t
 
 
 def _intake(tariff_id: str = DE) -> dict:
@@ -110,8 +91,10 @@ def _gs_tariff(tariff_id: str = DE):
 
 
 def _site_network(option: str, tariff_id: str = DE):
-    """The production pack's network, with GS's prices REMOVED (C2: IC prices
-    transiently at solve; Link marginal_cost stays 0)."""
+    """
+    The production pack's network, with GS's prices REMOVED (C2: IC prices
+    transiently at solve; Link marginal_cost stays 0).
+    """
     from services.study import packs
 
     n = packs.build_site_network(_intake(tariff_id), _ledger(tariff_id), option,
@@ -123,7 +106,7 @@ def _site_network(option: str, tariff_id: str = DE):
 
 
 def _commercial(tariff_id: str = DE, **over) -> dict:
-    t = compile_tariff(_gs_tariff(tariff_id))
+    t = pack_tariff(tariff_id)
     out = {"poc_link": IMPORT, "export_link": EXPORT, "import_tariff": t,
            "import_tariff_id": t["id"], "timezone": None, "site_party": "site"}
     out.update(over)
@@ -134,7 +117,7 @@ FAKE_REF = {"id": "study-export-flat", "version": 1, "hash": "f" * 64, "source":
 
 
 def _flat_export(n, tariff_id: str = DE) -> pd.Series:
-    price = _gs_tariff(tariff_id).export.price_per_mwh
+    price = _pack().export_price_eur_per_mwh(tariff_id)
     return pd.Series(float(price), index=pd.DatetimeIndex(n.snapshots), name="price")
 
 
@@ -189,8 +172,10 @@ _SOLVED: dict = {}
 
 
 def _solved(option: str = "bess_2h", tariff_id: str = DE):
-    """(solved network, SolverConfig) of one IC-priced site option, once per
-    process: export series bound, single_owner value flows, run_simulation."""
+    """
+    (solved network, SolverConfig) of one IC-priced site option, once per
+    process: export series bound, single_owner value flows, run_simulation.
+    """
     key = (option, tariff_id)
     if key not in _SOLVED:
         n = _site_network(option, tariff_id)
@@ -213,9 +198,11 @@ def _owned(cfg) -> list[tuple[str, str]]:
 
 def _rows_21_34(owned_names, *, p_mw: float, pv: bool = False, terminal: float = 0.0,
                 **over):
-    """FinanceInputs from plan §1.2 rows 21–34 (+ rows 1, 4, 20 for the
+    """
+    FinanceInputs from plan §1.2 rows 21–34 (+ rows 1, 4, 20 for the
     replacements and rates). The terminal value is a placeholder `fixed`
-    (C2's annuity-PV salvage is WP7's compile)."""
+    (C2's annuity-PV salvage is WP7's compile).
+    """
     from models.finance import ESCALATION_CLASSES, FinanceInputs
     from services.study import packs
 
@@ -255,10 +242,12 @@ def _p_battery(n) -> float:
 
 
 def test_q5_single_owner_owns_the_poc_meter_links():
-    """WP1 item 1 / Q5 / R3 (plan §1.2 row 28): `value_flow_templates.build
+    """
+    WP1 item 1 / Q5 / R3 (plan §1.2 row 28): `value_flow_templates.build
     ("single_owner")` on the site pack assigns the PoC meter Links
     (`grid_import`, `grid_export`) to the owner as assets, beside the battery
-    (and PV); the grid-side supply Generator is not owned."""
+    (and PV); the grid-side supply Generator is not owned.
+    """
     for option, expect in (("bess_2h", {("Link", IMPORT), ("Link", EXPORT),
                                         ("StorageUnit", "battery")}),
                            ("bess_pv_2h", {("Link", IMPORT), ("Link", EXPORT),
@@ -273,45 +262,51 @@ def test_q5_single_owner_owns_the_poc_meter_links():
 
 
 @pytest.mark.live_solve
-def test_q5_meter_links_make_capex_not_established_from_overnight_cost_none():
-    """WP1 item 1 / Q5 (§4.5, C1): with the meter Links owned, `finance_case
-    ._assets` reads their typed `overnight_cost` (NaN on the pack's Links) as
-    None, so the engine's capex is `not_established` with
-    `overnight_cost_missing:grid_import` / `grid_export` — and the battery
-    (no typed overnight_cost, C1) adds `overnight_cost_missing:battery`.
-    Two GS-side ways out are measured: (a) typed `overnight_cost = 0` on the
-    meter Links; (b) dropping them from `asset_owners` (a template edit)."""
+def test_q5_meter_links_are_skipped_by_d11_or_typed_at_zero_by_way_a():
+    """
+    WP1 item 1 / Q5 (§4.5, C1), as master ships it. `single_owner` still
+    owns the meter Links (the template is unchanged), but IC's D11 rule in
+    `finance_case.build_finance_case` skips an owner's PoC meter Link with no
+    typed cost: not an asset, no COD, flagged `meter_link_not_investment:*`.
+    The capex then misses ONLY the battery's overnight cost (C1, blocked on
+    S0b). Way (a) — what U2's compile does (row 28) — types
+    `overnight_cost = 0` and a finite `lifetime` on both Links: they become
+    zero-cost assets (no flag, no `asset_lifetime_unknown`, COD row 22 covers
+    them). Way (b) (drop them from `asset_owners`) is still measured below.
+    """
     from services.finance.engine import run_case
 
     n, cfg = _solved()
     owned = _owned(cfg)
     names = [a for _c, a in owned]
+    assert {IMPORT, EXPORT} <= set(names)
     case = _case(n, cfg, _rows_21_34(names, p_mw=_p_battery(n)))
-    by = {a.name: a for a in case.assets}
-    assert by[IMPORT].overnight_cost is None and by[EXPORT].overnight_cost is None
-    assert by["battery"].overnight_cost is None
+    assert [a.name for a in case.assets] == ["battery"]
+    assert {f"meter_link_not_investment:{IMPORT}",
+            f"meter_link_not_investment:{EXPORT}"} <= set(case.flags)
+    assert case.assets[0].overnight_cost is None
     res = run_case(case)
-    assert res.op.reasons["capex"] == sorted(
-        ["overnight_cost_missing:battery", f"overnight_cost_missing:{EXPORT}",
-         f"overnight_cost_missing:{IMPORT}"])
+    assert res.op.reasons["capex"] == ["overnight_cost_missing:battery"]
     assert res.metrics["project_pre_tax_npv"] is None
 
-    # (a) typed 0 on the meter Links: they read 0.0, only the battery is missing.
+    # (a) typed 0 on the meter Links: they are assets at 0.0, only the battery
+    # is missing; PyPSA's default lifetime (inf) flags them unless a finite
+    # lifetime is typed too (compile types H, the horizon).
     saved, saved_life = n.links["overnight_cost"].copy(), n.links["lifetime"].copy()
     try:
         n.links.loc[[IMPORT, EXPORT], "overnight_cost"] = 0.0
         case_a = _case(n, cfg, _rows_21_34(names, p_mw=_p_battery(n)))
         by_a = {a.name: a for a in case_a.assets}
         assert by_a[IMPORT].overnight_cost == 0.0 and by_a[EXPORT].overnight_cost == 0.0
+        assert not [f for f in case_a.flags if f.startswith("meter_link_not_investment")]
         res_a = run_case(case_a)
         assert res_a.op.reasons["capex"] == ["overnight_cost_missing:battery"]
-        # The pack's Links keep PyPSA's lifetime = inf → `asset_lifetime_unknown:*`
-        # flags, unless a finite lifetime is typed too.
         assert math.isinf(float(saved_life[IMPORT]))
         assert f"asset_lifetime_unknown:{IMPORT}" in res_a.flags
         n.links.loc[[IMPORT, EXPORT], "lifetime"] = 25.0
         res_a2 = run_case(_case(n, cfg, _rows_21_34(names, p_mw=_p_battery(n))))
         assert not [f for f in res_a2.flags if f.startswith("asset_lifetime_unknown")]
+        assert res_a2.op.reasons["capex"] == ["overnight_cost_missing:battery"]
     finally:
         n.links["overnight_cost"] = saved
         n.links["lifetime"] = saved_life
@@ -346,12 +341,15 @@ def test_q5_meter_links_make_capex_not_established_from_overnight_cost_none():
 
 @pytest.mark.parametrize("tariff_id", [DE, TOU])
 def test_c4_rate_meter_rates_the_unsolved_baseline_pack(tariff_id):
-    """WP1 item 2 / C4 (preview over `rate_meter`, not
+    """
+    WP1 item 2 / C4 (preview over `rate_meter`, not
     `compute_billing_preview`): `billing.rate_meter(n, commercial, load, 0)`
     rates the UNSOLVED `none` pack (no `p_nom_opt`, no solve record): one
     `RatingResult` for the flat period, no drift flags, capacity on the PoC
     `p_nom`. Its energy + network, demand and fixed equal GS's
-    `BillCalculator` on the same meter to 1e-9 relative."""
+    `BillCalculator` on the same meter (the GS seed from `study_library`) to
+    1e-9 relative: the pack's IC tariffs ARE the GS seeds.
+    """
     from services.commercial import billing
     from services.study import tariff as study_tariff
 
@@ -377,19 +375,19 @@ def test_c4_rate_meter_rates_the_unsolved_baseline_pack(tariff_id):
     assert math.isclose(res.total, gs.total, rel_tol=1e-9), (res.total, gs.total)
     print(f"\n{tariff_id}: rate_meter total {res.total:,.2f} = GS {gs.total:,.2f}; "
           f"notes {res.notes}; provenance keys {sorted(bill.provenance)}")
-    # §3.1 correction: energy / network items left at IC's default settlement
-    # ("15min") carry `resolution:dispatch_1h_settlement_0.25h` notes on the
-    # hourly axis (→ `bill_resolution_differs_from_settlement`, §3.2);
-    # compiled with settlement "h" they carry none, and the bill is unchanged.
-    assert any(k == "energy" and any(x.startswith("resolution:") for x in v)
-               for k, v in res.notes.items())
-    com_h = _commercial(tariff_id)
-    for it in com_h["import_tariff"]["items"]:
-        it["settlement"] = "h"
-    res_h = billing.rate_meter(n, com_h, load, np.zeros_like(load)).per_period[None]
-    assert not any(x.startswith("resolution:") for v in res_h.notes.values() for x in v), \
-        res_h.notes
-    assert math.isclose(res_h.total, res.total, rel_tol=1e-12)
+    # §3.1 correction: compiled with settlement "h" on every item, the hourly
+    # axis carries no `resolution:*` note; the pack AS SHIPPED keeps the DE
+    # seed's IC default ("15min"), whose energy and network items carry
+    # `resolution:dispatch_1h_settlement_0.25h` (→ `bill_resolution_differs_
+    # from_settlement`, §3.2) on the same, unchanged bill.
+    assert not any(x.startswith("resolution:") for v in res.notes.values() for x in v), \
+        res.notes
+    shipped = {**_commercial(tariff_id), "import_tariff": pack_tariff(tariff_id, settlement=None)}
+    res_s = billing.rate_meter(n, shipped, load, np.zeros_like(load)).per_period[None]
+    if tariff_id == DE:
+        assert any(k == "energy" and any(x.startswith("resolution:") for x in v)
+                   for k, v in res_s.notes.items()), res_s.notes
+    assert math.isclose(res_s.total, res.total, rel_tol=1e-12)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -399,14 +397,16 @@ def test_c4_rate_meter_rates_the_unsolved_baseline_pack(tariff_id):
 
 @pytest.mark.parametrize("tariff_id", [DE, TOU])
 def test_q9_preflight_on_the_compiled_config_is_clean(tariff_id):
-    """WP1 item 3 / Q9 / §3.1: IC's preflight (`commercial_findings`, the
-    `_check_commercial` source) on the hand-compiled DE and TOU configs, export
+    """
+    WP1 item 3 / Q9 / §3.1: IC's preflight (`commercial_findings`, the
+    `_check_commercial` source) on the pack's DE and TOU configs ("h"), export
     series bound: no error; no `commercial.demand_resolution` with
     `settlement="h"` on the hourly axis; no `commercial.tariff_out_of_validity`
     with `valid_from = date(currency_year, 1, 1)`, `valid_to = None`. Controls:
     `settlement="15min"` raises the resolution warning; `valid_from` after the
     modelled year raises the validity warning (both checks are live). Also
-    run through `validate_for_run` (the solve's preflight)."""
+    run through `validate_for_run` (the solve's preflight).
+    """
     from services.commercial.preflight import commercial_findings
     from services.validation_service import validate_for_run
 
@@ -422,11 +422,10 @@ def test_q9_preflight_on_the_compiled_config_is_clean(tariff_id):
     print(f"\n{tariff_id} preflight findings: {codes}; validate_for_run: "
           f"{sorted({i.code for i in issues})}")
 
-    gs = _gs_tariff(tariff_id)
-    if gs.demand_charge is not None:
-        com15 = {**com, "import_tariff": compile_tariff(gs, settlement="15min")}
+    if _gs_tariff(tariff_id).demand_charge is not None:
+        com15 = {**com, "import_tariff": pack_tariff(tariff_id, settlement="15min")}
         assert "commercial.demand_resolution" in [f[1] for f in commercial_findings(n, com15)]
-    late = {**com, "import_tariff": compile_tariff(gs, valid_from=f"{YEAR + 1}-01-01")}
+    late = {**com, "import_tariff": pack_tariff(tariff_id, valid_from=f"{YEAR + 1}-01-01")}
     assert "commercial.tariff_out_of_validity" in [f[1] for f in commercial_findings(n, late)]
 
 
@@ -437,10 +436,12 @@ def test_q9_preflight_on_the_compiled_config_is_clean(tariff_id):
 
 @pytest.mark.live_solve
 def test_rows_21_34_build_finance_case_refusals_then_flags():
-    """WP1 item 4 (§1.2 rows 21–34): the refusal sequence of
+    """
+    WP1 item 4 (§1.2 rows 21–34): the refusal sequence of
     `build_finance_case` / `run_case` for a minimal single-owner case, and the
     sections, reasons and flags once rows 21–34 are supplied (pv row 30 on
-    `bess_pv_2h`, the `degradation_missing:pv` question of row 30)."""
+    `bess_pv_2h`, the `degradation_missing:pv` question of row 30).
+    """
     from models.finance import FinanceInputs
     from services.finance.case import FinanceRefused
     from services.finance.engine import run_case
@@ -458,11 +459,20 @@ def test_rows_21_34_build_finance_case_refusals_then_flags():
     with pytest.raises(FinanceRefused) as e1:
         _case(n, cfg, bare)
     assert e1.value.code == "cod_missing"
-    # 2. COD for the battery only: the meter Links still need one (Q5).
-    with pytest.raises(FinanceRefused) as e2:
-        _case(n, cfg, FinanceInputs(financial_close=date(Y0, 1, 1),
-                                    cod_by_asset={"battery": date(YEAR, 1, 1)}))
-    assert e2.value.code == "cod_missing" and IMPORT in str(e2.value)
+    assert "battery" in str(e1.value) and IMPORT not in str(e1.value)
+    # 2. COD for the battery only BUILDS on master (D11: uncosted meter Links are
+    # no assets, so need no COD); typed at 0 (way a) they need one again (Q5).
+    _case(n, cfg, FinanceInputs(financial_close=date(Y0, 1, 1),
+                                cod_by_asset={"battery": date(YEAR, 1, 1)}))
+    saved_l = n.links["overnight_cost"].copy()
+    try:
+        n.links.loc[[IMPORT, EXPORT], "overnight_cost"] = 0.0
+        with pytest.raises(FinanceRefused) as e2:
+            _case(n, cfg, FinanceInputs(financial_close=date(Y0, 1, 1),
+                                        cod_by_asset={"battery": date(YEAR, 1, 1)}))
+        assert e2.value.code == "cod_missing" and IMPORT in str(e2.value)
+    finally:
+        n.links["overnight_cost"] = saved_l
     # 3. Every owner COD: the case BUILDS; run_case refuses without analysis_years (row 27).
     only_cod = FinanceInputs(financial_close=date(Y0, 1, 1),
                              cod_by_asset={a: date(YEAR, 1, 1) for a in names})
@@ -487,18 +497,17 @@ def test_rows_21_34_build_finance_case_refusals_then_flags():
           "\n result flags", res.flags, "\n gate", res.gate,
           "\n metrics", {k: v for k, v in res.metrics.items() if v is not None})
     assert res.op.reasons["operating"] == [] and res.op.reasons["terminal"] == []
-    # Capex is not established ONLY because of the overnight costs (Q5 + C1):
-    assert res.op.reasons["capex"] == sorted(
-        ["overnight_cost_missing:battery", f"overnight_cost_missing:{EXPORT}",
-         f"overnight_cost_missing:{IMPORT}"])
+    # Capex is not established ONLY because of the battery's overnight cost (C1;
+    # the meter Links are skipped by D11):
+    assert res.op.reasons["capex"] == ["overnight_cost_missing:battery"]
     assert res.reasons.get("tax") and "tax_pack_missing" in res.reasons["tax"]
     # C4 gate: consistent; inflation leg n/a (auto_discount_periods off).
     assert res.gate["wacc_vs_discount_rate_consistent"] is True
     assert res.gate["legs"] == {"discount_rate": "ok", "asset_rates": "ok", "inflation": "n/a"}
-    # The owned meter Links (Q5) also put lifetime flags on the case.
-    assert {f"asset_lifetime_unknown:{IMPORT}", f"asset_lifetime_unknown:{EXPORT}"} <= \
-        set(res.flags)
-    assert list(case.flags) == []
+    # D11 discloses the skipped meter Links on the case, never as lifetime flags.
+    assert not [f for f in res.flags if f.startswith("asset_lifetime_unknown")]
+    assert sorted(case.flags) == [f"meter_link_not_investment:{EXPORT}",
+                                  f"meter_link_not_investment:{IMPORT}"]
 
     # 6. The same with the battery's overnight cost typed (stand-in for S0b) and the
     # meter Links at 0: the headline is established.
@@ -524,10 +533,12 @@ def test_rows_21_34_build_finance_case_refusals_then_flags():
 
 @pytest.mark.live_solve
 def test_row_30_pv_degradation_is_required_on_bess_pv():
-    """WP1 item 4, row 30 (§1.2, 'unverified that the bess_pv case fails'):
+    """
+    WP1 item 4, row 30 (§1.2, 'unverified that the bess_pv case fails'):
     on `bess_pv_2h`, without `degradation_by_asset["pv"]` the operating
     section is `not_established` with `degradation_missing:pv`; with 0.0 it
-    is established."""
+    is established.
+    """
     from services.finance.engine import run_case
 
     n, cfg = _solved("bess_pv_2h")
@@ -544,10 +555,12 @@ def test_row_30_pv_degradation_is_required_on_bess_pv():
 
 @pytest.mark.live_solve
 def test_q14_export_revenue_is_an_energy_export_line_in_actual_and_counterfactual():
-    """Q14: the export revenue in the P3 ledger reaches the owner's actual
+    """
+    Q14: the export revenue in the P3 ledger reaches the owner's actual
     template as a line with stream `energy_export` and escalation class
     `export`; the counterfactual (export 0) carries no export revenue line
-    of non-zero amount."""
+    of non-zero amount.
+    """
     n, cfg = _solved("bess_pv_2h")
     names = [a for _c, a in _owned(cfg)]
     case = _case(n, cfg, _rows_21_34(names, p_mw=_p_battery(n), pv=True))
@@ -574,12 +587,14 @@ def test_q14_export_revenue_is_an_energy_export_line_in_actual_and_counterfactua
 
 
 def test_c1_apply_parts_reproduces_the_two_annuity_capital_cost_and_upfront():
-    """WP1 item 5 / C1 (§4.5 S0 facade): writing the battery through
+    """
+    WP1 item 5 / C1 (§4.5 S0 facade): writing the battery through
     `derive.apply_parts` with the ledger's two parts gives a `capital_cost`
     equal to `packs.battery_capital_cost_eur_per_mw` to 1e-9 at the ledger
     rate, the same `fom_cost` as `packs.battery_fom_eur_per_mw`, lifetime 25
     and `overnight_cost` NaN; `sum(upfront_per_unit)` of
-    `access.upfront_parts` equals `packs.battery_upfront_eur_per_mw` total."""
+    `access.upfront_parts` equals `packs.battery_upfront_eur_per_mw` total.
+    """
     from services.asset_schema import access, derive
     from services.study import packs
 
@@ -611,13 +626,15 @@ def test_c1_apply_parts_reproduces_the_two_annuity_capital_cost_and_upfront():
 
 
 def test_c1_finance_case_assets_do_not_read_upfront_parts_yet():
-    """WP1 item 5 / C1 / R1: on the combined copy (IC + #78) `finance_case
+    """
+    WP1 item 5 / C1 / R1: on the combined copy (IC + #78) `finance_case
     ._assets` reads ONLY the typed `overnight_cost` — a battery written through
     `apply_parts` reads `overnight_cost=None` (`overnight_cost_missing:battery`
     in the engine), although `upfront_parts` knows both parts. So C1 needs
     S0b (IC's follow-up: `_assets` via `upfront_parts`). Also pins that
     nothing in `services/results/finance_case.py` or `services/finance/`
-    imports `asset_schema` yet."""
+    imports `asset_schema` yet.
+    """
     import inspect
 
     from services.asset_schema import access, derive
@@ -645,11 +662,13 @@ def test_c1_finance_case_assets_do_not_read_upfront_parts_yet():
 
 @pytest.mark.live_solve
 def test_c1_parts_leave_the_solved_objective_and_size_unchanged():
-    """C1 / §4.5 (WP7 test, measured early on the combined copy): the
+    """
+    C1 / §4.5 (WP7 test, measured early on the combined copy): the
     `bess_2h` site option solved through `run_simulation` with the battery
     written by `apply_parts` (S0's solve-time fill re-derives `capital_cost`
     at the live rate) gives the same objective and `p_nom_opt` as the pack's
-    direct two-annuity `capital_cost` (1e-9 relative / 1e-6 MW)."""
+    direct two-annuity `capital_cost` (1e-9 relative / 1e-6 MW).
+    """
     from services.asset_schema import derive
     from services.study import packs
 
@@ -682,7 +701,6 @@ def test_c1_parts_leave_the_solved_objective_and_size_unchanged():
 def local_mode_db(_auth_db, monkeypatch, tmp_path):
     """Local (desktop) mode: the one seeded org + user (`local_mode`)."""
     import local_mode
-    from settings import get_settings
 
     monkeypatch.setenv("PYPSAGUI_LOCAL_MODE", "1")
     _engine, session_local = _auth_db
@@ -694,13 +712,15 @@ def local_mode_db(_auth_db, monkeypatch, tmp_path):
 
 
 def test_c3_c6_q15_mint_in_local_org_and_bind_on_a_study_owned_fork(local_mode_db):
-    """WP1 item 6 / C3 / C6 / Q15 / R2.
+    """
+    WP1 item 6 / C3 / C6 / Q15 / R2.
     (1) A study-owned fork made by `forks.create_option_fork` in local mode
-    has `org_id = LOCAL_ORG_ID` (the base's org), so a series minted with
-    `series_store.put_series(db, fork.org_id, …)` resolves there:
-    `library_org_unknown` cannot arise for a study project (it needs a
-    context with no org AND a non-User caller). Minting is idempotent on
-    content.
+    has `org_id = LOCAL_ORG_ID` (the base's org), so a series minted by IC's
+    flat export series helper (`put_flat_export_series(db, fork.org_id, …)`,
+    U1 e) under the owner-decided name `decision-study:<base_uuid>:<study_id>
+    :export` resolves there: `library_org_unknown` cannot arise for a study
+    project (it needs a context with no org AND a non-User caller). Minting
+    is idempotent on content; a changed price is the next version.
     (2) `routers.simulation._bind_commercial(commercial, user)` takes no
     project/context argument: it binds the ACTIVE context's network
     (`PyPSAService.get_active_context()` / `get_network()`), so pointed at a
@@ -709,11 +729,12 @@ def test_c3_c6_q15_mint_in_local_org_and_bind_on_a_study_owned_fork(local_mode_d
     (3) `binding.bind_commercial(fork_net, …, project_dir=<fork dir>,
     resolve_ref=<series_store.resolve in the fork's org>)` binds the fork's
     in-memory network (before the runner writes it), and the bound
-    `links_t["ic_export_price"]` survives the fork's netCDF round trip."""
+    `links_t["ic_export_price"]` survives the fork's netCDF round trip.
+    """
     import inspect
 
     import routers.simulation as sim_router
-    from db.models import Project, User
+    from db.models import User
     from models.commercial import CommercialConfig, PriceSeriesRef
     from services import project_registry
     from services.commercial import binding
@@ -738,16 +759,28 @@ def test_c3_c6_q15_mint_in_local_org_and_bind_on_a_study_owned_fork(local_mode_d
         fork_dir = project_registry.project_dir(fork)
 
         # (1) Mint the flat export series in the fork's (the study's) org.
-        series = _flat_export(fork_net)
-        meta = {"source": "tariff:de_industrial_illustrative", "unit": "EUR/MWh",
-                "description": "study export price (flat)"}
-        name = "study-" + "s" * 12 + "-export"
-        ref = series_store.put_series(db, fork.org_id, name, series, meta)
-        again = series_store.put_series(db, fork.org_id, name, series, meta)
+        from services.library.export_series import put_flat_export_series
+
+        name = f"decision-study:{base.id}:{'s' * 32}:export"
+        assert len(name) <= 128
+        price = _pack().export_price_eur_per_mwh(DE)
+
+        def mint(eur):
+            return put_flat_export_series(db, fork.org_id, name, eur,
+                                          snapshots=fork_net.snapshots, source="decision_study",
+                                          description="u2-wp1-site \u2014 export price")
+        ref = mint(price)
+        again = mint(price)
         assert (again.version, again.hash) == (ref.version, ref.hash) == (1, ref.hash)
-        assert isinstance(ref, PriceSeriesRef)
+        assert isinstance(ref, PriceSeriesRef) and ref.source == "decision_study"
         got = series_store.resolve(db, fork.org_id, ref)
         assert np.allclose(got.to_numpy(dtype=float), 40.0) and len(got) == 8760
+        meta = series_store.series_meta(db, fork.org_id, ref)
+        # The helper takes no label: it writes its own (engine ask), so the
+        # study's name travels in `description`.
+        assert meta["label"] == "Flat export price 40 EUR/MWh"
+        assert meta["description"] == "u2-wp1-site \u2014 export price"
+        assert mint(41.0).version == 2
 
         com = _commercial(export_price_ref=ref.model_dump(mode="json"))
 
@@ -801,24 +834,25 @@ def test_c3_c6_q15_mint_in_local_org_and_bind_on_a_study_owned_fork(local_mode_d
 @pytest.mark.live_solve
 @pytest.mark.parametrize("option", ["bess_2h", "bess_pv_2h"])
 def test_s32_export_line_cross_checks_with_commercial_cost_terms(option):
-    """WP1 item 7 / §3.2 `export_credit`: the value-flow export line
-    (`results/value_flows.py::_export_revenue` = Σ w·p0·`ic_export_price`)
+    """
+    WP1 item 7 / §3.2 `export_credit`: the value-flow export line
+    (the facade's `results.value_flows.export_revenue` = Σ w·p0·`ic_export_price`)
     equals − the `energy_export` row of `commercial_cost_terms` to 1e-9 (the
     row exists separately). Q12: `commercial_cost_terms` reports the demand
     charge as `demand_charge` items (per period, the item named in
     `ic_demand_peaks`), which equals the bill's `demand` item; master's
     `objective_decomposition` closes (`residual_gap_eur` ≈ 0) with the
-    Commercial component in `cost_breakdown`."""
+    Commercial component in `cost_breakdown`.
+    """
     from services.commercial import billing
     from services.commercial import lp_bindings as LP
     from services.commercial.cost_rows import commercial_cost_terms
     from services.results.cost_breakdown import compute_cost_breakdown
     from services.results.objective_decomposition import compute_objective_decomposition
-    from services.results.value_flows import _export_revenue
+    from services.results.value_flows import export_revenue
 
     n, cfg = _solved(option)
-    parsed = LP._parse(cfg.commercial)
-    rev, _intervals = _export_revenue(n, parsed)
+    rev = export_revenue(n, cfg.commercial)
     terms = commercial_cost_terms(n, cfg.commercial)
     labels = sorted({lab for lab, *_ in terms["items"]})
     exp_items = sum(cx + ox for lab, _p, cx, ox in terms["items"] if lab == "energy_export")
@@ -850,10 +884,12 @@ def test_s32_export_line_cross_checks_with_commercial_cost_terms(option):
 
 @pytest.mark.live_solve
 def test_r9_build_finance_case_run_time_on_8760h():
-    """WP1 item 8 / R9 / §4.9: wall time of `build_finance_case` (value-flow
+    """
+    WP1 item 8 / R9 / §4.9: wall time of `build_finance_case` (value-flow
     ledger + counterfactual) and of `run_case` on the 8,760-h site options;
     the solve time is reported beside it. Bound asserted loosely (< 30 s per
-    build) — the number is the finding."""
+    build) — the number is the finding.
+    """
     from services.finance.engine import run_case
 
     out = {}
@@ -880,48 +916,11 @@ def test_r9_build_finance_case_run_time_on_8760h():
 # ════════════════════════════════════════════════════════════════════════════
 
 
-class _DemandChargeRefused(Exception):
-    pass
-
-
-def _gs_wrap_with_demand_charge(network, user_fn, cfg):
-    """VERBATIM copy (refusal branches trimmed, logging dropped) of the GS
-    branch's `services/solver/objective.py::_wrap_with_demand_charge` — the
-    combined copy's `objective.py` is IC's and does not carry it."""
-    raw = getattr(cfg, "demand_charge", None)
-    if not raw:
-        return user_fn
-    from services.study.tariff import billing_period_labels, parse_demand_charge_config
-
-    spec = parse_demand_charge_config(raw)
-    price = spec.price_per_mw_per_period
-
-    def demand_charge_fn(n, snapshots):
-        import xarray as xr
-
-        m = n.model
-        link_p = m.variables["Link-p"].sel(name=list(spec.import_links))
-        snap = pd.DatetimeIndex(link_p.coords["snapshot"].values)
-        labels = billing_period_labels(snap, spec.billing_period)
-        periods = pd.Index(list(dict.fromkeys(labels.tolist())), name="billing_period")
-        peak = m.add_variables(lower=0.0, coords=[periods], name="peak_import")
-        per_snapshot = xr.DataArray(labels, dims=["snapshot"],
-                                    coords={"snapshot": link_p.coords["snapshot"]})
-        peak_t = peak.sel(billing_period=per_snapshot)
-        m.add_constraints(link_p.sum("name") - peak_t <= 0.0, name="peak_import_le")
-        m.objective += (price * peak).sum()
-
-    def wrapper(n, snapshots):
-        if user_fn is not None:
-            user_fn(n, snapshots)
-        demand_charge_fn(n, snapshots)
-
-    return wrapper
-
-
 def _toy(months: int = 3):
-    """A 3-month hourly site: grid supply, PoC import Link, a load with a
-    weekday evening spike, an extendable 2-h battery (annuity-priced)."""
+    """
+    A 3-month hourly site: grid supply, PoC import Link, a load with a
+    weekday evening spike, an extendable 2-h battery (annuity-priced).
+    """
     import pypsa
 
     idx = pd.date_range(f"{YEAR}-01-01", f"{YEAR}-{months + 1:02d}-01", freq="h",
@@ -954,14 +953,17 @@ def _toy_prices(idx) -> np.ndarray:
 
 @pytest.mark.live_solve
 def test_s47_demand_formulation_gs_wrapper_equals_ic_add_demand_terms():
-    """WP1 item 9 / §4.7 (WP6's toy, measured now): one 3-month toy solved
+    """
+    WP1 item 9 / §4.7 (WP6's toy, measured now): one 3-month toy solved
     with GS's `_wrap_with_demand_charge` (prices on the Link) and with IC's
     `add_demand_terms` (via `apply_commercial_for_solve` +
     `_wrap_with_commercial_bindings`, items `energy` TOU + `network:energy:0`
     + `demand` at `settlement="h"`): objectives ≤ 1e-7 relative, equal
-    monthly peaks, equal battery size."""
+    monthly peaks, equal battery size.
+    """
     from services.commercial import connection as conn
     from services.commercial import lp_bindings as LP
+    from services.solver.objective import _wrap_with_demand_charge
 
     price_dc = 9000.0
     # GS
@@ -973,7 +975,7 @@ def test_s47_demand_formulation_gs_wrapper_equals_ic_add_demand_terms():
                                           "import_links": [IMPORT]},
                            solve_strategy="full", sclopf=False, multi_investment_periods=False)
     st, cond = g.optimize(solver_name="highs",
-                          extra_functionality=_gs_wrap_with_demand_charge(g, None, gcfg))
+                          extra_functionality=_wrap_with_demand_charge(g, None, gcfg))
     assert (st, cond) == ("ok", "optimal")
     g_peaks = g.model.variables["peak_import"].solution.to_series()
     g_obj = float(g.objective)
@@ -1060,13 +1062,15 @@ def _gs_salvage(n, ledger, *, pv: bool) -> float:
 @pytest.mark.live_solve
 @pytest.mark.parametrize("option,pv", [("bess_2h", False), ("bess_pv_2h", True)])
 def test_s46_identity_npv_equals_lp_saving_times_af_on_the_ic_engine(option, pv):
-    """§4.6 (WP7's test, measured early): on IC-solved site options, with
+    """
+    §4.6 (WP7's test, measured early): on IC-solved site options, with
     rows 21–34, C2's `fixed` terminal value = GS's annuity-PV salvage, C4
     (escalation 0, inflation None, wacc = the real rate), the meter Links at
     typed 0 (Q5 way a) and the battery's ledger upfront typed post-solve as a
     STAND-IN for S0b's `upfront_parts` read: the engine's `project_pre_tax_npv`
     equals (obj_none − obj_option) × AF(0.07, 25) to 1e-6 relative, where
-    obj_none is the IC-solved grid-only option. Also reports the IRR."""
+    obj_none is the IC-solved grid-only option. Also reports the IRR.
+    """
     from services.finance.engine import run_case
     from services.study import packs
     from services.study.proforma import _annuity_pv_factor
@@ -1103,36 +1107,45 @@ def test_s46_identity_npv_equals_lp_saving_times_af_on_the_ic_engine(option, pv)
     assert ("project_pre_tax:irr_multiple_sign_changes" in res.flags) == (option == "bess_2h")
 
 
-def test_q2_q3_q4_q6_engine_shapes_on_the_combined_copy():
-    """Q2, Q3, Q4, Q6 (facts from the models and modules as merged):
-    Q2 `FinanceInputs.replacement_capex` is `list[tuple[int, str, float]]`
-    (year, asset, ABSOLUTE amount); Q3 `TerminalValueRule.method` has no
-    remaining-life-annuity method; Q6 `FinanceInputs` has no currency-year
-    field; Q4 the names exist (`finance.engine.payback`, `finance.metrics.irr`
-    / `npv`, `finance.report.assemble_finance_sections`,
-    `tariff_engine.RatingResult`) but the export line is only the PRIVATE
-    `results.value_flows._export_revenue`, and the IC branch at 9b3f65a has
-    no facade module, no defaults-pack loader and no flat-export-series helper
-    (U1 follow-up a/c/e not landed)."""
-    import pathlib
+def test_q2_q3_q4_q6_engine_shapes_on_master():
+    """
+    Q2, Q3, Q4, Q6 and the U1 follow-up items as master ships them
+    (re-checked after WP0; the spike's combined copy predated #85):
+    Q2 `FinanceInputs.replacement_capex` is still `list[tuple[int, str,
+    float]]` (year, asset, ABSOLUTE amount) — D9's `part_lifetimes` rule waits
+    for S0b; Q3 `TerminalValueRule.method` still has no remaining-life-annuity
+    method (D10 waits for S0b), so C2 passes a `fixed` value; Q6 answered:
+    `FinanceInputs.currency_year` and `price_basis` (D6); Q4 answered: the
+    export line is the PUBLIC `results.value_flows.export_revenue`; the U1
+    follow-up's defaults-pack loader, flat export series helper and
+    `binding.bind_commercial_on_context` exist and are pinned by
+    `tests/test_engine_facade_frozen.py`. `binding.bind_commercial` (what C6
+    uses on an unloaded fork's network) is NOT in the frozen list (engine ask
+    Q15).
+    """
     import typing
 
     from models.finance import FinanceInputs, TerminalValueRule
-    from services.commercial import tariff_engine
+    from services.commercial import binding, tariff_engine
     from services.finance import engine, metrics, report
+    from services.library import export_series
+    from services.library.defaults_pack import loader
     from services.results import value_flows
+    from tests import test_engine_facade_frozen as facade
 
     ann = FinanceInputs.model_fields["replacement_capex"].annotation
     assert typing.get_args(ann)[0] == tuple[int, str, float]
     methods = typing.get_args(TerminalValueRule.model_fields["method"].annotation)
     assert set(methods) == {"none", "book_value", "multiple_of_ebitda", "fixed"}
-    assert not [f for f in FinanceInputs.model_fields if "currency_year" in f or
-                f == "money_year"]
+    assert {"currency_year", "price_basis"} <= set(FinanceInputs.model_fields)
     assert callable(engine.payback) and callable(metrics.irr) and callable(metrics.npv)
     assert callable(report.assemble_finance_sections) and tariff_engine.RatingResult
-    assert hasattr(value_flows, "_export_revenue")
-    assert not [n for n in dir(value_flows) if "export" in n and not n.startswith("_")]
-    root = pathlib.Path(engine.__file__).resolve().parents[1]
-    blob = "\n".join(p.read_text() for p in root.rglob("*.py")
-                     if "study" not in p.parts)
-    assert "flat_export" not in blob and "defaults_pack" not in blob
+    assert callable(value_flows.export_revenue)
+    assert callable(loader.load_defaults_pack) and callable(export_series.put_flat_export_series)
+    assert callable(binding.bind_commercial_on_context) and callable(binding.bind_commercial)
+    frozen = set(facade.SIGNATURES)
+    assert {"services.results.value_flows.export_revenue",
+            "services.library.export_series.put_flat_export_series",
+            "services.library.defaults_pack.loader.load_defaults_pack",
+            "services.commercial.binding.bind_commercial_on_context"} <= frozen
+    assert "services.commercial.binding.bind_commercial" not in frozen
