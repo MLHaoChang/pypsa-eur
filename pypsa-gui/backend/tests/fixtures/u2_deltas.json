@@ -2,7 +2,7 @@
  "schema": "u2_deltas/1",
  "plan": "docs/superpowers/plans/2026-10-05-guided-study-u2-engine-rewire.md WP2 (deltas), \u00a74",
  "rule": "{test, figure, pre, post, abs, rel, cause}: pre = GS (BillCalculator or the WP0 record), post = the engine through the U2 seam. A cause is a stable code; WP10's assessor gates every row outside tolerance.",
- "stage": "U2 stage 1 (WP1-WP5)",
+ "stage": "U2 stage 1 (WP1-WP5) + WP6 (LP switch)",
  "deltas": [
   {
    "test": "test_engine_adapter_bill.py::test_a_year_billed_peak_is_prorated_by_the_hours_it_represents",
@@ -359,6 +359,123 @@
    "abs": 1.1641532182693481e-10,
    "rel": 1.6009519002430856e-16,
    "cause": "lp_dispatch_on_ic_chain (WP6 judges)"
+  },
+  {
+   "test": "test_u2_wp6_lp_switch.py::test_the_site_golden_through_the_queue_equals_wp0[none]",
+   "figure": "objective",
+   "pre": 861624.0,
+   "post": 861624.0,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "lp_on_ic_commercial_chain_same_formulation"
+  },
+  {
+   "test": "test_u2_wp6_lp_switch.py::test_the_site_golden_through_the_queue_equals_wp0[bess_2h]",
+   "figure": "objective",
+   "pre": 829729.809424455,
+   "post": 829729.809424455,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "lp_on_ic_commercial_chain_same_formulation"
+  },
+  {
+   "test": "test_u2_wp6_lp_switch.py::test_the_site_golden_through_the_queue_equals_wp0[bess_2h]",
+   "figure": "battery_p_nom_mw",
+   "pre": 0.7719576815922196,
+   "post": 0.7719576815922198,
+   "abs": 2.220446049250313e-16,
+   "rel": 2.876383125912394e-16,
+   "cause": "lp_on_ic_commercial_chain_same_formulation"
+  },
+  {
+   "test": "u2_targets.ic_site_option[bess_pv_2h] (run_simulation in process)",
+   "figure": "objective",
+   "pre": 727163.144684475,
+   "post": 727163.1446844751,
+   "abs": 1.1641532182693481e-10,
+   "rel": 1.6009519002430856e-16,
+   "cause": "lp_on_ic_commercial_chain_same_formulation"
+  },
+  {
+   "test": "u2_targets.ic_site_option[bess_pv_2h] (run_simulation in process)",
+   "figure": "battery_p_nom_mw",
+   "pre": 0.8103971842669744,
+   "post": 0.8103971842669744,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "lp_on_ic_commercial_chain_same_formulation"
+  },
+  {
+   "test": "u2_targets.ic_site_option[bess_pv_2h] (run_simulation in process)",
+   "figure": "pv_p_nom_mw",
+   "pre": 2.2742601357876504,
+   "post": 2.2742601357876504,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "lp_on_ic_commercial_chain_same_formulation"
+  },
+  {
+   "test": "test_engine_adapter_demand.py::test_the_objective_equals_the_gs_wrappers_wp0_record",
+   "figure": "toy_3month.objective",
+   "pre": 7669821.11992656,
+   "post": 7669821.119926562,
+   "abs": 1.862645149230957e-09,
+   "rel": 2.4285379282076297e-16,
+   "cause": "lp_on_ic_commercial_chain_same_formulation"
+  },
+  {
+   "test": "test_engine_adapter_demand.py::test_the_objective_equals_the_gs_wrappers_wp0_record",
+   "figure": "toy_3month.battery_p_nom_mw",
+   "pre": 7.090727908937822,
+   "post": 7.090727908937822,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "lp_on_ic_commercial_chain_same_formulation"
+  },
+  {
+   "test": "test_engine_adapter_demand.py::test_objective_delta_is_the_charge_plus_the_cost_delta",
+   "figure": "toy_3month.demand_charge_eur",
+   "pre": 1578218.403542037,
+   "post": 1578218.403542037,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "lp_on_ic_commercial_chain_same_formulation"
+  },
+  {
+   "test": "test_u2_wp6_lp_switch.py::test_the_year_billed_demand_charge_is_the_gs_wrappers_formulation_on_a_toy_year",
+   "figure": "toy_year.objective (GS wrapper live, not WP0)",
+   "pre": 29086152.714819793,
+   "post": 29086152.714819793,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "year_billed_demand_basis_verified_same_formulation"
+  },
+  {
+   "test": "test_u2_wp6_lp_switch.py::test_the_year_billed_demand_charge_is_the_gs_wrappers_formulation_on_a_toy_year",
+   "figure": "toy_year.annual_peak_import_mw",
+   "pre": 33.80980016880164,
+   "post": 33.809800168801644,
+   "abs": 7.105427357601002e-15,
+   "rel": 2.1015880963879853e-16,
+   "cause": "year_billed_demand_basis_verified_same_formulation"
+  },
+  {
+   "test": "qa_decision_study.py (WP6)",
+   "figure": "driver_section (every recorded figure)",
+   "pre": "WP0 driver record",
+   "post": "WP6 run",
+   "abs": 0,
+   "rel": 0,
+   "cause": "no_delta_under_the_fixture_tolerances (60/60 checks; marginal / bess_1h / [demand_charge_price])"
+  },
+  {
+   "test": "test_study_runner.py::test_the_bridge_reads_the_forks_config_and_equals_the_bill",
+   "figure": "details.<option>.demand_charge_eur (fake solver)",
+   "pre": "GS bridge term (= bill demand)",
+   "post": null,
+   "abs": null,
+   "rel": null,
+   "cause": "engine_committed_amount_only: a solve the engine did not make records none -> null + demand_charge_not_established (real solves: = bill demand, test_u2_wp6 test_the_run_records_the_engines_committed_demand_charge)"
   }
  ]
 }
