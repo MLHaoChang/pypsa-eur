@@ -211,6 +211,20 @@ def _drafts(project) -> Path:
     return codes_dir(project) / "drafts"
 
 
+def _inside(base: Path, filename: str) -> Path:
+    """``base / filename``, refused (422) unless it resolves inside ``base``.
+
+    Every file name built from a request-derived id goes through here. The ids
+    are already checked against their patterns (``_profile_id``, ``_doc_id``);
+    this is the containment itself: normalise, resolve symlinks, and require
+    the result to sit under the resolved folder."""
+    base_real = os.path.realpath(base)
+    full = os.path.realpath(os.path.join(base_real, filename))
+    if not full.startswith(base_real + os.sep):
+        raise HTTPException(status_code=422, detail="that file name leaves the grid-code folder")
+    return Path(full)
+
+
 def _profile_id(profile_id) -> str:
     cs = ce.cs
     if not isinstance(profile_id, str) or not cs.PROFILE_ID.fullmatch(profile_id):
@@ -296,8 +310,8 @@ def _count_pages(data: bytes) -> int:
 
 
 def _doc_meta(project, document_id: str) -> dict:
-    meta = _docs(project) / f"{document_id}.json"
-    if not meta.is_file() or not (_docs(project) / f"{document_id}.pdf").is_file():
+    meta = _inside(_docs(project), f"{document_id}.json")
+    if not meta.is_file() or not _inside(_docs(project), f"{document_id}.pdf").is_file():
         raise HTTPException(status_code=404, detail=f"no uploaded document {document_id}")
     return json.loads(meta.read_text())
 
@@ -325,12 +339,12 @@ def upload_document(project, data: bytes, filename: str | None, content_type: st
     sha = hashlib.sha256(data).hexdigest()
     docs = _docs(project)
     with _lock(project):
-        existing = docs / f"{sha}.json"
-        if existing.is_file() and (docs / f"{sha}.pdf").is_file():
+        existing = _inside(docs, f"{sha}.json")
+        if existing.is_file() and _inside(docs, f"{sha}.pdf").is_file():
             return json.loads(existing.read_text())
         meta = {"id": sha, "sha256": sha, "filename": _clean_filename(filename), "size": len(data),
                 "uploaded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "pages": pages}
-        _write_atomic(docs / f"{sha}.pdf", data)
+        _write_atomic(_inside(docs, f"{sha}.pdf"), data)
         _write_atomic(existing, json.dumps(meta, indent=2))
     return meta
 
@@ -341,7 +355,7 @@ def delete_document(project, document_id: str) -> dict:
     with _lock(project):
         _doc_meta(project, document_id)
         for suffix in (".pdf", ".json"):
-            (_docs(project) / f"{document_id}{suffix}").unlink(missing_ok=True)
+            _inside(_docs(project), f"{document_id}{suffix}").unlink(missing_ok=True)
     return {"deleted": document_id}
 
 
@@ -351,7 +365,7 @@ def _documents(project) -> list:
         return []
     out = []
     for meta in sorted(docs.glob("*.json")):
-        if _DOC_ID.fullmatch(meta.stem) and (docs / f"{meta.stem}.pdf").is_file():
+        if _DOC_ID.fullmatch(meta.stem) and _inside(docs, f"{meta.stem}.pdf").is_file():
             out.append(json.loads(meta.read_text()))
     return sorted(out, key=lambda m: m.get("uploaded_at", ""))
 
@@ -424,7 +438,7 @@ def _check_quotes(profile: dict, pages) -> dict:
 def _pages_for(project, profile: dict):
     doc = profile.get("document")
     sha = doc.get("sha256") if isinstance(doc, dict) else None
-    pdf = _docs(project) / f"{sha}.pdf" if isinstance(sha, str) and _DOC_ID.fullmatch(sha) else None
+    pdf = _inside(_docs(project), f"{sha}.pdf") if isinstance(sha, str) and _DOC_ID.fullmatch(sha) else None
     return _page_texts(pdf) if pdf is not None and pdf.is_file() else None
 
 
@@ -567,11 +581,11 @@ def extract(project, document_id: str, profile_id: str | None = None, overwrite:
     document_id = _doc_id(document_id)
     profile_id = _profile_id(profile_id if profile_id is not None else default_profile_id(document_id))
     doc = _doc_meta(project, document_id)
-    draft_file = _drafts(project) / f"{profile_id}.yaml"
+    draft_file = _inside(_drafts(project), f"{profile_id}.yaml")
     if draft_file.is_file() and not overwrite:
         raise HTTPException(status_code=409, detail=f"a draft {profile_id!r} already exists; extract again with "
                                                     "overwrite to replace it, or choose another id")
-    pdf = (_docs(project) / f"{document_id}.pdf").read_bytes()
+    pdf = _inside(_docs(project), f"{document_id}.pdf").read_bytes()
     client = _client()
     model = _extraction_model()
     inp = _tool_input(_call(client, model, pdf))
@@ -582,11 +596,11 @@ def extract(project, document_id: str, profile_id: str | None = None, overwrite:
         "model": model,
         "extracted_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "filled_from_template": filled,
-        "limits": _check_quotes(validated, _page_texts(_docs(project) / f"{document_id}.pdf")),
+        "limits": _check_quotes(validated, _page_texts(_inside(_docs(project), f"{document_id}.pdf"))),
     }
     with _lock(project):
         _write_atomic(draft_file, _dump(validated))
-        _write_atomic(_drafts(project) / f"{profile_id}.review.json", json.dumps(review, indent=2))
+        _write_atomic(_inside(_drafts(project), f"{profile_id}.review.json"), json.dumps(review, indent=2))
     return get_draft(project, profile_id)
 
 
@@ -605,14 +619,14 @@ def _shape(project, profile_id: str, text: str, profile: dict, review) -> dict:
     doc = profile.get("document") if isinstance(profile, dict) else None
     meta = None
     if isinstance(doc, dict) and isinstance(doc.get("sha256"), str) and _DOC_ID.fullmatch(doc["sha256"]):
-        meta_file = _docs(project) / f"{doc['sha256']}.json"
+        meta_file = _inside(_docs(project), f"{doc['sha256']}.json")
         meta = json.loads(meta_file.read_text()) if meta_file.is_file() else None
     return {"id": profile_id, "yaml": text, "profile": profile, "review": review,
             "unconfirmed": ce.cs.unconfirmed(profile), "document": meta}
 
 
 def _review(project, profile_id: str):
-    f = _drafts(project) / f"{profile_id}.review.json"
+    f = _inside(_drafts(project), f"{profile_id}.review.json")
     return json.loads(f.read_text()) if f.is_file() else None
 
 
@@ -622,7 +636,7 @@ def get_draft(project, profile_id: str) -> dict:
     the uploaded document's metadata (None when there is none)."""
     _require(project)
     profile_id = _profile_id(profile_id)
-    text, profile = _read_profile(_drafts(project) / f"{profile_id}.yaml", "draft", profile_id)
+    text, profile = _read_profile(_inside(_drafts(project), f"{profile_id}.yaml"), "draft", profile_id)
     return _shape(project, profile_id, text, profile, _review(project, profile_id))
 
 
@@ -633,7 +647,7 @@ def save_draft(project, profile_id: str, text: str) -> dict:
     profile_id = _profile_id(profile_id)
     if len(text.encode()) > MAX_PROFILE_BYTES:
         raise HTTPException(status_code=413, detail=f"the profile is larger than {MAX_PROFILE_BYTES} bytes")
-    draft_file = _drafts(project) / f"{profile_id}.yaml"
+    draft_file = _inside(_drafts(project), f"{profile_id}.yaml")
     if not draft_file.is_file():
         raise HTTPException(status_code=404, detail=f"no draft grid-code profile {profile_id!r}")
     try:
@@ -649,9 +663,9 @@ def _save(project, profile_id: str, validated: dict) -> dict:
         review = dict(review or {})
         review["limits"] = _check_quotes(validated, _pages_for(project, validated))
     with _lock(project):
-        _write_atomic(_drafts(project) / f"{profile_id}.yaml", _dump(validated))
+        _write_atomic(_inside(_drafts(project), f"{profile_id}.yaml"), _dump(validated))
         if review is not None:
-            _write_atomic(_drafts(project) / f"{profile_id}.review.json", json.dumps(review, indent=2))
+            _write_atomic(_inside(_drafts(project), f"{profile_id}.review.json"), json.dumps(review, indent=2))
     return get_draft(project, profile_id)
 
 
@@ -660,7 +674,7 @@ def confirm(project, profile_id: str, limit: str) -> dict:
     page and quote."""
     _require(project)
     profile_id = _profile_id(profile_id)
-    _, profile = _read_profile(_drafts(project) / f"{profile_id}.yaml", "draft", profile_id)
+    _, profile = _read_profile(_inside(_drafts(project), f"{profile_id}.yaml"), "draft", profile_id)
     try:
         confirmed = ce.cs.confirm_limit(_validate(profile_id, profile), limit)
     except ce.ContractError as exc:
@@ -673,15 +687,15 @@ def new_draft(project, profile_id: str, title: str | None = None, overwrite: boo
     every limit ``assumed``. Needs no key."""
     _require(project)
     profile_id = _profile_id(profile_id)
-    if (_drafts(project) / f"{profile_id}.yaml").is_file() and not overwrite:
+    if _inside(_drafts(project), f"{profile_id}.yaml").is_file() and not overwrite:
         raise HTTPException(status_code=409, detail=f"a draft {profile_id!r} already exists; pass overwrite to "
                                                     "replace it")
     profile = _template()
     profile["title"] = (title or "").strip()[:200] or "Project grid code (to be filled in by hand)"
     validated = _validate(profile_id, profile)
     with _lock(project):
-        (_drafts(project) / f"{profile_id}.review.json").unlink(missing_ok=True)
-        _write_atomic(_drafts(project) / f"{profile_id}.yaml", _dump(validated))
+        _inside(_drafts(project), f"{profile_id}.review.json").unlink(missing_ok=True)
+        _write_atomic(_inside(_drafts(project), f"{profile_id}.yaml"), _dump(validated))
     return get_draft(project, profile_id)
 
 
@@ -691,7 +705,7 @@ def publish(project, profile_id: str, allow_unconfirmed: bool = False) -> dict:
     ``extracted`` and every report row on them says so."""
     _require(project)
     profile_id = _profile_id(profile_id)
-    _, profile = _read_profile(_drafts(project) / f"{profile_id}.yaml", "draft", profile_id)
+    _, profile = _read_profile(_inside(_drafts(project), f"{profile_id}.yaml"), "draft", profile_id)
     validated = _validate(profile_id, profile)
     open_limits = ce.cs.unconfirmed(validated)
     if open_limits and not allow_unconfirmed:
@@ -701,7 +715,7 @@ def publish(project, profile_id: str, allow_unconfirmed: bool = False) -> dict:
                    "or publish with allow_unconfirmed (every report row on them will then say extracted)",
         )
     with _lock(project):
-        _write_atomic(codes_dir(project) / f"{profile_id}.yaml", _dump(validated))
+        _write_atomic(_inside(codes_dir(project), f"{profile_id}.yaml"), _dump(validated))
     return {"id": profile_id, "unconfirmed": open_limits,
             "profiles": ce.cs.grid_code_profiles(extra_dirs=(codes_dir(project),))}
 
@@ -711,7 +725,7 @@ def get_published(project, profile_id: str) -> dict:
     published profile."""
     _require(project)
     profile_id = _profile_id(profile_id)
-    text, profile = _read_profile(codes_dir(project) / f"{profile_id}.yaml", "published", profile_id)
+    text, profile = _read_profile(_inside(codes_dir(project), f"{profile_id}.yaml"), "published", profile_id)
     return _shape(project, profile_id, text, profile, None)
 
 
@@ -719,11 +733,11 @@ def delete_draft(project, profile_id: str) -> dict:
     _require(project)
     profile_id = _profile_id(profile_id)
     with _lock(project):
-        draft = _drafts(project) / f"{profile_id}.yaml"
+        draft = _inside(_drafts(project), f"{profile_id}.yaml")
         if not draft.is_file():
             raise HTTPException(status_code=404, detail=f"no draft grid-code profile {profile_id!r}")
         draft.unlink()
-        (_drafts(project) / f"{profile_id}.review.json").unlink(missing_ok=True)
+        _inside(_drafts(project), f"{profile_id}.review.json").unlink(missing_ok=True)
     return {"deleted": profile_id}
 
 
@@ -731,7 +745,7 @@ def delete_published(project, profile_id: str) -> dict:
     _require(project)
     profile_id = _profile_id(profile_id)
     with _lock(project):
-        f = codes_dir(project) / f"{profile_id}.yaml"
+        f = _inside(codes_dir(project), f"{profile_id}.yaml")
         if not f.is_file():
             raise HTTPException(status_code=404, detail=f"no published grid-code profile {profile_id!r}")
         f.unlink()
