@@ -215,3 +215,235 @@ def test_undo_keeps_a_finished_record(
     assert body["started_at"] == rec["started_at"]
     st = session_state(client).get("eh_study")
     assert st.get("thread") is None or not st["thread"].is_alive()
+
+
+# ── D-1: the finished EH record travels with the project ──────────────────
+# Persisted in results_state.pkl as `eh_study_record` (a declared result-state
+# field, always None in memory) with the edit counter in metadata.json, so a
+# re-opened or restarted project still knows its study and reads it honestly:
+# the restored record is COMPARED against the saved counter, never trusted.
+
+def _save(client, name):
+    r = client.post(f"/api/projects/{name}")
+    assert r.status_code == 200, r.text
+
+
+def _drop_resident(registry_key_for, name):
+    key = registry_key_for(name)
+    with PyPSAService._registry_lock:
+        PyPSAService._contexts.pop(key, None)
+
+
+def _assert_declared_keys(state):
+    """B-3: the live dict carries exactly the ProjectSolverState fields — the
+    mirror is assigned None at hydrate, never popped."""
+    from dataclasses import fields
+
+    from services.project_context import ProjectSolverState
+    assert set(state) == {f.name for f in fields(ProjectSolverState)}
+    assert state["eh_study_record"] is None
+
+
+def _pkl_data(project_storage_dir, name):
+    from routers.projects import _safe_unpickle_results, _unwrap_results_state
+    raw = (project_storage_dir(name) / "results_state.pkl").read_bytes()
+    return _unwrap_results_state(_safe_unpickle_results(raw))
+
+
+def test_a_finished_record_is_saved_and_restored_cold(
+        client, install_network, monkeypatch, session_state, registry_key_for,
+        project_storage_dir):
+    import json
+
+    fake_done(monkeypatch)
+    a = hub_project(client, install_network, "persist-a")
+    rec = run_study(client)
+    _wait_thread_exit(session_state, client)
+    _save(client, a)
+
+    data = _pkl_data(project_storage_dir, a)
+    mirror = data.get("eh_study_record")
+    assert isinstance(mirror, dict) and mirror["status"] == "done"
+    assert "thread" not in mirror and "stop_event" not in mirror
+    assert mirror["started_at"] == rec["started_at"]
+    meta = json.loads((project_storage_dir(a) / "metadata.json").read_text())
+    assert meta["network_revision"] == mirror["network_revision"]
+    # In memory the mirror is always None (a declared field, never a copy).
+    assert session_state(client).get("eh_study_record") is None
+
+    _drop_resident(registry_key_for, a)
+    r = client.post(f"/api/projects/{a}/activate")
+    assert r.status_code == 200, r.text
+    r = client.get(STUDY_URL)
+    assert r.status_code == 200, "a cold re-activation lost the saved study"
+    body = r.json()
+    assert body["status"] == "done"
+    assert body["started_at"] == rec["started_at"]
+    assert body["edited_since_study"] is False
+    _assert_declared_keys(session_state(client))
+    # The 409 mesh sees a restored record as finished: a new study is admitted.
+    r = client.post(STUDY_URL, json={"archetype": "weak_flexible"})
+    assert r.status_code == 200, r.text
+    poll(client)
+
+
+def test_a_restored_record_reads_edited_when_the_saved_network_moved_on(
+        client, install_network, monkeypatch, session_state, registry_key_for):
+    fake_done(monkeypatch)
+    a = hub_project(client, install_network, "persist-edited")
+    run_study(client)
+    _wait_thread_exit(session_state, client)
+    bus = client.get("/api/network/buses").json()[0]
+    r = client.put(f"/api/network/buses/{bus['name']}",
+                   json={**bus, "x": float(bus.get("x") or 0.0) + 0.001})
+    assert r.status_code == 200, r.text
+    rev = client.get("/api/network/undo/info").json()["network_revision"]
+    _save(client, a)
+
+    _drop_resident(registry_key_for, a)
+    assert client.post(f"/api/projects/{a}/activate").status_code == 200
+    body = client.get(STUDY_URL).json()
+    assert body["status"] == "done"
+    assert body["edited_since_study"] is True
+    assert client.get("/api/network/undo/info").json()["network_revision"] == rev
+    r = client.get(REVIEW_URL)
+    assert r.status_code == 200, r.text
+    assert r.json()["stale"] is False
+    assert r.json()["edited_since_study"] is True
+
+
+def test_a_restart_style_first_request_restores_the_record(
+        client, install_network, monkeypatch, session_state, registry_key_for):
+    """(E2)'s path: no activate at all — the first request with a stored
+    pointer and no resident ctx hydrates through `active_project`."""
+    fake_done(monkeypatch)
+    a = hub_project(client, install_network, "persist-pointer")
+    rec = run_study(client)
+    _wait_thread_exit(session_state, client)
+    _save(client, a)
+    _drop_resident(registry_key_for, a)
+    r = client.get(STUDY_URL)
+    assert r.status_code == 200, r.text
+    assert r.json()["started_at"] == rec["started_at"]
+    assert r.json()["edited_since_study"] is False
+
+
+def test_a_failed_and_an_aborted_record_are_restored_too(
+        client, install_network, monkeypatch, session_state, registry_key_for):
+    def boom(network, pack, cfg, **kw):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("services.adequacy.eh_study.run_eh_study", boom)
+    a = hub_project(client, install_network, "persist-failed")
+    r = client.post(STUDY_URL, json={"archetype": "weak_flexible"})
+    assert r.status_code == 200, r.text
+    assert poll(client)["status"] == "failed"
+    _wait_thread_exit(session_state, client)
+    _save(client, a)
+    _drop_resident(registry_key_for, a)
+    assert client.post(f"/api/projects/{a}/activate").status_code == 200
+    body = client.get(STUDY_URL).json()
+    assert body["status"] == "failed"
+    assert client.get(REVIEW_URL).status_code == 204   # no report: stays 204
+
+    gate = threading.Event()
+
+    def wait_for_stop(network, pack, cfg, **kw):
+        assert kw["stop_event"].wait(30)
+        return {"archetype": "weak_flexible", "sections": {}, "notes": []}
+
+    monkeypatch.setattr("services.adequacy.eh_study.run_eh_study", wait_for_stop)
+    b = hub_project(client, install_network, "persist-aborted")
+    assert client.post(STUDY_URL, json={"archetype": "weak_flexible"}).status_code == 200
+    deadline = time.time() + 10
+    while client.get(STUDY_URL).json().get("status") != "running":
+        assert time.time() < deadline
+        time.sleep(0.02)
+    assert client.post(f"{STUDY_URL}/abort").status_code == 200
+    assert poll(client)["status"] == "aborted"
+    gate.set()
+    _wait_thread_exit(session_state, client)
+    _save(client, b)
+    _drop_resident(registry_key_for, b)
+    assert client.post(f"/api/projects/{b}/activate").status_code == 200
+    assert client.get(STUDY_URL).json()["status"] == "aborted"
+
+
+def test_legacy_pkl_without_the_record_restores_nothing(
+        client, install_network, monkeypatch, session_state, registry_key_for,
+        project_storage_dir):
+    import pickle
+
+    fake_done(monkeypatch)
+    a = hub_project(client, install_network, "persist-legacy")
+    run_study(client)
+    _wait_thread_exit(session_state, client)
+    _save(client, a)
+    path = project_storage_dir(a) / "results_state.pkl"
+    from routers.projects import _RESULTS_STATE_SCHEMA
+    data = dict(_pkl_data(project_storage_dir, a))
+    data.pop("eh_study_record", None)
+    path.write_bytes(pickle.dumps({"__schema__": _RESULTS_STATE_SCHEMA, "data": data}))
+    _drop_resident(registry_key_for, a)
+    assert client.post(f"/api/projects/{a}/activate").status_code == 200
+    assert client.get(STUDY_URL).status_code == 204
+
+
+def test_a_finished_record_survives_save_and_reload_through_load(
+        client, install_network, monkeypatch, session_state, api_project):
+    """`GET /api/projects/{name}` (load) restores through
+    `_restore_results_state`, the active-scoped twin of the hydrate path."""
+    b = api_project("persist-other")
+    fake_done(monkeypatch)
+    a = hub_project(client, install_network, "persist-load")
+    rec = run_study(client)
+    _wait_thread_exit(session_state, client)
+    _save(client, a)
+    assert client.get(f"/api/projects/{b}").status_code == 200
+    assert client.get(f"/api/projects/{a}").status_code == 200
+    body = client.get(STUDY_URL).json()
+    assert body["status"] == "done"
+    assert body["started_at"] == rec["started_at"]
+    assert body["edited_since_study"] is False
+    _assert_declared_keys(session_state(client))
+
+
+def test_hydrate_keeps_a_newer_in_memory_record(tmp_path):
+    """The mirror is mapped only when the ctx has no `eh_study` of its own."""
+    import pickle
+
+    import pypsa
+
+    from routers.projects import _RESULTS_STATE_SCHEMA, _hydrate_context_from_disk
+    from services.project_context import ProjectContext
+
+    n = pypsa.Network()
+    n.add("Bus", "b")
+    n.export_to_netcdf(tmp_path / "network.nc")
+    disk = {"status": "done", "started_at": 1.0, "network_revision": 0}
+    (tmp_path / "results_state.pkl").write_bytes(pickle.dumps(
+        {"__schema__": _RESULTS_STATE_SCHEMA, "data": {"eh_study_record": disk}}))
+    ctx = ProjectContext(network=pypsa.Network())
+    planted = {"status": "done", "started_at": 2.0, "network_revision": 3}
+    ctx.solver_state["eh_study"] = planted
+    _hydrate_context_from_disk(ctx, tmp_path, "p")
+    assert ctx.solver_state["eh_study"] is planted
+    assert ctx.solver_state["eh_study_record"] is None
+
+    ctx2 = ProjectContext(network=pypsa.Network())
+    _hydrate_context_from_disk(ctx2, tmp_path, "p")
+    assert ctx2.solver_state["eh_study"]["started_at"] == 1.0
+    assert ctx2.solver_state["eh_study"]["thread"] is None
+    assert ctx2.solver_state["eh_study_record"] is None
+
+
+def test_the_mirror_round_trips_through_the_restricted_unpickler(
+        client, install_network, monkeypatch, session_state, project_storage_dir):
+    fake_done(monkeypatch)
+    a = hub_project(client, install_network, "persist-unpickle")
+    run_study(client)
+    _wait_thread_exit(session_state, client)
+    _save(client, a)
+    mirror = _pkl_data(project_storage_dir, a)["eh_study_record"]
+    assert isinstance(mirror["report"], dict)
+    assert mirror["status"] == "done"

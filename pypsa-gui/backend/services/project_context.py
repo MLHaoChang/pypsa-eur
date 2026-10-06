@@ -256,6 +256,9 @@ RESULT_STATE_KEYS = (
     "ac_pf_convergence", "ac_pf_convergence_list",
     "ac_pf_slack_bus_used", "ac_pf_stripped_voll_slacks",
     "ac_pf_converged_count", "ac_pf_total_snapshots",
+    # P33b D-1: the on-disk mirror of a FINISHED `eh_study` record — derived
+    # at save, mapped onto `eh_study` at hydrate, always None in memory.
+    "eh_study_record",
 )
 
 
@@ -464,6 +467,13 @@ class ProjectSolverState:
     ac_pf_stripped_voll_slacks: Any = None
     ac_pf_converged_count: Any = None
     ac_pf_total_snapshots: Any = None
+    # P33b D-1: the on-disk mirror of a FINISHED `eh_study` record (no thread,
+    # no stop event). Result state so it rides `results_state.pkl`, but it is
+    # DERIVED at save from the live record and CONSUMED at hydrate (mapped onto
+    # `eh_study` when the ctx has none, then assigned None) — so in memory it is
+    # always None. The restored record is compared against `network_revision`
+    # at read time (`study_state.edited_since`), never trusted as current.
+    eh_study_record: Any = None
     # ── Study records (STUDY_KEYS) — NOT persisted, NOT lifecycle ────────────
     # Each holds the record of one long-running adequacy study: status, its
     # result, the worker thread the 409 mesh tests for liveness.
@@ -478,9 +488,13 @@ class ProjectSolverState:
     # and a study of a discarded network survived "New". Both reproduced over
     # HTTP in `tests/test_adequacy_study_scoping.py`.
     #
-    # They are deliberately in NO persistence group: a study measures a
-    # network in memory and must not be restored from disk beside a network it
-    # may no longer describe.
+    # Study records are not persisted — except the finished EH record's
+    # mirror, `eh_study_record` above, which is result state, compared against
+    # `network_revision` at read time and never trusted as current (P33b D-1).
+    # The rule for the rest stands: a study measures a network in memory and
+    # must not be restored from disk beside a network it may no longer
+    # describe; the EH record may, only because the edit counter travels with
+    # it and says whether the network was edited since.
     fmea_sweep: Any = None
     frontier: Any = None
     mc: Any = None

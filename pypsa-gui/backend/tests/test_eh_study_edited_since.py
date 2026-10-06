@@ -402,3 +402,22 @@ def test_edited_since_is_null_for_running_and_non_dict_records():
     assert edited_since({"status": "done", "network_revision": 3}, revision=3) is False
     assert edited_since({"status": "done", "network_revision": 2}, revision=3) is True
     assert edited_since({"status": "failed", "network_revision": 2}, revision=3) is True
+
+
+def test_the_revision_survives_save_and_reload(
+        client, install_network, monkeypatch, session_state, project_storage_dir,
+        api_project):
+    import json
+
+    other = api_project("rev-other")
+    _done_study(client, install_network, monkeypatch, session_state, "rev-persist")
+    _edit_bus(client)
+    rev = _rev(client)
+    r = client.post("/api/projects/rev-persist")
+    assert r.status_code == 200, r.text
+    meta = json.loads((project_storage_dir("rev-persist") / "metadata.json").read_text())
+    assert meta["network_revision"] == rev
+    assert client.get(f"/api/projects/{other}").status_code == 200
+    assert client.get("/api/projects/rev-persist").status_code == 200
+    assert _rev(client) == rev
+    assert client.get(STUDY_URL).json()["edited_since_study"] is True

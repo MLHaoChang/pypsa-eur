@@ -415,6 +415,31 @@ def _unwrap_results_state(raw: object) -> dict | None:
     return raw
 
 
+def _map_eh_study_mirror(state: dict) -> None:
+    """
+    P33b D-1: put a restored FINISHED EH study record back on ``eh_study``.
+
+    The mirror (``eh_study_record``) is mapped only when the ctx holds no
+    ``eh_study`` of its own (an in-memory record is newer than the disk one),
+    with ``thread`` / ``stop_event`` None so ``record_is_running`` reads it as
+    finished. The mirror key is then ASSIGNED None, never popped: it is a
+    declared field and the live dict keeps the declared key set.
+    """
+    rec = state.get("eh_study_record")
+    if isinstance(rec, dict) and state.get("eh_study") is None:
+        state["eh_study"] = {**rec, "thread": None, "stop_event": None}
+    state["eh_study_record"] = None
+
+
+def _restore_network_revision(ctx, project_dir: pathlib.Path) -> None:
+    """P33b: the project's edit counter from metadata.json (0 when absent — an
+    older save; a restored record then reads edited, the safe direction)."""
+    try:
+        ctx.network_revision = int(_read_meta(project_dir).get("network_revision") or 0)
+    except (TypeError, ValueError):
+        ctx.network_revision = 0
+
+
 def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None:
     """
     Reset and (if present) restore `_state` side-results from
@@ -431,6 +456,10 @@ def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None
     # old and new state during the restore window.
     from routers.simulation import _state_update as _sim_state_update
     _sim_state_update(**{k: None for k in _RESULTS_STATE_KEYS})
+    # P33b: the edit counter travels with the record it is compared against.
+    # Every caller (load, bundle import, Saved-snapshot restore) restores the
+    # active ctx from these files, so both are set here, together.
+    _restore_network_revision(PyPSAService.get_active_context(), project_dir)
     results_path = project_dir / "results_state.pkl"
     if not results_path.exists():
         return
@@ -453,6 +482,8 @@ def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None
         applied = {k: v for k, v in data.items() if k in _RESULTS_STATE_KEYS}
         if applied:
             _sim_state_update(**applied)
+        with PyPSAService.get_solver_state_lock():
+            _map_eh_study_mirror(PyPSAService.get_solver_state())
     except Exception as exc:
         change_log_service.log(
             "warn", "Project", project_name,
@@ -2006,6 +2037,12 @@ def _save_context(
     # the .nc itself, so disk overhead is acceptable.
     import pickle
     results_state = {k: ctx.solver_state.get(k) for k in _RESULTS_STATE_KEYS}
+    # P33b D-1: the finished EH study record's mirror, derived from the LIVE
+    # record (never from the always-None mirror key), compared against the
+    # `network_revision` written to metadata.json below when it is restored.
+    from services.study_state import finished_study_record
+    results_state["eh_study_record"] = finished_study_record(
+        ctx.solver_state.get("eh_study"))
     results_path = dest / "results_state.pkl"
     if any(v is not None for v in results_state.values()):
         # Versioned envelope so a future shape change can be detected on load
@@ -2122,6 +2159,8 @@ def _save_context(
             "condition":   ctx.solver_state.get("condition") if has_dispatch else None,
             "solve_time":  ctx.solver_state.get("solve_time") if has_dispatch else None,
             "user_ts_count": len(user_ts_data),
+            # P33b: the edit counter the saved EH study record is compared to.
+            "network_revision": int(ctx.network_revision or 0),
             "parent_project": new_parent,
             "scenario_description": new_desc,
             "scenario_type": new_type,
@@ -2349,6 +2388,7 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
                 for k, v in data.items():
                     if k in _RESULTS_STATE_KEYS:
                         ctx.solver_state[k] = v
+            _map_eh_study_mirror(ctx.solver_state)
         except Exception as exc:
             change_log_service.log(
                 "warn", "Project", name,
@@ -2356,6 +2396,9 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
                 f"({type(exc).__name__}: {exc}). The netcdf still carries the "
                 f"dispatch; only side-results are affected.",
             )
+
+    ctx.solver_state["eh_study_record"] = None
+    _restore_network_revision(ctx, src)
 
     try:
         ctx.network.name = name
