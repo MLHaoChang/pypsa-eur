@@ -11,8 +11,16 @@ map-view.md, M1).
     {
       "version": 1,
       "routes":  {"<kind>:<name>": {"points": [[lng, lat], ...], "source": "user" | "import" | "osm"}},
-      "bubbles": {"<bus>|<category>": {"dx": px, "dy": px}}
+      "bubbles": {"<bus>|<category>": {"dx": px, "dy": px}},
+      "lengths": {"<kind>:<name>": {"source": "typed" | "chord" | "route"}}   # optional (M2)
     }
+
+`lengths` is the length PROVENANCE of a branch — where its PyPSA `length`
+came from — which PyPSA has no column for. `typed` is a number the user (or
+an import) entered, `chord` the great-circle bus0→bus1 distance, `route` the
+geodesic length of the routed polyline. The table is optional: the M1
+migration wrote none, and a key that is absent reads as `typed` ("unknown,
+and nothing was derived for it"), so every pre-M2 document is valid as is.
 
 `kind` is one of the map's edge-kind prefixes — `line`, `link`, `tr` — which
 is why `route_key` maps the PyPSA class to it. `points` are the INTERIOR
@@ -46,6 +54,9 @@ SCHEMA_VERSION = 1
 
 ROUTE_KINDS = frozenset({"line", "link", "tr"})
 ROUTE_SOURCES = frozenset({"user", "import", "osm"})
+LENGTH_SOURCES = frozenset({"typed", "chord", "route"})
+# A branch with no provenance entry: nothing was ever derived for it.
+DEFAULT_LENGTH_SOURCE = "typed"
 # PyPSA class → the map's edge-kind prefix. Only branches have routes.
 CLASS_TO_KIND = {"Line": "line", "Link": "link", "Transformer": "tr"}
 
@@ -127,11 +138,19 @@ def _check_point(v: object, where: str) -> None:
         raise MapLayoutInvalid(f"{where}: point out of range (lng ±180, lat ±90)")
 
 
+def _check_branch_key(table: str, key: object) -> None:
+    kind, sep, name = str(key).partition(":")
+    if not isinstance(key, str) or not sep or not name or kind not in ROUTE_KINDS:
+        raise MapLayoutInvalid(
+            f"{table}: key {key!r} must be <kind>:<name> with kind in {sorted(ROUTE_KINDS)}"
+        )
+
+
 def validate_map_layout(doc: object) -> None:
     """
     Raise `MapLayoutInvalid` naming the field, else return. Unknown keys are
-    allowed at every level (forward compatibility: M2 adds `length_source`
-    beside `points`); only the keys the backend relies on are checked.
+    allowed at every level (forward compatibility); only the keys the backend
+    relies on are checked. `lengths` is optional (see the module docstring).
     """
     if not isinstance(doc, dict):
         raise MapLayoutInvalid("document must be an object")
@@ -141,11 +160,7 @@ def validate_map_layout(doc: object) -> None:
     if not isinstance(routes, dict):
         raise MapLayoutInvalid("routes must be an object")
     for key, route in routes.items():
-        kind, sep, name = key.partition(":")
-        if not sep or not name or kind not in ROUTE_KINDS:
-            raise MapLayoutInvalid(
-                f"routes: key {key!r} must be <kind>:<name> with kind in {sorted(ROUTE_KINDS)}"
-            )
+        _check_branch_key("routes", key)
         where = f"routes[{key!r}]"
         if not isinstance(route, dict):
             raise MapLayoutInvalid(f"{where}: must be an object")
@@ -168,6 +183,51 @@ def validate_map_layout(doc: object) -> None:
         where = f"bubbles[{key!r}]"
         if not isinstance(bubble, dict) or not all(_finite(bubble.get(f)) for f in ("dx", "dy")):
             raise MapLayoutInvalid(f"{where}: dx, dy must be finite numbers")
+    if "lengths" in doc:
+        lengths = doc["lengths"]
+        if not isinstance(lengths, dict):
+            raise MapLayoutInvalid("lengths must be an object")
+        for key, entry in lengths.items():
+            _check_branch_key("lengths", key)
+            where = f"lengths[{key!r}]"
+            if not isinstance(entry, dict):
+                raise MapLayoutInvalid(f"{where}: must be an object")
+            if entry.get("source") not in LENGTH_SOURCES:
+                raise MapLayoutInvalid(f"{where}.source: must be one of {sorted(LENGTH_SOURCES)}")
+
+
+# ── length provenance ───────────────────────────────────────────────────────
+
+def length_source(doc: dict, key: str) -> str:
+    """
+    Where the branch's `length` came from: `typed`, `chord` or `route`. A
+    missing or malformed entry is `typed` — unknown, and nothing derived.
+    """
+    lengths = doc.get("lengths")
+    entry = lengths.get(key) if isinstance(lengths, dict) else None
+    source = entry.get("source") if isinstance(entry, dict) else None
+    return source if source in LENGTH_SOURCES else DEFAULT_LENGTH_SOURCE
+
+
+def set_length_source(doc: dict, key: str, source: str) -> None:
+    """Record provenance in place, creating the table on first use."""
+    if source not in LENGTH_SOURCES:
+        raise MapLayoutInvalid(f"lengths[{key!r}].source: must be one of {sorted(LENGTH_SOURCES)}")
+    lengths = doc.get("lengths")
+    if not isinstance(lengths, dict):
+        lengths = doc["lengths"] = {}
+    entry = lengths.get(key)
+    if not isinstance(entry, dict):
+        entry = lengths[key] = {}
+    entry["source"] = source
+
+
+def route_points(doc: dict, key: str) -> list | None:
+    """The branch's interior `[lng, lat]` waypoints, or None when it has no route."""
+    routes = doc.get("routes")
+    route = routes.get(key) if isinstance(routes, dict) else None
+    points = route.get("points") if isinstance(route, dict) else None
+    return points if isinstance(points, list) and points else None
 
 
 # ── rename hook ─────────────────────────────────────────────────────────────
@@ -180,18 +240,20 @@ def route_key(component_class: str, name: str) -> str | None:
 
 def rename_component(doc: dict, component_class: str, old: str, new: str) -> bool:
     """
-    Re-key the branch's route in place. Returns whether anything changed. A
-    class without routes, or a missing key, is a no-op; other kinds with the
-    same name are untouched.
+    Re-key the branch's route AND its length provenance in place. Returns
+    whether anything changed. A class without routes, or a key in neither
+    table, is a no-op; other kinds with the same name are untouched.
     """
     old_key, new_key = route_key(component_class, old), route_key(component_class, new)
     if old_key is None or new_key is None:
         return False
-    routes = doc.get("routes")
-    if not isinstance(routes, dict) or old_key not in routes:
-        return False
-    routes[new_key] = routes.pop(old_key)
-    return True
+    changed = False
+    for table in ("routes", "lengths"):
+        entries = doc.get(table)
+        if isinstance(entries, dict) and old_key in entries:
+            entries[new_key] = entries.pop(old_key)
+            changed = True
+    return changed
 
 
 def rename_component_on_disk(project_dir: pathlib.Path | str | None, component_class: str, old: str, new: str) -> None:

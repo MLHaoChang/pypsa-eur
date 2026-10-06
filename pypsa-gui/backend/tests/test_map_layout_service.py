@@ -270,3 +270,81 @@ def test_rename_on_disk_swallows_and_logs_failures(tmp_path, monkeypatch, caplog
     monkeypatch.setattr(ml, "write_map_layout", boom)
     ml.rename_component_on_disk(tmp_path, "Line", "L1", "L2")  # must not raise
     assert any("map_layout.json rename hook failed" in r.getMessage() for r in caplog.records), caplog.text
+
+
+# ── M2: length provenance beside the route ──────────────────────────────────
+# PyPSA has no column for "where did this length come from", so the document
+# carries it: `lengths: {"<kind>:<name>": {"source": "typed" | "chord" | "route"}}`.
+# A document without the key (the M1 migration, any pre-M2 file) reads as
+# "unknown", which is treated as `typed` — nothing was ever derived for it.
+
+def test_length_source_defaults_to_typed_when_absent():
+    d = copy.deepcopy(EXAMPLE)
+    assert "lengths" not in d
+    assert ml.length_source(d, "line:L1") == "typed"
+    assert ml.length_source(ml.empty_document(), "link:K") == "typed"
+
+
+def test_set_length_source_creates_the_table_and_reads_back():
+    d = copy.deepcopy(EXAMPLE)
+    ml.set_length_source(d, "line:L1", "route")
+    ml.set_length_source(d, "link:HVDC", "chord")
+    assert d["lengths"] == {"line:L1": {"source": "route"}, "link:HVDC": {"source": "chord"}}
+    assert ml.length_source(d, "line:L1") == "route"
+    assert ml.length_source(d, "link:HVDC") == "chord"
+    ml.validate_map_layout(d)  # what we write must pass what PUT checks
+
+
+def test_set_length_source_rejects_an_unknown_source():
+    with pytest.raises(ml.MapLayoutInvalid):
+        ml.set_length_source(copy.deepcopy(EXAMPLE), "line:L1", "guess")
+
+
+def test_length_source_tolerates_a_malformed_table():
+    """A hand-edited or partial table degrades to 'typed', never raises."""
+    assert ml.length_source(_doc(lengths="nope"), "line:L1") == "typed"
+    assert ml.length_source(_doc(lengths={"line:L1": "route"}), "line:L1") == "typed"
+    assert ml.length_source(_doc(lengths={"line:L1": {"source": "magic"}}), "line:L1") == "typed"
+
+
+def test_validate_accepts_lengths_and_keeps_unknown_keys_inside():
+    d = _doc(lengths={"line:L1": {"source": "route", "measured_at": "2026-10-06"}})
+    ml.validate_map_layout(d)
+
+
+@pytest.mark.parametrize(
+    "lengths, needle",
+    [
+        ([], "lengths must be an object"),
+        ({"L1": {"source": "route"}}, "lengths: key 'L1'"),
+        ({"bus:B1": {"source": "route"}}, "lengths: key 'bus:B1'"),
+        ({"line:L1": "route"}, "lengths['line:L1']"),
+        ({"line:L1": {"source": "guess"}}, "lengths['line:L1'].source"),
+        ({"line:L1": {}}, "lengths['line:L1'].source"),
+    ],
+)
+def test_validate_rejects_a_bad_lengths_table(lengths, needle):
+    with pytest.raises(ml.MapLayoutInvalid) as exc:
+        ml.validate_map_layout(_doc(lengths=lengths))
+    assert needle in str(exc.value), str(exc.value)
+
+
+def test_rename_component_moves_the_length_provenance_too():
+    d = _doc(lengths={"line:L1": {"source": "route"}, "link:HVDC": {"source": "chord"}})
+    assert ml.rename_component(d, "Line", "L1", "L9") is True
+    assert "line:L1" not in d["lengths"] and d["lengths"]["line:L9"] == {"source": "route"}
+    assert d["lengths"]["link:HVDC"] == {"source": "chord"}
+
+
+def test_rename_component_re_keys_provenance_without_a_route():
+    """A typed-then-derived branch may have provenance but no bend."""
+    d = _doc(lengths={"link:K": {"source": "chord"}})
+    assert ml.rename_component(d, "Link", "K", "K2") is True
+    assert d["lengths"] == {"link:K2": {"source": "chord"}}
+
+
+def test_route_points_returns_interior_lnglat_or_none():
+    d = copy.deepcopy(EXAMPLE)
+    assert ml.route_points(d, "line:L1") == [[6.8321, 53.4396], [6.8340, 53.4401]]
+    assert ml.route_points(d, "line:nope") is None
+    assert ml.route_points(_doc(routes={"line:L1": {"points": "bad"}}), "line:L1") is None

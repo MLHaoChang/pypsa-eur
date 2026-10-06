@@ -65,6 +65,36 @@ def _line_haversine_km(n, bus0: str, bus1: str) -> float | None:
     return _haversine_km(c0[0], c0[1], c1[0], c1[1])
 
 
+def route_length_km(points_lnglat) -> float:
+    """
+    Geodesic length of a polyline, haversine per segment. `points_lnglat` is
+    GeoJSON order — `[[lng, lat], ...]`, the order `map_layout.json` stores
+    (plan M2). Fewer than two points is a length of zero. The frontend twin is
+    `utils/geo.ts::routeLengthKm` (in Leaflet's `[lat, lng]`); the two are
+    tested against the same geodesics.
+    """
+    total = 0.0
+    for (lng0, lat0), (lng1, lat1) in zip(points_lnglat, points_lnglat[1:]):
+        total += _haversine_km(float(lng0), float(lat0), float(lng1), float(lat1))
+    return total
+
+
+def _branch_geometry_km(n, bus0: str, bus1: str, interior_lnglat=None) -> tuple[float, str] | None:
+    """
+    The branch's length from its geometry: `(km, "route")` through the
+    interior waypoints when it has any, else `(km, "chord")` bus0→bus1. None
+    when either bus is unplaced — the same guard `_line_haversine_km` has, for
+    the same reason (never measure to Null Island).
+    """
+    c0 = _bus_coord(n, bus0)
+    c1 = _bus_coord(n, bus1)
+    if c0 is None or c1 is None:
+        return None
+    if interior_lnglat:
+        return route_length_km([list(c0), *interior_lnglat, list(c1)]), "route"
+    return _haversine_km(c0[0], c0[1], c1[0], c1[1]), "chord"
+
+
 _IMPEDANCE_FIELDS = ("r", "x", "b")
 
 
