@@ -35,7 +35,6 @@ import {
   CanvasResultsProvider, useCanvasResults, fmtMW, loadingColor, socColor,
 } from '../components/CanvasResultsContext'
 import type { Bus, Generator, Line, Load, StorageUnit, Store, Transformer } from '../api/types'
-import { safeMinMax } from '../utils/numeric'
 import { colourForCarrier } from './results/shared'
 import {
   useLayoutPersistence, localLayoutFor, loadLayoutNewestWins,
@@ -44,6 +43,7 @@ import {
 import {
   buildLinkEdges, componentNameFromEdgeId, derivedPortFlow, getLinkColor, FALLBACK_COLORS,
 } from './topologyEdges'
+import { runLayout, BUS_R, ASSET_R, type LayoutSatellite } from './topologyLayout'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type AssetCategory = 'Thermal' | 'Renewables' | 'Storage' | 'Load'
@@ -88,26 +88,9 @@ const ConnectModeContext = createContext<ConnectModeCtx>({ active: false, source
 const HighlightContext = createContext<{ type: string; name: string; busName?: string } | null>(null)
 
 // ── Layout constants and pure functions ───────────────────────────────────────
-export const BUS_R = 44  // half-diagonal of rounded-rect bus node (~88px wide × 30px tall)
-const ASSET_R = 62  // half-diagonal of ~100×100 asset card
-
-function hashStr(s: string): number {
-  let h = 0x811c9dc5
-  for (let i = 0; i < s.length; i++) {
-    h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0
-  }
-  return h
-}
-
-function mulberry32(seed: number): () => number {
-  let s = seed >>> 0
-  return () => {
-    s += 0x6d2b79f5
-    let x = Math.imul(s ^ (s >>> 15), 1 | s)
-    x ^= x + Math.imul(x ^ (x >>> 7), 61 | x)
-    return ((x ^ (x >>> 14)) >>> 0) / 0xffffffff
-  }
-}
+// `runLayout`, the name hash and the node radii live in ./topologyLayout
+// (pure, tested); BUS_R is re-exported for useAssetDrag.
+export { BUS_R }
 
 const LAYOUT_ASSET_OFFSETS: Record<AssetCategory, { dx: number; dy: number }> = {
   Thermal:    { dx: -185, dy: -155 },
@@ -137,73 +120,9 @@ function buildAssetDescriptors(
   return result
 }
 
-function runLayout(
-  buses: { id: string; v_nom: number }[],
-  assetNodes: { id: string; busId: string; category: AssetCategory }[],
-  W = 1400, H = 900,
-): Record<string, { x: number; y: number }> {
-  if (buses.length === 0) return {}
-  const TIER_Y = [H * 0.2, H * 0.5, H * 0.8]
-  const BUS_SEP = 210
-
-  const tierGroups: [string, number][][] = [[], [], []]
-  buses.forEach(b => {
-    const tier = b.v_nom >= 220 ? 0 : b.v_nom >= 50 ? 1 : 2
-    tierGroups[tier].push([b.id, b.v_nom])
-  })
-
-  const pos: Record<string, { x: number; y: number }> = {}
-
-  tierGroups.forEach((group, tier) => {
-    if (group.length === 0) return
-    const startX = W / 2 - ((group.length - 1) * BUS_SEP) / 2
-    group.forEach(([id], i) => {
-      const rand = mulberry32(hashStr(id))
-      pos[id] = {
-        x: startX + i * BUS_SEP + (rand() - 0.5) * 40,
-        y: TIER_Y[tier]              + (rand() - 0.5) * 60,
-      }
-    })
-  })
-
-  // Collision resolution — push overlapping bus nodes apart
-  const ids = buses.map(b => b.id)
-  const minDist = BUS_R * 2 + 32
-  for (let iter = 0; iter < 50; iter++) {
-    let moved = false
-    for (let i = 0; i < ids.length; i++) {
-      for (let j = i + 1; j < ids.length; j++) {
-        const a = pos[ids[i]], b = pos[ids[j]]
-        const dx = b.x - a.x, dy = b.y - a.y
-        const dist = Math.sqrt(dx * dx + dy * dy) || 0.01
-        if (dist < minDist) {
-          const push = (minDist - dist) / 2 + 1
-          const nx = (dx / dist) * push, ny = (dy / dist) * push
-          a.x -= nx; a.y -= ny; b.x += nx; b.y += ny
-          moved = true
-        }
-      }
-    }
-    if (!moved) break
-  }
-
-  // Center around canvas origin (single-pass min/max — see utils/numeric.ts).
-  const xs = ids.map(id => pos[id].x), ys = ids.map(id => pos[id].y)
-  const xmm = safeMinMax(xs), ymm = safeMinMax(ys)
-  const cx = (xmm.min + xmm.max) / 2
-  const cy = (ymm.min + ymm.max) / 2
-  const offX = W / 2 - cx, offY = H / 2 - cy
-  ids.forEach(id => { pos[id].x += offX; pos[id].y += offY })
-
-  // Place asset nodes relative to their bus with fixed offsets
-  assetNodes.forEach(ag => {
-    if (!pos[ag.busId]) return
-    const off = LAYOUT_ASSET_OFFSETS[ag.category]
-    pos[ag.id] = { x: pos[ag.busId].x + off.dx, y: pos[ag.busId].y + off.dy }
-  })
-
-  return pos
-}
+/** Group bubbles as layout satellites: each at its category's fixed offset from its bus. */
+const groupSatellites = (descs: { id: string; busId: string; category: AssetCategory }[]): LayoutSatellite[] =>
+  descs.map(d => ({ id: d.id, busId: d.busId, ...LAYOUT_ASSET_OFFSETS[d.category] }))
 
 interface AssetGroupData extends Record<string, unknown> {
   category: AssetCategory
@@ -2223,7 +2142,7 @@ export default function TopologyCanvas() {
     if (stillUncached.length > 0) {
       const layoutPos = runLayout(
         (buses as Bus[]).map(b => ({ id: b.name, v_nom: b.v_nom ?? 1 })),
-        assetDescs,
+        groupSatellites(assetDescs),
       )
       Object.entries(layoutPos).forEach(([id, p]) => {
         if (!posCache.current[id]) posCache.current[id] = p
@@ -2632,7 +2551,7 @@ export default function TopologyCanvas() {
     )
     const layoutPos = runLayout(
       (buses as Bus[]).map(b => ({ id: b.name, v_nom: b.v_nom ?? 1 })),
-      assetDescs,
+      groupSatellites(assetDescs),
     )
     Object.entries(layoutPos).forEach(([id, p]) => { posCache.current[id] = p })
     setNodes(prev => prev.map(n => ({
@@ -2664,7 +2583,7 @@ export default function TopologyCanvas() {
     // from geographic bus.x/y. See the "latent coordinates" note at the top.
     const layoutPos = runLayout(
       (buses as Bus[]).map(b => ({ id: b.name, v_nom: b.v_nom ?? 1 })),
-      assetDescs,
+      groupSatellites(assetDescs),
     )
     Object.entries(layoutPos).forEach(([id, p]) => { posCache.current[id] = p })
     setNodes(prev => prev.map(n => ({ ...n, position: posCache.current[n.id] ?? n.position })))

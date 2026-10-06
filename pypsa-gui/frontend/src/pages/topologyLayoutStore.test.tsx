@@ -19,6 +19,7 @@ import { render, screen, act, fireEvent } from '@testing-library/react'
 import {
   useLayoutPersistence, layoutMemCache, layoutCacheKey, loadDiagramState, saveDiagramState,
   newestLayout, loadLayoutNewestWins, flushPendingLayoutToServer, resetLayoutNotices,
+  buildPersistedState, coercePersistedState, storageKeyFor,
   SAVE_DEBOUNCE_MS, STORAGE_VERSION, type LayoutNodeLike, type LayoutEdgeLike, type PersistedState,
 } from './topologyLayoutStore'
 import { projectsApi } from '../api/projects'
@@ -169,6 +170,81 @@ describe('useLayoutPersistence', () => {
     vi.mocked(projectsApi.putLayout).mockClear()
     unmount()
     expect(wpOf(readPersisted())).toEqual([WP_MOVED])
+  })
+})
+
+// ── A2: the persisted shape gains the asset mode and asset-node positions ────
+// Version 2. A version-1 document (every layout saved before A2) still reads,
+// as `grouped` — the only view it had — and is never thrown away.
+
+const V1_DOC = { version: 1, savedAt: 500, nodes: [{ id: 'bus-A', canvasX: 1, canvasY: 2 }], edges: [] }
+
+describe('PersistedState v2', () => {
+  it('STORAGE_VERSION is 2', () => { expect(STORAGE_VERSION).toBe(2) })
+
+  it('reads a version-1 document as grouped at the current version, keeping its positions', () => {
+    const s = coercePersistedState(V1_DOC)
+    expect(s).toMatchObject({ version: 2, assetMode: 'grouped', savedAt: 500 })
+    expect(s?.nodes).toEqual(V1_DOC.nodes)
+  })
+
+  it('reads a version-1 document from localStorage too, without removing it', () => {
+    localStorage.setItem(storageKeyFor(PROJECT), JSON.stringify(V1_DOC))
+    expect(loadDiagramState(PROJECT)).toMatchObject({ version: 2, assetMode: 'grouped' })
+    expect(localStorage.getItem(storageKeyFor(PROJECT))).not.toBeNull()
+  })
+
+  it('passes a version-2 document through, drops an unknown assetMode, and rejects a future version', () => {
+    const v2 = { ...V1_DOC, version: 2, assetMode: 'individual', nodes: [...V1_DOC.nodes, { id: 'asset-Generator:PV', canvasX: 3, canvasY: 4 }] }
+    expect(coercePersistedState(v2)).toEqual(v2)
+    expect(coercePersistedState({ ...V1_DOC, version: 2 })?.assetMode).toBeUndefined()
+    expect(coercePersistedState({ ...V1_DOC, version: 2, assetMode: 'weird' })?.assetMode).toBeUndefined()
+    expect(coercePersistedState({ ...V1_DOC, version: 3 })).toBeNull()
+  })
+
+  it('buildPersistedState writes the mode and the hidden asset-node positions, deduplicated against live nodes', () => {
+    const live: LayoutNodeLike[] = [
+      { id: 'bus-A', position: { x: 0, y: 0 } },
+      { id: 'asset-Generator:PV', position: { x: 10, y: 20 } },
+      { id: 'assetgrp-bus-A-Load', position: { x: 9, y: 9 } },
+    ]
+    const s = buildPersistedState(live, [], {
+      assetMode: 'individual',
+      assetNodes: [
+        { id: 'asset-Generator:PV', canvasX: 99, canvasY: 99 },   // live wins
+        { id: 'asset-Load:DataHall', canvasX: 30, canvasY: 40 },  // hidden (grouped mode) — kept
+      ],
+    })
+    expect(s.version).toBe(2)
+    expect(s.assetMode).toBe('individual')
+    expect(s.nodes).toEqual([
+      { id: 'bus-A', canvasX: 0, canvasY: 0 },
+      { id: 'asset-Generator:PV', canvasX: 10, canvasY: 20 },
+      { id: 'asset-Load:DataHall', canvasX: 30, canvasY: 40 },
+    ])
+    // no choice made: the key is absent so the default rule decides on load
+    expect('assetMode' in buildPersistedState(live, [])).toBe(false)
+  })
+
+  it('the hook persists the extras read at save time', () => {
+    function Harness2() {
+      const [nodes] = useState<LayoutNodeLike[]>([{ id: 'bus-A', position: { x: 0, y: 0 } }])
+      const [mode, setMode] = useState<'grouped' | 'individual'>('grouped')
+      const scheduleSave = useLayoutPersistence(nodes, [], () => ({
+        assetMode: mode, assetNodes: [{ id: 'asset-Store:S', canvasX: 5, canvasY: 6 }],
+      }))
+      return <button onClick={() => { setMode('individual'); scheduleSave() }}>individual</button>
+    }
+    vi.useFakeTimers()
+    vi.mocked(projectsApi.putLayout).mockClear()
+    useUIStore.setState({ currentProject: PROJECT })
+    render(<Harness2 />)
+    fireEvent.click(screen.getByText('individual'))
+    act(() => { vi.advanceTimersByTime(SAVE_DEBOUNCE_MS) })
+    const saved = readPersisted()
+    expect(saved?.assetMode).toBe('individual')
+    expect(saved?.nodes).toEqual([{ id: 'bus-A', canvasX: 0, canvasY: 0 }, { id: 'asset-Store:S', canvasX: 5, canvasY: 6 }])
+    vi.useRealTimers()
   })
 })
 
