@@ -171,69 +171,6 @@ own cookie policy through configuration. The CSRF double-submit check
 (`main.py:645`) currently carries the load for those sessions. Source: gap 5 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
 
-### 10b. An edit after a hub study is not tracked (owner-approved: P33b)
-
-Added 2026-09-30 (P28 gate, owner decision O1). The EH review's `stale`
-flag is true only when a later foreground solve cleared the stored report
-(`services/adequacy/eh_review.py:455-466`). An edit to the network after a
-finished study leaves the Guided greeting and the Hub design Results card
-unaware. P28 softened the greeting's wording so that it claims nothing about
-the current network.
-
-**Specified 2026-10-06:** `specs/2026-10-06-guided-p33b-study-freshness.md`
-§1 — a per-ctx revision counter bumped at the edit seams, captured on the
-study record and read as `edited_since_study` on `/eh_study` and `/eh_review`;
-both surfaces say "edited since", which is all the signal carries. Plan:
-`plans/2026-09-28-guided-mode-deferred.md` §"P33b plan (2026-10-06)". Owner
-decisions D-1 … D-5 were decided 2026-10-06 and are recorded in the spec's §8.
-
-**Amended 2026-10-06** after the spec review
-(`qa/2026-10-06-guided-p33b-spec-review.md`): the chat predicate also covers
-the five `_SERVICE_CALL` tools that write the live network (B-1); the P33b undo
-claims build on a new step 0 (see 10a and item 12); the greeting's
-solved-since arm now sits above the dispatch-stale arm for a finished hub
-study, an owner-approved change from O1 (D-3).
-
-### 10c. Two narrow project-lock races have correct guards but no test
-
-Added 2026-09-30 (P28 re-gate, mutants R4 and R7). In `moveProjectLock`, a
-stale 409 re-acquire that fails after a fresh acquire of the same project
-(R4), and a stale failed acquire in an X→Y→Z switch (R7), are both ignored
-by the generation guard. Removing either check leaves every test green.
-
-**Specified 2026-10-06:** the two tests, step by step, in
-`specs/2026-10-06-guided-p33b-study-freshness.md` §3 (P33b step 6).
-
-### 10a. Re-activating a project does not restore its hub study record
-
-Added 2026-09-30, from the P28 smoke. A project whose Energy Hub study
-finished, and which is then left and re-activated
-(`POST /api/projects/<p>/activate`), answers `GET /api/results/eh_study`
-with no study. The Guided hub rail opens at Site again, and the greeting says
-"No study has run yet".
-
-**Traced and specified 2026-10-06** (`specs/2026-10-06-guided-p33b-study-freshness.md`
-§2): the record is in-memory only, and `PyPSAService.reset_network`
-(`services/pypsa_service.py:443-445`) nulls the finished study records **on
-the resident outgoing ctx** before copying its state for the new one — so
-creating or loading another project wipes the first project's record, and
-re-activation (a pointer swap) finds nothing. Undo (`services/network_undo.py:129`)
-and eviction / restart lose it the same way. Fix: clear on the copy, not the
-resident; undo captures and restores finished records; and (owner decision
-D-1) persist the finished EH record with the project, compared against the
-P33b counter on restore so a study from before a later saved edit reads as
-edited.
-
-**Amended 2026-10-06** (spec review B-2, owner decision D-5): under session
-routing an HTTP undo re-imports into a ctx that `_publish_active`
-(`services/pypsa_service.py:287-298`) files under `scratch:<session>` and
-`set_binding` never re-keys, so the next request reads the **pre-undo** ctx
-from the project's `org:uuid` slot (`services/active_project.py:103`).
-Reproduced on `bb8b2e7b8`: `PUT` x → x+2.5, undo 200, `GET` still x+2.5.
-Saved-snapshot restore (`routers/snapshots.py:681-695`) has the same defect.
-P33b step 0 (spec §0a) adds `rekey_context` at both sites with HTTP read-back
-tests; the undo-keeps-the-record rule above is only meaningful on top of it.
-
 ### 12. `/api/io/import/*` under a session pointer imports into a context the next request never reads
 
 Added 2026-10-06, found while scoping P33b step 0 (spec §0a). The four io
@@ -248,12 +185,11 @@ a 1-bus project active, `POST /api/io/import/netcdf` of a 7-bus file returns
 registry holds `org:uuid → (project, 1 bus)` and `scratch:<session> → (None,
 7 buses)`. The user sees an import that appears not to happen. The fix is the
 "New" rule (clear the pointer, as `/api/network/reset` does), not P33b's
-re-keying, so it is outside step 0. Related and not lossy: `import_bundle`
-(`routers/projects.py:1083`) and `create_from_template` (`:1402`) bind the new
-ctx and move the pointer but never register it, so the next request hydrates a
-second copy from the files the handler just wrote; the scratch copy is
-orphaned. Severity: High (a write that is silently not read back). Server
-only.
+re-keying, so it is outside step 0. (The related note about `import_bundle` and
+`create_from_template` never registering their new ctx is resolved by P33b step
+4b, `_register_created_context` in `routers/projects.py`: in local mode it was
+lossy — the next project switch dropped the unregistered ctx.) Severity: High
+(a write that is silently not read back). Server only.
 
 ## Verification / CI
 
