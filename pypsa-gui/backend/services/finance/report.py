@@ -252,6 +252,10 @@ def _project_payload(result, case) -> dict[str, Any]:
     return {
         "owner": case.owner,
         "currency": fin.currency,
+        # The price basis (GS Q6; U1 follow-up d): machine-readable and in words.
+        "currency_year": fin.currency_year,
+        "price_basis": fin.price_basis,
+        "basis_statement": basis_statement(fin),
         "years": [int(y) for y in result.tl.years],
         "cod_year": result.tl.cod_year,
         "base_year": result.tl.base_year,
@@ -271,6 +275,10 @@ def _project_payload(result, case) -> dict[str, Any]:
         "payback_years": _num(m.get("payback_years")),
         "lcoe_nominal_per_mwh": _num(m.get("lcoe_nominal_per_mwh")),
         "lcoe_real_per_mwh": _num(m.get("lcoe_real_per_mwh")),
+        # Storage LCOS (owner decision 6): the totals and the per-asset block.
+        "lcos_nominal_per_mwh": _num(m.get("lcos_nominal_per_mwh")),
+        "lcos_real_per_mwh": _num(m.get("lcos_real_per_mwh")),
+        "lcos": _lcos_block(result),
         "solved_ppa_price": _num(m.get("solved_ppa_price")),
         "solve_ppa_status": m.get("solve_ppa_status"),
         # A price that zeroes the NPV but not at the case's own IRR (several
@@ -295,6 +303,32 @@ def _project_payload(result, case) -> dict[str, Any]:
         "cfads_definition": CFADS_DEFINITION,
         "flags": list(result.flags),
     }
+
+
+def basis_statement(fin) -> str:
+    """The price basis in words (IC plan C4; GS Q6): "real basis, 2020 EUR",
+    "nominal basis, 2024 USD", or the currency alone with "(currency year
+    not stated)" — never a guessed year."""
+    money = (f"{fin.currency_year} {fin.currency}" if fin.currency_year is not None
+             else f"{fin.currency} (currency year not stated)")
+    return f"{fin.price_basis} basis, {money}"
+
+
+def _lcos_block(result) -> dict[str, Any]:
+    """The storage LCOS per asset and in total, with its basis and reasons
+    (`services.finance.lcos`); every unknown figure None."""
+    lc = getattr(result, "lcos", None) or {}
+    assets = {}
+    for name, rec in (lc.get("assets") or {}).items():
+        assets[name] = {k: (_num(v) if not isinstance(v, list) else list(v))
+                        for k, v in rec.items()}
+    return {"lcos_nominal_per_mwh": _num(lc.get("lcos_nominal_per_mwh")),
+            "lcos_real_per_mwh": _num(lc.get("lcos_real_per_mwh")),
+            "assets": assets,
+            "reasons": list(lc.get("reasons") or []),
+            "basis": lc.get("basis"),
+            "charging_basis": lc.get("charging_basis"),
+            "discount_rate": _num(lc.get("discount_rate"))}
 
 
 def _operating_status(result) -> dict[str, str]:

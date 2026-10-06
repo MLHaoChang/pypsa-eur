@@ -352,7 +352,7 @@ function IncentiveEditor({ inc, i, set, remove, errors, report }: {
 }
 
 /** Every top-level path the form places; the rest of a 422 is shown at the top. */
-const PLACED = ['currency', 'financial_close', 'acquisition_date', 'construction_start', 'analysis_years',
+const PLACED = ['currency', 'currency_year', 'price_basis', 'financial_close', 'acquisition_date', 'construction_start', 'analysis_years',
   'annualise', 'cod_by_asset', 'capex_phasing', 'contingency_share', 'escalation', 'degradation_by_asset',
   'debt', 'tax_pack_id', 'hebesatz_pct', 'state_rate', 'tax_losses', 'financing_fee_tax', 'pwa_met',
   'small_business_163j', 'depreciation_class_by_asset', 'incentives', 'wacc_nominal', 'cost_of_equity',
@@ -373,6 +373,14 @@ function Form({ d, set, errors, report, assets }: {
         <legend className="font-semibold">Case dates and length</legend>
         <TextField label="Currency" hint="(ISO code; blank: EUR)" value={d.currency} errors={e('currency')}
                    onChange={v => set('currency', v ?? undefined)} />
+        <NumField label="Currency year" hint="(the money year of the costs and rates)" int
+                  value={d.currency_year} errors={e('currency_year')}
+                  onChange={v => set('currency_year', v)} />
+        <SelectField label="Price basis" value={d.price_basis} errors={e('price_basis')}
+                     empty="(default: nominal)"
+                     options={[['nominal', 'nominal (escalated)'],
+                               ['real', 'real (constant money of the currency year)']]}
+                     onChange={v => set('price_basis', v ?? undefined)} />
         <DateField label="Financial close" value={d.financial_close} errors={e('financial_close')}
                    onChange={v => set('financial_close', v ?? '')} />
         <DateField label="Acquisition date" value={d.acquisition_date} errors={e('acquisition_date')}

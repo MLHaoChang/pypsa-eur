@@ -1028,3 +1028,53 @@ def test_every_action_refuses_a_project_of_another_kind(study, action):
     with pytest.raises(HTTPException) as exc:
         action(study)
     assert exc.value.status_code == 409 and "capacity-expansion" in exc.value.detail
+
+
+# --------------------------------------------------------------------------
+# containment: every request-derived filename stays inside its folder
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name", ["../escape.yaml", "../../etc/passwd", "a/../../b.pdf", "/etc/passwd"])
+def test_a_filename_that_leaves_its_folder_is_refused(tmp_path, name):
+    base = tmp_path / "grid_codes"
+    base.mkdir()
+    with pytest.raises(HTTPException) as exc:
+        gc._inside(base, name)
+    assert exc.value.status_code == 422
+
+
+def test_a_symlinked_file_pointing_outside_is_refused(tmp_path):
+    base = tmp_path / "grid_codes"
+    base.mkdir()
+    outside = tmp_path / "secret.yaml"
+    outside.write_text("x")
+    (base / "link.yaml").symlink_to(outside)
+    with pytest.raises(HTTPException):
+        gc._inside(base, "link.yaml")
+
+
+def test_a_plain_filename_resolves_inside_its_folder(tmp_path):
+    base = tmp_path / "grid_codes"
+    base.mkdir()
+    got = gc._inside(base, "tso.yaml")
+    assert got == (base / "tso.yaml").resolve()
+    assert gc._inside(base, "missing_yet.review.json").parent == base.resolve()
+
+
+def test_every_id_built_path_goes_through_the_containment_helper():
+    """No path in the service is joined from an id without ``_inside``."""
+    import inspect
+    import re
+    src = inspect.getsource(gc)
+    assert not re.search(r'\)\s*/\s*f"', src), "a path is joined with '/ f\"…\"' instead of _inside(...)"
+    assert not re.search(r'\bdocs\s*/\s*f"', src)
+
+
+def test_a_sibling_folder_sharing_the_name_prefix_is_outside(tmp_path):
+    """``grid_codes_evil`` starts with ``grid_codes``: the check needs the
+    separator, not just the prefix."""
+    base = tmp_path / "grid_codes"
+    base.mkdir()
+    (tmp_path / "grid_codes_evil").mkdir()
+    with pytest.raises(HTTPException):
+        gc._inside(base, "../grid_codes_evil/x.yaml")

@@ -225,6 +225,13 @@ class FinanceInputs(BaseModel):
     model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
 
     currency: str = Field(default="EUR", min_length=3, max_length=3)
+    # The money year of the typed costs and rates (GS Q6; U1 follow-up d):
+    # None = not stated, never a guessed year. `price_basis` says whether the
+    # cash is nominal (escalated, the default) or real (constant money of
+    # `currency_year`: escalation and inflation then 0 — a non-zero one is
+    # flagged `real_basis_with_escalation:<class>`, IC plan C4).
+    currency_year: int | None = Field(default=None, ge=1900, le=2200)
+    price_basis: Literal["nominal", "real"] = "nominal"
     financial_close: date
     cod_by_asset: dict[str, date] = Field(default_factory=dict)
     construction_months_by_asset: dict[str, int] = Field(default_factory=dict)

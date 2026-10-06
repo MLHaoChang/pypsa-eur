@@ -151,6 +151,37 @@ describe('FinanceInputsEditor', () => {
     expect(body.construction_months_by_asset).toEqual({ pv: 12 })
   })
 
+  it('the price basis: an unstated currency year is "not stated"; both fields are sent as typed', async () => {
+    renderEditor()
+    await screen.findByTestId('fi-tranche-1')
+    const year = screen.getByLabelText('Currency year') as HTMLInputElement
+    expect(year.value).toBe('')
+    expect(year.placeholder).toBe('not stated')
+    const basis = screen.getByLabelText('Price basis') as HTMLSelectElement
+    expect(basis.value).toBe('')
+    expect(basis.selectedOptions[0].textContent).toBe('(default: nominal)')
+    fireEvent.change(year, { target: { value: '2020' } })
+    fireEvent.change(basis, { target: { value: 'real' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save the finance inputs' }))
+    await waitFor(() => expect(api.putFinance).toHaveBeenCalled())
+    expect(putBody().currency_year).toBe(2020)
+    expect(putBody().price_basis).toBe('real')
+  })
+
+  it('an emptied currency year is null, never 0', async () => {
+    api.getFinance.mockResolvedValue({ finance: { ...structuredClone(FINANCE), currency_year: 2024,
+      price_basis: 'nominal' }, digest: 'digest-1', status: 'ok' })
+    renderEditor()
+    await screen.findByTestId('fi-tranche-1')
+    const year = screen.getByLabelText('Currency year') as HTMLInputElement
+    expect(year.value).toBe('2024')
+    fireEvent.change(year, { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save the finance inputs' }))
+    await waitFor(() => expect(api.putFinance).toHaveBeenCalled())
+    expect(putBody().currency_year).toBeNull()
+    expect(putBody().price_basis).toBe('nominal')
+  })
+
   it('switching a tranche to DSCR sculpting drops its amount / gearing', async () => {
     renderEditor()
     await screen.findByTestId('fi-tranche-0')

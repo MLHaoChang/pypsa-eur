@@ -147,6 +147,9 @@ describe('InvestmentCaseView', () => {
     expect(h('plcr')).toBe('not established')
     expect(h('lcoe')).toBe('55.50 per MWh')
     expect(h('ppa_price')).toBe('not established')
+    // No storage in the case: no LCOS row; no basis stated: said so.
+    expect(screen.queryByTestId('ic-headline-lcos')).toBeNull()
+    expect(screen.getByTestId('ic-basis').textContent).toBe('Price basis: not stated')
     // Never a zero or a blank where the report establishes nothing.
     for (const el of screen.getByTestId('ic-headlines').querySelectorAll('dd')) {
       expect(el.textContent?.trim()).not.toBe('')
