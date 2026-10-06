@@ -96,6 +96,56 @@ which one it means by carrying an explicit flag beside the value; a bare `0.0`
 asserts a real zero.
 _Avoid_: missing, empty, N/A, no data, zero
 
+## Assistant language
+
+The in-app assistant's own vocabulary. The code lives in
+`pypsa-gui/backend/harness/` (its README is the contract); the spec is
+`.scratch/harness/spec.md`.
+
+**Harness**:
+Everything the assistant needs that is not a language model: the provider
+seam (`harness/protocol.py`), the tool catalogue (`harness/catalogue.py`),
+the frame vocabulary, the workflows, the skills, and (as the loop moves) the
+session, confirmation, budget and history machinery. A provider plugs in
+underneath it. The word comes from the provider-seam spec of 2026-08-05; the
+folder makes the tree match the word.
+_Avoid_: agent layer, chatbot core, orchestrator
+
+**Provider** / **Wire**:
+A Provider is one implementation of the seam (Anthropic, OpenAI-compatible,
+the fake); the Wire is its message format (`anthropic` or `openai`), named
+only inside the provider layer and in the profile store.
+_Avoid_: backend (overloaded), vendor, model (that is the id a profile names)
+
+**Workflow**:
+A step-by-step flow the assistant leads, defined as one Markdown file in
+`harness/workflows/` with front matter (where it is offered, its steps and
+their completion criteria) and one body section per step. Runtime state is
+the pair (workflow id, step) on the chat session; the current step's body
+travels as per-turn user content, never in the system prompt. The hub-design
+Guided flow is the first workflow.
+_Avoid_: playbook, recipe, flow (unqualified), wizard (that is a dialog)
+
+**Start menu**:
+The list of workflows offered when a chat opens in a given context (no
+project, Expert, Guided). Served by the harness; the panel renders it as
+chips. Replaces the hardcoded "Try asking" prompt arrays.
+_Avoid_: starter prompts, suggestions, quick actions
+
+**Skill**:
+A reusable procedure the assistant loads on demand: `harness/skills/<name>/SKILL.md`
+with `name` and `description` front matter, the same layout as the developer
+agents' `.claude/skills/`. The prompt carries only the catalogue line; the
+body arrives through the `use_skill` tool. `grill` is the first skill.
+_Avoid_: prompt template, macro, plugin
+
+**Choice card**:
+The card the panel renders when the assistant calls `ask_user`: a title, a
+question, options with one marked recommended, and a free-text field. A pick
+is sent as the next user message; the turn does not block on it. Distinct
+from the Confirmation card, which gates a write or run and does block.
+_Avoid_: prompt, dialog, confirmation (that is the other card)
+
 ## Investment language
 
 Shared by the expert workbench and the guided investment path, which run on one

@@ -91,6 +91,15 @@ datas = [
     # In-app guide catalogue (P21): `services/guides.py` resolves
     # `parents[1] / "data" / "guides"`, i.e. _MEIPASS root.
     (str(BACKEND / "data" / "guides"), "data/guides"),
+    # The chat harness's Markdown (prompts, workflows, skills; chat harness
+    # issue 10). Each loader resolves `Path(__file__).resolve().parent` of
+    # `harness/<part>/__init__.py`, which under _MEIPASS is
+    # `harness/<part>/`, so the data must keep that exact layout. The prompt
+    # fragments are not optional: `harness/loop.py` reads them at
+    # import, so a bundle without them does not start.
+    (str(BACKEND / "harness" / "prompts"), "harness/prompts"),
+    (str(BACKEND / "harness" / "workflows"), "harness/workflows"),
+    (str(BACKEND / "harness" / "skills"), "harness/skills"),
     # The generic defaults pack (IC U1 a): `services/library/defaults_pack/
     # loader.py` resolves `Path(__file__).parent / "versions"`; the loader is a
     # module (collected by import), its data files are not.

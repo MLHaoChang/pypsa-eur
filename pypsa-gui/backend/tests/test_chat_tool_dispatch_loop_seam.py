@@ -32,6 +32,7 @@ import inspect
 import pytest
 
 from services import chat_service
+from harness import budget as harness_budget
 
 
 def _seam():
@@ -116,7 +117,7 @@ def test_the_cap_ends_the_turn_with_both_frames(monkeypatch, tmp_projects_dir,
                                                 install_network):
     import pypsa
     n = pypsa.Network(); n.add("Bus", "B1"); install_network(n, name=None)
-    monkeypatch.setattr(chat_service, "MAX_TOOL_CALLS_PER_TURN", 1)
+    monkeypatch.setattr(harness_budget, "MAX_TOOL_CALLS_PER_TURN", 1)
     frames, outcome = _drive(chat_service.ChatSession(), [_tu("t1"), _tu("t2")])
     names = [n_ for n_, _ in frames]
     assert "tool_error" in names and names[-1] == "session_done"

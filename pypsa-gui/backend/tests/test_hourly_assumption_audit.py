@@ -12,7 +12,11 @@ from __future__ import annotations
 import pathlib
 import re
 
-_SERVICES = pathlib.Path(__file__).resolve().parent.parent / "services"
+_BACKEND = pathlib.Path(__file__).resolve().parent.parent
+_SERVICES = _BACKEND / "services"
+# The chat harness (`harness/`) holds the tool catalogue since 2026-10-05;
+# its files are keyed `harness/<path>` so the pin follows the move.
+_HARNESS = _BACKEND / "harness"
 _PATTERN = re.compile(r'8760|freq="h"|Timedelta\(hours=1\)')
 
 # file (relative to services/) -> (count, reason)
@@ -32,7 +36,7 @@ ALLOWED: dict[str, tuple[int, str]] = {
                               "(formula, code, message) — a unit"),
     "solver_service.py": (1, "comment restating the solver/adequacy.py cap formula"),
     "asset_results/compute.py": (2, "prose explaining why Σweights/8760 is avoided"),
-    "chat_service.py": (1, "prompt text about CSV row counts"),
+    "harness/loop.py": (1, "prompt text about CSV row counts"),
     "solver/periodized_costs.py": (3, "HOURS_PER_YEAR converts Σ objective weights to years "
                                       "(PyPSA's n.nyears) to scale annual FOM and capital cost "
                                       "to the modelled horizon — a unit, not a step (FOM merge, "
@@ -51,7 +55,7 @@ ALLOWED: dict[str, tuple[int, str]] = {
                                     "operating time the snapshots represent (Σ weights / 8760) "
                                     "— a unit, not a step (IC WP1.4a)"),
     "chat_tools.py": (2, "prose / output-budget guidance"),
-    "chat_tools_schema.py": (3, "tool descriptions (row counts, default hours)"),
+    "harness/catalogue.py": (3, "tool descriptions (row counts, default hours)"),
     "legacy_import.py": (1, "prose describing a legacy fixture"),
     "profile_shapes.py": (2, "168 h week template used ONLY when there are no snapshots "
                              "to follow; with snapshots the template follows the axis"),
@@ -93,10 +97,11 @@ ALLOWED: dict[str, tuple[int, str]] = {
 
 def _scan() -> dict[str, int]:
     out: dict[str, int] = {}
-    for p in sorted(_SERVICES.rglob("*.py")):
-        n = sum(1 for line in p.read_text().splitlines() if _PATTERN.search(line))
-        if n:
-            out[str(p.relative_to(_SERVICES))] = n
+    for root, prefix in ((_SERVICES, ""), (_HARNESS, "harness/")):
+        for p in sorted(root.rglob("*.py")):
+            n = sum(1 for line in p.read_text().splitlines() if _PATTERN.search(line))
+            if n:
+                out[prefix + str(p.relative_to(root))] = n
     return out
 
 

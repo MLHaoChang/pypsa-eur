@@ -15,3 +15,7 @@ The five default role strings (`needs-triage`, `needs-info`, `ready-for-agent`, 
 ### Domain docs
 
 Multi-context: `GLOSSARY-MAP.md` at the root points to each context's glossary (`pypsa-gui/CONTEXT.md` today). See `docs/agents/domain.md`.
+
+### The chat harness
+
+Working on the in-app assistant (chat, tools, prompts, provider profiles, Guided flows): read `pypsa-gui/backend/harness/README.md` first; it is the contract, and the moved modules keep their old `services.*` names as aliases.
