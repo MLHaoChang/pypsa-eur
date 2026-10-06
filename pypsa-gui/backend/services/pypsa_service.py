@@ -440,9 +440,21 @@ class PyPSAService:
             # replace the network); leaking its record keeps the mutex honest
             # and the panel reads "running" rather than showing a fabricated
             # result. A test pins this choice.
+            #
+            # ★ Cleared on the COPY, not on `prev` (P33b 10a). `prev` is the
+            # outgoing project's RESIDENT, registered context: clearing its own
+            # dict erased that project's finished study, so creating B from a
+            # template, loading B or pressing "New" and then re-activating A (a
+            # pointer swap) found no study while A's stored report was still
+            # there. The fresh context must not inherit A's study — that is the
+            # whole purpose of the clear, and the copy serves it. `prev`'s
+            # record still describes `prev`'s own network object, which the swap
+            # does not touch. (`set_network` keeps its in-place clear: there the
+            # measured network IS replaced.)
+            state = dict(prev.solver_state)
             for key in STUDY_KEYS:
-                if not record_is_running(prev.solver_state.get(key)):
-                    prev.solver_state[key] = None
+                if not record_is_running(state.get(key)):
+                    state[key] = None
             cls._publish_active(ProjectContext(
                 network=n,
                 # ★ A COPY, not the same dict (Phase 11 review, BLOCKER 5).
@@ -464,7 +476,7 @@ class PyPSAService:
                 # and lifecycle surviving "New" — is preserved by the copy's
                 # VALUES. The lock stays shared: it guards both dicts, which
                 # is coarser than necessary and never wrong.
-                solver_state=dict(prev.solver_state),
+                solver_state=state,
                 solver_state_lock=prev.solver_state_lock,
                 undo=prev.undo,
                 # Carry the mutation_lock forward too (B4 Inc 2): the foreground

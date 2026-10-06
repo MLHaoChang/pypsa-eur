@@ -126,6 +126,18 @@ def apply_undo():
             # cross-org collision Step 0a removed.
             prev_binding = PyPSAService.get_binding()
             prev_loaded = prev_binding["name"]
+            # ★ P33b 10a: undo is an in-place edit of the same project, so a
+            # FINISHED study record survives it. `reset_network()` clears the
+            # finished keys on the fresh copy (the right rule for a project
+            # switch); capture them here and put them back on the re-keyed
+            # ctx below. A running record is carried by reference already.
+            from services.project_context import STUDY_KEYS, record_is_running
+            prev_state = PyPSAService.get_solver_state()
+            finished = {
+                k: prev_state.get(k) for k in STUDY_KEYS
+                if prev_state.get(k) is not None
+                and not record_is_running(prev_state.get(k))
+            }
             PyPSAService.reset_network()
             n = PyPSAService.get_network()
             with PyPSAService.get_netcdf_io_lock():
@@ -140,6 +152,9 @@ def apply_undo():
             # identity implies, inside the lock. An unbound draft has no key
             # and stays in scratch (`rekey_context` is a no-op).
             PyPSAService.rekey_context(PyPSAService.get_active_context())
+            if finished:
+                with PyPSAService.get_solver_state_lock():
+                    PyPSAService.get_solver_state().update(finished)
             if prev_loaded:
                 try:
                     n.name = prev_loaded
