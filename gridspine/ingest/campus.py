@@ -27,7 +27,19 @@ The description is one YAML mapping under ``campus``:
 
 ``cables``
     ``{name: {from_bus, to_bus, length_km, r_ohm_per_km, x_ohm_per_km,
-    c_nf_per_km, max_i_ka}}``.
+    c_nf_per_km, max_i_ka}}``. Optionally ``parallel``, a whole number of
+    identical runs (default 1); ``max_i_ka`` is per run.
+
+A transformer or cable may carry ``existing: true``: it is owned already, so
+an investment study (``static/campus_invest.py``) prices it at zero. It may
+also carry ``library_id``, the asset-library entry it was taken from. Both
+are plain flags, not values, so they are untagged.
+
+``compensation`` (optional)
+    A list of reactive compensation, each ``{name, bus, kind, q_mvar}`` with
+    ``kind`` one of ``COMP_KINDS``, an optional ``library_id`` and
+    ``pypsa_name``, and for a capacitor bank its ``steps`` (a whole number,
+    at least 1). ``q_mvar`` is the rating, tagged and positive.
 
 ``units``
     ``{name: {kind, bus, ...}}``, with ``kind`` one of ``UNIT_KINDS``:
@@ -53,6 +65,21 @@ What becomes what:
   ``gen``. For IEC 60909 it is screened as a current source of ``1/x''d``
   times its rated current. That is a screening approximation of a
   synchronous machine, and it is ledgered in ``CAMPUS_LEDGER``.
+* Compensation is not a unit and has no row in the hourly table; the
+  reactive correction (``static/campus_reactive.py``) dispatches it, and
+  the ``compensation`` table lists it.
+  * A **capacitor bank** is a pandapower ``shunt``. pandapower writes a
+    shunt in the load convention, so a capacitor has a **negative**
+    ``q_mvar`` (checked by solving, in the tests). The rating is split into
+    ``steps`` equal steps (``q_mvar`` is per step, ``max_step = steps``) and
+    the bank starts switched off (``step = 0``).
+  * A **shunt reactor** is a one-step shunt with a positive ``q_mvar``, also
+    starting off.
+  * A **STATCOM** is an ``sgen`` at ``p_mw = 0`` with ``sn_mva = q_mvar``,
+    marked controllable within ``+-q_mvar``. For IEC 60909 it is screened
+    as a converter, a current source of ``STATCOM_K`` times its rated
+    current (ledgered). A shunt does not feed a fault (pandapower's IEC
+    60909 leaves shunts out, as the standard does).
 * The net's base is 1 MVA. Results are in physical units, so the base only
   sets the solver's numerical scale, and 1 MVA suits a campus.
 
@@ -63,7 +90,12 @@ Refused at load, each with a message naming the field:
 * a missing or untagged value;
 * a bus that does not exist, or that cannot be reached from the PCC;
 * a transformer winding more than 10 % off its bus voltage;
-* a cable between two nominal voltages;
+* a cable between two nominal voltages, or a ``parallel`` that is not a
+  whole number of at least 1;
+* an ``existing`` that is not true or false;
+* a compensation entry of unknown kind, at an unknown bus, with an unknown
+  field, a non-positive ``q_mvar`` or (a capacitor bank) ``steps`` that is
+  not a whole number of at least 1;
 * an inverter whose MVA is below its MW;
 * ``sk_min`` above ``sk_max``;
 * duplicate names;
@@ -92,6 +124,10 @@ from gridspine.static.shortcircuit import LINE_ENDTEMP_DEGREE
 
 SOURCES = frozenset({"measured", "datasheet", "assumed"})
 UNIT_KINDS = ("load", "bess", "pv", "wind", "genset")
+COMP_KINDS = ("capacitor_bank", "shunt_reactor", "statcom")
+#: A STATCOM's IEC 60909 screening: a current source of k times its rated
+#: current, the drafted inverter's figures (producers/campus.py), assumed.
+STATCOM_K, STATCOM_RX = 1.2, 0.1
 GRID_NAME = "GRID"
 NET_BASE_MVA = 1.0
 
@@ -104,7 +140,7 @@ REGISTRY_KIND = {"bess": "storage", "pv": "res", "wind": "res", "genset": "gense
 #: 20 kV busbar). More than this is a wiring mistake.
 WINDING_TOLERANCE = 0.10
 
-_TOP = frozenset({"name", "f_hz", "pcc", "buses", "transformers", "cables", "units"})
+_TOP = frozenset({"name", "f_hz", "pcc", "buses", "transformers", "cables", "units", "compensation"})
 _PCC_FIELDS = ("vm_pu", "sk_max_mva", "sk_min_mva", "rx_max", "rx_min")
 #: Optional at the PCC: the contracted connection capacity, the P_ref of the
 #: reactive requirement. Without it the study uses the year's peak import.
@@ -120,6 +156,9 @@ _UNIT_FIELDS = {
     "wind": ("p_mw", "s_mva", "k_sc", "rx_sc"),
     "genset": ("p_mw", "s_mva", "xd_pp", "rx_sc"),
 }
+#: Untagged flags a transformer or cable may carry (see the docstring).
+_ASSET_FLAGS = ("existing", "library_id")
+_COMP_STRUCTURAL = ("name", "bus", "kind", "library_id", "pypsa_name")
 #: Fields that may be zero. Every other tagged field must be strictly positive.
 _MAY_BE_ZERO = frozenset({"pfe_kw", "i0_percent", "c_nf_per_km", "rx_sc", "rx_max", "rx_min"})
 
@@ -133,6 +172,9 @@ CAMPUS_LEDGER = (
     "(ext_grid); nothing is derived from the machines on the campus",
     "campus: cable end-of-fault conductor temperature for the IEC 60909 "
     "minimum case is the study-wide 80 degC (static/shortcircuit.py) (assumed)",
+    "campus: a STATCOM is screened for IEC 60909 as a current source of "
+    "STATCOM_K = 1.2 times its rated current, the drafted inverter figure "
+    "(assumed); capacitor banks and reactors feed no fault current",
 )
 
 
@@ -141,12 +183,22 @@ class Campus:
     """The built campus: the pandapower ``net``, the ``units`` table (index
     ``unit_id``: ``kind``, ``bus``, and the ratings), every tagged value in
     long form (``params``: ``element``, ``param``, ``value``, ``source``), and
-    the unit ``registry`` (index ``unit_id``: ``bus``, ``kind``)."""
+    the unit ``registry`` (index ``unit_id``: ``bus``, ``kind``), and the
+    ``compensation`` (index ``name``: ``kind``, ``bus``, ``q_mvar``,
+    ``steps``, ``library_id``; empty when there is none)."""
     name: str
     net: object
     units: pd.DataFrame
     params: pd.DataFrame
     registry: pd.DataFrame
+    compensation: pd.DataFrame = dataclasses.field(default_factory=lambda: _empty_compensation())
+
+
+_COMP_COLUMNS = ["name", "kind", "bus", "q_mvar", "steps", "library_id", "pypsa_name"]
+
+
+def _empty_compensation():
+    return pd.DataFrame(columns=_COMP_COLUMNS).set_index("name")
 
 
 def _tagged(where, field, spec, rows):
@@ -174,6 +226,20 @@ def _fields(where, spec, required, structural=()):
     unknown = sorted(set(spec) - set(required) - set(structural))
     if unknown:
         raise ContractError(f"{where}: unknown field(s) {unknown}; allowed {sorted(set(required) | set(structural))}")
+
+
+def _flags(where, spec):
+    """Check the untagged asset flags (``existing``, ``library_id``)."""
+    if "existing" in spec and not isinstance(spec["existing"], bool):
+        raise ContractError(f"{where}.existing must be true or false, got {spec['existing']!r}")
+    if "library_id" in spec and not (isinstance(spec["library_id"], str) and spec["library_id"]):
+        raise ContractError(f"{where}.library_id must be a non-empty string, got {spec['library_id']!r}")
+
+
+def _whole(where, field, v):
+    if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+        raise ContractError(f"{where}.{field} must be a whole number of at least 1, got {v!r}")
+    return v
 
 
 def _bus_kv(where, buses, name):
@@ -235,7 +301,14 @@ def build_campus(spec) -> Campus:
                 _tagged(f"buses.{b}", f, bspec, rows)
 
     trafos, cables, units = c.get("transformers") or {}, c.get("cables") or {}, c["units"] or {}
-    element_names = [GRID_NAME, *map(str, trafos), *map(str, cables), *map(str, units)]
+    comps = c.get("compensation") or []
+    if not isinstance(comps, list):
+        raise ContractError(f"campus.compensation must be a list of entries, got {type(comps).__name__}")
+    for i, cs in enumerate(comps):
+        if not isinstance(cs, dict) or not isinstance(cs.get("name"), str) or not cs["name"]:
+            raise ContractError(f"compensation[{i}]: needs a mapping with a string 'name'")
+    element_names = [GRID_NAME, *map(str, trafos), *map(str, cables), *map(str, units),
+                     *(str(cs["name"]) for cs in comps)]
     dup = sorted({n for n in element_names if element_names.count(n) > 1})
     if dup:
         raise ContractError(f"campus: duplicate element name(s) {dup}; transformer, cable and unit names share one namespace")
@@ -258,7 +331,8 @@ def build_campus(spec) -> Campus:
     edges = []
     for tname, ts in trafos.items():
         where = f"transformers.{tname}"
-        _fields(where, ts, _TRAFO_FIELDS, ("hv_bus", "lv_bus", "pypsa_name"))
+        _fields(where, ts, _TRAFO_FIELDS, ("hv_bus", "lv_bus", "pypsa_name", *_ASSET_FLAGS))
+        _flags(where, ts)
         hv, lv = str(ts.get("hv_bus")), str(ts.get("lv_bus"))
         if hv == lv:
             raise ContractError(f"{where}: hv_bus and lv_bus are the same bus {hv!r}")
@@ -281,7 +355,9 @@ def build_campus(spec) -> Campus:
 
     for cname, cs in cables.items():
         where = f"cables.{cname}"
-        _fields(where, cs, _CABLE_FIELDS, ("from_bus", "to_bus", "pypsa_name"))
+        _fields(where, cs, _CABLE_FIELDS, ("from_bus", "to_bus", "pypsa_name", "parallel", *_ASSET_FLAGS))
+        _flags(where, cs)
+        parallel = _whole(where, "parallel", cs["parallel"]) if "parallel" in cs else 1
         a, b = str(cs.get("from_bus")), str(cs.get("to_bus"))
         if a == b:
             raise ContractError(f"{where}: from_bus and to_bus are the same bus {a!r}")
@@ -291,7 +367,7 @@ def build_campus(spec) -> Campus:
         pp.create_line_from_parameters(
             net, idx[a], idx[b], length_km=v["length_km"], r_ohm_per_km=v["r_ohm_per_km"],
             x_ohm_per_km=v["x_ohm_per_km"], c_nf_per_km=v["c_nf_per_km"], max_i_ka=v["max_i_ka"],
-            endtemp_degree=LINE_ENDTEMP_DEGREE, name=str(cname))
+            endtemp_degree=LINE_ENDTEMP_DEGREE, parallel=parallel, name=str(cname))
         edges.append((a, b))
 
     reachable = _connected_from(pcc_bus, edges, buses)
@@ -330,10 +406,34 @@ def build_campus(spec) -> Campus:
             reg_rows.append({"unit_id": uname, "bus": bus, "kind": REGISTRY_KIND[kind]})
         unit_rows.append(row)
 
+    comp_rows = []
+    for cs in comps:
+        cname = str(cs["name"])
+        where = f"compensation.{cname}"
+        kind = cs.get("kind")
+        if kind not in COMP_KINDS:
+            raise ContractError(f"{where}: unknown kind {kind!r}; allowed {list(COMP_KINDS)}")
+        _fields(where, cs, ("q_mvar", "steps") if kind == "capacitor_bank" else ("q_mvar",), _COMP_STRUCTURAL)
+        bus = str(cs.get("bus"))
+        _bus_kv(where, buses, bus)
+        _flags(where, cs)
+        q = _tagged(where, "q_mvar", cs, rows)
+        steps = _whole(where, "steps", cs.get("steps")) if kind == "capacitor_bank" else 1
+        if kind == "statcom":
+            pp.create_sgen(net, idx[bus], p_mw=0.0, q_mvar=0.0, sn_mva=q, name=cname, k=STATCOM_K, rx=STATCOM_RX,
+                           generator_type="current_source", controllable=True, max_q_mvar=q, min_q_mvar=-q)
+        else:
+            sign = -1.0 if kind == "capacitor_bank" else 1.0       # pandapower shunt: load convention
+            pp.create_shunt(net, idx[bus], q_mvar=sign * q / steps, p_mw=0.0, step=0, max_step=steps, name=cname)
+        comp_rows.append({"name": cname, "kind": kind, "bus": bus, "q_mvar": q, "steps": steps,
+                          "library_id": cs.get("library_id"), "pypsa_name": cs.get("pypsa_name")})
+    compensation = (pd.DataFrame(comp_rows, columns=_COMP_COLUMNS).set_index("name") if comp_rows
+                    else _empty_compensation())
+
     units_df = pd.DataFrame(unit_rows).set_index("unit_id")
     registry = pd.DataFrame(reg_rows).set_index("unit_id")
     params = pd.DataFrame(rows, columns=["element", "param", "value", "source"])
-    return Campus(name=name, net=net, units=units_df, params=params, registry=registry)
+    return Campus(name=name, net=net, units=units_df, params=params, registry=registry, compensation=compensation)
 
 
 def load_campus(path) -> Campus:

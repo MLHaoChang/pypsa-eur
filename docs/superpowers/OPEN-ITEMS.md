@@ -3,6 +3,13 @@
 **Verified against the tree on 2026-09-12.** Every entry below was reproduced or
 re-read in source on that date, not carried forward on trust.
 
+**2026-09-29:** four items closed and removed per the convention below — the
+user-timeseries tenancy item, and the three follow-ups fixing it uncovered (an
+obsolete `persist_user_ts` predicate at three call sites, a hydrate that ignored
+its project's `user_ts.json`, and an adequacy-sweep test that could not fail for
+its own regression). Their findings carry the detail. Nothing else was re-verified
+on that date, so the entries below still date from 2026-09-12.
+
 **The High authorization family was re-verified on 2026-09-30** (against
 `a9a1f5b`). Items 2, 3 and 4 were found already fixed — see "Closed since the
 2026-09-12 pass" — and the re-verification turned up a fourth instance of item
@@ -22,34 +29,6 @@ verification record.
 
 ---
 
-## Critical
-
-### 1. The user-timeseries store is a process global shared across tenants
-
-`services/user_timeseries.py:39` — `_user_ts` is keyed `(component, attribute,
-column)` with no org, project or session. It is authoritative, not a cache: the
-timeseries GET prefers it over the network's own data, and every foreground save
-serialises it into that project's `user_ts.json` and reapplies it onto the
-network before the netCDF export.
-
-Reproduced: org A uploads a profile for `L1`; org B activates its OWN project and
-reads A's values, then saves them into B's storage. Cross-tenant read AND
-cross-tenant write. The desktop build is affected too, as a multi-project
-data-integrity bug.
-
-The code mitigated only the BACKGROUND case, on the stated basis that the store
-"belongs to the FOREGROUND ctx" — true for one desktop user, false once one
-process serves many signed-in sessions, where every session is a foreground.
-
-NOT patched: ~230 references across 13 modules; per-`ProjectContext` isolation is
-the real fix and needs its own plan. A narrow containment exists (restore-or-clear
-on activate, as `load_project` already does) but closes only the demonstrated
-path, not the class — two concurrent sessions on different projects still share
-one dict. Full analysis, reproduction and fix criteria:
-`findings/2026-09-12-user-ts-is-a-process-global-shared-across-tenants.md`.
-
----
-
 ## High
 
 ### 14. The campus-electrical chat tools bypass the edit-lock check
@@ -60,7 +39,7 @@ tools `campus_draft_campus` and `campus_run_study` call the service directly,
 and `_gridspine_project` resolves access but not the lock. Reproduced on
 `af69613`: the HTTP draft returned 409 for a non-holder, while
 `campus_draft_campus(overwrite=True)` and `campus_run_study` both reached the
-write path. This is the fifth instance of the "a second caller skips the
+write path. #84 added a third, `campus_extract_grid_code` (it can add a grid-code draft but not overwrite one), reproduced the same way. This is the fifth instance of the "a second caller skips the
 handler" shape. `tests/test_write_surface_lock_policy.py` caught it on the day
 it landed, by going red on #80 merged with the new master. Note for the fix:
 these tools take a `project_id`, so the seam's active-project predicate would

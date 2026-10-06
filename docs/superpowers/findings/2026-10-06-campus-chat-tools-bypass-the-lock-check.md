@@ -43,6 +43,18 @@ So under a foreign lock:
 
 `campus_get_study` is a read and is correctly left alone.
 
+**A third tool, added the same afternoon.** #84 (campus grid codes) added
+`campus_extract_grid_code`, which has the same shape. `POST
+/{name}/grid-codes/documents/{id}/extract` runs `_check_lock` and then
+`campus_grid_code_service.extract`, while the tool calls `extract` directly.
+`extract` writes a draft (`<profile>.yaml` plus `<profile>.review.json`) into
+the project's drafts directory. The tool always passes the default
+`overwrite=False`, so it can ADD a draft under a foreign lock but cannot
+replace one. That makes it less severe than `campus_draft_campus`, but it is
+the same bypass. The write-surface test caught it when master (with #84) was
+merged into #80. Reproduced the same way: HTTP extract returns 409 for a
+non-holder, and the tool reached `gc.extract('doc1')`.
+
 ## Reproduced
 
 Against master `af69613`. The acting chat identity is a same-org user who
@@ -80,11 +92,11 @@ handler with `_route`.
 
 ## Fix criteria
 
-* Under a foreign lock on the project named by `project_id`, both tools raise
+* Under a foreign lock on the project named by `project_id`, all three tools raise
   409 `project_locked`, in the same run as the HTTP control.
 * The holder's own calls succeed.
 * A test asserts that `campus_input.yaml` is unchanged after a refused
   `campus_draft_campus(overwrite=True)` (the property), not only that a 409 was
   raised.
-* The two `KNOWN_GAPS` entries in `tests/test_write_surface_lock_policy.py`
+* The three `KNOWN_GAPS` entries in `tests/test_write_surface_lock_policy.py`
   are deleted. That test fails until they are.

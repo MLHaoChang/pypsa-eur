@@ -10,9 +10,12 @@ check (``CHECKS``):
     The PCC voltage, in every selected hour and case, against the profile's
     band for its nominal voltage. The clause and tag are the band's.
 ``campus_voltage``
-    Every other bus against the same banded limits. Inside the campus these
-    are a **design** limit, not a code requirement, so they are tagged
-    ``assumed``.
+    Every other bus. If the profile carries a ``campus_voltage`` band, that
+    band and its clause and tag are used. Otherwise the buses are held to the
+    same banded limits as the PCC. Inside the campus these are a **design**
+    limit, not a code requirement, so that fallback is tagged ``assumed``,
+    unless the band is still ``extracted`` (read from a document and not yet
+    confirmed), which it then stays.
 ``transformer_loading``
     The highest loading of any transformer, intact or N-1, against 100 % of
     its rating (equipment).
@@ -27,7 +30,8 @@ Every row carries:
   measure is recommended, because those measures move voltages and the
   study did not re-solve with them in place.
 - ``value``, ``limit``, ``unit``, the worst ``(period, hour)``, ``clause``,
-  ``source`` and ``detail``.
+  ``source`` and ``detail``. ``source`` is the limit's own tag, so a limit
+  read from an uploaded grid code and not yet confirmed says ``extracted``.
 
 pandas only, plus the profile's band lookup.
 """
@@ -54,13 +58,13 @@ def _row(check, as_is, with_measures, value, limit, unit, where, clause, source,
             "clause": clause, "source": source, "detail": detail}
 
 
-def _voltage(rows: pd.DataFrame, profile, bus_kv):
+def _voltage(rows: pd.DataFrame, profile, bus_kv, fixed_band=None):
     """Worst voltage against its band: ``(status, value, limit, where, band)``.
     The worst is the largest excursion outside a band, or else the reading
-    closest to its band edge."""
+    closest to its band edge. ``fixed_band`` replaces the per-voltage lookup."""
     worst = None
     for r in rows.itertuples(index=False):
-        band = band_for(profile, bus_kv[r.bus])
+        band = fixed_band or band_for(profile, bus_kv[r.bus])
         over, under = r.vm_pu - band["v_max"], band["v_min"] - r.vm_pu
         if over >= under:
             key, limit = over, band["v_max"]
@@ -96,15 +100,22 @@ def campus_compliance(bus, trafo, reactive, sizing, compensation, short_circuit,
     # voltages
     for check, sel, design in (("pcc_voltage", bus["bus"] == pcc_bus, False),
                                ("campus_voltage", bus["bus"] != pcc_bus, True)):
-        v = _voltage(bus[sel], profile, bus_kv)
+        own = profile.get("campus_voltage") if design else None
+        v = _voltage(bus[sel], profile, bus_kv, own)
         if v is None:
             rows.append(_row(check, "pass", "pass", math.nan, math.nan, "pu", None, "", "assumed",
                              "no bus of this kind"))
             continue
         status, value, limit, where, band, b, case = v
         after = "not_rechecked" if measures else status
-        source = "assumed" if design else band["source"]
-        detail = (f"worst at {b} ({case}); {'design limit inside the campus, the code band applied as one' if design else 'code band at the connection point'}"
+        # The code band applied inside the campus is a design choice, so
+        # assumed; but a band nobody has confirmed stays extracted, so an
+        # unconfirmed number is never laundered into an engineering choice.
+        source = band["source"] if own or not design or band["source"] == "extracted" else "assumed"
+        what = ("code band at the connection point" if not design else
+                "the profile's campus design band" if own else
+                "design limit inside the campus, the code band applied as one")
+        detail = (f"worst at {b} ({case}); {what}"
                   f"; band {band['v_min']:g}-{band['v_max']:g} pu")
         rows.append(_row(check, status, after, value, limit, "pu", where, band["clause"], source, detail))
 

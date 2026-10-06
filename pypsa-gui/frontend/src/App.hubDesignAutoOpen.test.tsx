@@ -119,6 +119,19 @@ describe('the hubDesign panel slot', () => {
     // Full-screen: the panel takes the whole area (FULL_SCREEN_TABS).
     expect(container.className).toContain('flex-1')
     expect(container.className).not.toContain('w-1/2')
+    expect(container.className).not.toContain('max(560px')
+  })
+})
+
+// UX assessment Q1: a side panel takes half the area but never less than
+// 560 px, so a form beside the canvas is not squeezed into wrapped labels.
+describe('side-panel width policy', () => {
+  it('gives a non-full-screen panel max(560px, 50%)', () => {
+    useUIStore.setState({ uiMode: 'expert', activeSlidePanel: 'simparams' })
+    renderApp()
+    const container = screen.getByTestId('panel-container')
+    expect(container.className).toContain('w-[max(560px,50%)]')
+    expect(container.className).not.toContain('w-1/2')
   })
 })
 
