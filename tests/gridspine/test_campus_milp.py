@@ -299,6 +299,12 @@ def test_the_back_off_and_trust_region_rules_are_the_documented_numbers():
     assert update_delta(0.25, 10.0, 100.0) == (pytest.approx(10.0), True)
     assert update_delta(0.24, 10.0, 100.0) == (pytest.approx(5.0), False)
     assert update_delta(-50.0, 10.0, 100.0) == (pytest.approx(5.0), False)
+    # rho = actual / predicted improvement of the merit
+    from gridspine.static.campus_milp import gain_ratio
+    assert gain_ratio(100.0, 80.0, 60.0) == pytest.approx(0.5)
+    assert gain_ratio(100.0, 40.0, 80.0) == pytest.approx(3.0)
+    assert gain_ratio(100.0, 120.0, 60.0) == pytest.approx(-0.5)
+    assert gain_ratio(100.0, 100.0, 100.0) == 1.0 and gain_ratio(100.0, 101.0, 100.0) == 0.0
 
 
 def transformer_case(tmp_path, load=38.0):
@@ -348,7 +354,8 @@ def test_the_margin_is_judged_on_c8s_dispatch_not_on_the_milps_extra_q(tmp_path)
     assert out["investment"].set_index("need").at["transformer TR1", "library_id"] == "T63"
     assert out["fallback"] is not None and out["summary"]["fallback"] is True
     h = out["milp_history"]
-    assert not h.loc[h["choice"].str.contains("T50"), "feasible"].any()
+    assert not h["choice"].str.contains("T50").any()             # never even proposed: no Q lever on the margin
+    assert out["summary"]["iterations"] == 1
 
 
 def outage_case(tmp_path):
@@ -452,6 +459,12 @@ def test_the_returned_compliance_is_an_ac_re_solve_not_the_linear_prediction(tmp
     assert out["pcc"].set_index("case").at["intact", "q_mvar"] == pytest.approx(
         float(cases[0].res_ext_grid["q_mvar"].sum()), abs=1e-6)
     assert set(comp_["status_with_measures"]) <= {"pass", "not_rated"}
+    # the margin was judged on C8's dispatch (none: the band is wide), not on the battery's Q
+    ref = pair_net(0.0)
+    sizing = out["sizing"].set_index("group").loc["TR1+TR2"]
+    total = float(((ref.res_trafo["p_hv_mw"] ** 2 + ref.res_trafo["q_hv_mvar"] ** 2) ** 0.5).sum())
+    assert sizing["max_s_intact_mva"] == pytest.approx(total, rel=1e-6)
+    assert float(((cases[0].res_trafo["p_hv_mw"] ** 2 + cases[0].res_trafo["q_hv_mvar"] ** 2) ** 0.5).sum()) < total - 3
 
 
 # --------------------------------------------------------------------------
@@ -565,37 +578,42 @@ def test_a_rated_pcc_left_to_the_grid_operator_constrains_nothing(tmp_path):
 
 
 def test_the_battery_is_held_to_the_polygon_not_the_circle(tmp_path):
-    """The battery discharges at P = S cos^2(pi/8), midway between two
-    vertices, where the octagon allows 7.8 Mvar and the circle 11.5. The
-    grid holds the PCC at 1.05 pu, so the voltages hold. T_R is rated so
-    that it carries the hour with the margin only with Q beyond the
-    octagon, and passes every check with the circle's Q (solved here). The
-    MILP must not buy it."""
+    """The outage case at 45 MW, the battery discharging at P = S cos^2(pi/8),
+    midway between two vertices, where the octagon allows 7.8 Mvar and the
+    circle 11.5; the grid holds the PCC at 1.05 pu. The pair is rated so
+    that the survivor stays within 100 % only with Q beyond the octagon,
+    and passes every check with the circle's Q (solved here). The MILP must
+    not buy the pair."""
     from gridspine.static.campus_milp import q_range, select_assets_milp
     p_bess = 22.0 * math.cos(math.pi / 8) ** 2
     q_poly, q_circle = q_range(p_bess, 22.0)[1], math.sqrt(22.0 ** 2 - p_bess ** 2)
     assert q_circle - q_poly > 3.0
 
-    def at(q, rating):
-        net = t50_net(55.0, q)
-        net.trafo.at[0, "sn_mva"], net.ext_grid.at[0, "vm_pu"] = rating, 1.05
+    def at(q, rating, out=None):
+        net = pair_net(q, out)
+        net.trafo["sn_mva"] = rating
+        net.ext_grid.at[0, "vm_pu"] = 1.05
+        net.load.at[0, "p_mw"], net.load.at[0, "q_mvar"] = 45.0, 45.0 * math.tan(math.acos(0.85))
         net.sgen.loc[net.sgen["name"] == "BESS1", "p_mw"] = p_bess
         pp.runpp(net)
         return net
 
-    rating = round(1.2 * (s_t50(at(q_poly, 60.0)) + s_t50(at(q_circle, 60.0))) / 2, 2)
-    inside, outside = at(q_poly, rating), at(q_circle, rating)
-    assert s_t50(inside) * 1.2 > rating > s_t50(outside) * 1.2                     # the oracle
-    assert outside.res_bus["vm_pu"].between(0.9, 1.1).all() and outside.res_trafo.at[0, "loading_percent"] < 100
-    spec, table, sel, lib = transformer_case(tmp_path, load=55.0)
-    table.loc[table["unit_id"] == "BESS1", "p_mw"] = p_bess
-    lib["transformers"] = [tr("T_R", rating, 1.1e6), tr("T80", 80.0, 1.5e6)]
+    rating = next(r for r in (35.0, 36.0, 37.0, 38.0, 39.0)
+                  if at(q_poly, r, 0).res_trafo.at[1, "loading_percent"] > 101.0
+                  > 99.0 > at(q_circle, r, 0).res_trafo.at[1, "loading_percent"])
+    for case in (at(q_circle, rating), at(q_circle, rating, 0), at(q_circle, rating, 1)):          # the oracle
+        on = case.trafo["in_service"]
+        assert case.res_bus["vm_pu"].between(0.9, 1.1).all() and (case.res_trafo.loc[on, "loading_percent"] < 100).all()
+    lib = library(tmp_path, transformers=[tr("TS", rating, 0.6e6), tr("T63", 63.0, 1.3e6)])
+    table, sel = hourly((2030, 1, {"DC_LOAD": -45.0, "BESS1": p_bess, "PV1": 0.0, "GEN1": 0.0}, {"PV1": 0, "GEN1": 0}))
+    spec = lowpf_spec(existing=False)
     spec["campus"]["pcc"]["vm_pu"] = {"value": 1.05, "source": "assumed"}
-    c8 = select_assets(spec, table, sel, lib, WIDE, PROFILE)
-    assert c8["investment"].set_index("need").at["transformer TR1", "library_id"] == "T80"
-    out = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE, c8=c8)
-    assert out["investment"].set_index("need").at["transformer TR1", "library_id"] == "T80"
+    crit = SizingCriteria(n_minus_1=False)
+    c8 = select_assets(spec, table, sel, lib, WIDE, PROFILE, crit)
+    assert c8["investment"].set_index("need").at["transformer TR1+TR2", "library_id"] == "T63"
+    out = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE, crit, c8=c8)
+    assert out["investment"].set_index("need").at["transformer TR1+TR2", "library_id"] == "T63"
     h = out["milp_history"]
-    assert not h.loc[h["choice"].str.contains("T_R"), "feasible"].any()
+    assert not h.loc[h["choice"].str.contains("TS"), "feasible"].any()
     q = out["dispatch"].loc[out["dispatch"]["element"] == "inverters", "q_mvar"].abs()
     assert (q <= q_poly + 1e-6).all()

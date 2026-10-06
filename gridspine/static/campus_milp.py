@@ -346,6 +346,16 @@ def update_beta(beta: float, violated: bool, ample: bool) -> float:
     return beta
 
 
+def gain_ratio(merit_now: float, merit_trial: float, merit_predicted: float) -> float:
+    """rho: the actual improvement of the merit over the predicted one. A
+    step predicted to gain nothing scores 1 if it loses nothing, else 0."""
+    predicted, actual = merit_now - merit_predicted, merit_now - merit_trial
+    tiny = 1e-9 * max(1.0, abs(merit_now))
+    if predicted > tiny:
+        return actual / predicted
+    return 1.0 if actual >= -tiny else 0.0
+
+
 def update_delta(rho: float, delta: float, cap: float):
     """Step 6 of the loop: ``(new delta, accepted)``."""
     if rho > RHO_GOOD:
@@ -1069,7 +1079,8 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
     Returns C8's shapes (``investment``, ``cost``, ``compliance``,
     ``dispatch``, ``spec``, ``history`` (C8's escalations), ``unresolved``,
     ``pcc``, ``short_circuit``, ``scope``), plus ``milp_history`` (one row
-    per iteration), ``lin_errors`` (per trial and constraint, AC minus the
+    per iteration), ``sizing`` (the transformer sizing the margin was
+    judged by, on C8's dispatch), ``lin_errors`` (per trial and constraint, AC minus the
     linear prediction, in scale units), ``comparison`` (per need, C8
     against the MILP), ``summary`` and ``fallback`` (None, or why C8's
     result is returned)."""
@@ -1128,10 +1139,7 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
             t_worst, merit_trial, errs = math.inf, math.inf, {}
         p_viol = sum(max(0.0, pred[k] - prob.limit[k][0] - (Q_TOL if k[0] == "q" else 1e-9)) / prob.limit[k][1]
                      for k in lin.keys)
-        predicted = merit_cur - (trial.cost + penalty * p_viol)
-        actual = merit_cur - merit_trial
-        tiny = 1e-9 * max(1.0, abs(merit_cur))
-        rho = actual / predicted if predicted > tiny else (1.0 if actual >= -tiny else 0.0)
+        rho = gain_ratio(merit_cur, merit_trial, trial.cost + penalty * p_viol)
         grown = []
         if adaptive:
             for k in lin.keys:
@@ -1182,6 +1190,7 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
     else:
         out = _result(c8, prob, best, hist, c8_cost, stop)
     out["lin_errors"] = pd.DataFrame(lin_rows, columns=["iteration", "constraint", "error"])
+    out["sizing"] = (best.study if out["fallback"] is None else state.study).sizing
     return out
 
 
