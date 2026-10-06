@@ -18,14 +18,18 @@ import { nk } from '../utils/queryKeys'
  */
 export function useStudyFinishedInvalidation(status: string | null | undefined): void {
   const qc = useQueryClient()
-  const prev = useRef<string | null | undefined>(undefined)
+  const project = useUIStore(s => s.currentProject)
+  // The previous sample belongs to ONE project (A5, deferred spec §2.2): after
+  // a switch, project A's last `running` followed by project B's `done` is not
+  // a transition, so a sample from another project is no "before".
+  const prev = useRef<{ project: string | null; status: string | null } | undefined>(undefined)
   useEffect(() => {
     if (status === undefined) return
     const before = prev.current
-    prev.current = status
-    if (before === 'running' && status !== 'running') {
-      const project = useUIStore.getState().currentProject
+    prev.current = { project, status }
+    if (!before || before.project !== project) return
+    if (before.status === 'running' && status !== 'running') {
       void qc.invalidateQueries({ queryKey: nk(project, 'simulationStatus') })
     }
-  }, [status, qc])
+  }, [status, project, qc])
 }

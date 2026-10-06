@@ -223,7 +223,9 @@ def test_a_crash_after_binding_is_a_warning_not_a_500(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(L, "circulation_risk_snapshots", boom)
+    # Any check after binding (U1 f dropped the circulation-count gate, so
+    # the meter-bypass walk is the seam: it always runs).
+    monkeypatch.setattr(L, "meter_bypass_buses", boom)
     codes = _codes(build_edge_15min(), {"poc_link": "import", "import_tariff": _tariff(ENERGY)})
     assert codes["commercial.preflight_incomplete"].severity == "warning"
 

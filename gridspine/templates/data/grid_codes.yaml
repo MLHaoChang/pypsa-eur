@@ -5,6 +5,9 @@
 #               as-adopted EU text: DCC = Regulation (EU) 2016/1388,
 #               RfG = Regulation (EU) 2016/631);
 #   assumed  -- not set by the code; a stated engineering choice to revisit.
+#   extracted -- read from an uploaded grid-code document by the copilot and
+#               not yet confirmed by a person; carries page and quote. Only
+#               a project's own profiles carry it, never this file.
 # The code values below were read from legislation.gov.uk's "adopted" text
 # (the retained UK version has deleted the Continental Europe rows).
 #

@@ -10,6 +10,7 @@ import type { EhArchetype, EhReadiness } from '../../../api/simulation'
 import { useHubDesignStore } from '../hubDesignStore'
 import { siteFixText, type SiteFix } from '../delegate'
 import { CardShell, DelegateButton } from '../shared/CardShell'
+import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStudyRunning'
 import { Term, type TermKey } from '../shared/Term'
 import { useHubReadiness, useHubStudy, useHubTemplate } from '../useHubData'
 
@@ -65,7 +66,9 @@ const ROW_META: { k: SiteFix; term: TermKey; label: string }[] = [
   { k: 'outage', term: 'outage_data', label: 'Outage data' },
 ]
 
-function SiteRow({ k, term, label, row }: { k: SiteFix; term: TermKey; label: string; row: Row }) {
+function SiteRow({ k, term, label, row, liveStudy }: {
+  k: SiteFix; term: TermKey; label: string; row: Row; liveStudy: boolean
+}) {
   return (
     <li className="flex flex-wrap items-center gap-2 text-[12px]">
       <span data-testid={`hub-site-${k}`} className="flex-1 min-w-[16rem]">
@@ -73,7 +76,8 @@ function SiteRow({ k, term, label, row }: { k: SiteFix; term: TermKey; label: st
         <Term k={term}>{label}</Term>: <span className="text-text">{row.value}</span>
       </span>
       {row.gap && row.fix && (
-        <DelegateButton testId={`hub-site-fix-${k}`} text={row.fix} label="Fix with the assistant" />
+        <DelegateButton testId={`hub-site-fix-${k}`} text={row.fix} label="Fix with the assistant"
+          disabled={liveStudy} disabledTitle={LIVE_STUDY_EDIT} />
       )}
     </li>
   )
@@ -87,6 +91,7 @@ export function SiteCard() {
   const { readiness, isError } = useHubReadiness(template, running,
     !studyPending && !templatePending)
   const rows = readiness ? siteRows(readiness, archetype) : null
+  const liveStudy = useLiveStudyRunning()
 
   return (
     <CardShell step="site" testId="hub-card-site" title="Site" next="goal">
@@ -107,7 +112,7 @@ export function SiteCard() {
           </p>
         ) : rows ? (
           <ul className="flex flex-col gap-2">
-            {ROW_META.map(m => <SiteRow key={m.k} {...m} row={rows[m.k]} />)}
+            {ROW_META.map(m => <SiteRow key={m.k} {...m} row={rows[m.k]} liveStudy={liveStudy} />)}
           </ul>
         ) : (
           <p className="text-[12px] text-muted">

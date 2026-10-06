@@ -12,6 +12,9 @@ import { useUIStore } from '../store/uiStore'
 import { editScope, loadExtras } from '../utils/extrasStore'
 import { nk } from '../utils/queryKeys'
 import { updateAsset } from '../utils/assetWrite'
+// A1-FE: a refused edit (`study_in_flight`, quiet in the interceptor) toasts
+// the backend's sentence, not axios' "Request failed with status code 409".
+import { blockerMessage } from '../utils/blockerMessage'
 import { isRenewableCarrier } from '../utils/carriers'
 import { ingestRescale } from '../utils/rescaleActions'
 import type { RescalePreview } from '../utils/rescale'
@@ -95,7 +98,7 @@ function showDeleteUndoToast(label: string, qc: QueryClient) {
               const proj = useUIStore.getState().currentProject
               ALL_NETWORK_KEYS.forEach(k => qc.invalidateQueries({ queryKey: nk(proj, k) }))
               toast.success('Undone')
-            }).catch((e: Error) => toast.error(e.message))
+            }).catch((e: Error) => toast.error(blockerMessage(e)))
           }}
           className="ml-1 text-accent font-semibold text-xs hover:underline whitespace-nowrap"
         >
@@ -144,7 +147,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteGenerator(gen.name),
     onSuccess: () => { qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'generators') }); showDeleteUndoToast(gen.name, qc) },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
   const saveMut = useMutation({
@@ -227,7 +230,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
       const newName = form.name?.trim() || gen.name
       if (newName !== gen.name) onRename?.(newName)
     },
-    onError: (e: Error) => toast.error(`Save failed: ${e.message}`),
+    onError: (e: Error) => toast.error(`Save failed: ${blockerMessage(e)}`),
   })
 
   const startEdit = () => {
@@ -491,7 +494,7 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteStorageUnit(su.name),
     onSuccess: () => { qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'storage_units') }); showDeleteUndoToast(su.name, qc) },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
   const saveMut = useMutation({
@@ -547,7 +550,7 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       const newName = form.name?.trim() || su.name
       if (newName !== su.name) onRename?.(newName)
     },
-    onError: (e: Error) => toast.error(`Save failed: ${e.message}`),
+    onError: (e: Error) => toast.error(`Save failed: ${blockerMessage(e)}`),
   })
 
   const startEdit = () => {
@@ -718,7 +721,7 @@ function StoreCard({ store, onRename, mode = 'card', title }: {
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteStore(store.name),
     onSuccess: () => { qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'stores') }); showDeleteUndoToast(store.name, qc) },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
   const saveMut = useMutation({
@@ -768,7 +771,7 @@ function StoreCard({ store, onRename, mode = 'card', title }: {
       const newName = form.name?.trim() || store.name
       if (newName !== store.name) onRename?.(newName)
     },
-    onError: (e: Error) => toast.error(`Save failed: ${e.message}`),
+    onError: (e: Error) => toast.error(`Save failed: ${blockerMessage(e)}`),
   })
 
   const startEdit = () => {
@@ -925,7 +928,7 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteLoad(load.name),
     onSuccess: () => { qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'loads') }); showDeleteUndoToast(load.name, qc) },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
   const saveMut = useMutation({
@@ -954,7 +957,7 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
       const newName = form.name?.trim() || load.name
       if (newName !== load.name) onRename?.(newName)
     },
-    onError: (e: Error) => toast.error(`Save failed: ${e.message}`),
+    onError: (e: Error) => toast.error(`Save failed: ${blockerMessage(e)}`),
   })
 
   const startEdit = () => {
@@ -1124,7 +1127,7 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteLink(link.name),
     onSuccess: () => { qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'links') }); showDeleteUndoToast(link.name, qc) },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
   const saveMut = useMutation({
@@ -1174,7 +1177,7 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
       const newName = form.name?.trim() || link.name
       if (newName !== link.name) onRename?.(newName)
     },
-    onError: (e: Error) => toast.error(`Save failed: ${e.message}`),
+    onError: (e: Error) => toast.error(`Save failed: ${blockerMessage(e)}`),
   })
 
   const startEdit = () => {
@@ -1194,11 +1197,11 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
   // it (card mode stacks several Links in one asset group).
   const editRequest = useUIStore(s => s.propertiesEditRequest)
   useEffect(() => {
-    if (editRequest !== 'Link' || mode !== 'detail') return
+    if (editRequest?.type !== 'Link' || editRequest.name !== link.name || mode !== 'detail') return
     if (!open) startEdit()
     useUIStore.getState().clearPropertiesEditRequest()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editRequest, mode])
+  }, [editRequest, mode, link.name])
 
   const isExt = form.p_nom_extendable === 'true'
 
@@ -1538,7 +1541,7 @@ function AddForm({ bus, type, onClose }: { bus: string; type: AddType; onClose: 
       }
     },
     onSuccess: () => { toast.success(`${type} added`); onClose() },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
   const inp = (label: string, key: string, placeholder?: string, type_?: string) => (
@@ -1643,7 +1646,7 @@ function BusPanel({ name }: { name: string }) {
   // consume the request.
   const editRequest = useUIStore(s => s.propertiesEditRequest)
   useEffect(() => {
-    if (editRequest !== 'Bus' || !bus) return
+    if (editRequest?.type !== 'Bus' || !bus || editRequest.name !== bus.name) return
     if (!editing) startEdit()
     useUIStore.getState().clearPropertiesEditRequest()
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1691,7 +1694,7 @@ function BusPanel({ name }: { name: string }) {
       // preview.
       ingestRescale(qc, data.rescale)
     },
-    onError: (e: Error) => toast.error(`Update failed: ${e.message}`),
+    onError: (e: Error) => toast.error(`Update failed: ${blockerMessage(e)}`),
   })
 
   const CATEGORY_GROUPS: { cat: AssetCategory; count: number }[] = (
@@ -1917,7 +1920,7 @@ function LinePanel({ name }: { name: string }) {
       const newName = form.name?.trim() || name
       if (newName !== name) setSelectedComponent({ type: 'Line', name: newName })
     },
-    onError: (e: Error) => toast.error(`Update failed: ${e.message}`),
+    onError: (e: Error) => toast.error(`Update failed: ${blockerMessage(e)}`),
   })
 
   if (!line) return <p className="p-3 text-xs text-muted">Loading…</p>
@@ -2241,7 +2244,7 @@ function TransformerPanel({ name }: { name: string }) {
       const newName = form.name?.trim() || name
       if (newName !== name) setSelectedComponent({ type: 'Transformer', name: newName })
     },
-    onError: (e: Error) => toast.error(`Update failed: ${e.message}`),
+    onError: (e: Error) => toast.error(`Update failed: ${blockerMessage(e)}`),
   })
 
   if (!tr) return <p className="p-3 text-xs text-muted">Loading…</p>
@@ -2513,7 +2516,7 @@ export default function PropertiesPanel() {
       showDeleteUndoToast(label, qc)
       setSelectedComponent(null)
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
   const handleDelete = () => {

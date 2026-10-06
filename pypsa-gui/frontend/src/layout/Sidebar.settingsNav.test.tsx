@@ -54,7 +54,7 @@ vi.mock('../utils/projectActions', async (importOriginal) => {
   }
 })
 
-const LOCAL_STATE: LocalSettingsState = { key_set: false, key_hint: null, key_redactable: null, log_path: '/tmp/app.log' }
+const LOCAL_STATE: LocalSettingsState = { key_set: false, key_hint: null, key_redactable: null, log_path: '/tmp/app.log', projects_root: '/tmp/projects' }
 const LLM_PAYLOAD: LLMSettingsPayload = {
   active_profile_id: 'anthropic-sonnet',
   profiles: [],

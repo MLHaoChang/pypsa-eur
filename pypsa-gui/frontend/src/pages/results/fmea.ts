@@ -38,6 +38,25 @@ export function unpricedRankingWarning(
   )
 }
 
+// P29 (B3): why a computed row costs €0 — the backend's
+// `worksheet.zero_reason`, forwarded on `per_mode`. One text table, read by
+// the FMEA tab and the hub's Results card, so the two cannot disagree.
+export type ZeroReason = 'no_shortfall' | 'no_outage_data' | 'unpriced' | 'out_of_scope'
+export const ZERO_REASON_TEXT: Record<ZeroReason, string> = {
+  no_shortfall: 'no shortfall — the site copes without it',
+  // P29 gate S-2: also fires for an explicit rate of 0 (the unit never
+  // fails), so the text must be true in both cases.
+  no_outage_data: 'no outage frequency (outage rate or repair time missing or zero)',
+  unpriced: 'no price set for undelivered energy',
+  out_of_scope: 'not counted (outside the electricity metric)',
+}
+/** The text for a row's reason, or null when there is none (or unknown). */
+export function zeroReasonText(reason: unknown): string | null {
+  return typeof reason === 'string' && Object.prototype.hasOwnProperty.call(ZERO_REASON_TEXT, reason)
+    ? ZERO_REASON_TEXT[reason as ZeroReason]
+    : null
+}
+
 // One worksheet row after the client-side merge. Computed rows come from
 // /results/copt and regenerate on every view; manual rows and overlays come
 // from the per-project sidecar (GET /api/projects/{name}/worksheet).
@@ -55,6 +74,7 @@ export interface WorksheetRow {
   mitigability: string
   engine: string
   fidelity: string
+  zero_reason?: ZeroReason | null
   // Manual (class-D, expert) rows are fully editable and deletable;
   // computed rows expose ONLY the mitigability cell.
   editable: boolean
@@ -94,6 +114,7 @@ export function mergeWorksheet(
       mitigability: overlays[modeId]?.mitigability ?? '',
       engine: String(r.engine ?? ''),
       fidelity: String(r.fidelity ?? ''),
+      zero_reason: zeroReasonText(r.zero_reason) ? (r.zero_reason as ZeroReason) : undefined,
       editable: false,
     })
   }
@@ -112,6 +133,7 @@ export function mergeWorksheet(
       mitigability: String(r.mitigability ?? ''),
       engine: String(r.engine ?? 'expert'),
       fidelity: String(r.fidelity ?? 'expert_judgement'),
+      zero_reason: null,
       editable: true,
     })
   }
