@@ -14,7 +14,8 @@ harness/
   skills/         procedures the model loads on demand (<name>/SKILL.md)
   prompts/        the system-prompt fragments as Markdown, byte-identical to the old constants
   providers/      anthropic, openai_compat, fake, and wiring (profile → provider, tools payload, history portability) — the only place a wire is named
-  loop.py         the turn loop: the stream seam, tool dispatch, the solver bridge (the former services/chat_service.py)
+  loop.py         the turn loop: the stream seam and tool dispatch (the former services/chat_service.py)
+  solver_bridge.py  the solver log → tool_progress bridge for a running run_simulation / run_ac_pf_stage call
   compose.py      the system prompt for a turn, the live network line, and the per-turn ui-context / Guided / workflow-step blocks
   budget.py       the per-turn / per-session / daily caps, the retry schedule, the per-tool timeout, the budget gate
   stub.py         the scripted stub loop behind StreamRequest.script
@@ -88,7 +89,7 @@ tests that patch it move their target to the new module in the same
 commit**, with the frame-recording gate
 (`tests/test_chat_turn_frame_contract.py`, re-recorded only by
 `tests/record_chat_turn_frames.py`) unchanged. Done so far: `sse`, `fence`, `results`, `history`, `metrics`, `ratelimit`,
-`session`, `confirm`, `providers/wiring`, `stub`, `budget`, `compose`. Nine tunables have moved with their readers
+`session`, `confirm`, `providers/wiring`, `stub`, `budget`, `compose`, `solver_bridge`. Nine tunables have moved with their readers
 (`MOVED_TUNABLES` in the layout test lists them with their homes); a
 reader that stays in the loop goes through the home's attribute
 (`harness_session.CONFIRMATION_TTL_SECONDS`), the loop forwards every
@@ -100,8 +101,9 @@ one. The same rule covers a patched FUNCTION whose readers move
 patched on `providers/wiring`; `_profile_awareness_block` and `_skills_block`
 on `compose`; `_neutralise_untrusted_delimiters`, whose readers all left the
 loop, on `fence`, and every reader goes through `harness_fence.`). Still in
-`loop.py`: the solver bridge and the turn body itself (which reads the budget
-through `harness_budget.<NAME>`).
+`loop.py`: the turn body itself — `run_turn`, `_run_turn_body`, the stream
+seam, `_build_user_content`, tool dispatch and the real tool call (which reads
+the budget through `harness_budget.<NAME>`).
 
 ## Measuring parity
 
