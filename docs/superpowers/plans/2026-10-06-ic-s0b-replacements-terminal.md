@@ -76,9 +76,11 @@ the campus defaults-pack rows (G1), and any LP change.
   with no parts behaves exactly as today.
   - **One source of truth (review B4, B5).** Everything that reads parts reads `effective_parts(a)`: `a.parts`, or,
     when it is empty, one part `investment` = `(a.overnight_cost, a.lifetime_years, None)`. `AssetFinance.__post_init__`
-    refuses (`ValueError`) parts whose sum differs from `overnight_cost` by more than 1e-9 relative (None if any part
-    is None). Capex is scaled through one facade helper, `finance.case.scale_capex(case, f)`, which scales the parts
-    and `overnight_cost` together (the GS tornado, C5, must use it; `dataclasses.replace(overnight_cost=…)` on an
+    runs only when `parts` is non-empty and refuses (`ValueError`) parts that disagree with `overnight_cost`:
+    `overnight_cost` is None exactly when some part's cost is None (both directions), else
+    `math.isclose(sum, overnight_cost, rel_tol=1e-9, abs_tol=1e-6)` (a typed-0 part passes). Capex is scaled through one facade helper, `finance.case.scale_capex(case, f)`, which scales the parts,
+    `overnight_cost` and the amounts of `fixed` `replacement_capex` entries together (one CAPEX bound moves every
+    purchase) (the GS tornado, C5, must use it; `dataclasses.replace(overnight_cost=…)` on an
     asset with parts is refused by the check).
 - **S3. COD from `build_year`.** An owner asset missing from `cod_by_asset` takes 1 January of its `build_year`,
   flagged `cod_from_build_year:<asset>`; with neither it is `cod_missing` as today. A `build_year` that is 0, NaN,
@@ -97,9 +99,11 @@ the campus defaults-pack rows (G1), and any LP change.
   `replacement_capex` entry for an asset under `part_lifetimes` is refused `replacement_rule_conflict:<asset>`
   (double counting); entries for other assets still apply. A non-integer `L` rounds each year to the nearest whole
   year, half up (`floor(k·L + 0.5)`), disclosed `part_lifetime_rounded:<asset>:<part>`. An infinite `L` is never
-  replaced. The `asset_lifetime_short` check counts a `part_lifetimes` asset as replaced only when every one of its
-  effective parts (S2) is either at least the axis long or has a finite lifetime (so an asset with no parts and a
-  short lifetime is replaced through its one effective part, never silently skipped). `schedule()` needs the
+  replaced. The `asset_lifetime_short` check counts a `part_lifetimes` asset as replaced only when every effective part
+  (S2) has a known lifetime: a finite one is scheduled, an infinite one outlives the axis (so an asset with no parts
+  and a short lifetime is replaced through its one effective part, never silently skipped). A part lifetime below
+  1 year is refused `part_lifetime_too_short:<asset>:<part>`. The S5/S6 timing reproduces GS exactly for whole-year
+  lifetimes (GS refuses others); a non-whole lifetime is an approximation, flagged `part_lifetime_rounded`. `schedule()` needs the
   `Timeline`: `build_timeline` builds it first, then runs the check. Under `fixed`, a part with L < the axis and no
   entry for its asset is flagged `part_not_replaced:<asset>:<part>` (a battery inverter at 10 y in a 25-y case).
 - **S6. `remaining_life_annuity` (D10).** `TerminalValueRule.method` gains `"remaining_life_annuity"` (`value`
@@ -187,7 +191,7 @@ Tests (`tests/test_finance_terminal_remaining_life.py`):
 
 Per WP: tests first, the implementation, an independent reviewer until PASS, each round recorded in §6. Then the
 gate: the full backend suite, the QA drivers (`qa_investment_case.py` must stay at its 245 checks plus any added),
-vitest and tsc if the frontend's finance editor gains the two options, a findings note, an independent assessor.
+vitest and tsc (S8 is unconditional), a findings note, an independent assessor.
 One PR, owner-merged.
 
 ## 6. Review record
@@ -199,3 +203,8 @@ One PR, owner-merged.
   All taken into S1–S9 and the tests, plus: the LCOS nets the part terms under the new method, half-up rounding,
   `part_not_replaced` under `fixed`, `parts` after `carrier`, `source="replacement_capex"` kept, a named payload key.
   The derived-from-`capital_cost` question went to the owner: not established (S1).
+- **Plan round 2 (e19ff47): PASS.** The hand identity is exact (diff 0) for whole-year lifetimes at 7 %, 3 % and 0 %
+  (battery 10/15 y and PV 30 y in H = 25; a 10-y part in H = 20); a 12.5-y part is approximate, as expected. Taken
+  after it: the `__post_init__` check runs only with parts, uses `math.isclose` and the None rule both ways;
+  `scale_capex` also scales fixed replacement entries; L < 1 y refused; the `asset_lifetime_short` wording; the
+  identity's whole-year scope; §5 aligned with S8.
