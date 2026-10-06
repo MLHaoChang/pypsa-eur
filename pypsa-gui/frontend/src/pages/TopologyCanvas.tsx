@@ -11,7 +11,7 @@ import '@xyflow/react/dist/style.css'
 import {
   Plus, Layers, Flame, BatteryCharging,
   Zap, Wind, Trash2, X as XIcon, type LucideIcon,
-  Clock, CheckCircle2, Loader2, XCircle, ExternalLink,
+  Clock, CheckCircle2, Loader2, XCircle, ExternalLink, ChevronDown, ChevronRight,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { networkApi } from '../api/network'
@@ -1857,8 +1857,11 @@ function ResultsPill() {
 
 // ── Main canvas ────────────────────────────────────────────────────────────────
 // Q11 (UX assessment 2026-10-05): below this canvas width the minimap covers
-// the network it maps.
-const MINIMAP_MIN_CANVAS_PX = 900
+// the network it maps. The assessment proposed 900 px; a browser check showed
+// that hides it for good on a 1366 px laptop (the canvas is ~790 px beside the
+// sidebar and properties), where it fits. 640 px hides it only when a side
+// panel squeezes the canvas (~400 px).
+const MINIMAP_MIN_CANVAS_PX = 640
 const LEGEND_KEY = 'pypsa.canvasLegendOpen'
 function readLegendOpen(): boolean {
   try { return localStorage.getItem(LEGEND_KEY) !== 'false' } catch { return true }
@@ -3118,26 +3121,29 @@ export default function TopologyCanvas() {
                 onClick={() => setLegendOpen(true)}
                 aria-expanded={false}
                 data-testid="canvas-legend-toggle"
-                className="border border-border rounded-[10px] shadow-md px-3 py-1.5 text-[10px] font-bold text-muted uppercase tracking-[0.14em] hover:text-text"
+                className="flex items-center gap-1 border border-border rounded-[10px] shadow-md px-2.5 py-1.5 text-[10px] font-bold text-muted uppercase tracking-[0.14em] hover:text-text"
                 style={{ background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)', backdropFilter: 'blur(8px)' }}
-              >Legend</button>
+              ><ChevronRight size={10} className="shrink-0" />Legend</button>
             ) : (
             <div
               className="border border-border rounded-[10px] shadow-md w-[164px] p-3"
               style={{ background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)', backdropFilter: 'blur(8px)' }}
               data-testid="canvas-legend"
             >
-              <div className="flex items-start justify-between gap-2 mb-2">
-                <p className="text-[9px] font-bold text-muted uppercase tracking-[0.14em]">Buses &amp; Lines · voltage</p>
-                <button
-                  type="button"
-                  onClick={() => setLegendOpen(false)}
-                  aria-label="Hide legend"
-                  aria-expanded={true}
-                  data-testid="canvas-legend-toggle"
-                  className="-mt-0.5 text-muted hover:text-text text-[13px] leading-none"
-                >×</button>
-              </div>
+              {/* The fold control sits at the card's LEFT edge: on a narrow
+                  canvas the map-mode switcher overlaps the card's right side. */}
+              <button
+                type="button"
+                onClick={() => setLegendOpen(false)}
+                aria-label="Hide legend"
+                aria-expanded={true}
+                data-testid="canvas-legend-toggle"
+                title="Hide legend"
+                className="flex items-center gap-1 mb-2 -ml-0.5 text-left text-muted hover:text-text"
+              >
+                <ChevronDown size={10} className="shrink-0" />
+                <span className="text-[9px] font-bold uppercase tracking-[0.14em]">Buses &amp; Lines · voltage</span>
+              </button>
               {[['> 300 kV', '#ef4444'], ['200–300 kV', '#16a34a'], ['100–200 kV', '#2563eb'], ['< 100 kV', '#6b7280']].map(([label, color]) => (
                 <div key={label} className="flex items-center gap-2 mb-1">
                   <svg width="20" height="3" style={{ flexShrink: 0 }}><line x1="0" y1="1.5" x2="20" y2="1.5" stroke={color} strokeWidth="2.5" strokeLinecap="round" /></svg>
