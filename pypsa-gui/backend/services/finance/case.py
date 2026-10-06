@@ -78,6 +78,34 @@ class TemplateLine:
 
 
 @dataclass(frozen=True)
+class StorageYear:
+    """A storage asset's throughput in one operating year of its template —
+    the storage LCOS reads it (owner decision 6; IC U1 follow-up). Energy at
+    the asset's bus (MWh, objective-weighted), before degradation; money in
+    the line's money year (`money_year`, else its template's, else the base
+    year), signed as a cost (> 0 = the site paid).
+
+    * `charge_import_cost` — what the site actually paid for the charged
+      energy it imported in the dispatch (the committed per-interval import
+      price × the grid share of each interval's charge); escalates with
+      `tariff`.
+    * `charge_surplus_cost` — the charged energy that came from on-site
+      surplus (PV): the export revenue the site forwent (0 with no export
+      route); escalates with `export`.
+    * `om_keys` — the template lines that are this asset's own O&M (fom, vom).
+
+    None = not established (plan C12): the LCOS is then None with the reason.
+    """
+
+    discharge_mwh: float
+    charge_mwh: float
+    charge_import_cost: float | None
+    charge_surplus_cost: float | None
+    om_keys: tuple[str, ...] = ()
+    money_year: int | None = None
+
+
+@dataclass(frozen=True)
 class Template:
     """The operating year from `first_year` on (calendar year)."""
 
@@ -89,6 +117,9 @@ class Template:
     # The money year of the lines (None = the case's base year). Keyword-only,
     # so a positional `energy_mwh` never binds here (WP4.1 review round 2 #2).
     money_year: int | None = field(default=None, kw_only=True)
+    # The owner's storage assets' throughput and charging cost this year (the
+    # LCOS; additive — empty for a case without storage).
+    storage: dict[str, StorageYear] = field(default_factory=dict, kw_only=True)
 
 
 @dataclass(frozen=True)

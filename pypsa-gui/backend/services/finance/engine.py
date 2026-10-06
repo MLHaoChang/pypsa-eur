@@ -48,6 +48,7 @@ from services.finance.case import (
 from services.finance.cashflow import Operating, build_operating
 from services.finance.debt import Debt, build_debt
 from services.finance.incentives import Incentives, build_incentives
+from services.finance.lcos import storage_lcos
 from services.finance.metrics import irr, npv
 from services.finance.packs.base import JurisdictionPack
 from services.finance.tax import DepreciationClass, TaxLayer, TaxResult, compute_tax
@@ -78,6 +79,9 @@ class FinanceResult:
     # cashflow lines reconcile to the cash series through them (WP4.6b review B2).
     terminal: np.ndarray | None = None
     op_counterfactual: Operating | None = None
+    # The storage LCOS block (`services.finance.lcos.storage_lcos`; owner
+    # decision 6): per asset and in total; the totals are also in `metrics`.
+    lcos: dict = field(default_factory=dict)
 
 
 # ── metrics ──────────────────────────────────────────────────────────────────
@@ -154,6 +158,7 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
     flags: list[str] = list(case.flags)
     op = build_operating(case, tl)
     flags += op.flags
+    flags += _basis_flags(case)
     n = tl.n
     last = n - 1
 
@@ -357,7 +362,11 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
         de = float(np.sum(e_tot / d))
         lcoe = num / de if de > 0 else None
         if de > 0:
-            if fin.inflation is None:
+            if fin.price_basis == "real":
+                # The cash is already constant money (GS Q6): real = nominal.
+                lcoe_r = lcoe
+                flags_m.append("lcoe_real_equals_nominal:real_basis")
+            elif fin.inflation is None:
                 flags_m.append("lcoe_real_not_established:inflation_missing")
             else:
                 rr = (1.0 + r) / (1.0 + fin.inflation) - 1.0
@@ -365,13 +374,19 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
         if case.counterfactual:
             flags_m.append("lcoe_on_incremental_value")
     m["lcoe_nominal_per_mwh"], m["lcoe_real_per_mwh"] = lcoe, lcoe_r
+    # Storage LCOS (owner decision 6): None with its reasons when not
+    # established; a case without storage adds no flag.
+    lcos = storage_lcos(case, op, tl)
+    m["lcos_nominal_per_mwh"] = lcos["lcos_nominal_per_mwh"]
+    m["lcos_real_per_mwh"] = lcos["lcos_real_per_mwh"]
+    flags_m += lcos["flags"]
     flags += flags_m
 
     gate = wacc_gate(case)
     result = FinanceResult(case=case, tl=tl, op=op, op_incremental={"net": inc_net, "counterfactual": cf_net},
                            debt=debt, incentives=inc, tax=tax, tax_unlevered=tax_u, cash=cash,
                            metrics=m, gate=gate, reasons=reasons, flags=sorted(set(flags)),
-                           terminal=terminal, op_counterfactual=cf_op)
+                           terminal=terminal, op_counterfactual=cf_op, lcos=lcos)
     sections = {"operating": "ok" if inc_net is not None and terminal is not None else "not_established",
                 "debt": "ok" if debt.established() else "not_established",
                 "incentives": "ok" if inc.established() else "not_established",
@@ -382,6 +397,25 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
         result.flags = sorted(set(result.flags) | set(sol.pop("solve_ppa_flags", [])))
         m.update(sol)
     return result
+
+
+def _basis_flags(case: FinanceCase) -> list[str]:
+    """A real price basis (GS Q6, IC plan C4) states constant money: any
+    non-zero escalation class, inflation or contract indexation contradicts it
+    — flagged `real_basis_with_escalation:<class>` (`contract:<id>` for a
+    contract's own indexation), never silently zeroed."""
+    fin = case.inputs
+    if fin.price_basis != "real":
+        return []
+    out = [f"real_basis_with_escalation:{c}" for c, v in sorted(fin.escalation.items())
+           if v not in (None, 0.0)]
+    if fin.inflation not in (None, 0.0):
+        out.append("real_basis_with_escalation:inflation")
+    for t in case.templates:
+        for ln in t.lines:
+            if ln.esc_class == CONTRACT_CLASS and ln.indexation not in (None, 0.0):
+                out.append(f"real_basis_with_escalation:contract:{ln.contract_id or ln.key}")
+    return sorted(set(out))
 
 
 def _asset_costs(op: Operating, case: FinanceCase) -> np.ndarray:

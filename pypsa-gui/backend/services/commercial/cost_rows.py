@@ -47,6 +47,17 @@ def _energy_by_period(n, link: str, prices: pd.DataFrame) -> dict | None:
     return {None: float(amount.sum())}
 
 
+def _by_item(block: dict, label: str, item_id, period, amount: float) -> None:
+    """`block["by_item"][label][item id][period key] += amount` (GS Q12a): the
+    per-tariff-item split of a label built from the same committed records as
+    the items, unweighted per period like them (keys "_" or "YYYY"). A record
+    with no item id (a pre-P2 solve) is keyed "unknown"."""
+    key = "_" if period is None else str(int(period))
+    per = block.setdefault("by_item", {}).setdefault(label, {}).setdefault(
+        str(item_id) if item_id is not None else "unknown", {})
+    per[key] = per.get(key, 0.0) + float(amount)
+
+
 def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
     """{"items": [(label, period, capex, opex)], "block": {...}, "flags": [...]}.
 
@@ -54,6 +65,10 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
     payload) sums them with the SAME `years(period)` weighting the caller
     applies to the items, so a label in the block equals what the totals carry
     (WP1.3 review round 3 #2). `years` defaults to 1 per period.
+
+    `block["by_item"]` (GS Q12a, additive): {"demand_charge" | "tariff_capacity":
+    {tariff item id: {period key: amount}}}, unweighted like the items; a
+    tariff capacity term not established is None there too.
     """
     yrs = years or (lambda p: 1.0)
 
@@ -106,6 +121,7 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
         for v in peaks.values():
             amount = _lp.demand_amount(v)
             items.append(("demand_charge", v.get("inv_period"), 0.0, amount))
+            _by_item(block, "demand_charge", v.get("item"), v.get("inv_period"), amount)
         block["demand_charge"] = weighted("demand_charge")
         drift = sorted(info.get("items", [])) != sorted(wanted) or (
             info.get("items_hash") is not None and info.get("items_hash") != wanted_hash)
@@ -195,15 +211,18 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
                 size = float(n.links.at[link, "p_nom_opt"])
                 for key, eur_per_mw in c.get("eur_per_mw_by_period", {}).items():
                     cap_items.append(("tariff_capacity", None if key == "_" else int(key),
-                                      float(eur_per_mw) * size, 0.0))
+                                      float(eur_per_mw) * size, 0.0, item_id))
             else:
                 known = False
         for v in (cap.get("peaks") or {}).values():
             cap_items.append(("tariff_capacity", v.get("inv_period"), 0.0,
-                              float(v["eur_per_mw"]) * float(v["peak_mw"])))
+                              float(v["eur_per_mw"]) * float(v["peak_mw"]), v.get("item")))
         if known:
-            items.extend(cap_items)
+            for lab, period, cx, ox, item_id in cap_items:
+                items.append((lab, period, cx, ox))
+                _by_item(block, "tariff_capacity", item_id, period, cx + ox)
         else:
+            block.setdefault("by_item", {})["tariff_capacity"] = None
             # A partly unknown term is unknown: nothing of it enters the
             # totals (ADR-0001; review #4).
             flags.append("tariff_capacity_not_established")

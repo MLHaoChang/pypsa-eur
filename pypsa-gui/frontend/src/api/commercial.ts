@@ -1,7 +1,7 @@
 // Edge Investment Case commercial clients (IC P3 WP3.5): the Library, the
 // value-flow config (its own route, If-Match always sent), commercial sub-tree
 // writes through the solver-config route, and the commercial results.
-import client from './client'
+import client, { formatApiDetail } from './client'
 import type {
   AssetOwnership, CommercialConfig, LibraryItemRef, LibraryRef, SolverConfig, Tariff,
   ValueFlowConfig, ValueFlowsState,
@@ -58,6 +58,22 @@ export class NoCommercialConfigError extends Error {
   constructor(message: string) { super(message); this.name = 'NoCommercialConfigError' }
 }
 
+/** A save the server refused (a 422, or a 409 other than the typed ones): its
+ *  message, and the refusal `code` when the server named one. */
+export class SaveRefusedError extends Error {
+  readonly code?: string
+  readonly status?: number
+  constructor(message: string, code?: string, status?: number) {
+    super(message); this.name = 'SaveRefusedError'; this.code = code; this.status = status
+  }
+}
+/** The commercial root (IC U1 follow-up b): the meter Links and the site clock. */
+export interface SiteConnection {
+  poc_link: string
+  export_link: string | null
+  timezone: string | null
+}
+
 function detailOf(e: unknown): { status?: number; code?: string; message?: string } {
   const r = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response
   const d = r?.data?.detail
@@ -76,6 +92,18 @@ function typed(e: unknown): never {
     throw new NoCommercialConfigError(message ?? 'set up the commercial config first')
   }
   throw e
+}
+
+/** A refused save, as a typed error (409 in-flight stays SolverInFlightError). */
+function refused(e: unknown): never {
+  const r = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response
+  if (r?.status === 422 || (r?.status === 409 && detailOf(e).code !== 'solver_in_flight')) {
+    const { code, message } = detailOf(e)
+    throw new SaveRefusedError(message ?? formatApiDetail(r.data?.detail,
+                                                          'the server refused the change'),
+                               code, r.status)
+  }
+  return typed(e)
 }
 
 /** Result requests never toast (the tab shows the state itself), so their
@@ -246,6 +274,21 @@ export const commercialApi = {
     }
     return client.put<SolverConfig>('/simulation/solver_config', { commercial: next })
       .then(r => r.data, typed)
+  },
+  /**
+   * Set the commercial root, `poc_link` / `export_link` / `timezone` (IC U1
+   * follow-up b), on the LATEST stored config: every other key is kept, and
+   * `value_flows` is never sent (the server keeps it). Works on a project with
+   * no commercial config yet. A refusal is a `SaveRefusedError` (the binding's
+   * 422s, a stale Library ref's 409) shown by the caller, never a toast.
+   */
+  saveSiteConnection: async (root: SiteConnection) => {
+    const current = (await client.get<SolverConfig>('/simulation/solver_config')).data
+    const next = { ...(current.commercial ?? {}), poc_link: root.poc_link,
+                   export_link: root.export_link, timezone: root.timezone } as Partial<CommercialConfig>
+    delete (next as { value_flows?: unknown }).value_flows
+    return client.put<SolverConfig>('/simulation/solver_config', { commercial: next }, QUIET)
+      .then(r => r.data, refused)
   },
   /** Append contracts (a template's priced drafts, IC P3 WP3.6) to the LATEST
    *  stored list, through the solver-config route like `saveCommercial`. */
