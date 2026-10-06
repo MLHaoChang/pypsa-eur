@@ -32,7 +32,8 @@ from starlette.responses import StreamingResponse
 from db.models import Session as SessionRow
 from db.models import User
 from deps import current_session, optional_user
-from services import app_secrets, chat_service, llm_config
+from harness import loop as chat_service
+from services import app_secrets, llm_config
 
 logger = logging.getLogger("pypsa_gui.chat")
 
@@ -684,6 +685,43 @@ def get_chat_profiles(
     }
 
 
+@router.get("/workflows")
+def get_chat_workflows(
+    context: Literal["unbound", "expert", "guided"] = "unbound",
+    project_kind: str | None = None,
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """
+    The start menu (chat harness issue 03): the workflows offered when a chat
+    opens in `context` — `unbound` (no project), `expert` or `guided` — in
+    menu order. The panel renders them as chips and sends `opening_request`
+    through its request queue, labelled with `title` (owner decision Q10).
+
+    Served from `harness.workflows` so the menu is one source of truth for
+    every provider and for any future external client; the three hardcoded
+    chip arrays the panel used to carry are gone. Nothing here depends on an
+    LLM profile or a key: the menu renders with no key configured, like the
+    launch greeting. Gated on "authenticated" like `/profiles`.
+    """
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    from harness import workflows
+
+    return {
+        "context": context,
+        "workflows": [
+            {
+                "id": wf.id,
+                "title": wf.title,
+                "intent": wf.intent,
+                "opening_request": wf.opening_request,
+                "steps": [{"id": s.id, "title": s.title} for s in wf.steps],
+            }
+            for wf in workflows.menu(context, project_kind)
+        ],
+    }
+
+
 def _recover_pending_turn(ctx: Any) -> dict[str, Any] | None:
     """
     Resolve the WAL record left by an interrupted turn (#20), or None.
@@ -762,6 +800,7 @@ def chat_history(limit: int = 200,
                 "bound_project": ctx.loaded_project,
                 "history_gap": history_gap,
                 "pending_turn": pending_turn,
+                "workflow": None,
                 "bound_profile_id": None}
     if limit > 0:
         turns = turns[-limit:]
@@ -770,6 +809,9 @@ def chat_history(limit: int = 200,
     # is process-lifetime; after a backend restart the session is gone in
     # memory but the chat.jsonl is the durable record.
     last_session_id = None
+    # The bound session's workflow step (issue 06 follow-up), so a reloaded
+    # page shows the strip again while the server session is still resident.
+    workflow_state = None
     # P28 A3 — the profile the resumed session is bound to (see the docstring).
     bound_profile_id: str | None = None
     if turns:
@@ -851,6 +893,7 @@ def chat_history(limit: int = 200,
                 live_id = sess.profile_id
                 configured = {p.id for p in llm_config.load_profiles()[0]}
                 bound_profile_id = live_id if live_id in configured else None
+            workflow_state = chat_service._workflow_state_payload(sess)["workflow"]
             # Rebuild the in-memory message history so the next turn can
             # thread the prior conversation into the Anthropic SDK (INT-001
             # threading fix). Best-effort: skip turns missing required keys.
@@ -886,6 +929,7 @@ def chat_history(limit: int = 200,
         "bound_project": ctx.loaded_project,
         "history_gap": history_gap,
         "pending_turn": pending_turn,
+        "workflow": workflow_state,
         "bound_profile_id": bound_profile_id,
     }
 
