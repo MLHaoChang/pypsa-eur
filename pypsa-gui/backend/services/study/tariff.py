@@ -348,6 +348,25 @@ def _aligned(series, index, what: str) -> pd.Series | None:
     return out
 
 
+def _itemised(tariff: Tariff) -> list[str]:
+    """
+    The bill components this tariff carries a charge for (U2 gate: a zero
+    stream with no item is hidden). Energy always; no tax item exists here.
+    """
+    out = ["energy"]
+    if tariff.demand_charge is not None:
+        out.append("demand")
+    if tariff.capacity_charge is not None:
+        out.append("capacity")
+    if tariff.fixed_charge_per_period:
+        out.append("fixed")
+    if tariff.network_charges:
+        out.append("network")
+    if tariff.export.price_per_mwh is not None or tariff.export.series_ref is not None:
+        out.append("export_credit")
+    return out
+
+
 class BillCalculator:
     """
     Prices a site's import and export series under a `Tariff`. `series`
@@ -482,7 +501,8 @@ class BillCalculator:
             horizon_hours=hours, currency=tariff.currency,
             currency_year=tariff.currency_year, unavailable=bill_flags,
             fidelity=None if fidelity is None else Fidelity(fidelity),
-            honesty_notes=tuple(notes), partial_billing_periods=partial)
+            honesty_notes=tuple(notes), partial_billing_periods=partial,
+            itemised_components=_itemised(tariff))
 
 
 #: `n.meta` key holding the demand-charge config the last successful LOPF

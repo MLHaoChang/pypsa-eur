@@ -9,12 +9,12 @@ import type { Findings, InvestmentCase } from '../../api/decisionStudies'
 import {
   BASIS_SENTENCE, GLOSSARY, HELP, OPTION_LABELS, STREAMS_BASIS_LABELS, STREAM_LABELS, NOT_ESTABLISHED, UI_LABELS, helpFor,
 } from '../../utils/decisionVocabulary'
-import { streamsBasis, valueText } from './decisionModel'
+import { shownStreams, streamsBasis, valueText } from './decisionModel'
 import { Card, CodeList } from './DecisionUi'
 
 function Waterfall({ findings }: { findings: Findings }) {
   const basis = streamsBasis(findings)
-  const streams = findings.value_streams
+  const streams = shownStreams(findings.value_streams)
   if (!basis) {
     const codes = findings.honesty_notes.filter(c => c.startsWith('value_streams_'))
     return (
@@ -46,7 +46,7 @@ function Waterfall({ findings }: { findings: Findings }) {
             const w = v == null ? 0 : Math.max(2, (Math.abs(v) / max) * 100)
             return (
               <li key={s.key ?? s.label} data-stream={s.key ?? s.label} className="grid grid-cols-[10rem_1fr_8rem] items-center gap-2">
-                <span>{STREAM_LABELS[s.key ?? ''] ?? s.label}</span>
+                <span title={s.key === 'taxes_levies' ? GLOSSARY.taxes_levies.text : undefined}>{STREAM_LABELS[s.key ?? ''] ?? s.label}</span>
                 <span className="h-3 rounded-sm bg-panel relative" aria-hidden="true">
                   <span className={`absolute inset-y-0 left-0 rounded-sm ${v != null && v < 0 ? 'bg-muted' : 'bg-accent'}`} style={{ width: `${w}%` }} />
                 </span>

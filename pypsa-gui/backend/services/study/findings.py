@@ -91,7 +91,7 @@ __all__ = [
     "STREAMS", "TORNADO_AUX", "TornadoContext", "TornadoOutcome", "VariantFailed",
     "assemble_findings", "attribute", "bounds_for", "centre_attributions",
     "context_from_disk", "estimate_tornado_solves", "explain", "is_zero_size",
-    "load_inputs", "run_tornado", "value_streams", "verdict",
+    "load_inputs", "run_tornado", "shown_streams", "value_streams", "verdict",
 ]
 
 # A battery at or below `EPSILON_MW` is "no investment" (gate S5 carry); the
@@ -154,6 +154,9 @@ def value_streams(bill_baseline: Bill, bill_option: Bill) -> list[ValueStream]:
     share null (``zero_savings``).
     """
     base, opt = bill_baseline.by_component, bill_option.by_component
+    listed = (None if bill_baseline.itemised_components is None
+              or bill_option.itemised_components is None
+              else set(bill_baseline.itemised_components) | set(bill_option.itemised_components))
     savings = None
     if bill_baseline.annual_bill is not None and bill_option.annual_bill is not None:
         savings = float(bill_baseline.annual_bill) - float(bill_option.annual_bill)
@@ -177,8 +180,20 @@ def value_streams(bill_baseline: Bill, bill_option: Bill) -> list[ValueStream]:
         else:
             share = value / savings
         out.append(ValueStream(key=key, label=label, annual_value=value, share=share,
-                               engine="bill_calculator", unavailable=flags))
+                               engine="bill_calculator", unavailable=flags,
+                               itemised=None if listed is None
+                               else any(c in listed for c in comps)))
     return out
+
+
+def shown_streams(streams) -> list[ValueStream]:
+    """
+    The streams the report and the UI show (U2 gate, owner decision 7): all of
+    them but a stream at exactly 0.0 none of whose components the tariff has
+    an item for (`itemised` False) — e.g. "Taxes & levies" on a tariff without
+    a tax item. A stream whose bills did not list their items is shown.
+    """
+    return [s for s in streams if not (s.itemised is False and s.annual_value == 0.0)]
 
 
 # ── range semantics (gate S2 [S5]) ────────────────────────────────────────

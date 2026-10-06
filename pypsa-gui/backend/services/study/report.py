@@ -328,6 +328,17 @@ _PREFIX_HELP: tuple[tuple[str, str], ...] = (
 _FALLBACK = "No explanation is recorded for this code."
 
 
+def _shown_streams(streams):
+    """
+    The streams the report shows (`findings.shown_streams`: a zero stream the
+    tariff has no item for is hidden). Imported at call time, so this module
+    keeps importing no runner-side code at load.
+    """
+    from services.study.findings import shown_streams
+
+    return shown_streams(streams)
+
+
 def help_for(code: str, tariff: Tariff | None = None) -> tuple[str, str]:
     """``(sentence, source)`` for a code: the tariff's, the study's, a prefix, or the fallback."""
     if tariff is not None and code in tariff.honesty_help:
@@ -987,7 +998,8 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
         prose=_para(*drivers_prose),
         payload={"value_streams_basis": "pv_only_reference" if increment else "baseline",
                  "value_streams_label": streams_label, "value_streams_option": stream_oid,
-                 "value_streams": [s.model_dump(mode="json") for s in f.value_streams],
+                 "value_streams": [s.model_dump(mode="json")
+                                   for s in _shown_streams(f.value_streams)],
                  "tornado": [r.model_dump(mode="json") for r in rob.tornado],
                  "tornado_centre": rob.npv_centre, "tornado_option": rob.option_id})
 

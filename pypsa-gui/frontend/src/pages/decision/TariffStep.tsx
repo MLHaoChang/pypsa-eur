@@ -5,7 +5,7 @@
 // the load alone (grid only: the import IS the load), before any option.
 import type { IntakePreview, StudyError, StudyIntake, StudyLibrary, Tariff } from '../../api/decisionStudies'
 import { BASIS_SENTENCE, BILL_COMPONENT_LABELS, NOT_ESTABLISHED, errorCopy } from '../../utils/decisionVocabulary'
-import { valueText } from './decisionModel'
+import { billLineShown, valueText } from './decisionModel'
 import { Banner, Card, CodeList, Refusal } from './DecisionUi'
 
 const COMPONENTS = Object.entries(BILL_COMPONENT_LABELS) as Array<[Exclude<keyof IntakePreviewBillComponents, 'unavailable'>, string]>
@@ -41,7 +41,7 @@ export function BillPreview({ preview, error }: { preview: IntakePreview | null;
         <span className="text-muted"> · {BASIS_SENTENCE}{b.bill.currency_year != null ? `, ${cur} of ${b.bill.currency_year}` : ''} · bill calculator, no optimisation</span>
       </p>
       <ul className="grid grid-cols-2 gap-x-4 text-[11.5px]">
-        {COMPONENTS.map(([k, label]) => (
+        {COMPONENTS.filter(([k]) => billLineShown(b.bill.by_component[k], k, b.bill.itemised_components)).map(([k, label]) => (
           <li key={k} className="flex justify-between"><span>{label}</span>
             <span className="font-mono">{valueText(b.bill.by_component[k], `${cur}/yr`)}</span></li>
         ))}

@@ -212,6 +212,11 @@ export const GLOSSARY = {
       + '“tornado”) moves each key assumption, one at a time, to the low and the high end of its plausible range, '
       + 'with the battery size held fixed; “at every tornado bound” means the result held at all of them.',
   },
+  taxes_levies: {
+    term: 'Taxes & levies',
+    text: 'Taxes, levies and certificate charges the tariff bills on the energy bought from the grid. '
+      + 'Shown only when the tariff has such a charge.',
+  },
   pv_only: {
     term: 'Battery value against PV-only',
     text: 'When an option also builds solar PV, the battery’s value is what it adds on top of the same PV built '
@@ -231,7 +236,7 @@ export const PV_VERDICT = {
     + 'does not show that a battery pays on its own.',
 }
 
-/** The bill's components (the bill calculator's six). */
+/** The bill's components (seven since U2: owner decision 7 adds taxes and levies). */
 export const BILL_COMPONENT_LABELS = {
   energy: 'Energy',
   network: 'Network charges',
@@ -239,6 +244,7 @@ export const BILL_COMPONENT_LABELS = {
   capacity: 'Capacity charge',
   fixed: 'Fixed charges',
   export_credit: 'Export credit',
+  taxes_levies: 'Taxes & levies',
 } as const
 
 /** Field, column and card labels used by the pages (gate S8 [S7]: this file is the only source). */
@@ -281,6 +287,7 @@ export const STREAM_LABELS: Record<string, string> = {
   energy_shift: 'Energy time-shift',
   export_credit: 'Export credit',
   fixed: 'Fixed charges',
+  taxes_levies: 'Taxes & levies',
 }
 
 // ── refusals: every typed code a study route can answer with ──────────────

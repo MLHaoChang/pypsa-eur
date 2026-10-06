@@ -129,6 +129,8 @@ export interface BillComponents {
   fixed: number | null
   network: number | null
   export_credit: number | null
+  /** U2 (owner decision 7): the seventh component; absent on a bill stored before U2. */
+  taxes_levies?: number | null
   unavailable: Record<string, string>
 }
 
@@ -142,10 +144,12 @@ export interface Bill {
   basis: FinancialBasis
   currency: string
   currency_year: number | null
-  engine: 'bill_calculator'
+  engine: 'bill_calculator' | 'tariff_engine'
   fidelity: Fidelity | null
   honesty_notes: string[]
   partial_billing_periods: string[]
+  /** U2: the components the tariff carries an item for (absent or null: not listed). */
+  itemised_components?: string[] | null
   unavailable: Record<string, string>
 }
 
@@ -332,6 +336,8 @@ export interface ValueStream {
   share: number | null
   engine: Engine
   basis: FinancialBasis
+  /** U2: whether the tariff has an item for one of the stream's components (null: not said). */
+  itemised?: boolean | null
   unavailable: Record<string, string>
 }
 

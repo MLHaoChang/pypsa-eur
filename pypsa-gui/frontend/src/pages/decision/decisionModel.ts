@@ -114,6 +114,22 @@ export function formatMoney(value: number, currency = 'EUR'): string {
 }
 
 /** A value in a unit, as the guided flow shows it; `null` is "not established". */
+/**
+ * U2 gate (owner decision 7): the streams the page shows — all but one at
+ * exactly 0 whose tariff has no item for any of its components
+ * (`itemised === false`), as `findings.shown_streams` does for the report.
+ */
+export function shownStreams<T extends { annual_value: number | null; itemised?: boolean | null }>(streams: T[]): T[] {
+  return streams.filter(s => !(s.itemised === false && s.annual_value === 0))
+}
+
+/** Whether a bill line is shown: present on the bill, and not a 0 the tariff has no item for. */
+export function billLineShown(value: number | null | undefined, key: string,
+  itemised: string[] | null | undefined): boolean {
+  if (value === undefined) return false
+  return !(value === 0 && itemised != null && !itemised.includes(key))
+}
+
 export function valueText(value: number | null | undefined, unit: string | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return NOT_ESTABLISHED
   const u = (unit ?? '').trim()

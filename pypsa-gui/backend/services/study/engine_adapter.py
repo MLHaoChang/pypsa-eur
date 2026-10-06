@@ -133,6 +133,17 @@ def _notes(res, partial: list[str], has_fixed: bool) -> tuple[str, ...]:
     return tuple(sorted(dict.fromkeys(out)))
 
 
+def _itemised(compiled: C.CompiledCommercial, items) -> list[str]:
+    """
+    The components the compiled tariff carries an item for, plus the export
+    credit when the config prices export (the value-flow line).
+    """
+    found = {component_of(i, compiled.item_component) for i in items}
+    if compiled.config.export_price_ref is not None or "export_series_not_minted" in compiled.notes:
+        found.add("export_credit")
+    return [k for k in BILL_COMPONENT_KEYS if k in found]
+
+
 def _bill_notes(compiled: C.CompiledCommercial, res, partial: list[str],
                 has_fixed: bool) -> tuple[str, ...]:
     """
@@ -243,7 +254,7 @@ def _bill(n, compiled: C.CompiledCommercial, site_bill, *, export_credit: float 
         engine="tariff_engine", unavailable=bill_flags,
         fidelity=None if fidelity is None else Fidelity(fidelity),
         honesty_notes=_bill_notes(compiled, res, partial, has_fixed),
-        partial_billing_periods=partial)
+        partial_billing_periods=partial, itemised_components=_itemised(compiled, items))
 
 
 def _export_line(n, compiled: C.CompiledCommercial) -> tuple[float | None, str | None]:

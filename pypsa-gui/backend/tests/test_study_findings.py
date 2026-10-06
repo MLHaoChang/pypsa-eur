@@ -82,6 +82,41 @@ def test_zero_savings_leave_the_shares_null_with_a_flag():
     assert all(s.share is None and s.unavailable == {"share": "zero_savings"} for s in streams)
 
 
+def test_a_zero_stream_the_tariff_has_no_item_for_is_marked_and_hidden():
+    """
+    Gate U2-S1 (visible now): a stream is `itemised` when the tariff has an
+    item for one of its components; a zero stream with no item (the toy has
+    no tax item) is hidden from the report and the UI (`shown_streams`).
+    """
+    base, opt = _toy_bills()
+    streams = F.value_streams(base, opt)
+    by = {s.key: s for s in streams}
+    assert (by["taxes_levies"].annual_value, by["taxes_levies"].itemised) == (0.0, False)
+    assert by["demand_charge_reduction"].itemised is True and by["fixed"].itemised is True
+    assert [s.key for s in F.shown_streams(streams)] == [
+        "demand_charge_reduction", "energy_shift", "export_credit", "fixed"]
+
+
+def test_a_zero_stream_the_tariff_has_an_item_for_is_shown():
+    base, opt = _toy_bills()
+    taxed = [b.model_copy(update={"itemised_components": [*b.itemised_components,
+                                                          "taxes_levies"]})
+             for b in (base, opt)]
+    streams = F.value_streams(*taxed)
+    tax = next(s for s in streams if s.key == "taxes_levies")
+    assert (tax.annual_value, tax.itemised) == (0.0, True)
+    assert "taxes_levies" in [s.key for s in F.shown_streams(streams)]
+
+
+def test_a_bill_that_does_not_list_its_items_hides_nothing():
+    """A bill stored before the item list (`itemised_components` None)."""
+    base, opt = _toy_bills()
+    legacy = [b.model_copy(update={"itemised_components": None}) for b in (base, opt)]
+    streams = F.value_streams(*legacy)
+    assert all(s.itemised is None for s in streams)
+    assert len(F.shown_streams(streams)) == len(streams) == 5
+
+
 def test_the_stream_map_reuses_the_adapters_seven_components():
     """U2 WP5: the components moved to `engine_adapter.BILL_COMPONENTS` (seven)."""
     from services.study.engine_adapter import BILL_COMPONENTS

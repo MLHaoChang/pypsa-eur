@@ -522,6 +522,10 @@ class Bill(_FigureBlock):
     honesty_notes: tuple[str, ...] = ()
     # Billing periods the snapshots cover only in part (labels, not prose).
     partial_billing_periods: list[str] = Field(default_factory=list)
+    # U2 gate (visible now): the components the tariff carries an item for
+    # (None on a bill stored before the list existed). A zero value stream
+    # none of whose components has an item is hidden from the report and UI.
+    itemised_components: list[str] | None = None
 
 
 # ── 4.2 DecisionQuestion ──────────────────────────────────────────────────
@@ -800,6 +804,10 @@ class ValueStream(_FigureBlock):
     share: float | None
     engine: Engine
     basis: FinancialBasis = Field(default_factory=FinancialBasis)
+    # U2 gate (visible now): whether the tariff has an item for one of the
+    # stream's components (None: the bills did not say). A stream at 0.0 with
+    # `itemised` False is hidden from the report and the UI.
+    itemised: bool | None = None
 
 
 class MarketRevenueAtDuals(_FigureBlock):

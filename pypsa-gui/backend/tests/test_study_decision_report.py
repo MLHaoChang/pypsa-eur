@@ -730,3 +730,23 @@ def test_the_maturity_advice_names_only_what_still_holds_the_badge():
         "load: sector_profile (upload metered load to raise maturity)"))
     text = _advice(_report(study=synthetic))
     assert "metered load" in text and "defaults" in text and "tariff" not in text, text
+
+
+def test_the_report_hides_a_zero_stream_the_tariff_has_no_item_for():
+    """
+    Gate U2-S1 (visible now), both ways: a zero stream with no tariff item
+    leaves the drivers payload (the waterfall, the docx and html tables); a
+    zero stream the tariff has an item for stays.
+    """
+    from models.study import ValueStream
+
+    def vs(key, value, itemised):
+        return ValueStream(key=key, label=key, annual_value=value, share=None,
+                           engine="bill_calculator", itemised=itemised,
+                           unavailable={"share": "zero_savings"})
+
+    streams = [vs("energy_shift", 5e4, True), vs("taxes_levies", 0.0, False),
+               vs("fixed", 0.0, True)]
+    payload = _report(streams=streams).sections["drivers"].payload
+    assert [s["key"] for s in payload["value_streams"]] == ["energy_shift", "fixed"]
+
