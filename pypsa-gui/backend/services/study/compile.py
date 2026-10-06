@@ -406,19 +406,27 @@ def commercial_from_form(form: Tariff, snapshots, *, connection_mw: float | None
     (:func:`mint_export_series`, a `PriceSeriesRef` or its dict): a tariff
     with an export price and no minted series compiles with no
     `export_price_ref`, noted `export_series_not_minted` (it cannot be bound);
-    a tariff with none compiles unpriced (`export_unpriced`: the export Link
-    earns nothing). An export cap needs the connection (row 34).
+    a tariff with no export price at all is refused `tariff_export_pricing`
+    (gate U2-S1 C1; a stated 0.0 is a price). An export cap needs the
+    connection (row 34).
     """
     idx = _flat_index(snapshots)
     _refuse_unsupported(form)
     eng = tariff_to_engine(form, snapshots=idx, connection_mw=connection_mw,
                            jurisdiction=jurisdiction, valid_from=valid_from)
     notes = list(eng.notes)
-    priced = form.export.price_per_mwh is not None or form.export.series_ref is not None
-    ref = _as_ref(export_series) if priced else None
-    if not priced:
-        notes.append("export_unpriced")
-    elif ref is None:
+    if form.export.price_per_mwh is None and form.export.series_ref is None:
+        # Gate U2-S1 C1: the site pack always builds the export Link. A form
+        # that states no export compensation is refused, as GS refused writing
+        # it: an absent price is not a zero (ADR-0001), and an unpriced export
+        # Link would escape the engine's import-to-export cycling check, which
+        # reads the export price (owner decision 10). A stated 0.0 compiles.
+        raise CompileError(
+            "tariff_export_pricing",
+            "the site exports through grid_export but the tariff states no export "
+            "compensation; give price_per_mwh (0 if export is not paid) or series_ref")
+    ref = _as_ref(export_series)
+    if ref is None:
         notes.append("export_series_not_minted")
     connection = None
     if form.export.cap_mw is not None:

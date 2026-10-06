@@ -273,17 +273,38 @@ def test_export_price_and_series_ref_together_are_refused():
     assert exc.value.code == "tariff_export_pricing"
 
 
-def test_an_export_link_without_any_price_is_unpriced_not_refused():
+def test_an_export_link_without_any_price_is_refused():
     """
-    Port of `test_export_link_without_any_export_price_is_refused_when_writing`:
-    GS refused WRITING prices; IC prices export only through a series, so a
-    tariff without one compiles with no `export_price_ref` (the export Link
-    earns nothing), noted `export_unpriced` (delta recorded).
+    Port of `test_export_link_without_any_export_price_is_refused_when_writing`
+    (gate U2-S1 C1): the site pack always builds `grid_export`, and a form
+    that states no export compensation (neither a price nor a series) is
+    refused `tariff_export_pricing`, as GS refused writing it. An absent price
+    is not a zero (ADR-0001), and an unpriced export Link would escape the
+    import-to-export cycling check the engine's preflight runs on the export
+    price (owner decision 10). A stated 0.0 compiles (the site is paid
+    nothing for export, a known fact).
     """
-    compiled = _C().commercial_from_form(_form(), JAN_FEB)
-    assert compiled.config.export_price_ref is None
-    assert compiled.config.export_link == "grid_export"
-    assert "export_unpriced" in compiled.notes
+    with pytest.raises(_C().CompileError) as exc:
+        _C().commercial_from_form(_form(), JAN_FEB)
+    assert exc.value.code == "tariff_export_pricing"
+    zero = _C().commercial_from_form(_form(export={"price_per_mwh": 0.0}), JAN_FEB,
+                                     export_series=FAKE_REF)
+    assert zero.config.export_price_ref is not None
+    assert "export_unpriced" not in zero.notes
+
+
+def test_a_user_tariff_without_an_export_price_is_refused_through_the_ledger():
+    from services.study import library as L
+    from services.study import questions as Q
+
+    tariff = {"tariff_id": "u", "name": "user", "source": "user bill", "currency": "EUR",
+              "currency_year": 2020,
+              "energy_bands": [{"label": "flat", "price_per_mwh": 120.0, "applies": {}}]}
+    intake = {**SF.site_intake(), "tariff": {"custom": tariff}}
+    ledger = L.seed_ledger(Q.BESS_AT_SITE, intake, _defaults())
+    with pytest.raises(_C().CompileError) as exc:
+        _C().commercial_from_ledger(intake, ledger, _defaults(), YEAR, export_series=FAKE_REF)
+    assert exc.value.code == "tariff_export_pricing"
 
 
 def test_an_export_price_without_a_minted_series_is_noted_and_cannot_bind():

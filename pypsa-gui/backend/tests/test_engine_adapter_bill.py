@@ -51,7 +51,8 @@ def _form(**over) -> Tariff:
         currency_year=2026, billing_period="month",
         energy_bands=[{"label": "flat", "price_per_mwh": 100.0, "applies": {}}],
         demand_charge=None, fixed_charge_per_period=0.0, network_charges=[],
-        export={"price_per_mwh": None, "series_ref": None, "cap_mw": None},
+        # A stated export price (gate U2-S1 C1: an unpriced export is refused).
+        export={"price_per_mwh": 0.0, "series_ref": None, "cap_mw": None},
     )
     base.update(over)
     return Tariff.model_validate(base)
@@ -490,3 +491,45 @@ def test_on_an_engine_solved_fork_the_bill_is_established_and_export_is_the_ledg
     assert close(-export_revenue(live, c.config)["_"], bill.by_component.export_credit)
     want = WP0["seed_bills"][DE]["bess_pv_2h"]
     assert close(bill.total, want["total"], rel=1e-4)
+
+
+@pytest.mark.live_solve
+def test_a_pv_option_with_a_zero_export_price_bills_a_real_zero_credit():
+    """
+    Gate U2-S1 C1 on a PV option: a site whose tariff states export is paid
+    0.0 compiles, is solved through `run_simulation`, and its bill is
+    ESTABLISHED with `export_credit == 0.0` however much the PV exports —
+    never null because some kWh left the site.
+    """
+    import queue
+    import threading
+
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig, run_simulation
+    from services.study import library as L
+    from services.study import packs
+    from services.study import questions as Q
+    from tests.conftest import install_network_into_backend
+
+    defaults = _defaults()
+    form = defaults.tariffs[DE].model_copy(
+        update={"export": defaults.tariffs[DE].export.model_copy(update={"price_per_mwh": 0.0})})
+    intake = {**SF.site_intake(), "tariff": {"custom": form.model_dump(mode="json")}}
+    ledger = L.seed_ledger(Q.BESS_AT_SITE, intake, defaults)
+    n = packs.build_site_network(intake, ledger, "bess_pv_2h", library=defaults)
+    n.links_t.marginal_cost = n.links_t.marginal_cost.drop(
+        columns=[x for x in ("grid_import", "grid_export") if x in n.links_t.marginal_cost])
+    c = _C().commercial_from_ledger(intake, ledger, defaults, n.snapshots, export_series=FAKE_REF)
+    c = _C().bind_on_network(n, c, resolve_ref=flat_resolver(0.0, n.snapshots))
+    install_network_into_backend(n)
+    cfg = SolverConfig(solver_name="highs", discount_rate=0.07, default_lifetime=25.0,
+                       commercial=c.config.model_dump(mode="json"))
+    live = PyPSAService.get_network()
+    status, _ = run_simulation(cfg, live, PyPSAService.get_lock(), threading.Event(),
+                               queue.SimpleQueue(), state_update=lambda **k: None)
+    assert status in ("ok", "optimal")
+    bill = _A().bill(live, c)
+    assert bill.by_component.export_credit == 0.0
+    assert "export_credit" not in bill.by_component.unavailable
+    assert bill.total is not None and bill.unavailable == {}
+

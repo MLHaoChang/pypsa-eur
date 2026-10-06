@@ -17,7 +17,7 @@
    "test_export_credit_is_negative_and_uses_the_price": "test_engine_adapter_bill.py::test_export_credit_is_negative_and_uses_the_price",
    "test_export_series_ref_resolves_through_the_calculators_series": "test_engine_adapter_bill.py::test_a_market_indexed_export_series_is_the_credit",
    "test_export_price_and_series_ref_together_are_refused": "test_study_compile_commercial.py::test_export_price_and_series_ref_together_are_refused",
-   "test_export_link_without_any_export_price_is_refused_when_writing": "test_study_compile_commercial.py::test_an_export_link_without_any_price_is_unpriced_not_refused",
+   "test_export_link_without_any_export_price_is_refused_when_writing": "test_study_compile_commercial.py::test_an_export_link_without_any_price_is_refused",
    "test_absent_import_series_nulls_the_import_components_with_a_flag": "test_engine_adapter_bill.py::test_absent_import_series_nulls_the_import_components_with_a_flag",
    "test_absent_export_series_nulls_the_export_credit_with_a_flag": "test_engine_adapter_bill.py::test_absent_export_series_nulls_the_export_credit_with_a_flag",
    "test_annual_bill_only_for_a_one_year_horizon": "test_engine_adapter_bill.py::test_annual_bill_only_for_a_one_year_horizon",

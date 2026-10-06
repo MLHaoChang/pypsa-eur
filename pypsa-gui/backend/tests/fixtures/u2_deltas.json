@@ -60,11 +60,11 @@
    "cause": "export_line_needs_the_dispatch"
   },
   {
-   "test": "test_study_compile_commercial.py::test_an_export_link_without_any_price_is_unpriced_not_refused",
+   "test": "test_study_compile_commercial.py::test_an_export_link_without_any_price_is_refused",
    "figure": "outcome",
    "pre": "ExportPricingError (write_tariff_prices)",
-   "post": "compiled, export_unpriced",
-   "cause": "export_priced_only_through_a_series"
+   "post": "CompileError tariff_export_pricing (compile)",
+   "cause": "none: refused as GS did (gate U2-S1 C1: an absent export price is not a zero, ADR-0001; an unpriced export Link would escape the cycling preflight, decision 10); a stated 0.0 is billed as a real 0.0 credit"
   },
   {
    "test": "test_engine_adapter_bill.py::test_a_bill_is_the_tariff_engines_with_seven_components",
