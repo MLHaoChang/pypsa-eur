@@ -39,7 +39,7 @@ tools `campus_draft_campus` and `campus_run_study` call the service directly,
 and `_gridspine_project` resolves access but not the lock. Reproduced on
 `af69613`: the HTTP draft returned 409 for a non-holder, while
 `campus_draft_campus(overwrite=True)` and `campus_run_study` both reached the
-write path. This is the fifth instance of the "a second caller skips the
+write path. #84 added a third, `campus_extract_grid_code` (it can add a grid-code draft but not overwrite one), reproduced the same way. This is the fifth instance of the "a second caller skips the
 handler" shape. `tests/test_write_surface_lock_policy.py` caught it on the day
 it landed, by going red on #80 merged with the new master. Note for the fix:
 these tools take a `project_id`, so the seam's active-project predicate would
