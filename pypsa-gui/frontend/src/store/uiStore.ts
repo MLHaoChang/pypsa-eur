@@ -11,7 +11,10 @@ import { appLog } from './simulationStore'
 import type { ProjectMismatch } from '../utils/projectMismatch'
 
 interface SelectedComponent { type: string; name: string }
-export interface PropertiesEditRequest { type: 'Bus' | 'Link'; name: string }
+// The classes whose Properties card can be asked to open its editor: the
+// tagging tour (Bus, Link) and the schematic's asset-node double-click
+// (plan 1 A2: Generator, StorageUnit, Store, Load, Link).
+export interface PropertiesEditRequest { type: 'Bus' | 'Link' | 'Generator' | 'StorageUnit' | 'Store' | 'Load'; name: string }
 // CreationRequest is set when the user wants to add a new asset to the network.
 // Two entry points:
 //   • Click in AssetPalette → setCreationItem({id, label}) → renders as

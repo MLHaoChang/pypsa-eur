@@ -14,11 +14,17 @@ import { projectsApi } from '../api/projects'
 import { rawFetchHeaders } from '../api/csrf'
 import { useUIStore } from '../store/uiStore'
 import { appLog } from '../store/simulationStore'
+import type { AssetMode } from './topologyAssets'
 
 export type WP = { x: number; y: number }
+export type { AssetMode }
 
 // ── localStorage persistence ───────────────────────────────────────────────────
-export const STORAGE_VERSION = 1
+// Version 2 (plan 1 A2): `assetMode` and `asset-…` node positions. A version-1
+// document is still read — as `grouped`, today's behaviour — never discarded:
+// a user's positions must survive the client upgrading.
+export const STORAGE_VERSION = 2
+const READABLE_VERSIONS: readonly number[] = [1, 2]
 // Per-project localStorage key, mirroring `layoutCacheKey` (defined later). The
 // `?? '__local__'` is inlined here on purpose: this helper is referenced from
 // module-level functions that run before `layoutCacheKey` is initialised, so it
@@ -31,7 +37,10 @@ export interface PersistedNode { id: string; canvasX: number; canvasY: number }
 export interface PersistedEdge { id: string; waypoints: WP[]; history: WP[][] }
 export interface PersistedState {
   version: number; savedAt: number
+  /** Bus nodes by name; asset nodes (`asset-<Class>:<name>`, A2) alongside. Group bubbles are never persisted. */
   nodes: PersistedNode[]; edges: PersistedEdge[]
+  /** The user's *grouped* / *individual* choice (A2). Absent: the default rule (`defaultAssetMode`) decides. */
+  assetMode?: AssetMode
 }
 
 export function loadDiagramState(project: string | null): PersistedState | null {
@@ -39,12 +48,12 @@ export function loadDiagramState(project: string | null): PersistedState | null 
   try {
     const raw = localStorage.getItem(key)
     if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!parsed || parsed.version !== STORAGE_VERSION) {
+    const state = coercePersistedState(JSON.parse(raw))
+    if (!state) {
       localStorage.removeItem(key)
       return null
     }
-    return parsed as PersistedState
+    return state
   } catch (e) {
     console.warn('Saved diagram state could not be loaded:', e)
     return null
@@ -73,8 +82,14 @@ export function saveDiagramState(project: string | null, state: PersistedState):
 export function coercePersistedState(raw: unknown): PersistedState | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
-  if (o.version !== STORAGE_VERSION) return null
+  if (typeof o.version !== 'number' || !READABLE_VERSIONS.includes(o.version)) return null
   if (!Array.isArray(o.nodes) || !Array.isArray(o.edges)) return null
+  // A version-1 document predates the asset-mode toggle: it reads as
+  // `grouped` (the only view it had) at the current version, and is written
+  // back at the current version on the next save.
+  if (o.version === 1) return { ...o, version: STORAGE_VERSION, assetMode: 'grouped' } as unknown as PersistedState
+  const mode = o.assetMode
+  if (mode !== undefined && mode !== 'grouped' && mode !== 'individual') delete o.assetMode
   return o as unknown as PersistedState
 }
 
@@ -339,24 +354,42 @@ export const SAVE_DEBOUNCE_MS = 300
 export interface LayoutNodeLike { id: string; position: { x: number; y: number } }
 export interface LayoutEdgeLike { id: string; data?: unknown }
 
+/**
+ * What the canvas persists beyond its live nodes and edges (A2): the user's
+ * asset-mode choice, and the asset-node positions that are not on the canvas
+ * right now (grouped mode hides them; a saved position must not be lost by a
+ * mode switch). The canvas has already dropped positions of deleted
+ * components from `assetNodes` (`liveAssetPositions`) — prune on save.
+ */
+export interface PersistExtras {
+  assetMode?: AssetMode
+  assetNodes?: readonly PersistedNode[]
+}
+
 // Asset group nodes (`assetgrp-*`) and asset edges (`assetedge-*`) are derived
-// from the network on every render, so they are never persisted.
+// from the network on every render, so they are never persisted. Asset nodes
+// (`asset-*`) are persisted like buses.
 export function buildPersistedState(
   nodes: readonly LayoutNodeLike[],
   edges: readonly LayoutEdgeLike[],
+  extras?: PersistExtras,
 ): PersistedState {
+  const live = nodes
+    .filter(n => !n.id.startsWith('assetgrp-'))
+    .map(n => ({ id: n.id, canvasX: n.position.x, canvasY: n.position.y }))
+  const seen = new Set(live.map(n => n.id))
+  const hidden = (extras?.assetNodes ?? []).filter(n => !seen.has(n.id))
   return {
     version: STORAGE_VERSION,
     savedAt: Date.now(),
-    nodes: nodes
-      .filter(n => !n.id.startsWith('assetgrp-'))
-      .map(n => ({ id: n.id, canvasX: n.position.x, canvasY: n.position.y })),
+    nodes: [...live, ...hidden],
     edges: edges
       .filter(e => !e.id.startsWith('assetedge-'))
       .map(e => {
         const d = e.data as { waypoints?: WP[]; history?: WP[][] } | undefined
         return { id: e.id, waypoints: d?.waypoints ?? [], history: d?.history ?? [[]] }
       }),
+    ...(extras?.assetMode ? { assetMode: extras.assetMode } : {}),
   }
 }
 
@@ -387,11 +420,15 @@ export interface ScheduleSaveOptions {
 export function useLayoutPersistence(
   nodes: readonly LayoutNodeLike[],
   edges: readonly LayoutEdgeLike[],
+  /** Read when the payload is built (the commit after `scheduleSave`), so a fresh function each render is fine. */
+  extras?: () => PersistExtras,
 ): (opts?: ScheduleSaveOptions) => void {
   const [saveTick, setSaveTick] = useState(0)
   const savePendingRef = useRef(false)
   const saveImmediateRef = useRef(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const extrasRef = useRef(extras)
+  extrasRef.current = extras
 
   const scheduleSave = useCallback((opts?: ScheduleSaveOptions) => {
     savePendingRef.current = true
@@ -405,7 +442,7 @@ export function useLayoutPersistence(
     const immediate = saveImmediateRef.current
     saveImmediateRef.current = false
 
-    const state = buildPersistedState(nodes, edges)
+    const state = buildPersistedState(nodes, edges, extrasRef.current?.())
     // Read currentProject FRESH from the store — a project switch since the
     // last render would otherwise persist under the previous project's key.
     const proj = useUIStore.getState().currentProject

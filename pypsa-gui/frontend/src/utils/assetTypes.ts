@@ -266,3 +266,56 @@ export function legendFor(objects: readonly { kind: string; carrier?: string }[]
   }
   return out
 }
+
+// ── sizing figure ───────────────────────────────────────────────────────────
+// The one number a type is named by — "40 MWh", "12 MW" — for a node label
+// (plan 1 A2). Mirrors the 3D library's `size` rules (site3d/assetLibrary.ts
+// `SiteAppearance.size`, read by site3d/sizing.ts) without importing that
+// table into the main bundle: generators and conversion Links by `p_nom`,
+// loads by `p_set`, Stores by `e_nom`, StorageUnits by the energy they hold
+// (`p_nom × max_hours`) except the two the library sizes by power (flywheels,
+// compressed air). Installed sizes, as the 3D view's default; the overlay
+// replaces the figure with the period-effective capacity when it is on.
+
+export type SizingUnit = 'MW' | 'MWh' | 'MVA'
+export interface SizingFigure { amount: number; unit: SizingUnit }
+
+/** StorageUnit types the 3D library sizes by power, not energy. */
+const POWER_SIZED_STORAGE = new Set(['flywheel', 'caes'])
+
+const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+
+/** The sizing figure of a component of `cls` drawn as `typeId`; null for a class without one (Bus). */
+export function sizingFigure(cls: string, comp: Record<string, unknown>, typeId?: string): SizingFigure | null {
+  switch (cls as PyPSAClass) {
+    case 'Generator': case 'Link': return { amount: num(comp.p_nom), unit: 'MW' }
+    case 'Load': return { amount: Math.abs(num(comp.p_set_peak) || num(comp.p_set)), unit: 'MW' }
+    case 'Store': return { amount: num(comp.e_nom), unit: 'MWh' }
+    case 'StorageUnit': {
+      const p = num(comp.p_nom), h = num(comp.max_hours)
+      if (typeId && POWER_SIZED_STORAGE.has(typeId)) return { amount: p, unit: 'MW' }
+      return h > 0 ? { amount: p * h, unit: 'MWh' } : { amount: p, unit: 'MW' }
+    }
+    case 'Line': case 'Transformer': return { amount: num(comp.s_nom), unit: 'MVA' }
+    default: return null
+  }
+}
+
+/** "40 MWh", "12.5 MW", "1.2 GW": integers plain, otherwise one decimal; ≥ 1000 MW/MWh in G. */
+export function formatSizing(s: SizingFigure): string {
+  const { amount, unit } = s
+  const big = Math.abs(amount) >= 1000 && unit !== 'MVA'
+  const v = big ? amount / 1000 : amount
+  const u = big ? unit.replace(/^M/, 'G') : unit
+  return `${Number.isInteger(v) ? v : v.toFixed(1)} ${u}`
+}
+
+// ── asset nodes ─────────────────────────────────────────────────────────────
+// Which types are a thing the user designs (drawn as a node of its own in the
+// schematic's *individual* mode) rather than infrastructure that stays an edge
+// or a bus: a Link between two electrical buses (`feeder`) is a branch; a
+// transformer is a branch; buses are buses.
+export const ASSET_NODE_EXCLUDED_TYPES: ReadonlySet<string> = new Set(['feeder', 'transformer', 'switchyard', 'manifold'])
+
+/** True when a component drawn as this type is an asset node (not a branch or a bus). */
+export const isAssetNodeType = (typeId: string): boolean => !ASSET_NODE_EXCLUDED_TYPES.has(typeId)
