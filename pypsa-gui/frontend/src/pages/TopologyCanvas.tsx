@@ -55,6 +55,10 @@ import {
   pushHistory, removeWaypoint,
 } from './edgeWaypoints'
 import { assetIcon } from '../utils/assetTypeIcon'
+import {
+  FLOW_CYCLE_VAR, FLOW_DASH, flowAnimationCss, flowClass, flowCycleValue, flowDirection, flowShare, flowSpeedBucket, flowWidth,
+} from '../utils/flowMotion'
+import { useReducedMotion } from '../site3d/motion'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type AssetCategory = 'Thermal' | 'Renewables' | 'Storage' | 'Load'
@@ -97,6 +101,11 @@ const ConnectModeContext = createContext<ConnectModeCtx>({ active: false, source
 
 // ── Highlight context ──────────────────────────────────────────────────────────
 const HighlightContext = createContext<{ type: string; name: string; busName?: string } | null>(null)
+
+// ── Flow style context (A3) ────────────────────────────────────────────────────
+// The toolbar's "width by flow" toggle, read by every edge. Off by default:
+// the static s_nom width stays what the canvas draws.
+const FlowStyleContext = createContext<{ widthByFlow: boolean }>({ widthByFlow: false })
 
 // ── Layout constants and pure functions ───────────────────────────────────────
 // `runLayout`, the name hash and the node radii live in ./topologyLayout
@@ -938,7 +947,7 @@ const ClearRouteIcon = () => (
 )
 
 // ── Editable edge ──────────────────────────────────────────────────────────────
-function EditableEdge({ id, sourceX, sourceY, targetX, targetY, data, selected }: EdgeProps) {
+export function EditableEdge({ id, sourceX, sourceY, targetX, targetY, data, selected }: EdgeProps) {
   const { setEdges, screenToFlowPosition } = useReactFlow()
   const edgeMenu = useContext(EdgeMenuContext)
   const highlight = useContext(HighlightContext)
@@ -975,8 +984,22 @@ function EditableEdge({ id, sourceX, sourceY, targetX, targetY, data, selected }
   const isAsset = ed.type === 'asset'
   const isLink = ed.type === 'link'
   const isTransformer = ed.type === 'transformer'
-  const sw = ed.type === 'line' ? Math.max(2.5, Math.min(6, (ed.s_nom ?? 100) / 200))
+  // A3: the signed flow in the drawing direction (source → target; an extra
+  // Link port: the derived flow toward its far bus) and the rating it is
+  // measured against. The speed bucket and the optional width both read
+  // |p| / rating (utils/flowMotion). Reduced motion stops the dash and keeps
+  // the colour band and the chip — the rule the 3D view applies to rotors.
+  const flowStyle = useContext(FlowStyleContext)
+  const reducedMotion = useReducedMotion()
+  const flowP: number | null = lineOverlay ? lineOverlay.p0
+    : linkOverlay ? (ed.port != null ? -derivedPortFlow(linkOverlay.p0, ed.efficiency) : linkOverlay.p0)
+    : null
+  const flowRating: number | null = lineOverlay ? lineOverlay.sNom : linkOverlay ? linkOverlay.pNom : null
+  const flowBucket = !isAsset && flowP != null ? flowSpeedBucket(flowP, flowRating) : 0
+  const flowAnimated = flowBucket > 0 && !reducedMotion
+  const staticSw = ed.type === 'line' ? Math.max(2.5, Math.min(6, (ed.s_nom ?? 100) / 200))
            : isAsset ? 2 : 2.5
+  const sw = flowStyle.widthByFlow && !isAsset && flowP != null ? flowWidth(flowShare(flowP, flowRating)) : staticSw
   const dashArray = isLink ? '8 5' : isAsset ? '6 3' : undefined
   const isHighlightedEdge = (
     (ed.type === 'line' && highlight?.type === 'Line' && highlight.name === edgeName) ||
@@ -1152,6 +1175,25 @@ function EditableEdge({ id, sourceX, sourceY, targetX, targetY, data, selected }
           opacity={active ? 1 : 0.85}
           pointerEvents="none"
         />
+        {/* A3: the moving dash — light packets over the loading-band colour,
+            advancing toward the receiving bus. Pure CSS (the canvas's one
+            <style> block has the keyframe and a duration class per bucket);
+            the only per-edge inputs are the class and the direction variable.
+            During a waypoint drag the live path is painted imperatively on the
+            two refs above; this path follows on the next render. */}
+        {flowAnimated && (
+          <path d={pathD}
+            className={flowClass(flowBucket)}
+            data-flow-bucket={flowBucket}
+            style={{ [FLOW_CYCLE_VAR]: flowCycleValue(flowDirection(flowP!)) } as React.CSSProperties}
+            stroke="#ffffff" strokeOpacity={0.85}
+            strokeWidth={Math.max(1.5, sw - 1)}
+            fill="none"
+            strokeDasharray={FLOW_DASH}
+            strokeLinecap="round" strokeLinejoin="round"
+            pointerEvents="none"
+          />
+        )}
         {allPoints.slice(0, -1).map((p, i) => {
           const q = allPoints[i + 1]
           const isBadgeSeg = isLink && i === middleSegmentIndex(allPoints.length)
@@ -2043,6 +2085,9 @@ export default function TopologyCanvas() {
   // Which asset group node IDs are currently visible (hidden by default)
   const [visibleGroups, setVisibleGroups] = useState<Set<string>>(new Set())
   const [overlappingNodes, setOverlappingNodes] = useState<Set<string>>(new Set())
+  // A3: width by flow — a toolbar toggle, off by default (static s_nom width), not persisted.
+  const [widthByFlow, setWidthByFlow] = useState(false)
+  const flowStyleCtxValue = useMemo(() => ({ widthByFlow }), [widthByFlow])
   const [busEditor, setBusEditor] = useState<{ busName: string; anchorX: number; anchorY: number } | null>(null)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const resetConfirmTitleId = useId()
@@ -2965,6 +3010,7 @@ export default function TopologyCanvas() {
     <ConnectModeContext.Provider value={connectModeCtxValue}>
     <OverlapContext.Provider value={overlappingNodes}>
     <EdgeMenuContext.Provider value={edgeMenuCtxValue}>
+    <FlowStyleContext.Provider value={flowStyleCtxValue}>
     <style>{`
       @keyframes highlightPulse { 0%,100%{opacity:1} 50%{opacity:0.55} }
       .highlight-ring { animation: highlightPulse 1s ease-in-out 4; }
@@ -2972,6 +3018,7 @@ export default function TopologyCanvas() {
       .highlight-ring-outer { animation: highlightRingOuter 1.1s ease-out 3; }
       @keyframes edgePulse { 0%,100%{opacity:0.85} 50%{opacity:1} }
       .highlight-edge-pulse { animation: edgePulse 1s ease-in-out 4; }
+      ${flowAnimationCss()}
     `}</style>
     <div
       ref={setCanvasEl}
@@ -3147,6 +3194,21 @@ export default function TopologyCanvas() {
                 >
                   <Layers size={15} />
                 </button>
+                {/* A3: width by flow — edges thicken with |p| / rating while
+                    the overlay is on. Off by default: the static s_nom width. */}
+                {resultsOverlayEnabled && (
+                  <button
+                    type="button"
+                    aria-label="Width by flow"
+                    aria-pressed={widthByFlow}
+                    onClick={() => setWidthByFlow(v => !v)}
+                    title="Width by flow — edge width follows |flow| / rating (off: static s_nom width)"
+                    className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors
+                      ${widthByFlow ? 'bg-accent-50 text-accent' : 'text-ink-600 hover:bg-panel hover:text-accent'}`}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeLinecap="round"><path d="M2 4h12" strokeWidth="1"/><path d="M2 8h12" strokeWidth="2"/><path d="M2 12.5h12" strokeWidth="3.2"/></svg>
+                  </button>
+                )}
                 {/* A2: Assets — grouped (four bubbles per bus, shown on
                     request) or individual (one node per asset). Persisted in
                     layout.json; the default follows the component count. */}
@@ -3580,6 +3642,7 @@ export default function TopologyCanvas() {
         )
       })()}
     </div>
+    </FlowStyleContext.Provider>
     </EdgeMenuContext.Provider>
     </OverlapContext.Provider>
     </ConnectModeContext.Provider>
