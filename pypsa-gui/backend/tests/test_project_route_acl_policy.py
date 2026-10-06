@@ -69,6 +69,7 @@ UNAMBIGUOUS_PROJECT_PARAMS = frozenset({"project_id", "base"})
 NAME_MEANS: dict[str, str] = {
     "/api/projects/": "project",
     "/api/gridspine/": "project",  # a planning_dynamics study is a project
+    "/api/campus-electrical/": "project",  # #79: the hub project the campus study runs on
     "/api/network/": "component on the active project",
     "/api/results/": "component on the active project",
     "/api/library/": "org library item",
