@@ -6,6 +6,7 @@ import { useChatStore } from '../store/chatStore'
 import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
 import { getChatHealth, getApiKeySettings } from '../api/chat'
+import { getChatProfiles } from '../api/llmSettings'
 import ChatLaunchGreeting from './ChatLaunchGreeting'
 
 // The launch orientation, from the approved spec
@@ -34,6 +35,10 @@ vi.mock('../api/network', () => ({
 vi.mock('../api/simulation', () => ({
   simulationApi: { getStatus: vi.fn() },
 }))
+// P28: the key offer reads per-profile readiness from GET /chat/profiles.
+// Refused by default (the local-mode / older-backend fallback: `/health`
+// decides for the active profile); a case that needs the list says so.
+vi.mock('../api/llmSettings', () => ({ getChatProfiles: vi.fn() }))
 vi.mock('../api/chat', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/chat')>()
   return {
@@ -75,7 +80,8 @@ beforeEach(() => {
   vi.mocked(getApiKeySettings).mockResolvedValue(KEY_CONFIGURED)
   // Readiness unknown (the probe carries no chat_ready) unless a test says.
   vi.mocked(getChatHealth).mockResolvedValue({ ok: true } as never)
-  useChatStore.setState({ profileId: null })
+  vi.mocked(getChatProfiles).mockRejectedValue(new Error('401'))
+  useChatStore.setState({ profileId: null, boundProfileId: null } as never)
 })
 
 describe('the launch orientation, with a project open', () => {
@@ -249,6 +255,52 @@ describe('the key offer follows the effective profile (P26)', () => {
     useChatStore.setState({ profileId: 'anthropic-default' })
     vi.mocked(getApiKeySettings).mockResolvedValue(KEY_MISSING)
     vi.mocked(getChatHealth).mockResolvedValue(health(true) as never)
+    renderGreeting()
+    expect(await screen.findByTestId('chat-launch-key-offer')).toBeTruthy()
+  })
+})
+
+// P28 A3 (deferred spec §3.1; closes P26 note 5): the offer follows the
+// profile the next turn runs on — `profileId ?? boundProfileId ?? active` —
+// and that profile's own `chat_ready` from GET /chat/profiles.
+describe('the key offer follows per-profile readiness (P28 A3)', () => {
+  const LIST = {
+    active_profile_id: 'anthropic-default',
+    profiles: [
+      { id: 'anthropic-default', label: 'Default', wire: 'anthropic', chat_ready: false },
+      { id: 'local', label: 'Local', wire: 'openai', chat_ready: true },
+    ],
+  }
+  const notReadyHealth = { ok: true, chat_ready: false,
+    active_profile: { id: 'anthropic-default', label: 'Default', wire: 'anthropic' } }
+
+  it('picked ready non-active profile → no key offer', async () => {
+    useChatStore.setState({ profileId: 'local' })
+    vi.mocked(getApiKeySettings).mockResolvedValue(KEY_MISSING)
+    vi.mocked(getChatHealth).mockResolvedValue(notReadyHealth as never)
+    vi.mocked(getChatProfiles).mockResolvedValue(LIST as never)
+    renderGreeting()
+    await waitFor(() => expect(vi.mocked(getChatProfiles)).toHaveBeenCalled())
+    await waitFor(() => expect(vi.mocked(getApiKeySettings)).toHaveBeenCalled())
+    await new Promise(r => setTimeout(r, 30))
+    expect(screen.queryByTestId('chat-launch-key-offer')).toBeNull()
+  })
+
+  it('bound (after a reload) to a ready non-active profile → no key offer', async () => {
+    useChatStore.setState({ boundProfileId: 'local' } as never)
+    vi.mocked(getApiKeySettings).mockResolvedValue(KEY_MISSING)
+    vi.mocked(getChatHealth).mockResolvedValue(notReadyHealth as never)
+    vi.mocked(getChatProfiles).mockResolvedValue(LIST as never)
+    renderGreeting()
+    await waitFor(() => expect(vi.mocked(getChatProfiles)).toHaveBeenCalled())
+    await new Promise(r => setTimeout(r, 30))
+    expect(screen.queryByTestId('chat-launch-key-offer')).toBeNull()
+  })
+
+  it('the control: nothing picked or bound, the active profile not ready → the offer shows', async () => {
+    vi.mocked(getApiKeySettings).mockResolvedValue(KEY_MISSING)
+    vi.mocked(getChatHealth).mockResolvedValue(notReadyHealth as never)
+    vi.mocked(getChatProfiles).mockResolvedValue(LIST as never)
     renderGreeting()
     expect(await screen.findByTestId('chat-launch-key-offer')).toBeTruthy()
   })

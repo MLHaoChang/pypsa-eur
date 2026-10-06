@@ -402,6 +402,11 @@ class SolverConfig:
     # Library ref nested in it is pinned by `services/library/bundle_pins`
     # at save (WP1.1c). None = no commercial layer: the LP is unchanged.
     commercial: dict | None = None
+    # Edge Investment Case finance inputs (IC P4 WP4.6b): the `FinanceInputs`
+    # JSON, validated and set ONLY by `PUT /api/simulation/finance` (If-Match);
+    # the solver-config PUT keeps it. Nothing at solve time reads it, and it is
+    # in no solve fingerprint (a finance edit never makes a dispatch stale).
+    finance: dict | None = None
 
     def __post_init__(self):
         # ── Sanitize solver_options ───────────────────────────────────────
@@ -604,18 +609,25 @@ def run_simulation(
             # The reapply helper handles all 4 cases (flat↔multi, with
             # broadcasting via level-1 timestep match) and is idempotent.
             # Imported here to avoid a circular top-level import.
-            # GATED on "is this the FOREGROUND/active network?" — `_user_ts` is a
-            # process-global store that belongs to the ACTIVE project (B6-writes
-            # deferred → no per-ctx _user_ts yet). For a foreground solve (/run, or
-            # the dispatcher solving the resident foreground in-place) `network IS`
-            # the active network → reapply (byte-identical to pre-B4). For a
-            # BACKGROUND ctx solve (B4.3 dispatcher on a non-active project) the
-            # active `_user_ts` is a DIFFERENT project's store; reapplying it would
-            # overlay the foreground's uploaded profiles onto this project's network
-            # wherever an asset name collides (corrupting its LP + persisted
-            # dispatch). Skip it — the background netcdf already carries baked,
+            # GATED on "is this the FOREGROUND/active network?", because this
+            # call passes a network but NOT a store, so it reapplies whatever
+            # store the calling thread resolves. `/run` copies the request's
+            # context into its worker (`contextvars.copy_context()`), so there
+            # `network IS` the resolved network and the store is that project's
+            # own — reapply. The QUEUE dispatcher thread carries no request
+            # context and resolves the process foreground instead, which is a
+            # DIFFERENT project (or a fresh empty context): reapplying there would
+            # overlay another project's uploaded profiles onto this network
+            # wherever an asset name collides, corrupting its LP and its persisted
+            # dispatch. Skip it — the background netcdf already carries baked,
             # solve-ready profiles (`_hydrate_context_from_disk`). Closes the C2
             # end-to-end QA `_user_ts` cross-talk finding.
+            #
+            # The store is per-`ProjectContext` now, so the sound fix is to pass
+            # the solved context's own store (`_reapply_user_ts_to_network` takes
+            # `store=`). That needs `run_simulation` to receive the ctx, not just
+            # its network; until it does, this gate is what keeps the pairing
+            # honest.
             try:
                 from services.pypsa_service import PyPSAService as _PS
                 _is_foreground = network is _PS.get_network()
@@ -653,8 +665,8 @@ def run_simulation(
                       "profiles would overwrite it).")
             else:
                 phase("Skipped _user_ts reapply (background project solve — netcdf "
-                      "carries baked profiles; the active _user_ts belongs to the "
-                      "foreground project).")
+                      "carries baked profiles; the store this thread resolves "
+                      "belongs to a different project).")
             # Belt-and-suspenders index sync: makes sure every _t DataFrame's
             # row index matches n.snapshots before the LP. Catches stale
             # MultiIndex residue from a previous multi-period solve that

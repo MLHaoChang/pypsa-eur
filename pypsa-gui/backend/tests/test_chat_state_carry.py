@@ -149,11 +149,12 @@ def test_save_evicted_ctx_calls_chat_flush_after_save(monkeypatch):
 
     def fake_save_context(ctx, name, *, expect=None, persist_user_ts=True, **kw):
         call_log.append(f"save:{name}")
-        # _save_context's documented args from _save_evicted_ctx (expect=victim_id,
-        # persist_user_ts=False) — assert here so a refactor that breaks the
+        # _save_context's documented args from _save_evicted_ctx: expect is the
+        # victim's name, and persist_user_ts follows may_rewrite_user_ts (True
+        # for a readable victim) — assert here so a refactor that breaks the
         # contract fails loudly:
         assert expect == name
-        assert persist_user_ts is False
+        assert persist_user_ts is True
 
     def fake_flush(ctx):
         call_log.append(f"flush:{ctx.loaded_project}")

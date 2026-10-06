@@ -3,6 +3,13 @@
 **Verified against the tree on 2026-09-12.** Every entry below was reproduced or
 re-read in source on that date, not carried forward on trust.
 
+**2026-09-29:** four items closed and removed per the convention below — the
+user-timeseries tenancy item, and the three follow-ups fixing it uncovered (an
+obsolete `persist_user_ts` predicate at three call sites, a hydrate that ignored
+its project's `user_ts.json`, and an adequacy-sweep test that could not fail for
+its own regression). Their findings carry the detail. Nothing else was re-verified
+on that date, so the entries below still date from 2026-09-12.
+
 **The High authorization family was re-verified on 2026-09-30** (against
 `a9a1f5b`). Items 2, 3 and 4 were found already fixed — see "Closed since the
 2026-09-12 pass" — and the re-verification turned up a fourth instance of item
@@ -22,34 +29,6 @@ verification record.
 
 ---
 
-## Critical
-
-### 1. The user-timeseries store is a process global shared across tenants
-
-`services/user_timeseries.py:39` — `_user_ts` is keyed `(component, attribute,
-column)` with no org, project or session. It is authoritative, not a cache: the
-timeseries GET prefers it over the network's own data, and every foreground save
-serialises it into that project's `user_ts.json` and reapplies it onto the
-network before the netCDF export.
-
-Reproduced: org A uploads a profile for `L1`; org B activates its OWN project and
-reads A's values, then saves them into B's storage. Cross-tenant read AND
-cross-tenant write. The desktop build is affected too, as a multi-project
-data-integrity bug.
-
-The code mitigated only the BACKGROUND case, on the stated basis that the store
-"belongs to the FOREGROUND ctx" — true for one desktop user, false once one
-process serves many signed-in sessions, where every session is a foreground.
-
-NOT patched: ~230 references across 13 modules; per-`ProjectContext` isolation is
-the real fix and needs its own plan. A narrow containment exists (restore-or-clear
-on activate, as `load_project` already does) but closes only the demonstrated
-path, not the class — two concurrent sessions on different projects still share
-one dict. Full analysis, reproduction and fix criteria:
-`findings/2026-09-12-user-ts-is-a-process-global-shared-across-tenants.md`.
-
----
-
 ## High
 
 *(Nothing open at this severity.)*
@@ -65,7 +44,8 @@ used by `compare`, `adequacy_worksheet`, `uploads`, `snapshots`, `gridspine` and
 routes), `results` (48), `chat` (20), `simulation` (14), `io` (8) — 171 of 267.
 Those rely on the path-prefix middleware instead.
 
-This is the structural cause of item 1, and it is a shape rather than a one-off:
+This is the structural cause of the route-scoping defects above, and it is a
+shape rather than a one-off:
 a prefix list denies by omission, so a new router under a new prefix is ungated
 by default, silently, with nothing failing. A dependency declared on the route
 has the opposite default. Worth a test that fails when a route is mounted under
@@ -135,6 +115,37 @@ preview environment, not as a permanent rule — the deployment should decide it
 own cookie policy through configuration. The CSRF double-submit check
 (`main.py:645`) currently carries the load for those sessions. Source: gap 5 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
+
+### 10b. An edit after a hub study is not tracked (owner-approved: P33b)
+
+Added 2026-09-30 (P28 gate, owner decision O1). The EH review's `stale`
+flag is true only when a later foreground solve cleared the stored report
+(`services/adequacy/eh_review.py:455-460`). An edit to the network after a
+finished study leaves the Guided greeting and the Hub design Results card
+unaware. P28 softened the greeting's wording so that it claims nothing about
+the current network. The fix is a backend network-revision marker on the
+study record (e.g. `network_changed`), read by both surfaces. It is scheduled
+as P33b in `plans/2026-09-28-guided-mode-deferred.md` §3.
+
+### 10c. Two narrow project-lock races have correct guards but no test
+
+Added 2026-09-30 (P28 re-gate, mutants R4 and R7). In `moveProjectLock`, a
+stale 409 re-acquire that fails after a fresh acquire of the same project
+(R4), and a stale failed acquire in an X→Y→Z switch (R7), are both ignored
+by the generation guard. Removing either check leaves every test green. Add
+one test for each so the guard stays pinned.
+
+### 10a. Re-activating a project does not restore its hub study record
+
+Added 2026-09-30, from the P28 smoke. A project whose Energy Hub study
+finished, and which is then left and re-activated
+(`POST /api/projects/<p>/activate`), answers `GET /api/results/eh_study`
+with no study. The Guided hub rail opens at Site again, and the greeting says
+"No study has run yet". The Guided "study done" state is lost for a user who
+re-opens a project. Where the record is stored was not traced. The P28 smoke
+part (C) works around it by re-running the study. Sources: the plan's "P28
+phase note" (contract drift 3) and
+`qa/2026-09-30-guided-mode-deferred-gate-P28.md`.
 
 ---
 

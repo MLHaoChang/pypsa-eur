@@ -178,7 +178,12 @@ export interface SnapshotInfo {
   // from the network.
   freq?: string | null
 }
-export interface NetworkMeta { name: string; snapshot_count: number; bus_count: number }
+export interface NetworkMeta {
+  name: string; snapshot_count: number; bus_count: number
+  /** The project the backend is bound to (`null` for an unbound draft) —
+   *  the A2 mismatch check compares it with `currentProject`. */
+  loaded_project?: string | null
+}
 export interface SolverConfig {
   solver_name: string; mode: string; transmission_losses: boolean
   multi_investment_periods: boolean; solver_options: Record<string, unknown>
@@ -487,6 +492,8 @@ export interface ValueFlowConfig {
   template?: 'single_owner' | 'btm_ppa' | 'landlord_tenant' | 'dso_developer' | 'energy_hub' | 'custom'
   template_version?: string | null
   built_digest?: string | null
+  /** What the builder read (site assets, contracts, PoC); `template_stale` when they differ. */
+  built_inputs_digest?: string | null
   participants?: Participant[]
   /** Default: retailer, dso, tso, market, tax_authority, capex_supplier, om_contractor. */
   externals?: string[]
@@ -495,6 +502,8 @@ export interface ValueFlowConfig {
   hub_members?: HubMember[]
   allocation?: AllocationKey | null
   export_revenue_to?: 'site_party' | 'asset_owner'
+  /** Who is paid the connection agreement's fees; null = "dso". */
+  connection_fee_payee?: string | null
 }
 /**
  * GET/PUT /api/simulation/commercial/value_flows (IC P3 WP3.0). Send `digest` back as
@@ -985,4 +994,227 @@ export interface CatalogAttribute {
 export interface CatalogPayload {
   component: string
   attributes: CatalogAttribute[]
+}
+
+// ── Edge Investment Case finance (IC P4 WP4.0; models/finance.py) ──────────
+// Mirrors the pydantic contracts field for field; `tests/test_finance_types_ts_parity.py`
+// (backend) checks names and optionality. `null` = not stated (ADR-0001), never 0.
+
+export type EscalationClass = 'opex' | 'fuel' | 'tariff' | 'ppa' | 'export' | 'capex'
+
+export interface DebtTranche {
+  kind: 'term_loan' | 'mini_perm' | 'construction' | 'mezzanine'
+  amount?: number | null
+  gearing?: number | null
+  gearing_base?: 'capex' | 'total_uses'
+  rate: number | number[]
+  tenor_years: number
+  sculpting?: 'annuity' | 'dscr_target' | 'level'
+  dscr_target?: number | null
+  max_gearing?: number | null
+  dsra_months?: number | null
+  upfront_fee?: number | null
+  commitment_fee?: number | null
+  grace_years?: number | null
+}
+
+export interface EligibilityRule {
+  begin_construction_by?: string | null
+  placed_in_service_by?: string | null
+  asset_classes?: string[]
+}
+
+export interface Incentive {
+  kind: 'itc' | 'ptc' | 'grant' | 'accelerated_depreciation' | 'cfd' | 'capacity_payment'
+  rate?: number | null
+  amount?: number | null
+  eligibility?: EligibilityRule
+  phase_out?: Array<[string, number]>
+  feoc_flag?: boolean | null
+  // A grant's tax treatment (no default): reduces the basis, or taxable when received.
+  grant_tax_treatment?: 'reduces_basis' | 'taxable' | null
+}
+
+export interface SolvePpa {
+  contract_id?: string | null
+  target_irr: number
+  target_year: number
+}
+
+export interface TerminalValueRule {
+  method?: 'none' | 'book_value' | 'multiple_of_ebitda' | 'fixed'
+  value?: number | null
+}
+
+export interface FinanceInputs {
+  currency?: string
+  /** The money year of the typed costs and rates; null = not stated (GS Q6). */
+  currency_year?: number | null
+  /** Nominal (escalated, the default) or real (constant money of `currency_year`). */
+  price_basis?: 'nominal' | 'real'
+  financial_close: string
+  cod_by_asset?: Record<string, string>
+  construction_months_by_asset?: Record<string, number>
+  capex_phasing?: number[]
+  contingency_share?: number | null
+  escalation?: Partial<Record<EscalationClass, number>>
+  degradation_by_asset?: Record<string, number | number[]>
+  analysis_years?: number | null
+  acquisition_date?: string | null
+  construction_start?: string | null
+  annualise?: boolean
+  tax_losses?: 'offset_other_income' | 'carryforward' | null
+  financing_fee_tax?: 'amortised' | 'not_deducted' | null
+  hebesatz_pct?: number | null
+  state_rate?: number | null
+  pwa_met?: boolean | null
+  small_business_163j?: boolean | null
+  reserves_rate?: number | null
+  solve_ppa?: SolvePpa | null
+  depreciation_class_by_asset?: Record<string, string>
+  replacement_capex?: Array<[number, string, number]>
+  terminal_value?: TerminalValueRule
+  wacc_nominal?: number | null
+  cost_of_equity?: number | null
+  inflation?: number | null
+  debt?: DebtTranche[]
+  tax_pack_id?: string | null
+  incentives?: Incentive[]
+  /** P7 (tax equity) — kept opaque here. */
+  tax_equity?: Record<string, unknown> | null
+  participants?: Participant[]
+}
+
+export type CashflowStream = ValueStreamKind
+  | 'corporate_tax' | 'terminal_value' | 'financing_fee' | 'reserve' | 'interest' | 'principal'
+
+export interface CashflowProvenance {
+  source: string
+  mode: 'pf' | 'realistic'
+  pack_hash?: string | null
+  seed?: number | null
+  source_id?: string | null
+  contract_id?: string | null
+  period?: string | null
+}
+
+export interface CashflowLine {
+  year: number
+  participant: string
+  counterparty: string
+  value_stream: CashflowStream
+  tariff_item?: string | null
+  asset?: string | null
+  amount: number
+  provenance: CashflowProvenance
+}
+
+// ── Investment case report (IC P4 WP4.6b/4.7b; models/finance.py) ─────────
+// `InvestmentCaseReport` mirrors the pydantic model field for field (same
+// optionality and nullability as the finance parity test checks). The HTTP
+// report route serves `export_investment_case(report)` — the IC_EXPORT_KEYS
+// with the gate flattened — possibly with `gates` / `sections` /
+// `cashflow_lines` beside it: `InvestmentCaseReportPayload` is that view, every
+// field optional and read defensively. A `null` headline is "not established"
+// (ADR-0001), never 0.
+
+export const IC_REPORT_SECTIONS = [
+  'design', 'commercial', 'dispatch_modes', 'participants', 'project',
+  'debt', 'tax', 'tax_equity', 'uncertainty', 'gates',
+] as const
+export type IcReportSection = typeof IC_REPORT_SECTIONS[number]
+
+export type IcSectionStatus = 'ok' | 'not_established' | 'skipped'
+
+export interface IcSectionState {
+  status: IcSectionStatus
+  payload?: Record<string, unknown> | null
+  note?: string | null
+}
+
+export interface GatesBlock {
+  wacc_vs_discount_rate_consistent?: boolean | null
+  billing_vs_lp_gap_pct?: Record<string, number> | null
+  conservation_ok?: boolean | null
+}
+
+export interface IcPipelineStageRecord {
+  stage: string
+  status?: 'run' | 'skipped' | 'aborted' | 'pending'
+  solves_charged?: number
+  note?: string | null
+}
+
+export interface IcStudyPipeline {
+  stages?: IcPipelineStageRecord[]
+  budget_solves?: number
+  solves_consumed?: number
+  aborted?: boolean
+}
+
+export interface InvestmentCaseReport {
+  case_id: string
+  reference_design_id?: string | null
+  assumptions_hash: string
+  packs?: Record<string, string>
+  cost_at_target_eur?: number | null
+  excludes_shed_cost?: true
+  haircut_pct?: number | null
+  project_irr_pre_tax?: number | null
+  project_irr_post_tax?: number | null
+  npv_at_wacc?: number | null
+  lcoe_finance_consistent_eur_per_mwh?: number | null
+  ppa_price_for_target_irr_eur_per_mwh?: number | null
+  min_dscr?: number | null
+  avg_dscr?: number | null
+  llcr?: number | null
+  plcr?: number | null
+  flip_year?: number | null
+  gates?: GatesBlock
+  sections?: Partial<Record<IcReportSection, IcSectionState>>
+  completeness: Record<IcReportSection, IcSectionStatus>
+  pipeline?: IcStudyPipeline
+  cashflow_lines?: CashflowLine[]
+}
+
+/** GET /results/investment_case/report: `export_investment_case(report)` and
+ *  whatever of the full report rides beside it. */
+export type InvestmentCaseReportPayload =
+  Partial<Omit<InvestmentCaseReport, 'completeness' | 'sections'>> & {
+    completeness?: Partial<Record<string, IcSectionStatus | (string & {})>>
+    sections?: Partial<Record<string, IcSectionState>>
+    /** The export view's flattened gate (`gates.*` in the model). */
+    wacc_vs_discount_rate_consistent?: boolean | null
+    conservation_ok?: boolean | null
+    stale?: boolean
+  }
+
+/** GET /simulation/finance (IC P4 WP4.6b). */
+export interface FinanceState {
+  finance: FinanceInputs | null
+  digest: string
+  status: string
+  message?: string
+}
+
+/** GET /results/investment_case: the study record (IC P4 WP4.6b); 204 when
+ *  neither a run nor a report exists. Read defensively: the progress is a
+ *  fraction / record (`progress`) or the runner's stages; the staleness is
+ *  top-level (`stale`) or the stored report's block (`report.stale`). */
+export interface InvestmentCaseStudy {
+  status: 'idle' | 'running' | 'done' | 'aborted' | 'error' | 'refused' | 'failed' | (string & {})
+  study?: string
+  /** A fraction in [0, 1], or a stage record. */
+  progress?: number | Record<string, unknown> | null
+  stage?: string | null
+  stages?: string[]
+  stages_done?: string[]
+  /** The stored report's assumptions changed since it was computed. */
+  stale?: boolean | null
+  report?: { present?: boolean; stale?: boolean | null; changed?: string[]; reason?: string | null } | null
+  code?: string | null
+  message?: string | null
+  error?: string | null
+  error_code?: string | null
+  flags?: string[]
 }

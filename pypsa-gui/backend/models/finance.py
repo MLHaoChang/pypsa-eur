@@ -11,9 +11,9 @@ here imports ``services``.
 from __future__ import annotations
 
 from datetime import date
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from models.commercial import Participant, ValueStreamKind
 
@@ -58,27 +58,53 @@ DispatchMode = Literal["pf", "realistic"]
 # ------------------------------------------------------------------ finance inputs
 
 
+NonNegRate = Annotated[float, Field(ge=0)]
+
+
 class DebtTranche(BaseModel):
+    """A debt tranche (spec §4.2; IC P4 plan C8). The fees, DSRA months and
+    grace years have NO default (P0 gate finding 5, plan C12): `None` = not
+    stated, refused at run time — 0 must be typed. `rate` is one rate or one
+    per operating year of the tenor."""
+    model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
+
     kind: Literal["term_loan", "mini_perm", "construction", "mezzanine"]
     amount: float | None = Field(default=None, ge=0)
     gearing: float | None = Field(default=None, ge=0, le=1)
-    rate: float = Field(ge=0)
+    # What `gearing` is a share of: installed capex incl. contingency (SAM's
+    # `debt_percent` base) or total uses (capex + IDC + fees + DSRA — the
+    # fixed point, plan C8).
+    gearing_base: Literal["capex", "total_uses"] = "capex"
+    rate: NonNegRate | list[NonNegRate]
     tenor_years: int = Field(ge=1)
     sculpting: Literal["annuity", "dscr_target", "level"] = "annuity"
     dscr_target: float | None = Field(default=None, gt=1)
-    dsra_months: int = Field(default=0, ge=0)
-    upfront_fee: float = Field(default=0.0, ge=0)
-    commitment_fee: float = Field(default=0.0, ge=0)
-    grace_years: int = Field(default=0, ge=0)
+    # A cap on a sculpted tranche (SAM `dscr_maximum_debt_fraction`).
+    max_gearing: float | None = Field(default=None, gt=0, le=1)
+    dsra_months: int | None = Field(default=None, ge=0)
+    upfront_fee: float | None = Field(default=None, ge=0, le=1)       # a share (IC P4 WP4.2 review B6)
+    commitment_fee: float | None = Field(default=None, ge=0, le=1)
+    grace_years: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _sizing(self) -> "DebtTranche":
-        if self.amount is None and self.gearing is None:
-            raise ValueError("DebtTranche needs amount or gearing")
-        if self.amount is not None and self.gearing is not None:
-            raise ValueError("DebtTranche takes amount OR gearing, not both")
-        if self.sculpting == "dscr_target" and self.dscr_target is None:
-            raise ValueError("dscr_target sculpting needs dscr_target")
+        # A sculpted tranche is sized by its DSCR (plan C8) — `max_gearing` is
+        # its cap; `amount` / `gearing` size the others (IC P4 WP4.2).
+        if self.sculpting == "dscr_target":
+            if self.dscr_target is None:
+                raise ValueError("dscr_target sculpting needs dscr_target")
+            if self.amount is not None or self.gearing is not None:
+                raise ValueError("a sculpted tranche is sized by dscr_target; cap it with "
+                                 "max_gearing, not amount / gearing")
+        else:
+            if self.amount is None and self.gearing is None:
+                raise ValueError("DebtTranche needs amount or gearing")
+            if self.amount is not None and self.gearing is not None:
+                raise ValueError("DebtTranche takes amount OR gearing, not both")
+            if self.max_gearing is not None:
+                raise ValueError("max_gearing caps a sculpted (dscr_target) tranche only")
+        if isinstance(self.rate, list) and not self.rate:
+            raise ValueError("a per-year rate list needs at least one rate")
         return self
 
 
@@ -120,16 +146,37 @@ class EligibilityRule(BaseModel):
 
 
 class Incentive(BaseModel):
+    """An incentive (spec §6.5; IC P4 plan WP4.4). `rate` is a SHARE of the
+    eligible basis for `itc` / `grant`, and a price in currency/MWh (COD-year
+    money) for a stated `ptc`; `amount` is the ITC cap or the grant's sum.
+    `feoc_flag`: material assistance from a prohibited foreign entity (applies
+    where the pack's rule does). A grant states its tax treatment
+    (`grant_tax_treatment`, no default): it reduces the depreciable basis (and
+    the ITC base of its assets), or it is taxable income when received."""
+    model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
+
     kind: Literal["itc", "ptc", "grant", "accelerated_depreciation", "cfd", "capacity_payment"]
     rate: float | None = Field(default=None, ge=0)
     amount: float | None = Field(default=None, ge=0)
     eligibility: EligibilityRule = Field(default_factory=EligibilityRule)
     phase_out: list[tuple[date, float]] = Field(default_factory=list)
     feoc_flag: bool | None = None
+    grant_tax_treatment: Literal["reduces_basis", "taxable"] | None = None
+
+    @model_validator(mode="after")
+    def _share_at_most_one(self) -> "Incentive":
+        # An ITC / grant rate is a share of the eligible basis (WP4.4 round 4,
+        # deferred to the P4 gate): above 1 it is refused here, not later as
+        # `tax_basis_invalid`.
+        if self.kind in ("itc", "grant") and self.rate is not None and self.rate > 1.0:
+            raise ValueError(f"incentive_rate_above_one: a {self.kind} rate is a share of the "
+                             f"eligible basis (≤ 1), got {self.rate}")
+        return self
 
 
 class TaxEquityStructure(BaseModel):
     """Spec §6.7 (fields beyond shares added after review F13)."""
+    model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
 
     kind: Literal["partnership_flip", "sale_leaseback", "inverted_lease"]
     te_share_pre_flip: float = Field(ge=0, le=1)
@@ -142,17 +189,49 @@ class TaxEquityStructure(BaseModel):
     itc_share_te: float | None = Field(default=None, ge=0, le=1)
     developer_fee: float = Field(default=0.0, ge=0)
     target_irr_basis: Literal["after_tax_cash_plus_tax_benefits"] = "after_tax_cash_plus_tax_benefits"
-    itc_recapture_years: int = Field(default=5, ge=0)
+    # P0 gate finding 5: no default — P7 states it (sourced) or leaves None.
+    itc_recapture_years: int | None = Field(default=None, ge=0)
     debt_in_structure: bool = False
 
 
+class SolvePpa(BaseModel):
+    """Solve a contract's price for a target after-tax equity IRR in a target
+    year (spec §6.6; SAM `ppa_soln_mode=0`; IC P4 plan C9). `contract_id`
+    None = the case's single owner-sold PPA."""
+    model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
+
+    contract_id: str | None = None
+    target_irr: float = Field(gt=-1, lt=10)
+    target_year: int = Field(ge=1)
+
+
 class TerminalValueRule(BaseModel):
+    model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
+
     method: Literal["none", "book_value", "multiple_of_ebitda", "fixed"] = "none"
     value: float | None = None
 
 
+ESCALATION_CLASSES: tuple[str, ...] = ("opex", "fuel", "tariff", "ppa", "export", "capex")
+
+
 class FinanceInputs(BaseModel):
+    """The finance case's inputs (spec §4.2, §4.2a; IC P4 plan C2–C14).
+
+    `escalation` holds nominal rates per year for the six classes of
+    `ESCALATION_CLASSES` (plan C4); a class with cashflows and no rate is
+    not established, never 0. `participants` is derived from the value-flow
+    config (P3) — a stored list that differs is refused at run time."""
+    model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
+
     currency: str = Field(default="EUR", min_length=3, max_length=3)
+    # The money year of the typed costs and rates (GS Q6; U1 follow-up d):
+    # None = not stated, never a guessed year. `price_basis` says whether the
+    # cash is nominal (escalated, the default) or real (constant money of
+    # `currency_year`: escalation and inflation then 0 — a non-zero one is
+    # flagged `real_basis_with_escalation:<class>`, IC plan C4).
+    currency_year: int | None = Field(default=None, ge=1900, le=2200)
+    price_basis: Literal["nominal", "real"] = "nominal"
     financial_close: date
     cod_by_asset: dict[str, date] = Field(default_factory=dict)
     construction_months_by_asset: dict[str, int] = Field(default_factory=dict)
@@ -161,7 +240,33 @@ class FinanceInputs(BaseModel):
     # not_established rather than fabricating a 0.
     contingency_share: float | None = Field(default=None, ge=0)
     escalation: dict[str, float] = Field(default_factory=dict)
-    degradation_by_asset: dict[str, float] = Field(default_factory=dict)
+    # A constant annual rate d (factor (1 − d)^(k − 1), SAM's), or a list of annual
+    # STEPS: entry j = the loss from operating year j+1 to j+2, compounded, the last
+    # entry repeating (NOT SAM's cumulative-vs-nameplate schedule) — plan C5.
+    degradation_by_asset: dict[str, float | list[float]] = Field(default_factory=dict)
+    # The case's dates and length (plan C2): the axis, eligibility and the
+    # pack's dated rules. `analysis_years` None → the run is refused.
+    analysis_years: int | None = Field(default=None, ge=1, le=60)
+    acquisition_date: date | None = None
+    construction_start: date | None = None
+    # Scale a non-annual operating template to a year (plan C3; flagged).
+    annualise: bool = False
+    # Tax treatment choices with no default (plan C6, C7, C12).
+    tax_losses: Literal["offset_other_income", "carryforward"] | None = None
+    financing_fee_tax: Literal["amortised", "not_deducted"] | None = None
+    # Jurisdiction inputs the packs need (plan WP4.3a/4.4): None = not stated,
+    # distinct from a typed 0.
+    hebesatz_pct: float | None = Field(default=None, ge=0)
+    state_rate: float | None = Field(default=None, ge=0, le=1)
+    pwa_met: bool | None = None
+    small_business_163j: bool | None = None
+    reserves_rate: float | None = Field(default=None, ge=0)
+    solve_ppa: SolvePpa | None = None
+    # A depreciation class per owner asset where the pack assigns none (plan
+    # WP4.3a, C11): "macrs_<n>", "sl_<n>" (US half-year), "afa_<n>" (DE
+    # straight-line pro rata), "db_<rate>_<n>" (declining balance, rate as a
+    # fraction, switching to straight-line). Stated by the user (source: user).
+    depreciation_class_by_asset: dict[str, str] = Field(default_factory=dict)
     replacement_capex: list[tuple[int, str, float]] = Field(default_factory=list)
     terminal_value: TerminalValueRule = Field(default_factory=TerminalValueRule)
     wacc_nominal: float | None = Field(default=None, ge=0)
@@ -179,6 +284,13 @@ class FinanceInputs(BaseModel):
     def _phasing_sums_to_one(self) -> "FinanceInputs":
         if self.capex_phasing and abs(sum(self.capex_phasing) - 1.0) > 1e-9:
             raise ValueError("capex_phasing must sum to 1")
+        unknown = sorted(set(self.escalation) - set(ESCALATION_CLASSES))
+        if unknown:
+            raise ValueError(f"escalation classes {unknown} are not in {list(ESCALATION_CLASSES)}")
+        for asset, d in self.degradation_by_asset.items():
+            rates = d if isinstance(d, list) else [d]
+            if not rates or any(not (0.0 <= r < 1.0) for r in rates):
+                raise ValueError(f"degradation for {asset!r} must be rates in [0, 1)")
         return self
 
 
@@ -190,13 +302,25 @@ class Provenance(BaseModel):
     mode: DispatchMode
     pack_hash: str | None = None
     seed: int | None = None
+    # The P3 ledger's drill-down (plan WP4.0; the WP3.1 mapping pin).
+    source_id: str | None = None
+    contract_id: str | None = None
+    period: str | None = None
+
+
+# The finance-side streams (IC P4 plan WP4.0, review round 2 R4): the ledger's
+# `ValueStreamKind` plus kinds only finance has. Corporate tax never collides
+# with the P3 levy stream `tax`; incentives use the existing `incentive`.
+FinanceOnlyStream = Literal["corporate_tax", "terminal_value", "financing_fee", "reserve",
+                            "interest", "principal"]
+CashflowStream = ValueStreamKind | FinanceOnlyStream
 
 
 class CashflowLine(BaseModel):
     year: int
     participant: str
     counterparty: str
-    value_stream: ValueStreamKind
+    value_stream: CashflowStream
     tariff_item: str | None = None
     asset: str | None = None
     amount: float

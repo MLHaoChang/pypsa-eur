@@ -164,3 +164,22 @@ describe('compare rail seeding', () => {
     expect(screen.getByTestId('compare-stub').getAttribute('data-initial-tab')).toBe('prices')
   })
 })
+
+// P29 (B2, deferred spec §4.2): the page header in Guided names the hub
+// design's reliability results; Expert keeps the base header.
+describe('P29: the Results header', () => {
+  const header = () => document.querySelector('header') as HTMLElement
+  it('Guided: HUB DESIGN · RESULTS / Reliability results', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    await renderResults()
+    expect(header().querySelector('h1')!.textContent).toBe('Reliability results')
+    expect(header().textContent).toContain('HUB DESIGN · RESULTS')
+    expect(header().textContent).not.toContain('Optimization results')
+  })
+  it('Expert: SIMULATION · RESULTS / Optimization results', async () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    await renderResults()
+    expect(header().querySelector('h1')!.textContent).toBe('Optimization results')
+    expect(header().textContent).toContain('SIMULATION · RESULTS')
+  })
+})

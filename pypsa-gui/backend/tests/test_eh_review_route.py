@@ -137,3 +137,126 @@ def test_review_latest_is_the_one_source():
     assert out["status"] == "ok"
     assert out["stale"] is True
     assert out["source"].startswith("study record")
+
+
+# ── P31 C5: the route docstring's 204 / 200 cases, each pinned ────────────
+# The docstring says: 204 only when neither a stored report nor a study
+# record WITH a report exists — a study whose worker raised has a record but
+# no report (204); an aborted or stage-failed study keeps its partial report
+# (200 ``ok``), whose ``summary.verdict`` is null unless MC certification
+# finished before the stop.
+
+_PARTIAL = {"archetype": "weak_flexible", "sections": {}, "notes": []}
+
+
+class _Stage:
+    def __init__(self, stage, status, note=None):
+        self.stage, self.status, self.note = stage, status, note
+
+
+class _Report:
+    """What the worker reads off ``run_eh_study``'s result: ``pipeline``
+    (``aborted``, ``stages``) and ``model_dump``."""
+
+    def __init__(self, body, *, stages=()):
+        self._body = body
+        self.pipeline = type("P", (), {"aborted": False, "stages": list(stages)})()
+
+    def model_dump(self, mode="json"):
+        return dict(self._body)
+
+
+def _run_fake(client, install_network, monkeypatch, fake, *, abort=False):
+    started = threading.Event()
+
+    def run(network, pack, cfg, **kw):
+        started.set()
+        return fake(kw["stop_event"])
+
+    monkeypatch.setattr("services.adequacy.eh_study.run_eh_study", run)
+    _setup(client, install_network)
+    assert client.post(STUDY_URL,
+                       json={"archetype": "weak_flexible"}).status_code == 200
+    assert started.wait(10)
+    if abort:
+        assert client.post(f"{STUDY_URL}/abort").status_code == 200
+    return _poll(client)
+
+
+def test_a_study_whose_worker_raised_is_204(client, install_network, monkeypatch):
+    def fake(stop):
+        raise RuntimeError("boom")
+
+    rec = _run_fake(client, install_network, monkeypatch, fake)
+    assert rec["status"] == "failed" and rec["report"] is None
+    r = client.get(REVIEW_URL)
+    assert r.status_code == 204, r.text
+
+
+def test_an_aborted_study_is_200_ok_with_a_null_verdict(client, install_network,
+                                                         monkeypatch):
+    def fake(stop):
+        assert stop.wait(30)
+        return dict(_PARTIAL)
+
+    rec = _run_fake(client, install_network, monkeypatch, fake, abort=True)
+    assert rec["status"] == "aborted"
+    r = client.get(REVIEW_URL)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["summary"]["verdict"] is None
+
+
+def test_an_aborted_study_keeps_a_verdict_mc_already_reached(client, install_network,
+                                                             monkeypatch):
+    certified = {**_PARTIAL, "sections": {"certification": {
+        "status": "ok", "payload": {"verdict": "pass", "lole_h_per_year": 0.5,
+                                    "target_lole_h": 3.0}}}}
+
+    def fake(stop):
+        assert stop.wait(30)
+        return dict(certified)
+
+    rec = _run_fake(client, install_network, monkeypatch, fake, abort=True)
+    assert rec["status"] == "aborted"
+    r = client.get(REVIEW_URL)
+    assert r.status_code == 200, r.text
+    assert r.json()["summary"]["verdict"] == "pass"
+
+
+def test_a_stage_failed_study_is_200_ok(client, install_network, monkeypatch):
+    def fake(stop):
+        return _Report(_PARTIAL, stages=[_Stage("ens_solve", "failed", "infeasible")])
+
+    rec = _run_fake(client, install_network, monkeypatch, fake)
+    assert rec["status"] == "failed" and isinstance(rec["report"], dict)
+    r = client.get(REVIEW_URL)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "ok"
+
+
+def test_a_study_clears_an_earlier_stored_report_so_a_raised_study_is_204(
+        client, install_network, monkeypatch, session_ctx):
+    """P31 gate S-1: the docstring's "a study clears the stored report when it
+    starts". An earlier stored report is reviewed (200); then the REAL
+    ``run_eh_study`` raises right after its clear, and the review is 204 —
+    not the previous study's report as ``ok``."""
+    _setup(client, install_network)
+    ctx = session_ctx(client)
+    ctx.solver_state[EH_REPORT_STORE_KEY] = {**_PARTIAL, "pack_hash": "h",
+                                             "assumptions_hash": "a"}
+    before = client.get(REVIEW_URL)
+    assert before.status_code == 200, before.text
+    assert before.json()["stale"] is False
+
+    def boom(network):
+        raise RuntimeError("after the clear")
+
+    monkeypatch.setattr("services.adequacy.redundancy._detach_solver_model", boom)
+    assert client.post(STUDY_URL,
+                       json={"archetype": "weak_flexible"}).status_code == 200
+    rec = _poll(client)
+    assert rec["status"] == "failed" and "after the clear" in (rec["error"] or "")
+    r = client.get(REVIEW_URL)
+    assert r.status_code == 204, r.text

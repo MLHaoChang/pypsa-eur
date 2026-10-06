@@ -17,11 +17,15 @@ contexts make them earn their keep); per-project locking without concurrent
 contexts would be premature.
 
 What is per-context vs global:
-  * Per-context (here): the network, its on-disk identity, and its transient-row
-    registry — all meaningless across projects.
+  * Per-context (here): the network, its on-disk identity, its transient-row
+    registry, and its user-uploaded time-series store — all meaningless across
+    projects, and the last of them unsafe to share across them (see `user_ts`).
   * Global (stays on PyPSAService): the mutation lock and the netCDF I/O lock.
     The latter guards process-global, thread-unsafe HDF5 library state and MUST
     remain a single shared instance even once multiple contexts are resident.
+    `services/user_timeseries._user_ts_lock` is global for the first reason and
+    not the second: it guards whichever context's dict the caller resolved, which
+    is coarser than necessary and never wrong.
 """
 from __future__ import annotations
 
@@ -187,6 +191,37 @@ class ProjectContext:
     # before the context is dropped. See ChatState above for field details.
     chat_state: ChatState = field(default_factory=ChatState)
 
+    # ── User-uploaded time series ───────────────────────────────────────────
+    # Every GUI-uploaded profile for THIS project, keyed
+    # `(component, attribute, column_name)` — the store `services/
+    # user_timeseries.py` owns the semantics of, and whose module-level
+    # `_user_ts` name is a per-context VIEW of this dict.
+    #
+    # ★ Per-context because the store is AUTHORITATIVE, not a cache.
+    # `GET /api/network/timeseries/{component}/{attribute}` prefers it over the
+    # network's own `_t` tables, every foreground save serialises it into that
+    # project's `user_ts.json`, and `_reapply_user_ts_to_network` writes it back
+    # onto the network immediately before the netCDF export — so whatever is in
+    # it at save time is what lands in `network.nc` and in the solve results.
+    # While it was a module-level dict, one process serving many signed-in
+    # sessions shared all of that: org A's uploaded demand profile was readable
+    # from org B's own project and was persisted into B's storage, and A opening
+    # a project wiped B's in-flight uploads. Reproduced cross-org; the write-up is
+    # the 2026-09-12 `user-ts-is-a-process-global-shared-across-tenants` finding
+    # under `docs/superpowers/findings/`, and `tests/test_user_ts_tenancy.py` pins
+    # all four properties it requires.
+    #
+    # The `Any` value type is `pd.Series`, spelled loosely to keep this module's
+    # imports to `pypsa` alone (the same reason `ChatState.session` is `Any`).
+    #
+    # LIFECYCLE — carried forward (as a COPY) by `reset_network` / `set_network`,
+    # NOT carried by `build_context`. See those methods for why each way round.
+    user_ts: dict[tuple[str, str, str], Any] = field(default_factory=dict)
+    # Set by `_hydrate_context_from_disk` when `user_ts.json` exists but cannot
+    # be read, cleared by the next save that rewrites it. See
+    # `may_rewrite_user_ts`.
+    user_ts_unreadable: bool = False
+
     @property
     def registry_key(self) -> str | None:
         """
@@ -260,7 +295,18 @@ RESULT_STATE_KEYS = (
 # so `pypsa_service` cannot import `study_state`, but it already imports this
 # module.
 STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
-             "eh_study")
+             "eh_study", "investment_case")
+
+# The studies that re-solve the USER'S OWN network object in place, between
+# their iterates — so an edit landing mid-study is either overwritten by the
+# study's restore or measured as if it were the user's plan (P27a, A1). These
+# refuse component edits; the others do not, and the evidence is in the code:
+# `mc` snapshots the network under the lock and never mutates it
+# (`mc_loop_runner.py`, the `network.copy()` under `lock`), and `eh_study`
+# solves a private `network.copy()` (`eh_study.py`). A key added to STUDY_KEYS
+# must be classified here on purpose.
+LIVE_NETWORK_STUDIES = frozenset({"fmea_sweep", "frontier", "coupling_loop",
+                                  "margin_loop"})
 
 # What each study is called in a refusal. A user who is told "a study is
 # running" cannot act; one who is told WHICH can go and deal with it.
@@ -271,6 +317,9 @@ STUDY_LABELS = {
     "coupling_loop": "a coupling-loop study",
     "margin_loop": "a margin-loop study",
     "eh_study": "an Energy Hub study",
+    # Edge Investment Case P4 WP4.6b: the finance run reads the solved network's
+    # result tables, so it holds the mesh like any other study.
+    "investment_case": "an investment-case run",
 }
 
 # The studies a user can actually STOP.
@@ -286,7 +335,26 @@ STUDY_LABELS = {
 # Pinned by a test against the routes that actually exist, so this cannot
 # drift the day someone REMOVES an abort.
 ABORTABLE_STUDIES = ("coupling_loop", "margin_loop", "mc", "frontier",
-                     "fmea_sweep", "eh_study")
+                     "fmea_sweep", "eh_study", "investment_case")
+
+
+def may_rewrite_user_ts(ctx: Any) -> bool:
+    """
+    Whether a save the user did not ask for (shutdown flush, resident-cap
+    eviction, solve-queue save) may rewrite this context's `user_ts.json`.
+
+    Yes, unless the hydrate could not READ the sidecar. The store is faithful to
+    disk otherwise (`_hydrate_context_from_disk` and `load_project` both restore
+    it, and `_backup_network_ts_to_user_ts` only fills keys the store lacks), so
+    rewriting is what keeps the file current, including unlinking it when the
+    user has deleted every uploaded series. An unreadable sidecar leaves the
+    store empty; rewriting then would replace the only copy of its contents
+    with the `_t` view, so the bytes are left on disk for a human.
+
+    History: `docs/superpowers/findings/2026-09-28-every-shutdown-flush-saves-with-persist-user-ts-false.md`.
+    `getattr` because `shutdown.flush_all` is tested with stub contexts.
+    """
+    return not getattr(ctx, "user_ts_unreadable", False)
 
 
 def record_is_running(record) -> bool:
@@ -460,6 +528,10 @@ class ProjectSolverState:
     coupling_loop: Any = None
     margin_loop: Any = None
     eh_study: Any = None
+    # IC P4 WP4.6b: the investment-case run's record (status, stage, refusal
+    # code). Its REPORT is result state (`investment_case_report`); the record
+    # is not persisted, like every study record above.
+    investment_case: Any = None
 
     def as_dict(self) -> dict[str, Any]:
         """A plain dict with the same keys/values — the legacy `_state` shape."""

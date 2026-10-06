@@ -15,6 +15,7 @@ import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { VOLL_TEXT } from '../delegate'
 import { DC_TEMPLATE, readiness } from '../testFixtures'
 import { GoalCard } from './GoalCard'
+import { nk } from '../../../utils/queryKeys'
 
 vi.mock('../../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/simulation')>()
@@ -23,7 +24,7 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
     resultsApi: {
       ...actual.resultsApi,
       getEhStudy: vi.fn(), getEhReadiness: vi.fn(), getEhTemplate: vi.fn(),
-      startEhStudy: vi.fn(), abortEhStudy: vi.fn(),
+      startEhStudy: vi.fn(), abortEhStudy: vi.fn(), getFmeaModes: vi.fn(),
     },
     simulationApi: { ...actual.simulationApi, getSolverConfig: vi.fn() },
   }
@@ -39,6 +40,7 @@ beforeEach(() => {
   vi.mocked(resultsApi.getEhReadiness).mockResolvedValue(readiness())
   vi.mocked(resultsApi.startEhStudy).mockResolvedValue({ status: 'running' })
   vi.mocked(simulationApi.getSolverConfig).mockResolvedValue({ voll: 5000 } as never)
+  vi.mocked(resultsApi.getFmeaModes).mockResolvedValue({ per_mode: [], sweep_status: null } as never)
 })
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
@@ -180,6 +182,11 @@ describe('GoalCard run', () => {
     expect(screen.getByTestId('term-voll_plain').parentElement!.textContent)
       .toBe('Price of undelivered energy:')
     expect(screen.queryByTestId('hub-goal-voll-fix')).toBeNull()
+    // P30 (C12): the unit has its own hover.
+    const unit = screen.getByTestId('term-mwh')
+    expect(unit.textContent).toContain('MWh')
+    expect(unit.getAttribute('data-tip')).toMatch(/megawatt-hour/)
+    expect(screen.getByTestId('hub-goal-voll').textContent).toContain('€5,000 per MWh')
   })
 })
 
@@ -244,6 +251,9 @@ describe('GoalCard when the template read failed', () => {
     expect(reason.textContent).toMatch(/recommended settings could not be read/)
     expect(reason.textContent).not.toMatch(/eh_template|500/)
     expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(true)
+    // P30 (B8): the disabled Run says why.
+    expect(screen.getByTestId('hub-goal-run').getAttribute('title'))
+      .toBe('The template could not be read — retry above.')
     await user.click(screen.getByTestId('hub-goal-run'))
     expect(resultsApi.startEhStudy).not.toHaveBeenCalled()
 
@@ -251,6 +261,7 @@ describe('GoalCard when the template read failed', () => {
     await waitFor(() => expect(screen.queryByTestId('hub-goal-template-error')).toBeNull())
     await waitFor(() => expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement)
       .disabled).toBe(false))
+    expect(screen.getByTestId('hub-goal-run').getAttribute('title')).toBeNull()
     await user.click(screen.getByTestId('hub-goal-run'))
     await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledTimes(1))
     const form = { ...formFromTemplate(DC_TEMPLATE),
@@ -266,5 +277,24 @@ describe('GoalCard when the template read failed', () => {
     await waitFor(() => expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement)
       .disabled).toBe(false))
     expect(screen.queryByTestId('hub-goal-template-error')).toBeNull()
+  })
+})
+
+// A1-FE (deferred spec 2026-09-28 §2.4): the VOLL "Let the assistant set it"
+// button is disabled with one plain sentence while an FMEA sweep runs.
+describe('GoalCard while a risk check runs (A1-FE)', () => {
+  const LIVE = 'A risk check is running — wait for it to finish or abort it before changing the network.'
+  it('the VOLL fix is disabled with the sentence while the sweep runs; enabled after', async () => {
+    vi.mocked(simulationApi.getSolverConfig).mockResolvedValue({ voll: 0 } as never)
+    vi.mocked(resultsApi.getFmeaModes).mockResolvedValue({ per_mode: [], sweep_status: 'running' } as never)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><GoalCard /></QueryClientProvider>)
+    const fix = await screen.findByTestId('hub-goal-voll-fix') as HTMLButtonElement
+    await waitFor(() => expect(fix.disabled).toBe(true))
+    expect(fix.title).toBe(LIVE)
+    await act(async () => {
+      client.setQueryData(nk('Demo', 'results', 'fmea_modes'), { per_mode: [], sweep_status: 'done' })
+    })
+    await waitFor(() => expect(fix.disabled).toBe(false))
   })
 })
