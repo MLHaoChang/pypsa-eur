@@ -52,6 +52,21 @@ one dict. Full analysis, reproduction and fix criteria:
 
 ## High
 
+### 14. The campus-electrical chat tools bypass the edit-lock check
+
+`services/chat_tools.py`, added by #79 (merged 2026-10-06). The HTTP routes in
+`routers/campus_electrical.py` call `_check_lock` before the service. The chat
+tools `campus_draft_campus` and `campus_run_study` call the service directly,
+and `_gridspine_project` resolves access but not the lock. Reproduced on
+`af69613`: the HTTP draft returned 409 for a non-holder, while
+`campus_draft_campus(overwrite=True)` and `campus_run_study` both reached the
+write path. This is the fifth instance of the "a second caller skips the
+handler" shape. `tests/test_write_surface_lock_policy.py` caught it on the day
+it landed, by going red on #80 merged with the new master. Note for the fix:
+these tools take a `project_id`, so the seam's active-project predicate would
+test the wrong lock. Check the lock of the resolved project. Full analysis:
+`findings/2026-10-06-campus-chat-tools-bypass-the-lock-check.md`. Server only.
+
 ### 13. Chat tools that write a project's upload store bypass its lock check
 
 `services/chat_tools.py`. The HTTP upload routes (`post_upload`,
