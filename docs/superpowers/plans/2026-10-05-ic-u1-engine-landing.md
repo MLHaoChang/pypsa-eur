@@ -158,8 +158,8 @@ imbalance (a year of energy against one month of demand in the objective).
 
 | Item | State |
 |---|---|
-| U1 PR | #81 green and mergeable (CodeQL fixed in 056a8ad; master and #82 merged in 26ecd27); owner merges |
-| U1 follow-up PR | #85 open, stacked on #81; gate on af444ac green after df9ad88; retarget to master once #81 merges |
+| U1 PR | #81 merged to master (aae746e, 2026-10-06) |
+| U1 follow-up PR | #85 open against master (retargeted after #81 merged); gate on af444ac green after df9ad88 |
 | (a) defaults pack, (e) export helper | done (part A, PASS round 3) |
 | (b) site connection, (f) preflight port, D13 | done (part C, PASS round 2) |
 | (d), LCOS, D11, D12, Q12b / Q14 tests, Q4 facade test | done (part B, PASS round 2) |
