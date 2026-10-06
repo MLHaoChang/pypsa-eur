@@ -1,8 +1,8 @@
 # 19 — External tools over MCP: the harness as an MCP client
 
-Status: needs-info (owner question Q18 in the spec; issue 11 is the other direction and stays deferred under Q8)
+Status: needs-info (Q18 decided 2026-10-06: later, in one spec with issue 11; the defaults below are the owner's)
 Type: research
-Blocked by: 08 (done), Q18 answered
+Blocked by: 08 (done), the MCP spec (with 11)
 
 Source: assessment design 7; DeepSeek Harness `docs/subsystems/mcp.md`
 (stdio and Streamable HTTP transports, per-server connection plugins, tool

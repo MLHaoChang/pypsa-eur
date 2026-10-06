@@ -278,11 +278,20 @@ The questions as asked, with the recommendations:
 ❓ **Q9 — Provider adapters**: move `llm_anthropic`, `llm_openai_compat`, `llm_fake`, `llm_config` under `harness/providers/` in phase 1, or leave them in `services/`?
 ➡️ Move in phase 1 with shims, so the layering is visible; `llm_config` (the profile store) stays in `services/` because it is settings, not a provider.
 
-## §9. Open owner questions (2026-10-06, from the DeepSeek Harness assessment)
+## §9. Owner decisions, grill round 3 (2026-10-06, from the DeepSeek Harness assessment)
 
-Raised by `docs/superpowers/assessments/2026-10-06-deepseek-harness-adoption-assessment.md`.
-Not decisions yet: each gates one of issues 13–19. Ask in the grilling format
-with these recommendations.
+Raised by `docs/superpowers/assessments/2026-10-06-deepseek-harness-adoption-assessment.md`;
+asked through the app's question UI; the owner chose the recommended answer
+on all four.
+
+| # | Decision |
+|---|---|
+| Q15 | The session event log is adopted as the source of truth; `chat.jsonl` stays as a projection for one release so `/history`, lineage and every test see no change (issue 13). |
+| Q16 | One extra skills root under the app data directory, never a project folder or bundle; same-name shadowing refused; provenance shown in the panel, never in the prompt (issue 14; D12 amended accordingly). |
+| Q17 | Goals may run unattended rounds: default 5, ceiling 20, no tier changes, every card still blocks, only a human resumes a paused or blocked goal; after issue 13 (issue 17). |
+| Q18 | The MCP client is specified later, in one spec with issue 11 (exposure, Q8): admin-only, zero servers by default, write tier unless marked read-only, descriptions capped and results fenced (issue 19 stays deferred). |
+
+The questions as asked, with the recommendations:
 
 ❓ **Q15 — The session event log (issue 13)**: adopt an append-only event log as
 the source of truth, with `chat.jsonl` kept as a projection for one release,

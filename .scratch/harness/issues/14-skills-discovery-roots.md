@@ -1,8 +1,8 @@
 # 14 — User-authored skills: discovery roots and invocation policy
 
-Status: needs-info (owner question Q16 in the spec: spec D12 says Markdown is loaded from the package only)
+Status: ready-for-agent (Q16 decided 2026-10-06: the app-data root only; D12 to be amended in the same change)
 Type: task
-Blocked by: 05 (done), Q16 answered
+Blocked by: 05 (done)
 
 Source: assessment design 6; DeepSeek Harness `docs/subsystems/skills.md`
 (five discovery roots ranked by priority, `skill()` tool, catalogue of name
@@ -14,7 +14,7 @@ and description only, per-skill `modelInvocable` / `userInvocable`).
 package only (D12), caches the registry, and `catalogue_block()` puts one
 line per skill into the tools-on system prompt; `use_skill` returns the body.
 
-## What changes (if Q16 allows it)
+## What changes
 
 1. A second root under the app data directory (`<PYPSAGUI_APP_DATA_DIR>/skills/<name>/SKILL.md`),
    never a project folder or bundle: a project can arrive from someone else

@@ -1,8 +1,8 @@
 # 13 — The session event log: "model-visible means logged", replay and fork
 
-Status: needs-info (owner question Q15 in the spec: it changes the history format that decision Q7 kept)
+Status: ready-for-agent (Q15 decided 2026-10-06: adopt, `chat.jsonl` kept as a projection for one release)
 Type: task
-Blocked by: 08 (done), PR MLHaoChang/pypsa-eur#86 merged, Q15 answered
+Blocked by: 08 (done), PR MLHaoChang/pypsa-eur#86 merged
 
 Source: `docs/superpowers/assessments/2026-10-06-deepseek-harness-adoption-assessment.md`
 (design 1). The borrowed idea is DeepSeek Harness's append-only `SessionEvent`

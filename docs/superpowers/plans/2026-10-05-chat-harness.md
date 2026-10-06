@@ -124,20 +124,20 @@ the loaded network) and borrow seven designs. Each is an issue under
 
 | Issue | Design | Status | Why not now |
 |---|---|---|---|
-| 13 | session event log, replay, fork | needs-info (Q15) | changes the history format decision Q7 kept |
-| 14 | user skill roots, invocation policy | needs-info (Q16) | D12 says package only |
+| 13 | session event log, replay, fork | ready-for-agent (Q15: adopt, projection kept) | waits for #86 to merge |
+| 14 | user skill roots, invocation policy | ready-for-agent (Q16: app-data root only) | amends D12 in the same change |
 | 15 | `ask_user` multi-select, detail, intents | ready-for-agent | frontend + catalogue change; small |
 | 16 | spill store and `read_result` | ready-for-agent | new tool; small-medium |
-| 17 | goal with a round budget | needs-info (Q17) | autonomy; needs 13 |
+| 17 | goal with a round budget | ready-for-agent after 13 (Q17: yes, 5 default, 20 max) | needs 13 |
 | 18 | approval audit events | ready after 13 | log state |
-| 19 | MCP client | needs-info (Q18) | security surface; own spec with 11 |
+| 19 | MCP client | deferred (Q18: later, one spec with 11) | security surface |
 | 20 | cache accounting and reasoning on the OpenAI wire | ready-for-agent | small |
 
 **Pilot decision.** None of it goes into PR #86: the PR is a 119-file,
 behaviour-preserving move under review, and the two highest-value items
-(13, 17) overturn owner decisions (Q7) or add autonomy (Q17). Phase 5 runs
-after #86 merges, on its own branch, in this order: 20 and 15 (small, no
-decisions, prove the path), 16, then 13 once Q15 is answered, then 18 and 17.
+(13, 17) overturned owner decision Q7 and added autonomy (now decided as
+Q15 and Q17, spec §9). Phase 5 runs after #86 merges, on its own branch, in
+this order: 20 and 15 (small, prove the path), 16, 14, then 13, then 18 and 17.
 Rules in §4 apply unchanged; rule 2 (byte-identical system prompt) holds for
 every item here because each adds per-turn content, tools or log state.
 
