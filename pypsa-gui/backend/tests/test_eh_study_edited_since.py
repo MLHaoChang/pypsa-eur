@@ -269,3 +269,136 @@ def test_set_network_bumps_the_carried_revision(client, install_network):
     n.add("Bus", "b")
     PyPSAService.set_network(n)
     assert dirty_state.revision() == r0 + 1
+
+
+# ── Step 3: capture on the record, compared at read time ─────────────────
+
+STUDY_URL = "/api/results/eh_study"
+REVIEW_URL = "/api/results/eh_review"
+
+
+def _tool(ctx):
+    from tests.test_eh_review_route import _tool as review_tool
+    return review_tool(ctx)
+
+
+def _done_study(client, install_network, monkeypatch, session_state, name):
+    from tests.test_eh_study_record_survives_reactivation import run_study
+    fake_done(monkeypatch)
+    hub_project(client, install_network, name)
+    rec = run_study(client)
+    t = (session_state(client).get("eh_study") or {}).get("thread")
+    if t is not None:
+        t.join(5)
+    return rec
+
+
+def _both(client):
+    study = client.get(STUDY_URL)
+    review = client.get(REVIEW_URL)
+    assert study.status_code == 200, study.text
+    assert review.status_code == 200, review.text
+    return study.json(), review.json()
+
+
+def test_a_finished_study_carries_the_revision_and_reads_unedited(
+        client, install_network, monkeypatch, session_state, session_ctx):
+    rec = _done_study(client, install_network, monkeypatch, session_state, "carries")
+    assert rec["network_revision"] == _rev(client)
+    study, review = _both(client)
+    assert study["edited_since_study"] is False
+    assert review["edited_since_study"] is False
+    assert review["stale"] is False
+    assert review == _tool(session_ctx(client))
+
+
+def test_an_asset_write_after_the_study_reads_edited_on_both_routes(
+        client, install_network, monkeypatch, session_state, session_ctx):
+    _done_study(client, install_network, monkeypatch, session_state, "edited-after")
+    r0 = _rev(client)
+    _edit_bus(client)
+    study, review = _both(client)
+    assert study["edited_since_study"] is True
+    assert review["edited_since_study"] is True
+    assert review["stale"] is False
+    assert _rev(client) == r0 + 1
+    assert review == _tool(session_ctx(client))
+
+
+def test_a_solve_after_the_study_is_stale_but_not_edited(
+        client, install_network, monkeypatch, session_state, session_ctx):
+    from services.adequacy.eh_report import EH_REPORT_STORE_KEY
+
+    _done_study(client, install_network, monkeypatch, session_state, "stale-only")
+    session_ctx(client).solver_state.pop(EH_REPORT_STORE_KEY, None)
+    study, review = _both(client)
+    assert review["stale"] is True
+    assert review["edited_since_study"] is False
+    assert study["edited_since_study"] is False
+    _edit_bus(client)
+    study, review = _both(client)
+    assert review["stale"] is True
+    assert review["edited_since_study"] is True
+    assert study["edited_since_study"] is True
+
+
+def test_undo_bumps_and_keeps_the_finished_record(
+        client, install_network, monkeypatch, session_state):
+    _done_study(client, install_network, monkeypatch, session_state, "undo-keeps")
+    r0 = _rev(client)
+    _edit_bus(client)
+    assert client.post("/api/network/undo").status_code == 200
+    # Fresh requests: the context later requests read (step 0).
+    r = client.get(STUDY_URL)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "done"
+    assert r.json()["edited_since_study"] is True
+    assert _rev(client) == r0 + 2
+
+
+def test_an_edit_during_a_running_study_reads_edited_when_it_finishes(
+        client, install_network, monkeypatch, session_state):
+    import threading
+
+    gate, reached = threading.Event(), threading.Event()
+    fake_done(monkeypatch, gate=gate, reached=reached)
+    hub_project(client, install_network, "edit-during")
+    try:
+        r = client.post(STUDY_URL, json={"archetype": "weak_flexible"})
+        assert r.status_code == 200, r.text
+        assert reached.wait(10)
+        assert client.get(STUDY_URL).json()["status"] == "running"
+        assert client.get(STUDY_URL).json().get("edited_since_study") is None
+        _edit_bus(client)
+    finally:
+        gate.set()
+    deadline = time.time() + 30
+    while client.get(STUDY_URL).json().get("status") == "running":
+        assert time.time() < deadline
+        time.sleep(0.05)
+    study, review = _both(client)
+    assert study["status"] == "done"
+    assert study["edited_since_study"] is True
+    assert review["edited_since_study"] is True
+
+
+def test_a_record_without_a_revision_reads_unavailable(
+        client, install_network, monkeypatch, session_state, session_ctx):
+    _done_study(client, install_network, monkeypatch, session_state, "unavailable")
+    rec = session_state(client)["eh_study"]
+    rec.pop("network_revision", None)
+    study, review = _both(client)
+    assert study["edited_since_study"] is None
+    assert review["edited_since_study"] is None
+    assert review == _tool(session_ctx(client))
+
+
+def test_edited_since_is_null_for_running_and_non_dict_records():
+    from services.study_state import edited_since
+    assert edited_since(None, revision=3) is None
+    assert edited_since("x", revision=3) is None
+    assert edited_since({"status": "running", "network_revision": 3}, revision=3) is None
+    assert edited_since({"status": "done"}, revision=3) is None
+    assert edited_since({"status": "done", "network_revision": 3}, revision=3) is False
+    assert edited_since({"status": "done", "network_revision": 2}, revision=3) is True
+    assert edited_since({"status": "failed", "network_revision": 2}, revision=3) is True

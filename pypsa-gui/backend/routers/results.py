@@ -1398,7 +1398,12 @@ def get_eh_study():
     st = _state.get("eh_study")
     if not st:
         return Response(status_code=204)
-    return {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+    from services.study_state import edited_since
+    out = {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+    # P33b 10b: has the network been edited since this study started? null
+    # (Unavailable) while running or for a record without a captured revision.
+    out["edited_since_study"] = edited_since(st)
+    return out
 
 
 @results_router.post("/eh_study/abort")

@@ -41,7 +41,8 @@ from services.pypsa_service import PyPSAService
 __all__ = ["STUDY_KEYS", "STUDY_LABELS", "LIVE_NETWORK_STUDIES",
            "record_is_running", "study_running", "running_study",
            "blocking_study_detail", "study_in_flight_detail",
-           "refuse_edit_during_live_study"]
+           "refuse_edit_during_live_study", "edited_since",
+           "finished_study_record"]
 
 # What each study is called in a 409 message. A user who is told "a study is
 # running" cannot act; one who is told WHICH can go and abort it.
@@ -152,3 +153,47 @@ def refuse_edit_during_live_study() -> None:
                                     keys=LIVE_NETWORK_STUDIES)
     if detail:
         raise HTTPException(status_code=409, detail=detail)
+
+
+def edited_since(record, *, revision: int | None = None) -> bool | None:
+    """Has an edit seam been crossed since this study STARTED? (P33b 10b)
+
+    The record carries the project's `network_revision` captured in the study
+    worker, under the ctx lock, immediately before the private copy is taken;
+    this compares it with the current counter (`!=`, not `>`: a Saved-snapshot
+    restore moves the counter back together with the record it belongs to).
+
+    ``None`` — Unavailable, never ``False`` — when the record is not a dict,
+    is running, or has no captured revision (a record from before this phase,
+    or restored from an older ``results_state.pkl``). The claim is "edited
+    since", never "changed" or "differs": an edit then its undo reads True.
+    """
+    if not isinstance(record, dict):
+        return None
+    if record.get("status") == "running":
+        return None
+    captured = record.get("network_revision")
+    if not isinstance(captured, int) or isinstance(captured, bool):
+        return None
+    if revision is None:
+        from services import dirty_state
+        revision = dirty_state.revision()
+    return int(revision) != captured
+
+
+def finished_study_record(record) -> dict | None:
+    """The on-disk mirror of a FINISHED study record (P33b D-1), or None.
+
+    A deep copy without the worker handle and stop event, for ``status`` in
+    {done, failed, aborted}; anything else (running, absent, malformed) is
+    None. A running record never reaches a save anyway
+    (``_refuse_save_during_study``).
+    """
+    import copy
+
+    if not isinstance(record, dict):
+        return None
+    if record.get("status") not in ("done", "failed", "aborted"):
+        return None
+    return copy.deepcopy(
+        {k: v for k, v in record.items() if k not in ("thread", "stop_event")})

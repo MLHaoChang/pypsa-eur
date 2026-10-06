@@ -107,6 +107,7 @@ def test_done_route_equals_tool_and_stale_follows_the_stored_report(
     body = r.json()
     assert body["status"] == "ok"
     assert body["stale"] is False
+    assert body["edited_since_study"] is False   # P33b: no edit since the study
     assert body["source"] == "stored report"
     assert {"summary", "findings", "next_steps"} <= set(body)
     ctx = session_ctx(client)
