@@ -4,7 +4,7 @@
 // P24-BE gate N4: on an off-grid site the (normally open) tie is not
 // presented as a grid connection gap or as missing outage data.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { resultsApi } from '../../../api/simulation'
@@ -14,6 +14,7 @@ import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { siteFixText } from '../delegate'
 import { DC_TEMPLATE, MG_TEMPLATE, readiness } from '../testFixtures'
 import { SiteCard } from './SiteCard'
+import { nk } from '../../../utils/queryKeys'
 
 vi.mock('../../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/simulation')>()
@@ -22,6 +23,7 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
     resultsApi: {
       ...actual.resultsApi,
       getEhStudy: vi.fn(), getEhReadiness: vi.fn(), getEhTemplate: vi.fn(),
+      getFmeaModes: vi.fn(),
     },
   }
 })
@@ -34,6 +36,7 @@ beforeEach(() => {
   vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
   vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(DC_TEMPLATE)
   vi.mocked(resultsApi.getEhReadiness).mockResolvedValue(readiness())
+  vi.mocked(resultsApi.getFmeaModes).mockResolvedValue({ per_mode: [], sweep_status: null } as never)
 })
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
@@ -151,5 +154,47 @@ describe('SiteCard next step', () => {
     await user.click(next)
     expect(useHubDesignStore.getState().step).toBe('goal')
     expect(useHubDesignStore.getState().userMovedRail).toBe(true)
+  })
+})
+
+// A1-FE (deferred spec 2026-09-28 §2.4): while an FMEA sweep re-solves the
+// live network, P27a's backend refuses every edit (409 `study_in_flight`). The
+// Site card's "Fix with the assistant" buttons — and its footer's "Let the
+// assistant do this", which fixes the gaps — are disabled with one plain
+// sentence instead of sending requests the backend will refuse.
+describe('SiteCard while a risk check runs (A1-FE)', () => {
+  const LIVE = 'A risk check is running — wait for it to finish or abort it before changing the network.'
+  const gaps = () => vi.mocked(resultsApi.getEhReadiness).mockResolvedValue(readiness({
+    import: { rule: 'eh_role', links: [], applied: false }, import_p_nom_mw: null,
+  }))
+
+  it('fix buttons disabled with the sentence while the sweep runs; enabled after', async () => {
+    gaps()
+    vi.mocked(resultsApi.getFmeaModes).mockResolvedValue({ per_mode: [], sweep_status: 'running' } as never)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><SiteCard /></QueryClientProvider>)
+    const fix = await screen.findByTestId('hub-site-fix-grid') as HTMLButtonElement
+    await waitFor(() => expect(fix.disabled).toBe(true))
+    expect(fix.title).toBe(LIVE)
+    const footer = screen.getByTestId('hub-delegate-site') as HTMLButtonElement
+    expect(footer.disabled).toBe(true)
+    expect(screen.getByTestId('hub-live-study-note').textContent).toBe(LIVE)
+    await act(async () => {
+      client.setQueryData(nk('Demo', 'results', 'fmea_modes'),
+        { per_mode: [], sweep_status: 'done' })
+    })
+    await waitFor(() => expect(fix.disabled).toBe(false))
+    expect(fix.title).not.toBe(LIVE)
+    expect(footer.disabled).toBe(false)
+    expect(screen.queryByTestId('hub-live-study-note')).toBeNull()
+  })
+
+  it('no sweep → the fix buttons are enabled and there is no note', async () => {
+    gaps()
+    mount()
+    const fix = await screen.findByTestId('hub-site-fix-grid') as HTMLButtonElement
+    await waitFor(() => expect(resultsApi.getFmeaModes).toHaveBeenCalled())
+    expect(fix.disabled).toBe(false)
+    expect(screen.queryByTestId('hub-live-study-note')).toBeNull()
   })
 })

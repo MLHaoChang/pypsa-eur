@@ -33,9 +33,11 @@ from gridspine.static.campus_reactive import requirement_from
 from gridspine.templates.grid_codes import (
     PROFILE_ID,
     SOURCES,
+    band_for,
     confirm_limit,
     list_grid_codes,
     load_grid_code,
+    uncovered_kv_ranges,
     unconfirmed,
     validate_profile,
 )
@@ -410,3 +412,115 @@ def test_the_investment_step_takes_project_profiles_too(tmp_path, project):  # n
     assert rows.at["pcc_reactive", "source"] == "extracted"
     with pytest.raises(ContractError, match="tso"):
         invest_campus(run, profile="tso")
+
+
+# --------------------------------------------------------------------------
+# voltage coverage: which nominal voltages below the top band have no band
+# --------------------------------------------------------------------------
+
+def _bands(*spec):
+    """A profile of ``(kv_min, kv_max[, inclusive])`` bands."""
+    return {"voltage_bands": [
+        {"kv_min": float(lo), "kv_max": float(hi), **({"kv_max_inclusive": True} if rest and rest[0] else {}),
+         "v_min": 0.9, "v_max": 1.1, "clause": "c", "source": "assumed"}
+        for lo, hi, *rest in spec]}
+
+
+def test_every_shipped_profile_covers_every_voltage_up_to_its_top_band():
+    for name in list_grid_codes():
+        assert uncovered_kv_ranges(load_grid_code(name)) == [], name
+
+
+def test_a_profile_that_starts_at_110_kv_leaves_0_to_110_uncovered():
+    """The DCC states bands from 110 kV upward, so a profile drafted from it
+    has nothing below."""
+    dcc = _bands((110, 300), (300, 400, True))
+    assert uncovered_kv_ranges(dcc) == [(0.0, 110.0, True)]
+
+
+def test_a_gap_in_the_middle_is_reported():
+    assert uncovered_kv_ranges(_bands((0, 20), (110, 300))) == [(20.0, 110.0, True)]
+
+
+def test_several_gaps_are_reported_in_order_whatever_the_order_of_the_bands():
+    p = _bands((300, 400), (50, 110), (0, 20))
+    assert uncovered_kv_ranges(p) == [(20.0, 50.0, True), (110.0, 300.0, True)]
+
+
+def test_nothing_is_uncovered_above_the_top_band():
+    """Only 0 up to the highest band is asked for: a profile ending at 400 kV
+    inclusive is complete, whether or not 500 kV exists."""
+    assert uncovered_kv_ranges(_bands((0, 110), (110, 400, True))) == []
+    assert uncovered_kv_ranges(_bands((0, 400))) == []
+
+
+def test_an_inclusive_edge_covers_its_own_point_and_the_gap_starts_above_it():
+    """A band ending at 110 kV inclusive covers 110 kV, so the next band's gap
+    is open at 110: 110 kV itself is not uncovered."""
+    assert uncovered_kv_ranges(_bands((0, 110, True), (200, 400))) == [(110.0, 200.0, False)]
+
+
+def test_an_exclusive_edge_leaves_its_own_point_to_the_gap_or_the_next_band():
+    """A band ending at 110 kV exclusive does not cover 110 kV. A band starting
+    there covers it (no gap); one starting higher leaves 110 kV in the gap."""
+    assert uncovered_kv_ranges(_bands((0, 110), (110, 400))) == []
+    assert uncovered_kv_ranges(_bands((0, 110), (110.5, 400))) == [(110.0, 110.5, True)]
+
+
+def test_an_inclusive_edge_met_by_the_next_band_is_not_a_gap():
+    assert uncovered_kv_ranges(_bands((0, 110, True), (110, 400))) == []
+
+
+def test_an_inclusive_edge_counts_even_when_another_band_ends_at_the_same_voltage_first():
+    """Two bands end at 110 kV, the later-starting one inclusive: 110 kV is covered
+    whichever the order, so the gap above starts open."""
+    assert uncovered_kv_ranges(_bands((0, 110), (10, 110, True), (110.5, 400))) == [(110.0, 110.5, False)]
+    assert uncovered_kv_ranges(_bands((10, 110, True), (0, 110), (110.5, 400))) == [(110.0, 110.5, False)]
+
+
+def test_a_first_band_above_zero_leaves_zero_up_to_it_uncovered():
+    assert uncovered_kv_ranges(_bands((0.4, 110))) == [(0.0, 0.4, True)]
+
+
+def test_a_band_inside_another_does_not_hide_a_gap_after_it_or_make_one():
+    p = _bands((0, 100), (10, 20), (150, 200))
+    assert uncovered_kv_ranges(p) == [(100.0, 150.0, True)]
+
+
+def test_uncovered_ranges_are_exactly_where_band_for_finds_no_band():
+    """The helper and the engine's lookup agree at every probe voltage,
+    including each edge."""
+    profiles = [_bands((110, 300), (300, 400, True)), _bands((0, 20), (110, 300)),
+                _bands((0, 110, True), (200, 400)), _bands((0, 110), (110.5, 400)),
+                _bands((0, 110), (110, 400))]
+    probes = [0.0, 0.2, 20.0, 50.0, 109.99, 110.0, 110.25, 110.5, 199.0, 200.0, 300.0, 399.0, 400.0]
+    for p in profiles:
+        top = max(b["kv_max"] for b in p["voltage_bands"])
+        top_inclusive = any(b.get("kv_max_inclusive") for b in p["voltage_bands"] if b["kv_max"] == top)
+        gaps = uncovered_kv_ranges(p)
+        for kv in (k for k in probes if k < top or (k == top and top_inclusive)):
+            in_gap = any((lo <= kv if inc else lo < kv) and kv < hi for lo, hi, inc in gaps)
+            try:
+                band_for(p, kv)
+                has_band = True
+            except ContractError:
+                has_band = False
+            assert has_band != in_gap, (p["voltage_bands"], kv)
+
+
+def test_uncovered_kv_ranges_does_not_touch_its_argument_and_a_profile_without_bands_has_none():
+    p = _bands((110, 300))
+    before = copy.deepcopy(p)
+    uncovered_kv_ranges(p)
+    assert p == before
+    assert uncovered_kv_ranges({"voltage_bands": []}) == []
+
+
+def test_validate_profile_and_the_loader_still_accept_a_profile_with_a_gap(tmp_path):
+    """Coverage is asked of a published profile (the backend), not at load: a
+    partial test profile stays loadable."""
+    p = load_grid_code("generic_assumed", raw=True)
+    p["voltage_bands"][0].update(kv_min=110.0)
+    assert uncovered_kv_ranges(validate_profile("partial", p)) == [(0.0, 110.0, True)]
+    (tmp_path / "partial.yaml").write_text(yaml.safe_dump(p))
+    assert load_grid_code("partial", extra_dirs=(tmp_path,))["name"] == "partial"

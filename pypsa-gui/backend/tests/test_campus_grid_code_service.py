@@ -450,11 +450,94 @@ def test_a_quote_not_on_its_page_is_flagged_not_refused(hub, fake_api):
     inp = tool_input()
     inp["q_range_demand"]["quote"] = "The reactive range shall not exceed 33 percent"
     inp["voltage_bands"][0]["page"] = 9                          # beyond the document
+    inp["voltage_bands"][0]["quote"] = "a sentence the document never says"
     _, draft = _extracted(hub, fake_api, inp)
     limits = draft["review"]["limits"]
     assert limits["q_range_demand"] == {"quote_found": False, "found_on_page": None}
     assert limits["voltage_bands[0]"] == {"quote_found": False, "found_on_page": None}
     assert draft["profile"]["q_range_demand"]["source"] == "extracted"     # still a draft for review
+
+
+FILLER = tuple(f"Annex {i}\nNothing about limits is written on this page." for i in range(3, 8))
+PDF7 = make_pdf((PAGE_1, PAGE_2, *FILLER))                       # pages 1 and 2 as before, then five more
+
+
+def _extracted_in(hub, fake_api, inp, pdf=PDF7, profile_id="tso"):
+    doc = _upload(hub, pdf)
+    fake_api(response(inp))
+    return doc, gc.extract(hub, doc["id"], profile_id)
+
+
+def test_a_verbatim_quote_on_the_wrong_page_is_flagged_and_the_real_page_named(hub, fake_api):
+    """The live probe: the model gave page 21 for a quote that is on page 13."""
+    inp = tool_input()
+    inp["q_range_demand"]["page"] = 7                            # the quote is on page 2
+    _, draft = _extracted_in(hub, fake_api, inp)
+    check = draft["review"]["limits"]["q_range_demand"]
+    assert check == {"quote_found": False, "found_on_page": 2}    # still flagged: the stated page is wrong
+    assert set(check) == {"quote_found", "found_on_page"}         # the shape the UI reads
+    assert draft["review"]["limits"]["voltage_bands[0]"] == {"quote_found": True, "found_on_page": 1}
+
+
+def test_a_stated_page_beyond_the_document_still_finds_the_quote_elsewhere(hub, fake_api):
+    inp = tool_input()
+    inp["q_range_demand"]["page"] = 99
+    _, draft = _extracted_in(hub, fake_api, inp)
+    assert draft["review"]["limits"]["q_range_demand"] == {"quote_found": False, "found_on_page": 2}
+
+
+def test_a_quote_found_nowhere_in_a_longer_document_has_no_page(hub, fake_api):
+    inp = tool_input()
+    inp["q_range_demand"]["quote"] = "The reactive range shall not exceed 33 percent"
+    inp["q_range_demand"]["page"] = 5
+    _, draft = _extracted_in(hub, fake_api, inp)
+    assert draft["review"]["limits"]["q_range_demand"] == {"quote_found": False, "found_on_page": None}
+
+
+def test_a_quote_on_several_pages_names_the_first_when_the_stated_page_is_wrong(hub, fake_api):
+    twice = make_pdf((PAGE_1, "filler", "filler", "filler", PAGE_1, "filler", "filler"))
+    inp = tool_input()
+    inp["voltage_bands"][0]["page"] = 7
+    _, draft = _extracted_in(hub, fake_api, inp, pdf=twice)
+    assert draft["review"]["limits"]["voltage_bands[0]"] == {"quote_found": False, "found_on_page": 1}
+
+
+def test_a_quote_the_stated_page_has_wins_over_an_earlier_page_that_repeats_it(hub, fake_api):
+    """The search of every page runs only when the stated page and its
+    neighbours do not have the quote."""
+    twice = make_pdf((PAGE_1, "filler", "filler", "filler", PAGE_1, "filler", "filler"))
+    inp = tool_input()
+    inp["voltage_bands"][0]["page"] = 5
+    _, draft = _extracted_in(hub, fake_api, inp, pdf=twice)
+    assert draft["review"]["limits"]["voltage_bands[0]"] == {"quote_found": True, "found_on_page": 5}
+
+
+def test_a_quote_on_the_stated_page_and_the_page_before_it_names_the_stated_page(hub, fake_api):
+    """The stated page is tried first, then the page before, then the one after."""
+    repeated = make_pdf(("filler", "filler", PAGE_1, PAGE_1, "filler", "filler"))
+    inp = tool_input()
+    inp["voltage_bands"][0]["page"] = 4
+    _, draft = _extracted_in(hub, fake_api, inp, pdf=repeated)
+    assert draft["review"]["limits"]["voltage_bands[0]"] == {"quote_found": True, "found_on_page": 4}
+
+
+def test_editing_the_page_rechecks_the_quote_across_the_document(hub, fake_api):
+    _extracted_in(hub, fake_api, tool_input())
+    text = gc.get_draft(hub, "tso")["yaml"]
+    wrong = yaml.safe_load(text)
+    wrong["q_range_demand"]["page"] = 7
+    out = gc.save_draft(hub, "tso", yaml.safe_dump(wrong, sort_keys=False))
+    assert out["review"]["limits"]["q_range_demand"] == {"quote_found": False, "found_on_page": 2}
+
+
+def test_confirming_a_limit_whose_page_is_wrong_is_still_allowed(hub, fake_api):
+    """A person confirms with the warning in view; it does not block."""
+    inp = tool_input()
+    inp["q_range_demand"]["page"] = 7
+    _extracted_in(hub, fake_api, inp)
+    out = gc.confirm(hub, "tso", "q_range_demand")
+    assert out["profile"]["q_range_demand"]["source"] == "code" and out["profile"]["q_range_demand"]["page"] == 7
+    assert out["review"]["limits"]["q_range_demand"] == {"quote_found": False, "found_on_page": 2}
 
 
 def test_the_review_metadata_lives_beside_the_draft_not_in_it(hub, fake_api):
@@ -619,8 +702,195 @@ def test_confirming_what_is_not_an_extracted_limit_is_refused(hub, fake_api, pat
 
 
 # --------------------------------------------------------------------------
+# voltage coverage: a profile faithful to a code that starts at 110 kV
+# --------------------------------------------------------------------------
+
+def _band(kv_min, kv_max, inclusive=False, page=1, quote="between 0,90 pu and 1,10 pu", **over):
+    b = {"kv_min": kv_min, "kv_max": kv_max, "v_min": 0.90, "v_max": 1.118, "clause": f"Art. 12 ({kv_min}-{kv_max})",
+         "page": page, "quote": quote}
+    if inclusive:
+        b["kv_max_inclusive"] = True
+    b.update(over)
+    return b
+
+
+def dcc_like(**over):
+    """What the live probe got from the real DCC: bands from 110 kV only."""
+    return tool_input(voltage_bands=[_band(110.0, 300.0), _band(300.0, 400.0, inclusive=True)], **over)
+
+
+def test_a_band_range_the_document_does_not_state_below_its_lowest_band_is_filled_as_assumed(hub, fake_api):
+    _, draft = _extracted(hub, fake_api, dcc_like())
+    bands = draft["profile"]["voltage_bands"]
+    assert [(b["kv_min"], b["kv_max"], b["source"]) for b in bands] == [
+        (0.0, 110.0, "assumed"), (110.0, 300.0, "extracted"), (300.0, 400.0, "extracted")]
+    fill = bands[0]
+    template = ce.cs.load_grid_code("generic_assumed", raw=True)["voltage_bands"][0]
+    assert (fill["v_min"], fill["v_max"]) == (template["v_min"], template["v_max"])
+    assert fill["clause"] == f"not stated in the document; {template['clause']}"
+    assert "page" not in fill and "quote" not in fill and "kv_max_inclusive" not in fill
+    assert bands[2]["kv_max_inclusive"] is True                   # the extracted bands are untouched
+
+
+def test_a_filled_band_is_listed_by_its_own_index_after_sorting_beside_the_whole_key_fills(hub, fake_api):
+    _, draft = _extracted(hub, fake_api, dcc_like())
+    assert draft["review"]["filled_from_template"] == ["voltage_bands[0]", "rvc_limit_pct"]
+    # the extracted bands moved to 1 and 2: they are what is unconfirmed, and what has quotes to check
+    assert draft["unconfirmed"] == ["voltage_bands[1]", "voltage_bands[2]", "q_range_demand"]
+    assert sorted(draft["review"]["limits"]) == ["q_range_demand", "voltage_bands[1]", "voltage_bands[2]"]
+
+
+def test_a_gap_between_extracted_bands_is_filled_by_its_own_index(hub, fake_api):
+    inp = tool_input(voltage_bands=[_band(110.0, 300.0), _band(0.0, 20.0)])      # not in order
+    _, draft = _extracted(hub, fake_api, inp)
+    bands = draft["profile"]["voltage_bands"]
+    assert [(b["kv_min"], b["kv_max"], b["source"]) for b in bands] == [
+        (0.0, 20.0, "extracted"), (20.0, 110.0, "assumed"), (110.0, 300.0, "extracted")]
+    assert bands[1]["clause"].startswith("not stated in the document; ")
+    assert draft["review"]["filled_from_template"] == ["voltage_bands[1]", "rvc_limit_pct"]
+
+
+def test_every_gap_is_filled_not_only_the_first(hub, fake_api):
+    inp = tool_input(voltage_bands=[_band(10.0, 20.0), _band(50.0, 110.0), _band(200.0, 300.0)])
+    _, draft = _extracted(hub, fake_api, inp)
+    spans = [(b["kv_min"], b["kv_max"], b["source"]) for b in draft["profile"]["voltage_bands"]]
+    assert spans == [(0.0, 10.0, "assumed"), (10.0, 20.0, "extracted"), (20.0, 50.0, "assumed"),
+                     (50.0, 110.0, "extracted"), (110.0, 200.0, "assumed"), (200.0, 300.0, "extracted")]
+    assert draft["review"]["filled_from_template"] == [
+        "voltage_bands[0]", "voltage_bands[2]", "voltage_bands[4]", "rvc_limit_pct"]
+    assert ce.cs.uncovered_kv_ranges(draft["profile"]) == []
+
+
+def test_nothing_is_filled_above_the_highest_extracted_band(hub, fake_api):
+    _, draft = _extracted(hub, fake_api, dcc_like())
+    assert max(b["kv_max"] for b in draft["profile"]["voltage_bands"]) == 400.0
+    assert [b["source"] for b in draft["profile"]["voltage_bands"]].count("assumed") == 1
+    _, draft2 = _extracted(hub, fake_api, tool_input(), profile_id="tso2")      # 0-300, already complete
+    assert [b["source"] for b in draft2["profile"]["voltage_bands"]] == ["extracted"]
+    assert draft2["review"]["filled_from_template"] == ["rvc_limit_pct"]
+
+
+def test_an_inclusive_top_edge_leaves_no_gap_above_it(hub, fake_api):
+    inp = tool_input(voltage_bands=[_band(0.0, 400.0, inclusive=True)])
+    _, draft = _extracted(hub, fake_api, inp)
+    assert len(draft["profile"]["voltage_bands"]) == 1
+
+
+def test_an_inclusive_edge_below_a_gap_starts_the_fill_at_that_edge(hub, fake_api):
+    """0-110 inclusive covers 110 kV; the fill then starts at 110 (a shared
+    point, which band_for resolves to the first band) and ends at the next."""
+    inp = tool_input(voltage_bands=[_band(0.0, 110.0, inclusive=True), _band(200.0, 400.0)])
+    _, draft = _extracted(hub, fake_api, inp)
+    spans = [(b["kv_min"], b["kv_max"], b["source"]) for b in draft["profile"]["voltage_bands"]]
+    assert spans == [(0.0, 110.0, "extracted"), (110.0, 200.0, "assumed"), (200.0, 400.0, "extracted")]
+    from gridspine.templates.grid_codes import band_for
+    assert band_for(draft["profile"], 110.0)["source"] == "extracted"
+    assert band_for(draft["profile"], 150.0)["source"] == "assumed"
+
+
+def test_a_band_that_is_not_a_band_is_left_to_the_loader_not_filled(hub, fake_api):
+    doc = _upload(hub)
+    fake_api(response(tool_input(voltage_bands=[{"kv_max": 300.0, "v_min": 0.9, "v_max": 1.1, "clause": "x",
+                                                  "page": 1, "quote": "q"}])))
+    with pytest.raises(HTTPException) as exc:
+        gc.extract(hub, doc["id"], "bad")
+    assert _status(exc) == 422 and "kv_min" in exc.value.detail
+    assert not (_codes(hub) / "drafts" / "bad.yaml").exists()
+
+
+def test_a_profile_extracted_from_a_code_that_starts_at_110_kv_runs_the_campus_study(user_and_db, fake_api):
+    """The live probe's failure: no band at the campus's 20 kV bus."""
+    db, user = user_and_db
+    hub = project_registry.create_root(db, user, f"Dcc Hub {uuid.uuid4().hex[:6]}")
+    hub_network().export_to_netcdf(str(project_registry.ensure_project_dir(hub) / "network.nc"))
+    ce.draft(hub)
+    _extracted(hub, fake_api, dcc_like())
+    gc.publish(hub, "tso", allow_unconfirmed=True)
+    out = ce.run(hub, {"k": 1, "profile": "tso"})
+    rows = {r["check"]: r for r in out["results"]["compliance"]}
+    assert rows["campus_voltage"]["source"] == "assumed"          # the filled 0-110 kV band, said so
+    assert rows["campus_voltage"]["clause"].startswith("not stated in the document; ")
+    assert rows["pcc_voltage"]["source"] == "extracted"           # the 110 kV PCC keeps its extracted band
+
+
+# --------------------------------------------------------------------------
 # publish
 # --------------------------------------------------------------------------
+
+def _edit(hub, profile_id, mutate):
+    profile = yaml.safe_load(gc.get_draft(hub, profile_id)["yaml"])
+    mutate(profile)
+    return gc.save_draft(hub, profile_id, yaml.safe_dump(profile, sort_keys=False))
+
+
+def test_publishing_a_hand_edited_draft_with_a_gap_is_refused_naming_the_range(hub, fake_api):
+    _extracted(hub, fake_api)                                     # 0-300, complete
+    _edit(hub, "tso", lambda p: p["voltage_bands"][0].update(kv_min=110.0))
+    with pytest.raises(HTTPException) as exc:
+        gc.publish(hub, "tso", allow_unconfirmed=True)
+    assert _status(exc) == 422
+    detail = exc.value.detail
+    assert "0 kV" in detail and "110 kV" in detail and "'tso'" in detail
+    assert "add a voltage band" in detail and "assumed" in detail
+    assert not (_codes(hub) / "tso.yaml").exists()
+    assert "tso" not in ce.get_state(hub)["profiles"]
+
+
+def test_a_gap_is_refused_before_unconfirmed_limits_are_mentioned(hub, fake_api):
+    """The message to act on is the one about the range, not a confirm
+    that would still leave the profile unusable."""
+    _extracted(hub, fake_api)
+    _edit(hub, "tso", lambda p: p["voltage_bands"][0].update(kv_min=110.0))
+    with pytest.raises(HTTPException) as exc:
+        gc.publish(hub, "tso")                                    # no allow_unconfirmed either
+    assert _status(exc) == 422 and "110 kV" in exc.value.detail
+
+
+def test_every_uncovered_range_is_named(hub, fake_api):
+    _extracted(hub, fake_api, tool_input(voltage_bands=[_band(0.0, 300.0)]))
+    def gappy(p):
+        b = p["voltage_bands"][0]
+        p["voltage_bands"] = [dict(b, kv_min=10.0, kv_max=20.0), dict(b, kv_min=50.0, kv_max=110.0)]
+    _edit(hub, "tso", gappy)
+    with pytest.raises(HTTPException) as exc:
+        gc.publish(hub, "tso", allow_unconfirmed=True)
+    d = exc.value.detail
+    assert "from 0 kV up to 10 kV" in d and "from 20 kV up to 50 kV" in d
+
+
+def test_a_range_after_an_inclusive_edge_is_named_as_above_it(hub, fake_api):
+    _extracted(hub, fake_api, tool_input(voltage_bands=[_band(0.0, 300.0)]))
+    def gappy(p):
+        b = p["voltage_bands"][0]
+        p["voltage_bands"] = [dict(b, kv_min=0.0, kv_max=110.0, kv_max_inclusive=True), dict(b, kv_min=200.0, kv_max=300.0)]
+    _edit(hub, "tso", gappy)
+    with pytest.raises(HTTPException) as exc:
+        gc.publish(hub, "tso", allow_unconfirmed=True)
+    assert "above 110 kV up to 200 kV" in exc.value.detail
+
+
+def test_adding_an_assumed_band_for_the_gap_lets_it_publish(hub, fake_api):
+    _extracted(hub, fake_api)
+    def with_gap_then_fix(p):
+        p["voltage_bands"][0]["kv_min"] = 110.0
+        p["voltage_bands"].insert(0, {"kv_min": 0.0, "kv_max": 110.0, "v_min": 0.9, "v_max": 1.1,
+                                      "clause": "design choice", "source": "assumed"})
+    _edit(hub, "tso", with_gap_then_fix)
+    assert gc.publish(hub, "tso", allow_unconfirmed=True)["id"] == "tso"
+
+
+def test_a_blank_draft_covers_every_voltage_and_publishes(hub):
+    gc.new_draft(hub, "mine")
+    assert gc.publish(hub, "mine")["id"] == "mine"
+
+
+def test_the_gap_is_only_refused_at_publish_a_draft_with_one_can_still_be_saved_and_confirmed(hub, fake_api):
+    _extracted(hub, fake_api)
+    _edit(hub, "tso", lambda p: p["voltage_bands"][0].update(kv_min=110.0))
+    out = gc.confirm(hub, "tso", "q_range_demand")
+    assert out["profile"]["voltage_bands"][0]["kv_min"] == 110.0
+
+
 
 def test_publishing_with_unconfirmed_limits_is_refused_naming_them(hub, fake_api):
     _extracted(hub, fake_api)
@@ -758,3 +1028,53 @@ def test_every_action_refuses_a_project_of_another_kind(study, action):
     with pytest.raises(HTTPException) as exc:
         action(study)
     assert exc.value.status_code == 409 and "capacity-expansion" in exc.value.detail
+
+
+# --------------------------------------------------------------------------
+# containment: every request-derived filename stays inside its folder
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name", ["../escape.yaml", "../../etc/passwd", "a/../../b.pdf", "/etc/passwd"])
+def test_a_filename_that_leaves_its_folder_is_refused(tmp_path, name):
+    base = tmp_path / "grid_codes"
+    base.mkdir()
+    with pytest.raises(HTTPException) as exc:
+        gc._inside(base, name)
+    assert exc.value.status_code == 422
+
+
+def test_a_symlinked_file_pointing_outside_is_refused(tmp_path):
+    base = tmp_path / "grid_codes"
+    base.mkdir()
+    outside = tmp_path / "secret.yaml"
+    outside.write_text("x")
+    (base / "link.yaml").symlink_to(outside)
+    with pytest.raises(HTTPException):
+        gc._inside(base, "link.yaml")
+
+
+def test_a_plain_filename_resolves_inside_its_folder(tmp_path):
+    base = tmp_path / "grid_codes"
+    base.mkdir()
+    got = gc._inside(base, "tso.yaml")
+    assert got == (base / "tso.yaml").resolve()
+    assert gc._inside(base, "missing_yet.review.json").parent == base.resolve()
+
+
+def test_every_id_built_path_goes_through_the_containment_helper():
+    """No path in the service is joined from an id without ``_inside``."""
+    import inspect
+    import re
+    src = inspect.getsource(gc)
+    assert not re.search(r'\)\s*/\s*f"', src), "a path is joined with '/ f\"…\"' instead of _inside(...)"
+    assert not re.search(r'\bdocs\s*/\s*f"', src)
+
+
+def test_a_sibling_folder_sharing_the_name_prefix_is_outside(tmp_path):
+    """``grid_codes_evil`` starts with ``grid_codes``: the check needs the
+    separator, not just the prefix."""
+    base = tmp_path / "grid_codes"
+    base.mkdir()
+    (tmp_path / "grid_codes_evil").mkdir()
+    with pytest.raises(HTTPException):
+        gc._inside(base, "../grid_codes_evil/x.yaml")

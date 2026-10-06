@@ -205,15 +205,24 @@ def test_a_member_with_vintage_bounds_is_refused():
         L.materialise_poc_prices(n, _commercial())
 
 
-def test_a_net_energy_item_on_a_group_with_export_is_refused():
+def test_a_net_energy_item_on_a_group_with_export_is_priced_on_net_import():
     """#2: the bill nets a group's import against its export on the group
-    meter; per-member adders cannot, so P1 refuses rather than overcharge."""
+    meter; per-member adders cannot, so P1 refused it. P3 WP3.3b prices a
+    net COST item once on the group's net import (`ic_group_net_*`, see
+    `test_group_net_import.py`) — never on the member adders — and still
+    refuses a negative rate."""
     n = _two_members()
     n.add("Link", "export", bus0="poc", bus1="grid", p_nom=80.0, carrier="AC")
     net = {**TOU, "measured_on": "net"}
+    applied = L.materialise_poc_prices(n, {**_commercial(), "export_link": "export",
+                                           "import_tariff": _tariff(net)})
+    assert getattr(n, L.GROUP_NET_SPEC_ATTR)["items"] == ["energy"]
+    assert "import_b" not in n.links_t.marginal_cost.columns
+    applied.undo()
+    neg = {**net, "periods": [{"name": "all", "rate": -0.01}]}
     with pytest.raises(L.CommercialBindingError, match="net"):
         L.materialise_poc_prices(n, {**_commercial(), "export_link": "export",
-                                     "import_tariff": _tariff(net)})
+                                     "import_tariff": _tariff(neg)})
 
 
 def test_reordered_members_are_not_drift():

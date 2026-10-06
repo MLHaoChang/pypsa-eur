@@ -313,6 +313,15 @@ _SOLVER_BLOCKING_EXEMPT: set[str] = set()
 # middleware 409 fires first and the user can't leave a solving project — the
 # whole point of the resident multi-project work.
 _SOLVER_BLOCKING_EXEMPT_SUFFIXES = ("/activate",)
+# P27a (A1): the prefixes whose writes a LIVE-NETWORK study refuses (the
+# component, profile, time-axis, cluster, vintage and import routes). A
+# separate tuple, and deliberately NOT `/api/projects/`: the project routes
+# keep their own endpoint-level guards, so a save still says "Cannot save the
+# project …" (`_refuse_save_during_study`) and a rename / delete / layout /
+# snapshot of ANOTHER project is not refused with a sentence about editing
+# this network. Pinned by
+# `test_live_network_untouched.py::test_save_during_a_sweep_still_gets_the_save_sentence`.
+_STUDY_EDIT_PREFIXES = ("/api/network/", "/api/io/")
 
 # Exempt from the SHUTTING-DOWN gate. `/api/simulation/abort` is step 4's own
 # mechanism, and step 1 closes the gate before step 4 runs — so without this
@@ -825,6 +834,26 @@ async def undo_snapshot_middleware(request: Request, call_next):
                     "code": "solver_in_flight",
                 },
             )
+        # ── Live-network study gate (P27a, A1) ─────────────────────────
+        # A sweep / frontier / coupling or margin loop re-solves the user's
+        # OWN network object between its iterates and puts its tables back at
+        # the end — so an edit landing mid-study is either measured as if it
+        # were the plan or overwritten by the restore. The request's context
+        # was bound above (`bind_request_context`), so `get_solver_state()`
+        # is THIS project's state. `eh_study` (a private copy) and `mc` (never
+        # mutates) are not in LIVE_NETWORK_STUDIES and do not block edits.
+        if any(path.startswith(p) for p in _STUDY_EDIT_PREFIXES):
+            from services.project_context import LIVE_NETWORK_STUDIES
+            from services.pypsa_service import PyPSAService
+            from services.study_state import study_in_flight_detail
+            detail = study_in_flight_detail(
+                PyPSAService.get_solver_state(), "edit the network",
+                keys=LIVE_NETWORK_STUDIES)
+            if detail:
+                return JSONResponse(
+                    status_code=409,
+                    content={"detail": detail, "code": "study_in_flight"},
+                )
 
     # ── Foreign-lock gate (project-write-safety Task 6) ────────────────
     # The resident ProjectContext is shared per (org, project): both a lock

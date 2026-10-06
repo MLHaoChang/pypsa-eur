@@ -1599,35 +1599,13 @@ def save_project(
 
 
 
-def _study_in_flight_detail(state, doing: str) -> dict | None:
-    """The structured 409 for an action a live study forbids, or None.
-
-    Whole-branch review, findings S5 and M12. Save and activate gated on
-    `_solver_in_flight` only — a study's worker is never `state["thread"]` —
-    while load, import, template and reset were guarded (Phase 11). A save
-    landing between a sweep's lock-free contingency mutations exported the
-    CONTINGENCY network, and its `results_state.pkl` with the contingency's
-    lost load, as the user's project; and a switch left the study running on
-    a project the user could no longer see or abort. Same shape as the
-    in-flight refusal so the chat agent and the frontend read one field.
-    """
-    from services.project_context import STUDY_LABELS, running_study_key
-    key = running_study_key(state)
-    if key is None:
-        return None
-    label = STUDY_LABELS.get(key, key)
-    verb = doing.split()[0]
-    return {
-        "error_kind": "study_in_flight",
-        "study": key,
-        "message": (
-            f"Cannot {doing} while {label} is running — it re-solves the "
-            "in-memory network between its own iterates (a sweep applies each "
-            "contingency in turn; a loop re-solves under each candidate), so "
-            f"a {verb} now would act on a mid-study plan rather than yours. "
-            "Wait for it to finish, or abort it, and retry."
-        ),
-    }
+# `_study_in_flight_detail` moved to `services/study_state.py` (P27a) so the
+# network-edit handlers can raise the same dict; re-imported under its old
+# name for this module's two callers (save, activate), which keep the default
+# `keys` (every study).
+from services.study_state import (  # noqa: E402
+    study_in_flight_detail as _study_in_flight_detail,
+)
 
 
 def _refuse_save_during_study(ctx) -> None:
@@ -2286,6 +2264,20 @@ def _queue_solve_conflict(name: str) -> HTTPException:
     )
 
 
+def _tariff_ref_load_issues(cfg, project_name: str | None) -> list[dict]:
+    """`[issue]` when the loaded config's inline import tariff no longer hashes
+    to its `import_tariff_ref` (`import_tariff_ref_conflict_on_load`), logged;
+    `[]` otherwise. Flagged, never repaired (the solve refuses the copy)."""
+    from services.commercial.binding import tariff_ref_load_issue
+
+    issue = tariff_ref_load_issue(getattr(cfg, "commercial", None)) if cfg is not None else None
+    if issue is None:
+        return []
+    change_log_service.log("warn", "Project", project_name or "(unsaved)",
+                           f"{issue['code']} ({issue['reason']}): {issue['message']}")
+    return [issue]
+
+
 def _library_pin_issues(db, project, src: pathlib.Path, cfg) -> list[dict]:
     """
     Re-check the project's Library pins (WP1.1c) against ITS org's Library and
@@ -2294,11 +2286,14 @@ def _library_pin_issues(db, project, src: pathlib.Path, cfg) -> list[dict]:
     """
     from services.library import bundle_pins
 
+    # The Library tariff ref's inline copy is re-hashed on EVERY load (IC P4
+    # WP4.6b): no database needed, so single-user mode checks it too.
+    local = _tariff_ref_load_issues(cfg, getattr(project, "name", None))
     if db is None or project is None:
-        return []
-    issues = bundle_pins.check_pins(
+        return local
+    issues = local + bundle_pins.check_pins(
         db, project.org_id, src, config=asdict(cfg) if cfg is not None else {})
-    for issue in issues:
+    for issue in issues[len(local):]:
         change_log_service.log(
             "warn", "Project", project.name,
             f"Library pin {issue['code']} ({issue['reason']}): {issue['message']}",
@@ -2537,6 +2532,7 @@ def activate_project(
             change_log_service.log(
                 "warn", "Project", project.name,
                 f"Library pin {issue['code']} ({issue['reason']}): {issue['message']}")
+        library_issues = _tariff_ref_load_issues(cfg, project.name) + library_issues
     return {"activated": project.name, "evicted": evicted, "lock": lock_info,
             "library_issues": library_issues}
 

@@ -252,11 +252,31 @@ describe('grid codes: the review form', () => {
     expect(q.textContent).toContain('page 20')
   })
 
-  it('warns "quote not found on its page" only where quote_found is false', async () => {
+  it('warns "quote not found in the document" only where quote_found is false and no page has it', async () => {
     await openDraftFromList()
-    expect(within(screen.getByTestId('limit-q_range_demand')).getByText(/quote not found on its page/i)).toBeTruthy()
-    expect(within(screen.getByTestId('limit-voltage_bands[0]')).queryByText(/quote not found on its page/i)).toBeNull()
-    expect(within(screen.getByTestId('limit-rvc_limit_pct')).queryByText(/quote not found on its page/i)).toBeNull()
+    expect(within(screen.getByTestId('limit-q_range_demand')).getByText(/quote not found in the document/i)).toBeTruthy()
+    expect(within(screen.getByTestId('limit-voltage_bands[0]')).queryByText(/quote not found in the document/i)).toBeNull()
+    expect(within(screen.getByTestId('limit-rvc_limit_pct')).queryByText(/quote not found in the document/i)).toBeNull()
+  })
+
+  it('says where a verbatim quote really is when the stated page is wrong', async () => {
+    api.gridCodes.mockResolvedValue(list({ drafts: [summary('vde_4110', ['q_range_demand'])] }))
+    const d = draft()
+    d.review!.limits.q_range_demand = { quote_found: false, found_on_page: 13 }
+    api.getGridCodeDraft.mockResolvedValue(d)
+    renderPanel()
+    await userEvent.click(await screen.findByRole('button', { name: 'Review draft vde_4110' }))
+    const q = await screen.findByTestId('limit-q_range_demand')
+    expect(within(q).getByText(/quote found on page 13, not on page 20 \(as stated\)/i)).toBeTruthy()
+    // it is not "not found": that wording is only for a quote no page has
+    expect(within(q).queryByText(/quote not found in the document/i)).toBeNull()
+    // and it names the stated page of this limit, not of another
+    expect(within(screen.getByTestId('limit-voltage_bands[0]')).queryByText(/quote found on page/i)).toBeNull()
+  })
+
+  it('does not say "found on page" when the quote is on its stated page (quote_found true)', async () => {
+    await openDraftFromList()
+    expect(within(screen.getByTestId('limit-voltage_bands[0]')).queryByText(/quote found on page/i)).toBeNull()
   })
 
   it('does not call a quote missing when the document has been deleted (quote_found null)', async () => {
@@ -267,7 +287,7 @@ describe('grid codes: the review form', () => {
     renderPanel()
     await userEvent.click(await screen.findByRole('button', { name: 'Review draft vde_4110' }))
     const q = await screen.findByTestId('limit-q_range_demand')
-    expect(within(q).queryByText(/quote not found on its page/i)).toBeNull()
+    expect(within(q).queryByText(/quote not found in the document/i)).toBeNull()
     expect(within(q).getByText(/document is no longer in the project/i)).toBeTruthy()
   })
 
@@ -292,6 +312,43 @@ describe('grid codes: the review form', () => {
     for (const path of ['voltage_bands[0]', 'voltage_bands[1]']) {
       expect(within(await screen.findByTestId(`limit-${path}`)).getByText(/not stated in the document — generic value/i)).toBeTruthy()
     }
+  })
+
+  it('marks a band the template filled by its own index, and no other band', async () => {
+    api.gridCodes.mockResolvedValue(list({ drafts: [summary('vde_4110')] }))
+    const d = draft()
+    d.profile.voltage_bands = [
+      { kv_min: 0, kv_max: 110, v_min: 0.9, v_max: 1.1, clause: 'not stated in the document; generic', source: 'assumed' },
+      { kv_min: 110, kv_max: 300, v_min: 0.9, v_max: 1.118, clause: 'Annex II', source: 'extracted', page: 44, quote: 'q' },
+      { kv_min: 300, kv_max: 400, v_min: 0.9, v_max: 1.05, clause: 'Annex II', source: 'extracted', page: 44, quote: 'q2' },
+    ]
+    d.review!.filled_from_template = ['voltage_bands[0]', 'rvc_limit_pct']
+    api.getGridCodeDraft.mockResolvedValue(d)
+    renderPanel()
+    await userEvent.click(await screen.findByRole('button', { name: 'Review draft vde_4110' }))
+    const marker = /not stated in the document — generic value/i
+    expect(within(await screen.findByTestId('limit-voltage_bands[0]')).getByText(marker)).toBeTruthy()
+    expect(within(screen.getByTestId('limit-voltage_bands[1]')).queryByText(marker)).toBeNull()
+    expect(within(screen.getByTestId('limit-voltage_bands[2]')).queryByText(marker)).toBeNull()
+    expect(within(screen.getByTestId('limit-rvc_limit_pct')).getByText(marker)).toBeTruthy()
+  })
+
+  it('marks the band at the index it was listed under when the fill is in the middle', async () => {
+    api.gridCodes.mockResolvedValue(list({ drafts: [summary('vde_4110')] }))
+    const d = draft()
+    d.profile.voltage_bands = [
+      { kv_min: 0, kv_max: 20, v_min: 0.9, v_max: 1.1, clause: 'Art. 12', source: 'extracted', page: 1, quote: 'q' },
+      { kv_min: 20, kv_max: 110, v_min: 0.9, v_max: 1.1, clause: 'not stated in the document; generic', source: 'assumed' },
+      { kv_min: 110, kv_max: 300, v_min: 0.9, v_max: 1.118, clause: 'Annex II', source: 'extracted', page: 44, quote: 'q2' },
+    ]
+    d.review!.filled_from_template = ['voltage_bands[1]']
+    api.getGridCodeDraft.mockResolvedValue(d)
+    renderPanel()
+    await userEvent.click(await screen.findByRole('button', { name: 'Review draft vde_4110' }))
+    const marker = /not stated in the document — generic value/i
+    expect(within(await screen.findByTestId('limit-voltage_bands[1]')).getByText(marker)).toBeTruthy()
+    expect(within(screen.getByTestId('limit-voltage_bands[0]')).queryByText(marker)).toBeNull()
+    expect(within(screen.getByTestId('limit-voltage_bands[2]')).queryByText(marker)).toBeNull()
   })
 
   it('offers Confirm on an extracted limit only', async () => {

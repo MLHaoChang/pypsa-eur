@@ -28,6 +28,11 @@ with `tariff_engine.rate`, exactly as the LP charged it:
 An unsolved network (or no import tariff) gives `per_period={}` flagged
 `not_solved` (`no_import_tariff`).
 
+`rate_meter(n, commercial, import_mw, export_mw, *, meter_history)` is the
+rating half of `bill_site`, factored out for any meter series on the axis (IC
+P4 WP4.6a: the counterfactual meter, plan C13): `bill_site` reads the solved
+PoC flows and calls it, then adds the drift flags and the tariff hash.
+
 `compact_frames(bill)` flattens a bill into the store's frames: per period
 `"{period}:lines"` / `":quantities"` (wide, one float32 column per item, index
 = interval), `":monthly"` and `":demand_lines"` — the restricted results
@@ -202,26 +207,40 @@ def _drift_flags(n, cfg: CommercialConfig) -> tuple[list[str], dict]:
     return flags, solve
 
 
-def bill_site(n, commercial, *, meter_history: dict | None = None) -> SiteBill:
+def _poc_capacity_mw(n, cfg: CommercialConfig) -> float:
+    """The PoC Link's size (MW) the capacity items bill: `p_nom_opt`, else `p_nom`."""
+    poc = cfg.poc_link
+    pn = n.links.at[poc, "p_nom_opt"] if "p_nom_opt" in n.links.columns else np.nan
+    return float(pn) if np.isfinite(pn) else float(n.links.at[poc, "p_nom"])
+
+
+def rate_meter(n, commercial, import_mw, export_mw, *,
+               meter_history: dict | None = None) -> SiteBill:
+    """Rate a meter series on the network's axis with the site's import tariff,
+    exactly as `bill_site` rates the solved PoC meter (IC P4 plan C13, WP4.6a):
+    per period the site clock, the step, `_represented` → `represents_hours` /
+    `billing_period`, capacity items on the PoC's `p_nom_opt` in the periods
+    the PoC is active, the power factor, and `meter_history` (default
+    `meter_history_peaks_kw`) seeding the first period only.
+
+    `import_mw` / `export_mw` are MW per snapshot (length `len(n.snapshots)`).
+    No import tariff → `per_period={}` flagged `no_import_tariff`. A period the
+    engine cannot rate is None, flagged `period_not_billed:<period>:<why>`.
+    The drift checks and the tariff hash are `bill_site`'s (a synthetic meter
+    has no solve to drift from)."""
     cfg: CommercialConfig = _lp._parse(commercial)
     tariff = cfg.import_tariff
-    links = _lp.import_links(cfg)
-    needed = links + ([cfg.export_link] if cfg.export_link else [])
-    if tariff is None or not _solved(n, needed):
-        return SiteBill(per_period={}, flags=["not_solved"] if tariff is not None
-                        else ["no_import_tariff"])
+    if tariff is None:
+        return SiteBill(per_period={}, flags=["no_import_tariff"])
     flags: list[str] = []
     history = meter_history if meter_history is not None else (cfg.meter_history_peaks_kw or None)
-    p0 = n.links_t.p0
-    imp_all = np.sum([_flow(p0, link, flags) for link in links], axis=0)
-    exp_all = (_flow(p0, cfg.export_link, flags) if cfg.export_link
-               else np.zeros(len(n.snapshots)))
+    imp_all = np.asarray(import_mw, dtype=float)
+    exp_all = np.asarray(export_mw, dtype=float)
     w_all = n.snapshot_weightings.objective.to_numpy(dtype=float)
     multi = isinstance(n.snapshots, pd.MultiIndex)
     periods = list(n.snapshots.get_level_values(0).unique()) if multi else [None]
     poc = cfg.poc_link
-    pn = n.links.at[poc, "p_nom_opt"] if "p_nom_opt" in n.links.columns else np.nan
-    p_nom_mw = float(pn) if np.isfinite(pn) else float(n.links.at[poc, "p_nom"])
+    p_nom_mw = _poc_capacity_mw(n, cfg)
     years_w = (n.investment_period_weightings["years"] if multi else None)
 
     cap_rec = n.meta.get(_lp.META_CAPACITY) or {}
@@ -274,11 +293,7 @@ def bill_site(n, commercial, *, meter_history: dict | None = None) -> SiteBill:
         for f in (res.flags.get("_tariff") if res is not None else None) or []:
             if f not in flags:
                 flags.append(f)   # a partial URDB import (WP2.4b-i review L4)
-    drift, solve = _drift_flags(n, cfg)
-    flags += drift
     provenance = {
-        "tariff_hash": _H.digest(tariff), "tariff_hash_version": _H.HASH_VERSION,
-        **solve,
         "period_years": ({int(p): float(years_w.loc[p]) for p in periods} if multi else None),
         # The calendar each period is billed on: with `set_investment_periods`
         # reusing one weather year, every period bills that year's calendar
@@ -291,6 +306,31 @@ def bill_site(n, commercial, *, meter_history: dict | None = None) -> SiteBill:
         "period_errors": errors,
     }
     return SiteBill(per_period=per_period, flags=flags, provenance=provenance)
+
+
+def bill_site(n, commercial, *, meter_history: dict | None = None) -> SiteBill:
+    cfg: CommercialConfig = _lp._parse(commercial)
+    tariff = cfg.import_tariff
+    links = _lp.import_links(cfg)
+    needed = links + ([cfg.export_link] if cfg.export_link else [])
+    if tariff is None or not _solved(n, needed):
+        return SiteBill(per_period={}, flags=["not_solved"] if tariff is not None
+                        else ["no_import_tariff"])
+    flags: list[str] = []
+    p0 = n.links_t.p0
+    imp_all = np.sum([_flow(p0, link, flags) for link in links], axis=0)
+    exp_all = (_flow(p0, cfg.export_link, flags) if cfg.export_link
+               else np.zeros(len(n.snapshots)))
+    metered = rate_meter(n, cfg, imp_all, exp_all, meter_history=meter_history)
+    flags += metered.flags
+    drift, solve = _drift_flags(n, cfg)
+    flags += drift
+    provenance = {
+        "tariff_hash": _H.digest(tariff), "tariff_hash_version": _H.HASH_VERSION,
+        **solve,
+        **metered.provenance,
+    }
+    return SiteBill(per_period=metered.per_period, flags=flags, provenance=provenance)
 
 
 def compact_frames(bill: SiteBill) -> dict[str, pd.DataFrame]:
