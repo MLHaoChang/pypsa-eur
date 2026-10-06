@@ -25,21 +25,20 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 
 import {
   createChatStream,
-  getChatHealth,
   getChatHistory,
   postChatAbort,
   postChatConfirm,
   type ChatFrame,
-  type ChatHealth,
   type InterruptedTurn,
 } from '../api/chat'
-import { useChatProfiles, CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
+import { useChatProfiles, useChatReadiness, CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
 import { nk } from '../utils/queryKeys'
-import { invalidateNetworkQueries } from '../utils/projectActions'
+import { mismatchSentence } from '../utils/projectMismatch'
+import { moveProjectLock } from '../utils/projectActions'
 import { invalidateAssetQueries, isMutatingTier } from '../utils/assetWrite'
 import {
   deleteUpload,
@@ -466,9 +465,94 @@ export function guidedCardSummary(tool: string, args: Record<string, unknown>): 
 // Render-only: the transcript keeps the raw lines, and Expert shows them.
 const DENIED_LINE = /^denied: \S+$/
 const DENIED_ERROR_LINE = /^✗ \S+ — confirmation_denied\b/
-export function guidedToolLine(content: string): { hidden: true } | { hidden: false; label: string | null } {
+
+// P29 (B1, deferred spec §4.1): the progress lines in words. `phrase(X)` is
+// this table's entry, else "use <tool name in words>". Render-only, like
+// the declined line above: the transcript keeps `… preparing X`, `→ X`,
+// `✓ X` and `✗ X — kind: message`, and Expert shows them.
+//
+// P29 gate B1-1: a tool that only STARTS background work returns at once
+// (e.g. run_fmea_sweep: "returns {status:'running'} immediately"), so its ✓
+// line means "started". Its phrase says "start …", so "Done: start the
+// reliability study" stays true while the study runs.
+const GUIDED_TOOL_PHRASE: Record<string, string> = {
+  update_component: 'change a setting',
+  suggest_eh_setup: 'look at how the site is set up',
+  get_adequacy_results: 'read the study results',
+  list_components: 'list what is in the network',
+  update_solver_config: 'change a study setting',
+  put_stress_scenarios: 'save the stress scenarios',
+  // Start-only tools (their schema description begins "Start …", or they
+  // hand the work to a queue / a worker).
+  run_eh_study: 'start the reliability study',
+  run_fmea_sweep: 'start the equipment-failure check',
+  run_simulation: 'start a solve',
+  run_ac_pf_stage: 'start the power-flow check',
+  run_frontier_study: 'start the cost-versus-reliability study',
+  run_mc_study: 'start the random-outage reliability study',
+  run_coupling_loop: 'start the planning loop that adjusts the shortfall limit',
+  run_margin_loop: 'start the planning loop that adds backup capacity',
+  gridspine_run_pipeline: 'start the planning and dynamics study',
+  solve_queue_enqueue: 'add the project to the solve queue',
+  abort_adequacy_study: 'ask the running study to stop',
+  // Report jobs run in the background (poll get_report_status).
+  generate_report: 'start writing the project report',
+  regenerate_report_section: 'start rewriting one section of the report',
+  abort_report_generation: 'ask the report writing to stop',
+}
+export function guidedToolPhrase(tool: string): string {
+  return Object.prototype.hasOwnProperty.call(GUIDED_TOOL_PHRASE, tool)
+    ? GUIDED_TOOL_PHRASE[tool]
+    : `use ${tool.replace(/_/g, ' ')}`
+}
+const PREPARING_LINE = /^… preparing \S+$/
+const REQUEST_LINE = /^→ (\S+)$/
+const RESULT_LINE = /^✓ (\S+)$/
+// `✗ X`, `✗ X — kind` or `✗ X — kind: message` (ChatPanel's tool_error line).
+const REBOUND_LINE = /^🔀 active project: .* → (.+)$/
+const ERROR_LINE = /^✗ (\S+)(?: — [^:\s]+(?:: ([\s\S]*))?)?$/
+
+// A tool call whose outcome line has arrived (✓, ✗ or "denied:"): in Guided
+// its "Working: …" line gives way to that outcome, so a finished or declined
+// call never keeps saying it is working. Cached per messages array.
+const _settledCache = new WeakMap<readonly unknown[], Set<string>>()
+export function guidedSettledToolIds(
+  messages: ReadonlyArray<{ role: string; content: string; tool_use_id?: string }>,
+): Set<string> {
+  const hit = _settledCache.get(messages)
+  if (hit) return hit
+  const out = new Set<string>()
+  for (const m of messages) {
+    if (m.role === 'tool' && m.tool_use_id && /^(✓ |✗ |denied: )/.test(m.content)) out.add(m.tool_use_id)
+  }
+  _settledCache.set(messages, out)
+  return out
+}
+
+export type GuidedToolLine =
+  | { hidden: true }
+  | { hidden: false; label: string | null; message?: string | null }
+
+export function guidedToolLine(content: string): GuidedToolLine {
   if (DENIED_ERROR_LINE.test(content)) return { hidden: true }
   if (DENIED_LINE.test(content)) return { hidden: false, label: 'You declined — nothing was changed.' }
+  if (PREPARING_LINE.test(content)) return { hidden: true }
+  let m = REQUEST_LINE.exec(content)
+  if (m) return { hidden: false, label: `Working: ${guidedToolPhrase(m[1])}…` }
+  m = RESULT_LINE.exec(content)
+  if (m) return { hidden: false, label: `Done: ${guidedToolPhrase(m[1])}` }
+  // The rebound line (`project_rebound`) carries a raw arrow too.
+  m = REBOUND_LINE.exec(content)
+  if (m) {
+    return { hidden: false, label: m[1] === '(unbound)'
+      ? 'The assistant replaced the network; it is not saved to a project yet.'
+      : `The assistant is now working in the project ${m[1]}.` }
+  }
+  m = ERROR_LINE.exec(content)
+  if (m) {
+    const message = m[2]?.trim() || null
+    return { hidden: false, label: `Could not: ${guidedToolPhrase(m[1])}`, message }
+  }
   return { hidden: false, label: null }
 }
 
@@ -534,6 +618,10 @@ function ConfirmationCard() {
   const sessionId = useChatStore((s) => s.sessionId)
   const appendMessage = useChatStore((s) => s.appendMessage)
   const uiMode = useUIStore((s) => s.uiMode)
+  // P27b gate note 6: approving runs the write on the BACKEND's project — while
+  // this tab and the backend disagree, Approve waits (Deny writes nothing).
+  const projectMismatch = useUIStore((s) => s.projectMismatch)
+  const mismatchLine = projectMismatch ? mismatchSentence(projectMismatch) : null
   const [secondsLeft, setSecondsLeft] = useState<number>(0)
   const [typedConfirmation, setTypedConfirmation] = useState<string>('')
   const timerRef = useRef<number | null>(null)
@@ -597,6 +685,7 @@ function ConfirmationCard() {
 
   const onApprove = useCallback(async () => {
     if (!pending || !sessionId) return
+    if (useUIStore.getState().projectMismatch) return
     const token = pending.confirmation_token
     try {
       await postChatConfirm(sessionId, {
@@ -714,11 +803,15 @@ function ConfirmationCard() {
           />
         </div>
       )}
+      {mismatchLine && (
+        <div className="mb-2 text-[11px] text-warn" data-testid="chat-confirm-mismatch">{mismatchLine}</div>
+      )}
       <div className="flex items-center gap-2">
         <button
           className="px-2 py-1 text-xs rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 disabled:opacity-40 disabled:cursor-not-allowed"
           onClick={onApprove}
-          disabled={!typedSatisfied}
+          disabled={!typedSatisfied || !!mismatchLine}
+          title={mismatchLine ?? undefined}
           data-testid="chat-confirm-approve"
         >
           Approve
@@ -1489,28 +1582,27 @@ export default function ChatPanel() {
   const closeStream = useChatStore((s) => s.closeStream)
   const chatError = useChatStore((s) => s.error)
 
-  // Send gate (click-through obstacle 9): without a key for the ACTIVE
-  // profile every send came back as "API key missing". Same key ApiKeySetup
-  // and AssistantModelSettings use, so a key save or a profile switch
-  // re-reads it. Only an explicit `chat_ready: false` gates; unknown (probe
+  // Send gate (click-through obstacle 9): without a key every send came back
+  // as "API key missing". Only an explicit `false` gates; unknown (probe
   // failed, older backend without the field) stays open — a probe outage
   // must not lock the assistant.
   //
-  // `chat_ready` describes the instance's ACTIVE profile only. A turn runs on
-  // the session's pick when it names one (`profile_id` in the request, which
-  // routers/chat.py binds); a `null` pick follows the active profile — the
-  // same rule the model dropdown displays (`profileId ?? active`). So the
-  // gate applies only while the pick IS the active profile (QA gate B1: a
-  // user with no Anthropic key who picked a working local profile was
-  // locked out).
-  const { data: chatHealth } = useQuery<ChatHealth>({
-    queryKey: ['chat', 'health'],
-    queryFn: getChatHealth,
-    staleTime: 30_000,
-    retry: false,
-  })
-  const notReady = chatHealth?.chat_ready === false
-    && (profileId == null || profileId === chatHealth.active_profile?.id)
+  // P28 A3 (deferred spec §3.1): the gate reads the readiness of the profile
+  // the turn RUNS on — the pick (sent as `profile_id`), else the session's
+  // bound profile (`/history.bound_profile_id`; `/stream` keeps a bound
+  // session's binding when the request names none), else the active one —
+  // from the per-profile `chat_ready` on GET /chat/profiles, with `/health`
+  // as the active profile's fallback (QA gate B1 of P22.9-FE: a user with no
+  // Anthropic key on a working local profile is never locked out; after a
+  // reload that profile is the bound one).
+  const { ready: effectiveReady } = useChatReadiness()
+  const notReady = effectiveReady === false
+  // A2 (deferred spec §2.1): while this tab and the backend disagree about the
+  // open project, the assistant's tools would write into the BACKEND's project
+  // (the stream is a raw fetch — the axios mismatch block never sees it). Send
+  // is gated with the banner's sentence until Reload or Switch.
+  const projectMismatch = useUIStore((s) => s.projectMismatch)
+  const mismatchLine = projectMismatch ? mismatchSentence(projectMismatch) : null
 
   const currentProject = useUIStore((s) => s.currentProject)
   // Read only for the autoscroll effect below — see the dependency-array
@@ -1673,6 +1765,9 @@ export default function ChatPanel() {
       if (h.last_session_id) {
         setSessionId(h.last_session_id)
       }
+      // P28 A3 — the resumed session's binding; the Send gate, the dropdown
+      // and the key offer follow it while nothing is picked.
+      useChatStore.getState().setBoundProfileId(h.bound_profile_id ?? null)
       // #20 — the backend detects both of these and reports them exactly
       // once. Dropping them here would make that whole recovery path
       // invisible: the user would see a shorter conversation than they had,
@@ -2160,6 +2255,10 @@ export default function ChatPanel() {
       case 'session_init': {
         const d = _frame_data<SessionInitFrame>(frame)
         setSessionId(d.session_id)
+        // P28 A3 — the frame names the profile the session is bound to. Kept
+        // as the session's binding (the gate and the dropdown follow it), and
+        // still never copied into `profileId` (see below).
+        if (d.profile_id) useChatStore.getState().setBoundProfileId(d.profile_id)
         // The dropdown's fallback display (`profileId ?? active_profile_id`)
         // is only as fresh as its last fetch — refetch on every new session
         // so an admin's `set_active_profile` elsewhere, or a prior turn's A8
@@ -2323,7 +2422,8 @@ export default function ChatPanel() {
       case 'project_rebound': {
         // The agent dispatched a tool that legitimately changed the
         // backend's active project (activate_project / load_project /
-        // save_project_as / rename_project / restore_project_snapshot).
+        // save_project_as / rename_project / restore_project_snapshot /
+        // create_project_from_template / import_project_bundle).
         // Mirror the change into uiStore.currentProject so the autosave
         // loop's `expect=<name>` matches the backend's binding —
         // otherwise the next autosave 409s with "Backend network is
@@ -2334,26 +2434,46 @@ export default function ChatPanel() {
         const d = _frame_data<{ from: string | null; to: string | null; via_tool: string }>(frame)
         if (d.to && d.to !== useUIStore.getState().currentProject) {
           const ui = useUIStore.getState()
+          const leaving = ui.currentProject
           ui.setCurrentProject(d.to)
           ui.setProjectName(d.to)
           ui.touchTab(d.to)
+          // P32 (D-8 = (a), deferred spec §7.1): a project the assistant
+          // CREATED is a new project for G4 — an implicit mode starts Guided;
+          // an explicit choice is kept (the rule is inside
+          // noteNewProjectCreated). After setCurrentProject, so the §3.7
+          // pruning sees the project. A save or an open is not a new project;
+          // a network import unbinds (`to: null`) and creates none.
+          if (d.via_tool === 'create_project_from_template') ui.noteNewProjectCreated('template')
+          else if (d.via_tool === 'import_project_bundle') ui.noteNewProjectCreated('file')
           qc.invalidateQueries({ queryKey: nk(d.to, 'meta') })
           qc.invalidateQueries({ queryKey: nk(d.to, 'simulationStatus') })
           qc.invalidateQueries({ queryKey: nk(d.to, 'snapshots') })
+          // P28 (P32 gate N6): in auth mode the edit lock moves with the
+          // rebind, as in `switchToProject` — release the old project's lock,
+          // claim the new one's, read-only if another user holds it. Without
+          // this the tab kept heart-beating the old lock and edited the new
+          // project holding none. A no-op without auth.
+          void moveProjectLock(leaving, d.to)
           toast(`Active project: ${d.to}`, { icon: '🔀' })
-        } else if (d.to === null && useUIStore.getState().currentProject !== null) {
-          // Open → UNBOUND: the agent imported a raw network (.nc / .csv /
-          // .xlsx / .m), which belongs to no saved project. Same answer as
-          // ImportExport.tsx gives the same import made by hand: clear the
-          // active project so the 5-min autosave (which bails when
-          // currentProject is null) cannot claim the previous project's
-          // folder and write the imported network over it. The backend's
-          // `expect` guard cannot catch that — it only fires against a
-          // BOUND backend. The user binds it with an explicit Save As.
+        } else if (d.to == null && useUIStore.getState().currentProject != null) {
+          // A network import (`import_network_nc`, `import_csv_bundle`,
+          // `import_excel`, `import_matpower`) replaced the backend's network
+          // with an UNBOUND draft (P27a gate finding 3). Keeping the old name
+          // would be wrong twice over: the tab would show a project the
+          // backend no longer holds, and the save identity guard lets an
+          // unbound network through, so the next autosave would write the
+          // import over the old project's folder. Show the unbound state
+          // instead — Save asks for a name, as for any new network.
+          const was = useUIStore.getState().currentProject
           useUIStore.getState().setCurrentProject(null)
-          invalidateNetworkQueries(qc, null)
-          qc.invalidateQueries({ queryKey: nk(null, 'results') })
-          toast('Imported network is not saved yet — use Save As to keep it', { icon: '🔀' })
+          // P28 (N6): the tab no longer edits `was` — give its lock back.
+          void moveProjectLock(was, null)
+          qc.invalidateQueries({ queryKey: nk(null, 'meta') })
+          qc.invalidateQueries({ queryKey: nk(null, 'simulationStatus') })
+          qc.invalidateQueries({ queryKey: nk(null, 'snapshots') })
+          toast(`The assistant replaced the network — it is no longer '${was}' and is not saved to a project yet. Save it under a name to keep it.`,
+            { icon: '🔀' })
         }
         // Render a small tool-line so the conversation explains what
         // happened.
@@ -2501,7 +2621,7 @@ export default function ChatPanel() {
 
   const onSend = useCallback(() => {
     const text = input.trim()
-    if (!text || streaming || notReady) return
+    if (!text || streaming || notReady || mismatchLine) return
     const attachIds = useChatStore.getState().attachedFileIds.slice()
     // First-send confirmation modal (default-ON friction killer).
     const firstAck = readPref('chat:firstSendAck') === '1'
@@ -2511,7 +2631,7 @@ export default function ChatPanel() {
       return
     }
     dispatchSend(text, attachIds)
-  }, [input, streaming, notReady, dispatchSend])
+  }, [input, streaming, notReady, mismatchLine, dispatchSend])
 
   const confirmSendWithAttachments = useCallback(() => {
     if (pendingSendText == null) return
@@ -2552,6 +2672,14 @@ export default function ChatPanel() {
   // once a key is added — and the key form below says what to do.
   useEffect(() => {
     if (requestCount === 0) return
+    // A2: a card request made while the tab is mismatched is dropped, like
+    // the no-key case below — it must not fire into whichever project a later
+    // Reload / Switch lands on.
+    if (mismatchLine) {
+      useChatStore.setState({ requestQueue: [] })
+      toast(`${mismatchLine} Nothing was sent to the assistant.`)
+      return
+    }
     if (notReady) {
       useChatStore.setState({ requestQueue: [] })
       toast('Add an API key for the assistant first — nothing was sent.')
@@ -2561,7 +2689,7 @@ export default function ChatPanel() {
     const req = useChatStore.getState().takeNextRequest()
     if (!req) return
     dispatchSend(req.text, [], { fromCard: true, label: req.label })
-  }, [requestCount, streaming, pendingCard, pendingSendText, notReady, dispatchSend])
+  }, [requestCount, streaming, pendingCard, pendingSendText, notReady, mismatchLine, dispatchSend])
 
   const onAbort = useCallback(async () => {
     // Stopping a turn has to stop the VOICE as well. A synthesiser that keeps
@@ -2782,7 +2910,11 @@ export default function ChatPanel() {
   // the SAME fetch, so this never lands on an id absent from `chatProfiles`
   // except in the brief window before the fetch resolves — handled by the
   // disabled placeholder below rather than by this fallback.
-  const selectedProfileId = profileId ?? activeProfileId
+  // P28 A3: a null pick shows the session's bound profile when it has one —
+  // the one its next turn runs on — so the dropdown, the Send gate and the
+  // cross-wire check below agree.
+  const boundProfileId = useChatStore((s) => s.boundProfileId)
+  const selectedProfileId = profileId ?? boundProfileId ?? activeProfileId
   const selectedProfileMeta = chatProfiles.find((p) => p.id === selectedProfileId) ?? null
 
   const [pendingProfilePick, setPendingProfilePick] = useState<{ id: string; label: string } | null>(null)
@@ -3125,7 +3257,10 @@ export default function ChatPanel() {
           // P26 item 6: Guided renders a declined card as one plain line.
           const toolLine = m.role === 'tool' && uiMode === 'guided' ? guidedToolLine(m.content) : null
           if (toolLine?.hidden) return null
+          if (toolLine && m.tool_use_id && REQUEST_LINE.test(m.content)
+            && guidedSettledToolIds(messages).has(m.tool_use_id)) return null
           const toolLabel = toolLine && !toolLine.hidden ? toolLine.label : null
+          const toolMessage = toolLine && !toolLine.hidden ? toolLine.message ?? null : null
           return (
           <div
             key={m.id}
@@ -3162,6 +3297,10 @@ export default function ChatPanel() {
               : toolLabel ? (
                 <>
                   <span className="font-sans text-[12px] text-text" data-testid="chat-tool-label">{toolLabel}</span>
+                  {toolMessage && (
+                    <span className="block font-sans text-[12px] text-text whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+                      data-testid="chat-tool-message">{toolMessage}</span>
+                  )}
                   <details className="mt-0.5" data-testid="chat-tool-details">
                     <summary className="cursor-pointer select-none font-sans">Details</summary>
                     <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>
@@ -3219,7 +3358,10 @@ export default function ChatPanel() {
       />
       {/* The key form, inline, while Send is gated — unless the error
           banner above already shows it for a missing_api_key turn. */}
-      {notReady && chatError?.error_kind !== 'missing_api_key' && (
+      {mismatchLine ? (
+        <div className="px-3 py-2 border-t border-border bg-bg-2 shrink-0 text-[12px] text-muted"
+             data-testid="chat-send-gate">{mismatchLine}</div>
+      ) : notReady && chatError?.error_kind !== 'missing_api_key' && (
         <div className="px-3 py-2 border-t border-border bg-bg-2 shrink-0 text-[12px] text-muted"
              data-testid="chat-send-gate">
           The assistant needs an API key for the active model before it can answer.
@@ -3353,10 +3495,12 @@ export default function ChatPanel() {
           <button
             className="self-end px-3 py-1.5 text-xs rounded bg-accent text-bg disabled:opacity-50 max-w-[260px]"
             onClick={onSend}
-            disabled={streaming || !input.trim() || notReady}
+            disabled={streaming || !input.trim() || notReady || !!mismatchLine}
             data-testid="chat-send"
             title={
-              notReady
+              mismatchLine
+                ? mismatchLine
+                : notReady
                 ? 'Add an API key first (Settings → Assistant)'
                 : attachedFileIds.length > 0
                 ? `Sending with ${attachedFileIds.length} file(s): ` +

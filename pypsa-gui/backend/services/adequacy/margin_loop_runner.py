@@ -959,7 +959,7 @@ def start_margin_loop(
         # The outer stack is the every-path guarantee (a raise before the
         # explicit close in `_worker`); closing it twice is a no-op.
         with contextlib.ExitStack() as topology:
-            topology.enter_context(preserve_bus_topology(n))
+            topology.enter_context(preserve_bus_topology(n, lock))
             _worker(topology)
 
     _ctx = _contextvars.copy_context()

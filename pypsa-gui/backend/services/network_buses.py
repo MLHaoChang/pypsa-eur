@@ -14,6 +14,7 @@ from services import change_log_service
 from services.network_crud import purge_component_side_data
 from services.network_geometry import _recompute_lengths_for_bus
 from services.pypsa_service import PyPSAService
+from services.study_state import refuse_edit_during_live_study
 
 
 def apply_update_bus(name: str, bus, *, update_component):
@@ -74,6 +75,7 @@ def apply_update_bus(name: str, bus, *, update_component):
 
 
 def apply_delete_bus_cascade(name: str) -> None:
+    refuse_edit_during_live_study()  # P27a A1: not routed via _delete_component
     # Every removal here goes through `purge_component_side_data`, the same
     # cleanup `_delete_component` runs. Without it the cascade — the path a
     # user reaches by deleting a node on the map, so the common one — left an
@@ -111,6 +113,7 @@ def apply_delete_bus_cascade(name: str) -> None:
 
 
 def apply_rename_bus(name: str, body: dict):
+    refuse_edit_during_live_study()  # P27a A1: not routed via _update_component
     new_name = (body.get("new_name") or "").strip()
     if not new_name:
         raise HTTPException(400, "new_name cannot be empty")

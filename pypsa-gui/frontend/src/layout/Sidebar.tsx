@@ -39,6 +39,7 @@ import { useLocalSettingsAvailable } from '../hooks/useLocalSettings'
 import { useLLMSettingsAvailable } from '../hooks/useLLMSettings'
 import { isActive } from '../api/solveQueue'
 import { evaluateMutation } from '../utils/mutationGuard'
+import { mismatchSentence } from '../utils/projectMismatch'
 import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -684,7 +685,7 @@ function ProjectSectionContent({
     autosaveEnabled, setAutosaveEnabled, markProjectSaved,
     lastSavedByProject, recents,
     activeSlidePanel, setSlidePanel, setProjectSwitchInProgress,
-    readOnly, readOnlyReason,
+    readOnly, readOnlyReason, projectMismatch,
   } = useUIStore()
   const [showNameModal, setShowNameModal] = useState(false)
   // Separate flag for the "Save a Copy" flow so its modal can pre-fill a
@@ -728,6 +729,15 @@ function ProjectSectionContent({
   const networkHasBuses = (networkMeta?.bus_count ?? 0) > 0
 
   const guardProjectMutation = useCallback((opts?: { silent?: boolean }) => {
+    // A2: while this tab and the backend disagree about the open project, a
+    // save would write the backend's network under this tab's name — the
+    // banner offers Reload / Switch; saves wait for it (silent for autosave).
+    const mismatch = useUIStore.getState().projectMismatch
+    if (mismatch) {
+      if (opts?.silent) appLog('WARN', `Autosave skipped — ${mismatchSentence(mismatch)}`)
+      else toast.error(mismatchSentence(mismatch))
+      return false
+    }
     const verdict = evaluateMutation(readOnly, readOnlyReason)
     if (verdict.allowed) return true
     if (opts?.silent) appLog('INFO', `Autosave skipped — ${verdict.blockedMessage}`)
@@ -844,17 +854,30 @@ function ProjectSectionContent({
     } catch (e: unknown) {
       const status = (e as { response?: { status?: number } })?.response?.status
       if (status === 409) {
-        const detail = String(
-          (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? '',
-        )
-        // Two distinct 409s from save_project: (a) identity mismatch — the
+        const raw = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+        // A structured refusal (`study_in_flight`, `solver_in_flight`,
+        // `project_mismatch`) is a dict whose `message` is the sentence;
+        // `String(dict)` read "[object Object]" and fell through to the
+        // empty-network sentence (spec review, Sidebar 409 branch).
+        const structured = typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+        const detail = structured ? formatApiDetail(raw) : String(raw ?? '')
+        // Three distinct 409s from save_project: (a) identity mismatch — the
         // backend's in-memory network is a DIFFERENT project than `name` (it
-        // was swapped by another tab / external client); (b) empty-network
-        // refusal. Both mean "don't save", but the user-facing guidance
-        // differs. Detail text disambiguates.
+        // was swapped by another tab / external client); (b) a structured
+        // refusal with its own sentence; (c) empty-network refusal. All mean
+        // "don't save", but the user-facing guidance differs.
         if (/bound to project/i.test(detail)) {
+          // A2: the backend names its binding — raise the mismatch now (the
+          // banner, the write block) rather than wait for the meta samples.
+          const bound = /bound to project '([^']+)', not '([^']+)'/i.exec(detail)
+          if (bound && bound[2] === useUIStore.getState().currentProject) {
+            useUIStore.getState().setProjectMismatch({ tab: bound[2], backend: bound[1] })
+          }
           if (auto) appLog('WARN', `Autosave skipped — ${detail}`)
           else toast.error(`Can't save '${name}': the backend is on a different project. Reload '${name}' to resync.`)
+        } else if (structured) {
+          if (auto) appLog('WARN', `Autosave skipped — ${detail}`)
+          else toast.error(detail)
         } else {
           if (auto) appLog('WARN', `Autosave skipped: network is empty, refusing to overwrite '${name}'`)
           else toast.error('Cannot save: network is empty but project has data. Load the project first.')
@@ -1153,6 +1176,7 @@ function ProjectSectionContent({
             icon={saveStatus === 'saved' ? <Check size={15} /> : <Save size={15} />}
             label={saveStatus === 'saved' ? 'Saved ✓' : 'Save'}
             hint={dirty ? '●' : undefined}
+            title={projectMismatch ? mismatchSentence(projectMismatch) : undefined}
             onClick={handleSave}
           />
           {!guided && (<>
