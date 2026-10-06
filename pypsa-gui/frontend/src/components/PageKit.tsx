@@ -178,7 +178,9 @@ export function Field({
 }
 
 // ── Toggle ───────────────────────────────────────────────────────────────────
-// 26×15 pill, success-green when on. The whole row is the click target.
+// 26×15 pill, success-green when on. The whole row is the click target, and
+// it is a real switch (a <button role="switch">), so it takes keyboard focus,
+// toggles on Space/Enter and announces its state.
 export function Toggle({
   on, onChange, label,
 }: {
@@ -187,10 +189,13 @@ export function Toggle({
   label: ReactNode
 }) {
   return (
-    <div
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
       onClick={() => onChange?.(!on)}
       className="inline-flex items-center gap-2.5 w-full py-2.5 px-3 rounded-lg cursor-pointer
-        select-none transition-colors hover:bg-panel"
+        select-none transition-colors hover:bg-panel text-left"
     >
       <span
         className={`relative w-[26px] h-[15px] rounded-full shrink-0 transition-colors
@@ -203,7 +208,7 @@ export function Toggle({
         />
       </span>
       <span className="text-[12px] text-ink-700">{label}</span>
-    </div>
+    </button>
   )
 }
 

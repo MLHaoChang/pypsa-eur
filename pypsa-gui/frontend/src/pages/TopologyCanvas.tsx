@@ -2963,7 +2963,7 @@ export default function TopologyCanvas() {
                 className="flex flex-col gap-0.5 border border-border rounded-[10px] p-1 shadow-md"
                 style={{ background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)', backdropFilter: 'blur(8px)' }}
               >
-                <button
+                <button aria-label="Add bus (auto-name, rename via Properties)"
                   title="Add bus (auto-name, rename via Properties)"
                   className="flex items-center justify-center w-8 h-8 rounded-md text-ink-600 hover:bg-panel hover:text-accent transition-colors"
                   onClick={() => {
@@ -2987,7 +2987,7 @@ export default function TopologyCanvas() {
                 >
                   <Plus size={15} />
                 </button>
-                <button
+                <button aria-label="Connect buses — route a line between two buses"
                   onClick={() => setCanvasMode(canvasMode === 'connect' ? 'select' : 'connect')}
                   title="Connect buses — route a line between two buses"
                   className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors
@@ -2997,14 +2997,14 @@ export default function TopologyCanvas() {
                 >
                   <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="3.5" cy="3.5" r="1.6"/><circle cx="12.5" cy="12.5" r="1.6"/><path d="M3.5 5v3a2 2 0 0 0 2 2h5a2 2 0 0 1 2 2v-0.5"/></svg>
                 </button>
-                <button
+                <button aria-label="Fit view — centre the network in the canvas"
                   onClick={() => rfInstance.current?.fitView({ padding: 0.25, duration: 400, maxZoom: 0.85 })}
                   title="Fit view — centre the network in the canvas"
                   className="flex items-center justify-center w-8 h-8 rounded-md text-ink-600 hover:bg-panel hover:text-accent transition-colors"
                 >
                   <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M3 5V3h2M11 3h2v2M13 11v2h-2M5 13H3v-2"/><circle cx="8" cy="8" r="2"/></svg>
                 </button>
-                <button
+                <button aria-label="Auto-layout by voltage tier"
                   onClick={runAutoLayout}
                   title="Auto-layout by voltage tier"
                   className="flex items-center justify-center w-8 h-8 rounded-md text-ink-600 hover:bg-panel hover:text-accent transition-colors"
@@ -3013,7 +3013,7 @@ export default function TopologyCanvas() {
                 </button>
                 {/* "Reset to model coordinates" button removed: the blank
                     canvas is decoupled from geographic bus.x/y by design. */}
-                <button
+                <button aria-label="Reset diagram — clear saved positions and waypoints"
                   onClick={() => setShowResetConfirm(true)}
                   title="Reset diagram — clear saved positions and waypoints"
                   className="flex items-center justify-center w-8 h-8 rounded-md text-ink-600 hover:bg-panel hover:text-danger transition-colors"
@@ -3026,7 +3026,7 @@ export default function TopologyCanvas() {
                 className="flex flex-col gap-0.5 border border-border rounded-[10px] p-1 shadow-md"
                 style={{ background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)', backdropFilter: 'blur(8px)' }}
               >
-                <button
+                <button aria-label="Toggle results overlay"
                   onClick={() => setResultsOverlay(!resultsOverlayEnabled)}
                   title="Toggle results overlay"
                   className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors
@@ -3067,6 +3067,8 @@ export default function TopologyCanvas() {
                     title="Flow overlay: active power (P, MW) or reactive power (Q, MVAr)">
                     <button
                       type="button"
+                      aria-label="Show active power (P)"
+                      aria-pressed={flowOverlayKind === 'p'}
                       onClick={() => setFlowOverlayKind('p')}
                       className={`px-1.5 py-1 transition-colors ${
                         flowOverlayKind === 'p' ? 'bg-accent text-white' : 'text-muted hover:text-text'
@@ -3074,6 +3076,8 @@ export default function TopologyCanvas() {
                     >P</button>
                     <button
                       type="button"
+                      aria-label="Show reactive power (Q)"
+                      aria-pressed={flowOverlayKind === 'q'}
                       onClick={() => setFlowOverlayKind('q')}
                       className={`px-1.5 py-1 border-t border-border transition-colors ${
                         flowOverlayKind === 'q' ? 'bg-accent text-white' : 'text-muted hover:text-text'

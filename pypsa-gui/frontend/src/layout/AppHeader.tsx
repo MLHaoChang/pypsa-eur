@@ -905,7 +905,7 @@ export default function AppHeader() {
       </button>
 
       {/* Undo */}
-      <button
+      <button aria-label="Undo"
         onClick={handleUndo}
         disabled={undoDepth === 0 || undoMut.isPending || busy || readOnly}
         title={readOnly ? (readOnlyMessage(readOnlyReason) ?? READ_ONLY_MUTATION_MESSAGE) : undoDepth > 0 ? `Undo last action (Ctrl+Z) · ${undoDepth} step${undoDepth !== 1 ? 's' : ''} available` : 'Nothing to undo'}
@@ -925,7 +925,7 @@ export default function AppHeader() {
           When no project exists yet (currentProject is null), the button
           prompts for a name on click instead of being disabled — same path
           Ctrl+S already takes. Only disable for in-flight save / running solve. */}
-      <button
+      <button aria-label="Save project"
         onClick={handleQuickSave}
         disabled={saveMut.isPending || busy || readOnly}
         title={readOnly
@@ -1019,7 +1019,7 @@ export default function AppHeader() {
       })()}
 
       {/* Right panel toggle */}
-      <button
+      <button aria-label={rightPanelOpen ? 'Hide properties panel' : 'Show properties panel'}
         onClick={toggleRightPanel}
         className="ml-1 p-1.5 text-muted hover:text-text border border-transparent hover:border-border rounded transition-colors"
         title={rightPanelOpen ? 'Hide properties panel' : 'Show properties panel'}
