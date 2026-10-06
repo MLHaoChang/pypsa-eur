@@ -195,3 +195,13 @@ def test_sizing_ends_with_the_compliance_report(tmp_path, project):
     stored = pd.read_csv(run / "campus_compliance.csv")
     assert list(stored["check"]) == list(CHECKS) == list(out["compliance"]["check"])
     assert set(stored["status_as_is"]) <= {"pass", "fail", "not_rated"}
+
+
+def test_an_unsolved_project_cannot_be_drafted(tmp_path):
+    n = solved_hub()
+    for ts, attr in (("generators_t", "p"), ("storage_units_t", "p"), ("loads_t", "p"), ("links_t", "p0")):
+        setattr(getattr(n, ts), attr, __import__("pandas").DataFrame(index=n.snapshots))
+    path = tmp_path / "unsolved.nc"
+    n.export_to_netcdf(str(path))
+    with pytest.raises(ContractError, match="not solved"):
+        draft_from_project(path)

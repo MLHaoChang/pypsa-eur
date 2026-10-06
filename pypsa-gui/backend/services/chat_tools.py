@@ -3354,6 +3354,29 @@ def gridspine_get_connection_assessments(project_id: str, assessment_id: str | N
         return _h(_gridspine_project(db, user, project_id), assessment_id=assessment_id, hour=hour)
 
 
+def campus_get_study(project_id: str) -> dict:
+    from services.campus_electrical_service import get_state as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def campus_draft_campus(project_id: str, overwrite: bool = False) -> dict:
+    from services.campus_electrical_service import draft as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), bool(overwrite))
+
+
+def campus_run_study(project_id: str, k: int | None = None, pf: float | None = None,
+                     profile: str | None = None, margin: float | None = None,
+                     n_minus_1: bool | None = None) -> dict:
+    from services.campus_electrical_service import run as _h
+    settings = {key: v for key, v in (("k", k), ("profile", profile), ("margin", margin),
+                                       ("n_minus_1", n_minus_1)) if v is not None}
+    settings["pf"] = pf
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), settings)
+
+
 def gridspine_assess_connection(project_id: str, bus: str, load_mw: float, load_pf: float = 0.98,
                                 onsite_mw: float = 0.0, onsite_converter: bool = True,
                                 profile: str = "eu_rfg_dcc_ce") -> dict:
@@ -6671,6 +6694,10 @@ DISPATCHERS: dict[str, Any] = {
     "gridspine_compute_capacity": gridspine_compute_capacity,
     "gridspine_get_connection_assessments": gridspine_get_connection_assessments,
     "gridspine_assess_connection": gridspine_assess_connection,
+    # campus electrical (3)
+    "campus_get_study": campus_get_study,
+    "campus_draft_campus": campus_draft_campus,
+    "campus_run_study": campus_run_study,
     # library (4)
     "list_library_items": list_library_items,
     "get_library_item": get_library_item,

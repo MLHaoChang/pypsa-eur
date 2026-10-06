@@ -9,7 +9,7 @@ import {
   Thermometer, Zap, Camera, LayoutDashboard,
   Sun, Moon, Rows2, Rows3,
   GitBranch as GitBranchIcon, ListChecks, FlaskConical,
-  MessageSquare, LayoutGrid, Users, SlidersHorizontal, FileText, Compass,
+  MessageSquare, LayoutGrid, Users, SlidersHorizontal, FileText, Compass, Cable,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
@@ -1285,6 +1285,34 @@ function DataSectionContent({ onCloseModal }: { onCloseModal?: () => void }) {
   )
 }
 
+// ── Studies ────────────────────────────────────────────────────────────────────
+// The study tools that take a solved model further: the planning → dynamics
+// pipeline, the campus electrical design of a hub, and the written reports.
+// Grouped here rather than spread through Simulation, which is about setting
+// up and solving the model itself.
+function StudiesSectionContent({ onCloseModal }: { onCloseModal?: () => void }) {
+  const { setSlidePanel, activeSlidePanel } = useUIStore()
+  return (
+    <div className="pb-1">
+      <SItem icon={<FlaskConical size={15} />} label="Planning → dynamics"
+        title="Rank a year's extreme hours, screen N-1/N-2 and fault levels, and export PowerFactory handoff bundles (gridspine)."
+        active={activeSlidePanel === 'gridspine'}
+        onClick={() => { setSlidePanel(activeSlidePanel === 'gridspine' ? null : 'gridspine'); onCloseModal?.() }}
+      />
+      <SItem icon={<Cable size={15} />} label="Campus electrical"
+        title="Take a solved hub to its electrical design: transformers, reactive compensation, short circuit and PCC grid-code compliance at the critical hours (AC load flow)."
+        active={activeSlidePanel === 'campusElectrical'}
+        onClick={() => { setSlidePanel(activeSlidePanel === 'campusElectrical' ? null : 'campusElectrical'); onCloseModal?.() }}
+      />
+      <SItem icon={<FileText size={15} />} label="Reports"
+        title="Study reports written from the Energy Hub reference design and the adequacy study; read them here and export to Word."
+        active={activeSlidePanel === 'reports'}
+        onClick={() => { setSlidePanel(activeSlidePanel === 'reports' ? null : 'reports'); onCloseModal?.() }}
+      />
+    </div>
+  )
+}
+
 function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
   onCloseModal?: () => void
   requestBottomTab: (tab: string) => void
@@ -1384,16 +1412,6 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
           >{activeQueueCount}</span>
         ) : undefined}
         onClick={() => { setSlidePanel(activeSlidePanel === 'solveQueue' ? null : 'solveQueue'); onCloseModal?.() }}
-      />
-      <SItem icon={<FlaskConical size={15} />} label="Planning → dynamics"
-        title="Rank a year's extreme hours, screen N-1/N-2 and fault levels, and export PowerFactory handoff bundles (gridspine)."
-        active={activeSlidePanel === 'gridspine'}
-        onClick={() => { setSlidePanel(activeSlidePanel === 'gridspine' ? null : 'gridspine'); onCloseModal?.() }}
-      />
-      <SItem icon={<FileText size={15} />} label="Reports"
-        title="Study reports written from the Energy Hub reference design and the adequacy study; read them here and export to Word."
-        active={activeSlidePanel === 'reports'}
-        onClick={() => { setSlidePanel(activeSlidePanel === 'reports' ? null : 'reports'); onCloseModal?.() }}
       />
       {/* The Assistant row used to live here, as the last of seven. It is not
           a simulation feature — it answers questions about the network and
@@ -1690,7 +1708,7 @@ function PreferencesFooter({ small = false }: { small?: boolean }) {
 }
 
 // ── Icon strip section button ──────────────────────────────────────────────────
-type FlyoutSection = 'project' | 'data' | 'simulation'
+type FlyoutSection = 'project' | 'data' | 'simulation' | 'studies'
 
 function IconStripBtn({
   icon, label, sectionId, activeFlyout, onClick,
@@ -1733,7 +1751,7 @@ function FlyoutPanel({
   const ref = useRef<HTMLDivElement>(null)
 
   const SECTION_LABELS: Record<FlyoutSection, string> = {
-    project: 'PROJECT', data: 'DATA', simulation: 'SIMULATION',
+    project: 'PROJECT', data: 'DATA', simulation: 'SIMULATION', studies: 'STUDIES',
   }
 
   // Close on outside click
@@ -1781,6 +1799,7 @@ function FlyoutPanel({
         {section === 'simulation' && (
           <SimulationSectionContent onCloseModal={onClose} requestBottomTab={requestBottomTab} />
         )}
+        {section === 'studies' && <StudiesSectionContent onCloseModal={onClose} />}
       </div>
     </div>
   )
@@ -1796,7 +1815,7 @@ export default function Sidebar() {
   } = useUIStore()
   // Guided (spec §3.5) is a render condition only — `sections` below is untouched.
   const guided = uiMode === 'guided'
-  const [sections, setSections] = useState({ project: true, data: true, simulation: true })
+  const [sections, setSections] = useState({ project: true, data: true, simulation: true, studies: true })
   const [activeFlyout, setActiveFlyout] = useState<FlyoutSection | null>(null)
   const [ioOpen, setIoOpen] = useState(false)
   const [ioTab, setIoTab] = useState<'import' | 'export'>('import')
@@ -1943,6 +1962,7 @@ export default function Sidebar() {
             {!guided && (<>
             <IconStripBtn icon={<Layers size={18} />}       label="Data"       sectionId="data"       activeFlyout={activeFlyout} onClick={() => toggleFlyout('data')} />
             <IconStripBtn icon={<Settings2 size={18} />}   label="Simulation" sectionId="simulation" activeFlyout={activeFlyout} onClick={() => toggleFlyout('simulation')} />
+            <IconStripBtn icon={<FlaskConical size={18} />} label="Studies"    sectionId="studies"    activeFlyout={activeFlyout} onClick={() => toggleFlyout('studies')} />
             </>)}
           </div>
 
@@ -2038,6 +2058,9 @@ export default function Sidebar() {
           {sections.simulation && (
             <SimulationSectionContent requestBottomTab={requestBottomTab} />
           )}
+
+          <SectionHdr title="STUDIES" open={sections.studies} onToggle={() => toggleSection('studies')} testId="sidebar-section-studies" />
+          {sections.studies && <StudiesSectionContent />}
           </>)}
         </div>
 
