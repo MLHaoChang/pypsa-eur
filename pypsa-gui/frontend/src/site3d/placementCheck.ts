@@ -12,7 +12,7 @@
 // Pure: no React, no three (the Issues panel in the main bundle imports it).
 
 import { footprintCorners } from './fit'
-import type { AssetType, PlacementRule } from './assetLibrary'
+import { PACKING, type AssetType, type PlacementRule } from './assetLibrary'
 
 // ── geometry ────────────────────────────────────────────────────────────────
 
@@ -137,4 +137,114 @@ export function pairRequirement(aKind: string, aRule: PlacementRule | undefined,
 export const ruleLookup = (lib: readonly AssetType[]) => {
   const m = new Map(lib.map(t => [t.id, t.placement]))
   return (kind: string): PlacementRule | undefined => m.get(kind)
+}
+
+// ── the check ───────────────────────────────────────────────────────────────
+
+export type FindingKind = 'outsideBoundary' | 'overlap' | 'keepOut' | 'clearance' | 'notBetweenBuses' | 'notFacingFar'
+
+export interface PlacementFinding {
+  /** The object the finding is about (`"<Class>:<name>"`). */
+  key: string
+  kind: FindingKind
+  /** `warn`: outside the plot, overlapping, inside a keep-out. `info`: a clearance, a position or a bearing the rule would rather see otherwise. */
+  severity: 'warn' | 'info'
+  /** Written for the user: names, metres, degrees. */
+  message: string
+  /** The other object of a pair (overlap, keep-out, clearance) or the yard the object should face. */
+  other?: string
+  /** The measured distance, rounded, where one applies. */
+  distanceM?: number
+}
+
+/** What the check needs of a layout object (a `SiteObject` has all of it). */
+export interface CheckObject extends PlacedShape {
+  type: string
+  name: string
+  kind: string
+  bus: string
+  far?: string
+  /** Set for an object standing on a roof: exempt from every finding. */
+  elevation?: number
+}
+
+const keyOf = (o: Pick<CheckObject, 'type' | 'name'>): string => `${o.type}:${o.name}`
+/** How an object is named in a message: a yard by its bus. */
+const nameOf = (o: Pick<CheckObject, 'type' | 'name'>): string => (o.type === 'Bus' ? `the ${o.name} yard` : o.name)
+const capital = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)
+const metres = (v: number): number => Math.round(v)
+
+/** The outline colour a finding kind earns: red for the two that matter most on the ground, amber for the rest. */
+export const findingColor = (kind: FindingKind): 'red' | 'amber' => (kind === 'outsideBoundary' || kind === 'keepOut' ? 'red' : 'amber')
+
+/** The keys a set of findings marks: each finding's object, and the other object of a pair. */
+export function findingKeys(findings: readonly PlacementFinding[], color?: 'red' | 'amber'): Set<string> {
+  const out = new Set<string>()
+  for (const f of findings) {
+    if (color && findingColor(f.kind) !== color) continue
+    out.add(f.key)
+    if (f.other && (f.kind === 'overlap' || f.kind === 'keepOut' || f.kind === 'clearance')) out.add(f.other)
+  }
+  return out
+}
+
+/**
+ * Every way the arrangement breaks a placement rule, per object: outside the
+ * boundary (`outside` is the fit check's list of keys), overlapping another
+ * object, inside a keep-out, short of a clearance, a `between` object off
+ * the line between its yards, a `faceFar` object turned away from its far
+ * yard. A pair is reported once, on the object whose rule it is (the first
+ * of the two when both or neither have one). Rooftop objects are exempt.
+ * Deterministic for a given input.
+ */
+export function placementFindings(objects: readonly CheckObject[], lib: readonly AssetType[], opts: { outside?: readonly string[] } = {}): PlacementFinding[] {
+  const ruleOf = ruleLookup(lib)
+  const solid = objects.filter(o => !o.elevation)
+  const rects = new Map(solid.map(o => [o, rectOf(o)]))
+  const yards = new Map(solid.filter(o => o.type === 'Bus').map(o => [o.name, o]))
+  const outside = new Set(opts.outside ?? [])
+  const out: PlacementFinding[] = []
+
+  for (let i = 0; i < solid.length; i++) {
+    const a = solid[i], ar = rects.get(a)!, aRule = ruleOf(a.kind)
+    if (outside.has(keyOf(a))) {
+      out.push({ key: keyOf(a), kind: 'outsideBoundary', severity: 'warn', message: `${capital(nameOf(a))} sticks out of the site boundary` })
+    }
+    for (let j = i + 1; j < solid.length; j++) {
+      const b = solid[j], br = rects.get(b)!, bRule = ruleOf(b.kind)
+      if (rectsOverlap(ar, br)) {
+        out.push({ key: keyOf(a), other: keyOf(b), kind: 'overlap', severity: 'warn', message: `${capital(nameOf(a))} overlaps ${nameOf(b)}` })
+        continue
+      }
+      const d = rectDistance(ar, br)
+      const ka = pairRequirement(a.kind, aRule, b.kind, undefined).keepOutM, kb = pairRequirement(b.kind, bRule, a.kind, undefined).keepOutM
+      const keepOut = Math.max(ka, kb)
+      if (keepOut > 0 && d < keepOut) {
+        const [who, whom] = kb > ka ? [b, a] : [a, b]
+        out.push({ key: keyOf(who), other: keyOf(whom), kind: 'keepOut', severity: 'warn', distanceM: metres(d), message: `${capital(nameOf(who))} is ${metres(d)} m from ${nameOf(whom)}; it should keep ${keepOut} m away` })
+        continue
+      }
+      const ca = aRule?.clearanceM ?? 0, cb = bRule?.clearanceM ?? 0
+      const clearance = Math.max(ca, cb)
+      if (clearance > 0 && d < clearance) {
+        const [who, whom] = cb > ca ? [b, a] : [a, b]
+        out.push({ key: keyOf(who), other: keyOf(whom), kind: 'clearance', severity: 'info', distanceM: metres(d), message: `${capital(nameOf(who))} is ${metres(d)} m from ${nameOf(whom)}; it needs ${clearance} m clear` })
+      }
+    }
+    const owner = yards.get(a.bus), far = a.far ? yards.get(a.far) : undefined
+    if (aRule?.anchor === 'between' && owner && far && owner !== far) {
+      const seg = betweenSegment(rects.get(owner)!, rects.get(far)!)
+      const d = seg ? segmentRectDistance(seg.a, seg.b, ar) : 0
+      if (seg && d > PACKING.betweenToleranceM) {
+        out.push({ key: keyOf(a), kind: 'notBetweenBuses', severity: 'info', distanceM: metres(d), message: `${capital(nameOf(a))} is ${metres(d)} m from the line between the ${owner.name} and ${far.name} yards; it should sit between its two buses` })
+      }
+    }
+    if (aRule?.orientation === 'faceFar' && far && far !== a) {
+      const off = angleDiffDeg(a.heading, bearingDeg(a.origin, far.origin))
+      if (off > PACKING.facingToleranceDeg) {
+        out.push({ key: keyOf(a), other: keyOf(far), kind: 'notFacingFar', severity: 'info', message: `${capital(nameOf(a))} faces ${Math.round(off)}° away from ${nameOf(far)}; it should face it` })
+      }
+    }
+  }
+  return out
 }
