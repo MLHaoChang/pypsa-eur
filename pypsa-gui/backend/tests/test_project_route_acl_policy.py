@@ -97,6 +97,7 @@ TOOL_NAME_IS_NOT_A_PROJECT: dict[str, str] = {
         "ui_select_component", "update_component", "upload_timeseries",
     )},
     "get_library_item": "an org Library item",
+    "use_skill": "a harness skill name (#86); reads a static catalogue and resolves no project",
     "import_urdb_tariff": "the Library item the import creates",
     "update_meta": "the display name of the ACTIVE network (`NetworkMeta`)",
     "gridspine_create_study": "the name of the NEW study it creates; nothing to resolve",
