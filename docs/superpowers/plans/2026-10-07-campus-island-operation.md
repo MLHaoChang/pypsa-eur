@@ -385,7 +385,7 @@ optional earthing transformers as elements (I5b).
 **The Data Center template gains:**
 - `island_config.json`;
 - `bess_new` marked `gfm_droop` (it already exists);
-- the UPS as a `ups` unit, **re-rated to carry the IT load** (about 36 MW
+- the UPS as a `ups` unit, **re-rated to carry the IT load** in S0 (about 36 MW
   plus margin, tagged `assumed`), not today's 15 MW;
 - genset governor and earthing data, tagged `assumed`;
 - per-Load critical tags.
@@ -413,6 +413,14 @@ energy-hub templates".
   cost behind I2c's cost of island capability.
 - **The fix:** `stores = 1.0`, keeping `objective` at 52.14. The test is
   written first, and every changed fixture is explained.
+- **The UPS re-rate moves here from I1** (owner, 2026-10-07): `ups_battery`
+  becomes 40 MW / 0.25 h. 40 MW carries the ~37.5 MW IT peak with ~6 %
+  margin. 15 min covers the 600 s bridge (Q1) at that peak after dispatch
+  losses (6.6 MWh of 10 MWh), with room for end-of-life fade. I1 keeps the
+  `ups` unit and its sidecar fields.
+- Limited foresight (`services/solver/myopic.py`) wrote the objective-based
+  representative weight into `stores` too. Each column now scales its own
+  step weight, which is the old behaviour when the columns are equal.
 
 ### I2a: ride-through, fuel and bridge reserve in the hub LP — step 1 (M)
 
@@ -1275,7 +1283,7 @@ the session scratchpad. Every finding is folded in, as below.
 |---|---|
 | B1 droop GFM modelled as a lag in I6; it contradicts I2(d) | I6 uses native droop (a filtered measured P, imposed frequency). D'Arco–Suul is tested with two independently coded models. The control-table principle is reworded. |
 | B2 ride-through under-specified | I2a: Δ is the snapshot duration, not the weighting; cyclic windows; D ≤ T; the RT storage set is named; η_dis; e(t−1); d(τ) without t; N+k; avail_g defined; the test uses `max_hours` ≠ D. |
-| B3 ΔP_isl unconservative | I2b: no UPS reduction in `seamless` unless `transfers_on_islanding` with a late walk-in; min(L_it, p_nom_u) through two rows; export headroom; `pickup_blocks`. The template UPS is re-rated (I1). |
+| B3 ΔP_isl unconservative | I2b: no UPS reduction in `seamless` unless `transfers_on_islanding` with a late walk-in; min(L_it, p_nom_u) through two rows; export headroom; `pickup_blocks`. The template UPS is re-rated (S0, moved from I1). |
 | B4 linearised UC gives spinning for free | I2c: spinning implies p ≥ p_min·p_nom with p_min > 0; UC for fixed-size gensets only; solver plumbing listed. |
 | B5 the hourly data does not exist | New I3a `island_hourly` contract. Order updated. Minimum criteria use the (max − x) transformation (I3b). |
 | S1 Q–V droop loop diverges | I4 uses a virtual reactance x_v, tested on the spike-1 ties. |
