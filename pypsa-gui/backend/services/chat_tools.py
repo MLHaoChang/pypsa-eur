@@ -3398,6 +3398,14 @@ def campus_get_investment(project_id: str) -> dict:
         return _h(_gridspine_project(db, user, project_id))
 
 
+def campus_get_milp(project_id: str) -> dict:
+    # Read only, on purpose: the joint optimisation runs for minutes and is
+    # started and cancelled in the panel (plan C12).
+    from services.campus_electrical_service import get_milp as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
 def campus_list_grid_codes(project_id: str) -> dict:
     from services.campus_grid_code_service import list_grid_codes as _h
     with _acting() as (db, user):
@@ -6908,6 +6916,7 @@ DISPATCHERS: dict[str, Any] = {
     "campus_get_library": campus_get_library,
     "campus_set_library": campus_set_library,
     "campus_get_investment": campus_get_investment,
+    "campus_get_milp": campus_get_milp,
     # campus grid codes (2): no publish tool, by design (plan C10)
     "campus_list_grid_codes": campus_list_grid_codes,
     "campus_extract_grid_code": campus_extract_grid_code,

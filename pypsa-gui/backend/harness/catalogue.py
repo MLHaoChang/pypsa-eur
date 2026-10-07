@@ -2735,6 +2735,27 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id"],
     ),
     _t(
+        "campus_get_milp",
+        "The joint optimisation (MILP) of a campus study: {status (the background "
+        "job's record: state running|done|cancelled|failed, iteration, max_iter, "
+        "best_cost and c8_cost in EUR per year, message, error; null when no job "
+        "has run since the backend started), summary (c8_cost, milp_cost, "
+        "iterations, stop, fallback), stop (converged|stalled|delta_floor|"
+        "max_iter|cancelled), fallback (why the least-cost choice was kept, or "
+        "null), comparison (per need: c8_choice, milp_choice and each one's "
+        "annualised cost), stale, notes}. You cannot start or cancel it: it "
+        "takes minutes and runs from the panel's Joint optimisation button, so "
+        "tell the user to start it there. Say these with the numbers: the "
+        "design margin is the owner's rule, judged on the least-cost dispatch "
+        "and never met by extra inverter reactive power; costs are placeholder "
+        "figures tagged assumed unless replaced by quotes; a fallback keeps the "
+        "least-cost choice; a cancelled job keeps the best choice it had; when "
+        "stale is true the least-cost run it was based on has changed. 409 for "
+        "a project of another kind. Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
         "campus_list_grid_codes",
         "The grid codes of a capacity-expansion (hub) project's campus study: "
         "{shipped ({id: title}), published and drafts (each {id, title, "
@@ -3368,6 +3389,8 @@ TOOL_ROUTES: dict[str, list] = {
     "campus_get_library": _SERVICE_CALL,
     "campus_set_library": _SERVICE_CALL,
     "campus_get_investment": _SERVICE_CALL,
+    # the joint optimisation (1, plan C12) — a read; no start or cancel tool
+    "campus_get_milp": _SERVICE_CALL,
     # campus grid codes (2) — service calls; no publish tool (plan C10)
     "campus_list_grid_codes": _SERVICE_CALL,
     "campus_extract_grid_code": _SERVICE_CALL,

@@ -169,3 +169,30 @@ def test_each_library_dispatcher_resolves_the_project_and_calls_its_service_func
     project, *rest = call
     assert isinstance(project, Project) and project.name == "Chat Hub"
     assert tuple(rest) == expected
+
+
+# --------------------------------------------------------------------------
+# the joint optimisation (plan C12): a read tool, no start and no cancel
+# --------------------------------------------------------------------------
+
+def test_the_milp_read_tool_is_registered_routed_and_read_tiered_and_there_is_no_start_or_cancel_tool():
+    names = {t["name"] for t in TOOLS}
+    assert "campus_get_milp" in names
+    assert TOOL_ROUTES["campus_get_milp"] == ["_service_call_"]
+    assert callable(chat_tools.DISPATCHERS["campus_get_milp"])
+    assert safety_tier_for("campus_get_milp") == "read"
+    schema = {t["name"]: t["input_schema"] for t in TOOLS}
+    assert schema["campus_get_milp"]["required"] == ["project_id"]
+    assert not [n for n in names if n.startswith("campus_") and "milp" in n and n != "campus_get_milp"]
+    desc = {t["name"]: t["description"] for t in TOOLS}["campus_get_milp"]
+    assert desc.rstrip().endswith("Safety: read.")
+    assert "panel" in desc and "cannot start" in desc
+    assert "inverter" in desc and "placeholder" in desc and "stale" in desc and "fallback" in desc
+
+
+def test_the_milp_read_dispatcher_resolves_the_project_and_calls_get_milp(hub, monkeypatch):
+    calls = []
+    monkeypatch.setattr(ce, "get_milp", lambda *a: calls.append(a) or {"ok": True})
+    assert chat_tools.DISPATCHERS["campus_get_milp"](project_id="Chat Hub") == {"ok": True}
+    (call,) = calls
+    assert isinstance(call[0], Project) and call[0].name == "Chat Hub" and len(call) == 1
