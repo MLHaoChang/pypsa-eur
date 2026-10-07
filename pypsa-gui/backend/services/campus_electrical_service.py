@@ -91,6 +91,7 @@ NETWORK_FILE = "network.nc"
 GRID_CODES_SUBDIR = "grid_codes"
 LIBRARY_FILE = "campus_assets.yaml"
 USED_LIBRARY_FILE = "campus_assets_used.yaml"
+COST_BASIS_FILE = "campus_cost_basis.json"
 SOLVER_CONFIG_FILE = "solver_config.json"
 MAX_CAMPUS_BYTES = 1_000_000
 MAX_LIBRARY_BYTES = 1_000_000
@@ -206,6 +207,10 @@ def _results(run: Path):
         # Who buys the PCC switchgear: {"pcc_switchgear": "campus" | "grid_operator"}.
         "scope": (json.loads((run / cs.INVEST_SCOPE_JSON).read_text())
                   if investment is not None and (run / cs.INVEST_SCOPE_JSON).is_file() else None),
+        # Part three D1a: the rate, money year and currency the costs were annualised on, and where
+        # each came from. None when the run did not invest.
+        "cost_basis": (json.loads((run / COST_BASIS_FILE).read_text())
+                       if investment is not None and (run / COST_BASIS_FILE).is_file() else None),
     }
 
 
@@ -223,12 +228,89 @@ def _effective_library(d: Path) -> Path:
     return own if own.is_file() else Path(cs.ASSET_LIBRARY_PATH)
 
 
-def _library_stale(d: Path) -> bool:
-    """A run that invested kept the library it used; the results are stale when
-    the library a run would use now is another one. A run that did not invest
-    kept none, and does not depend on the library."""
+# ── the discount rate and the price year come from the project (part three, D1a) ──
+
+FROM_SOLVER_CONFIG = "project solver config"
+FROM_FINANCE_INPUTS = "project finance inputs"
+FROM_LIBRARY = "asset library"
+
+
+def _saved_solver_config(project):
+    """The project's saved solver config, or None when it has none (the
+    default is then not "the project's")."""
+    if not (project_registry.project_dir(project) / SOLVER_CONFIG_FILE).is_file():
+        return None
+    return _solver_config(project)
+
+
+def _money_year(cfg):
+    """``FinanceInputs.currency_year`` of the project's stored finance inputs
+    (``SolverConfig.finance``, the dict ``PUT /api/simulation/finance``
+    validated), or None when there are none or the year is not stated."""
+    fin = getattr(cfg, "finance", None)
+    year = fin.get("currency_year") if isinstance(fin, dict) else None
+    return year if isinstance(year, int) and not isinstance(year, bool) else None
+
+
+def _project_rate(cfg) -> float:
+    rate = getattr(cfg, "discount_rate", None)
+    if isinstance(rate, bool) or not isinstance(rate, (int, float)) or not 0 <= rate < 1:
+        raise HTTPException(
+            status_code=422,
+            detail=f"the project's discount rate {rate!r} (solver config) must lie in [0, 1) for the campus "
+                   "asset library; change it in the solver settings")
+    return float(rate)
+
+
+def _engine_library(project, d: Path) -> tuple:
+    """``(text, overridden, cost_basis)``: the library a run would hand to the
+    engine now, and what its costs are annualised on.
+
+    The library is the project's copy, else the shipped one. When the project
+    has a saved solver config, its ``discount_rate`` replaces the library's
+    (the library's own value is a stand-alone default for gridspine-only use);
+    otherwise the library is handed over byte for byte. When the project has
+    finance inputs with a ``currency_year``, that is the price year reported;
+    it is never used to convert a cost: the library's costs stay in the
+    library's price year, with no escalation, and ``price_year_mismatch`` says
+    when the two differ. Raises ``ContractError`` when the library does not load."""
+    path = _effective_library(d)
+    lib = cs.load_asset_library(path)
+    cfg = _saved_solver_config(project)
+    rate, rate_from, text = lib["discount_rate"]["value"], FROM_LIBRARY, path.read_bytes().decode()
+    overridden = cfg is not None
+    if overridden:
+        rate, rate_from = _project_rate(cfg), FROM_SOLVER_CONFIG
+        data = yaml.safe_load(text)
+        data["discount_rate"] = {"value": rate, "source": "assumed", "note": "the project's solver config discount rate"}
+        text = yaml.safe_dump(data, sort_keys=False)
+    year = _money_year(cfg) if cfg is not None else None
+    library_year = lib["price_year"]
+    basis = {"discount_rate": rate, "discount_rate_from": rate_from,
+             "price_year": library_year if year is None else year,
+             "price_year_from": FROM_LIBRARY if year is None else FROM_FINANCE_INPUTS,
+             "library_price_year": library_year,
+             "price_year_mismatch": year is not None and year != library_year,
+             "currency": lib["currency"]}
+    return text, overridden, basis
+
+
+def _library_stale(project, d: Path) -> bool:
+    """A run that invested kept the library it used and the basis it was
+    costed on; the results are stale when the library a run would hand over
+    now, or that basis, is another one. A run that did not invest kept
+    neither, and does not depend on the library. A side file that cannot be
+    read now means a rerun would not reproduce the run, so: stale."""
     used = d / "run" / USED_LIBRARY_FILE
-    return used.is_file() and _sha256_file(_effective_library(d)) != _sha256_file(used)
+    if not used.is_file():
+        return False
+    try:
+        text, _overridden, basis = _engine_library(project, d)
+        kept = d / "run" / COST_BASIS_FILE
+        return (text.encode() != used.read_bytes()
+                or (kept.is_file() and json.loads(kept.read_text()) != basis))
+    except Exception:                                          # noqa: BLE001 - see the docstring
+        return True
 
 
 def _stale(project, d: Path) -> bool:
@@ -241,7 +323,7 @@ def _stale(project, d: Path) -> bool:
     text = yaml.safe_dump(yaml.safe_load(campus.read_text()), sort_keys=False)
     return (hashlib.sha256(text.encode()).hexdigest() != m.get("campus_sha256")
             or _sha256_file(nc) != m.get("network_sha256")
-            or _library_stale(d))
+            or _library_stale(project, d))
 
 
 # ── the hub's own system cost ────────────────────────────────────────────────
@@ -366,7 +448,7 @@ def get_investment(project) -> dict:
         "investment": res["investment"], "cost": res["cost"], "unresolved": res["unresolved"],
         "history": res["history"], "compliance_invested": res["compliance_invested"], "scope": res["scope"],
         "hub_cost": state["hub_cost"], "hub_cost_reason": state["hub_cost_reason"],
-        "library_is_default": _library_text(campus_dir(project))[1],
+        "library_is_default": _library_text(campus_dir(project))[1], "cost_basis": res["cost_basis"],
         "stale": state["stale"], "notes": list(INVESTMENT_NOTES),
     }
 
@@ -480,7 +562,8 @@ def _clear_investment(run_dir: Path) -> None:
     """Remove the investment files of an earlier run, so that a run that does
     not invest, or fails part way, never sits beside another run's purchases."""
     for name in (cs.INVESTMENT_CSV, cs.COST_CSV, cs.INVESTED_YAML, cs.COMPLIANCE_INVESTED_CSV,
-                 cs.INVEST_HISTORY_CSV, cs.INVEST_DISPATCH_CSV, cs.INVEST_SCOPE_JSON, USED_LIBRARY_FILE):
+                 cs.INVEST_HISTORY_CSV, cs.INVEST_DISPATCH_CSV, cs.INVEST_SCOPE_JSON, USED_LIBRARY_FILE,
+                 COST_BASIS_FILE):
         (run_dir / name).unlink(missing_ok=True)
 
 
@@ -509,13 +592,14 @@ def run(project, settings: dict) -> dict:
                 # The library is read once and kept: the engine buys from this
                 # copy, and a later change to the library is then a different
                 # file from the one the results were made with.
-                own = d / LIBRARY_FILE
                 used = run_dir / USED_LIBRARY_FILE
                 try:
-                    used.write_bytes(_effective_library(d).read_bytes())
-                    cs.invest_campus(run_dir, used if own.is_file() else None, criteria=criteria,
-                                     profile=s["profile"], pf=s["pf"], profile_dirs=profile_dirs,
-                                     pcc_switchgear=not s["pcc_switchgear_by_operator"])
+                    text, overridden, basis = _engine_library(project, d)
+                    used.write_bytes(text.encode())
+                    cs.invest_campus(run_dir, used if overridden or (d / LIBRARY_FILE).is_file() else None,
+                                     criteria=criteria, profile=s["profile"], pf=s["pf"],
+                                     profile_dirs=profile_dirs, pcc_switchgear=not s["pcc_switchgear_by_operator"])
+                    (run_dir / COST_BASIS_FILE).write_text(json.dumps(basis))
                 except BaseException:
                     _clear_investment(run_dir)       # never half a purchase beside the new sizing
                     raise

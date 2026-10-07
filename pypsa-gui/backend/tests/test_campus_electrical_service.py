@@ -590,3 +590,194 @@ def test_an_unresolved_row_reaches_the_state_and_the_copilot_summary(hub):
     want = [{"need": df.loc[1, "need"], "reason": "campus_voltage: needs a tap change"}]
     assert ce.get_state(hub)["results"]["unresolved"] == want
     assert ce.get_investment(hub)["unresolved"] == want
+
+
+# --------------------------------------------------------------------------
+# part three, D1a: the discount rate and the price year come from the project
+# --------------------------------------------------------------------------
+#
+# The library's own 0.07 and price year are stand-alone defaults. A project
+# that has saved a solver config annualises at that config's discount rate,
+# and one that has finance inputs states its money year there. The engine
+# is handed a copy of the library with the project's rate, and that copy is
+# the one kept as run/campus_assets_used.yaml.
+
+def save_solver_config(project, **fields):
+    import json
+    path = project_registry.project_dir(project) / ce.SOLVER_CONFIG_FILE
+    path.write_text(json.dumps(fields))
+    return path
+
+
+def finance_with(currency_year):
+    return {"currency_year": currency_year}
+
+
+def library_rate(text):
+    return yaml.safe_load(text)["discount_rate"]["value"]
+
+
+def library_entry(library_id, text=None):
+    data = yaml.safe_load(text or default_library_text())
+    return next(e for kind in data if isinstance(data[kind], list) for e in data[kind] if e["id"] == library_id)
+
+
+def annualised(row, rate):
+    from gridspine.templates.campus_assets import annuity
+    life = library_entry(row["library_id"])["lifetime_a"]["value"]
+    return row["capex_eur"] * annuity(rate, life) + row["opex_eur_per_a"]
+
+
+def test_without_a_saved_solver_config_the_library_keeps_its_rate_and_year(hub):
+    ce.draft(hub)
+    out = ce.run(hub, {"k": 1})
+    basis = out["results"]["cost_basis"]
+    assert basis["discount_rate"] == 0.07 and basis["discount_rate_from"] == "asset library"
+    assert basis["price_year"] == 2026 and basis["price_year_from"] == "asset library"
+    assert basis["library_price_year"] == 2026 and basis["price_year_mismatch"] is False
+    assert basis["currency"] == "EUR"
+    assert (ce.campus_dir(hub) / "run" / ce.USED_LIBRARY_FILE).read_text() == default_library_text()
+
+
+def test_the_projects_discount_rate_replaces_the_librarys_for_the_engine_and_the_snapshot(hub, monkeypatch):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.03)
+    seen = []
+    real = ce.cs.invest_campus
+
+    def spy(run_dir, library=None, **kw):
+        seen.append(open(library).read() if library is not None else None)
+        return real(run_dir, library, **kw)
+    monkeypatch.setattr(ce.cs, "invest_campus", spy)
+    out = ce.run(hub, {"k": 1})
+    assert seen and seen[0] is not None and library_rate(seen[0]) == 0.03
+    assert library_rate((ce.campus_dir(hub) / "run" / ce.USED_LIBRARY_FILE).read_text()) == 0.03
+    basis = out["results"]["cost_basis"]
+    assert basis["discount_rate"] == 0.03 and basis["discount_rate_from"] == "project solver config"
+    chosen = [r for r in out["results"]["investment"] if r["status"] == "chosen"]
+    assert chosen
+    for r in chosen:
+        assert r["annualised_eur_per_a"] == pytest.approx(annualised(r, 0.03))
+        assert r["annualised_eur_per_a"] != pytest.approx(annualised(r, 0.07))
+
+
+def test_the_rate_override_also_applies_to_the_projects_own_library_copy(hub):
+    ce.draft(hub)
+    ce.save_library(hub, library_with(scaled_capex(2)))
+    save_solver_config(hub, discount_rate=0.10)
+    out = ce.run(hub, {"k": 1})
+    used = yaml.safe_load((ce.campus_dir(hub) / "run" / ce.USED_LIBRARY_FILE).read_text())
+    assert used["discount_rate"]["value"] == 0.10
+    assert used["transformers"][0]["capex_eur"]["value"] == 2 * yaml.safe_load(default_library_text())[
+        "transformers"][0]["capex_eur"]["value"]                       # the rest of the copy is as saved
+    assert out["results"]["cost_basis"]["discount_rate_from"] == "project solver config"
+    assert yaml.safe_load(ce.get_library(hub)["yaml"])["discount_rate"]["value"] == 0.07   # the saved copy is not rewritten
+
+
+def test_the_price_year_is_the_projects_when_it_has_finance_inputs(hub):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.07, finance=finance_with(2024))
+    basis = ce.run(hub, {"k": 1})["results"]["cost_basis"]
+    assert basis["price_year"] == 2024 and basis["price_year_from"] == "project finance inputs"
+    assert basis["library_price_year"] == 2026
+    assert basis["price_year_mismatch"] is True                       # flagged; no money is converted
+
+
+def test_a_project_money_year_equal_to_the_librarys_is_not_a_mismatch(hub):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.07, finance=finance_with(2026))
+    basis = ce.run(hub, {"k": 1})["results"]["cost_basis"]
+    assert basis["price_year"] == 2026 and basis["price_year_from"] == "project finance inputs"
+    assert basis["price_year_mismatch"] is False
+
+
+@pytest.mark.parametrize("finance", [None, {}, {"currency_year": None}, {"currency_year": "2024"}])
+def test_finance_inputs_without_a_money_year_leave_the_librarys(hub, finance):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.05, finance=finance)
+    basis = ce.run(hub, {"k": 1})["results"]["cost_basis"]
+    assert basis["price_year"] == 2026 and basis["price_year_from"] == "asset library"
+    assert basis["price_year_mismatch"] is False
+    assert basis["discount_rate"] == 0.05 and basis["discount_rate_from"] == "project solver config"
+
+
+def test_a_mismatched_year_does_not_change_a_single_cost(hub):
+    ce.draft(hub)
+    plain = ce.run(hub, {"k": 1})["results"]["cost"]
+    save_solver_config(hub, discount_rate=0.07, finance=finance_with(2019))
+    assert ce.run(hub, {"k": 1})["results"]["cost"] == plain
+
+
+def test_a_project_rate_outside_the_librarys_range_is_a_422_naming_the_rate(hub):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=1.5)
+    with pytest.raises(HTTPException) as exc:
+        ce.run(hub, {"k": 1})
+    assert exc.value.status_code == 422 and "1.5" in exc.value.detail and "solver config" in exc.value.detail
+    assert not (ce.campus_dir(hub) / "run" / ce.USED_LIBRARY_FILE).exists()
+
+
+def test_a_run_without_invest_has_no_cost_basis(hub):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.03)
+    ce.run(hub, {"k": 1})
+    out = ce.run(hub, {"k": 1, "invest": False})
+    assert out["results"]["cost_basis"] is None
+    assert not (ce.campus_dir(hub) / "run" / ce.COST_BASIS_FILE).exists()
+
+
+def test_a_change_of_the_projects_discount_rate_makes_the_results_stale(hub):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.05)
+    ce.run(hub, {"k": 1})
+    assert not ce.get_state(hub)["stale"]
+    save_solver_config(hub, discount_rate=0.06)
+    assert ce.get_state(hub)["stale"]
+    ce.run(hub, {"k": 1})
+    assert not ce.get_state(hub)["stale"]
+
+
+def test_saving_or_removing_the_solver_config_changes_the_basis_and_so_the_staleness(hub):
+    ce.draft(hub)
+    ce.run(hub, {"k": 1})                                              # the library's 0.07, no config
+    assert not ce.get_state(hub)["stale"]
+    path = save_solver_config(hub, discount_rate=0.04)
+    assert ce.get_state(hub)["stale"]
+    ce.run(hub, {"k": 1})
+    assert not ce.get_state(hub)["stale"]
+    path.unlink()
+    assert ce.get_state(hub)["stale"]
+
+
+def test_a_change_to_something_else_in_the_solver_config_is_not_a_change_of_the_results(hub):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.05, solver_name="highs")
+    ce.run(hub, {"k": 1})
+    save_solver_config(hub, discount_rate=0.05, solver_name="gurobi")
+    assert not ce.get_state(hub)["stale"]
+
+
+def test_a_change_of_the_money_year_makes_the_results_stale_since_the_basis_is_shown(hub):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.05, finance=finance_with(2026))
+    ce.run(hub, {"k": 1})
+    assert not ce.get_state(hub)["stale"]
+    save_solver_config(hub, discount_rate=0.05, finance=finance_with(2024))
+    assert ce.get_state(hub)["stale"]
+
+
+def test_a_run_that_fails_leaves_no_cost_basis_behind(hub, monkeypatch):
+    from gridspine.schema.contracts import ContractError
+    ce.draft(hub)
+    ce.run(hub, {"k": 1})
+    monkeypatch.setattr(ce.cs, "invest_campus", lambda *a, **k: (_ for _ in ()).throw(ContractError("no")))
+    with pytest.raises(HTTPException):
+        ce.run(hub, {"k": 1})
+    assert not (ce.campus_dir(hub) / "run" / ce.COST_BASIS_FILE).exists()
+
+
+def test_the_investment_summary_for_the_copilot_carries_the_cost_basis(hub):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.05)
+    ce.run(hub, {"k": 1})
+    assert ce.get_investment(hub)["cost_basis"]["discount_rate"] == 0.05
