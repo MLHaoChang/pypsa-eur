@@ -62,6 +62,12 @@
   Its `peak_load_mw` is now the simultaneous peak (loads summed per snapshot, then maxed); before, loads peaking in different hours were added together.
   The analyser follows every multi-port link `busN`, not only `bus2..bus4`, and reports `has_supply_asset` per island.
 
+* Fix(pypsa-gui): An independent end-to-end QA pass fixed 27 verified findings (plus three defects found re-reading its own diff), each with a guard test ([#76](https://github.com/MLHaoChang/pypsa-eur/pull/76)); the registers are `docs/superpowers/notes/2026-09-28-qa-*.md`.
+  Network editing: cascade bus delete purges side data, clustering carries `n.meta`, Create-model attributes survive a from-scratch network, weightings must be finite and non-negative, and a timeseries upload reports unmatched columns.
+  Solver lifecycle: a failed or aborted assumptions apply reverts itself, both solve claims clear every result key, and the queue releases what a job claimed on every exit path.
+  Chat: a tool's project switch reaches the rest of the streamed turn, an import is a rebind (the panel clears the active project, so the autosave can no longer overwrite the previous project), one undo reverts the assistant's last turn, `/history` hands each user their own session, and `/stream` refuses another user's session.
+  In server mode a raw import over HTTP is now what the next request sees; the session's active-project pointer was never moved.
+
 ## PyPSA-Eur v2026.02.0 (18th February 2026)
 
 **Features**

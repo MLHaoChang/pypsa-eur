@@ -41,6 +41,28 @@ export interface ChatMessage {
   ts: number
 }
 
+/** The live Choice card (`ask_user`, chat harness issue 04). One at a
+ *  time, like the confirmation card; cleared when the next turn starts or
+ *  when the user picks. */
+/** The session's workflow step (chat harness issue 06), shown as a strip
+ *  above the composer and sent back as `ui_context.workflow`. */
+export interface WorkflowState {
+  id: string
+  title: string
+  step: string
+  step_title: string
+  step_index: number
+  step_count: number
+}
+
+export interface PendingChoiceCard {
+  tool_use_id?: string
+  title: string
+  question: string
+  options: { label: string; description?: string; recommended?: boolean }[]
+  allow_free_text: boolean
+}
+
 export interface PendingConfirmationCard {
   tool_use_id: string
   tool_name: string
@@ -144,6 +166,10 @@ interface ChatState {
   // card at a time (M7 — parallel destructives are rejected at the agent
   // layer, so the UI never has to handle two).
   pending: PendingConfirmationCard | null
+  /** The live Choice card, or null. */
+  choice: PendingChoiceCard | null
+  /** The active workflow step, or null. */
+  workflow: WorkflowState | null
   // Live tool-progress (the latest tool_progress payload per tool_use_id).
   toolProgress: Record<string, { kind: string; line: string }[]>
   // Usage (token count) meter
@@ -224,6 +250,8 @@ interface ChatState {
    */
   setMessages: (msgs: ChatMessage[]) => void
   setPending: (c: PendingConfirmationCard | null) => void
+  setChoice: (c: PendingChoiceCard | null) => void
+  setWorkflow: (w: WorkflowState | null) => void
   appendToolProgress: (toolUseId: string, frame: { kind: string; line: string }) => void
   accrueUsage: (delta: Partial<ChatUsageAcc>) => void
   setStreaming: (v: boolean) => void
@@ -341,6 +369,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   newChatSeq: 0,
   messages: [],
   pending: null,
+  choice: null,
+  workflow: null,
   toolProgress: {},
   usage: {
     input_tokens: 0,
@@ -426,6 +456,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   }),
   setPending: (c) => set({ pending: c }),
+  setChoice: (c) => set({ choice: c }),
+  setWorkflow: (w) => set({ workflow: w }),
   appendToolProgress: (toolUseId, frame) => set((s) => {
     const prev = s.toolProgress[toolUseId] ?? []
     // Cap retained lines so long solves (PHASE/VALIDATION spam) cannot
@@ -534,6 +566,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       boundProfileId: null,
       messages: [],
       pending: null,
+      choice: null,
+      workflow: null,
       toolProgress: {},
       usage: {
         input_tokens: 0, output_tokens: 0,
@@ -560,6 +594,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       boundProfileId: null,
       messages: [],
       pending: null,
+      choice: null,
+      workflow: null,
       toolProgress: {},
       error: null,
       usage: {

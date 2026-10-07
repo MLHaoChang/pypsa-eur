@@ -26,6 +26,8 @@ import time
 import pytest
 
 from services import chat_service
+from harness import ratelimit as harness_ratelimit
+from harness import session as harness_session
 
 # NOTE — sessions built directly in this file pass `owner_user_id`. /confirm,
 # /rewind and /abort authorize against the session owner and are FAIL-CLOSED, so
@@ -74,7 +76,7 @@ def _short_confirmation_ttl(monkeypatch):
     the production 300 s. Tests that exercise specific TTL semantics
     re-override locally.
     """
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 0.3)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 0.3)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -193,7 +195,7 @@ def test_approve_within_ttl_executes_tool(client, monkeypatch):
     # exactly what `_short_confirmation_ttl`'s docstring asks of tests with
     # specific TTL semantics, and the expiry path stays covered by the two
     # tests below that set 0.1s deliberately.
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 60.0)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 60.0)
     import threading
 
     streamed: list[tuple[str, dict]] = []
@@ -262,7 +264,7 @@ def test_approve_within_ttl_executes_tool(client, monkeypatch):
 def test_confirmation_expires_after_ttl(client, monkeypatch):
     """Short TTL — stream times out the confirmation and emits tool_error expired."""
     # Inject a 100ms TTL so the test doesn't wait 5 minutes
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 0.1)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 0.1)
 
     resp = client.post(
         "/api/chat/stream",
@@ -294,7 +296,7 @@ def test_late_confirm_after_ttl_returns_409(client, seeded_identity, monkeypatch
     error_kind='confirmation_expired' only fires if the /confirm POST
     arrives in the narrow window BEFORE the agent's wait-side prune runs.
     """
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 0.1)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 0.1)
 
     # Pre-issue a token directly on a session WITHOUT routing through SSE so
     # we control the timing precisely.
@@ -331,6 +333,15 @@ def test_replay_after_consume_returns_404(client, seeded_identity):
     pc = sess.issue_confirmation(
         tool_name="delete_project", args={"name": "P"},
         safety_tier="destructive",
+        # EXPLICIT, not the module default. `issue_confirmation` reads the
+        # module-level `CONFIRMATION_TTL_SECONDS` at call time, and several
+        # test modules monkeypatch it down to 0.1-1.0s; this test asserts the
+        # FIRST confirm succeeds, so inheriting a tiny value makes it a race
+        # against however long one in-process request takes. Observed failing
+        # exactly that way in a full-suite run under load (409
+        # `confirmation_expired` on the first call), and passing alone and
+        # with its own module.
+        ttl_seconds=120.0,
     )
     # First call: should succeed (200)
     r1 = client.post(
@@ -488,7 +499,7 @@ def test_invalid_decision_returns_400_and_preserves_token(
     # requests on one token. On a loaded runner the token expired between them
     # and the retry got 409 `confirmation_expired` (seen in the full suite; a
     # 0.5s stall reproduces it). "Preserves token" must not race the TTL.
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 60.0)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 60.0)
     # The session records its owner, as production does (master 7a6edcc2f).
     sess = chat_service.get_or_create_session(
         "sess-invalid", owner_user_id=str(seeded_identity["user_id"]))
@@ -518,8 +529,8 @@ def test_invalid_decision_returns_400_and_preserves_token(
 
 def test_stream_rate_limit_returns_429_with_retry_after(client, monkeypatch):
     """capacity=1 + slow refill → the 2nd /stream on the SAME session_id 429s."""
-    monkeypatch.setattr(chat_service, "STREAM_RATE_CAPACITY", 1.0)
-    monkeypatch.setattr(chat_service, "STREAM_RATE_REFILL_PER_SEC", 0.001)
+    monkeypatch.setattr(harness_ratelimit, "STREAM_RATE_CAPACITY", 1.0)
+    monkeypatch.setattr(harness_ratelimit, "STREAM_RATE_REFILL_PER_SEC", 0.001)
 
     body = {"session_id": "sess-rate-1", "script": [{"type": "session_done"}]}
     r1 = client.post("/api/chat/stream", json=body)
@@ -533,7 +544,7 @@ def test_stream_rate_limit_returns_429_with_retry_after(client, monkeypatch):
 
 def test_rate_limit_disabled_by_default(client, monkeypatch):
     """With the default capacity (0 → disabled), repeated /stream all 200."""
-    monkeypatch.setattr(chat_service, "STREAM_RATE_CAPACITY", 0.0)
+    monkeypatch.setattr(harness_ratelimit, "STREAM_RATE_CAPACITY", 0.0)
     body = {"session_id": "sess-rate-off", "script": [{"type": "session_done"}]}
     for _ in range(5):
         r = client.post("/api/chat/stream", json=body)
@@ -542,8 +553,8 @@ def test_rate_limit_disabled_by_default(client, monkeypatch):
 
 def test_rate_limit_separate_sessions_independent(client, monkeypatch):
     """A bucket is per-session — exhausting one session doesn't block another."""
-    monkeypatch.setattr(chat_service, "STREAM_RATE_CAPACITY", 1.0)
-    monkeypatch.setattr(chat_service, "STREAM_RATE_REFILL_PER_SEC", 0.001)
+    monkeypatch.setattr(harness_ratelimit, "STREAM_RATE_CAPACITY", 1.0)
+    monkeypatch.setattr(harness_ratelimit, "STREAM_RATE_REFILL_PER_SEC", 0.001)
 
     a = {"session_id": "sess-rate-A", "script": [{"type": "session_done"}]}
     b = {"session_id": "sess-rate-B", "script": [{"type": "session_done"}]}
@@ -555,8 +566,8 @@ def test_rate_limit_separate_sessions_independent(client, monkeypatch):
 
 def test_check_rate_limit_unit_refill_allows_again(monkeypatch):
     """Token-bucket unit check: after enough refill the key is allowed again."""
-    monkeypatch.setattr(chat_service, "STREAM_RATE_CAPACITY", 2.0)
-    monkeypatch.setattr(chat_service, "STREAM_RATE_REFILL_PER_SEC", 1000.0)
+    monkeypatch.setattr(harness_ratelimit, "STREAM_RATE_CAPACITY", 2.0)
+    monkeypatch.setattr(harness_ratelimit, "STREAM_RATE_REFILL_PER_SEC", 1000.0)
     chat_service._reset_sessions_for_tests()  # clear buckets
 
     allowed1, _ = chat_service.check_rate_limit("k")

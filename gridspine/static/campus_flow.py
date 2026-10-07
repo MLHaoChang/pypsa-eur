@@ -154,24 +154,33 @@ def apply_setpoints(net, setpoints) -> None:
             net[table].at[idx[name], col] = v
 
 
-def solve_cases(campus, rows: pd.DataFrame, setpoints=None) -> dict:
+def solve_cases(campus, rows: pd.DataFrame, setpoints=None, inspect=None) -> dict:
     """``{"intact": HourFlow, "N-1:<trafo>": HourFlow, ...}`` for one hour,
     with an optional reactive dispatch in place (module docstring). Works on
-    a copy; ``campus.net`` is not changed."""
+    a copy; ``campus.net`` is not changed. ``inspect(case, net)``, if given,
+    is called on the solved net of every converged case (the MILP reads its
+    Jacobian there, ``campus_milp``)."""
     work = copy.copy(campus)
     work.net = copy.deepcopy(campus.net)
     apply_hour(work, rows)
     net = work.net
     if setpoints:
         apply_setpoints(net, setpoints)
-    out = {"intact": _solve(net)}
+
+    def run(case):
+        out[case] = _solve(net)
+        if inspect is not None and out[case].converged:
+            inspect(case, net)
+
+    out = {}
+    run("intact")
     idx = dict(zip(net.trafo["name"].astype(str), net.trafo.index))
     for members in trafo_groups(work).values():
         if len(members) < 2:
             continue
         for name in members:
             net.trafo.at[idx[name], "in_service"] = False
-            out[f"N-1:{name}"] = _solve(net)
+            run(f"N-1:{name}")
             net.trafo.at[idx[name], "in_service"] = True
     return out
 
