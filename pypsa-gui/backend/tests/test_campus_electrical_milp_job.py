@@ -66,6 +66,11 @@ def _clean_slot():
             t.join(timeout=60)
     ce._MILP_JOBS.clear()
     ce._MILP_SLOT["active"] = None
+    lock = ce._netcdf_lock()
+    free = lock.acquire(blocking=False)
+    if free:
+        lock.release()
+    assert free, "a job left the NetCDF lock held"
 
 
 class FakeEngine:
@@ -396,6 +401,17 @@ def test_the_milp_turns_stale_when_the_least_cost_run_is_made_again_with_other_s
 def test_the_milp_stays_fresh_when_the_least_cost_run_is_made_again_alike(milp_done):
     ce.run(milp_done, SETTINGS)
     assert ce.get_state(milp_done)["milp"]["stale"] is False
+
+
+def test_the_milp_turns_stale_when_the_least_cost_run_is_made_again_alike_on_another_library(milp_done):
+    """The least-cost run is fresh again (made on the new library) and its
+    settings are the job's: only the files the job was made from tell that
+    the MILP bought from another library."""
+    from tests.test_campus_electrical_service import library_with, scaled_capex
+    ce.save_library(milp_done, library_with(scaled_capex(2.0)))
+    ce.run(milp_done, SETTINGS)
+    state = ce.get_state(milp_done)
+    assert state["stale"] is False and state["milp"]["stale"] is True
 
 
 def test_the_milp_turns_stale_when_its_basis_is_missing(milp_done):

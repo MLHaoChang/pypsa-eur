@@ -677,3 +677,25 @@ def test_a_stop_before_any_iteration_returns_c8s_result_flagged(tmp_path):
     assert out["comparison"].set_index("need").at["transformer TR1", "milp_choice"] == "1 x T_A"
     assert out["investment"].set_index("need").at["transformer TR1", "library_id"] == "T_A"
     assert set(out["compliance"]["status_with_measures"]) <= {"pass", "not_rated"}
+
+
+def test_progress_reports_the_best_ac_feasible_cost_so_far_not_the_trials(tmp_path):
+    """On the outage case the first trial (the pair) is cheaper than C8's
+    point but fails the AC check: the cost reported as best stays the
+    cheapest AC-feasible point seen so far (None while there is none), not
+    the trial's."""
+    from gridspine.static.campus_milp import select_assets_milp
+    spec, table, sel, lib, crit = outage_case(tmp_path)
+    calls = []
+    out = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE, crit,
+                             progress=lambda i, n, s: calls.append((i, dict(s))))
+    h = out["milp_history"]
+    first = h.iloc[1]
+    assert not first["feasible"] and first["cost"] < h.iloc[0]["cost"]          # a cheaper, infeasible trial
+    best = math.inf
+    for (i, s), feasible, cost in zip(calls, h["feasible"], h["cost"]):
+        if feasible:
+            best = min(best, cost)
+        assert s["best_cost"] == (None if best == math.inf else pytest.approx(best)), i
+    assert calls[1][1]["best_cost"] != pytest.approx(first["cost"])
+    assert calls[-1][1]["best_cost"] == pytest.approx(out["summary"]["milp_cost"])
