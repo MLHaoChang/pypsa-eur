@@ -609,7 +609,7 @@ def test_the_campus_producer_shape_runs_through_the_case_and_the_report(solved):
 
 
 @pytest.mark.live_solve
-def test_the_real_campus_producer_feeds_the_case(solved, hub):
+def test_the_real_campus_producer_feeds_the_case(solved, hub):  # noqa: F811 (a fixture)
     """#97's `extra_owner_assets` on its own test fixture (a campus hub project with a hand-made
     investment run), through `build_finance_case` and `run_case`."""
     from services import campus_electrical_service as ce
