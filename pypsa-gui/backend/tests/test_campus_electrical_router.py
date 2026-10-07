@@ -42,7 +42,7 @@ def hub(client, _auth_db, seeded_identity):
     ("get", "/library", "get_library", None, ()),
     ("put", "/library", "save_library", {"yaml": "discount_rate: {}"}, ("discount_rate: {}",)),
     ("post", "/library/reset", "reset_library", None, ()),
-    ("get", "/owner-assets", "extra_owner_assets", None, ()),
+    ("get", "/owner-assets", "owner_assets_response", None, ()),
 ])
 def test_each_route_calls_its_service_function_with_the_row(client, hub, monkeypatch, method, path, function,
                                                             payload, expected_args):
@@ -114,16 +114,16 @@ def test_another_orgs_project_is_404_not_403(other_org_client, hub):
 
 def test_the_owner_assets_are_a_read_that_a_lock_does_not_refuse_and_a_write_verb_cannot_reach(
         client, hub, same_org_other_user, monkeypatch):  # noqa: F811
-    monkeypatch.setattr(ce, "extra_owner_assets", lambda *a: [])
+    monkeypatch.setattr(ce, "owner_assets_response", lambda *a: {"assets": [], "source_hash": None, "stale": False})
     assert client.post("/api/projects/Router Hub/lock").status_code == 200
     base = "/api/campus-electrical/Router Hub/owner-assets"
     assert same_org_other_user.get(base).status_code == 200
-    assert client.get(base).json() == []
+    assert client.get(base).json() == {"assets": [], "source_hash": None, "stale": False}
     for verb in ("post", "put", "delete"):
         assert getattr(client, verb)(base).status_code == 405, verb
 
 
-def test_the_owner_assets_of_a_project_with_no_run_are_an_empty_list_over_http(client, hub):
+def test_the_owner_assets_of_a_project_with_no_run_are_empty_with_no_hash_over_http(client, hub):
     resp = client.get("/api/campus-electrical/Router Hub/owner-assets")
     assert resp.status_code == 200, resp.text
-    assert resp.json() == []
+    assert resp.json() == {"assets": [], "source_hash": None, "stale": False}
