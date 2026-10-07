@@ -462,6 +462,15 @@ def _tool_write_routes(TOOL_ROUTES, name) -> list[tuple[str, str]]:
 def _tool_is_covered(name, chat_tools, TOOL_ROUTES, gated) -> bool:
     if name in gated:
         return True
+    # A tool that checks the lock in its own body is holder-checked, the same
+    # rule the HTTP routes get above, and verified the same way. Without this
+    # the main test and the ratchet below disagreed: the ratchet counted an
+    # in-body check as a fix, while this function did not count it as a
+    # decision. That only surfaced with the first real in-body fix (OPEN-ITEMS
+    # 14, `_gridspine_project_for_write`); until then every tool was either
+    # seam-gated or routed.
+    if _lock_check_path(chat_tools.DISPATCHERS[name]) is not None:
+        return True
     writes = _tool_write_routes(TOOL_ROUTES, name)
     routes = _write_routes()
     return bool(writes) and all(k in routes and _route_is_covered(k) for k in writes)
