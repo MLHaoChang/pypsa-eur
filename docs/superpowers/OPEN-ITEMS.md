@@ -31,21 +31,6 @@ verification record.
 
 ## High
 
-### 14. The campus-electrical chat tools bypass the edit-lock check
-
-`services/chat_tools.py`, added by #79 (merged 2026-10-06). The HTTP routes in
-`routers/campus_electrical.py` call `_check_lock` before the service. The chat
-tools `campus_draft_campus` and `campus_run_study` call the service directly,
-and `_gridspine_project` resolves access but not the lock. Reproduced on
-`af69613`: the HTTP draft returned 409 for a non-holder, while
-`campus_draft_campus(overwrite=True)` and `campus_run_study` both reached the
-write path. #84 added a third, `campus_extract_grid_code` (it can add a grid-code draft but not overwrite one), reproduced the same way. #91 added a fourth, `campus_set_library` (it replaces the project's asset library), also reproduced. This is the fifth instance of the "a second caller skips the
-handler" shape. `tests/test_write_surface_lock_policy.py` caught it on the day
-it landed, by going red on #80 merged with the new master. Note for the fix:
-these tools take a `project_id`, so the seam's active-project predicate would
-test the wrong lock. Check the lock of the resolved project. Full analysis:
-`findings/2026-10-06-campus-chat-tools-bypass-the-lock-check.md`. Server only.
-
 ### 13. Chat tools that write a project's upload store bypass its lock check
 
 **Fixed independently in #76 (`e36c041`), not yet on master.** Do not fix
@@ -213,6 +198,17 @@ NOT reused or compacted — other findings and assessments cite these numbers.
   tenancy tests hold that). Three product questions the lock table states
   rather than settles (gridspine studies, chat-history import, adequacy
   campaigns) are in the plan. #76 settles two of them.
+* **14** — the campus-electrical chat tools bypassed the edit-lock check.
+  Four tools: `campus_draft_campus` and `campus_run_study` (#79),
+  `campus_extract_grid_code` (#84) and `campus_set_library` (#91). The
+  write-surface test caught each one on the day it landed. Each was reproduced
+  (the HTTP twin returned 409 while the tool reached the write) and recorded in
+  `KNOWN_GAPS`. Fixed 2026-10-07 by `_gridspine_project_for_write`, which
+  checks the lock of the project the tool NAMES. The seam's active-project
+  check would have tested the wrong one. Reads keep the unchecked resolver
+  and stay open. Tripwire: `tests/test_campus_tools_foreign_lock.py`,
+  written first and red for the right reason ("did not raise"). The ratchet
+  then required deleting the four `KNOWN_GAPS` entries.
 * **5** — chat sessions have no owner, so the confirmation gate rests on id
   secrecy. Closed by the same commit as item 3: `owner_user_id` plus one
   comparison is exactly the fix this item asked for, so `/confirm` no longer

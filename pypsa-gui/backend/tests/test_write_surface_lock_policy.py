@@ -240,16 +240,7 @@ _ITEM_13 = (
     "check, while the HTTP upload routes refuse a non-holder. "
     "findings/2026-10-05-chat-tools-bypass-the-upload-lock-check.md"
 )
-_ITEM_14 = (
-    "OPEN-ITEMS item 14: calls the campus service directly, skipping the "
-    "`_check_lock` its HTTP handler runs. "
-    "findings/2026-10-06-campus-chat-tools-bypass-the-lock-check.md"
-)
 KNOWN_GAPS: dict[str, str] = {
-    "campus_draft_campus": _ITEM_14,
-    "campus_run_study": _ITEM_14,
-    "campus_extract_grid_code": _ITEM_14,  # #84, same shape, found the day it merged
-    "campus_set_library": _ITEM_14,  # #91, replaces the project's asset library
     "clear_uploads": _ITEM_13,
     "export_to_excel": _ITEM_13,
     "export_to_csv": _ITEM_13,
