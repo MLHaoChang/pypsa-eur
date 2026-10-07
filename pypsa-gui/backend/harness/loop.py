@@ -74,6 +74,7 @@ logger = logging.getLogger("pypsa_gui.chat")
 
 from harness.history import (  # noqa: E402, F401 — moved (issue 08); re-exported
     _message_is_tool_results, _is_turn_start, rewind_session, _drop_oldest_turn_group, TURN_SUMMARY_PREFIX, TURN_SUMMARY_MAX_CHARS, _SUMMARY_LINE_CHARS, _SUMMARY_MAX_LINES, is_turn_summary, _describe_dropped, _render_summary, _parse_summary, trim_session_messages, CHAT_FILENAME, _redact_for_persist, get_persist_path, read_all_turns, read_all_turns_with_gap, append_turn, _pending_turn_path_unlocked, begin_pending_turn, read_pending_turn, clear_pending_turn, flush_to_disk, _rotate_chat_jsonl_unlocked, SAVE_LINEAGE_REBIND_MOVE, SAVE_LINEAGE_COPY, SAVE_LINEAGE_SCENARIO_COPY, _project_chat_paths, handle_save_lineage, handle_rename_lineage, handle_snapshot_lineage, _chat_paths_in,
+    TURN_USAGE_KEY, INTERRUPTED_KEY, INTERRUPTED_REASON_KEY, usage_since, is_interrupted_turn, TurnTrace,
 )
 
 
@@ -1113,21 +1114,44 @@ def run_turn(
     except Exception:  # noqa: BLE001 — the WAL must never block the turn
         logger.exception("chat: failed to open the pending-turn record")
 
+    with session._lock:
+        _usage_at_start = dict(session.usage_acc)
+    # What the turn showed, for the interrupted-turn record. Iterated by hand
+    # rather than `yield from` so every frame passes through it; `body.close()`
+    # below is what `yield from` did implicitly on a client disconnect.
+    trace = TurnTrace()
+    _ended_by: str | None = None
+    body = _run_turn_body(
+        session,
+        message,
+        client=client,
+        provider=provider,
+        message_history=message_history,
+        attachment_file_ids=attachment_file_ids,
+        ui_context=ui_context,
+    )
     try:
         # The body is a separate generator so this one try/finally clears the
         # in-flight flag + records the duration on EVERY exit path (normal
         # return, error return, GeneratorExit on client disconnect) without
         # re-indenting the 480-line body. #19 + #20 share this single finally.
-        yield from _run_turn_body(
-            session,
-            message,
-            client=client,
-            provider=provider,
-            message_history=message_history,
-            attachment_file_ids=attachment_file_ids,
-            ui_context=ui_context,
-        )
+        try:
+            for frame in body:
+                trace.note(*frame)
+                yield frame
+        except GeneratorExit:
+            _ended_by = "disconnected"
+            raise
+        except Exception:
+            _ended_by = "internal_error"
+            raise
     finally:
+        body.close()
+        _persist_interrupted_turn(
+            _wal_ctx, session, message, trace, ended_by=_ended_by,
+            usage_at_start=_usage_at_start,
+            attachment_file_ids=attachment_file_ids,
+        )
         _metric_record_duration(time.monotonic() - _t_start)
         with session._lock:
             session._turn_in_flight = False
@@ -1146,6 +1170,54 @@ def run_turn(
         # record behind. Only a crash skips this line — which is the point.
         if _wal_ctx is not None:
             clear_pending_turn(_wal_ctx)
+
+
+def _persist_interrupted_turn(
+    ctx: ProjectContext | None,
+    session: ChatSession,
+    message: str,
+    trace: TurnTrace,
+    *,
+    ended_by: str | None,
+    usage_at_start: dict[str, Any],
+    attachment_file_ids: list[str] | None,
+) -> None:
+    """
+    Write the display-only record of a turn that produced model output and
+    did not complete (see `harness.history.INTERRUPTED_KEY`). Before this a
+    turn ending by abort, the tool-call cap, a mid-turn project switch, a
+    stream error or a disconnect left no transcript record although its tools
+    ran, and a reload showed a conversation without it.
+
+    To the turn's START project, like the completed record (P0). Never
+    raises: it runs in `run_turn`'s `finally`, where an exception would
+    replace whatever ended the turn.
+    """
+    try:
+        fields = trace.interrupted_record(ended_by=ended_by)
+        if fields is None or ctx is None:
+            return
+        with session._lock:
+            usage_now = dict(session.usage_acc)
+        record: dict[str, Any] = {
+            "ts": time.time(),
+            "session_id": session.session_id,
+            "model": session.model,
+            "user": _redact_for_persist(message),
+            "usage": usage_now,
+            TURN_USAGE_KEY: usage_since(usage_now, usage_at_start),
+            **fields,
+        }
+        record["assistant"] = _redact_for_persist(record["assistant"])
+        if trace.profile_id:
+            record["profile_id"] = trace.profile_id
+        if session.owner_user_id is not None:
+            record[TURN_AUTHOR_KEY] = session.owner_user_id
+        if attachment_file_ids:
+            record["attachment_file_ids"] = list(attachment_file_ids)
+        append_turn(ctx, record)
+    except Exception:  # noqa: BLE001 — persistence is best-effort
+        logger.exception("chat: failed to persist an interrupted turn")
 
 
 def _outbound_vision_block_kinds(
@@ -1233,6 +1305,9 @@ def _run_turn_body(
     # snapshots its ctx (F10); the turn loop did not until now.
     from services.pypsa_service import PyPSAService
     turn_ctx = PyPSAService.get_active_context()
+    # The record's `turn_usage` is measured from here (TURN_USAGE_KEY).
+    with session._lock:
+        usage_at_turn_start = dict(session.usage_acc)
     # Use a single-element list so the dispatch loop below can refresh the
     # expected-project name when one of the agent's own tools legitimately
     # rebinds the active context (activate_project / load_project /
@@ -1673,6 +1748,7 @@ def _run_turn_body(
                     "user": _redact_for_persist(message),
                     "assistant": _redact_for_persist(assistant_blocks),
                     "usage": usage_snapshot,
+                    TURN_USAGE_KEY: usage_since(usage_snapshot, usage_at_turn_start),
                 }
                 # CH-6 — who ran this turn, so GET /history can hand each user
                 # back THEIR session rather than whoever spoke last. Omitted

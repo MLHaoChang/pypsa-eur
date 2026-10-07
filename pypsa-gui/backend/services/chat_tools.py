@@ -5645,6 +5645,12 @@ def export_preview_png(filename: str, png_bytes_b64: str) -> dict:
     return _save_agent_export(payload, filename, "image/png")
 
 
+def _interrupted_reason(turn: dict) -> str:
+    """The recorded end of an interrupted turn, for a summary line."""
+    from services import chat_service
+    return str(turn.get(chat_service.INTERRUPTED_REASON_KEY) or "unknown")
+
+
 def export_chat_summary(
     format: str = "md",
     since_turn: int | None = None,
@@ -5663,6 +5669,7 @@ def export_chat_summary(
     `filename`: override the auto-generated `chat_summary_<ts>.<ext>` name.
     """
     import time as _time
+    from services import chat_service
     fmt = format.lower()
     if fmt not in {"md", "txt"}:
         raise HTTPException(
@@ -5695,6 +5702,8 @@ def export_chat_summary(
                     assistant_text += f"\n_[tool: {b.get('name','?')}]_\n"
             if assistant_text.strip():
                 lines.append(f"\n**Assistant**: {assistant_text.rstrip()}\n")
+            if chat_service.is_interrupted_turn(t):
+                lines.append(f"\n_(interrupted: {_interrupted_reason(t)})_\n")
     else:  # txt
         for i, t in enumerate(turns):
             user = (t.get("user") or "").strip()
@@ -5707,6 +5716,8 @@ def export_chat_summary(
                     assistant_text += str(b.get("text", "")) + "\n"
             if assistant_text.strip():
                 lines.append(f"Assistant: {assistant_text.rstrip()}")
+            if chat_service.is_interrupted_turn(t):
+                lines.append(f"(interrupted: {_interrupted_reason(t)})")
             lines.append("")
     payload = "\n".join(lines).encode("utf-8")
     target = filename or f"chat_summary_{int(_time.time())}.{fmt}"

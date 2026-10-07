@@ -1652,27 +1652,39 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _empty(
         "export_network_nc",
-        "Export the active network as PyPSA netCDF. Saves a downloadable file in "
-        "the chat file strip and returns its metadata {file_id, filename, size}. "
+        "Export the active network as PyPSA netCDF and return the new file's "
+        "metadata {file_id, filename, size}. "
+        "Writes the file into the project's uploads (shown in the chat file "
+        "strip, counted toward the uploads quota, refused while another user "
+        "holds the project lock); the network and the project are unchanged. "
         "Requires a loaded project. Safety: read.",
     ),
     _empty(
         "export_csv_bundle",
-        "Export the active network as a CSV bundle (zip). Saves a downloadable file "
-        "and returns its metadata {file_id, filename, size}. Requires a loaded "
-        "project. Safety: read.",
+        "Export the active network as a CSV bundle (zip) and return the new "
+        "file's metadata {file_id, filename, size}. "
+        "Writes the file into the project's uploads (shown in the chat file "
+        "strip, counted toward the uploads quota, refused while another user "
+        "holds the project lock); the network and the project are unchanged. "
+        "Requires a loaded project. Safety: read.",
     ),
     _empty(
         "export_excel",
-        "Export the active network to an .xlsx workbook. Saves a downloadable file "
-        "and returns its metadata {file_id, filename, size}. Requires a loaded "
-        "project. Safety: read.",
+        "Export the active network to an .xlsx workbook and return the new "
+        "file's metadata {file_id, filename, size}. "
+        "Writes the file into the project's uploads (shown in the chat file "
+        "strip, counted toward the uploads quota, refused while another user "
+        "holds the project lock); the network and the project are unchanged. "
+        "Requires a loaded project. Safety: read.",
     ),
     _empty(
         "export_matpower",
-        "Export the active network in MATPOWER case format. Saves a downloadable "
-        "file and returns its metadata {file_id, filename, size}. Requires a "
-        "loaded project. Safety: read.",
+        "Export the active network in MATPOWER case format and return the new "
+        "file's metadata {file_id, filename, size}. "
+        "Writes the file into the project's uploads (shown in the chat file "
+        "strip, counted toward the uploads quota, refused while another user "
+        "holds the project lock); the network and the project are unchanged. "
+        "Requires a loaded project. Safety: read.",
     ),
 
     # ── Audit / Undo (4) ───────────────────────────────────────────────────
