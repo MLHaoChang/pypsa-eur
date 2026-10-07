@@ -4,7 +4,10 @@ The engine facade frozen for the guided study (IC plan
 `2026-10-05-ic-u1-engine-landing.md` §3; GS Q4, IC U1 follow-up; the S0b
 additions of `2026-10-06-ic-s0b-replacements-terminal.md` S7: the asset parts,
 `effective_parts`, `scale_capex`, the replacement schedule,
-`FinanceInputs.replacement_rule` and the `remaining_life_annuity` method).
+`FinanceInputs.replacement_rule` and the `remaining_life_annuity` method; and
+the G2 additions of `2026-10-07-ic-g1-g2-campus-equipment.md` G-11:
+`ExtraOwnerAsset`, `FinanceCase.extra_assets` and the `extra_assets` keyword of
+`build_finance_case`).
 
 Every facade name is imported and its call signature pinned with
 `inspect.signature` against the expectation below, so any change — a renamed
@@ -43,8 +46,13 @@ SIGNATURES: dict[str, str] = {
     "services.commercial.value_flow_templates.build":
         "(name: 'str', n, commercial: 'CommercialConfig', *, dsr_buses=()) -> 'TemplateResult'",
     "services.results.finance_case.build_finance_case":
-        "(n, cfg, fin, *, result_df, lost_load=None, owner: 'str | None' = None)"
-        " -> 'FinanceCase'",
+        "(n, cfg, fin, *, result_df, lost_load=None, owner: 'str | None' = None, "
+        "extra_assets: 'Sequence[ExtraOwnerAsset]' = ()) -> 'FinanceCase'",
+    # IC G2 (plan G-11): campus equipment as owner capex.
+    "services.finance.case.ExtraOwnerAsset":
+        "(name: 'str', kind: 'str', basis: 'str', quantity: 'float', "
+        "parts: 'tuple[UpfrontPart, ...]', build_year: 'int', source: 'str', "
+        "source_hash: 'str') -> None",
     "services.finance.case.FinanceRefused": "(code: 'str', detail: 'str' = '')",
     "services.finance.engine.run_case":
         "(case: 'FinanceCase', pack: 'JurisdictionPack | None' = None, *, "
@@ -125,6 +133,12 @@ DATACLASS_FIELDS: dict[str, tuple[str, ...]] = {
         "name", "component", "overnight_cost", "lifetime_years", "carrier", "parts"),
     "services.finance.case.AssetPart": ("name", "overnight_cost", "lifetime_years", "fom_share"),
     "services.finance.replacements.Replacement": ("year", "asset", "part", "amount", "source"),
+    # IC G2 (plan G-4, G-5): the extra asset and the case field that carries it.
+    "services.finance.case.ExtraOwnerAsset": (
+        "name", "kind", "basis", "quantity", "parts", "build_year", "source", "source_hash"),
+    "services.finance.case.FinanceCase": (
+        "inputs", "owner", "base_year", "cod", "templates", "assets", "flags", "counterfactual",
+        "lp_basis", "counterfactual_hash", "conservation_ok", "extra_assets"),
 }
 
 # The literal choices the guided study compiles to (IC S0b plan S7: C2 compiles

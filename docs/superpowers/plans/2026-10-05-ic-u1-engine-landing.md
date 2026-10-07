@@ -56,6 +56,9 @@ signature (`tests/test_engine_facade_frozen.py`): an accidental change fails lou
   capex: the parts, `overnight_cost` and the fixed replacement entries together),
   `finance.replacements.schedule` (with `Replacement`), `FinanceInputs.replacement_rule`
   (`fixed | part_lifetimes`) and the `TerminalValueRule` method `remaining_life_annuity`.
+- **Finance, added by G2** (`2026-10-07-ic-g1-g2-campus-equipment.md` G-11): `finance.case.ExtraOwnerAsset`
+  (signature and field pins), `FinanceCase.extra_assets` and the keyword
+  `results.finance_case.build_finance_case(..., extra_assets=())` (§8).
 - **Library:** `library.items.resolve` / `put_item`, `library.series_store.put_series`, the defaults-pack
   loader and the flat export series helper (new, items a and e).
 - **Field names** of `CommercialConfig` and `FinanceInputs` that the guided ledger compiles to.

@@ -323,6 +323,9 @@ def _project_payload(result, case) -> dict[str, Any]:
         # The terminal value's method and, for `remaining_life_annuity`, its
         # per-part terms (IC S0b plan S6).
         "terminal_value": _terminal_block(result, case),
+        # Campus equipment bought as owner capex, under its own heading (IC G2 plan
+        # G-10); readers use `.get` (older payloads lack the key).
+        "extra_assets": _extra_assets_block(case),
         "flags": list(result.flags),
     }
 
@@ -336,6 +339,38 @@ TERMINAL_BASE_BASIS = ("a part's base is what its last purchase cost: the part's
                        "LP's. Under replacement_rule fixed, a single-part asset's last "
                        "replacement_capex entry is valued as a full re-purchase, so a partial "
                        "overhaul replaces the initial purchase's remaining value")
+
+
+TERMINAL_EXTRA_ASSETS_BASIS = (
+    "; the extra (campus) assets' terms are valued at the case's LP basis but were never "
+    "charged by the LP, so the guided study's by-construction identity (NPV = LP saving x the "
+    "annuity factor) does not hold with extra assets")
+
+
+def _extra_assets_block(case) -> list[dict[str, Any]]:
+    """Each extra asset (IC G2 plan G-10): what it is, its quantity and parts, its
+    overnight cost READ FROM `case.assets` (so `scale_capex` is reflected), its
+    build year, its source and `source_hash`, and its money year and COD."""
+    fin = case.inputs
+    assets = {a.name: a for a in case.assets}
+    money = (f"{fin.currency_year} {fin.currency}" if fin.currency_year is not None
+             else f"{fin.currency} (currency year not stated)")
+    out = []
+    for e in getattr(case, "extra_assets", ()) or ():
+        a = assets.get(e.name)
+        out.append({
+            "name": e.name, "kind": e.kind, "basis": e.basis, "quantity": e.quantity,
+            "overnight_cost": None if a is None else _num(a.overnight_cost),
+            "parts": [{"name": p.name, "upfront_per_unit": _num(p.upfront_per_unit),
+                       "lifetime": _num(p.lifetime), "fom_share": _num(p.fom_share)}
+                      for p in e.parts],
+            "build_year": e.build_year, "source": e.source, "source_hash": e.source_hash,
+            "money_year": (f"upfront costs in the case's money, {money}: the caller converted "
+                           "them from the campus library's currency and price year"),
+            "cod": (f"taken at the case COD {case.cod.isoformat()}, within its build year "
+                    f"{e.build_year}"),
+        })
+    return out
 
 
 def _terminal_block(result, case) -> dict[str, Any]:
@@ -358,7 +393,8 @@ def _terminal_block(result, case) -> dict[str, Any]:
                   for t in getattr(result.op, "terminal_terms", ()) or ()],
     }
     if tv.method == "remaining_life_annuity":
-        out["rate_basis"] = TERMINAL_RATE_BASIS
+        out["rate_basis"] = TERMINAL_RATE_BASIS + (TERMINAL_EXTRA_ASSETS_BASIS
+                                                   if getattr(case, "extra_assets", ()) else "")
         out["base_basis"] = TERMINAL_BASE_BASIS
     return out
 
