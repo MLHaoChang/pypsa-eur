@@ -221,7 +221,7 @@ def _attach_island(n, spec, island, pypsa_ids, skipped):
         if "xd_pp" in block["values"]:
             u["xd_pp"] = {"value": block["values"]["xd_pp"], "source": block["sources"]["xd_pp"]}
         if block["kind"] == "ups":
-            out["it_load"] = _translate(block["it_load"], pypsa_ids, f"the UPS {name}'s it_load", skipped)
+            out["it_load"] = _translate(block["it_load"], pypsa_ids, f"the UPS {name}'s it_load", skipped, known)
             if not out["it_load"]:
                 raise ContractError(f"island_config.units.{name}: none of the loads it protects is in the draft")
         u["island"] = out
@@ -234,15 +234,20 @@ def _attach_island(n, spec, island, pypsa_ids, skipped):
                gfl_min_case=req["gfl_min_case"],
                frequency_limits={k: _retag(v) for k, v in req["frequency_limits"].items()})
     if req["ride_through_storage"]:
-        rts = _translate(req["ride_through_storage"], pypsa_ids, "ride_through_storage", skipped)
+        rts = _translate(req["ride_through_storage"], pypsa_ids, "ride_through_storage", skipped, known)
         if rts:
             out["ride_through_storage"] = rts
     spec["island"] = out
 
 
-def _translate(names, pypsa_ids, what, skipped):
+def _translate(names, pypsa_ids, what, skipped, known):
+    """Campus ids for PyPSA ``names``. A name the project lacks is refused; a
+    name the draft skipped is listed. The built campus then checks each
+    id's kind."""
     out = []
     for x in names:
+        if x not in known:
+            raise ContractError(f"island_config {what}: the project has no component {x!r}")
         if x in pypsa_ids:
             out.append(pypsa_ids[x])
         else:

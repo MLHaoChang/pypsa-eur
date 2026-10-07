@@ -418,22 +418,31 @@ def check_horizon(requirements, period_hours):
         raise ContractError(f"requirements.sustained_h ({d:g} h) is longer than the period ({period_hours:g} h)")
 
 
-def check_cross(units, requirements, where="island"):
+def check_cross(units, requirements, where="island", strict=True):
     """The checks that need every unit at once: the names a UPS or the
-    requirements point at exist and are of the right kind, and the genset
-    redundancy leaves at least one genset. Fills the default
-    ``ride_through_storage`` (every bess)."""
+    requirements point at are of the right kind, and the genset redundancy
+    leaves at least one genset. Fills the default ``ride_through_storage``
+    (every bess).
+
+    ``strict`` (a campus file, which lists every unit) also refuses a name
+    that is not a unit. The hub sidecar lists only the units it has data
+    for, so it is checked with ``strict=False``: a name it does not list is
+    left for the campus draft to check against the project."""
     kinds = {name: u["kind"] for name, u in units.items()}
+
+    def wrong(names, kind):
+        return [x for x in names if (strict or x in kinds) and kinds.get(x) != kind]
+
     for name, u in units.items():
         if u["kind"] == "ups":
-            bad = [x for x in u["it_load"] if kinds.get(x) != "load"]
+            bad = wrong(u["it_load"], "load")
             if bad:
                 raise ContractError(f"{where}.{name}.it_load names {bad}, which are not loads")
     rts = requirements["ride_through_storage"]
     if rts is None:
         requirements["ride_through_storage"] = sorted(n for n, k in kinds.items() if k == "bess")
     else:
-        bad = [x for x in rts if kinds.get(x) != "bess"]
+        bad = wrong(rts, "bess")
         if bad:
             raise ContractError(f"{where}.requirements.ride_through_storage names {bad}, which are not bess units")
     n_gen = sum(k == "genset" for k in kinds.values())
@@ -471,5 +480,5 @@ def validate_island_config(cfg) -> dict:
         body = {k: v for k, v in spec.items() if k != "kind"}
         units[str(name)] = validate_unit_island(where, spec["kind"], body, sidecar=True)
     req = validate_requirements(cfg["requirements"], "island_config.requirements")
-    check_cross(units, req, "island_config")
+    check_cross(units, req, "island_config", strict=False)
     return {"units": units, "requirements": req}

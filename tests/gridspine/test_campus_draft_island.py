@@ -142,3 +142,17 @@ def test_a_named_unit_the_expansion_did_not_build_is_listed_and_dropped_from_nam
     # every name it held is gone, so the key goes and the default (every bess) applies
     assert "ride_through_storage" not in d.spec["campus"]["island"]
     build_campus(d.spec)
+
+
+def test_a_name_the_project_lacks_is_refused_in_names_too():
+    s = sidecar()
+    s["units"]["ups_battery"]["it_load"] = ["it_load", "nowhere"]
+    with pytest.raises(ContractError, match="nowhere"):
+        drafted(s)
+
+
+def test_a_protected_load_the_sidecar_does_not_list_is_translated():
+    s = sidecar()
+    s["units"]["ups_battery"]["it_load"] = ["it_load", "offices"]
+    units = by_pypsa(drafted(s).spec["campus"]["units"])
+    assert units["ups_battery"][1]["island"]["it_load"] == [units["it_load"][0], units["offices"][0]]

@@ -152,3 +152,27 @@ def test_requirements_need_no_unit_blocks():
         build_campus(s)                      # the default N+1 leaves no genset of the one there is
     s["campus"]["island"]["genset_redundancy_n"] = t(0)
     assert build_campus(s).island["requirements"]["scenarios"] == ["seamless"]
+
+
+def test_a_ups_naming_a_non_load_is_refused_even_without_requirements():
+    """Mutation C8: the unit cross-checks run whenever there are blocks."""
+    s = island_campus()
+    del s["campus"]["island"]
+    s["campus"]["units"]["UPS1"]["island"]["it_load"] = ["PV1"]
+    with pytest.raises(ContractError, match="PV1"):
+        build_campus(s)
+
+
+def test_a_ups_starts_idle_like_a_battery():
+    """Mutation C9: its rating is not an injection; the hour's dispatch sets it."""
+    net = build_campus(island_campus()).net
+    row = net.sgen[net.sgen["name"] == "UPS1"]
+    assert row["p_mw"].tolist() == [0.0] and row["sn_mva"].tolist() == [22.0]
+
+
+def test_a_ups_naming_a_unit_the_campus_lacks_is_refused():
+    """The campus lists every unit, so the cross-check is strict there."""
+    s = island_campus()
+    s["campus"]["units"]["UPS1"]["island"]["it_load"] = ["DC_LOAD", "GHOST"]
+    with pytest.raises(ContractError, match="GHOST"):
+        build_campus(s)

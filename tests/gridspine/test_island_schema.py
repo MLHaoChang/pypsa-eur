@@ -291,11 +291,19 @@ def test_the_sidecar_validates_and_keeps_pypsa_names():
     assert cfg["requirements"]["values"]["sustained_h"] == 24.0
 
 
-def test_a_ups_must_protect_loads_that_exist():
+def test_a_ups_naming_a_listed_unit_that_is_not_a_load_is_refused():
     s = sidecar()
-    s["units"]["ups_battery"]["it_load"] = ["nowhere"]
-    with pytest.raises(ContractError, match="nowhere"):
+    s["units"]["ups_battery"]["it_load"] = ["pv"]
+    with pytest.raises(ContractError, match="pv"):
         validate_island_config(s)
+
+
+def test_the_sidecar_leaves_unlisted_names_to_the_draft():
+    """The sidecar lists only units with island data; a load it does not list
+    may still be protected. The draft checks it against the project."""
+    s = sidecar()
+    s["units"]["ups_battery"]["it_load"] = ["it_load", "unlisted_load"]
+    validate_island_config(s)
 
 
 def test_ride_through_storage_must_be_batteries_not_a_ups():
@@ -349,3 +357,20 @@ def test_every_field_names_the_increment_that_reads_it():
     for field, users in FIELD_USERS.items():
         assert users, f"{field} has no reader"
         assert set(users) <= increments, f"{field}: unknown readers {set(users) - increments}"
+
+
+def test_a_current_limit_below_one_pu_is_refused_on_its_own():
+    """Mutation M2: the k_gfm_min check must not be what catches it."""
+    spec = gfm_bess()
+    spec["i_max_pu"] = t(0.9)
+    spec["k_gfm_min"] = t(0.5)
+    with pytest.raises(ContractError, match=r"i_max_pu must be at least 1"):
+        validate_unit_island("u", "bess", spec)
+
+
+def test_a_curve_with_a_repeated_voltage_is_refused():
+    """Mutation M9: x must rise strictly, or Q(U) is two-valued."""
+    spec = pv_qu()
+    spec["qu_points"] = t([[0.9, 0.3], [1.0, 0.0], [1.0, -0.1], [1.1, -0.3]])
+    with pytest.raises(ContractError, match="increasing"):
+        validate_unit_island("u", "pv", spec)

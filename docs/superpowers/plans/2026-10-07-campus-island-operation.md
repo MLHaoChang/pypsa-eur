@@ -68,6 +68,8 @@ grid-code checks are a follow-up (see Out of scope).
 | Review findings (2026-10-07, third round) | **All** blocking, should-fix and nit findings are folded in, and a focused re-review follows before coding starts. |
 | Re-review findings (2026-10-07, fourth round) | **All** N1–N14 and nit findings are folded in. **I1 starts without a third review**; each increment's PR keeps its own gates. |
 | Storage weighting (N12) | The hub templates weight storage by 52.14 h per snapshot today. That is fixed in **its own PR before I2a** (S0, below). |
+| UPS re-rate (2026-10-07, fifth round) | The Data Center template's UPS (15 MW against about 36 MW of IT) is re-rated **in the S0 PR**. Both change the template's storage results, so the fixtures are updated and explained once. |
+| Pull requests (2026-10-07, fifth round) | **Two PRs:** the plan to master, and I1 stacked on the plan branch so its diff is code only. |
 
 ### Owner decisions (2026-10-07, second round)
 
@@ -462,8 +464,9 @@ optional earthing transformers as elements (I5b).
 **Deferred from I1, with the reason**
 - **Earthing transformers as elements:** to I5b, the only reader. I1 ships
   the winding earthing.
-- **The UPS re-rate** (15 MW → about 40 MW): an owner decision, recorded
-  below. It changes every Data Center hub result, as S0 does.
+- **The UPS re-rate** (15 MW → about 40 MW) moves to S0, by owner
+  decision (fifth round). It changes every Data Center hub result, as S0
+  does.
 
 ### S0: storage weighting in the hub templates (S; owner, before I2a)
 
@@ -478,6 +481,10 @@ energy-hub templates".
   cost behind I2c's cost of island capability.
 - **The fix:** `stores = 1.0`, keeping `objective` at 52.14. The test is
   written first, and every changed fixture is explained.
+- **The UPS re-rate lands here too** (owner, fifth round). `ups_battery`
+  is re-rated to carry the IT load it protects (about 40 MW, tagged
+  `assumed` in the island sidecar's provenance), with a test that its
+  rating covers the IT peak.
 
 ### I2a: ride-through, fuel and bridge reserve in the hub LP — step 1 (M)
 
