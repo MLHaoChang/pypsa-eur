@@ -55,7 +55,6 @@ import pandas as pd
 
 from gridspine.schema.campus import STANDARD_MVA, validate_hourly, validate_pcc
 from gridspine.schema.contracts import ContractError
-from gridspine.schema.island import CONVERTER_KINDS
 from gridspine.schema.network import MAX_NAME_LEN
 
 #: Power factor a transformer is sized at, from the MW the expansion chose.

@@ -13,7 +13,6 @@ campus file, so the hub and the campus never disagree:
 The oracle is the sidecar itself: what goes in must come out of
 ``build_campus`` under the right id, with the same values and tags.
 """
-import copy
 
 import pytest
 
