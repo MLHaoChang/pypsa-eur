@@ -137,9 +137,10 @@ def _column_weight_overrides(sw, overrides, cols) -> dict:
     ``overrides`` is cluster count × each step's ``objective`` weight
     (``time_aggregation_service``). Each column gets count × its OWN step
     weight, so a network whose columns differ keeps them apart: the Energy
-    Hub templates weight ``objective`` 8760/168 but ``stores`` 1 h, the
-    elapsed hours of the state-of-charge balance, and writing the objective
-    weight there moved 52 h of energy per hourly dispatch. Equal columns
+    Hub templates weight ``objective`` 52.14 (a year over one week) but
+    ``stores`` 1 h, the elapsed hours of the state-of-charge balance, and
+    writing the objective weight there moved 52 h of energy per hourly
+    dispatch. Equal columns
     get ``overrides`` unchanged. A step with zero objective weight has no
     count to recover; it keeps ``overrides`` as before.
     """
