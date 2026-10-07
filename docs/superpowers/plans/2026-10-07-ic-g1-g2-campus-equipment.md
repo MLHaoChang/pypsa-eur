@@ -196,3 +196,11 @@ owner-merged.
   the targeted `_canon` omission hash-stable. C1 G-6 named `CashflowLine` for `TemplateLine`. Taken, with the notes:
   parts validated as dataclasses with the attributes, a real-`UpfrontPart` test, the COD wording, a targeted `_canon`
   rule, a hash pinned to master.
+- **Code round 1 (153a8ab): PASS.** The transcription exact on all 81 entries (the reviewer's own script); 2026-10-05
+  byte-identical and its pin unchanged; the new pin equals the loader hash. End to end through `run_case`: capex with
+  contingency (1.15 × 2,115,000), the FOM line per year with escalation and the 2027-07-01 COD, the capacitor bank's
+  replacement and every extra's terminal term by hand, the counterfactual identical, the battery LCOS unchanged, tax
+  missing vs set, the may-double-count flag with an owned Transformer. The hash without extras recomputed on a
+  546f2cb archive (64e7a34307ea1af3). The four readings accepted. Taken after it: the scaled part cost in the payload,
+  the COD sentence when a typed date overrides `build_year`, `asset_finance()` pinned, `:` refused in names. Noted
+  for U2: `scale_capex` does not move an extra's FOM line (as for network FOM).
