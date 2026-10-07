@@ -920,6 +920,45 @@ includes the losses and the UPS state after the event.
   - the gate is run on a case where a unit saturates.
 - Mutations.
 
+### I4 as built (2026-10-07)
+
+**`gridspine/static/island_flow.py`**
+- `island_flow(campus, rows, online=None, settings=...)` returns an
+  `IslandFlow`: `viable`, `reason`, `df_hz`, `delta_p_ac_mw`, the units,
+  buses, transformers and cables, `sync` (Δf, ΔV at the PCC), and
+  `label = "steady-state screening"`.
+- `island_net` builds the net for inspection, and `check_gate` is the
+  per-unit gate.
+- **The Q laws are gridspine's own** (Q(U), fixed cos φ, cos φ(P)), not
+  pandapower's `DERController`. They are three short functions, tested
+  against their curves. So `QModelCosphiP`'s sin φ (spike 5) is never on the
+  path, and the planned pin test is not needed.
+- **Q sharing through x_v** goes as 1 / (x_v + the tie to the load) on the
+  unit base. The plan's "∝ 1/k_q" holds only with no tie. The test uses the
+  exact form: 2.55 and 2.055 for the two ties, both by hand.
+- **The current limit is judged at the terminal voltage**, not behind x_v.
+  The limited source then carries `i_max · S_n · V_t` at the voltage it ends
+  up at, as part of the fixed point. Building this found the bug of using
+  the auxiliary bus's 1 pu.
+- **Gensets have a P range, not a current limit.** Their overload shows in
+  `loading_pct` and the verdict. The verdict checks, in order: no reference,
+  every reference saturated, convergence, voltage band, overload.
+- `online` picks the units in the island; a unit outside it is out of
+  service. A UPS keeps its battery dispatch and never forms the island.
+
+**`control_law_flow` (I4b)**
+- The hour stays grid-connected: GFM converters sit behind x_v at their
+  dispatched P and V0, GFL units follow their law, and gensets stay in
+  power-factor control.
+- **Without island data it equals today's campus flow**, which the test
+  pins. The comparison with the MILP's free Q is left to the driver that
+  joins the two (I9).
+
+**Tests**
+- 31 tests, each worked by hand.
+- Mutation testing: 29 of 29 mutants killed. The first round left 8
+  survivors, closed by new tests and one dead line removed.
+
 ### I5: short circuit by control mode, grid-connected and islanded — step 3b (M–L)
 
 **Grid-connected** (`static/campus_sc.py`):
