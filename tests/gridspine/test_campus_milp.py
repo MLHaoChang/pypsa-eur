@@ -617,3 +617,63 @@ def test_the_battery_is_held_to_the_polygon_not_the_circle(tmp_path):
     assert not h.loc[h["choice"].str.contains("TS"), "feasible"].any()
     q = out["dispatch"].loc[out["dispatch"]["element"] == "inverters", "q_mvar"].abs()
     assert (q <= q_poly + 1e-6).all()
+
+
+# --------------------------------------------------------------------------
+# progress and cancel (plan C12): the panel runs the loop as a background job
+# --------------------------------------------------------------------------
+
+def test_progress_is_reported_once_per_iteration_in_order(tmp_path):
+    """One call per row of the history, the warm start (0) included, with
+    the iteration, the cap and the best AC-feasible cost so far."""
+    from gridspine.static.campus_milp import MAX_ITER, select_assets_milp
+    spec, table, sel, lib, req = joint_case(tmp_path)
+    calls = []
+    out = select_assets_milp(spec, table, sel, lib, req, PROFILE,
+                             progress=lambda i, n, s: calls.append((i, n, dict(s))))
+    h = out["milp_history"]
+    assert [c[0] for c in calls] == list(h["iteration"]) == [0, 1, 2]
+    assert {c[1] for c in calls} == {MAX_ITER}
+    c8_cost = out["summary"]["c8_cost"]
+    assert all(c[2]["c8_cost"] == pytest.approx(c8_cost) for c in calls)
+    # the warm start is C8's (feasible) point; iteration 1 finds T_B alone
+    assert calls[0][2]["best_cost"] == pytest.approx(c8_cost)
+    assert calls[1][2]["best_cost"] == pytest.approx(out["summary"]["milp_cost"])
+    assert out["summary"]["milp_cost"] < c8_cost
+    assert [c[2]["cost"] for c in calls] == pytest.approx(list(h["cost"]))
+    assert out["summary"]["stop"] == "converged"
+
+
+def test_a_stop_after_the_first_iteration_keeps_the_best_ac_feasible_point(tmp_path):
+    """Cancelled after iteration 1, the loop returns the best AC-feasible
+    point it has seen (T_B alone, already cheaper than C8), AC re-checked,
+    with ``stop == "cancelled"``; no further MILP is solved."""
+    from gridspine.static.campus_milp import select_assets_milp
+    spec, table, sel, lib, req = joint_case(tmp_path)
+    seen = []
+    out = select_assets_milp(spec, table, sel, lib, req, PROFILE, progress=lambda i, n, s: seen.append(i),
+                             should_stop=lambda: bool(seen) and seen[-1] >= 1)
+    assert out["summary"]["stop"] == "cancelled" and seen == [0, 1]
+    assert list(out["milp_history"]["iteration"]) == [0, 1] and out["summary"]["iterations"] == 1
+    assert out["fallback"] is None
+    inv = out["investment"].set_index("need")
+    assert inv.at["transformer TR1", "library_id"] == "T_B" and inv.at["reactive", "status"] == "not_needed"
+    assert set(out["compliance"]["status_with_measures"]) <= {"pass", "not_rated"}
+    assert out["summary"]["milp_cost"] < out["summary"]["c8_cost"]
+
+
+def test_a_stop_before_any_iteration_returns_c8s_result_flagged(tmp_path):
+    """Cancelled at once, even the warm start's finite differences are
+    skipped: C8's result comes back, flagged, with ``stop == "cancelled"``."""
+    from gridspine.static.campus_milp import select_assets_milp
+    spec, table, sel, lib, req = joint_case(tmp_path)
+    full = select_assets_milp(spec, table, sel, lib, req, PROFILE)
+    assert full["milp_history"].iloc[0]["fd_solves"] > 0
+    out = select_assets_milp(spec, table, sel, lib, req, PROFILE, should_stop=lambda: True)
+    assert out["summary"]["stop"] == "cancelled" and out["summary"]["fallback"] is True
+    assert out["fallback"] is not None and "cancelled" in out["fallback"]
+    h = out["milp_history"]
+    assert list(h["iteration"]) == [0] and h.iloc[0]["fd_solves"] == 0      # stopped between the FD solves
+    assert out["comparison"].set_index("need").at["transformer TR1", "milp_choice"] == "1 x T_A"
+    assert out["investment"].set_index("need").at["transformer TR1", "library_id"] == "T_A"
+    assert set(out["compliance"]["status_with_measures"]) <= {"pass", "not_rated"}

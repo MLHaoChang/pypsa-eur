@@ -339,7 +339,7 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
 
 def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,
                   pf: float | None = None, profile_dirs=(), pcc_switchgear: bool = True,
-                  method: str = "least_cost") -> dict:
+                  method: str = "least_cost", progress=None, should_stop=None) -> dict:
     """Least-cost electrical assets for a ranked run, AC-checked (module
     docstring). ``library`` is a path, or None for the shipped library;
     ``profile`` may be a project profile in ``profile_dirs``, as for
@@ -352,9 +352,15 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
     ``method="milp"`` chooses jointly (plan C11, ``campus_milp``), starting
     from the least-cost pick, and also writes ``campus_milp_history.csv``
     and ``campus_milp_comparison.csv``; its result adds ``milp_history``,
-    ``comparison``, ``summary`` and ``fallback``."""
+    ``comparison``, ``summary`` and ``fallback``. ``progress`` and
+    ``should_stop`` go to the MILP's loop (``select_assets_milp``): one call
+    per iteration, and a cancel that ends the loop with
+    ``summary["stop"] == "cancelled"``, its best point still written; the
+    least-cost pick takes neither."""
     if method not in METHODS:
         raise ContractError(f"unknown investment method {method!r}; allowed {list(METHODS)}")
+    if method != "milp" and (progress is not None or should_stop is not None):
+        raise ContractError("progress and should_stop belong to method='milp'; the least-cost pick takes neither")
     run_dir = Path(run_dir)
     hourly, pcc = campus_tables(run_dir)
     selection = selected_hours(run_dir)
@@ -363,8 +369,9 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
     p_ref, _ = _p_ref(build_campus(spec), pcc)
     grid_code = load_grid_code(profile, extra_dirs=profile_dirs)
     choose = select_assets_milp if method == "milp" else select_assets
+    hooks = {"progress": progress, "should_stop": should_stop} if method == "milp" else {}
     out = choose(spec, hourly, selection, lib, requirement_from(grid_code, p_ref, pf=pf), grid_code, criteria,
-                 pcc_switchgear=pcc_switchgear)
+                 pcc_switchgear=pcc_switchgear, **hooks)
     build_campus(out["spec"])                                # the invested file must build before it is written
     _write_text_atomic(run_dir / INVESTMENT_CSV, out["investment"].to_csv(index=False))
     _write_text_atomic(run_dir / COST_CSV, out["cost"].to_csv(index=False))

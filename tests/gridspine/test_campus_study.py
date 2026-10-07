@@ -313,3 +313,27 @@ def test_investing_by_milp_writes_c8s_files_and_the_milp_history(tmp_path, proje
     assert set(cmp_.columns) >= {"need", "c8_choice", "milp_choice"}
     with pytest.raises(ContractError, match="method"):
         invest_campus(run, method="greedy")
+
+
+def test_a_cancelled_milp_still_writes_its_files_and_the_least_cost_pick_takes_no_hooks(tmp_path, project):
+    """``invest_campus(method="milp")`` hands ``progress`` and ``should_stop``
+    to the loop (plan C12): cancelled at once, it writes the same files with
+    C8's result, flagged, and ``stop == "cancelled"``."""
+    import pandas as pd
+    from gridspine.drivers.campus_study import MILP_COMPARISON_CSV, MILP_HISTORY_CSV
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(project).spec, project)
+    rank_campus(run, k=1)
+    with pytest.raises(ContractError, match="milp"):
+        invest_campus(run, progress=lambda *a: None)
+    with pytest.raises(ContractError, match="milp"):
+        invest_campus(run, should_stop=lambda: False)
+    assert not (run / INVESTMENT_CSV).exists()
+    seen = []
+    out = invest_campus(run, method="milp", progress=lambda i, n, s: seen.append((i, n)), should_stop=lambda: True)
+    assert out["summary"]["stop"] == "cancelled" and out["summary"]["fallback"] is True
+    assert seen == [(0, 20)]
+    for name in (INVESTMENT_CSV, COST_CSV, INVESTED_YAML, COMPLIANCE_INVESTED_CSV, MILP_HISTORY_CSV,
+                 MILP_COMPARISON_CSV):
+        assert (run / name).is_file(), name
+    assert list(pd.read_csv(run / MILP_HISTORY_CSV)["iteration"]) == [0]
