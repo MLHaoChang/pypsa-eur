@@ -280,6 +280,21 @@ describe('MappingPlanEditor', () => {
     expect((screen.getByTestId('mapping-propose') as HTMLButtonElement).disabled).toBe(false)
   })
 
+  it('Save plan stays disabled while a report job runs, even with unsaved edits', async () => {
+    const user = userEvent.setup()
+    renderEditor()
+    await screen.findAllByTestId(/^mapping-row-/)
+    api.getGenerateStatus.mockResolvedValue(job())
+    await user.click(screen.getByTestId('mapping-propose'))
+    await screen.findByTestId('report-job-strip')
+    await user.selectOptions(within(row(9)).getByLabelText('Action for heading 9'), 'keep')
+    expect(screen.getByTestId('mapping-dirty')).toBeTruthy()
+    const save = screen.getByTestId('mapping-save') as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+    expect(save.title).toMatch(/report job is running/i)
+    expect(api.putMappingPlan).not.toHaveBeenCalled()
+  })
+
   it('toasts the template copy when a proposal is refused', async () => {
     const { ReportsError } = await vi.importActual<typeof import('../../api/reports')>('../../api/reports')
     api.proposeMappingPlan.mockRejectedValue(new ReportsError(

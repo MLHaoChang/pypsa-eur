@@ -676,6 +676,32 @@ def test_put_plan_stores_the_sanitised_plan_and_notes_what_it_dropped(
     assert client.get(f"/api/projects/{name}/reports/{rid}/template").json()["plan"] == stored
 
 
+def test_put_plan_is_409_while_a_report_job_is_running(
+        client, api_project, project_storage_dir, session_state, fixtures, fake_untagged):
+    # A mapping job stores its proposal when it finishes, so a plan saved while
+    # it runs would be overwritten: the save is refused instead.
+    from services.pypsa_service import PyPSAService
+
+    name = api_project("tpl-put-plan-inflight")
+    rid = _report(client, name)
+    tpl = _upload(client, name, "corporate.docx", fixtures["corporate_untagged.docx"])
+    bound = _bind(client, name, rid, tpl["file_id"])
+    before = store.load_meta(project_storage_dir(name), rid).mapping_plan
+    state = session_state(client)
+    with PyPSAService.get_solver_state_lock():
+        state["report_job"] = {"status": "running", "mode": "mapping", "report_id": rid,
+                               "thread": None}
+    try:
+        r = client.put(f"/api/projects/{name}/reports/{rid}/template/plan",
+                       json=_plan_for(bound["outline"]))
+    finally:
+        with PyPSAService.get_solver_state_lock():
+            state["report_job"] = None
+    assert r.status_code == 409, r.text[:200]
+    assert r.json()["detail"]["error_kind"] == "report_job_in_flight"
+    assert store.load_meta(project_storage_dir(name), rid).mapping_plan == before
+
+
 def test_put_plan_strict_refuses_a_plan_that_needs_sanitising(
         client, api_project, project_storage_dir, fixtures, fake_untagged):
     name = api_project("tpl-put-strict")

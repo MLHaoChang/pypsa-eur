@@ -5,11 +5,23 @@
  *   → evidence-only report → generate (LLM) → poll → viewer document
  *   → regenerate one section → export .docx → the blob lands (`PK…`)
  *   → with --browser, the SPA's Reports panel lists it and the viewer shows
- *     its sections (headless Chromium through Playwright).
+ *     its sections (headless Chromium through Playwright), then
+ *   → phase 4 in the browser: the tagged and the untagged (corporate)
+ *     fixtures from backend/tests/fixtures/report_templates are uploaded
+ *     through the template picker and bound; the mapping plan is reviewed in
+ *     the editor (rename one heading, drop one, place two sections, save);
+ *     each export is rendered by the docx-preview pane and its text checked
+ *     (title in place of the tag, the renamed heading, cover and footer);
+ *   → phase 5 in the browser: the export is edited with python-docx
+ *     (`smoke_reports_edit_docx.py`: a new paragraph in one section, a Word
+ *     comment in another), uploaded as the edited copy, and the merged
+ *     version marks the section "edited by you", lists the comment as a
+ *     pending instruction, and the version diff view shows the one change.
  *
  * Plan: docs/superpowers/plans/2026-09-28-llm-report-generation-increment-1.md
- * (phase-3 row: `smoke-reports.mjs`). PASS/FAIL lines like the backend QA
- * drivers (`backend/tests/qa_reports_phase1.py`); exit 1 on any FAIL.
+ * (phase-3 row: `smoke-reports.mjs`; phases 4 and 5 browser legs). PASS/FAIL
+ * lines like the backend QA drivers (`backend/tests/qa_reports_phase1.py`);
+ * exit 1 on any FAIL.
  *
  * Run it against a backend that is already up:
  *
@@ -32,7 +44,9 @@
  *   --network FILE.nc   the network to load (or SMOKE_NETWORK_NC). Without
  *                       one, the script builds the certifiable weak hub from
  *                       backend/tests/eh_stage_fixtures.py with SMOKE_PYTHON
- *                       (default `python`, which must import pypsa).
+ *                       (default `python`, which must import pypsa; with
+ *                       --browser it also builds the template fixtures and
+ *                       the edited copy, so it must import python-docx too).
  *   --project NAME      project name (default smoke_reports)
  *   --keep              do not delete the project's reports at the end
  *   SMOKE_EMAIL / SMOKE_PASSWORD   the sign-in when /api/health says
@@ -287,8 +301,55 @@ async function loadPlaywright() {
   }
 }
 
-async function browserCheck(reportId) {
-  section('5 --browser: the SPA lists the report and the viewer shows its sections')
+/** The report-template fixtures, built by the backend's own builder (no binary in git). */
+function templateFixtures() {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'smoke-templates-'))
+  const build = path.join(BACKEND_DIR, 'tests', 'fixtures', 'report_templates', '_build.py')
+  execFileSync(PYTHON, [build, out], { stdio: ['ignore', 'ignore', 'inherit'] })
+  return { tagged: path.join(out, 'tagged_minimal.docx'), corporate: path.join(out, 'corporate_untagged.docx') }
+}
+
+/** An exported report edited with python-docx (`smoke_reports_edit_docx.py`): a new paragraph + a comment. */
+function editedCopy(src) {
+  const dst = src.replace(/\.docx$/, '-edited.docx')
+  const helper = path.join(HERE, 'smoke_reports_edit_docx.py')
+  const out = execFileSync(PYTHON, [helper, src, dst], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] })
+  return { path: dst, ...JSON.parse(out.trim().split('\n').pop()) }
+}
+
+const RENAMED_HEADING = '4 Residual failure modes (renamed in the smoke)'
+const T = (id) => `[data-testid="${id}"]`
+
+/** Click `report-export` (or another export trigger) and wait for docx-preview to have rendered the new file. */
+async function exportAndPreview(page, trigger) {
+  // The blob wait is armed before the click: when the preview pane is already
+  // open (a second export), it fetches the new blob as soon as the export lands.
+  let fileId = null
+  const blobWait = page.waitForResponse(r => fileId !== null && r.url().includes(`/uploads/${fileId}/blob`), { timeout: 60_000 })
+  blobWait.catch(() => {})
+  const [exportResp] = await Promise.all([
+    page.waitForResponse(r => r.request().method() === 'POST' && /\/reports\/[0-9a-f]{16}\/export$/.test(new URL(r.url()).pathname), { timeout: 60_000 }),
+    page.locator(trigger).click(),
+  ])
+  if (exportResp.status() !== 200) return { ok: false, why: `export answered ${exportResp.status()}` }
+  const upload = await exportResp.json()
+  fileId = upload.file_id
+  await page.locator(T('export-preview-panel')).waitFor({ timeout: 30_000 })
+  const toggle = page.locator(T('export-preview-toggle'))
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click()
+  await blobWait
+  const pane = page.locator(T('docx-preview'))
+  try {
+    await page.locator(`${T('docx-preview')}[data-state="ready"]`).waitFor({ timeout: 60_000 })
+  } catch {
+    const err = await page.locator(T('docx-preview-error')).textContent().catch(() => null)
+    return { ok: false, why: err || `preview state ${await pane.getAttribute('data-state')}`, upload }
+  }
+  const text = await page.locator(T('docx-preview-container')).innerText()
+  return { ok: true, upload, text }
+}
+
+async function withBrowser(fn) {
   let pw
   try { pw = await loadPlaywright() } catch (e) { step('Playwright loads', false, e.message); return }
   step('Playwright loads', true)
@@ -314,33 +375,183 @@ async function browserCheck(reportId) {
     const errors = []
     page.on('pageerror', e => errors.push(String(e)))
     await page.goto(`/app?project=${encodeURIComponent(PROJECT)}`, { waitUntil: 'domcontentloaded' })
-    const reportsItem = page.locator('[title^="Study reports"]').first()
-    await reportsItem.waitFor({ timeout: 30_000 })
-    step('the sidebar has the Reports row', true)
-    await reportsItem.click()
-    const rows = page.locator('[data-testid="report-row"]')
-    await rows.first().waitFor({ timeout: 30_000 })
-    const n = await rows.count()
-    step('the panel lists the report', n >= 1, `rows=${n}`)
-    const gen = page.locator('[data-testid="reports-generate"]')
-    step('the Generate report… button is there', (await gen.count()) === 1)
-    // The newest report is listed first; with --keep off it is the one this
-    // run made (the id is what the API steps above asserted on).
-    note(`opening the first row (report ${reportId})`)
-    await rows.first().locator('[data-testid="report-open"]').click()
-    const sections = page.locator('[data-testid="report-section"]')
-    await sections.first().waitFor({ timeout: 30_000 })
-    const ns = await sections.count()
-    step('the viewer shows the sections', ns >= 1, `sections=${ns}`)
-    const marks = await page.locator('[data-testid="report-section"] mark').count()
-    note(`flagged numbers in the viewer: ${marks}`)
-    step('the per-section Regenerate… control is offered', (await page.locator('[data-testid="section-regenerate"]').count()) >= 1)
-    step('no uncaught page errors', errors.length === 0, errors.join(' | ').slice(0, 300))
+    await fn(page, errors)
   } catch (e) {
-    step('browser journey', false, String(e).slice(0, 300))
+    step('browser journey', false, String(e && e.stack || e).slice(0, 400))
   } finally {
     await browser.close()
   }
+}
+
+async function browserViewer(page, errors, title) {
+  section('5 --browser: the SPA lists the report and the viewer shows its sections')
+  const reportsItem = page.locator('[title^="Study reports"]').first()
+  await reportsItem.waitFor({ timeout: 30_000 })
+  step('the sidebar has the Reports row', true)
+  await reportsItem.click()
+  const rows = page.locator(T('report-row'))
+  await rows.first().waitFor({ timeout: 30_000 })
+  const n = await rows.count()
+  step('the panel lists the report', n >= 1, `rows=${n}`)
+  const gen = page.locator(T('reports-generate'))
+  step('the Generate report… button is there', (await gen.count()) === 1)
+  note(`opening the row titled ${JSON.stringify(title)}`)
+  await rows.filter({ hasText: title }).first().locator(T('report-open')).click()
+  const sections = page.locator(T('report-section'))
+  await sections.first().waitFor({ timeout: 30_000 })
+  const ns = await sections.count()
+  step('the viewer shows the sections', ns >= 1, `sections=${ns}`)
+  const marks = await page.locator(`${T('report-section')} mark`).count()
+  note(`flagged numbers in the viewer: ${marks}`)
+  step('the per-section Regenerate… control is offered', (await page.locator(T('section-regenerate')).count()) >= 1)
+  step('no uncaught page errors', errors.length === 0, errors.join(' | ').slice(0, 300))
+}
+
+/** Phase 4 in the browser: upload + bind both fixtures, review the plan, export, docx-preview. */
+async function browserTemplates(page, reportId, title, generated) {
+  section('6 --browser: templates — upload, bind, mapping plan, export, docx-preview')
+  const fixtures = templateFixtures()
+  step('the template fixtures were built', fs.existsSync(fixtures.tagged) && fs.existsSync(fixtures.corporate), path.dirname(fixtures.tagged))
+
+  // tagged
+  await page.locator(T('template-file-input')).setInputFiles(fixtures.tagged)
+  await page.locator(`${T('template-mode')}:has-text("tagged")`).waitFor({ timeout: 60_000 })
+  step('the tagged fixture uploads, binds, and the outline summary says tagged', true)
+  const label1 = await page.locator(T('report-export-template')).innerText()
+  step('the export button names the bound template', label1.includes('tagged_minimal.docx'), label1.trim())
+  const bind1 = await api(R(`/${reportId}/template`))
+  step('GET …/template agrees (mode tagged)', bind1.res.status === 200 && bind1.data.mode === 'tagged', short(bind1.data && bind1.data.mode))
+  const p1 = await exportAndPreview(page, T('report-export'))
+  if (step('Export .docx renders in the docx-preview pane (tagged)', p1.ok, p1.why || p1.upload.filename)) {
+    // The bind wrote a new version; the viewer must export THAT one (the
+    // first run of this leg exported the pre-binding v1 with the built-in
+    // writer under a button that named the template — findings §7).
+    const latest = (await api(R(`/${reportId}`))).data.version
+    step('the export is of the latest version (the one bound to the template)', p1.upload.filename.endsWith(`_v${latest}.docx`), `${p1.upload.filename} latest=v${latest}`)
+    step('the preview shows the report title where {{ meta.title }} was', p1.text.includes(title) && !p1.text.includes('meta.title'))
+    step('the preview shows the looped FMEA table header', p1.text.includes('Loop') && p1.text.includes('Rank'))
+    step('no tag is left in the preview', !p1.text.includes('{{') && !p1.text.includes('{%'))
+  }
+
+  // untagged (corporate)
+  await page.locator(T('template-file-input')).setInputFiles(fixtures.corporate)
+  await page.locator(`${T('template-mode')}:has-text("untagged")`).waitFor({ timeout: 60_000 })
+  step('the corporate fixture uploads, binds, and the outline summary says untagged', true)
+  const table = page.locator(T('mapping-table'))
+  await table.waitFor({ timeout: 30_000 })
+  const rowLoc = page.locator('[data-testid^="mapping-row-"]')
+  const headings = []
+  for (let i = 0; i < await rowLoc.count(); i++) {
+    const r = rowLoc.nth(i)
+    headings.push({ index: Number(await r.getAttribute('data-heading-index')), text: (await r.locator('td').nth(2).innerText()).trim() })
+  }
+  step('the mapping-plan editor lists the template headings', headings.length >= 5, headings.map(h => `${h.index}:${h.text}`).join(' | ').slice(0, 200))
+  const h1 = headings.find(h => h.text.startsWith('1 '))
+  const h4 = headings.find(h => h.text.startsWith('4 '))
+  const h5 = headings.find(h => h.text.startsWith('5 '))
+  if (!step('headings 1, 4 and 5 of the fixture are there', Boolean(h1 && h4 && h5))) return
+
+  if (generated) {
+    // With a usable LLM profile the proposal runs for real; the manual review below then edits it.
+    // Wait for the propose POST to start the job, then for the job record to be
+    // the mapping job: polling straight after the click reads the previous
+    // (regenerate) record, already done.
+    await Promise.all([
+      page.waitForResponse(r => r.request().method() === 'POST' && /\/template\/plan$/.test(new URL(r.url()).pathname), { timeout: 60_000 }),
+      page.locator(T('mapping-propose')).click(),
+    ])
+    let rec = { status: 'timeout' }
+    for (const t0 = Date.now(); Date.now() - t0 < 600_000;) {
+      rec = await poll(R('/generate/status'), { timeoutMs: 600_000, everyMs: 1500 })
+      if (rec.mode === 'mapping' || !String(rec.status).match(/^(done|error|failed)$/)) break
+      await new Promise(r => setTimeout(r, 1500))
+    }
+    step('Propose with the assistant: the mapping job reaches done', rec.status === 'done' && rec.mode === 'mapping', `status=${rec.status} mode=${rec.mode} error=${short(rec.error)}`)
+    await page.locator(T('mapping-dirty')).waitFor({ state: 'detached', timeout: 30_000 }).catch(() => {})
+  } else {
+    note('Propose with the assistant needs an LLM profile — reviewed by hand instead')
+  }
+
+  await page.getByLabel(`Sections for heading ${h1.index}`).selectOption(['executive_summary'])
+  await page.getByLabel(`Action for heading ${h4.index}`).selectOption('rename')
+  await page.getByLabel(`New text for heading ${h4.index}`).fill(RENAMED_HEADING)
+  await page.getByLabel(`Sections for heading ${h4.index}`).selectOption(['fmea_top'])
+  await page.getByLabel(`Action for heading ${h5.index}`).selectOption('drop')
+  step('editing the plan marks it unsaved', (await page.locator(T('mapping-dirty')).count()) === 1)
+  await page.locator(T('mapping-save')).click()
+  await page.locator(T('mapping-dirty')).waitFor({ state: 'detached', timeout: 30_000 })
+  step('Save plan stores it (the unsaved tag goes)', true)
+  const stored = await api(R(`/${reportId}/template`))
+  const entries = (stored.data && stored.data.plan && stored.data.plan.entries) || []
+  step('GET …/template carries the reviewed plan (heading 4 renamed, 5 dropped)',
+    entries.some(e => e.heading_index === h4.index && e.action === 'rename' && e.new_text === RENAMED_HEADING && e.section_ids.includes('fmea_top'))
+    && entries.some(e => e.heading_index === h5.index && e.action === 'drop'),
+    entries.map(e => `${e.heading_index}:${e.action}`).join(' '))
+
+  const p2 = await exportAndPreview(page, T('mapping-export'))
+  if (step('Export with this template renders in the docx-preview pane (untagged)', p2.ok, p2.why || p2.upload.filename)) {
+    step('the preview shows the renamed heading', p2.text.includes(RENAMED_HEADING))
+    step('the dropped "Lorem ipsum" heading is gone', !p2.text.includes('Lorem ipsum'))
+    step('the cover text is intact', p2.text.includes('Energy Hub Reference Design'))
+    step('the "Confidential" footer is intact', p2.text.includes('Confidential'))
+  }
+
+  // back to the built-in writer for the round trip
+  await page.getByLabel('Template', { exact: true }).selectOption('')
+  await page.locator(T('template-outline')).waitFor({ state: 'detached', timeout: 30_000 })
+  const unbound = await api(R(`/${reportId}/template`))
+  step('"Built-in default" unbinds (outline gone, GET …/template null)', unbound.res.status === 200 && unbound.data.template_file_id === null)
+}
+
+/** Phase 5 in the browser: an edited export merges as the next version; markers, pending instruction, diff. */
+async function browserRoundTrip(page, reportId) {
+  section('7 --browser: round trip — edited copy → merge → markers → version diff')
+  const exp = await api(R(`/${reportId}/export`), { method: 'POST', json: { filename: 'smoke-roundtrip-base' } })
+  if (!step('the API export of the open report answers', exp.res.status === 200 && exp.data.file_id, short(exp.data))) return
+  const blob = await api(`/api/projects/${encodeURIComponent(PROJECT)}/uploads/${exp.data.file_id}/blob`, { raw: true })
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'smoke-roundtrip-'))
+  const src = path.join(dir, 'export.docx')
+  fs.writeFileSync(src, blob.bytes)
+  let info
+  try { info = editedCopy(src) } catch (e) { step('python-docx edits the export', false, String(e).slice(0, 300)); return }
+  step('python-docx edited the export: a paragraph and a comment', Boolean(info.edited && info.commented), `edited=${info.edited} commented=${info.commented}`)
+  const before = await api(R(`/${reportId}`))
+  const baseVersion = before.data.version
+
+  await page.locator(T('roundtrip-file-input')).setInputFiles(info.path)
+  const result = page.locator(T('roundtrip-result'))
+  await result.waitFor({ timeout: 90_000 })
+  const resultText = await result.innerText()
+  step('the edited copy uploads and merges (result panel)', /Merged as v\d+/.test(resultText), resultText.split('\n')[0].slice(0, 160))
+  const changedRows = page.locator(T('roundtrip-changed-row'))
+  step('the merge lists the edited section as edited by you', (await changedRows.filter({ hasText: info.edited_heading }).count()) === 1, `rows=${await changedRows.count()}`)
+  const comments = page.locator(T('roundtrip-comment'))
+  step('the comment is listed as a pending instruction', (await comments.filter({ hasText: info.comment }).count()) === 1, `comments=${await comments.count()}`)
+
+  const editedCard = page.locator(`${T('report-section')}[data-section-id="${info.edited}"]`)
+  await editedCard.locator(T('section-edited')).waitFor({ timeout: 30_000 })
+  step('the viewer marks the section as edited by you', true, info.edited)
+  const commentedCard = page.locator(`${T('report-section')}[data-section-id="${info.commented}"]`)
+  const pending = commentedCard.locator(T('section-pending'))
+  await pending.waitFor({ timeout: 30_000 })
+  step('the commented section shows the pending instruction', (await pending.innerText()).includes(info.comment), info.commented)
+
+  const after = await api(R(`/${reportId}`))
+  const byId = Object.fromEntries((after.data.sections || []).map(s => [s.section_id, s]))
+  step('the merged version is base + 1', after.data.version === baseVersion + 1, `v${baseVersion} → v${after.data.version}`)
+  step('the API agrees: source user_edit + pending_instruction',
+    byId[info.edited] && byId[info.edited].source === 'user_edit' && byId[info.commented] && byId[info.commented].pending_instruction === info.comment,
+    `source=${byId[info.edited] && byId[info.edited].source} pending=${byId[info.commented] && byId[info.commented].pending_instruction}`)
+
+  await page.locator(T('report-compare')).click()
+  await page.locator(T('version-diff-table')).waitFor({ timeout: 30_000 })
+  step('Compare… opens the version diff view', true)
+  const summary = await page.locator(T('version-diff-summary')).innerText()
+  step('the diff summary counts one changed section', summary.startsWith('1 changed'), summary)
+  const editedRow = page.locator(`[data-testid="diff-row-${info.edited}"]`)
+  step('the edited section\'s row is marked changed', (await editedRow.getAttribute('data-change')) === 'changed')
+  const commentedRow = page.locator(`[data-testid="diff-row-${info.commented}"]`)
+  step('the commented section\'s row carries the pending instruction', (await commentedRow.locator(T('diff-pending')).innerText()).includes(info.comment))
 }
 
 // ── main ────────────────────────────────────────────────────────────────────
@@ -354,9 +565,18 @@ try {
       const gen = await generate()
       genPath = gen.path
       await listFetchExport(gen.reportId || evidence.report_id)
-      if (BROWSER) await browserCheck(gen.reportId || evidence.report_id)
+      if (BROWSER) {
+        const reportId = gen.reportId || evidence.report_id
+        const title = gen.reportId ? 'Smoke generated report' : 'Smoke evidence report'
+        await withBrowser(async (page, errors) => {
+          await browserViewer(page, errors, title)
+          await browserTemplates(page, reportId, title, gen.path === 'generated')
+          await browserRoundTrip(page, reportId)
+          step('no uncaught page errors across the browser legs', errors.length === 0, errors.join(' | ').slice(0, 300))
+        })
+      }
       if (!KEEP) {
-        section('6 cleanup')
+        section('8 cleanup')
         for (const id of [evidence.report_id, gen.reportId].filter(Boolean)) {
           const del = await api(R(`/${id}`), { method: 'DELETE' })
           step(`DELETE …/reports/${id}`, del.res.status === 200, short(del.data))
