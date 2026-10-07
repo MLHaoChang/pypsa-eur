@@ -13,6 +13,7 @@ from __future__ import annotations
 from services.redaction import (  # moved 2026-08-13 (provider seam, Task 1)
     redact_secrets_in_str as _redact_secrets_in_str,
 )
+from pathlib import Path
 from typing import Any
 from harness import fence as harness_fence
 from harness.fence import _UNTRUSTED_CLOSE, _UNTRUSTED_OPEN
@@ -172,7 +173,8 @@ def _error_result_content(detail: Any, exc: BaseException, error_kind: str) -> s
     message embeds an address would still pass it through. No code path
     currently does that — `project_locks` puts the address in the dict, never in
     the message — so the structural fix covers the real path, and a general
-    address scrub here would mangle more than it protects.
+    address scrub here would mangle more than it protects. Storage PATHS in a
+    bare exception's text are handled: see `_redact_storage_roots`.
     """
     free_text: str | None = None
     if isinstance(detail, dict):
@@ -188,8 +190,88 @@ def _error_result_content(detail: Any, exc: BaseException, error_kind: str) -> s
         return error_kind
 
     free_text = _redact_secrets_in_str(free_text[:_ERROR_DETAIL_CAP])
+    free_text = _redact_storage_roots(free_text)
     free_text = harness_fence._neutralise_untrusted_delimiters(free_text)
     return f"{error_kind}\n{_UNTRUSTED_OPEN}\n{free_text}\n{_UNTRUSTED_CLOSE}"
+
+
+_STORAGE_PLACEHOLDER = "<project storage>"
+
+
+def _redact_storage_roots(text: str) -> str:
+    """Replace the server's project storage roots in model-facing error text.
+
+    A bare exception — a `FileNotFoundError` from a missing sidecar, an
+    `OSError` from a full disk — carries the absolute path it failed on, and
+    under the org-scoped layout that path is `<root>/<org uuid>/<project
+    uuid>/…`: the server's directory layout and two tenant identifiers, sent to
+    a third-party provider and replayed on every later turn. The model needs
+    the FILE NAME to explain the error, not where the server keeps it, so only
+    the root is replaced and the rest of the message survives. Targeted rather
+    than a general path scrub, which would mangle legitimate text (an uploaded
+    file's own name, a URL).
+    """
+    try:
+        from settings import get_settings
+
+        settings = get_settings()
+        roots = {
+            str(p) for root in (settings.projects_root, settings.flat_projects_root)
+            for p in (root, Path(root).resolve())
+        }
+    except Exception:  # noqa: BLE001 — never fail an error path on its scrub
+        return text
+    # Longest first, so a root nested inside another is not half-replaced.
+    for root in sorted((r for r in roots if len(r) > 1), key=len, reverse=True):
+        text = text.replace(root, _STORAGE_PLACEHOLDER)
+    return text
+
+
+# Result members that identify a PERSON. Scrubbed from every model-facing
+# tool result — see `_scrub_identities`.
+_IDENTIFYING_RESULT_KEYS: frozenset[str] = frozenset({"holder_email"})
+
+
+def _scrub_identities(value: Any) -> Any:
+    """Drop person-identifying members from a tool result, recursively.
+
+    `docs/superpowers/findings/2026-08-27-lock-holder-email-reaches-the-model.md`
+    was closed on the `is_error` path only, by `_error_result_content`. The
+    SUCCESS path had no filter at all, and two routes carry the same member on
+    success: `activate_project` returns `{"activated", "evicted", "lock"}` and
+    `load_project` returns `{**summary, "lock"}`, where
+    `project_locks.serialize_lock` puts the HOLDER'S EMAIL in that member. So a
+    non-holder asking chat to open a project someone else is editing sent a
+    colleague's address to the third-party provider, kept it in
+    `session.messages` to be replayed on every later turn, and let the model
+    paraphrase it into a reply persisted to `chat.jsonl`.
+
+    The sibling `yours` is KEPT: whether the project is held against this
+    caller is something the model should know, and it identifies nobody. Only
+    the name goes.
+
+    Recursive, because the member travels inside `detail` and inside lists on
+    some payloads — a top-level key check would miss exactly the shapes that
+    matter.
+
+    Deliberately NOT part of `_redact_secrets_in_str`. That redactor is
+    secrets-only by design and says so: bare addresses are intentionally left
+    alone there because the pattern over-redacts legitimate project and
+    component names. This drops a known key, not a guessed pattern.
+
+    The browser's own SSE frames are unaffected — the frontend reads the lock
+    holder from `tool_error`/`project_locked`, which is the product's intent
+    and stays within the user's own organisation.
+    """
+    if isinstance(value, dict):
+        return {
+            k: _scrub_identities(v)
+            for k, v in value.items()
+            if k not in _IDENTIFYING_RESULT_KEYS
+        }
+    if isinstance(value, (list, tuple)):
+        return [_scrub_identities(v) for v in value]
+    return value
 
 
 def _result_to_anthropic_content(result: Any) -> Any:
@@ -227,6 +309,9 @@ def _result_to_anthropic_content(result: Any) -> Any:
     is_error sites pass a typed constant and need no fence, and the fourth
     passes exception text, which does.
     """
+    # Person-identifying members go before anything else touches the payload,
+    # so every branch below (and any future one) is covered by one call.
+    result = _scrub_identities(result)
     if isinstance(result, str):
         # Capped like the json branch. Previously only the `else` applied
         # `_RESULT_CONTENT_CAP`, leaving a second uncapped entry into the

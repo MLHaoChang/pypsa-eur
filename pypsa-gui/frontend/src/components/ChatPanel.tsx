@@ -2702,6 +2702,21 @@ export default function ChatPanel() {
       },
       handleFrame,
       (err) => {
+        // A session that belongs to someone else is recoverable, and retrying
+        // the same id never will be: the server refuses it every time. Drop it
+        // and start a fresh conversation so the next send mints one owned by
+        // this user. Reachable without anyone doing anything wrong — the id
+        // comes from the project's shared transcript, so a co-member's GET
+        // /history can mint it under their name first.
+        const kind = (err as Error & { kind?: string })?.kind
+        if (kind === 'session_not_yours') {
+          startNewChat()
+          toast.error(
+            'chat: that conversation belongs to another user — started a new one',
+          )
+          setStreaming(false)
+          return
+        }
         toast.error(`chat: connection lost — ${(err as Error).message ?? err}`)
         setStreaming(false)
       },
@@ -2711,7 +2726,7 @@ export default function ChatPanel() {
       setAttachedFileIds([])
     }
   }, [appendMessage, sessionId, profileId, handleFrame, setStreaming, setError,
-      setStreamCleanup, autoUncheckAfterSend, setAttachedFileIds])
+      setStreamCleanup, autoUncheckAfterSend, setAttachedFileIds, startNewChat])
 
   const onSend = useCallback(() => {
     const text = input.trim()

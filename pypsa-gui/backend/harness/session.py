@@ -147,6 +147,13 @@ class ChatSession:
     # cleared in run_turn's try/finally so a concurrent second run_turn on the
     # same session_id (two tabs) is rejected with turn_already_in_flight.
     _turn_in_flight: bool = field(default=False)
+    # CH-3 — the undo stacks this turn has already pushed its one snapshot
+    # onto (each project's `_UndoState` object; see `_snapshot_for_turn_undo`).
+    # A list of objects compared by identity, not a set of names: the state
+    # object is what `reset_network`/`set_network` carry across an in-place
+    # swap (undo, clustering), so it identifies "this project's stack" where a
+    # name would not. Emptied at the start and end of every turn.
+    _undo_snapshotted: list = field(default_factory=list)
     # W-3 (ADR-0001) — whether the provider has EVER reported usage for this
     # session. `stream_options.include_usage` is a request, not a guarantee:
     # an OpenAI-compatible endpoint that omits the usage chunk leaves
@@ -386,6 +393,40 @@ _SESSIONS_LOCK = threading.Lock()
 def get_session(session_id: str) -> ChatSession | None:
     with _SESSIONS_LOCK:
         return _SESSIONS.get(session_id)
+
+
+# CH-6 — the transcript key naming the user who ran a turn (the session owner).
+TURN_AUTHOR_KEY = "owner_user_id"
+
+
+def turn_is_callers(rec: dict[str, Any], user_id: str | None) -> bool:
+    """
+    Did `user_id` run this transcript turn?
+
+    `chat.jsonl` is per PROJECT and shared by everyone who works on it, but a
+    chat session is per USER. GET /history used to hand back the session of the
+    LAST turn in the file, whoever ran it, and mint it owned by whoever asked
+    first — so a co-member could end up owning another user's thread, which the
+    `/stream` ownership check then refused to its real author. Picking the
+    caller's own last turn removes the conflict at the source.
+
+    A record without an author predates this key, and keeps the behaviour it
+    always had: it counts as the caller's. Treating it as nobody's in server
+    mode was the stricter option and the worse one — every server user would
+    lose session continuity (and the model its prior context) on the first
+    reload after upgrading — while what it would prevent is bounded already:
+    `/history` will not hand back or rebuild a live session with a DIFFERENT
+    known owner, and `/stream` refuses one with `session_not_yours`, which the
+    panel recovers from by starting a new chat. Legacy records age out with
+    each user's next turn. With no caller identity at all there is nothing to
+    distinguish, which is also the pre-existing behaviour.
+    """
+    if user_id is None:
+        return True
+    author = rec.get(TURN_AUTHOR_KEY)
+    if author is None:
+        return True
+    return str(author) == str(user_id)
 
 
 def session_owner_allows(sess: "ChatSession", user_id: str | None) -> bool:

@@ -51,6 +51,11 @@ signature (`tests/test_engine_facade_frozen.py`): an accidental change fails lou
   `finance.engine.solve_ppa`, `finance.engine.payback`, `finance.metrics.irr` (returns `(value, flags)`,
   not a bare number) and `finance.metrics.npv`, `finance.report.assemble_finance_sections`,
   `finance.export_xlsx.build_workbook`, `finance.packs.base.load_pack`.
+- **Finance, added by S0b** (`2026-10-06-ic-s0b-replacements-terminal.md` S7): `AssetFinance.parts` and
+  `finance.case.AssetPart`, `finance.case.effective_parts`, `finance.case.scale_capex` (the one way to move
+  capex: the parts, `overnight_cost` and the fixed replacement entries together),
+  `finance.replacements.schedule` (with `Replacement`), `FinanceInputs.replacement_rule`
+  (`fixed | part_lifetimes`) and the `TerminalValueRule` method `remaining_life_annuity`.
 - **Library:** `library.items.resolve` / `put_item`, `library.series_store.put_series`, the defaults-pack
   loader and the flat export series helper (new, items a and e).
 - **Field names** of `CommercialConfig` and `FinanceInputs` that the guided ledger compiles to.
