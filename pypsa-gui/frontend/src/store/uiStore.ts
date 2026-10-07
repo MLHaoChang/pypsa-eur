@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { effectiveLockState, type LockState, type ReadOnlyReason } from '../utils/lockState'
+import { readActiveSite } from '../site3d/activeSite'
+import type { SizingMode } from '../site3d/sizing'
 // Floor for the docked comparison rail width — keeps both the rail and the
 // live Results pane usable when the splitter is dragged to an extreme. Single
 // definition, shared with the rail's own width arithmetic: this store and
@@ -29,6 +31,11 @@ export interface CreationRequest {
   // canvas — dropping onto nothing must stay exactly as permissive as it is
   // today, so this is optional and never validated here.
   dropBusName?: string
+  // A drop onto the 3D site view (design D16): which site, and where on its
+  // ground (metres east/north of the site origin). CreationForm restricts
+  // the terminal bus to the site's members, prefills the primary one, and
+  // writes the placement at this point on success.
+  dropSite?: { siteId: string; ground: { x: number; y: number } }
 }
 // pendingNodePosition is a one-shot handoff used by the drag-drop flow.
 // CreationForm sets it after a successful create; TopologyCanvas reads it
@@ -47,11 +54,13 @@ export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 's
 // `'projects'` = focused project switcher (⌘P).
 export type PaletteMode = 'all' | 'projects' | null
 export type SidebarMode = 'expanded' | 'icon' | 'hidden'
-// Three canvas backgrounds:
+// Four canvas views:
 //   blank      — current React Flow grid (full edit, drag-to-move)
 //   satellite  — Leaflet + Esri World_Imagery tiles
 //   hybrid     — satellite with place / boundary labels overlay
-export type CanvasView = 'blank' | 'satellite' | 'hybrid'
+//   site       — 3D site view of one bus (pages/SiteCanvas.tsx; spike, see
+//                docs/superpowers/assessments/2026-09-28-3d-site-view-feasibility.md)
+export type CanvasView = 'blank' | 'satellite' | 'hybrid' | 'site'
 export type Theme = 'light' | 'dark'
 export type Density = 'comfortable' | 'compact'
 // Guided hides the navigation chrome the EH hub-design flow does not need;
@@ -215,7 +224,7 @@ function storedOpenTabs(): OpenTab[] {
 function storedCanvasView(): CanvasView {
   try {
     const v = localStorage.getItem(CANVAS_VIEW_KEY)
-    if (v === 'blank' || v === 'satellite' || v === 'hybrid') return v
+    if (v === 'blank' || v === 'satellite' || v === 'hybrid' || v === 'site') return v
   } catch { /* noop */ }
   return 'blank'
 }
@@ -528,6 +537,18 @@ interface UIStore {
   setPendingNodePosition: (p: PendingNodePosition | null) => void
   setCanvasMode: (mode: CanvasMode) => void
   setCanvasView: (view: CanvasView) => void
+  // 3D site view (WP2): drawing a boundary on the map, and the active site.
+  siteDrawMode: 'idle' | 'drawing'
+  siteDraft: Array<[number, number]>
+  setSiteDrawMode: (m: 'idle' | 'drawing') => void
+  setSiteDraft: (d: Array<[number, number]>) => void
+  activeSiteId: string | null
+  setActiveSiteId: (id: string | null) => void
+  // 3D site view (Phase 2 E6): draw extendable assets at their installed
+  // size or at the optimum. Takes effect only while dispatch is fresh
+  // (site3d/sizing.ts effectiveSizing). A view setting, not a mutation.
+  siteSizing: SizingMode
+  setSiteSizing: (m: SizingMode) => void
   setSlidePanel: (p: SlidePanel | null) => void
   setAssistantDockOpen: (open: boolean) => void
   toggleAssistantDock: () => void
@@ -604,6 +625,10 @@ export const useUIStore = create<UIStore>((set) => ({
   pendingNodePosition: null,
   canvasMode: 'select',
   canvasView: storedCanvasView(),
+  siteDrawMode: 'idle',
+  siteDraft: [],
+  activeSiteId: readActiveSite(storedCurrentProject()),
+  siteSizing: 'installed',
   activeSlidePanel: null,
   assistantDockOpen: storedAssistantDockOpen(),
   assistantDockWidth: storedAssistantDockWidth(),
@@ -755,6 +780,10 @@ export const useUIStore = create<UIStore>((set) => ({
     try { localStorage.setItem(CANVAS_VIEW_KEY, view) } catch { /* noop */ }
     set({ canvasView: view })
   },
+  setSiteDrawMode: (m) => set({ siteDrawMode: m }),
+  setSiteDraft: (d) => set({ siteDraft: d }),
+  setActiveSiteId: (id) => set({ activeSiteId: id }),
+  setSiteSizing: (m) => set({ siteSizing: m }),
   setSlidePanel: (p) => set({ activeSlidePanel: p }),
   setAssistantDockOpen: (open) => {
     persistAssistantDockOpen(open)
@@ -877,6 +906,14 @@ export const useUIStore = create<UIStore>((set) => ({
         // an instant switch lands on the source the user last picked there.
         // Defaults to 'lopf' for a never-visited / fresh project.
         resultSource: name ? (s.resultSourceByProject[name] ?? 'lopf') : 'lopf',
+        // The 3D site view is per project too: restore the new project's
+        // remembered site and drop any boundary being drawn for the old
+        // one (a draft panel left open would otherwise create A's site in B).
+        activeSiteId: readActiveSite(name),
+        siteDrawMode: 'idle',
+        siteDraft: [],
+        // Optimised sizes are opted into per project, not carried over.
+        siteSizing: 'installed',
       }
       if (name) patch.lastProjectId = preferredId ?? name
       if (name && !s.openTabs.some(t => t.name === name)) {

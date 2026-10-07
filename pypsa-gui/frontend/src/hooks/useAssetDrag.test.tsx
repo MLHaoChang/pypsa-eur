@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render } from '@testing-library/react'
 import { useAssetDrag, resolveDrop } from './useAssetDrag'
 import { useUIStore } from '../store/uiStore'
+import { registerSiteDropTarget, unregisterSiteDropTarget, siteDropTarget, type SiteDropTarget } from '../site3d/dropRegistry'
 
 function stubElementFromPoint(el: Element | null) {
   Object.defineProperty(document, 'elementFromPoint', {
@@ -49,6 +50,7 @@ describe('resolveDrop — the four outcomes', () => {
       canvas: 'schematic',
       busName: 'Bus A',
       position: { x: 11, y: 21 },
+      site: null,
     })
   })
 
@@ -63,6 +65,7 @@ describe('resolveDrop — the four outcomes', () => {
       canvas: 'map',
       busName: 'Bus B',
       position: null,
+      site: null,
     })
   })
 
@@ -72,6 +75,7 @@ describe('resolveDrop — the four outcomes', () => {
       canvas: 'schematic',
       busName: null,
       position: { x: 11, y: 21 },
+      site: null,
     })
   })
 
@@ -81,17 +85,18 @@ describe('resolveDrop — the four outcomes', () => {
       canvas: 'map',
       busName: null,
       position: null,
+      site: null,
     })
   })
 
   it('anything else cancels', () => {
     stubElementFromPoint(mount('some-other-panel'))
-    expect(resolveDrop(10, 20)).toEqual({ canvas: null, busName: null, position: null })
+    expect(resolveDrop(10, 20)).toEqual({ canvas: null, busName: null, position: null, site: null })
   })
 
   it('cancels when the pointer is over nothing at all', () => {
     stubElementFromPoint(null)
-    expect(resolveDrop(10, 20)).toEqual({ canvas: null, busName: null, position: null })
+    expect(resolveDrop(10, 20)).toEqual({ canvas: null, busName: null, position: null, site: null })
   })
 
   it('a schematic drop with no rfInstance still resolves, with a null position', () => {
@@ -101,6 +106,7 @@ describe('resolveDrop — the four outcomes', () => {
       canvas: 'schematic',
       busName: null,
       position: null,
+      site: null,
     })
   })
 })
@@ -208,5 +214,63 @@ describe('useAssetDrag — the gesture', () => {
     fireEvent.pointerDown(getByTestId('item'), { button: 2, clientX: 5, clientY: 5 })
     window.dispatchEvent(new MouseEvent('pointerup', { clientX: 5, clientY: 5 }))
     expect(useUIStore.getState().creationItem).toBe(null)
+  })
+})
+
+
+describe('resolveDrop — the 3D site view (WP4, D16)', () => {
+  const target: SiteDropTarget = {
+    siteId: 'site_a',
+    screenToGround: (x, y) => (y < 0 ? null : { x: x * 2, y: -y }),
+    groundToScreen: () => null,
+  }
+  afterEach(() => { const cur = siteDropTarget(); if (cur) unregisterSiteDropTarget(cur) })
+
+  it('a drop on the registered 3D canvas resolves to the site and the ground point', () => {
+    const canvas = mount('site3d-canvas')
+    stubElementFromPoint(canvas)
+    registerSiteDropTarget(target)
+    expect(resolveDrop(10, 20)).toEqual({ canvas: 'site', busName: null, position: null, site: { siteId: 'site_a', ground: { x: 20, y: -20 } } })
+  })
+
+  it('cancels when no 3D view has registered, and when the ray misses the ground', () => {
+    const canvas = mount('site3d-canvas')
+    stubElementFromPoint(canvas)
+    expect(resolveDrop(10, 20).canvas).toBeNull()
+    registerSiteDropTarget(target)
+    expect(resolveDrop(10, -5).canvas).toBeNull()
+  })
+
+  it('a site drop while read-only is cancelled with the reason, and nothing is created', () => {
+    const canvas = mount('site3d-canvas')
+    stubElementFromPoint(canvas)
+    registerSiteDropTarget(target)
+    useUIStore.setState({ readOnly: true, readOnlyReason: 'locked-by-user' })
+    function Harness() {
+      const { beginDrag } = useAssetDrag()
+      return <button onPointerDown={e => beginDrag(e, { id: 'battery', label: 'Battery' })}>drag</button>
+    }
+    const { getByText } = render(<Harness />)
+    act(() => { fireEvent.pointerDown(getByText('drag'), { button: 0, clientX: 0, clientY: 0 }) })
+    act(() => { fireEvent.pointerMove(window, { clientX: 30, clientY: 40 }) })
+    act(() => { fireEvent.pointerUp(window, { clientX: 30, clientY: 40 }) })
+    expect(useUIStore.getState().creationItem).toBeNull()
+    useUIStore.setState({ readOnly: false, readOnlyReason: 'writable' })
+  })
+
+  it('the gesture forwards dropSite into the creation request', () => {
+    const canvas = mount('site3d-canvas')
+    stubElementFromPoint(canvas)
+    registerSiteDropTarget(target)
+    function Harness() {
+      const { beginDrag } = useAssetDrag()
+      return <button onPointerDown={e => beginDrag(e, { id: 'battery', label: 'Battery' })}>drag</button>
+    }
+    const { getByText } = render(<Harness />)
+    const btn = getByText('drag')
+    act(() => { fireEvent.pointerDown(btn, { button: 0, clientX: 0, clientY: 0 }) })
+    act(() => { fireEvent.pointerMove(window, { clientX: 30, clientY: 40 }) })
+    act(() => { fireEvent.pointerUp(window, { clientX: 30, clientY: 40 }) })
+    expect(useUIStore.getState().creationItem).toEqual({ id: 'battery', label: 'Battery', dropSite: { siteId: 'site_a', ground: { x: 60, y: -40 } } })
   })
 })

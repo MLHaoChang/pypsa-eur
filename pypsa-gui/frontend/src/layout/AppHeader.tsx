@@ -18,6 +18,7 @@ import SettingsButton from './SettingsButton'
 import type { Bus, FailureInfo, Generator, Line, Link, Load, StorageUnit } from '../api/types'
 import toast from 'react-hot-toast'
 import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
+import { flushPendingSitesToServer } from '../site3d/sitesStore'
 
 // ── Status indicators ──────────────────────────────────────────────────────────
 const STATUS_DOT: Record<string, string> = {
@@ -422,9 +423,18 @@ export default function AppHeader() {
           appLog('WARN', `Layout server write failed — kept ${r.nodes} node(s) + ${r.edges} edge(s) in localStorage`)
           layoutHint = ` · ⚠ layout to localStorage only`
         }
+
       } catch (e) {
         appLog('WARN', `Layout flush failed for '${result.saved}': ${String((e as Error)?.message ?? e)}`)
         layoutHint = ` · ⚠ layout flush failed`
+      }
+      // The 3D site sidecar flushes beside the layout, same reasons, same
+      // debounce: a Save-As re-homes the pending document to the new name.
+      try {
+        const sr = await flushPendingSitesToServer(result.saved, { previousProject: currentProject })
+        if (sr.status === 'local') appLog('WARN', 'Sites server write failed — kept the site document in localStorage')
+      } catch (e) {
+        appLog('WARN', `Sites flush failed: ${e instanceof Error ? e.message : String(e)}`)
       }
       // Bundle download happens immediately after the backend write so a
       // hardware/network failure during download still leaves a valid project

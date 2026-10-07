@@ -130,3 +130,6 @@ doc/img/intro-workflow.svg
 # whether someone else is mid-edit. One permanent line of noise in a signal
 # everyone is checking.
 .DS_Store
+
+# Session tooling installs a root node_modules (SessionStart hook); never part of the repo.
+node_modules/

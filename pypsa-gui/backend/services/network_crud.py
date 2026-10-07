@@ -570,6 +570,10 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
             # lost on the next save+reload (re-apply skips entries whose
             # column is no longer in the network DataFrame).
             _user_ts_rename_asset(attr, name, new_name)
+            # The 3D site view keys placements by "<Class>:<name>"; re-key the
+            # sidecar so the asset keeps its position (D14). Best-effort: a
+            # sidecar problem never fails a rename the model already did.
+            _rename_site_placement(component_class, name, new_name)
         _normalise_flag_column(n, attr)
     desc = (f"Renamed {component_class.lower()} '{name}' → '{new_name}'"
             if new_name != name else f"Updated {component_class.lower()} '{name}'")
@@ -609,3 +613,14 @@ def _delete_component(component_class: str, attr: str, name: str) -> None:
         n.remove(component_class, name)
         purge_component_side_data(n, component_class, attr, name)
     change_log_service.log("delete", component_class, name, f"Deleted {component_class.lower()} '{name}'")
+
+
+def _rename_site_placement(component_class: str, old: str, new: str) -> None:
+    """Re-key the active project's `sites.json` placement; no-op for a scratch network."""
+    from services import site_service
+
+    try:
+        storage_dir = getattr(PyPSAService.get_active_context(), "storage_dir", None)
+    except Exception:  # noqa: BLE001 — no active context is a no-op, not an error
+        storage_dir = None
+    site_service.rename_component_on_disk(storage_dir, component_class, old, new)

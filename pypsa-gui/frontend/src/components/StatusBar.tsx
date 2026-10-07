@@ -62,7 +62,7 @@ export default function StatusBar() {
   // the results were invalidated by an edit: clear the stale display + tell the
   // user to re-run. Reuses the simulationStatus query key (deduped with Results).
   const watchDispatch = status === 'completed' || status === 'failed'
-  const { data: liveStatus } = useQuery({
+  const { data: liveStatus, dataUpdatedAt: liveAt } = useQuery({
     queryKey: nk(currentProject, 'simulationStatus'),
     queryFn: simulationApi.getStatus,
     enabled: !!currentProject && watchDispatch,
@@ -72,9 +72,20 @@ export default function StatusBar() {
   // Reset the transition baseline whenever the active project changes — a
   // switch must not look like a fresh→cleared edit on the new project.
   useEffect(() => { prevDispatchRef.current = null }, [currentProject])
+  // Only answers fetched while watching form the baseline. Other views share
+  // this query key (the 3D site view polls it always; SnapshotPicker reads
+  // it), so the cache can hold a 'fresh' from before an edit the status bar
+  // never saw; taken as the baseline, a later solve failure would toast
+  // "Results cleared" and clear the failure (Phase 2 WP4 gate).
+  const watchFromRef = useRef<number | null>(null)
+  useEffect(() => {
+    watchFromRef.current = watchDispatch ? Date.now() : null
+    prevDispatchRef.current = null
+  }, [watchDispatch])
   useEffect(() => {
     const d = liveStatus?.dispatch
     if (!d) return
+    if (watchFromRef.current == null || liveAt < watchFromRef.current) return
     const prev = prevDispatchRef.current
     prevDispatchRef.current = d
     if (prev === 'fresh' && d !== 'fresh' && (status === 'completed' || status === 'failed')) {
@@ -82,7 +93,7 @@ export default function StatusBar() {
       toast('Results cleared — the network changed since the last solve. Re-run to refresh.',
         { icon: '↻', duration: 6000 })
     }
-  }, [liveStatus?.dispatch, status, clearResults])
+  }, [liveStatus?.dispatch, liveAt, status, clearResults])
 
   // Re-render every minute so "Saved Xm ago" updates without polling backend.
   const [, setTick] = useState(0)
