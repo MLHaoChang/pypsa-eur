@@ -191,7 +191,27 @@ def get_asset_health(project: AuthorizedProject = ProjectAccessDep) -> dict:
 
 @router.put("/{name}/asset_health")
 def put_asset_health(body: AssetHealthPut,
-                     project: AuthorizedProject = ProjectAccessDep) -> dict:
+                     project: AuthorizedProject = ProjectAccessDep,
+                     db: DBSession = Depends(get_db),
+                     user: User | None = Depends(optional_user)) -> dict:
+    # Same foreign-lock refusal its two siblings above carry, and missed by
+    # the sweep that added them — this handler did not even accept `db` /
+    # `user`, so it could not have checked. `save_asset_health` REPLACES the
+    # sidecar the same way `save_worksheet` does.
+    #
+    # `asset_health.json` is the outage-rate PROVENANCE ledger, and it is in
+    # `projects._BUNDLE_FILES` for the reason recorded there: without it
+    # `study_report._evidence_gaps` reports every asset-level rate as
+    # `unsourced`. So a non-holder's write does not merely lose the holder's
+    # entries — it travels into every later bundle and snapshot and changes
+    # what the study says about its own evidence.
+    #
+    # Check-only, not acquire: editing a sidecar is not claiming the project.
+    from routers.projects import _check_project_lock
+
+    _lock = _lock_target(project)
+    if _lock is not None:
+        _check_project_lock(db, _lock, user)
     try:
         return save_asset_health(project.directory, body.entries)
     except AssetHealthValidationError as exc:

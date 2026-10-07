@@ -556,7 +556,10 @@ def _derived_chat_writes() -> list[str]:
     for name in chat_tools._lock_gated_tool_names():
         if name in _SWAP_TOOLS:
             continue
-        if name in chat_tools._LOCK_GATE_SERVICE_CALL_MUTATORS:
+        # The routeless NETWORK mutators. The lock-gate set is wider — it also
+        # holds project-folder writes (uploads, chat history, campaigns) that
+        # a study, which re-solves the network, has no reason to refuse.
+        if name in chat_tools._NETWORK_SERVICE_CALL_MUTATORS:
             out.add(name)
             continue
         for route in TOOL_ROUTES.get(name, ()):
