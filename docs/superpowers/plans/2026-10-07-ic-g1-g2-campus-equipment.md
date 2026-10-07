@@ -204,3 +204,14 @@ owner-merged.
   546f2cb archive (64e7a34307ea1af3). The four readings accepted. Taken after it: the scaled part cost in the payload,
   the COD sentence when a typed date overrides `build_year`, `asset_finance()` pinned, `:` refused in names. Noted
   for U2: `scale_capex` does not move an extra's FOM line (as for network FOM).
+- **Gate assessor (c65d900): PASS WITH CONDITIONS.** The §8 shapes implemented; its own probe (switchgear per_bay ×
+  3, a STATCOM, from `load_defaults_pack('2026-10-07').cost_parts`) exact by hand. Conditions: (1) #97, merged after
+  the gate, writes `campus:<id>#<k>` names (the approved §8 example) and dict parts, which G2 refused; (2) the new
+  pack breaks U2's loader (it raises on unmapped rows and loads the latest pack); (3) the findings note. Taken:
+  master with #97 merged in (2954bc6); G2 accepts both (0141bb5, 83ba9b9); the coordinating session decided U2 pins
+  `load_defaults_pack("2026-10-05")` and lands that before this PR merges; the parity test compares cost fields only.
+- **Code round 2 (83ba9b9): PASS.** No other parser broken by `:` in names (finance, adapter, chat tools, frontend,
+  xlsx, QA drivers); the `rsplit` safe (class names never contain `:`); eu_de depreciation exact per asset with
+  three campus extras; dict and `UpfrontPart` parts hash alike; #97's tests pass. Follow-ups, non-binding: cast
+  numeric part fields and `quantity` to float (an int changes the provenance hash), a strict bool for
+  `derived_from_capital_cost`, a non-empty part name.
