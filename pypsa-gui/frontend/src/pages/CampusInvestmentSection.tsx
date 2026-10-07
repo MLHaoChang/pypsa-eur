@@ -11,7 +11,7 @@
 // project has only its total as solved, and a project whose cost cannot be
 // computed has none, which is said rather than shown as zero.
 import {
-  type CampusState, type CostRow, type HistoryRow, type HubCost, type InvestmentRow, type InvestStatus,
+  type CampusState, type CostBasis, type CostRow, type HistoryRow, type HubCost, type InvestmentRow, type InvestStatus,
 } from '../api/campusElectrical'
 import { PageSection, Tag } from '../components/PageKit'
 
@@ -40,6 +40,35 @@ const SCOPE_TEXT = {
   grid_operator: 'PCC switchgear: owned by the grid operator, not costed',
 } as const
 
+/** `0.07` as `7 %`, `0.035` as `3.5 %`. */
+function ratePercent(rate: number): string {
+  return `${Number((rate * 100).toFixed(2))} %`
+}
+
+/** The one plain line of what the costs stand on. The library's costs are in the
+ *  library's price year even when the project states another one: no escalation
+ *  is applied, so the year named here is the library's and the mismatch is said
+ *  apart, not hidden in the line. */
+function CostBasisLine({ basis }: { basis: CostBasis }) {
+  const mismatch = basis.price_year_mismatch
+  const year = mismatch ? basis.library_price_year : basis.price_year
+  const yearFrom = mismatch ? 'asset library' : basis.price_year_from
+  return (
+    <>
+      <p data-testid="invest-cost-basis" className="text-[12px] mb-2">
+        Annualised at {ratePercent(basis.discount_rate)} (from {basis.discount_rate_from}); costs in {year} money
+        (from {yearFrom}).
+      </p>
+      {mismatch && (
+        <p data-testid="invest-price-year-mismatch" role="alert" className="text-[11.5px] text-warn mb-2">
+          The project's finance inputs state {basis.price_year} money, but the library's costs are in{' '}
+          {basis.library_price_year} money. No escalation is applied.
+        </p>
+      )}
+    </>
+  )
+}
+
 /** The hub's cost to set beside one electrical period, or null when it has none there. */
 function hubFor(hub: HubCost | null, period: number, periods: number): number | null {
   if (!hub) return null
@@ -66,6 +95,7 @@ export default function CampusInvestmentSection({ state }: { state: CampusState 
           Prices come from the asset library; every cost in the shipped library is one of the assumed placeholders,
           an order of magnitude and not a quote.
         </p>
+        {r.cost_basis && <CostBasisLine basis={r.cost_basis} />}
         {r.scope && (
           <p data-testid="invest-scope" className="text-[12px] mb-2">{SCOPE_TEXT[r.scope.pcc_switchgear]}</p>
         )}

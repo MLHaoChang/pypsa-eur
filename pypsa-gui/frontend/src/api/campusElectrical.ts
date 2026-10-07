@@ -133,6 +133,21 @@ export interface HubCost {
   total: number
 }
 
+/** What the electrical costs were annualised on (part three, D1a). The rate is
+ *  the project's solver config when it has one, else the library's; the price
+ *  year is the project's finance inputs' `currency_year` when stated. A year
+ *  that differs from the library's is flagged, never converted: the library's
+ *  costs stay in `library_price_year` money. */
+export interface CostBasis {
+  discount_rate: number
+  discount_rate_from: 'project solver config' | 'asset library'
+  price_year: number
+  price_year_from: 'project finance inputs' | 'asset library'
+  library_price_year: number
+  price_year_mismatch: boolean
+  currency: string
+}
+
 export interface CampusResults {
   selection: SelectedHour[]
   transformers: TransformerSizing[]
@@ -147,6 +162,8 @@ export interface CampusResults {
   history: HistoryRow[] | null
   unresolved: UnresolvedNeed[] | null
   scope: InvestScope | null
+  /** Null when the run did not invest. */
+  cost_basis?: CostBasis | null
 }
 
 export interface CampusState {
@@ -159,6 +176,8 @@ export interface CampusState {
   /** Null, with `hub_cost_reason`, when the hub's cost cannot be computed. */
   hub_cost: HubCost | null
   hub_cost_reason: string | null
+  /** How many purchased items the last investment run offers as extra owner assets. */
+  owner_assets_count?: number
 }
 
 /** The asset library: the project's copy, else the shipped default. */

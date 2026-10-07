@@ -698,10 +698,24 @@ SAVE_LINEAGE_COPY: str = "copy"
 SAVE_LINEAGE_SCENARIO_COPY: str = "scenario_copy"
 
 
+def _chat_paths_in(directory) -> tuple[Path, Path]:
+    """`(chat.jsonl, chat.jsonl.1)` inside an ALREADY-RESOLVED directory."""
+    d = Path(directory)
+    return d / CHAT_FILENAME, d / (CHAT_FILENAME + ".1")
+
+
 def _project_chat_paths(project_name: str) -> tuple[Path | None, Path | None]:
     """
-    Resolve `(chat.jsonl, chat.jsonl.1)` for a project directory by name,
+    Resolve `(chat.jsonl, chat.jsonl.1)` for a project directory BY NAME,
     or `(None, None)` if the project name is empty / unresolvable.
+
+    This is the FLAT, pre-tenancy shape — `PROJECTS_DIR / name` — and
+    `get_persist_path` says in its own comment why that is not where a
+    project's data lives under tenancy: storage is org-scoped at
+    `projects_root/<org_uuid>/<project_uuid>/`, so this path is wrong or
+    absent there. Callers that can resolve the real directory MUST pass it
+    (`_chat_paths_in`); this remains the fallback for local mode and the
+    legacy layout, where the flat path IS the project directory.
     """
     if not project_name:
         return None, None
@@ -709,8 +723,7 @@ def _project_chat_paths(project_name: str) -> tuple[Path | None, Path | None]:
         from routers.projects import PROJECTS_DIR
     except Exception:  # noqa: BLE001 — never break the lineage path on import
         return None, None
-    proj = PROJECTS_DIR / project_name
-    return proj / CHAT_FILENAME, proj / (CHAT_FILENAME + ".1")
+    return _chat_paths_in(PROJECTS_DIR / project_name)
 
 
 def handle_save_lineage(
@@ -718,6 +731,9 @@ def handle_save_lineage(
     target_name: str,
     mode: str,
     source_name: str | None = None,
+    *,
+    source_dir=None,
+    target_dir=None,
 ) -> None:
     """
     F12 — apply the appropriate chat.jsonl lineage rule on a project-save
@@ -756,8 +772,19 @@ def handle_save_lineage(
     if not source or not target_name:
         return  # nothing to move/copy
 
-    src_path, src_backup = _project_chat_paths(source)
-    dst_path, dst_backup = _project_chat_paths(target_name)
+    # Resolved directories win over names. Under tenancy the flat
+    # `PROJECTS_DIR / name` path is not where either project lives, so
+    # resolving by name found nothing and the new project started with the
+    # conversation silently gone. The caller already resolves both ends
+    # through the registry for the `uploads/` half of the same hook.
+    src_path, src_backup = (
+        _chat_paths_in(source_dir) if source_dir is not None
+        else _project_chat_paths(source)
+    )
+    dst_path, dst_backup = (
+        _chat_paths_in(target_dir) if target_dir is not None
+        else _project_chat_paths(target_name)
+    )
     if src_path is None or dst_path is None:
         return
 
@@ -852,9 +879,20 @@ def handle_snapshot_lineage(
     """
     import shutil
 
-    active_path, active_backup = _project_chat_paths(ctx.loaded_project or "")
+    # Through the CONTEXT, which already knows where its storage lives — the
+    # flat-by-name resolution captured an empty (or another tenant's) history
+    # under tenancy. `get_persist_path` is the one resolver that handles both
+    # layouts, and it caches on `ctx.chat_state` as a side benefit.
+    if not ctx.loaded_project:
+        # `get_persist_path` returns None only for `loaded_project is None`;
+        # an empty STRING would resolve to `PROJECTS_DIR / "" / chat.jsonl`,
+        # i.e. the projects root itself. The by-name resolver this replaced
+        # rejected both, so keep rejecting both.
+        return
+    active_path = get_persist_path(ctx)
     if active_path is None:
         return
+    active_backup = active_path.parent / (CHAT_FILENAME + ".1")
     snap_chat = snapshot_dir / CHAT_FILENAME
     snap_backup = snapshot_dir / (CHAT_FILENAME + ".1")
 

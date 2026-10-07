@@ -163,7 +163,10 @@ def test_export_returns_a_file_description_not_a_path_only(study, monkeypatch, t
     target.write_bytes(b"PK\x05\x06" + b"\x00" * 18)
     monkeypatch.setattr(gs, "export_handoff_bundle", lambda project, hour: target)
     out = chat_tools.DISPATCHERS["gridspine_export_handoff_bundle"](project_id="Chat Study", hour=7)
-    assert out == {"path": str(target), "filename": "bundle_h7.zip", "bytes": 22}
+    # A route, not `str(target)`: the absolute path named the storage root and
+    # the org/project UUIDs, and nothing can fetch a server-side path anyway.
+    assert out == {"download_url": "/api/gridspine/Chat%20Study/bundles/7",
+                   "filename": "bundle_h7.zip", "bytes": 22}
 
 
 def test_an_unknown_or_foreign_project_is_404_like_the_router(study):

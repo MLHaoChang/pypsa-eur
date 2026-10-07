@@ -51,6 +51,7 @@ from services.finance.incentives import Incentives, build_incentives
 from services.finance.lcos import storage_lcos
 from services.finance.metrics import irr, npv
 from services.finance.packs.base import JurisdictionPack
+from services.finance.replacements import on_axis, schedule
 from services.finance.tax import DepreciationClass, TaxLayer, TaxResult, compute_tax
 from services.finance.tax_layers import OwnerAsset, resolve_tax_layers
 from services.finance.timeline import Timeline, build_timeline
@@ -239,7 +240,7 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
         basis_u = capex_total - inc.grant_basis_reduction
         if inc.grant_basis_reduction:
             flags.append("grant_reduces_basis_pro_rata")
-        vintages = _replacement_vintages(fin, tl)
+        vintages = _replacement_vintages(case, tl)
         if fin.terminal_value.method == "book_value":
             try:
                 probe = compute_tax(tl, layers, ebitda=np.zeros(n), basis=basis,
@@ -436,12 +437,12 @@ def _asset_costs(op: Operating, case: FinanceCase) -> np.ndarray:
     return out
 
 
-def _replacement_vintages(fin, tl: Timeline) -> tuple:
-    """(axis index, escalated amount, asset) per replacement (plan C6)."""
-    r = fin.escalation.get("capex") or 0.0
-    return tuple((tl.index(year), amount * (1.0 + r) ** (year - tl.base_year), asset)
-                 for year, asset, amount in fin.replacement_capex
-                 if tl.cod_year <= year < tl.cod_year + tl.analysis_years)
+def _replacement_vintages(case: FinanceCase, tl: Timeline) -> tuple:
+    """(axis index, escalated amount, asset) per replacement (plan C6), from
+    the one schedule (IC S0b plan S4)."""
+    r = case.inputs.escalation.get("capex") or 0.0
+    return tuple((tl.index(x.year), x.amount * (1.0 + r) ** (x.year - tl.base_year), x.asset)
+                 for x in schedule(case, tl) if on_axis(tl, x.year))
 
 
 def _tranche_rates(debt: Debt) -> list[float]:

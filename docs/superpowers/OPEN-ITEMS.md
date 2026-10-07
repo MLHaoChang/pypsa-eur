@@ -31,32 +31,7 @@ verification record.
 
 ## High
 
-### 13. Chat tools that write a project's upload store bypass its lock check
-
-**Fixed independently in #76 (`e36c041`), not yet on master.** Do not fix
-again. When #76 lands, close this entry and delete the 7 `KNOWN_GAPS` and 3
-`TOOL_POLICY` entries the write-surface test then fails on (verified by trial
-merge on 2026-10-05).
-
-`services/chat_tools.py`. The HTTP upload routes (`post_upload`,
-`delete_upload_route`) check the edit lock. Seven chat tools write the same
-store with no check of their own and are not gated at the chat seam:
-`clear_uploads` (destructive: deletes every upload of the active project) and
-the six `export_*` tools (additive, via `_save_agent_export` →
-`upload_service.add_upload(kind="agent_export")`). All seven are routeless, and
-`_LOCK_GATE_SERVICE_CALL_MUTATORS` only lists **network** mutators.
-
-They were excluded by a docstring justification that went stale: "upload /
-export / chat-history tools write ... on surfaces the middleware does not gate
-either". That stopped being true for uploads when the HTTP upload routes gained
-in-handler checks. Reproduced 2026-10-05: with the same non-holder identity,
-HTTP `DELETE .../uploads/{id}` was refused 409 while `clear_uploads` wiped the
-holder's files (`[...] -> []`), and HTTP `POST .../uploads` was refused 409
-while `export_to_csv` added a file (1 → 2). `uploads/` is in `_BUNDLE_DIRS`.
-Found while doing item 6. `tests/test_write_surface_lock_policy.py` lists all
-seven as `KNOWN_GAPS` and fails when one is fixed until its entry is deleted.
-Full analysis, reproduction and fix criteria:
-`findings/2026-10-05-chat-tools-bypass-the-upload-lock-check.md`. Server only.
+*(Nothing open at this severity.)*
 
 
 ## Medium
@@ -209,6 +184,16 @@ NOT reused or compacted — other findings and assessments cite these numbers.
   and stay open. Tripwire: `tests/test_campus_tools_foreign_lock.py`,
   written first and red for the right reason ("did not raise"). The ratchet
   then required deleting the four `KNOWN_GAPS` entries.
+* **13** — chat tools that wrote a project's upload store bypassed its lock
+  check (`clear_uploads` and six `export_*` tools). Found and reproduced
+  2026-10-05 while doing item 6. Fixed independently by #76 (`e36c041`), which
+  merged on 2026-10-07: it gates the tools at the seam and checks every export
+  through `_check_foreign_lock("export")` in `_save_agent_export`. On merge,
+  the write-surface ratchet failed on exactly the 7 `KNOWN_GAPS` entries and
+  on the 3 `TOOL_POLICY` entries #76 also gated (`clear_chat_history`,
+  `start_campaign`, `end_campaign`). That is the same 10 a trial merge
+  predicted two days earlier, and all are now deleted. #76 also settled two of
+  the three product questions item 6 recorded.
 * **5** — chat sessions have no owner, so the confirmation gate rests on id
   secrecy. Closed by the same commit as item 3: `owner_user_id` plus one
   comparison is exactly the fix this item asked for, so `/confirm` no longer

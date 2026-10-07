@@ -73,13 +73,13 @@ from services.project_context import ProjectContext
 logger = logging.getLogger("pypsa_gui.chat")
 
 from harness.history import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    _message_is_tool_results, _is_turn_start, rewind_session, _drop_oldest_turn_group, TURN_SUMMARY_PREFIX, TURN_SUMMARY_MAX_CHARS, _SUMMARY_LINE_CHARS, _SUMMARY_MAX_LINES, is_turn_summary, _describe_dropped, _render_summary, _parse_summary, trim_session_messages, CHAT_FILENAME, _redact_for_persist, get_persist_path, read_all_turns, read_all_turns_with_gap, append_turn, _pending_turn_path_unlocked, begin_pending_turn, read_pending_turn, clear_pending_turn, flush_to_disk, _rotate_chat_jsonl_unlocked, SAVE_LINEAGE_REBIND_MOVE, SAVE_LINEAGE_COPY, SAVE_LINEAGE_SCENARIO_COPY, _project_chat_paths, handle_save_lineage, handle_rename_lineage, handle_snapshot_lineage,
+    _message_is_tool_results, _is_turn_start, rewind_session, _drop_oldest_turn_group, TURN_SUMMARY_PREFIX, TURN_SUMMARY_MAX_CHARS, _SUMMARY_LINE_CHARS, _SUMMARY_MAX_LINES, is_turn_summary, _describe_dropped, _render_summary, _parse_summary, trim_session_messages, CHAT_FILENAME, _redact_for_persist, get_persist_path, read_all_turns, read_all_turns_with_gap, append_turn, _pending_turn_path_unlocked, begin_pending_turn, read_pending_turn, clear_pending_turn, flush_to_disk, _rotate_chat_jsonl_unlocked, SAVE_LINEAGE_REBIND_MOVE, SAVE_LINEAGE_COPY, SAVE_LINEAGE_SCENARIO_COPY, _project_chat_paths, handle_save_lineage, handle_rename_lineage, handle_snapshot_lineage, _chat_paths_in,
 )
 
 
 
 from harness.session import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    RESULT_REFS_MAXLEN, PendingConfirmation, ChatSession, _SESSIONS, _SESSIONS_LOCK, get_session, session_owner_allows, _evict_idle_sessions_locked, get_or_create_session_reporting, get_or_create_session, drop_session, _reset_sessions_for_tests,
+    RESULT_REFS_MAXLEN, PendingConfirmation, ChatSession, _SESSIONS, _SESSIONS_LOCK, get_session, session_owner_allows, _evict_idle_sessions_locked, get_or_create_session_reporting, get_or_create_session, drop_session, _reset_sessions_for_tests, TURN_AUTHOR_KEY, turn_is_callers,
 )
 
 
@@ -108,6 +108,11 @@ from harness.confirm import (  # noqa: E402, F401 — moved (issue 08); re-expor
 # and every later tool in the same turn was refused as a mid-turn switch. The
 # frame still fires only on an actual move, so Save-a-Copy (`rebind=False`)
 # and a save of the already-bound project emit nothing.
+# For the raw imports the stake was larger than a 409: with the panel still on
+# the old name, its autosave sent `expect=<old>` to an UNBOUND backend, which the
+# save guard lets through, and wrote the imported network over the old
+# project. The panel now clears its project on `to: null` (CH-2 in the
+# 2026-09-28 solver-and-chat register).
 PROJECT_REBINDING_TOOLS = frozenset([
     "activate_project",
     "load_project",
@@ -170,7 +175,7 @@ _TOOL_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 )
 
 from harness.results import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    _RESULT_CONTENT_CAP, _ERROR_DETAIL_CAP, _coerce_jsonable, _truncate_result, _truncation_marker, _apply_turn_tool_result_budget, _error_result_content, _result_to_anthropic_content,
+    _RESULT_CONTENT_CAP, _ERROR_DETAIL_CAP, _coerce_jsonable, _truncate_result, _truncation_marker, _apply_turn_tool_result_budget, _error_result_content, _result_to_anthropic_content, _STORAGE_PLACEHOLDER, _redact_storage_roots, _IDENTIFYING_RESULT_KEYS, _scrub_identities,
 )
 
 
@@ -1083,6 +1088,7 @@ def run_turn(
             yield "session_done", {"reason": "turn_already_in_flight"}
             return
         session._turn_in_flight = True
+        session._undo_snapshotted = []
 
     _metric_incr("turns")
     _t_start = time.monotonic()
@@ -1125,6 +1131,7 @@ def run_turn(
         _metric_record_duration(time.monotonic() - _t_start)
         with session._lock:
             session._turn_in_flight = False
+            session._undo_snapshotted = []
         # C-3 — the turn's profile must not outlive the turn. A tool invoked
         # OUTSIDE a turn (a direct call, a test) has no profile to honour and
         # must take the pre-profile path; leaving a stale value bound would
@@ -1667,6 +1674,12 @@ def _run_turn_body(
                     "assistant": _redact_for_persist(assistant_blocks),
                     "usage": usage_snapshot,
                 }
+                # CH-6 — who ran this turn, so GET /history can hand each user
+                # back THEIR session rather than whoever spoke last. Omitted
+                # when there is no owner (a direct `run_turn`), which reads as
+                # a legacy record. See `turn_is_callers`.
+                if session.owner_user_id is not None:
+                    turn_record[TURN_AUTHOR_KEY] = session.owner_user_id
                 # Phase C — persist which uploads were attached to this
                 # turn so the chat panel can render their chips on
                 # rehydration. Field omitted when empty so legacy turns
@@ -1792,6 +1805,78 @@ def _run_turn_body(
 
 
 
+
+
+def _snapshot_for_turn_undo(session: ChatSession, tool_name: str) -> None:
+    """
+    CH-3 — push ONE undo snapshot per turn, per project, before the turn's
+    first network-changing tool.
+
+    Undo snapshots are pushed by `main.undo_snapshot_middleware`; a chat tool
+    calls its handler in-process and never passes through it, so a chat edit
+    pushed nothing, and `undo_last` then either refused or — worse — reverted
+    an OLDER canvas edit while reporting `{"undone": true}`.
+
+    Per TURN rather than per tool call, for two reasons. It is what the texts
+    the model reads already promised — "Writes participate in the turn-level
+    undo", and an image reconstruction "created inside one undo snapshot so a
+    misread can be reverted in one click" — and it is the unit a user means by
+    "undo what the assistant just did". And it bounds the cost the register
+    named as the open question: a snapshot is an `export_to_netcdf`
+    round-trip, so a 30-edit turn pays for one, not thirty. (A canvas drag gets
+    the same treatment from the middleware's coalesce window.)
+
+    Kept on failure, not popped the way the middleware pops on a 4xx: the
+    dirty-marking just above makes the same call for the same reason — a tool
+    that fails partway may still have changed the network. An undo step that
+    turns out to change nothing costs less than an edit that cannot be undone.
+    """
+    from services import chat_tools as _chat_tools
+
+    if tool_name not in _chat_tools.UNDO_CAPTURED_TOOLS:
+        return
+    try:
+        from services.pypsa_service import PyPSAService
+
+        stack = PyPSAService.get_active_context().undo
+    except Exception:  # noqa: BLE001 — never block a tool on undo machinery
+        return
+    if any(stack is done for done in session._undo_snapshotted):
+        return
+    # Not while a live-network study runs. Every captured tool is refused then
+    # (the study gate, or the swap refusal for an import or a re-cluster), and
+    # the HTTP middleware returns that refusal BEFORE it snapshots. Snapshotting
+    # first would export a network the study is re-solving between iterates —
+    # holding the network lock against it — for an undo step that changes
+    # nothing.
+    try:
+        from services.project_context import LIVE_NETWORK_STUDIES
+        from services.study_state import study_in_flight_detail
+
+        if study_in_flight_detail(PyPSAService.get_solver_state(),
+                                  "edit the network", keys=LIVE_NETWORK_STUDIES):
+            return
+    except Exception:  # noqa: BLE001 — the gate itself will still refuse
+        pass
+    from services.network_undo import push_undo_snapshot
+
+    push_undo_snapshot()  # logs and swallows its own failures
+    session._undo_snapshotted.append(stack)
+
+
+def _forget_turn_undo(session: ChatSession) -> None:
+    """After an `undo_last` in this turn, the turn's snapshot has been popped:
+    the NEXT network-changing tool must push a fresh one, or the edits after
+    the undo would have no step of their own."""
+    try:
+        from services.pypsa_service import PyPSAService
+
+        stack = PyPSAService.get_active_context().undo
+    except Exception:  # noqa: BLE001
+        return
+    session._undo_snapshotted = [
+        done for done in session._undo_snapshotted if done is not stack
+    ]
 
 
 def _dispatch_real_tool_call(
@@ -1950,6 +2035,10 @@ def _dispatch_real_tool_call(
     if tier != "read":
         from services import dirty_state
         dirty_state.mark_dirty()
+    # Same seam, same reason: the HTTP middleware's undo snapshot never runs
+    # for an in-process call either. After the confirmation gate, so a refused
+    # tool costs no snapshot. See `_snapshot_for_turn_undo`.
+    _snapshot_for_turn_undo(session, tool_name)
 
     # Execute via the chat_tools dispatcher. `handler` was resolved above the
     # confirmation gate — see Improvement #19 there.
@@ -1990,6 +2079,37 @@ def _dispatch_real_tool_call(
             )
             try:
                 result = future.result(timeout=harness_budget.PER_TOOL_TIMEOUT_SECONDS)
+                # The tool ran inside a COPY of this context, so anything it
+                # published through a contextvar died with that copy. For a
+                # tool whose whole job is to change the active project, that
+                # means the switch never reached this thread: `run_turn`'s
+                # `PROJECT_REBINDING_TOOLS` check re-reads
+                # `get_active_context().loaded_project` here and saw the OLD
+                # name, so it emitted no `project_rebound` frame and never
+                # refreshed `turn_project_holder` — and every later tool in
+                # the turn ran against the previous project while the model
+                # believed it had moved. The frontend kept its old
+                # `currentProject` too, which is the `expect=` 409 the
+                # rebound frame exists to prevent (incident 2026-06-08).
+                #
+                #
+                # In production this is now belt-and-braces: `routers/chat.py`
+                # binds a turn CELL that every context copy shares, so the
+                # tool's publish already reached the turn, and this adopt
+                # finds nothing to do. It is what a caller without a cell (a
+                # direct `run_turn`, a test) relies on, and it adopts for
+                # EVERY tool so both paths agree. That used to be scoped to
+                # `PROJECT_REBINDING_TOOLS`, to keep an import's switch from
+                # tripping `project_switched_mid_turn`; the imports are on that
+                # list now, and a switch only a tool can have made — a copy
+                # nobody else writes to — is never the external one the guard
+                # is for. A switch that changes identity without being on the
+                # list still stops the turn, loudly, which is the safe failure.
+                from services.pypsa_service import (
+                    PyPSAService as _PyPSAService,
+                )
+
+                _PyPSAService.adopt_active_from(_ctx_snapshot)
             except concurrent.futures.TimeoutError:
                 # Anthropic requires a tool_result for every tool_use_id in the
                 # next user message (same invariant the project_switched and
@@ -2040,6 +2160,11 @@ def _dispatch_real_tool_call(
             "content": _error_result_content(detail, exc, error_kind),
         })
         return
+
+    # Only a SUCCESSFUL undo reaches this line (a refused one raised above and
+    # returned), and it popped this turn's snapshot — see `_forget_turn_undo`.
+    if tool_name == "undo_last":
+        _forget_turn_undo(session)
 
     # Long-running execution tier: bridge solver log lines into tool_progress
     # frames between tool_running and tool_result. run_simulation /
