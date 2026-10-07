@@ -486,6 +486,22 @@ energy-hub templates".
   `assumed` in the island sidecar's provenance), with a test that its
   rating covers the IT peak.
 
+### S0 as built (2026-10-07)
+
+- `_base()` sets `objective` and `generators` to 52.14 and `stores` to 1.0.
+  Annual cost and energy are unchanged; a snapshot's state-of-charge step is
+  now one hour of power.
+- **The UPS is 40 MW / 0.25 h (10 MWh)** (owner, sixth round): a realistic
+  15-minute autonomy. It covers the 600 s bridge (about 6.3 MWh at 36 MW and
+  95 %), and it does not arbitrage like a large battery.
+- The SCR comment no longer counts the UPS as inverter-based: its rectifier
+  feeds no fault upstream, as in I1. The `eh_ibr_mva` value is unchanged.
+- **Tests:**
+  - every template pins `stores == 1`, and a solved template's state of
+    charge moves by exactly one hour of power per snapshot;
+  - the UPS covers the IT peak and the bridge.
+- Nothing else in the backend reads the `stores` weighting.
+
 ### I2a: ride-through, fuel and bridge reserve in the hub LP — step 1 (M)
 
 New module: `services/solver/island.py`, an `extra_functionality` wrapper
