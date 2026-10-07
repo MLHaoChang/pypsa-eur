@@ -410,8 +410,12 @@ def test_save_context_rebind_invokes_lineage_rebind_move(tmp_projects_dir, monke
 
     calls: list[tuple[str, str, str | None]] = []
 
-    def fake_lineage(ctx, target_name: str, mode: str, source_name=None):
-        calls.append((target_name, mode, source_name))
+    # `**kwargs` on purpose: the hook also threads the RESOLVED source and
+    # target directories now (QA-P1), and a fake with a narrower signature
+    # raises a TypeError that the caller's best-effort `except Exception`
+    # swallows — the call then looks as though it never happened at all.
+    def fake_lineage(ctx, target_name: str, mode: str, source_name=None, **kwargs):
+        calls.append((target_name, mode, source_name, kwargs))
 
     monkeypatch.setattr(chat_service, "handle_save_lineage", fake_lineage)
 
@@ -431,7 +435,11 @@ def test_save_context_rebind_invokes_lineage_rebind_move(tmp_projects_dir, monke
     # The lineage call captured the documented args, including the explicit
     # source_name (the PRE-rebind binding "A").
     assert calls
-    target_name, mode, source_name = calls[0]
+    target_name, mode, source_name, kwargs = calls[0]
+    # Both ends resolved by the CALLER, which is the only place that can
+    # resolve them under tenancy.
+    assert kwargs.get("source_dir") is not None
+    assert kwargs.get("target_dir") is not None
     assert target_name == "B"
     assert mode == chat_service.SAVE_LINEAGE_REBIND_MOVE
     assert source_name == "A", (
@@ -448,7 +456,7 @@ def test_save_context_no_rebind_diff_target_invokes_lineage_copy(tmp_projects_di
     calls: list[tuple[str, str, str | None]] = []
     monkeypatch.setattr(
         chat_service, "handle_save_lineage",
-        lambda ctx, target_name, mode, source_name=None:
+        lambda ctx, target_name, mode, source_name=None, **kwargs:
             calls.append((target_name, mode, source_name)),
     )
 
@@ -600,3 +608,130 @@ def test_concurrent_append_turn_no_torn_writes_no_lost_writes(
         f"lost writes: {N - len(seen)}/{N} concurrent messages missing"
     )
     assert ok >= N
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# QA-P1 — the lineage must resolve the project's REAL directory
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_save_lineage_honours_explicitly_resolved_directories(tmp_projects_dir, tmp_path):
+    """
+    QA-P1. `_project_chat_paths` builds a flat `PROJECTS_DIR / name` path,
+    which is the pre-tenancy shape — `get_persist_path` says so in its own
+    comment ("the flat-name path below is the pre-tenancy shape, which put a
+    project's chat history in a different directory from the project
+    itself"). In tenancy mode storage is org-scoped, so Save-As and
+    Save-a-Copy resolved a directory that is not the tenant's: the copy found
+    nothing and the new project started with the history silently gone.
+
+    The caller already resolves both directories through the registry for the
+    `uploads/` half of the same hook. The chat half now takes them too.
+    """
+    src_dir = tmp_path / "org-uuid" / "source-uuid"
+    dst_dir = tmp_path / "org-uuid" / "target-uuid"
+    src_dir.mkdir(parents=True)
+    dst_dir.mkdir(parents=True)
+    (src_dir / chat_service.CHAT_FILENAME).write_text(
+        json.dumps({"role": "user", "content": "org-scoped"}) + "\n",
+        encoding="utf-8",
+    )
+    # A decoy at the FLAT path: if the helper still resolves by name it will
+    # copy this instead, and the assertion below names which one it took.
+    _write_chat(tmp_projects_dir, "Target", [{"role": "user", "content": "flat decoy"}])
+
+    ctx = _make_bound_ctx("Source", tmp_projects_dir)
+    chat_service.handle_save_lineage(
+        ctx,
+        target_name="Target",
+        mode=chat_service.SAVE_LINEAGE_COPY,
+        source_name="Source",
+        source_dir=src_dir,
+        target_dir=dst_dir,
+    )
+
+    copied = dst_dir / chat_service.CHAT_FILENAME
+    assert copied.exists(), "the copy did not land in the resolved target dir"
+    assert "org-scoped" in copied.read_text(encoding="utf-8")
+    # And it did not reach for the flat path instead.
+    flat_target = tmp_projects_dir / "Target" / chat_service.CHAT_FILENAME
+    assert "flat decoy" in flat_target.read_text(encoding="utf-8")
+
+
+def test_save_lineage_without_explicit_dirs_still_uses_the_flat_path(tmp_projects_dir):
+    """
+    The control: local mode and every legacy caller pass no directories and
+    must keep resolving by name exactly as before.
+    """
+    _write_chat(tmp_projects_dir, "Source", [{"role": "user", "content": "legacy"}])
+    (tmp_projects_dir / "Target").mkdir(parents=True, exist_ok=True)
+    ctx = _make_bound_ctx("Source", tmp_projects_dir)
+
+    chat_service.handle_save_lineage(
+        ctx, target_name="Target", mode=chat_service.SAVE_LINEAGE_COPY,
+        source_name="Source",
+    )
+
+    dst = tmp_projects_dir / "Target" / chat_service.CHAT_FILENAME
+    assert dst.exists() and "legacy" in dst.read_text(encoding="utf-8")
+
+
+def test_snapshot_lineage_reads_the_contexts_own_storage_dir(tmp_projects_dir, tmp_path):
+    """
+    QA-P1, same root on the snapshot path: `handle_snapshot_lineage` resolved
+    the ACTIVE project flat, although the context it is handed already knows
+    where its storage lives. In tenancy mode a snapshot therefore captured an
+    empty (or another tenant's) history.
+    """
+    storage = tmp_path / "org-uuid" / "project-uuid"
+    storage.mkdir(parents=True)
+    (storage / chat_service.CHAT_FILENAME).write_text(
+        json.dumps({"role": "user", "content": "org-scoped history"}) + "\n",
+        encoding="utf-8",
+    )
+    _write_chat(tmp_projects_dir, "Study", [{"role": "user", "content": "flat decoy"}])
+
+    ctx = _make_bound_ctx("Study", tmp_projects_dir)
+    ctx.storage_dir = str(storage)
+
+    snap = tmp_path / "snapshots" / "snap-1"
+    chat_service.handle_snapshot_lineage(ctx, snap, "create")
+
+    captured = snap / chat_service.CHAT_FILENAME
+    assert captured.exists(), "snapshot captured no chat at all"
+    assert "org-scoped history" in captured.read_text(encoding="utf-8"), (
+        "snapshot captured the flat legacy path, not the context's storage dir"
+    )
+
+
+def test_a_scenario_fork_inherits_the_conversation(
+    client, api_project, project_storage_dir,
+):
+    """
+    QA-P1, second half. `SAVE_LINEAGE_SCENARIO_COPY` documents that a
+    scenario receives a copy of the base project's `chat.jsonl` — but the
+    auth-mode scenario create copies `_BUNDLE_FILES` and the bundle dirs and
+    nothing else, so a scenario branched from a project started with a blank
+    conversation while inheriting its network, layout, worksheet and stress
+    registry.
+
+    `chat.jsonl` deliberately stays OUT of `_BUNDLE_FILES`: it is a
+    per-conversation thread, not part of the exportable bundle. The two lists
+    are not the same list, so the copy is explicit.
+    """
+    name = api_project("chatparent")
+    base_dir = project_storage_dir(name)
+    (base_dir / chat_service.CHAT_FILENAME).write_text(
+        json.dumps({"role": "user", "content": "carried into the branch"}) + "\n",
+        encoding="utf-8",
+    )
+
+    r = client.post(
+        f"/api/projects/{name}/scenarios", json={"name": "chatparent_child"},
+    )
+    assert r.status_code in (200, 201), r.text
+    child = r.json().get("name") or "chatparent_child"
+
+    child_chat = project_storage_dir(child) / chat_service.CHAT_FILENAME
+    assert child_chat.exists(), "the scenario inherited no conversation"
+    assert "carried into the branch" in child_chat.read_text(encoding="utf-8")
