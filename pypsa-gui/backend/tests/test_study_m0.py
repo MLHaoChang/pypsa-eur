@@ -286,3 +286,189 @@ def test_a_bind_refusal_after_the_mint_leaves_no_series(
     assert r.json()["detail"]["error_kind"] == "library_series_unresolved"
     assert len(names) == 1
     assert _series_rows(session_local, names[0]) == 0
+
+
+# ── Gate U2-WP6 W1: the series is kept while the base project uses it ─────
+
+def _base_of(session_local, body: dict):
+    """(org id, export series name) of a created pack study."""
+    import uuid
+
+    from db.models import Project
+    from services.study import compile as study_compile
+
+    with session_local() as db:
+        row = db.get(Project, uuid.UUID(body["base_project"]))
+        return row.org_id, study_compile.export_series_name(row.id, body["study_id"])
+
+
+def _put_series(session_local, org_id, name: str, price: float, source="decision_study"):
+    import pandas as pd
+
+    from services.library.export_series import put_flat_export_series
+
+    with session_local() as db:
+        return put_flat_export_series(db, org_id, name, price, source=source,
+                                      snapshots=pd.date_range("2025-01-01", periods=24,
+                                                              freq="h"))
+
+
+def _payload_files(session_local, name: str) -> list:
+    """The payload file of every version of `name` (any org)."""
+    import pathlib
+
+    from sqlalchemy import select
+
+    from db.models import LibraryItem
+    from services.storage_paths import library_file
+    from settings import get_settings
+
+    root = pathlib.Path(get_settings().projects_root)
+    with session_local() as db:
+        return [library_file(root, r.org_id, r.path) for r in db.scalars(select(LibraryItem).where(
+            LibraryItem.kind == "series", LibraryItem.name == name)).all()]
+
+
+def _unpin_base(base_dir) -> None:
+    """The base no longer names the series (an expert rebound its export price)."""
+    def strip(x):
+        if isinstance(x, dict):
+            return {k: (None if k == "export_price_ref" else strip(v)) for k, v in x.items()}
+        if isinstance(x, list):
+            return [strip(v) for v in x]
+        return x
+
+    cfg_path = base_dir / "solver_config.json"
+    cfg = json.loads(cfg_path.read_text())
+    assert "decision-study:" in json.dumps(cfg)          # it did pin it
+    cfg_path.write_text(json.dumps(strip(cfg)))
+    (base_dir / "library_refs.json").unlink(missing_ok=True)
+    assert "decision-study:" not in cfg_path.read_text()
+
+
+def _created_with_two_versions(client, session_local, src: str, base: str):
+    r = create_pack_study(client, src, base)
+    assert r.status_code == 201, r.text
+    body = r.json()
+    org_id, name = _base_of(session_local, body)
+    assert _put_series(session_local, org_id, name, 41.0).version == 2
+    files = _payload_files(session_local, name)
+    assert len(files) == 2 and all(f.is_file() for f in files)
+    return body, org_id, name, files
+
+
+def test_a_study_delete_keeps_every_version_while_its_untouched_base_uses_it(
+        client, api_project, studies_on, _auth_db, project_row):
+    _engine, session_local = _auth_db
+    api_project("w1-keep-src")
+    body, _org, name, files = _created_with_two_versions(
+        client, session_local, "w1-keep-src", "w1-keep-base")
+    r = client.delete(f"/api/projects/w1-keep-base/studies/{body['study_id']}")
+    assert r.status_code == 204, r.text
+    assert r.headers["X-Study-Export-Series"] == "export_series_kept_in_use"
+    assert _series_rows(session_local, name) == 2
+    assert all(f.is_file() for f in files)
+    assert project_row("w1-keep-base") is not None
+
+
+def test_a_study_delete_removes_every_version_once_the_base_no_longer_pins_it(
+        client, api_project, studies_on, _auth_db, project_storage_dir):
+    _engine, session_local = _auth_db
+    api_project("w1-del-src")
+    body, _org, name, files = _created_with_two_versions(
+        client, session_local, "w1-del-src", "w1-del-base")
+    _unpin_base(project_storage_dir("w1-del-base"))
+    r = client.delete(f"/api/projects/w1-del-base/studies/{body['study_id']}")
+    assert r.status_code == 204, r.text
+    assert r.headers["X-Study-Export-Series"] == "deleted:2"
+    assert _series_rows(session_local, name) == 0
+    assert not any(f.exists() for f in files)
+
+
+def test_a_study_delete_keeps_the_series_an_unrelated_project_pins(
+        client, api_project, studies_on, _auth_db, project_storage_dir):
+    from services.library import bundle_pins, series_store
+
+    _engine, session_local = _auth_db
+    api_project("w1-pin-src")
+    body, org_id, name, files = _created_with_two_versions(
+        client, session_local, "w1-pin-src", "w1-pin-base")
+    _unpin_base(project_storage_dir("w1-pin-base"))
+    api_project("w1-pin-expert")
+    with session_local() as db:
+        ref = series_store.ref_for(db, org_id, name, 1)
+    bundle_pins.write_pins(project_storage_dir("w1-pin-expert"), [ref])
+    r = client.delete(f"/api/projects/w1-pin-base/studies/{body['study_id']}")
+    assert r.status_code == 204, r.text
+    assert r.headers["X-Study-Export-Series"] == "export_series_kept_in_use"
+    assert _series_rows(session_local, name) == 2
+    assert all(f.is_file() for f in files)
+
+
+def test_a_series_failure_never_fails_the_study_delete(
+        client, api_project, studies_on, _auth_db, project_storage_dir, monkeypatch):
+    from services.study import compile as study_compile
+
+    _engine, session_local = _auth_db
+    api_project("w1-fail-src")
+    body, _org, name, _files = _created_with_two_versions(
+        client, session_local, "w1-fail-src", "w1-fail-base")
+
+    def boom(*_a, **_k):
+        raise RuntimeError("library unavailable")
+
+    monkeypatch.setattr(study_compile, "delete_export_series", boom)
+    sid = body["study_id"]
+    r = client.delete(f"/api/projects/w1-fail-base/studies/{sid}")
+    assert r.status_code == 204, r.text
+    assert r.headers["X-Study-Export-Series"] == "export_series_delete_failed"
+    assert not (project_storage_dir("w1-fail-base") / "studies" / f"{sid}.json").exists()
+    assert _series_rows(session_local, name) == 2
+
+
+def test_the_startup_sweep_deletes_the_series_of_a_gone_base_and_keeps_the_rest(
+        client, api_project, studies_on, _auth_db, project_row, project_storage_dir):
+    """
+    Owner (W1): deleting the BASE is what makes the series go, through the
+    startup sweep. A series whose base row still exists is never touched, even
+    when nothing pins it; nor is any series that is not a study's.
+    """
+    import uuid
+
+    from services.study import compile as study_compile
+    from services.study import forks as study_forks
+
+    _engine, session_local = _auth_db
+    api_project("w1-sweep-src")
+    _live, org_id, live_name, live_files = _created_with_two_versions(
+        client, session_local, "w1-sweep-src", "w1-sweep-live")
+    _gone, _org, gone_name, gone_files = _created_with_two_versions(
+        client, session_local, "w1-sweep-src", "w1-sweep-gone")
+    # Only the base row's existence keeps the live series from here on.
+    _unpin_base(project_storage_dir("w1-sweep-live"))
+    # A series minted for a base that never became a project (a pre-W2
+    # orphan), and series that are not a study's: a strict parse skips them.
+    never = study_compile.export_series_name(uuid.uuid4(), uuid.uuid4().hex)
+    _put_series(session_local, org_id, never, 40.0)
+    others = ["my prices", f"decision-study:not-a-uuid:{uuid.uuid4().hex}:export",
+              study_compile.export_series_name(uuid.uuid4(), uuid.uuid4().hex) + ":old"]
+    for other in others:
+        _put_series(session_local, org_id, other, 40.0)
+    r = client.delete("/api/projects/w1-sweep-gone")
+    assert r.status_code == 200, r.text
+    assert project_row("w1-sweep-gone") is None
+    assert _series_rows(session_local, gone_name) == 2   # project delete is not GS's
+
+    with session_local() as db:
+        assert study_forks.sweep_leftover_forks(db) == []    # no fork: the series sweep ran
+
+    assert _series_rows(session_local, gone_name) == 0
+    assert not any(f.exists() for f in gone_files)
+    assert _series_rows(session_local, never) == 0
+    assert _series_rows(session_local, live_name) == 2
+    assert all(f.is_file() for f in live_files)
+    for other in others:
+        assert _series_rows(session_local, other) == 1, other
+    with session_local() as db:
+        assert study_compile.sweep_orphan_export_series(db) == []   # idempotent
+    assert _series_rows(session_local, live_name) == 2

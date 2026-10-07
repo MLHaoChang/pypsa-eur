@@ -38,7 +38,9 @@ What it compiles (WP4):
   name ``decision-study:<base_uuid>:<study_id>:export`` (C3), idempotent on
   content; :func:`delete_export_series` its delete (WORKAROUND, see there);
   :func:`discard_export_series_of_failed_creation` the creation rollback's
-  delete, once the base is gone (gate U2-WP6 W2).
+  delete, once the base is gone (gate U2-WP6 W2); :func:`sweep_orphan_export_series`
+  the startup sweep of a series whose base project row is gone (W1: the
+  series is kept while the base project uses it).
 * :func:`bind_on_network` — C6: the commercial block bound on the fork's
   IN-MEMORY network (`binding.bind_commercial`) before the runner writes it.
 * :func:`type_meter_links` — row 28 way (a) (WORKAROUND, Q5).
@@ -76,7 +78,8 @@ __all__ = [
     "SITE_PARTY", "apply_ledger", "bind_on_network", "commercial_from_form",
     "commercial_from_ledger", "delete_export_series",
     "discard_export_series_of_failed_creation", "export_series_name",
-    "library_series_resolver", "mint_export_series", "solver_config", "tariff_to_engine",
+    "library_series_resolver", "mint_export_series", "parse_export_series_name",
+    "solver_config", "sweep_orphan_export_series", "tariff_to_engine",
     "type_meter_links", "with_value_flows",
 ]
 
@@ -535,8 +538,23 @@ def export_series_name(base_uuid: UUID | str, study_id: str) -> str:
     return f"decision-study:{base_uuid}:{study_id}:export"
 
 
+_EXPORT_SERIES_RE = re.compile(
+    r"decision-study:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+    r":([0-9a-f]{32}):export")
+
+
+def parse_export_series_name(name: object) -> tuple[UUID, str] | None:
+    """
+    ``(base_uuid, study_id)`` of a name :func:`export_series_name` mints (a
+    canonical lower-case uuid, a 32-hex study id), else None. Strict: the
+    startup sweep deletes by it, so anything else is not a study's series.
+    """
+    m = _EXPORT_SERIES_RE.fullmatch(name) if isinstance(name, str) else None
+    return None if m is None else (UUID(m.group(1)), m.group(2))
+
+
 def mint_export_series(db, org_id: UUID, *, base_uuid: UUID | str, study_id: str,
-                       study_name: str, tariff: Tariff, snapshots,
+                       study_name: str, base_name: str, tariff: Tariff, snapshots,
                        series: Mapping[str, pd.Series] | None = None,
                        created_by: UUID | None = None, root: Path | None = None
                        ) -> PriceSeriesRef | None:
@@ -548,14 +566,18 @@ def mint_export_series(db, org_id: UUID, *, base_uuid: UUID | str, study_id: str
     Idempotent on content: an unchanged price adds no version; a changed one is
     the next version. None when the tariff has no export price.
 
-    The owner's label (``"<study name> — export price"``) travels in the
-    series' `description`: the helper writes its own `label` and takes none
-    (engine ask). `source` is ``"decision_study"``.
+    The owner's label (``"<study name> — export price (kept while project
+    <base name> exists)"``, gate U2-WP6 W1: the base pins the series, so it
+    outlives the study) travels in the series' `description`: the helper
+    writes its own `label` and takes none (engine ask). `source` is
+    ``"decision_study"``. `put_series` versions on the payload alone, so a
+    re-mint under a new label adds no version and the stored one keeps the
+    label it was minted with.
     """
     if tariff.export.price_per_mwh is not None and tariff.export.series_ref is not None:
         raise CompileError("tariff_export_pricing", "export price and series_ref together")
     name = export_series_name(base_uuid, study_id)
-    label = f"{study_name} — export price"
+    label = f"{study_name} — export price (kept while project {base_name} exists)"
     if tariff.export.price_per_mwh is not None:
         from services.library.export_series import put_flat_export_series
 
@@ -588,7 +610,10 @@ def delete_export_series(db, org_id: UUID, *, base_uuid: UUID | str, study_id: s
                          root: Path | None = None) -> dict[str, Any]:
     """
     Delete EVERY version of the study's export series (owner decision
-    2026-10-05), unless a project of the org still pins it.
+    2026-10-05), unless a project of the org still pins it. Since WP6 the base
+    project pins it, so the study delete keeps it while the base uses it
+    (amended rule, gate U2-WP6 W1) and :func:`sweep_orphan_export_series`
+    deletes it once the base row is gone.
 
     `project_dirs` is REQUIRED (gate U2-S1 C3a): the caller enumerates every
     project directory of the org except the study's own forks (the base
@@ -597,8 +622,8 @@ def delete_export_series(db, org_id: UUID, *, base_uuid: UUID | str, study_id: s
     check. A pin is read from each directory's `library_refs.json` sidecar AND
     from its `solver_config.json` (a ref copied into a config not saved since,
     C3b). A pinned series is kept: ``{"deleted_versions": 0, "kept":
-    "export_series_kept_in_use"}``; an unreadable config keeps it too
-    (``"export_series_pins_unreadable"``).
+    "export_series_kept_in_use"}``; an unreadable config or sidecar keeps it
+    too (``"export_series_pins_unreadable"``).
 
     The Library access is the WORKAROUND :func:`_ic_internals_delete_series`
     (the one place GS touches IC internals for it); it COMMITS `db`, as
@@ -665,7 +690,9 @@ def _ic_internals_delete_series(db, org_id: UUID, name: str, *, project_dirs: li
     from services.storage_paths import library_file
 
     for d in project_dirs:
-        pins, _issues = bundle_pins.read_pins(d)
+        pins, issues = bundle_pins.read_pins(d)
+        if issues:  # a sidecar that cannot be read might pin it
+            return {"deleted_versions": 0, "kept": "export_series_pins_unreadable"}
         if any(p.get("id") == name for p in pins):
             return {"deleted_versions": 0, "kept": "export_series_kept_in_use"}
         cfg_path = d / "solver_config.json"
@@ -693,6 +720,62 @@ def _ic_internals_delete_series(db, org_id: UUID, name: str, *, project_dirs: li
         if still is None:
             library_file(root, org_id, rel).unlink(missing_ok=True)
     return {"deleted_versions": len(rows), "kept": None}
+
+
+def sweep_orphan_export_series(db, *, root: Path | None = None) -> list[str]:
+    """
+    Delete every version of each study export series whose BASE PROJECT ROW
+    no longer exists (gate U2-WP6 W1, owner 2026-10-06: deleting the base is
+    what makes the series go; project delete is not GS-owned). Returns the
+    names deleted.
+
+    Run by the startup sweep (`forks.sweep_leftover_forks`). Strict: only a
+    name :func:`parse_export_series_name` reads whose latest version's source
+    is ``"decision_study"``; a malformed name is skipped. Never a series whose
+    base uuid names ANY project row (also of another org: the conservative
+    reading of "never while the base exists"). The pin check stays honest:
+    every remaining project directory of the series' org is passed to
+    :func:`_ic_internals_delete_series`, so a project that copied the ref
+    keeps it. Listing the org's series (`series_store.list_series`) is outside
+    the frozen facade, like :func:`library_series_resolver` (Q15). A failure
+    on one series is logged and the sweep goes on. COMMITS `db`.
+    """
+    import logging
+
+    from sqlalchemy import select
+
+    from db.models import Organization, Project
+    from services import project_registry
+    from services.library import series_store
+
+    log = logging.getLogger(__name__)
+    swept: list[str] = []
+    for org_id in db.scalars(select(Organization.id)).all():
+        dirs: list[Path] | None = None
+        for ref in series_store.list_series(db, org_id):
+            parsed = parse_export_series_name(ref.id)
+            if parsed is None or ref.source != EXPORT_SERIES_SOURCE:
+                continue
+            if db.get(Project, parsed[0]) is not None:
+                continue
+            try:
+                if dirs is None:
+                    dirs = [project_registry.project_dir(p) for p in db.scalars(
+                        select(Project).where(Project.org_id == org_id)).all()]
+                out = _ic_internals_delete_series(db, org_id, ref.id, project_dirs=dirs,
+                                                  root=root)
+            except Exception:  # noqa: BLE001 — one series never stops the sweep
+                db.rollback()
+                log.exception("study: could not sweep export series %s", ref.id)
+                continue
+            if out["kept"] is None:
+                swept.append(ref.id)
+                log.info("study: swept export series %s (%d versions; its base is gone)",
+                         ref.id, out["deleted_versions"])
+            else:
+                log.info("study: export series %s of a gone base kept (%s)", ref.id,
+                         out["kept"])
+    return swept
 
 
 # ── C6: bind on the fork's network; row 28 ────────────────────────────────

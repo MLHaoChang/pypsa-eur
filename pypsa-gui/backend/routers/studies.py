@@ -29,6 +29,7 @@ runs before the project is resolved and cannot serve as an existence oracle.
 """
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from datetime import datetime, UTC
@@ -62,6 +63,8 @@ from services.study import packs
 from services.study import questions as study_questions
 from services.study import run_hashes
 from services.study import runner as study_runner
+
+logger = logging.getLogger(__name__)
 
 OPEN_ITEMS_1 = (
     "OPEN-ITEMS 1 (docs/superpowers/OPEN-ITEMS.md, item 1: the user-timeseries "
@@ -499,6 +502,10 @@ def delete_study(study_id: str,
     Refused (409) while the study is running or while an owned fork cannot
     be removed (an active queue job, or a project branched from it); nothing
     is deleted then.
+
+    Then the study's export series (gate U2-WP6 W1, owner: "kept while the
+    base project uses it"): `_cascade_export_series`. The answer stays 204;
+    the outcome is in the ``X-Study-Export-Series`` header and the log.
     """
     _refuse_unless_enabled()
     _check_lock(db, project, user)
@@ -519,7 +526,52 @@ def delete_study(study_id: str,
             store.delete_study(_project_dir(project), study_id)
         except store.StudyNotFound:
             raise HTTPException(404, "Study not found") from None
-    return Response(status_code=204)
+        # The series LAST, after the forks and the record: the runner reads
+        # the record before it mints, so once the record is gone no run of
+        # this study can mint a version after this delete. A series delete
+        # that fails here then leaves only Library rows (removed by the
+        # startup sweep once the base row is gone), never a study whose
+        # record survives without its series.
+        outcome = _cascade_export_series(db, project, study_id,
+                                         {str(r.id) for r in forks})
+    return Response(status_code=204, headers={"X-Study-Export-Series": outcome})
+
+
+def _cascade_export_series(db: DBSession, project: AuthorizedProject, study_id: str,
+                           fork_ids: set[str]) -> str:
+    """
+    Delete every version of the study's export series unless a project of
+    the org pins it, and return the outcome: ``deleted:<versions>``, the kept
+    code (``export_series_kept_in_use`` — the normal case, since the base
+    pins it — or ``export_series_pins_unreadable``) or
+    ``export_series_delete_failed``. The pin sources are every project
+    directory of the org EXCEPT the study's own forks (already deleted; left
+    out in case a row lingers); the base is included. Never raises: the
+    forks and the record are gone by now.
+    """
+    from sqlalchemy import select
+
+    from db.models import Project
+    from services import project_registry
+    from services.study import compile as study_compile
+
+    try:
+        org_id = uuid.UUID(str(project.org_id))
+        dirs = [project_registry.project_dir(p) for p in db.scalars(
+            select(Project).where(Project.org_id == org_id)).all()
+            if str(p.id) not in fork_ids]
+        out = study_compile.delete_export_series(
+            db, org_id, base_uuid=project.uuid, study_id=study_id, project_dirs=dirs)
+    except Exception:  # noqa: BLE001 — never fail a delete that already happened
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        logger.exception("study %s deleted; its export series was not", study_id)
+        return "export_series_delete_failed"
+    outcome = out["kept"] or f"deleted:{out['deleted_versions']}"
+    logger.info("study %s deleted; export series %s", study_id, outcome)
+    return outcome
 
 
 def _base_row(project: AuthorizedProject, db: DBSession, user: User | None):
@@ -671,7 +723,7 @@ def _create_pack_study(body: StudyCreate, project: AuthorizedProject,
             minting = True
             ref = study_compile.mint_export_series(
                 db, row.org_id, base_uuid=row.id, study_id=study_id, study_name=body.name,
-                tariff=tariff, snapshots=network.snapshots)
+                base_name=row.name, tariff=tariff, snapshots=network.snapshots)
             bound = packs.bind_option(
                 network, packs.option_commercial(body.intake, ledger, library,
                                                  network.snapshots, export_series=ref),

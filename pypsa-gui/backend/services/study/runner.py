@@ -645,7 +645,7 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
         try:
             ref = study_compile.mint_export_series(
                 db, base_row.org_id, base_uuid=base_row_id, study_id=study_id,
-                study_name=study.name, tariff=tariff, snapshots=idx)
+                study_name=study.name, base_name=base_row.name, tariff=tariff, snapshots=idx)
         except study_compile.CompileError as exc:
             raise packs.PackError(exc.code, exc.message) from None
         compiled = packs.option_commercial(intake, ledger, library, idx, export_series=ref)

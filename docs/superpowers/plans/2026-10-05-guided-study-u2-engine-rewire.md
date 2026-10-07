@@ -392,7 +392,14 @@ Adapt in place (WP3–WP8 as their code moves): `test_study_pack.py` (36: no pri
 - **Stage-1 guesses corrected.** IC has no `commercial_strategy_*` codes: rolling is refused by `refuse_windowed_terms` (preflight `commercial.binding_invalid`); myopic on a flat network is refused by the solver (`myopic_no_periods`) — IC does not window a single-period myopic solve. GS's cost breakdown left the demand charge out; IC's total includes it (Commercial component).
 - **Workarounds (engine asks).** `compile.library_series_resolver` (`series_store.resolve` outside the frozen facade, Q15); `binding.bind_commercial` (Q15); `compile._refuse_inactive_meter_links` — IC's `validate_for_network` accepts an INACTIVE `poc_link` and the solve then dies with a raw `KeyError` (GS refused it typed); the study refuses `import_link_inactive` at bind until IC does.
 - **Kept on purpose.** `tests/golden/site_fixture.py` stays the GS oracle (writes GS prices and `demand_charge` itself; WP10 rewrites it). The GS wrapper, `SolverConfig.demand_charge`, `write_tariff_prices` and the F1-B4 bridge term are unused by the guided path (`test_the_guided_path_does_not_use_the_gs_demand_wrapper_or_link_prices`) and go in WP10.
-- **Open for WP7/WP8.** The minted series is not yet deleted with the study (C3 delete cascade + sweep: WP8); a stored pre-WP6 study's tornado refuses, its case and findings still read (C6 stale path: WP8); C5 (meter Links way a) untouched.
+- **WP6 gate (2026-10-06, `docs/superpowers/notes/2026-10-06-u2-wp6-gate.md`): GO with W1–W5.** W2, W3 and W5 are fixed in `c1e032f7`.
+  - W1 is fixed per the owner's amendment (§ Minted export series):
+    - the study delete cascades to the series with the base among the pin sources, so the series is normally kept, and the outcome is in `X-Study-Export-Series`;
+    - the label says "kept while project <base> exists";
+    - `sweep_leftover_forks` then sweeps series whose base row is gone;
+    - an unreadable pin sidecar keeps the series.
+  - W4 (C6) stays open for WP8.
+- **Open for WP7/WP8.** A stored pre-WP6 study's tornado refuses, its case and findings still read (C6 stale path: WP8); C5 (meter Links way a) untouched.
 
 ### WP7 — `compile.finance_from_ledger` + `engine_adapter.option_case` (C1, C2, C4, C5)
 **Tests.** WP2's case targets green: S5 table = WP0 to 1e-9 (IRR 1e-9 absolute); §4.6 identity ≤ 1e-6; WACC gate consistent at the centre and `differs` (accepted) on rate bounds only; post-tax KPIs `None` with reasons; no `contingency_share` → `contingency_share_missing`; `escalation_tariff=None` → `escalation_missing:tariff`; C1 (once S0 lands): the two upfront parts through `upfront_parts` equal the ledger's and leave the objective and sizes byte-identical; C5 bounds equal GS's `_capex_bound` / `_rate_bound` NPVs (WP0) and re-read no network; `case_streams_reconcile_with_engine`. **Mutations:** `salvage_rule → none` → identity red; set `overnight_cost` on the StorageUnit → LP-identity red; `escalation_tariff = 0.02` → real-basis red.

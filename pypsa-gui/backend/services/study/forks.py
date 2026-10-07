@@ -32,7 +32,9 @@ child project of the study's own base project (M0), named deterministically
   has branched a scenario from, rather than cascading into the user's copy.
 * **The startup sweep** (:func:`sweep_leftover_forks`, called by
   ``main.lifespan``; plan S9, gate S6 [N7]) removes what a crash left behind:
-  throw-away variant forks, and option forks whose study record is gone.
+  throw-away variant forks, and option forks whose study record is gone. It
+  then sweeps the study export series whose base project row is gone
+  (``compile.sweep_orphan_export_series``, gate U2-WP6 W1).
 """
 from __future__ import annotations
 
@@ -292,6 +294,12 @@ def sweep_leftover_forks(db) -> list[str]:
     Every deletion goes through :func:`delete_fork`, which verifies ownership
     again and refuses a fork with an active queue job or a child project; a
     refusal is logged and the fork kept. Never raises for one fork.
+
+    Then, from here because ``main`` calls only this (gate U2-WP6 W1): the
+    study export series whose base project row is gone
+    (``compile.sweep_orphan_export_series``), AFTER the forks so a swept fork
+    is not counted as a pin. Logged, not returned; a failure there never
+    loses the fork sweep.
     """
     from sqlalchemy import select
 
@@ -339,4 +347,13 @@ def sweep_leftover_forks(db) -> list[str]:
                            getattr(row, "name", "?"), exc.code)
         except Exception:  # noqa: BLE001 — one fork never stops the sweep
             logger.exception("forks: could not sweep %s", getattr(row, "name", "?"))
+    try:
+        from services.study import compile as study_compile
+
+        series = study_compile.sweep_orphan_export_series(db)
+        if series:
+            logger.info("forks: swept %d export series of gone base projects: %s",
+                        len(series), ", ".join(series))
+    except Exception:  # noqa: BLE001 — a failed series sweep keeps the series, not the boot
+        logger.exception("forks: export series sweep failed; continuing without it")
     return swept

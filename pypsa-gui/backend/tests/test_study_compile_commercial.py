@@ -455,6 +455,26 @@ def test_the_export_series_name_carries_base_and_study():
     assert len(name) <= 128
 
 
+def test_the_export_series_name_parses_strictly():
+    """
+    Gate U2-WP6 W1: the startup sweep reads the base uuid and the study id
+    back out of a Library name; anything not minted by
+    :func:`export_series_name` is not a study series and is never touched.
+    """
+    import uuid
+
+    base, sid = uuid.UUID(int=0xABCDEF), "a" * 32
+    assert _C().parse_export_series_name(_C().export_series_name(base, sid)) == (base, sid)
+    for bad in (f"decision-study:{base}:{sid}:export ", f"decision-study:{base}:{sid}:import",
+                f"decision-study:{str(base).upper()}:{sid}:export",
+                f"decision-study:{base.hex}:{sid}:export",
+                f"decision-study:{base}:{'A' * 32}:export",
+                f"decision-study:{base}:{sid[:-1]}:export",
+                f"decision-study:{base}:{sid}:x:export", f"xdecision-study:{base}:{sid}:export",
+                "decision-study:not-a-uuid:" + sid + ":export", "my prices", "", None, 7):
+        assert _C().parse_export_series_name(bad) is None, bad
+
+
 @pytest.fixture
 def local_db(_auth_db, monkeypatch, tmp_path):
     import local_mode
@@ -478,18 +498,77 @@ def test_the_export_series_is_minted_once_per_study_and_versioned_by_content(loc
     with session_local() as db:
         def mint(t):
             return _C().mint_export_series(db, org, base_uuid=base, study_id=sid,
-                                           study_name="Site A", tariff=t, snapshots=JAN_FEB,
-                                           root=root)
+                                           study_name="Site A", base_name="Base A",
+                                           tariff=t, snapshots=JAN_FEB, root=root)
         ref = mint(form)
         assert ref.id == _C().export_series_name(base, sid) and ref.version == 1
         assert ref.source == "decision_study"
         assert mint(form).version == 1                     # unchanged price: no new version
         assert mint(_form(export={"price_per_mwh": 41.0})).version == 2
         meta = series_store.series_meta(db, org, ref)
-        assert meta["description"] == "Site A — export price"
+        assert meta["description"] == "Site A — export price (kept while project Base A exists)"
         got = series_store.resolve(db, org, ref, root=root)
         assert np.allclose(got.to_numpy(), 40.0) and len(got) == len(JAN_FEB)
         assert mint(_form()) is None                       # no export price: nothing minted
+
+
+def test_a_re_mint_under_the_kept_while_label_adds_no_version(local_db):
+    """
+    Gate U2-WP6 W1: the label names the base project, and `put_series`
+    versions on the payload alone, so a re-mint with an unchanged price adds
+    no version — also over a series minted under the pre-W1 label, which
+    keeps its stored label — while a changed price is the next version, under
+    the new label.
+    """
+    import uuid
+
+    from services.library import series_store
+    from services.library.export_series import put_flat_export_series
+
+    session_local, org, root = local_db
+    base, sid = uuid.uuid4(), "1" * 32
+    name = _C().export_series_name(base, sid)
+    with session_local() as db:
+        def mint(price):
+            return _C().mint_export_series(db, org, base_uuid=base, study_id=sid,
+                                           study_name="Site A", base_name="Base A",
+                                           tariff=_form(export={"price_per_mwh": price}),
+                                           snapshots=JAN_FEB, root=root)
+        old = put_flat_export_series(db, org, name, 40.0, snapshots=JAN_FEB,
+                                     source="decision_study",
+                                     description="Site A — export price", root=root)
+        assert mint(40.0) == old and mint(40.0).version == 1
+        assert series_store.series_meta(db, org, old)["description"] == "Site A — export price"
+        v2 = mint(41.0)
+        assert v2.version == 2 and mint(41.0) == v2
+        assert (series_store.series_meta(db, org, v2)["description"]
+                == "Site A — export price (kept while project Base A exists)")
+
+
+def test_an_unreadable_pin_sidecar_keeps_the_series(local_db, tmp_path):
+    """
+    The pin check reads every project of the org: a `library_refs.json` it
+    cannot read might pin the series, so the series is kept, never deleted on
+    a guess.
+    """
+    import uuid
+
+    from services.library import bundle_pins, series_store
+
+    session_local, org, root = local_db
+    base, sid = uuid.uuid4(), "2" * 32
+    with session_local() as db:
+        ref = _C().mint_export_series(db, org, base_uuid=base, study_id=sid, study_name="A",
+                                      base_name="Base A",
+                                      tariff=_form(export={"price_per_mwh": 40.0}),
+                                      snapshots=JAN_FEB, root=root)
+        broken = tmp_path / "broken_pins"
+        broken.mkdir()
+        (broken / bundle_pins.SIDECAR_NAME).write_text("{not json")
+        out = _C().delete_export_series(db, org, base_uuid=base, study_id=sid, root=root,
+                                        project_dirs=[_empty_project(root), broken])
+        assert out == {"deleted_versions": 0, "kept": "export_series_pins_unreadable"}
+        assert series_store.latest_ref(db, org, ref.id) is not None
 
 
 def _empty_project(root):
@@ -515,12 +594,14 @@ def test_a_copied_studys_series_survives_the_origins_delete(local_db):
     form = _form(export={"price_per_mwh": 40.0})
     with session_local() as db:
         a1 = _C().mint_export_series(db, org, base_uuid=origin, study_id=sid, study_name="A",
-                                     tariff=form, snapshots=JAN_FEB, root=root)
+                                     base_name="Base A", tariff=form, snapshots=JAN_FEB,
+                                     root=root)
         _C().mint_export_series(db, org, base_uuid=origin, study_id=sid, study_name="A",
-                                tariff=_form(export={"price_per_mwh": 41.0}), snapshots=JAN_FEB,
-                                root=root)
+                                base_name="Base A", tariff=_form(export={"price_per_mwh": 41.0}),
+                                snapshots=JAN_FEB, root=root)
         b1 = _C().mint_export_series(db, org, base_uuid=copy, study_id=sid, study_name="A copy",
-                                     tariff=form, snapshots=JAN_FEB, root=root)
+                                     base_name="Base A copy", tariff=form, snapshots=JAN_FEB,
+                                     root=root)
         out = _C().delete_export_series(db, org, base_uuid=origin, study_id=sid, root=root,
                                         project_dirs=[_empty_project(root)])
         assert out == {"deleted_versions": 2, "kept": None}
@@ -537,6 +618,7 @@ def test_a_pinned_series_is_kept_and_reported(local_db, tmp_path):
     base, sid = uuid.uuid4(), "d" * 32
     with session_local() as db:
         ref = _C().mint_export_series(db, org, base_uuid=base, study_id=sid, study_name="A",
+                                      base_name="Base A",
                                       tariff=_form(export={"price_per_mwh": 40.0}),
                                       snapshots=JAN_FEB, root=root)
         other = tmp_path / "expert_project"
@@ -562,6 +644,7 @@ def test_a_delete_without_pin_sources_is_refused(local_db, dirs):
     base, sid = uuid.uuid4(), "e" * 32
     with session_local() as db:
         ref = _C().mint_export_series(db, org, base_uuid=base, study_id=sid, study_name="A",
+                                      base_name="Base A",
                                       tariff=_form(export={"price_per_mwh": 40.0}),
                                       snapshots=JAN_FEB, root=root)
         with pytest.raises(_C().CompileError) as exc:
@@ -587,7 +670,7 @@ def test_a_failed_creations_series_is_discarded_unless_another_project_pins_it(
     with session_local() as db:
         def mint(base, sid, price=40.0):
             return _C().mint_export_series(db, org, base_uuid=base, study_id=sid,
-                                           study_name="A",
+                                           study_name="A", base_name="Base A",
                                            tariff=_form(export={"price_per_mwh": price}),
                                            snapshots=JAN_FEB, root=root)
         base, sid = uuid.uuid4(), "7" * 32
@@ -625,6 +708,7 @@ def test_a_ref_in_a_projects_commercial_config_keeps_the_series(local_db, tmp_pa
     base, sid = uuid.uuid4(), "f" * 32
     with session_local() as db:
         ref = _C().mint_export_series(db, org, base_uuid=base, study_id=sid, study_name="A",
+                                      base_name="Base A",
                                       tariff=_form(export={"price_per_mwh": 40.0}),
                                       snapshots=JAN_FEB, root=root)
         expert = tmp_path / "expert_unsaved"
@@ -657,10 +741,11 @@ def test_the_delete_never_reaches_another_orgs_series(local_db):
         db.add(Organization(id=other, name="other org", created_at=datetime.now(UTC)))
         db.commit()
         mine = _C().mint_export_series(db, org, base_uuid=base, study_id=sid, study_name="A",
-                                       tariff=form, snapshots=JAN_FEB, root=root)
+                                       base_name="Base A", tariff=form, snapshots=JAN_FEB,
+                                       root=root)
         theirs = _C().mint_export_series(db, other, base_uuid=base, study_id=sid,
-                                         study_name="A", tariff=form, snapshots=JAN_FEB,
-                                         root=root)
+                                         study_name="A", base_name="Base A", tariff=form,
+                                         snapshots=JAN_FEB, root=root)
         out = _C().delete_export_series(db, org, base_uuid=base, study_id=sid, root=root,
                                         project_dirs=[_empty_project(root)])
         assert out == {"deleted_versions": 1, "kept": None}
