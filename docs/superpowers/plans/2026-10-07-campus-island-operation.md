@@ -13,7 +13,7 @@ On 2026-10-07 the owner asked for two things:
   are to be exercised in the steady-state load flow, in the short-circuit
   analysis, and partly in that frequency check.
 
-Multi-bus RMS (I8) is gated behind its own decision. EMT stays a flag.
+Multi-bus RMS (I8) waits on a legal check (Q4). EMT stays a flag.
 
 ## The goal
 
@@ -57,17 +57,21 @@ grid-code checks are a follow-up (see Out of scope).
 | Converter control | Control strategies become a **unit attribute** (I1). They are implemented and tested in the steady-state load flow (I4), the short-circuit analysis (I5), and the frequency check (I6), and later in RMS (I8). |
 | Steps | 1 sizing, 2 island critical hours, 3 island steady state and short circuit, 4 frequency. |
 
-### Open questions for the owner (recommended defaults, used until answered)
+### Owner decisions (2026-10-07, second round)
 
-| # | question | recommended default |
+All nine were answered on 2026-10-07. Each took the recommended answer.
+
+| # | question | decision |
 |---|---|---|
-| Q1 | Ride-through duration required | No silent default. The template ships 24 h, tagged `assumed`, and the panel asks for it. |
-| Q2 | Frequency limits (RoCoF, nadir, quasi-steady-state, UPS input window) | Profile settings tagged `assumed` (1 Hz/s over 500 ms, ±2.5 Hz nadir, ±1 Hz quasi-steady-state). ISO 8528-5 class limits are entered by the user, not shipped: the standard is not freely available, so it gets the same treatment as VDE in the campus plan. |
-| Q3 | Which islanding scenarios are studied | All three, as an enum per study: `seamless` (an online GFM BESS takes the step), `ups_bridged` (dead bus, gensets start, UPS carries the IT load meanwhile), `planned` (the site ramps up first, then opens the PCC). The template default is `ups_bridged` plus `seamless`. |
-| Q4 | ANDES is GPL-3.0 (I8) | Check the licence policy before I8, as was done for PowSyBl's MPL. I1–I7 do not depend on it. |
-| Q5 | Island constraints in the hub LP | **Opt-in** per project. The template ships them enabled, in its sidecar. |
-| Q6 | Frequency results fed back into sizing (I7) | Off by default. The user applies them with an explicit "apply cuts" action, which re-solves the hub. This respects the 2026-10-05 rule that gridspine does not silently re-size the hub. |
-| Q7 | Gensets running in parallel with the grid ("spinning") | Per genset, a flag in the sidecar, default off (cold standby). Turning on genset unit commitment (MILP) is ledgered, not default. |
+| Q1 | How the outage ride-through is specified | **Two durations.** A **bridge** time in seconds to minutes (UPS/BESS until the gensets are online) is checked in I6 (E4). A **sustained** time in hours (gensets, fuel, BESS) is an I2 constraint, from every start hour. Fuel autonomy is its own input. The template ships 24 h sustained, tagged `assumed`, and the panel asks for it. Critical load = IT plus the cooling the IT needs; offices are not critical. |
+| Q2 | Where the frequency limits come from | **From the most sensitive island equipment, with defaults.** The equipment is the UPS input window, the chiller and drive trips, and the genset ISO 8528-5 class. The class limits are user-entered, because the standard is not freely available (the same treatment as VDE). Until entered, the defaults are tagged `assumed`: 47.5 Hz lowest frequency (the bottom of the RfG continuous-operation band in Continental Europe), ±1 Hz quasi-steady-state, and 1 Hz/s RoCoF over 500 ms. The limits for the transition and for steady island operation are kept separate. The report names the binding limit. |
+| Q3 | Which islanding scenarios are studied | **All three:** `ups_bridged`, `seamless` and `planned`. `ups_bridged` and `seamless` are compared side by side, which gives the client the cost of seamless islanding. In `seamless`, the gensets start and join the BESS-formed island after their start delay. |
+| Q4 | Multi-bus RMS, given ANDES is GPL-3.0-or-later (confirmed from the wheel metadata) | **ANDES as an optional engine in its own process**, exchanging files as the gridspine stages do. It is not bundled in the desktop app. The **PSS/E/PowerFactory export** is built as the client-grade route. A short legal check comes before I8. |
+| Q5 | Island constraints in the hub LP | **Opt-in** per project; the template ships them enabled. A regression test guards that results are unchanged when they are off. |
+| Q6 | Frequency failures fed back into sizing (I7) | **Manual, with a preview.** The panel shows the failed hours, the proposed cut and its estimated cost, and the user applies it with "apply cuts". It becomes automatic only once a project's parameters are mostly datasheet-backed. |
+| Q7 | Gensets running in parallel with the grid | **Cold standby by default**, a per-genset `spinning` flag, and **optional linearised unit commitment** (PyPSA `linearized_unit_commitment`), so the LP can buy spinning capacity at its fuel cost. A full unit-commitment MILP stays out of scope. |
+| Q8 | GFM short-time current limit | **1.2 pu, tagged `assumed`**, with a request for the datasheet value, and a **report sensitivity at 1.2 / 1.5 / 2.0 pu** (I5, I6). |
+| Q9 | Unbalanced faults | **Their own increment, I5b, straight after I5.** |
 
 ## What exists today (surveyed 2026-10-07)
 
@@ -134,7 +138,7 @@ grid-code checks are a follow-up (see Out of scope).
    - the exciters `SEXS`, `ESST4B`, `AC8B` and others;
    - a pandapower importer (`andes.interop.pandapower`).
 
-   I8 is therefore feasible in-tree, subject to Q4.
+   I8 is therefore feasible, as a separate-process engine (Q4).
 
 ## The control strategies
 
@@ -199,12 +203,19 @@ the pattern of `dtc_config.json` and is validated by a pydantic model in
 - for UPS units: `it_load` (the Load it protects), `autonomy_min`,
   `walk_in_s`, `f_window_hz`, `efficiency`;
 - the requirements:
-  - `ride_through_h` (Q1);
+  - `bridge_s`, `sustained_h` and `fuel_autonomy_h` (Q1);
   - `scenarios` (Q3);
-  - the RoCoF, nadir and quasi-steady-state limits (Q2);
+  - the frequency limits (Q2), as two sets: `transition` and
+    `steady_island`. Each set holds RoCoF, the lowest and highest
+    frequency, and the quasi-steady-state band;
   - `rocof_window_ms`;
   - `gfm_margin`;
-  - the critical loads (reusing the DtC critical tags).
+  - `i_max_sensitivity_pu` (Q8), default `[1.2, 1.5, 2.0]`;
+  - the critical loads, reusing the DtC critical tags. The default is IT
+    plus the cooling the IT needs (Q1).
+- **Equipment limits per load (Q2):** an optional `f_trip_hz` and
+  `v_trip_pu` for chillers and drives. With the UPS `f_window_hz` and the
+  genset class limits, these are what the binding limit is chosen from.
 
 **Every value is tagged** `measured | datasheet | assumed`.
 
@@ -214,7 +225,8 @@ the pattern of `dtc_config.json` and is validated by a pydantic model in
 - `draft_campus` copies them from the sidecar, so the hub and the campus
   never disagree.
 - Defaults live in `producers/campus.py`, tagged `assumed`:
-  - BESS `gfm_droop`, R 4 %, τ_f 0.1 s, i_max 1.2 pu;
+  - BESS `gfm_droop`, R 4 %, τ_f 0.1 s, i_max 1.2 pu (Q8: tagged
+    `assumed`; the panel asks for the datasheet value);
   - PV `gfl_qu`;
   - genset `droop`, R 4 %, H 1.5 s, T_g 0.5 s, start 10 s.
 
@@ -245,6 +257,8 @@ composed like `adequacy.py`. It runs per period. Δ is the hourly weight. For
 each hour t, with the critical load L_c(t) and the import flow p_imp(t):
 
 **(a) Ride-through energy.**
+- D is `sustained_h` (Q1). The seconds-to-minutes bridge is not an hourly
+  question; I6 checks it (E4).
 - For an outage of duration D starting at t, define the deficit the gensets
   leave, d(t,τ) ≥ L_c(τ) − Σ_g avail_g(τ)·p_nom_g for τ ∈ [t, t+D), with
   d ≥ 0.
@@ -254,16 +268,25 @@ each hour t, with the critical load L_c(t) and the import flow p_imp(t):
 - PV is left out, which is conservative and ledgered.
 - The start hours are strided (`ride_through_stride_h`, default 1 on the
   168 h week) to bound the O(T·D) rows.
-- With `fuel_store` set, the genset fuel draw over D must fit the fuel
-  Store's `e_nom`.
+- **Fuel (Q1).** With `fuel_store` set, the genset fuel draw over
+  `fuel_autonomy_h` must fit the fuel Store's `e_nom`. Fuel autonomy is its
+  own input, because client specifications state it separately from D.
 
 **(b) Power headroom at the instant of islanding** (scenario `seamless`).
 - Define ΔP_isl(t) = p_imp(t) − P_ups,it(t). The IT load the UPS carries
   leaves the island at t = 0.
 - The constraint is:
   Σ_{s∈GFM} (p_nom_s − p_s(t)) + Σ_{g spinning} (avail_g·p_nom_g − p_g(t)) ≥ ΔP_isl(t).
+- In `seamless` (Q3), the gensets start and join the BESS-formed island
+  after `start_s`. So (b), (d) and (e) count only the units online at
+  t = 0, while (a) counts the gensets from the first hour.
 - Under `ups_bridged`, the step is instead the largest pickup block onto the
   started gensets: Σ_g load_step_max_g·p_nom_g ≥ the largest block.
+- `planned` adds no constraint: the site ramps up first. It is reported, and
+  its ramp is checked in I6.
+- **Side-by-side (Q3).** The study solves `ups_bridged` and `seamless` as
+  two variants. Their cost difference is reported as the **cost of
+  seamless islanding**.
 
 **(c) Grid-forming MVA.**
 - Σ_{s∈GFM} s_nom_s + Σ_{g online in island} s_nom_g ≥ (1 + gfm_margin)·L_island(t).
@@ -277,6 +300,14 @@ each hour t, with the critical load L_c(t) and the import flow p_imp(t):
 
 **(e) Quasi-steady-state frequency.**
 - Σ_i p_nom_i / (R_i·f0) · Δf_qss,max ≥ ΔP_isl(t).
+
+**(f) Spinning gensets (Q7).**
+- The default is cold standby: a genset counts in (b), (d) and (e) only
+  when its `spinning` flag is set.
+- With `linearised_uc: true`, the gensets become committable with PyPSA's
+  `linearized_unit_commitment`. The online capacity u_g(t)·p_nom_g then
+  enters (b), (d) and (e), and costs fuel at its minimum load.
+- A full unit-commitment MILP stays out of scope.
 
 **The nadir is not in the LP.** I6 checks it, and I7 may feed cuts back.
 
@@ -297,6 +328,10 @@ answer is worked by hand:
 - (b) 10 MW import, UPS carries 6 MW: the BESS needs 4 MW of headroom.
 - (d) ΔP 4 MW, f0 50, RoCoF_max 1 Hz/s, H_v 4 s: s_nom ≥ 25 MVA.
 - (e) by hand.
+- (f) a spinning flag turns a genset's headroom on in (b); with linearised
+  UC, the LP buys exactly the online capacity (b) requires, by hand.
+- `ups_bridged` against `seamless` on the same hand network: the reported
+  cost difference equals the hand-worked cost of the extra BESS headroom.
 - Constraints off: the solution is identical to today's (a regression guard
   over all three hub templates).
 - Mutations.
@@ -401,6 +436,10 @@ empty island config adds nothing.
   - a "protection blind in island" verdict when it fails.
 - **The ratio of grid-connected Ik''max to island Ik''min**, reported per
   bus. It is the setting-group question for the protection engineer.
+- **The GFM current-limit sensitivity (Q8).** The island min case and the
+  protection verdict are rerun at each `i_max_sensitivity_pu` value (default
+  1.2 / 1.5 / 2.0 pu). The report shows whether oversizing the inverter
+  turns a "protection blind" bus into a pass.
 
 **Tests:**
 - Genset-only island against the IEC formula with K_G, worked by hand
@@ -412,6 +451,41 @@ empty island config adds nothing.
 - The protection verdict on both sides of s.
 - Grid-connected results are unchanged for converters, and changed for
   gensets only by the `gen` model, with the delta explained in the test.
+- The sensitivity: Ik''min in an inverter-only island scales linearly with
+  i_max, by hand.
+- Mutations.
+
+### I5b: unbalanced faults (M; owner Q9)
+
+This increment comes straight after I5, in its own PR.
+
+**What it adds.**
+- Single-phase-to-earth and phase-to-phase faults, grid-connected and
+  islanded, through pandapower `calc_sc(fault="1ph" | "2ph")`.
+- The data it needs:
+  - zero-sequence data on transformers (vector group, `vk0_percent`,
+    `vkr0_percent`) and on cables (`r0`, `x0`, `c0`), drafted with typical
+    values tagged `assumed`;
+  - the earthing of each transformer neutral (solid, resistance, isolated)
+    as a campus YAML field.
+- **Converters as positive-sequence-only sources.** This is the common GFL
+  behaviour, and it is what makes earth faults hard to detect in an
+  inverter-heavy island. GFM negative-sequence capability is an optional,
+  tagged per-unit field (default none).
+- **The inverter-only island case** extends I5's own method to the
+  sequence networks: the converters feed only the positive-sequence
+  network.
+- **Earth-fault protection sensitivity:**
+  - an optional `i_pickup_e_ka` per bus or feeder;
+  - a check that the 1-phase Ik min in the island is at least s times it;
+  - the verdict "earth-fault protection blind in island" when it fails.
+
+**Tests:**
+- 1-phase and 2-phase faults on a hand network with a solidly earthed
+  transformer, against the symmetrical-component formulas worked by hand.
+- A positive-sequence-only converter adds nothing to the zero-sequence
+  current, by hand.
+- An isolated neutral gives no earth-fault current, by hand.
 - Mutations.
 
 ### I6: first-pass frequency check — aggregated inertia and droop — step 4a (M)
@@ -445,6 +519,13 @@ empty island config adds nothing.
 - **E3:** the largest unit trip in the island.
 - **E4:** `ups_bridged` start. The bus is dead, the gensets start after
   `start_s`, and the load is picked up in blocks.
+  - **The bridge check (Q1):** UPS/BESS autonomy ≥ `bridge_s`, and ≥
+    `start_s` plus the time to pick up the last block.
+- **E1 under `seamless` (Q3):** the BESS forms the island at t = 0, and the
+  gensets join after `start_s` and take load at their ramp. The BESS
+  energy used before they join is reported against the bridge requirement.
+- **E6 under `planned`:** the gensets and BESS ramp to cover the import, and
+  then the PCC opens with ΔP ≈ 0. The ramp time is reported.
 - **E5:** PV loss in the island (cloud).
 
 **Metrics:**
@@ -454,6 +535,18 @@ empty island config adds nothing.
 - the time to return to within the band;
 - headroom and current saturation flags;
 - UPS window violations.
+
+**Limits (Q2).**
+- Every metric is judged against the most sensitive equipment in the
+  island: the UPS input window, the chiller and drive `f_trip_hz`, and the
+  genset class limits. The profile defaults apply only where nothing is
+  entered.
+- The `transition` limits apply during the event; the `steady_island`
+  limits apply after it.
+- The report names the **binding limit** for each failure, e.g. "UPS
+  window, 18:00, nadir 47.1 Hz against 47.5 Hz".
+- **The GFM current-limit sensitivity (Q8):** E1 and E2 are rerun at each
+  `i_max_sensitivity_pu` value.
 
 **Where it runs.**
 - E1 runs at **every hour**: it takes milliseconds, so it doubles as a
@@ -483,7 +576,7 @@ oscillation and no current-limit dynamics.
   This consistency gate between the two models must hold.
 - Mutations.
 
-### I7: closing the loop — frequency cuts back into sizing (S–M; gated by Q6)
+### I7: closing the loop — frequency cuts back into sizing (S–M; manual, owner Q6)
 
 When I6 fails at hours T_fail, cuts are added to I2 at those hours:
 - **From a failed nadir:** a required H_sys(t) or headroom, obtained by
@@ -491,7 +584,16 @@ When I6 fails at hours T_fail, cuts are added to I2 at those hours:
   It is linear in s_nom.
 - **From a failed recovery:** a required droop gain.
 
-Then the hub is re-solved, and I3, I4 and I6 rerun. This repeats at most N
+**The user applies the cuts (Q6).**
+- The panel previews the failed hours, each proposed cut and the
+  estimated added cost. That cost is the cut's dual on the current
+  solution, labelled as an estimate.
+- Only "apply cuts" re-solves the hub. Nothing applies automatically.
+- Automatic application is reconsidered once a project's frequency
+  parameters are mostly `datasheet` or `measured`.
+
+Once the user applies the cuts, the hub is re-solved, and I3, I4 and I6
+rerun. This repeats at most N
 times, by default 3. It is reported like C11's loop: trial, verdict, cost.
 
 **Tests:**
@@ -499,10 +601,23 @@ times, by default 3. It is reported like C11's loop: trial, verdict, cost.
 - termination at N;
 - no cuts when everything passes.
 
-### I8: multi-bus RMS and the client-grade handoff — step 4b (L; gated by Q4)
+### I8: multi-bus RMS and the client-grade handoff — step 4b (L; legal check first, owner Q4)
 
-**ANDES path** (`handoff/andes_campus.py` plus `static/rms.py`):
-- Convert the island net (I4) through `andes.interop.pandapower`.
+**The licence (Q4).**
+- ANDES is GPL-3.0-or-later, confirmed from the 2.0.0 wheel metadata.
+- So it runs **as an optional engine in its own process**: gridspine writes
+  the island case to files, a separate `andes` environment runs it, and the
+  results come back as files. This is the same file-contract style as the
+  gridspine stages.
+- gridspine never imports `andes`, and the desktop app does not bundle it.
+  A test asserts that no gridspine module imports `andes`.
+- A short legal check comes before any ANDES code lands.
+- The PSS/E path below has no licence question, so it can proceed first.
+
+**ANDES path** (`handoff/andes_campus.py` writes the case; a runner
+script in the separate environment runs it):
+- Convert the island net (I4) through `andes.interop.pandapower`, inside
+  the ANDES process.
 - Attach dynamic models by `control`:
   - REGCA1+REECA1(+REPCA1) for GFL;
   - REGF1 for GFM droop;
@@ -548,10 +663,12 @@ frequency screening, not a certificate. Every `assumed` row is marked.
 ## Order, PRs and agents
 
 - **I1** comes first: everything reads the control modes.
-- Then **I2** in pypsa-gui and **I3 → I4 → I5** in gridspine, in parallel.
-  They share only the I1 schema.
+- Then **I2** in pypsa-gui and **I3 → I4 → I5 → I5b** in gridspine, in
+  parallel. They share only the I1 schema.
 - Then **I6**, which needs the I4 Δf_qss consistency gate, and then **I9**.
-- **I7** and **I8** follow their owner gates (Q6, Q4).
+- **I7** follows I6 and I9, as a manual action (Q6).
+- **I8** starts with its PSS/E path. The ANDES path waits for the legal
+  check (Q4).
 
 The first deliverable of I1 is the sidecar contract and the campus YAML
 fields. It is tested against a hand-built campus with one GFM BESS, one
@@ -564,6 +681,7 @@ through I4–I6.
 | I3 | hand series |
 | I4 | droop sharing by hand; spike 1; PCC re-closed equals today's flow |
 | I5 | IEC 60909 by hand (with K_G); Σk·In; pandapower min-case pin |
+| I5b | symmetrical-component fault formulas by hand |
 | I6 | closed-form RoCoF, second-order nadir, Δf_qss; D'Arco–Suul; I4 agreement |
 | I8 | I6 agreement; ANDES's own examples for each model |
 
@@ -573,10 +691,7 @@ through I4–I6.
   - sub-cycle current limiting;
   - converter control interaction;
   - weak-island harmonics.
-- **Asymmetric faults:** only 3-phase is computed. GFL converters inject
-  mostly positive sequence, which matters for earth-fault protection in an
-  island. **This is a strong ledger item.**
-- **Protection coordination:** only sensitivity is checked (I5).
+- **Protection coordination:** only sensitivity is checked (I5, I5b).
 - **Resynchronisation dynamics.** I4 reports the static sync-check inputs
   (Δf, ΔV), not the transient.
 - **Grid-forming support of the utility grid at the PCC** (GC0137, the RfG
@@ -585,7 +700,8 @@ through I4–I6.
   - an ESCR or impedance screen.
 
   It reuses I1, I5, I6 and I8. It is a follow-up plan.
-- **Genset unit commitment as a MILP** in the hub (Q7).
+- **Genset unit commitment as a MILP** in the hub. Linearised UC is in
+  I2 (f) (Q7).
 - Black start of the utility grid.
 - Tap-changer dynamics.
 - Harmonics and flicker.
