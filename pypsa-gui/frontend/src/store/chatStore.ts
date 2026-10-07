@@ -38,6 +38,9 @@ export interface ChatMessage {
   // string) on every turn the model didn't emit extended thinking for, so
   // the UI can gate the `<details>` on presence rather than length.
   thinking?: string
+  // Replayed from an interrupted turn record: why it ended. Shown under the
+  // bubble; the assistant does not see this turn on later ones.
+  interrupted?: string
   ts: number
 }
 

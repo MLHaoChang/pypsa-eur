@@ -648,17 +648,24 @@ un-pointing removed, and with the wrapper's session dropped, respectively.
 
 Recorded on 2026-09-28 and not counted above. **Each was verified on 2026-10-06**;
 the outcome is given per note. The four that were real are fixed, and so is one
-interaction the #82 merge created. Guard: `tests/test_chat_tool_output_hygiene.py`
+interaction the #82 merge created. The two left open as decisions were settled on
+2026-10-07, and one further defect found then is fixed (entries below). Guard: `tests/test_chat_tool_output_hygiene.py`
 (6 tests), with each fix checked against its mutation.
 
-- **`chat.jsonl` is written only when a turn ends cleanly.** VERIFIED, left as a
-  design decision. A turn ending by abort, the tool-call cap, a mid-turn project
-  switch or a stream error leaves no transcript record, although its mutations ran.
-  They are not unrecorded: the change log has every one. Persisting a partial turn
-  is a design change, not a patch: an interrupted assistant message can end on a
-  `tool_use` with no `tool_result`, and replaying that from `/history` makes every
-  later turn of the session invalid to the provider. That needs an explicit
-  "interrupted turn" record shape and a sanitiser on rehydration.
+- **`chat.jsonl` is written only when a turn ends cleanly.** VERIFIED; left open on
+  2026-10-06 as a design decision, then FIXED on 2026-10-07 with the shape the user
+  chose: record it, display only. A turn ending by abort, the tool-call cap, a
+  mid-turn project switch, a stream error or a client disconnect left no transcript
+  record, although its mutations ran (the change log has every one). Such a turn, if
+  the model produced anything, is now recorded with `interrupted: true` and
+  `interrupted_reason`. Its `assistant` half is what the user saw, read off the turn's
+  frames (streamed text and the names of the tools it asked for), never provider
+  messages. GET /history returns it, so the panel shows it with a note, and skips it
+  when it rebuilds the session's history: the step it stopped in can end on a
+  `tool_use` with no `tool_result`, which makes every later turn invalid to the
+  provider. A refusal before the model's first token still writes nothing; nothing
+  ran, and its error frame said why. Guard: `tests/test_chat_interrupted_turn_record.py`
+  plus a panel test in `ChatPanelSurfaces.test.tsx`, each checked against its mutation.
 - **`export_to_csv` / `export_to_excel` write model-supplied cells unmodified.**
   VERIFIED and FIXED, and worse than noted for xlsx. openpyxl stores any string
   starting with `=` as a live formula (`data_type == "f"`), not merely text a
@@ -668,10 +675,25 @@ interaction the #82 merge created. Guard: `tests/test_chat_tool_output_hygiene.p
   (`"-5"`). xlsx formula cells are re-typed as strings, so the text survives
   unchanged.
 - **`export_*` tools are tagged `Safety: read` but write into the uploads directory
-  and consume quota.** VERIFIED, left as a product decision. Re-tiering them changes
-  their confirmation behaviour, which this register does not decide. The part that
-  was a defect, a non-holder writing into a locked project, is closed at their
-  shared chokepoint (`_save_agent_export` calls `_check_foreign_lock`; CH-4).
+  and consume quota.** VERIFIED. The tier is kept (the user's decision on 2026-10-07:
+  no change to confirmation behaviour) and the wording is FIXED. The four network
+  exports (`export_network_nc`, `export_csv_bundle`, `export_excel`,
+  `export_matpower`) now say they write a file into the project's uploads, count
+  toward the uploads quota, are refused while another user holds the project lock,
+  and leave the network and the project unchanged. The part that was a defect, a
+  non-holder writing into a locked project, is closed at their shared chokepoint
+  (`_save_agent_export` calls `_check_foreign_lock`; CH-4).
+- **The daily token cap counted each turn once per later turn of its session.**
+  Found on 2026-10-07 while building the interrupted-turn record, and FIXED. A turn
+  record's `usage` is `session.usage_acc`, the session's running total (what the
+  panel's token footer shows), and `_today_token_spend` summed it over records.
+  Measured: three 30-token turns on one session read as 180, so the cap tripped at a
+  fraction of its limit. Records now also carry `turn_usage`, the turn's own spend,
+  which the cap reads. Records written before it have only the running total and are
+  still counted that way: an over-count that never hides spend, rather than a guess.
+  Interrupted turns now count too; before, they had no record, so their spend was
+  missing from the cap altogether. Guard: the three spend tests in
+  `tests/test_chat_interrupted_turn_record.py`.
 - **`gridspine_export_handoff_bundle` returns an absolute server path.** VERIFIED and
   FIXED. `str(path)` named the storage root plus the org and project UUIDs, and was
   of no use to anyone, since nothing can fetch a server-side path. The tool now

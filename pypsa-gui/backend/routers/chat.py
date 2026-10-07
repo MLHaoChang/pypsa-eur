@@ -949,6 +949,11 @@ def chat_history(limit: int = 200,
                 with sess._lock:
                     sess.messages.clear()
                     for rec in turns:
+                        # Display only: an interrupted turn's assistant half is
+                        # what the user saw, not provider messages, and the
+                        # step it stopped in can end on an unanswered tool_use.
+                        if chat_service.is_interrupted_turn(rec):
+                            continue
                         user_text = rec.get("user")
                         assistant_blocks = rec.get("assistant")
                         if user_text is not None:

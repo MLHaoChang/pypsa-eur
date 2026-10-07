@@ -68,6 +68,8 @@
   Chat: a tool's project switch reaches the rest of the streamed turn, an import is a rebind (the panel clears the active project, so the autosave can no longer overwrite the previous project), one undo reverts the assistant's last turn, `/history` hands each user their own session, and `/stream` refuses another user's session.
   In server mode a raw import over HTTP is now what the next request sees; the session's active-project pointer was never moved.
 
+* Fix(pypsa-gui): A chat turn that stops before finishing (Stop, the tool-call cap, a project switch, a stream error, a closed tab) is now kept in the transcript and shown after a reload with a note, but never sent back to the model. The daily chat token cap now counts each turn once; it summed every session's running total, so it tripped early. The network-export tools' descriptions now say they write a file into the project's uploads.
+
 ## PyPSA-Eur v2026.02.0 (18th February 2026)
 
 **Features**
