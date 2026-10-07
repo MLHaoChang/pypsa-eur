@@ -10,6 +10,11 @@ its project's `user_ts.json`, and an adequacy-sweep test that could not fail for
 its own regression). Their findings carry the detail. Nothing else was re-verified
 on that date, so the entries below still date from 2026-09-12.
 
+**The High authorization family was re-verified on 2026-09-30** (against
+`a9a1f5b`). Items 2, 3 and 4 were found already fixed — see "Closed since the
+2026-09-12 pass" — and the re-verification turned up a fourth instance of item
+2's defect, entered below as item 12.
+
 This file exists because GitHub Issues is **disabled** on this repository, so
 there is nowhere else to keep a queue. It is deliberately thin: one entry per
 open item, with the anchor and the source document. The analysis lives in
@@ -26,81 +31,48 @@ verification record.
 
 ## High
 
-### 2. `worksheet` and `stress_scenarios` PUTs ignore a foreign edit lock
+### 14. The campus-electrical chat tools bypass the edit-lock check
 
-`routers/adequacy_worksheet.py:43-51` and `:65-71` carry `ProjectAccessDep` (ACL)
-only — no lock check. They are mounted under `/api/projects`, which is
-deliberately absent from the middleware's prefix list because that family is
-covered by in-handler enforcement; these two handlers never got it. Verified: with
-A holding the lock, `PUT .../layout` and `POST .../uploads` are refused 409 while
-`PUT .../worksheet` and `PUT .../stress_scenarios` return 200, replacing the
-sidecar wholesale and bumping `version` so A's client treats B's content as
-authoritative. Both files are in `_BUNDLE_FILES`, so the write propagates into
-bundles and snapshots. Fix: `_check_project_lock(db, _lock_target(project), user)`
-on both, as `routers/uploads.py:182,308` does. Server only.
-
-### 3. `/api/chat/{id}/rewind` and `/abort` perform no authorization
-
-`routers/chat.py:1299-1332` declare no user dependency and consult no owner, org
-or project; `_SESSIONS` is a process-global whose `ChatSession` has no owner
-field. Verified cross-org: a different organization's user called
-`POST /api/chat/<victim>/rewind {"turns":2}` → `200 {"dropped":4}`, emptying the
-victim's session, and `/abort` → 200 with the victim's `abort_event` set. The
-session id is not secret either — `GET /api/chat/history` returns
-`last_session_id` to any co-member who activates the project. (`/confirm` is the
-same family, practically shielded by a uuid4 token: defence by accident.)
-Server only.
-
-### 4. `/api/changelog/` is unscoped for a caller with no OrgMembership
-
-`routers/changelog.py:15-17` returns `None` for a membership-less caller, and
-`change_log_service` reads `org_id=None` as "no filter" and, on DELETE, "clear
-EVERYTHING" — contradicting both its own docstring and the route's. Verified: an
-orgless user reads every tenant's entries and `DELETE /api/changelog/` → 204
-destroys org1's audit trail. Membership-less users are the normal case for the
-shipped first user: `tools/bootstrap_super_admin.py` creates it with no
-OrgMembership. The predicate should be "is a super-admin", not "has no
-membership". Server only.
-
+`services/chat_tools.py`, added by #79 (merged 2026-10-06). The HTTP routes in
+`routers/campus_electrical.py` call `_check_lock` before the service. The chat
+tools `campus_draft_campus` and `campus_run_study` call the service directly,
+and `_gridspine_project` resolves access but not the lock. Reproduced on
+`af69613`: the HTTP draft returned 409 for a non-holder, while
+`campus_draft_campus(overwrite=True)` and `campus_run_study` both reached the
+write path. #84 added a third, `campus_extract_grid_code` (it can add a grid-code draft but not overwrite one), reproduced the same way. #91 added a fourth, `campus_set_library` (it replaces the project's asset library), also reproduced. This is the fifth instance of the "a second caller skips the
+handler" shape. `tests/test_write_surface_lock_policy.py` caught it on the day
+it landed, by going red on #80 merged with the new master. Note for the fix:
+these tools take a `project_id`, so the seam's active-project predicate would
+test the wrong lock. Check the lock of the resolved project. Full analysis:
+`findings/2026-10-06-campus-chat-tools-bypass-the-lock-check.md`. Server only.
 
 ## Medium
 
-### 5. Chat sessions have no owner, so the confirmation gate rests on id secrecy
+### 6. Authorization denies by omission: lock dimension done, ACL dimension open
 
-`ChatSession` (`services/chat_service.py:474`) has no user field and
-`get_session` (`:745`) is a plain lookup in a process-global dict, so nothing
-compares the caller to the session. `POST /api/chat/{session_id}/confirm` can
-therefore supply the approval for **another account's** pending
-destructive-tool confirmation — and that approval is the whole protection the
-safety tiers give destructive and execution tools. `abort` and `rewind` are
-reachable the same way.
+**Narrowed 2026-10-05.** The original entry ("`ProjectAccessDep` is adopted by
+6 of 23 routers") was partly stale and partly mis-framed: `/api/results/` has
+since been lock-gated; the count missed `ProjectDep`, a second ACL dependency
+on the same `resolve_project`; and the five large routers act on the ACTIVE
+project, which no path-param dependency can resolve. The item's own remedy was
+the right one: make the omission fail loudly.
 
-**Not currently exploitable:** `session_id` is `uuid.uuid4().hex` (122 bits),
-and greps found it neither logged nor persisted into `chat.jsonl`. It is a strong
-capability-style secret.
+**Lock dimension: done** in `a266dd5`. `tests/test_write_surface_lock_policy.py`
+fails on any write route or non-read chat tool that is not gated, not
+verifiably holder-checked (calls are followed, not source-scanned), and not
+given a written reason. Mutation-tested seven ways; undoing item 12's fix turns
+it red naming that exact route. Writing it found item 13.
 
-The problem is that this is load-bearing and undeclared. The day a session id
-becomes visible — a support endpoint, a debug log line, an error body, a
-screenshot — the gate is forgeable with no code change and no review step that
-would catch it. An owner field and one comparison removes the dependency.
-Source: finding 2 of the same audit.
+**Still open:**
+* the **ACL** dimension ("may this caller SEE this project") has the same shape
+  and no omission test. Nothing has been found there, and nothing has looked
+  systematically either;
+* three product questions the policy table now states rather than settles:
+  should gridspine studies, chat-history import/clear, and adequacy campaigns
+  respect the edit lock?
 
-### 6. `ProjectAccessDep` is adopted by 6 of 23 routers
-
-`routers/deps.py:100` defines the right primitive — a per-route dependency that
-resolves the project named by the request and checks the caller's access. It is
-used by `compare`, `adequacy_worksheet`, `uploads`, `snapshots`, `gridspine` and
-`deps`, and NOT by the five routers carrying most of the surface: `network` (81
-routes), `results` (48), `chat` (20), `simulation` (14), `io` (8) — 171 of 267.
-Those rely on the path-prefix middleware instead.
-
-This is the structural cause of the route-scoping defects above, and it is a
-shape rather than a one-off:
-a prefix list denies by omission, so a new router under a new prefix is ungated
-by default, silently, with nothing failing. A dependency declared on the route
-has the opposite default. Worth a test that fails when a route is mounted under
-a prefix no mechanism covers — the omission is what needs to become loud.
-Source: finding 3 of the same audit.
+Plan and ground-truth counts:
+`plans/2026-10-05-item-6-write-surface-lock-policy.md`.
 
 ### 7. Node positions revert on the blank canvas
 
@@ -181,6 +153,60 @@ re-opens a project. Where the record is stored was not traced. The P28 smoke
 part (C) works around it by re-running the study. Sources: the plan's "P28
 phase note" (contract drift 3) and
 `qa/2026-09-30-guided-mode-deferred-gate-P28.md`.
+
+---
+
+## Closed since the 2026-09-12 pass
+
+Listed once, with the closing commit, because the drift this file exists to
+prevent was statuses reading *open* for things fixed weeks earlier. Numbering is
+NOT reused or compacted — other findings and assessments cite these numbers.
+
+* **2** — `worksheet` / `stress_scenarios` PUTs ignore a foreign edit lock.
+  Closed by `68e5f62` (+ `2ede7a4`, tolerating a project with no real uuid).
+  Tripwire: `tests/test_worksheet_foreign_lock.py`, which asserts the two
+  subjects AND two lock-checked controls. Mutation-verified 2026-09-30: removing
+  both guard blocks turns exactly the two subject tests red. **The class is not
+  closed — see item 12.**
+* **3** — `/api/chat/{id}/rewind` and `/abort` perform no authorization. Closed
+  by `be4d5ed`, which gave `ChatSession` an `owner_user_id` and a fail-closed
+  `session_owner_allows`. Tripwire: `tests/test_chat_session_ownership.py`.
+  Mutation-verified 2026-09-30: stubbing `session_owner_allows` to `return True`
+  turns the `/rewind`, `/abort` and owner-less tests red — but NOT the `/confirm`
+  test, which posted a fresh `uuid4()` and so was satisfied by token lookup
+  failing before ownership was ever consulted. The guard was real; its tripwire
+  was not. Repaired 2026-09-30 to mint a live token and assert the property
+  (still pending, no decision recorded, owner can still spend it).
+* **4** — `/api/changelog/` is unscoped for a caller with no OrgMembership.
+  Closed by `6f5e170`, which made the predicate `is_super_admin` rather than
+  "has no membership", and kept read and destroy at different privileges: a
+  super-admin still reads across tenants, and nobody clears across them through
+  this route. Tripwire: `tests/test_changelog_scoping.py`, six tests including
+  both halves of the super-admin distinction.
+* **12** — `PUT /{name}/asset_health` ignores a foreign edit lock. Opened and
+  closed on 2026-09-30: recorded first as a defect outside items 2-4, then fixed
+  by `4eca8d2` on a separate instruction. The fourth instance of item 2's defect
+  and the second in that file; ungated for 20 days because it landed two days
+  before the commit that fixed its two siblings, so it was never in the audit's
+  route list. Tripwire: `tests/test_asset_health_foreign_lock.py`, written
+  before the fix, red on the property rather than a status code, and
+  mutation-verified after. **This closes the class in this router family — all
+  three sidecar PUTs now carry the check** — but not the shape that produced it,
+  which is item 6.
+* **13** — chat tools that wrote a project's upload store bypassed its lock
+  check (`clear_uploads` and six `export_*` tools). Found and reproduced
+  2026-10-05 while doing item 6. Fixed independently by #76 (`e36c041`), which
+  merged on 2026-10-07: it gates the tools at the seam and checks every export
+  through `_check_foreign_lock("export")` in `_save_agent_export`. On merge,
+  the write-surface ratchet failed on exactly the 7 `KNOWN_GAPS` entries and
+  on the 3 `TOOL_POLICY` entries #76 also gated (`clear_chat_history`,
+  `start_campaign`, `end_campaign`). That is the same 10 a trial merge
+  predicted two days earlier, and all are now deleted. #76 also settled two of
+  the three product questions item 6 recorded.
+* **5** — chat sessions have no owner, so the confirmation gate rests on id
+  secrecy. Closed by the same commit as item 3: `owner_user_id` plus one
+  comparison is exactly the fix this item asked for, so `/confirm` no longer
+  depends on the session id being unguessable.
 
 ---
 
