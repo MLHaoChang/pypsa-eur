@@ -255,6 +255,18 @@ def _money_year(cfg):
     return year if isinstance(year, int) and not isinstance(year, bool) else None
 
 
+def _states_discount_rate(project) -> bool:
+    """Whether the saved solver config file itself holds a ``discount_rate``.
+    The loader fills a missing one with its 0.07 default, which is not a rate
+    the project stated, so it must not replace the library's."""
+    import json
+    try:
+        raw = json.loads((project_registry.project_dir(project) / SOLVER_CONFIG_FILE).read_text())
+    except (OSError, ValueError):
+        return False
+    return isinstance(raw, dict) and "discount_rate" in raw
+
+
 def _project_rate(cfg) -> float:
     rate = getattr(cfg, "discount_rate", None)
     if isinstance(rate, bool) or not isinstance(rate, (int, float)) or not 0 <= rate < 1:
@@ -270,7 +282,7 @@ def _engine_library(project, d: Path) -> tuple:
     engine now, and what its costs are annualised on.
 
     The library is the project's copy, else the shipped one. When the project
-    has a saved solver config, its ``discount_rate`` replaces the library's
+    has a saved solver config that states a ``discount_rate``, that rate replaces the library's
     (the library's own value is a stand-alone default for gridspine-only use);
     otherwise the library is handed over byte for byte. When the project has
     finance inputs with a ``currency_year``, that is the price year reported;
@@ -281,7 +293,7 @@ def _engine_library(project, d: Path) -> tuple:
     lib = cs.load_asset_library(path)
     cfg = _saved_solver_config(project)
     rate, rate_from, text = lib["discount_rate"]["value"], FROM_LIBRARY, path.read_bytes().decode()
-    overridden = cfg is not None
+    overridden = cfg is not None and _states_discount_rate(project)
     if overridden:
         rate, rate_from = _project_rate(cfg), FROM_SOLVER_CONFIG
         data = yaml.safe_load(text)

@@ -621,11 +621,16 @@ The campus asset library (C7), the least-cost pick (C8) and the MILP (C11) join 
 
 ## Part three as built (2026-10-07)
 
+### Owner decisions (2026-10-07)
+
+- **Grid-code review, a quote not found on its stated page:** warn and still allow Confirm (today's behaviour). The reviewer is the check; real documents often have small page offsets.
+- **The MILP in the panel:** as a run option ("Joint optimisation (MILP, slow)") executed as a background job with progress and cancel, its result shown beside the least-cost one. Planned as C12.
+
 The campus side of part three is built on `feat/gridspine-campus-ic-seam`. Words follow `pypsa-gui/CONTEXT.md` ("Investment language"): *Overnight cost*, *Generic default*, *illustrative*, *upfront part*. The engine's files (`services/finance/*`, `services/results/finance_case.py`, `services/library/*`, `services/asset_schema/*`, `models/finance.py`) are untouched.
 
 ### D1a: done. The discount rate and the price year come from the project
 
-- **Rate.** When the run invests, the library handed to `invest_campus` has its `discount_rate` replaced by the **project's saved solver config** `discount_rate`, if the project has a saved solver config file (`solver_config.json`). Without that file the library's own value is kept. The replacement is tagged `assumed`, with a note saying where it came from. A project rate outside [0, 1) is a 422 that names it; nothing is annualised on it.
+- **Rate.** When the run invests, the library handed to `invest_campus` has its `discount_rate` replaced by the **project's saved solver config** `discount_rate`, if the project's saved solver config file (`solver_config.json`) **states** a `discount_rate`. Without that file, or when the file has no `discount_rate` key (the loader's 0.07 default is not a rate the project stated), the library's own value is kept and labelled as the library's. The replacement is tagged `assumed`, with a note saying where it came from. A project rate outside [0, 1) is a 422 that names it; nothing is annualised on it.
 - **Price year.** The project's finance inputs are not a file of their own: they are `SolverConfig.finance`, the dict `PUT /api/simulation/finance` validated, kept in the same `solver_config.json`. If it carries a `currency_year`, that is the price year reported, and `price_year_mismatch` is true when it differs from the library's. **No money is converted.** The library's costs stay in the library's price year and no escalation is applied. The panel says so.
 - **The record.** `results.cost_basis` is `{discount_rate, discount_rate_from: "project solver config" | "asset library", price_year, price_year_from: "project finance inputs" | "asset library", library_price_year, price_year_mismatch, currency}`. It is written with the run (`run/campus_cost_basis.json`) and cleared with the other investment files, so it describes the run and not the project as it is now. `get_investment` (the copilot's summary) carries it too.
 - **Staleness.** The engine's copy, rate included, is what `run/campus_assets_used.yaml` keeps, byte for byte. The results are stale when the library a run would hand over now differs from that snapshot (so a change of the project's discount rate makes them stale) **or** when the cost basis differs (so a change of the finance inputs' `currency_year` does too, since the basis is shown). A solver-config change that touches neither (the solver name, say) does not. A library or a solver config that cannot be read now counts as stale: a rerun would not reproduce the run.

@@ -639,6 +639,18 @@ def test_without_a_saved_solver_config_the_library_keeps_its_rate_and_year(hub):
     assert (ce.campus_dir(hub) / "run" / ce.USED_LIBRARY_FILE).read_text() == default_library_text()
 
 
+def test_a_solver_config_that_states_no_discount_rate_leaves_the_librarys(hub):
+    """The loader's 0.07 default is not a rate the project stated: a saved
+    config with only finance inputs keeps the library's rate, labelled as
+    the library's, and hands the library over byte for byte."""
+    ce.draft(hub)
+    save_solver_config(hub, finance=finance_with(2024))
+    basis = ce.run(hub, {"k": 1})["results"]["cost_basis"]
+    assert basis["discount_rate_from"] == "asset library"
+    assert basis["price_year"] == 2024 and basis["price_year_from"] == "project finance inputs"
+    assert (ce.campus_dir(hub) / "run" / ce.USED_LIBRARY_FILE).read_text() == default_library_text()
+
+
 def test_the_projects_discount_rate_replaces_the_librarys_for_the_engine_and_the_snapshot(hub, monkeypatch):
     ce.draft(hub)
     save_solver_config(hub, discount_rate=0.03)
