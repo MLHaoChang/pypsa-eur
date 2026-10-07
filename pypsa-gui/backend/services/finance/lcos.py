@@ -15,15 +15,21 @@ LCOS is the nominal one.
 The terms, all from the `FinanceCase` (the engine reads no network, plan C1):
 
 * capex — the asset's share of the installed capex (its `overnight_cost` ×
-  (1 + contingency), phased like the case's), and its own replacement-capex
-  entries (escalated as the cash engine books them);
+  (1 + contingency), phased like the case's), and its own replacements from
+  the one schedule (`replacements.schedule`: the `replacement_capex` entries,
+  or its parts under `part_lifetimes` — IC S0b plan S4), escalated as the cash
+  engine books them;
 * O&M — the asset's own template lines (`StorageYear.om_keys`: fom, vom),
   escalated and degraded as the operating cash has them;
 * charging — `StorageYear.charge_import_cost` escalated with `tariff` and
   `charge_surplus_cost` with `export`, from the line's money year; the
   adapter priced the charged energy at what the site actually paid for it in
   the dispatch (see `CHARGING_BASIS`);
-* discharge — `StorageYear.discharge_mwh`.
+* discharge — `StorageYear.discharge_mwh`;
+* the remaining-life value — under the `remaining_life_annuity` terminal
+  value only (IC S0b plan S6), the asset's own per-part terms at the last
+  operating year, netted from its capex (GS's LCOS nets the inverter salvage,
+  `proforma.py:536-542`); `pv_terminal` is None under the other methods.
 
 Throughput (discharge and charging cost) scales with the asset's degradation
 (`degradation_by_asset`, first order: a faded battery cycles less energy);
@@ -44,11 +50,15 @@ import numpy as np
 
 from services.finance.case import FinanceCase
 from services.finance.cashflow import Operating, _templates_by_year, degradation_factor
+from services.finance.replacements import on_axis, remaining_life_terms, schedule
 from services.finance.timeline import Timeline
 
 LCOS_BASIS = ("(PV of the storage asset's capex + replacements + its own O&M + the cost of the "
               "energy charged) / PV of the energy discharged, at the WACC, index 0 (the "
-              "financial close) undiscounted; per storage asset and in total")
+              "financial close) undiscounted; per storage asset and in total; under the "
+              "remaining_life_annuity terminal value, the capex is net of the PV of the asset's "
+              "own remaining-life terms at the last operating year (as GS's LCOS nets the "
+              "inverter salvage)")
 CHARGING_BASIS = (
     "charging energy priced at what the site actually paid for it in the dispatch: per "
     "interval, the share of the charge the site imported (up to its import) at that "
@@ -91,6 +101,8 @@ def storage_lcos(case: FinanceCase, op: Operating, tl: Timeline) -> dict:
     assets = {a.name: a for a in case.assets}
     total_overnight = sum(a.overnight_cost for a in case.assets if a.overnight_cost is not None)
     r_capex = fin.escalation.get("capex")
+    rla = fin.terminal_value.method == "remaining_life_annuity"
+    tv_terms, tv_reasons = remaining_life_terms(case, tl) if rla else ((), [])
     all_reasons: list[str] = []
     num_tot = den_tot = den_real_tot = 0.0
     established = True
@@ -147,23 +159,34 @@ def storage_lcos(case: FinanceCase, op: Operating, tl: Timeline) -> dict:
         elif total_overnight > 0:
             cap = op.capex * (af.overnight_cost / total_overnight)
         if op.capex is not None:
-            for year, asset, amount in fin.replacement_capex:
-                if asset == a and tl.cod_year <= year < tl.cod_year + tl.analysis_years:
-                    repl[tl.index(year)] += amount * (1.0 + (r_capex or 0.0)) ** \
-                        (year - tl.base_year)
+            for x in schedule(case, tl):             # the one schedule (IC S0b plan S4)
+                if x.asset == a and on_axis(tl, x.year):
+                    repl[tl.index(x.year)] += x.amount * (1.0 + (r_capex or 0.0)) ** \
+                        (x.year - tl.base_year)
+        # Under `remaining_life_annuity` the asset's own remaining-life terms
+        # are netted from its capex (IC S0b plan S6, GS's LCOS); not otherwise.
+        tv = None
+        if rla:
+            mine = [x for x in tv_reasons
+                    if x in ("terminal_needs_lp_rate", "escalation_missing:capex")
+                    or x.split(":")[1:2] == [a]]
+            rs += mine
+            tv = np.zeros(n)
+            tv[n - 1] = sum(t.value for t in tv_terms if t.asset == a)
         rs = sorted(set(rs))
         rec: dict = {"lcos_nominal_per_mwh": None, "lcos_real_per_mwh": None,
                      "discharge_mwh_year1": dis_raw, "charge_mwh_year1": charge_raw,
-                     "pv_capex": None, "pv_replacement": None, "pv_om": None,
+                     "pv_capex": None, "pv_replacement": None, "pv_terminal": None, "pv_om": None,
                      "pv_charging_cost": None, "pv_discharge_mwh": None, "reasons": rs}
         if r is not None:
             rec.update(pv_capex=_pv(cap, r), pv_replacement=_pv(repl, r), pv_om=_pv(om, r),
-                       pv_charging_cost=_pv(charge, r), pv_discharge_mwh=_pv(dis, r))
+                       pv_charging_cost=_pv(charge, r), pv_discharge_mwh=_pv(dis, r),
+                       pv_terminal=None if tv is None else _pv(tv, r))
             if not rs and rec["pv_discharge_mwh"] <= 0.0:
                 rs.append(f"no_discharge:{a}")
         if not rs:
-            num = (rec["pv_capex"] + rec["pv_replacement"] + rec["pv_om"]
-                   + rec["pv_charging_cost"])
+            num = (rec["pv_capex"] + rec["pv_replacement"] - (rec["pv_terminal"] or 0.0)
+                   + rec["pv_om"] + rec["pv_charging_cost"])
             rec["lcos_nominal_per_mwh"] = num / rec["pv_discharge_mwh"]
             num_tot += num
             den_tot += rec["pv_discharge_mwh"]

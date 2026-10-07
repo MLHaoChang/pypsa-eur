@@ -4,7 +4,8 @@ Operating cashflows over the finance axis (IC P4 plan WP4.1; C3–C6, C12, C14).
 From a `FinanceCase`: each template line escalated from its money year (the
 line's own, else its template's, else the base year) by its class (or its contract's own indexation), scaled by its asset's degradation,
 stopped after its contract's tenor; capex over the construction years with
-contingency and phasing; replacement capex; the terminal value; EBITDA.
+contingency and phasing; replacement capex (the one schedule,
+`replacements.schedule` — IC S0b plan S4); the terminal value; EBITDA.
 Every array is indexed by `Timeline.years` (index 0 = the financial-close
 year). A value that cannot be established is None with a reason — never a
 substituted 0 (ADR-0001).
@@ -16,7 +17,13 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from models.finance import ESCALATION_CLASSES
-from services.finance.case import CONTRACT_CLASS, FinanceCase, Template, TemplateLine
+from services.finance.case import (
+    CONTRACT_CLASS, UPFRONT_FROM_CAPITAL_COST, FinanceCase, Template, TemplateLine,
+)
+from services.finance.replacements import (
+    Replacement, TerminalTerm, on_axis, remaining_life_terms, schedule,
+)
+from services.finance.replacements import notes as replacement_notes
 from services.finance.timeline import Timeline
 
 # The escalation class of each ledger stream (plan WP4.1). Contract streams
@@ -57,6 +64,11 @@ class Operating:
     status: dict[str, str] = field(default_factory=dict)
     reasons: dict[str, list[str]] = field(default_factory=dict)
     flags: list[str] = field(default_factory=list)
+    # Each replacement the cash booked, with its escalated amount (IC S0b plan
+    # S4, S9: the report's per-part lines).
+    replacement_items: tuple[tuple[Replacement, float], ...] = ()
+    # The `remaining_life_annuity` terms (IC S0b plan S6; empty otherwise).
+    terminal_terms: tuple[TerminalTerm, ...] = ()
 
     def established(self, section: str) -> bool:
         return self.status.get(section) == "ok"
@@ -203,6 +215,8 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
     for a in case.assets:
         if a.overnight_cost is None:
             reasons["capex"].append(f"overnight_cost_missing:{a.name}")
+            if f"{UPFRONT_FROM_CAPITAL_COST}:{a.name}" in case.flags:    # IC S0b S1
+                reasons["capex"].append(f"{UPFRONT_FROM_CAPITAL_COST}:{a.name}")
         else:
             total += a.overnight_cost
     if fin.contingency_share is None:
@@ -214,23 +228,34 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
         idx = tl.construction_years or [tl.y0]
         for y, share in zip(idx, fin.capex_phasing):
             capex[tl.index(y)] += total * share
+    # Replacements: the one schedule (IC S0b plan S4), escalated by `capex`
+    # from the base year, no contingency, on the operating axis.
     replacement = np.zeros(tl.n)
+    items: list[tuple[Replacement, float]] = []
     r_capex = fin.escalation.get("capex")
-    for year, asset, amount in fin.replacement_capex:
-        if not (tl.cod_year <= year < tl.cod_year + tl.analysis_years):
-            reasons["capex"].append(f"replacement_outside_axis:{asset}:{year}")
+    for x in schedule(case, tl):
+        if not on_axis(tl, x.year):
+            reasons["capex"].append(f"replacement_outside_axis:{x.asset}:{x.year}")
             continue
         if r_capex is None:
             reasons["capex"].append("escalation_missing:capex")
             continue
-        replacement[tl.index(year)] += amount * (1.0 + r_capex) ** (year - tl.base_year)
-    if any(r.startswith(("replacement_outside_axis", "escalation_missing")) for r in reasons["capex"]):
+        v = x.amount * (1.0 + r_capex) ** (x.year - tl.base_year)
+        replacement[tl.index(x.year)] += v
+        items.append((x, v))
+    sched_reasons, sched_flags = replacement_notes(case, tl)
+    reasons["capex"] += sched_reasons
+    flags += sched_flags
+    if any(r.startswith(("replacement_outside_axis", "escalation_missing", "part_lifetime_missing"))
+           for r in reasons["capex"]):
         capex = None
     reasons["capex"] = sorted(set(reasons["capex"]))
 
     # Terminal value at the last operating year (plan WP4.1; SAM salvage =
-    # `fixed`, not escalated, inside EBITDA and taxed).
+    # `fixed`, not escalated, inside EBITDA and taxed; `remaining_life_annuity`
+    # the same place and treatment — IC S0b plan S6).
     terminal: np.ndarray | None = np.zeros(tl.n)
+    terminal_terms: tuple[TerminalTerm, ...] = ()
     tv = fin.terminal_value
     last = tl.n - 1
     if tv.method == "fixed":
@@ -250,6 +275,15 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
         # The remaining tax basis: filled by the tax engine (WP4.3a).
         terminal = None
         reasons["terminal"].append("book_value_needs_tax_basis")
+    elif tv.method == "remaining_life_annuity":
+        # Each part's purchase alive at the horizon on the LP's annuity (IC S0b
+        # plan S6, D10: GS's salvage), placed and taxed as `fixed`.
+        terminal_terms, tv_reasons = remaining_life_terms(case, tl)
+        if tv_reasons:
+            reasons["terminal"] += ["terminal_value_missing", *tv_reasons]
+            terminal = None
+        else:
+            terminal[last] = sum(t.value for t in terminal_terms)
 
     ebitda = None
     if revenue is not None and terminal is not None:
@@ -257,4 +291,5 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
     status = {s: ("ok" if not reasons[s] else "not_established") for s in reasons}
     return Operating(tl=tl, lines=lines, line_meta=meta, revenue=revenue, costs=costs,
                      ebitda=ebitda, capex=capex, replacement=replacement, terminal=terminal,
-                     energy_mwh=energy, status=status, reasons=reasons, flags=flags)
+                     energy_mwh=energy, status=status, reasons=reasons, flags=flags,
+                     replacement_items=tuple(items), terminal_terms=terminal_terms)
