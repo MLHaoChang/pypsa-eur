@@ -23,6 +23,7 @@ import pypsa
 import pytest
 
 from services import chat_service
+from harness import history as harness_history
 from services.project_context import ProjectContext
 
 
@@ -67,7 +68,7 @@ def test_two_threads_rotation_race_exactly_one_backup(
     # Since rotation is under the same lock as append, both threads see
     # the rotated state consistently. Backup = first ~67 lines, current =
     # last ~53 lines, total = 120. (Boundary may vary ±1 depending on race.)
-    monkeypatch.setattr(chat_service, "ROTATE_BYTES", 600 * 1024)
+    monkeypatch.setattr(harness_history, "ROTATE_BYTES", 600 * 1024)
 
     ctx = _make_bound_ctx("race", tmp_projects_dir)
     chat_path = pathlib.Path(ctx.chat_state.persist_path)
@@ -192,7 +193,7 @@ def test_concurrent_read_during_rotation_never_empty_spuriously(
     """
     from routers import projects as projects_router
     monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
-    monkeypatch.setattr(chat_service, "ROTATE_BYTES", 8 * 1024)
+    monkeypatch.setattr(harness_history, "ROTATE_BYTES", 8 * 1024)
 
     ctx = _make_bound_ctx("readrace", tmp_projects_dir)
     PAD = "y" * 4000
@@ -266,7 +267,7 @@ def test_append_turn_fsyncs_the_chat_jsonl_descriptor(
         synced_inodes.append(_os.fstat(fd).st_ino)
         real_fsync(fd)
 
-    monkeypatch.setattr(chat_service.os, "fsync", recording_fsync)
+    monkeypatch.setattr(harness_history.os, "fsync", recording_fsync)
 
     chat_service.append_turn(ctx, {"role": "user", "content": "durable?"})
 

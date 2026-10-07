@@ -160,7 +160,7 @@ def test_the_forwarder_fallbacks_are_still_what_the_code_invents():
     except block starts inventing a third, this catches it rather than letting
     a kind reach users that no test has ever seen.
     """
-    source = (BACKEND / "services" / "chat_service.py").read_text(encoding="utf-8")
+    source = (BACKEND / "harness" / "loop.py").read_text(encoding="utf-8")
     block = source[source.index("# noqa: BLE001 — surface as tool_error"):]
     block = block[:block.index("yield \"tool_error\"")]
     assigned = {

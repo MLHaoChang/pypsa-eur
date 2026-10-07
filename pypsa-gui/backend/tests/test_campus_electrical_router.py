@@ -8,11 +8,14 @@ These tests check two things:
 
 What the service does is ``test_campus_electrical_service.py``'s business.
 """
+import re
+
 import pytest
 
 from db.models import Project, User
 from services import project_registry
 from services import campus_electrical_service as ce
+from tests.test_worksheet_foreign_lock import _is_lock_refusal, same_org_other_user  # noqa: F401
 
 
 @pytest.fixture
@@ -28,7 +31,17 @@ def hub(client, _auth_db, seeded_identity):
     ("post", "/draft", "draft", {"overwrite": True}, (True,)),
     ("put", "/campus", "save_campus", {"yaml": "campus: {}"}, ("campus: {}",)),
     ("post", "/run", "run", {"k": 2, "pf": 0.95}, ({"k": 2, "pf": 0.95, "profile": "eu_rfg_dcc_ce",
-                                                    "margin": 0.2, "n_minus_1": True},)),
+                                                    "margin": 0.2, "n_minus_1": True, "invest": True,
+                                                    "pcc_switchgear_by_operator": False},)),
+    ("post", "/run", "run", {"invest": False}, ({"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce",
+                                                  "margin": 0.2, "n_minus_1": True, "invest": False,
+                                                  "pcc_switchgear_by_operator": False},)),
+    ("post", "/run", "run", {"pcc_switchgear_by_operator": True}, ({"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce",
+                                                                   "margin": 0.2, "n_minus_1": True, "invest": True,
+                                                                   "pcc_switchgear_by_operator": True},)),
+    ("get", "/library", "get_library", None, ()),
+    ("put", "/library", "save_library", {"yaml": "discount_rate: {}"}, ("discount_rate: {}",)),
+    ("post", "/library/reset", "reset_library", None, ()),
 ])
 def test_each_route_calls_its_service_function_with_the_row(client, hub, monkeypatch, method, path, function,
                                                             payload, expected_args):
@@ -56,8 +69,43 @@ def test_bad_run_settings_are_422_before_the_service(client, hub, monkeypatch, b
     assert resp.status_code == 422, resp.text
 
 
+def test_an_oversized_library_is_413_from_the_service_not_a_422_from_the_model(client, hub):
+    from services import campus_electrical_service as real
+    resp = client.put("/api/campus-electrical/Router Hub/library", json={"yaml": "x" * (real.MAX_LIBRARY_BYTES + 1)})
+    assert resp.status_code == 413, resp.text
+
+
+def test_the_library_round_trips_over_http_and_a_bad_one_is_422_naming_the_field(client, hub):
+    base = "/api/campus-electrical/Router Hub/library"
+    default = client.get(base).json()
+    assert default["is_default"] is True and "transformers:" in default["yaml"]
+    bad = re.sub(r"^(\s+)opex_frac:", r"\1opex_fraction:", default["yaml"], count=1, flags=re.M)
+    assert bad != default["yaml"]
+    resp = client.put(base, json={"yaml": bad})
+    assert resp.status_code == 422 and "opex_fraction" in resp.json()["detail"], resp.text
+    assert client.put(base, json={"yaml": default["yaml"] + "\n# mine\n"}).json()["is_default"] is False
+    assert client.get(base).json()["yaml"].endswith("# mine\n")
+    assert client.post(base + "/reset").json() == default
+    assert client.put(base, json={}).status_code == 422
+
+
+def test_every_write_is_refused_under_another_users_lock_and_a_read_is_not(client, hub, same_org_other_user,  # noqa: F811
+                                                                          monkeypatch):
+    for function in ("save_library", "reset_library", "run", "draft", "save_campus", "get_library"):
+        monkeypatch.setattr(ce, function, lambda *a: {"ok": True})
+    assert client.post("/api/projects/Router Hub/lock").status_code == 200
+    other = same_org_other_user
+    for method, path, payload in [("put", "/library", {"yaml": "x"}), ("post", "/library/reset", None),
+                                  ("post", "/run", {}), ("post", "/draft", {}), ("put", "/campus", {"yaml": "x"})]:
+        kw = {"json": payload} if payload is not None else {}
+        resp = getattr(other, method)(f"/api/campus-electrical/Router Hub{path}", **kw)
+        assert _is_lock_refusal(resp), (method, path, resp.status_code, resp.text)
+    assert other.get("/api/campus-electrical/Router Hub/library").status_code == 200
+
+
 def test_another_orgs_project_is_404_not_403(other_org_client, hub):
-    for method, path in (("get", ""), ("post", "/draft"), ("post", "/run")):
-        kw = {"json": {}} if method == "post" else {}
+    for method, path in (("get", ""), ("post", "/draft"), ("post", "/run"), ("get", "/library"),
+                         ("put", "/library"), ("post", "/library/reset")):
+        kw = {"json": {}} if method in ("post", "put") else {}
         resp = getattr(other_org_client, method)(f"/api/campus-electrical/Router Hub{path}", **kw)
         assert resp.status_code == 404, (path, resp.status_code)

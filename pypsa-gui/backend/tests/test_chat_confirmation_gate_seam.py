@@ -35,6 +35,7 @@ import inspect
 import pytest
 
 from services import chat_service
+from harness import confirm as harness_confirm
 
 
 class _Pending:
@@ -116,7 +117,7 @@ def test_an_auto_approved_destructive_tier_is_not_gated(monkeypatch):
     monkeypatch AUTO_APPROVE_TIERS directly."
     """
     tier = sorted(chat_service.DESTRUCTIVE_TIERS)[0]
-    monkeypatch.setattr(chat_service, "AUTO_APPROVE_TIERS", frozenset([tier]))
+    monkeypatch.setattr(harness_confirm, "AUTO_APPROVE_TIERS", frozenset([tier]))
     session = _Session()
     frames, approved, collector = _drive(session, tier)
     assert approved is True
@@ -131,7 +132,7 @@ def test_a_gated_tier_is_still_gated_when_a_DIFFERENT_tier_is_exempt(monkeypatch
     tiers = sorted(chat_service.DESTRUCTIVE_TIERS)
     if len(tiers) < 2:
         pytest.skip("only one destructive tier exists")
-    monkeypatch.setattr(chat_service, "AUTO_APPROVE_TIERS", frozenset([tiers[0]]))
+    monkeypatch.setattr(harness_confirm, "AUTO_APPROVE_TIERS", frozenset([tiers[0]]))
     session = _Session(decision="approve")
     frames, approved, _c = _drive(session, tiers[1])
     assert [n for n, _ in frames] == ["tool_pending_confirmation"]

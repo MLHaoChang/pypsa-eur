@@ -27,6 +27,7 @@ import collections
 import pytest
 
 from services import chat_service
+from harness import history as harness_history
 
 
 def _user(text: str) -> dict:
@@ -213,7 +214,7 @@ def test_a_session_appending_normally_gets_the_summary(monkeypatch):
     End to end through the real entry point, not just the helper: the trim
     runs inside append_history_message, which is what run_turn calls.
     """
-    monkeypatch.setattr(chat_service, "SESSION_MESSAGES_MAX", 4)
+    monkeypatch.setattr(harness_history, "SESSION_MESSAGES_MAX", 4)
     session = chat_service.ChatSession()
     for i in range(8):
         for msg in _turn(f"message {i}", "ok"):

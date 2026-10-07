@@ -619,7 +619,7 @@ describe('P26: a declined card in Guided', () => {
 
 // P26 gate B2: the collapsed Details hid what a destructive card deletes or
 // replaces. Every destructive and execution tool the assistant can call
-// (BE/services/chat_tools_schema.py, "Safety: destructive" / "execution" /
+// (BE/harness/catalogue.py — the former services/chat_tools_schema.py, "Safety: destructive" / "execution" /
 // "execution_long_running") has a summary that names its target; the fallback
 // names the first identifying argument; destructive cards open their Details.
 describe('P26 gate B2: Guided cards name what they touch', () => {
@@ -816,7 +816,7 @@ describe('P29: Guided tool lines', () => {
 // to "use <tool words>", and none reads as a finished study.
 describe('P29 gate B1-1: start-only tools never say they finished', () => {
   // The backend schema's own word: descriptions that begin "Start …".
-  const schema = readFileSync(resolve(process.cwd(), '..', 'backend', 'services', 'chat_tools_schema.py'), 'utf8')
+  const schema = readFileSync(resolve(process.cwd(), '..', 'backend', 'harness', 'catalogue.py'), 'utf8')
   const fromSchema = [...schema.matchAll(/"([a-z_]+)",\s*\n\s*"Start /g)].map(m => m[1])
   const START_ONLY = [...new Set([...fromSchema,
     'run_simulation', 'run_ac_pf_stage', 'run_fmea_sweep', 'run_frontier_study', 'run_mc_study',
