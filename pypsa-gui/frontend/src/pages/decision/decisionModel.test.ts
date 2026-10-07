@@ -172,6 +172,14 @@ describe('the report', () => {
     expect(`${copy.title} ${copy.action}`).toMatch(/run the study again/i)
     expect(`${copy.title} ${copy.action}`).not.toMatch(/engine|investment-case|commercial/i)
   })
+
+  it('explains a case the investment calculation refuses in plain words, without a re-run offer', () => {
+    // Gate U2-WP7 N13: the case route's `engine_refused` (422).
+    const copy = errorCopy('engine_refused')
+    expect(copy).not.toBe(ERROR_FALLBACK)
+    expect(rerunNeeded('engine_refused')).toBe(false)
+    expect(`${copy.title} ${copy.action}`).not.toMatch(/engine|FinanceRefused|_/)
+  })
 })
 
 describe('the hub section chips', () => {

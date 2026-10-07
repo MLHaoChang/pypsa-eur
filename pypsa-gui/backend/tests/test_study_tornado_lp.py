@@ -215,6 +215,54 @@ def test_a_price_bound_recomputes_the_baseline_bill_at_the_perturbed_tariff():
         assert npv == pytest.approx(expected, rel=1e-9), bound
 
 
+def test_an_engine_price_bound_bills_the_baseline_at_the_variant_tariff():
+    """
+    Gate U2-WP7 X2 (mutation G5: the bound's case compiled at the CENTRE
+    ledger): one REAL re-dispatch of `bess_2h` at the demand-charge price's
+    low bound, through `findings._price_bound` on the engine. BC-7 on the
+    engine: the bound's baseline is billed at the VARIANT tariff — the
+    engine's counterfactual (`engine_adapter.bill_meter` on the served load,
+    export 0) equals GS's bill of the solved `none` fork at that tariff, and
+    is not the centre's baseline bill. The bound's NPV is the pro forma's on
+    the same solved network with GS's bills at the variant tariff, to 1e-9.
+    """
+    import numpy as np
+
+    from services.study import engine_adapter as A
+
+    n, _cfg = ic_site_option("bess_2h")
+    ledger = sf.site_ledger()
+    ctx = _ctx(ledger, {"bess_2h": n}, _question())
+    key = "demand_charge_price"
+    low, _high, _notes = F.bounds_for(next(r for r in ledger.rows if r.key == key))
+    solves = []
+
+    def solve(net, cfg, vid):
+        solves.append((net, cfg))
+        return lp_solve(net, cfg, vid)
+
+    case = F._price_bound(ctx, n, "bess_2h", key, low, solve, "t0l", reference=False)
+    [(net, cfg)] = solves
+    assert (case.engine, case.status) == ("finance_engine", "ok"), case.honesty_notes
+
+    vl = F._with_value(ledger, key, low)
+    vt = packs.effective_tariff(ctx.intake, vl, ctx.library, n.snapshots)
+    base = F._bill_of(ctx.baseline_network, vt, ctx.fidelity)
+    assert abs(base.annual_bill - ctx.baseline_bill.annual_bill) > 1000.0
+    assert case.years[1].bill_baseline == pytest.approx(base.annual_bill, rel=1e-9)
+    meter = A.bill_meter(net, F._compiled(ctx, vl, n.snapshots), A._served_load(net),
+                         np.zeros(len(net.snapshots)), fidelity=ctx.fidelity)
+    assert case.years[1].bill_baseline == pytest.approx(meter.annual_bill, rel=1e-12)
+
+    pf = proforma.build_investment_case(
+        net, cfg, None, vl, {"baseline": base, "option": F._bill_of(net, vt, ctx.fidelity)},
+        "bess_2h", study_id=ctx.study_id, tariff=vt, fidelity=ctx.fidelity,
+        question=ctx.question)
+    assert pf.engine == "cash_flow_expander" and pf.status == "ok"
+    assert abs(case.kpis.npv - pf.kpis.npv) <= 1e-9 * abs(pf.kpis.npv), (case.kpis.npv,
+                                                                         pf.kpis.npv)
+
+
 def test_a_zero_size_battery_is_judged_by_its_size_not_its_npv_sign():
     """
     Gate S5 carry: a battery at or below epsilon is "no investment". Here the

@@ -561,11 +561,12 @@
   {
    "test": "test_u2_pre_numbers_recorded.py::test_the_driver_evidence_reproduces",
    "figure": "driver.case_kpis.lcos_excl_charging",
+   "post_figure": "driver.case_kpis.lcos_finance_engine",
    "pre": 305.0300695946147,
    "post": 446.0890973937832,
    "abs": 141.05902779916852,
    "rel": 0.46244302401607856,
-   "cause": "lcos_is_the_engines_storage_metric: owner decision 6 (Q8): the case's LCOS is the finance engine's storage LCOS, which includes the charging energy at the committed import price; GS's pro forma figure excluded it (the frozen key keeps its WP0 name)"
+   "cause": "lcos_is_the_engines_storage_metric: owner decision 6 (Q8): the case's LCOS is the finance engine's storage LCOS, which includes the charging energy (imported energy at the committed import price, PV surplus at the export price forgone); GS's pro forma figure excluded it. Gate U2-WP7 X5 (c): the driver records it under lcos_finance_engine (post_figure), never under the charging-free key; the WP0 freeze keeps lcos_excl_charging"
   },
   {
    "test": "test_proforma_golden.py::test_the_battery_capex_is_not_the_single_lifetime_back_calculation",

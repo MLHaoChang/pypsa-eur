@@ -122,7 +122,8 @@ def live(tmp_path_factory):
         tariff=tariff, details=details, option_forks={f"fork-{o}": o for o in OPTIONS},
         generated_at=now, run_intake=intake))
     return {"nets": nets, "details": details, "findings": findings, "report": report,
-            "cases": cases, "ledger": ledger, "ref_calls": ref_calls}
+            "cases": cases, "ledger": ledger, "ref_calls": ref_calls, "outcome": outcome,
+            "intake": intake, "library": library}
 
 
 def test_the_real_solves_reach_the_three_states_the_report_must_disclose(live):
@@ -199,3 +200,62 @@ def test_the_live_report_renders_to_html_docx_and_xlsx_with_those_disclosures(li
     wb = openpyxl.load_workbook(io.BytesIO(
         write_report_xlsx(report, live["cases"], live["ledger"])))
     assert {"Verdict", "Tornado", "Cash flows bess_pv_2h"} <= set(wb.sheetnames)
+
+
+def test_the_findings_and_the_report_value_the_engine_solved_forks_on_the_engine(live):
+    """
+    Gate U2-WP7 X1 (mutation G4: `findings._on_engine` → False, every case
+    back on the pro forma) and X4. The forks here are solved on the engine's
+    commercial chain with the battery's two upfront parts (`engine_ready`),
+    so every centre case and the PV-only reference case are the finance
+    engine's. The report's economics section carries the engine's LCOS fact,
+    its disclosure and the prose that explains it, and each money fact of the
+    case names the engine that produced it (X4: never the pro forma's
+    `cash_flow_expander` on an engine case; the HTML and XLSX print it). The
+    case route's construction (`routers.studies._option_case` on an
+    engine-ready fork with the run's export series) gives the report's LCOS.
+    """
+    from services.study import engine_adapter as A
+    from tests.u2_targets import FAKE_REF
+
+    out = live["outcome"]
+    assert set(out.cases) == {"bess_4h", "bess_pv_2h"}
+    assert set(out.reference_cases) == {"bess_pv_2h"}
+    for case in (*out.cases.values(), *out.reference_cases.values(), *live["cases"].values()):
+        assert case.engine == "finance_engine", case.case_id
+
+    report = live["report"]
+    econ = report.sections["economics"]
+    oid = econ.payload["option_id"]
+    assert oid == "bess_pv_2h"
+    assert "lcos_finance_engine" in econ.facts and "lcos_excl_charging" not in econ.facts
+    codes = [d.code for d in report.required_disclosures]
+    assert "lcos_includes_charging_energy_cost" in codes
+    assert "lcos_two_definitions" not in codes
+    prose = " ".join(p.text for p in econ.prose)
+    assert "{{lcos_finance_engine}}" in prose and "export income" in prose
+    # X5 (a): imported charge at what the site paid, PV charge at the export
+    # income given up, and why the optimisation's figure differs.
+    [lcos_help] = [d.text for d in report.required_disclosures
+                   if d.code == "lcos_includes_charging_energy_cost"]
+    for words in ("price the site paid", "export income the site gave up",
+                  "model's hourly price", "demand charge"):
+        assert words in lcos_help and words in prose, words
+    assert REP.validate_prose(report)["economics"]
+    for key in ("case_npv", "case_irr", "case_payback_simple", "case_payback_discounted",
+                "case_capex_total", "lcos_finance_engine"):
+        assert econ.facts[key].engine == "finance_engine", key
+        assert report.facts[key].engine == "finance_engine", key
+
+    n = live["nets"][oid]
+    ledger = live["ledger"]
+    compiled = packs.option_commercial(live["intake"], ledger, live["library"], n.snapshots,
+                                       export_series=FAKE_REF)
+    assert A.engine_ready(n)
+    route = A.option_case(n, packs.option_solver_config(ledger, compiled), ledger,
+                          compiled=compiled, option_id=oid, study_id=SID,
+                          fidelity="full_study",
+                          asset_economics=live["details"][oid]["asset_economics"],
+                          question=QUESTION, study_currency_year=2020).view
+    assert route.engine == "finance_engine"
+    assert route.kpis.lcos == pytest.approx(econ.facts["lcos_finance_engine"].value, rel=1e-12)

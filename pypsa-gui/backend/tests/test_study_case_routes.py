@@ -241,3 +241,77 @@ def test_a_run_record_without_the_forks_hash_is_refused_not_trusted(
         assert r.json()["detail"]["error_kind"] == "fork_changed_since_run"
     other = client.get(f"/api/projects/case-nohash/studies/{sid}/options/bess_1h/case")
     assert other.status_code == 200, other.text
+
+
+# ── gate U2-WP7 X3: which engine values the case ───────────────────────────
+
+@pytest.fixture
+def engine_solves(monkeypatch):
+    """
+    The REAL LP (`run_simulation`: the engine's commercial chain, which
+    records its committed PoC on the fork) for `bess_2h` and `bess_4h`, the
+    fake solver for the other options. `bess_4h`'s battery has its two
+    upfront part columns cleared before its solve: a fork written before WP7
+    (a battery priced by `capital_cost` alone), solved on the engine's chain.
+    """
+    from services import solver_service
+    from services.study import packs
+
+    real, fake = solver_service.run_simulation, FakeSolver()
+
+    def solve(config, n, *args, **kwargs):
+        option = (n.meta.get(packs.PACK_META_KEY) or {}).get("option_id")
+        if option == "bess_4h":
+            parts = [c for c in n.storage_units.columns
+                     if c.startswith(("inv_power_", "inv_energy_"))]
+            assert parts, "the pack writes the battery's parts (C1)"
+            n.storage_units[parts] = float("nan")
+        if option in ("bess_2h", "bess_4h"):
+            return real(config, n, *args, **kwargs)
+        return fake(config, n, *args, **kwargs)
+
+    monkeypatch.setattr(solver_service, "run_simulation", solve)
+
+
+@pytest.mark.live_solve
+def test_the_case_route_takes_the_engine_only_for_an_engine_ready_fork_of_a_wp6_run(
+        client, api_project, studies_on, engine_solves, project_storage_dir):
+    """
+    Gate U2-WP7 X3 (mutations G3: the route never takes the engine; G9:
+    `engine_ready` ignores the battery's parts). The route values a case on
+    the finance engine exactly when the fork is `engine_ready` (solved on the
+    engine's chain, the battery written as its two upfront parts) AND the run
+    recorded its export series; otherwise the pro forma:
+
+    * `bess_2h`, engine-solved with its parts → `finance_engine`;
+    * `bess_4h`, engine-solved with a capital-cost battery (no parts, a fork
+      written before WP7) → `cash_flow_expander`;
+    * `bess_2h` again once the run record has no `export_series` (a run
+      recorded before WP6) → `cash_flow_expander`.
+    """
+    from services.study import store
+
+    sid = _setup(client, api_project, "case-eng")
+    _run(client, "case-eng", sid)
+    base = f"/api/projects/case-eng/studies/{sid}/options"
+
+    def case(option):
+        r = client.get(f"{base}/{option}/case")
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    ready = case("bess_2h")
+    assert (ready["engine"], ready["status"]) == ("finance_engine", "ok"), ready["honesty_notes"]
+    assert "basis_real_pre_tax_no_subsidy" in ready["honesty_notes"]
+    no_parts = case("bess_4h")
+    assert no_parts["engine"] == "cash_flow_expander", no_parts["honesty_notes"]
+    assert no_parts["status"] == "ok"
+
+    project_dir = project_storage_dir("case-eng")
+    record = store.load_aux(project_dir, sid, "run")
+    assert record.get("export_series"), "the run must record its export series (WP6)"
+    record.pop("export_series")
+    store.save_aux(project_dir, sid, "run", record)
+    pre_wp6 = case("bess_2h")
+    assert pre_wp6["engine"] == "cash_flow_expander", pre_wp6["honesty_notes"]
+    assert pre_wp6["status"] == "ok"

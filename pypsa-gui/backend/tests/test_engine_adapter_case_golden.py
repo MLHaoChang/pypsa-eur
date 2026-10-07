@@ -162,21 +162,72 @@ def test_npv_is_the_lp_saving_annuitised_by_construction(bundles):
         assert abs(bundles[o].view.kpis.npv - want) <= 1e-6 * abs(want)
 
 
+def _charging_per_mwh_discharged(option):
+    """
+    The battery's charging cost per MWh it discharged, from GS's own prices
+    on the option's solved dispatch, independent of the engine: per hour,
+    the charge the site imported (up to its import) at GS's import price
+    (`tariff.band_prices` + `tariff._network_per_mwh`), the rest (PV surplus)
+    at the export price it forwent. Returns (cost per MWh discharged, the
+    PV-surplus share of the charge).
+    """
+    import numpy as np
+
+    from services.study import library as L
+    from services.study import packs
+    from services.study import tariff as T
+
+    n, _cfg, _compiled, ledger = _solved_ic(option)
+    tariff = packs.effective_tariff(sf.site_intake(), ledger, L.load_defaults(), n.snapshots)
+    su = n.storage_units_t
+    p = su.p["battery"].to_numpy()
+    charge = su.p_store["battery"].to_numpy() if "battery" in su.p_store else np.clip(-p, 0, None)
+    out = su.p_dispatch["battery"].to_numpy() if "battery" in su.p_dispatch \
+        else np.clip(p, 0, None)
+    w = n.snapshot_weightings.objective.to_numpy()
+    from_grid = np.minimum(charge, np.clip(n.links_t.p0["grid_import"].to_numpy(), 0, None))
+    from_pv = charge - from_grid
+    idx = n.snapshots
+    import_price = (T.band_prices(idx, tariff.energy_bands)
+                    + T._network_per_mwh(idx, tariff)).to_numpy()
+    export_price = float(tariff.export.price_per_mwh or 0.0)
+    cost = float(np.sum(w * (from_grid * import_price + from_pv * export_price)))
+    return cost / float(np.sum(w * out)), float(np.sum(w * from_pv) / np.sum(w * charge))
+
+
 def test_lcos_is_on_discounted_energy(bundles):
     """
     Owner decision 6 (Q8): the guided LCOS is the engine's storage LCOS
-    (charging cost included, real basis), exactly; its delta against GS's
-    charging-free pro forma figure and asset economics' charging-included one
-    is recorded (`lcos_is_the_engines_storage_metric`).
+    (charging cost included, real basis). Gate U2-WP7 X5 (b), the independent
+    identity: the engine's LCOS = GS's pro forma LCOS (charging excluded, its
+    own code on the same network and bills) + the charging cost per MWh
+    discharged at GS's own prices (`_charging_per_mwh_discharged`), to 1e-9.
+    The battery's costs are levelised on the same basis (C1, C2), and a
+    charge cost that is constant across the years levelises to itself. Both
+    charging branches are covered: `bess_2h` charges from the grid only,
+    `bess_pv_2h` mostly from the PV surplus (at the export price it forwent).
+    The recorded delta (`lcos_is_the_engines_storage_metric`) runs from the
+    pro forma figure to the engine's.
     """
+    from services.study import library as L
+    from services.study import packs, proforma
+
     for o in OPTIONS:
         b = bundles[o]
+        n, cfg, _compiled, ledger = _solved_ic(o)
+        tariff = packs.effective_tariff(sf.site_intake(), ledger, L.load_defaults(), n.snapshots)
+        pf = proforma.build_investment_case(n, cfg, None, ledger, dict(b.bills), o,
+                                            study_id=sf.SITE_STUDY_ID, tariff=tariff)
+        charging, pv_share = _charging_per_mwh_discharged(o)
         assert b.view.kpis.lcos is not None
-        assert b.view.kpis.lcos == b.result.metrics["lcos_real_per_mwh"]
+        assert abs(pf.kpis.lcos + charging - b.view.kpis.lcos) <= 1e-9 * b.view.kpis.lcos, \
+            (o, pf.kpis.lcos, charging, b.view.kpis.lcos)
+        assert (pv_share == 0.0) if o == "bess_2h" else (pv_share > 0.5), (o, pv_share)
         assert "lcos_includes_charging_energy_cost" in b.view.honesty_notes
         rows = [r for r in json.loads((FIXTURES / "u2_deltas.json").read_text())["deltas"]
                 if r.get("figure") == f"golden_s5.{o}.lcos"]
         assert rows and rows[0]["cause"] == "lcos_is_the_engines_storage_metric"
+        assert close(rows[0]["pre"], pf.kpis.lcos, rel=1e-9)
         assert close(rows[0]["post"], b.view.kpis.lcos, rel=1e-9)
 
 

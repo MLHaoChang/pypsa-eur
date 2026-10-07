@@ -451,11 +451,17 @@ def _record_figures(run: dict, findings: dict, case: dict) -> None:
         "storage_units") or []
     lcos_incl = next((row.get("lcos_eur_per_mwh") for row in econ
                       if row.get("name") == packs.BATTERY_NAME), None)
+    # Gate U2-WP7 X5 (c): the finance engine's LCOS includes the charging
+    # energy, so it is recorded under its own key, never the charging-free
+    # one (the WP0 freeze's `lcos_excl_charging`; recorded delta with its
+    # `post_figure`). A pro forma case (a fork written before WP7) keeps it.
+    lcos_key = ("lcos_finance_engine" if case.get("engine") == "finance_engine"
+                else "lcos_excl_charging")
     EVIDENCE["case_kpis"] = {
         "option_id": case["option_id"], "npv": k.get("npv"), "irr": k.get("irr"),
         "payback_simple": k.get("payback_simple"),
         "payback_discounted": k.get("payback_discounted"), "capex_total": k.get("capex_total"),
-        "salvage_eur": k.get("salvage_eur"), "lcos_excl_charging": k.get("lcos"),
+        "salvage_eur": k.get("salvage_eur"), lcos_key: k.get("lcos"),
         "lcos_incl_charging": lcos_incl,
         "ledger_hash": (case.get("provenance") or {}).get("ledger_hash")}
     EVIDENCE["bills"] = {

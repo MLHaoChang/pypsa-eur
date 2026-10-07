@@ -205,8 +205,11 @@ def _with_recorded_deltas(want: dict, section: str, test_id: str, tol: dict,
     `want` (a frozen section) with each recorded delta of `test_id` applied:
     the row's `figure` is `<section>.<dotted path>`, its `pre` must be the
     frozen value (within the fixture's tolerance: a row cannot paper over a
-    different number) and its `post` replaces it. A row on a path the section
-    does not have fails.
+    different number) and its `post` replaces it. A row with a `post_figure`
+    (a sibling path in the same section) moves the figure to that key: the
+    frozen key is gone and the post is read under the new one (gate U2-WP7
+    X5 (c): a key that would otherwise misname what it holds). A row on a
+    path the section does not have fails.
     """
     rows = rows if rows is not None else json.loads(DELTAS.read_text(encoding="utf-8"))["deltas"]
     out = json.loads(json.dumps(want))
@@ -221,7 +224,15 @@ def _with_recorded_deltas(want: dict, section: str, test_id: str, tol: dict,
         assert _close(leaf, parents[-1] if parents else "", float(r["pre"]), float(node[leaf]),
                       tol), f"{r['figure']}: the row's pre {r['pre']!r} is not the frozen " \
                             f"{node[leaf]!r}"
-        node[leaf] = r["post"]
+        if r.get("post_figure"):
+            *new_parents, new_leaf = r["post_figure"].split(".")[1:]
+            assert r["post_figure"].startswith(f"{section}.") and new_parents == parents, \
+                f"{r['figure']}: post_figure {r['post_figure']!r} is not a sibling key"
+            assert new_leaf not in node, f"{r['post_figure']}: already a frozen figure"
+            del node[leaf]
+            node[new_leaf] = r["post"]
+        else:
+            node[leaf] = r["post"]
     return out
 
 
@@ -282,6 +293,31 @@ def test_a_recorded_delta_applies_only_on_its_frozen_pre():
     with pytest.raises(AssertionError, match="is not the frozen"):
         _with_recorded_deltas(want, "driver", "t", tol, [{**row, "pre": pre + 1.0}])
     assert _with_recorded_deltas(want, "driver", "other", tol, [row]) == want
+
+
+def test_a_recorded_delta_with_a_post_figure_renames_the_key():
+    """
+    Gate U2-WP7 X5 (c): the driver's case LCOS is the engine's, charging
+    included, so it is recorded under `lcos_finance_engine`; the delta row
+    moves the frozen `lcos_excl_charging` there, and the comparison then
+    wants the new key and refuses the old one.
+    """
+    frozen = _frozen()
+    tol = frozen["tolerances"]
+    want = frozen["driver"]
+    [row] = [r for r in json.loads(DELTAS.read_text(encoding="utf-8"))["deltas"]
+             if r.get("test") == DRIVER_TEST_ID
+             and r["figure"] == "driver.case_kpis.lcos_excl_charging"]
+    assert row["post_figure"] == "driver.case_kpis.lcos_finance_engine"
+    got = _with_recorded_deltas(want, "driver", DRIVER_TEST_ID, tol, [row])
+    assert "lcos_excl_charging" not in got["case_kpis"]
+    assert got["case_kpis"]["lcos_finance_engine"] == row["post"]
+    assert want["case_kpis"]["lcos_excl_charging"] == row["pre"]
+    stale = {**got["case_kpis"], "lcos_excl_charging": row["post"]}
+    assert _diff(got["case_kpis"], stale, tol) == [".lcos_excl_charging: not in the recording"]
+    with pytest.raises(AssertionError, match="not a sibling key"):
+        _with_recorded_deltas(want, "driver", DRIVER_TEST_ID, tol,
+                              [{**row, "post_figure": "driver.lcos_finance_engine"}])
 
 
 def test_the_comparison_goes_red_on_a_one_euro_npv_move():

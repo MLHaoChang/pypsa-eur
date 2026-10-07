@@ -380,6 +380,12 @@ export const ERROR_COPY: Record<string, ErrorCopy> = {
   },
   load_profile_invalid: { title: 'That sector profile is damaged in the library.', action: 'Choose another profile, or report the defect.' },
   import_link_inactive: { title: 'The study’s grid connection is switched off in its network.', action: 'Run the study again; it rebuilds the network.' },
+  // Gate U2-WP7 N13: the case route's 422 when the investment calculation
+  // refuses the case; re-running the same inputs would not change it.
+  engine_refused: {
+    title: 'The investment case for this option could not be calculated from these assumptions.',
+    action: 'The message below names what is missing or inconsistent. Correct that assumption; if none applies, report it as a defect.',
+  },
 }
 
 export const ERROR_FALLBACK: ErrorCopy = { title: 'The request was refused.', action: 'The message below says why.' }
@@ -491,7 +497,7 @@ export const HELP: Record<string, string> = {
   "wacc_field_holds_the_real_rate": "The finance engine's discount-rate field is labelled nominal; on this real basis it holds the study's real discount rate.",
   "wacc_gate_differs_on_rate_bound": "This tornado bound values the case at another discount rate than the one the optimisation sized the battery at; the sizes are kept, so the bound shows the rate's effect on value only.",
   "demand_peak_hourly_resolution": "The demand charge is billed on hourly peaks, the model's time step, not on shorter metering intervals.",
-  "lcos_includes_charging_energy_cost": "The levelised cost of storage is the finance engine's: it includes what the site paid for the energy that charged the battery.",
+  "lcos_includes_charging_energy_cost": "The levelised cost of storage is what each MWh the battery delivers costs over its life, including the energy that charged it. Energy taken from the grid is counted at the price the site paid for it; energy taken from the site's own PV is counted at the export income the site gave up by storing it instead of selling it. The optimisation's own figure counts all charging energy at the model's hourly price at the site, which also reflects any demand charge, so the two can differ.",
   "finance_rules_from_guided_defaults": "The ledger has no rows for the finance rules (financial close, escalation, contingency, degradation), so the guided study's own defaults were applied.",
   "meter_links_are_not_investments": "The connection meters are part of the site's bill, not of the investment: they carry no purchase cost.",
   "case_streams_do_not_reconcile_with_engine": "The bill savings and the finance engine's operating cash disagree, so the case is not shown."

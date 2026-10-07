@@ -326,8 +326,13 @@ HELP: dict[str, str] = {
         "The demand charge is billed on hourly peaks, the model's time step, not on "
         "shorter metering intervals."),
     "lcos_includes_charging_energy_cost": (
-        "The levelised cost of storage is the finance engine's: it includes what the site"
-        " paid for the energy that charged the battery."),
+        "The levelised cost of storage is what each MWh the battery delivers costs over "
+        "its life, including the energy that charged it. Energy taken from the grid is "
+        "counted at the price the site paid for it; energy taken from the site's own PV is "
+        "counted at the export income the site gave up by storing it instead of selling "
+        "it. The optimisation's own figure counts all charging energy at the model's "
+        "hourly price at the site, which also reflects any demand charge, so the two can "
+        "differ."),
     "finance_rules_from_guided_defaults": (
         "The ledger has no rows for the finance rules (financial close, escalation, "
         "contingency, degradation), so the guided study's own defaults were applied."),
@@ -935,7 +940,10 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
     else:
         k, cy, fid = case.kpis, case.currency_year, case.fidelity
 
-        def cf(key, label, value, unit, engine="cash_flow_expander", flag=None):
+        # Gate U2-WP7 X4: the case's money facts name the engine that built the
+        # case (`finance_engine` on the Investment Case engine, else the pro
+        # forma's `cash_flow_expander`); the HTML and XLSX print it.
+        def cf(key, label, value, unit, engine=case.engine, flag=None):
             facts[key] = _fact(key, label, value, unit, engine, currency_year=cy,
                                fidelity=fid, flag=flag or k.unavailable.get(key.replace(
                                    "case_", "")))
@@ -951,11 +959,10 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
             cf("case_payback_simple", "Simple payback", k.payback_simple, "years"),
             cf("case_payback_discounted", "Discounted payback", k.payback_discounted, "years"),
             cf("case_capex_total", "Total CAPEX", k.capex_total, "EUR"),
-            cf(lcos_key, "LCOS including charging energy (finance engine)" if engine_lcos
-               else "LCOS excluding charging energy (pro forma)", k.lcos, "EUR/MWh",
-               "finance_engine" if engine_lcos else "cash_flow_expander",
-               flag=k.unavailable.get("lcos")),
-            cf("lcos_incl_charging", "LCOS including charging energy (asset economics)",
+            cf(lcos_key, "LCOS, charging at what the site paid (investment case)"
+               if engine_lcos else "LCOS excluding charging energy (pro forma)", k.lcos,
+               "EUR/MWh", flag=k.unavailable.get("lcos")),
+            cf("lcos_incl_charging", "LCOS, charging at the model's hourly price (optimisation)",
                _lcos_including_charging(inp.details, econ_oid), "EUR/MWh", "lp",
                flag="asset_economics_row_missing"),
             cf("market_revenue_at_duals", "Market revenue at the model's prices (annual)",
@@ -984,9 +991,20 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
             "is at least the discount rate and the discounted payback is within the horizon: "
             "those signs restate the optimiser's choice and are not independent evidence. The "
             "magnitudes inform; the tornado's bars, at fixed sizes, can be negative.",
-            ("The levelised cost of storage is {{lcos_finance_engine}} on the finance engine "
-             "and {{lcos_incl_charging}} in asset economics; both include the energy bought "
-             "to charge the battery, the engine at what the site paid for it in the dispatch."
+            # Gate U2-WP7 X5: what the engine prices charging at (IC's
+            # `CHARGING_BASIS`), and why asset economics' figure differs: it
+            # prices the charge at the LP's site price (`corrected_marginal_prices`,
+            # the dual, which carries the demand charge); its other terms are
+            # the same by construction (C1, C2).
+            ("The levelised cost of storage is what each MWh the battery delivers costs "
+             "over its life: its purchase, replacements and upkeep, plus the energy that "
+             "charged it. In the investment case it is {{lcos_finance_engine}}: energy the "
+             "battery took from the grid is counted at the price the site paid for it, and "
+             "energy it took from the site's own PV at the export income the site gave up by "
+             "storing it instead of selling it. The optimisation's own accounting gives "
+             "{{lcos_incl_charging}}: it counts the battery's own costs the same way, but "
+             "prices all charging energy at the model's hourly price at the site, which also "
+             "reflects any demand charge, so the two figures can differ."
              if engine_lcos else
              "Two levelised costs of storage answer different questions: "
              "{{lcos_excl_charging}} leaves out the energy bought to charge the battery (the "
