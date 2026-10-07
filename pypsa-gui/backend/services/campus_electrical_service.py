@@ -38,6 +38,9 @@ The functions:
   The library a run used is kept as ``run/campus_assets_used.yaml``, so a
   later change to the library flags the results as stale.
 * ``get_library``, ``save_library``, ``reset_library``: the asset library.
+* ``extra_owner_assets``: what the last investment run bought, as owner assets
+  for the investment case (plan, part three D2). Read only; ``get_state``
+  carries only their count, ``owner_assets_count``.
 * ``hub_cost``, in ``get_state``: the solved hub's own system cost, from the
   helper the results pages use, for the panel to show beside the electrical
   annualised cost. It never fails the state: when it cannot be computed it is
@@ -409,6 +412,7 @@ def get_state(project) -> dict:
     results = _results(d / "run")
     cost, reason = hub_cost(project) if results else (None, "no study has run yet")
     return {
+        "owner_assets_count": len(extra_owner_assets(project)),
         "campus_yaml": campus.read_text() if campus.is_file() else None,
         "skipped": json.loads(notes.read_text()) if notes.is_file() else [],
         "profiles": profiles(project),
@@ -451,6 +455,76 @@ def get_investment(project) -> dict:
         "library_is_default": _library_text(campus_dir(project))[1], "cost_basis": res["cost_basis"],
         "stale": state["stale"], "notes": list(INVESTMENT_NOTES),
     }
+
+
+def _priced(lib: dict) -> dict:
+    """``{library id: (entry, cost field)}`` across all the kinds of a library;
+    the cost field is ``capex_eur_per_km`` for a cable, else ``capex_eur``."""
+    return {e["id"]: (e, "capex_eur_per_km" if "capex_eur_per_km" in e else "capex_eur")
+            for entries in lib.values() if isinstance(entries, list) for e in entries}
+
+
+def extra_owner_assets(project) -> list:
+    """What the last investment run bought, as owner assets for the investment
+    case: one entry per purchased item that is neither existing (sunk) nor
+    unresolved. ``[]`` when the project has no investment run (no study, or a
+    run with ``invest`` off); a project of another kind is refused like every
+    other action here.
+
+    Read from the run directory: ``campus_investment.csv`` (the items, their
+    units, cable length and investment period) and ``campus_assets_used.yaml``
+    (the library the run bought from, kept beside the results: its costs,
+    lifetimes, fixed-O&M shares and cost tags are the run's, not those of a
+    library saved since). Who owns the PCC switchgear
+    (``campus_invest_scope.json``) is already settled in the table: when the
+    grid operator owns it the engine writes no row for it, so none appears here.
+
+    Each entry::
+
+        {"name": "<need> <library_id>", "need", "kind", "library_id",
+         "units": n, "invest_period": p,
+         "upfront_parts": [{"name": "investment", "upfront": EUR, "lifetime": years, "fom_share": share}],
+         "currency", "price_year", "provenance", "illustrative"}
+
+    ``upfront_parts`` mirrors ``asset_schema.access.UpfrontPart`` (``name``,
+    ``lifetime``, ``fom_share``) but carries the TOTAL overnight cost in the
+    library's currency in ``upfront``, not ``upfront_per_unit``: these items
+    have no per-MW sizing variable. The total is the units times the library's
+    overnight cost (times the cable's km: ``capex_eur_per_km``; for switchgear
+    ``units`` are the bays). ``price_year`` is the library's: the costs are in
+    that year's money, with no escalation. ``provenance`` is the source tag of
+    that cost in the library (``measured``, ``datasheet`` or ``assumed``);
+    ``illustrative`` is True when it is ``assumed``."""
+    require_capacity_expansion(project)
+    run_dir = campus_dir(project) / "run"
+    table, used = run_dir / cs.INVESTMENT_CSV, run_dir / USED_LIBRARY_FILE
+    if not table.is_file() or not used.is_file():
+        return []
+    lib = cs.load_asset_library(used)
+    priced = _priced(lib)
+    out = []
+    for r in pd.read_csv(table).to_dict(orient="records"):
+        if bool(r["existing"]) or r["status"] == "unresolved" or not isinstance(r["library_id"], str):
+            continue
+        if r["library_id"] not in priced:
+            raise HTTPException(status_code=422, detail=f"{r['need']}: {r['library_id']} is not in the library the run used")
+        entry, cost = priced[r["library_id"]]
+        units = int(r["units"])
+        length = r["length_km"]
+        km = float(length) if cost == "capex_eur_per_km" else 1.0
+        if cost == "capex_eur_per_km" and (not isinstance(length, (int, float)) or math.isnan(length)):
+            raise HTTPException(status_code=422, detail=f"{r['need']}: a cable row has no length_km")
+        source = entry[cost]["source"]
+        out.append({
+            "name": f"{r['need']} {r['library_id']}", "need": r["need"], "kind": r["kind"],
+            "library_id": r["library_id"], "units": units, "invest_period": int(r["invest_period"]),
+            "upfront_parts": [{"name": "investment", "upfront": units * float(entry[cost]["value"]) * km,
+                               "lifetime": float(entry["lifetime_a"]["value"]),
+                               "fom_share": float(entry["opex_frac"]["value"])}],
+            "currency": lib["currency"], "price_year": lib["price_year"],
+            "provenance": source, "illustrative": source == "assumed",
+        })
+    return out
 
 
 def draft(project, overwrite: bool = False) -> dict:

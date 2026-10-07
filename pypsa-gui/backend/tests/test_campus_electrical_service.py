@@ -781,3 +781,178 @@ def test_the_investment_summary_for_the_copilot_carries_the_cost_basis(hub):
     save_solver_config(hub, discount_rate=0.05)
     ce.run(hub, {"k": 1})
     assert ce.get_investment(hub)["cost_basis"]["discount_rate"] == 0.05
+
+
+# --------------------------------------------------------------------------
+# part three, D2: the chosen equipment as extra owner assets
+# --------------------------------------------------------------------------
+#
+# ``extra_owner_assets`` turns what the last investment run bought into the
+# list the investment-case builder can take: one entry per purchased item that
+# is neither existing nor unresolved, with the TOTAL overnight cost in EUR.
+
+INVEST_COLUMNS = ["need", "library_id", "kind", "units", "length_km", "invest_period", "capex_eur",
+                  "opex_eur_per_a", "annualised_eur_per_a", "existing", "status", "reason"]
+
+
+def inv_row(need, library_id, kind, units, *, length_km=None, period=2030, capex=1.0, existing=False,
+            status="chosen", reason=None):
+    return {"need": need, "library_id": library_id, "kind": kind, "units": units, "length_km": length_km,
+            "invest_period": period, "capex_eur": capex, "opex_eur_per_a": 0.0, "annualised_eur_per_a": 0.0,
+            "existing": existing, "status": status, "reason": reason}
+
+
+def fake_investment(project, rows, library_text=None, scope="campus"):
+    """Write a run directory as an investment run leaves it, from hand-made rows."""
+    import json
+    run_dir = ce.campus_dir(project) / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows, columns=INVEST_COLUMNS).to_csv(run_dir / ce.cs.INVESTMENT_CSV, index=False)
+    (run_dir / ce.cs.INVEST_SCOPE_JSON).write_text(json.dumps({"pcc_switchgear": scope}))
+    (run_dir / ce.USED_LIBRARY_FILE).write_text(library_text or default_library_text())
+    return run_dir
+
+
+def purchase_rows():
+    return [
+        inv_row("transformer GRID_IMPORT", "TR_132_33_63", "transformer", 2, capex=5_000_000.0),
+        inv_row("cable CBL_1", "CB_33_AL240", "cable", 2, length_km=1.5, period=2032, capex=420_000.0),
+        inv_row("switchgear GRID", "SG_132_31p5", "switchgear", 3, capex=1_350_000.0),
+        inv_row("reactive", "CAP_33_10M", "capacitor_bank", 2, period=2035, capex=300_000.0),
+        inv_row("reactive", "SR_33_5M", "shunt_reactor", 1, period=2035, capex=150_000.0),
+    ]
+
+
+def test_each_purchased_item_is_one_owner_asset_with_the_total_overnight_cost(hub):
+    fake_investment(hub, purchase_rows())
+    assets = ce.extra_owner_assets(hub)
+    assert [a["name"] for a in assets] == [
+        "transformer GRID_IMPORT TR_132_33_63", "cable CBL_1 CB_33_AL240", "switchgear GRID SG_132_31p5",
+        "reactive CAP_33_10M", "reactive SR_33_5M"]
+    assert assets[0] == {
+        "name": "transformer GRID_IMPORT TR_132_33_63", "need": "transformer GRID_IMPORT", "kind": "transformer",
+        "library_id": "TR_132_33_63", "units": 2, "invest_period": 2030,
+        "upfront_parts": [{"name": "investment", "upfront": 5_000_000.0, "lifetime": 40.0, "fom_share": 0.015}],
+        "currency": "EUR", "price_year": 2026, "provenance": "assumed", "illustrative": True}
+
+
+def test_the_upfront_cost_is_units_times_the_library_overnight_cost(hub):
+    # the figure is the library's, multiplied out here: wrong CSV capex columns must not leak through
+    rows = [inv_row("transformer T", "TR_132_33_63", "transformer", 3, capex=-1.0)]
+    fake_investment(hub, rows)
+    (asset,) = ce.extra_owner_assets(hub)
+    assert asset["upfront_parts"][0]["upfront"] == 3 * 2_500_000.0
+
+
+def test_a_cable_is_priced_per_km_times_km_times_the_cables(hub):
+    fake_investment(hub, [inv_row("cable CBL_1", "CB_33_AL240", "cable", 2, length_km=1.5, capex=-1.0)])
+    (asset,) = ce.extra_owner_assets(hub)
+    assert asset["units"] == 2
+    assert asset["upfront_parts"][0]["upfront"] == 2 * 140_000.0 * 1.5
+    assert asset["upfront_parts"][0]["lifetime"] == 40.0 and asset["upfront_parts"][0]["fom_share"] == 0.005
+
+
+def test_switchgear_is_priced_per_bay_times_the_bays(hub):
+    fake_investment(hub, [inv_row("switchgear MV", "SG_20_25p0", "switchgear", 4, capex=-1.0)])
+    (asset,) = ce.extra_owner_assets(hub)
+    assert asset["units"] == 4 and asset["upfront_parts"][0]["upfront"] == 4 * 54_000.0
+    assert asset["upfront_parts"][0]["fom_share"] == 0.01
+
+
+def test_existing_and_unresolved_and_empty_needs_are_left_out(hub):
+    rows = [
+        inv_row("transformer T", "TR_132_33_63", "transformer", 1),
+        inv_row("transformer OLD", "TR_132_33_40", "transformer", 1, existing=True),      # sunk, even if 'chosen'
+        inv_row("transformer KEPT", None, "keep", 0, existing=True, status="kept"),
+        inv_row("reactive", "CAP_33_5M", "capacitor_bank", 1, status="unresolved", reason="needs a tap change"),
+        inv_row("cable NONE", None, "none", 0, status="not_needed"),
+    ]
+    fake_investment(hub, rows)
+    assert [a["name"] for a in ce.extra_owner_assets(hub)] == ["transformer T TR_132_33_63"]
+
+
+def test_there_are_no_owner_assets_before_a_run_or_after_a_run_that_did_not_invest(hub):
+    assert ce.extra_owner_assets(hub) == []
+    ce.draft(hub)
+    assert ce.extra_owner_assets(hub) == []
+    ce.run(hub, {"k": 1, "invest": False})
+    assert ce.extra_owner_assets(hub) == []
+
+
+def test_a_run_that_only_kept_what_exists_has_no_owner_assets(hub):
+    fake_investment(hub, [inv_row("transformer KEPT", None, "keep", 0, existing=True, status="kept")])
+    assert ce.extra_owner_assets(hub) == []
+
+
+def test_a_project_of_another_kind_is_refused_like_every_other_action(study):
+    with pytest.raises(HTTPException) as exc:
+        ce.extra_owner_assets(study)
+    assert exc.value.status_code == 409
+
+
+def test_the_cost_tag_of_the_library_is_the_provenance_and_assumed_alone_is_illustrative(hub):
+    def measured(data):
+        for e in data["transformers"]:
+            if e["id"] == "TR_132_33_63":
+                e["capex_eur"]["source"] = "datasheet"
+    fake_investment(hub, purchase_rows(), library_text=library_with(measured))
+    by_id = {a["library_id"]: a for a in ce.extra_owner_assets(hub)}
+    assert by_id["TR_132_33_63"]["provenance"] == "datasheet" and by_id["TR_132_33_63"]["illustrative"] is False
+    assert by_id["CB_33_AL240"]["provenance"] == "assumed" and by_id["CB_33_AL240"]["illustrative"] is True
+
+
+def test_a_cable_takes_the_provenance_of_its_per_km_cost(hub):
+    def change(data):
+        for e in data["cables"]:
+            if e["id"] == "CB_33_AL240":
+                e["capex_eur_per_km"]["source"] = "measured"
+    fake_investment(hub, [inv_row("cable CBL_1", "CB_33_AL240", "cable", 1, length_km=2.0)], library_text=library_with(change))
+    (asset,) = ce.extra_owner_assets(hub)
+    assert asset["provenance"] == "measured" and asset["illustrative"] is False
+
+
+def test_the_currency_and_the_price_year_are_the_libraries_of_the_run(hub):
+    def change(data):
+        data["currency"] = "USD"
+        data["price_year"] = 2021
+    fake_investment(hub, purchase_rows(), library_text=library_with(change))
+    assert {(a["currency"], a["price_year"]) for a in ce.extra_owner_assets(hub)} == {("USD", 2021)}
+
+
+def test_the_invest_period_is_the_rows(hub):
+    fake_investment(hub, purchase_rows())
+    assert [a["invest_period"] for a in ce.extra_owner_assets(hub)] == [2030, 2032, 2030, 2035, 2035]
+
+
+def test_the_owner_assets_come_from_the_library_the_run_used_not_the_one_saved_since(hub):
+    fake_investment(hub, [inv_row("transformer T", "TR_132_33_63", "transformer", 1)])
+    ce.save_library(hub, library_with(scaled_capex(5)))                 # saved after the run
+    (asset,) = ce.extra_owner_assets(hub)
+    assert asset["upfront_parts"][0]["upfront"] == 2_500_000.0
+
+
+def test_a_real_run_gives_owner_assets_that_add_up_to_its_cost_table(hub):
+    ce.draft(hub)
+    out = ce.run(hub, {"k": 1, "pf": 0.95})
+    assets = ce.extra_owner_assets(hub)
+    chosen = [r for r in out["results"]["investment"] if r["status"] == "chosen" and not r["existing"]]
+    assert chosen and len(assets) == len(chosen)
+    assert sum(a["upfront_parts"][0]["upfront"] for a in assets) == pytest.approx(sum(r["capex_eur"] for r in chosen))
+    assert sum(a["upfront_parts"][0]["upfront"] for a in assets) == pytest.approx(out["results"]["cost"][0]["capex_eur"])
+    assert out["owner_assets_count"] == len(assets)
+    assert all(a["illustrative"] and a["provenance"] == "assumed" for a in assets)
+
+
+def test_the_pcc_switchgear_the_operator_owns_is_not_an_owner_asset(hub):
+    ce.draft(hub)
+    mine = ce.run(hub, {"k": 1, "pf": 0.95})
+    assert "switchgear GRID SG_110_31p5" in [a["name"] for a in ce.extra_owner_assets(hub)]
+    theirs = ce.run(hub, {"k": 1, "pf": 0.95, "pcc_switchgear_by_operator": True})
+    assert not [a for a in ce.extra_owner_assets(hub) if a["need"] == "switchgear GRID"]
+    assert theirs["owner_assets_count"] == mine["owner_assets_count"] - 1
+
+
+def test_the_state_counts_the_owner_assets(hub):
+    assert ce.get_state(hub)["owner_assets_count"] == 0
+    fake_investment(hub, purchase_rows())
+    assert ce.extra_owner_assets(hub) and ce.get_state(hub)["owner_assets_count"] == 5
