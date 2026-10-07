@@ -43,7 +43,9 @@ in). **Plan:** `docs/superpowers/plans/2026-10-07-ic-g1-g2-campus-equipment.md` 
   archive).
 - **Gate on d94402e.**
   - Backend: **10,091 passed, 39 skipped, 0 failed** (82 min).
-  - QA drivers, vitest and tsc: recorded below.
+  - All **31** QA drivers pass (`qa_investment_case.py` 259/259: the 251 baseline plus scenario N).
+  - vitest: **3,411** tests in 292 files pass.
+  - tsc: clean.
 
 ## Known limits (disclosed, not defects)
 
