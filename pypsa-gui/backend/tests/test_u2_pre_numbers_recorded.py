@@ -22,6 +22,14 @@ Real solves: the S5 golden and seed-bill checks reuse
 the driver re-run (``slow``) is ``qa_decision_study.py`` in a subprocess
 (about 70 s). From WP8 on the driver's figures move by design and the §4
 judging rule takes over from its re-derivation here.
+
+A figure a U2 work package moves BY DESIGN is never re-frozen: it is a row of
+``tests/fixtures/u2_deltas.json`` whose ``test`` is the comparing test's id
+and whose ``figure`` is the frozen dotted path; the comparison checks the
+row's ``pre`` IS the frozen value, then compares against its ``post``
+(:func:`_with_recorded_deltas`). Since WP7: the driver's
+``upfront_cost_series_eur_per_mw`` (C1 closes the S4 gap), the FOM line's
+rounding and the engine's LCOS.
 """
 from __future__ import annotations
 
@@ -187,6 +195,36 @@ def _diff(want, got, tol: dict, path: str = "", key: str = "", parent: str = "")
         f"{path}: {got!r} != {want!r} (Δ {float(got) - float(want):.3e})"]
 
 
+DELTAS = REC.FIXTURE.parent / "u2_deltas.json"
+DRIVER_TEST_ID = "test_u2_pre_numbers_recorded.py::test_the_driver_evidence_reproduces"
+
+
+def _with_recorded_deltas(want: dict, section: str, test_id: str, tol: dict,
+                          rows: list[dict] | None = None) -> dict:
+    """
+    `want` (a frozen section) with each recorded delta of `test_id` applied:
+    the row's `figure` is `<section>.<dotted path>`, its `pre` must be the
+    frozen value (within the fixture's tolerance: a row cannot paper over a
+    different number) and its `post` replaces it. A row on a path the section
+    does not have fails.
+    """
+    rows = rows if rows is not None else json.loads(DELTAS.read_text(encoding="utf-8"))["deltas"]
+    out = json.loads(json.dumps(want))
+    for r in rows:
+        if r.get("test") != test_id or not str(r.get("figure", "")).startswith(f"{section}."):
+            continue
+        *parents, leaf = r["figure"].split(".")[1:]
+        node = out
+        for k in parents:
+            node = node[k]
+        assert leaf in node, f"{r['figure']}: not a frozen figure"
+        assert _close(leaf, parents[-1] if parents else "", float(r["pre"]), float(node[leaf]),
+                      tol), f"{r['figure']}: the row's pre {r['pre']!r} is not the frozen " \
+                            f"{node[leaf]!r}"
+        node[leaf] = r["post"]
+    return out
+
+
 def _json_round_trip(obj):
     """Compare what the fixture would hold (tuples as lists, -0.0 kept)."""
     return json.loads(json.dumps(obj))
@@ -220,8 +258,30 @@ def test_the_driver_evidence_reproduces():
     got = _json_round_trip(REC.driver_section(REC.run_driver()))
     assert got["checks"]["failed"] == 0, got["checks"]
     want = {k: v for k, v in frozen["driver"].items() if k != "checks"}
+    want = _with_recorded_deltas(want, "driver", DRIVER_TEST_ID, frozen["tolerances"])
     got = {k: v for k, v in got.items() if k != "checks"}
     assert _diff(want, got, frozen["tolerances"], "driver") == []
+
+
+def test_a_recorded_delta_applies_only_on_its_frozen_pre():
+    """
+    The delta mechanism cannot re-freeze silently: a row moves exactly its
+    figure from its frozen `pre` to its `post`, and a row whose `pre` is not
+    the frozen value is refused.
+    """
+    frozen = _frozen()
+    tol = frozen["tolerances"]
+    want = frozen["driver"]
+    pre = want["upfront_cost_series_eur_per_mw"]
+    row = {"test": "t", "figure": "driver.upfront_cost_series_eur_per_mw", "pre": pre,
+           "post": 730000.0}
+    got = _with_recorded_deltas(want, "driver", "t", tol, [row])
+    assert got["upfront_cost_series_eur_per_mw"] == 730000.0
+    assert _diff(want, got, tol, "driver") == [
+        f"driver.upfront_cost_series_eur_per_mw: 730000.0 != {pre!r} (Δ {730000.0 - pre:.3e})"]
+    with pytest.raises(AssertionError, match="is not the frozen"):
+        _with_recorded_deltas(want, "driver", "t", tol, [{**row, "pre": pre + 1.0}])
+    assert _with_recorded_deltas(want, "driver", "other", tol, [row]) == want
 
 
 def test_the_comparison_goes_red_on_a_one_euro_npv_move():

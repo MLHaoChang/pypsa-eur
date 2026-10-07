@@ -88,7 +88,8 @@ SECTIONS: tuple[tuple[str, str], ...] = (
 )
 TITLES = dict(SECTIONS)
 _CURRENCIES = frozenset({"EUR", "USD", "GBP", "CHF"})
-_RUN_ENGINES = frozenset({"lp", "lp_duals", "bill_calculator", "cash_flow_expander"})
+_RUN_ENGINES = frozenset({"lp", "lp_duals", "bill_calculator", "cash_flow_expander",
+                          "tariff_engine", "finance_engine"})
 
 # ── the code -> sentence table (the study's own codes) ────────────────────
 #
@@ -306,6 +307,36 @@ HELP: dict[str, str] = {
         "The tariff's capacity charge states no contracted capacity, so it is billed on "
         "the site's connection size. Enter the contracted capacity from the contract if "
         "it differs."),
+    # U2 WP7: the engine-built investment case.
+    "battery_upfront_from_two_parts": (
+        "The battery's purchase cost is the sum of its two parts from the assumptions "
+        "ledger (inverter and storage block), and every screen reads the same figure."),
+    "irr_cash_changes_sign_more_than_once": (
+        "The yearly cash changes sign more than once (the inverter replacements cost more"
+        " than a year's saving), so more than one rate could zero the NPV; the one "
+        "closest to zero is shown."),
+    "wacc_field_holds_the_real_rate": (
+        "The finance engine's discount-rate field is labelled nominal; on this real basis"
+        " it holds the study's real discount rate."),
+    "wacc_gate_differs_on_rate_bound": (
+        "This tornado bound values the case at another discount rate than the one the "
+        "optimisation sized the battery at; the sizes are kept, so the bound shows the "
+        "rate's effect on value only."),
+    "demand_peak_hourly_resolution": (
+        "The demand charge is billed on hourly peaks, the model's time step, not on "
+        "shorter metering intervals."),
+    "lcos_includes_charging_energy_cost": (
+        "The levelised cost of storage is the finance engine's: it includes what the site"
+        " paid for the energy that charged the battery."),
+    "finance_rules_from_guided_defaults": (
+        "The ledger has no rows for the finance rules (financial close, escalation, "
+        "contingency, degradation), so the guided study's own defaults were applied."),
+    "meter_links_are_not_investments": (
+        "The connection meters are part of the site's bill, not of the investment: they "
+        "carry no purchase cost."),
+    "case_streams_do_not_reconcile_with_engine": (
+        "The bill savings and the finance engine's operating cash disagree, so the case "
+        "is not shown."),
 }
 
 # (prefix, sentence) for codes that carry a qualifier.
@@ -324,6 +355,8 @@ _PREFIX_HELP: tuple[tuple[str, str], ...] = (
     ("fork_changed_since_findings", HELP["fork_changed_since_findings"]),
     ("size_at_upper_bound", HELP["size_at_upper_bound"]),
     ("options_not_established", HELP["options_not_established"]),
+    # U2 WP7: a finance-engine reason, named after the prefix.
+    ("engine_reason:", "The finance engine could not establish part of the case; the reason is named."),
 )
 _FALLBACK = "No explanation is recorded for this code."
 
@@ -367,6 +400,7 @@ DISCLOSURE_RULES: tuple[tuple[str, str], ...] = (
     ("duals_at_limit", "market_revenue_at_duals_exceeds_cost_at_size_limit"),
     ("duals_unknown", "market_revenue_at_duals_relation_not_established"),
     ("lcos_both", "lcos_two_definitions"),
+    ("lcos_engine", "lcos_includes_charging_energy_cost"),
     ("dc_foresight", "demand_charge_perfect_foresight"),
     ("unjudged", "options_not_all_judged"),
     ("bess_pv_named", "battery_value_against_pv_only_reference"),
@@ -907,14 +941,20 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
                                    "case_", "")))
             return key
 
+        # U2 WP7: an engine-built case's LCOS is the finance engine's storage
+        # metric, which INCLUDES the charging energy (owner decision 6).
+        engine_lcos = "lcos_includes_charging_energy_cost" in case.honesty_notes
+        lcos_key = "lcos_finance_engine" if engine_lcos else "lcos_excl_charging"
         keys = [
             cf("case_npv", "Option NPV", k.npv, "EUR"),
             cf("case_irr", "IRR", k.irr, "per unit"),
             cf("case_payback_simple", "Simple payback", k.payback_simple, "years"),
             cf("case_payback_discounted", "Discounted payback", k.payback_discounted, "years"),
             cf("case_capex_total", "Total CAPEX", k.capex_total, "EUR"),
-            cf("lcos_excl_charging", "LCOS excluding charging energy (pro forma)", k.lcos,
-               "EUR/MWh", flag=k.unavailable.get("lcos")),
+            cf(lcos_key, "LCOS including charging energy (finance engine)" if engine_lcos
+               else "LCOS excluding charging energy (pro forma)", k.lcos, "EUR/MWh",
+               "finance_engine" if engine_lcos else "cash_flow_expander",
+               flag=k.unavailable.get("lcos")),
             cf("lcos_incl_charging", "LCOS including charging energy (asset economics)",
                _lcos_including_charging(inp.details, econ_oid), "EUR/MWh", "lp",
                flag="asset_economics_row_missing"),
@@ -925,7 +965,9 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
             cf("horizon_years", "Horizon", float(case.horizon_years), "years", "ledger"),
             cf("discount_rate", "Real discount rate", case.discount_rate, "per unit", "ledger"),
         ]
-        if facts["lcos_excl_charging"].value is not None and \
+        if engine_lcos:
+            tags.add("lcos_engine")
+        elif facts["lcos_excl_charging"].value is not None and \
                 facts["lcos_incl_charging"].value is not None:
             tags.add("lcos_both")
         tags.add("economics")
@@ -942,9 +984,13 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
             "is at least the discount rate and the discounted payback is within the horizon: "
             "those signs restate the optimiser's choice and are not independent evidence. The "
             "magnitudes inform; the tornado's bars, at fixed sizes, can be negative.",
-            "Two levelised costs of storage answer different questions: "
-            "{{lcos_excl_charging}} leaves out the energy bought to charge the battery (the "
-            "pro forma's figure) and {{lcos_incl_charging}} includes it (asset economics).",
+            ("The levelised cost of storage is {{lcos_finance_engine}} on the finance engine "
+             "and {{lcos_incl_charging}} in asset economics; both include the energy bought "
+             "to charge the battery, the engine at what the site paid for it in the dispatch."
+             if engine_lcos else
+             "Two levelised costs of storage answer different questions: "
+             "{{lcos_excl_charging}} leaves out the energy bought to charge the battery (the "
+             "pro forma's figure) and {{lcos_incl_charging}} includes it (asset economics)."),
             _DUALS_PROSE[duals],
         ]
         if _has_pv(q, econ_oid):

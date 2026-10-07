@@ -28,8 +28,9 @@ Checked on the way (plan S9; gate carries S2, S4, S5, S6, S7, S8):
 2. the run solves every option, charged to a ``decision_study`` campaign on
    the study's base context, not the session's;
 3. the best option's case reconciles: CAPEX to ``packs.battery_upfront_eur_per_mw``
-   x size from the ledger (NOT ``upfront_cost_series``, which the S4 gate
-   showed overstates this pack's battery by 24-35 %; the gap is printed), and
+   x size from the ledger, which ``upfront_cost_series`` now reads too (U2 WP7
+   C1: the pack writes the battery as its two upfront parts, so the S4 gate's
+   24-35 % single-lifetime overstatement is gone; checked equal), and
    fixed O&M to ``asset_economics.fom_cost_eur`` and to ``cost_breakdown``'s
    StorageUnit FOM recomputed on the fork's own network;
 4. the findings carry a verdict; the tornado re-dispatches the demand-charge
@@ -410,9 +411,11 @@ def _reconcile(sid: str, ledger: dict, run: dict, findings: dict) -> None:
         back = float(upfront_cost_series(n, "StorageUnit").get(packs.BATTERY_NAME, float("nan")))
     EVIDENCE["upfront_cost_series_eur_per_mw"] = back
     EVIDENCE["upfront_cost_series_overstatement_pct"] = round(100 * (back / upfront - 1), 1)
-    _step("upfront_cost_series is NOT the upfront figure on this pack (disclosed gap)",
-          back > upfront, f"{back:.0f} vs ledger {upfront:.0f} EUR/MW "
-          f"(+{EVIDENCE['upfront_cost_series_overstatement_pct']} %)")
+    # U2 WP7 C1: the battery is written as its two upfront parts, which
+    # `upfront_cost_series` sums — the S4 gap (a single-lifetime back-
+    # calculation, 881,618 EUR/MW here at WP0) is closed (u2_deltas.json).
+    _step("upfront_cost_series equals the ledger upfront on this pack (C1 parts)",
+          abs(back - upfront) <= 1e-9 * upfront, f"{back:.0f} vs ledger {upfront:.0f} EUR/MW")
     x = c.get(_study_url(BASE, sid, f"/options/{oid}/case.xlsx"))
     _step("the case workbook downloads", x.status_code == 200 and x.content[:2] == b"PK")
     _record_figures(run, findings, case)

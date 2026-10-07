@@ -119,3 +119,36 @@ def ic_site_option(option_id: str, ledger=None):
         cfg = packs.option_solver_config(ledger, c)
         _IC_SOLVED[key] = (ic_solve(n, cfg), cfg)
     return _IC_SOLVED[key]
+
+
+# ── WP7: the option's fork as the engine-valued case reads it ──────────────
+
+_IC_CASE: dict = {}
+
+
+def ic_case_option(option: str):
+    """
+    (solved network, SolverConfig, compiled commercial, ledger) of a site
+    golden option as WP8's runner will make its fork, once per process: the
+    pack-seeded ledger (`library.load_defaults`, rows 21-34), the pack network
+    (no prices; the battery's two upfront parts, C1), the compiled commercial
+    bound on it (C6) with its `single_owner` value flows, solved through
+    `run_simulation` with `compile.solver_config`.
+    """
+    if option not in _IC_CASE:
+        from services.study import compile as C
+        from services.study import library as L
+        from services.study import packs
+        from services.study import questions as Q
+        from tests.golden import site_fixture as sf
+
+        defaults = L.load_defaults()
+        ledger = L.seed_ledger(Q.BESS_AT_SITE, sf.site_intake(), defaults)
+        n = packs.build_site_network(sf.site_intake(), ledger, option, library=defaults)
+        compiled = C.commercial_from_ledger(sf.site_intake(), ledger, defaults, n.snapshots,
+                                            export_series=FAKE_REF)
+        compiled = C.bind_on_network(n, compiled, resolve_ref=flat_resolver(40.0, n.snapshots))
+        compiled = C.with_value_flows(compiled, n)
+        cfg = C.solver_config(ledger, compiled)
+        _IC_CASE[option] = (ic_solve(n, cfg), cfg, compiled, ledger)
+    return _IC_CASE[option]

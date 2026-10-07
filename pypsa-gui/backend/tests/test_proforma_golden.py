@@ -88,7 +88,13 @@ def test_capex_is_the_ledger_upfront_booked_in_year_zero(cases, option):
 
 
 def test_the_battery_capex_is_not_the_single_lifetime_back_calculation(cases):
-    """Gate S4: `upfront_cost_series` overstates the battery; it is disclosed, not used."""
+    """
+    Gate S4: the case books the ledger's upfront, never a single-lifetime
+    back-calculation. Since U2 WP7 (C1) the pack writes the battery as its two
+    upfront parts and `upfront_cost_series` sums them, so the S4 gap is CLOSED
+    (recorded delta `c1_parts_close_the_s4_gap`): the figure other screens show
+    equals the case's, and the case says so (`battery_upfront_from_two_parts`).
+    """
     from services.solver.periodized_costs import upfront_cost_series
     from services.solver_service import with_periodized_cost_defaults
 
@@ -96,11 +102,12 @@ def test_the_battery_capex_is_not_the_single_lifetime_back_calculation(cases):
     with with_periodized_cost_defaults(n, cfg, for_back_calculation=True):
         back = float(upfront_cost_series(n, "StorageUnit")["battery"]) * _sizes("bess_2h")[0]
     case = cases["bess_2h"]
-    assert back > case.kpis.capex_total * 1.10
+    assert back == pytest.approx(case.kpis.capex_total, rel=1e-9)
     [gap] = [g for g in case.upfront_gaps if g.asset == "battery"]
     assert gap.ledger_upfront_eur == pytest.approx(case.kpis.capex_total, rel=1e-9)
     assert gap.back_calculated_upfront_eur == pytest.approx(back, rel=1e-9)
-    assert "battery_upfront_from_ledger_not_back_calculated" in case.honesty_notes
+    assert "battery_upfront_from_two_parts" in case.honesty_notes
+    assert "battery_upfront_from_ledger_not_back_calculated" not in case.honesty_notes
 
 
 def test_inverter_replacements_land_at_its_lifetime_inside_the_horizon(cases):
@@ -393,7 +400,7 @@ REQUIRED_NOTES = {
     "perfect_foresight_dispatch", "demand_charge_perfect_foresight", "no_degradation",
     "inverter_replaced_at_its_lifetime", "duals_include_demand_charge",
     "market_revenue_at_duals_excluded_from_cash_flow",
-    "battery_upfront_from_ledger_not_back_calculated",
+    "battery_upfront_from_two_parts",          # U2 WP7 C1 (the S4 gap closed)
 }
 
 

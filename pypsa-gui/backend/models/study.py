@@ -95,6 +95,10 @@ Engine = Literal[
     # S7 (gate S7 [N6]): a constant of the method itself (the verdict's
     # break-even tolerance), neither a ledger row nor a run's output.
     "method_constant",
+    # U2 WP7: the Investment Case engine's bill and finance engines (the
+    # engine-built case and its value streams; §5.4's rename of the old two
+    # names, with read-compat, is WP8's).
+    "tariff_engine", "finance_engine",
 ]
 SolveStatus = Literal[
     "not_run", "queued", "running", "ok", "infeasible", "failed", "aborted",
@@ -212,7 +216,8 @@ class Figure(_Model):
 
 
 _CURRENCIES = frozenset({"EUR", "USD", "GBP", "CHF"})
-_RUN_ENGINES = frozenset({"lp", "lp_duals", "bill_calculator", "cash_flow_expander"})
+_RUN_ENGINES = frozenset({"lp", "lp_duals", "bill_calculator", "cash_flow_expander",
+                          "tariff_engine", "finance_engine"})
 
 
 def _completeness_agrees(sections: dict[str, SectionStatus],

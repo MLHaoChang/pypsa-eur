@@ -49,6 +49,16 @@ on the BATTERY's value, not an option's:
   range; a customised value OUTSIDE that range re-centres the range's
   relative width on the value (``range_recentred_on_user_value``).
 
+**On the Investment Case engine (U2 WP7).** A solved option network the
+engine can value (``engine_adapter.engine_ready``: solved on the engine's
+commercial chain, the battery written as its two upfront parts) is valued by
+``engine_adapter.option_case`` — its ONE ``FinanceCase`` — and its CAPEX and
+discount-rate bounds by ``engine_adapter.bound_case`` on that case (C5: no
+value-flow ledger rebuilt, no network re-read); a price bound re-dispatches
+and calls ``option_case`` on the variant network. Any other network (a fork
+written before WP7, a test's fake solve) keeps the pro forma until WP8 marks
+such studies stale.
+
 Solving is injected (``solve(network, cfg, variant_id)``): the worker
 (``services/study/tornado_runner.py``) solves each variant on a throw-away
 study-owned fork through the queue; the tests solve in process.
@@ -79,6 +89,7 @@ from models.study import (
     ValueStream,
     Verdict,
 )
+from services.study import engine_adapter as study_engine
 from services.study import packs
 from services.study import proforma
 from services.study import questions as Q
@@ -253,6 +264,10 @@ class TornadoContext:
     # U2 WP6: the study's minted export price series the run bound its forks
     # to (`PriceSeriesRef` or its dict; None on a run recorded before WP6).
     export_series: Any = None
+    # U2 WP7: each engine-valued centre or reference network's `CaseBundle`
+    # (by `id(network)`, the network kept beside it so an id is never reused),
+    # so its CAPEX and rate bounds derive from its ONE `FinanceCase` (C5).
+    bundles: dict = field(default_factory=dict)
 
 
 def _compiled(ctx: TornadoContext, ledger: AssumptionsLedger, snapshots=None):
@@ -355,8 +370,36 @@ def _bill_of(n, tariff: Tariff, fidelity=None) -> Bill:
                                               fidelity=fidelity)
 
 
+def _on_engine(ctx: TornadoContext, n) -> bool:
+    """Whether `n` is valued by the engine (U2 WP7; see the module docstring)."""
+    return ctx.export_series is not None and study_engine.engine_ready(n)
+
+
+def _bundle_of(ctx: TornadoContext, n):
+    entry = ctx.bundles.get(id(n))
+    return entry[1] if entry is not None and entry[0] is n else None
+
+
 def _case(ctx: TornadoContext, n, cfg, ledger, tariff, bills, option_id,
-          asset_economics=None) -> InvestmentCase:
+          asset_economics=None, *, keep: bool = True) -> InvestmentCase:
+    """
+    One option's case: the engine's (`engine_adapter.option_case`, its
+    bundle kept for the bounds) when `n` is engine-valued, else the pro
+    forma. On the engine the bills are the engine's own (the option's solved
+    meter, the counterfactual at the case's tariff); a bill the caller names
+    as None (the run could not bill it) still makes the case not established.
+    `keep` keeps the bundle for the network's bounds (not a price bound's).
+    """
+    if _on_engine(ctx, n):
+        missing = {w: None for w, b in (bills or {}).items() if b is None}
+        bundle = study_engine.option_case(
+            n, cfg, ledger, compiled=_compiled(ctx, ledger, n.snapshots), option_id=option_id,
+            study_id=ctx.study_id, fidelity=ctx.fidelity, asset_economics=asset_economics,
+            question=ctx.question, bills=missing or None,
+            study_currency_year=ctx.study_currency_year)
+        if keep:
+            ctx.bundles[id(n)] = (n, bundle)
+        return bundle.view
     return proforma.build_investment_case(
         n, cfg, None, ledger, bills, option_id, study_id=ctx.study_id, tariff=tariff,
         fidelity=ctx.fidelity, asset_economics=asset_economics,
@@ -544,6 +587,10 @@ def _price_bound(ctx: TornadoContext, n_centre, option_id: str, key: str, value:
     cfg = _solver_config(ctx, vl, n_centre.snapshots)
     net = fixed_size_network(n_centre, drop_battery=reference)
     solved = _solved(solve, net, cfg, variant_id)
+    if _on_engine(ctx, solved):
+        # U2 WP7: the engine's counterfactual IS the baseline at the variant
+        # tariff (the served load rated, export 0 — BC-7 without a solve).
+        return _case(ctx, solved, cfg, vl, vt, {}, option_id, keep=False)
     # BC-7: the baseline bill at the SAME perturbed tariff (no solve).
     bills = {"baseline": _bill_of(ctx.baseline_network, vt, ctx.fidelity),
              "option": _bill_of(solved, vt, ctx.fidelity)}
@@ -562,6 +609,10 @@ def _capex_bound(ctx: TornadoContext, n_centre, option_id: str, key: str, value:
     (``packs.battery_fom_eur_per_mw``, read back by asset economics from the
     network's ``fom_cost``). The bills are the centre's.
     """
+    bundle = _bundle_of(ctx, n_centre)
+    if bundle is not None:
+        # U2 WP7 (C5): from the centre's ONE FinanceCase, no network read.
+        return study_engine.bound_case(bundle, {key: float(value)}, kind="capex").view
     vl = _with_value(ctx.ledger, key, value)
     net = copy_network(n_centre)
     if packs.BATTERY_NAME in net.storage_units.index:
@@ -582,6 +633,11 @@ def _rate_bound(ctx: TornadoContext, n_centre, option_id: str, key: str, value: 
     and to the assets' ``discount_rate`` and the battery's two-annuity
     ``capital_cost``, which the pro forma and asset economics read.
     """
+    bundle = _bundle_of(ctx, n_centre)
+    if bundle is not None:
+        # U2 WP7 (C5 as amended): the WACC and the valuation basis move, the
+        # WACC gate reads `differs` against the LP's basis (accepted here only).
+        return study_engine.bound_case(bundle, {key: float(value)}, kind="rate").view
     vl = _with_value(ctx.ledger, key, value)
     net = copy_network(n_centre)
     if packs.BATTERY_NAME in net.storage_units.index:
@@ -773,7 +829,7 @@ def run_tornado(ctx: TornadoContext, solve: SolveFn, *,
             pending.append(key)
             continue
         except (proforma.ProformaError, packs.PackError, study_tariff.TariffError,
-                VariantFailed) as exc:
+                study_engine.EngineRefused, VariantFailed) as exc:
             failed = True
             code = getattr(exc, "code", "tornado_row_failed")
             for side in ("low", "high"):

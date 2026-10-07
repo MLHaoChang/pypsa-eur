@@ -4,24 +4,35 @@ filled by IC's finance engine (`build_finance_case` + `run_case`) on the S5
 site golden fixture.
 
 Plan: docs/superpowers/plans/2026-10-05-guided-study-u2-engine-rewire.md §4,
-WP2 (port of `test_proforma_golden.py`), WP7. Blocked on S0b (C1: the
-finance engine reads the battery's two upfront parts through
-`upfront_parts`), so every target here is `pending("WP7")` until stage 2.
+WP2 (port of `test_proforma_golden.py`), WP7 (green since WP7: IC #90's S0b
+read of the battery's two upfront parts, D9's part-lifetime replacements and
+D10's remaining-life terminal value are on master).
 
-The WP0 record (`golden_s5`) is the oracle: CAPEX, replacements, FOM, NPV,
-IRR, paybacks and the value streams equal it to 1e-9 (IRR 1e-9 absolute);
-LCOS is the engine's storage metric (owner decision 6), its delta against
-GS's charging-free figure recorded in `u2_deltas.json`.
+The WP0 record (`golden_s5`) is the oracle: CAPEX, replacements, NPV, IRR,
+paybacks, the salvage and the value streams equal it to 1e-9 (IRR 1e-9
+absolute). Recorded deltas (`u2_deltas.json`, WP7 rows): the FOM line is
+PyPSA's `n.statistics` figure, rounded to five decimals (1.3e-9 relative on
+`bess_2h`); LCOS is the engine's storage metric (owner decision 6, charging
+included), not GS's charging-free figure; an uncomputed salvage makes the
+engine's case not established (IC C12) where GS reported an NPV without it.
+
+WP7 adaptations of the WP2 guesses (the seam as built): the meter Links are
+not typed (gate C5: IC's D11 skips them); §5.4's `terminal_value_eur` /
+`levelised_cost` rename is WP8's, so the view still reads `salvage_eur` /
+`lcos`; the salvage basis stays `annuity_pv` (C2 chose the engine's
+`remaining_life_annuity`, which IS the PV of the remaining annuities, not a
+`fixed` value); the bills travel on the `CaseBundle`.
 """
 from __future__ import annotations
+
+import json
 
 import pytest
 
 from tests.golden import oracle
 from tests.golden import site_fixture as sf
-from tests.u2_targets import FAKE_REF, WP0, close, flat_resolver, pending
+from tests.u2_targets import FIXTURES, WP0, close, ic_case_option
 
-pytestmark = pending("WP7", "option_case needs S0b's upfront_parts read (C1) and WP6's LP")
 OPTIONS = ("bess_2h", "bess_pv_2h")
 
 
@@ -29,9 +40,6 @@ def _A():
     from services.study import engine_adapter as A
 
     return A
-
-
-_SOLVED: dict = {}
 
 
 def _ledger(defaults=None):
@@ -43,37 +51,12 @@ def _ledger(defaults=None):
 
 def _solved_ic(option):
     """
-    The option's fork as WP8's runner will make it: the pack network (no
-    prices), the compiled commercial bound on it (C6), the meter Links typed
-    (way a), and a solve through `run_simulation` with `compile.solver_config`.
+    The option's fork as WP8's runner will make it (`u2_targets.ic_case_option`):
+    the pack network (no prices, the battery's two parts, C1), the compiled
+    commercial bound on it (C6) with its `single_owner` value flows, and a
+    solve through `run_simulation` with `compile.solver_config`.
     """
-    if option not in _SOLVED:
-        import queue
-        import threading
-
-        from services.pypsa_service import PyPSAService
-        from services.solver_service import run_simulation
-        from services.study import compile as C
-        from services.study import library as L
-        from services.study import packs
-        from tests.conftest import install_network_into_backend
-
-        defaults = L.load_defaults()
-        ledger = _ledger(defaults)
-        n = packs.build_site_network(sf.site_intake(), ledger, option, library=defaults)
-        compiled = C.commercial_from_ledger(sf.site_intake(), ledger, defaults, n.snapshots,
-                                            export_series=FAKE_REF)
-        compiled = C.bind_on_network(n, compiled, resolve_ref=flat_resolver(40.0, n.snapshots))
-        C.type_meter_links(n, horizon_years=25)
-        compiled = C.with_value_flows(compiled, n)
-        cfg = C.solver_config(ledger, compiled)
-        install_network_into_backend(n)
-        live = PyPSAService.get_network()
-        status, _ = run_simulation(cfg, live, PyPSAService.get_lock(), threading.Event(),
-                                   queue.SimpleQueue(), state_update=lambda **k: None)
-        assert status in ("ok", "optimal")
-        _SOLVED[option] = (live, cfg, compiled, ledger)
-    return _SOLVED[option]
+    return ic_case_option(option)
 
 
 def _bundle(option, **kw):
@@ -112,9 +95,17 @@ def test_the_battery_capex_is_not_the_single_lifetime_back_calculation(bundles):
     C1: the engine's battery asset reads the two upfront parts, never a
     blended `overnight_cost` (which PyPSA would annuitise over one lifetime).
     """
+    from services.study import packs
+
     case = bundles["bess_2h"].case
     [bat] = [a for a in case.assets if a.name == "battery"]
     assert close(bat.overnight_cost, _gold("bess_2h")["capex_total"])
+    p = _gold("bess_2h")["battery_p_nom_mw"]
+    up = packs.battery_upfront_eur_per_mw(_solved_ic("bess_2h")[3], 2.0)
+    assert [x.name for x in bat.parts] == ["power", "energy"]
+    assert close(bat.parts[0].overnight_cost, up["inverter"] * p, rel=1e-6)
+    assert close(bat.parts[1].overnight_cost, up["storage"] * p, rel=1e-6)
+    assert [x.lifetime_years for x in bat.parts] == [10.0, 25.0]
 
 
 def test_inverter_replacements_land_at_its_lifetime_inside_the_horizon(bundles):
@@ -127,7 +118,15 @@ def test_inverter_replacements_land_at_its_lifetime_inside_the_horizon(bundles):
 
 @pytest.mark.parametrize("option", OPTIONS)
 def test_fixed_om_reconciles_to_asset_economics_and_cost_breakdown(bundles, option):
-    assert close(bundles[option].view.years[1].opex_fixed, _gold(option)["fom_annual"])
+    """
+    The engine's FOM line is `n.statistics.fom`, which PyPSA rounds to five
+    decimals: equal to WP0 within half a unit of the fifth decimal (the
+    recorded delta `fom_rounded_by_pypsa_statistics`).
+    """
+    assert abs(bundles[option].view.years[1].opex_fixed - _gold(option)["fom_annual"]) <= 5e-6
+    rows = [r for r in json.loads((FIXTURES / "u2_deltas.json").read_text())["deltas"]
+            if r.get("figure") == f"golden_s5.{option}.fom_annual"]
+    assert rows and rows[0]["cause"] == "fom_rounded_by_pypsa_statistics"
 
 
 def test_variable_opex_is_the_assets_own_vom_never_the_system_opex(bundles):
@@ -165,12 +164,20 @@ def test_npv_is_the_lp_saving_annuitised_by_construction(bundles):
 
 def test_lcos_is_on_discounted_energy(bundles):
     """
-    Owner decision 6: the guided LCOS is the engine's storage LCOS
-    (charging cost included); GS's charging-free figure is the recorded delta.
+    Owner decision 6 (Q8): the guided LCOS is the engine's storage LCOS
+    (charging cost included, real basis), exactly; its delta against GS's
+    charging-free pro forma figure and asset economics' charging-included one
+    is recorded (`lcos_is_the_engines_storage_metric`).
     """
-    v = bundles["bess_2h"].view
-    assert v.kpis.levelised_cost is not None
-    assert close(v.kpis.levelised_cost, _gold("bess_2h")["lcos_incl_charging"], rel=1e-2)
+    for o in OPTIONS:
+        b = bundles[o]
+        assert b.view.kpis.lcos is not None
+        assert b.view.kpis.lcos == b.result.metrics["lcos_real_per_mwh"]
+        assert "lcos_includes_charging_energy_cost" in b.view.honesty_notes
+        rows = [r for r in json.loads((FIXTURES / "u2_deltas.json").read_text())["deltas"]
+                if r.get("figure") == f"golden_s5.{o}.lcos"]
+        assert rows and rows[0]["cause"] == "lcos_is_the_engines_storage_metric"
+        assert close(rows[0]["post"], b.view.kpis.lcos, rel=1e-9)
 
 
 def test_market_revenue_at_duals_is_reported_and_excluded_from_net_cash_flow(bundles):
@@ -181,22 +188,36 @@ def test_market_revenue_at_duals_is_reported_and_excluded_from_net_cash_flow(bun
 
 
 def test_salvage_is_the_present_value_of_the_remaining_annuities(bundles):
-    """C2: `TerminalValueRule(fixed)` = GS's remaining-annuity salvage."""
+    """
+    C2: the engine's `TerminalValueRule("remaining_life_annuity")` (IC D10) =
+    GS's remaining-annuity salvage, exactly; the basis is the PV of the
+    remaining annuities (`annuity_pv`).
+    """
     for o in OPTIONS:
-        v = bundles[o].view
-        assert v.salvage_basis == "fixed_from_remaining_annuities"
-        assert close(v.kpis.terminal_value_eur, _gold(o)["salvage_eur"])
+        b = bundles[o]
+        assert b.case.inputs.terminal_value.method == "remaining_life_annuity"
+        assert b.view.salvage_basis == "annuity_pv"
+        assert close(b.view.kpis.salvage_eur, _gold(o)["salvage_eur"])
+        assert close(b.view.years[-1].salvage, _gold(o)["salvage_eur"])
 
 
 def test_an_uncomputed_salvage_is_flagged_never_a_zero():
-    n, _cfg = sf.solve_site_option("bess_pv_2h")
+    """
+    A PV array with no finite lifetime has no remaining-life value: the
+    engine leaves the terminal value, and with it the case, not established
+    (`terminal_part_unknown`, IC C12; recorded delta: GS reported an NPV
+    without the salvage) — never a zero salvage.
+    """
+    n = _solved_ic("bess_pv_2h")[0]
     saved = n.generators.at["pv", "lifetime"]
     n.generators.at["pv", "lifetime"] = float("inf")
     try:
         v = _bundle("bess_pv_2h").view
     finally:
         n.generators.at["pv", "lifetime"] = saved
-    assert v.kpis.terminal_value_eur is None and "terminal_value_eur" in v.kpis.unavailable
+    assert v.status == "not_established" and v.kpis is None
+    assert "salvage_not_computed" in v.honesty_notes
+    assert any(c.startswith("engine_reason:terminal_part_unknown") for c in v.honesty_notes)
 
 
 def test_a_salvage_without_a_basis_or_a_null_without_a_flag_is_refused(bundles):
@@ -224,14 +245,26 @@ def test_a_null_bill_is_not_established_never_zero_savings():
 
 
 def test_a_second_currency_year_is_refused_typed():
-    from services.study import ledger as LG
+    """The source's three branches: a money row, the tariff, the study."""
+    import dataclasses
 
-    led = LG.apply_user_row(_ledger(), "battery_storage_eur_per_kwh", 190.0, unit="EUR/kWh",
-                            changed_by="u")
-    rows = [r.model_copy(update={"currency_year": 2024}) if r.key == "discount_rate" else r
-            for r in led.rows]
+    led = _ledger()
+    rows = [r.model_copy(update={"currency_year": 2023})
+            if r.key == "battery_storage_eur_per_kwh" else r for r in led.rows]
     with pytest.raises(_A().EngineRefused) as exc:
         _bundle("bess_2h", ledger=led.model_copy(update={"rows": rows}))
+    assert exc.value.code == "currency_year_mixed"
+
+    n, cfg, compiled, ledger = _solved_ic("bess_2h")
+    other = dataclasses.replace(compiled, tariff_meta={**compiled.tariff_meta,
+                                                       "currency_year": 2026})
+    with pytest.raises(_A().EngineRefused) as exc:
+        _A().option_case(n, cfg, ledger, compiled=other, option_id="bess_2h",
+                         study_id=sf.SITE_STUDY_ID)
+    assert exc.value.code == "currency_year_mixed"
+
+    with pytest.raises(_A().EngineRefused) as exc:
+        _bundle("bess_2h", study_currency_year=2024)
     assert exc.value.code == "currency_year_mixed"
 
 
@@ -315,5 +348,6 @@ def test_a_supplied_tariffs_prose_note_is_flagged_never_dropped():
 def test_bill_lives_in_the_models_with_a_fidelity(bundles):
     from models.study import Bill
 
-    b = bundles["bess_2h"].view
+    b = bundles["bess_2h"]
     assert isinstance(b.bills["option"], Bill) and b.bills["option"].fidelity == "full_study"
+    assert b.bills["option"].engine == "tariff_engine"

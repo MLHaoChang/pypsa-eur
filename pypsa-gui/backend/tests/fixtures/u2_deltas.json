@@ -1,8 +1,8 @@
 {
  "schema": "u2_deltas/1",
- "plan": "docs/superpowers/plans/2026-10-05-guided-study-u2-engine-rewire.md WP2 (deltas), \u00a74",
+ "plan": "docs/superpowers/plans/2026-10-05-guided-study-u2-engine-rewire.md WP2 (deltas), §4",
  "rule": "{test, figure, pre, post, abs, rel, cause}: pre = GS (BillCalculator or the WP0 record), post = the engine through the U2 seam. A cause is a stable code; WP10's assessor gates every row outside tolerance.",
- "stage": "U2 stage 1 (WP1-WP5) + WP6 (LP switch)",
+ "stage": "U2 stage 1 (WP1-WP5) + WP6 (LP switch) + WP7 (the case on the finance engine)",
  "deltas": [
   {
    "test": "test_engine_adapter_bill.py::test_a_year_billed_peak_is_prorated_by_the_hours_it_represents",
@@ -476,6 +476,105 @@
    "abs": null,
    "rel": null,
    "cause": "engine_committed_amount_only: a solve the engine did not make records none -> null + demand_charge_not_established (real solves: = bill demand, test_u2_wp6 test_the_run_records_the_engines_committed_demand_charge)"
+  },
+  {
+   "test": "test_engine_adapter_case_golden.py::test_fixed_om_reconciles_to_asset_economics_and_cost_breakdown[bess_2h]",
+   "figure": "golden_s5.bess_2h.fom_annual",
+   "pre": 557.3585892776363,
+   "post": 557.35859,
+   "abs": 7.223637794595561e-07,
+   "rel": 1.2960485284631112e-09,
+   "cause": "fom_rounded_by_pypsa_statistics"
+  },
+  {
+   "test": "test_engine_adapter_case_golden.py::test_fixed_om_reconciles_to_asset_economics_and_cost_breakdown[bess_pv_2h]",
+   "figure": "golden_s5.bess_pv_2h.fom_annual",
+   "pre": 29195.772328812956,
+   "post": 29195.77233,
+   "abs": 1.1870433809235692e-06,
+   "rel": 4.065805718563199e-11,
+   "cause": "fom_rounded_by_pypsa_statistics"
+  },
+  {
+   "test": "test_engine_adapter_case_golden.py::test_lcos_is_on_discounted_energy",
+   "figure": "golden_s5.bess_2h.lcos",
+   "pre": 244.3901945714324,
+   "post": 385.44922235279716,
+   "abs": 141.05902778136476,
+   "rel": 0.5771877551336654,
+   "cause": "lcos_is_the_engines_storage_metric"
+  },
+  {
+   "test": "test_engine_adapter_case_golden.py::test_lcos_is_on_discounted_energy",
+   "figure": "golden_s5.bess_pv_2h.lcos",
+   "pre": 126.7170106432846,
+   "post": 200.26833387722004,
+   "abs": 73.55132323393545,
+   "rel": 0.5804376449582329,
+   "cause": "lcos_is_the_engines_storage_metric"
+  },
+  {
+   "test": "test_engine_adapter_case_golden.py::test_an_uncomputed_salvage_is_flagged_never_a_zero",
+   "figure": "kpis.npv (PV lifetime not finite)",
+   "pre": "NPV without the salvage + npv_excludes_uncomputed_salvage",
+   "post": null,
+   "abs": null,
+   "rel": null,
+   "cause": "terminal_part_unknown_case_not_established: IC D10 / C12 leaves the terminal value and every project metric not established (IC S0b findings, limit 7); the pack always types the PV lifetime, so a guided study never reaches it"
+  },
+  {
+   "test": "test_u2_wp7_case.py::test_the_pack_writes_the_battery_as_two_upfront_parts",
+   "figure": "upfront_gaps[battery].gap_eur",
+   "pre": "back-calculated single-lifetime upfront − ledger upfront (+24-35 %)",
+   "post": 0.0,
+   "abs": null,
+   "rel": null,
+   "cause": "c1_parts_close_the_s4_gap: upfront_cost_series sums the battery's two parts; the case notes battery_upfront_from_two_parts instead of battery_upfront_from_ledger_not_back_calculated"
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_the_driver_evidence_reproduces",
+   "figure": "driver.upfront_cost_series_eur_per_mw",
+   "pre": 881617.8562714397,
+   "post": 730000.0,
+   "abs": -151617.8562714397,
+   "rel": -0.17197684370035984,
+   "cause": "c1_parts_close_the_s4_gap: the pack writes the battery as its two upfront parts and upfront_cost_series sums them (= the ledger upfront, 730,000 EUR/MW) instead of back-calculating one lifetime from the two-annuity capital_cost"
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_the_driver_evidence_reproduces",
+   "figure": "driver.fom.sum_years_opex_fixed",
+   "pre": 15443.307143372018,
+   "post": 15443.307250000002,
+   "abs": 0.00010662798376870342,
+   "rel": 6.904478605443406e-09,
+   "cause": "fom_rounded_by_pypsa_statistics: the case's FOM is the engine's line, n.statistics.fom rounded to five decimals (617.73229 vs 617.7322857 EUR/yr)"
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_the_driver_evidence_reproduces",
+   "figure": "driver.case_kpis.payback_discounted",
+   "pre": 13.258679684951593,
+   "post": 13.258679686119086,
+   "abs": 1.1674927691274206e-09,
+   "rel": 8.805497959593275e-11,
+   "cause": "fom_rounded_by_pypsa_statistics: the 4.3e-6 EUR/yr FOM rounding moves the discounted payback by 1.2e-9 years (NPV 2.2e-10 relative, inside tolerance)"
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_the_driver_evidence_reproduces",
+   "figure": "driver.case_kpis.lcos_excl_charging",
+   "pre": 305.0300695946147,
+   "post": 446.0890973937832,
+   "abs": 141.05902779916852,
+   "rel": 0.46244302401607856,
+   "cause": "lcos_is_the_engines_storage_metric: owner decision 6 (Q8): the case's LCOS is the finance engine's storage LCOS, which includes the charging energy at the committed import price; GS's pro forma figure excluded it (the frozen key keeps its WP0 name)"
+  },
+  {
+   "test": "test_proforma_golden.py::test_the_battery_capex_is_not_the_single_lifetime_back_calculation",
+   "figure": "upfront_cost_series(battery) x p_nom_opt vs capex_total",
+   "pre": "back-calculated > capex_total x 1.10 (gate S4 gap, disclosed battery_upfront_from_ledger_not_back_calculated)",
+   "post": "equal to 1e-9 (battery_upfront_from_two_parts)",
+   "abs": null,
+   "rel": null,
+   "cause": "c1_parts_close_the_s4_gap: the pack writes the battery as its two upfront parts (WP7 C1), which upfront_cost_series sums; the pro forma's own figures are unchanged"
   }
  ]
 }

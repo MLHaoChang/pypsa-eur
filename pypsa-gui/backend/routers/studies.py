@@ -1071,6 +1071,7 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
     against it) and for a case the engine refuses (a second currency year).
     """
     from db.models import Project
+    from services.study import engine_adapter as study_engine
     from services.study import proforma
 
     study = _load(project, study_id)
@@ -1136,16 +1137,27 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
     try:
         tariff = packs.effective_tariff(study.intake, ledger, library, network.snapshots)
         # U2 WP6: the config the fork was solved with (the run's export series).
-        cfg = packs.option_solver_config(ledger, packs.option_commercial(
-            study.intake, ledger, library, network.snapshots,
-            export_series=run.get("export_series")))
-        case = proforma.build_investment_case(
-            network, cfg, None, ledger, bills, option_id, study_id=study_id,
-            tariff=tariff, fidelity=result.get("fidelity"),
-            asset_economics=(details.get(option_id) or {}).get("asset_economics"),
-            study_currency_year=study.currency_year, question=question,
-            project_ref=str(fork.id), model_hash=disk_hash)
-    except (proforma.ProformaError, packs.PackError) as exc:
+        compiled = packs.option_commercial(study.intake, ledger, library, network.snapshots,
+                                           export_series=run.get("export_series"))
+        cfg = packs.option_solver_config(ledger, compiled)
+        econ = (details.get(option_id) or {}).get("asset_economics")
+        if run.get("export_series") is not None and study_engine.engine_ready(network):
+            # U2 WP7: the option's ONE FinanceCase on the Investment Case
+            # engine, its bills the engine's (the counterfactual is the
+            # baseline). A fork written before WP7 keeps the pro forma (WP8
+            # marks such a study stale and offers a re-run).
+            case = study_engine.option_case(
+                network, cfg, ledger, compiled=compiled, option_id=option_id,
+                study_id=study_id, fidelity=result.get("fidelity"), asset_economics=econ,
+                question=question, project_ref=str(fork.id), model_hash=disk_hash,
+                study_currency_year=study.currency_year).view
+        else:
+            case = proforma.build_investment_case(
+                network, cfg, None, ledger, bills, option_id, study_id=study_id,
+                tariff=tariff, fidelity=result.get("fidelity"), asset_economics=econ,
+                study_currency_year=study.currency_year, question=question,
+                project_ref=str(fork.id), model_hash=disk_hash)
+    except (proforma.ProformaError, packs.PackError, study_engine.EngineRefused) as exc:
         raise HTTPException(422, detail={"error_kind": exc.code,
                                          "message": exc.message}) from None
     return study, ledger, case

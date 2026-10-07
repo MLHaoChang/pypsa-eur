@@ -102,7 +102,9 @@ def test_storage_capital_cost_is_the_two_annuity_formula(ledger, option_id, hour
            * _v(ledger, "battery_inverter_eur_per_kw") * 1000.0)
     assert n.storage_units.at["battery", "fom_cost"] == pytest.approx(fom)
     meta = n.meta[P.PACK_META_KEY]
-    assert meta["cost_basis"]["battery"] == "derived_from_two_annuities"
+    # U2 WP7 C1: written as the two upfront parts (`derive.apply_parts`),
+    # which derive the same two-annuity `capital_cost`.
+    assert meta["cost_basis"]["battery"] == "two_upfront_parts"
     # The upfront figures the pro forma books are the ledger's, x 1000.
     up = meta["upfront_eur_per_mw"]["battery"]
     assert up["inverter"] == pytest.approx(_v(ledger, "battery_inverter_eur_per_kw") * 1000)

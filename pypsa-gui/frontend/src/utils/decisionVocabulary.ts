@@ -166,6 +166,8 @@ export const ENGINE_LABELS: Record<Engine, string> = {
   cash_flow_expander: 'cash-flow model',
   ledger: 'assumptions ledger',
   method_constant: 'a constant of the method',
+  tariff_engine: 'tariff engine',
+  finance_engine: 'finance engine',
 }
 
 export const FIDELITY_LABELS = { quick_screen: 'quick screen (8760 h, one year)', full_study: 'full study (8760 h, one year)' } as const
@@ -483,7 +485,16 @@ export const HELP: Record<string, string> = {
   "copied_record_findings_computed_on_the_origin_forks": "This study was copied from another project; its findings and report were computed on the origin's option networks.",
   "tariff_export_exceeds_import": "In some hours the tariff credits export above the import price, so the model sends energy out and back through the connection for profit. Check the export price: unless the contract really pays this, the battery's value is overstated.",
   "tariff_export_exceeds_import_via_storage": "The tariff's best export credit, after the battery's losses, is above its cheapest import price, so the model charges the battery from the grid to export later. Unless the contract pays export of grid-charged energy, the battery's value is overstated.",
-  "capacity_charge_assumed_connection_size": "The tariff's capacity charge states no contracted capacity, so it is billed on the site's connection size. Enter the contracted capacity from the contract if it differs."
+  "capacity_charge_assumed_connection_size": "The tariff's capacity charge states no contracted capacity, so it is billed on the site's connection size. Enter the contracted capacity from the contract if it differs.",
+  "battery_upfront_from_two_parts": "The battery's purchase cost is the sum of its two parts from the assumptions ledger (inverter and storage block), and every screen reads the same figure.",
+  "irr_cash_changes_sign_more_than_once": "The yearly cash changes sign more than once (the inverter replacements cost more than a year's saving), so more than one rate could zero the NPV; the one closest to zero is shown.",
+  "wacc_field_holds_the_real_rate": "The finance engine's discount-rate field is labelled nominal; on this real basis it holds the study's real discount rate.",
+  "wacc_gate_differs_on_rate_bound": "This tornado bound values the case at another discount rate than the one the optimisation sized the battery at; the sizes are kept, so the bound shows the rate's effect on value only.",
+  "demand_peak_hourly_resolution": "The demand charge is billed on hourly peaks, the model's time step, not on shorter metering intervals.",
+  "lcos_includes_charging_energy_cost": "The levelised cost of storage is the finance engine's: it includes what the site paid for the energy that charged the battery.",
+  "finance_rules_from_guided_defaults": "The ledger has no rows for the finance rules (financial close, escalation, contingency, degradation), so the guided study's own defaults were applied.",
+  "meter_links_are_not_investments": "The connection meters are part of the site's bill, not of the investment: they carry no purchase cost.",
+  "case_streams_do_not_reconcile_with_engine": "The bill savings and the finance engine's operating cash disagree, so the case is not shown."
 }
 // END HELP MIRROR
 
@@ -536,6 +547,10 @@ export const PREFIX_HELP: ReadonlyArray<readonly [string, string]> = [
   [
     "options_not_established",
     "Some options were not solved; they are listed in the options table."
+  ],
+  [
+    "engine_reason:",
+    "The finance engine could not establish part of the case; the reason is named."
   ]
 ]
 // END PREFIX HELP MIRROR

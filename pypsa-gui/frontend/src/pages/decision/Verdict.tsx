@@ -38,7 +38,8 @@ function Explain({ entry }: { entry: keyof typeof GLOSSARY }) {
 
 function Kpi({ fig, byConstruction }: { fig: Figure; byConstruction: boolean }) {
   const parts = figureBasisParts(fig)
-  const against = fig.engine === 'cash_flow_expander' ? 'against the grid-only baseline'
+  const against = fig.engine === 'cash_flow_expander' || fig.engine === 'finance_engine'
+    ? 'against the grid-only baseline'
     : fig.engine === 'lp' ? 'sized by the optimisation' : ENGINE_LABELS[fig.engine]
   const plain = KPI_LABELS[fig.key]
   const gloss = KPI_GLOSSARY[fig.key]

@@ -773,18 +773,22 @@ def test_binding_writes_the_export_price_on_the_network_and_survives_netcdf(tmp_
     assert np.allclose(back.links_t["ic_export_price"]["grid_export"].to_numpy(), 40.0)
 
 
-def test_the_meter_links_are_typed_at_zero_cost_over_the_horizon():
+def test_the_meter_links_are_left_uncosted_for_d11():
     """
-    Row 28 way (a), an adapter-side WORKAROUND until IC settles Q5's
-    `single_owner` template: the PoC meter Links carry `overnight_cost = 0`
-    and `lifetime = H`, which leaves the LP's link costs at 0.
+    Row 28 / gate C5 (WP7): the PoC meter Links that `single_owner` makes the
+    site's are left UNCOSTED — no typed `overnight_cost`, no `capital_cost`,
+    not extendable — so IC's D11 skips them as `meter_link_not_investment:*`
+    (no capex, no COD). Way (a)'s `compile.type_meter_links` (typed 0 over the
+    horizon) is gone: one semantics, the engine's (the case's flags and WACC
+    gate: `test_u2_wp7_case.py`).
     """
+    import math
+
     from services.study import packs
 
+    assert not hasattr(_C(), "type_meter_links")
     n = packs.build_site_network(_intake(DE), _ledger(DE), "bess_2h", library=_defaults())
-    _C().type_meter_links(n, horizon_years=25)
     for link in ("grid_import", "grid_export"):
-        assert n.links.at[link, "overnight_cost"] == 0.0
-        assert n.links.at[link, "lifetime"] == 25.0
+        assert math.isnan(n.links.at[link, "overnight_cost"])
         assert n.links.at[link, "capital_cost"] == 0.0
         assert not bool(n.links.at[link, "p_nom_extendable"])

@@ -370,7 +370,9 @@ def test_the_guided_path_does_not_use_the_gs_demand_wrapper_or_link_prices():
 def test_bill_meter_is_called_only_by_the_preview():
     """
     Gate C6: a bill without a solve (`bill_meter`) is the intake preview's
-    (export 0); every option bill is a solved fork's.
+    or, since WP7, the case's counterfactual baseline (`option_case`: the
+    served load, export ≡ 0 — the baseline at the case's tariff, BC-7); every
+    option bill is a solved fork's.
     """
     callers = []
     for rel, p in _guided_modules():
@@ -383,4 +385,12 @@ def test_bill_meter_is_called_only_by_the_preview():
                         node.func, "id", None)) == "bill_meter":
                     callers.append((rel, fn.name))
     assert set(callers) <= {("routers/studies.py", "preview_intake"),
-                            ("services/study/engine_adapter.py", "bill_meter")}
+                            ("services/study/engine_adapter.py", "bill_meter"),
+                            ("services/study/engine_adapter.py", "option_case")}
+    # The case's counterfactual meter exports nothing.
+    import inspect
+
+    from services.study import engine_adapter as A
+
+    src = inspect.getsource(A.option_case)
+    assert "bill_meter(n, compiled, _served_load(n), np.zeros(len(n.snapshots))" in src

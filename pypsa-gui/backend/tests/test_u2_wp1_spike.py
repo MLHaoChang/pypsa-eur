@@ -43,7 +43,8 @@ from tests.golden import site_fixture as SF
 #: IC #90 (S0b): the adapter's flag and capex reason for an asset priced only
 #: by a back-calculated `capital_cost` (`finance.case.UPFRONT_FROM_CAPITAL_COST`).
 UPFRONT = "upfront_only_from_capital_cost"
-#: The capex reasons of the pack's battery while it carries no parts.
+#: The capex reasons of a battery priced only by `capital_cost` (the pack
+#: before WP7's C1; `test_c1_finance_case_assets_read_upfront_parts`).
 CAPEX_NO_PARTS = ["overnight_cost_missing:battery", f"{UPFRONT}:battery"]
 YEAR = SF.SITE_YEAR            # the modelled year y_m (2025)
 Y0 = YEAR - 1                   # GS year 0 = financial close (row 21)
@@ -273,20 +274,20 @@ def test_q5_meter_links_are_skipped_by_d11_or_typed_at_zero_by_way_a():
     owns the meter Links (the template is unchanged), but IC's D11 rule in
     `finance_case.build_finance_case` skips an owner's PoC meter Link with no
     typed cost: not an asset, no COD, flagged `meter_link_not_investment:*`.
-    The capex then misses ONLY the battery's overnight cost. Way (a) types
-    `overnight_cost = 0` and a finite `lifetime` on both Links: they become
-    zero-cost assets (no flag, no `asset_lifetime_unknown`, a COD covers
-    them). Way (b) (drop them from `asset_owners`) is still measured below.
+    Way (a) types `overnight_cost = 0` and a finite `lifetime` on both
+    Links: they become zero-cost assets (no flag, no `asset_lifetime_unknown`,
+    a COD covers them). Way (b) (drop them from `asset_owners`) is still
+    measured below. WP7 resolved gate C5 for D11 (`compile` types nothing).
 
-    IC #90 (S0b) changed the battery's reason: `_assets` reads every owner
-    asset through `asset_schema.access.upfront_parts` with the config's
-    discount rate, and the pack's battery (a bare two-annuity `capital_cost`,
-    no parts, no `overnight_cost`) is back-calculated there and refused as
-    `upfront_only_from_capital_cost:battery` (S1: a capital-cost figure can
-    include FOM), beside `overnight_cost_missing:battery`. WP7's C1 writes
-    the battery's parts through `apply_parts`, which removes the flag (see
+    The battery: since IC #90 (S0b) `_assets` reads every owner asset through
+    `asset_schema.access.upfront_parts`, and since WP7's C1 the pack writes
+    the battery as its two parts (`derive.apply_parts`), so its capex IS
+    established (the parts' sum × `p_nom_opt`) on every way; before C1 the
+    pack's bare two-annuity `capital_cost` read `CAPEX_NO_PARTS` (pinned in
     `test_c1_finance_case_assets_read_upfront_parts`).
     """
+    from services.study import packs
+
     from services.finance.engine import run_case
 
     n, cfg = _solved()
@@ -297,11 +298,13 @@ def test_q5_meter_links_are_skipped_by_d11_or_typed_at_zero_by_way_a():
     assert [a.name for a in case.assets] == ["battery"]
     assert {f"meter_link_not_investment:{IMPORT}",
             f"meter_link_not_investment:{EXPORT}"} <= set(case.flags)
-    assert case.assets[0].overnight_cost is None
-    assert f"{UPFRONT}:battery" in case.flags
+    upfront = packs.battery_upfront_eur_per_mw(_ledger(), 2.0)["total"] * _p_battery(n)
+    assert math.isclose(case.assets[0].overnight_cost, upfront, rel_tol=1e-12)
+    assert [x.name for x in case.assets[0].parts] == ["power", "energy"]
+    assert f"{UPFRONT}:battery" not in case.flags
     res = run_case(case)
-    assert res.op.reasons["capex"] == CAPEX_NO_PARTS
-    assert res.metrics["project_pre_tax_npv"] is None
+    assert res.op.reasons["capex"] == []
+    assert res.metrics["project_pre_tax_npv"] is not None
 
     # (a) typed 0 on the meter Links: they are assets at 0.0, only the battery
     # is missing; PyPSA's default lifetime (inf) flags them unless a finite
@@ -314,13 +317,13 @@ def test_q5_meter_links_are_skipped_by_d11_or_typed_at_zero_by_way_a():
         assert by_a[IMPORT].overnight_cost == 0.0 and by_a[EXPORT].overnight_cost == 0.0
         assert not [f for f in case_a.flags if f.startswith("meter_link_not_investment")]
         res_a = run_case(case_a)
-        assert res_a.op.reasons["capex"] == CAPEX_NO_PARTS
+        assert res_a.op.reasons["capex"] == []
         assert math.isinf(float(saved_life[IMPORT]))
         assert f"asset_lifetime_unknown:{IMPORT}" in res_a.flags
         n.links.loc[[IMPORT, EXPORT], "lifetime"] = 25.0
         res_a2 = run_case(_case(n, cfg, _rows_21_34(names, p_mw=_p_battery(n))))
         assert not [f for f in res_a2.flags if f.startswith("asset_lifetime_unknown")]
-        assert res_a2.op.reasons["capex"] == CAPEX_NO_PARTS
+        assert res_a2.op.reasons["capex"] == []
     finally:
         n.links["overnight_cost"] = saved
         n.links["lifetime"] = saved_life
@@ -336,7 +339,7 @@ def test_q5_meter_links_are_skipped_by_d11_or_typed_at_zero_by_way_a():
     cfg_b = dataclasses.replace(cfg, commercial=com_b)
     case_b = _case(n, cfg_b, _rows_21_34(["battery"], p_mw=_p_battery(n)))
     assert [a.name for a in case_b.assets] == ["battery"]
-    assert run_case(case_b).op.reasons["capex"] == CAPEX_NO_PARTS
+    assert run_case(case_b).op.reasons["capex"] == []
     status = VFT.template_status(ValueFlowConfig.model_validate(com_b["value_flows"]), n,
                                  CommercialConfig.model_validate(com_b))
     assert "template_edited" in status
@@ -456,11 +459,12 @@ def test_rows_21_34_build_finance_case_refusals_then_flags():
     sections, reasons and flags once rows 21–34 are supplied (pv row 30 on
     `bess_pv_2h`, the `degradation_missing:pv` question of row 30).
 
-    IC #90 (S0b) added one case flag and one capex reason on the pack's
-    capital-cost-only battery: `upfront_only_from_capital_cost:battery`
-    (`finance.case.UPFRONT_FROM_CAPITAL_COST`). The refusal order is unchanged
-    (S0b's `cod_from_build_year` default does not apply: the pack leaves
-    PyPSA's `build_year = 0`, which is absent).
+    IC #90 (S0b) reads the battery through its upfront parts, which the pack
+    writes since WP7's C1, so with rows 21–34 supplied the headline is
+    established (the pack's capital-cost-only battery read `CAPEX_NO_PARTS`
+    before C1). The refusal order is unchanged (S0b's `cod_from_build_year`
+    default does not apply: the pack leaves PyPSA's `build_year = 0`, which
+    is absent).
     """
     from models.finance import FinanceInputs
     from services.finance.case import FinanceRefused
@@ -517,12 +521,9 @@ def test_rows_21_34_build_finance_case_refusals_then_flags():
           "\n result flags", res.flags, "\n gate", res.gate,
           "\n metrics", {k: v for k, v in res.metrics.items() if v is not None})
     assert res.op.reasons["operating"] == [] and res.op.reasons["terminal"] == []
-    # Capex is not established ONLY because of the battery's overnight cost (the
-    # meter Links are skipped by D11). Since IC #90 (S0b) the reason names why:
-    # the pack's battery is priced only by a two-annuity `capital_cost`, which
-    # the parts accessor back-calculates and the adapter refuses (WP7's C1
-    # writes the two parts instead).
-    assert res.op.reasons["capex"] == CAPEX_NO_PARTS
+    # Capex is established from the battery's two parts (C1; the meter Links
+    # are skipped by D11).
+    assert res.op.reasons["capex"] == []
     assert res.reasons.get("tax") and "tax_pack_missing" in res.reasons["tax"]
     # C4 gate: consistent; inflation leg n/a (auto_discount_periods off).
     assert res.gate["wacc_vs_discount_rate_consistent"] is True
@@ -530,29 +531,12 @@ def test_rows_21_34_build_finance_case_refusals_then_flags():
     # D11 discloses the skipped meter Links on the case, never as lifetime flags.
     assert not [f for f in res.flags if f.startswith("asset_lifetime_unknown")]
     assert sorted(case.flags) == [f"meter_link_not_investment:{EXPORT}",
-                                  f"meter_link_not_investment:{IMPORT}",
-                                  f"{UPFRONT}:battery"]
-
-    # 6. The same with the battery's overnight cost typed (stand-in for S0b) and the
-    # meter Links at 0: the headline is established.
-    saved_l, saved_s = n.links["overnight_cost"].copy(), n.storage_units["overnight_cost"].copy()
-    from services.study import packs
-    try:
-        n.links.loc[[IMPORT, EXPORT], "overnight_cost"] = 0.0
-        n.storage_units.loc["battery", "overnight_cost"] = \
-            packs.battery_upfront_eur_per_mw(_ledger(), 2.0)["total"]
-        res6 = run_case(_case(n, cfg, fin))
-    finally:
-        n.links["overnight_cost"] = saved_l
-        n.storage_units["overnight_cost"] = saved_s
-    print("with typed overnight (stand-in for S0b): sections", res6.sections,
-          "\n reasons", res6.reasons, "\n gate", res6.gate,
-          "\n project_pre_tax npv/irr", res6.metrics["project_pre_tax_npv"],
-          res6.metrics["project_pre_tax_irr"], "\n flags", res6.flags)
-    assert res6.cash["project_pre_tax"] is not None
-    assert res6.metrics["project_pre_tax_npv"] is not None
-    assert res6.metrics["equity_post_tax_npv"] is None          # pre-tax basis
-    assert res6.metrics["lcoe_nominal_per_mwh"] is None         # storage: no generation
+                                  f"meter_link_not_investment:{IMPORT}"]
+    # The headline is established (before C1 this needed a typed stand-in).
+    assert res.cash["project_pre_tax"] is not None
+    assert res.metrics["project_pre_tax_npv"] is not None
+    assert res.metrics["equity_post_tax_npv"] is None          # pre-tax basis
+    assert res.metrics["lcoe_nominal_per_mwh"] is None         # storage: no generation
 
 
 @pytest.mark.live_solve
@@ -672,6 +656,11 @@ def test_c1_finance_case_assets_read_upfront_parts():
     v = packs.ledger_values(led)
     n = _site_network("bess_2h")
     capital_only = n.copy()
+    # The pack before C1: a bare two-annuity `capital_cost`, no part columns.
+    su = capital_only.storage_units
+    for col in [c for c in su.columns if c.startswith("inv_")]:
+        su[col] = float("nan")
+    su.loc["battery", "capital_cost"] = packs.battery_capital_cost_eur_per_mw(led, 2.0)
     derive.apply_parts(n, "StorageUnit", "battery",
                        {"inv_power_overnight": v["battery_inverter_eur_per_kw"] * 1000.0,
                         "inv_power_lifetime": 10.0,
@@ -1071,7 +1060,7 @@ def test_s47_demand_formulation_gs_wrapper_equals_ic_add_demand_terms():
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# §4.6 identity on the combined copy (C1 stand-in + C2 + C4), measured early
+# §4.6 identity on the combined copy (C1 + C2 + C4), measured early
 # ════════════════════════════════════════════════════════════════════════════
 
 
@@ -1105,13 +1094,13 @@ def test_s46_identity_npv_equals_lp_saving_times_af_on_the_ic_engine(option, pv)
     §4.6 (WP7's test, measured early): on IC-solved site options, with
     rows 21–34, C2's `fixed` terminal value = GS's annuity-PV salvage, C4
     (escalation 0, inflation None, wacc = the real rate), the meter Links at
-    typed 0 (Q5 way a) and the battery's ledger upfront typed post-solve as a
-    STAND-IN for S0b's `upfront_parts` read: the engine's `project_pre_tax_npv`
+    typed 0 (Q5 way a) and the battery read through its two upfront parts
+    (S0b; the pack writes them since WP7's C1 — before it, its ledger upfront
+    was typed post-solve as a stand-in): the engine's `project_pre_tax_npv`
     equals (obj_none − obj_option) × AF(0.07, 25) to 1e-6 relative, where
     obj_none is the IC-solved grid-only option. Also reports the IRR.
     """
     from services.finance.engine import run_case
-    from services.study import packs
     from services.study.proforma import _annuity_pv_factor
 
     n, cfg = _solved(option)
@@ -1120,15 +1109,12 @@ def test_s46_identity_npv_equals_lp_saving_times_af_on_the_ic_engine(option, pv)
     names = [a for _c2, a in _owned(cfg)]
     V = _gs_salvage(n, led, pv=pv)
     fin = _rows_21_34(names, p_mw=_p_battery(n), pv=pv, terminal=V)
-    saved_l, saved_s = n.links["overnight_cost"].copy(), n.storage_units["overnight_cost"].copy()
+    saved_l = n.links["overnight_cost"].copy()
     try:
         n.links.loc[[IMPORT, EXPORT], "overnight_cost"] = 0.0
-        n.storage_units.loc["battery", "overnight_cost"] = packs.battery_upfront_eur_per_mw(
-            led, float(n.storage_units.at["battery", "max_hours"]))["total"]
         res = run_case(_case(n, cfg, fin))
     finally:
         n.links["overnight_cost"] = saved_l
-        n.storage_units["overnight_cost"] = saved_s
     af = _annuity_pv_factor(0.07, 25)
     want = (float(n_none.objective) - float(n.objective)) * af
     got = res.metrics["project_pre_tax_npv"]

@@ -43,8 +43,12 @@ What it compiles (WP4):
   series is kept while the base project uses it).
 * :func:`bind_on_network` — C6: the commercial block bound on the fork's
   IN-MEMORY network (`binding.bind_commercial`) before the runner writes it.
-* :func:`type_meter_links` — row 28 way (a) (WORKAROUND, Q5).
 * :func:`with_value_flows` — row 28: `single_owner` on the option's network.
+  The PoC meter Links it makes the owner's are left uncosted: IC's D11 skips
+  them (`meter_link_not_investment:*`, no capex, no COD) — gate C5, WP7.
+* :func:`finance_from_ledger` (WP7, C1 C2 C4) — the option's `FinanceInputs`
+  (real pre-tax basis, part-lifetime replacements, the remaining-life
+  terminal value) and :func:`currency_year_of`, the one-currency-year rule.
 * :func:`solver_config` (WP6, C6) — the option fork's explicit `SolverConfig`:
   the compiled `CommercialConfig` on `commercial`, so IC prices the LP
   (`materialise_poc_prices`) and carries the demand charge
@@ -80,7 +84,8 @@ __all__ = [
     "discard_export_series_of_failed_creation", "export_series_name",
     "library_series_resolver", "mint_export_series", "parse_export_series_name",
     "solver_config", "sweep_orphan_export_series", "tariff_to_engine",
-    "type_meter_links", "with_value_flows",
+    "with_value_flows", "CompiledFinance", "FINANCE_RULES_FROM_DEFAULTS",
+    "GUIDED_FINANCE_DEFAULTS", "currency_year_of", "finance_from_ledger",
 ]
 
 POC_LINK = "grid_import"
@@ -823,21 +828,6 @@ def _refuse_inactive_meter_links(n, config: CommercialConfig) -> None:
                                "site through it")
 
 
-def type_meter_links(n, *, horizon_years: float) -> None:
-    """
-    WORKAROUND (row 28 way a, until IC settles Q5's `single_owner` template):
-    `single_owner` makes the site party own the PoC meter Links; typed at
-    `overnight_cost = 0` and `lifetime = H` they are zero-cost owner assets
-    the COD row covers, with no `asset_lifetime_unknown` flag. Non-extendable,
-    uncosted Links: the LP's objective is unchanged. (IC's D11 would instead
-    skip them as `meter_link_not_investment:*`.)
-    """
-    for link in (POC_LINK, EXPORT_LINK):
-        if link in n.links.index:
-            n.links.loc[link, "overnight_cost"] = 0.0
-            n.links.loc[link, "lifetime"] = float(horizon_years)
-
-
 def with_value_flows(compiled: CompiledCommercial, n) -> CompiledCommercial:
     """
     Row 28: the `single_owner` value flows built on the option's network
@@ -848,6 +838,167 @@ def with_value_flows(compiled: CompiledCommercial, n) -> CompiledCommercial:
     vf = VFT.build("single_owner", n, compiled.config).config.model_dump(mode="json")
     config = compiled.config.model_copy(update={"value_flows": vf})
     return _finish(config, compiled.item_component, compiled.tariff_meta, compiled.notes)
+
+
+# ── WP7: the finance inputs (rows 1, 4, 6, 20-32; C1, C2, C4) ─────────────
+
+#: The guided rules of plan §1.2 rows 21-32 for a ledger seeded before they
+#: were rows (the legacy `study_library` ledger, until WP8 seeds production
+#: from the pack): the SAME constants `library._engine_rows` seeds, applied
+#: here and disclosed `finance_rules_from_guided_defaults`.
+GUIDED_FINANCE_DEFAULTS: Mapping[str, float] = {
+    "contingency_share": 0.0,
+    **{f"escalation_{c}": 0.0 for c in ("opex", "fuel", "tariff", "ppa", "export", "capex")},
+    "pv_degradation_pct_per_year": 0.0,
+}
+FINANCE_RULES_FROM_DEFAULTS = "finance_rules_from_guided_defaults"
+
+
+@dataclass(frozen=True)
+class CompiledFinance:
+    """
+    What `compile` hands the finance engine (plan §2 C6, WP7): the
+    `FinanceInputs` of one option, the compile notes (digit-free codes) and
+    a digest (sha256 of the inputs; the compiled hash of C10).
+    """
+
+    inputs: Any                     # models.finance.FinanceInputs
+    notes: tuple[str, ...] = ()
+    digest: str = ""
+
+    def finance(self) -> dict:
+        """The inputs as `SolverConfig.finance` stores them."""
+        return self.inputs.model_dump(mode="json")
+
+
+def _row_or_default(ledger: AssumptionsLedger, key: str, notes: list[str]) -> float | None:
+    """
+    A row's value (None when the row is null: the engine then says what is
+    missing); a ledger without the row takes the guided rule, disclosed.
+    """
+    for row in ledger.rows:
+        if row.key == key:
+            return None if row.value is None else float(row.value)
+    notes.append(FINANCE_RULES_FROM_DEFAULTS)
+    return GUIDED_FINANCE_DEFAULTS[key]
+
+
+def _whole_years(ledger: AssumptionsLedger, key: str) -> int:
+    """Gate S2 nit, kept (the pro forma's rule): a lifetime is whole years."""
+    v = _ledger_value(ledger, key)
+    if v is None or not math.isfinite(float(v)) or v <= 0 or abs(v - round(v)) > 1e-9:
+        raise CompileError(
+            "lifetime_not_whole_years",
+            f"{key} is {v!r}; the case books whole years, so a lifetime must be a "
+            "whole number of years")
+    return int(round(v))
+
+
+def currency_year_of(ledger: AssumptionsLedger, tariff_meta: Mapping[str, Any],
+                     study_year: int | None = None) -> int:
+    """
+    The study's ONE currency year (gate S2 BC-S2-4, moved from the pro
+    forma): a money row, the tariff or the study in another year is refused
+    `currency_year_mixed` (nothing is converted); a tariff in another
+    currency `currency_mixed`; none stated `currency_year_unstated`.
+    """
+    years: dict[int, list[str]] = {}
+    for row in ledger.rows:
+        if row.currency_year is not None and row.unit.startswith("EUR"):
+            years.setdefault(int(row.currency_year), []).append(row.key)
+    currency = tariff_meta.get("currency") or "EUR"
+    if currency != "EUR":
+        raise CompileError("currency_mixed",
+                           f"the tariff is in {currency}; the ledger is in EUR")
+    if tariff_meta.get("currency_year") is not None:
+        years.setdefault(int(tariff_meta["currency_year"]), []).append(
+            f"tariff {tariff_meta.get('tariff_id')}")
+    if study_year is not None:
+        years.setdefault(int(study_year), []).append("study")
+    if len(years) > 1:
+        detail = "; ".join(f"{y}: {', '.join(sorted(k)[:4])}" for y, k in sorted(years.items()))
+        raise CompileError(
+            "currency_year_mixed",
+            f"the case would mix currency years ({detail}); nothing is converted — "
+            "re-enter the values in one currency year")
+    if not years:
+        raise CompileError("currency_year_unstated",
+                           "no money row, tariff or study states a currency year")
+    return next(iter(years))
+
+
+def finance_from_ledger(ledger: AssumptionsLedger, *, model_year: int,
+                        owned_assets: Iterable[str], tariff_meta: Mapping[str, Any],
+                        study_currency_year: int | None = None) -> CompiledFinance:
+    """
+    The finance inputs of one option (plan §1.1 rows 1, 4, 6, 20; §1.2 rows
+    21-32; C1, C2, C4):
+
+    * C4 — real, pre-tax, no subsidy: `price_basis="real"`, every escalation
+      class from its row (0.0; a null row leaves the class out, so the engine
+      says `escalation_missing:<class>`), `inflation=None`, `wacc_nominal` =
+      `cost_of_equity` = the ledger's real `discount_rate` (all equity, row
+      26), `tax_pack_id=None`, no incentives, no debt.
+    * Timing — financial close 1 January of `model_year - 1` (row 21, one
+      construction year, `capex_phasing=[1.0]`), every owner asset's COD 1
+      January of `model_year` (row 22), `analysis_years` = the storage
+      lifetime (row 27, whole years), `contingency_share` (row 23).
+    * C1 — replacements follow the parts (`replacement_rule="part_lifetimes"`,
+      IC D9): the inverter part is re-bought in its last service year, no
+      hand-booked `replacement_capex`.
+    * C2 — the terminal value is the engine's `remaining_life_annuity` (IC
+      D10): each part's purchase still alive at the horizon valued on the
+      annuity the LP charged for it, GS's salvage rule, computed by the engine.
+    * Degradation — PV at row 30 (÷ 100); the battery at 0.0 (rows 14-15 are
+      not used: the `no_degradation` basis).
+
+    `owned_assets` are the value flows' owner assets (the COD covers them all;
+    the meter Links IC's D11 skips need none, and an extra entry is unread).
+    Refused, typed: a second currency year, a lifetime that is not whole
+    years, a missing discount rate.
+    """
+    from models.finance import ESCALATION_CLASSES, FinanceInputs, TerminalValueRule
+
+    notes: list[str] = []
+    currency_year = currency_year_of(ledger, tariff_meta, study_currency_year)
+    rate = _ledger_value(ledger, "discount_rate")
+    if rate is None or not math.isfinite(float(rate)):
+        raise CompileError("ledger_row_missing", "the case needs a discount rate (row 20)")
+    horizon = _whole_years(ledger, "battery_storage_lifetime_years")
+    _whole_years(ledger, "battery_inverter_lifetime_years")
+    rows = {r.key: r for r in ledger.rows}
+    close = rows.get("financial_close_year")
+    close_year = int(close.value) if close is not None and close.value is not None \
+        else int(model_year) - 1
+    cod = rows.get("cod_year")
+    cod_year = int(cod.value) if cod is not None and cod.value is not None else int(model_year)
+    escalation = {}
+    for c in ESCALATION_CLASSES:
+        v = _row_or_default(ledger, f"escalation_{c}", notes)
+        if v is not None:
+            escalation[c] = v
+    owned = list(dict.fromkeys(owned_assets))
+    degradation: dict[str, float] = {}
+    if "pv" in owned:
+        pv = _row_or_default(ledger, "pv_degradation_pct_per_year", notes)
+        if pv is not None:
+            degradation["pv"] = pv / 100.0
+    if "battery" in owned:
+        degradation["battery"] = 0.0
+    inputs = FinanceInputs(
+        currency=str(tariff_meta.get("currency") or "EUR"), currency_year=currency_year,
+        price_basis="real", financial_close=date(close_year, 1, 1), capex_phasing=[1.0],
+        cod_by_asset={a: date(cod_year, 1, 1) for a in owned},
+        contingency_share=_row_or_default(ledger, "contingency_share", notes),
+        escalation=escalation, degradation_by_asset=degradation, inflation=None,
+        analysis_years=horizon, annualise=False,
+        replacement_rule="part_lifetimes", replacement_capex=[],
+        terminal_value=TerminalValueRule(method="remaining_life_annuity"),
+        wacc_nominal=float(rate), cost_of_equity=float(rate),
+        tax_pack_id=None, incentives=[], debt=[])
+    digest = hashlib.sha256(json.dumps(inputs.model_dump(mode="json"), sort_keys=True,
+                                       default=str).encode()).hexdigest()
+    return CompiledFinance(inputs=inputs, notes=tuple(dict.fromkeys(notes)), digest=digest)
 
 
 # ── C6 / WP6: the option fork's solver config ─────────────────────────────

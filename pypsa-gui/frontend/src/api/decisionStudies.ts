@@ -25,10 +25,11 @@ export type MaturityClass = 'screening' | 'feasibility' | 'design'
 export type LedgerStatus = 'default' | 'customised' | 'needs_attention'
 export type Provenance = 'library' | 'user' | 'imported' | 'measured'
 /** Every engine a figure may name (`models/study.py::Engine`), including the
- * S7 `method_constant` (the verdict's break-even tolerance). */
+ * S7 `method_constant` (the verdict's break-even tolerance) and, since U2 WP7,
+ * the Investment Case engine's `tariff_engine` and `finance_engine`. */
 export type Engine =
   | 'lp' | 'lp_duals' | 'bill_calculator' | 'contract' | 'mc_resilience'
-  | 'cash_flow_expander' | 'ledger' | 'method_constant'
+  | 'cash_flow_expander' | 'ledger' | 'method_constant' | 'tariff_engine' | 'finance_engine'
 export type SolveStatus = 'not_run' | 'queued' | 'running' | 'ok' | 'infeasible' | 'failed' | 'aborted'
 export type ValueStreamsBasis = 'baseline' | 'pv_only_reference'
 

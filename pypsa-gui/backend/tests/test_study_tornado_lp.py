@@ -33,6 +33,21 @@ from tests.u2_targets import FAKE_REF, bound_option, ic_site_option
 from tests.u2_targets import ic_solve as lp_solve
 
 
+def _not_an_engine_solve(net):
+    """
+    An identity "solve" returns the centre's dispatch, which the engine did
+    NOT solve under the variant's config: its solve record is dropped, so the
+    case is the pro forma's on GS's bills at the variant tariff (BC-7, these
+    tests' subject). On the engine (U2 WP7) a re-dispatch is a real solve and
+    its bills say so; an identity dispatch would rightly read
+    `config_changed_since_solve` (gate C6).
+    """
+    from services.commercial.lp_bindings import META_LINKS
+
+    net.meta.pop(META_LINKS, None)
+    return net
+
+
 def _question(*drivers):
     return Q.BESS_AT_SITE.model_copy(update={"key_drivers": list(drivers)})
 
@@ -173,7 +188,7 @@ def test_a_price_bound_recomputes_the_baseline_bill_at_the_perturbed_tariff():
                 assert not bool(df.at[name, "p_nom_extendable"]), name
                 assert float(df.at[name, "p_nom"]) == pytest.approx(centre[comp]), name
         calls.append(cfg)
-        return net
+        return _not_an_engine_solve(net)
 
     out = F.run_tornado(ctx, identity)
     assert out.robustness.status == "ok", out.robustness
@@ -242,7 +257,7 @@ def test_every_tornado_solve_keeps_the_studys_export_price():
 
     def solve(net, cfg, vid):
         calls.append((vid, cfg))
-        return lp_solve(net, cfg, vid) if vid.startswith("ref-") else net
+        return lp_solve(net, cfg, vid) if vid.startswith("ref-") else _not_an_engine_solve(net)
 
     out = F.run_tornado(ctx, solve)
     assert out.robustness.status == "ok", out.robustness

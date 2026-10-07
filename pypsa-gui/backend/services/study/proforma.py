@@ -440,8 +440,13 @@ def build_investment_case(n_option, cfg_option, n_baseline, ledger: AssumptionsL
             asset=packs.BATTERY_NAME, ledger_upfront_eur=capex_by[packs.BATTERY_NAME],
             back_calculated_upfront_eur=back_total,
             gap_eur=None if back_total is None else back_total - capex_by[packs.BATTERY_NAME]))
+        # U2 WP7 C1: a battery written as its two parts reads the same upfront
+        # everywhere (`upfront_cost_series` sums the parts): no gap to disclose.
+        same = back_total is not None and abs(back_total - capex_by[packs.BATTERY_NAME]) \
+            <= 1e-9 * max(1.0, capex_by[packs.BATTERY_NAME])
         notes += ["inverter_replaced_at_its_lifetime",
-                  "battery_upfront_from_ledger_not_back_calculated"]
+                  "battery_upfront_from_two_parts" if same
+                  else "battery_upfront_from_ledger_not_back_calculated"]
     if has_pv:
         q_pv = _p_nom_opt(n_option.generators, packs.PV_NAME)
         per_mw = _upfront_series(n_option, "Generator", packs.PV_NAME)

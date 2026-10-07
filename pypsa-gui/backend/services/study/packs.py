@@ -36,22 +36,28 @@ never a literal; every rule below is a plan or gate condition:
   Generator on the ordinary ``overnight_cost`` + ``lifetime`` +
   ``discount_rate`` path, with a synthetic profile marked
   ``synthetic_pv_profile``. Rooftop or utility rows by ``intake.pv.kind``.
-* **Battery** (review v1 B3/B4, spec §8.1 amended): a ``StorageUnit`` with
-  ``p_nom_extendable``, the option's enumerated ``max_hours``,
-  ``cyclic_state_of_charge`` (N3-v2), ``efficiency_store =
-  efficiency_dispatch = sqrt(rte)`` from the ledger's ONE round-trip row, and
-  ``capital_cost`` per MW written directly as the SUM OF TWO ANNUITIES
-  (labelled ``derived_from_two_annuities``; the one place the guided flow
-  writes the annuity field, because ``overnight_cost`` cannot carry two
-  lifetimes)::
+* **Battery** (review v1 B3/B4, spec §8.1 amended; U2 WP7 C1): a
+  ``StorageUnit`` with ``p_nom_extendable``, the option's enumerated
+  ``max_hours``, ``cyclic_state_of_charge`` (N3-v2), ``efficiency_store =
+  efficiency_dispatch = sqrt(rte)`` from the ledger's ONE round-trip row,
+  written through the asset schema's ``derive.apply_parts`` as TWO UPFRONT
+  PARTS (:func:`battery_parts`, labelled ``two_upfront_parts``): power =
+  the inverter (EUR/kW x 1000 per MW, the inverter lifetime, the inverter FOM
+  share) and energy = the storage block (EUR/kWh x 1000 per MWh, scaled by
+  ``max_hours``, the storage lifetime, no FOM row). ``apply_parts`` derives
+  the columns the LP reads — ``capital_cost`` per MW, the SUM OF TWO
+  ANNUITIES::
 
       annuity(r, inverter_life) x inverter_eur_per_kw x 1000
         + max_hours x annuity(r, storage_life) x storage_eur_per_kwh x 1000
 
-  plus ``fom_cost`` = inverter FOM share x inverter investment (the library
-  has no storage-block FOM row, so FOM applies to the inverter only).
-  ``overnight_cost`` stays unset; the upfront figures the pro forma books are
-  :func:`battery_upfront_eur_per_mw`, read from the ledger.
+  (= :func:`battery_capital_cost_eur_per_mw`), ``fom_cost`` = inverter FOM
+  share x inverter investment (= :func:`battery_fom_eur_per_mw`) and
+  ``lifetime`` = the longest part — and leaves ``overnight_cost`` EMPTY,
+  because PyPSA annuitises a typed ``overnight_cost`` over ONE lifetime and
+  then ignores ``capital_cost``. The finance engine reads the parts through
+  ``asset_schema.access.upfront_parts`` (S0b); their sum is
+  :func:`battery_upfront_eur_per_mw`.
 * **Bounds** (BC-2): every extendable asset gets a finite ``p_nom_max`` =
   connection limit x the ledger's ``sizing_limit_connection_multiple``.
 * **Snapshots**: 8760 hourly steps of one non-leap year, weightings 1.
@@ -83,6 +89,7 @@ import pandas as pd
 import pypsa
 
 from models.study import AssumptionsLedger, DecisionQuestion, OptionSpec, Tariff
+from services.asset_schema import derive
 from services.solver.periodized_costs import _annuity
 from services.study import library as study_library
 from services.study import questions as Q
@@ -90,7 +97,8 @@ from services.study import tariff as study_tariff
 
 __all__ = [
     "HOURS", "LOAD_UNITS", "LoadUpload", "PackError", "PACK_META_KEY", "battery_capital_cost_eur_per_mw",
-    "battery_fom_eur_per_mw", "battery_upfront_eur_per_mw", "bind_option", "build_site_network",
+    "battery_fom_eur_per_mw", "battery_parts", "battery_upfront_eur_per_mw", "bind_option",
+    "build_site_network",
     "effective_tariff", "option_commercial", "intake_tariff", "ledger_hash", "ledger_values",
     "load_profile_ids", "load_profiles", "needs_attention_rows", "read_intake_load", "snapshots_for", "option_solver_config", "parse_load_upload",
     "refuse_unrunnable_ledger", "round_trip_efficiency",
@@ -185,6 +193,25 @@ def battery_fom_eur_per_mw(ledger: AssumptionsLedger) -> float:
     v = ledger_values(ledger)
     return (_need(v, "battery_inverter_fom_pct_per_year") / 100.0
             * _need(v, "battery_inverter_eur_per_kw") * 1000.0)
+
+
+def battery_parts(ledger: AssumptionsLedger) -> dict[str, float]:
+    """
+    U2 WP7 C1: the battery's two upfront parts as the asset schema's
+    StorageUnit part columns (`derive.apply_parts`), from the ledger rows
+    1, 2, 4, 5 and 6: power = the inverter (EUR/MW, its lifetime, its FOM
+    share), energy = the storage block (EUR/MWh, scaled by `max_hours` on
+    the asset, its lifetime; FOM 0, the library has no storage FOM row).
+    """
+    v = ledger_values(ledger)
+    return {
+        "inv_power_overnight": _need(v, "battery_inverter_eur_per_kw") * 1000.0,
+        "inv_power_lifetime": _need(v, "battery_inverter_lifetime_years"),
+        "inv_power_fom_share": _need(v, "battery_inverter_fom_pct_per_year") / 100.0,
+        "inv_energy_overnight": _need(v, "battery_storage_eur_per_kwh") * 1000.0,
+        "inv_energy_lifetime": _need(v, "battery_storage_lifetime_years"),
+        "inv_energy_fom_share": 0.0,
+    }
 
 
 def battery_upfront_eur_per_mw(ledger: AssumptionsLedger,
@@ -647,14 +674,13 @@ def build_site_network(intake: Mapping[str, Any] | None,
               p_nom_extendable=True, p_nom_min=0.0, p_nom_max=p_nom_max,
               max_hours=hours, cyclic_state_of_charge=True,
               efficiency_store=eta, efficiency_dispatch=eta,
-              capital_cost=battery_capital_cost_eur_per_mw(ledger, hours),
-              fom_cost=battery_fom_eur_per_mw(ledger),
-              # Recorded, not used for the annuity: the storage block's
-              # lifetime is the pro forma horizon. `overnight_cost` stays
-              # unset — it cannot carry two lifetimes.
-              lifetime=_need(values, "battery_storage_lifetime_years"),
               discount_rate=r, marginal_cost=0.0)
-        cost_basis[BATTERY_NAME] = "derived_from_two_annuities"
+        # C1: the two parts; `apply_parts` writes the two-annuity
+        # `capital_cost`, the FOM and the lifetime (the storage block's: the
+        # case horizon) and leaves `overnight_cost` empty.
+        derive.apply_parts(n, "StorageUnit", BATTERY_NAME, battery_parts(ledger),
+                           discount_rate=r)
+        cost_basis[BATTERY_NAME] = "two_upfront_parts"
         upfront[BATTERY_NAME] = battery_upfront_eur_per_mw(ledger, hours)
         notes.append("battery_fom_on_inverter_investment_only")
 

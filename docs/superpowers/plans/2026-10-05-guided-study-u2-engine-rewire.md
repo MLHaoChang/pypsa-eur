@@ -404,6 +404,94 @@ Adapt in place (WP3–WP8 as their code moves): `test_study_pack.py` (36: no pri
 ### WP7 — `compile.finance_from_ledger` + `engine_adapter.option_case` (C1, C2, C4, C5)
 **Tests.** WP2's case targets green: S5 table = WP0 to 1e-9 (IRR 1e-9 absolute); §4.6 identity ≤ 1e-6; WACC gate consistent at the centre and `differs` (accepted) on rate bounds only; post-tax KPIs `None` with reasons; no `contingency_share` → `contingency_share_missing`; `escalation_tariff=None` → `escalation_missing:tariff`; C1 (once S0 lands): the two upfront parts through `upfront_parts` equal the ledger's and leave the objective and sizes byte-identical; C5 bounds equal GS's `_capex_bound` / `_rate_bound` NPVs (WP0) and re-read no network; `case_streams_reconcile_with_engine`. **Mutations:** `salvage_rule → none` → identity red; set `overnight_cost` on the StorageUnit → LP-identity red; `escalation_tariff = 0.02` → real-basis red.
 
+**WP7 status (2026-10-07, on 8fdbc3c9: master 12fd3c02 with IC #90's S0b, D9, D10).** Done; uncommitted at the time of writing. The case route and the findings now value every engine-solved option on IC's finance engine.
+- **Seams.**
+  - `compile.finance_from_ledger(ledger, *, model_year, owned_assets, tariff_meta, study_currency_year) -> CompiledFinance(inputs, notes, digest)`, with `compile.currency_year_of`, the one-currency-year rule moved from the pro forma.
+  - `engine_adapter.option_case(n, cfg, ledger, *, compiled, option_id, study_id, fidelity, asset_economics, question, project_ref, model_hash, bills, study_currency_year) -> CaseBundle(view, case, result, bills, compiled, finance, context)`. It adds the option's `single_owner` value flows when the config has none, so forks solved without them are valued too. It refuses with `EngineRefused`: GS's codes, plus `engine_refused` with the engine's `engine_code`.
+  - `engine_adapter.bound_case(bundle, variant, *, kind="capex"|"rate")`.
+  - Also `engine_ready(n)`, `irr`, `payback`, `is_zero_size` and `EPSILON_MW` (C7).
+- **C1.**
+  - `packs.build_site_network` writes the battery through `derive.apply_parts` with `packs.battery_parts(ledger)`; the meta records `cost_basis="two_upfront_parts"`.
+  - `capital_cost` is the two-annuity value to 1e-9 (1, 2 and 4 h). `overnight_cost` stays empty. The parts sum to `battery_upfront_eur_per_mw`.
+  - The LP is identical: the parts' objective and sizes equal WP0's (recorded from a capital-cost-only battery) to 1e-12 relative and 1e-9 MW.
+  - The engine reads the parts: `upfront_only_from_capital_cost` is gone from the guided case, and the spike's Q5 and rows 21–34 tests are re-pinned.
+  - Replacements come from `replacement_rule="part_lifetimes"` (D9) at years 10 and 20, exactly GS's. No `replacement_capex` is booked.
+  - The S4 gap is closed: `upfront_cost_series` now sums the parts and equals the ledger upfront. So:
+    - the pro forma and the engine view disclose `battery_upfront_from_two_parts` instead of `battery_upfront_from_ledger_not_back_calculated` when the gap is 0;
+    - the QA driver's step reads "equals the ledger upfront";
+    - the WP0 driver key `upfront_cost_series_eur_per_mw` (881,617.86 → 730,000) is a recorded delta.
+- **C2 — chose `remaining_life_annuity` (D10).** It reproduces WP0's salvage to 6e-16 relative on `bess_2h` and exactly on `bess_pv_2h`, and the §4.6 identity holds. It removes GS's own salvage computation. `salvage_basis` stays `annuity_pv`, because the method IS the PV of the remaining annuities; §5.4's `fixed_from_remaining_annuities` is not needed. Limit (IC S0b limit 7): a part with no finite lifetime makes the case not established (`engine_reason:terminal_part_unknown:*`, `salvage_not_computed`), where GS showed an NPV without the salvage. The pack always types every lifetime. Recorded delta.
+- **C4.** `price_basis="real"`, every escalation class 0 (from its row), `inflation=None`, WACC = cost of equity = the real rate. Pre-tax, no incentives, no debt. Financial close is `y_m − 1` with `capex_phasing [1]`; the COD of every owner asset is `y_m`; `analysis_years` is the storage lifetime (whole years, else `lifetime_not_whole_years`). PV degradation comes from row 30; the battery's is 0 (rows 14–15 unused, `no_degradation`), which the engine's LCOS needs. The gate is consistent at the centre. Post-tax metrics are None and the tax reasons name `tax_pack_missing`. A null `contingency_share` or `escalation_*` row is the engine's reason (`engine_reason:contingency_share_missing`, `engine_reason:escalation_missing:tariff:*`), never a 0.
+- **Rows 21–34.** They are read from the ledger when it has them (pack-seeded). A legacy `study_library` ledger, which production uses until WP8, takes the SAME guided constants, disclosed `finance_rules_from_guided_defaults`. `build_finance_case`'s refusal order (WP1) is unchanged: `value_flows_not_configured` → `cod_missing` → `analysis_years_missing`.
+- **Gate C5 (meter Links) — chose IC's D11; way (a) is gone.** `compile.type_meter_links` was removed and its test replaced. The case's only owner investment is the battery (and PV); the Links read `meter_link_not_investment:*`, need no COD, and leave the WACC gate unaffected. The view discloses `meter_links_are_not_investments`. Way (a) was never needed: the case is the same either way (WP1).
+- **C5 bounds (the parent's C5 as amended at the IC S0b gate).**
+  - **CAPEX.** A battery cost row moves its ONE part, plus the asset's `overnight_cost`, plus the battery's FOM line by the change in Σ part cost × FOM share. Replacements and the terminal value follow in the engine. `scale_capex` cannot express a one-part, one-asset change: it scales every asset and part uniformly. So this is a WORKAROUND, approved by the coordinator 2026-10-07.
+  - **RATE.** WACC, cost of equity and the valuation basis `lp_basis` (`discount_rate` and every set asset rate) move together. The result's gate is the engine's `wacc_gate` against the basis the LP solved on, so it reads `differs`. That is accepted for rate rows only and disclosed `wacc_gate_differs_on_rate_bound`. The BY_CONSTRUCTION codes stay at the centre only.
+  - Neither reads the network: tested with `build_finance_case` and `value_flow_ledger` patched to raise. A price bound re-dispatches and calls `option_case` on the variant network; its counterfactual is the baseline at the variant tariff.
+- **Wiring.**
+  - The case route `_option_case` goes to the engine when `engine_ready(fork)` and the run recorded its export series, with the engine's bills.
+  - `findings._case`, `_capex_bound`, `_rate_bound` and `_price_bound` (and through them `_centre` and the PV-only reference) go to the engine for engine-ready networks. Bundles are kept on `TornadoContext.bundles` by network id, with the network beside each one so a reused id never fetches a stale bundle. A price bound's bundle is not kept.
+  - Everything else falls back to the pro forma: forks written before WP7, and the fake-solver tests.
+  - The report's LCOS fact follows the case: `lcos_finance_engine`, disclosed `lcos_includes_charging_energy_cost` instead of `lcos_two_definitions`.
+- **Vocabulary (additive).** `Engine` (backend, TS union, `ENGINE_LABELS`) gains `tariff_engine` and `finance_engine`; both are in `_RUN_ENGINES`. The engine view is `engine="finance_engine"`, and its streams carry their bill's engine. `Verdict.tsx` treats `finance_engine` like the cash-flow model. HELP codes were added with their frontend mirror:
+  - `battery_upfront_from_two_parts`, `irr_cash_changes_sign_more_than_once`, `wacc_field_holds_the_real_rate`, `wacc_gate_differs_on_rate_bound`;
+  - `demand_peak_hourly_resolution`, `lcos_includes_charging_energy_cost`, `finance_rules_from_guided_defaults`, `meter_links_are_not_investments`;
+  - `case_streams_do_not_reconcile_with_engine`, and the prefix `engine_reason:`.
+- **Evidence.** WP2's case targets are green (32, `pending` removed). Test bugs fixed when the marks came off:
+  - way (a) dropped;
+  - `salvage_eur` and `lcos` read until WP8's rename;
+  - bills on the bundle;
+  - the currency-year test re-ported to the source's three branches;
+  - the uncomputed-salvage test re-pointed at the engine-solved fork.
+
+  `test_u2_wp7_case.py` adds 23 tests. Golden parity against WP0:
+
+  | Figure | `bess_2h` | `bess_pv_2h` |
+  |---|---|---|
+  | NPV (relative) | 2.3e-11 | 8.8e-12 |
+  | IRR (absolute) | 1.7e-12 | 7.8e-13 |
+  | Paybacks (absolute) | ≤ 8.8e-11 | ≤ 8.8e-11 |
+  | CAPEX, salvage, savings, streams, market revenue (relative) | ≤ 6e-16 | ≤ 6e-16 |
+  | Yearly cash (absolute, from the FOM rounding) | ≤ 1.2e-6 EUR | ≤ 1.2e-6 EUR |
+
+  The §4.6 identity holds on the live objectives to 1e-6. Every CAPEX and RATE bound on both options equals GS's bound NPV to 1e-9. `qa_decision_study.py`: 60/60, `marginal` / `bess_1h` / `["demand_charge_price"]`, 2 h and 4 h skipped. Its NPV is 2.2e-10 relative from WP0, all four tornado bounds are ≤ 8.1e-10 relative, and outside tolerance there are only the four recorded driver deltas.
+- **Deltas (`u2_deltas.json`, WP7 rows).**
+  - `fom_rounded_by_pypsa_statistics`: the engine's FOM line is `n.statistics.fom`, rounded to 5 decimals. `bess_2h` 557.3585893 → 557.35859 (1.3e-9 relative); the driver's Σ opex_fixed is 6.9e-9 relative and its discounted payback 1.2e-9 years.
+  - `lcos_is_the_engines_storage_metric` (owner decision 6): the engine's LCOS includes charging. Golden 244.39 → 385.45 and 126.72 → 200.27; driver 305.03 → 446.09. GS's charging-included asset-economics figures are 391.12, 210.85 and 450.49; the engine prices charging at the committed import price.
+  - `c1_parts_close_the_s4_gap`: driver `upfront_cost_series_eur_per_mw` and the case's upfront gap.
+  - The uncomputed-salvage semantics (C2 limit).
+
+  `test_u2_pre_numbers_recorded` applies a row only on its frozen `pre` (`_with_recorded_deltas`, with its own test); the WP0 freeze is untouched.
+- **Suite.** `test_study_*`, `test_u2_*`, `test_engine_adapter_*`, `test_no_commercial_is_noop`, `test_hourly_assumption_audit`, `test_engine_facade_frozen`, `test_decision_vocabulary_parity`, `test_tool_error_kind_manifest`, `test_tariff_bill` and `test_proforma_golden`, including the slow driver re-derivation: 803 passed, 6 xfailed (WP9's `pending`), 5 failed. The 5 failures were the WP7 consequences below; their files were re-run green (217 passed). `test_studies_routes.py`: 30 passed. vitest (decision pages and utils): 526 passed; `tsc -b` clean.
+  - **The S4 gap closed.** `test_proforma_golden`: the gap test now asserts the back-calculation EQUALS the booked capex, `battery_upfront_from_two_parts` is required, and a delta row is recorded.
+  - **Gate C6.** `test_u2_wp6_lp_switch::test_bill_meter_is_called_only_by_the_preview` admits `option_case`'s counterfactual meter and asserts its export is zeros.
+  - **Identity solves.** `test_study_tornado_lp`'s two identity "solves" drop the engine's solve record. An identity dispatch is not a solve under the variant config, so the engine would rightly flag drift; those two tests keep testing BC-7 and the export ref on the pro forma path. The engine's price bounds are covered by the driver: `demand_charge_price` = WP0 to 8.1e-10.
+- **Mutations** (on a copy of the tree): each file was restored and diffed after its run. All 8 went red as intended, with only the intended tests red:
+
+  | # | Mutation | Red |
+  |---|---|---|
+  | M1 (plan) | `salvage_rule → none` (`TerminalValueRule("none")`) | 10: the §4.6 identity (live and WP0), NPV, salvage, the basis rule, real-basis parity |
+  | M2 (plan) | `overnight_cost` typed on the StorageUnit | 6: the LP identity on both options, and the parts test (4) |
+  | M3 (plan) | `escalation_tariff = 0.02` | 2: real basis |
+  | M4 (own) | a WACC-only rate bound (`lp_basis` kept) | 2: rate-bound parity with GS |
+  | M5 (own) | the inverter bound leaves the FOM line | 3: CAPEX-bound parity on both options, the per-part test |
+  | M6 (own) | `replacement_rule="fixed"` (no part replacements) | 3: the replacement years, NPV, IRR |
+  | M7 (own) | the rate bound's gate read on its own basis | 3: rate parity (gate) on both options, the WP2 rate-bound target |
+  | M8 (own) | way (a) back (meter Links typed at 0) | 1: the D11 test |
+- **Engine asks (to IC through the owner).**
+  - `scale_capex(case, f, *, asset=, part=)`, so a per-part CAPEX bound needs no WORKAROUND.
+  - P3's `_asset_costs` reads `n.statistics.*` with PyPSA's default 5-decimal rounding: ask for unrounded FOM, CAPEX and OPEX.
+  - Freeze the names WP7 reads outside the facade: `finance.engine.wacc_gate`; the `FinanceResult` fields `op`, `op_incremental`, `terminal`, `gate`, `flags`, `reasons`, `sections` and `Operating.lines` / `line_meta` / `capex` / `replacement` (today only `cash`, `metrics` and `lcos` are pinned); `TerminalTerm`; `lp_bindings.META_LINKS` (`engine_ready`).
+  - The asset-schema writers `derive.apply_parts` / `access.upfront_parts`, which S0 owns, are not in the frozen list either.
+- **Open for WP8.**
+  - Stored studies whose forks were written before WP7 still get the pro forma, with no stale mark: C6 / W4, `compiled_hash`. WP8 marks them stale and offers a re-run.
+  - The runner should also write `finance` (`CompiledFinance.finance()`) into each fork's `solver_config` (`compile.solver_config(finance=...)` takes it).
+  - Findings' value streams and bills still use `BillCalculator`, and the case's streams the engine's bills; they are equal on engine-solved forks.
+  - Production still seeds the legacy ledger, so cases disclose `finance_rules_from_guided_defaults` until the pack seeding switch (C4).
+  - §5.4's rename with read-compat: `bill_calculator` / `cash_flow_expander`, `CaseKpis.lcos` → `levelised_cost`, `salvage_eur` → `terminal_value_eur`, `bill_refs`.
+  - The report's remaining pro-forma wording, and `proforma.py` / `proforma_xlsx.py` (WP9 / WP10).
+  - A non-zero PV degradation (row 30, pack ledgers only) adds IC's first-order bill pair, so the yearly engine cash differs from the constant bill savings. The case then reads `case_streams_do_not_reconcile_with_engine`, not established. WP8 should either show the engine's yearly savings or keep row 30 at 0 in the guided basis.
+
 ### WP8 — Findings, tornado, runner, routes; vocabulary rename
 **Do.** `findings._case` / `_bill_of` / `_price_bound` / `_capex_bound` / `_rate_bound` / `_centre` / `load_inputs` on the adapter; `runner._worker` compiles, mints, binds and writes `commercial` + `finance` into each fork; routes; §5.4 rename with read-compat; `FindingsHashes.compiled_hash`.
 **Tests.** Ported `test_study_findings`, `test_study_tornado_lp`, `test_study_runner`, `test_study_decision_report`, `test_study_report_live_lp` with WP0 values or recorded deltas; `test_study_engine_literal_compat.py` (a stored pre-U2 study loads; new writes use the new names); `test_study_compiled_hash.py` (editing a fork's commercial → 409 `engine_inputs_changed_since_run`, report stale); vitest: `vocabularySource.test.ts`, `Verdict.render.test.tsx`, `Findings.render.test.tsx` on renamed fixtures; HELP mirror test. **Mutation:** remove the legacy mapping → stored-study red; skip `compiled_hash` → 409 test red.
