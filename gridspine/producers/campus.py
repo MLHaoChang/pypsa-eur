@@ -55,6 +55,7 @@ import pandas as pd
 
 from gridspine.schema.campus import STANDARD_MVA, validate_hourly, validate_pcc
 from gridspine.schema.contracts import ContractError
+from gridspine.schema.island import CONVERTER_KINDS
 from gridspine.schema.network import MAX_NAME_LEN
 
 #: Power factor a transformer is sized at, from the MW the expansion chose.
@@ -89,6 +90,25 @@ GENSET_XD_PP, GENSET_RX_SC = 0.15, 0.07
 
 #: A same-voltage bus tie: a short cable of typical MV data.
 TIE_KM, TIE_R, TIE_X, TIE_C = 0.01, 0.0754, 0.11, 0.0
+
+#: The island block a drafted converter or genset gets when the hub sidecar
+#: does not name it (plan I1). Every value is tagged ``assumed``. The genset
+#: ``load_step_max_pct`` stands in for the ISO 8528-5 class, which the user
+#: enters from the standard; the panel asks for it.
+_QU_DEFAULT = [[0.9, 0.33], [0.97, 0.0], [1.03, 0.0], [1.1, -0.33]]
+DEFAULT_ISLAND = {
+    "bess": {"control": "gfm_droop", "pf_rated": 0.95, "droop_pct": 4.0, "q_droop_pct": 4.0,
+             "tau_f_s": 0.1, "i_max_pu": 1.2, "k_gfm_min": 1.0},
+    "pv": {"control": "gfl_qu", "pf_rated": 0.95, "qu_points": _QU_DEFAULT},
+    "wind": {"control": "gfl_qu", "pf_rated": 0.95, "qu_points": _QU_DEFAULT},
+    "genset": {"governor": "droop", "droop_pct": 4.0, "q_droop_pct": 4.0, "H_s": 1.5, "T_g_s": 0.5,
+               "ramp_pu_per_s": 0.2, "start_s": 10.0, "sync_s": 5.0, "p_min_pu": 0.3,
+               "load_step_max_pct": 50.0, "cos_phi_r": GENSET_PF,
+               "xd_sat": 2.0, "excitation": "avr_pmg", "neutral_earthing": "solid"},
+}
+#: Untagged fields of an island block: enumerations, flags and names.
+_UNTAGGED = ("control", "governor", "excitation", "neutral_earthing", "spinning", "unit_transformer",
+             "transfers_on_islanding", "critical")
 
 GRID_CARRIERS = frozenset({"grid", "import", "grid_import", "electricity_import"})
 CARRIER_KIND = {
@@ -165,9 +185,76 @@ def _typical_sk(kv):
             return sk, rx
 
 
-def draft_campus(n) -> CampusDraft:
+def _default_block(kind):
+    return {f: v if f in _UNTAGGED else _t(v) if not isinstance(v, list) else
+            {"value": [list(p) for p in v], "source": "assumed"}
+            for f, v in DEFAULT_ISLAND[kind].items()}
+
+
+def _retag(block, drop=()):
+    """A validated island block (``schema/island.py``) back in the tagged
+    file form, without the fields in ``drop``."""
+    out = {f: {"value": v, "source": block["sources"][f]} for f, v in block["values"].items() if f not in drop}
+    out.update({f: block[f] for f in _UNTAGGED if f in block})
+    return out
+
+
+def _attach_island(n, spec, island, pypsa_ids, skipped):
+    """Copy the validated hub sidecar ``island`` into the drafted ``spec``
+    (plan I1). ``pypsa_ids`` maps each drafted PyPSA name to its campus id."""
+    units = spec["units"]
+    known = set()
+    for tbl in ("generators", "storage_units", "loads", "links"):
+        known |= set(getattr(n, tbl, pd.DataFrame()).index)
+    for name, block in island["units"].items():
+        if name not in known:
+            raise ContractError(f"island_config.units.{name}: the project has no component of that name")
+        if name not in pypsa_ids:
+            skipped.append(f"island data for {name}: the unit is not in the draft, so its island block is left out")
+            continue
+        uid = pypsa_ids[name]
+        u = units[uid]
+        if block["kind"] != u["kind"]:
+            raise ContractError(
+                f"island_config.units.{name} says kind {block['kind']!r}, but the project drafts it as {u['kind']!r}")
+        out = _retag(block, drop=("unit_mw", "xd_pp"))
+        if "xd_pp" in block["values"]:
+            u["xd_pp"] = {"value": block["values"]["xd_pp"], "source": block["sources"]["xd_pp"]}
+        if block["kind"] == "ups":
+            out["it_load"] = _translate(block["it_load"], pypsa_ids, f"the UPS {name}'s it_load", skipped)
+            if not out["it_load"]:
+                raise ContractError(f"island_config.units.{name}: none of the loads it protects is in the draft")
+        u["island"] = out
+    for uid, u in units.items():
+        if "island" not in u and u["kind"] in DEFAULT_ISLAND:
+            u["island"] = _default_block(u["kind"])
+    req = island["requirements"]
+    out = _retag(req)
+    out.update(scenarios=list(req["scenarios"]), linearised_uc=req["linearised_uc"],
+               gfl_min_case=req["gfl_min_case"],
+               frequency_limits={k: _retag(v) for k, v in req["frequency_limits"].items()})
+    if req["ride_through_storage"]:
+        rts = _translate(req["ride_through_storage"], pypsa_ids, "ride_through_storage", skipped)
+        if rts:
+            out["ride_through_storage"] = rts
+    spec["island"] = out
+
+
+def _translate(names, pypsa_ids, what, skipped):
+    out = []
+    for x in names:
+        if x in pypsa_ids:
+            out.append(pypsa_ids[x])
+        else:
+            skipped.append(f"{what}: {x} is not in the draft, so it is left out")
+    return out
+
+
+def draft_campus(n, island=None) -> CampusDraft:
     """The campus description for a solved hub network ``n`` (see the module
-    docstring for what becomes what)."""
+    docstring for what becomes what). ``island`` is the hub sidecar as
+    ``schema.island.validate_island_config`` returns it; with it, the draft
+    carries the island data (``_attach_island``)."""
     buses = n.buses
     carrier = buses["carrier"].fillna("AC") if "carrier" in buses.columns else pd.Series("AC", index=buses.index)
     ac = [b for b in buses.index if carrier[b] in _AC]
@@ -193,6 +280,7 @@ def draft_campus(n) -> CampusDraft:
         "transformers": {}, "cables": {}, "units": {},
     }
     taken = {"GRID"}
+    pypsa_ids = {}
 
     def ids(names):
         out = short_names(names, taken)
@@ -274,6 +362,7 @@ def draft_campus(n) -> CampusDraft:
             skipped.append(f"generator {gname}: built at 0 MW")
             continue
         (eid,) = ids([gname])
+        pypsa_ids[gname] = eid
         u = {"kind": kind, "bus": bus_ids[bus], "pypsa_name": gname, "p_mw": _t(p)}
         if kind == "genset":
             u.update(s_mva=_t(p / GENSET_PF), xd_pp=_t(GENSET_XD_PP), rx_sc=_t(GENSET_RX_SC))
@@ -292,11 +381,14 @@ def draft_campus(n) -> CampusDraft:
             skipped.append(f"storage unit {sname}: built at 0 MW")
             continue
         (eid,) = ids([sname])
-        spec["units"][eid] = {
-            "kind": "bess", "bus": bus_ids[bus], "pypsa_name": sname, "p_mw": _t(p),
-            "e_mwh": _t(p * float(su.at[sname, "max_hours"])), "s_mva": _t(p / INVERTER_PF),
-            "k_sc": _t(INVERTER_K_SC), "rx_sc": _t(INVERTER_RX_SC),
-        }
+        pypsa_ids[sname] = eid
+        u = {"kind": "bess", "bus": bus_ids[bus], "pypsa_name": sname, "p_mw": _t(p),
+             "e_mwh": _t(p * float(su.at[sname, "max_hours"])), "s_mva": _t(p / INVERTER_PF)}
+        if island and island["units"].get(sname, {}).get("kind") == "ups":
+            u["kind"] = "ups"                        # the sidecar says so; a UPS feeds no fault
+        else:
+            u.update(k_sc=_t(INVERTER_K_SC), rx_sc=_t(INVERTER_RX_SC))
+        spec["units"][eid] = u
 
     p_set_t = getattr(getattr(n, "loads_t", None), "p_set", pd.DataFrame())
     loads = n.loads
@@ -310,11 +402,14 @@ def draft_campus(n) -> CampusDraft:
             skipped.append(f"load {lname}: never draws power")
             continue
         (eid,) = ids([lname])
+        pypsa_ids[lname] = eid
         spec["units"][eid] = {"kind": "load", "bus": bus_ids[bus], "pypsa_name": lname,
                               "p_mw": _t(peak), "pf": _t(LOAD_PF)}
 
     if not spec["cables"]:
         del spec["cables"]
+    if island is not None:
+        _attach_island(n, spec, island, pypsa_ids, skipped)
     return CampusDraft(spec={"campus": spec}, skipped=skipped)
 
 
@@ -323,7 +418,7 @@ def draft_campus(n) -> CampusDraft:
 _SERIES = (
     # (network table, time-series attribute, campus kinds it may hold)
     ("generators", "generators_t", ("pv", "wind", "genset")),
-    ("storage_units", "storage_units_t", ("bess",)),
+    ("storage_units", "storage_units_t", ("bess", "ups")),
     ("loads", "loads_t", ("load",)),
     ("links", "links_t", ("load",)),
 )
