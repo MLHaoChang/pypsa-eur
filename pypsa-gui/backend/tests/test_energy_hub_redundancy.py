@@ -210,13 +210,23 @@ def test_default_pipeline_skips_redundancy_when_lever_off():
 
 
 def test_claim_wipe_includes_eh_keys():
-    from pathlib import Path
-    text = Path("routers/simulation.py").read_text()
-    idx = text.find('status="running"')
-    chunk = text[idx:idx + 900]
-    assert "eh_redundancy_comparison=None" in chunk
-    assert "eh_lever_comparison=None" in chunk
-    assert "eh_reference_design_report=None" in chunk
+    """
+    These keys must be wiped when a new solve claims the context, or a re-run
+    serves the previous plan's tables.
+
+    Asserted against `cleared_result_state()` — the derived wipe both claims
+    now splat — rather than against the SOURCE TEXT of a hand-typed list.
+    The text assertion was the right property checked the wrong way: the two
+    claims maintained parallel hand-typed lists, they drifted (the queue claim
+    was missing every `eh_*` key), and a test reading one list could not see
+    that. See `tests/test_claim_clears_every_result_key.py`.
+    """
+    from services.project_context import cleared_result_state
+
+    wipe = cleared_result_state()
+    for key in ("eh_redundancy_comparison", "eh_lever_comparison",
+                "eh_reference_design_report"):
+        assert key in wipe and wipe[key] is None
 
 
 @pytest.mark.live_solve

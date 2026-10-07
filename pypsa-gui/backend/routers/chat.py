@@ -802,6 +802,15 @@ def chat_history(limit: int = 200,
                 "pending_turn": pending_turn,
                 "workflow": None,
                 "bound_profile_id": None}
+    # CH-6 — the CALLER's last turn, not the file's. The transcript is shared
+    # by everyone on the project; a session is one user's. Searched over the
+    # whole transcript, before `limit` trims it, so a user whose last turn is
+    # older than the window still gets their own session back.
+    actor_id = str(actor.id) if actor is not None else None
+    own_turns = [
+        rec for rec in turns
+        if rec.get("session_id") and chat_service.turn_is_callers(rec, actor_id)
+    ]
     if limit > 0:
         turns = turns[-limit:]
 
@@ -814,8 +823,8 @@ def chat_history(limit: int = 200,
     workflow_state = None
     # P28 A3 — the profile the resumed session is bound to (see the docstring).
     bound_profile_id: str | None = None
-    if turns:
-        last_rec = turns[-1]
+    if own_turns:
+        last_rec = own_turns[-1]
         last_session_id = last_rec.get("session_id")
         if last_session_id:
             # Task 7 — resolve the profile the LATEST turn was recorded
@@ -878,7 +887,20 @@ def chat_history(limit: int = 200,
             # NOT already registered (this GET minted it) adopts the
             # resolved profile; an already-live session is left exactly as
             # `/stream` bound it.
-            if session_was_freshly_minted:
+            # Defence in depth for CH-6: an id that is the caller's by the
+            # transcript but registered to a DIFFERENT known owner (a legacy or
+            # forged record) is neither handed back nor rebuilt — rebuilding
+            # would overwrite another user's live session from this GET. An
+            # owner-less session (no production path creates one) keeps the
+            # pre-CH-6 behaviour, like an author-less record does.
+            if (
+                not session_was_freshly_minted
+                and sess.owner_user_id is not None
+                and not chat_service.session_owner_allows(sess, actor_id)
+            ):
+                last_session_id = None
+                sess = None
+            if sess is not None and session_was_freshly_minted:
                 sess.profile_id = resolved_profile.id
                 sess.bound_wire = resolved_profile.wire
                 sess.model = resolved_profile.model
@@ -887,9 +909,10 @@ def chat_history(limit: int = 200,
                 # construction): `/stream` with no profile keeps it, so the
                 # panel must gate on it, not on the active one (P28 gate N-c).
                 bound_profile_id = resolved_profile.id
-            else:
+            elif sess is not None:
                 # An already-live session keeps what `/stream` bound; report
                 # THAT, and only while it still names a configured profile.
+                # (None — refused above as someone else's — reports nothing.)
                 live_id = sess.profile_id
                 configured = {p.id for p in llm_config.load_profiles()[0]}
                 bound_profile_id = live_id if live_id in configured else None
@@ -903,28 +926,53 @@ def chat_history(limit: int = 200,
             # last turn); blocks that wire can't replay (thinking /
             # redacted_thinking / image / document) are dropped here rather
             # than sent and rejected.
-            with sess._lock:
-                sess.messages.clear()
-                for rec in turns:
-                    user_text = rec.get("user")
-                    assistant_blocks = rec.get("assistant")
-                    if user_text is not None:
-                        sess.append_history_message({
-                            "role": "user",
-                            "content": chat_service._filter_non_portable_blocks(
-                                user_text, resolved_profile.wire,
-                            ),
-                        })
-                    if isinstance(assistant_blocks, list):
-                        sess.append_history_message({
-                            "role": "assistant",
-                            "content": chat_service._filter_non_portable_blocks(
-                                assistant_blocks, resolved_profile.wire,
-                            ),
-                        })
+            # NOT while a turn is in flight. The profile guard above reasons
+            # about exactly this race ("a GET /history racing a same-wire
+            # rebind mid-turn — two tabs sharing a session_id, or a reload")
+            # and was applied to the three profile lines only; the message
+            # rebuild below is the destructive half. A live turn has already
+            # appended its user message and the assistant's `tool_use`, and is
+            # about to append the matching `tool_result` — clearing in between
+            # drops the `tool_use` and leaves an ORPHAN `tool_result`, which
+            # `_sanitise_history_message` does not catch (it drops malformed
+            # thinking blocks, not orphan results), so every later turn of that
+            # session is rejected by the provider.
+            #
+            # The transcript is also the wrong source mid-turn: it holds only
+            # COMPLETED turns, so rebuilding from it discards the in-flight one
+            # wholesale even when the clear itself is survivable.
+            turn_in_flight = True
+            if sess is not None:
+                with sess._lock:
+                    turn_in_flight = sess._turn_in_flight
+            if not turn_in_flight:
+                with sess._lock:
+                    sess.messages.clear()
+                    for rec in turns:
+                        user_text = rec.get("user")
+                        assistant_blocks = rec.get("assistant")
+                        if user_text is not None:
+                            sess.append_history_message({
+                                "role": "user",
+                                "content": chat_service._filter_non_portable_blocks(
+                                    user_text, resolved_profile.wire,
+                                ),
+                            })
+                        if isinstance(assistant_blocks, list):
+                            sess.append_history_message({
+                                "role": "assistant",
+                                "content": chat_service._filter_non_portable_blocks(
+                                    assistant_blocks, resolved_profile.wire,
+                                ),
+                            })
 
     return {
-        "turns": turns,
+        # The author key is how THIS route picks a session; it is not part of
+        # the wire, so co-members' user ids do not reach each other's browser.
+        "turns": [
+            {k: v for k, v in rec.items() if k != chat_service.TURN_AUTHOR_KEY}
+            for rec in turns
+        ],
         "last_session_id": last_session_id,
         "bound_project": ctx.loaded_project,
         "history_gap": history_gap,
@@ -1005,6 +1053,13 @@ def chat_import(body: ImportRequest) -> dict[str, Any]:
         return {"imported": 0, "project": ctx.loaded_project}
     imported = 0
     for turn in body.turns:
+        # An author key on an imported turn names a user of ANOTHER install
+        # (or is forged), so here it would either match nobody — stranding the
+        # conversation for the user who imported it — or name someone it
+        # should not. Dropped, the turn reads as a legacy record: continuable
+        # by whoever imports it, and still refused by GET /history if its
+        # session is live under a different owner. CH-6.
+        turn = {k: v for k, v in turn.items() if k != chat_service.TURN_AUTHOR_KEY}
         redacted = chat_service._redact_for_persist(turn)
         chat_service.append_turn(ctx, redacted)
         imported += 1
@@ -1163,16 +1218,62 @@ async def chat_stream(
     # the note above requires. None (local mode issues no cookie) is legal and
     # is what the HTTP path passes there too.
     _chat_tools.set_acting_session(getattr(acting_session, "id", None))
+    # And the PROJECT, for the same reason and from the same place: a tool that
+    # switches the active project (activate, load, an import, an undo) publishes
+    # through a ContextVar, and `_gen()`'s per-item copies would drop that
+    # publish at the next yield — so the rest of the turn edited the previous
+    # project. The cell is shared by reference across those copies. See
+    # `PyPSAService._turn_cell`.
+    from services.pypsa_service import PyPSAService as _PyPSAService
+    _PyPSAService.bind_turn_cell()
 
-    session = chat_service.get_or_create_session(
+    _acting_user_id = (
+        str(getattr(getattr(request.state, "auth_user", None), "id", None) or "")
+        or None
+    )
+    session, _session_created = chat_service.get_or_create_session_reporting(
         body.session_id, model=body.model or chat_service.DEFAULT_MODEL,
         # Same source the tool layer binds from two lines above, rather than a
         # second resolution that could disagree with it.
-        owner_user_id=(
-            str(getattr(getattr(request.state, "auth_user", None), "id", None) or "")
-            or None
-        ),
+        owner_user_id=_acting_user_id,
     )
+    # Authorization, not just authentication — the fourth route to need it.
+    # `session_owner_allows` was added for /confirm, /rewind and /abort; this
+    # one resolves a CALLER-SUPPLIED session_id through a process-global
+    # registry that sets the owner on CREATE ONLY, so an existing session
+    # belonging to someone else came back as-is and the turn ran inside it.
+    # That is worse than what the three closed: the outbound message array is
+    # seeded from that session's history, so a stranger's conversation (and the
+    # tool results in it) goes to the provider on the caller's behalf and can
+    # be elicited in the reply; the caller's message lands in the stranger's
+    # thread; and the tools run with the CALLER's authority. The id is not
+    # secret — /confirm's own comment records that GET /history hands
+    # `last_session_id` to any co-member who activates the project.
+    #
+    # Scoped to sessions that ALREADY EXISTED: minting one for a caller-chosen
+    # id is what every first turn does, and refusing that would break it.
+    #
+    # A refusal rather than quietly minting a different session for the caller:
+    # the client uses the id it SENT for /abort and /confirm (see this
+    # handler's docstring), so handing back another one would leave both
+    # pointing at a session that is not running the turn. Unlike the three
+    # routes above, this one does not hide the session's existence behind a
+    # 404 — the caller was given the id by /history on a project they belong
+    # to, so there is nothing left to conceal, and a clear refusal beats a turn
+    # that runs and then blocks on a confirmation they can never answer.
+    if not _session_created and not chat_service.session_owner_allows(
+        session, _acting_user_id,
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error_kind": "session_not_yours",
+                "message": (
+                    "that chat session belongs to another user; omit "
+                    "`session_id` to start your own"
+                ),
+            },
+        )
 
     # #26 — in-memory token-bucket rate limit, keyed per session_id (a session
     # is one conversation = one rate-limit subject). Disabled by default

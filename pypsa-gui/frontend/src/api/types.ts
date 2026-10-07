@@ -1049,7 +1049,8 @@ export interface SolvePpa {
 }
 
 export interface TerminalValueRule {
-  method?: 'none' | 'book_value' | 'multiple_of_ebitda' | 'fixed'
+  /** `remaining_life_annuity`: each part's remaining life on the LP's annuity (IC S0b S6); no value. */
+  method?: 'none' | 'book_value' | 'multiple_of_ebitda' | 'fixed' | 'remaining_life_annuity'
   value?: number | null
 }
 
@@ -1080,6 +1081,8 @@ export interface FinanceInputs {
   solve_ppa?: SolvePpa | null
   depreciation_class_by_asset?: Record<string, string>
   replacement_capex?: Array<[number, string, number]>
+  /** `part_lifetimes`: each part re-bought at the end of its lifetime at its upfront cost (IC S0b S5). */
+  replacement_rule?: 'fixed' | 'part_lifetimes'
   terminal_value?: TerminalValueRule
   wacc_nominal?: number | null
   cost_of_equity?: number | null

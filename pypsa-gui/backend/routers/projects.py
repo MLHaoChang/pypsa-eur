@@ -102,6 +102,24 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
                  # `test_library_bundle_pins` pins it equal to SIDECAR_NAME.
                  "library_refs.json")
 
+# The campus electrical study's inputs and investment results (plan C9), under
+# `campus_electrical/`: the campus description, the asset library (the
+# project's copy, and the one the last run used) and what the run bought, its
+# cost, its re-checked compliance and who owns the PCC switchgear. Literals,
+# for the reason above; `test_bundle_campus` pins them to the service's
+# constants. Exported and imported with the bundle, each only when it exists.
+# The grid-code documents and drafts are NOT carried: a licensed text stays with
+# its licensee. Not copied by Save-As, snapshots or forks.
+_BUNDLE_CAMPUS_FILES = (
+    "campus_electrical/campus_input.yaml",
+    "campus_electrical/campus_assets.yaml",
+    "campus_electrical/run/campus_assets_used.yaml",
+    "campus_electrical/run/campus_investment.csv",
+    "campus_electrical/run/campus_cost.csv",
+    "campus_electrical/run/campus_compliance_invested.csv",
+    "campus_electrical/run/campus_invest_scope.json",
+)
+
 # Per-project subdirectories that travel alongside the bundle FILES on every
 # project-to-project transition. Chatbot uploads (Phase A) live here under
 # `uploads/<file_id>/`. The transition table (Save-As, Save-a-Copy, scenario
@@ -1091,6 +1109,10 @@ async def import_bundle(
             # existed at this call. It DOES exist at the `copy2` site below,
             # which opens the destination before reading the source.
             atomic_write_bytes(dest / fname, zf.read(fname))
+    for fname in _BUNDLE_CAMPUS_FILES:
+        if fname in members:
+            (dest / fname).parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_bytes(dest / fname, zf.read(fname))
     # Chatbot uploads (Phase A) — extract any `uploads/...` entries the
     # exporting GUI included. Each archive member's path is verified to
     # stay inside `dest` before writing (zip-slip defence) and the parent
@@ -1680,6 +1702,21 @@ def _carry_sidecars_on_move(
     # Best-effort: chat-history lineage must not fail the project save itself,
     # so `handle_save_lineage` swallows OSErrors internally.
     if loaded is not None and loaded != name:
+        # Resolve the SOURCE directory ONCE, for both sidecars. It used to be
+        # resolved for `uploads/` only, a few lines down, while the chat half
+        # resolved by name inside `chat_service` — and the flat
+        # `PROJECTS_DIR / name` shape that resolution uses is not where a
+        # project lives under tenancy, so Save-As and Save-a-Copy carried no
+        # conversation at all there. One resolution, used by both, is also the
+        # only way the two cannot drift apart again.
+        src_dir = _safe_project_dir(loaded)
+        if db is not None and user is not None:
+            from services import project_registry
+
+            src_project = project_registry.find_project(db, user, loaded)
+            if src_project is not None:
+                src_dir = project_registry.project_dir(src_project)
+
         try:
             from services import chat_service
             mode = (
@@ -1694,6 +1731,7 @@ def _carry_sidecars_on_move(
             # move/copy would be a no-op (Phase 4 walkthrough bug).
             chat_service.handle_save_lineage(
                 ctx, target_name=name, mode=mode, source_name=loaded,
+                source_dir=src_dir, target_dir=dest,
             )
         except Exception:  # noqa: BLE001 — never abort save on lineage failure
             pass
@@ -1706,18 +1744,9 @@ def _carry_sidecars_on_move(
         try:
             # Destination is the already-resolved `dest` (the org-scoped
             # storage dir in auth mode, or the flat PROJECTS_DIR/name in legacy
-            # mode). The SOURCE (`loaded`) must be resolved the same way — in
-            # auth mode via the DB registry so we copy from the source
-            # project's org-scoped storage_path rather than a flat
-            # `_safe_project_dir(loaded)` that would point at the wrong (or a
-            # nonexistent) directory.
-            src_dir = _safe_project_dir(loaded)
-            if db is not None and user is not None:
-                from services import project_registry
-
-                src_project = project_registry.find_project(db, user, loaded)
-                if src_project is not None:
-                    src_dir = project_registry.project_dir(src_project)
+            # mode); `src_dir` was resolved the same way above, and is shared
+            # with the chat half so the two sidecars cannot disagree about
+            # where the source project is.
             _copy_bundle_dirs(src_dir, dest)
         except Exception:  # noqa: BLE001 — best-effort, never abort save
             logger.exception("save: _copy_bundle_dirs(%s → %s) failed", loaded, name)
@@ -1872,6 +1901,7 @@ def _save_context(
     db: DBSession | None = None,
     user: User | None = None,
     project_row=None,
+    solver_config_override=None,
 ):
     """
     Persist `ctx`'s in-memory network to ``projects/<name>/``.
@@ -2052,8 +2082,24 @@ def _save_context(
             except Exception:
                 pass
 
-    # Save solver config if present
-    cfg = ctx.solver_state.get("solver_config")
+    # Save solver config if present.
+    #
+    # `solver_config_override` is the config that ACTUALLY produced this save,
+    # passed by the solve queue. A queued job deliberately solves with the
+    # config snapshotted at enqueue rather than whatever the context holds now
+    # (see the comment at the head of `services/solve_queue.py`: a
+    # `PUT /solver_config` after enqueue used to change the solve silently) —
+    # but this write used the CONTEXT's config regardless, so `network.nc` held
+    # one solve and the `solver_config.json` beside it described another. The
+    # original defect was not closed, it moved from the solve to the record of
+    # the solve.
+    #
+    # An override rather than writing the snapshot back into the live context:
+    # the user may have edited their config after enqueueing, and that edit is
+    # theirs to keep. Only the FILE has to match the solve.
+    cfg = solver_config_override if solver_config_override is not None else (
+        ctx.solver_state.get("solver_config")
+    )
     if cfg is not None:
         _atomic_write_text(dest / "solver_config.json", json.dumps(asdict(cfg), indent=2))
         # Pin the Library versions the config references (WP1.1c).
@@ -2985,6 +3031,18 @@ def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> Proj
         # `studies/` and `results_state.pkl`, or every option fork would
         # carry the study that owns it (review v1 B7, review v2 BC-4).
         _copy_bundle_dirs(base_dir, child_dir)
+        # The conversation travels with the branch, which is what
+        # `SAVE_LINEAGE_SCENARIO_COPY` documents for the legacy path — this
+        # one carried the bundle and left the history behind, so a scenario
+        # created from a project started blank. `chat.jsonl` is deliberately
+        # not in `_BUNDLE_FILES`: it is a per-conversation thread, not part of
+        # the exportable bundle, and the two lists must not be conflated.
+        from services.chat_service import CHAT_FILENAME as _CHAT
+
+        for fname in (_CHAT, _CHAT + ".1"):
+            src_file = base_dir / fname
+            if src_file.exists():
+                atomic_write_bytes(child_dir / fname, src_file.read_bytes())
 
         # Keep metadata.json's NAME pointer in sync with the DB parent id so
         # bundle export/import (which only carries the flat metadata) round-trips
@@ -3303,6 +3361,14 @@ def _rename_project_db(db, user, name: str, req: RenameProjectRequest) -> Projec
         raise HTTPException(409, f"Project '{new_name}' already exists")
 
     children = project_registry.direct_children(db, project)
+    # Captured BEFORE the registry call. `rename_project` rebinds resident
+    # contexts (it must: otherwise every rename leaves the context on the old
+    # name and the next save 409s), which sets `ctx.loaded_project` to the NEW
+    # name — so a `get_loaded_project() == old_name` test after the call is
+    # always False and the in-memory `n.name` update below silently stopped
+    # happening. Caught by `tests/qa_rename_project.py` and by nothing in the
+    # unit suite.
+    was_active = PyPSAService.get_loaded_project() in (old_name, new_name)
     project = project_registry.rename_project(db, project, new_name)
 
     # Sync metadata.json name pointer on the renamed project + parent pointer
@@ -3327,7 +3393,7 @@ def _rename_project_db(db, user, name: str, req: RenameProjectRequest) -> Projec
                 pass
 
     with PyPSAService.get_lock():
-        if PyPSAService.get_loaded_project() == old_name:
+        if was_active:
             n = PyPSAService.get_network()
             try:
                 n.name = new_name
@@ -3619,6 +3685,10 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:
         for fname in _BUNDLE_FILES:
             p = src / fname
             if p.exists():
+                zf.write(p, arcname=fname)
+        for fname in _BUNDLE_CAMPUS_FILES:
+            p = src / fname
+            if p.is_file():
                 zf.write(p, arcname=fname)
         # Chatbot uploads (Phase A) — locked decision row 6: uploads/ travels
         # with the bundle. Walk each _BUNDLE_DIRS recursively so an exported

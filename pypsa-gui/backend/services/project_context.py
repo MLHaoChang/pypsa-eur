@@ -281,6 +281,26 @@ RESULT_STATE_KEYS = (
 )
 
 
+
+def cleared_result_state() -> dict[str, None]:
+    """Every `RESULT_STATE_KEYS` entry set to None — the per-solve wipe a
+    claim performs.
+
+    Both claims (`routers.simulation.run` and `solve_queue._run_solve_job`)
+    splat this instead of listing the keys by hand. They listed them by hand,
+    and drifted: the queue claim was missing all five `eh_*` keys, so a queued
+    re-solve saved the PREVIOUS plan's energy-hub tables beside the new
+    dispatch and `/results/eh_*` served them. Those keys are persisted to
+    `results_state.pkl` and re-hydrated, so a resident context was not even
+    required for it to survive.
+
+    That is the drift the comment above `RESULT_STATE_KEYS` exists to prevent
+    — it already says the tuple is the single source of truth "rather than
+    maintaining a parallel copy that can drift". Two parallel copies had grown
+    anyway, because nothing made deriving them easier than typing them.
+    """
+    return {key: None for key in RESULT_STATE_KEYS}
+
 # The keys under a project's solver state that hold a long-running STUDY
 # record — the class-B/C sweep, the frontier, the sequential MC and the two
 # planning loops.

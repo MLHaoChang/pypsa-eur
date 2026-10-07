@@ -183,6 +183,8 @@ def _cashflow_lines(result, case, packs: dict[str, str]) -> list:
     NEGATED (source `counterfactual:*`, C13: returns are on the owner's cash
     minus it), so each year's lines sum to the post-tax equity cash
     (WP4.6b review B2)."""
+    import numpy as np
+
     from models.finance import CashflowLine, Provenance
 
     tl, op, owner = result.tl, result.op, case.owner
@@ -215,7 +217,24 @@ def _cashflow_lines(result, case, packs: dict[str, str]) -> list:
              tariff_item=ln.tariff_item, source=ln.source, source_id=ln.source_id or key,
              contract_id=ln.contract_id, period=ln.period)
     emit("capex", op.capex, sign=-1.0, source="capex")
-    emit("capex", op.replacement, sign=-1.0, source="replacement_capex")
+    # Replacements (IC S0b plan S9): a `fixed` entry as before; a generated
+    # (`part_lifetimes`) one keeps `source="replacement_capex"` (the chat tools
+    # classify on it) with its part in `source_id` (`<asset>:<part>`).
+    items = tuple(getattr(op, "replacement_items", ()) or ())
+    if not items:
+        emit("capex", op.replacement, sign=-1.0, source="replacement_capex")
+    else:
+        fixed = np.zeros(len(years))
+        for x, v in items:
+            if x.source == "fixed":
+                fixed[tl.index(x.year)] += v
+        emit("capex", fixed, sign=-1.0, source="replacement_capex")
+        for x, v in items:
+            if x.source != "fixed":
+                one = np.zeros(len(years))
+                one[tl.index(x.year)] = v
+                emit("capex", one, sign=-1.0, asset=x.asset, source="replacement_capex",
+                     source_id=f"{x.asset}:{x.part}")
     emit("terminal_value", getattr(result, "terminal", None) if getattr(result, "terminal", None)
          is not None else op.terminal, source="terminal_value")
     cf_op = getattr(result, "op_counterfactual", None)
@@ -301,8 +320,47 @@ def _project_payload(result, case) -> dict[str, Any]:
         "cost_of_equity": _num(fin.cost_of_equity),
         "wacc_nominal": _num(fin.wacc_nominal),
         "cfads_definition": CFADS_DEFINITION,
+        # The terminal value's method and, for `remaining_life_annuity`, its
+        # per-part terms (IC S0b plan S6).
+        "terminal_value": _terminal_block(result, case),
         "flags": list(result.flags),
     }
+
+
+TERMINAL_RATE_BASIS = ("each part's remaining life is valued on the annuity the LP charged for it: "
+                       "annuitised at the asset's own discount rate (else the LP's) and discounted "
+                       "at the LP's discount rate — the LP basis, not the WACC")
+TERMINAL_BASE_BASIS = ("a part's base is what its last purchase cost: the part's overnight cost "
+                       "for the initial purchase (no contingency), a replacement's escalated "
+                       "(nominal) cost, annuitised at the asset's own discount rate, else the "
+                       "LP's. Under replacement_rule fixed, a single-part asset's last "
+                       "replacement_capex entry is valued as a full re-purchase, so a partial "
+                       "overhaul replaces the initial purchase's remaining value")
+
+
+def _terminal_block(result, case) -> dict[str, Any]:
+    """The terminal value as the engine used it: the method, the amount at the
+    last operating year (None when not established), the reasons, and the
+    `remaining_life_annuity` per-part terms with their bases (IC S0b plan S6)."""
+    tv = case.inputs.terminal_value
+    used = getattr(result, "terminal", None)
+    if used is None:
+        used = result.op.terminal
+    out: dict[str, Any] = {
+        "method": tv.method,
+        "value": None if used is None else _num(used[-1]),
+        "reasons": list((getattr(result.op, "reasons", {}) or {}).get("terminal") or []),
+        "terms": [{"asset": t.asset, "part": t.part, "lifetime_years": _num(t.lifetime_years),
+                   "start_year": _num(t.start_year), "remaining_years": _num(t.remaining_years),
+                   "base": _num(t.base), "asset_rate": _num(t.asset_rate), "rate": _num(t.rate),
+                   "annuity": _num(t.annuity), "pv_factor": _num(t.pv_factor),
+                   "value": _num(t.value)}
+                  for t in getattr(result.op, "terminal_terms", ()) or ()],
+    }
+    if tv.method == "remaining_life_annuity":
+        out["rate_basis"] = TERMINAL_RATE_BASIS
+        out["base_basis"] = TERMINAL_BASE_BASIS
+    return out
 
 
 def basis_statement(fin) -> str:

@@ -572,3 +572,49 @@ This closes part one's "voltages not re-checked": the *with measures* column is 
 | 4 | C11 (MILP loop) | Opus |
 
 The coordinator writes each brief from this plan and reviews every diff. It also runs the gates and mutation checks before anything is pushed.
+
+## Part three: joining the one investment engine (plan note, 2026-10-06, no code yet)
+
+The coordinating session passed on a request, which it says the owner approved on 2026-10-06: there should be **one investment implementation** in pypsa-gui. The references are:
+- `docs/superpowers/plans/2026-10-05-one-investment-engine-two-faces.md`;
+- ADR-0004;
+- "Investment language" in `pypsa-gui/CONTEXT.md`.
+
+The campus asset library (C7), the least-cost pick (C8) and the MILP (C11) join it as a third participant. Nothing here changes the open PRs (#74, #79, #83, #84).
+
+**No code for D1 or D2 until** the engine's PRs #81 and #85 and the asset-schema PR #78 have merged. Words follow CONTEXT.md: *Overnight cost* (not capex), *Generic default* and *illustrative*.
+
+### D1: one source for equipment cost data
+
+- **gridspine stays free of pypsa-gui imports.** `campus_assets.yaml` remains the engine's input format and the test fixture library.
+- **On the pypsa-gui side**, `campus_electrical_service` seeds a project's campus library from the **generic defaults pack** (`services/library/defaults_pack`, PR #85), not from the shipped YAML. The fields map one to one:
+
+  | campus library | defaults pack |
+  |---|---|
+  | `capex_eur` | Overnight cost, lump per unit |
+  | `capex_eur_per_km` | Overnight cost, per km |
+  | switchgear `capex_eur` | Overnight cost, per bay |
+  | `opex_frac` | FOM share |
+  | `lifetime_a` | lifetime |
+  | `measured` / `datasheet` / `assumed` | provenance; `assumed` = illustrative |
+
+- **The rows themselves** (transformers, cables, capacitor banks, shunt reactors, STATCOMs, switchgear) are added to the pack. The engine session owns the pack, so the rows are agreed with it and it adds them, or approves a PR that does.
+- **The discount rate and price year** come from the project (its solver config or FinanceInputs `currency_year`), not from a library-level 0.07. The engine API is unchanged: `select_assets` already receives the library as data, and the service writes the project's rate into the library it hands over. The library's own `discount_rate` remains as a stand-alone default for gridspine-only use.
+- **Ratings and impedances stay in the campus library.** They are electrical data, not cost, and the pack has no field for them.
+
+### D2: the picks feed the investment case
+
+- **What is produced.** A solved campus study produces **extra owner assets**. Each item chosen by C8 (or C11) becomes one owner asset with its upfront parts, in the asset-schema `UpfrontPart` shape:
+  - name;
+  - Overnight cost × units (× km for a cable, × bays for switchgear);
+  - lifetime;
+  - FOM share.
+
+  Each asset also carries its investment period, its need (for example "transformer GRID_IMPORT") and its provenance. Existing (sunk) items are left out, and unresolved needs are never emitted.
+- **Who does what.** The engine session adds the input hook: a list of extra owner assets read by `results/finance_case.build_finance_case`. This side only produces the list, from the run directory (`campus_investment.csv` with `campus_invest_scope.json`), through one function in `campus_electrical_service`. **Do not edit `services/finance` or `results/finance_case.py`.** The shape is agreed with the engine session before any code.
+- **Consistent with the owner's decision of 2026-10-05.** Electrical cost is still not fed back into the capacity expansion. The PyPSA project is untouched; the equipment only joins the cash flows, NPV and report, next to the batteries and PV.
+
+### File ownership (one-engine plan §5)
+
+- **Ours:** `gridspine/*` and `campus_electrical_*`.
+- **Shared hot files:** `App.tsx`, `layout/*`, `uiStore.ts`, `chat_tools*.py`, `main.py`, `pypsa-gui.spec`, `tool-error-kinds.json`. Additive edits only, and merge master before each PR.

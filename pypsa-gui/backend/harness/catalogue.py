@@ -467,8 +467,10 @@ TOOLS: list[dict[str, Any]] = [
     _t(
         "bulk_update_components",
         "Atomic bulk attribute set on N components of one class (PATCH "
-        "/api/network/_bulk). Single lock acquisition, single audit entry, "
-        "single undo snapshot. Backend coerces values against df[col].dtype; "
+        "/api/network/_bulk). Single lock acquisition, single audit entry. "
+        "Undoable as part of this turn (one undo reverts the turn's network "
+        "edits). Backend coerces values against "
+        "df[col].dtype; "
         "all-or-nothing on unknown names. Safety: write.",
         {
             "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
@@ -1691,9 +1693,16 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _empty(
         "undo_last",
-        "Roll back the most recent mutation (pops the per-project undo stack). "
-        "Returns {undone: bool, remaining: int} (remaining = undo-stack depth "
-        "after the pop). Safety: destructive.",
+        "Roll back the most recent step ON THE UNDO STACK (pops the "
+        "per-project stack). The stack holds the user's canvas edits AND your "
+        "turns: before the first network-changing tool of a turn, one "
+        "snapshot is taken, so one undo reverts EVERYTHING you changed in that "
+        "turn — not just your last call. Called later in the same turn, it "
+        "returns the network to how it was when the turn began. If the user "
+        "edited the canvas after your turn, the newest step is theirs and this "
+        "reverts that instead. Refuses when the stack is empty. Returns "
+        "{undone: bool, remaining: int} (remaining = undo-stack depth after "
+        "the pop). Safety: destructive.",
     ),
     _empty(
         "undo_status",
@@ -1892,7 +1901,7 @@ TOOLS: list[dict[str, Any]] = [
     _t(
         "apply_demand_from_excel",
         "Write a demand profile from an uploaded Excel/CSV into the named "
-        "Load's p_set time-series. Values are mapped to snapshots POSITIONALLY "
+        "Load's p_set time-series, REPLACING any profile it already has. Values are mapped to snapshots POSITIONALLY "
         "(row 0 → first snapshot, row 1 → second, etc.), so the spreadsheet "
         "order matters. Both FLAT and MULTI-PERIOD networks are supported. "
         "Row-count rules:\n"
@@ -1914,7 +1923,6 @@ TOOLS: list[dict[str, Any]] = [
             "time_col": {"type": "string"},
             "value_col": {"type": "string"},
             "load_name": {"type": "string"},
-            "replace": {"type": "boolean"},
         },
         ["file_id", "time_col", "value_col", "load_name"],
     ),
@@ -2553,8 +2561,8 @@ TOOLS: list[dict[str, Any]] = [
         "gridspine_export_handoff_bundle",
         "Zip one selected hour's handoff bundle (.raw, .dyr, contingencies, "
         "screening, fault levels, ledger) inside the project directory and "
-        "return {path, filename, bytes}. The user downloads it from the "
-        "study view; this tool prepares it. Safety: write.",
+        "return {download_url, filename, bytes}. The user downloads it from "
+        "the study view (or that URL); this tool prepares it. Safety: write.",
         {
             "project_id": {"type": "string"},
             "hour": {"type": "integer"},
@@ -2661,7 +2669,13 @@ TOOLS: list[dict[str, Any]] = [
         "and the PCC compliance report against the grid-code profile. pf is "
         "the connection agreement's power factor; omit it to use the code's "
         "widest range (EU DCC 0.48 Q/Pmax). Seconds of CPU. Returns the "
-        "campus_get_study shape. 422 without a campus file or for a bad "
+        "campus_get_study shape. invest (default true) also buys the "
+        "electrical assets from the project's asset library at least cost, "
+        "re-checked by AC load flow at every critical hour: read the purchase "
+        "with campus_get_investment. pcc_switchgear_by_operator (default "
+        "false) says the grid operator owns the PCC switchgear, so it is "
+        "neither bought nor costed: ask the user who owns it before assuming. "
+        "422 without a campus file or for a bad "
         "setting. Safety: write.",
         {
             "project_id": {"type": "string"},
@@ -2670,7 +2684,65 @@ TOOLS: list[dict[str, Any]] = [
             "profile": {"type": "string"},
             "margin": {"type": "number"},
             "n_minus_1": {"type": "boolean"},
+            "invest": {"type": "boolean"},
+            "pcc_switchgear_by_operator": {"type": "boolean"},
         },
+        ["project_id"],
+    ),
+    _t(
+        "campus_get_library",
+        "The asset library the campus study of a capacity-expansion (hub) "
+        "project buys from: {yaml (the library as text: transformers, cables, "
+        "capacitor banks, shunt reactors, STATCOMs and switchgear, each with "
+        "its ratings, capex, fixed opex fraction and lifetime, every number "
+        "tagged measured|datasheet|assumed), is_default}. is_default is true "
+        "until the user saves a copy for the project. Every cost in the shipped "
+        "library is an assumed placeholder. 409 for a project of another kind. "
+        "Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "campus_set_library",
+        "Save a project's asset library for the campus study: the whole library "
+        "as YAML text, which replaces the project's copy and is used by every "
+        "later run. It is validated by the engine's loader first, so an "
+        "untagged value, a duplicate id or a non-positive rating is refused "
+        "(422, naming the entry and the field; 413 over 1 MB) and nothing is "
+        "saved. Start from campus_get_library, change only what the user "
+        "asked, and keep every value's source tag honest: a price from a quote "
+        "is datasheet or measured, a guess stays assumed. You must ask before replacing "
+        "a library the user already edited (is_default false), because that "
+        "discards their copy. Results of an earlier run turn stale. "
+        "Safety: write.",
+        {"project_id": {"type": "string"}, "yaml": {"type": "string"}},
+        ["project_id", "yaml"],
+    ),
+    _t(
+        "campus_get_investment",
+        "What the last campus run bought: {investment (rows: need, library_id, "
+        "kind, units, length_km, invest_period, capex_eur, opex_eur_per_a, "
+        "annualised_eur_per_a, existing, status chosen|kept|not_needed|"
+        "unresolved, reason), cost (per period: capex_eur and the annualised "
+        "electrical cost per year), hub_cost (the solved hub's own system cost: "
+        "per_period in EUR per year for a multi-period project, else the total "
+        "as solved; null with hub_cost_reason when it cannot be computed), "
+        "unresolved ({need, reason}: needs the library could not meet), history "
+        "(each escalation to a dearer candidate and the check that forced it), "
+        "compliance_invested (the compliance table re-solved with the assets), "
+        "scope ({pcc_switchgear: campus|grid_operator}: whether the PCC switchgear "
+        "was costed to the campus or left to the grid operator, say which), "
+        "library_is_default, stale, notes}. Say these with the numbers: costs "
+        "are placeholders tagged assumed unless the user replaced them with "
+        "quotes, so quote them as orders of magnitude; tap changers are not "
+        "optimised, so a voltage excursion compensation cannot shrink is "
+        "reported unresolved, not fixed; and when stale is true the campus, "
+        "the project or the library changed since the run. Never add the "
+        "electrical cost to the hub's as if it were in the hub's optimisation: "
+        "it is reported alongside, and the PyPSA project is unchanged. "
+        "investment is null with a reason before a run or after a run with "
+        "invest off. 409 for a project of another kind. Safety: read.",
+        {"project_id": {"type": "string"}},
         ["project_id"],
     ),
     _t(
@@ -3303,6 +3375,10 @@ TOOL_ROUTES: dict[str, list] = {
     "campus_get_study": _SERVICE_CALL,
     "campus_draft_campus": _SERVICE_CALL,
     "campus_run_study": _SERVICE_CALL,
+    # campus asset library and investment (3, plan C9) — service calls
+    "campus_get_library": _SERVICE_CALL,
+    "campus_set_library": _SERVICE_CALL,
+    "campus_get_investment": _SERVICE_CALL,
     # campus grid codes (2) — service calls; no publish tool (plan C10)
     "campus_list_grid_codes": _SERVICE_CALL,
     "campus_extract_grid_code": _SERVICE_CALL,

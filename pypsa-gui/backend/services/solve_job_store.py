@@ -300,9 +300,18 @@ def load_by_status(
         return []
 
 
-def delete_jobs(ids: Iterable[uuid.UUID]) -> None:
+def delete_jobs(ids: Iterable[uuid.UUID]) -> int | None:
     """
-    Delete rows by id. Best-effort — never raises.
+    Delete rows by id. Returns the number of rows deleted, or None when the
+    delete FAILED. Best-effort — never raises.
+
+    The return value is load-bearing: `clear_finished` reports a count to a
+    super-admin, and it used to report every id it had intended to delete
+    whether or not the delete landed. On a database error the caller was told
+    "removed N" while the rows survived and the next listing pulled them
+    straight back — and `clear_finished`'s own docstring claimed the number
+    was what "actually" left the table. None means "nothing is known to have
+    gone", which is what the caller needs in order to say so.
 
     The only caller is `SolveQueue.clear_finished()`. That is a super-admin,
     process-wide "wipe the terminal jobs" action — and once the listing route
@@ -320,7 +329,7 @@ def delete_jobs(ids: Iterable[uuid.UUID]) -> None:
     """
     id_list = list(ids)
     if not id_list:
-        return
+        return 0
     try:
         from sqlalchemy import delete
 
@@ -328,10 +337,18 @@ def delete_jobs(ids: Iterable[uuid.UUID]) -> None:
         from db.session import SessionLocal
 
         with SessionLocal() as db:
-            db.execute(delete(SolveJobRow).where(SolveJobRow.id.in_(id_list)))
+            result = db.execute(
+                delete(SolveJobRow).where(SolveJobRow.id.in_(id_list))
+            )
             db.commit()
+        rowcount = getattr(result, "rowcount", None)
+        # A driver that does not report `rowcount` returns -1; treat the
+        # delete as having landed (it committed) but say nothing false about
+        # how many rows it took.
+        return len(id_list) if rowcount is None or rowcount < 0 else int(rowcount)
     except Exception:  # noqa: BLE001 — bookkeeping must not fail the clear
         logger.exception("solve_job_store: could not delete jobs %s", id_list)
+        return None
 
 
 def record_dismissed(job_id: uuid.UUID, user_id: uuid.UUID) -> None:
