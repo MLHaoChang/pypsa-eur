@@ -138,8 +138,10 @@ def _with_itc_classes(layers: tuple[TaxLayer, ...], itc_assets: tuple[str, ...])
     assets (WP4.4); SAM's class-only names keep their own flags."""
     out = []
     for layer in layers:
+        # `<asset>:<class>`: the class has no ':', the asset name may (§8's
+        # `campus:<id>#<k>`), so the asset is everything before the LAST ':'.
         classes = tuple(
-            dataclasses.replace(c, itc_reduces=c.name.split(":", 1)[0] in itc_assets)
+            dataclasses.replace(c, itc_reduces=c.name.rsplit(":", 1)[0] in itc_assets)
             if ":" in c.name else c for c in layer.depreciation)
         out.append(dataclasses.replace(layer, depreciation=classes))
     return tuple(out)

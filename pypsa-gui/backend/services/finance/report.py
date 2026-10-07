@@ -355,8 +355,13 @@ def _extra_assets_block(case) -> list[dict[str, Any]]:
     `cod_by_asset`, or within its build year — review note 2)."""
     fin = case.inputs
     assets = {a.name: a for a in case.assets}
-    money = (f"{fin.currency_year} {fin.currency}" if fin.currency_year is not None
-             else f"{fin.currency} (currency year not stated)")
+    if fin.currency_year is not None:
+        money = (f"upfront costs in the case's money, {fin.currency_year} {fin.currency}: the "
+                 "caller converted them from the campus library's currency and price year")
+    else:
+        # IC G2 gate r1 note 5 (flag `extra_asset_money_year_unstated`): nothing to claim.
+        money = (f"upfront costs as passed, read as {fin.currency}; the case's currency year is "
+                 "not stated, so their money year is not checked against it")
     out = []
     for e in getattr(case, "extra_assets", ()) or ():
         a = assets.get(e.name)
@@ -376,8 +381,7 @@ def _extra_assets_block(case) -> list[dict[str, Any]]:
                        "lifetime": _num(p.lifetime), "fom_share": _num(p.fom_share)}
                       for p in e.parts],
             "build_year": e.build_year, "source": e.source, "source_hash": e.source_hash,
-            "money_year": (f"upfront costs in the case's money, {money}: the caller converted "
-                           "them from the campus library's currency and price year"),
+            "money_year": money,
             "cod": cod,
         })
     return out

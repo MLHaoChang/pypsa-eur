@@ -13,7 +13,6 @@ defaults pack version 2026-10-07 = 2026-10-05 unchanged plus the campus equipmen
 from __future__ import annotations
 
 import csv
-import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -127,38 +126,94 @@ def test_campus_money_rows_are_in_2026_and_catalogue_rows_keep_2020(new):
     assert money and all((v.currency, v.currency_year) == ("EUR", 2020) for v in money)
 
 
-def test_the_campus_rows_match_the_yaml_as_pinned_by_the_manifest(new):
-    """G-3, review note 8: if the campus YAML changes, a price change needs a new pack version — this
-    says so rather than failing on a number."""
+COST_FIELDS = ("capex", "lifetime_a", "opex_frac")        # capex: capex_eur, or capex_eur_per_km
+
+
+def _campus_parts(pack) -> dict[str, tuple[str, object]]:
+    """The pack's campus parts by campus id: (kind, part)."""
+    kinds = {k for k, _ in KINDS.values()}
+    out = {}
+    for tech in pack.technologies():
+        kind = tech.split(".", 1)[0]
+        if kind in kinds:
+            (p,) = pack.cost_parts(tech)
+            out[p.source_technology] = (kind, p)
+    return out
+
+
+def _cost_mismatches(pack, lib: dict) -> list[str]:
+    """Gate r1 note 4: only the COST fields of the pack's campus entries are compared with a
+    campus YAML (`capex_eur` / `capex_eur_per_km`, `lifetime_a`, `opex_frac`); an id the pack
+    has that the YAML lacks is a mismatch. Ratings, notes, new keys (a pack-key pointer, §8) and
+    entries the pack does not have are not."""
+    listing_of = {kind: listing for listing, (kind, _b) in KINDS.items()}
+    out = []
+    for cid, (kind, p) in sorted(_campus_parts(pack).items()):
+        entry = next((e for e in lib.get(listing_of[kind]) or [] if e.get("id") == cid), None)
+        if entry is None:
+            out.append(f"{cid}: missing from the YAML")
+            continue
+        capex = entry.get("capex_eur_per_km" if kind == "cable" else "capex_eur") or {}
+        for name, want, got in (("capex", p.overnight.value, capex.get("value")),
+                                ("lifetime_a", p.lifetime.value, (entry.get("lifetime_a") or {})
+                                 .get("value")),
+                                ("opex_frac", p.fom_share.value, (entry.get("opex_frac") or {})
+                                 .get("value"))):
+            if got is None or float(got) != want:
+                out.append(f"{cid}.{name}: pack {want}, YAML {got}")
+    return out
+
+
+def _yaml():
     import yaml
 
-    path = REPO / CAMPUS_YAML
-    digest = hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
-    pinned = new.seeded_from["campus_equipment"]["sha256"]
-    if digest != pinned:
-        pytest.fail(f"{CAMPUS_YAML} changed (sha256 {digest[:12]}…, the pack pins {pinned[:12]}…): "
-                    "a price change needs a new pack version, never an edit of 2026-10-07")
-    lib = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return yaml.safe_load((REPO / CAMPUS_YAML).read_text(encoding="utf-8"))
+
+
+def test_the_pack_rows_are_the_transcription(new):
+    """G-3: 81 entries, one `investment` part each, on the kind's basis, illustrative with the
+    stated source and a label; the manifest's sha256 is the provenance of the transcription."""
+    parts = _campus_parts(new)
+    assert len(parts) == 81
+    basis_of = dict(KINDS.values())
+    for cid, (kind, p) in parts.items():
+        assert (p.part, p.basis) == ("investment", basis_of[kind]), cid
+        assert p.technology == f"{kind}.{cid.lower()}", cid
+        for v in (p.overnight, p.lifetime, p.fom_share):
+            assert v.source == SOURCE and v.illustrative is True and v.label.strip(), v.key
+    assert len(new.seeded_from["campus_equipment"]["sha256"]) == 64
+
+
+def test_the_campus_cost_fields_match_the_current_yaml(new):
+    """G-3, review note 8, gate r1 note 4: the campus session edits the YAML (§8: it points at the
+    pack key), so only a cost value that differs, or an id that is gone, fails — and says why."""
+    lib = _yaml()
     assert (lib["currency"], lib["price_year"]) == ("EUR", 2026)
-    seen = 0
-    for listing, (kind, basis) in KINDS.items():
-        for e in lib[listing]:
-            seen += 1
-            tech = f"{kind}.{e['id'].lower()}"
-            (p,) = new.cost_parts(tech)
-            capex = e["capex_eur_per_km"] if kind == "cable" else e["capex_eur"]
-            assert (p.part, p.basis, p.source_technology) == ("investment", basis, e["id"]), tech
-            assert p.overnight.value == float(capex["value"]), tech
-            assert p.lifetime.value == float(e["lifetime_a"]["value"]), tech
-            assert p.fom_share.value == float(e["opex_frac"]["value"]), tech
-            assert p.overnight.note == capex.get("note"), tech
-            for v in (p.overnight, p.lifetime, p.fom_share):
-                assert v.source == SOURCE and v.illustrative is True, v.key
-                assert v.label.strip(), v.key
-    assert seen == 81
-    campus_techs = {t for t in new.technologies() if t.split(".", 1)[0] in
-                    {k for k, _ in KINDS.values()}}
-    assert len(campus_techs) == 81
+    bad = _cost_mismatches(new, lib)
+    if bad:
+        pytest.fail(f"{CAMPUS_YAML}: a price change needs a new pack version, never an edit of "
+                    f"2026-10-07 ({len(bad)}: {'; '.join(bad[:5])})")
+
+
+def test_the_parity_check_ignores_non_cost_edits_and_catches_a_price_change(new):
+    import copy
+
+    lib = _yaml()
+    edited = copy.deepcopy(lib)
+    for listing in KINDS:
+        for e in edited[listing]:
+            e["pack_key"] = "transformer.x"                      # §8's pointer, a new key
+            e.setdefault("note", "an edited note")
+    edited["transformers"][0]["s_mva"] = {"value": 99.0, "source": "datasheet"}   # a rating
+    edited["cables"].append({"id": "CB_NEW", "capex_eur_per_km": {"value": 1.0}})  # not in the pack
+    assert _cost_mismatches(new, edited) == []
+    priced = copy.deepcopy(lib)
+    tr = next(e for e in priced["transformers"] if e["id"] == "TR_132_33_40")
+    tr["capex_eur"]["value"] = 1_900_000
+    assert _cost_mismatches(new, priced) == ["TR_132_33_40.capex: pack 1800000.0, YAML 1900000"]
+    gone = copy.deepcopy(lib)
+    gone["switchgear"] = [e for e in gone["switchgear"] if e["id"] != "SG_132_31p5"]
+    assert _cost_mismatches(new, gone) == ["SG_132_31p5: missing from the YAML"]
 
 
 def test_the_domains_of_the_campus_rows(new):

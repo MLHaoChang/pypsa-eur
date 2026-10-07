@@ -1592,6 +1592,10 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
     assets, rates, asset_flags = _assets(n, invest_list, discount_rate=lp_rate)
     cod, cod_flags = _cod(n, fin, invest_list)
     flags += asset_flags + cod_flags + extra_flags + _extra_cod_flags(fin, extras, cod)
+    if extras and fin.currency_year is None:
+        # The extras' costs are in the caller's money; with no case currency year
+        # nothing says whether it matches (IC G2 gate r1 note 5).
+        flags.append("extra_asset_money_year_unstated")
     lp = LpBasis(discount_rate=lp_rate,
                  inflation_rate=_fin(getattr(cfg, "inflation_rate", None)),
                  auto_discount_periods=bool(getattr(cfg, "auto_discount_periods", False)),

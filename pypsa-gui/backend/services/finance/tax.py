@@ -349,7 +349,9 @@ def compute_tax(tl: Timeline, layers: tuple[TaxLayer, ...], *, ebitda: np.ndarra
 def _vintage_classes(layer: TaxLayer, v: tuple) -> tuple[DepreciationClass, ...]:
     asset = v[2] if len(v) > 2 else None
     if asset is not None:
-        own = [c for c in layer.depreciation if c.name.split(":", 1)[0] == asset and ":" in c.name]
+        # `<asset>:<class>`: the asset is everything before the LAST ':' (an asset
+        # name may contain ':', a class never does — IC G2 gate r1 note 1).
+        own = [c for c in layer.depreciation if ":" in c.name and c.name.rsplit(":", 1)[0] == asset]
         tot = sum(c.share for c in own)
         if own and tot > 0:
             import dataclasses

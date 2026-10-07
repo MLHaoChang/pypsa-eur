@@ -25,17 +25,11 @@ import dataclasses
 import math
 import numbers
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
-from typing import TYPE_CHECKING
 
 from models.finance import FinanceInputs
-
-if TYPE_CHECKING:
-    # Named only for the annotation (IC G2 plan G-4, review B1): `asset_schema.access`
-    # imports the solve stack, which the finance package must never load
-    # (`test_investment_case_tripwires.py`). The parts are read by attribute.
-    from services.asset_schema.access import UpfrontPart
 
 # Escalation classes of a template line (plan C4): the six nominal classes, or
 # the line's own contract indexation.
@@ -237,6 +231,7 @@ EXTRA_ASSET_KINDS = ("transformer", "cable", "capacitor_bank", "shunt_reactor", 
 EXTRA_ASSET_BASES = ("lump", "per_km", "per_bay")
 _UPFRONT_PART_ATTRS = ("name", "upfront_per_unit", "lifetime", "fom_share",
                        "derived_from_capital_cost")
+_UPFRONT_PART_KEYS = _UPFRONT_PART_ATTRS[:4]            # a mapping part: the flag is optional
 _SOURCE_HASH_RE = re.compile(r"[0-9a-fA-F]{16}")
 
 
@@ -249,20 +244,61 @@ def _real(v) -> float | None:
 
 
 @dataclass(frozen=True)
+class ExtraAssetPart:
+    """One investment part of an `ExtraOwnerAsset`, finance-side (gate r1 note 2): the
+    fields of `asset_schema.access.UpfrontPart`, which the finance package cannot
+    import (it loads the solve stack). `ExtraOwnerAsset` normalises its parts to it, so
+    the case hash reads these fields, never a repr."""
+
+    name: str
+    upfront_per_unit: float
+    lifetime: float
+    fom_share: float
+    derived_from_capital_cost: bool = False
+
+
+def _extra_part(p) -> ExtraAssetPart | None:
+    """A part as passed (a dataclass with the `UpfrontPart` attributes, e.g. an
+    `asset_schema.access.UpfrontPart`, or a mapping with the keys `name`,
+    `upfront_per_unit`, `lifetime`, `fom_share` and an optional
+    `derived_from_capital_cost` — the campus producer's shape) as an
+    `ExtraAssetPart`; None for anything else."""
+    if isinstance(p, Mapping):
+        if not all(k in p for k in _UPFRONT_PART_KEYS):
+            return None
+        get = p.__getitem__
+        derived = p.get("derived_from_capital_cost", False)
+    elif dataclasses.is_dataclass(p) and not isinstance(p, type) and \
+            all(hasattr(p, a) for a in _UPFRONT_PART_ATTRS):
+        def get(a):
+            return getattr(p, a)
+        derived = p.derived_from_capital_cost
+    else:
+        return None
+    return ExtraAssetPart(get("name"), get("upfront_per_unit"), get("lifetime"), get("fom_share"),
+                          bool(derived))
+
+
+@dataclass(frozen=True)
 class ExtraOwnerAsset:
     """Equipment the owner buys that is not a network component (IC G2 plan G-4,
     U1 landing §8): a campus study's chosen transformer, cable, capacitor bank,
-    shunt reactor, STATCOM or switchgear. `parts` are `asset_schema.access.UpfrontPart`s
-    (read by attribute; any dataclass with `name`, `upfront_per_unit`, `lifetime`,
-    `fom_share`, `derived_from_capital_cost`), `upfront_per_unit` per basis unit in the
+    shunt reactor, STATCOM or switchgear. `parts` (a list or a tuple) are
+    `asset_schema.access.UpfrontPart`s (read by attribute; any dataclass with `name`,
+    `upfront_per_unit`, `lifetime`, `fom_share`, `derived_from_capital_cost`) or
+    mappings with those keys (the flag optional: the campus producer's
+    `extra_owner_assets` shape), normalised to a tuple of `ExtraAssetPart`;
+    `upfront_per_unit` per basis unit in the
     case's `currency` and `currency_year` (the caller converts); `quantity` is units
     (`lump`), km (`per_km`: units × length) or bays (`per_bay`); `build_year` the year
     it is built; `source_hash` sha256[:16] of the solved campus study that chose it.
+    The name may contain ':' (§8's `campus:<library_id>#<k>`): reason codes that end in
+    `:<name>` or `:<name>:<part>` are matched whole, never split on ':'.
 
     Refused at construction, `ValueError("extra_asset_invalid:<name>:<field>")`: an
-    empty name or one containing ':', an unknown kind or basis, a quantity that is not finite and > 0 (or
-    not whole for `lump` / `per_bay`), no part or a part that is not such a dataclass
-    (`parts`), a build year outside 1900..2200, a `source_hash` that is not 16 hex
+    empty name, an unknown kind or basis, a quantity that is not finite and > 0 (or
+    not whole for `lump` / `per_bay`), no part or a part that is neither such a dataclass
+    nor such a mapping (`parts`), a build year outside 1900..2200, a `source_hash` that is not 16 hex
     characters, a part lifetime that is None, NaN, infinite or below a year
     (`lifetime`: every part needs a finite typed lifetime, C12), an upfront cost that
     is not finite or below 0 (`upfront_per_unit`), a `fom_share` outside [0, 1]
@@ -272,7 +308,7 @@ class ExtraOwnerAsset:
     kind: str
     basis: str
     quantity: float
-    parts: tuple[UpfrontPart, ...]
+    parts: tuple[ExtraAssetPart, ...]
     build_year: int
     source: str
     source_hash: str
@@ -283,9 +319,6 @@ class ExtraOwnerAsset:
 
         if not isinstance(self.name, str) or not self.name.strip():
             bad("name", "an extra asset needs a name")
-        if ":" in self.name:
-            # Review note 4: a ':' would make the `<code>:<name>:<field>` codes ambiguous.
-            bad("name", f"{self.name!r} contains ':'")
         if self.kind not in EXTRA_ASSET_KINDS:
             bad("kind", f"{self.kind!r} is not one of {list(EXTRA_ASSET_KINDS)}")
         if self.basis not in EXTRA_ASSET_BASES:
@@ -297,10 +330,14 @@ class ExtraOwnerAsset:
             bad("quantity", f"{self.quantity!r} {self.basis} is not a whole number of units")
         if not isinstance(self.parts, (tuple, list)) or not self.parts:
             bad("parts", "an extra asset needs at least one investment part")
+        parts = []
         for p in self.parts:
-            if not (dataclasses.is_dataclass(p) and not isinstance(p, type)) or \
-                    not all(hasattr(p, a) for a in _UPFRONT_PART_ATTRS):
-                bad("parts", f"{p!r} is not a dataclass with {list(_UPFRONT_PART_ATTRS)}")
+            got = _extra_part(p)
+            if got is None:
+                bad("parts", f"{p!r} is neither a dataclass with {list(_UPFRONT_PART_ATTRS)} "
+                             f"nor a mapping with {list(_UPFRONT_PART_KEYS)}")
+            parts.append(got)
+        object.__setattr__(self, "parts", tuple(parts))          # frozen: normalised once
         if isinstance(self.build_year, bool) or not isinstance(self.build_year, numbers.Integral) \
                 or not 1900 <= self.build_year <= 2200:
             bad("build_year", f"{self.build_year!r} is not a year in 1900..2200")

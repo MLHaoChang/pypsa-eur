@@ -58,7 +58,9 @@ signature (`tests/test_engine_facade_frozen.py`): an accidental change fails lou
   (`fixed | part_lifetimes`) and the `TerminalValueRule` method `remaining_life_annuity`.
 - **Finance, added by G2** (`2026-10-07-ic-g1-g2-campus-equipment.md` G-11): `finance.case.ExtraOwnerAsset`
   (signature and field pins), `FinanceCase.extra_assets` and the keyword
-  `results.finance_case.build_finance_case(..., extra_assets=())` (§8).
+  `results.finance_case.build_finance_case(..., extra_assets=())` (§8). After the gate (#97's producer):
+  `parts` takes `UpfrontPart`s or the producer's dicts and is normalised to `finance.case.ExtraAssetPart`
+  (pinned), and a name may contain ':' (§8's `campus:<library_id>#<k>`).
 - **Library:** `library.items.resolve` / `put_item`, `library.series_store.put_series`, the defaults-pack
   loader and the flat export series helper (new, items a and e).
 - **Field names** of `CommercialConfig` and `FinanceInputs` that the guided ledger compiles to.

@@ -51,8 +51,12 @@ SIGNATURES: dict[str, str] = {
     # IC G2 (plan G-11): campus equipment as owner capex.
     "services.finance.case.ExtraOwnerAsset":
         "(name: 'str', kind: 'str', basis: 'str', quantity: 'float', "
-        "parts: 'tuple[UpfrontPart, ...]', build_year: 'int', source: 'str', "
+        "parts: 'tuple[ExtraAssetPart, ...]', build_year: 'int', source: 'str', "
         "source_hash: 'str') -> None",
+    # Gate r1 note 2: the finance-side part the extra asset normalises its parts to.
+    "services.finance.case.ExtraAssetPart":
+        "(name: 'str', upfront_per_unit: 'float', lifetime: 'float', fom_share: 'float', "
+        "derived_from_capital_cost: 'bool' = False) -> None",
     "services.finance.case.ExtraOwnerAsset.asset_finance": "(self) -> 'AssetFinance'",
     "services.finance.case.FinanceRefused": "(code: 'str', detail: 'str' = '')",
     "services.finance.engine.run_case":
@@ -137,6 +141,8 @@ DATACLASS_FIELDS: dict[str, tuple[str, ...]] = {
     # IC G2 (plan G-4, G-5): the extra asset and the case field that carries it.
     "services.finance.case.ExtraOwnerAsset": (
         "name", "kind", "basis", "quantity", "parts", "build_year", "source", "source_hash"),
+    "services.finance.case.ExtraAssetPart": (
+        "name", "upfront_per_unit", "lifetime", "fom_share", "derived_from_capital_cost"),
     "services.finance.case.FinanceCase": (
         "inputs", "owner", "base_year", "cod", "templates", "assets", "flags", "counterfactual",
         "lp_basis", "counterfactual_hash", "conservation_ok", "extra_assets"),

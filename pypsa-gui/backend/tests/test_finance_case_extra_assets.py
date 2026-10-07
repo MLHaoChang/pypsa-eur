@@ -28,6 +28,7 @@ import pytest
 
 from models.finance import ESCALATION_CLASSES, FinanceInputs
 from services.finance.case import FinanceRefused
+from tests.test_campus_electrical_service import hub, user_and_db  # noqa: F401  (fixtures)
 
 COD = date(2030, 1, 1)
 HASH = "0123456789abcdef"
@@ -107,7 +108,6 @@ def _lines(t) -> dict:
 
 @pytest.mark.parametrize("over,field", [
     ({"name": ""}, "name"),
-    ({"name": "trf:a"}, "name"),                     # a ':' would make the codes ambiguous
     ({"kind": "busbar"}, "kind"),
     ({"basis": "per_MW"}, "basis"),
     ({"quantity": 0}, "quantity"),
@@ -141,10 +141,47 @@ def test_an_invalid_extra_asset_names_its_field(over, field):
 
 
 def test_a_cable_takes_fractional_km_and_a_real_upfront_part_is_accepted():
-    from services.asset_schema.access import UpfrontPart
+    from services.finance.case import ExtraAssetPart
 
     e = _mk(CABLE)
-    assert e.quantity == 2.5 and isinstance(e.parts[0], UpfrontPart)
+    # A real `asset_schema` UpfrontPart is read by attribute and normalised (G2 r2 note 2).
+    assert e.quantity == 2.5
+    assert e.parts == (ExtraAssetPart("investment", 90_000.0, 40.0, 0.005, False),)
+
+
+def test_the_approved_campus_name_with_a_colon_is_accepted():
+    """§8's name `campus:<library_id>#<k>` (gate r1 note 1: the ':' refusal is reverted)."""
+    e = _ext(name="campus:TR_132_33_40#1")
+    assert e.name == "campus:TR_132_33_40#1"
+    assert e.asset_finance().name == "campus:TR_132_33_40#1"
+
+
+def test_mapping_parts_in_a_list_are_normalised_to_frozen_finance_parts():
+    """The campus producer writes parts as a list of dicts (`extra_owner_assets`): accepted and
+    normalised to a tuple of `ExtraAssetPart` (a frozen dataclass, so the hash reads fields)."""
+    import dataclasses as dc
+
+    from services.finance.case import ExtraAssetPart
+
+    e = _ext(parts=[{"name": "investment", "upfront_per_unit": 1_800_000.0, "lifetime": 40.0,
+                     "fom_share": 0.015}])
+    assert isinstance(e.parts, tuple)
+    assert e.parts == (ExtraAssetPart("investment", 1_800_000.0, 40.0, 0.015, False),)
+    assert dc.is_dataclass(e.parts[0]) and dc.fields(ExtraAssetPart)[-1].name == \
+        "derived_from_capital_cost"
+    with pytest.raises(dc.FrozenInstanceError):
+        e.parts[0].lifetime = 1.0
+    d = _ext(parts=({"name": "investment", "upfront_per_unit": 1.0, "lifetime": 40.0,
+                     "fom_share": 0.0, "derived_from_capital_cost": True},))
+    assert d.parts[0].derived_from_capital_cost is True
+    # A mapping missing a key, or one with a value check failing, is refused as before.
+    with pytest.raises(ValueError, match="extra_asset_invalid:trf:parts"):
+        _ext(parts=[{"name": "investment", "upfront_per_unit": 1.0, "lifetime": 40.0}])
+    with pytest.raises(ValueError, match="extra_asset_invalid:trf:lifetime"):
+        _ext(parts=[{"name": "investment", "upfront_per_unit": 1.0, "lifetime": 0.5,
+                     "fom_share": 0.0}])
+    with pytest.raises(ValueError, match="extra_asset_invalid:trf:parts"):
+        _ext(parts="investment")
 
 
 def test_a_part_that_is_not_a_dataclass_or_misses_a_field_is_invalid():
@@ -476,3 +513,135 @@ def test_the_report_block_shows_scaled_part_costs_and_a_typed_cod(solved):
     assert by["feeder_cable"]["parts"][0]["overnight_cost"] == pytest.approx(1.2 * 2.5 * 90_000.0)
     assert "typed in cod_by_asset" in by["trf"]["cod"] and "within" not in by["trf"]["cod"]
     assert "within its build year 2027" in by["feeder_cable"]["cod"]
+
+
+# ── gate round 1: the campus producer's shape (#97) ─────────────────────────
+
+
+def test_a_name_with_colons_keeps_its_tax_classes_and_itc_flags_its_own():
+    """A depreciation class is `<asset>:<class>` and the class has no ':', so the asset is
+    everything before the LAST ':' — `campus:CAP_33_5M#1:afa_20` is the extra's, not `campus`'s."""
+    from services.finance.engine import _with_itc_classes
+    from services.finance.tax import DepreciationClass, TaxLayer, _vintage_classes
+
+    mine = DepreciationClass("campus:CAP_33_5M#1:afa_20", 0.5, (0.05,) * 20)
+    other = DepreciationClass("campus:afa_10", 0.5, (0.1,) * 10)          # an asset named campus
+    layer = TaxLayer(name="corp", rate=0.25, depreciation=(mine, other))
+    assert _vintage_classes(layer, (3, 1_000.0, "campus:CAP_33_5M#1")) == \
+        (dataclasses.replace(mine, share=1.0),)
+    assert _vintage_classes(layer, (3, 1_000.0, "campus")) == (dataclasses.replace(other, share=1.0),)
+    (got,) = _with_itc_classes((layer,), ("campus",))
+    assert [c.itc_reduces for c in got.depreciation] == [False, True]
+
+
+def test_the_lcos_reads_only_its_own_terminal_reasons_beside_a_colon_named_extra():
+    """`terminal_needs_part_lifetimes:campus:X#1` is the extra's reason, never the storage
+    asset `campus`'s (the LCOS matched `split(":")[1]`)."""
+    from services.asset_schema.access import UpfrontPart
+    from services.finance.case import (
+        AssetFinance, FinanceCase, LpBasis, StorageYear, Template, TemplateLine,
+    )
+    from services.finance.engine import run_case
+    from services.finance.tax import DepreciationClass, TaxLayer, sl_half_year
+
+    extra = _ext(name="campus:X#1", parts=(UpfrontPart("a", 100.0, 40.0, 0.0),
+                                            UpfrontPart("b", 100.0, 40.0, 0.0)))
+    fin = _fin(cod_by_asset={}, degradation_by_asset={"campus": 0.0},
+               replacement_capex=[(2035, "campus:X#1", 50.0)],
+               terminal_value={"method": "remaining_life_annuity"})
+    case = FinanceCase(
+        inputs=fin, owner="o", base_year=2030, cod=COD,
+        templates=(Template(2030, (TemplateLine("bill", "energy_import", 100_000.0, "tariff"),),
+                            storage={"campus": StorageYear(900.0, 1000.0, 1.0, 0.0)}),),
+        assets=(AssetFinance("campus", "StorageUnit", 500_000.0, 20.0, "battery"),
+                extra.asset_finance()), extra_assets=(extra,), lp_basis=LpBasis(0.07))
+    r = run_case(case, layers=(TaxLayer("corp", 0.25, (DepreciationClass(
+        "all", 1.0, sl_half_year(10)),)),))
+    assert "terminal_needs_part_lifetimes:campus:X#1" in r.op.reasons["terminal"]
+    assert "terminal_needs_part_lifetimes:campus:X#1" not in r.lcos["assets"]["campus"]["reasons"]
+
+
+def _campus_shaped(build_year=2030):
+    """Entries exactly in `extra_owner_assets()`'s documented shape (#97), `meta` included."""
+    def entry(lib_id, kind, basis, quantity, cost, life, fom, units, length=None):
+        return {"name": f"campus:{lib_id}#1", "kind": kind, "basis": basis, "quantity": quantity,
+                "parts": [{"name": "investment", "upfront_per_unit": cost, "lifetime": life,
+                           "fom_share": fom}],
+                "build_year": build_year, "source": "campus_study", "source_hash": HASH,
+                "meta": {"need": f"{kind} N", "library_id": lib_id, "units": units,
+                         "length_km": length, "currency": "EUR", "price_year": 2026,
+                         "provenance": "assumed", "illustrative": True}}
+    return [entry("TR_132_33_40", "transformer", "lump", 1.0, 1_800_000.0, 40.0, 0.015, 1),
+            entry("CB_33_AL95", "cable", "per_km", 2.5, 90_000.0, 40.0, 0.005, 1, 2.5),
+            entry("SG_132_31p5", "switchgear", "per_bay", 3.0, 450_000.0, 40.0, 0.01, 3)]
+
+
+def _from_dicts(entries):
+    from services.finance.case import ExtraOwnerAsset
+
+    names = [f.name for f in dataclasses.fields(ExtraOwnerAsset)]
+    return tuple(ExtraOwnerAsset(**{k: d[k] for k in names}) for d in entries)
+
+
+@pytest.mark.live_solve
+def test_the_campus_producer_shape_runs_through_the_case_and_the_report(solved):
+    from services.finance.engine import run_case
+    from services.finance.report import assemble_finance_sections
+
+    n, cfg = solved
+    extras = _from_dicts(_campus_shaped())
+    fin = _fin(currency_year=2026, contingency_share=0.1)
+    base = run_case(_build(n, cfg, fin))
+    case = _build(n, cfg, fin, extras=extras)
+    r = run_case(case)
+    total = 1_800_000.0 + 2.5 * 90_000.0 + 3 * 450_000.0
+    assert float(r.op.capex.sum()) == pytest.approx(float(base.op.capex.sum()) + 1.1 * total)
+    by = {a.name: a for a in case.assets}
+    assert by["campus:SG_132_31p5#1"].overnight_cost == pytest.approx(1_350_000.0)
+    assert by["campus:CB_33_AL95#1"].component == "campus:cable"
+    assert "cod_from_build_year:campus:TR_132_33_40#1" in case.flags
+    assert "extra_asset_money_year_unstated" not in case.flags
+    block = {b["name"]: b for b in assemble_finance_sections(r, case)
+             .sections["project"].payload["extra_assets"]}
+    assert set(block) == {"campus:TR_132_33_40#1", "campus:CB_33_AL95#1", "campus:SG_132_31p5#1"}
+    assert block["campus:CB_33_AL95#1"]["overnight_cost"] == pytest.approx(225_000.0)
+    assert block["campus:SG_132_31p5#1"]["basis"] == "per_bay"
+
+
+@pytest.mark.live_solve
+def test_the_real_campus_producer_feeds_the_case(solved, hub):
+    """#97's `extra_owner_assets` on its own test fixture (a campus hub project with a hand-made
+    investment run), through `build_finance_case` and `run_case`."""
+    from services import campus_electrical_service as ce
+    from services.finance.engine import run_case
+    from tests.test_campus_electrical_service import fake_investment, inv_row
+
+    fake_investment(hub, [inv_row("transformer T", "TR_132_33_40", "transformer", 1),
+                          inv_row("cable CBL_1", "CB_33_AL95", "cable", 1, length_km=2.5),
+                          inv_row("switchgear G", "SG_132_31p5", "switchgear", 3)])
+    entries = ce.extra_owner_assets(hub)
+    assert all("meta" in d for d in entries)
+    extras = _from_dicts(entries)
+    n, cfg = solved
+    fin = _fin(currency_year=2026)
+    r = run_case(_build(n, cfg, fin, extras=extras))
+    base = run_case(_build(n, cfg, fin))
+    want = sum(e.quantity * e.parts[0].upfront_per_unit for e in extras)
+    assert want == pytest.approx(1_800_000.0 + 2.5 * 90_000.0 + 3 * 450_000.0)
+    assert float(r.op.capex.sum()) == pytest.approx(float(base.op.capex.sum()) + want)
+
+
+@pytest.mark.live_solve
+def test_an_unstated_currency_year_with_extras_is_flagged_and_the_text_softened(solved):
+    from services.finance.engine import run_case
+    from services.finance.report import assemble_finance_sections
+
+    n, cfg = solved
+    case = _build(n, cfg, _fin(), extras=(_ext(),))                 # currency_year None
+    assert "extra_asset_money_year_unstated" in case.flags
+    (b,) = assemble_finance_sections(run_case(case), case).sections["project"].payload[
+        "extra_assets"]
+    assert "not stated" in b["money_year"] and "converted" not in b["money_year"]
+    stated = _build(n, cfg, _fin(currency_year=2026), extras=(_ext(),))
+    assert "extra_asset_money_year_unstated" not in stated.flags
+    assert "extra_asset_money_year_unstated" not in _build(n, cfg, _fin()).flags   # no extras
