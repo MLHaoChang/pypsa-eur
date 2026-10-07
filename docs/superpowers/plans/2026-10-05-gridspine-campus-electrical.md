@@ -618,3 +618,73 @@ The campus asset library (C7), the least-cost pick (C8) and the MILP (C11) join 
 
 - **Ours:** `gridspine/*` and `campus_electrical_*`.
 - **Shared hot files:** `App.tsx`, `layout/*`, `uiStore.ts`, `chat_tools*.py`, `main.py`, `pypsa-gui.spec`, `tool-error-kinds.json`. Additive edits only, and merge master before each PR.
+
+## Part three as built (2026-10-07)
+
+The campus side of part three is built on `feat/gridspine-campus-ic-seam`. Words follow `pypsa-gui/CONTEXT.md` ("Investment language"): *Overnight cost*, *Generic default*, *illustrative*, *upfront part*. The engine's files (`services/finance/*`, `services/results/finance_case.py`, `services/library/*`, `services/asset_schema/*`, `models/finance.py`) are untouched.
+
+### D1a: done. The discount rate and the price year come from the project
+
+- **Rate.** When the run invests, the library handed to `invest_campus` has its `discount_rate` replaced by the **project's saved solver config** `discount_rate`, if the project has a saved solver config file (`solver_config.json`). Without that file the library's own value is kept. The replacement is tagged `assumed`, with a note saying where it came from. A project rate outside [0, 1) is a 422 that names it; nothing is annualised on it.
+- **Price year.** The project's finance inputs are not a file of their own: they are `SolverConfig.finance`, the dict `PUT /api/simulation/finance` validated, kept in the same `solver_config.json`. If it carries a `currency_year`, that is the price year reported, and `price_year_mismatch` is true when it differs from the library's. **No money is converted.** The library's costs stay in the library's price year and no escalation is applied. The panel says so.
+- **The record.** `results.cost_basis` is `{discount_rate, discount_rate_from: "project solver config" | "asset library", price_year, price_year_from: "project finance inputs" | "asset library", library_price_year, price_year_mismatch, currency}`. It is written with the run (`run/campus_cost_basis.json`) and cleared with the other investment files, so it describes the run and not the project as it is now. `get_investment` (the copilot's summary) carries it too.
+- **Staleness.** The engine's copy, rate included, is what `run/campus_assets_used.yaml` keeps, byte for byte. The results are stale when the library a run would hand over now differs from that snapshot (so a change of the project's discount rate makes them stale) **or** when the cost basis differs (so a change of the finance inputs' `currency_year` does too, since the basis is shown). A solver-config change that touches neither (the solver name, say) does not. A library or a solver config that cannot be read now counts as stale: a rerun would not reproduce the run.
+- **Panel.** One plain line in the investment section: "Annualised at 7 % (from asset library); costs in 2026 money (from asset library)." When the project states another year, the line still names the library's year (those are the costs' money) and a warning says the project states another, with no escalation applied.
+
+### D2 producer: done. The chosen equipment as extra owner assets
+
+`campus_electrical_service.extra_owner_assets(project) -> list[dict]`, read only, from the last investment run: `campus_investment.csv`, `campus_assets_used.yaml` (the library the run bought from, not one saved since). Who owns the PCC switchgear (`campus_invest_scope.json`) is already settled in the table: with `grid_operator` the engine writes no row for it, so no entry appears. `GET /api/campus-electrical/{name}/owner-assets` returns the list, and `get_state` carries `owner_assets_count`. It is `[]` when the project has no investment run.
+
+**One entry per purchased item that is neither existing nor unresolved.** This is the proposed contract for the engine session's hook in `build_finance_case`, which this branch does not touch:
+
+```json
+{
+  "name": "transformer GRID_IMPORT TR_132_33_63",
+  "need": "transformer GRID_IMPORT",
+  "kind": "transformer",
+  "library_id": "TR_132_33_63",
+  "units": 2,
+  "invest_period": 2030,
+  "upfront_parts": [
+    {"name": "investment", "upfront": 5000000.0, "lifetime": 40.0, "fom_share": 0.015}
+  ],
+  "currency": "EUR",
+  "price_year": 2026,
+  "provenance": "assumed",
+  "illustrative": true
+}
+```
+
+- `upfront_parts` mirrors `asset_schema.access.UpfrontPart` (`name`, `lifetime`, `fom_share`) but carries the **total** Overnight cost in `upfront`, not `upfront_per_unit`: these items have no per-MW sizing variable. The total is units × the library's Overnight cost, × km for a cable (`capex_eur_per_km`), and the units of switchgear are its bays.
+- `price_year` is the library's: the money the cost is in. The project's money year, when it differs, is in `results.cost_basis`.
+- `provenance` is the source tag of the cost in the library (`measured`, `datasheet` or `assumed`); `illustrative` is true when it is `assumed`. The shipped library tags every cost `assumed`, so every entry is illustrative today.
+- A reactive need can give two entries (a capacitor bank and a reactor), each with its own investment period.
+
+### Checks
+
+**Tests.** 34 service cases (D1a and D2, most on hand-made run directories with known units, km and bays, plus three real runs), 3 router cases and 4 panel tests. The route inventory (`route_inventory_phase0.txt`) gains exactly the one new route; `/api/chat/workflows`, which the app has and the file lacks, is another PR's and was not added.
+
+**Mutations.** 20 by hand on the service: the rate override ignored, a wrong source label, an out-of-range rate not refused, the cost basis not cleared with the investment, the snapshot not the engine's copy, the price-year mismatch flag (always false, always true when a year is stated), the project's year never used, existing items included, unresolved items included, units not multiplied, cable km not multiplied, switchgear bays not multiplied, the empty-run handling, `illustrative` always true, the provenance taken from the wrong tag, lifetime and FOM share swapped, the owner assets priced from the library as it is now instead of the run's, the count always 0, and both halves of the staleness test. 19 were caught at once. One was not by the new tests: the byte comparison of the library in the staleness test. For a rate change it is redundant, since the cost basis changes with the rate and the other half catches it; for a library edit the older library-staleness tests catch it. Three more on the panel line (the year shown, the mismatch warning, the rate format), all caught.
+
+### D1b: a proposal for the pack's owner. Nothing is added to the pack
+
+Seeding the campus library from the generic defaults pack (D1) needs rows the pack does not have. This is what the campus library's cost rows would become in `defaults_pack/versions/<date>/values.csv`. It is **a proposal for the pack's owner**: this branch adds nothing to the pack.
+
+**These costs are unsourced placeholders.** Every figure in the shipped campus library is tagged `assumed` and was not checked against a price list, a datasheet or a quote. The pack's other rows are sourced (technology-data v0.14.0, Danish Energy Agency). Putting the campus rows beside them would make an order-of-magnitude guess look like a sourced default, so every row must carry `illustrative = true` and the source "assumed — placeholder, replace with vendor quotes".
+
+| campus library field | kinds | pack `key` (per library entry) | `technology` | `part` | `basis` | `parameter` | `unit` |
+|---|---|---|---|---|---|---|---|
+| `capex_eur` | transformers (29) | `campus.transformer.132_33.63mva.overnight` | `campus.transformer.132_33.63mva` | `investment` | `per_unit` | `overnight` | `EUR/unit` |
+| `capex_eur` | capacitor banks (9), shunt reactors (9), STATCOMs (9) | `campus.capacitor_bank.33kv.10mvar.overnight` (likewise `campus.shunt_reactor…`, `campus.statcom…`) | `campus.capacitor_bank.33kv.10mvar` | `investment` | `per_unit` | `overnight` | `EUR/unit` |
+| `capex_eur_per_km` | cables (12) | `campus.cable.33kv.al240.overnight` | `campus.cable.33kv.al240` | `investment` | `per_km` | `overnight` | `EUR/km` |
+| `capex_eur` | switchgear (13) | `campus.switchgear.132kv.31p5ka.overnight` | `campus.switchgear.132kv.31p5ka` | `investment` | `per_bay` | `overnight` | `EUR/bay` |
+| `opex_frac` | all 81 | `….fom_share` | as above | `investment` | as above | `fom_share` | `share/year` |
+| `lifetime_a` | all 81 | `….lifetime` | as above | `investment` | as above | `lifetime` | `years` |
+
+Common columns: `illustrative` true; `source` "assumed — placeholder, replace with vendor quotes"; `currency` EUR; `currency_year` the library's `price_year` (2026, which differs from the DEA rows' 2020, the same mismatch D1a flags); `range_low`, `range_high` empty; `price_basis` left to the owner (the campus library does not say whether it is real or nominal). That is 81 entries × 3 parameters = 243 rows.
+
+For the pack's owner:
+- The loader's `basis` is `per_MW | per_MWh | per_km` today, with `_BASIS_UNIT` mapping each to its overnight unit. `per_unit` and `per_bay` would be new.
+- The keys above follow the brief, `<technology>.<parameter>`, whereas the existing rows are `<technology>.<part>.<parameter>` (`solar-utility.investment.overnight`). The owner may prefer `<technology>.investment.overnight`.
+- A new pack version directory and its pinned hash are needed; a shipped version is never edited.
+- Ratings and impedances stay in the campus library (D1).
