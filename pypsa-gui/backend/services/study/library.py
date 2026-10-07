@@ -527,7 +527,11 @@ def _domain_in(text: str | None, factor: float) -> LedgerDomain | None:
 def _pack_technology(pack, finance_year: int) -> tuple[TechnologyRow, ...]:
     by_key = {v.key: v for v in pack.cost_values}
     mapped = {k for k, _ in _PACK_TECH_ROWS} | set(_PACK_ROWS_NOT_SEEDED)
-    stray = sorted(set(by_key) - mapped)
+    # Strict on the technologies the guided study reads (a new battery or PV
+    # row must be mapped or named not seeded); rows of other technologies
+    # belong to another face (IC's campus equipment, pack 2026-10-07).
+    ours = {by_key[k].technology for k in mapped if k in by_key}
+    stray = sorted(k for k, v in by_key.items() if v.technology in ours and k not in mapped)
     if stray:
         raise LibraryError(f"defaults pack {pack.version}: no ledger key for {stray}")
     out: list[TechnologyRow] = []

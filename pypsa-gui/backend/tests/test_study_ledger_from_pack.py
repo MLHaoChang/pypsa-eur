@@ -276,3 +276,52 @@ def test_a_reseed_re_derives_a_supplied_tariffs_prices(defaults):
     again = _LG().reseed_ledger(seeded, _Q(), _intake(tariff={"custom": changed}), defaults)
     assert next(r for r in again.rows if r.key == "demand_charge_price").value == 9100.0
     assert not any(n.startswith("needs_attention:") for n in again.honesty_notes)
+
+
+
+@pytest.fixture(autouse=False)
+def _uncached():
+    yield
+    _L()._load_defaults.cache_clear()  # never leave a patched pack in the cache
+
+
+def _pack_with(extra):
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    pack = load_defaults_pack()
+    return pack.model_copy(update={"cost_values": [*pack.cost_values, *extra]})
+
+
+def _row(**update):
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    return load_defaults_pack().cost_values[0].model_copy(update=update)
+
+
+def test_rows_of_technologies_the_guided_study_does_not_use_are_left_to_their_face(
+        monkeypatch, _uncached):
+    """
+    IC's pack 2026-10-07 adds campus equipment (`transformer.*`, `cable.*`, on
+    the bases `lump`/`per_km`/`per_bay`). The guided study prices a battery
+    and PV, so those rows are not its to map: the defaults still load, row
+    for row as without them. The strict check stays on the technologies it
+    does read (next test).
+    """
+    from services.library.defaults_pack import loader
+
+    want = [(r.key, r.value) for r in _L().load_defaults().technology]
+    pack = _pack_with([_row(key="transformer.tx_33_11.overnight", technology="transformer",
+                            part=None)])
+    monkeypatch.setattr(loader, "load_defaults_pack", lambda version=None: pack)
+    _L()._load_defaults.cache_clear()
+    assert [(r.key, r.value) for r in _L().load_defaults().technology] == want
+
+
+def test_an_unmapped_row_of_a_technology_the_study_reads_is_still_refused(monkeypatch, _uncached):
+    from services.library.defaults_pack import loader
+
+    pack = _pack_with([_row(key="battery.power.augmentation")])
+    monkeypatch.setattr(loader, "load_defaults_pack", lambda version=None: pack)
+    _L()._load_defaults.cache_clear()
+    with pytest.raises(_L().LibraryError, match="battery.power.augmentation"):
+        _L().load_defaults()
