@@ -7491,7 +7491,10 @@ def _undo_captured_tool_names() -> frozenset[str]:
     it: the undo stack holds the NETWORK, so a snapshot before them would be an
     undo step that changes nothing.
     """
-    from services.chat_tools_schema import TOOL_ROUTES, safety_tier_for
+    # From the catalogue's home, per harness/README.md's contract item 7 (new
+    # code imports from `harness.*`); `services.chat_tools_schema` is an alias
+    # of the same module object.
+    from harness.catalogue import TOOL_ROUTES, safety_tier_for
 
     captured: set[str] = set()
     for name in DISPATCHERS:
