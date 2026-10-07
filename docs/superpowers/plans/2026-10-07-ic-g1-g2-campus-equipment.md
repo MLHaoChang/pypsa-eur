@@ -21,7 +21,7 @@ campus session's answer), the campus mapping from `_investment` rows (campus sid
   `tests/fixtures/defaults_pack/pack_hashes.json` (D2). `load_defaults_pack()` with no argument loads the latest
   version (`loader.py:1093`); no production caller passes no argument today (only the README documents it).
 - **Bases are closed.** `PackValue.basis` and `CostPart.basis` are `Literal["per_MW", "per_MWh", "per_km"]`
-  (`loader.py:194, 226`); `_BASIS_UNIT` maps each to its overnight unit (`per_km → EUR/km`, `loader.py:165`);
+  (`loader.py:194, 226`); `_BASIS_UNIT` maps each to its overnight unit (`per_km → EUR/km`, `loader.py:164`);
   `_cost_parts` refuses a part whose overnight unit disagrees with its basis (`loader.py:835-842`).
   `UNIT_CONVERSIONS` is a closed map of (catalogue unit, pack unit) → factor (`loader.py:146-154`).
 - **Campus library** (`gridspine/templates/data/campus_assets.yaml`, merged with #83): 81 entries in six lists
@@ -71,7 +71,8 @@ campus session's answer), the campus mapping from `_investment` rows (campus sid
     (`test_investment_case_tripwires.py:191-210`). `case.py` names `UpfrontPart` only under `TYPE_CHECKING` and
     reads the parts by attribute (`name`, `upfront_per_unit`, `lifetime`, `fom_share`,
     `derived_from_capital_cost`), so an `asset_schema` `UpfrontPart` is accepted as is and `asset_schema` (another
-    session's package) is not edited.
+    session's package) is not edited. A part must be a dataclass (so `_canon` hashes its fields, not its repr) with
+    those attributes; otherwise `extra_asset_invalid:<name>:parts`, never a bare `AttributeError`.
   - `__post_init__` raises `ValueError` naming a code: `extra_asset_invalid:<name>:<field>` when `name` is empty,
     `kind` is not one of the six, `basis` not `lump | per_km | per_bay`, `quantity` not finite and > 0 (and not a
     whole number for `lump` / `per_bay`), there is no part, `build_year` is outside 1900..2200, `source_hash` is not
@@ -96,19 +97,23 @@ campus session's answer), the campus mapping from `_investment` rows (campus sid
     none, post-tax reads `tax_input_missing:depreciation_class:<name>` (the existing rule, no default class).
   - **Lifetime under `replacement_rule="fixed"`.** The existing `asset_lifetime_short` rule applies (a 20-y STATCOM on
     a 25-y axis is refused unless a `replacement_capex` entry names it); under `part_lifetimes` it is replaced.
-  - **Field.** `FinanceCase.extra_assets: tuple[ExtraOwnerAsset, ...] = ()`, appended last; `_canon` omits an empty
-    tuple so a case without extras keeps its hash.
+  - **Field.** `FinanceCase.extra_assets: tuple[ExtraOwnerAsset, ...] = ()`, appended last; `_canon` omits exactly
+    `FinanceCase.extra_assets == ()` (no generic empty-tuple rule, which would re-hash every case through `flags`,
+    `templates`, `parts`), so a case without extras keeps its S0b hash.
 - **G-6. Fixed O&M (review B6).** Network FOM reaches the case from `n.statistics.fom` as a ledger line
-  (`value_flows.py:105`); an extra asset has none, so the adapter adds one `CashflowLine` per extra asset and template:
-  `key = f"extra_asset_fom:{name}"`, `stream = "fom"` (the closed `value_stream` set, `models/finance.py:335-342`;
-  `fom` maps to `opex`, `cashflow.py:38`), amount `−Σ fom_share × overnight_cost` (the owner's cost), `esc_class =
-  "opex"`, `money_year = base_year`, `period = k`. It is appended **after** `_scale`, so an annualised template does
+  (`value_flows.py:105`); an extra asset has none, so the adapter adds one `TemplateLine` (`services/finance/case.py`)
+  per extra asset and template: `TemplateLine(key=f"extra_asset_fom:{name}", stream="fom", amount=−Σ fom_share ×
+  overnight_cost, esc_class="opex", source="extra_asset_fom", source_id=name, money_year=base_year, period=k)`.
+  `stream="fom"` because the report turns it into a `CashflowLine` whose `value_stream` is a closed set
+  (`models/finance.py:335-342`; `fom` maps to `opex`, `cashflow.py:38`). It is appended **after** `_scale`, so an annualised template does
   not multiply it (`finance_case.py:1478`), and it never enters the counterfactual. (`fom_share` is never None, G-4.)
 - **G-7. COD (review B7, §8 compares years).** The case COD comes from the network owner assets as today
   (`_cod`). An extra asset with a typed `fin.cod_by_asset[name]` must equal the case COD (`cod_mismatch`
   otherwise, `timeline.py:78-84`). Without one it is compared **by year**: `build_year` = the case COD's year is
   accepted at the case COD (`cod_from_build_year:<name>`); an earlier year is `cod_mismatch`; a later one is
-  `extra_asset_staged_build:<name>` (until P5). Never moved.
+  `extra_asset_staged_build:<name>` (until P5). An extra is taken at the case COD within its build year (stated in
+  the `cod_from_build_year` flag and the report block); a later year is never moved. Extras are compared by year where
+  network assets are compared by date, as §8 words it. The check runs after `_cod`.
 - **G-8. Counterfactual.** Extra assets never enter the counterfactual (default A): the counterfactual is built from
   the network as today; the extra assets are only on the project side.
 - **G-9. Refusals.** A name equal to an owner-owned network component, or duplicated among the extras, is refused
@@ -162,7 +167,10 @@ Tests (`tests/test_finance_case_extra_assets.py`):
 - Under `fixed`: a 20-y STATCOM on a 25-y axis → `asset_lifetime_short`; with a `replacement_capex` entry → accepted.
 - Refusals and validation: each `extra_asset_invalid:<name>:<field>`, derived upfront, duplicate names, a name equal to
   a network owner asset; `extra_asset_may_double_count` with an owned network Line.
-- Importing `services.finance` still does not load `services.solver` (the tripwire).
+- Importing `services.finance` still does not load `services.solver` (the tripwire); an `ExtraOwnerAsset` built from a
+  real `asset_schema.access.UpfrontPart` works (the test may import `access`); a non-dataclass part or one missing a
+  field is `extra_asset_invalid:<name>:parts`.
+- Hash stability: one fixture case's `finance_case_hash` pinned to its value on master 546f2cb.
 - Report `extra_assets` block and the xlsx row; the case hash changes when an extra asset changes.
 - Facade pins.
 
@@ -183,3 +191,8 @@ owner-merged.
   tests, plus notes: an explicit `extra_assets` field hashed only when non-empty, the key rule recorded, a
   may-double-count flag, overnight read from `case.assets`, the terminal basis text, validation codes, row domains,
   the sha256-pinned parity test, U2 and route notes.
+- **Plan round 2 (9b4cce4): PASS WITH CONDITIONS.** B1 sound (the tripwire's runtime and AST checks pass; the facade
+  pins compare `str(signature)` and never evaluate annotations); G-7 consistent with `_cod`; the G-6 placement right;
+  the targeted `_canon` omission hash-stable. C1 G-6 named `CashflowLine` for `TemplateLine`. Taken, with the notes:
+  parts validated as dataclasses with the attributes, a real-`UpfrontPart` test, the COD wording, a targeted `_canon`
+  rule, a hash pinned to master.
