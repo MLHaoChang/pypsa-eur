@@ -76,6 +76,10 @@ least-cost pick, and writes the same files, plus:
 ``campus_milp_comparison.csv``
     Per need, C8's choice and cost against the MILP's.
 
+``ASSET_LIBRARY_PATH`` (the shipped library) and ``load_asset_library`` are
+re-exported, so that a backend keeping a project's own copy needs nothing
+but this module.
+
 ``draft_from_project`` is the "generate" step. ``check_campus``,
 ``grid_code_profiles`` and ``SizingCriteria`` complete the seam the backend
 uses, since pypsa-gui reaches gridspine through ``drivers`` and ``schema``
@@ -115,6 +119,7 @@ from gridspine.static.campus_compliance import campus_compliance
 from gridspine.static.campus_invest import select_assets
 from gridspine.static.campus_milp import select_assets_milp
 from gridspine.static.campus_sc import campus_fault_levels
+from gridspine.templates.campus_assets import DEFAULT_PATH as ASSET_LIBRARY_PATH  # noqa: F401  (the backend's seam)
 from gridspine.templates.campus_assets import load_asset_library
 from gridspine.templates.grid_codes import (  # noqa: F401  (re-exported: the backend's seam)
     PROFILE_ID,

@@ -29,6 +29,9 @@ POST    /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/confirm    
 POST    /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/publish       -> publish_grid_code_api_campus_electrical__name__grid_codes_drafts__profile_id__publish_post
 DELETE  /api/campus-electrical/{name}/grid-codes/published/{profile_id}            -> delete_published_grid_code_api_campus_electrical__name__grid_codes_published__profile_id__delete
 GET     /api/campus-electrical/{name}/grid-codes/published/{profile_id}            -> get_published_grid_code_api_campus_electrical__name__grid_codes_published__profile_id__get
+GET     /api/campus-electrical/{name}/library                                      -> get_library_api_campus_electrical__name__library_get
+PUT     /api/campus-electrical/{name}/library                                      -> save_library_api_campus_electrical__name__library_put
+POST    /api/campus-electrical/{name}/library/reset                                -> reset_library_api_campus_electrical__name__library_reset_post
 POST    /api/campus-electrical/{name}/run                                          -> run_api_campus_electrical__name__run_post
 DELETE  /api/changelog/                                                            -> clear_changelog_api_changelog__delete
 GET     /api/changelog/                                                            -> get_changelog_api_changelog__get
