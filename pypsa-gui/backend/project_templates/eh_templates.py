@@ -433,22 +433,74 @@ STRESS_SCENARIOS: dict[str, list[dict]] = {
 # fmea_top need VOLL > 0 (a template otherwise starts from the default 0).
 SOLVER_CONFIG: dict = {"voll": 5000.0}
 
+# The island sidecar (plan 2026-10-07 campus island, I1): control modes, unit
+# dynamics and island requirements, keyed by PyPSA name. Its schema is
+# gridspine's (gridspine/schema/island.py), which cannot be imported here
+# (_build.py runs with only this directory on sys.path), so the content is a
+# plain mapping and tests/test_island_config.py validates it through
+# gridspine. Every number is {value, source}; all are "assumed" until the
+# client's datasheets arrive. Only templates listed here ship the file.
+def _a(value):
+    return {"value": value, "source": "assumed"}
+
+
+def _genset_island(**extra):
+    return {"kind": "genset", "governor": "droop", "droop_pct": _a(4.0), "q_droop_pct": _a(4.0),
+            "H_s": _a(1.5), "T_g_s": _a(0.5), "ramp_pu_per_s": _a(0.2), "start_s": _a(10.0),
+            "sync_s": _a(5.0), "p_min_pu": _a(0.3), "load_step_max_pct": _a(50.0),
+            "cos_phi_r": _a(0.8), "xd_sat": _a(2.0), "excitation": "avr_pmg",
+            "neutral_earthing": "solid", **extra}
+
+
+_LIMITS = {"rocof_hz_per_s": _a(1.0), "f_min_hz": _a(47.5), "f_max_hz": _a(51.5), "qss_band_hz": _a(1.0)}
+
+ISLAND_CONFIG: dict[str, dict] = {
+    "eh_datacenter": {
+        "units": {
+            **{f"genset_{i}": _genset_island() for i in range(1, 5)},
+            "genset_new": _genset_island(unit_mw=_a(10.0)),
+            "rooftop_pv": {"kind": "pv", "control": "gfl_qu", "pf_rated": _a(0.95),
+                           "qu_points": _a([[0.9, 0.33], [0.97, 0.0], [1.03, 0.0], [1.1, -0.33]])},
+            "bess_new": {"kind": "bess", "control": "gfm_droop", "pf_rated": _a(0.95),
+                         "droop_pct": _a(4.0), "q_droop_pct": _a(4.0), "tau_f_s": _a(0.1),
+                         "i_max_pu": _a(1.2), "k_gfm_min": _a(1.0)},
+            "ups_battery": {"kind": "ups", "it_load": ["it_load"], "walk_in_s": _a(15.0),
+                            "f_window_hz": _a(2.0)},
+            # Plan Q1: the critical load is the IT and the cooling it needs.
+            "it_load": {"kind": "load", "critical": True},
+            "cooling": {"kind": "load", "critical": True},
+            "offices": {"kind": "load", "critical": False},
+        },
+        "requirements": {
+            "bridge_s": _a(600.0), "sustained_h": _a(24.0), "fuel_autonomy_h": _a(24.0),
+            "genset_redundancy_n": _a(1), "scenarios": ["ups_bridged", "seamless"],
+            "pickup_blocks": _a([15.0, 15.0, 15.0, 10.0]),
+            "frequency_limits": {"transition": dict(_LIMITS), "steady_island": dict(_LIMITS)},
+            "rocof_window_ms": _a(500.0), "gfm_margin": _a(0.1), "ride_through_storage": ["bess_new"],
+        },
+    },
+}
+
 # Sidecar file names copied by POST /api/projects/from_template/<id>.
 META_FILE = "eh_template.json"
 STRESS_FILE = "adequacy_stress_scenarios.json"
 SOLVER_FILE = "solver_config.json"
 SIDECAR_FILES = (META_FILE, STRESS_FILE, SOLVER_FILE)
+# Written only for the templates in ISLAND_CONFIG.
+ISLAND_FILE = "island_config.json"
 # services.adequacy.stress.SCHEMA — not imported: _build.py runs with only
 # this directory on sys.path. A test pins the two equal.
 SCHEMA = 1
 
 
 def write_sidecars(out_dir, template_id: str) -> None:
-    """Write the template's metadata and stress registry beside network.nc."""
+    """Write the template's metadata and stress registry beside network.nc,
+    and its island sidecar when it has one."""
     import json
     import pathlib
 
     out_dir = pathlib.Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / META_FILE).write_text(
         json.dumps(TEMPLATE_META[template_id], indent=2, sort_keys=True) + "\n")
     (out_dir / STRESS_FILE).write_text(json.dumps(
@@ -456,3 +508,6 @@ def write_sidecars(out_dir, template_id: str) -> None:
         indent=2, sort_keys=True) + "\n")
     (out_dir / SOLVER_FILE).write_text(
         json.dumps(SOLVER_CONFIG, indent=2, sort_keys=True) + "\n")
+    if template_id in ISLAND_CONFIG:
+        (out_dir / ISLAND_FILE).write_text(
+            json.dumps(ISLAND_CONFIG[template_id], indent=2, sort_keys=True) + "\n")

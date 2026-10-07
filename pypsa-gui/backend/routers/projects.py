@@ -97,6 +97,9 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
                  # SIDECAR_NAME under services/adequacy/ so a fourth sidecar
                  # cannot repeat this.
                  "asset_health.json",
+                 # The island sidecar (plan 2026-10-07 campus island, I1):
+                 # control modes, unit dynamics and island requirements.
+                 "island_config.json",
                  # Edge Investment Case WP1.1c: the (id, version, hash) of every
                  # Library series the project references, re-checked on open.
                  # `test_library_bundle_pins` pins it equal to SIDECAR_NAME.
@@ -1267,7 +1270,9 @@ _TEMPLATE_DEFAULT_NAMES = {
 # template metadata, its Class-C stress registry and its solver settings.
 # An allow-list, never a directory copy.
 _TEMPLATE_SIDECARS = ("eh_template.json", "adequacy_stress_scenarios.json",
-                      "solver_config.json")
+                      "solver_config.json",
+                      # The island sidecar (plan 2026-10-07 campus island, I1).
+                      "island_config.json")
 
 
 def _eh_template_builder(template_key: str):
