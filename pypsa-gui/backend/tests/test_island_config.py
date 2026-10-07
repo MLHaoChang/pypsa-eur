@@ -98,3 +98,15 @@ def test_the_template_and_bundle_allow_lists_carry_the_file():
     assert IC.SIDECAR_NAME == T.ISLAND_FILE == "island_config.json"
     assert IC.SIDECAR_NAME in _TEMPLATE_SIDECARS
     assert IC.SIDECAR_NAME in _BUNDLE_FILES
+
+
+def test_a_build_without_gridspine_says_so_instead_of_failing_obscurely(tmp_path, monkeypatch):
+    """The frozen desktop app may not carry gridspine (packaging rule, see
+    test_packaging_requirements.OPTIONAL_AT_RUNTIME): the import is guarded,
+    and using the sidecar then names what is missing."""
+    from services.adequacy import island_config as IC
+    monkeypatch.setattr(IC, "GRIDSPINE_AVAILABLE", False)
+    monkeypatch.setattr(IC, "GRIDSPINE_IMPORT_ERROR", "No module named 'gridspine'")
+    (tmp_path / IC.SIDECAR_NAME).write_text(json.dumps(T.ISLAND_CONFIG["eh_datacenter"]))
+    with pytest.raises(IC.ContractError, match="gridspine"):
+        IC.load_island_config(tmp_path / IC.SIDECAR_NAME)
