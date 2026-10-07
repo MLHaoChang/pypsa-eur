@@ -729,6 +729,15 @@ def build_workflow_prompts() -> list[SmokePrompt]:
         # Issue 20: a reasoning prompt. No frame is required (whether a live
         # model shows thinking depends on the profile); the summary prints
         # whether `thinking` arrived, and the stub always sends it.
+        # Issue 15: a question whose answer may be several options.
+        SmokePrompt(
+            name="W5_multi_select",
+            message=("Ask me which of the network checks N-1, short circuit and "
+                     "harmonics to run; I may pick several."),
+            expected_tools={"ask_user"},
+            expected_frames={"choice_request"},
+            session_id=session_id,
+        ),
         SmokePrompt(
             name="W4_reasoning",
             message=("Think it through before you answer: is there anything "
@@ -785,6 +794,10 @@ def check_workflow_results(results: list[PromptResult]) -> list[str]:
     if w3 and w3.workflow_states:
         if (w3.workflow_states[-1] or {}).get("workflow") is not None:
             problems.append("W3: workflow_state after end_workflow is not null")
+    w5 = by.get("W5_multi_select")
+    if w5 and w5.choice_requests:
+        if w5.choice_requests[0].get("multi_select") is not True:
+            problems.append("W5: the Choice card for several picks did not set multi_select")
     # Issue 20: every wire reports usage. A turn without it means the daily
     # cap and the metrics are blind on that provider.
     for r in results:

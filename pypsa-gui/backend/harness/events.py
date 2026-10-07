@@ -46,7 +46,10 @@ FRAME_PAYLOADS: dict[str, tuple[str, ...]] = {
     "ui_event": ("kind",),
     # `ask_user` (issue 04): the panel renders a Choice card; the pick is
     # the next user message, so the turn does not block on it.
-    "choice_request": ("tool_use_id", "title", "question", "options", "allow_free_text"),
+    # Issue 15: `multi_select`, a Markdown `detail` (or null) and the
+    # presentation `intent` ("choice" | "plan_review").
+    "choice_request": ("tool_use_id", "title", "question", "options", "allow_free_text",
+                       "multi_select", "detail", "intent"),
     # After start_workflow / advance_workflow / end_workflow: the session's
     # workflow step for the panel's strip, or `workflow: null`.
     "workflow_state": ("workflow",),

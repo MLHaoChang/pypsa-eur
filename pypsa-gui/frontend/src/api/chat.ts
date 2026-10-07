@@ -258,12 +258,20 @@ export interface ChoiceOption {
   recommended?: boolean
 }
 
+export type ChoiceIntent = 'choice' | 'plan_review'
+
 export interface ChoiceRequestFrame {
   tool_use_id?: string
   title: string
   question: string
   options: ChoiceOption[]
   allow_free_text: boolean
+  // Issue 15: several picks go out together, joined by "; ".
+  multi_select?: boolean
+  // Issue 15: Markdown shown under the question (a plan, a comparison).
+  detail?: string | null
+  // Issue 15: presentation only; `plan_review` shows `detail` as the plan.
+  intent?: ChoiceIntent
 }
 
 // ── The session's workflow step (chat harness issue 06) ─────────────────────

@@ -2096,10 +2096,14 @@ def _dispatch_real_tool_call(
         # answer is NOT in this result — it arrives as the next user message.
         ui_event_payload = {"tool_use_id": tool_use_id}
         ui_event_payload.update({k: v for k, v in result.items() if k != "_ui_event"})
+        multi = bool(ui_event_payload.get("multi_select"))
         result_for_model = {
             "ok": True, "status": "presented", "awaiting": "user",
             "title": ui_event_payload.get("title"),
             "options": [o.get("label") for o in ui_event_payload.get("options", [])],
+            "multi_select": multi,
+            "answer_format": ("the chosen labels joined by '; '" if multi
+                              else "one option label, or the user's own words"),
         }
         yield "choice_request", ui_event_payload
     elif isinstance(result, dict) and result.get("_ui_event"):

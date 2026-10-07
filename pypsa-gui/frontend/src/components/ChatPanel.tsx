@@ -658,24 +658,43 @@ export function WorkflowStrip() {
  * "<title>: <option>" in the transcript — so the assistant's next turn
  * starts with the answer. Nothing blocks on it: the user can equally type
  * an answer, and the card goes away when the next turn starts.
+ *
+ * Issue 15: `detail` is rendered as Markdown under the question; with
+ * `multi_select` a click toggles an option and one Send button sends the
+ * picks, in option order, joined by "; "; a `plan_review` card is marked as
+ * one and shows `detail` as the plan (presentation only, same answer).
  */
 export function ChoiceCard() {
   const choice = useChatStore((s) => s.choice)
   const setChoice = useChatStore((s) => s.setChoice)
   const sendRequest = useChatStore((s) => s.sendRequest)
   const streaming = useChatStore((s) => s.streaming)
+  const [picked, setPicked] = useState<string[]>([])
+  // A new card starts with nothing picked.
+  useEffect(() => { setPicked([]) }, [choice])
   if (!choice) return null
-  const pick = (label: string) => {
-    sendRequest(label, { source: 'choice-card', label: `${choice.title}: ${label}` })
+  const multi = choice.multi_select === true
+  const planReview = choice.intent === 'plan_review'
+  const send = (answer: string) => {
+    sendRequest(answer, { source: 'choice-card', label: `${choice.title}: ${answer}` })
     setChoice(null)
   }
+  const toggle = (label: string) =>
+    setPicked((cur) => (cur.includes(label) ? cur.filter((l) => l !== label) : [...cur, label]))
+  const sendPicked = () =>
+    send(choice.options.map((o) => o.label).filter((l) => picked.includes(l)).join('; '))
   return (
     <div
       className="border border-accent/50 bg-accent/5 rounded p-3 mx-3 my-2"
       data-testid="chat-choice-card"
+      data-intent={planReview ? 'plan_review' : 'choice'}
       role="group"
       aria-labelledby="chat-choice-title"
     >
+      {planReview && (
+        <div className="text-[10px] uppercase tracking-wide text-accent mb-1"
+          data-testid="chat-choice-intent">Plan review</div>
+      )}
       <div id="chat-choice-title" className="text-sm font-medium mb-1 text-text"
         data-testid="chat-choice-title">
         {choice.title}
@@ -683,21 +702,39 @@ export function ChoiceCard() {
       <div className="text-[12px] text-text/90 mb-2" data-testid="chat-choice-question">
         {choice.question}
       </div>
+      {choice.detail && (
+        <div
+          className={`text-[12px] text-text/90 mb-2 overflow-y-auto rounded border border-border bg-bg-2/40 px-2.5 py-1.5 ${
+            planReview ? 'max-h-80' : 'max-h-48'
+          }`}
+          data-testid="chat-choice-detail"
+        >
+          <ChatMarkdown>{choice.detail}</ChatMarkdown>
+        </div>
+      )}
       <div className="flex flex-col gap-1.5">
         {choice.options.map((o) => (
           <button
             key={o.label}
             type="button"
             disabled={streaming}
-            onClick={() => pick(o.label)}
+            onClick={() => (multi ? toggle(o.label) : send(o.label))}
+            aria-pressed={multi ? picked.includes(o.label) : undefined}
             data-testid="chat-choice-option"
             data-recommended={o.recommended ? 'true' : undefined}
             className={`text-left px-2.5 py-1.5 text-[12px] rounded border transition-colors disabled:opacity-50 disabled:pointer-events-none ${
-              o.recommended
+              multi && picked.includes(o.label)
+                ? 'border-accent bg-accent/25'
+                : o.recommended
                 ? 'border-accent/70 bg-accent/10 hover:bg-accent/20'
                 : 'border-border bg-bg-2/60 hover:bg-bg-3/50 hover:border-accent/40'
             }`}
           >
+            {multi && (
+              <span aria-hidden="true" className="mr-1.5 text-accent">
+                {picked.includes(o.label) ? '☑' : '☐'}
+              </span>
+            )}
             <span className="font-medium text-text">{o.label}</span>
             {o.recommended && (
               <span className="ml-2 text-[10px] uppercase tracking-wide text-accent"
@@ -709,6 +746,17 @@ export function ChoiceCard() {
           </button>
         ))}
       </div>
+      {multi && (
+        <button
+          type="button"
+          disabled={streaming || picked.length === 0}
+          onClick={sendPicked}
+          data-testid="chat-choice-send"
+          className="mt-2 px-2.5 py-1 text-[12px] rounded border border-accent/70 bg-accent/10 hover:bg-accent/20 disabled:opacity-50 disabled:pointer-events-none"
+        >
+          {picked.length > 1 ? `Send ${picked.length} choices` : 'Send choice'}
+        </button>
+      )}
       {choice.allow_free_text && (
         <div className="text-[11px] text-muted mt-2" data-testid="chat-choice-free-text">
           Or type your own answer below.
@@ -2499,6 +2547,9 @@ export default function ChatPanel() {
           question: d.question,
           options: Array.isArray(d.options) ? d.options : [],
           allow_free_text: d.allow_free_text !== false,
+          multi_select: d.multi_select === true,
+          detail: typeof d.detail === 'string' && d.detail.trim() ? d.detail : null,
+          intent: d.intent === 'plan_review' ? 'plan_review' : 'choice',
         })
         break
       }

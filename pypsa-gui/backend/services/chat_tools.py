@@ -4178,6 +4178,8 @@ def ui_set_snapshot(snapshot_iso: str, period: int | None = None) -> dict:
 # ── Harness: ask the user (chat harness issue 04) ──────────────────────────
 
 ASK_USER_MAX_OPTIONS = 8
+ASK_USER_MAX_DETAIL = 2000
+ASK_USER_INTENTS = ("choice", "plan_review")
 
 
 def ask_user(
@@ -4185,6 +4187,9 @@ def ask_user(
     question: str,
     options: list[dict],
     allow_free_text: bool = True,
+    multi_select: bool = False,
+    detail: str | None = None,
+    intent: str = "choice",
 ) -> dict:
     """
     Present a structured question. Non-blocking by design (owner decision
@@ -4194,6 +4199,12 @@ def ask_user(
 
     Validation is strict and typed (`invalid_tool_args`) because a half-built
     card — no options, two recommendations — is worse than none.
+
+    Issue 15: `multi_select` lets several options go out together (one
+    message, labels joined by "; "); `detail` is Markdown shown under the
+    question, line breaks kept, capped at ASK_USER_MAX_DETAIL; `intent`
+    changes the presentation only — a `plan_review` card shows `detail` as
+    the plan and takes one verdict, so it needs a detail and is single-pick.
     """
     def bad(message: str) -> HTTPException:
         return HTTPException(status_code=422, detail={
@@ -4228,6 +4239,16 @@ def ask_user(
         clean.append(entry)
     if sum(1 for o in clean if o.get("recommended")) > 1:
         raise bad("mark at most one option as recommended")
+    if intent not in ASK_USER_INTENTS:
+        raise bad(f"intent must be one of {', '.join(ASK_USER_INTENTS)}")
+    if detail is not None and not isinstance(detail, str):
+        raise bad("detail must be a string of Markdown")
+    body = (detail or "").strip()[:ASK_USER_MAX_DETAIL] or None
+    if intent == "plan_review":
+        if body is None:
+            raise bad("a plan_review needs the plan in detail")
+        if multi_select:
+            raise bad("a plan_review takes one verdict; multi_select must be false")
     return {
         "_ui_event": True,
         "kind": "choice",
@@ -4235,6 +4256,9 @@ def ask_user(
         "question": " ".join(question.split())[:800],
         "options": clean,
         "allow_free_text": bool(allow_free_text),
+        "multi_select": bool(multi_select),
+        "detail": body,
+        "intent": intent,
     }
 
 

@@ -20,7 +20,10 @@ reads the same on each.
    `build-network` / `orient`.
 3. **W3** — "Please end the current workflow." Expects `end_workflow` and
    `workflow_state` with `workflow: null`.
-4. **W4** — "Think it through before you answer: …" (issue 20). No tool and
+4. **W5** — "Ask me which of the network checks … to run; I may pick
+   several." (issue 15). Expects `ask_user` and a `choice_request` with
+   `multi_select: true`. It runs before W4.
+5. **W4** — "Think it through before you answer: …" (issue 20). No tool and
    no frame is required: whether a live model shows its reasoning depends on
    the profile. The stub always answers it with `reasoning_content`, so on
    the OpenAI wire it proves reasoning reaches the panel as `thinking`.
@@ -74,6 +77,8 @@ frame payloads held.
 | 2026-10-06 | same | `anthropic-sonnet` (live) | **3/3** in 19 s; W1 two tools, W2 three (the model started the workflow and took its first step) |
 | 2026-10-06 | issue 20 (W4 and usage added) | `stub-openai` | **4/4**; per turn `in=6 cached=16 written=0 out=6` on W1–W3 (two model calls each), W4 `in=3 cached=8` with `thinking` |
 | 2026-10-06 | same | `anthropic-sonnet` (live) | **4/4** in 31 s; W1 `in=1359 cached=95062 written=47531`, W4 `in=34 cached=50612`; thinking shown on W1–W3, not on W4 |
+| 2026-10-07 | issue 15 (W5 added) | `stub-openai` | **5/5** |
+| 2026-10-07 | same | `anthropic-sonnet` (live) | **5/5** in 26 s; W5: the model called `ask_user` with `multi_select: true` from the tool description alone |
 
 **What the first run found.** The workflow tools read the chat session from
 a ContextVar that `run_turn` set at turn start. The route drives `run_turn`

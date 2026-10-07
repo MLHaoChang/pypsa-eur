@@ -208,3 +208,17 @@ def test_a_wire_that_reports_no_usage_fails_the_battery():
     problems = s.check_workflow_results(results)
     assert any("W1_ask_user_card" in p and "usage" in p for p in problems)
     assert any("W2_start_workflow" in p and "usage" in p for p in problems)
+
+
+def test_the_battery_asks_a_multi_select_question_and_checks_the_card():
+    s = _smoke()
+    w5 = [p for p in s.build_workflow_prompts() if p.name == "W5_multi_select"]
+    assert len(w5) == 1
+    assert w5[0].expected_tools == {"ask_user"} and w5[0].expected_frames == {"choice_request"}
+    usage = {"input_tokens": 1, "reported": True}
+    single = _result("W5_multi_select", usage, ["choice_request"])
+    single.choice_requests = [{"options": [{"label": "A"}], "multi_select": False}]
+    assert any("W5" in p and "multi_select" in p for p in s.check_workflow_results([single]))
+    multi = _result("W5_multi_select", usage, ["choice_request"])
+    multi.choice_requests = [{"options": [{"label": "A"}], "multi_select": True}]
+    assert not any("W5" in p for p in s.check_workflow_results([multi]))

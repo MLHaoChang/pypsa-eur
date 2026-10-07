@@ -126,7 +126,7 @@ the loaded network) and borrow seven designs. Each is an issue under
 |---|---|---|---|
 | 13 | session event log, replay, fork | ready-for-agent (Q15: adopt, projection kept) | waits for #86 to merge |
 | 14 | user skill roots, invocation policy | ready-for-agent (Q16: app-data root only) | amends D12 in the same change |
-| 15 | `ask_user` multi-select, detail, intents | ready-for-agent | frontend + catalogue change; small |
+| 15 | `ask_user` multi-select, detail, intents | done 2026-10-07 | — |
 | 16 | spill store and `read_result` | ready-for-agent | new tool; small-medium |
 | 17 | goal with a round budget | ready-for-agent after 13 (Q17: yes, 5 default, 20 max) | needs 13 |
 | 18 | approval audit events | ready after 13 | log state |

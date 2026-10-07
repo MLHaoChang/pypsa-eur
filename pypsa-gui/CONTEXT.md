@@ -130,6 +130,9 @@ The card the panel renders when the assistant calls `ask_user`: a title, a
 question, options with one marked recommended, and a free-text field. A pick
 is sent as the next user message; the turn does not block on it. Distinct
 from the Confirmation card, which gates a write or run and does block.
+It may carry a **detail** (Markdown under the question), allow several
+picks (**multi-select**: one Send button, the picks joined by "; "), or be a
+**plan review**: the detail is a plan and the card takes one verdict.
 _Avoid_: prompt, dialog, confirmation (that is the other card)
 
 ## Investment language

@@ -166,7 +166,9 @@ What the harness adds to the assistant (all read tier, see the README):
   the session on a step; the step's instructions ride every turn. Guided
   mode's rules are the `hub-design` workflow's preamble.
 - **Choice cards.** `ask_user` renders a question with options and a
-  recommendation; your pick is sent as your next message.
+  recommendation; your pick is sent as your next message. A card may show
+  more context under the question, let you pick several options (tick them,
+  then Send), or ask you to approve a plan (a "Plan review" card).
 - **Skills.** `use_skill` loads a procedure (`grill` first); the prompt
   carries only the catalogue.
 

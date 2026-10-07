@@ -486,3 +486,12 @@ def test_every_reply_reports_a_cache_read_in_its_usage(stub):
     usage = [c["usage"] for c in _chunks(base, "hello") if c.get("usage")][-1]
     cached = usage["prompt_tokens_details"]["cached_tokens"]
     assert 0 < cached < usage["prompt_tokens"]
+
+
+def test_the_multi_select_branch_asks_with_multi_select(stub):
+    mod, base = stub
+    calls, _ = _chat(base, [{"role": "user", "content": f"Which checks? {mod._ASK_MULTI}."}])
+    assert [c["name"] for c in calls] == ["ask_user"]
+    args = json.loads(calls[0]["arguments"])
+    assert args["multi_select"] is True and len(args["options"]) == 3
+    assert sum(1 for o in args["options"] if o.get("recommended")) == 1

@@ -98,6 +98,9 @@ one failure mode this harness cannot self-detect:
   9. "Think it through" (chat harness issue 20): two `reasoning_content`
      deltas, then the answer, so the panel's thinking display and the
      probe's `thinking` frame are exercised on this wire.
+  10. "I may pick several" (chat harness issue 15): `ask_user` with
+     `multi_select: true` and three checks to choose from, then one closing
+     sentence.
 
 Every other prompt gets "Saved.".
 
@@ -170,6 +173,7 @@ _ASK = "ask me which"
 _START_WF = "Start the build-network workflow"
 _END_WF = "Please end the current workflow"
 _THINK = "Think it through"
+_ASK_MULTI = "I may pick several"
 _SITE_GRID = "Run suggest_eh_setup, then tag the import Link"
 _SITE_CRITICAL = "no critical load is tagged"
 _SITE_ALL = "fix every gap you can, one confirmation at a time"
@@ -416,6 +420,18 @@ class Handler(BaseHTTPRequestHandler):
             said = (f"Understood — {name} was not applied." if _DECLINED.search(result)
                     else f"Done — {name} applied.")
             emit(_sse({"choices": [{"delta": {"content": said}}]}))
+        elif _ASK_MULTI in text and not scripted and not turn_tools:
+            emit(_sse(_call("call_stub_10", "ask_user", {
+                "title": "Q2 — Which checks?",
+                "question": "Pick every check to run on this network.",
+                "options": [{"label": "N-1", "description": "Cheapest; run it first.", "recommended": True},
+                            {"label": "Short circuit"},
+                            {"label": "Harmonics"}],
+                "multi_select": True,
+                "detail": "Each check takes about a minute.",
+            })))
+        elif _ASK_MULTI in text and not scripted:
+            emit(_sse({"choices": [{"delta": {"content": "Pick any above, then send."}}]}))
         elif _THINK in text and not scripted and not turn_tools:
             emit(_sse({"choices": [{"delta": {"reasoning_content": "The user wants a reasoned answer; "}}]}))
             emit(_sse({"choices": [{"delta": {"reasoning_content": "nothing to look up first."}}]}))

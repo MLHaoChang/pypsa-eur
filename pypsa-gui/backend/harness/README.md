@@ -72,7 +72,8 @@ Borrowed designs under consideration: `docs/superpowers/assessments/2026-10-06-d
 
 Five read-tier tools exist only for the harness (catalogue banner "Harness"):
 `ask_user` (a Choice card; the pick is the next user message, the turn does
-not block), `use_skill` (a skill's body on demand), `start_workflow`,
+not block; optional `multi_select`, a Markdown `detail`, and `intent`
+`choice` or `plan_review`), `use_skill` (a skill's body on demand), `start_workflow`,
 `advance_workflow`, `end_workflow` (the session's `{id, step}`; the current
 step's body rides each turn as per-turn user content, after the context
 block and outside the untrusted fence). None of them touches a project.
@@ -108,8 +109,8 @@ the budget through `harness_budget.<NAME>`).
 ## Measuring parity
 
 `backend/smoke/run_chat_smoke.py --workflow --profile <id>` drives the same
-battery (start menu, one Choice card, a workflow started and ended, one
-reasoning prompt) on any profile and prints each turn's usage, with the same
+battery (start menu, a single-pick and a multi-select Choice card, a
+workflow started and ended, one reasoning prompt) on any profile and prints each turn's usage, with the same
 meaning on every wire, and whether it showed reasoning;
 `docs/superpowers/runbooks/harness-parity-probe.md` has the recipe and the
 runs. Run it on every wire you can reach before calling a harness
