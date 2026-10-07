@@ -3281,6 +3281,33 @@ def _gridspine_project(db, user, project_id: str):
     return project_registry.resolve_project(db, user, project_id)
 
 
+def _gridspine_project_for_write(db, user, project_id: str):
+    """
+    `_gridspine_project` for a tool that WRITES the project it names: resolve
+    it (ACL), then refuse 409 `project_locked` when another user holds the
+    edit lock on THAT project.
+
+    The campus write tools call their service directly, so the `_check_lock`
+    each HTTP handler in `routers/campus_electrical.py` runs never ran for them
+    (OPEN-ITEMS 14: four tools, added by #79, #84 and #91, each caught on the
+    day it landed by `tests/test_write_surface_lock_policy.py`). The chat
+    seam's `_check_foreign_lock` is the wrong check for them, because it tests
+    the session's ACTIVE project, and these tools take a `project_id` that
+    need not be the active one.
+
+    A separate function, NOT a `write=True` flag on `_gridspine_project`.
+    Reads go through `_gridspine_project` too and must stay open to a
+    non-holder. A flag would also blind the write-surface policy test, which
+    follows calls statically and cannot see an argument's value: every read
+    tool would appear lock-checked. Check-only, never acquire.
+    """
+    from routers.projects import _check_project_lock
+
+    project = _gridspine_project(db, user, project_id)
+    _check_project_lock(db, project, user)
+    return project
+
+
 def gridspine_create_study(name: str, config: dict | None = None) -> dict:
     from services.gridspine_service import create_study as _h
     with _acting() as (db, user):
@@ -3391,7 +3418,7 @@ def campus_get_study(project_id: str) -> dict:
 def campus_draft_campus(project_id: str, overwrite: bool = False) -> dict:
     from services.campus_electrical_service import draft as _h
     with _acting() as (db, user):
-        return _h(_gridspine_project(db, user, project_id), bool(overwrite))
+        return _h(_gridspine_project_for_write(db, user, project_id), bool(overwrite))
 
 
 def campus_run_study(project_id: str, k: int | None = None, pf: float | None = None,
@@ -3405,7 +3432,7 @@ def campus_run_study(project_id: str, k: int | None = None, pf: float | None = N
                 if v is not None}
     settings["pf"] = pf
     with _acting() as (db, user):
-        return _h(_gridspine_project(db, user, project_id), settings)
+        return _h(_gridspine_project_for_write(db, user, project_id), settings)
 
 
 def campus_get_library(project_id: str) -> dict:
@@ -3417,7 +3444,7 @@ def campus_get_library(project_id: str) -> dict:
 def campus_set_library(project_id: str, yaml: str) -> dict:
     from services.campus_electrical_service import save_library as _h
     with _acting() as (db, user):
-        return _h(_gridspine_project(db, user, project_id), yaml)
+        return _h(_gridspine_project_for_write(db, user, project_id), yaml)
 
 
 def campus_get_investment(project_id: str) -> dict:
@@ -3437,7 +3464,7 @@ def campus_extract_grid_code(project_id: str, document_id: str) -> dict:
     # person confirms each limit and publishes, in the panel (plan C10).
     from services.campus_grid_code_service import extract as _h
     with _acting() as (db, user):
-        return _h(_gridspine_project(db, user, project_id), document_id)
+        return _h(_gridspine_project_for_write(db, user, project_id), document_id)
 
 
 def gridspine_assess_connection(project_id: str, bus: str, load_mw: float, load_pf: float = 0.98,

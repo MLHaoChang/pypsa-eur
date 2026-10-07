@@ -131,6 +131,9 @@ _UNDO_EXCLUDE = {"/api/network/undo", "/api/network/undo/info"}
 # `_SOLVER_BLOCKING_PREFIXES` (below) while absent here, so the uploads
 # endpoints are guarded against a solve-in-flight but not against another
 # user's edit lock. Reading any one guard makes coverage look complete.
+# `tests/test_write_surface_lock_policy.py` now asks that question per route
+# and per chat tool, and FAILS on a write path nobody made a decision for, so
+# this comment is no longer the only thing holding the line (OPEN-ITEMS 6).
 # `/api/results/` carries exactly ten write routes: the five adequacy-study
 # STARTS (frontier, mc, fmea_sweep, margin_loop, coupling_loop) and their five
 # aborts, which are exempted above. The starts belong here because each takes
