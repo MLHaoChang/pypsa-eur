@@ -415,6 +415,12 @@ def load_library(version: str = LIBRARY_VERSION) -> Library:
 # the row's own `conversion_factor`.
 
 DEFAULTS_VERSION_PREFIX = "generic-defaults"
+# The defaults pack the guided study reads, PINNED (coordinating session,
+# 2026-10-08): the report states the defaults it used, so the version is an
+# input, never "the newest vendored". A bump is a conscious U2 change with its
+# own parity check; `test_study_ledger_from_pack` fails when a newer vendored
+# pack carries rows `unmapped_pack_rows` would refuse.
+PACK_VERSION = "2026-10-05"
 
 # Pack value key -> the GS identity in `_TECH_KEYS`, in the ledger's row order
 # (the order of the legacy `technology_costs.csv`, so a seeded ledger lists
@@ -524,14 +530,19 @@ def _domain_in(text: str | None, factor: float) -> LedgerDomain | None:
                                 "high": _scaled(d.high, factor)})
 
 
+def unmapped_pack_rows(pack) -> list[str]:
+    """
+    The pack's cost rows the guided ledger neither maps nor names as not
+    seeded. Non-empty refuses the pack (`_pack_technology`): a deliberate
+    tripwire, so a new row is a conscious U2 change, never silently dropped.
+    """
+    mapped = {k for k, _ in _PACK_TECH_ROWS} | set(_PACK_ROWS_NOT_SEEDED)
+    return sorted({v.key for v in pack.cost_values} - mapped)
+
+
 def _pack_technology(pack, finance_year: int) -> tuple[TechnologyRow, ...]:
     by_key = {v.key: v for v in pack.cost_values}
-    mapped = {k for k, _ in _PACK_TECH_ROWS} | set(_PACK_ROWS_NOT_SEEDED)
-    # Strict on the technologies the guided study reads (a new battery or PV
-    # row must be mapped or named not seeded); rows of other technologies
-    # belong to another face (IC's campus equipment, pack 2026-10-07).
-    ours = {by_key[k].technology for k in mapped if k in by_key}
-    stray = sorted(k for k, v in by_key.items() if v.technology in ours and k not in mapped)
+    stray = unmapped_pack_rows(pack)
     if stray:
         raise LibraryError(f"defaults pack {pack.version}: no ledger key for {stray}")
     out: list[TechnologyRow] = []
@@ -633,7 +644,7 @@ def _finance_spec(v) -> dict[str, Any]:
 
 
 @functools.lru_cache(maxsize=4)
-def _load_defaults(version: str | None) -> Library:
+def _load_defaults(version: str) -> Library:
     from services.library.defaults_pack.loader import load_defaults_pack
 
     pack = load_defaults_pack(version)
@@ -669,12 +680,13 @@ def load_defaults(version: str | None = None) -> Library:
     """
     The guided defaults read from IC's generic defaults pack (U2 WP3), as the
     `Library` view `seed_ledger` / `reseed_ledger` / `reset_rows` and
-    `packs.build_site_network` take. `version` None is the newest shipped
-    pack; an unknown one is refused by the pack loader (nothing is fetched).
-    Its `version` (and a seeded ledger's `ledger_version`) reads
+    `packs.build_site_network` take. `version` None is the pinned
+    :data:`PACK_VERSION`, never the newest shipped pack; an unknown one is
+    refused by the pack loader (nothing is fetched). Its `version` (and a
+    seeded ledger's `ledger_version`) reads
     ``"generic-defaults <pack version> <pack hash[:12]>"``.
     """
-    return _load_defaults(version)
+    return _load_defaults(version or PACK_VERSION)
 
 
 def _engine_rows(intake: Mapping[str, Any], tariff: Tariff, tariff_provenance: str,

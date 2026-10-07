@@ -279,49 +279,89 @@ def test_a_reseed_re_derives_a_supplied_tariffs_prices(defaults):
 
 
 
-@pytest.fixture(autouse=False)
+
+@pytest.fixture()
 def _uncached():
+    _L()._load_defaults.cache_clear()
     yield
     _L()._load_defaults.cache_clear()  # never leave a patched pack in the cache
-
-
-def _pack_with(extra):
-    from services.library.defaults_pack.loader import load_defaults_pack
-
-    pack = load_defaults_pack()
-    return pack.model_copy(update={"cost_values": [*pack.cost_values, *extra]})
 
 
 def _row(**update):
     from services.library.defaults_pack.loader import load_defaults_pack
 
-    return load_defaults_pack().cost_values[0].model_copy(update=update)
+    return load_defaults_pack(_L().PACK_VERSION).cost_values[0].model_copy(update=update)
 
 
-def test_rows_of_technologies_the_guided_study_does_not_use_are_left_to_their_face(
-        monkeypatch, _uncached):
+def test_the_defaults_are_read_from_the_pinned_pack_never_the_newest(monkeypatch, _uncached):
     """
-    IC's pack 2026-10-07 adds campus equipment (`transformer.*`, `cable.*`, on
-    the bases `lump`/`per_km`/`per_bay`). The guided study prices a battery
-    and PV, so those rows are not its to map: the defaults still load, row
-    for row as without them. The strict check stays on the technologies it
-    does read (next test).
+    Coordinating session, 2026-10-08: the report states the defaults it used,
+    so the pack version is an input. A newer vendored pack (IC's 2026-10-07
+    adds campus equipment) is not read until U2 bumps the pin.
     """
     from services.library.defaults_pack import loader
 
-    want = [(r.key, r.value) for r in _L().load_defaults().technology]
-    pack = _pack_with([_row(key="transformer.tx_33_11.overnight", technology="transformer",
-                            part=None)])
-    monkeypatch.setattr(loader, "load_defaults_pack", lambda version=None: pack)
-    _L()._load_defaults.cache_clear()
-    assert [(r.key, r.value) for r in _L().load_defaults().technology] == want
+    real, asked = loader.load_defaults_pack, []
+
+    def spy(version=None):
+        asked.append(version)
+        return real(version)
+
+    monkeypatch.setattr(loader, "load_defaults_pack", spy)
+    lib = _L().load_defaults()
+    assert asked == [_L().PACK_VERSION] == ["2026-10-05"]
+    assert lib.version.startswith(f"generic-defaults {_L().PACK_VERSION} ")
 
 
-def test_an_unmapped_row_of_a_technology_the_study_reads_is_still_refused(monkeypatch, _uncached):
-    from services.library.defaults_pack import loader
+def test_an_unmapped_pack_row_is_refused_whatever_its_technology():
+    """The tripwire stays strict: a battery row and a campus row are both refused."""
+    from services.library.defaults_pack.loader import load_defaults_pack
 
-    pack = _pack_with([_row(key="battery.power.augmentation")])
-    monkeypatch.setattr(loader, "load_defaults_pack", lambda version=None: pack)
-    _L()._load_defaults.cache_clear()
-    with pytest.raises(_L().LibraryError, match="battery.power.augmentation"):
-        _L().load_defaults()
+    pack = load_defaults_pack(_L().PACK_VERSION)
+    for extra in (_row(key="battery.power.augmentation"),
+                  _row(key="transformer.tx_33_11.overnight", technology="transformer",
+                       part=None)):
+        bumped = pack.model_copy(update={"cost_values": [*pack.cost_values, extra]})
+        assert _L().unmapped_pack_rows(bumped) == [extra.key]
+        with pytest.raises(_L().LibraryError, match=extra.key.replace(".", r"\.")):
+            _L()._pack_technology(bumped, 2020)
+
+
+
+def _bump_blocker(newest: str, pack) -> str | None:
+    """The bump tripwire's message, or None when the pin is safe."""
+    if newest <= _L().PACK_VERSION:
+        return None
+    stray = _L().unmapped_pack_rows(pack)
+    if not stray:
+        return None
+    return (f"defaults pack {newest} is vendored, newer than the guided study's pin "
+            f"{_L().PACK_VERSION}, and has {len(stray)} row(s) the guided ledger does not "
+            f"map (first: {stray[:5]}). Map them or name them in _PACK_ROWS_NOT_SEEDED, then "
+            f"bump services/study/library.PACK_VERSION and re-run the U2 parity tests.")
+
+
+def test_a_newer_vendored_pack_is_noticed_before_the_pin_is_bumped():
+    """
+    The bump tripwire: when the newest vendored pack is newer than the pin
+    and carries rows the guided ledger would refuse, fail here, by name, so
+    the next pack is a conscious U2 change (map or name the rows, bump
+    `PACK_VERSION`, re-run the WP0 parity) rather than a silent one.
+    """
+    from services.library.defaults_pack.loader import available_versions, load_defaults_pack
+
+    newest = available_versions()[-1]
+    message = _bump_blocker(newest, load_defaults_pack(newest))
+    assert message is None, message
+
+
+def test_the_bump_tripwire_fires_on_a_newer_pack_with_unmapped_rows():
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    pack = load_defaults_pack(_L().PACK_VERSION)
+    campus = _row(key="transformer.tx_33_11.overnight", technology="transformer", part=None)
+    newer = pack.model_copy(update={"cost_values": [*pack.cost_values, campus]})
+    message = _bump_blocker("2026-10-07", newer)
+    assert message and "2026-10-07" in message and "transformer.tx_33_11.overnight" in message
+    assert _bump_blocker("2026-10-07", pack) is None           # newer, nothing unmapped
+    assert _bump_blocker(_L().PACK_VERSION, newer) is None     # the pin itself: refused at load
