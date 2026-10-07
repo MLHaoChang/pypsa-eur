@@ -131,6 +131,26 @@ def _build_iteration_snapshots(n, current_period, all_periods, cfg):
     return combined, (overrides if not overrides.empty else None)
 
 
+def _column_weight_overrides(sw, overrides, cols) -> dict:
+    """Per weighting column, the representative weights to write.
+
+    ``overrides`` is cluster count × each step's ``objective`` weight
+    (``time_aggregation_service``). Each column gets count × its OWN step
+    weight, so a network whose columns differ keeps them apart: the Energy
+    Hub templates weight ``objective`` 8760/168 but ``stores`` 1 h, the
+    elapsed hours of the state-of-charge balance, and writing the objective
+    weight there moved 52 h of energy per hourly dispatch. Equal columns
+    get ``overrides`` unchanged. A step with zero objective weight has no
+    count to recover; it keeps ``overrides`` as before.
+    """
+    idx = overrides.index
+    ov = overrides.astype(float)
+    obj = sw.loc[idx, "objective"].astype(float)
+    out = {}
+    for col in cols:
+        ratio = (sw.loc[idx, col].astype(float) / obj.where(obj != 0)).fillna(1.0)
+        out[col] = ov * ratio
+    return out
 
 
 def _clear_myopic_build_periods(n) -> None:
@@ -795,10 +815,13 @@ def _run_myopic_foresight(
                 future_idx = sw.index[future_mask]
                 target_idx = weight_overrides.index.intersection(sw.index)
                 if len(target_idx) > 0 and weight_cols:
+                    # Computed before the loop below rewrites `objective`.
+                    col_overrides = _column_weight_overrides(
+                        sw, weight_overrides.loc[target_idx], weight_cols)
                     for col in weight_cols:
                         orig = sw.loc[future_idx, col].copy()
                         sw.loc[future_idx, col] = 0.0  # zero EVERY future-period snapshot
-                        sw.loc[target_idx, col] = weight_overrides.loc[target_idx].astype(float)
+                        sw.loc[target_idx, col] = col_overrides[col]
                         # Single undo entry per column covers both the zero
                         # and the overlay — restoring the original future
                         # weights wipes both transforms in one step.
