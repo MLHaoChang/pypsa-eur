@@ -119,8 +119,6 @@ def _apply_merit_order_correction(n, prices):
     one — the latent drift flagged under "Known limitations" in
     `docs/superpowers/findings/2026-08-03-compare-tab-correctness.md`.
     """
-    import pandas as _pd
-
     prices = prices.fillna(0.0)
     try:
         gens = n.generators
