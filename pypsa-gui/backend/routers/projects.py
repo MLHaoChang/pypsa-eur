@@ -102,6 +102,24 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
                  # `test_library_bundle_pins` pins it equal to SIDECAR_NAME.
                  "library_refs.json")
 
+# The campus electrical study's inputs and investment results (plan C9), under
+# `campus_electrical/`: the campus description, the asset library (the
+# project's copy, and the one the last run used) and what the run bought, its
+# cost, its re-checked compliance and who owns the PCC switchgear. Literals,
+# for the reason above; `test_bundle_campus` pins them to the service's
+# constants. Exported and imported with the bundle, each only when it exists.
+# The grid-code documents and drafts are NOT carried: a licensed text stays with
+# its licensee. Not copied by Save-As, snapshots or forks.
+_BUNDLE_CAMPUS_FILES = (
+    "campus_electrical/campus_input.yaml",
+    "campus_electrical/campus_assets.yaml",
+    "campus_electrical/run/campus_assets_used.yaml",
+    "campus_electrical/run/campus_investment.csv",
+    "campus_electrical/run/campus_cost.csv",
+    "campus_electrical/run/campus_compliance_invested.csv",
+    "campus_electrical/run/campus_invest_scope.json",
+)
+
 # Per-project subdirectories that travel alongside the bundle FILES on every
 # project-to-project transition. Chatbot uploads (Phase A) live here under
 # `uploads/<file_id>/`. The transition table (Save-As, Save-a-Copy, scenario
@@ -1050,6 +1068,10 @@ async def import_bundle(
             # `zf.read(fname)` is fully evaluated first, so that hazard never
             # existed at this call. It DOES exist at the `copy2` site below,
             # which opens the destination before reading the source.
+            atomic_write_bytes(dest / fname, zf.read(fname))
+    for fname in _BUNDLE_CAMPUS_FILES:
+        if fname in members:
+            (dest / fname).parent.mkdir(parents=True, exist_ok=True)
             atomic_write_bytes(dest / fname, zf.read(fname))
     # Chatbot uploads (Phase A) — extract any `uploads/...` entries the
     # exporting GUI included. Each archive member's path is verified to
@@ -3584,6 +3606,10 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:
         for fname in _BUNDLE_FILES:
             p = src / fname
             if p.exists():
+                zf.write(p, arcname=fname)
+        for fname in _BUNDLE_CAMPUS_FILES:
+            p = src / fname
+            if p.is_file():
                 zf.write(p, arcname=fname)
         # Chatbot uploads (Phase A) — locked decision row 6: uploads/ travels
         # with the bundle. Walk each _BUNDLE_DIRS recursively so an exported
