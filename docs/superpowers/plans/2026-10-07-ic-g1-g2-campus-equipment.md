@@ -40,49 +40,95 @@ campus session's answer), the campus mapping from `_investment` rows (campus sid
 
 ## 3. Conventions
 
-- **G-1. A new version, never an edit.** `versions/2026-10-07/` copies every 2026-10-05 file byte for byte except
-  `manifest.json` (version, a `campus_equipment` entry in `seeded_from`) and `values.csv` (the 2026-10-05 rows
-  unchanged, then the campus rows). Both versions are hash-pinned; 2026-10-05 keeps its pin. The latest version
-  becomes 2026-10-07; every existing test that pins 2026-10-05 names it explicitly.
+- **G-1. A new version, never an edit.** `versions/2026-10-07/` copies every 2026-10-05 file except:
+  `manifest.json` (version; a `campus_equipment` entry in `seeded_from` with the campus YAML's path and **sha256**);
+  `values.csv` (the 2026-10-05 rows unchanged, then the campus rows); `finance.yaml` (only its comments and
+  `currency_year_source`: rows now state their own money year, review B4); and any "2026-10-05" in the copied
+  `tariffs.json` / `finance.yaml` comments. Both versions are hash-pinned; 2026-10-05 keeps its pin; the latest
+  version becomes 2026-10-07. Two existing tests change with it (review B3): the new manifest is listed in
+  `smoke/check_bundle.py` (`test_library_export_series.py:217-218` requires every version's manifest there), and
+  `test_energy_hub_class_c_authoring.py`'s fake root gains the 2026-10-07 manifest. The README states that each
+  row carries its own `currency_year` (2020 for the catalogue rows, 2026 for the campus rows) and gains the new
+  units.
 - **G-2. Bases.** `basis` gains `"lump"` (overnight unit `EUR/unit`) and `"per_bay"` (`EUR/bay`); `per_km` already
-  exists (`EUR/km`). `UNIT_CONVERSIONS` gains `("EUR", "EUR/unit")`, `("EUR/km", "EUR/km")`, `("EUR/bay", "EUR/bay")`
+  exists (`EUR/km`, `loader.py:164`). `UNIT_CONVERSIONS` gains `("EUR", "EUR/unit")`, `("EUR/km", "EUR/km")`, `("EUR/bay", "EUR/bay")`
   and `("share/year", "share/year")`, each 1.0.
 - **G-3. Rows.** Per campus entry, `technology = "<kind>.<id lowercased>"` (`kind` ∈ transformer, cable,
   capacitor_bank, shunt_reactor, statcom, switchgear; e.g. `transformer.tr_132_33_40`), one part `investment`, three
   rows: `overnight` (the capex), `lifetime` (`lifetime_a`), `fom_share` (`opex_frac`). `source = "assumed (gridspine
   campus_assets.yaml placeholder)"`, `source_year = 2026`, `currency = EUR`, `currency_year = 2026`,
   `price_basis = real`, `illustrative = true`, `source_technology` = the campus `id`, `note` = the YAML's note where
-  it has one. Transcribed by a one-off script whose output is checked in (the script is not shipped); a test reads
-  the YAML and asserts every entry's three numbers equal the pack's, so the two cannot drift silently.
+  it has one; a `label` per row; the three rows share `basis` and `source_technology` (`loader.py:835-838`);
+  domains `[0, inf)` overnight, `[1, inf)` lifetime, `[0, 1]` fom_share. The key rule `<kind>.<id lowercased>` is
+  this plan's (§8's `transformer.132_33.40mva` was an example); the campus session is told. Transcribed by a one-off
+  script whose output is checked in (not shipped). A parity test checks the 2026-10-07 rows against the YAML **as
+  pinned by the manifest's sha256**: if the campus YAML changes, the test says "a price change needs a new pack
+  version" instead of failing on a number (review note 8).
 - **G-4. `ExtraOwnerAsset`** (in `services/finance/case.py`, frozen facade):
-  `(name, kind, basis, quantity, parts: tuple[UpfrontPart, ...], build_year, source, source_hash)`; validated in
-  `__post_init__`: `kind` in the six, `basis` in `lump | per_km | per_bay`, `quantity > 0` and finite, at least one
-  part, `build_year` a plausible year (the S0b bounds 1900..2200), `name` non-empty.
+  `(name, kind, basis, quantity, parts: tuple[UpfrontPart, ...], build_year, source, source_hash)`.
+  - **No solver import (review B1).** `asset_schema.access` imports `services.solver.periodized_costs`, and the IC
+    tripwire forbids the finance package from loading the solve stack
+    (`test_investment_case_tripwires.py:191-210`). `case.py` names `UpfrontPart` only under `TYPE_CHECKING` and
+    reads the parts by attribute (`name`, `upfront_per_unit`, `lifetime`, `fom_share`,
+    `derived_from_capital_cost`), so an `asset_schema` `UpfrontPart` is accepted as is and `asset_schema` (another
+    session's package) is not edited.
+  - `__post_init__` raises `ValueError` naming a code: `extra_asset_invalid:<name>:<field>` when `name` is empty,
+    `kind` is not one of the six, `basis` not `lump | per_km | per_bay`, `quantity` not finite and > 0 (and not a
+    whole number for `lump` / `per_bay`), there is no part, `build_year` is outside 1900..2200, `source_hash` is not
+    16 hex characters, or a part's lifetime is None, NaN, infinite or below 1 year, its `upfront_per_unit` is not
+    finite or below 0, or its `fom_share` is outside [0, 1] (review B5; §8: every part needs a finite typed
+    lifetime).
 - **G-5. Into the case.** `build_finance_case(..., extra_assets=())`; each extra asset becomes one `AssetFinance`
   appended after the network assets:
-  - `component = "campus:<kind>"`, `carrier = None` (no incentive), `lifetime_years` = the longest finite part life
-    (None if none);
+  - `component = "campus:<kind>"`, `carrier = None`, `lifetime_years` = the longest part lifetime (all finite by
+    G-4);
   - `parts` = one `AssetPart` per `UpfrontPart` with `overnight_cost = upfront_per_unit × quantity` and the part's
     lifetime and `fom_share`; `overnight_cost` = their sum (the S0b check holds by construction);
   - a part with `derived_from_capital_cost=True` is refused `extra_asset_derived_upfront:<name>` (S1: a
     capital-cost-derived upfront is not established; here it is a caller error, so it refuses).
-- **G-6. Fixed O&M.** The adapter adds, per extra asset, a fixed-opex template line of `Σ fom_share × overnight_cost`
-  per operating year, payer the owner, `source = "extra_asset_fom"`, `source_id = <name>`, escalated by the `opex`
-  class like any fixed opex. A part with `fom_share = None` reads `fom_share_missing:<name>:<part>` (opex not
-  established for that line).
-- **G-7. COD.** One COD rule for all owner assets (S0b `_cod`): an extra asset's COD is `fin.cod_by_asset[name]`, else
-  1 January of `build_year` (`cod_from_build_year:<name>`). A COD different from the network assets' COD is
-  `cod_mismatch` when earlier and `extra_asset_staged_build:<name>` when later (until P5); never moved.
+  - **Money year (review B4).** Upfront costs are in the case's `fin.currency` and `fin.currency_year`; the caller
+    converts. The report block states it; the route builder must refuse or convert when the campus library's
+    `currency` / `price_year` differ from the case's.
+  - **Incentives (review B2).** `build_incentives` excludes extra assets before its carrier checks (they would read
+    `asset_carrier_missing`, or enter an ITC/grant basis when no `asset_classes` are set), disclosed
+    `incentive_excludes_extra_asset:<name>`.
+  - **Tax (review B8).** An extra asset's depreciation class comes from `fin.depreciation_class_by_asset[name]`; with
+    none, post-tax reads `tax_input_missing:depreciation_class:<name>` (the existing rule, no default class).
+  - **Lifetime under `replacement_rule="fixed"`.** The existing `asset_lifetime_short` rule applies (a 20-y STATCOM on
+    a 25-y axis is refused unless a `replacement_capex` entry names it); under `part_lifetimes` it is replaced.
+  - **Field.** `FinanceCase.extra_assets: tuple[ExtraOwnerAsset, ...] = ()`, appended last; `_canon` omits an empty
+    tuple so a case without extras keeps its hash.
+- **G-6. Fixed O&M (review B6).** Network FOM reaches the case from `n.statistics.fom` as a ledger line
+  (`value_flows.py:105`); an extra asset has none, so the adapter adds one `CashflowLine` per extra asset and template:
+  `key = f"extra_asset_fom:{name}"`, `stream = "fom"` (the closed `value_stream` set, `models/finance.py:335-342`;
+  `fom` maps to `opex`, `cashflow.py:38`), amount `−Σ fom_share × overnight_cost` (the owner's cost), `esc_class =
+  "opex"`, `money_year = base_year`, `period = k`. It is appended **after** `_scale`, so an annualised template does
+  not multiply it (`finance_case.py:1478`), and it never enters the counterfactual. (`fom_share` is never None, G-4.)
+- **G-7. COD (review B7, §8 compares years).** The case COD comes from the network owner assets as today
+  (`_cod`). An extra asset with a typed `fin.cod_by_asset[name]` must equal the case COD (`cod_mismatch`
+  otherwise, `timeline.py:78-84`). Without one it is compared **by year**: `build_year` = the case COD's year is
+  accepted at the case COD (`cod_from_build_year:<name>`); an earlier year is `cod_mismatch`; a later one is
+  `extra_asset_staged_build:<name>` (until P5). Never moved.
 - **G-8. Counterfactual.** Extra assets never enter the counterfactual (default A): the counterfactual is built from
   the network as today; the extra assets are only on the project side.
 - **G-9. Refusals.** A name equal to an owner-owned network component, or duplicated among the extras, is refused
-  `extra_asset_duplicates_network_asset:<name>` / `extra_asset_duplicate:<name>`.
-- **G-10. Report and hash.** The report gains `extra_assets` (per asset: name, kind, basis, quantity, overnight,
-  parts, build year, source, source_hash) under its own heading; the xlsx About sheet lists them; the case hash covers
-  them (a field of the case). Replacement lines and terminal-value terms of extra assets carry their names, as for any
-  part (S9).
+  `extra_asset_duplicates_network_asset:<name>` / `extra_asset_duplicate:<name>`. A `transformer` or `cable` extra
+  when the owner also owns a network Transformer or Line (investable, `finance_case.py:163-164`) is flagged
+  `extra_asset_may_double_count:<name>` (not refused: names differ, the overlap is a judgement).
+- **G-10. Report and hash.** The report payload gains `extra_assets` (per asset: name, kind, basis, quantity, the
+  overnight cost **read from `case.assets`** so `scale_capex` is reflected, parts, build year, source, source_hash,
+  money-year statement); the xlsx About sheet lists them. There is no frontend change, so the "own heading" exists in
+  the payload and the xlsx only; readers use `.get` (old payloads lack the key). The case hash covers them.
+  Replacement lines and terminal-value terms of extra assets carry their names (S9). The terminal basis text says the
+  extra assets' terms are valued at the case's LP basis but were never charged by the LP; GS's by-construction
+  identity does not hold with extras.
 - **G-11. Facade.** `ExtraOwnerAsset` and the new `build_finance_case` keyword join the frozen facade (signature and
   field pins; U1 landing §3 updated).
+- **G-12. For U2 and the route.** "Latest" now carries 81 more technologies on `lump` / `per_km` / `per_bay`: U2
+  filters by basis, and looks a stamped tariff's pack up by its stamp version (`tariff_is_unchanged` against the latest
+  pack returns False for a 2026-10-05 stamp, `loader.py:463-470`). The future campus route must put the extra assets
+  and their `source_hash` into the assumptions digest (`investment_case_runner.py:118-129`), or a changed campus study
+  will not mark a report stale.
 
 ## 4. Work packages, tests first
 
@@ -95,7 +141,8 @@ Tests (`tests/test_library_defaults_pack_campus.py`):
   (SG_132_31p5: 450,000 EUR/bay).
 - The YAML ↔ pack parity test over all 81 entries; every campus row is `illustrative` with the stated source.
 - The loader refuses a `lump` part whose overnight unit is not `EUR/unit` (the existing basis/unit rule extended).
-- The existing pack tests pass, naming 2026-10-05 where they pin it.
+- Campus money rows carry `currency_year` 2026; catalogue rows keep 2020.
+- The existing pack tests pass, including `check_bundle` listing both manifests and the class-C authoring fake root.
 
 ### WP-G2 (G-4 … G-11)
 Tests (`tests/test_finance_case_extra_assets.py`):
@@ -107,9 +154,15 @@ Tests (`tests/test_finance_case_extra_assets.py`):
 - FOM: the `extra_asset_fom` line equals Σ fom_share × overnight per year, escalated by `opex`.
 - Replacements and TV under `part_lifetimes` + `remaining_life_annuity` include the extra parts (a 25-y capacitor
   bank on a 30-y axis is replaced in its last service year; its remaining life is valued).
-- COD: `build_year` = the network COD year → accepted with `cod_from_build_year`; earlier → `cod_mismatch`; later →
-  `extra_asset_staged_build`.
-- Refusals: derived upfront, duplicate names, a name equal to a network owner asset, an invalid kind/basis/quantity.
+- COD with a network COD of 2027-07-01: `build_year` 2027 → accepted at 2027-07-01 (`cod_from_build_year`); 2026 →
+  `cod_mismatch`; 2028 → `extra_asset_staged_build`; a typed entry ≠ the case COD → `cod_mismatch`.
+- FOM with an annualised template and a two-period network: one unscaled line per period; none in the counterfactual.
+- Incentives: with and without `asset_classes`, the extras are excluded (flagged) and the network battery's incentive
+  is unchanged. Tax: missing class → `tax_input_missing:depreciation_class:<name>`; set → depreciated.
+- Under `fixed`: a 20-y STATCOM on a 25-y axis → `asset_lifetime_short`; with a `replacement_capex` entry → accepted.
+- Refusals and validation: each `extra_asset_invalid:<name>:<field>`, derived upfront, duplicate names, a name equal to
+  a network owner asset; `extra_asset_may_double_count` with an owned network Line.
+- Importing `services.finance` still does not load `services.solver` (the tripwire).
 - Report `extra_assets` block and the xlsx row; the case hash changes when an extra asset changes.
 - Facade pins.
 
@@ -122,4 +175,11 @@ owner-merged.
 
 ## 6. Review record
 
-(empty)
+- **Plan round 1 (71fa630): PASS WITH CONDITIONS.** §2 facts confirmed (81 entries: 29 transformers, 12 cables,
+  9 capacitor banks, 9 reactors, 9 STATCOMs, 13 switchgear; unique ids; the hand numbers). B1 `UpfrontPart` import
+  loads the solve stack (tripwire); B2 `carrier=None` is not "no incentive"; B3 two existing tests need the new
+  manifest; B4 mixed money years unstated; B5 part lifetimes unvalidated; B6 the FOM line unspecified (closed
+  streams, `_scale`); B7 COD compared by date, §8 by year; B8 tax class for extras. All taken into G-1 … G-12 and the
+  tests, plus notes: an explicit `extra_assets` field hashed only when non-empty, the key rule recorded, a
+  may-double-count flag, overnight read from `case.assets`, the terminal basis text, validation codes, row domains,
+  the sha256-pinned parity test, U2 and route notes.
