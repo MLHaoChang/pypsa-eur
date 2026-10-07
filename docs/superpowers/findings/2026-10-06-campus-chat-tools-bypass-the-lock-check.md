@@ -69,9 +69,18 @@ subject  campus_draft_campus(project_id=<p>, overwrite=True) -> reached ce.draft
 subject  campus_run_study(project_id=<p>)                    -> reached ce.run({'pf': None})
 ```
 
+**A fourth tool, a day later.** #91 (campus investment, a per-project asset
+library) added `campus_set_library`. `PUT /{name}/library` runs `_check_lock`
+before `campus_electrical_service.save_library`, while the tool calls
+`save_library` directly. `save_library` replaces the project's asset library
+wholesale, so this one is a destructive overwrite, like `campus_draft_campus`.
+The write-surface test caught it when master (with #91) was merged into #80 on
+2026-10-07. Reproduced the same way: for a non-holder, HTTP PUT returned 409,
+and the tool reached `save_library` with the intruder's YAML.
+
 ## Why it keeps happening
 
-This is the fifth occurrence of one shape (items 12 and 13, the stress and
+This is the fifth occurrence of one shape (now with four tools in this item alone) (items 12 and 13, the stress and
 worksheet PUTs in `68e5f62`, and now this one). A REST handler is the only
 place that checks the lock, and a second caller of the same service skips
 the handler. The chat tools are that second caller every time. #76's
@@ -92,11 +101,11 @@ handler with `_route`.
 
 ## Fix criteria
 
-* Under a foreign lock on the project named by `project_id`, all three tools raise
+* Under a foreign lock on the project named by `project_id`, all four tools raise
   409 `project_locked`, in the same run as the HTTP control.
 * The holder's own calls succeed.
 * A test asserts that `campus_input.yaml` is unchanged after a refused
   `campus_draft_campus(overwrite=True)` (the property), not only that a 409 was
   raised.
-* The three `KNOWN_GAPS` entries in `tests/test_write_surface_lock_policy.py`
+* The four `KNOWN_GAPS` entries in `tests/test_write_surface_lock_policy.py`
   are deleted. That test fails until they are.

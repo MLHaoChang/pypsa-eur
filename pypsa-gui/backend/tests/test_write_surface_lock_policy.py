@@ -249,6 +249,7 @@ KNOWN_GAPS: dict[str, str] = {
     "campus_draft_campus": _ITEM_14,
     "campus_run_study": _ITEM_14,
     "campus_extract_grid_code": _ITEM_14,  # #84, same shape, found the day it merged
+    "campus_set_library": _ITEM_14,  # #91, replaces the project's asset library
     "clear_uploads": _ITEM_13,
     "export_to_excel": _ITEM_13,
     "export_to_csv": _ITEM_13,
