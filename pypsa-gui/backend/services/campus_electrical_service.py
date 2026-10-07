@@ -42,9 +42,12 @@ The functions:
   The library a run used is kept as ``run/campus_assets_used.yaml``, so a
   later change to the library flags the results as stale.
 * ``get_library``, ``save_library``, ``reset_library``: the asset library.
-* ``extra_owner_assets``: what the last investment run bought, as owner assets
-  for the investment case (plan, part three D2). Read only; ``get_state``
-  carries only their count, ``owner_assets_count``.
+* ``extra_owner_assets``: what the last investment run bought, as the extra
+  owner assets of the investment case (plan, part three D2), in the shape of the
+  IC's ``ExtraOwnerAsset`` (``services/finance/case.py``, to be added by the IC
+  session). ``campus_study_hash`` identifies the study they come from;
+  ``owner_assets_response`` is the route's body (assets, hash, stale). Read only;
+  ``get_state`` carries only the count, ``owner_assets_count``.
 * ``start_milp_job``, ``milp_job_status``, ``cancel_milp_job``: the joint
   optimisation (plan C11's MILP) as a background job, in the report job's
   shape (``services/reports/report_job.py``): one job at a time on a daemon
@@ -494,12 +497,76 @@ def _priced(lib: dict) -> dict:
             for entries in lib.values() if isinstance(entries, list) for e in entries}
 
 
+#: The kinds the investment table writes (``gridspine/static/campus_invest.py``: the item kind of a
+#: candidate, one row per item) mapped to the investment case's vocabulary. Explicit, so that a kind the
+#: engine adds later is refused (422) rather than passed on under a name the IC does not know.
+IC_KIND = {
+    "transformer": "transformer",
+    "cable": "cable",
+    "capacitor_bank": "capacitor_bank",
+    "shunt_reactor": "shunt_reactor",
+    "statcom": "statcom",
+    "switchgear": "switchgear",
+}
+#: ``kind`` to the IC's ``basis``; anything not listed is a ``lump``.
+_BASIS = {"cable": "per_km", "switchgear": "per_bay"}
+OWNER_ASSET_SOURCE = "campus_study"
+
+
+def campus_study_hash(project):
+    """The first 16 hex characters of a sha256 over the files of the last
+    investment run, or None when the project has no investment run. In this
+    order: ``campus_investment.csv``, ``campus_assets_used.yaml``, the run's
+    campus file (``campus.yaml``, what ``prepare_campus`` writes) and, when
+    present, ``campus_cost_basis.json``; each as its file name, a NUL byte and
+    its bytes, so file boundaries are unambiguous. The campus file is hashed
+    when present (a real run always has it). The same for every entry of a
+    run; another study, library, rate or campus gives another one."""
+    require_capacity_expansion(project)
+    run_dir = campus_dir(project) / "run"
+    names = (cs.INVESTMENT_CSV, USED_LIBRARY_FILE, cs.CAMPUS_YAML, COST_BASIS_FILE)
+    if not (run_dir / names[0]).is_file() or not (run_dir / names[1]).is_file():
+        return None
+    h = hashlib.sha256()
+    for name in names:
+        path = run_dir / name
+        if path.is_file():
+            h.update(name.encode() + b"\0" + path.read_bytes())
+    return h.hexdigest()[:16]
+
+
 def extra_owner_assets(project) -> list:
-    """What the last investment run bought, as owner assets for the investment
-    case: one entry per purchased item that is neither existing (sunk) nor
-    unresolved. ``[]`` when the project has no investment run (no study, or a
-    run with ``invest`` off); a project of another kind is refused like every
-    other action here.
+    """What the last investment run bought, as the extra owner assets of the
+    investment case (IC): one dict per purchased item that is neither existing
+    (sunk) nor unresolved. ``[]`` when the project has no investment run (no
+    study, or a run with ``invest`` off); a project of another kind is refused
+    like every other action here.
+
+    The TOP-LEVEL keys of an entry are exactly the fields of the IC's
+    ``ExtraOwnerAsset`` (``services/finance/case.py``, a frozen dataclass; the
+    type is the IC's and is added by the IC session, not here), so the IC builds
+    it with ``ExtraOwnerAsset(**{k: d[k] for k in fields})``::
+
+        {"name": "campus:<library_id>#<k>",   # k counts that library id among the entries, from 1
+         "kind": "transformer" | "cable" | "capacitor_bank" | "shunt_reactor" | "statcom" | "switchgear",
+         "basis": "lump" | "per_km" | "per_bay",
+         "quantity": float,   # lump: units; per_km: units x length_km; per_bay: bays (the table's units)
+         "parts": [{"name": "investment", "upfront_per_unit": EUR per basis unit,
+                    "lifetime": years, "fom_share": share}],      # asset_schema.access.UpfrontPart
+         "build_year": int,   # the campus invest_period
+         "source": "campus_study",
+         "source_hash": str,  # campus_study_hash(project): the same for every entry
+         "meta": {"need", "library_id", "units", "length_km", "currency", "price_year",
+                  "provenance", "illustrative"}}
+
+    ``quantity x upfront_per_unit`` is the item's total overnight cost in the
+    library's currency, in the library's price year (no escalation).
+    ``upfront_per_unit`` is the library's ``capex_eur_per_km`` for a cable and
+    ``capex_eur`` otherwise. ``meta`` is what the IC does not take:
+    ``provenance`` is the source tag of that cost in the library (``measured``,
+    ``datasheet`` or ``assumed``) and ``illustrative`` is True when it is
+    ``assumed``. An engine kind that ``IC_KIND`` does not list is refused with
+    422 naming it.
 
     Read from the run directory: ``campus_investment.csv`` (the items, their
     units, cable length and investment period) and ``campus_assets_used.yaml``
@@ -508,23 +575,7 @@ def extra_owner_assets(project) -> list:
     library saved since). Who owns the PCC switchgear
     (``campus_invest_scope.json``) is already settled in the table: when the
     grid operator owns it the engine writes no row for it, so none appears here.
-
-    Each entry::
-
-        {"name": "<need> <library_id>", "need", "kind", "library_id",
-         "units": n, "invest_period": p,
-         "upfront_parts": [{"name": "investment", "upfront": EUR, "lifetime": years, "fom_share": share}],
-         "currency", "price_year", "provenance", "illustrative"}
-
-    ``upfront_parts`` mirrors ``asset_schema.access.UpfrontPart`` (``name``,
-    ``lifetime``, ``fom_share``) but carries the TOTAL overnight cost in the
-    library's currency in ``upfront``, not ``upfront_per_unit``: these items
-    have no per-MW sizing variable. The total is the units times the library's
-    overnight cost (times the cable's km: ``capex_eur_per_km``; for switchgear
-    ``units`` are the bays). ``price_year`` is the library's: the costs are in
-    that year's money, with no escalation. ``provenance`` is the source tag of
-    that cost in the library (``measured``, ``datasheet`` or ``assumed``);
-    ``illustrative`` is True when it is ``assumed``."""
+    The IC route refuses a stale study (``owner_assets_response``'s ``stale``)."""
     require_capacity_expansion(project)
     run_dir = campus_dir(project) / "run"
     table, used = run_dir / cs.INVESTMENT_CSV, run_dir / USED_LIBRARY_FILE
@@ -532,29 +583,56 @@ def extra_owner_assets(project) -> list:
         return []
     lib = cs.load_asset_library(used)
     priced = _priced(lib)
+    digest = campus_study_hash(project)
+    seen: dict = {}
     out = []
     for r in pd.read_csv(table).to_dict(orient="records"):
         if bool(r["existing"]) or r["status"] == "unresolved" or not isinstance(r["library_id"], str):
             continue
         if r["library_id"] not in priced:
             raise HTTPException(status_code=422, detail=f"{r['need']}: {r['library_id']} is not in the library the run used")
-        entry, cost = priced[r["library_id"]]
+        if r["kind"] not in IC_KIND:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{r['need']}: the investment table has an item of kind {r['kind']!r}, which the investment "
+                       f"case does not know (known: {', '.join(IC_KIND)})")
+        kind = IC_KIND[r["kind"]]
+        basis = _BASIS.get(kind, "lump")
+        entry, _ = priced[r["library_id"]]
+        cost = "capex_eur_per_km" if basis == "per_km" else "capex_eur"
+        if cost not in entry:
+            raise HTTPException(status_code=422, detail=f"{r['need']}: {r['library_id']} has no {cost} in the library the run used")
         units = int(r["units"])
         length = r["length_km"]
-        km = float(length) if cost == "capex_eur_per_km" else 1.0
-        if cost == "capex_eur_per_km" and (not isinstance(length, (int, float)) or math.isnan(length)):
+        if basis == "per_km" and (not isinstance(length, (int, float)) or math.isnan(length)):
             raise HTTPException(status_code=422, detail=f"{r['need']}: a cable row has no length_km")
+        quantity = units * float(length) if basis == "per_km" else float(units)
         source = entry[cost]["source"]
+        seen[r["library_id"]] = seen.get(r["library_id"], 0) + 1
         out.append({
-            "name": f"{r['need']} {r['library_id']}", "need": r["need"], "kind": r["kind"],
-            "library_id": r["library_id"], "units": units, "invest_period": int(r["invest_period"]),
-            "upfront_parts": [{"name": "investment", "upfront": units * float(entry[cost]["value"]) * km,
-                               "lifetime": float(entry["lifetime_a"]["value"]),
-                               "fom_share": float(entry["opex_frac"]["value"])}],
-            "currency": lib["currency"], "price_year": lib["price_year"],
-            "provenance": source, "illustrative": source == "assumed",
+            "name": f"campus:{r['library_id']}#{seen[r['library_id']]}", "kind": kind, "basis": basis,
+            "quantity": quantity,
+            "parts": [{"name": "investment", "upfront_per_unit": float(entry[cost]["value"]),
+                       "lifetime": float(entry["lifetime_a"]["value"]),
+                       "fom_share": float(entry["opex_frac"]["value"])}],
+            "build_year": int(r["invest_period"]), "source": OWNER_ASSET_SOURCE, "source_hash": digest,
+            "meta": {"need": r["need"], "library_id": r["library_id"], "units": units,
+                     "length_km": float(length) if basis == "per_km" else None,
+                     "currency": lib["currency"], "price_year": lib["price_year"],
+                     "provenance": source, "illustrative": source == "assumed"},
         })
     return out
+
+
+def owner_assets_response(project) -> dict:
+    """The body of ``GET /api/campus-electrical/{name}/owner-assets``:
+    ``{"assets": extra_owner_assets, "source_hash": campus_study_hash or None,
+    "stale": the results-stale flag of get_state}``. The assets of a stale study
+    are still listed, flagged: the IC refuses to build a case on them."""
+    require_capacity_expansion(project)
+    d = campus_dir(project)
+    return {"assets": extra_owner_assets(project), "source_hash": campus_study_hash(project),
+            "stale": bool(_results(d / "run")) and _stale(project, d)}
 
 
 def draft(project, overwrite: bool = False) -> dict:

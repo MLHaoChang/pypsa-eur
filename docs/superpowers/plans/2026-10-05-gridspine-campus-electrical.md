@@ -638,60 +638,272 @@ The campus side of part three is built on `feat/gridspine-campus-ic-seam`. Words
 
 ### D2 producer: done. The chosen equipment as extra owner assets
 
-`campus_electrical_service.extra_owner_assets(project) -> list[dict]`, read only, from the last investment run: `campus_investment.csv`, `campus_assets_used.yaml` (the library the run bought from, not one saved since). Who owns the PCC switchgear (`campus_invest_scope.json`) is already settled in the table: with `grid_operator` the engine writes no row for it, so no entry appears. `GET /api/campus-electrical/{name}/owner-assets` returns the list, and `get_state` carries `owner_assets_count`. It is `[]` when the project has no investment run.
+`campus_electrical_service.extra_owner_assets(project) -> list[dict]`, read only, from the last investment run: `campus_investment.csv`, `campus_assets_used.yaml` (the library the run bought from, not one saved since). Who owns the PCC switchgear (`campus_invest_scope.json`) is already settled in the table: with `grid_operator` the engine writes no row for it, so no entry appears. `GET /api/campus-electrical/{name}/owner-assets` returns `{"assets": [...], "source_hash": str | None, "stale": bool}` (`stale` is the results-stale flag of `get_state`), and `get_state` carries `owner_assets_count`. The assets are `[]` and `source_hash` is `None` when the project has no investment run.
 
-**One entry per purchased item that is neither existing nor unresolved.** This is the proposed contract for the engine session's hook in `build_finance_case`, which this branch does not touch:
+**One entry per purchased item that is neither existing nor unresolved**, in the contract below: agreed with the IC session, owner-approved 2026-10-07. The IC session adds the type (`services/finance/case.py ExtraOwnerAsset`) and the `extra_assets` hook in `build_finance_case`; the investment-case route calls `campus_electrical_service.extra_owner_assets` and refuses a stale study. This branch adds neither. The top-level keys of an entry are exactly the type's fields, so the IC can build it with `ExtraOwnerAsset(**{k: d[k] for k in fields})`; everything else is under `meta`.
+
+```python
+@dataclass(frozen=True)
+class ExtraOwnerAsset:                  # the IC's, not ours
+    name: str                       # unique in the case, e.g. "campus:TR_132_33_40#1"
+    kind: str                       # transformer | cable | capacitor_bank | shunt_reactor | statcom | switchgear
+    basis: str                      # lump | per_km | per_bay
+    quantity: float                 # units (lump), units x length_km (per_km), bays (per_bay)
+    parts: tuple[UpfrontPart, ...]  # asset_schema.access.UpfrontPart; upfront_per_unit is per basis unit
+    build_year: int                 # the campus invest_period
+    source: str                     # "campus_study"
+    source_hash: str                # sha256[:16] of the solved campus study that chose it
+```
 
 ```json
 {
-  "name": "transformer GRID_IMPORT TR_132_33_63",
-  "need": "transformer GRID_IMPORT",
+  "name": "campus:TR_132_33_63#1",
   "kind": "transformer",
-  "library_id": "TR_132_33_63",
-  "units": 2,
-  "invest_period": 2030,
-  "upfront_parts": [
-    {"name": "investment", "upfront": 5000000.0, "lifetime": 40.0, "fom_share": 0.015}
+  "basis": "lump",
+  "quantity": 2.0,
+  "parts": [
+    {"name": "investment", "upfront_per_unit": 2500000.0, "lifetime": 40.0, "fom_share": 0.015}
   ],
-  "currency": "EUR",
-  "price_year": 2026,
-  "provenance": "assumed",
-  "illustrative": true
+  "build_year": 2030,
+  "source": "campus_study",
+  "source_hash": "3f9a1c5e07b2d864",
+  "meta": {
+    "need": "transformer GRID_IMPORT", "library_id": "TR_132_33_63", "units": 2, "length_km": null,
+    "currency": "EUR", "price_year": 2026, "provenance": "assumed", "illustrative": true
+  }
 }
 ```
 
-- `upfront_parts` mirrors `asset_schema.access.UpfrontPart` (`name`, `lifetime`, `fom_share`) but carries the **total** Overnight cost in `upfront`, not `upfront_per_unit`: these items have no per-MW sizing variable. The total is units × the library's Overnight cost, × km for a cable (`capex_eur_per_km`), and the units of switchgear are its bays.
-- `price_year` is the library's: the money the cost is in. The project's money year, when it differs, is in `results.cost_basis`.
-- `provenance` is the source tag of the cost in the library (`measured`, `datasheet` or `assumed`); `illustrative` is true when it is `assumed`. The shipped library tags every cost `assumed`, so every entry is illustrative today.
+- `name` is `campus:<library_id>#<k>`, k the 1-based occurrence of that library id among the entries, in the table's order: unique in the list.
+- `kind` is the investment table's item kind, mapped explicitly (`IC_KIND`): `transformer`, `cable`, `capacitor_bank`, `shunt_reactor`, `statcom` and `switchgear` are the six kinds the engine writes, and the IC's vocabulary is the same six; any other kind is a 422 that names it.
+- `basis` and `quantity`: a cable is `per_km` with quantity units × `length_km`; switchgear is `per_bay` with the table's units, which are the bays; everything else is a `lump` with quantity = units.
+- `parts` has one part, `investment`. `upfront_per_unit` is the library's Overnight cost **per basis unit** (`capex_eur_per_km` for a cable, `capex_eur` otherwise), not the total: `quantity × upfront_per_unit` is the total, the figure the first draft carried as `upfront`. `lifetime` and `fom_share` are the library's `lifetime_a` and `opex_frac`. Money is in the library's currency and price year; no escalation.
+- `build_year` is the investment period. `source` is `"campus_study"`.
+- `source_hash` is `campus_electrical_service.campus_study_hash(project)`: the first 16 hex characters of a sha256 over `run/campus_investment.csv`, `run/campus_assets_used.yaml`, `run/campus.yaml` and, when present, `run/campus_cost_basis.json`, in that order, each as its file name, a NUL byte and its bytes. The same for every entry of a run; `None` without an investment run. It changes when the campus, the library, the rate or the run does. The IC refuses a stale study (its owner default B) and a `build_year` after the case COD (default C).
+- `meta.price_year` is the library's: the money the cost is in. The project's money year, when it differs, is in `results.cost_basis`.
+- `meta.provenance` is the source tag of the cost in the library (`measured`, `datasheet` or `assumed`); `meta.illustrative` is true when it is `assumed`. The shipped library tags every cost `assumed`, so every entry is illustrative today.
+- A reactive need can give two entries (a capacitor bank and a reactor), each with its own investment period.
+
+### Checks
+
+**Tests.** 35 service cases for D1a and D2 in the IC's shape (most on hand-made run directories with known units, km and bays, plus the real runs), 3 router cases and 4 panel tests; 352 campus cases in the gate. The route inventory (`route_inventory_phase0.txt`) gains exactly the one new route; `/api/chat/workflows`, which the app has and the file lacks, is another PR's and was not added.
+
+**Mutations.** 39 by hand across the campus file, the dispatch and the selector. 26 were caught at once and one, mistyped in the first run, when re-run; tests were added for the 10 survivors (the trim back onto the edge, a saturated STATCOM, the intact margin, an existing pair short of the margin, the grid's bay, the sizing-rule escalation, the directional reactive escalation, the dispatch held in the re-solve, the reactive margin, the STATCOM's fault current), and all are caught now. Two are equivalent: `<` against `<=` on two equal non-zero step distances (an exact float tie), and the early break once the PCC is in the band (the scan cannot then find a better count).
+
+### C9: panel
+
+- **The library editor.** It edits the per-project copy, starting from the shipped default, with a reset.
+- **The investment table and cost summary.** The electrical cost per period is shown next to the hub's system cost from the solved project, and as a total.
+- **Chat tools**, which read and edit the library and read the investment.
+- **The bundle** carries the library used and the investment table.
+
+### C10: grid-code upload and extraction
+
+- **The upload route.** It takes a PDF only, with a size budget, and stores the file in the project.
+- **The extraction.** A service function calls the Anthropic API with the document and a strict output schema; the copilot tool calls the same function.
+- **The draft.** It is validated by the profile loader and saved as a *draft* profile.
+- **The review form.** Limits are confirmed one by one, with the quote shown beside each.
+- **Profiles listed.** Project profiles appear next to the shipped ones in the grid-code picker.
+- **Tests.** They mock the API. A live run happens in a session that has the key.
+
+### C11: MILP with successive linearisation
+
+- **Variables:**
+  - binaries for each discrete option (transformer n × size, STATCOM size, cable size, switchgear rating);
+  - integers for capacitor and reactor steps;
+  - continuous inverter Q per hour and case, inside a polygon of its capability circle.
+- **Linearisation**, per hour and case, around the current AC point:
+  - for continuous Q: sensitivities of bus voltage, PCC Q and branch loading, from the load-flow Jacobian;
+  - for each discrete option: its effect, by finite difference. One AC solve per option and hour is affordable, because options are few.
+- **Objective:** minimum annualised cost, built in linopy and solved with HiGHS (both already in the environment).
+- **The loop**, with an adaptive convergence rate:
+  1. Solve the MILP.
+  2. Apply the result, and re-solve AC at every hour and case.
+  3. Measure, per constraint, the **linearisation error**: AC minus linear.
+  4. **Tighten each limit** by a back-off β × that error. β grows while a violation persists and relaxes when there is ample slack.
+  5. **Bound the change in continuous Q** by a trust region Δ:
+     - Δ doubles when the predicted and actual changes agree (ratio ρ near 1);
+     - Δ halves when they disagree.
+  6. Re-linearise, and go back to 1.
+- **When it stops.** It stops when the AC check passes and the cost changes by less than a tolerance, or after a maximum number of iterations.
+- **The least-cost result (C8)** is the warm start and the upper bound.
+- **What is reported:** the iteration history (cost, worst violation, worst linearisation error, Δ, β), and MILP against least-cost.
+
+### C11 as built (2026-10-05, margin rule 2026-10-06)
+
+**Where.** `gridspine/static/campus_milp.py` (`select_assets_milp`), and `invest_campus(..., method="least_cost" | "milp")`, default `least_cost`. The MILP path writes C8's investment files from its own result, plus `campus_milp_history.csv` and `campus_milp_comparison.csv`. C8 gained `open_candidates`, `study_from`, `with_measures`, an `inspect` hook on `solve_cases`, and returns its final `state`, the warm start; its behaviour is unchanged.
+
+**The choices the plan left open:**
+- **Candidates.** C8's generators with a requirement of zero: "none" and every combination for the reactive need, every transformer size in 1..3 units (a redundant group stays redundant), every cable section in 1..3 runs, every switchgear rating. When C8's point is AC-feasible, a candidate dearer on its own than C8's whole set is pruned. Rated buses and cables that are not needs are held, not bought.
+- **Dispatch.** Per hour, held in every case, as in C8's re-check. Inverters as C8's dispatch would use them; capability an **inscribed** octagon with vertices on the axes (a hard limit the AC check cannot repair; at most 7.6 % of S lost, none at P = 0). C8's inverter Q is clipped into it for the warm start. STATCOM Q per hour within the chosen units; integer steps per bank and reactor candidate and hour.
+- **Constraints**, per hour and case class (intact; the worst outage of each group): voltages against the profile's bands, the PCC band (intact), transformer loading and the sizing rule with the margin (ratings inside `g`, so a candidate's rating is exact), cable current, Ik'' and ip per period. Each scaled to 1 % of its limit (0.01 pu for voltages), with a slack at a penalty ten times a bound on any set's cost.
+- **Sensitivities: the Jacobian**, rebuilt at the converged point from pandapower's internal `Ybus` (`dSbus_dV`; the stored `J` is from the last Newton iterate). One sparse solve per hour and case gives every quantity per Mvar at each control bus; checked against a finite-difference AC re-solve to 1e-4. A bank step enters as `q x V^2`.
+- **Discrete candidates: finite differences**, one AC solve per transformer or cable candidate, hour and case at the current dispatch, with IEC 60909 per period; compensation changes no load flow at zero dispatch, so it enters through its dispatch (and, with a STATCOM, its fault level, cached). Switchgear ratings enter exactly; its cost is per bay, the bays a linear function of the other choices, with exact products of binaries.
+- **The loop.** beta x1.5 when violated in AC (cap 8), x0.7 with more than 5 scale units of slack (floor 0.25). rho > 0.75 doubles Delta (cap 4 x Q_ref), rho < 0.25 halves it and rejects, keeping the point and its linearisation. Delta starts at 2 x Q_ref (a full swing), floor Delta_0 / 64. A tie-break of 1e-3 per Mvar moved keeps the dispatch put. Stop: an accepted AC-feasible point whose cost moved less than 1 a year; the MILP returning the current point; Delta at its floor; 20 iterations. A trial whose campus does not converge gets a no-good cut.
+- **A deviation, flagged.** The trust region binds only while every need keeps its current candidate. Literally applied, a rejected step that changed a candidate halves Delta around the old point, and the cheaper candidate can become unreachable. That was shown on a case the margin rule below has since closed; on every case tried after it, the literal and the relaxed trust region give the same result and count, so this is now a precaution without a demonstrating test (its mutation survives). **Owner decision (2026-10-06): C11 confirmed as built, this relaxed trust region included.** The surviving mutation is recorded here as a known, accepted gap rather than dead code.
+- **The result** is the best AC-feasible point seen; C8's own re-check (`_failures`) is the judge. If none is cheaper than C8 by more than 1 a year, C8's result is returned, flagged.
+- **The sizing margin is judged on C8's dispatch** (owner, 2026-10-06: no, keep the 20 % margin; it may not be met with dispatched inverter Q). Every point the loop solves is also re-solved with the dispatch C8's re-check gives the same assets (`reactive_need(residual=False)`: inverters, STATCOMs, steps, only as far as the PCC band needs). The margin constraint reads those flows, with no coefficient on the MILP's Q, and the AC judge sizes the transformers from them (`size_transformers`; `_failures` itself sizes from whatever flows it is given, so before this the MILP's own dispatch was used). The MILP's extra Q still serves the 100 % loading, the PCC band and the voltages. A candidate's effect on the margin is a finite difference with that dispatch re-run (a compensation candidate's only at hours where C8's dispatch reaches the compensation). The sizing the margin was judged by is returned (`sizing`), and the linearisation error per trial and constraint (`lin_errors`).
+
+**What it finds.**
+- **The joint optimum** (test campus, one dark hour, 25 MW at pf 0.85): C8 takes the cheapest transformer, 40 MVA at 14 %, whose reactive loss puts the PCC out of its band, then a 4 Mvar bank: 95.6 k a year. The MILP takes the 50 MVA, 10 % unit alone: 75.1 k, the brute-force minimum over all 24 combinations, solved independently in the test. Two iterations. It does not lean on Q for the margin (dark hour; C8's dispatch with T_B alone needs nothing).
+- **No margin from inverter Q** (38 MW, pf 0.85): a 50 MVA unit holds the margin only with about 15 Mvar from the battery; C8's dispatch gives none, so the MILP keeps C8's 63 MVA (flagged fallback, one iteration, the 50 MVA never proposed). Before the owner's rule it bought the 50 MVA.
+- **Adaptive against fixed rate.** On an outage relieved by the battery's Q (two 40 MVA units, N-1 sizing off, 38 MW: the margin holds on the intact share with C8's dispatch, the survivor needs Q to stay within 100 %), both rates reach the pair (81.9 k against C8's 88.8 k) in **4 iterations each**; beta grows on the survivor's loading. In a scan of 33 more cases (outage cases at 30-44 MW, voltage cases on 300-3000 MVA grids with 2-10 km cables; many end at C8's choice in one or two iterations) the counts were equal in 31, and adaptation took one iteration more in 2. **With the margin loophole closed, no case was found where adaptation saves an iteration.** The earlier 5 against 9 depended on the margin being met with the battery's Q.
+- **The Data Center hub** (one period, 14 hours, pf 0.95 agreement, shipped library): **1 x 63 MVA 132/33 kV, as C8**, everything else as C8: 610.3 k a year, flagged fallback, 1 iteration, 500 s (the reference dispatch is re-run for every candidate). Before the owner's rule the MILP took 50 MVA (574.3 k) on 1.8-3.8 Mvar of inverter Q.
+
+**Mutations.** 30 by hand. The first 28 (beta and Delta directions, caps and the rho thresholds, the best-point choice, three sensitivity signs, the polygon, the one-per-need constraint, the fallback, the back-off sign, the rejected point, the free switch, the step sign, the bay products, the PCC scope, the margin, the feasibility judge): 24 caught at once, tests added for 4. After the margin rule, two more: **the margin using dispatched Q** (both the constraint and the judge on the MILP's flows, with Q coefficients: caught) and the judge alone on the MILP's flows (caught once the sizing used is returned). Re-run on the new code, the tests written for the closed loophole no longer caught rho inverted, the margin dropped and the polygon; rho now has a unit test, the 38 MW test asserts the 50 MVA is never proposed, and the polygon test moved to the outage case. The free switch survives (above).
+
+### Order, PRs and agents
+
+| PR | increments | implementer |
+|---|---|---|
+| 1 | C7 + C8 (engine) | C7: Sonnet (patterned data and loader); C8: Opus (engineering judgement) |
+| 2 | C9 (panel, routes, chat tools) | Sonnet; Haiku for mechanical updates (snapshots, route inventory, packaging list) |
+| 3 | C10 (upload and extraction) | Opus for the schema, prompt and upload safety; Sonnet for the form |
+| 4 | C11 (MILP loop) | Opus |
+
+The coordinator writes each brief from this plan and reviews every diff. It also runs the gates and mutation checks before anything is pushed.
+
+## Part three: joining the one investment engine (plan note, 2026-10-06, no code yet)
+
+The coordinating session passed on a request, which it says the owner approved on 2026-10-06: there should be **one investment implementation** in pypsa-gui. The references are:
+- `docs/superpowers/plans/2026-10-05-one-investment-engine-two-faces.md`;
+- ADR-0004;
+- "Investment language" in `pypsa-gui/CONTEXT.md`.
+
+The campus asset library (C7), the least-cost pick (C8) and the MILP (C11) join it as a third participant. Nothing here changes the open PRs (#74, #79, #83, #84).
+
+**No code for D1 or D2 until** the engine's PRs #81 and #85 and the asset-schema PR #78 have merged. Words follow CONTEXT.md: *Overnight cost* (not capex), *Generic default* and *illustrative*.
+
+### D1: one source for equipment cost data
+
+- **gridspine stays free of pypsa-gui imports.** `campus_assets.yaml` remains the engine's input format and the test fixture library.
+- **On the pypsa-gui side**, `campus_electrical_service` seeds a project's campus library from the **generic defaults pack** (`services/library/defaults_pack`, PR #85), not from the shipped YAML. The fields map one to one:
+
+  | campus library | defaults pack |
+  |---|---|
+  | `capex_eur` | Overnight cost, lump per unit |
+  | `capex_eur_per_km` | Overnight cost, per km |
+  | switchgear `capex_eur` | Overnight cost, per bay |
+  | `opex_frac` | FOM share |
+  | `lifetime_a` | lifetime |
+  | `measured` / `datasheet` / `assumed` | provenance; `assumed` = illustrative |
+
+- **The rows themselves** (transformers, cables, capacitor banks, shunt reactors, STATCOMs, switchgear) are added to the pack. The engine session owns the pack, so the rows are agreed with it and it adds them, or approves a PR that does.
+- **The discount rate and price year** come from the project (its solver config or FinanceInputs `currency_year`), not from a library-level 0.07. The engine API is unchanged: `select_assets` already receives the library as data, and the service writes the project's rate into the library it hands over. The library's own `discount_rate` remains as a stand-alone default for gridspine-only use.
+- **Ratings and impedances stay in the campus library.** They are electrical data, not cost, and the pack has no field for them.
+
+### D2: the picks feed the investment case
+
+- **What is produced.** A solved campus study produces **extra owner assets**. Each item chosen by C8 (or C11) becomes one owner asset with its upfront parts, in the asset-schema `UpfrontPart` shape:
+  - name;
+  - Overnight cost × units (× km for a cable, × bays for switchgear);
+  - lifetime;
+  - FOM share.
+
+  Each asset also carries its investment period, its need (for example "transformer GRID_IMPORT") and its provenance. Existing (sunk) items are left out, and unresolved needs are never emitted.
+- **Who does what.** The engine session adds the input hook: a list of extra owner assets read by `results/finance_case.build_finance_case`. This side only produces the list, from the run directory (`campus_investment.csv` with `campus_invest_scope.json`), through one function in `campus_electrical_service`. **Do not edit `services/finance` or `results/finance_case.py`.** The shape is agreed with the engine session before any code.
+- **Consistent with the owner's decision of 2026-10-05.** Electrical cost is still not fed back into the capacity expansion. The PyPSA project is untouched; the equipment only joins the cash flows, NPV and report, next to the batteries and PV.
+
+### File ownership (one-engine plan §5)
+
+- **Ours:** `gridspine/*` and `campus_electrical_*`.
+- **Shared hot files:** `App.tsx`, `layout/*`, `uiStore.ts`, `chat_tools*.py`, `main.py`, `pypsa-gui.spec`, `tool-error-kinds.json`. Additive edits only, and merge master before each PR.
+
+## Part three as built (2026-10-07)
+
+### Owner decisions (2026-10-07)
+
+- **Grid-code review, a quote not found on its stated page:** warn and still allow Confirm (today's behaviour). The reviewer is the check; real documents often have small page offsets.
+- **The MILP in the panel:** as a run option ("Joint optimisation (MILP, slow)") executed as a background job with progress and cancel, its result shown beside the least-cost one. Planned as C12.
+
+The campus side of part three is built on `feat/gridspine-campus-ic-seam`. Words follow `pypsa-gui/CONTEXT.md` ("Investment language"): *Overnight cost*, *Generic default*, *illustrative*, *upfront part*. The engine's files (`services/finance/*`, `services/results/finance_case.py`, `services/library/*`, `services/asset_schema/*`, `models/finance.py`) are untouched.
+
+### D1a: done. The discount rate and the price year come from the project
+
+- **Rate.** When the run invests, the library handed to `invest_campus` has its `discount_rate` replaced by the **project's saved solver config** `discount_rate`, if the project's saved solver config file (`solver_config.json`) **states** a `discount_rate`. Without that file, or when the file has no `discount_rate` key (the loader's 0.07 default is not a rate the project stated), the library's own value is kept and labelled as the library's. The replacement is tagged `assumed`, with a note saying where it came from. A project rate outside [0, 1) is a 422 that names it; nothing is annualised on it.
+- **Price year.** The project's finance inputs are not a file of their own: they are `SolverConfig.finance`, the dict `PUT /api/simulation/finance` validated, kept in the same `solver_config.json`. If it carries a `currency_year`, that is the price year reported, and `price_year_mismatch` is true when it differs from the library's. **No money is converted.** The library's costs stay in the library's price year and no escalation is applied. The panel says so.
+- **The record.** `results.cost_basis` is `{discount_rate, discount_rate_from: "project solver config" | "asset library", price_year, price_year_from: "project finance inputs" | "asset library", library_price_year, price_year_mismatch, currency}`. It is written with the run (`run/campus_cost_basis.json`) and cleared with the other investment files, so it describes the run and not the project as it is now. `get_investment` (the copilot's summary) carries it too.
+- **Staleness.** The engine's copy, rate included, is what `run/campus_assets_used.yaml` keeps, byte for byte. The results are stale when the library a run would hand over now differs from that snapshot (so a change of the project's discount rate makes them stale) **or** when the cost basis differs (so a change of the finance inputs' `currency_year` does too, since the basis is shown). A solver-config change that touches neither (the solver name, say) does not. A library or a solver config that cannot be read now counts as stale: a rerun would not reproduce the run.
+- **Panel.** One plain line in the investment section: "Annualised at 7 % (from asset library); costs in 2026 money (from asset library)." When the project states another year, the line still names the library's year (those are the costs' money) and a warning says the project states another, with no escalation applied.
+
+### D2 producer: done. The chosen equipment as extra owner assets
+
+`campus_electrical_service.extra_owner_assets(project) -> list[dict]`, read only, from the last investment run: `campus_investment.csv`, `campus_assets_used.yaml` (the library the run bought from, not one saved since). Who owns the PCC switchgear (`campus_invest_scope.json`) is already settled in the table: with `grid_operator` the engine writes no row for it, so no entry appears. `GET /api/campus-electrical/{name}/owner-assets` returns `{"assets": [...], "source_hash": str | None, "stale": bool}` (`stale` is the results-stale flag of `get_state`), and `get_state` carries `owner_assets_count`. The assets are `[]` and `source_hash` is `None` when the project has no investment run.
+
+**One entry per purchased item that is neither existing nor unresolved**, in the contract below: agreed with the IC session, owner-approved 2026-10-07. The IC session adds the type (`services/finance/case.py ExtraOwnerAsset`) and the `extra_assets` hook in `build_finance_case`; the investment-case route calls `campus_electrical_service.extra_owner_assets` and refuses a stale study. This branch adds neither. The top-level keys of an entry are exactly the type's fields, so the IC can build it with `ExtraOwnerAsset(**{k: d[k] for k in fields})`; everything else is under `meta`.
+
+```python
+@dataclass(frozen=True)
+class ExtraOwnerAsset:                  # the IC's, not ours
+    name: str                       # unique in the case, e.g. "campus:TR_132_33_40#1"
+    kind: str                       # transformer | cable | capacitor_bank | shunt_reactor | statcom | switchgear
+    basis: str                      # lump | per_km | per_bay
+    quantity: float                 # units (lump), units x length_km (per_km), bays (per_bay)
+    parts: tuple[UpfrontPart, ...]  # asset_schema.access.UpfrontPart; upfront_per_unit is per basis unit
+    build_year: int                 # the campus invest_period
+    source: str                     # "campus_study"
+    source_hash: str                # sha256[:16] of the solved campus study that chose it
+```
+
+```json
+{
+  "name": "campus:TR_132_33_63#1",
+  "kind": "transformer",
+  "basis": "lump",
+  "quantity": 2.0,
+  "parts": [
+    {"name": "investment", "upfront_per_unit": 2500000.0, "lifetime": 40.0, "fom_share": 0.015}
+  ],
+  "build_year": 2030,
+  "source": "campus_study",
+  "source_hash": "3f9a1c5e07b2d864",
+  "meta": {
+    "need": "transformer GRID_IMPORT", "library_id": "TR_132_33_63", "units": 2, "length_km": null,
+    "currency": "EUR", "price_year": 2026, "provenance": "assumed", "illustrative": true
+  }
+}
+```
+
+- `name` is `campus:<library_id>#<k>`, k the 1-based occurrence of that library id among the entries, in the table's order: unique in the list.
+- `kind` is the investment table's item kind, mapped explicitly (`IC_KIND`): `transformer`, `cable`, `capacitor_bank`, `shunt_reactor`, `statcom` and `switchgear` are the six kinds the engine writes, and the IC's vocabulary is the same six; any other kind is a 422 that names it.
+- `basis` and `quantity`: a cable is `per_km` with quantity units × `length_km`; switchgear is `per_bay` with the table's units, which are the bays; everything else is a `lump` with quantity = units.
+- `parts` has one part, `investment`. `upfront_per_unit` is the library's Overnight cost **per basis unit** (`capex_eur_per_km` for a cable, `capex_eur` otherwise), not the total: `quantity × upfront_per_unit` is the total, the figure the first draft carried as `upfront`. `lifetime` and `fom_share` are the library's `lifetime_a` and `opex_frac`. Money is in the library's currency and price year; no escalation.
+- `build_year` is the investment period. `source` is `"campus_study"`.
+- `source_hash` is `campus_electrical_service.campus_study_hash(project)`: the first 16 hex characters of a sha256 over `run/campus_investment.csv`, `run/campus_assets_used.yaml`, `run/campus.yaml` and, when present, `run/campus_cost_basis.json`, in that order, each as its file name, a NUL byte and its bytes. The same for every entry of a run; `None` without an investment run. It changes when the campus, the library, the rate or the run does. The IC refuses a stale study (its owner default B) and a `build_year` after the case COD (default C).
+- `meta.price_year` is the library's: the money the cost is in. The project's money year, when it differs, is in `results.cost_basis`.
+- `meta.provenance` is the source tag of the cost in the library (`measured`, `datasheet` or `assumed`); `meta.illustrative` is true when it is `assumed`. The shipped library tags every cost `assumed`, so every entry is illustrative today.
 - A reactive need can give two entries (a capacitor bank and a reactor), each with its own investment period.
 
 ### Checks
 
 **Tests.** 34 service cases (D1a and D2, most on hand-made run directories with known units, km and bays, plus three real runs), 3 router cases and 4 panel tests. The route inventory (`route_inventory_phase0.txt`) gains exactly the one new route; `/api/chat/workflows`, which the app has and the file lacks, is another PR's and was not added.
 
-**Mutations.** 20 by hand on the service: the rate override ignored, a wrong source label, an out-of-range rate not refused, the cost basis not cleared with the investment, the snapshot not the engine's copy, the price-year mismatch flag (always false, always true when a year is stated), the project's year never used, existing items included, unresolved items included, units not multiplied, cable km not multiplied, switchgear bays not multiplied, the empty-run handling, `illustrative` always true, the provenance taken from the wrong tag, lifetime and FOM share swapped, the owner assets priced from the library as it is now instead of the run's, the count always 0, and both halves of the staleness test. 19 were caught at once. One was not by the new tests: the byte comparison of the library in the staleness test. For a rate change it is redundant, since the cost basis changes with the rate and the other half catches it; for a library edit the older library-staleness tests catch it. Three more on the panel line (the year shown, the mismatch warning, the rate format), all caught.
+**Mutations.** 20 by hand on the service for the first producer: the rate override ignored, a wrong source label, an out-of-range rate not refused, the cost basis not cleared with the investment, the snapshot not the engine's copy, the price-year mismatch flag (always false, always true when a year is stated), the project's year never used, existing items included, unresolved items included, units not multiplied, cable km not multiplied, switchgear bays not multiplied, the empty-run handling, `illustrative` always true, the provenance taken from the wrong tag, lifetime and FOM share swapped, the owner assets priced from the library as it is now instead of the run's, the count always 0, and both halves of the staleness test. 19 were caught at once. One was not by the new tests: the byte comparison of the library in the staleness test. For a rate change it is redundant, since the cost basis changes with the rate and the other half catches it; for a library edit the older library-staleness tests catch it. Three more on the panel line (the year shown, the mismatch warning, the rate format), all caught.
 
-### D1b: a proposal for the pack's owner. Nothing is added to the pack
+For the IC shape, 18 more by hand, all caught: the name counter (always 1, global instead of per id), the basis of a cable and of switchgear, the quantity of a cable and of switchgear bays, `upfront_per_unit` as the total, the hash (file order, the campus file left out, the cost basis left out, no NUL framing, 15 characters), the stale flag always false, a kind dropped from the map, an unknown kind passed on, `meta` fields at the top level (two ways), `build_year`, `source_hash`.
 
-Seeding the campus library from the generic defaults pack (D1) needs rows the pack does not have. This is what the campus library's cost rows would become in `defaults_pack/versions/<date>/values.csv`. It is **a proposal for the pack's owner**: this branch adds nothing to the pack.
+### D1b: a proposal for the pack's owner, in the IC's pack conventions. Nothing is added to the pack
 
-**These costs are unsourced placeholders.** Every figure in the shipped campus library is tagged `assumed` and was not checked against a price list, a datasheet or a quote. The pack's other rows are sourced (technology-data v0.14.0, Danish Energy Agency). Putting the campus rows beside them would make an order-of-magnitude guess look like a sourced default, so every row must carry `illustrative = true` and the source "assumed — placeholder, replace with vendor quotes".
+Seeding the campus library from the generic defaults pack (D1) needs rows the pack does not have. This is what the campus library's cost rows would become in `defaults_pack/versions/<new date>/values.csv`, in the conventions the IC session set for the pack. It is **a proposal**: this branch adds nothing to the pack. **The IC session transcribes these rows itself unless it is asked otherwise.**
 
-| campus library field | kinds | pack `key` (per library entry) | `technology` | `part` | `basis` | `parameter` | `unit` |
-|---|---|---|---|---|---|---|---|
-| `capex_eur` | transformers (29) | `campus.transformer.132_33.63mva.overnight` | `campus.transformer.132_33.63mva` | `investment` | `per_unit` | `overnight` | `EUR/unit` |
-| `capex_eur` | capacitor banks (9), shunt reactors (9), STATCOMs (9) | `campus.capacitor_bank.33kv.10mvar.overnight` (likewise `campus.shunt_reactor…`, `campus.statcom…`) | `campus.capacitor_bank.33kv.10mvar` | `investment` | `per_unit` | `overnight` | `EUR/unit` |
-| `capex_eur_per_km` | cables (12) | `campus.cable.33kv.al240.overnight` | `campus.cable.33kv.al240` | `investment` | `per_km` | `overnight` | `EUR/km` |
-| `capex_eur` | switchgear (13) | `campus.switchgear.132kv.31p5ka.overnight` | `campus.switchgear.132kv.31p5ka` | `investment` | `per_bay` | `overnight` | `EUR/bay` |
-| `opex_frac` | all 81 | `….fom_share` | as above | `investment` | as above | `fom_share` | `share/year` |
-| `lifetime_a` | all 81 | `….lifetime` | as above | `investment` | as above | `lifetime` | `years` |
+**These costs are unsourced placeholders.** Every figure in the shipped campus library is tagged `assumed` and was not checked against a price list, a datasheet or a quote. The pack's other rows are sourced (technology-data v0.14.0, Danish Energy Agency). Putting the campus rows beside them would make an order-of-magnitude guess look like a sourced default, so every row carries `illustrative = true` and the source `"assumed (gridspine campus_assets.yaml placeholder)"`.
 
-Common columns: `illustrative` true; `source` "assumed — placeholder, replace with vendor quotes"; `currency` EUR; `currency_year` the library's `price_year` (2026, which differs from the DEA rows' 2020, the same mismatch D1a flags); `range_low`, `range_high` empty; `price_basis` left to the owner (the campus library does not say whether it is real or nominal). That is 81 entries × 3 parameters = 243 rows.
+| campus library field | kinds | `technology` (per library entry) | `part` | `basis` | `parameter` | `unit` |
+|---|---|---|---|---|---|---|
+| `capex_eur` | transformers (29) | `transformer.132_33.40mva` | `investment` | `lump` | `overnight` | `EUR/unit` |
+| `capex_eur` | capacitor banks (9), shunt reactors (9), STATCOMs (9) | `capacitor_bank.33kv.10mvar` (likewise `shunt_reactor…`, `statcom…`) | `investment` | `lump` | `overnight` | `EUR/unit` |
+| `capex_eur_per_km` | cables (12) | `cable.33kv.al240` | `investment` | `per_km` | `overnight` | `EUR/km` |
+| `capex_eur` | switchgear (13) | `switchgear.132kv.31p5ka` | `investment` | `per_bay` | `overnight` | `EUR/bay` |
+| `opex_frac` | all 81 | as above | `investment` | as above | `fom_share` | `share/year` |
+| `lifetime_a` | all 81 | as above | `investment` | as above | `lifetime` | `years` |
+
+The `basis` is the one the producer reports (`lump | per_km | per_bay`), so a pack row and an extra owner asset price the same unit. The `technology` is the library entry's id in the IC's dotted form (`TR_132_33_40` is `transformer.132_33.40mva`, ratings kept in the name), and the key is `<technology>.investment.<parameter>`, as the existing rows are.
+
+Common columns: `illustrative` true; `source` "assumed (gridspine campus_assets.yaml placeholder)"; `currency` EUR; `currency_year` the library's `price_year` (2026, which differs from the DEA rows' 2020, the same mismatch D1a flags); `range_low`, `range_high` empty; `price_basis` left to the owner (the campus library does not say whether it is real or nominal). That is 81 entries × 3 parameters = 243 rows.
 
 For the pack's owner:
-- The loader's `basis` is `per_MW | per_MWh | per_km` today, with `_BASIS_UNIT` mapping each to its overnight unit. `per_unit` and `per_bay` would be new.
-- The keys above follow the brief, `<technology>.<parameter>`, whereas the existing rows are `<technology>.<part>.<parameter>` (`solar-utility.investment.overnight`). The owner may prefer `<technology>.investment.overnight`.
-- A new pack version directory and its pinned hash are needed; a shipped version is never edited.
+- **A NEW pack version** directory and its pinned hash are needed. The shipped version (2026-10-05) is never edited.
+- The loader's `basis` is `per_MW | per_MWh | per_km` today, with `_BASIS_UNIT` mapping each to its overnight unit. `lump` and `per_bay` would be new.
 - Ratings and impedances stay in the campus library (D1).
 
 ## C12 as built (2026-10-07): the MILP in the panel, as a background job

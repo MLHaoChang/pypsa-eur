@@ -171,11 +171,13 @@ def test_default_pipeline_skips_dtc_planning_unless_pack_flag():
 
 
 def test_claim_wipe_includes_eh_dtc_planning():
-    from pathlib import Path
-    text = Path("routers/simulation.py").read_text()
-    idx = text.find('status="running"')
-    chunk = text[idx:idx + 1200]
-    assert "eh_dtc_planning=None" in chunk
+    """Property, not source text — see the sibling in
+    `tests/test_energy_hub_redundancy.py` for why the text form could not see
+    that the two claims had drifted."""
+    from services.project_context import cleared_result_state
+
+    wipe = cleared_result_state()
+    assert "eh_dtc_planning" in wipe and wipe["eh_dtc_planning"] is None
 
 
 def test_run_dtc_planning_refuses_missing_ens_cap():
