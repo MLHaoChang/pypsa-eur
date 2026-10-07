@@ -1,0 +1,88 @@
+# Finance defaults of the generic defaults pack, version 2026-10-07.
+# Seeded from the guided study's study_library/finance_defaults.yaml
+# (branch claude/edge-tool-ux-research-n0n2l6). Every number keeps its source.
+# Rules name PACK keys (values.csv `key`), not the guided ledger's keys.
+
+seed_library: technology-data v0.14.0
+
+# The finance defaults and the seed tariffs are in one currency year, 2020:
+# technology-data v0.14.0 states its cost rows in 2020 EUR. Every values.csv
+# row states its own currency_year: 2020 for the catalogue rows, 2026 for the
+# campus equipment rows (gridspine campus_assets.yaml price_year). No row is
+# converted with a price index.
+currency: EUR
+currency_year: 2020
+currency_year_source: >-
+  technology-data v0.14.0 outputs/costs_2030.csv, column currency_year (2020
+  on every catalogue row, and the seed tariffs' year); every values.csv row
+  states its own currency_year (the campus equipment rows: 2026, the campus
+  library's price_year)
+
+# The one labelled convention (IRENA): real terms, pre-tax, without subsidy.
+basis:
+  terms: real
+  tax: pre
+  subsidy: excl
+basis_source: >-
+  Guided investment study spec, decision 7 (IRENA convention: real, pre-tax,
+  without subsidy)
+
+perspective: site_owner
+perspective_source: Guided investment study plan v2, honest scope (MVP-1 models the site owner only)
+
+discount_rate:
+  key: finance.discount_rate
+  label: Discount rate (real, pre-tax)
+  value: 0.07
+  unit: per unit
+  price_basis: real
+  source: >-
+    PyPSA-Eur v2026.02.0 config/config.default.yaml, costs.fill_values
+    'discount rate' (the fill-in rate for technologies whose technology-data
+    row carries no discount rate of its own)
+  source_year: 2026
+  source_url: https://github.com/PyPSA/pypsa-eur/blob/v2026.02.0/config/config.default.yaml
+  range:
+    low: 0.049
+    high: 0.091
+    source: assumed
+  # The physical domain of a real rate a user may enter.
+  domain: "[0, 1)"
+  illustrative: false
+
+# Two lifetimes, one battery: the pro forma horizon is the storage (energy
+# part) lifetime, and the inverter (power part) is replaced every inverter
+# lifetime strictly inside that horizon (10 y and 25 y: years 10 and 20).
+horizon_rule:
+  horizon_years: battery.energy.lifetime
+  source: Guided investment study plan v2, S2 "Two lifetimes, one StorageUnit"
+replacement_rules:
+  - key: replacement_inverter
+    part: battery.power
+    every_years: battery.power.lifetime
+    within: horizon_exclusive
+    cost: battery.power.overnight
+    source: Guided investment study plan v2, S2 "Two lifetimes, one StorageUnit"
+
+# Degradation is not modelled; values.csv carries the placeholder rows.
+degradation: not_used_in_mvp1
+
+# Sizing limit: every extendable asset is bounded by the site's connection
+# limit times this multiple. A stated assumption, not a source figure, hence
+# illustrative.
+sizing_limit:
+  key: finance.sizing_limit_connection_multiple
+  label: Sizing limit for every extendable asset (multiple of the connection limit)
+  value: 2.0
+  unit: multiple of connection limit
+  source: >-
+    Assumed (guided investment study plan v2, S4 / review v2 BC-2): two
+    connection limits bound what import plus export can carry through the
+    site connection
+  source_year: 2026
+  range:
+    low: 1.0
+    high: 4.0
+    source: assumed
+  domain: "(0, inf)"
+  illustrative: true
