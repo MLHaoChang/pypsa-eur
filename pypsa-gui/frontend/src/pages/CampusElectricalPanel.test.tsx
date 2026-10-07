@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { CampusState } from '../api/campusElectrical'
+import type { CampusState, InvestmentRow, MilpJobRecord } from '../api/campusElectrical'
 import CampusElectricalPanel from './CampusElectricalPanel'
 
 const store = vi.hoisted(() => ({ currentProject: 'Hub A' as string | null }))
@@ -20,6 +20,7 @@ vi.mock('../store/uiStore', () => ({
 const api = vi.hoisted(() => ({
   state: vi.fn(), draft: vi.fn(), save: vi.fn(), run: vi.fn(), gridCodes: vi.fn(),
   library: vi.fn(), saveLibrary: vi.fn(), resetLibrary: vi.fn(),
+  startMilp: vi.fn(), milpStatus: vi.fn(), cancelMilp: vi.fn(),
 }))
 vi.mock('../api/campusElectrical', async () => {
   const real = await vi.importActual<typeof import('../api/campusElectrical')>('../api/campusElectrical')
@@ -75,6 +76,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   api.state.mockResolvedValue(empty)
   api.gridCodes.mockResolvedValue({ shipped: {}, published: [], drafts: [], documents: [], extraction_available: false })
+  api.milpStatus.mockResolvedValue(null)
   api.library.mockResolvedValue({ yaml: 'discount_rate: {value: 0.07, source: assumed}\n', is_default: true })
 })
 afterEach(() => cleanup())
@@ -225,5 +227,95 @@ describe('CampusElectricalPanel', () => {
     renderPanel()
     const intro = await screen.findByTestId('campus-intro')
     expect(within(intro).getByText(/steady-state/i)).toBeTruthy()
+  })
+
+  describe('the joint optimisation (MILP) job', () => {
+    const MILP = 'Joint optimisation (MILP, slow — minutes)'
+    const bought: InvestmentRow = {
+      need: 'transformer GRID_IMPORT', library_id: 'TR63', kind: 'transformer', units: 1, length_km: null,
+      invest_period: 2030, capex_eur: 2e6, opex_eur_per_a: 3e4, annualised_eur_per_a: 95_000, existing: false,
+      status: 'chosen', reason: null,
+    }
+    const leastCost = (): CampusState => {
+      const s = sized()
+      return { ...s, results: { ...s.results!, investment: [bought], cost: [], history: [], unresolved: [] } }
+    }
+    const record = (over: Partial<MilpJobRecord> = {}): MilpJobRecord => ({
+      state: 'running', project: 'Hub A', started_at: 1, finished_at: null, iteration: 2, max_iter: 20,
+      best_cost: 80_000, c8_cost: 95_000, stop: null, error: null, message: 'iteration 2 of 20', ...over,
+    })
+
+    it('is disabled until a least-cost run has bought assets, and says why', async () => {
+      api.state.mockResolvedValue(sized())
+      renderPanel()
+      const btn = (await screen.findByRole('button', { name: MILP })) as HTMLButtonElement
+      expect(btn.disabled).toBe(true)
+      expect(screen.getByText(/needs a least-cost run first/)).toBeTruthy()
+      expect(screen.getByText(/takes minutes/)).toBeTruthy()
+    })
+
+    it('starts with the run settings, then shows the iteration and the best cost against the least cost', async () => {
+      api.state.mockResolvedValue(leastCost())
+      api.startMilp.mockResolvedValue(record({ iteration: null, max_iter: null, best_cost: null,
+                                               message: 'the least-cost run first' }))
+      api.milpStatus.mockResolvedValue(null)
+      renderPanel()
+      const btn = (await screen.findByRole('button', { name: MILP })) as HTMLButtonElement
+      expect(btn.disabled).toBe(false)
+      api.milpStatus.mockResolvedValue(record())
+      await userEvent.click(btn)
+      await waitFor(() => expect(api.startMilp).toHaveBeenCalledWith('Hub A', {
+        k: 3, pf: 0.95, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true, invest: false,
+        pcc_switchgear_by_operator: false,
+      }))
+      const line = await screen.findByTestId('milp-progress')
+      await waitFor(() => expect(line.textContent).toContain('Iteration 2 of 20 · best €80,000/a vs least cost €95,000/a'))
+      expect((screen.getByRole('button', { name: MILP }) as HTMLButtonElement).disabled).toBe(true)
+      expect((screen.getByRole('button', { name: 'Run study' }) as HTMLButtonElement).disabled).toBe(true)
+    })
+
+    it('says what it is doing before the first iteration', async () => {
+      api.state.mockResolvedValue(leastCost())
+      api.milpStatus.mockResolvedValue(record({ iteration: null, max_iter: null, best_cost: null,
+                                                message: 'the least-cost run first' }))
+      renderPanel()
+      expect((await screen.findByTestId('milp-progress')).textContent).toContain('the least-cost run first')
+    })
+
+    it('cancels through the API and says it is cancelling', async () => {
+      api.state.mockResolvedValue(leastCost())
+      api.milpStatus.mockResolvedValue(record())
+      api.cancelMilp.mockResolvedValue({ state: 'running', cancelling: true })
+      renderPanel()
+      await screen.findByTestId('milp-progress')
+      await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      await waitFor(() => expect(api.cancelMilp).toHaveBeenCalledWith('Hub A'))
+      expect(await screen.findByText(/cancelling…/)).toBeTruthy()
+    })
+
+    it('re-reads the state when the job ends, and says how it ended', async () => {
+      api.state.mockResolvedValue(leastCost())
+      api.startMilp.mockResolvedValue(record())
+      renderPanel()
+      const btn = await screen.findByRole('button', { name: MILP })
+      api.milpStatus.mockResolvedValue(record())
+      await userEvent.click(btn)
+      await waitFor(() => expect(screen.getByTestId('milp-progress').textContent).toContain('Iteration 2 of 20'))
+      const reads = api.state.mock.calls.length
+      api.milpStatus.mockResolvedValue(record({ state: 'cancelled', stop: 'cancelled', finished_at: 2 }))
+      // the next poll sees the job ended
+      await waitFor(() => expect(screen.getByTestId('milp-progress').textContent).toMatch(/was cancelled/), { timeout: 4000 })
+      await waitFor(() => expect(api.state.mock.calls.length).toBeGreaterThan(reads))
+    })
+
+    it('shows a failed job with its reason and a refused start inline', async () => {
+      api.state.mockResolvedValue(leastCost())
+      api.milpStatus.mockResolvedValue(record({ state: 'failed', error: 'the MILP solver gave up' }))
+      api.startMilp.mockRejectedValue({ response: { status: 409, data: { detail: 'a joint optimisation (MILP) is already running' } } })
+      renderPanel()
+      expect((await screen.findByTestId('milp-progress')).textContent).toContain('failed: the MILP solver gave up')
+      await userEvent.click(screen.getByRole('button', { name: MILP }))
+      expect(await screen.findByText(/already running/)).toBeTruthy()
+    })
   })
 })

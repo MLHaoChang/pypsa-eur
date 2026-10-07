@@ -6,7 +6,9 @@
 // - reactive compensation at the PCC;
 // - short circuit against the switchgear;
 // - PCC grid-code compliance, at the critical hours, by AC load flow;
-// - what to buy from the asset library to meet it, at least cost (plan C9).
+// - what to buy from the asset library to meet it, at least cost (plan C9);
+// - optionally, the joint optimisation (a MILP, plan C11), run as a background
+//   job with progress and cancel (plan C12), its result beside the least-cost one.
 //
 // Thin like GridspinePanel. Everything shown is READ from
 // `GET /api/campus-electrical/{name}`, and every action is one request:
@@ -15,16 +17,18 @@
 // file that does not build (422, naming the field).
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Play, RefreshCw, Save, Wand2 } from 'lucide-react'
+import { Play, RefreshCw, Save, Square, Wand2, Workflow } from 'lucide-react'
 import {
   campusApi, errorText, isOtherKind,
   type CampusSettings, type CampusState, type CheckStatus, type ComplianceRow, type InvestedComplianceRow,
+  type MilpJobRecord,
 } from '../api/campusElectrical'
 import { useUIStore } from '../store/uiStore'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
-import CampusInvestmentSection from './CampusInvestmentSection'
+import CampusInvestmentSection, { formatEur } from './CampusInvestmentSection'
 import CampusLibrarySection from './CampusLibrarySection'
+import { useCampusMilpJob } from './useCampusMilpJob'
 
 export const CAMPUS_KEY = (name: string) => ['campusElectrical', 'state', name] as const
 
@@ -213,6 +217,16 @@ function RunSection({ name, state, onChange }: {
     onSuccess: data => onChange(data),
     onError: e => setRefusal(errorText(e)),
   })
+  // The joint optimisation: a background job, polled while it runs; when it
+  // ends the state is re-read so its results appear beside the least-cost ones.
+  const milp = useCampusMilpJob(name, { onStarted: () => onChange(), onFinished: () => onChange() })
+  const hasLeastCost = state.results?.investment != null
+  const startMilp = () => {
+    setRefusal(null)
+    milp.start(settings()).catch(e => setRefusal(errorText(e)))
+  }
+  const cancelMilp = () => { milp.cancel().catch(e => setRefusal(errorText(e))) }
+  const busy = run.isPending || milp.isStarting || milp.isRunning
 
   return (
     <PageSection title="Study settings" hint="Applies to the next run">
@@ -246,12 +260,61 @@ function RunSection({ name, state, onChange }: {
           <input type="checkbox" aria-label="PCC switchgear owned by the grid operator (not costed)" checked={byOperator}
                  disabled={!invest} onChange={e => setByOperator(e.target.checked)} />
         </Field>
-        <Btn variant="primary" onClick={() => run.mutate()} disabled={run.isPending}>
+        <Btn variant="primary" onClick={() => run.mutate()} disabled={busy}>
           <Play size={13} /> {run.isPending ? 'Running…' : 'Run study'}
         </Btn>
+        <Btn
+          onClick={startMilp}
+          disabled={!hasLeastCost || busy}
+          title={hasLeastCost ? undefined : 'Run the study with assets bought from the library first'}
+        >
+          <Workflow size={13} /> {milp.isStarting ? 'Starting…' : 'Joint optimisation (MILP, slow — minutes)'}
+        </Btn>
       </div>
+      <p className="text-[11.5px] text-muted mt-2">
+        The joint optimisation chooses every asset together instead of one need at a time, starting from the
+        least-cost choice and re-checking each step by AC load flow. It takes minutes on a real site and runs in the
+        background; you can cancel it and keep the best choice found so far.
+        {!hasLeastCost && ' It needs a least-cost run first: run the study with assets bought from the library.'}
+      </p>
+      {milp.record && <MilpProgress record={milp.record} cancelling={milp.cancelling} onCancel={cancelMilp} />}
       {refusal && <p className="text-[12px] text-danger mt-2">{refusal}</p>}
     </PageSection>
+  )
+}
+
+/** The job's line: while it runs, its iteration and best cost against the
+ *  least-cost one, with Cancel; once ended, how it ended. */
+function MilpProgress({ record, cancelling, onCancel }: {
+  record: MilpJobRecord; cancelling: boolean; onCancel: () => void
+}) {
+  if (record.state === 'running') {
+    const started = record.iteration != null && record.max_iter != null
+    return (
+      <div data-testid="milp-progress" className="flex items-center gap-3 mt-2 text-[12px]">
+        <span className="tabular-nums">
+          {started
+            ? `Iteration ${record.iteration} of ${record.max_iter} · best ${formatEur(record.best_cost)}/a vs least cost ${formatEur(record.c8_cost)}/a`
+            : `Joint optimisation running: ${record.message}`}
+          {cancelling && <span className="text-muted"> · cancelling…</span>}
+        </span>
+        <Btn onClick={onCancel} disabled={cancelling}><Square size={12} /> Cancel</Btn>
+      </div>
+    )
+  }
+  if (record.state === 'failed') {
+    return (
+      <p data-testid="milp-progress" role="alert" className="text-[12px] text-danger mt-2">
+        The joint optimisation failed: {record.error ?? 'no reason given'}.
+      </p>
+    )
+  }
+  return (
+    <p data-testid="milp-progress" className="text-[12px] text-muted mt-2">
+      {record.state === 'cancelled'
+        ? 'The joint optimisation was cancelled; the best choice it had found is shown under Investment.'
+        : 'The joint optimisation has finished; its choice is shown under Investment.'}
+    </p>
   )
 }
 

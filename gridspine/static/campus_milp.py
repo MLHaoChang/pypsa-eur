@@ -158,7 +158,9 @@ it is needed.
 7. **Stop** when an accepted point passes the AC check and its cost moved
    less than ``COST_TOL``; when the MILP returns the current point (it
    predicts nothing better); when ``Delta`` falls below its floor; or at
-   ``max_iter``.
+   ``max_iter``. A caller's ``should_stop()`` (plan C12, the panel's
+   cancel) ends it too, before an iteration or between two
+   finite-difference solves: ``stop == "cancelled"``.
 
 The result is the best AC-feasible point seen, accepted or not (lowest
 cost, the first on a tie), never a linear prediction. **Fallback:** when no
@@ -747,8 +749,17 @@ class _Linear:
     fd_solves: int
 
 
+class _Cancelled(Exception):
+    """``should_stop`` answered True between two finite-difference solves."""
+
+    def __init__(self, solves):
+        super().__init__("cancelled")
+        self.solves = solves
+
+
 def _linearise(prob, ev):
     keys = sorted(ev.g, key=str)
+    stop = getattr(prob, "should_stop", None)
     row = {k: i for i, k in enumerate(keys)}
     g0 = np.array([ev.g[k] for k in keys])
     D = np.zeros((len(keys), len(prob.options)))
@@ -766,6 +777,8 @@ def _linearise(prob, ev):
         for k in idx:
             if k == cur[j]:
                 continue
+            if stop is not None and kind != "switchgear" and stop():
+                raise _Cancelled(solves)
             o = prob.options[k]
             trial = dataclasses.replace(ev.point, choice=tuple(k if i == j else c for i, c in enumerate(cur)))
             if kind in ("transformer", "cable"):
@@ -1071,10 +1084,22 @@ def _label(prob, point):
 
 def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
                        criteria: SizingCriteria = SizingCriteria(), max_iter: int = MAX_ITER,
-                       pcc_switchgear: bool = True, adaptive: bool = True, c8=None) -> dict:
+                       pcc_switchgear: bool = True, adaptive: bool = True, c8=None,
+                       progress=None, should_stop=None) -> dict:
     """The joint asset choice (module docstring). ``adaptive=False`` holds
     ``beta`` at 1 and ``Delta`` at its start, for comparison. ``c8`` is
     C8's result if already computed.
+
+    ``progress(iteration, max_iter, summary)``, when given, is called once
+    per row of the history (the warm start is iteration 0), in order;
+    ``summary`` is ``{"cost", "feasible", "accepted", "best_cost",
+    "c8_cost", "delta", "choice"}``, ``best_cost`` the cheapest AC-feasible
+    point so far (None while there is none). ``should_stop()``, when given,
+    is asked before every iteration and between the finite-difference
+    solves of a linearisation; once it answers True the loop ends with
+    ``stop == "cancelled"`` and the result is built as at any other stop:
+    the best AC-feasible point seen, or C8's result, flagged. Neither
+    changes the loop otherwise.
 
     Returns C8's shapes (``investment``, ``cost``, ``compliance``,
     ``dispatch``, ``spec``, ``history`` (C8's escalations), ``unresolved``,
@@ -1089,6 +1114,7 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
                            pcc_switchgear=pcc_switchgear)
     state = c8["state"]
     prob = _Problem(campus_spec, hourly, library, req, criteria, state)
+    prob.should_stop = should_stop
     c8_items = [((n.choice.items, n.choice.existing) if n.choice is not None and n.pos >= 0 else None)
                 for n in prob.needs]
     inv = c8["investment"]
@@ -1101,18 +1127,35 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
     cur = prob.evaluate(point, linearise=True)
     if not cur.converged:
         return _fallback(c8, prob, [], "C8's point does not converge in the MILP's re-solve", c8_cost)
-    lin = _linearise(prob, cur)
     delta, d_cap, d_floor = DELTA_START * prob.q_ref, DELTA_CAP * prob.q_ref, DELTA_FLOOR * prob.q_ref
-    beta = {k: BETA0 for k in lin.keys}
-    err = {k: 0.0 for k in lin.keys}
     best = cur if cur.feasible else None
-    v_tot, v_worst = _violation(prob, cur.g)
-    history = [{"iteration": 0, "cost": cur.cost, "feasible": cur.feasible, "worst_violation": v_worst,
-                "worst_lin_error": 0.0, "delta": delta, "beta_mean": 1.0, "beta_max": 1.0, "beta_up": "",
-                "rho": math.nan, "accepted": True, "point_cost": cur.cost, "slack": 0.0, "slack_on": "", "choice": _label(prob, point),
-                "fd_solves": lin.fd_solves, "note": "C8's result, the warm start"}]
     stop, cuts, lin_rows = "max_iter", [], []
+    try:
+        lin = _linearise(prob, cur)
+        fd0 = lin.fd_solves
+    except _Cancelled as c:
+        lin, fd0, stop = None, c.solves, "cancelled"
+    history = []
+
+    def report(row):
+        history.append(row)
+        if progress is not None:
+            progress(int(row["iteration"]), max_iter,
+                     {"cost": row["cost"], "feasible": bool(row["feasible"]), "accepted": bool(row["accepted"]),
+                      "best_cost": None if best is None else best.cost, "c8_cost": c8_cost, "delta": row["delta"],
+                      "choice": row["choice"]})
+
+    v_tot, v_worst = _violation(prob, cur.g)
+    report({"iteration": 0, "cost": cur.cost, "feasible": cur.feasible, "worst_violation": v_worst,
+            "worst_lin_error": 0.0, "delta": delta, "beta_mean": 1.0, "beta_max": 1.0, "beta_up": "",
+            "rho": math.nan, "accepted": True, "point_cost": cur.cost, "slack": 0.0, "slack_on": "",
+            "choice": _label(prob, point), "fd_solves": fd0, "note": "C8's result, the warm start"})
+    beta = {k: BETA0 for k in (lin.keys if lin is not None else [])}
+    err = {k: 0.0 for k in beta}
     for it in range(1, max_iter + 1):
+        if lin is None or (should_stop is not None and should_stop()):
+            stop = "cancelled"
+            break
         backoff = np.array([beta.setdefault(k, BETA0) * abs(err.get(k, 0.0)) for k in lin.keys])
         trial_pt, pred, sigma = _solve_milp(prob, lin, cur.point, backoff, delta, penalty, cuts)
         slack_on = sorted((k for k, s in sigma.items() if s > 1e-6), key=lambda k: -sigma[k])
@@ -1124,7 +1167,7 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
                        worst_lin_error=0.0, beta_mean=float(np.mean(list(beta.values()))),
                        beta_max=float(max(beta.values())), rho=math.nan, accepted=False, point_cost=cur.cost,
                        choice=_label(prob, cur.point), note="the MILP returns the current point")
-            history.append(row)
+            report(row)
             stop = "converged" if cur.feasible else "stalled"
             break
         trial = prob.evaluate(trial_pt, linearise=True)
@@ -1170,15 +1213,21 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
             row["point_cost"] = trial.cost
             moved = abs(trial.cost - cur.cost)
             cur = trial
-            lin = _linearise(prob, cur)
+            try:
+                lin = _linearise(prob, cur)
+            except _Cancelled as c:
+                row["fd_solves"] = c.solves
+                report(row)
+                stop = "cancelled"
+                break
             row["fd_solves"] = lin.fd_solves
-            history.append(row)
+            report(row)
             if cur.feasible and moved < COST_TOL:
                 stop = "converged"
                 break
         else:
             row["point_cost"] = cur.cost                       # the previous point is kept
-            history.append(row)
+            report(row)
         if delta < d_floor:
             stop = "delta_floor"
             break
@@ -1186,6 +1235,8 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
     if best is None or (state.feasible and best.cost >= c8_cost - COST_TOL):
         why = ("no AC-feasible point was found" if best is None else
                f"no AC-feasible point is cheaper than C8's ({best.cost:,.0f} against {c8_cost:,.0f} per year)")
+        if stop == "cancelled":
+            why = f"cancelled after {len(history) - 1} iteration(s): {why}"
         out = _fallback(c8, prob, hist, why, c8_cost, stop)
     else:
         out = _result(c8, prob, best, hist, c8_cost, stop)
