@@ -5,9 +5,13 @@ import pathlib
 import tempfile
 import zipfile
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from db.models import Session as SessionRow
+from db.session import get_db
+from deps import current_session
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from models.schemas import ImportSummary
-from services import change_log_service
+from services import active_project, change_log_service
+from sqlalchemy.orm import Session as DBSession
 from services.pypsa_service import PyPSAService
 from services.upload_guard import read_capped, safe_extract
 from starlette.responses import StreamingResponse
@@ -192,6 +196,33 @@ def _reset_with_ts_clear() -> None:
     _restore_user_ts({})
 
 
+def _unbind_session(db: DBSession, session: SessionRow | None) -> None:
+    """Point the session at its scratch slot, where the import just landed.
+
+    A raw import replaces the network with one that belongs to no saved
+    project: `reset_network` publishes an UNBOUND context, which in server mode
+    goes into the session's scratch slot. But each request re-resolves its
+    context from the session's active-project POINTER, and nothing moved it —
+    so the very next request resolved the previous project again and the
+    import vanished behind a 200 that described a network nobody could see.
+    Measured: import a 1-bus file over a 3-bus project, GET /network/buses,
+    get the 3 buses back.
+
+    `/network/reset` (New Project) had already met this and says so: "Leaving
+    the pointer set would make the very next request re-resolve the old
+    project ... the reset would appear to silently undo itself." An import is
+    the same swap with content, so it needs the same un-pointing — which is
+    also exactly what the UI does on its side, `setCurrentProject(null)`.
+
+    Called on SUCCESS only. A refused import (`_refuse_reserved_buses`) raises
+    before this, leaving the session on the project it was on, which is still
+    resident and untouched — the reset landed in the scratch slot, not there.
+    `session` is None in local mode, where there is no pointer to move.
+    """
+    if session is not None:
+        active_project.set_active_project(db, session, None)
+
+
 def _refuse_reserved_buses(n) -> None:
     """An imported network may not name a bus `ic:…` (the commercial reference
     frames' namespace, P2 WP2.2-0): the import is undone and refused."""
@@ -204,7 +235,11 @@ def _refuse_reserved_buses(n) -> None:
 
 
 @router.post("/import/netcdf")
-async def import_netcdf(file: UploadFile = File(...)):
+async def import_netcdf(
+    file: UploadFile = File(...),
+    db: DBSession = Depends(get_db),
+    session: SessionRow | None = Depends(current_session),
+):
     data = await read_capped(file)
     with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as f:
         f.write(data)
@@ -223,11 +258,16 @@ async def import_netcdf(file: UploadFile = File(...)):
         "import", "Network", file.filename or "network.nc",
         f"Imported NetCDF '{file.filename}': {summary.buses} buses, {summary.generators} generators, {summary.snapshots} snapshots",
     )
+    _unbind_session(db, session)
     return summary
 
 
 @router.post("/import/csv")
-async def import_csv(file: UploadFile = File(...)):
+async def import_csv(
+    file: UploadFile = File(...),
+    db: DBSession = Depends(get_db),
+    session: SessionRow | None = Depends(current_session),
+):
     import zipfile as _zip
     data = await read_capped(file)
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -245,11 +285,16 @@ async def import_csv(file: UploadFile = File(...)):
         "import", "Network", file.filename or "network_csv.zip",
         f"Imported CSV zip '{file.filename}': {summary.buses} buses, {summary.generators} generators, {summary.snapshots} snapshots",
     )
+    _unbind_session(db, session)
     return summary
 
 
 @router.post("/import/excel")
-async def import_excel(file: UploadFile = File(...)):
+async def import_excel(
+    file: UploadFile = File(...),
+    db: DBSession = Depends(get_db),
+    session: SessionRow | None = Depends(current_session),
+):
     import openpyxl
     data = await read_capped(file)
     wb = openpyxl.load_workbook(io.BytesIO(data))
@@ -284,11 +329,16 @@ async def import_excel(file: UploadFile = File(...)):
         "import", "Network", file.filename or "network.xlsx",
         f"Imported Excel '{file.filename}': {summary.buses} buses, {summary.generators} generators",
     )
+    _unbind_session(db, session)
     return summary
 
 
 @router.post("/import/matpower")
-async def import_matpower(file: UploadFile = File(...)):
+async def import_matpower(
+    file: UploadFile = File(...),
+    db: DBSession = Depends(get_db),
+    session: SessionRow | None = Depends(current_session),
+):
     data = (await read_capped(file)).decode("utf-8")
     with PyPSAService.get_lock():
         _reset_with_ts_clear()
@@ -300,6 +350,7 @@ async def import_matpower(file: UploadFile = File(...)):
         "import", "Network", file.filename or "network.m",
         f"Imported MATPOWER '{file.filename}': {summary.buses} buses, {summary.generators} generators",
     )
+    _unbind_session(db, session)
     return summary
 
 

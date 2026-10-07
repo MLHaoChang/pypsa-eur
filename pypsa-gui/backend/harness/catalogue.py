@@ -467,8 +467,10 @@ TOOLS: list[dict[str, Any]] = [
     _t(
         "bulk_update_components",
         "Atomic bulk attribute set on N components of one class (PATCH "
-        "/api/network/_bulk). Single lock acquisition, single audit entry, "
-        "single undo snapshot. Backend coerces values against df[col].dtype; "
+        "/api/network/_bulk). Single lock acquisition, single audit entry. "
+        "Undoable as part of this turn (one undo reverts the turn's network "
+        "edits). Backend coerces values against "
+        "df[col].dtype; "
         "all-or-nothing on unknown names. Safety: write.",
         {
             "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
@@ -1688,9 +1690,16 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _empty(
         "undo_last",
-        "Roll back the most recent mutation (pops the per-project undo stack). "
-        "Returns {undone: bool, remaining: int} (remaining = undo-stack depth "
-        "after the pop). Safety: destructive.",
+        "Roll back the most recent step ON THE UNDO STACK (pops the "
+        "per-project stack). The stack holds the user's canvas edits AND your "
+        "turns: before the first network-changing tool of a turn, one "
+        "snapshot is taken, so one undo reverts EVERYTHING you changed in that "
+        "turn — not just your last call. Called later in the same turn, it "
+        "returns the network to how it was when the turn began. If the user "
+        "edited the canvas after your turn, the newest step is theirs and this "
+        "reverts that instead. Refuses when the stack is empty. Returns "
+        "{undone: bool, remaining: int} (remaining = undo-stack depth after "
+        "the pop). Safety: destructive.",
     ),
     _empty(
         "undo_status",
@@ -1889,7 +1898,7 @@ TOOLS: list[dict[str, Any]] = [
     _t(
         "apply_demand_from_excel",
         "Write a demand profile from an uploaded Excel/CSV into the named "
-        "Load's p_set time-series. Values are mapped to snapshots POSITIONALLY "
+        "Load's p_set time-series, REPLACING any profile it already has. Values are mapped to snapshots POSITIONALLY "
         "(row 0 → first snapshot, row 1 → second, etc.), so the spreadsheet "
         "order matters. Both FLAT and MULTI-PERIOD networks are supported. "
         "Row-count rules:\n"
@@ -1911,7 +1920,6 @@ TOOLS: list[dict[str, Any]] = [
             "time_col": {"type": "string"},
             "value_col": {"type": "string"},
             "load_name": {"type": "string"},
-            "replace": {"type": "boolean"},
         },
         ["file_id", "time_col", "value_col", "load_name"],
     ),
@@ -2550,8 +2558,8 @@ TOOLS: list[dict[str, Any]] = [
         "gridspine_export_handoff_bundle",
         "Zip one selected hour's handoff bundle (.raw, .dyr, contingencies, "
         "screening, fault levels, ledger) inside the project directory and "
-        "return {path, filename, bytes}. The user downloads it from the "
-        "study view; this tool prepares it. Safety: write.",
+        "return {download_url, filename, bytes}. The user downloads it from "
+        "the study view (or that URL); this tool prepares it. Safety: write.",
         {
             "project_id": {"type": "string"},
             "hour": {"type": "integer"},

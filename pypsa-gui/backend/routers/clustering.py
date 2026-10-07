@@ -20,7 +20,7 @@ from typing import Any, Literal
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from services import change_log_service
+from services import change_log_service, vintage_service
 from services.pypsa_service import PyPSAService
 
 router = APIRouter()
@@ -306,6 +306,17 @@ def apply_clustering(req: ClusterRequest) -> dict:
 
         new_n = clustering.n
         # Preserve coords, x/y aren't lost — aggregatebuses averages them.
+        #
+        # `n.meta` is NOT carried by PyPSA: `clustering.n` is a freshly
+        # constructed network, so swapping it in as-is silently discarded the
+        # user's per-period `vintage_bounds` and any stored `vintage_results`.
+        # Carry it, then prune — clustering aggregates and renames components
+        # wholesale, so a blind carry would hand the solver bounds for assets
+        # that no longer exist. What the prune drops is reported rather than
+        # swallowed: the user chose those bounds, and losing them to a
+        # clustering run is a thing to be told about.
+        new_n.meta = dict(getattr(n, "meta", None) or {})
+        dropped_bounds = vintage_service.prune_orphaned_entries(new_n)
         PyPSAService.set_network(new_n)
 
     # Audit log entry summarising the reduction. For region mode, also report
@@ -317,19 +328,25 @@ def apply_clustering(req: ClusterRequest) -> dict:
         n_user = busmap.attrs.get("region_n_user", 0)
         n_auto = busmap.attrs.get("region_n_auto", 0)
         region_split = f" — {n_user} manually labelled, {n_auto} auto-determined"
+    n_dropped = sum(len(v) for v in dropped_bounds.values())
+    dropped_note = (
+        f"; dropped per-period bounds for {n_dropped} asset(s) that clustering "
+        f"renamed away" if n_dropped else ""
+    )
     change_log_service.log(
         "cluster",
         "Network",
         label,
         f"Clustered ({label}): {before_buses} → {len(new_n.buses)} buses, "
-        f"{before_lines} → {len(new_n.lines)} lines{region_split}",
+        f"{before_lines} → {len(new_n.lines)} lines{region_split}{dropped_note}",
     )
 
     return {
         "bus_count": int(len(new_n.buses)),
         "line_count": int(len(new_n.lines)),
+        "dropped_vintage_bounds": dropped_bounds,
         "message": (
             f"Clustered: {before_buses} → {len(new_n.buses)} buses · "
-            f"{before_lines} → {len(new_n.lines)} lines{region_split}"
+            f"{before_lines} → {len(new_n.lines)} lines{region_split}{dropped_note}"
         ),
     }

@@ -194,17 +194,19 @@ def put_asset_health(body: AssetHealthPut,
                      project: AuthorizedProject = ProjectAccessDep,
                      db: DBSession = Depends(get_db),
                      user: User | None = Depends(optional_user)) -> dict:
-    # Same reasoning as `put_worksheet` and `put_stress_scenarios` above, and
-    # the FOURTH site to need it: `save_asset_health` replaces the ledger whole
-    # and bumps `version`, `asset_health.json` is in `projects._BUNDLE_FILES`,
-    # and `study_report._evidence_gaps` reads it — so a non-holder's write did
-    # not just overwrite the holder's provenance, it made the holder's own study
-    # report call every asset-level rate `unsourced`.
+    # Same foreign-lock refusal its two siblings above carry, and missed by
+    # the sweep that added them — this handler did not even accept `db` /
+    # `user`, so it could not have checked. `save_asset_health` REPLACES the
+    # sidecar the same way `save_worksheet` does.
     #
-    # This handler took no `db`/`user` at all, so it had nothing to check a lock
-    # with; it landed two days before the commit that fixed its two siblings and
-    # was never in that fix's scope. Check-only, not acquire: recording
-    # provenance is not claiming the project.
+    # `asset_health.json` is the outage-rate PROVENANCE ledger, and it is in
+    # `projects._BUNDLE_FILES` for the reason recorded there: without it
+    # `study_report._evidence_gaps` reports every asset-level rate as
+    # `unsourced`. So a non-holder's write does not merely lose the holder's
+    # entries — it travels into every later bundle and snapshot and changes
+    # what the study says about its own evidence.
+    #
+    # Check-only, not acquire: editing a sidecar is not claiming the project.
     from routers.projects import _check_project_lock
 
     _lock = _lock_target(project)

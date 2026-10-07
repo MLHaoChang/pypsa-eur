@@ -214,15 +214,6 @@ TOOL_POLICY: dict[str, tuple[str, str]] = {
         "selects among already-configured LLM profiles; super-admin-only, "
         "matching `POST /api/chat/settings/llm/active`. Instance scope."
     )),
-    "clear_chat_history": (CHAT_SESSION, _R_CHAT_HISTORY),
-    "start_campaign": (IN_MEMORY_BOOKKEEPING, (
-        "a per-context study budget record in `solver_state`; study records are "
-        "NOT persisted (`STUDY_KEYS`, `services/project_context.py`). The "
-        "studies it budgets are lock-gated themselves (`/api/results/*`). "
-        "At worst a co-member can open/close the holder's budget record "
-        "in memory."
-    )),
-    "end_campaign": (IN_MEMORY_BOOKKEEPING, "see start_campaign."),
     "gridspine_create_study": (CREATES_PROJECT, _R_CREATES),
     "gridspine_set_dispatch_source": (STUDY_NOT_LOCK_COORDINATED, _R_STUDY),
     "gridspine_update_config": (STUDY_NOT_LOCK_COORDINATED, _R_STUDY),
@@ -235,11 +226,6 @@ TOOL_POLICY: dict[str, tuple[str, str]] = {
 
 # Recorded, reproduced, open defects. Each MUST still be a gap. When one is
 # fixed, `test_every_known_gap_is_still_a_gap` fails until its line is deleted.
-_ITEM_13 = (
-    "OPEN-ITEMS item 13: writes the project's upload store with no lock "
-    "check, while the HTTP upload routes refuse a non-holder. "
-    "findings/2026-10-05-chat-tools-bypass-the-upload-lock-check.md"
-)
 _ITEM_14 = (
     "OPEN-ITEMS item 14: calls the campus service directly, skipping the "
     "`_check_lock` its HTTP handler runs. "
@@ -250,13 +236,6 @@ KNOWN_GAPS: dict[str, str] = {
     "campus_run_study": _ITEM_14,
     "campus_extract_grid_code": _ITEM_14,  # #84, same shape, found the day it merged
     "campus_set_library": _ITEM_14,  # #91, replaces the project's asset library
-    "clear_uploads": _ITEM_13,
-    "export_to_excel": _ITEM_13,
-    "export_to_csv": _ITEM_13,
-    "export_preview_png": _ITEM_13,
-    "export_chat_summary": _ITEM_13,
-    "export_eh_report_docx": _ITEM_13,
-    "export_asset_results": _ITEM_13,
 }
 
 
@@ -461,6 +440,16 @@ def _tool_write_routes(TOOL_ROUTES, name) -> list[tuple[str, str]]:
 
 def _tool_is_covered(name, chat_tools, TOOL_ROUTES, gated) -> bool:
     if name in gated:
+        return True
+    # A tool that checks the lock in its own body is holder-checked, the same
+    # rule the HTTP routes get above, and verified the same way. Without this
+    # the main test and the ratchet below disagreed: the ratchet counted an
+    # in-body check as a fix, while this function did not count it as a
+    # decision. That only surfaced with the first real in-body fixes: #76's
+    # `_check_foreign_lock("export")` inside `_save_agent_export`, then
+    # OPEN-ITEMS 14's `_gridspine_project_for_write`. Until then every
+    # covered tool was either seam-gated or routed.
+    if _lock_check_path(chat_tools.DISPATCHERS[name]) is not None:
         return True
     writes = _tool_write_routes(TOOL_ROUTES, name)
     routes = _write_routes()

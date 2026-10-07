@@ -1,0 +1,421 @@
+{
+  "requirements": {
+    "bridge_s": {
+      "source": "assumed",
+      "value": 600.0
+    },
+    "frequency_limits": {
+      "steady_island": {
+        "f_max_hz": {
+          "source": "assumed",
+          "value": 51.5
+        },
+        "f_min_hz": {
+          "source": "assumed",
+          "value": 47.5
+        },
+        "qss_band_hz": {
+          "source": "assumed",
+          "value": 1.0
+        },
+        "rocof_hz_per_s": {
+          "source": "assumed",
+          "value": 1.0
+        }
+      },
+      "transition": {
+        "f_max_hz": {
+          "source": "assumed",
+          "value": 51.5
+        },
+        "f_min_hz": {
+          "source": "assumed",
+          "value": 47.5
+        },
+        "qss_band_hz": {
+          "source": "assumed",
+          "value": 1.0
+        },
+        "rocof_hz_per_s": {
+          "source": "assumed",
+          "value": 1.0
+        }
+      }
+    },
+    "fuel_autonomy_h": {
+      "source": "assumed",
+      "value": 24.0
+    },
+    "genset_redundancy_n": {
+      "source": "assumed",
+      "value": 1
+    },
+    "gfm_margin": {
+      "source": "assumed",
+      "value": 0.1
+    },
+    "pickup_blocks": {
+      "source": "assumed",
+      "value": [
+        15.0,
+        15.0,
+        15.0,
+        10.0
+      ]
+    },
+    "ride_through_storage": [
+      "bess_new"
+    ],
+    "rocof_window_ms": {
+      "source": "assumed",
+      "value": 500.0
+    },
+    "scenarios": [
+      "ups_bridged",
+      "seamless"
+    ],
+    "sustained_h": {
+      "source": "assumed",
+      "value": 24.0
+    }
+  },
+  "units": {
+    "bess_new": {
+      "control": "gfm_droop",
+      "droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "i_max_pu": {
+        "source": "assumed",
+        "value": 1.2
+      },
+      "k_gfm_min": {
+        "source": "assumed",
+        "value": 1.0
+      },
+      "kind": "bess",
+      "pf_rated": {
+        "source": "assumed",
+        "value": 0.95
+      },
+      "q_droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "tau_f_s": {
+        "source": "assumed",
+        "value": 0.1
+      }
+    },
+    "cooling": {
+      "critical": true,
+      "kind": "load"
+    },
+    "genset_1": {
+      "H_s": {
+        "source": "assumed",
+        "value": 1.5
+      },
+      "T_g_s": {
+        "source": "assumed",
+        "value": 0.5
+      },
+      "cos_phi_r": {
+        "source": "assumed",
+        "value": 0.8
+      },
+      "droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "excitation": "avr_pmg",
+      "governor": "droop",
+      "kind": "genset",
+      "load_step_max_pct": {
+        "source": "assumed",
+        "value": 50.0
+      },
+      "neutral_earthing": "solid",
+      "p_min_pu": {
+        "source": "assumed",
+        "value": 0.3
+      },
+      "q_droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "ramp_pu_per_s": {
+        "source": "assumed",
+        "value": 0.2
+      },
+      "start_s": {
+        "source": "assumed",
+        "value": 10.0
+      },
+      "sync_s": {
+        "source": "assumed",
+        "value": 5.0
+      },
+      "xd_sat": {
+        "source": "assumed",
+        "value": 2.0
+      }
+    },
+    "genset_2": {
+      "H_s": {
+        "source": "assumed",
+        "value": 1.5
+      },
+      "T_g_s": {
+        "source": "assumed",
+        "value": 0.5
+      },
+      "cos_phi_r": {
+        "source": "assumed",
+        "value": 0.8
+      },
+      "droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "excitation": "avr_pmg",
+      "governor": "droop",
+      "kind": "genset",
+      "load_step_max_pct": {
+        "source": "assumed",
+        "value": 50.0
+      },
+      "neutral_earthing": "solid",
+      "p_min_pu": {
+        "source": "assumed",
+        "value": 0.3
+      },
+      "q_droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "ramp_pu_per_s": {
+        "source": "assumed",
+        "value": 0.2
+      },
+      "start_s": {
+        "source": "assumed",
+        "value": 10.0
+      },
+      "sync_s": {
+        "source": "assumed",
+        "value": 5.0
+      },
+      "xd_sat": {
+        "source": "assumed",
+        "value": 2.0
+      }
+    },
+    "genset_3": {
+      "H_s": {
+        "source": "assumed",
+        "value": 1.5
+      },
+      "T_g_s": {
+        "source": "assumed",
+        "value": 0.5
+      },
+      "cos_phi_r": {
+        "source": "assumed",
+        "value": 0.8
+      },
+      "droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "excitation": "avr_pmg",
+      "governor": "droop",
+      "kind": "genset",
+      "load_step_max_pct": {
+        "source": "assumed",
+        "value": 50.0
+      },
+      "neutral_earthing": "solid",
+      "p_min_pu": {
+        "source": "assumed",
+        "value": 0.3
+      },
+      "q_droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "ramp_pu_per_s": {
+        "source": "assumed",
+        "value": 0.2
+      },
+      "start_s": {
+        "source": "assumed",
+        "value": 10.0
+      },
+      "sync_s": {
+        "source": "assumed",
+        "value": 5.0
+      },
+      "xd_sat": {
+        "source": "assumed",
+        "value": 2.0
+      }
+    },
+    "genset_4": {
+      "H_s": {
+        "source": "assumed",
+        "value": 1.5
+      },
+      "T_g_s": {
+        "source": "assumed",
+        "value": 0.5
+      },
+      "cos_phi_r": {
+        "source": "assumed",
+        "value": 0.8
+      },
+      "droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "excitation": "avr_pmg",
+      "governor": "droop",
+      "kind": "genset",
+      "load_step_max_pct": {
+        "source": "assumed",
+        "value": 50.0
+      },
+      "neutral_earthing": "solid",
+      "p_min_pu": {
+        "source": "assumed",
+        "value": 0.3
+      },
+      "q_droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "ramp_pu_per_s": {
+        "source": "assumed",
+        "value": 0.2
+      },
+      "start_s": {
+        "source": "assumed",
+        "value": 10.0
+      },
+      "sync_s": {
+        "source": "assumed",
+        "value": 5.0
+      },
+      "xd_sat": {
+        "source": "assumed",
+        "value": 2.0
+      }
+    },
+    "genset_new": {
+      "H_s": {
+        "source": "assumed",
+        "value": 1.5
+      },
+      "T_g_s": {
+        "source": "assumed",
+        "value": 0.5
+      },
+      "cos_phi_r": {
+        "source": "assumed",
+        "value": 0.8
+      },
+      "droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "excitation": "avr_pmg",
+      "governor": "droop",
+      "kind": "genset",
+      "load_step_max_pct": {
+        "source": "assumed",
+        "value": 50.0
+      },
+      "neutral_earthing": "solid",
+      "p_min_pu": {
+        "source": "assumed",
+        "value": 0.3
+      },
+      "q_droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "ramp_pu_per_s": {
+        "source": "assumed",
+        "value": 0.2
+      },
+      "start_s": {
+        "source": "assumed",
+        "value": 10.0
+      },
+      "sync_s": {
+        "source": "assumed",
+        "value": 5.0
+      },
+      "unit_mw": {
+        "source": "assumed",
+        "value": 10.0
+      },
+      "xd_sat": {
+        "source": "assumed",
+        "value": 2.0
+      }
+    },
+    "it_load": {
+      "critical": true,
+      "kind": "load"
+    },
+    "offices": {
+      "critical": false,
+      "kind": "load"
+    },
+    "rooftop_pv": {
+      "control": "gfl_qu",
+      "kind": "pv",
+      "pf_rated": {
+        "source": "assumed",
+        "value": 0.95
+      },
+      "qu_points": {
+        "source": "assumed",
+        "value": [
+          [
+            0.9,
+            0.33
+          ],
+          [
+            0.97,
+            0.0
+          ],
+          [
+            1.03,
+            0.0
+          ],
+          [
+            1.1,
+            -0.33
+          ]
+        ]
+      }
+    },
+    "ups_battery": {
+      "f_window_hz": {
+        "source": "assumed",
+        "value": 2.0
+      },
+      "it_load": [
+        "it_load"
+      ],
+      "kind": "ups",
+      "walk_in_s": {
+        "source": "assumed",
+        "value": 15.0
+      }
+    }
+  }
+}

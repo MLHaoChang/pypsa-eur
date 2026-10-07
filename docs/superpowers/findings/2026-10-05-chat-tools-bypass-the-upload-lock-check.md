@@ -2,12 +2,7 @@
 
 **Date:** 2026-10-05
 **Severity:** HIGH: cross-user write to a bundled project store. One tool deletes, six add.
-**Status: OPEN, NOT FIXED.** Found while doing OPEN-ITEMS item 6. Recorded rather
-than fixed, under the standing rule that a defect found along the way is
-recorded, not folded into another piece of work. The item-6 policy test
-(`tests/test_write_surface_lock_policy.py`) lists these seven tools as known
-gaps that point here. That test fails when one of them is fixed, so the entry
-must be deleted in the same change.
+**Status: FIXED** by #76 (`e36c041`), merged 2026-10-07, not by this work. It was recorded here first, and the write-surface test's `KNOWN_GAPS` ratchet confirmed the fix on merge. The reproduction below is the pre-fix behaviour.
 **Scope:** the multi-user server only. Local mode has one identity, so there is
 never a foreign holder.
 
