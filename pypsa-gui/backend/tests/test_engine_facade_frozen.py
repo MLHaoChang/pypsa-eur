@@ -53,6 +53,7 @@ SIGNATURES: dict[str, str] = {
         "(name: 'str', kind: 'str', basis: 'str', quantity: 'float', "
         "parts: 'tuple[UpfrontPart, ...]', build_year: 'int', source: 'str', "
         "source_hash: 'str') -> None",
+    "services.finance.case.ExtraOwnerAsset.asset_finance": "(self) -> 'AssetFinance'",
     "services.finance.case.FinanceRefused": "(code: 'str', detail: 'str' = '')",
     "services.finance.engine.run_case":
         "(case: 'FinanceCase', pack: 'JurisdictionPack | None' = None, *, "

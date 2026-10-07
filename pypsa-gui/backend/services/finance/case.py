@@ -260,7 +260,7 @@ class ExtraOwnerAsset:
     it is built; `source_hash` sha256[:16] of the solved campus study that chose it.
 
     Refused at construction, `ValueError("extra_asset_invalid:<name>:<field>")`: an
-    empty name, an unknown kind or basis, a quantity that is not finite and > 0 (or
+    empty name or one containing ':', an unknown kind or basis, a quantity that is not finite and > 0 (or
     not whole for `lump` / `per_bay`), no part or a part that is not such a dataclass
     (`parts`), a build year outside 1900..2200, a `source_hash` that is not 16 hex
     characters, a part lifetime that is None, NaN, infinite or below a year
@@ -283,6 +283,9 @@ class ExtraOwnerAsset:
 
         if not isinstance(self.name, str) or not self.name.strip():
             bad("name", "an extra asset needs a name")
+        if ":" in self.name:
+            # Review note 4: a ':' would make the `<code>:<name>:<field>` codes ambiguous.
+            bad("name", f"{self.name!r} contains ':'")
         if self.kind not in EXTRA_ASSET_KINDS:
             bad("kind", f"{self.kind!r} is not one of {list(EXTRA_ASSET_KINDS)}")
         if self.basis not in EXTRA_ASSET_BASES:

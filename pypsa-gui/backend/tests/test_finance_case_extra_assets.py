@@ -107,6 +107,7 @@ def _lines(t) -> dict:
 
 @pytest.mark.parametrize("over,field", [
     ({"name": ""}, "name"),
+    ({"name": "trf:a"}, "name"),                     # a ':' would make the codes ambiguous
     ({"kind": "busbar"}, "kind"),
     ({"basis": "per_MW"}, "basis"),
     ({"quantity": 0}, "quantity"),
@@ -436,8 +437,10 @@ def test_the_report_block_reads_the_case_assets_and_the_workbook_lists_them(solv
     assert (trf["kind"], trf["basis"], trf["quantity"], trf["build_year"], trf["source"],
             trf["source_hash"]) == ("transformer", "lump", 1, 2030, "campus study s1", HASH)
     assert trf["overnight_cost"] == pytest.approx(1.1 * 1_800_000.0)      # scale_capex reflected
-    assert trf["parts"] == [{"name": "investment", "upfront_per_unit": 1_800_000.0,
+    assert trf["parts"] == [{"name": "investment", "upfront_per_unit_as_passed": 1_800_000.0,
+                             "overnight_cost": pytest.approx(1.1 * 1_800_000.0),
                              "lifetime": 40.0, "fom_share": 0.015}]
+    assert "within its build year 2030" in trf["cod"]
     assert "2026 EUR" in trf["money_year"]
     assert by["feeder_cable"]["overnight_cost"] == pytest.approx(1.1 * 225_000.0)
     ws = load_workbook(io.BytesIO(build_workbook(rep)))["About"]
@@ -448,3 +451,28 @@ def test_the_report_block_reads_the_case_assets_and_the_workbook_lists_them(solv
     plain = _build(n, cfg)
     assert assemble_finance_sections(run_case(plain), plain).sections["project"].payload[
         "extra_assets"] == []
+
+
+@pytest.mark.live_solve
+def test_the_report_block_shows_scaled_part_costs_and_a_typed_cod(solved):
+    """Review notes 1, 2: after `scale_capex` each part's overnight cost is the scaled one from
+    `case.assets` (the per-unit cost is labelled as passed); a typed `cod_by_asset` entry over a
+    different build year is stated as typed, not "within its build year"."""
+    from services.finance.case import scale_capex
+    from services.finance.engine import run_case
+    from services.finance.report import assemble_finance_sections
+
+    n, cfg = solved
+    cod = date(2027, 7, 1)
+    fin = _fin(financial_close=date(2027, 1, 1), cod_by_asset={"pv": cod, "bess": cod, "trf": cod})
+    case = scale_capex(_build(n, cfg, fin, extras=(_ext(build_year=2028), _mk(CABLE, build_year=2027))),
+                       1.2)
+    by = {b["name"]: b for b in assemble_finance_sections(run_case(case), case)
+          .sections["project"].payload["extra_assets"]}
+    (part,) = by["trf"]["parts"]
+    assert part["upfront_per_unit_as_passed"] == 1_800_000.0
+    assert part["overnight_cost"] == pytest.approx(1.2 * 1_800_000.0)
+    assert by["trf"]["overnight_cost"] == pytest.approx(1.2 * 1_800_000.0)
+    assert by["feeder_cable"]["parts"][0]["overnight_cost"] == pytest.approx(1.2 * 2.5 * 90_000.0)
+    assert "typed in cod_by_asset" in by["trf"]["cod"] and "within" not in by["trf"]["cod"]
+    assert "within its build year 2027" in by["feeder_cable"]["cod"]

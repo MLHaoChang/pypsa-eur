@@ -349,8 +349,10 @@ TERMINAL_EXTRA_ASSETS_BASIS = (
 
 def _extra_assets_block(case) -> list[dict[str, Any]]:
     """Each extra asset (IC G2 plan G-10): what it is, its quantity and parts, its
-    overnight cost READ FROM `case.assets` (so `scale_capex` is reflected), its
-    build year, its source and `source_hash`, and its money year and COD."""
+    overnight cost READ FROM `case.assets` (so `scale_capex` is reflected) — per
+    part too, beside the per-unit cost as passed (review note 1) — its build
+    year, its source and `source_hash`, and its money year and COD (typed in
+    `cod_by_asset`, or within its build year — review note 2)."""
     fin = case.inputs
     assets = {a.name: a for a in case.assets}
     money = (f"{fin.currency_year} {fin.currency}" if fin.currency_year is not None
@@ -358,17 +360,25 @@ def _extra_assets_block(case) -> list[dict[str, Any]]:
     out = []
     for e in getattr(case, "extra_assets", ()) or ():
         a = assets.get(e.name)
+        scaled = {} if a is None else {p.name: p.overnight_cost for p in a.parts}
+        if e.name in fin.cod_by_asset:
+            cod = (f"taken at the case COD {case.cod.isoformat()}, typed in cod_by_asset "
+                   f"(build year {e.build_year})")
+        else:
+            cod = (f"taken at the case COD {case.cod.isoformat()}, within its build year "
+                   f"{e.build_year}")
         out.append({
             "name": e.name, "kind": e.kind, "basis": e.basis, "quantity": e.quantity,
             "overnight_cost": None if a is None else _num(a.overnight_cost),
-            "parts": [{"name": p.name, "upfront_per_unit": _num(p.upfront_per_unit),
+            "parts": [{"name": p.name,
+                       "upfront_per_unit_as_passed": _num(p.upfront_per_unit),
+                       "overnight_cost": _num(scaled.get(p.name)),
                        "lifetime": _num(p.lifetime), "fom_share": _num(p.fom_share)}
                       for p in e.parts],
             "build_year": e.build_year, "source": e.source, "source_hash": e.source_hash,
             "money_year": (f"upfront costs in the case's money, {money}: the caller converted "
                            "them from the campus library's currency and price year"),
-            "cod": (f"taken at the case COD {case.cod.isoformat()}, within its build year "
-                    f"{e.build_year}"),
+            "cod": cod,
         })
     return out
 
