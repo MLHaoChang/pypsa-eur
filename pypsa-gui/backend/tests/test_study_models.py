@@ -267,12 +267,12 @@ def test_investment_case_roundtrip_irr_null_with_flag():
                             "debt_service": "no_financing_in_mvp1"},
         }],
         kpis={"npv": -1.0e6, "irr": None, "payback_simple": None,
-              "payback_discounted": None, "lcoe": None, "lcos": None,
+              "payback_discounted": None, "lcoe": None, "levelised_cost": None,
               "lcoh": None, "dscr_min": None, "capex_total": 1.0e6,
               "unavailable": {"irr": "no_sign_change",
                               "payback_simple": "never_pays_back",
                               "payback_discounted": "never_pays_back",
-                              "lcoe": "not_applicable", "lcos": "no_discharge",
+                              "lcoe": "not_applicable", "levelised_cost": "no_discharge",
                               "lcoh": "not_applicable",
                               "dscr_min": "no_financing_in_mvp1"}},
         value_streams=[{"label": "Demand-charge savings", "annual_value": None,
@@ -405,7 +405,9 @@ def test_later_phase_fields_exist_as_typed():
     )
 
     assert "salvage" in CashFlowYear.model_fields
-    assert "salvage_eur" in CaseKpis.model_fields
+    # U2 WP8 (§5.4): `salvage_eur` is `terminal_value_eur` (read-compat:
+    # test_study_engine_literal_compat.py).
+    assert "terminal_value_eur" in CaseKpis.model_fields
     assert "salvage_basis" in InvestmentCase.model_fields
     assert {"pending", "note"} <= set(Robustness.model_fields)
     assert {"options_status", "pending_options", "hashes"} <= set(Findings.model_fields)

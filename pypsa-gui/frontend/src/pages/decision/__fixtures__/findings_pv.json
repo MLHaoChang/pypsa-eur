@@ -18,7 +18,7 @@
    "battery_p_nom_mw": 0.0,
    "battery_payback_simple": null,
    "currency_year": 2020,
-   "engine": "cash_flow_expander",
+   "engine": "finance_engine",
    "fidelity": "quick_screen",
    "method": "battery_only",
    "notes": [
@@ -44,7 +44,7 @@
    "battery_p_nom_mw": 0.0,
    "battery_payback_simple": null,
    "currency_year": 2020,
-   "engine": "cash_flow_expander",
+   "engine": "finance_engine",
    "fidelity": "quick_screen",
    "method": "battery_only",
    "notes": [
@@ -70,7 +70,7 @@
    "battery_p_nom_mw": 0.0,
    "battery_payback_simple": null,
    "currency_year": 2020,
-   "engine": "cash_flow_expander",
+   "engine": "finance_engine",
    "fidelity": "quick_screen",
    "method": "battery_only",
    "notes": [
@@ -96,7 +96,7 @@
    "battery_p_nom_mw": 0.3,
    "battery_payback_simple": 0.5617161435336111,
    "currency_year": 2020,
-   "engine": "cash_flow_expander",
+   "engine": "finance_engine",
    "fidelity": "quick_screen",
    "method": "battery_removed_same_pv",
    "notes": [
@@ -545,7 +545,7 @@
     "tax": "pre",
     "terms": "real"
    },
-   "engine": "bill_calculator",
+   "engine": "tariff_engine",
    "key": "demand_charge_reduction",
    "label": "Demand-charge reduction",
    "share": 0.10212067273296285,
@@ -558,7 +558,7 @@
     "tax": "pre",
     "terms": "real"
    },
-   "engine": "bill_calculator",
+   "engine": "tariff_engine",
    "key": "energy_shift",
    "label": "Energy time-shift",
    "share": 0.8978793272670371,
@@ -571,7 +571,7 @@
     "tax": "pre",
     "terms": "real"
    },
-   "engine": "bill_calculator",
+   "engine": "tariff_engine",
    "key": "export_credit",
    "label": "Export credit",
    "share": 0.0,
@@ -584,7 +584,7 @@
     "tax": "pre",
     "terms": "real"
    },
-   "engine": "bill_calculator",
+   "engine": "tariff_engine",
    "key": "fixed",
    "label": "Fixed charges",
    "share": 0.0,
@@ -625,7 +625,7 @@
      "terms": "real"
     },
     "currency_year": 2020,
-    "engine": "cash_flow_expander",
+    "engine": "finance_engine",
     "fidelity": "quick_screen",
     "key": "battery_npv",
     "label": "Battery NPV",
@@ -651,7 +651,7 @@
      "terms": "real"
     },
     "currency_year": 2020,
-    "engine": "cash_flow_expander",
+    "engine": "finance_engine",
     "fidelity": "quick_screen",
     "key": "battery_payback_simple",
     "label": "Battery simple payback",
@@ -679,7 +679,7 @@
      "terms": "real"
     },
     "currency_year": 2020,
-    "engine": "cash_flow_expander",
+    "engine": "finance_engine",
     "fidelity": "quick_screen",
     "key": "battery_npv",
     "label": "Battery NPV",
@@ -705,7 +705,7 @@
      "terms": "real"
     },
     "currency_year": 2020,
-    "engine": "cash_flow_expander",
+    "engine": "finance_engine",
     "fidelity": "quick_screen",
     "key": "battery_payback_simple",
     "label": "Battery simple payback",

@@ -261,7 +261,7 @@ def test_the_findings_and_the_report_value_the_engine_solved_forks_on_the_engine
                           asset_economics=live["details"][oid]["asset_economics"],
                           question=QUESTION, study_currency_year=2020).view
     assert route.engine == "finance_engine"
-    assert route.kpis.lcos == pytest.approx(econ.facts["lcos_finance_engine"].value, rel=1e-12)
+    assert route.kpis.levelised_cost == pytest.approx(econ.facts["lcos_finance_engine"].value, rel=1e-12)
 
 
 def test_every_bill_and_value_on_the_live_report_names_the_engine_that_made_it(live):

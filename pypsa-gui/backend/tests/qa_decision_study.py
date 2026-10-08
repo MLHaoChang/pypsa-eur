@@ -457,11 +457,14 @@ def _record_figures(run: dict, findings: dict, case: dict) -> None:
     # `post_figure`). A pro forma case (a fork written before WP7) keeps it.
     lcos_key = ("lcos_finance_engine" if case.get("engine") == "finance_engine"
                 else "lcos_excl_charging")
+    # U2 WP8 part B (§5.4): the case says `terminal_value_eur` and
+    # `levelised_cost`; the evidence key follows (the WP0 freeze's
+    # `salvage_eur`, moved by its recorded delta's `post_figure`).
     EVIDENCE["case_kpis"] = {
         "option_id": case["option_id"], "npv": k.get("npv"), "irr": k.get("irr"),
         "payback_simple": k.get("payback_simple"),
         "payback_discounted": k.get("payback_discounted"), "capex_total": k.get("capex_total"),
-        "salvage_eur": k.get("salvage_eur"), lcos_key: k.get("lcos"),
+        "terminal_value_eur": k.get("terminal_value_eur"), lcos_key: k.get("levelised_cost"),
         "lcos_incl_charging": lcos_incl,
         "ledger_hash": (case.get("provenance") or {}).get("ledger_hash")}
     EVIDENCE["bills"] = {

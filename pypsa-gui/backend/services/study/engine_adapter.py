@@ -788,20 +788,23 @@ def _view(ctx: Mapping[str, Any], case, result, *, centre: bool,
     for key, v in (("payback_simple", pb), ("payback_discounted", pbd)):
         if v is None:
             kpi_flags[key] = "never_pays_back" if invested else "no_investment"
+    # §5.4: the levelised cost is the engine's storage LCOS on the real basis.
     lcos = None
     if not any(a.component == "StorageUnit" for a in case.assets):
-        kpi_flags["lcos"] = "not_applicable"
+        kpi_flags["levelised_cost"] = "not_applicable"
     else:
         lcos = m.get("lcos_real_per_mwh")
         if lcos is None:
             reasons = [_code(r) for r in (result.lcos.get("reasons") or [])]
-            kpi_flags["lcos"] = next((r for r in reasons if r), "lcos_not_established")
+            kpi_flags["levelised_cost"] = next((r for r in reasons if r), "lcos_not_established")
         else:
             notes.append("lcos_includes_charging_energy_cost")
     salvage = float(result.terminal[-1])
     kpis = CaseKpis(npv=float(m["project_pre_tax_npv"]), irr=irr_value, payback_simple=pb,
-                    payback_discounted=pbd, lcoe=None, lcos=lcos, lcoh=None, dscr_min=None,
-                    capex_total=capex_total, salvage_eur=salvage, unavailable=kpi_flags)
+                    payback_discounted=pbd, lcoe=None, levelised_cost=lcos,
+                    levelised_cost_basis=None if lcos is None else "real", lcoh=None,
+                    dscr_min=None, capex_total=capex_total, terminal_value_eur=salvage,
+                    unavailable=kpi_flags)
 
     p_sizes = []
     if packs.BATTERY_NAME in ctx["sizes"]:
@@ -831,7 +834,7 @@ def option_case(n, cfg, ledger: AssumptionsLedger, *, compiled: C.CompiledCommer
                 asset_economics: Mapping | None = None, question=None,
                 project_ref: str | None = None, model_hash: str | None = None,
                 bills: Mapping[str, Any] | None = None,
-                study_currency_year: int | None = None) -> CaseBundle:
+                study_currency_year: int | None = None, centre: bool = True) -> CaseBundle:
     """
     One solved option's investment case on the Investment Case engine (plan
     §2 C6, WP7): `compile.finance_from_ledger` (C1 parts read by the engine,
@@ -851,6 +854,10 @@ def option_case(n, cfg, ledger: AssumptionsLedger, *, compiled: C.CompiledCommer
     a rate bound is `bound_case`'s), a second currency year, a lifetime that
     is not whole years, and a `FinanceRefused` of the engine (`engine_refused`
     with its `engine_code`).
+
+    `centre=False` values a case off the centre — a price bound, the fixed
+    sizes re-dispatched at another tariff (gate U2-WP7 N6): its view carries
+    no `BY_CONSTRUCTION` code, which hold at the LP optimum only.
     """
     import dataclasses as dc
 
@@ -948,7 +955,7 @@ def option_case(n, cfg, ledger: AssumptionsLedger, *, compiled: C.CompiledCommer
            "market": _market(n, econ), "upfront_gaps": gaps, "sizes": sizes,
            "centre_values": {k: float(v) for k, v in packs.ledger_values(ledger).items()
                              if v is not None}}
-    view = _view(ctx, case, result, centre=True)
+    view = _view(ctx, case, result, centre=centre)
     return CaseBundle(view=view, case=case, result=result, bills=got, compiled=compiled,
                       finance=finance, context=ctx)
 

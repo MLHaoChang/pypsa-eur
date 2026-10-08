@@ -585,6 +585,16 @@
    "abs": null,
    "rel": null,
    "cause": "c4_ledger_seeded_from_the_pinned_pack: production seeds the study ledger from the pinned defaults pack (library.load_defaults, U2 WP8 gate C4) instead of the legacy study_library; rows 1-20 hold the same values, and the guided rules (rows 21-34) are rows now, so the ledger hash the case records changes. No figure moves (every other driver leaf is within the frozen tolerances)."
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_the_driver_evidence_reproduces",
+   "figure": "driver.case_kpis.salvage_eur",
+   "post_figure": "driver.case_kpis.terminal_value_eur",
+   "pre": 106849.54178734843,
+   "post": 106849.54178734843,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "vocabulary_rename_5_4: plan §5.4 (U2 WP8 part B) renames CaseKpis.salvage_eur to terminal_value_eur; the driver records the case's figure under the new name (post_figure). The number does not move (it is compared at the frozen tolerance); the WP0 freeze keeps salvage_eur"
   }
  ]
 }

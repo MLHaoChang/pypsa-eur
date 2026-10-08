@@ -281,7 +281,8 @@ def test_headline_kpis_state_their_provenance():
     v = F.verdict([_att("bess_2h", 3e4)], _rob("bess_2h", (5e4, 1e4)), fidelity="full_study")
     assert len(v.headline_kpis) == 3
     for fig in v.headline_kpis:
-        assert fig.fidelity == "full_study" and fig.engine in ("cash_flow_expander", "lp")
+        # U2 WP8 part B (§5.4): the attribution's default engine is the finance engine.
+        assert fig.fidelity == "full_study" and fig.engine in ("finance_engine", "lp")
         if fig.unit == "EUR":
             assert fig.basis is not None and fig.currency_year == 2020
 

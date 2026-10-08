@@ -252,7 +252,7 @@ def test_lcos_is_on_discounted_energy(cases):
     energy = row["discharge_mwh"] * oracle.annuity_pv_factor(rate, horizon)
     costs = oracle.npv(rate, [y.capex + y.replacements + y.opex_fixed + y.opex_variable
                               - (y.salvage or 0.0) for y in case.years])
-    assert case.kpis.lcos == pytest.approx(costs / energy, rel=1e-9)
+    assert case.kpis.levelised_cost == pytest.approx(costs / energy, rel=1e-9)
 
 
 # ── market revenue at duals: reported, never in the cash flow ────────────
@@ -293,7 +293,7 @@ def test_salvage_is_the_present_value_of_the_remaining_annuities(cases):
         pv = (_v(ledger, "pv_rooftop_eur_per_kw") * 1000.0 * p_pv
               * oracle.crf(rate, pv_life) * oracle.annuity_pv_factor(rate, pv_life - horizon))
         assert case.salvage_basis == "annuity_pv"
-        assert case.kpis.salvage_eur == pytest.approx(inverter + pv, rel=1e-9)
+        assert case.kpis.terminal_value_eur == pytest.approx(inverter + pv, rel=1e-9)
         assert case.years[-1].salvage == pytest.approx(inverter + pv, rel=1e-9)
         assert all(y.salvage == 0.0 for y in case.years[:-1])
 
@@ -306,8 +306,8 @@ def test_an_uncomputed_salvage_is_flagged_never_a_zero():
         case = _case("bess_pv_2h")
     finally:
         n.generators.at["pv", "lifetime"] = saved
-    assert case.kpis.salvage_eur is None
-    assert case.kpis.unavailable["salvage_eur"].startswith("salvage_not_computed")
+    assert case.kpis.terminal_value_eur is None
+    assert case.kpis.unavailable["terminal_value_eur"].startswith("salvage_not_computed")
     assert case.years[-1].salvage is None
     assert case.years[-1].unavailable["salvage"].startswith("salvage_not_computed")
     assert case.salvage_basis is None
@@ -326,8 +326,8 @@ def test_a_salvage_without_a_basis_or_a_null_without_a_flag_is_refused(cases):
     no_basis = {**good, "salvage_basis": None}
     with pytest.raises(ValidationError, match="salvage_basis"):
         InvestmentCase.model_validate(no_basis)
-    kpis = {**good["kpis"], "salvage_eur": None}
-    with pytest.raises(ValidationError, match="salvage_eur"):
+    kpis = {**good["kpis"], "terminal_value_eur": None}
+    with pytest.raises(ValidationError, match="terminal_value_eur"):
         CaseKpis.model_validate(kpis)
 
 

@@ -89,7 +89,7 @@ def test_a_report_of_a_run_renders_and_every_verdict_kpi_is_the_findings(
                         ("case_payback_simple", k["payback_simple"]),
                         ("case_payback_discounted", k["payback_discounted"]),
                         ("case_capex_total", k["capex_total"]),
-                        ("lcos_finance_engine", k["lcos"]),
+                        ("lcos_finance_engine", k["levelised_cost"]),
                         ("market_revenue_at_duals",
                          case["market_revenue_at_duals"]["annual_value"])):
         assert econ["facts"][fact]["value"] == value, fact

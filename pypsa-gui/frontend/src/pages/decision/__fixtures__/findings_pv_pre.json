@@ -18,7 +18,7 @@
    "battery_p_nom_mw": 0.0,
    "battery_payback_simple": null,
    "currency_year": 2020,
-   "engine": "cash_flow_expander",
+   "engine": "finance_engine",
    "fidelity": "quick_screen",
    "method": "battery_only",
    "notes": [
@@ -44,7 +44,7 @@
    "battery_p_nom_mw": 0.0,
    "battery_payback_simple": null,
    "currency_year": 2020,
-   "engine": "cash_flow_expander",
+   "engine": "finance_engine",
    "fidelity": "quick_screen",
    "method": "battery_only",
    "notes": [
@@ -70,7 +70,7 @@
    "battery_p_nom_mw": 0.0,
    "battery_payback_simple": null,
    "currency_year": 2020,
-   "engine": "cash_flow_expander",
+   "engine": "finance_engine",
    "fidelity": "quick_screen",
    "method": "battery_only",
    "notes": [
@@ -96,7 +96,7 @@
    "battery_p_nom_mw": 0.3,
    "battery_payback_simple": null,
    "currency_year": 2020,
-   "engine": "cash_flow_expander",
+   "engine": "finance_engine",
    "fidelity": "quick_screen",
    "method": "battery_removed_same_pv",
    "notes": [

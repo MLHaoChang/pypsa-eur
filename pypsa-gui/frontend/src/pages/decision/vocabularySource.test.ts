@@ -14,6 +14,8 @@ function labels(): string[] {
     V.VIEW_LABELS, V.HUB_SECTION_LABELS, V.INTAKE_STEP_LABELS, V.CHIP_LABELS, V.VERDICT_LABELS,
     V.OPTION_LABELS, V.STREAM_LABELS, V.MATURITY_LABELS, V.LEDGER_STATUS_LABELS, V.UI_LABELS,
     V.BILL_COMPONENT_LABELS, V.REOPEN_LABELS, V.STUDY_FORK_LABELS, V.TESTED_RANGE_LABELS,
+    // U2 WP8 part B (§5.4): the engine labels (the bill preview once hard-coded one).
+    V.ENGINE_LABELS, V.FIDELITY_LABELS,
   ]
   for (const m of maps) for (const v of Object.values(m)) if (typeof v === 'string') out.add(v)
   for (const e of Object.values(V.VOCAB)) out.add(e.label)

@@ -1,10 +1,12 @@
 // Prices and tariffs (spec §3 screen 4, plan S8). The tariff picker lists the
 // library's seed tariffs; the chosen tariff's own honesty notes are shown with
 // the sentence behind each code (`Tariff.honesty_help`; gate S2: wherever the
-// tariff's name appears). The baseline bill preview is the bill calculator on
-// the load alone (grid only: the import IS the load), before any option.
+// tariff's name appears). The baseline bill preview prices the load alone
+// (grid only: the import IS the load), before any option; since U2 the tariff
+// engine prices it, and it is labelled by the engine the bill names. Every note
+// on the bill is shown with its sentence (U2 WP8, gate C7).
 import type { IntakePreview, StudyError, StudyIntake, StudyLibrary, Tariff } from '../../api/decisionStudies'
-import { BASIS_SENTENCE, BILL_COMPONENT_LABELS, NOT_ESTABLISHED, errorCopy } from '../../utils/decisionVocabulary'
+import { BASIS_SENTENCE, BILL_COMPONENT_LABELS, ENGINE_LABELS, NOT_ESTABLISHED, errorCopy } from '../../utils/decisionVocabulary'
 import { billLineShown, valueText } from './decisionModel'
 import { Banner, Card, CodeList, Refusal } from './DecisionUi'
 
@@ -38,7 +40,7 @@ export function BillPreview({ preview, error }: { preview: IntakePreview | null;
     <div data-testid="bill-preview" className="flex flex-col gap-1">
       <p>
         Your bill today (grid only, before any option): <strong className="font-mono">{valueText(b.bill.annual_bill, `${cur}/yr`)}</strong>
-        <span className="text-muted"> · {BASIS_SENTENCE}{b.bill.currency_year != null ? `, ${cur} of ${b.bill.currency_year}` : ''} · bill calculator, no optimisation</span>
+        <span className="text-muted"> · {BASIS_SENTENCE}{b.bill.currency_year != null ? `, ${cur} of ${b.bill.currency_year}` : ''} · {ENGINE_LABELS[b.bill.engine]}, no optimisation</span>
       </p>
       <ul className="grid grid-cols-2 gap-x-4 text-[11.5px]">
         {COMPONENTS.filter(([k]) => billLineShown(b.bill.by_component[k], k, b.bill.itemised_components)).map(([k, label]) => (
@@ -47,6 +49,9 @@ export function BillPreview({ preview, error }: { preview: IntakePreview | null;
         ))}
       </ul>
       <p className="text-[11px] text-muted">Priced on the tariff as published, before any change you make in Assumptions.</p>
+      {b.bill.honesty_notes.length > 0 && (
+        <div className="text-[11px]"><CodeList codes={b.bill.honesty_notes} tariffHelp={b.tariff.honesty_help} testId="bill-notes" /></div>
+      )}
     </div>
   )
 }

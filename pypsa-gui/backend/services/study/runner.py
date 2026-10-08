@@ -618,7 +618,7 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
     # U2 WP8 (C10): each option's compiled finance digest, and why a finance
     # was not compiled.
     finance_digests: dict[str, str | None] = {}
-    finance_refused: dict[str, str] = {}
+    finance_refused: dict[str, tuple[str, str]] = {}
     status, error = "failed", None
     study = None
     try:
@@ -675,7 +675,7 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
                                                    study_currency_year=study.currency_year)
             except study_compile.CompileError as exc:
                 fin = None
-                finance_refused[opt.option_id] = exc.code
+                finance_refused[opt.option_id] = (exc.code, exc.message)
             finance_digests[opt.option_id] = None if fin is None else fin.digest
             try:
                 cfg = study_compile.solver_config(
@@ -732,7 +732,10 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
                 outcome["engine_digest"] = run_hashes.fork_engine_digest(row)
                 outcome["finance_digest"] = finance_digests.get(opt.option_id)
                 if opt.option_id in finance_refused:
-                    outcome["finance_unavailable"] = finance_refused[opt.option_id]
+                    # Gate U2-WP8a Y1: read by `findings.load_inputs` (422).
+                    code, message = finance_refused[opt.option_id]
+                    outcome["finance_unavailable"] = code
+                    outcome["finance_unavailable_message"] = message
             elif timed_out is not None:
                 # A typed failure of THIS option (gate S4 nit); the run stops
                 # below, because a solver that hangs pins the queue for the rest.

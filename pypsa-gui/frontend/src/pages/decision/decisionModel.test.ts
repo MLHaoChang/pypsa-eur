@@ -13,7 +13,7 @@ import { ERROR_FALLBACK, errorCopy } from '../../utils/decisionVocabulary'
 
 const nullKpi: Figure = {
   key: 'battery_npv', label: 'Battery NPV', value: null, unit: 'EUR', basis: null, currency_year: null,
-  engine: 'cash_flow_expander', fidelity: 'quick_screen', unavailable: 'currency_year_unknown',
+  engine: 'finance_engine', fidelity: 'quick_screen', unavailable: 'currency_year_unknown',
 }
 
 describe('the intake and the entry state', () => {

@@ -61,7 +61,7 @@
     "terms": "real"
    },
    "currency_year": 2020,
-   "engine": "finance_engine",
+   "engine": "cash_flow_expander",
    "fidelity": "quick_screen",
    "key": "battery_npv",
    "label": "Battery NPV",
@@ -87,7 +87,7 @@
     "terms": "real"
    },
    "currency_year": 2020,
-   "engine": "finance_engine",
+   "engine": "cash_flow_expander",
    "fidelity": "quick_screen",
    "key": "battery_payback_simple",
    "label": "Battery simple payback",
@@ -102,7 +102,7 @@
     "terms": "real"
    },
    "currency_year": 2020,
-   "engine": "finance_engine",
+   "engine": "cash_flow_expander",
    "fidelity": "quick_screen",
    "key": "case_capex_total",
    "label": "Total CAPEX",
@@ -113,7 +113,7 @@
   "case_irr": {
    "basis": null,
    "currency_year": null,
-   "engine": "finance_engine",
+   "engine": "cash_flow_expander",
    "fidelity": "quick_screen",
    "key": "case_irr",
    "label": "IRR",
@@ -128,7 +128,7 @@
     "terms": "real"
    },
    "currency_year": 2020,
-   "engine": "finance_engine",
+   "engine": "cash_flow_expander",
    "fidelity": "quick_screen",
    "key": "case_npv",
    "label": "Option NPV",
@@ -139,7 +139,7 @@
   "case_payback_discounted": {
    "basis": null,
    "currency_year": null,
-   "engine": "finance_engine",
+   "engine": "cash_flow_expander",
    "fidelity": "quick_screen",
    "key": "case_payback_discounted",
    "label": "Discounted payback",
@@ -150,7 +150,7 @@
   "case_payback_simple": {
    "basis": null,
    "currency_year": null,
-   "engine": "finance_engine",
+   "engine": "cash_flow_expander",
    "fidelity": "quick_screen",
    "key": "case_payback_simple",
    "label": "Simple payback",
@@ -187,7 +187,7 @@
     "terms": "real"
    },
    "currency_year": 2020,
-   "engine": "finance_engine",
+   "engine": "cash_flow_expander",
    "fidelity": "quick_screen",
    "key": "lcos_excl_charging",
    "label": "LCOS excluding charging energy (pro forma)",
@@ -232,7 +232,7 @@
     "terms": "real"
    },
    "currency_year": 2020,
-   "engine": "finance_engine",
+   "engine": "cash_flow_expander",
    "fidelity": "quick_screen",
    "key": "tornado_centre_npv",
    "label": "Battery NPV at the centre",
@@ -247,7 +247,7 @@
     "terms": "real"
    },
    "currency_year": 2020,
-   "engine": "tariff_engine",
+   "engine": "bill_calculator",
    "fidelity": "quick_screen",
    "key": "value_streams_total",
    "label": "Annual saving shown by the streams",

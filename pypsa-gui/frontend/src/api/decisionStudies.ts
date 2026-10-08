@@ -26,7 +26,10 @@ export type LedgerStatus = 'default' | 'customised' | 'needs_attention'
 export type Provenance = 'library' | 'user' | 'imported' | 'measured'
 /** Every engine a figure may name (`models/study.py::Engine`), including the
  * S7 `method_constant` (the verdict's break-even tolerance) and, since U2 WP7,
- * the Investment Case engine's `tariff_engine` and `finance_engine`. */
+ * the Investment Case engine's `tariff_engine` and `finance_engine` — what
+ * the backend writes since U2 WP8 (plan §5.4). `bill_calculator` and
+ * `cash_flow_expander` are the study's earlier engines: a figure a study
+ * stored before U2 keeps the label of what made it. */
 export type Engine =
   | 'lp' | 'lp_duals' | 'bill_calculator' | 'contract' | 'mc_resilience'
   | 'cash_flow_expander' | 'ledger' | 'method_constant' | 'tariff_engine' | 'finance_engine'
@@ -130,7 +133,8 @@ export interface BillComponents {
   fixed: number | null
   network: number | null
   export_credit: number | null
-  /** U2 (owner decision 7): the seventh component; absent on a bill stored before U2. */
+  /** U2 (owner decision 7): the seventh component, "Taxes & levies" (a bill stored
+   * before U2 reads 0; optional only for payloads dumped before it). */
   taxes_levies?: number | null
   unavailable: Record<string, string>
 }
@@ -145,6 +149,7 @@ export interface Bill {
   basis: FinancialBasis
   currency: string
   currency_year: number | null
+  /** `tariff_engine` since U2; `bill_calculator` on a bill stored before it. */
   engine: 'bill_calculator' | 'tariff_engine'
   fidelity: Fidelity | null
   honesty_notes: string[]
@@ -388,9 +393,12 @@ export interface CaseKpis {
   irr: number | null
   payback_simple: number | null
   payback_discounted: number | null
-  lcos: number | null
+  /** U2 WP8 (§5.4): the storage LCOS of the engine that built the case, on its basis. */
+  levelised_cost: number | null
+  levelised_cost_basis: 'nominal' | 'real' | null
   capex_total: number
-  salvage_eur: number | null
+  /** U2 WP8 (§5.4): the residual value at the horizon end (was `salvage_eur`). */
+  terminal_value_eur: number | null
   unavailable: Record<string, string>
   [k: string]: unknown
 }

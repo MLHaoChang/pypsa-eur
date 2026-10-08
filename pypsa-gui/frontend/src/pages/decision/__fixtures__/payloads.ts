@@ -3,6 +3,14 @@
 // once and trimmed (long arrays cut; `explain` to one entry; report section
 // bodies emptied). Tests derive their variants from these, so the shapes the
 // pages read are the shapes the routes send.
+//
+// U2 WP8 part B (plan §5.4): renamed in place to the names the routes send
+// since U2 — `tariff_engine` / `finance_engine` (with the case's
+// `tariff_engine:counterfactual` bill ref and engine list), `levelised_cost`
+// (+ `levelised_cost_basis`) and `terminal_value_eur`, and the case's LCOS
+// note to the engine's. The figures are the S8 dump's. The S8 originals are
+// kept verbatim as the backend's stored pre-U2 study
+// (`backend/tests/fixtures/pre_u2_study/`, `test_study_engine_literal_compat.py`).
 import type {
   DecisionReport, DecisionStudy, Findings, IntakePreview, InvestmentCase, LedgerPayload,
   RunRecord, StudyLibrary, TornadoRecord,

@@ -175,18 +175,27 @@ def test_the_discount_rate_bar_reaches_the_ledger_and_the_solver_config():
     assert exc.value.code == "discount_rate_differs_from_lp"
 
 
-def test_a_price_bound_recomputes_the_baseline_bill_at_the_perturbed_tariff():
+def test_an_identity_redispatch_on_a_study_context_is_refused_never_valued_on_gs(monkeypatch):
     """
-    BC-7: at a perturbed demand-charge price BOTH bills are priced at that
-    price. With the dispatch held (an identity solve), the only change in the
-    savings is the demand stream scaled by the price ratio, so the battery NPV
-    at each bound is known in closed form.
+    Gate U2-WP8a Y2 (was BC-7's closed form on GS's bills, the pro forma
+    fallback): a re-dispatch that comes back without the engine's solve
+    record — an identity "solve" of the fixed sizes — is refused
+    `variant_not_engine_solved` on a study context; the bar is not
+    established with that code and GS's bill is never taken. BC-7 on the
+    engine (the baseline billed at the variant tariff) is
+    `test_an_engine_price_bound_bills_the_baseline_at_the_variant_tariff`
+    and the driver's `demand_charge_price` bounds (WP0 to 8.1e-10).
     """
     n, _cfg = ic_site_option("bess_2h")
     ledger = sf.site_ledger()
     ctx = _ctx(ledger, {"bess_2h": n}, _question("demand_charge_price"))
     calls = []
     centre = {"storage_units": F.battery_size(n), "generators": F.pv_size(n)}
+
+    def gs(*a, **kw):
+        raise AssertionError("GS's bill was taken on a study context")
+
+    monkeypatch.setattr(F, "_gs_bill_of", gs)
 
     def identity(net, cfg, _vid):
         # BC-S6-3: every sized asset the re-dispatch receives is FIXED at the
@@ -200,28 +209,19 @@ def test_a_price_bound_recomputes_the_baseline_bill_at_the_perturbed_tariff():
         return _not_an_engine_solve(net)
 
     out = F.run_tornado(ctx, identity)
-    assert out.robustness.status == "ok", out.robustness
+    assert out.robustness.status == "not_established", out.robustness
+    assert out.robustness.note == "tornado_row_failed"
     [row] = out.robustness.tornado
     assert row.evaluation == "redispatch"
-    assert len(calls) == 2 and out.robustness.solves_charged == 2
-    # Each re-dispatch carries the perturbed price in its own SolverConfig:
-    # the engine's demand item (EUR/kW-month = EUR/MW-month / 1000, U2 WP6).
-    def demand_rate(c):
-        [item] = [i for i in c.commercial["import_tariff"]["items"] if i["id"] == "demand"]
-        return item["periods"][0]["rate"] * 1000.0
-
-    assert all(c.demand_charge is None for c in calls)
-    assert sorted(demand_rate(c) for c in calls) == pytest.approx(
-        [row.low_value, row.high_value])
-    centre = next(r.value for r in ledger.rows if r.key == "demand_charge_price")
-    streams = {s.key: s.annual_value for s in F.value_streams(
-        ctx.baseline_bill, ctx.options["bess_2h"].bill)}
-    rate = next(r.value for r in ledger.rows if r.key == "discount_rate")
-    af = (1 - (1 + rate) ** -25) / rate
-    for bound, npv in ((row.low_value, row.npv_low), (row.high_value, row.npv_high)):
-        expected = out.robustness.npv_centre + (bound / centre - 1.0) * streams[
-            "demand_charge_reduction"] * af
-        assert npv == pytest.approx(expected, rel=1e-9), bound
+    assert row.npv_low is None and row.npv_high is None
+    assert row.unavailable["npv_low"] == F.NOT_ENGINE_SOLVED
+    assert row.unavailable["npv_high"] == F.NOT_ENGINE_SOLVED
+    # The bound's first re-dispatch carried the perturbed price in its own
+    # SolverConfig (the engine's demand item, EUR/kW-month, U2 WP6).
+    [cfg] = calls
+    [item] = [i for i in cfg.commercial["import_tariff"]["items"] if i["id"] == "demand"]
+    assert cfg.demand_charge is None
+    assert item["periods"][0]["rate"] * 1000.0 == pytest.approx(row.low_value)
 
 
 def test_an_engine_price_bound_bills_the_baseline_at_the_variant_tariff():
@@ -303,9 +303,9 @@ def test_every_tornado_solve_keeps_the_studys_export_price():
     config carries `export_price_ref`, so every price-bound re-dispatch AND
     the PV-only reference solve must carry the run's export series; without
     it, export would earn 0 and move the `bess_pv` bounds silently. The
-    configs are read at the solve seam: the reference is solved on the LP (the
-    battery's value, hence the bars, needs it), each re-dispatch is an
-    identity solve (the dispatch is the centre's).
+    configs are read at the solve seam. Every solve is a real engine solve:
+    an identity re-dispatch is refused on a study context since gate
+    U2-WP8a Y2 (`test_an_identity_redispatch_on_a_study_context_is_refused…`).
     """
     from models.commercial import PriceSeriesRef
 
@@ -315,7 +315,7 @@ def test_every_tornado_solve_keeps_the_studys_export_price():
 
     def solve(net, cfg, vid):
         calls.append((vid, cfg))
-        return lp_solve(net, cfg, vid) if vid.startswith("ref-") else _not_an_engine_solve(net)
+        return lp_solve(net, cfg, vid)
 
     out = F.run_tornado(ctx, solve)
     assert out.robustness.status == "ok", out.robustness

@@ -160,10 +160,11 @@ export function needsAttentionReason(reason: string): string {
 export const ENGINE_LABELS: Record<Engine, string> = {
   lp: 'optimisation (LP)',
   lp_duals: 'the model’s own prices (LP duals)',
-  bill_calculator: 'bill calculator',
+  // U2 WP8: the study's earlier engines, on figures a study stored before U2.
+  bill_calculator: 'the earlier bill calculator',
   contract: 'contract',
   mc_resilience: 'resilience simulation',
-  cash_flow_expander: 'cash-flow model',
+  cash_flow_expander: 'the earlier cash-flow model',
   ledger: 'assumptions ledger',
   method_constant: 'a constant of the method',
   tariff_engine: 'tariff engine',
@@ -376,7 +377,22 @@ export const ERROR_COPY: Record<string, ErrorCopy> = {
   fork_has_children: { title: 'A project was branched from one of the study’s options.', action: 'Delete or move that project first.' },
   study_unreadable: { title: 'The study record on disk cannot be read.', action: 'Restore it from a snapshot, or start a new study.' },
   study_library_unreadable: { title: 'The assumptions library cannot be read.', action: 'Reinstall the app or report the defect.' },
-  currency_mixed: { title: 'Two currency years are mixed.', action: 'Enter every money value in the study’s currency year.' },
+  currency_mixed: { title: 'The tariff is in another currency than the study.', action: 'Use a tariff priced in the study’s currency.' },
+  // Gate U2-WP8a Y1: a finance the run could not compile (the findings, the
+  // tornado, the report and the case answer 422 with the code).
+  currency_year_mixed: {
+    title: 'Some money values are in a different currency year from the rest of the study.',
+    action: 'Nothing is converted between years. Re-enter the values named in the message (often the tariff) in the study’s currency year, then run the study again.',
+  },
+  lifetime_not_whole_years: {
+    title: 'An equipment lifetime is not a whole number of years.',
+    action: 'The investment case counts whole years. Open Assumptions and enter the lifetime named in the message in whole years, then run the study again.',
+  },
+  discount_rate_differs_from_lp: {
+    title: 'The discount rate changed after the options were sized.',
+    action: 'The sizes and their value must use the same rate. Run the study again.',
+    rerun: true,
+  },
   currency_year_unstated: { title: 'A money value has no currency year.', action: 'State the currency year of the value.' },
   load_upload_unit_unsupported: {
     title: 'The load file’s header names a unit other than kW or MW.',
@@ -506,7 +522,18 @@ export const HELP: Record<string, string> = {
   "lcos_includes_charging_energy_cost": "The levelised cost of storage is what each MWh the battery delivers costs over its life, including the energy that charged it. Energy taken from the grid is counted at the price the site paid for it; energy taken from the site's own PV is counted at the export income the site gave up by storing it instead of selling it. The optimisation's own figure counts all charging energy at the model's hourly price at the site, which also reflects any demand charge, so the two can differ.",
   "finance_rules_from_guided_defaults": "The ledger has no rows for the finance rules (financial close, escalation, contingency, degradation), so the guided study's own defaults were applied.",
   "meter_links_are_not_investments": "The connection meters are part of the site's bill, not of the investment: they carry no purchase cost.",
-  "case_streams_do_not_reconcile_with_engine": "The bill savings and the finance engine's operating cash disagree, so the case is not shown."
+  "case_streams_do_not_reconcile_with_engine": "The bill savings and the finance engine's operating cash disagree, so the case is not shown.",
+  "bill_resolution_differs_from_settlement": "The tariff settles some charges over intervals of a different length than the model's hourly steps, so the bill prices them on hourly values; the real bill may differ a little.",
+  "fixed_charge_prorated_on_partial_period": "The modelled period covers only part of a billing month, so that month's fixed charges are counted for the covered share of the month only.",
+  "demand_on_partial_month": "The modelled period covers only part of a month, so that month's demand charge is billed on the highest import in the covered days; the peak over the whole month may be higher.",
+  "peak_from_partial_year": "The capacity charge is billed on the highest import in the modelled period, which covers only part of the year; the peak over the whole year may be higher.",
+  "fixed_prorated_on_partial_coverage": "The modelled hours cover only part of the billing period, so fixed charges are counted for the covered share only.",
+  "energy_on_partial_coverage": "The modelled hours do not cover the whole billing period, so the energy of the missing hours is not billed and the bill's total is not shown.",
+  "capacity_on_partial_coverage": "The modelled hours do not cover the whole billing period, so the capacity charge cannot be billed in full and the bill's total is not shown.",
+  "ratchet_seed_missing": "The demand charge looks back at peaks from months before the modelled period, which are not known, so the bill could be higher and its total is not shown.",
+  "tiers_on_represented_volume": "The tiered prices are applied to the volume each modelled week stands for, not to a month's metered volume.",
+  "variant_not_engine_solved": "This bar or reference could not be recalculated the same way as the rest of the study, so it is left out rather than mixed with figures from another method.",
+  "monthly_shows_sampled_months_only": "The monthly breakdown shows only the months the sampled weeks fall in; it is not a calendar bill."
 }
 // END HELP MIRROR
 

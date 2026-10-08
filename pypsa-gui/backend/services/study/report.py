@@ -62,6 +62,7 @@ from models.study import (
     ReportSection,
     Tariff,
 )
+from models.study import _RUN_ENGINES as _MODEL_RUN_ENGINES
 from services import report_sections
 from services.results.economics_caveats import ZERO_PROFIT_BY_CONSTRUCTION
 from services.study import questions as Q
@@ -88,8 +89,9 @@ SECTIONS: tuple[tuple[str, str], ...] = (
 )
 TITLES = dict(SECTIONS)
 _CURRENCIES = frozenset({"EUR", "USD", "GBP", "CHF"})
-_RUN_ENGINES = frozenset({"lp", "lp_duals", "bill_calculator", "cash_flow_expander",
-                          "tariff_engine", "finance_engine"})
+# U2 WP8 (§5.4): the engines a run produces figures with are the model's one
+# set (`models.study._RUN_ENGINES`), never a second list here.
+_RUN_ENGINES = _MODEL_RUN_ENGINES
 
 # ── the code -> sentence table (the study's own codes) ────────────────────
 #
@@ -350,6 +352,47 @@ HELP: dict[str, str] = {
     "case_streams_do_not_reconcile_with_engine": (
         "The bill savings and the finance engine's operating cash disagree, so the case "
         "is not shown."),
+    # U2 WP8 (gate C7): the notes the tariff engine puts on a bill, in plain
+    # words (every one the engine can write: `test_decision_vocabulary_parity`).
+    "bill_resolution_differs_from_settlement": (
+        "The tariff settles some charges over intervals of a different length than the "
+        "model's hourly steps, so the bill prices them on hourly values; the real bill "
+        "may differ a little."),
+    "fixed_charge_prorated_on_partial_period": (
+        "The modelled period covers only part of a billing month, so that month's fixed "
+        "charges are counted for the covered share of the month only."),
+    "demand_on_partial_month": (
+        "The modelled period covers only part of a month, so that month's demand charge "
+        "is billed on the highest import in the covered days; the peak over the whole "
+        "month may be higher."),
+    "peak_from_partial_year": (
+        "The capacity charge is billed on the highest import in the modelled period, "
+        "which covers only part of the year; the peak over the whole year may be higher."),
+    "fixed_prorated_on_partial_coverage": (
+        "The modelled hours cover only part of the billing period, so fixed charges are "
+        "counted for the covered share only."),
+    "energy_on_partial_coverage": (
+        "The modelled hours do not cover the whole billing period, so the energy of the "
+        "missing hours is not billed and the bill's total is not shown."),
+    "capacity_on_partial_coverage": (
+        "The modelled hours do not cover the whole billing period, so the capacity charge"
+        " cannot be billed in full and the bill's total is not shown."),
+    "ratchet_seed_missing": (
+        "The demand charge looks back at peaks from months before the modelled period, "
+        "which are not known, so the bill could be higher and its total is not shown."),
+    "tiers_on_represented_volume": (
+        "The tiered prices are applied to the volume each modelled week stands for, not "
+        "to a month's metered volume."),
+    # Gate U2-WP8a Y2: a tornado solve that came back without the engine's
+    # solve record (a bar's `npv_*` flag; `reference_` + it for the PV-only
+    # reference, explained by its prefix).
+    "variant_not_engine_solved": (
+        "This bar or reference could not be recalculated the same way as the rest of "
+        "the study, so it is left out rather than mixed with figures from another "
+        "method."),
+    "monthly_shows_sampled_months_only": (
+        "The monthly breakdown shows only the months the sampled weeks fall in; it is not"
+        " a calendar bill."),
 }
 
 # (prefix, sentence) for codes that carry a qualifier.
@@ -984,8 +1027,8 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
             cf("case_payback_discounted", "Discounted payback", k.payback_discounted, "years"),
             cf("case_capex_total", "Total CAPEX", k.capex_total, "EUR"),
             cf(lcos_key, "LCOS, charging at what the site paid (investment case)"
-               if engine_lcos else "LCOS excluding charging energy (pro forma)", k.lcos,
-               "EUR/MWh", flag=k.unavailable.get("lcos")),
+               if engine_lcos else "LCOS excluding charging energy (pro forma)",
+               k.levelised_cost, "EUR/MWh", flag=k.unavailable.get("levelised_cost")),
             cf("lcos_incl_charging", "LCOS, charging at the model's hourly price (optimisation)",
                _lcos_including_charging(inp.details, econ_oid), "EUR/MWh", "lp",
                flag="asset_economics_row_missing"),

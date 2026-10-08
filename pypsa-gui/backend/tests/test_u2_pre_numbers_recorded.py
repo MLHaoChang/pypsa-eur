@@ -341,6 +341,25 @@ def test_a_recorded_delta_with_a_post_figure_renames_the_key():
                               [{**row, "post_figure": "driver.lcos_finance_engine"}])
 
 
+def test_the_driver_salvage_key_moves_to_the_u2_name():
+    """
+    U2 WP8 part B (§5.4): the case's `salvage_eur` is `terminal_value_eur`, so
+    the driver records it under the new key; its row moves the frozen figure
+    there without moving the number (the comparison then refuses the old key).
+    """
+    frozen = _frozen()
+    tol = frozen["tolerances"]
+    want = frozen["driver"]
+    [row] = [r for r in json.loads(DELTAS.read_text(encoding="utf-8"))["deltas"]
+             if r.get("test") == DRIVER_TEST_ID
+             and r["figure"] == "driver.case_kpis.salvage_eur"]
+    assert row["post_figure"] == "driver.case_kpis.terminal_value_eur"
+    assert row["pre"] == row["post"] == want["case_kpis"]["salvage_eur"]
+    got = _with_recorded_deltas(want, "driver", DRIVER_TEST_ID, tol, [row])
+    assert "salvage_eur" not in got["case_kpis"]
+    assert got["case_kpis"]["terminal_value_eur"] == want["case_kpis"]["salvage_eur"]
+
+
 def test_the_comparison_goes_red_on_a_one_euro_npv_move():
     """The mutation, kept as a test: 1 EUR on a frozen NPV is outside tolerance."""
     frozen = _frozen()

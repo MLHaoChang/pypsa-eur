@@ -15,7 +15,7 @@
  },
  "currency_year": 2020,
  "discount_rate": 0.07,
- "engine": "finance_engine",
+ "engine": "cash_flow_expander",
  "fidelity": "quick_screen",
  "honesty_notes": [
   "basis_real_pre_tax_no_subsidy",
@@ -27,7 +27,7 @@
   "no_degradation",
   "inverter_replaced_at_its_lifetime",
   "battery_upfront_from_ledger_not_back_calculated",
-  "lcos_includes_charging_energy_cost",
+  "lcos_excludes_charging_energy_cost",
   "npv_nonnegative_at_optimum_by_construction",
   "irr_and_discounted_payback_bounded_at_optimum_by_construction",
   "market_revenue_at_duals_excluded_from_cash_flow",
@@ -45,12 +45,11 @@
   "irr": 2.617330206968405,
   "lcoe": null,
   "lcoh": null,
-  "levelised_cost": 32.51547769742616,
-  "levelised_cost_basis": "real",
+  "lcos": 32.51547769742616,
   "npv": 3531384.450723247,
   "payback_discounted": 0.40881296496361996,
   "payback_simple": 0.38206819155478505,
-  "terminal_value_eur": 37465.78388585993,
+  "salvage_eur": 37465.78388585993,
   "unavailable": {
    "dscr_min": "no_financing_in_mvp1",
    "lcoe": "not_in_scope_mvp1",
@@ -70,8 +69,8 @@
  "perspective": "site_owner",
  "provenance": {
   "engines": [
-   "tariff_engine",
-   "finance_engine",
+   "cash_flow_expander",
+   "bill_calculator",
    "lp",
    "lp_duals",
    "ledger"
@@ -86,8 +85,8 @@
  "sources": {
   "asset_economics_ref": "run_record",
   "bill_refs": [
-   "tariff_engine:counterfactual",
-   "tariff_engine:bess_1h"
+   "bill_calculator:none",
+   "bill_calculator:bess_1h"
   ],
   "cost_breakdown_ref": null,
   "mc_ref": null
@@ -111,7 +110,7 @@
     "tax": "pre",
     "terms": "real"
    },
-   "engine": "tariff_engine",
+   "engine": "bill_calculator",
    "key": "energy",
    "label": "Energy charges",
    "share": 0.8978793272670371,
@@ -124,7 +123,7 @@
     "tax": "pre",
     "terms": "real"
    },
-   "engine": "tariff_engine",
+   "engine": "bill_calculator",
    "key": "demand",
    "label": "Demand charge on peak import",
    "share": 0.10212067273296285,
@@ -137,7 +136,7 @@
     "tax": "pre",
     "terms": "real"
    },
-   "engine": "tariff_engine",
+   "engine": "bill_calculator",
    "key": "capacity",
    "label": "Capacity charge",
    "share": 0.0,
@@ -150,7 +149,7 @@
     "tax": "pre",
     "terms": "real"
    },
-   "engine": "tariff_engine",
+   "engine": "bill_calculator",
    "key": "fixed",
    "label": "Fixed charges",
    "share": 0.0,
@@ -163,7 +162,7 @@
     "tax": "pre",
     "terms": "real"
    },
-   "engine": "tariff_engine",
+   "engine": "bill_calculator",
    "key": "network",
    "label": "Network charges",
    "share": 0.0,
@@ -176,7 +175,7 @@
     "tax": "pre",
     "terms": "real"
    },
-   "engine": "tariff_engine",
+   "engine": "bill_calculator",
    "key": "export_credit",
    "label": "Export credit",
    "share": 0.0,

@@ -200,10 +200,12 @@ def _kpis(ws, case: InvestmentCase, npv_row: int | None, title: str = "KPIs",
         _text(ws, r, 4, mr.engine)
 
 
+# U2 WP8 (§5.4): `levelised_cost` (with its basis) and `terminal_value_eur`.
 _KPI_UNITS = {"npv": "EUR", "irr": "per unit", "payback_simple": "years",
-              "payback_discounted": "years", "lcoe": "EUR/MWh", "lcos": "EUR/MWh",
+              "payback_discounted": "years", "lcoe": "EUR/MWh",
+              "levelised_cost": "EUR/MWh", "levelised_cost_basis": "",
               "lcoh": "EUR/MWh", "dscr_min": "ratio", "capex_total": "EUR",
-              "salvage_eur": "EUR"}
+              "terminal_value_eur": "EUR"}
 
 _LEDGER_COLUMNS = ("key", "label", "value", "unit", "currency_year", "basis",
                    "provenance", "status", "sensitivity_flag", "range_low",

@@ -389,6 +389,27 @@ def _on_engine(ctx: TornadoContext, n) -> bool:
     return ctx.export_series is not None and study_engine.engine_ready(n)
 
 
+#: Gate U2-WP8a Y2: a network solved on a study context without the engine's
+#: solve record (`engine_adapter.engine_ready`).
+NOT_ENGINE_SOLVED = "variant_not_engine_solved"
+
+
+def _require_engine(ctx: TornadoContext, n, what: str) -> None:
+    """
+    Gate U2-WP8a Y2: on a study context (the run's export series is known) a
+    network is valued on the engine or not at all. A PV-only reference or a
+    price-bound variant the tornado solved that came back without the
+    engine's solve record is `VariantFailed(NOT_ENGINE_SOLVED)` — its bar or
+    reference is not established with that code — never GS's bill and the
+    pro forma beside engine-valued figures. Without a study context (a test's
+    toy context) the fallback stays until WP10 deletes it.
+    """
+    if ctx.export_series is not None and not study_engine.engine_ready(n):
+        raise VariantFailed(NOT_ENGINE_SOLVED, (
+            f"{what} came back without the investment-case engine's solve record, "
+            "so it cannot be valued with the rest of the study"))
+
+
 def _bill_of(ctx: TornadoContext, n, ledger: AssumptionsLedger | None = None,
              tariff: Tariff | None = None) -> Bill:
     """
@@ -400,6 +421,7 @@ def _bill_of(ctx: TornadoContext, n, ledger: AssumptionsLedger | None = None,
     ledger = ledger if ledger is not None else ctx.ledger
     if _on_engine(ctx, n):
         return study_engine.bill(n, _compiled(ctx, ledger, n.snapshots), fidelity=ctx.fidelity)
+    _require_engine(ctx, n, "a network to bill")
     if tariff is None:
         tariff = ctx.tariff if ledger is ctx.ledger else packs.effective_tariff(
             ctx.intake, ledger, ctx.library, n.snapshots)
@@ -412,14 +434,16 @@ def _bundle_of(ctx: TornadoContext, n):
 
 
 def _case(ctx: TornadoContext, n, cfg, ledger, tariff, bills, option_id,
-          asset_economics=None, *, keep: bool = True) -> InvestmentCase:
+          asset_economics=None, *, keep: bool = True, centre: bool = True) -> InvestmentCase:
     """
     One option's case: the engine's (`engine_adapter.option_case`, its
     bundle kept for the bounds) when `n` is engine-valued, else the pro
     forma. On the engine the bills are the engine's own (the option's solved
     meter, the counterfactual at the case's tariff); a bill the caller names
     as None (the run could not bill it) still makes the case not established.
-    `keep` keeps the bundle for the network's bounds (not a price bound's).
+    `keep` keeps the bundle for the network's bounds (not a price bound's);
+    `centre=False` (a price bound, gate U2-WP7 N6) leaves the engine's view
+    without the `BY_CONSTRUCTION` codes, which hold at the centre only.
     """
     if _on_engine(ctx, n):
         missing = {w: None for w, b in (bills or {}).items() if b is None}
@@ -427,10 +451,11 @@ def _case(ctx: TornadoContext, n, cfg, ledger, tariff, bills, option_id,
             n, cfg, ledger, compiled=_compiled(ctx, ledger, n.snapshots), option_id=option_id,
             study_id=ctx.study_id, fidelity=ctx.fidelity, asset_economics=asset_economics,
             question=ctx.question, bills=missing or None,
-            study_currency_year=ctx.study_currency_year)
+            study_currency_year=ctx.study_currency_year, centre=centre)
         if keep:
             ctx.bundles[id(n)] = (n, bundle)
         return bundle.view
+    _require_engine(ctx, n, f"the network of {option_id}")
     return proforma.build_investment_case(
         n, cfg, None, ledger, bills, option_id, study_id=ctx.study_id, tariff=tariff,
         fidelity=ctx.fidelity, asset_economics=asset_economics,
@@ -622,13 +647,14 @@ def _price_bound(ctx: TornadoContext, n_centre, option_id: str, key: str, value:
     cfg = _solver_config(ctx, vl, n_centre.snapshots)
     net = fixed_size_network(n_centre, drop_battery=reference)
     solved = _solved(solve, net, cfg, variant_id)
+    _require_engine(ctx, solved, f"the {key} bound's re-dispatch of {option_id}")
     if _on_engine(ctx, solved):
         # U2 WP7: the engine's counterfactual IS the baseline at the variant
         # tariff (the served load rated, export 0 — BC-7 without a solve), and
         # the option's bill the engine's on the variant's solved meter.
-        return _case(ctx, solved, cfg, vl, None, {}, option_id, keep=False)
-    # FALLBACK (`_gs_bill_of`): BC-7, the baseline bill at the SAME perturbed
-    # tariff (no solve).
+        return _case(ctx, solved, cfg, vl, None, {}, option_id, keep=False, centre=False)
+    # FALLBACK (`_gs_bill_of`), off a study context only (Y2): BC-7, the
+    # baseline bill at the SAME perturbed tariff (no solve).
     vt = packs.effective_tariff(ctx.intake, vl, ctx.library, n_centre.snapshots)
     bills = {"baseline": _gs_bill_of(ctx.baseline_network, vt, ctx.fidelity),
              "option": _gs_bill_of(solved, vt, ctx.fidelity)}
@@ -747,9 +773,15 @@ def _centre(ctx: TornadoContext, solve: SolveFn | None):
         p_bat = battery_size(opt.network)
         case = None
         if opt.bill is not None and ctx.baseline_bill is not None:
-            case = _case(ctx, opt.network, centre_cfg, ctx.ledger, ctx.tariff,
-                         {"baseline": ctx.baseline_bill, "option": opt.bill}, oid,
-                         asset_economics=opt.asset_economics)
+            try:
+                case = _case(ctx, opt.network, centre_cfg, ctx.ledger, ctx.tariff,
+                             {"baseline": ctx.baseline_bill, "option": opt.bill}, oid,
+                             asset_economics=opt.asset_economics)
+            except study_engine.EngineRefused as exc:
+                # Gate U2-WP8a Y1: the engine refuses the centre case (its
+                # finance does not compile, a lifetime is not whole years, …):
+                # the user is told why, never an uncaught 500.
+                raise FindingsRefused(422, exc.code, exc.message) from None
             cases[oid] = case
         # The year the CASE was built on (`proforma._one_currency_year`: the
         # ledger's when the tariff states none), never the tariff's optional
@@ -771,6 +803,7 @@ def _centre(ctx: TornadoContext, solve: SolveFn | None):
                 ref_net = fixed_size_network(opt.network, drop_battery=True)
                 try:
                     solved = _solved(solve, ref_net, centre_cfg, f"ref-{oid}")
+                    _require_engine(ctx, solved, f"the PV-only reference of {oid}")
                 except TornadoStopped:
                     stopped = True
                     kw["reference_missing"] = "reference_not_computed_aborted"
@@ -1200,6 +1233,7 @@ def load_inputs(study, base_dir, db, base_uuid: str) -> StudyInputs:
             "re-run the study (the options were built from the old ones)"))
     if not run_hashes.engine_recorded(hashes, run):
         raise FindingsRefused(409, run_hashes.ENGINE_STALE, run_hashes.EARLIER_VERSION)
+    _refuse_unavailable_finance(run)
     library = study_library.load_defaults()
     try:
         tariff = packs.effective_tariff(study.intake, ledger, library)
@@ -1234,6 +1268,27 @@ def load_inputs(study, base_dir, db, base_uuid: str) -> StudyInputs:
         raise FindingsRefused(409, run_hashes.ENGINE_STALE, run_hashes.edited_since_run(edited))
     return StudyInputs(study, question, run, faux, ledger, library, tariff, rows,
                        recorded, current)
+
+
+def _refuse_unavailable_finance(run: Mapping[str, Any]) -> None:
+    """
+    Gate U2-WP8a Y1: an option whose finance the run could not compile
+    (`details.<option>.finance_unavailable`, e.g. a tariff in another currency
+    year) has no investment case, so the findings, the tornado and the report
+    answer 422 with the compile's code and message — as the case route does —
+    never a verdict without it, never a 500.
+    """
+    details = run.get("details") or {}
+    refused = {oid: d for oid, d in sorted(details.items())
+               if isinstance(d, Mapping) and d.get("finance_unavailable")}
+    if not refused:
+        return
+    code = next(iter(refused.values()))["finance_unavailable"]
+    message = next((d.get("finance_unavailable_message") for d in refused.values()
+                    if d.get("finance_unavailable_message")), None)
+    raise FindingsRefused(422, str(code), (
+        f"the investment case of {', '.join(refused)} cannot be valued: "
+        f"{message or code}; correct it, then re-run the study"))
 
 
 def context_from_disk(inp: StudyInputs) -> TornadoContext:

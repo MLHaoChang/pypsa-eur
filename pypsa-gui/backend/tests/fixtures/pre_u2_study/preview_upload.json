@@ -32,7 +32,7 @@
    },
    "currency": "EUR",
    "currency_year": 2020,
-   "engine": "tariff_engine",
+   "engine": "bill_calculator",
    "fidelity": null,
    "honesty_notes": [],
    "horizon_hours": 8760.0,

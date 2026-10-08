@@ -87,7 +87,13 @@ BILL_COMPONENTS: tuple[tuple[str, str], ...] = (
     ("network", "Network charges"),
     ("export_credit", "Export credit"),
 )
-ENGINES = ("cash_flow_expander", "bill_calculator", "lp", "lp_duals", "ledger")
+# U2 WP8 (plan §5.4, decision B1): the pro forma names ITSELF, never the
+# Investment Case engine's `finance_engine` (the model's default since §5.4):
+# `cash_flow_expander` is the honest label of this other engine, which
+# remains the findings' fallback until WP10 deletes it; its bills are GS's
+# calculator's (`bill_calculator`).
+PROFORMA_ENGINE = "cash_flow_expander"
+ENGINES = (PROFORMA_ENGINE, "bill_calculator", "lp", "lp_duals", "ledger")
 # S6 (gate S5 carry): a size at or below this is "no investment" — judged by
 # its size, never by the sign of an NPV that is 0 +- solver noise. The ONE
 # threshold; `services/study/findings.py` reads it from here.
@@ -381,8 +387,9 @@ def build_investment_case(n_option, cfg_option, n_baseline, ledger: AssumptionsL
         tariff_id=tariff.tariff_id, project_ref=project_ref, model_hash=model_hash,
         engines=list(ENGINES))
     common = dict(case_id=f"{study_id}.{option_id}", study_id=study_id, option_id=option_id,
-                  currency_year=currency_year, fidelity=fidelity, horizon_years=horizon,
-                  discount_rate=rate, sources=sources, provenance=provenance)
+                  currency_year=currency_year, fidelity=fidelity, engine=PROFORMA_ENGINE,
+                  horizon_years=horizon, discount_rate=rate, sources=sources,
+                  provenance=provenance)
     missing_bills = [w for w, b in (("baseline", base_bill), ("option", opt_bill))
                      if b is None or b.annual_bill is None]
     if missing_bills:
@@ -532,11 +539,11 @@ def build_investment_case(n_option, cfg_option, n_baseline, ledger: AssumptionsL
             kpi_flags[key] = "never_pays_back" if capex_total > 0 else "no_investment"
     lcos = None
     if not has_bat:
-        kpi_flags["lcos"] = "not_applicable"
+        kpi_flags["levelised_cost"] = "not_applicable"
     else:
         discharge = float(rows[packs.BATTERY_NAME].get("discharge_mwh") or 0.0)
         if discharge <= 0:
-            kpi_flags["lcos"] = "no_discharge"
+            kpi_flags["levelised_cost"] = "no_discharge"
         else:
             bat = rows[packs.BATTERY_NAME]
             bat_flows = [capex_by[packs.BATTERY_NAME]] + [
@@ -547,11 +554,14 @@ def build_investment_case(n_option, cfg_option, n_baseline, ledger: AssumptionsL
             lcos = npv(rate, bat_flows) / (discharge * _annuity_pv_factor(rate, horizon))
             notes.append("lcos_excludes_charging_energy_cost")
     if salvage is None:
-        kpi_flags["salvage_eur"] = salvage_flag
+        kpi_flags["terminal_value_eur"] = salvage_flag
+    # §5.4 names; the pro forma's LCOS (charging excluded) discounts at the
+    # real rate, so its basis is `real`.
     kpis = CaseKpis(
         npv=npv_value, irr=irr_value, payback_simple=pb, payback_discounted=pbd,
-        lcoe=None, lcos=lcos, lcoh=None, dscr_min=None, capex_total=capex_total,
-        salvage_eur=salvage, unavailable=kpi_flags)
+        lcoe=None, levelised_cost=lcos, levelised_cost_basis=None if lcos is None else "real",
+        lcoh=None, dscr_min=None, capex_total=capex_total, terminal_value_eur=salvage,
+        unavailable=kpi_flags)
 
     # ── value streams: the bill's components, summing to the savings
     streams = []

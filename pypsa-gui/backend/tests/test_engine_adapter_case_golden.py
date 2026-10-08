@@ -17,9 +17,9 @@ included), not GS's charging-free figure; an uncomputed salvage makes the
 engine's case not established (IC C12) where GS reported an NPV without it.
 
 WP7 adaptations of the WP2 guesses (the seam as built): the meter Links are
-not typed (gate C5: IC's D11 skips them); §5.4's `terminal_value_eur` /
-`levelised_cost` rename is WP8's, so the view still reads `salvage_eur` /
-`lcos`; the salvage basis stays `annuity_pv` (C2 chose the engine's
+not typed (gate C5: IC's D11 skips them); the view reads §5.4's
+`levelised_cost` / `terminal_value_eur` since WP8 part B (WP7 read the old
+`lcos` / `salvage_eur`); the salvage basis stays `annuity_pv` (C2 chose the engine's
 `remaining_life_annuity`, which IS the PV of the remaining annuities, not a
 `fixed` value); the bills travel on the `CaseBundle`.
 """
@@ -219,16 +219,16 @@ def test_lcos_is_on_discounted_energy(bundles):
         pf = proforma.build_investment_case(n, cfg, None, ledger, dict(b.bills), o,
                                             study_id=sf.SITE_STUDY_ID, tariff=tariff)
         charging, pv_share = _charging_per_mwh_discharged(o)
-        assert b.view.kpis.lcos is not None
-        assert abs(pf.kpis.lcos + charging - b.view.kpis.lcos) <= 1e-9 * b.view.kpis.lcos, \
-            (o, pf.kpis.lcos, charging, b.view.kpis.lcos)
+        assert b.view.kpis.levelised_cost is not None
+        assert abs(pf.kpis.levelised_cost + charging - b.view.kpis.levelised_cost) <= 1e-9 * b.view.kpis.levelised_cost, \
+            (o, pf.kpis.levelised_cost, charging, b.view.kpis.levelised_cost)
         assert (pv_share == 0.0) if o == "bess_2h" else (pv_share > 0.5), (o, pv_share)
         assert "lcos_includes_charging_energy_cost" in b.view.honesty_notes
         rows = [r for r in json.loads((FIXTURES / "u2_deltas.json").read_text())["deltas"]
                 if r.get("figure") == f"golden_s5.{o}.lcos"]
         assert rows and rows[0]["cause"] == "lcos_is_the_engines_storage_metric"
-        assert close(rows[0]["pre"], pf.kpis.lcos, rel=1e-9)
-        assert close(rows[0]["post"], b.view.kpis.lcos, rel=1e-9)
+        assert close(rows[0]["pre"], pf.kpis.levelised_cost, rel=1e-9)
+        assert close(rows[0]["post"], b.view.kpis.levelised_cost, rel=1e-9)
 
 
 def test_market_revenue_at_duals_is_reported_and_excluded_from_net_cash_flow(bundles):
@@ -248,7 +248,7 @@ def test_salvage_is_the_present_value_of_the_remaining_annuities(bundles):
         b = bundles[o]
         assert b.case.inputs.terminal_value.method == "remaining_life_annuity"
         assert b.view.salvage_basis == "annuity_pv"
-        assert close(b.view.kpis.salvage_eur, _gold(o)["salvage_eur"])
+        assert close(b.view.kpis.terminal_value_eur, _gold(o)["salvage_eur"])
         assert close(b.view.years[-1].salvage, _gold(o)["salvage_eur"])
 
 

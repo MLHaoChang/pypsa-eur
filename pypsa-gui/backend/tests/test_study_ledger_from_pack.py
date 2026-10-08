@@ -13,7 +13,7 @@ rule as its provenance. Production keeps the legacy library until WP8.
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -460,3 +460,106 @@ def test_the_bump_tripwire_guards_only_what_the_study_reads():
     # Unchanged, and the pin itself (refused at load by the strict loader).
     assert _bump_blocker(newer, pack, pack) is None
     assert _bump_blocker(_L().PACK_VERSION, added, pack) is None
+
+
+# ── gate U2-WP8a Y3: every compared field is pinned, one at a time ───────
+#
+# The oracle lists are written out HERE, not read from `_READ_ROW_FIELDS` /
+# `_READ_FINANCE_FIELDS`: a field cut from the tripwire's list (the gate's
+# mutations G4, G11) then still has its case below, and goes red. They are
+# the fields `library._pack_technology` and `_load_defaults` read (gate
+# note [N12]).
+_ROW_FIELDS_READ = ("value", "unit", "original_value", "original_unit", "conversion_factor",
+                    "basis", "price_basis", "currency", "currency_year", "range", "domain",
+                    "projection_year", "illustrative", "derived", "note", "source",
+                    "source_year", "source_url")
+_FINANCE_FIELDS_READ = ("currency", "currency_year", "basis", "perspective", "discount_rate",
+                        "sizing_limit", "horizon_rule", "replacement_rules")
+#: Copied into the library view, read by nothing: a change never blocks.
+_FINANCE_FIELDS_UNREAD = ("currency_year_source", "basis_source", "perspective_source",
+                          "seed_library", "degradation")
+
+
+def _other(v):
+    """A different value of the same shape (no validation: `model_copy`)."""
+    if isinstance(v, bool):
+        return not v
+    if isinstance(v, (int, float)):
+        return v + 1
+    if isinstance(v, str):
+        return v + "_changed"
+    if v is None:
+        return "changed"
+    if isinstance(v, date):
+        return v + timedelta(days=1)
+    if isinstance(v, (list, tuple)):
+        return [*v, v[0]] if v else ["changed"]
+    if isinstance(v, dict):
+        return {**v, "changed": next(iter(v.values()), 1)}
+    if hasattr(v, "model_dump"):
+        dumped = v.model_dump()
+        f = next((k for k, x in dumped.items() if x is not None
+                  and not isinstance(x, (dict, list))), None) or next(iter(dumped))
+        return v.model_copy(update={f: _other(getattr(v, f))})
+    raise AssertionError(f"no change for {v!r}")
+
+
+def _with(model, field):
+    return model.model_copy(update={field: _other(getattr(model, field))})
+
+
+@pytest.mark.parametrize("field", _ROW_FIELDS_READ)
+def test_each_read_row_field_changed_alone_blocks_the_bump(field):
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    pack = load_defaults_pack(_L().PACK_VERSION)
+    key = "battery.power.overnight"
+    rows = [_with(v, field) if v.key == key else v for v in pack.cost_values]
+    message = _bump_blocker("2026-10-07", pack.model_copy(update={"cost_values": rows}), pack)
+    assert message and f"{key}.{field}:" in message, (field, message)
+
+
+@pytest.mark.parametrize("field", _FINANCE_FIELDS_READ)
+def test_each_read_finance_field_changed_alone_blocks_the_bump(field):
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    pack = load_defaults_pack(_L().PACK_VERSION)
+    newer = pack.model_copy(update={"finance": _with(pack.finance, field)})
+    message = _bump_blocker("2026-10-07", newer, pack)
+    assert message and f"finance.{field}:" in message, (field, message)
+
+
+@pytest.mark.parametrize("field", _FINANCE_FIELDS_UNREAD)
+def test_an_unread_finance_field_changed_alone_passes(field):
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    pack = load_defaults_pack(_L().PACK_VERSION)
+    newer = pack.model_copy(update={"finance": _with(pack.finance, field)})
+    assert _bump_blocker("2026-10-07", newer, pack) is None
+
+
+def _tariff_fields():
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    pack = load_defaults_pack(_L().PACK_VERSION)
+    t = pack.tariffs[pack.default_tariff_id]
+    return [(part, f) for part in ("tariff", "meta")
+            for f in type(getattr(t, part)).model_fields]
+
+
+@pytest.mark.parametrize("part,field", _tariff_fields())
+def test_each_tariff_field_changed_alone_blocks_the_bump(part, field):
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    pack = load_defaults_pack(_L().PACK_VERSION)
+    tid = pack.default_tariff_id
+    t = pack.tariffs[tid]
+    tariffs = dict(pack.tariffs)
+    if (part, field) == ("meta", "default"):
+        # The pack has exactly one default: the flag moves to another tariff.
+        other = next(k for k in tariffs if k != tid)
+        tariffs[other] = tariffs[other].model_copy(update={
+            "meta": tariffs[other].meta.model_copy(update={"default": True})})
+    tariffs[tid] = t.model_copy(update={part: _with(getattr(t, part), field)})
+    message = _bump_blocker("2026-10-07", pack.model_copy(update={"tariffs": tariffs}), pack)
+    assert message and f"tariff {tid}: changed" in message, (part, field, message)

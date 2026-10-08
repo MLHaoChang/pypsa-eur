@@ -50,3 +50,47 @@ def test_the_prefix_mirror_equals_the_backend_table():
 
 def test_the_fallback_sentence_is_the_same():
     assert _block("FALLBACK MIRROR") == {"text": report._FALLBACK}
+
+
+# ── U2 WP8 part B, gate C7: the engine's bill notes reach the user ───────
+
+ENGINE_SRC = (pathlib.Path(__file__).resolve().parents[1]
+              / "services" / "commercial" / "tariff_engine.py")
+# A note the rating writes: `note.append("x")`, `notes.setdefault(id, []).append("x")`,
+# `.append(f"x:{…}")`, `.extend(f"x:{m}" …)` or `notes[id] = ["x"]`.
+_NOTE_LITERAL = re.compile(
+    r"""(?:note|notes\.setdefault\([^)]*\))\s*\.\s*(?:append|extend)\(\s*\n?\s*f?"([^"]+)"""
+    r"""|notes\[[^\]]+\]\s*=\s*\[\s*f?"([^"]+)\"""")
+
+
+def _engine_note_codes() -> set[str]:
+    """The tariff engine's notes as the adapter puts them on a bill (`_notes`)."""
+    import types
+
+    from services.study import engine_adapter as A
+
+    raw = {a or b for a, b in _NOTE_LITERAL.findall(ENGINE_SRC.read_text(encoding="utf-8"))}
+    raw = {r.split("{", 1)[0].rstrip(":_") if "{" in r else r for r in raw}
+    out = set(A._notes(types.SimpleNamespace(notes={"i": sorted(raw)}), [], False))
+    # the adapter's own partial-period note, and the compile's capacity note
+    out |= set(A._notes(types.SimpleNamespace(notes={}), ["2025-01"], True))
+    out.add("capacity_charge_assumed_connection_size")
+    return out
+
+
+def test_the_engine_bill_notes_are_found():
+    """The guard on the scan: the notes gate C7 names are among them."""
+    codes = _engine_note_codes()
+    assert {"bill_resolution_differs_from_settlement", "fixed_charge_prorated_on_partial_period",
+            "demand_on_partial_month", "capacity_charge_prorated_by_hours"} <= codes
+    assert not {c for c in codes if ":" in c or not re.fullmatch(r"[a-z]+(_[a-z]+)*", c)}
+
+
+def test_every_engine_bill_note_has_the_studys_own_sentence():
+    """
+    Gate C7: a note the tariff engine puts on a bill reaches the user (the
+    case's notes, the report, the bill preview), so the study explains it in
+    plain words — never the fallback.
+    """
+    missing = sorted(c for c in _engine_note_codes() if report.help_for(c)[1] != "study")
+    assert missing == []

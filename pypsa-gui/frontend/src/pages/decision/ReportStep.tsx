@@ -22,7 +22,8 @@ export default function ReportStep({ report, error, assembleError, run, tornado,
   urls: { html: string; docx: string; xlsx: string }
 }) {
   const never = !report && error?.code === 'report_never_assembled'
-  const staleNeedsRun = !!report?.stale_reasons.some(r => /changed|copied/.test(r))
+  // Gate U2-WP8a N7: `run_by_an_earlier_version` needs a re-run too.
+  const staleNeedsRun = !!report?.stale_reasons.some(r => /changed|copied|earlier/.test(r))
   const newer = reportNeedsReassembly(report, run, tornado)
   return (
     <div className="flex flex-col gap-4">

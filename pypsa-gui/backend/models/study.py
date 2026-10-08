@@ -24,6 +24,7 @@ Two rules every payload here obeys:
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
 from typing import Any, ClassVar, Literal
@@ -96,8 +97,12 @@ Engine = Literal[
     # break-even tolerance), neither a ledger row nor a run's output.
     "method_constant",
     # U2 WP7: the Investment Case engine's bill and finance engines (the
-    # engine-built case and its value streams; §5.4's rename of the old two
-    # names, with read-compat, is WP8's).
+    # engine-built case, its bills and value streams). Every default names
+    # them since U2 WP8 (§5.4). `bill_calculator` and `cash_flow_expander`
+    # stay as the honest labels of GS's own two engines where they made the
+    # figure: the findings' fallback until WP10, and every figure a study
+    # stored before U2 holds. They are never read as the engine's (plan WP8
+    # part B, decision B1).
     "tariff_engine", "finance_engine",
 ]
 SolveStatus = Literal[
@@ -107,6 +112,9 @@ Provenance = Literal["library", "user", "imported", "measured"]
 LedgerStatus = Literal["default", "customised", "needs_attention"]
 MaturityClass = Literal["screening", "feasibility", "design"]
 SalvageBasis = Literal["annuity_pv", "straight_line"]
+# U2 WP8 (§5.4): the terms a levelised cost is on (the engine's storage LCOS
+# on the guided real basis is `real`).
+LevelisedCostBasis = Literal["nominal", "real"]
 
 
 # ── shared building blocks ────────────────────────────────────────────────
@@ -518,9 +526,11 @@ class Bill(_FigureBlock):
     basis: FinancialBasis = Field(default_factory=FinancialBasis)
     currency: str = "EUR"
     currency_year: int | None = None
-    # U2 WP5: `tariff_engine` is the IC engine's bill (`engine_adapter`); the
-    # vocabulary rename of the GS literal with read-compat is WP8 (§5.4).
-    engine: Literal["bill_calculator", "tariff_engine"] = "bill_calculator"
+    # U2 WP5: `tariff_engine` is the IC engine's bill (`engine_adapter`), the
+    # default since WP8 (§5.4); GS's calculator (`study.tariff`, the findings'
+    # fallback until WP10, and every bill stored before U2) names itself
+    # `bill_calculator` (decision B1).
+    engine: Literal["bill_calculator", "tariff_engine"] = "tariff_engine"
     # Gate S3 N3 (carried to S5): which run the dispatch came from; the
     # calculator itself does not know, the runner stamps it.
     fidelity: Fidelity | None = None
@@ -779,9 +789,19 @@ class CashFlowYear(_FigureBlock):
 
 
 class CaseKpis(_FigureBlock):
+    """
+    The case's KPIs. U2 WP8 (plan §5.4): `levelised_cost` is the storage
+    LCOS of the engine that built the case (on the Investment Case engine its
+    `lcos_real_per_mwh`, owner decision 6: charging included), on the terms
+    `levelised_cost_basis` names; `terminal_value_eur` is the residual value
+    at the horizon end (C2: the PV of the remaining annuities, the case's
+    `salvage_basis`). A study stored before U2 says `lcos` / `salvage_eur`:
+    read here under the new names (`_legacy_names`), never written back.
+    """
+
     _figure_fields: ClassVar[tuple[str, ...]] = (
-        "irr", "payback_simple", "payback_discounted", "lcoe", "lcos", "lcoh",
-        "dscr_min", "salvage_eur",
+        "irr", "payback_simple", "payback_discounted", "lcoe", "levelised_cost", "lcoh",
+        "dscr_min", "terminal_value_eur",
     )
 
     npv: float
@@ -789,12 +809,52 @@ class CaseKpis(_FigureBlock):
     payback_simple: float | None
     payback_discounted: float | None
     lcoe: float | None
-    lcos: float | None
+    levelised_cost: float | None
+    # None exactly when `levelised_cost` is (its flag says why).
+    levelised_cost_basis: LevelisedCostBasis | None = None
     lcoh: float | None
     dscr_min: float | None
     capex_total: float
-    # S5: null plus `unavailable["salvage_eur"]` when not computed (ADR-0001).
-    salvage_eur: float | None = 0.0
+    # S5: null plus `unavailable["terminal_value_eur"]` when not computed (ADR-0001).
+    terminal_value_eur: float | None = 0.0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_names(cls, data: Any) -> Any:
+        """
+        Read-compat (§5.4): a payload stored before U2 names `lcos` and
+        `salvage_eur`, its flags too. Both producers then (the pro forma, and
+        the WP7 view) valued on the real basis, so a stored LCOS is `real`.
+        A payload naming the old and the new name of one figure is refused.
+        """
+        if not isinstance(data, Mapping) or not _LEGACY_KPIS.keys() & data.keys():
+            return data
+        out = dict(data)
+        unavailable = dict(out.get("unavailable") or {})
+        for old, new in _LEGACY_KPIS.items():
+            if old not in out:
+                continue
+            if new in out:
+                raise ValueError(f"a case's KPIs name both {old} and {new}")
+            out[new] = out.pop(old)
+            if old in unavailable:
+                unavailable[new] = unavailable.pop(old)
+            if new == "levelised_cost" and out[new] is not None:
+                out.setdefault("levelised_cost_basis", "real")
+        out["unavailable"] = unavailable
+        return out
+
+    @model_validator(mode="after")
+    def _levelised_cost_has_a_basis(self):
+        if self.levelised_cost is not None and self.levelised_cost_basis is None:
+            raise ValueError("a levelised_cost needs its levelised_cost_basis")
+        if self.levelised_cost is None and self.levelised_cost_basis is not None:
+            raise ValueError("a null levelised_cost has no levelised_cost_basis")
+        return self
+
+
+# §5.4: the KPI names a study stored before U2 holds → today's.
+_LEGACY_KPIS = {"lcos": "levelised_cost", "salvage_eur": "terminal_value_eur"}
 
 
 class ValueStream(_FigureBlock):
@@ -880,7 +940,9 @@ class InvestmentCase(_Model):
     basis: FinancialBasis = Field(default_factory=FinancialBasis)
     currency_year: int | None = None
     fidelity: Fidelity | None = None
-    engine: Engine = "cash_flow_expander"
+    # U2 WP8 (§5.4): the Investment Case engine by default; the pro forma
+    # (the fallback until WP10) names itself `cash_flow_expander`.
+    engine: Engine = "finance_engine"
     horizon_years: int = Field(ge=0)
     discount_rate: float
     wacc: float | None = None
@@ -907,7 +969,7 @@ class InvestmentCase(_Model):
         and then has no basis; the last year and the KPI agree.
         """
         in_years = [y.salvage for y in self.years]
-        kpi = self.kpis.salvage_eur if self.kpis is not None else 0.0
+        kpi = self.kpis.terminal_value_eur if self.kpis is not None else 0.0
         nonzero = any(v not in (None, 0.0) for v in in_years) or kpi not in (None, 0.0)
         if nonzero and self.salvage_basis is None:
             raise ValueError("a non-zero salvage needs its salvage_basis")
@@ -920,7 +982,7 @@ class InvestmentCase(_Model):
             if (total is None) != (kpi is None) or (
                     total is not None and abs(total - kpi) > 1e-6 * max(1.0, abs(kpi))):
                 raise ValueError(
-                    f"kpis.salvage_eur {kpi!r} disagrees with the years' "
+                    f"kpis.terminal_value_eur {kpi!r} disagrees with the years' "
                     f"salvage {total!r}")
         return self
 
@@ -1092,7 +1154,9 @@ class BatteryAttribution(_FigureBlock):
     currency_year: int | None = None
     basis: FinancialBasis = Field(default_factory=FinancialBasis)
     fidelity: Fidelity | None = None
-    engine: Engine = "cash_flow_expander"
+    # The engine that valued the case (`findings.attribute`); the Investment
+    # Case engine by default (U2 WP8, §5.4).
+    engine: Engine = "finance_engine"
     notes: tuple[str, ...] = ()
 
 

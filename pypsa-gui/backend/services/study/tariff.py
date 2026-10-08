@@ -27,7 +27,9 @@ docs/superpowers/notes/2026-09-29-mvp1-s1-gate.md):
 `TimeRule` fields read the snapshot timestamp as given (month 1..12, weekday
 0 = Monday, hour of the snapshot's start); snapshots are local clock time.
 
-The bill is one engine (`engine="bill_calculator"`): the LP wrapper prices
+The bill is one engine (`engine="bill_calculator"`, stated on every bill:
+since U2 WP8 the model's default is the Investment Case engine's
+`tariff_engine`, and this calculator is the findings' fallback until WP10): the LP wrapper prices
 the demand charge from the same spec, and the objective decomposition
 recomputes `demand_charge_eur` through `BillCalculator.demand_charge` from
 `links_t.p0`, never from `n.model`.
@@ -500,6 +502,9 @@ class BillCalculator:
             peak_mw_by_billing_period=peaks, billing_periods=periods,
             horizon_hours=hours, currency=tariff.currency,
             currency_year=tariff.currency_year, unavailable=bill_flags,
+            # U2 WP8 (decision B1): GS's calculator names itself; the model's
+            # default is the Investment Case engine's `tariff_engine`.
+            engine="bill_calculator",
             fidelity=None if fidelity is None else Fidelity(fidelity),
             honesty_notes=tuple(notes), partial_billing_periods=partial,
             itemised_components=_itemised(tariff))
