@@ -118,6 +118,27 @@ describe('ParticipantsDesigner', () => {
     expect(api.putValueFlows).not.toHaveBeenCalled()             // the user still saves
   })
 
+  it('a rebuilt template starts with empty draft inputs (a fresh dialog per build)', async () => {
+    api.buildTemplate.mockResolvedValue({
+      config: { template: 'landlord_tenant', participants: [
+        { id: 'landlord', name: 'landlord', role: 'landlord' }, { id: 'site', name: 'site', role: 'tenant' }] },
+      draft_contracts: [{ type: 'lease', id: 'lease_draft', lessor: 'landlord', lessee: 'site',
+                          annual_payment: null, tenor_years: 10, asset_ids: ['pv'] }],
+      notes: [] })
+    renderDesigner()
+    await screen.findByTestId('vf-designer')
+    fireEvent.change(screen.getByLabelText('Template'), { target: { value: 'landlord_tenant' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Build' }))
+    let dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('annual payment'), { target: { value: '50000' } })
+    expect((within(dialog).getByLabelText('annual payment') as HTMLInputElement).value).toBe('50000')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'Build' }))
+    dialog = await screen.findByRole('dialog')
+    expect((within(dialog).getByLabelText('annual payment') as HTMLInputElement).value).toBe('')
+  })
+
   it('says what is missing without a commercial config', async () => {
     const { NoCommercialConfigError } = await import('../../../api/commercial')
     api.getDesigner.mockRejectedValue(new NoCommercialConfigError('set it up'))

@@ -40,16 +40,16 @@ function problemsOf(e: unknown): string[] | null {
   return [String(detail?.message ?? 'the config was refused')]
 }
 
+// Mounted afresh per build (`key`), so its inputs start empty on the first render:
+// an effect that cleared them after mount raced a fast first keystroke.
 function TemplateDialog({ built, onClose, onUse }: {
-  built: { name: TemplateName; result: TemplateResult } | null
+  built: { name: TemplateName; result: TemplateResult }
   onClose: () => void
   onUse: (cfg: ValueFlowConfig, drafts: Array<Record<string, unknown>>) => Promise<void>
 }) {
   const [values, setValues] = useState<Record<string, Record<string, string>>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  useEffect(() => { setValues({}); setError(null) }, [built])
-  if (!built) return null
   const drafts = built.result.draft_contracts
   const filled = drafts.map(d => fillDraft(d, values[String(d.id)] ?? {}))
   const ready = filled.every(Boolean)
@@ -117,6 +117,7 @@ export default function ParticipantsDesigner() {
   const [digest, setDigest] = useState<string | null>(null)
   const [pick, setPick] = useState<TemplateName>('single_owner')
   const [built, setBuilt] = useState<{ name: TemplateName; result: TemplateResult } | null>(null)
+  const [buildSeq, setBuildSeq] = useState(0)
   const [problems, setProblems] = useState<string[]>([])
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
   const [stale, setStale] = useState(false)
@@ -226,7 +227,10 @@ export default function ParticipantsDesigner() {
         </label>
         <button type="button" className="underline" onClick={async () => {
           setMessage(null)
-          try { setBuilt({ name: pick, result: await commercialApi.buildTemplate(pick) }) }
+          try {
+            setBuilt({ name: pick, result: await commercialApi.buildTemplate(pick) })
+            setBuildSeq(n => n + 1)
+          }
           catch (e) {
             const d = (e as { response?: { data?: { detail?: { message?: string } } } })?.response
             setMessage({ tone: 'error', text: d?.data?.detail?.message ?? 'The template could not be built.' })
@@ -428,7 +432,10 @@ export default function ParticipantsDesigner() {
         <button type="button" className="px-2 py-1 underline" onClick={reload}>Discard changes</button>
       </div>
 
-      <TemplateDialog built={built} onClose={() => setBuilt(null)} onUse={applyTemplate} />
+      {built && (
+        <TemplateDialog key={buildSeq} built={built} onClose={() => setBuilt(null)}
+                        onUse={applyTemplate} />
+      )}
     </div>
   )
 }
