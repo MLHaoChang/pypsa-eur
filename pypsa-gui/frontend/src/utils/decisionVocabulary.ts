@@ -354,9 +354,13 @@ export const ERROR_COPY: Record<string, ErrorCopy> = {
     title: 'Your answers (site, load, tariff or PV) changed after the run.',
     action: 'The options were built from the old ones. Run the study again.', rerun: true,
   },
+  // U2 WP8 (plan §2 C10): the run was made by an earlier version of the app,
+  // or an option's tariff or finance settings were edited after it (the
+  // message below says which).
   engine_inputs_changed_since_run: {
-    title: 'This study’s results were calculated before an update to how prices are applied.',
-    action: 'Run the study again to refresh them.', rerun: true,
+    title: 'This study’s results no longer match how its options are priced and valued.',
+    action: 'Either the app’s calculation was updated since the run, or an option’s tariff or finance settings were edited. Run the study again to refresh them.',
+    rerun: true,
   },
   study_never_run: { title: 'The study has not been run yet.', action: 'Open Run and start it.' },
   tornado_never_run: { title: 'The robustness check has not been run yet.', action: 'Start it on the How robust page.' },
@@ -489,6 +493,8 @@ export const HELP: Record<string, string> = {
   "ledger_changed_during_run": "The assumptions ledger changed while the study was running.",
   "intake_changed_during_run": "The study's answers changed while the study was running.",
   "copied_record_findings_computed_on_the_origin_forks": "This study was copied from another project; its findings and report were computed on the origin's option networks.",
+  "run_by_an_earlier_version": "The study was run by an earlier version of the app, which priced its options and valued their investment cases differently, so these results are out of date. Run the study again to bring them up to date.",
+  "engine_inputs_changed_since_findings": "An option's tariff or finance settings were edited after the findings were computed (for example in the Expert view); re-run the study.",
   "tariff_export_exceeds_import": "In some hours the tariff credits export above the import price, so the model sends energy out and back through the connection for profit. Check the export price: unless the contract really pays this, the battery's value is overstated.",
   "tariff_export_exceeds_import_via_storage": "The tariff's best export credit, after the battery's losses, is above its cheapest import price, so the model charges the battery from the grid to export later. Unless the contract pays export of grid-charged energy, the battery's value is overstated.",
   "capacity_charge_assumed_connection_size": "The tariff's capacity charge states no contracted capacity, so it is billed on the site's connection size. Enter the contracted capacity from the contract if it differs.",
@@ -545,6 +551,10 @@ export const PREFIX_HELP: ReadonlyArray<readonly [string, string]> = [
   [
     "fork_changed_since_findings",
     "An option's network changed, or is gone, since the findings were computed; re-run the study."
+  ],
+  [
+    "engine_inputs_changed_since_findings",
+    "An option's tariff or finance settings were edited after the findings were computed (for example in the Expert view); re-run the study."
   ],
   [
     "size_at_upper_bound",

@@ -33,7 +33,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from models.study import BaselineResult, DecisionStudy
+from models.study import BaselineResult, Bill, DecisionStudy
 from services.study import findings as F
 from services.study import ledger as LG
 from services.study import packs
@@ -74,15 +74,18 @@ def live(tmp_path_factory):
         n, compiled = bound_option(intake, ledger, oid, library)
         cfg = packs.option_solver_config(ledger, compiled)
         _lp(n, cfg)
-        d = RN._read_option(n, cfg, tariff, Q.option(QUESTION, oid), "full_study",
+        d = RN._read_option(n, cfg, Q.option(QUESTION, oid), "full_study",
                             tariff.currency_year, compiled=compiled)
         res = d.pop("result").model_copy(update={"project_ref": f"fork-{oid}"})
         nets[oid], details[oid], results[oid] = n, d, res
+    # U2 WP8 (gate C6): the run record's bills are the engine's on each
+    # solved meter, and the findings read them from there.
+    bill = {oid: Bill.model_validate(details[oid]["bill"]) for oid in OPTIONS}
     ctx = F.TornadoContext(
         study_id=SID, question=QUESTION, intake=intake, ledger=ledger, library=library,
         tariff=tariff, baseline_network=nets["none"],
-        baseline_bill=F._bill_of(nets["none"], tariff), fidelity="full_study",
-        options={oid: F.OptionInput(oid, nets[oid], F._bill_of(nets[oid], tariff),
+        baseline_bill=bill["none"], fidelity="full_study",
+        options={oid: F.OptionInput(oid, nets[oid], bill[oid],
                                     details[oid]["asset_economics"],
                                     tuple(details[oid]["caveats"]))
                  for oid in OPTIONS if oid != "none"},
@@ -259,3 +262,28 @@ def test_the_findings_and_the_report_value_the_engine_solved_forks_on_the_engine
                           question=QUESTION, study_currency_year=2020).view
     assert route.engine == "finance_engine"
     assert route.kpis.lcos == pytest.approx(econ.facts["lcos_finance_engine"].value, rel=1e-12)
+
+
+def test_every_bill_and_value_on_the_live_report_names_the_engine_that_made_it(live):
+    """
+    U2 WP8 (gate C6; the WP7 carry-forward of X4): the run's bills are the
+    tariff engine's, established, and so are the streams built on them; the
+    battery attributions, the verdict's money facts and the report's
+    `option_total_npv` and `tornado_centre_npv` name the finance engine that
+    valued the cases — never the pro forma's `cash_flow_expander`.
+    """
+    for oid, d in live["details"].items():
+        assert d["bill"]["engine"] == "tariff_engine", oid
+        assert d["bill"]["total"] is not None, (oid, d["bill"]["unavailable"])
+    f, report = live["findings"], live["report"]
+    assert f.value_streams and all(s.engine == "tariff_engine" for s in f.value_streams)
+    assert report.facts["value_streams_total"].engine == "tariff_engine"
+    for a in f.battery_attribution:
+        assert a.engine == "finance_engine", a.option_id
+    for key in ("battery_npv", "battery_payback_simple"):
+        assert f.verdict.facts[key].engine == "finance_engine", key
+    for key in ("option_total_npv", "tornado_centre_npv"):
+        assert report.facts[key].engine == "finance_engine", key
+    engines = report.sections["appendix"].payload["engines"]
+    assert {"tariff_engine", "finance_engine"} <= set(engines)
+    assert not {"bill_calculator", "cash_flow_expander"} & set(engines)

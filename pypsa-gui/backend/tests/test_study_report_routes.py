@@ -72,10 +72,13 @@ def test_a_report_of_a_run_renders_and_every_verdict_kpi_is_the_findings(
     study = client.get(f"/api/projects/{name}/studies/{sid}").json()
     assert study["report_ref"] == f"studies/{sid}.report.json"
 
-    # economics carries both LCOS figures, named, and the duals disclosure
+    # economics carries both LCOS figures, named, and the duals disclosure;
+    # U2 WP8: the run's forks are the engine's, so the case's LCOS is the
+    # finance engine's (charging included)
     econ = body["sections"]["economics"]
     assert econ["status"] == "ok"
-    assert {"lcos_excl_charging", "lcos_incl_charging", "market_revenue_at_duals",
+    assert econ["facts"]["case_npv"]["engine"] == "finance_engine"
+    assert {"lcos_finance_engine", "lcos_incl_charging", "market_revenue_at_duals",
             "case_irr", "case_payback_discounted"} <= set(econ["facts"])
     # the golden registration (coverage.py `decision_report`): every economics
     # fact is the case route's KPI for the same option, copied
@@ -86,7 +89,7 @@ def test_a_report_of_a_run_renders_and_every_verdict_kpi_is_the_findings(
                         ("case_payback_simple", k["payback_simple"]),
                         ("case_payback_discounted", k["payback_discounted"]),
                         ("case_capex_total", k["capex_total"]),
-                        ("lcos_excl_charging", k["lcos"]),
+                        ("lcos_finance_engine", k["lcos"]),
                         ("market_revenue_at_duals",
                          case["market_revenue_at_duals"]["annual_value"])):
         assert econ["facts"][fact]["value"] == value, fact
@@ -370,9 +373,9 @@ def test_an_intake_edit_after_the_run_is_seen_by_every_reader(
 
 def _tou_with_export(price: float) -> dict:
     """The gate's probe: the TOU seed tariff, supplied with a custom export price."""
-    from services.study.library import load_library
+    from services.study.library import load_defaults
 
-    t = load_library().tariffs["tou_reference_illustrative"].model_dump(mode="json")
+    t = load_defaults().tariffs["tou_reference_illustrative"].model_dump(mode="json")
     t.update(tariff_id="tou_custom_export", source="my contract",
              export={"price_per_mwh": price, "series_ref": None, "cap_mw": None})
     return t

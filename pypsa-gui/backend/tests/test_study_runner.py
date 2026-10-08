@@ -16,12 +16,12 @@ import pytest
 from services.adequacy import campaign
 from services.pypsa_service import PyPSAService
 from services.study import runner as R
-from services.study import tariff as T
 from tests.study_s4_support import (
     INTAKE,
     OPTIONS,
     create_pack_study,
     enable_studies,
+    record_engine_solve,
     wait_run,
 )
 
@@ -48,14 +48,10 @@ class FakeSolver:
         # What a real solve leaves behind that the result reads need: the
         # storage dispatch and the site bus price (asset economics reads both).
         # U2 WP6: the pack writes no Link price; the import price is the one
-        # the engine materialises from the fork's commercial config.
-        from services.commercial.lp_bindings import materialise_poc_prices
-
-        applied = materialise_poc_prices(n, config.commercial)
-        try:
-            site_price = n.links_t.marginal_cost["grid_import"].copy()
-        finally:
-            applied.undo()
+        # the engine materialises from the fork's commercial config. U2 WP8:
+        # and the engine's solve record, so the fork is valued and billed by
+        # the engine like a real solve's (`record_engine_solve`).
+        site_price = record_engine_solve(n, config.commercial)
         n.buses_t.marginal_price = pd.DataFrame(
             {"site": site_price, "grid": 0.0}, index=n.snapshots)
         gen_p = {"grid": n.links_t.p0["grid_import"]}
@@ -161,9 +157,11 @@ def test_the_bridge_reads_the_forks_config_and_equals_the_bill(
     """
     Gate S3 [S4]/N4, U2 WP6: the run's `demand_charge_eur` is the amount the
     ENGINE's solve committed (`engine_adapter.demand_charge_eur`), never GS's
-    bridge term. The fake solver commits none, so every option records null
-    with the reason (ADR-0001, never 0). The equality with the bill on a real
-    engine solve is `test_u2_wp6_lp_switch.py::
+    bridge term. U2 WP8: the fake solver leaves the engine's solve record
+    (its peaks read from the written dispatch), so the committed amount is
+    established and equals the engine bill's demand line; a record without
+    the peaks is null with the reason (ADR-0001, never 0). The real engine
+    solve is `test_u2_wp6_lp_switch.py::
     test_the_run_records_the_engines_committed_demand_charge`.
     """
     sid = _setup(client, api_project, "run-bridge")
@@ -172,9 +170,29 @@ def test_the_bridge_reads_the_forks_config_and_equals_the_bill(
     assert rec["export_series"]["id"].endswith(f":{sid}:export")
     for o in OPTIONS:
         d = rec["details"][o]
-        assert d["demand_charge_eur"] is None, o
-        assert d["demand_charge_unavailable"] == "demand_charge_not_established", o
         assert d["bill"]["by_component"]["demand"] > 0, o
+        assert d["demand_charge_eur"] == pytest.approx(d["bill"]["by_component"]["demand"],
+                                                       rel=1e-12), o
+        assert "demand_charge_unavailable" not in d, o
+
+
+def test_a_solve_without_the_engines_peaks_records_no_demand_charge(monkeypatch):
+    """ADR-0001: no committed peak, no amount — null with the reason, never 0."""
+    from services.study import engine_adapter as A
+    from services.study import packs
+    from services.study import questions as Q
+    from tests.golden import site_fixture as sf
+    from tests.u2_targets import bound_option
+
+    ledger = sf.site_ledger()
+    m, compiled = bound_option(sf.site_intake(), ledger, "none", sf.site_library())
+    load = m.loads_t.p_set["site_load"]
+    m.links_t.p0 = pd.DataFrame({"grid_import": load, "grid_export": 0.0}, index=m.snapshots)
+    assert A.demand_charge_eur(m, compiled) is None      # dispatched, never solved
+    d = R._read_option(m, packs.option_solver_config(ledger, compiled),
+                       Q.option(Q.BESS_AT_SITE, "none"), "full_study", 2020, compiled=compiled)
+    assert d["demand_charge_eur"] is None
+    assert d["demand_charge_unavailable"] == "demand_charge_not_established"
 
 
 def test_an_open_agent_campaign_is_charged_not_replaced(
@@ -371,12 +389,40 @@ def test_every_run_handler_declares_access_and_refuses_when_disabled():
         assert "_enforce_project_lock(" in inspect.getsource(fn), fn.__name__
 
 
-def test_bill_is_a_bill_calculator_figure(client, api_project, studies_on, fake):
+def test_every_option_bill_is_the_engines_on_its_solved_meter(
+        client, api_project, studies_on, fake, project_storage_dir):
+    """
+    U2 WP8, gate C6: every option bill the run records is
+    `engine_adapter.bill` on the fork the engine solved, with the compiled
+    config that solve priced (read back from the fork's own solver config):
+    the tariff engine's, its total established.
+    """
+    import pypsa
+
+    from models.commercial import CommercialConfig
+    from models.study import Bill
+    from services.study import compile as C
+    from services.study import engine_adapter as A
+
     sid = _setup(client, api_project, "run-bill")
     client.post(f"/api/projects/run-bill/studies/{sid}/run", json={})
     rec = wait_run(client, "run-bill", sid)
-    bill = T.Bill.model_validate(rec["details"]["none"]["bill"])
-    assert bill.engine == "bill_calculator" and bill.annual_bill is not None
+    for o in OPTIONS:
+        bill = Bill.model_validate(rec["details"][o]["bill"])
+        assert bill.engine == "tariff_engine" and bill.annual_bill is not None, (o, bill.unavailable)
+        fork = project_storage_dir(f"run-bill-opt-{o}")
+        n = pypsa.Network(str(fork / "network.nc"))
+        cfg = json.loads((fork / "solver_config.json").read_text())
+        compiled = C.CompiledCommercial(
+            config=CommercialConfig.model_validate(cfg["commercial"]),
+            item_component={"energy": "energy", "network:energy:0": "network",
+                            "demand": "demand", "fixed": "fixed"},
+            tariff_meta={"currency": "EUR", "currency_year": 2020, "billing_period": "month"})
+        again = A.bill(n, compiled)
+        assert again.total == pytest.approx(bill.total, rel=1e-12), o
+        for key in ("energy", "demand", "fixed", "network", "export_credit"):
+            assert getattr(again.by_component, key) == pytest.approx(
+                getattr(bill.by_component, key), rel=1e-12, abs=1e-9), (o, key)
 
 
 # ── gate S4 binding conditions ───────────────────────────────────────────
@@ -644,3 +690,102 @@ def test_releasing_the_base_unmarks_and_drops_in_one_critical_section(monkeypatc
     assert key not in PyPSAService._study_owned
     assert watched.discards == [True]
     assert seen == ([] if in_use else [(True, False)])
+
+
+# ── U2 WP8: the production run on the engine and the pack (real LP) ───────
+
+@pytest.mark.live_solve
+def test_the_production_run_bills_on_the_engine_and_seeds_from_the_pack(
+        client, api_project, studies_on, project_row, project_storage_dir):
+    """
+    Gates C6 and C4 on the site golden through the production runner and the
+    queue (the real LP, PV off): every bill the run records is the tariff
+    engine's on its solved fork, established, and equals WP0's (GS's bill of
+    the same dispatch) at the frozen tolerances; each fork's solver config
+    carries the finance inputs beside the commercial config; the study's
+    ledger is the pinned pack's, its rule rows (21-34) name the guided study
+    as their author, and the case reads them (no fallback to the guided
+    defaults) and equals WP0's NPV.
+    """
+    from services.study import library as L
+    from tests.golden import site_fixture as SF
+    from tests.u2_targets import DE, WP0, close
+
+    intake = {**SF.site_intake(), "pv": {"enabled": False}}
+    api_project("wp8-run-src")
+    r = create_pack_study(client, "wp8-run-src", "wp8-run", intake=intake)
+    assert r.status_code == 201, r.text
+    sid = r.json()["study_id"]
+    ledger = client.get(f"/api/projects/wp8-run/studies/{sid}/ledger").json()["ledger"]
+    assert ledger["ledger_version"] == L.load_defaults().version
+    rows = {row["key"]: row for row in ledger["rows"]}
+    assert rows["salvage_rule"]["source"] == (
+        f"guided study rule guided.salvage.annuity_pv_remaining_life; not in pack "
+        f"{L.load_defaults().version}")
+    assert client.post(f"/api/projects/wp8-run/studies/{sid}/run", json={}).status_code == 202
+    rec = wait_run(client, "wp8-run", sid, timeout=1200.0)
+    assert rec["status"] == "done", rec
+    run = client.get(f"/api/projects/wp8-run/studies/{sid}/run").json()
+    tol = WP0["tolerances"]
+    for option in ("none", "bess_2h"):
+        bill = run["details"][option]["bill"]
+        assert bill["engine"] == "tariff_engine" and bill["unavailable"] == {}, bill["unavailable"]
+        want = WP0["seed_bills"][DE][option]
+        assert close(bill["total"], want["total"], rel=tol["arithmetic_rel"])
+        for key, value in want["by_component"].items():
+            if key != "unavailable":
+                assert close(bill["by_component"][key], value, rel=tol["arithmetic_rel"],
+                             abs_=tol["arithmetic_abs"]), (option, key)
+        cfg = json.loads((project_storage_dir(f"wp8-run-opt-{option}")
+                          / "solver_config.json").read_text())
+        assert cfg["finance"]["price_basis"] == "real" and cfg["commercial"]["value_flows"]
+    case = client.get(f"/api/projects/wp8-run/studies/{sid}/options/bess_2h/case").json()
+    assert case["engine"] == "finance_engine" and case["status"] == "ok"
+    assert "finance_rules_from_guided_defaults" not in case["honesty_notes"]
+    assert close(case["kpis"]["npv"], WP0["golden_s5"]["bess_2h"]["npv"], rel=1e-9)
+
+
+def test_a_study_seeded_from_the_legacy_library_still_loads_and_runs(
+        client, api_project, studies_on, fake, project_storage_dir):
+    """
+    U2 WP8 (gate C4): new studies seed from the pinned pack, but a study
+    stored with a ledger seeded from the legacy `study_library` (rows 1-20,
+    no rule rows 21-34) still reads, runs and values its cases — on the SAME
+    guided rules, disclosed `finance_rules_from_guided_defaults` — and a
+    re-seed moves it onto the pack, keeping the user's rows.
+    """
+    from services.study import library as L
+    from services.study import questions as Q
+    from services.study import store
+
+    sid = _setup(client, api_project, "run-legacy")
+    base = project_storage_dir("run-legacy")
+    study = store.load_study(base, sid)
+    legacy = L.seed_ledger(Q.BESS_AT_SITE, study.intake, L.load_library())
+    assert legacy.ledger_version == L.LIBRARY_VERSION
+    store.save_study(base, study.model_copy(update={"ledger": legacy,
+                                                    "ledger_version": legacy.ledger_version}))
+    led = client.get(f"/api/projects/run-legacy/studies/{sid}/ledger").json()["ledger"]
+    assert led["ledger_version"] == L.LIBRARY_VERSION
+    r = client.put(f"/api/projects/run-legacy/studies/{sid}/ledger", json={"rows": [
+        {"key": "battery_storage_eur_per_kwh", "value": 300.0, "unit": "EUR/kWh"}]})
+    assert r.status_code == 200, r.text
+    assert client.post(f"/api/projects/run-legacy/studies/{sid}/run", json={}).status_code == 202
+    assert wait_run(client, "run-legacy", sid)["status"] == "done"
+    case = client.get(f"/api/projects/run-legacy/studies/{sid}/options/bess_2h/case")
+    assert case.status_code == 200, case.text
+    assert case.json()["engine"] == "finance_engine"
+    assert "finance_rules_from_guided_defaults" in case.json()["honesty_notes"]
+
+    r = client.put(f"/api/projects/run-legacy/studies/{sid}/ledger", json={"reseed": True})
+    assert r.status_code == 200, r.text
+    led = r.json()["ledger"]
+    assert led["ledger_version"] == L.load_defaults().version
+    rows = {row["key"]: row for row in led["rows"]}
+    assert rows["battery_storage_eur_per_kwh"]["value"] == 300.0
+    assert rows["battery_storage_eur_per_kwh"]["provenance"] == "user"
+    assert rows["salvage_rule"]["source"].startswith("guided study rule ")
+    # The ledger the run was built on moved: the case says so, never mixes.
+    case = client.get(f"/api/projects/run-legacy/studies/{sid}/options/bess_2h/case")
+    assert case.status_code == 409
+    assert case.json()["detail"]["error_kind"] == "ledger_changed_since_run"

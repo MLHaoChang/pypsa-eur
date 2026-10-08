@@ -55,9 +55,16 @@ commercial chain, the battery written as its two upfront parts) is valued by
 ``engine_adapter.option_case`` — its ONE ``FinanceCase`` — and its CAPEX and
 discount-rate bounds by ``engine_adapter.bound_case`` on that case (C5: no
 value-flow ledger rebuilt, no network re-read); a price bound re-dispatches
-and calls ``option_case`` on the variant network. Any other network (a fork
-written before WP7, a test's fake solve) keeps the pro forma until WP8 marks
-such studies stale.
+and calls ``option_case`` on the variant network. Every bill is the engine's
+(``engine_adapter.bill`` on the solved meter with the compiled config the
+solve priced: the run record's, a PV-only reference's; the counterfactual at
+the case's tariff is the baseline). **Since U2 WP8** a stored study whose
+forks are not the engine's (a run before the engine inputs were recorded, a
+fork written before WP7) or whose fork's engine inputs were edited after the
+run is refused by ``load_inputs`` / ``context_from_disk`` (409
+``engine_inputs_changed_since_run``, a re-run offered); the pro forma and
+GS's bill calculator remain only as the fallback for a network the engine did
+not solve in process (a test's identity solve), until WP10.
 
 Solving is injected (``solve(network, cfg, variant_id)``): the worker
 (``services/study/tornado_runner.py``) solves each variant on a throw-away
@@ -191,7 +198,7 @@ def value_streams(bill_baseline: Bill, bill_option: Bill) -> list[ValueStream]:
         else:
             share = value / savings
         out.append(ValueStream(key=key, label=label, annual_value=value, share=share,
-                               engine="bill_calculator", unavailable=flags,
+                               engine=bill_option.engine, unavailable=flags,
                                itemised=None if listed is None
                                else any(c in listed for c in comps)))
     return out
@@ -362,7 +369,14 @@ def fixed_size_network(n, *, drop_battery: bool = False):
     return m
 
 
-def _bill_of(n, tariff: Tariff, fidelity=None) -> Bill:
+def _gs_bill_of(n, tariff: Tariff, fidelity=None) -> Bill:
+    """
+    FALLBACK until WP10 (plan §5.1): GS's bill calculator on a dispatch the
+    engine did not solve — a network that is not `engine_ready` (a fork
+    written before WP7, a test's fake or identity solve). Every reader of a
+    stored study refuses such forks first (`load_inputs`,
+    `context_from_disk`: `engine_inputs_changed_since_run`).
+    """
     p0 = getattr(n.links_t, "p0", None)
     imp = p0[packs.IMPORT_LINK] if p0 is not None and packs.IMPORT_LINK in p0 else None
     exp = p0[packs.EXPORT_LINK] if p0 is not None and packs.EXPORT_LINK in p0 else None
@@ -373,6 +387,23 @@ def _bill_of(n, tariff: Tariff, fidelity=None) -> Bill:
 def _on_engine(ctx: TornadoContext, n) -> bool:
     """Whether `n` is valued by the engine (U2 WP7; see the module docstring)."""
     return ctx.export_series is not None and study_engine.engine_ready(n)
+
+
+def _bill_of(ctx: TornadoContext, n, ledger: AssumptionsLedger | None = None,
+             tariff: Tariff | None = None) -> Bill:
+    """
+    A solved network's bill at `ledger` (the centre's by default). Gate C6:
+    on the engine it is `engine_adapter.bill` on the solved PoC meter with
+    the config the solve priced (the same compile, the run's export series);
+    otherwise the GS fallback at `tariff` (`_gs_bill_of`).
+    """
+    ledger = ledger if ledger is not None else ctx.ledger
+    if _on_engine(ctx, n):
+        return study_engine.bill(n, _compiled(ctx, ledger, n.snapshots), fidelity=ctx.fidelity)
+    if tariff is None:
+        tariff = ctx.tariff if ledger is ctx.ledger else packs.effective_tariff(
+            ctx.intake, ledger, ctx.library, n.snapshots)
+    return _gs_bill_of(n, tariff, ctx.fidelity)
 
 
 def _bundle_of(ctx: TornadoContext, n):
@@ -431,6 +462,11 @@ def attribute(option_id: str, case: InvestmentCase | None, p_bat: float | None, 
     method = "battery_removed_same_pv" if pv else "battery_only"
     common = dict(option_id=option_id, method=method, fidelity=fidelity,
                   currency_year=currency_year)
+    if case is not None:
+        # U2 WP8 (gate WP7 carry-forward): the engine that valued the case
+        # (`finance_engine` on the Investment Case engine), as X4 did for
+        # the case's facts.
+        common["engine"] = case.engine
     flags: dict[str, str] = {}
     if p_bat is None:
         reason = "battery_not_solved"
@@ -487,7 +523,7 @@ def attribute(option_id: str, case: InvestmentCase | None, p_bat: float | None, 
     else:
         net = [o.net_cash_flow - r.net_cash_flow
                for o, r in zip(case.years, reference_case.years, strict=True)]
-    pb = proforma.payback(net)
+    pb = study_engine.payback(net) if case.engine == "finance_engine" else proforma.payback(net)
     return BatteryAttribution(
         **common, status="ok", battery_p_nom_mw=p_bat, battery_npv=option_npv - ref,
         option_npv=option_npv, reference_npv=ref, battery_payback_simple=pb,
@@ -581,7 +617,6 @@ def _price_bound(ctx: TornadoContext, n_centre, option_id: str, key: str, value:
                  solve: SolveFn, variant_id: str, *, reference: bool) -> InvestmentCase:
     """A dispatch-sensitive bound: re-dispatch the fixed sizes at the tariff."""
     vl = _with_value(ctx.ledger, key, value)
-    vt = packs.effective_tariff(ctx.intake, vl, ctx.library, n_centre.snapshots)
     # U2 WP6: the variant tariff goes to the engine through the solver config;
     # the fixed-size copy keeps the centre fork's bound export price.
     cfg = _solver_config(ctx, vl, n_centre.snapshots)
@@ -589,11 +624,14 @@ def _price_bound(ctx: TornadoContext, n_centre, option_id: str, key: str, value:
     solved = _solved(solve, net, cfg, variant_id)
     if _on_engine(ctx, solved):
         # U2 WP7: the engine's counterfactual IS the baseline at the variant
-        # tariff (the served load rated, export 0 — BC-7 without a solve).
-        return _case(ctx, solved, cfg, vl, vt, {}, option_id, keep=False)
-    # BC-7: the baseline bill at the SAME perturbed tariff (no solve).
-    bills = {"baseline": _bill_of(ctx.baseline_network, vt, ctx.fidelity),
-             "option": _bill_of(solved, vt, ctx.fidelity)}
+        # tariff (the served load rated, export 0 — BC-7 without a solve), and
+        # the option's bill the engine's on the variant's solved meter.
+        return _case(ctx, solved, cfg, vl, None, {}, option_id, keep=False)
+    # FALLBACK (`_gs_bill_of`): BC-7, the baseline bill at the SAME perturbed
+    # tariff (no solve).
+    vt = packs.effective_tariff(ctx.intake, vl, ctx.library, n_centre.snapshots)
+    bills = {"baseline": _gs_bill_of(ctx.baseline_network, vt, ctx.fidelity),
+             "option": _gs_bill_of(solved, vt, ctx.fidelity)}
     return _case(ctx, solved, cfg, vl, vt, bills, option_id)
 
 
@@ -739,7 +777,7 @@ def _centre(ctx: TornadoContext, solve: SolveFn | None):
                 except VariantFailed as exc:
                     kw["reference_missing"] = f"reference_{exc.code}"
                 else:
-                    bill = _bill_of(solved, ctx.tariff, ctx.fidelity)
+                    bill = _bill_of(ctx, solved)
                     refs[oid] = _case(ctx, solved, centre_cfg, ctx.ledger, ctx.tariff,
                                       {"baseline": ctx.baseline_bill, "option": bill}, oid)
                     kw["reference_case"] = refs[oid]
@@ -956,7 +994,7 @@ def verdict(attributions: list[BatteryAttribution], robustness: Robustness | Non
         else:
             tpl = "not_recommended_best"
             facts["battery_npv"] = _fig("battery_npv", "Battery NPV", best.battery_npv,
-                                        "EUR", "cash_flow_expander", basis=basis,
+                                        "EUR", best.engine, basis=basis,
                                         currency_year=currency_year, fidelity=fidelity)
         return Verdict(status="ok", class_="not_recommended", sentence=_TEMPLATES[tpl],
                        sentence_template=tpl, facts=facts,
@@ -990,13 +1028,13 @@ def verdict(attributions: list[BatteryAttribution], robustness: Robustness | Non
     hours = Q.max_hours(Q.option(question, best.option_id))
     facts = {
         "battery_npv": _fig("battery_npv", "Battery NPV", best.battery_npv, "EUR",
-                            "cash_flow_expander", basis=basis, currency_year=currency_year,
+                            best.engine, basis=basis, currency_year=currency_year,
                             fidelity=fidelity),
         "battery_p_nom_mw": _fig("battery_p_nom_mw", "Battery power", best.battery_p_nom_mw,
                                  "MW", "lp", fidelity=fidelity),
         "battery_payback_simple": _fig(
             "battery_payback_simple", "Battery simple payback", best.battery_payback_simple,
-            "years", "cash_flow_expander", basis=basis, currency_year=currency_year,
+            "years", best.engine, basis=basis, currency_year=currency_year,
             fidelity=fidelity, flag=best.unavailable.get("battery_payback_simple")),
         "battery_max_hours": _fig("battery_max_hours", "Hours of storage", hours, "h",
                                   "ledger"),
@@ -1116,7 +1154,7 @@ def study_ledger(study) -> AssumptionsLedger:
     if study.ledger is not None:
         return ledger_mod.with_study_currency_year(study.ledger, study.currency_year)
     question = Q.get_question(study.question_id) or Q.BESS_AT_SITE
-    seeded = study_library.seed_ledger(question, study.intake, study_library.load_library())
+    seeded = study_library.seed_ledger(question, study.intake, study_library.load_defaults())
     return ledger_mod.with_study_currency_year(seeded, study.currency_year)
 
 
@@ -1127,6 +1165,13 @@ def load_inputs(study, base_dir, db, base_uuid: str) -> StudyInputs:
     from (409 ``ledger_changed_since_run``), and each fork is owned by the
     study (an unowned one is dropped, never read). Fork files are hashed
     here (cheap); networks are read later, with the S5 [B1] hash rule.
+
+    U2 WP8 (plan §2 C10, gate C6): the run recorded the engine inputs it gave
+    each fork, and every fork's solver config still carries them
+    (`run_hashes.compiled_matches`); otherwise 409
+    ``engine_inputs_changed_since_run`` with the plain reason — a run before
+    the engine inputs were recorded, or a fork edited since — never the
+    results of another calculation shown as current.
     """
     import uuid as uuid_mod
 
@@ -1153,9 +1198,15 @@ def load_inputs(study, base_dir, db, base_uuid: str) -> StudyInputs:
         raise FindingsRefused(409, "intake_changed_since_run", (
             "the study's answers (site, load, tariff or PV) changed after the run; "
             "re-run the study (the options were built from the old ones)"))
-    library = study_library.load_library()
+    if not run_hashes.engine_recorded(hashes, run):
+        raise FindingsRefused(409, run_hashes.ENGINE_STALE, run_hashes.EARLIER_VERSION)
+    library = study_library.load_defaults()
     try:
         tariff = packs.effective_tariff(study.intake, ledger, library)
+        # The engine's commercial config at the run's ledger and series: what
+        # every centre case and bound is compiled from (`_compiled`).
+        packs.option_commercial(study.intake, ledger, library,
+                                export_series=run.get("export_series"))
     except packs.PackError as exc:
         raise FindingsRefused(422, exc.code, exc.message) from None
     rows: dict[str, Any] = {}
@@ -1177,6 +1228,10 @@ def load_inputs(study, base_dir, db, base_uuid: str) -> StudyInputs:
         rows[oid] = row
         recorded[oid] = by_fork.get(str(row.id))
         current[oid] = run_hashes.fork_file_hash(row)
+    edited = [oid for oid, row in rows.items() if not run_hashes.compiled_matches(
+        hashes, str(row.id), run_hashes.fork_engine_digest(row))]
+    if edited:
+        raise FindingsRefused(409, run_hashes.ENGINE_STALE, run_hashes.edited_since_run(edited))
     return StudyInputs(study, question, run, faux, ledger, library, tariff, rows,
                        recorded, current)
 
@@ -1200,6 +1255,11 @@ def context_from_disk(inp: StudyInputs) -> TornadoContext:
         n, h = study_runner.fork_network_from_disk(row)
         if not run_hashes.fork_matches(inp.recorded[oid], h):
             continue
+        if not study_engine.engine_ready(n):
+            # Gate C6: a fork the engine did not solve, or whose battery has
+            # no upfront parts (written before WP7), is never valued on the
+            # pro forma as current.
+            raise FindingsRefused(409, run_hashes.ENGINE_STALE, run_hashes.EARLIER_VERSION)
         nets[oid] = n
     if "none" not in nets:
         raise FindingsRefused(409, "fork_changed_since_run", (
@@ -1350,7 +1410,9 @@ def assemble_findings(study, base_dir, db, base_uuid: str, *,
         hashes=FindingsHashes(ledger_hash=hashes.get("ledger_hash"),
                               intake_hash=hashes.get("intake_hash"),
                               base_network_hash=base_hash,
-                              option_network_hashes=hashes.get("option_network_hashes") or {}),
+                              option_network_hashes=hashes.get("option_network_hashes") or {},
+                              compiled_hash=hashes.get("compiled_hash"),
+                              option_compiled_hashes=hashes.get("option_compiled_hashes") or {}),
         baseline=BaselineResult.model_validate(faux["baseline"]),
         verdict=v, robustness=robustness, explain=explained,
         battery_attribution=attributions, value_streams=streams,

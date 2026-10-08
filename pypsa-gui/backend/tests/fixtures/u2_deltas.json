@@ -2,7 +2,7 @@
  "schema": "u2_deltas/1",
  "plan": "docs/superpowers/plans/2026-10-05-guided-study-u2-engine-rewire.md WP2 (deltas), §4",
  "rule": "{test, figure, pre, post, abs, rel, cause}: pre = GS (BillCalculator or the WP0 record), post = the engine through the U2 seam. A cause is a stable code; WP10's assessor gates every row outside tolerance.",
- "stage": "U2 stage 1 (WP1-WP5) + WP6 (LP switch) + WP7 (the case on the finance engine)",
+ "stage": "U2 stage 1 (WP1-WP5) + WP6 (LP switch) + WP7 (the case on the finance engine) + WP8 part A (findings, runner, routes on the engine; pack seeding)",
  "deltas": [
   {
    "test": "test_engine_adapter_bill.py::test_a_year_billed_peak_is_prorated_by_the_hours_it_represents",
@@ -576,6 +576,15 @@
    "abs": null,
    "rel": null,
    "cause": "c1_parts_close_the_s4_gap: the pack writes the battery as its two upfront parts (WP7 C1), which upfront_cost_series sums; the pro forma's own figures are unchanged"
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_the_driver_evidence_reproduces",
+   "figure": "driver.case_kpis.ledger_hash",
+   "pre": "4258ef46e3904d49",
+   "post": "57fd6bae9879b8dd",
+   "abs": null,
+   "rel": null,
+   "cause": "c4_ledger_seeded_from_the_pinned_pack: production seeds the study ledger from the pinned defaults pack (library.load_defaults, U2 WP8 gate C4) instead of the legacy study_library; rows 1-20 hold the same values, and the guided rules (rows 21-34) are rows now, so the ledger hash the case records changes. No figure moves (every other driver leaf is within the frozen tolerances)."
   }
  ]
 }

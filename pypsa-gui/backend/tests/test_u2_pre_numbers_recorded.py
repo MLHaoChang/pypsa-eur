@@ -221,9 +221,14 @@ def _with_recorded_deltas(want: dict, section: str, test_id: str, tol: dict,
         for k in parents:
             node = node[k]
         assert leaf in node, f"{r['figure']}: not a frozen figure"
-        assert _close(leaf, parents[-1] if parents else "", float(r["pre"]), float(node[leaf]),
-                      tol), f"{r['figure']}: the row's pre {r['pre']!r} is not the frozen " \
-                            f"{node[leaf]!r}"
+        if isinstance(r["pre"], str):
+            # A string figure (a hash, U2 WP8) matches its frozen value exactly.
+            assert r["pre"] == node[leaf], \
+                f"{r['figure']}: the row's pre {r['pre']!r} is not the frozen {node[leaf]!r}"
+        else:
+            assert _close(leaf, parents[-1] if parents else "", float(r["pre"]),
+                          float(node[leaf]), tol), \
+                f"{r['figure']}: the row's pre {r['pre']!r} is not the frozen {node[leaf]!r}"
         if r.get("post_figure"):
             *new_parents, new_leaf = r["post_figure"].split(".")[1:]
             assert r["post_figure"].startswith(f"{section}.") and new_parents == parents, \
@@ -272,6 +277,22 @@ def test_the_driver_evidence_reproduces():
     want = _with_recorded_deltas(want, "driver", DRIVER_TEST_ID, frozen["tolerances"])
     got = {k: v for k, v in got.items() if k != "checks"}
     assert _diff(want, got, frozen["tolerances"], "driver") == []
+
+
+def test_a_recorded_delta_of_a_string_figure_matches_its_pre_exactly():
+    """
+    U2 WP8 (gate C4): a hash is not a number — its row applies only when its
+    `pre` IS the frozen string, and a row whose `pre` differs is refused.
+    """
+    frozen = _frozen()
+    tol = frozen["tolerances"]
+    want = frozen["driver"]
+    pre = want["case_kpis"]["ledger_hash"]
+    row = {"test": "t", "figure": "driver.case_kpis.ledger_hash", "pre": pre, "post": "x" * 16}
+    got = _with_recorded_deltas(want, "driver", "t", tol, [row])
+    assert got["case_kpis"]["ledger_hash"] == "x" * 16
+    with pytest.raises(AssertionError, match="is not the frozen"):
+        _with_recorded_deltas(want, "driver", "t", tol, [{**row, "pre": "y" * 16}])
 
 
 def test_a_recorded_delta_applies_only_on_its_frozen_pre():

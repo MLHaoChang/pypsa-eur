@@ -348,7 +348,11 @@ export interface Findings {
   options: OptionResult[]
   options_status: SectionStatus
   pending_options: string[]
-  hashes: { ledger_hash: string | null; base_network_hash: string | null; option_network_hashes: Record<string, string>; intake_hash: string | null }
+  hashes: {
+    ledger_hash: string | null; base_network_hash: string | null; option_network_hashes: Record<string, string>; intake_hash: string | null
+    // U2 WP8 (plan §2 C10): the engine inputs the run gave each option fork.
+    compiled_hash?: string | null; option_compiled_hashes?: Record<string, string>
+  }
   baseline: { project_ref: string | null; solve_status: SolveStatus; bill: number | null; case_ref: string | null; unavailable: Record<string, string> }
   verdict: Verdict
   robustness: Robustness

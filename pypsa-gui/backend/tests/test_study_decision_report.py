@@ -30,7 +30,7 @@ from services.study import report as R
 from tests.study_s4_support import INTAKE
 from tests.test_study_findings import _att, _rob
 
-LIB = L.load_library()
+LIB = L.load_defaults()   # U2 WP8 (gate C4): production seeds from the pinned pack
 
 
 def _study(name="Site battery", **kw) -> DecisionStudy:
@@ -227,19 +227,47 @@ def _ledger():
     return L.seed_ledger(Q.BESS_AT_SITE, INTAKE, LIB)
 
 
-def _hashed_report():
+def _hashed_report(**kw):
     from services.study import packs, run_hashes
 
     ledger = _ledger()
     hashes = FindingsHashes(ledger_hash=packs.ledger_hash(ledger),
                             intake_hash=run_hashes.intake_hash(INTAKE),
-                            option_network_hashes={"f1": "h" * 16})
+                            option_network_hashes={"f1": "h" * 16},
+                            compiled_hash="c" * 16, option_compiled_hashes={"f1": "e" * 16})
+    hashes = hashes.model_copy(update=kw)
     return _report(hashes=hashes), ledger
+
+
+def _stale(report, study, ledger, net="h" * 16, engine="e" * 16):
+    return R.stale_reasons(report, study, ledger, lambda u: net,
+                           fork_engine_now=lambda u: engine)
 
 
 def test_nothing_changed_is_not_stale():
     report, ledger = _hashed_report()
-    assert R.stale_reasons(report, _study(), ledger, lambda u: "h" * 16) == []
+    assert _stale(report, _study(), ledger) == []
+
+
+def test_a_forks_engine_inputs_edited_after_assembly_are_stale():
+    """U2 WP8 (plan §2 C10): an Expert edit of a fork's commercial or finance block."""
+    report, ledger = _hashed_report()
+    assert _stale(report, _study(), ledger, engine="x" * 16) == [
+        "engine_inputs_changed_since_findings:bess_2h"]
+    assert _stale(report, _study(), ledger, engine=None) == [
+        "engine_inputs_changed_since_findings:bess_2h"]
+    # A changed network says so first; the engine rule does not repeat it.
+    assert _stale(report, _study(), ledger, net="x" * 16, engine="x" * 16) == [
+        "fork_changed_since_findings:bess_2h"]
+
+
+def test_a_report_of_a_run_before_the_engine_inputs_were_recorded_is_stale():
+    """U2 WP8 (gate C6, WP6 W4): never shown as current, a re-run offered."""
+    report, ledger = _hashed_report(compiled_hash=None, option_compiled_hashes={})
+    assert _stale(report, _study(), ledger) == ["run_by_an_earlier_version"]
+    text, source = R.help_for("run_by_an_earlier_version")
+    assert source == "study" and "Run the study again" in text
+    assert R.help_for("engine_inputs_changed_since_findings:bess_2h")[1] == "study"
 
 
 def test_a_ledger_edit_after_assembly_is_stale():
@@ -247,15 +275,14 @@ def test_a_ledger_edit_after_assembly_is_stale():
     rows = [r.model_copy(update={"value": 150.0, "status": "customised", "provenance": "user"})
             if r.key == "battery_storage_eur_per_kwh" else r for r in ledger.rows]
     edited = ledger.model_copy(update={"rows": rows})
-    assert R.stale_reasons(report, _study(), edited, lambda u: "h" * 16) == [
-        "ledger_changed_since_findings"]
+    assert _stale(report, _study(), edited) == ["ledger_changed_since_findings"]
 
 
 def test_an_option_fork_edit_after_assembly_is_stale():
     report, ledger = _hashed_report()
-    assert R.stale_reasons(report, _study(), ledger, lambda u: "x" * 16) == [
+    assert _stale(report, _study(), ledger, net="x" * 16) == [
         "fork_changed_since_findings:bess_2h"]
-    assert R.stale_reasons(report, _study(), ledger, lambda u: None) == [
+    assert _stale(report, _study(), ledger, net=None) == [
         "fork_changed_since_findings:bess_2h"]
 
 
@@ -264,14 +291,13 @@ def test_an_intake_edit_after_assembly_is_stale():
     report, ledger = _hashed_report()
     edited = _study().model_copy(update={"intake": {**INTAKE, "load": {
         **INTAKE["load"], "annual_mwh": 9000.0}}})
-    assert R.stale_reasons(report, edited, ledger, lambda u: "h" * 16) == [
-        "intake_changed_since_findings"]
+    assert _stale(report, edited, ledger) == ["intake_changed_since_findings"]
 
 
 def test_a_study_marked_stale_carries_its_reasons():
     report, ledger = _hashed_report()
     study = _study(stale=True, stale_reasons=["copied_record_findings_computed_on_the_origin_forks"])
-    assert R.stale_reasons(report, study, ledger, lambda u: "h" * 16) == [
+    assert _stale(report, study, ledger) == [
         "copied_record_findings_computed_on_the_origin_forks"]
 
 
@@ -523,6 +549,45 @@ def test_engine_labels_name_the_engine_that_made_the_figure():
     report = _report(atts=[_att("bess_2h", 3e5)], rob=_rob("bess_2h", (4e5, -0.5)),
                      options=("bess_2h",))
     assert report.facts["npv_tolerance_eur"].engine == "method_constant"
+
+
+def test_an_engine_valued_attributions_facts_name_the_finance_engine():
+    """
+    U2 WP8 (gate WP7 carry-forward, as X4 did for the case's facts): the
+    verdict's battery NPV and payback, the report's `option_total_npv`,
+    `battery_only_best_npv` and `tornado_centre_npv` name the engine of the
+    attributions they come from, never a fixed `cash_flow_expander`.
+    """
+    def eng(a):
+        return a.model_copy(update={"engine": "finance_engine"})
+
+    pv = eng(_att("bess_pv_2h", 5e5).model_copy(update={"option_npv": 1.2e6,
+                                                        "reference_npv": 7e5}))
+    report = _report(atts=[eng(_att("bess_1h", 1e5)), eng(_att("bess_2h", 2e5)),
+                           eng(_att("bess_4h", 1.5e5)), pv],
+                     rob=_rob("bess_pv_2h", (6e5, 4e5)),
+                     options=("bess_1h", "bess_2h", "bess_4h", "bess_pv_2h"))
+    for key in ("battery_npv", "battery_payback_simple", "option_total_npv",
+                "battery_only_best_npv", "tornado_centre_npv"):
+        assert report.facts[key].engine == "finance_engine", key
+
+
+def test_the_assumptions_never_attribute_a_guided_rule_to_the_defaults_pack():
+    """
+    Gate U2-S1 C4: rows 21-34 are the guided study's rules, which the pinned
+    pack does not carry; their source in the report's assumptions names the
+    rule and says so, and the prose does not call every default the pack's.
+    """
+    report = _report()
+    rows = {r["key"]: r for r in report.sections["assumptions"].payload["rows"]}
+    for key in ("financial_close_year", "contingency_share", "escalation_tariff",
+                "salvage_rule", "tax_pack"):
+        source = rows[key]["source"]
+        assert source.startswith("guided study rule guided."), (key, source)
+        assert source.endswith(f"; not in pack {LIB.version}"), (key, source)
+    assert rows["export_series"]["source"].startswith("Tariff ")
+    prose = " ".join(p.text for p in report.sections["assumptions"].prose)
+    assert "library's" not in prose and "rule of the guided study" in prose
 
 
 def test_validate_prose_rejects_a_digit_glued_to_a_unit_or_currency():

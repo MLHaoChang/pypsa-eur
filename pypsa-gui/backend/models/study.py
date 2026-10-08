@@ -1051,6 +1051,14 @@ class FindingsHashes(_Model):
     # (`services/study/run_hashes.py::intake_hash`); an edit after the run
     # makes every reader refuse or mark stale.
     intake_hash: str | None = None
+    # U2 WP8 (plan §2 C10): the engine inputs the run wrote into each option
+    # fork's solver config (`services/study/run_hashes.py::compiled_hash`,
+    # from the run's commercial digest and the forks' finance digests) and,
+    # per fork uuid, the digest of the fork's `commercial` and `finance`
+    # blocks. A run recorded before them (None) or a fork edited since reads
+    # stale everywhere (`engine_inputs_changed_since_run`).
+    compiled_hash: str | None = None
+    option_compiled_hashes: dict[str, str] = Field(default_factory=dict)
 
 
 class BatteryAttribution(_FigureBlock):

@@ -67,7 +67,9 @@ def test_the_case_and_its_workbook_after_a_run(client, api_project, studies_on, 
     case = r.json()
     assert case["available"] is True and case["status"] == "ok"
     assert case["option_id"] == "bess_2h" and case["study_id"] == sid
-    assert case["currency_year"] == 2020 and case["engine"] == "cash_flow_expander"
+    # U2 WP8: the fake's fork carries the engine's solve record, so the case
+    # is the finance engine's (the pro forma is never a stored study's).
+    assert case["currency_year"] == 2020 and case["engine"] == "finance_engine"
     assert case["horizon_years"] == 25 and len(case["years"]) == 26
     assert case["sources"]["asset_economics_ref"] == "run_record"
     assert case["provenance"]["model_hash"]
@@ -281,13 +283,15 @@ def test_the_case_route_takes_the_engine_only_for_an_engine_ready_fork_of_a_wp6_
     `engine_ready` ignores the battery's parts). The route values a case on
     the finance engine exactly when the fork is `engine_ready` (solved on the
     engine's chain, the battery written as its two upfront parts) AND the run
-    recorded its export series; otherwise the pro forma:
+    recorded its export series; otherwise — since U2 WP8 (gate C6) — it
+    refuses 409 `engine_inputs_changed_since_run` with the plain reason and a
+    re-run, never the pro forma's numbers shown as current:
 
     * `bess_2h`, engine-solved with its parts → `finance_engine`;
     * `bess_4h`, engine-solved with a capital-cost battery (no parts, a fork
-      written before WP7) → `cash_flow_expander`;
+      written before WP7) → 409;
     * `bess_2h` again once the run record has no `export_series` (a run
-      recorded before WP6) → `cash_flow_expander`.
+      recorded before WP6) → 409.
     """
     from services.study import store
 
@@ -303,15 +307,18 @@ def test_the_case_route_takes_the_engine_only_for_an_engine_ready_fork_of_a_wp6_
     ready = case("bess_2h")
     assert (ready["engine"], ready["status"]) == ("finance_engine", "ok"), ready["honesty_notes"]
     assert "basis_real_pre_tax_no_subsidy" in ready["honesty_notes"]
-    no_parts = case("bess_4h")
-    assert no_parts["engine"] == "cash_flow_expander", no_parts["honesty_notes"]
-    assert no_parts["status"] == "ok"
+    def refused(option):
+        r = client.get(f"{base}/{option}/case")
+        assert r.status_code == 409, r.text
+        detail = r.json()["detail"]
+        assert detail["error_kind"] == "engine_inputs_changed_since_run"
+        assert "earlier version" in detail["message"]
+
+    refused("bess_4h")
 
     project_dir = project_storage_dir("case-eng")
     record = store.load_aux(project_dir, sid, "run")
     assert record.get("export_series"), "the run must record its export series (WP6)"
     record.pop("export_series")
     store.save_aux(project_dir, sid, "run", record)
-    pre_wp6 = case("bess_2h")
-    assert pre_wp6["engine"] == "cash_flow_expander", pre_wp6["honesty_notes"]
-    assert pre_wp6["status"] == "ok"
+    refused("bess_2h")

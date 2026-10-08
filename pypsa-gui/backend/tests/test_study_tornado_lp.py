@@ -53,15 +53,23 @@ def _question(*drivers):
 
 
 def _ctx(ledger, options: dict, question) -> F.TornadoContext:
+    """
+    The tornado's context on the engine-solved site options, their bills the
+    engine's on each solved meter (U2 WP8, gate C6: what the run records).
+    """
     tariff = sf.site_tariff(ledger)
     nb, _ = ic_site_option("none", ledger)
-    return F.TornadoContext(
+    ctx = F.TornadoContext(
         study_id=sf.SITE_STUDY_ID, question=question, intake=sf.site_intake(),
         ledger=ledger, library=sf.site_library(), tariff=tariff, baseline_network=nb,
-        baseline_bill=F._bill_of(nb, tariff), fidelity="full_study",
-        options={oid: F.OptionInput(oid, n, F._bill_of(n, tariff))
-                 for oid, n in options.items()},
+        baseline_bill=None, fidelity="full_study",
+        options={oid: F.OptionInput(oid, n, None) for oid, n in options.items()},
         export_series=FAKE_REF)
+    ctx.baseline_bill = F._bill_of(ctx, nb)
+    for opt in ctx.options.values():
+        opt.bill = F._bill_of(ctx, opt.network)
+        assert opt.bill.engine == "tariff_engine" and opt.bill.total is not None
+    return ctx
 
 
 @pytest.fixture(scope="module")
@@ -156,13 +164,14 @@ def test_the_discount_rate_bar_reaches_the_ledger_and_the_solver_config():
     assert (row.low_value, row.high_value) == (0.049, 0.091) and row.notes == ()
     assert row.evaluation == "rate_only"
     assert row.npv_low > out.robustness.npv_centre > row.npv_high > 0.0
-    # The rate in the ledger alone is refused by the pro forma.
+    # U2 WP8: the rate in the ledger alone is refused by the engine's centre
+    # case (a rate bound is `bound_case`'s, C5).
+    from services.study import engine_adapter as A
+
     variant = F._with_value(ledger, "discount_rate", 0.091)
-    with pytest.raises(proforma.ProformaError) as exc:
-        proforma.build_investment_case(
-            n, cfg, None, variant, {"baseline": ctx.baseline_bill,
-                                    "option": ctx.options["bess_2h"].bill},
-            "bess_2h", study_id=sf.SITE_STUDY_ID, tariff=ctx.tariff)
+    with pytest.raises(A.EngineRefused) as exc:
+        A.option_case(n, cfg, variant, compiled=F._compiled(ctx, variant, n.snapshots),
+                      option_id="bess_2h", study_id=sf.SITE_STUDY_ID)
     assert exc.value.code == "discount_rate_differs_from_lp"
 
 
@@ -247,7 +256,8 @@ def test_an_engine_price_bound_bills_the_baseline_at_the_variant_tariff():
 
     vl = F._with_value(ledger, key, low)
     vt = packs.effective_tariff(ctx.intake, vl, ctx.library, n.snapshots)
-    base = F._bill_of(ctx.baseline_network, vt, ctx.fidelity)
+    # The oracle: GS's bill calculator at the variant tariff.
+    base = F._gs_bill_of(ctx.baseline_network, vt, ctx.fidelity)
     assert abs(base.annual_bill - ctx.baseline_bill.annual_bill) > 1000.0
     assert case.years[1].bill_baseline == pytest.approx(base.annual_bill, rel=1e-9)
     meter = A.bill_meter(net, F._compiled(ctx, vl, n.snapshots), A._served_load(net),
@@ -255,7 +265,7 @@ def test_an_engine_price_bound_bills_the_baseline_at_the_variant_tariff():
     assert case.years[1].bill_baseline == pytest.approx(meter.annual_bill, rel=1e-12)
 
     pf = proforma.build_investment_case(
-        net, cfg, None, vl, {"baseline": base, "option": F._bill_of(net, vt, ctx.fidelity)},
+        net, cfg, None, vl, {"baseline": base, "option": F._gs_bill_of(net, vt, ctx.fidelity)},
         "bess_2h", study_id=ctx.study_id, tariff=vt, fidelity=ctx.fidelity,
         question=ctx.question)
     assert pf.engine == "cash_flow_expander" and pf.status == "ok"

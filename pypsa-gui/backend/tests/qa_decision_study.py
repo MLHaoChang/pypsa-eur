@@ -472,9 +472,10 @@ def _record_figures(run: dict, findings: dict, case: dict) -> None:
 
 
 def _library():
+    # U2 WP8 (gate C4): the study seeds and compiles from the pinned pack.
     from services.study import library as L
 
-    return L.load_library()
+    return L.load_defaults()
 
 
 # ── 5. the report ────────────────────────────────────────────────────────

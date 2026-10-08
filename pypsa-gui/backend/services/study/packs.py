@@ -599,7 +599,7 @@ def build_site_network(intake: Mapping[str, Any] | None,
     which survives the netCDF round trip.
     """
     intake = intake or {}
-    library = library or study_library.load_library()
+    library = library or study_library.load_defaults()
     refuse_unrunnable_ledger(ledger)
     missing = missing_inputs(intake)
     if missing:

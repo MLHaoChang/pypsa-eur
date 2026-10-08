@@ -1,10 +1,14 @@
 """
 S6 findings, unit level (plan S6 "Acceptance"): the value streams over the
-bill's six components, the battery attribution, the verdict on constructed
+bill's seven components, the battery attribution, the verdict on constructed
 cases, and the tornado's range semantics. No solve here; the solving tests
 are `test_study_tornado_lp.py` (real LP on the site golden fixture) and
 `test_study_tornado_routes.py` (the worker, the forks and the routes with the
 fake solver).
+
+U2 WP8 (gate C6): the toy's bills are the engine's (`engine_adapter.bill` on
+a written dispatch that carries the engine's solve record, as the fake
+solvers leave it), so the streams name the tariff engine.
 """
 from __future__ import annotations
 
@@ -20,7 +24,6 @@ from models.study import (
     Tariff,
 )
 from services.study import findings as F
-from services.study import tariff as T
 
 # ── the value streams (S3 N8: all six bill components) ────────────────────
 
@@ -36,18 +39,47 @@ def _toy_tariff() -> Tariff:
         export=ExportCompensation(price_per_mwh=40.0))
 
 
+def _engine_bill(idx, imp: pd.Series, exp: pd.Series):
+    """
+    The engine's bill of a written meter dispatch on a toy site (2 MW
+    connection), the export price bound and the engine's solve record left
+    as a solve leaves it (`study_s4_support.record_engine_solve`).
+    """
+    import pypsa
+
+    from services.study import compile as C
+    from services.study import engine_adapter as A
+    from tests.study_s4_support import record_engine_solve
+    from tests.u2_targets import FAKE_REF, flat_resolver
+
+    n = pypsa.Network()
+    n.set_snapshots(idx)
+    n.add("Bus", "site")
+    n.add("Bus", "grid")
+    n.add("Generator", "grid", bus="grid", p_nom=2.0, p_min_pu=-1.0)
+    n.add("Link", C.POC_LINK, bus0="grid", bus1="site", p_nom=2.0)
+    n.add("Link", C.EXPORT_LINK, bus0="site", bus1="grid", p_nom=2.0)
+    n.add("Load", "site_load", bus="site", p_set=imp - exp)
+    compiled = C.commercial_from_form(_toy_tariff(), idx, connection_mw=2.0,
+                                      export_series=FAKE_REF)
+    compiled = C.bind_on_network(n, compiled, resolve_ref=flat_resolver(40.0, idx))
+    n.links_t.p0 = pd.DataFrame({C.POC_LINK: imp, C.EXPORT_LINK: exp}, index=idx)
+    record_engine_solve(n, compiled.commercial())
+    return A.bill(n, compiled)
+
+
 def _toy_bills():
     idx = pd.date_range("2025-01-01", periods=8760, freq="h")
-    w = pd.Series(1.0, index=idx)
     load = pd.Series(1.0, index=idx)
     load[idx.hour == 17] = 1.8
-    base = T.BillCalculator().bill(load, pd.Series(0.0, index=idx), _toy_tariff(), w)
+    base = _engine_bill(idx, load, pd.Series(0.0, index=idx))
     # The option: shaved peak, some export at noon (PV-like), round-trip loss.
     imp = load.clip(upper=1.2) + 0.02
     imp[idx.hour == 12] = 0.0
     exp = pd.Series(0.0, index=idx)
     exp[idx.hour == 12] = 0.5
-    opt = T.BillCalculator().bill(imp, exp, _toy_tariff(), w)
+    opt = _engine_bill(idx, imp, exp)
+    assert base.total is not None and opt.total is not None, (base.unavailable, opt.unavailable)
     return base, opt
 
 
@@ -72,7 +104,8 @@ def test_streams_cover_the_seven_components_and_sum_to_the_savings_on_the_toy():
         (base.by_component.demand + base.by_component.capacity)
         - (opt.by_component.demand + opt.by_component.capacity))
     assert sum(s.share for s in streams) == pytest.approx(1.0)
-    assert all(s.engine == "bill_calculator" for s in streams)
+    # U2 WP8: the stream names its bill's engine.
+    assert all(s.engine == "tariff_engine" for s in streams)
 
 
 def test_zero_savings_leave_the_shares_null_with_a_flag():
@@ -325,7 +358,7 @@ def test_the_single_band_energy_price_skip_records_its_documented_code():
     """
     from services.study import library as lib
 
-    library = lib.load_library()
+    library = lib.load_defaults()
     tariff = library.tariffs["de_industrial_illustrative"]
     assert len({b.price_per_mwh for b in tariff.energy_bands}) == 1
     led = lib.seed_ledger(["energy_price_level", "demand_charge_price"], {}, library)

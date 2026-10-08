@@ -211,13 +211,10 @@ def start_tornado(study_id: str, *, base_row, db, user_id,
     if "none" not in inp.rows:
         raise R.RunRefused(409, "baseline_not_solved",
                            "the last run did not solve the baseline; re-run the study")
-    if not inp.run.get("export_series"):
-        # U2 WP6: a run recorded before the LP switch solved its forks with
-        # the tariff written into the Links; re-dispatching them on the
-        # engine's commercial config would price the tariff twice.
-        raise R.RunRefused(409, "engine_inputs_changed_since_run", (
-            "the last run's results were calculated before an update to how prices "
-            "are applied; re-run the study before the sensitivity analysis"))
+    # U2 WP6/WP8: a run recorded before the engine inputs (its forks solved
+    # with the tariff written into the Links, which a re-dispatch on the
+    # engine's commercial config would price twice) or a fork edited since is
+    # refused by `load_inputs` above (409 `engine_inputs_changed_since_run`).
     solves = F.estimate_tornado_solves(inp.question, inp.ledger, inp.tariff, inp.sizes())
     budget = max(1, solves) if budget_solves is None else int(budget_solves)
 

@@ -394,3 +394,10 @@ def test_bill_meter_is_called_only_by_the_preview():
 
     src = inspect.getsource(A.option_case)
     assert "bill_meter(n, compiled, _served_load(n), np.zeros(len(n.snapshots))" in src
+    # U2 WP8: the intake preview's meter exports nothing either (the
+    # unsolved baseline pack: import = the load).
+    from routers import studies as S
+
+    src = inspect.getsource(S.preview_intake)
+    assert "bill_meter(baseline, compiled, series,\n" in src
+    assert "np.zeros(len(baseline.snapshots))" in src

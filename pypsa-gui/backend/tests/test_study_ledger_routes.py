@@ -62,7 +62,8 @@ def test_get_seeds_a_ledger_without_storing_it(client, api_project, studies_on,
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["stored"] is False
-    assert body["ledger"]["ledger_version"] == "technology-data v0.14.0"
+    # U2 WP8 (gate C4): seeded from the pinned defaults pack.
+    assert body["ledger"]["ledger_version"] == lib.load_defaults().version
     rows = body["ledger"]["rows"]
     assert {x["key"] for x in rows if x["sensitivity_flag"]} == set(KEY_DRIVERS)
     assert all(x["provenance"] == "library" and x["status"] == "default" for x in rows)
@@ -100,7 +101,7 @@ def test_put_stores_edits_and_recomputes_maturity(client, api_project, studies_o
 
     stored = _sidecar(project_storage_dir, name, sid)
     assert stored["ledger"]["rows"] == r.json()["ledger"]["rows"]
-    assert stored["ledger_version"] == "technology-data v0.14.0"
+    assert stored["ledger_version"] == lib.load_defaults().version
     assert stored["maturity"]["class"] == "feasibility"
     assert client.get(_url(name, sid)).json()["stored"] is True
 

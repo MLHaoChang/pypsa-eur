@@ -119,15 +119,19 @@ def test_rows_21_to_34_follow_with_engine_paths_and_the_pack_rule_as_provenance(
     assert rows["escalation_tariff"].engine_path == "finance.escalation.tariff"
     assert rows["pv_degradation_pct_per_year"].value == 0.0
     # Gate U2-S1 C4: the pack carries none of these rules (Q7), so they are the
-    # guided study's own, never attributed to the pack; the rule id is kept.
+    # guided study's own, never attributed to the pack: the source names the
+    # rule and its author, and says the pinned pack does not carry it (U2 WP8:
+    # production seeds from the pack). The pack's stamp is never the source.
     from services.library.defaults_pack.loader import load_defaults_pack
 
     stamp = load_defaults_pack().stamp
     for key in ROWS_21_34:
         if key == "export_series":
             continue                                   # the tariff's own source
-        assert rows[key].source == "guided study (pending pack rule, Q7)", key
-        assert stamp not in rows[key].source and "generic_defaults" not in rows[key].source
+        rule = rows[key].help.rsplit("Guided-study rule ", 1)[1].rstrip(".")
+        assert rows[key].source == (
+            f"guided study rule {rule}; not in pack {defaults.version}"), key
+        assert stamp not in rows[key].source and "generic_defaults@" not in rows[key].source
     assert "guided.salvage.annuity_pv_remaining_life" in rows["salvage_rule"].help
     assert rows["export_series"].source.startswith("Tariff ")
     assert rows["export_series"].engine_path == "commercial.export_price_ref"
@@ -328,40 +332,131 @@ def test_an_unmapped_pack_row_is_refused_whatever_its_technology():
 
 
 
-def _bump_blocker(newest: str, pack) -> str | None:
-    """The bump tripwire's message, or None when the pin is safe."""
+#: The fields of a pack cost row the guided ledger reads (`library._pack_technology`).
+_READ_ROW_FIELDS = ("value", "unit", "original_value", "original_unit", "conversion_factor",
+                    "basis", "price_basis", "currency", "currency_year", "range", "domain",
+                    "projection_year", "illustrative", "derived", "note", "source",
+                    "source_year", "source_url")
+#: The pack finance fields the guided study uses (`library._load_defaults` and its
+#: readers). `*_source`, `seed_library` and `degradation` are copied into the
+#: library view but read by nothing downstream: a reworded citation is no input.
+_READ_FINANCE_FIELDS = ("currency", "currency_year", "basis", "perspective", "discount_rate",
+                        "sizing_limit", "horizon_rule", "replacement_rules")
+
+
+def _dump(x):
+    return x.model_dump(mode="json") if hasattr(x, "model_dump") else (
+        [_dump(v) for v in x] if isinstance(x, (list, tuple)) else x)
+
+
+def _bump_changes(pinned, newer) -> tuple[list[str], list[str]]:
+    """
+    (what the study reads that `newer` changes against `pinned`, by key and
+    field; the cost rows of `newer` the study does not read). Read: the rows
+    `_PACK_TECH_ROWS` maps and `_PACK_ROWS_NOT_SEEDED` names, the pack tariffs
+    (all of them reach the guided library) and the finance fields
+    `_load_defaults` reads.
+    """
+    L = _L()
+    old = {v.key: v for v in pinned.cost_values}
+    new = {v.key: v for v in newer.cost_values}
+    read = [k for k, _ in L._PACK_TECH_ROWS] + sorted(L._PACK_ROWS_NOT_SEEDED)
+    changes: list[str] = []
+    for key in read:
+        if key not in new:
+            changes.append(f"{key}: missing")
+            continue
+        a, b = old[key].model_dump(mode="json"), new[key].model_dump(mode="json")
+        changes += [f"{key}.{f}: {a.get(f)!r} -> {b.get(f)!r}"
+                    for f in _READ_ROW_FIELDS if a.get(f) != b.get(f)]
+    for f in _READ_FINANCE_FIELDS:
+        a, b = _dump(getattr(pinned.finance, f)), _dump(getattr(newer.finance, f))
+        if a != b:
+            changes.append(f"finance.{f}: {a!r} -> {b!r}")
+    for tid in sorted(set(pinned.tariffs) | set(newer.tariffs)):
+        if tid not in newer.tariffs:
+            changes.append(f"tariff {tid}: missing")
+        elif tid not in pinned.tariffs:
+            changes.append(f"tariff {tid}: added (the guided library lists every pack tariff)")
+        elif _dump(pinned.tariffs[tid]) != _dump(newer.tariffs[tid]):
+            changes.append(f"tariff {tid}: changed")
+    if pinned.default_tariff_id != newer.default_tariff_id:
+        changes.append(f"default_tariff_id: {pinned.default_tariff_id!r} -> "
+                       f"{newer.default_tariff_id!r}")
+    return changes, sorted(set(new) - set(read))
+
+
+def _bump_blocker(newest: str, pack, pinned=None) -> str | None:
+    """
+    The bump tripwire's message, or None when a newer vendored pack leaves
+    everything the guided study READS as the pinned pack has it (rows it does
+    not read — e.g. a pack's campus equipment — never block).
+    """
+    from services.library.defaults_pack.loader import load_defaults_pack
+
     if newest <= _L().PACK_VERSION:
         return None
-    stray = _L().unmapped_pack_rows(pack)
-    if not stray:
+    pinned = pinned if pinned is not None else load_defaults_pack(_L().PACK_VERSION)
+    changes, _unread = _bump_changes(pinned, pack)
+    if not changes:
         return None
     return (f"defaults pack {newest} is vendored, newer than the guided study's pin "
-            f"{_L().PACK_VERSION}, and has {len(stray)} row(s) the guided ledger does not "
-            f"map (first: {stray[:5]}). Map them or name them in _PACK_ROWS_NOT_SEEDED, then "
-            f"bump services/study/library.PACK_VERSION and re-run the U2 parity tests.")
+            f"{_L().PACK_VERSION}, and changes the study's inputs ({len(changes)}: "
+            f"{changes[:8]}). A newer pack changes what the study reads: bump U2's "
+            f"services/study/library.PACK_VERSION deliberately and re-run the WP0 parity "
+            f"(test_u2_pre_numbers_recorded.py, qa_decision_study.py).")
 
 
 def test_a_newer_vendored_pack_is_noticed_before_the_pin_is_bumped():
     """
-    The bump tripwire: when the newest vendored pack is newer than the pin
-    and carries rows the guided ledger would refuse, fail here, by name, so
-    the next pack is a conscious U2 change (map or name the rows, bump
-    `PACK_VERSION`, re-run the WP0 parity) rather than a silent one.
+    The bump tripwire (redefined by the coordinating session, 2026-10-08):
+    every vendored pack newer than the pin must leave what the guided study
+    reads unchanged — the mapped and named cost rows (value, units, basis,
+    price basis, currency year, range, ...), the pack tariffs and the finance
+    fields — else fail here, by key and field, so a changed input is a
+    conscious U2 bump with its parity re-run. Rows the study does not read
+    pass; they are only reported.
     """
     from services.library.defaults_pack.loader import available_versions, load_defaults_pack
 
-    newest = available_versions()[-1]
-    message = _bump_blocker(newest, load_defaults_pack(newest))
-    assert message is None, message
+    pinned = load_defaults_pack(_L().PACK_VERSION)
+    for version in available_versions():
+        if version <= _L().PACK_VERSION:
+            continue
+        pack = load_defaults_pack(version)
+        message = _bump_blocker(version, pack, pinned)
+        assert message is None, message
+        _changes, unread = _bump_changes(pinned, pack)
+        print(f"defaults pack {version}: {len(unread)} row(s) the guided study does not read "
+              f"(first: {unread[:5]})")
 
 
-def test_the_bump_tripwire_fires_on_a_newer_pack_with_unmapped_rows():
+def test_the_bump_tripwire_guards_only_what_the_study_reads():
     from services.library.defaults_pack.loader import load_defaults_pack
 
     pack = load_defaults_pack(_L().PACK_VERSION)
-    campus = _row(key="transformer.tx_33_11.overnight", technology="transformer", part=None)
-    newer = pack.model_copy(update={"cost_values": [*pack.cost_values, campus]})
-    message = _bump_blocker("2026-10-07", newer)
-    assert message and "2026-10-07" in message and "transformer.tx_33_11.overnight" in message
-    assert _bump_blocker("2026-10-07", pack) is None           # newer, nothing unmapped
-    assert _bump_blocker(_L().PACK_VERSION, newer) is None     # the pin itself: refused at load
+    newer = "2026-10-07"
+    # A campus row the study does not read passes (and is reported).
+    campus = _row(key="transformer.tx_33_11.overnight", technology="transformer", part=None,
+                  basis="lump")
+    added = pack.model_copy(update={"cost_values": [*pack.cost_values, campus]})
+    assert _bump_blocker(newer, added, pack) is None
+    assert _bump_changes(pack, added)[1] == ["transformer.tx_33_11.overnight"]
+    # A changed value of a mapped row fails, naming the key and the field.
+    rows = [v.model_copy(update={"value": v.value * 1.1, "original_value": v.original_value * 1.1})
+            if v.key == "battery.power.overnight" else v for v in pack.cost_values]
+    message = _bump_blocker(newer, pack.model_copy(update={"cost_values": rows}), pack)
+    assert message and newer in message and "battery.power.overnight.value" in message
+    assert "PACK_VERSION" in message and "changes what the study reads" in message
+    # A changed finance discount rate fails.
+    dr = pack.finance.discount_rate.model_copy(update={"value": 0.08})
+    fin = pack.finance.model_copy(update={"discount_rate": dr})
+    message = _bump_blocker(newer, pack.model_copy(update={"finance": fin}), pack)
+    assert message and "finance.discount_rate" in message
+    # A dropped mapped row fails.
+    rows = [v for v in pack.cost_values if v.key != "battery.energy.lifetime"]
+    message = _bump_blocker(newer, pack.model_copy(update={"cost_values": rows}), pack)
+    assert message and "battery.energy.lifetime: missing" in message
+    # Unchanged, and the pin itself (refused at load by the strict loader).
+    assert _bump_blocker(newer, pack, pack) is None
+    assert _bump_blocker(_L().PACK_VERSION, added, pack) is None

@@ -34,7 +34,11 @@ the study's export price series in the base project's org under the owner's
 name (``compile.mint_export_series``, idempotent on content) and binds the
 config on each option's in-memory network (``compile.bind_on_network``)
 BEFORE the fork is written, so the Investment Case engine prices the PoC and
-carries the demand charge when the queue solves it. The fork is enqueued with its own
+carries the demand charge when the queue solves it. Since U2 WP8 the fork's
+config also carries the option's value flows and its finance inputs
+(`compile.option_finance`, the case's own compile), and the findings record
+what each fork was given (`run_hashes`: the run's `compiled_hash` and a
+digest per fork, plan §2 C10). The fork is enqueued with its own
 ``project_key``, ``storage_dir`` and ``enqueued_by_user_id`` and waited on,
 one at a time. After an option is read its fork context is dropped from the
 resident registry (it is saved on disk by the queue).
@@ -42,8 +46,9 @@ resident registry (it is saved on disk by the queue).
 **Results** are read from the fork's live frames with the fork's OWN config
 (``eh_report._live_result_df``), the demand charge from what the engine's
 solve committed (``engine_adapter.demand_charge_eur``), and the bill from the
-ledger-applied tariff (``packs.effective_tariff``) on the engine-solved
-dispatch (the bill's own switch to the engine is WP8).
+engine on the solved PoC meter with the config the solve priced
+(``engine_adapter.bill``, U2 WP8, gate C6). The ledger seeds from the pinned
+defaults pack (``library.load_defaults``, gate C4).
 
 **Abort** stops before the next option (the running job is aborted in the
 queue); unsolved forks are removed, ``options_status`` is
@@ -79,7 +84,6 @@ from services.study import packs
 from services.study import questions as Q
 from services.study import run_hashes
 from services.study import store
-from services.study import tariff as study_tariff
 
 logger = logging.getLogger(__name__)
 
@@ -241,24 +245,20 @@ def _opt_value(value) -> float | None:
     return v if v == v and abs(v) != float("inf") else None
 
 
-def _read_option(n, cfg, tariff, opt, fidelity: Fidelity, currency_year, *,
-                 compiled=None) -> dict:
+def _read_option(n, cfg, opt, fidelity: Fidelity, currency_year, *, compiled) -> dict:
     """
     One option's outcome, from the fork's live frames and its own config.
-    `compiled` is the commercial config the fork was solved with; the run's
-    demand charge is the amount that solve committed (null with a flag
-    without it, ADR-0001).
+    `compiled` is the commercial config the fork was solved with: the bill is
+    the engine's on the solved PoC meter (`engine_adapter.bill`, gate C6 —
+    the same compiled config the solve priced, so its total is established
+    only when the engine solved it) and the run's demand charge is the amount
+    that solve committed (null with a flag without it, ADR-0001).
     """
     from services.adequacy.eh_report import _live_result_df
     from services.study import engine_adapter
 
     detail: dict[str, Any] = {"option_id": opt.option_id, "caveats": []}
-    p0 = getattr(n.links_t, "p0", None)
-    imp = p0[packs.IMPORT_LINK] if p0 is not None and packs.IMPORT_LINK in p0 else None
-    exp = p0[packs.EXPORT_LINK] if p0 is not None and packs.EXPORT_LINK in p0 else None
-    # The calculator does not know which run the dispatch came from.
-    bill = study_tariff.BillCalculator().bill(imp, exp, tariff, n.snapshot_weightings,
-                                              fidelity=fidelity)
+    bill = engine_adapter.bill(n, compiled, fidelity=fidelity)
     detail["bill"] = bill.model_dump(mode="json")
     try:
         from services.results.cost_breakdown import compute_cost_breakdown
@@ -272,15 +272,12 @@ def _read_option(n, cfg, tariff, opt, fidelity: Fidelity, currency_year, *,
     # U2 WP6 (plan §2 C3, §5.2): the demand charge the engine's solve
     # committed, never GS's bridge term.
     detail["demand_charge_eur"] = None
-    if compiled is None:
-        detail["demand_charge_unavailable"] = "commercial_config_not_given"
-    else:
-        try:
-            detail["demand_charge_eur"] = engine_adapter.demand_charge_eur(n, compiled)
-            if detail["demand_charge_eur"] is None:
-                detail["demand_charge_unavailable"] = "demand_charge_not_established"
-        except Exception as exc:  # noqa: BLE001 — null with a flag (ADR-0001)
-            detail["demand_charge_unavailable"] = f"{type(exc).__name__}: {exc}"
+    try:
+        detail["demand_charge_eur"] = engine_adapter.demand_charge_eur(n, compiled)
+        if detail["demand_charge_eur"] is None:
+            detail["demand_charge_unavailable"] = "demand_charge_not_established"
+    except Exception as exc:  # noqa: BLE001 — null with a flag (ADR-0001)
+        detail["demand_charge_unavailable"] = f"{type(exc).__name__}: {exc}"
     try:
         from services.results.asset_economics import compute_asset_economics
 
@@ -394,7 +391,7 @@ def start_study_run(study_id: str, fidelity: Fidelity | str, *, base_row,
     except store.StudyNotFound:
         raise RunRefused(404, "study_not_found", "Study not found") from None
     question = _runnable(study, base_uuid)
-    library = study_library.load_library()
+    library = study_library.load_defaults()
     ledger = study.ledger or study_library.seed_ledger(question, study.intake, library)
     try:
         packs.refuse_unrunnable_ledger(ledger)
@@ -618,13 +615,17 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
     # study keeps no other preflight warning) and disclosed by the findings.
     preflight_flags: dict[str, list[str]] = {}
     bound_by_option: dict[str, Any] = {}
+    # U2 WP8 (C10): each option's compiled finance digest, and why a finance
+    # was not compiled.
+    finance_digests: dict[str, str | None] = {}
+    finance_refused: dict[str, str] = {}
     status, error = "failed", None
     study = None
     try:
         base_row = db.get(Project, _uuid(base_row_id))
         study = store.load_study(base_dir, study_id)
         question = Q.get_question(study.question_id)
-        library = study_library.load_library()
+        library = study_library.load_defaults()
         # The ledger and intake captured when the run started (BC-S4-2), not
         # whatever the sidecar holds by now.
         tariff = packs.effective_tariff(intake, ledger, library)
@@ -660,10 +661,27 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
             net = packs.build_site_network(intake, ledger, opt.option_id,
                                            library=library, question=question,
                                            resolve_upload=resolve_upload)
-            # C6: bound on the in-memory network before the fork is written.
+            # C6: bound on the in-memory network before the fork is written,
+            # with the option's value flows (row 28).
             bound = packs.bind_option(net, compiled, resolve_ref=resolve_ref)
+            bound = study_compile.with_value_flows(bound, net)
             bound_by_option[opt.option_id] = bound
-            cfg = packs.option_solver_config(ledger, bound)
+            # U2 WP8: the fork carries BOTH engine inputs, the commercial
+            # config and the finance inputs the case is valued on. A finance
+            # the compiler refuses (a second currency year) is not written;
+            # the case route then refuses with the same code.
+            try:
+                fin = study_compile.option_finance(ledger, bound, net,
+                                                   study_currency_year=study.currency_year)
+            except study_compile.CompileError as exc:
+                fin = None
+                finance_refused[opt.option_id] = exc.code
+            finance_digests[opt.option_id] = None if fin is None else fin.digest
+            try:
+                cfg = study_compile.solver_config(
+                    ledger, bound, finance=None if fin is None else fin.finance())
+            except study_compile.CompileError as exc:
+                raise packs.PackError(exc.code, exc.message) from None
             issues = validate_for_run(net, cfg)
             errors = [i for i in issues if i.severity == "error"]
             if errors:
@@ -704,12 +722,17 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
                 timed_out = exc
             if job.status == "completed" and timed_out is None:
                 n = _solved_network(row)
-                outcome = _read_option(n, cfg, tariff, opt, fidelity, currency_year,
-                                       compiled=bound_by_option.get(opt.option_id))
+                outcome = _read_option(n, cfg, opt, fidelity, currency_year,
+                                       compiled=bound_by_option[opt.option_id])
                 outcome["result"] = outcome["result"].model_copy(
                     update={"project_ref": str(row.id)})
                 outcome["network_hash"] = _network_hash(
                     project_registry.project_dir(row) / "network.nc")
+                # C10: what the fork's saved config gives the engine now.
+                outcome["engine_digest"] = run_hashes.fork_engine_digest(row)
+                outcome["finance_digest"] = finance_digests.get(opt.option_id)
+                if opt.option_id in finance_refused:
+                    outcome["finance_unavailable"] = finance_refused[opt.option_id]
             elif timed_out is not None:
                 # A typed failure of THIS option (gate S4 nit); the run stops
                 # below, because a solver that hangs pins the queue for the rest.
@@ -835,7 +858,7 @@ def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcom
         # downstream attributes these results to the edited assumptions.
         run_hash = packs.ledger_hash(run_ledger)
         now_ledger = study.ledger or study_library.seed_ledger(
-            question, study.intake, study_library.load_library())
+            question, study.intake, study_library.load_defaults())
         stale_reasons = []
         if packs.ledger_hash(now_ledger) != run_hash:
             stale_reasons.append("ledger_changed_during_run")
@@ -852,7 +875,16 @@ def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcom
                 option_network_hashes={
                     str(solved_rows[k].id): v["network_hash"]
                     for k, v in details.items()
-                    if k in solved_rows and v.get("network_hash")}),
+                    if k in solved_rows and v.get("network_hash")},
+                # U2 WP8 (C10): the engine inputs the forks were solved with.
+                compiled_hash=run_hashes.compiled_hash(
+                    record.get("commercial_digest"),
+                    {k: v.get("finance_digest") for k, v in details.items()
+                     if k in solved_rows}) if record.get("commercial_digest") else None,
+                option_compiled_hashes={
+                    str(solved_rows[k].id): v["engine_digest"]
+                    for k, v in details.items()
+                    if k in solved_rows and v.get("engine_digest")}),
             baseline=baseline,
             honesty_notes=tuple(
                 (["options_not_established:" + ",".join(pending)] if pending else [])

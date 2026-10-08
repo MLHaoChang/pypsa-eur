@@ -419,7 +419,9 @@ DEFAULTS_VERSION_PREFIX = "generic-defaults"
 # 2026-10-08): the report states the defaults it used, so the version is an
 # input, never "the newest vendored". A bump is a conscious U2 change with its
 # own parity check; `test_study_ledger_from_pack` fails when a newer vendored
-# pack carries rows `unmapped_pack_rows` would refuse.
+# pack changes anything the study reads (its mapped and named rows, the pack
+# tariffs, the finance fields), and `unmapped_pack_rows` stays strict on the
+# pinned pack itself.
 PACK_VERSION = "2026-10-05"
 
 # Pack value key -> the GS identity in `_TECH_KEYS`, in the ledger's row order
@@ -495,7 +497,9 @@ ENGINE_PATHS: Mapping[str, str | None] = MappingProxyType({
 
 # Rows 21-34's source until IC's pack carries the rules (Q7; gate U2-S1 C4),
 # and the year the U2 sub-plan stated them.
-GUIDED_RULE_SOURCE = "guided study (pending pack rule, Q7)"
+#: Gate U2-S1 C4: rows 21-34's source names the guided study as the rule's
+#: author and says the pinned pack does not carry it (Q7), never the pack.
+GUIDED_RULE_SOURCE = "guided study rule {rule}; not in pack {pack}"
 GUIDED_RULES_YEAR = 2026
 
 # A descriptor row: no number, a rule the pack states (`apply_user_row`
@@ -694,10 +698,11 @@ def _engine_rows(intake: Mapping[str, Any], tariff: Tariff, tariff_provenance: s
     """
     Plan §1.2 rows 21-34: what a minimal single-owner finance case needs and
     GS had no row for, each a guided-study rule (`provenance=library`,
-    `status=default`, source :data:`GUIDED_RULE_SOURCE` until the pack
-    carries the rules, Q7; the rule id in `help`) with its `engine_path`. Non-numeric rules
-    are descriptors (value null, `rule_descriptor`) so the report's
-    assumptions appendix still lists them.
+    `status=default`, source :data:`GUIDED_RULE_SOURCE` — the rule id, and
+    that the pinned pack does not carry it, until it does, Q7; the rule id
+    in `help` too) with its `engine_path`. Non-numeric rules are descriptors
+    (value null, `rule_descriptor`) so the report's assumptions appendix
+    still lists them.
     """
     fin = library.finance
     site = intake.get("site") if isinstance(intake, Mapping) else None
@@ -713,7 +718,8 @@ def _engine_rows(intake: Mapping[str, Any], tariff: Tariff, tariff_provenance: s
         # the guided study's own and are never attributed to the pack; the rule
         # id stays in the help. A row from the tariff cites the tariff.
         if source is None:
-            source, year_of_source = GUIDED_RULE_SOURCE, GUIDED_RULES_YEAR
+            source = GUIDED_RULE_SOURCE.format(rule=rule, pack=library.version)
+            year_of_source = GUIDED_RULES_YEAR
             help_ = " ".join(x for x in (help_, f"Guided-study rule {rule}.") if x)
         else:
             year_of_source = tariff.source_year

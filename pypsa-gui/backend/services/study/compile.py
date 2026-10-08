@@ -85,7 +85,7 @@ __all__ = [
     "library_series_resolver", "mint_export_series", "parse_export_series_name",
     "solver_config", "sweep_orphan_export_series", "tariff_to_engine",
     "with_value_flows", "CompiledFinance", "FINANCE_RULES_FROM_DEFAULTS",
-    "GUIDED_FINANCE_DEFAULTS", "currency_year_of", "finance_from_ledger",
+    "GUIDED_FINANCE_DEFAULTS", "currency_year_of", "finance_from_ledger", "option_finance",
 ]
 
 POC_LINK = "grid_import"
@@ -999,6 +999,24 @@ def finance_from_ledger(ledger: AssumptionsLedger, *, model_year: int,
     digest = hashlib.sha256(json.dumps(inputs.model_dump(mode="json"), sort_keys=True,
                                        default=str).encode()).hexdigest()
     return CompiledFinance(inputs=inputs, notes=tuple(dict.fromkeys(notes)), digest=digest)
+
+
+def option_finance(ledger: AssumptionsLedger, compiled: CompiledCommercial, n, *,
+                   study_currency_year: int | None = None) -> CompiledFinance:
+    """
+    U2 WP8: one option's finance inputs on its network — the SAME
+    `finance_from_ledger` the case compiles (`engine_adapter.option_case`),
+    for the owner assets of `compiled`'s value flows (row 28; the
+    `single_owner` template is built on `n` when the config has none) and the
+    model year of `n`'s snapshots. The runner writes it into the fork's
+    solver config (`CompiledFinance.finance()`) beside the commercial block.
+    """
+    if compiled.config.value_flows is None:
+        compiled = with_value_flows(compiled, n)
+    owned = [o["asset_id"] for o in compiled.commercial()["value_flows"]["asset_owners"]]
+    return finance_from_ledger(ledger, model_year=int(pd.DatetimeIndex(n.snapshots)[0].year),
+                               owned_assets=owned, tariff_meta=compiled.tariff_meta,
+                               study_currency_year=study_currency_year)
 
 
 # ── C6 / WP6: the option fork's solver config ─────────────────────────────

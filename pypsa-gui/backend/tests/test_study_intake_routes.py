@@ -91,10 +91,33 @@ def test_the_preview_reads_an_upload_as_the_pack_will_and_prices_the_bill_today(
     assert "load_upload_converted_from_kw" in load["notes"]
     assert load["peak_exceeds_connection"] is False
     bill = body["bill"]
-    assert bill["status"] == "ok" and bill["bill"]["engine"] == "bill_calculator"
-    assert bill["bill"]["annual_bill"] > 0
+    # U2 WP8 (gate C6): the engine's bill of the unsolved baseline pack's
+    # meter (import = the load, export 0), established.
+    assert bill["status"] == "ok" and bill["bill"]["engine"] == "tariff_engine"
+    assert bill["bill"]["annual_bill"] > 0 and bill["bill"]["unavailable"] == {}
+    assert bill["bill"]["by_component"]["export_credit"] == 0.0
     assert bill["tariff"]["tariff_id"] == "de_industrial_illustrative"
     assert bill["tariff"]["honesty_help"]
+
+
+def test_the_preview_bill_of_the_site_golden_load_equals_wp0(client, api_project, studies_on):
+    """
+    U2 WP8 (gate C6, WP1's `rate_meter` fact): the preview's engine bill of
+    the grid-only baseline equals the WP0 record of GS's bill on the same load
+    and tariff (the golden `none`: import = the load), component by component.
+    """
+    from tests.golden import site_fixture as SF
+    from tests.u2_targets import DE, WP0, close
+
+    name = api_project("s8-prev-wp0")
+    body = client.post(f"/api/projects/{name}/studies/preview",
+                       json={"intake": SF.site_intake()}).json()
+    assert body["bill"]["status"] == "ok", body["bill"]
+    bill, want = body["bill"]["bill"], WP0["seed_bills"][DE]["none"]
+    assert close(bill["annual_bill"], want["annual_bill"])
+    for key, value in want["by_component"].items():
+        if key != "unavailable":
+            assert close(bill["by_component"][key], value), key
 
 
 def test_the_preview_names_why_a_load_cannot_be_read(client, api_project, studies_on):

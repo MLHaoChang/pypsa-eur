@@ -292,6 +292,14 @@ HELP: dict[str, str] = {
     "copied_record_findings_computed_on_the_origin_forks": (
         "This study was copied from another project; its findings and report were computed "
         "on the origin's option networks."),
+    # U2 WP8 (plan §2 C10, gate C6): the engine inputs moved or were never recorded.
+    "run_by_an_earlier_version": (
+        "The study was run by an earlier version of the app, which priced its options and "
+        "valued their investment cases differently, so these results are out of date. Run "
+        "the study again to bring them up to date."),
+    "engine_inputs_changed_since_findings": (
+        "An option's tariff or finance settings were edited after the findings were "
+        "computed (for example in the Expert view); re-run the study."),
     # gate F1 BC-F1-1: the export-cycling preflight warnings, kept by the study
     "tariff_export_exceeds_import": (
         "In some hours the tariff credits export above the import price, so the model "
@@ -358,6 +366,7 @@ _PREFIX_HELP: tuple[tuple[str, str], ...] = (
         "spike far above its median); check the file.")),
     ("reference_", "The option's PV-only reference was not computed."),
     ("fork_changed_since_findings", HELP["fork_changed_since_findings"]),
+    ("engine_inputs_changed_since_findings", HELP["engine_inputs_changed_since_findings"]),
     ("size_at_upper_bound", HELP["size_at_upper_bound"]),
     ("options_not_established", HELP["options_not_established"]),
     # U2 WP7: a finance-engine reason, named after the prefix.
@@ -567,11 +576,18 @@ def validate_prose(report: DecisionReport) -> dict[str, list[str]]:
 # ── stale (review v1 S6; gate S1, S4 and S5 carries) ──────────────────────
 
 def stale_reasons(report: DecisionReport, study: DecisionStudy, ledger: AssumptionsLedger,
-                  fork_hash_now: Callable[[str], str | None]) -> list[str]:
+                  fork_hash_now: Callable[[str], str | None], *,
+                  fork_engine_now: Callable[[str], str | None]) -> list[str]:
     """
     Why the report no longer describes the study (empty when it does).
     ``fork_hash_now(fork_uuid)`` answers the fork's ``network.nc`` hash on
-    disk now, or None when the fork is gone or no longer this study's.
+    disk now, and ``fork_engine_now(fork_uuid)`` the digest of the engine
+    inputs its solver config carries now (`run_hashes.fork_engine_digest`);
+    either is None when the fork is gone or no longer this study's.
+
+    U2 WP8 (plan §2 C10, gate C6): a report of a run that recorded no engine
+    inputs is ``run_by_an_earlier_version``; a fork whose engine inputs were
+    edited since is ``engine_inputs_changed_since_findings:<option>``.
     """
     from services.study import run_hashes
 
@@ -580,6 +596,8 @@ def stale_reasons(report: DecisionReport, study: DecisionStudy, ledger: Assumpti
     if hashes is None:
         reasons.append("report_has_no_findings_hashes")
         return list(dict.fromkeys(reasons))
+    if not run_hashes.engine_recorded(hashes):
+        reasons.append("run_by_an_earlier_version")
     if not run_hashes.ledger_matches(ledger, hashes):
         reasons.append("ledger_changed_since_findings")
     if not run_hashes.intake_matches(study.intake, hashes):
@@ -589,6 +607,10 @@ def stale_reasons(report: DecisionReport, study: DecisionStudy, ledger: Assumpti
     for fork_uuid, recorded in sorted(hashes.option_network_hashes.items()):
         if not run_hashes.fork_matches(recorded, fork_hash_now(fork_uuid)):
             reasons.append(f"fork_changed_since_findings:{forks.get(fork_uuid, fork_uuid)}")
+        elif run_hashes.engine_recorded(hashes) and not run_hashes.compiled_matches(
+                hashes, fork_uuid, fork_engine_now(fork_uuid)):
+            reasons.append(
+                f"engine_inputs_changed_since_findings:{forks.get(fork_uuid, fork_uuid)}")
     return list(dict.fromkeys(reasons))
 
 
@@ -814,9 +836,11 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
     named_att = atts.get(named) if named else None
     if named_att is not None and named_att.method == "battery_removed_same_pv":
         tags.add("bess_pv_named")
+        # U2 WP8 (gate WP7 carry-forward): the engine that valued the case,
+        # as X4 did for the case's facts.
         facts["option_total_npv"] = _fact(
             "option_total_npv", "Option NPV, PV included", named_att.option_npv, "EUR",
-            "cash_flow_expander", currency_year=named_att.currency_year,
+            named_att.engine, currency_year=named_att.currency_year,
             fidelity=named_att.fidelity, flag=named_att.unavailable.get("option_npv"))
         exec_prose.append(_BESS_PV)
     if named_att is not None and named_att.method == "battery_removed_same_pv" or (
@@ -830,7 +854,7 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
         else:
             facts["battery_only_best_npv"] = _fact(
                 "battery_only_best_npv", "Best battery-only NPV", best.battery_npv, "EUR",
-                "cash_flow_expander", currency_year=best.currency_year, fidelity=best.fidelity)
+                best.engine, currency_year=best.currency_year, fidelity=best.fidelity)
             facts["battery_only_best_p_nom_mw"] = _fact(
                 "battery_only_best_p_nom_mw", "Best battery-only power", best.battery_p_nom_mw,
                 "MW", "lp", fidelity=best.fidelity)
@@ -1034,15 +1058,17 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
              if f.value_streams else None)
     facts["value_streams_total"] = _fact(
         "value_streams_total", "Annual saving shown by the streams", total, "EUR/yr",
-        "bill_calculator",
+        f.value_streams[0].engine if f.value_streams else "tariff_engine",
         currency_year=stream_case.currency_year if stream_case is not None else currency_year,
         fidelity=stream_case.fidelity if stream_case is not None else fidelity,
         flag="value_streams_not_established")
     rob = f.robustness
+    rob_att = atts.get(rob.option_id) if rob.option_id else None
     facts["tornado_centre_npv"] = _fact(
         "tornado_centre_npv", "Battery NPV at the centre", rob.npv_centre, "EUR",
-        "cash_flow_expander", currency_year=currency_year, fidelity=fidelity,
-        flag=rob.note or "tornado_not_run")
+        rob_att.engine if rob_att is not None else (
+            named_case.engine if named_case is not None else "finance_engine"),
+        currency_year=currency_year, fidelity=fidelity, flag=rob.note or "tornado_not_run")
     drivers_prose = [
         ("The waterfall shows the battery's increment over the same PV alone, not the "
          "option's full saving: {{value_streams_total}} in total." if increment else
@@ -1103,9 +1129,12 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
             "range_note": (tested[2][0] if tested and tested[2] else None)})
     sections["assumptions"] = ReportSection(
         status="ok",
+        # Gate C4: not every default is the defaults pack's — a tariff row
+        # cites the tariff, and a guided-study rule names itself.
         prose=_para("Every assumption the figures rest on is listed below with its source. "
-                    "Rows marked as edited were changed by a user; every other row is the "
-                    "library's."),
+                    "Rows marked as edited were changed by a user; every other row is a "
+                    "default, from the source it names: the defaults pack, the tariff, or a "
+                    "rule of the guided study itself."),
         payload={"ledger_version": inp.ledger.ledger_version, "rows": rows,
                  "honesty_notes": list(inp.ledger.honesty_notes)})
 
@@ -1158,7 +1187,12 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
             "option_network_hashes": dict(f.hashes.option_network_hashes),
             "option_forks": dict(inp.option_forks),
             "fidelity": fidelity.value if fidelity is not None else None,
-            "engines": ["lp", "lp_duals", "bill_calculator", "cash_flow_expander", "ledger"],
+            # U2 WP8: the engines that produced the figures (the cases' and
+            # the streams' bills), not a fixed list.
+            "engines": list(dict.fromkeys(
+                ["lp", "lp_duals"]
+                + [s.engine for s in f.value_streams[:1]]
+                + [c.engine for c in inp.cases.values()] + ["ledger"])),
             "solver_log": "not_in_mvp1",
         })
 

@@ -19,8 +19,14 @@ charge the solve COMMITTED (IC's `add_demand_terms`), for the run record. WP7:
 `option_case` — the option's ONE `FinanceCase` (`build_finance_case` on the
 compiled finance inputs, `run_case`) and its guided `InvestmentCase` view —
 and `bound_case`, the tornado's CAPEX and RATE bounds derived from it (C5).
-The GS `BillCalculator` path keeps running in parallel until WP8's switch of
-findings / runner / routes; the workbook (WP9) follows.
+WP8: the runner, the findings and the routes bill and value every option
+through here (gate C6: `bill` on a fork the engine solved with the same
+compiled config; `bill_meter` only where export ≡ 0 — the intake preview and
+the case's counterfactual baseline). GS's `BillCalculator` and the pro forma
+remain only as the findings' fallback for a network the engine did not solve,
+which no stored study reaches (its readers refuse such forks first,
+`engine_inputs_changed_since_run`); WP10 deletes them. The workbook (WP9)
+follows.
 """
 from __future__ import annotations
 

@@ -356,17 +356,19 @@ def preview_intake(body: PreviewRequest,
     The intake's load read EXACTLY as the pack will read it (an upload
     through `packs.parse_load_upload`: timestamps, unit, time-series QA; a
     sector profile scaled to its annual MWh) and the baseline bill on that
-    load from the bill calculator. The baseline is grid supply only, so its
-    import IS the load and no solve is needed; the tariff is the intake's,
-    with the library's seed values for the ledger rows it prices with (a
-    study's own edits to those rows are not applied here). Nothing is
-    written. An upload id resolves in the PATH project's uploads, the
-    project a new study's upload is copied from and an existing study's
-    runner reads.
+    load from the Investment Case engine (U2 WP8, gate C6:
+    `engine_adapter.bill_meter` on the unsolved baseline pack, import = the
+    load, export ≡ 0). The baseline is grid supply only, so its import IS
+    the load and no solve is needed; the tariff is the intake's, with the
+    defaults' seed values for the ledger rows it prices with (a study's own
+    edits to those rows are not applied here). Nothing is written. An upload
+    id resolves in the PATH project's uploads, the project a new study's
+    upload is copied from and an existing study's runner reads.
     """
+    import numpy as np
     import pandas as pd
 
-    from services.study import tariff as study_tariff
+    from services.study import engine_adapter as study_engine
 
     _refuse_unless_enabled()
     library = _library_or_500()
@@ -409,14 +411,16 @@ def preview_intake(body: PreviewRequest,
             ledger = study_library.seed_ledger(question, intake, library)
             tariff = packs.effective_tariff(intake, ledger, library, series.index)
             _t, tariff_notes = packs.intake_tariff(intake, library)
-            bill = study_tariff.BillCalculator().bill(
-                series, pd.Series(0.0, index=series.index), tariff,
-                pd.Series(1.0, index=series.index))
+            baseline = packs.build_site_network(intake, ledger, "none", library=library,
+                                                question=question,
+                                                resolve_upload=resolve_upload)
+            compiled = packs.option_commercial(intake, ledger, library, baseline.snapshots)
+            bill = study_engine.bill_meter(baseline, compiled, series,
+                                           np.zeros(len(baseline.snapshots)))
             bill_out = {"status": "ok", "bill": bill.model_dump(mode="json"),
                         "tariff": tariff.model_dump(mode="json"),
                         "notes": list(tariff_notes)}
-        except (packs.PackError, study_library.LibraryError,
-                study_tariff.TariffError) as exc:
+        except (packs.PackError, study_library.LibraryError) as exc:
             bill_out = _not_established(getattr(exc, "code", "tariff_invalid"), str(exc))
     return {"load": load_out, "bill": bill_out}
 
@@ -955,9 +959,15 @@ def _key_drivers(study: DecisionStudy) -> tuple[str, ...]:
 
 
 def _library_or_500() -> study_library.Library:
+    """
+    The guided defaults: the pinned defaults pack (`library.load_defaults`,
+    U2 WP8 gate C4), the one source new ledgers seed from. A ledger seeded
+    from the legacy library before WP8 is stored on its study and still
+    reads; a re-seed moves it onto the pack, keeping the user's rows.
+    """
     try:
-        return study_library.load_library()
-    except (study_library.LibraryError, OSError) as exc:
+        return study_library.load_defaults()
+    except (study_library.LibraryError, OSError, LookupError, ValueError) as exc:
         raise HTTPException(500, detail={
             "code": "study_library_unreadable", "message": str(exc)}) from None
 
@@ -1062,17 +1072,19 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
     """
     (study, ledger, case) for one solved option of a finished run.
 
-    Built from the option fork's saved network (its own frames), the run
-    record's bills and asset economics, and the ledger the run was built
-    from — a ledger edited since is refused (409), never mixed with results
-    it did not produce. 404 for a study never run, an option the question
-    does not have, and an option the run did not solve or whose fork the
-    study does not own; 422 for the baseline (every case is measured
-    against it) and for a case the engine refuses (a second currency year).
+    Built on the Investment Case engine (U2 WP7/WP8) from the option fork's
+    saved network (its own frames, the engine's bills on its solved meter),
+    the run record's asset economics, and the ledger the run was built from —
+    a ledger edited since is refused (409), never mixed with results it did
+    not produce; so is a fork whose engine inputs moved or were never
+    recorded (409 ``engine_inputs_changed_since_run``, plan §2 C10). 404 for
+    a study never run, an option the question does not have, and an option
+    the run did not solve or whose fork the study does not own; 422 for the
+    baseline (every case is measured against it) and for a case the engine
+    refuses (a second currency year).
     """
     from db.models import Project
     from services.study import engine_adapter as study_engine
-    from services.study import proforma
 
     study = _load(project, study_id)
     base_dir = _project_dir(project)
@@ -1131,33 +1143,34 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
             f"option {option_id!r}'s network changed after the run (opened, "
             "edited or re-solved outside the study); its case would price one "
             "network with another's bills. Re-run the study.")})
+    # U2 WP8 (plan §2 C10, gate C6): the engine inputs the run gave the fork
+    # are still its own, and the fork is the engine's (solved on its
+    # commercial chain, the battery as its two upfront parts). A run before
+    # the engine inputs were recorded, a fork written before WP7 or one whose
+    # tariff or finance settings were edited since is refused with the plain
+    # reason and a re-run offered — never valued on another calculation.
+    if not run_hashes.engine_recorded(hashes, run) or not study_engine.engine_ready(network):
+        raise HTTPException(409, detail={"error_kind": run_hashes.ENGINE_STALE,
+                                         "message": run_hashes.EARLIER_VERSION})
+    if not run_hashes.compiled_matches(hashes, str(fork.id),
+                                       run_hashes.fork_engine_digest(fork)):
+        raise HTTPException(409, detail={"error_kind": run_hashes.ENGINE_STALE,
+                                         "message": run_hashes.edited_since_run([option_id])})
     details = (run.get("details") or {})
-    bills = {"baseline": (details.get("none") or {}).get("bill"),
-             "option": (details.get(option_id) or {}).get("bill")}
     try:
-        tariff = packs.effective_tariff(study.intake, ledger, library, network.snapshots)
-        # U2 WP6: the config the fork was solved with (the run's export series).
+        # The config the fork was solved with (the run's export series).
         compiled = packs.option_commercial(study.intake, ledger, library, network.snapshots,
                                            export_series=run.get("export_series"))
         cfg = packs.option_solver_config(ledger, compiled)
         econ = (details.get(option_id) or {}).get("asset_economics")
-        if run.get("export_series") is not None and study_engine.engine_ready(network):
-            # U2 WP7: the option's ONE FinanceCase on the Investment Case
-            # engine, its bills the engine's (the counterfactual is the
-            # baseline). A fork written before WP7 keeps the pro forma (WP8
-            # marks such a study stale and offers a re-run).
-            case = study_engine.option_case(
-                network, cfg, ledger, compiled=compiled, option_id=option_id,
-                study_id=study_id, fidelity=result.get("fidelity"), asset_economics=econ,
-                question=question, project_ref=str(fork.id), model_hash=disk_hash,
-                study_currency_year=study.currency_year).view
-        else:
-            case = proforma.build_investment_case(
-                network, cfg, None, ledger, bills, option_id, study_id=study_id,
-                tariff=tariff, fidelity=result.get("fidelity"), asset_economics=econ,
-                study_currency_year=study.currency_year, question=question,
-                project_ref=str(fork.id), model_hash=disk_hash)
-    except (proforma.ProformaError, packs.PackError, study_engine.EngineRefused) as exc:
+        # U2 WP7: the option's ONE FinanceCase on the Investment Case engine,
+        # its bills the engine's (the counterfactual is the baseline).
+        case = study_engine.option_case(
+            network, cfg, ledger, compiled=compiled, option_id=option_id,
+            study_id=study_id, fidelity=result.get("fidelity"), asset_economics=econ,
+            question=question, project_ref=str(fork.id), model_hash=disk_hash,
+            study_currency_year=study.currency_year).view
+    except (packs.PackError, study_engine.EngineRefused) as exc:
         raise HTTPException(422, detail={"error_kind": exc.code,
                                          "message": exc.message}) from None
     return study, ledger, case
@@ -1395,7 +1408,7 @@ def _report_stale(report, study: DecisionStudy, project: AuthorizedProject,
     from services.study import findings as study_findings
     from services.study import report as study_report
 
-    def fork_hash_now(fork_uuid: str) -> str | None:
+    def owned(fork_uuid: str):
         try:
             row = db.get(Project, uuid.UUID(str(fork_uuid)))
         except (TypeError, ValueError):
@@ -1403,10 +1416,18 @@ def _report_stale(report, study: DecisionStudy, project: AuthorizedProject,
         if row is None or not study_forks.is_study_owned(
                 row, study_id=study.study_id, base_uuid=project.uuid):
             return None
-        return run_hashes.fork_file_hash(row)
+        return row
+
+    def fork_hash_now(fork_uuid: str) -> str | None:
+        row = owned(fork_uuid)
+        return None if row is None else run_hashes.fork_file_hash(row)
+
+    def fork_engine_now(fork_uuid: str) -> str | None:
+        row = owned(fork_uuid)
+        return None if row is None else run_hashes.fork_engine_digest(row)
 
     return study_report.stale_reasons(report, study, study_findings.study_ledger(study),
-                                      fork_hash_now)
+                                      fork_hash_now, fork_engine_now=fork_engine_now)
 
 
 def _report_out(report, reasons: list[str]) -> dict:
