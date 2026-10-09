@@ -1,0 +1,4 @@
+# Optional tooling for the explicitly opted-in paid tests. jsonschema is
+# already present in the repository's Pixi test environment.
+jsonschema>=4.23
+tiktoken>=0.8

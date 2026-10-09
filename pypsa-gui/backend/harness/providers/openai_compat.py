@@ -51,6 +51,7 @@ from urllib.parse import urlsplit
 
 from services import redaction
 from harness.protocol import LLMEvent, LLMRequest, ProviderError
+from harness.providers import openai_responses
 
 logger = logging.getLogger("pypsa_gui.chat")
 
@@ -205,6 +206,7 @@ class OpenAICompatProvider:
         self._base = base_url.rstrip("/")
         self._key = api_key
         self._http = http_client  # tests inject MockTransport clients
+        self._responses_state: dict[str, Any] = {}
         # Server-derived from the profile's preset (`llm_config
         # .derive_token_param`), never client-set. `max_tokens` is the default
         # because it is what every local and OpenAI-compatible server accepts;
@@ -252,6 +254,8 @@ class OpenAICompatProvider:
                                                                 connect=10.0))
 
     def _stream_payload(self, request: LLMRequest, token_param: str) -> dict:
+        if openai_responses.uses_responses(self._base, request):
+            return openai_responses.payload(request, _to_openai_messages(request), self._responses_state)
         payload: dict[str, Any] = {
             "model": request.model,
             # C-2 — EXACTLY ONE completion-length parameter. See the class
@@ -302,6 +306,7 @@ class OpenAICompatProvider:
     ) -> Iterator[LLMEvent]:
         import httpx
         payload = self._stream_payload(request, token_param)
+        responses = openai_responses.uses_responses(self._base, request)
         headers = {"content-type": "application/json"}
         if self._key:
             headers["authorization"] = f"Bearer {self._key}"
@@ -323,7 +328,8 @@ class OpenAICompatProvider:
         completed = False
         client = self._client()
         try:
-            with client.stream("POST", f"{self._base}/chat/completions",
+            endpoint = "responses" if responses else "chat/completions"
+            with client.stream("POST", f"{self._base}/{endpoint}",
                                json=payload, headers=headers) as resp:
                 if resp.status_code == 400:
                     # C-2 — the endpoint may want the OTHER spelling. Only a
@@ -340,15 +346,18 @@ class OpenAICompatProvider:
                         body += chunk
                         if len(body) >= 8192:
                             break
-                    if self._refused_the_token_param(body, token_param):
+                    if not responses and self._refused_the_token_param(body, token_param):
                         raise _TokenParamRefused(token_param)
                     raise ProviderError(
                         _kind_for_status(resp.status_code),
-                        f"HTTP {resp.status_code} from chat/completions")
+                        f"HTTP {resp.status_code} from {endpoint}")
                 if resp.status_code != 200:
                     raise ProviderError(
                         _kind_for_status(resp.status_code),
-                        f"HTTP {resp.status_code} from chat/completions")
+                        f"HTTP {resp.status_code} from {endpoint}")
+                if responses:
+                    yield from openai_responses.stream_response(resp, request, self._responses_state)
+                    return
                 for line in resp.iter_lines():
                     if not line.startswith("data:"):
                         yield LLMEvent(type="ping")
@@ -369,6 +378,9 @@ class OpenAICompatProvider:
                             "output_tokens": int(
                                 u.get("completion_tokens", 0) or 0),
                         }
+                        cached = int((u.get("prompt_tokens_details") or {}).get("cached_tokens", 0) or 0)
+                        if cached:
+                            usage["cache_read_tokens"] = cached
                     for choice in chunk.get("choices", []):
                         finish_reason = choice.get("finish_reason")
                         if finish_reason is not None:

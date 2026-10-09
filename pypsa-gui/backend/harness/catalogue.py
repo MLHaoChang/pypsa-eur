@@ -271,8 +271,9 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "download_timeseries_template",
-        "CSV template for uploading time-series profiles. The CSV has the "
-        "snapshot index as rows and asset names as columns — fill in values "
+        "Spreadsheet template for uploading time-series profiles. Returns "
+        "filename, media_type and an authenticated download_url. The sheet has "
+        "the snapshot index as rows and asset names as columns — fill in values "
         "and upload via upload_load_profile / upload_generator_profile / "
         "upload_link_profile. Safety: read.",
         {"kind": {"type": "string", "enum": TIMESERIES_KIND_ENUM}},
@@ -280,7 +281,8 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _empty(
         "download_snapshot_weightings_csv",
-        "CSV dump of n.snapshot_weightings (one row per snapshot, columns "
+        "Download metadata (filename, media_type, download_url) for a CSV dump "
+        "of n.snapshot_weightings (one row per snapshot, columns "
         "objective/generators/stores). Round-trips through "
         "upload_snapshot_weightings_csv. Safety: read.",
     ),

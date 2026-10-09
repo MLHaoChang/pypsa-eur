@@ -1346,13 +1346,16 @@ def _run_turn_body(
             yield "session_done", {"reason": "no_client"}
             return
 
+    with session._lock:
+        selection_history = list(session.messages)
+    selected_tools = _tools_payload_for_profile(profile, message, history=selection_history)
     yield "session_init", {
         "session_id": session.session_id,
         "session6": session.session6(),
         "model": session.model,
         # Task 8 — the count actually sent this turn (0 for a `tools: false`
         # profile), not the catalogue size. See _tools_payload_for_profile.
-        "tool_count": len(_tools_payload_for_profile(profile)),
+        "tool_count": len(selected_tools),
         "profile_id": profile.id,
         "profile_label": profile.label,
     }
@@ -1502,7 +1505,7 @@ def _run_turn_body(
     tool_call_count = 0
     # Task 8 — `[]` when the profile's `tools` capability is off; see
     # _tools_payload_for_profile.
-    tools = _tools_payload_for_profile(profile)
+    tools = selected_tools
     # C-1 — the ALLOWLIST the dispatch loop below enforces.
     #
     # Derived from `tools` (what this turn actually SENT), never from the
