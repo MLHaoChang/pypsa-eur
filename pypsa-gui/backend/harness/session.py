@@ -134,6 +134,9 @@ class ChatSession:
     # Set by the start_workflow / advance_workflow / end_workflow tools; the
     # per-turn addendum (`_workflow_addendum`) reads it.
     workflow: dict[str, Any] | None = None
+    # Catalogue view; kept separate from project identity and permissions.
+    toolset: str = "all"
+    job_wait_progress: dict[str, Any] | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
     pending_confirmations: dict[str, PendingConfirmation] = field(default_factory=dict)
     confirmation_decisions: dict[str, str] = field(default_factory=dict)

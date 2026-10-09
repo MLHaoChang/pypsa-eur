@@ -8,7 +8,8 @@ assistant behave the same whichever one is active.
 ```
 harness/
   protocol.py     the provider seam: LLMProvider, LLMRequest, LLMEvent, ERROR_KINDS
-  catalogue.py    the tool declarations (196 today), their Safety tiers, TOOL_ROUTES
+  catalogue.py    the tool declarations, their Safety tiers, TOOL_ROUTES
+  toolsets.py     ordered provider-neutral catalogue views and always-available controls
   events.py       the closed vocabulary of frames the turn loop yields to the UI
   workflows/      the start menu and the step-by-step flows (Markdown + front matter)
   skills/         procedures the model loads on demand (<name>/SKILL.md)
@@ -70,12 +71,39 @@ Borrowed designs under consideration: `docs/superpowers/assessments/2026-10-06-d
 
 ## The harness tools
 
-Five read-tier tools exist only for the harness (catalogue banner "Harness"):
+Read-tier tools exist only for the harness (catalogue banner "Harness"):
 `ask_user` (a Choice card; the pick is the next user message, the turn does
 not block), `use_skill` (a skill's body on demand), `start_workflow`,
 `advance_workflow`, `end_workflow` (the session's `{id, step}`; the current
 step's body rides each turn as per-turn user content, after the context
-block and outside the untrusted fence). None of them touches a project.
+block and outside the untrusted fence). `use_toolset` changes the session's
+catalogue view for the next model request, including within the same turn.
+These controls do not change project access or confirmation rules.
+
+The workflow helpers in `services/workflow_tools.py` reuse existing services:
+`project_readiness` checks prerequisites; `wait_for_job` waits locally for an
+authorized queue job for at most 25 seconds and emits existing progress frames;
+`get_study_evidence` returns bounded, filtered evidence and software-computed
+counts before paging/status filtering, cached by project/run/config/source
+fingerprints. Stale or active study results are unavailable. Source freshness
+uses file timestamps and saved config, not a scientific validity certificate.
+Simulation mode reads saved results and optional baseline comparisons.
+Wide study rows are explicitly clipped, retaining counts and page cursors;
+simulation comparisons expose saved headline deltas, with detailed tables
+available through existing result tools.
+
+`run_sensitivity_sweep` is execution-tier: one normal confirmation authorizes
+1–4 new scenarios and their queued solves. It preflights all typed component
+changes on isolated contexts, preserves the baseline and active binding, and
+reuses solved cases only with matching provenance and canonical model inputs.
+PyPSA's deterministic slack-control assignment is normalized in the fingerprint;
+solver outputs are excluded. It refuses dirty/conflicting cases, rechecks saved
+baseline files before writes, and reports partial failures without deleting work.
+Investment-period weights participate in reuse checks; active case jobs are
+returned through queue deduplication rather than reported as completed reuse.
+It changes static parameters; existing time-series overrides remain in force.
+Large preparations remain subject to the standard per-tool execution deadline.
+The `project-refinement` skill teaches the whole sequence on demand.
 
 ## Splitting the loop
 
@@ -108,10 +136,15 @@ the budget through `harness_budget.<NAME>`).
 ## Measuring parity
 
 Official OpenAI requests offer at most 128 tools per turn. Wiring selects from
-the eligible registry using explicit names, the five harness controls, recent
+the eligible registry using explicit names, always-available controls, recent
 calls, and query terms, then retains catalogue order for prefix caching. The
-exact selected set supplies both the dispatch allowlist and the advertised
-tool count. Anthropic and other compatible endpoints keep their catalogues.
+exact selected set supplies the dispatch allowlist; `session_init.tool_count`
+describes the first request. After a toolset switch or intentional project
+rebinding the next request receives the refreshed catalogue and allowlist;
+tools issued in the earlier batch are still checked against that batch's offer.
+Controls retain priority even if a query explicitly names more than 128 tools.
+Anthropic and other compatible endpoints keep their eligible catalogues, with
+the same optional provider-neutral toolset views.
 
 GridSpine studies bind a networkless backend project context on activation;
 the session pointer survives cold resolution. Tool selection reads that active

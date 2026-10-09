@@ -1805,6 +1805,13 @@ def _run_turn_body(
             yield "session_done", {"reason": "project_switched_mid_turn"}
             return
 
+        # A tool may change the catalogue view or bind a newly created study.
+        # Refresh only AFTER this batch has been checked against the catalogue
+        # it actually received. New tools are eligible on the next request.
+        if any(t.get("name") in PROJECT_REBINDING_TOOLS or t.get("name") == "use_toolset" for t in tool_uses):
+            tools = _tools_payload_for_profile(profile, message, history=messages)
+            offered_tool_names = {t["name"] for t in tools}
+
 
 
 
@@ -2035,7 +2042,7 @@ def _dispatch_real_tool_call(
     # fails partway can still have mutated the network, so marking on success
     # only would under-report. Over-marking costs a prompt about already-clean
     # work; under-marking costs the work itself.
-    if tier != "read":
+    if tier != "read" and tool_name != "run_sensitivity_sweep":
         from services import dirty_state
         dirty_state.mark_dirty()
     # Same seam, same reason: the HTTP middleware's undo snapshot never runs
@@ -2081,7 +2088,24 @@ def _dispatch_real_tool_call(
                 lambda: _ctx_snapshot.run(lambda: handler(**(args or {})))
             )
             try:
-                result = future.result(timeout=harness_budget.PER_TOOL_TIMEOUT_SECONDS)
+                tool_deadline = time.monotonic() + harness_budget.PER_TOOL_TIMEOUT_SECONDS
+                if tool_name == "wait_for_job":
+                    # A bounded local wait can publish progress without any
+                    # additional model request. Reuse the existing frame shape.
+                    deadline = tool_deadline
+                    previous_progress = None
+                    while not future.done() and time.monotonic() < deadline:
+                        with session._lock:
+                            progress = session.job_wait_progress
+                        if progress and progress.get("job_id") == args.get("job_id") and progress != previous_progress:
+                            yield "tool_progress", {"tool_use_id": tool_use_id, "tool_name": tool_name,
+                                                    "line": f"Job {progress['job_id']}: {progress['status']}", "kind": "INFO"}
+                            previous_progress = dict(progress)
+                        try:
+                            future.result(timeout=min(0.25, max(0, deadline - time.monotonic())))
+                        except concurrent.futures.TimeoutError:
+                            continue
+                result = future.result(timeout=max(0, tool_deadline - time.monotonic()))
                 # The tool ran inside a COPY of this context, so anything it
                 # published through a contextvar died with that copy. For a
                 # tool whose whole job is to change the active project, that

@@ -31,6 +31,12 @@ def test_recent_tools_remain_available_for_referential_followups():
     assert {"get_investment_case", "campus_get_library"} <= {t["name"] for t in selected}
 
 
+def test_controls_survive_more_explicit_requests_than_the_provider_limit():
+    selected = wiring._bounded_tools(TOOLS, " ".join(t["name"] for t in TOOLS))
+    assert len(selected) == 128
+    assert wiring._HARNESS_TOOL_NAMES <= {t["name"] for t in selected}
+
+
 def test_profile_limits_only_official_endpoint_and_never_mutates_catalogue(monkeypatch):
     monkeypatch.setattr(wiring, "_tools_payload", lambda: list(TOOLS))
     original = list(TOOLS)

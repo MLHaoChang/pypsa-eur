@@ -6873,7 +6873,16 @@ PRE_DISPATCH_VALIDATORS: dict[str, Any] = {
 # Single source of truth for the (tool_name → callable) mapping. The Phase 2
 # chat session loop iterates this dict to dispatch incoming tool_use blocks.
 # Tools NOT in this dict are NOT exposed to the LLM.
+from services.workflow_tools import (
+    project_readiness, wait_for_job, get_study_evidence, run_sensitivity_sweep, use_toolset,
+)
+
 DISPATCHERS: dict[str, Any] = {
+    "project_readiness": project_readiness,
+    "wait_for_job": wait_for_job,
+    "get_study_evidence": get_study_evidence,
+    "run_sensitivity_sweep": run_sensitivity_sweep,
+    "use_toolset": use_toolset,
     # read (22)
     "list_components": list_components,
     "diagnose_network": diagnose_network,

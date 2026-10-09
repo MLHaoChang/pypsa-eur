@@ -298,7 +298,7 @@ def _tools_payload(turn_ctx=None) -> list[dict[str, Any]]:
 
 
 _OPENAI_TOOL_LIMIT = 128
-_HARNESS_TOOL_NAMES = frozenset({"ask_user", "use_skill", "start_workflow", "advance_workflow", "end_workflow"})
+from harness.toolsets import CONTROL_TOOLS as _HARNESS_TOOL_NAMES, filter_tools
 _SELECTION_STOP_WORDS = frozenset({"the", "and", "for", "with", "this", "that", "from", "then", "once", "using", "call", "please", "tool", "tools"})
 
 
@@ -330,7 +330,7 @@ def _bounded_tools(tools: list[dict[str, Any]], query: str = "", history=None) -
         name = tool["name"]
         explicit = bool(re.search(r"(?<![a-z0-9_])" + re.escape(name) + r"(?![a-z0-9_])", query))
         name_words, description_words = _tool_vocabulary(name, tool.get("description", ""))
-        return (int(explicit), int(name in _HARNESS_TOOL_NAMES), int(name in recent),
+        return (int(name in _HARNESS_TOOL_NAMES), int(explicit), int(name in recent),
                 4 * len(words & name_words) + len(words & description_words), -index)
     chosen = {i for i, _ in sorted(enumerate(tools), key=rank, reverse=True)[:_OPENAI_TOOL_LIMIT]}
     return [tool for i, tool in enumerate(tools) if i in chosen]
@@ -350,6 +350,9 @@ def _tools_payload_for_profile(profile: Any, query: str = "", history=None) -> l
     if not profile.tools:
         return []
     tools = _tools_payload()
+    from services import chat_tools
+    session = chat_tools.chat_session()
+    tools = filter_tools(tools, getattr(session, "toolset", "all"))
     if profile.wire != "openai":
         return tools
     base = profile.base_url

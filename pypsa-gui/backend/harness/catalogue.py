@@ -1771,6 +1771,67 @@ TOOLS: list[dict[str, Any]] = [
 
     # ── Harness: ask the user (chat harness issue 04) ──────────────────────────
     _t(
+        "project_readiness",
+        "Check project kind, saved/dirty state, network validation, time-series store, solver availability, "
+        "and result freshness without running a solve. Defaults to the active project. "
+        "Returns ready, blockers, and next_tools; GridSpine returns run/config/source freshness. Safety: read.",
+        {"project_id": {"type": "string"}}, [],
+    ),
+    _t(
+        "wait_for_job",
+        "Wait locally for a solve-queue or GridSpine job, avoiding repeated model status polls. "
+        "Returns job, terminal, completed, timed_out, wait_cancelled, waited_seconds. "
+        "Default 20 seconds, maximum 25. On timeout report pending and end the turn; never busy-poll. "
+        "A cancelled wait leaves the job running; solve_queue_abort stops it. Safety: read.",
+        {"job_id": {"type": "string"}, "timeout_seconds": {"type": "number", "minimum": 0, "maximum": 25}}, ["job_id"],
+    ),
+    _t(
+        "get_study_evidence",
+        "Read bounded evidence from a completed GridSpine run: connection, capacity, or ranked_snapshots. "
+        "Supports check, status, hour, assessment_id, bus filters and offset/limit pagination (default 10, max 50). "
+        "Returns items, total_count, has_more, counts_before_status_filter, failed_count_before_status_filter, "
+        "run_id/fingerprint and freshness. check='connection' counts overall connection outcomes across ALL "
+        "matching rows, before paging. Refuses stale or in-progress evidence; summaries cache by run/config/source. "
+        "Capacity status is preexisting_violation, ac_computed, or dc_only; ranked status is converged or not_converged. "
+        "section='simulation' reads last SAVED network results; compare_to adds a baseline economic comparison. "
+        "No study-row filters in simulation mode. Defaults project_id to active project. Safety: read.",
+        {"project_id": {"type": "string"}, "section": {"type": "string", "enum": ["connection", "capacity", "ranked_snapshots", "simulation"]},
+         "check": {"type": "string"}, "status": {"type": "string"}, "hour": {"type": "integer", "minimum": 0},
+         "assessment_id": {"type": "string"}, "bus": {"type": "string"}, "compare_to": {"type": "string"},
+         "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 50}}, [],
+    ),
+    _t(
+        "run_sensitivity_sweep",
+        "Create and enqueue 1–4 saved sensitivity scenarios from a saved network baseline, preserving the "
+        "baseline and active project. Validate all cases before creation. Each case has new_name and 1–20 "
+        "changes: component_class, names (1–100), attribute, value. Numeric engineering inputs only; "
+        "*_extendable flags require booleans. No solver code or topology rewrites. Existing time-series overrides "
+        "still override static values. Reuses matching, solved cases; refuses name/input conflicts and unsaved "
+        "baseline/case edits. Returns per-case project IDs/jobs or reused objectives, with explicit partial failures. "
+        "After waiting for jobs, get_study_evidence(section='simulation', compare_to=baseline_project_id) "
+        "compares each saved result. Study refinement uses gridspine_update_config and gridspine_run_pipeline. "
+        "The confirmation authorizes these bounded changes and queued solves. Safety: execution.",
+        {"baseline_project_id": {"type": "string"}, "cases": {"type": "array", "minItems": 1, "maxItems": 4,
+            "items": {"type": "object", "additionalProperties": False, "properties": {
+                "new_name": {"type": "string", "minLength": 1, "maxLength": 64},
+                "changes": {"type": "array", "minItems": 1, "maxItems": 20, "items": {
+                    "type": "object", "additionalProperties": False, "properties": {
+                        "component_class": {"type": "string", "enum": ["Generator", "Load", "Line", "Link", "StorageUnit", "Store"]},
+                        "names": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "string"}},
+                        "attribute": {"type": "string", "enum": ["marginal_cost", "capital_cost", "p_nom", "p_nom_min", "p_nom_max", "p_nom_extendable", "p_min_pu", "p_max_pu", "efficiency", "p_set", "q_set", "s_nom", "s_nom_min", "s_nom_max", "s_nom_extendable", "s_max_pu", "r", "x", "max_hours", "efficiency_store", "efficiency_dispatch", "e_nom", "e_nom_min", "e_nom_max", "e_nom_extendable", "e_min_pu", "e_max_pu"]},
+                        "value": {"type": ["number", "boolean"]}},
+                    "required": ["component_class", "names", "attribute", "value"]}}},
+                "required": ["new_name", "changes"]}}}, ["baseline_project_id", "cases"],
+    ),
+    _t(
+        "use_toolset",
+        "Switch the session's catalogue view to all, project, network, simulation, results, or gridspine. "
+        "The next model request in THIS turn receives the refreshed eligible catalogue. Harness controls and "
+        "project navigation remain available. Does not change project access, confirmations, or model profile. "
+        "Use all to restore the full eligible catalogue. Safety: read.",
+        {"domain": {"type": "string", "enum": ["all", "project", "network", "simulation", "results", "gridspine"]}}, ["domain"],
+    ),
+    _t(
         "ask_user",
         "Ask the user ONE structured question with options, rendered as a "
         "Choice card in the chat. Use it whenever you need a decision from "
@@ -3279,6 +3340,11 @@ TOOL_ROUTES: dict[str, list] = {
     "ui_open_panel": _UI_EVENT,
     "ui_set_snapshot": _UI_EVENT,
     "ask_user": _UI_EVENT,
+    "project_readiness": _SERVICE_CALL,
+    "wait_for_job": _SERVICE_CALL,
+    "get_study_evidence": _SERVICE_CALL,
+    "run_sensitivity_sweep": _SERVICE_CALL,
+    "use_toolset": _SERVICE_CALL,
     "use_skill": _SERVICE_CALL,
     "start_workflow": _SERVICE_CALL,
     "advance_workflow": _SERVICE_CALL,
