@@ -47,6 +47,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any, Iterator
+from urllib.parse import urlsplit
 
 from services import redaction
 from harness.protocol import LLMEvent, LLMRequest, ProviderError
@@ -262,6 +263,12 @@ class OpenAICompatProvider:
         }
         if request.tools:
             payload["tools"] = _to_openai_tools(request.tools)
+            # Luna's default reasoning mode refuses function tools on this
+            # endpoint. Disable reasoning explicitly; other models and
+            # compatible servers retain their existing request parameters.
+            if (urlsplit(self._base).hostname == "api.openai.com"
+                    and request.model == "gpt-6-luna"):
+                payload["reasoning_effort"] = "none"
         return payload
 
     def stream(self, request: LLMRequest) -> Iterator[LLMEvent]:
@@ -313,6 +320,7 @@ class OpenAICompatProvider:
         started_indices: set[int] = set()
         seen_ids: set[str] = set()
         usage: dict[str, int] = {}
+        completed = False
         client = self._client()
         try:
             with client.stream("POST", f"{self._base}/chat/completions",
@@ -347,6 +355,7 @@ class OpenAICompatProvider:
                         continue
                     data = line[5:].strip()
                     if data == "[DONE]":
+                        completed = True
                         break
                     try:
                         chunk = json.loads(data)
@@ -361,6 +370,16 @@ class OpenAICompatProvider:
                                 u.get("completion_tokens", 0) or 0),
                         }
                     for choice in chunk.get("choices", []):
+                        finish_reason = choice.get("finish_reason")
+                        if finish_reason is not None:
+                            completed = True
+                        if (finish_reason in ("length", "content_filter")
+                                and (calls or (choice.get("delta") or {}).get("tool_calls"))):
+                            raise ProviderError(
+                                "invalid_request",
+                                f"completion stopped with {finish_reason}; "
+                                "refusing incomplete tool calls",
+                            )
                         delta = choice.get("delta") or {}
                         for rk in _REASONING_KEYS:
                             if delta.get(rk):
@@ -416,6 +435,10 @@ class OpenAICompatProvider:
             if self._http is None:
                 client.close()
 
+        if not completed:
+            raise ProviderError(
+                "upstream_error", "completion stream ended before a finish marker")
+
         blocks: list[dict[str, Any]] = []
         if text_parts:
             blocks.append({"type": "text", "text": "".join(text_parts)})
@@ -450,8 +473,12 @@ class OpenAICompatProvider:
                                tool_name=slot["name"])
             try:
                 args = json.loads(slot["args"]) if slot["args"] else {}
-            except ValueError:
-                args = {"_raw_arguments": slot["args"]}
+            except ValueError as exc:
+                raise ProviderError(
+                    "invalid_request", "tool-call arguments are not valid JSON") from exc
+            if not isinstance(args, dict):
+                raise ProviderError(
+                    "invalid_request", "tool-call arguments must be a JSON object")
             blocks.append({"type": "tool_use", "id": slot["id"],
                            "name": slot["name"], "input": args})
         yield LLMEvent(type="message_done", blocks=blocks, usage=usage)
@@ -495,8 +522,23 @@ class OpenAICompatProvider:
         client = self._client()
         start = time.monotonic()
         try:
-            resp = client.post(f"{self._base}/chat/completions",
-                               json=payload, headers=headers)
+            # Keep an owned client open until the adaptive retry finishes.
+            for token_param in (self._token_param,
+                                self._other_token_param(self._token_param)):
+                resp = client.post(f"{self._base}/chat/completions",
+                                   json=payload, headers=headers)
+                if resp.status_code == 200:
+                    return "ok", (time.monotonic() - start) * 1000.0
+                if resp.status_code in (401, 403):
+                    return "unauthorized", None
+                if resp.status_code == 404:
+                    return "model_not_found", None
+                if (token_param == self._token_param
+                        and resp.status_code == 400
+                        and self._refused_the_token_param(resp.content, token_param)):
+                    payload[self._other_token_param(token_param)] = payload.pop(token_param)
+                    continue
+                return "invalid_request", None
         except httpx.HTTPError as exc:
             logger.warning(
                 "chat: connection test could not reach the endpoint (%s)",
@@ -506,33 +548,6 @@ class OpenAICompatProvider:
         finally:
             if self._http is None:
                 client.close()
-        elapsed_ms = (time.monotonic() - start) * 1000.0
-        if resp.status_code == 200:
-            return "ok", elapsed_ms
-        if resp.status_code == 401:
-            return "unauthorized", None
-        if resp.status_code == 404:
-            return "model_not_found", None
-        if resp.status_code == 400 and self._refused_the_token_param(
-            resp.content, self._token_param
-        ):
-            # C-2 — same adaptive retry as `stream`, so a `custom` profile
-            # aimed at OpenAI does not report a bogus `invalid_request` from
-            # the one button an operator uses to check their configuration.
-            payload[self._other_token_param(self._token_param)] = payload.pop(
-                self._token_param
-            )
-            try:
-                retry = client.post(f"{self._base}/chat/completions",
-                                    json=payload, headers=headers)
-            except httpx.HTTPError:
-                return "unreachable", None
-            if retry.status_code == 200:
-                return "ok", (time.monotonic() - start) * 1000.0
-            if retry.status_code == 401:
-                return "unauthorized", None
-            if retry.status_code == 404:
-                return "model_not_found", None
         return "invalid_request", None
 
     def probe_models(self) -> list[str] | None:
@@ -571,7 +586,7 @@ class OpenAICompatProvider:
 
 
 def _kind_for_status(status: int) -> str:
-    if status == 401:
+    if status in (401, 403):
         return "unauthorized"
     if status == 429:
         return "rate_limited"
