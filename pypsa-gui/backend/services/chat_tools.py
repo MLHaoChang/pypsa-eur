@@ -429,11 +429,23 @@ def list_transformer_types() -> list[dict]:
     return _h()
 
 
-def download_timeseries_template(kind: str) -> Any:
+def _download_descriptor(response: Any, url: str) -> dict:
+    """Expose the authenticated browser download without replaying file bytes.
+
+    Returning a StreamingResponse into chat only produces its Python repr;
+    metadata lets the assistant offer the actual file without billing binary
+    content as prompt tokens or writing a read-tier artifact into the project.
     """
-    Returns the CSV-template StreamingResponse / string the route would emit.
-    For chat-tool callers we want the CSV body text; the handler returns a
-    StreamingResponse whose body we drain.
+    from email.message import Message
+    disposition = Message()
+    disposition["Content-Disposition"] = response.headers.get("content-disposition", "")
+    return {"filename": disposition.get_filename(), "media_type": response.media_type,
+            "download_url": url}
+
+
+def download_timeseries_template(kind: str) -> dict:
+    """
+    Return metadata and an authenticated link for the template spreadsheet.
     """
     if kind == "loads":
         from routers.network import download_load_profile_template as _h
@@ -443,12 +455,12 @@ def download_timeseries_template(kind: str) -> Any:
         from routers.network import download_link_profile_template as _h
     else:
         raise HTTPException(400, f"Unknown kind: {kind!r}")
-    return _h()
+    return _download_descriptor(_h(), f"/api/network/{kind}/template")
 
 
-def download_snapshot_weightings_csv() -> Any:
+def download_snapshot_weightings_csv() -> dict:
     from routers.network import download_snapshot_weightings_csv as _h
-    return _h()
+    return _download_descriptor(_h(), "/api/network/snapshots/weightings.csv")
 
 
 def list_investment_periods() -> dict:

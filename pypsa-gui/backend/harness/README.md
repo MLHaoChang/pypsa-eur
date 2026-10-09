@@ -13,7 +13,7 @@ harness/
   workflows/      the start menu and the step-by-step flows (Markdown + front matter)
   skills/         procedures the model loads on demand (<name>/SKILL.md)
   prompts/        the system-prompt fragments as Markdown, byte-identical to the old constants
-  providers/      anthropic, openai_compat, fake, and wiring (profile → provider, tools payload, history portability) — the only place a wire is named
+  providers/      anthropic, openai_compat, openai_responses, fake, and wiring (profile → provider, tools payload, history portability) — the only place a wire is named
   loop.py         the turn loop: the stream seam and tool dispatch (the former services/chat_service.py)
   solver_bridge.py  the solver log → tool_progress bridge for a running run_simulation / run_ac_pf_stage call
   compose.py      the system prompt for a turn, the live network line, and the per-turn ui-context / Guided / workflow-step blocks
@@ -106,6 +106,23 @@ seam, `_build_user_content`, tool dispatch and the real tool call (which reads
 the budget through `harness_budget.<NAME>`).
 
 ## Measuring parity
+
+Official OpenAI requests offer at most 128 tools per turn. Wiring selects from
+the eligible registry using explicit names, the five harness controls, recent
+calls, and query terms, then retains catalogue order for prefix caching. The
+exact selected set supplies both the dispatch allowlist and the advertised
+tool count. Anthropic and other compatible endpoints keep their catalogues.
+
+GridSpine studies bind a networkless backend project context on activation;
+the session pointer survives cold resolution. Tool selection reads that active
+context, so the study tools follow the project shown in the browser. A study
+needs its registered config; ordinary projects still need their saved network.
+
+The opt-in paid suites and coverage levels are documented in
+`docs/superpowers/plans/2026-10-09-openai-comprehensive-tests.md`. Reuse a ledger
+within the same test plan to resume completed cases without duplicate spend.
+It is a run checkpoint, not a persistent substitute for regression tests after
+changing their schemas, prompts, fixtures or relevant implementation.
 
 `backend/smoke/run_chat_smoke.py --workflow --profile <id>` drives the same
 battery (start menu, one Choice card, a workflow started and ended) on any

@@ -50,10 +50,12 @@ def provider_with_body(body, status=200):
 @pytest.mark.parametrize("base,model,tools,effort", [
     ("https://api.openai.com/v1", "gpt-6-luna", True, "none"),
     ("https://api.openai.com/v1", "gpt-6-luna", False, None),
-    ("https://api.openai.com/v1", "gpt-6.1-sol", True, None),
+    ("https://api.openai.com/v1", "gpt-6.1-sol", False, None),
+    ("https://api.openai.com/v1", "gpt-4.1-mini", True, None),
+    ("http://localhost:11434/v1", "gpt-6.1-sol", True, None),
     ("http://localhost:11434/v1", "gpt-6-luna", True, None),
 ])
-def test_luna_function_tools_use_supported_reasoning_mode(base, model, tools, effort):
+def test_function_tools_use_supported_reasoning_mode(base, model, tools, effort):
     from harness.catalogue import TOOLS
     req = request()
     req.model = model
@@ -146,7 +148,7 @@ def test_fragmented_tool_execution_and_response_continuation(install_network):
         sent = json.loads(req.content)
         sends.append(sent)
         assert req.headers["authorization"] == "Bearer test-key"
-        assert sent["model"] == "gpt-6.1-sol"
+        assert sent["model"] == "gpt-4.1-mini"
         assert "max_completion_tokens" in sent and "max_tokens" not in sent
         if len(sends) == 1:
             body = sse(tool_delta('{"component_'),
@@ -167,7 +169,7 @@ def test_fragmented_tool_execution_and_response_continuation(install_network):
     p = OpenAICompatProvider("https://api.openai.com/v1", api_key="test-key",
         http_client=httpx.Client(transport=httpx.MockTransport(handler)),
         token_param="max_completion_tokens")
-    session = chat_service.ChatSession(model="gpt-6.1-sol")
+    session = chat_service.ChatSession(model="gpt-4.1-mini")
     frames = list(chat_service.run_turn(session, "List one bus", provider=p))
     assert len(sends) == 2
     assert "tool_result" in [n for n, _ in frames]

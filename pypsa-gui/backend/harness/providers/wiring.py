@@ -12,6 +12,10 @@ function that lives here is patched on THIS module (harness/README.md,
 """
 from __future__ import annotations
 
+import re
+from functools import lru_cache
+from urllib.parse import urlsplit
+
 from harness.providers import anthropic as llm_anthropic
 from harness.providers import openai_compat as llm_openai_compat
 from harness.providers.anthropic import (  # moved 2026-08-13 (provider seam)
@@ -251,6 +255,9 @@ _GRIDSPINE_ALWAYS = frozenset({"gridspine_create_study"})
 def _bound_project_kind(turn_ctx) -> str | None:
     """The kind of the project this turn is bound to, or None when unbound or
     unknowable. Never raises — tool selection must not fail a turn."""
+    if turn_ctx is None:
+        from services.pypsa_service import PyPSAService
+        turn_ctx = PyPSAService.get_active_context()
     project_uuid = getattr(turn_ctx, "project_uuid", None)
     if not project_uuid:
         return None
@@ -290,7 +297,46 @@ def _tools_payload(turn_ctx=None) -> list[dict[str, Any]]:
     return tools
 
 
-def _tools_payload_for_profile(profile: Any) -> list[dict[str, Any]]:
+_OPENAI_TOOL_LIMIT = 128
+_HARNESS_TOOL_NAMES = frozenset({"ask_user", "use_skill", "start_workflow", "advance_workflow", "end_workflow"})
+_SELECTION_STOP_WORDS = frozenset({"the", "and", "for", "with", "this", "that", "from", "then", "once", "using", "call", "please", "tool", "tools"})
+
+
+@lru_cache(maxsize=512)
+def _tool_vocabulary(name: str, description: str):
+    return (frozenset(name.split("_")),
+            frozenset(re.findall(r"[a-z0-9]+", description.lower())))
+
+
+def _bounded_tools(tools: list[dict[str, Any]], query: str = "", history=None) -> list[dict[str, Any]]:
+    """Rank a large catalogue while keeping original order for prefix caching.
+
+    Explicit tool names always outrank generic description matches. Recent
+    calls keep referential follow-ups useful; harness controls remain offered.
+    Every declaration remains eligible on later turns, never deleted globally.
+    """
+    if len(tools) <= _OPENAI_TOOL_LIMIT:
+        return tools
+    query = query.lower()[:8000]
+    words = {w for w in re.findall(r"[a-z0-9]+", query) if len(w) > 2} - _SELECTION_STOP_WORDS
+    recent = []
+    for message in list(history or [])[-32:]:
+        content = message.get("content")
+        if message.get("role") == "assistant" and isinstance(content, list):
+            recent.extend(b.get("name") for b in content if isinstance(b, dict) and b.get("type") == "tool_use")
+    recent = set(recent[-8:])
+    def rank(pair):
+        index, tool = pair
+        name = tool["name"]
+        explicit = bool(re.search(r"(?<![a-z0-9_])" + re.escape(name) + r"(?![a-z0-9_])", query))
+        name_words, description_words = _tool_vocabulary(name, tool.get("description", ""))
+        return (int(explicit), int(name in _HARNESS_TOOL_NAMES), int(name in recent),
+                4 * len(words & name_words) + len(words & description_words), -index)
+    chosen = {i for i, _ in sorted(enumerate(tools), key=rank, reverse=True)[:_OPENAI_TOOL_LIMIT]}
+    return [tool for i, tool in enumerate(tools) if i in chosen]
+
+
+def _tools_payload_for_profile(profile: Any, query: str = "", history=None) -> list[dict[str, Any]]:
     """
     The `tools` field of the neutral `LLMRequest`, honouring the profile's
     `tools` capability (Task 8).
@@ -301,4 +347,16 @@ def _tools_payload_for_profile(profile: Any) -> list[dict[str, Any]]:
     sent. Single source of truth for both the `session_init` frame and the
     `LLMRequest.tools` field below, so they can never disagree.
     """
-    return _tools_payload() if profile.tools else []
+    if not profile.tools:
+        return []
+    tools = _tools_payload()
+    if profile.wire != "openai":
+        return tools
+    base = profile.base_url
+    if base is None and profile.preset != "custom":
+        from services import llm_config
+        entry = next((p for p in llm_config.load_presets() if p.get("id") == profile.preset), {})
+        base = entry.get("base_url")
+    if urlsplit(base or "").hostname == "api.openai.com":
+        return _bounded_tools(tools, query, history)
+    return tools
