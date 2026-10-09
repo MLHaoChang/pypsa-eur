@@ -27,11 +27,15 @@
     "tools": true,
     "vision": true,
     "suggested_models": [
+      "gpt-6-astra",
+      "gpt-6.1-sol",
+      "gpt-6-sol",
+      "gpt-6-luna",
       "gpt-5.6-sol",
       "gpt-5.6-terra",
       "gpt-5.6-luna"
     ],
-    "help": "Get an API key at platform.openai.com/api-keys and set OPENAI_API_KEY. Current models require max_completion_tokens rather than max_tokens."
+    "help": "Get an API key at platform.openai.com/api-keys and set OPENAI_API_KEY. Use an API model ID: Astra is gpt-6-astra; Sol is gpt-6.1-sol or gpt-6-sol. Availability depends on your API account; Test connection lists accessible models. Current models require max_completion_tokens rather than max_tokens."
   },
   {
     "id": "moonshot",
