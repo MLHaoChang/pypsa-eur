@@ -5,20 +5,20 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the collapsed assistant's reserved column with a floating companion whose Compose, Speak, and profile actions open the existing dock without starting live voice.
+**Goal:** Replace the collapsed assistant's reserved column with a floating companion. Compose and Dictate open the existing console. Live stays on the current page and does not open that console.
 
-**Architecture:** The open assistant stays `AssistantDock` plus `ChatPanel`. When `assistantDockOpen` is false the dock column takes no width and `CompanionLauncher` overlays the canvas. Compose, Speak, and the profile chip write a one-shot `assistantEntry` on the UI store. `ChatPanel` consumes it: compose relies on the existing composer focus, speak opens the reviewed dictation panel and does not call `getUserMedia`, and profiles focuses `chat-model-select`. Extra hosted models that speak OpenAI chat completions are catalogue presets on the existing `openai` wire. No second planner and no new provider class.
+**Architecture:** The console stays `AssistantDock` plus `ChatPanel`: composer, uploads, history, and reviewed dictation. When `assistantDockOpen` is false the dock column takes no width and `CompanionLauncher` overlays the canvas. Compose, Dictate, and the profile chip write a one-shot `assistantEntry` on the UI store. `ChatPanel` consumes it: compose relies on the existing composer focus, dictate opens the reviewed dictation panel and does not call `getUserMedia`, and profiles focuses `chat-model-select`. Live is a third control on the companion. Its click does not set `assistantDockOpen`. Issue 03 connects the session, lights the character, and runs the shared harness on the page the user is already using. Extra hosted models that speak OpenAI chat completions are catalogue presets on the existing `openai` wire. No second planner and no new provider class.
 
 **Tech Stack:** React 19, TypeScript, Zustand, Vitest, Testing Library, Tailwind; FastAPI preset catalogue in `pypsa-gui/backend/presets.json` read by `services.llm_config`.
 
 ## Global Constraints
 
 - One shared harness and one tool catalogue. "Another agent" means another LLM profile, not a second planner.
-- Reviewed dictation (merged PR #106) stays separate from continuous live conversation. Speak opens the existing dictation panel. A transcript is inserted only after the user accepts it.
-- Speak does not start a microphone, a recording, or a paid LiveKit session. Live conversation remains an explicit control inside the open dock and is out of scope for this plan (issue 03).
-- The companion is an original presence (accent-colored SVG, pencil and microphone). The reference screenshot defines the interaction — a floating character and a two-action pill — and is not an asset to copy.
-- Idle motion is decorative, honors `prefers-reduced-motion`, and never uses a listening or recording affordance while the microphone is closed.
-- The floating companion is not rendered while the dock is open, so it cannot cover results, confirmation cards, or the composer.
+- Reviewed dictation (merged PR #106) stays separate from continuous live conversation. Dictate opens the existing dictation panel inside the console. A transcript is inserted only after the user accepts it.
+- Dictate does not start a microphone, a recording, or a paid LiveKit session. Live is a third companion control. In this plan its click does not open the console, start the microphone, or connect a media session. Issue 03 connects it in place: the companion lights up on the current page, and the same harness navigates, creates, confirms, and announces downloads there.
+- The companion is an original presence (accent-colored SVG, pencil, dictation microphone, and a Live control). The reference screenshot defines the floating character and the pencil/microphone pill. Live is the additional in-place action. The screenshot is not an asset to copy.
+- Idle motion is decorative, honors `prefers-reduced-motion`, and never uses a listening or recording affordance while the microphone is closed. Listening, thinking, and speaking light the character only while a live session is active.
+- While the console is open, the floating companion is not drawn over the composer. A live session that the user later reveals in the console keeps running, and its state moves into the console header.
 - ChatPanel stays mounted while the dock is collapsed. Do not key the dock's error boundary on `assistantDockOpen`.
 - New hosted chat models use `wire: "openai"` and `OpenAICompatProvider`. Do not add a provider class for Kimi or Grok.
 - Kimi is already the `moonshot` preset (`https://api.moonshot.ai/v1`, `MOONSHOT_API_KEY`, `token_param: "max_tokens"`). Do not add a second Kimi preset.
@@ -32,7 +32,7 @@
 ## File structure
 
 - Modify `pypsa-gui/frontend/src/store/uiStore.ts` — one-shot `assistantEntry`. Not persisted.
-- Create `pypsa-gui/frontend/src/components/CompanionLauncher.tsx` — overlay, character, Compose, Speak, profile chip.
+- Create `pypsa-gui/frontend/src/components/CompanionLauncher.tsx` — overlay, character, Compose, Dictate, Live, profile chip.
 - Create `pypsa-gui/frontend/src/components/CompanionLauncher.test.tsx` — presence, reduced motion, the three callbacks.
 - Modify `pypsa-gui/frontend/src/components/AssistantDock.tsx` — zero-width collapsed column; mount the launcher only while closed.
 - Modify `pypsa-gui/frontend/src/components/AssistantDock.test.tsx` — launcher contract replaces the 40px gutter tests.
@@ -70,8 +70,8 @@
   - `setAssistantEntry(entry: 'compose' | 'speak' | 'profiles' | null): void`
   - `COMPANION_TOAST_OFFSET = 128`
   - `CompanionPresence = 'idle' | 'listening' | 'thinking' | 'speaking'`
-  - `CompanionLauncher` props: `presence?: CompanionPresence`, `profileLabel: string`, `onCompose: () => void`, `onSpeak: () => void`, `onProfiles: () => void`
-  - Test ids: `companion-launcher`, `companion-character`, `companion-compose`, `companion-speak`, `companion-profile`
+  - `CompanionLauncher` props: `presence?: CompanionPresence`, `profileLabel: string`, `onCompose: () => void`, `onSpeak: () => void`, `onLive: () => void`, `onProfiles: () => void`
+  - Test ids: `companion-launcher`, `companion-character`, `companion-compose`, `companion-speak`, `companion-live`, `companion-profile`
   - `data-presence` and `data-motion` (`on` | `off`) on `companion-launcher`
 
 - [ ] **Step 1: Write the failing launcher tests**
@@ -101,6 +101,7 @@ describe('CompanionLauncher', () => {
     mockMotion(false)
     const onCompose = vi.fn()
     const onSpeak = vi.fn()
+    const onLive = vi.fn()
     const onProfiles = vi.fn()
     const user = userEvent.setup()
     render(
@@ -108,6 +109,7 @@ describe('CompanionLauncher', () => {
         profileLabel="Claude"
         onCompose={onCompose}
         onSpeak={onSpeak}
+        onLive={onLive}
         onProfiles={onProfiles}
       />,
     )
@@ -117,9 +119,11 @@ describe('CompanionLauncher', () => {
     expect(screen.getByTestId('companion-speak').getAttribute('aria-pressed')).toBe('false')
     await user.click(screen.getByTestId('companion-compose'))
     await user.click(screen.getByTestId('companion-speak'))
+    await user.click(screen.getByTestId('companion-live'))
     await user.click(screen.getByTestId('companion-profile'))
     expect(onCompose).toHaveBeenCalledOnce()
     expect(onSpeak).toHaveBeenCalledOnce()
+    expect(onLive).toHaveBeenCalledOnce()
     expect(onProfiles).toHaveBeenCalledOnce()
     expect(screen.getByTestId('companion-profile').textContent).toBe('Claude')
   })
@@ -131,6 +135,7 @@ describe('CompanionLauncher', () => {
         profileLabel="Model"
         onCompose={vi.fn()}
         onSpeak={vi.fn()}
+        onLive={vi.fn()}
         onProfiles={vi.fn()}
       />,
     )
@@ -146,6 +151,7 @@ describe('CompanionLauncher', () => {
         profileLabel="Model"
         onCompose={vi.fn()}
         onSpeak={vi.fn()}
+        onLive={vi.fn()}
         onProfiles={vi.fn()}
       />,
     )
@@ -208,6 +214,7 @@ type Props = {
   profileLabel: string
   onCompose: () => void
   onSpeak: () => void
+  onLive: () => void
   onProfiles: () => void
 }
 
@@ -227,7 +234,7 @@ function useReducedMotion(): boolean {
 }
 
 export default function CompanionLauncher({
-  presence = 'idle', profileLabel, onCompose, onSpeak, onProfiles,
+  presence = 'idle', profileLabel, onCompose, onSpeak, onLive, onProfiles,
 }: Props) {
   const reduce = useReducedMotion()
   return (
@@ -282,6 +289,17 @@ export default function CompanionLauncher({
         >
           <Mic size={16} />
         </button>
+        <span className="h-4 w-px bg-border" aria-hidden="true" />
+        <button
+          type="button"
+          onClick={onLive}
+          data-testid="companion-live"
+          aria-label="Start a live conversation on this page"
+          title="Talk with the assistant here. This stays on the current page."
+          className="px-3 py-2 text-text hover:text-accent"
+        >
+          Live
+        </button>
       </div>
     </div>
   )
@@ -334,6 +352,9 @@ In `AssistantDock.tsx`:
           useUIStore.getState().setAssistantEntry('speak')
           setAssistantDockOpen(true)
         }}
+        onLive={() => {
+          // Issue 03 connects the session on this page. This click must not open the console.
+        }}
         onProfiles={() => {
           useUIStore.getState().setAssistantEntry('profiles')
           setAssistantDockOpen(true)
@@ -364,6 +385,7 @@ Replace the collapsed-launcher assertions:
 
 - `assistant-dock-launcher` becomes `companion-compose`. Clicking it sets `assistantDockOpen` true and `assistantEntry` to `'compose'`.
 - Delete the test that requires the microphone inside a collapsed strip. Replace it with: while collapsed, `companion-speak` is present; clicking it sets `assistantDockOpen` true and `assistantEntry` to `'speak'`.
+- Clicking `companion-live` leaves `assistantDockOpen` false and `assistantEntry` null. Live does not open the console.
 - While collapsed, `assistant-dock` class names include `w-0` and do not include `w-10`, and `style.width` is `''`.
 - While open, `companion-launcher` is absent (`queryByTestId` returns null) and the resize handle still exists.
 - The mount-identity test clicks `companion-compose` instead of `assistant-dock-launcher`.
@@ -804,7 +826,7 @@ Spec coverage:
 - Floating presence, not a column or a slide tab: Task 1.
 - Compose opens the dock and focuses the composer: Tasks 1 and 2. Focus is the existing open effect; Task 2 pins it.
 - Speak opens reviewed dictation and does not insert or record: Task 2.
-- Live conversation stays inside the open dock and is not started here: Global Constraints. No LiveKit import.
+- Live is a third control and does not open the console: Task 1. Connecting the session, lighting the character, navigating, creating, confirming, and announcing downloads on the current page is issue 03.
 - Idle motion and reduced motion: Task 1. Listening is a prop only; nothing in this plan sets it.
 - Companion hidden while the dock is open: Task 1.
 - Profile chip opens the existing picker: Tasks 1 and 3.
@@ -818,7 +840,7 @@ Type consistency: `assistantEntry` is `'compose' | 'speak' | 'profiles' | null` 
 
 ## Out of scope
 
-- LiveKit, Deepgram, OpenAI TTS, and the Start conversation control (issue 03, after issues 01, 02, 08, and 09).
+- LiveKit, Deepgram, OpenAI TTS, captions, in-place navigation, creation, confirmation cards, and download announcements (issue 03, after issues 01, 02, 08, and 09). The Live control shipped here must leave the console closed so that later work does not turn Live into a console entry.
 - A Responses API adapter for xAI, or any new `LLMProvider` class.
 - Paid probes of Moonshot, xAI, DashScope, Ollama, or LM Studio. Catalogue shape is not a live credential test.
 - Cursor as a provider, including unofficial proxies.

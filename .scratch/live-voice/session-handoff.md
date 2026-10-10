@@ -101,14 +101,19 @@ The companion decision is now in [spec.md](spec.md) under Companion launcher,
 [issue 12](issues/12-companion-launcher.md), and
 [the companion plan](../../docs/superpowers/plans/2026-10-10-assistant-companion.md).
 
-- Closed state: a floating character over the canvas, with Compose and Speak.
+- Closed state: a floating character over the canvas, with Compose, Dictate, and Live.
   It does not reserve the 40px column and it is not a slide-panel tab.
-- Compose opens the existing dock and focuses the typed composer.
-- Speak opens that dock and the reviewed dictation panel from PR 106. It does
-  not start the microphone, a recording, or a LiveKit session. A transcript is
-  inserted only after the user accepts it.
-- Live conversation stays an explicit control inside the open dock (issue 03).
-  Idle motion must not look like listening.
+- Compose opens the existing console and focuses the typed composer. Dictate
+  opens that console and the reviewed dictation panel from PR 106. The console
+  is where uploads, history, and the composer live. Neither action starts the
+  microphone, a recording, or a LiveKit session. A transcript is inserted only
+  after the user accepts it.
+- Live stays on the page the user is already using. The companion lights up
+  through listening, thinking, and speaking. The same harness navigates to the
+  right project, panel, or result, creates what was asked, asks for confirmation
+  beside the companion, and says when a file is ready to download. Live does
+  not open the console.
+- Idle motion must not look like listening.
 - The profile chip opens the existing model select. Another agent is another
   profile on the shared harness, not a second planner.
 - Kimi is already the `moonshot` preset on the OpenAI-compatible wire. Grok
