@@ -70,7 +70,7 @@ export default function CompanionLauncher({
             setDraft('')
           }}
         >
-          <p className="text-[11px] leading-snug text-text" data-testid="companion-live-caption">
+          <p className="text-sm font-medium leading-snug text-text" data-testid="companion-live-caption">
             {liveCaption}
           </p>
           {modelKeyMissing && (
