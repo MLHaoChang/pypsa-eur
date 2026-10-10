@@ -105,6 +105,23 @@ It changes static parameters; existing time-series overrides remain in force.
 Large preparations remain subject to the standard per-tool execution deadline.
 The `project-refinement` skill teaches the whole sequence on demand.
 
+All five workflow tools use the shared catalogue and dispatcher. They are
+available to any tool-capable agent using this harness: Claude through the
+Anthropic adapter, or a configured remote/local model through the compatible
+adapter. A new agent adapter implements `protocol.LLMProvider`; it receives
+the same neutral tool schemas and returns neutral tool-call events to the
+existing turn loop. The tool handlers do not construct model clients. Toolset
+views belong to each chat session, so one agent's selection does not change
+another agent's view. Project eligibility, authentication, confirmations and
+dispatch allowlists apply on every provider.
+
+`tests/test_workflow_provider_parity.py` exercises all five tools through the
+real Anthropic SDK adapter and compatible remote/local adapters with mocked
+HTTP streams, real project/queue handlers and HiGHS solves. It checks streamed
+arguments, tool-result IDs, continuation, confirmation denial and independent
+session views without API credentials or spending. These transport tests do
+not certify that an arbitrary endpoint/model supports tool calling.
+
 ## Splitting the loop
 
 `loop.py` is one module on purpose for now. The suite patches 27 of its

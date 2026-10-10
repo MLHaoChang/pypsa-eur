@@ -85,3 +85,20 @@ and cost totals unchanged.
 
 Only the connected environment was used; the previous failed environment was
 untouched. The PR targets `master` for review.
+
+## Provider portability follow-up — 2026-10-10
+
+The five tools are shared catalogue entries and dispatcher handlers; there is
+no OpenAI-only implementation. Nine additional offline checks cover approved
+execution and denied execution over the real Anthropic SDK adapter, official
+OpenAI transport, a compatible remote endpoint and a local endpoint, plus
+independent agent session views. Mock HTTP streams deliver split JSON arguments;
+real handlers create scenarios, queue HiGHS solves, wait and return evidence.
+Every continued request includes the actual preceding tool-result ID. The
+script consumes the returned job ID; approved cases produce objective 200 and
+preserve the baseline. Denied cases create no jobs. Normal confirmations and
+catalogue eligibility remain in force on every transport. No paid calls are
+needed, and these checks do not claim live capability of untested models.
+The combined helper, provider-adapter and harness-layout regression run passed
+**161 checks**, with **4 prerequisite-gated skips**. The existing API ledger
+remained at 632 requests and 3,990,215 charged tokens.
