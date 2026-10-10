@@ -8,7 +8,8 @@ assistant behave the same whichever one is active.
 ```
 harness/
   protocol.py     the provider seam: LLMProvider, LLMRequest, LLMEvent, ERROR_KINDS
-  catalogue.py    the tool declarations (196 today), their Safety tiers, TOOL_ROUTES
+  catalogue.py    the tool declarations, their Safety tiers, TOOL_ROUTES
+  toolsets.py     ordered provider-neutral catalogue views and always-available controls
   events.py       the closed vocabulary of frames the turn loop yields to the UI
   workflows/      the start menu and the step-by-step flows (Markdown + front matter)
   skills/         procedures the model loads on demand (<name>/SKILL.md)
@@ -70,12 +71,56 @@ Borrowed designs under consideration: `docs/superpowers/assessments/2026-10-06-d
 
 ## The harness tools
 
-Five read-tier tools exist only for the harness (catalogue banner "Harness"):
+Read-tier tools exist only for the harness (catalogue banner "Harness"):
 `ask_user` (a Choice card; the pick is the next user message, the turn does
 not block), `use_skill` (a skill's body on demand), `start_workflow`,
 `advance_workflow`, `end_workflow` (the session's `{id, step}`; the current
 step's body rides each turn as per-turn user content, after the context
-block and outside the untrusted fence). None of them touches a project.
+block and outside the untrusted fence). `use_toolset` changes the session's
+catalogue view for the next model request, including within the same turn.
+These controls do not change project access or confirmation rules.
+
+The workflow helpers in `services/workflow_tools.py` reuse existing services:
+`project_readiness` checks prerequisites; `wait_for_job` waits locally for an
+authorized queue job for at most 25 seconds and emits existing progress frames;
+`get_study_evidence` returns bounded, filtered evidence and software-computed
+counts before paging/status filtering, cached by project/run/config/source
+fingerprints. Stale or active study results are unavailable. Source freshness
+uses file timestamps and saved config, not a scientific validity certificate.
+Simulation mode reads saved results and optional baseline comparisons.
+Wide study rows are explicitly clipped, retaining counts and page cursors;
+simulation comparisons expose saved headline deltas, with detailed tables
+available through existing result tools.
+
+`run_sensitivity_sweep` is execution-tier: one normal confirmation authorizes
+1–4 new scenarios and their queued solves. It preflights all typed component
+changes on isolated contexts, preserves the baseline and active binding, and
+reuses solved cases only with matching provenance and canonical model inputs.
+PyPSA's deterministic slack-control assignment is normalized in the fingerprint;
+solver outputs are excluded. It refuses dirty/conflicting cases, rechecks saved
+baseline files before writes, and reports partial failures without deleting work.
+Investment-period weights participate in reuse checks; active case jobs are
+returned through queue deduplication rather than reported as completed reuse.
+It changes static parameters; existing time-series overrides remain in force.
+Large preparations remain subject to the standard per-tool execution deadline.
+The `project-refinement` skill teaches the whole sequence on demand.
+
+All five workflow tools use the shared catalogue and dispatcher. They are
+available to any tool-capable agent using this harness: Claude through the
+Anthropic adapter, or a configured remote/local model through the compatible
+adapter. A new agent adapter implements `protocol.LLMProvider`; it receives
+the same neutral tool schemas and returns neutral tool-call events to the
+existing turn loop. The tool handlers do not construct model clients. Toolset
+views belong to each chat session, so one agent's selection does not change
+another agent's view. Project eligibility, authentication, confirmations and
+dispatch allowlists apply on every provider.
+
+`tests/test_workflow_provider_parity.py` exercises all five tools through the
+real Anthropic SDK adapter and compatible remote/local adapters with mocked
+HTTP streams, real project/queue handlers and HiGHS solves. It checks streamed
+arguments, tool-result IDs, continuation, confirmation denial and independent
+session views without API credentials or spending. These transport tests do
+not certify that an arbitrary endpoint/model supports tool calling.
 
 ## Splitting the loop
 
@@ -108,10 +153,15 @@ the budget through `harness_budget.<NAME>`).
 ## Measuring parity
 
 Official OpenAI requests offer at most 128 tools per turn. Wiring selects from
-the eligible registry using explicit names, the five harness controls, recent
+the eligible registry using explicit names, always-available controls, recent
 calls, and query terms, then retains catalogue order for prefix caching. The
-exact selected set supplies both the dispatch allowlist and the advertised
-tool count. Anthropic and other compatible endpoints keep their catalogues.
+exact selected set supplies the dispatch allowlist; `session_init.tool_count`
+describes the first request. After a toolset switch or intentional project
+rebinding the next request receives the refreshed catalogue and allowlist;
+tools issued in the earlier batch are still checked against that batch's offer.
+Controls retain priority even if a query explicitly names more than 128 tools.
+Anthropic and other compatible endpoints keep their eligible catalogues, with
+the same optional provider-neutral toolset views.
 
 GridSpine studies bind a networkless backend project context on activation;
 the session pointer survives cold resolution. Tool selection reads that active
@@ -183,3 +233,65 @@ agents and the app.
 | `events` | the tripwire test; `choice_request` is what `ask_user` emits, `workflow_state` what the workflow tools emit | — |
 | `workflows` | `GET /api/chat/workflows` (the start menu the panel renders), the `start_workflow` / `advance_workflow` / `end_workflow` tools, `chat_service._workflow_addendum` (the per-turn step), `_guided_mode_addendum` (the `hub-design` preamble) | — |
 | `skills` | `chat_service._skills_block` (the catalogue in the tools-on prompt), the `use_skill` tool | — |
+
+## Durable assistant tasks and file delivery
+
+`find_capabilities(goal)` searches the shared catalogue and explains required
+arguments, safety, project eligibility and reduced-toolset visibility.
+Discovery is advisory: dispatch still checks the exact catalogue offered to
+that model request. Metadata searches cache the catalogue index; normal tool
+selection keeps original catalogue order for prefix reuse.
+
+`start_task(title, steps, request_id)` persists an owner/project-scoped plan
+with 1–12 ordinary calls. Create/activate/import a project first: rebinding
+and task-control tools cannot be steps. `list_tasks`, `get_task` and
+`resume_task` discover and recover plans across chat sessions and providers.
+`resume_task` returns the next exact call; it does not execute hidden actions.
+The normal dispatch seam reserves and checkpoints matching calls. Completed
+steps are retained, and `$earlier_step.path` references resolve their results.
+Defaults compare canonically. Each step's arguments are limited to 1800
+characters; large results should be referenced through existing file/result
+IDs. Task views stay within the ordinary result budget.
+
+A denied confirmation leaves a step pending. An interrupted effectful call
+requires review; native exports count as effectful despite their legacy read
+tier. `resolve_task_step` requires ordinary destructive confirmation to
+record verified completion or an explicit retry. Reconciliation refuses a
+still-running originating session or detached timeout worker. `cancel_task`
+stops future task steps and retains checkpoints; it never aborts a queued job.
+Tasks live in the authorized project directory, are atomically replaced,
+and recheck project access/account status/owner on every operation.
+
+`inspect_import` samples CSV/Excel columns, missing values and time axes.
+Units and mappings are not guessed. `import_uploaded_network` reads native
+network files by upload ID and invokes the existing NC/CSV/Excel/MATPOWER
+importers through normal destructive confirmation and project rebinding.
+Native binary files are tool-accessible attachments, represented as metadata.
+
+`preview_project_changes` validates typed engineering inputs on an isolated
+copy and stores an owner/project-bound preview. `apply_project_changes`
+requires normal execution confirmation, unchanged inputs, an idle project,
+and the existing foreign-lock/study/undo gates. It commits a validated private
+candidate, retains unsaved work, and refuses interrupted application replay.
+Topology operations remain the existing CRUD/batch tools.
+
+`create_chart` renders bounded numeric input/result data as PNG. Result
+charts require aligned dispatch and matching solve-input provenance;
+parameter edits invalidate the fingerprint even when component axes match.
+The solve service records that provenance under the existing solve lock and
+netCDF preserves it. Older imported solved files need a new solve before
+result charting. Private cloning skips the native solver model without
+changing the live model. `build_delivery` bundles selected authorized
+artifacts and a content-hash/provenance manifest within the 25 MB limit.
+All existing agent exports now include authenticated download metadata.
+The frontend renders task progress, ordinary resume/cancel requests and safe
+file links from existing `tool_result` frames; no new stream vocabulary or
+provider-specific handlers are introduced.
+
+A terminal failed/aborted job leaves its wait step incomplete. Explicit failure
+payloads are not counted as successful steps, and partial writes require
+review. Verified failed/uncertain steps may be explicitly reconciled through
+the normal confirmation gate. Interactive `ask_user` answers are user messages,
+so choice requests run outside durable action steps. Preview application
+confirmation includes the immutable old/new/unit diff while the actual handler
+still receives only its catalogue arguments; chat renders the preview table.

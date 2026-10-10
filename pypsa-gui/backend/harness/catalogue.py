@@ -1771,6 +1771,67 @@ TOOLS: list[dict[str, Any]] = [
 
     # ── Harness: ask the user (chat harness issue 04) ──────────────────────────
     _t(
+        "project_readiness",
+        "Check project kind, saved/dirty state, network validation, time-series store, solver availability, "
+        "and result freshness without running a solve. Defaults to the active project. "
+        "Returns ready, blockers, and next_tools; GridSpine returns run/config/source freshness. Safety: read.",
+        {"project_id": {"type": "string"}}, [],
+    ),
+    _t(
+        "wait_for_job",
+        "Wait locally for a solve-queue or GridSpine job, avoiding repeated model status polls. "
+        "Returns job, terminal, completed, timed_out, wait_cancelled, waited_seconds. "
+        "Default 20 seconds, maximum 25. On timeout report pending and end the turn; never busy-poll. "
+        "A cancelled wait leaves the job running; solve_queue_abort stops it. Safety: read.",
+        {"job_id": {"type": "string"}, "timeout_seconds": {"type": "number", "minimum": 0, "maximum": 25}}, ["job_id"],
+    ),
+    _t(
+        "get_study_evidence",
+        "Read bounded evidence from a completed GridSpine run: connection, capacity, or ranked_snapshots. "
+        "Supports check, status, hour, assessment_id, bus filters and offset/limit pagination (default 10, max 50). "
+        "Returns items, total_count, has_more, counts_before_status_filter, failed_count_before_status_filter, "
+        "run_id/fingerprint and freshness. check='connection' counts overall connection outcomes across ALL "
+        "matching rows, before paging. Refuses stale or in-progress evidence; summaries cache by run/config/source. "
+        "Capacity status is preexisting_violation, ac_computed, or dc_only; ranked status is converged or not_converged. "
+        "section='simulation' reads last SAVED network results; compare_to adds a baseline economic comparison. "
+        "No study-row filters in simulation mode. Defaults project_id to active project. Safety: read.",
+        {"project_id": {"type": "string"}, "section": {"type": "string", "enum": ["connection", "capacity", "ranked_snapshots", "simulation"]},
+         "check": {"type": "string"}, "status": {"type": "string"}, "hour": {"type": "integer", "minimum": 0},
+         "assessment_id": {"type": "string"}, "bus": {"type": "string"}, "compare_to": {"type": "string"},
+         "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 50}}, [],
+    ),
+    _t(
+        "run_sensitivity_sweep",
+        "Create and enqueue 1–4 saved sensitivity scenarios from a saved network baseline, preserving the "
+        "baseline and active project. Validate all cases before creation. Each case has new_name and 1–20 "
+        "changes: component_class, names (1–100), attribute, value. Numeric engineering inputs only; "
+        "*_extendable flags require booleans. No solver code or topology rewrites. Existing time-series overrides "
+        "still override static values. Reuses matching, solved cases; refuses name/input conflicts and unsaved "
+        "baseline/case edits. Returns per-case project IDs/jobs or reused objectives, with explicit partial failures. "
+        "After waiting for jobs, get_study_evidence(section='simulation', compare_to=baseline_project_id) "
+        "compares each saved result. Study refinement uses gridspine_update_config and gridspine_run_pipeline. "
+        "The confirmation authorizes these bounded changes and queued solves. Safety: execution.",
+        {"baseline_project_id": {"type": "string"}, "cases": {"type": "array", "minItems": 1, "maxItems": 4,
+            "items": {"type": "object", "additionalProperties": False, "properties": {
+                "new_name": {"type": "string", "minLength": 1, "maxLength": 64},
+                "changes": {"type": "array", "minItems": 1, "maxItems": 20, "items": {
+                    "type": "object", "additionalProperties": False, "properties": {
+                        "component_class": {"type": "string", "enum": ["Generator", "Load", "Line", "Link", "StorageUnit", "Store"]},
+                        "names": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "string"}},
+                        "attribute": {"type": "string", "enum": ["marginal_cost", "capital_cost", "p_nom", "p_nom_min", "p_nom_max", "p_nom_extendable", "p_min_pu", "p_max_pu", "efficiency", "p_set", "q_set", "s_nom", "s_nom_min", "s_nom_max", "s_nom_extendable", "s_max_pu", "r", "x", "max_hours", "efficiency_store", "efficiency_dispatch", "e_nom", "e_nom_min", "e_nom_max", "e_nom_extendable", "e_min_pu", "e_max_pu"]},
+                        "value": {"type": ["number", "boolean"]}},
+                    "required": ["component_class", "names", "attribute", "value"]}}},
+                "required": ["new_name", "changes"]}}}, ["baseline_project_id", "cases"],
+    ),
+    _t(
+        "use_toolset",
+        "Switch the session's catalogue view to all, project, network, simulation, results, or gridspine. "
+        "The next model request in THIS turn receives the refreshed eligible catalogue. Harness controls and "
+        "project navigation remain available. Does not change project access, confirmations, or model profile. "
+        "Use all to restore the full eligible catalogue. Safety: read.",
+        {"domain": {"type": "string", "enum": ["all", "project", "network", "simulation", "results", "gridspine"]}}, ["domain"],
+    ),
+    _t(
         "ask_user",
         "Ask the user ONE structured question with options, rendered as a "
         "Choice card in the chat. Use it whenever you need a decision from "
@@ -3032,6 +3093,25 @@ TOOLS: list[dict[str, Any]] = [
 
 # v4-NIT-1 / v6-F4: derive the count from the registry length at module
 # import. NEVER pre-state the count anywhere in code or docs.
+# Provider-neutral assistant operations. Every action uses normal dispatch.
+_ENGINEERING_CHANGES = next(t for t in TOOLS if t["name"] == "run_sensitivity_sweep")["input_schema"]["properties"]["cases"]["items"]["properties"]["changes"]
+TOOLS.extend([
+    _t("list_tasks", "List up to 20 most recently updated durable tasks owned by you in the active project. Use a returned ID to resume in a new chat or provider. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
+    _t("find_capabilities", "Find relevant supported tools for a goal. Returns required inputs, safety and current project/toolset eligibility. Cached catalogue search grants no authority. Safety: read.", {"goal": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 8}}, ["goal"]),
+    _t("start_task", "Persist a project/user-scoped plan of 1–12 ordinary tools. Create/activate the project first; rebinding and task-control tools cannot be steps. Each step has unique id, tool, args. Whole-value $earlier_step.path references resolve saved results. Stable request_id deduplicates identical plans. Returns task_id, status, next_step. Execute next_step via an ordinary offered call; this tool runs no hidden actions. Safety: write.", {"title": {"type": "string", "maxLength": 120}, "request_id": {"type": "string", "maxLength": 64}, "steps": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "object", "additionalProperties": False, "properties": {"id": {"type": "string"}, "tool": {"type": "string"}, "args": {"type": "object"}}, "required": ["id", "tool", "args"]}}}, ["title", "steps", "request_id"]),
+    _t("get_task", "Read a durable task in the active project owned by the caller. Returns completed steps and the next exact call; no completed step is replayed. Safety: read.", {"task_id": {"type": "string"}}, ["task_id"]),
+    _t("resume_task", "Attach a durable task to this chat and return next_step. Execute it as an ordinary offered tool call; all normal gates apply. Interrupted writes become uncertain and require explicit review. No implicit tool execution or job polling. Safety: write.", {"task_id": {"type": "string"}}, ["task_id"]),
+    _t("cancel_task", "Stop future task steps; retain its checkpoint. Does not abort a running queue job or solver. Use solve_queue_abort separately for a job. Safety: write.", {"task_id": {"type": "string"}}, ["task_id"]),
+    _t("resolve_task_step", "After verifying an uncertain step's actual effects, explicitly mark completed with a compact verified result or authorize retry. Refuses a still-running originating session. Normal destructive confirmation required. Safety: destructive.", {"task_id": {"type": "string"}, "outcome": {"type": "string", "enum": ["completed", "retry"]}, "result": {"type": "object"}}, ["task_id", "outcome"]),
+    _t("get_file_delivery", "Get a file's authenticated browser download link, content hash, size and project provenance by upload ID. Never returns binary bytes or server paths. Safety: read.", {"file_id": {"type": "string"}}, ["file_id"]),
+    _t("inspect_import", "Inspect uploaded CSV/Excel metadata: up to five sheets, 200 sampled rows and 20 columns. Returns missing-value/time-axis diagnostics, explicit sample limits and native import format. Units and column mappings require user confirmation; never guessed. Other native formats receive format guidance. Safety: read.", {"file_id": {"type": "string"}}, ["file_id"]),
+    _t("import_uploaded_network", "Replace the current network using an authorized upload ID and the existing native import handler. Binary bytes stay server-side. Rebinds to an unsaved draft; save under a chosen project afterward. Normal destructive confirmation and locks apply. Safety: destructive.", {"file_id": {"type": "string"}, "format": {"type": "string", "enum": ["netcdf", "csv_bundle", "excel", "matpower"]}}, ["file_id", "format"]),
+    _t("preview_project_changes", "Preview 1–20 typed engineering parameter changes on an isolated network. Returns immutable preview_id, old/new values with units, validation and fingerprint; stores a preview but does not modify network inputs. Existing time-series overrides remain. Topology edits use existing CRUD tools. Safety: write.", {"changes": _ENGINEERING_CHANGES}, ["changes"]),
+    _t("apply_project_changes", "Apply a reviewed typed preview atomically to unchanged active-project inputs. Refuses stale, foreign, busy or interrupted previews. Normal execution confirmation, lock/study guards and undo capture apply. Repeated successful application returns reused. Leaves changes unsaved. Safety: execution.", {"preview_id": {"type": "string"}}, ["preview_id"]),
+    _t("create_chart", "Generate a downloadable PNG from server-side numeric component data. Select 1–8 asset names and an input/output attribute; max 5000 rows. source=result requires fresh solved data. Returns file metadata and coverage/provenance; no arbitrary expression/code. Safety: write.", {"component": {"type": "string", "enum": ["Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"]}, "attribute": {"type": "string"}, "names": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "string"}}, "source": {"type": "string", "enum": ["input", "result"]}}, ["component", "attribute", "names"]),
+    _t("build_delivery", "Bundle 1–20 authorized upload IDs into a downloadable ZIP (25 MB max) with content hashes and a provenance manifest. Reuse existing exports, charts and reports; no file bytes in model context. Safety: write.", {"file_ids": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}}, "filename": {"type": "string"}}, ["file_ids"]),
+])
+
 TOOL_COUNT: int = len(TOOLS)
 
 
@@ -3103,6 +3183,21 @@ _COMP_DELETE_ROUTES = [
 
 
 TOOL_ROUTES: dict[str, list] = {
+    "list_tasks": _SERVICE_CALL,
+    "find_capabilities": _SERVICE_CALL,
+    "start_task": _SERVICE_CALL,
+    "get_task": _SERVICE_CALL,
+    "resume_task": _SERVICE_CALL,
+    "cancel_task": _SERVICE_CALL,
+    "resolve_task_step": _SERVICE_CALL,
+    "get_file_delivery": _SERVICE_CALL,
+    "inspect_import": _SERVICE_CALL,
+    "import_uploaded_network": _SERVICE_CALL,
+    "preview_project_changes": _SERVICE_CALL,
+    "apply_project_changes": _SERVICE_CALL,
+    "create_chart": _SERVICE_CALL,
+    "build_delivery": _SERVICE_CALL,
+
     # read (22)
     "list_components": _COMP_LIST_ROUTES,
     "get_component": _SERVICE_CALL,
@@ -3279,6 +3374,11 @@ TOOL_ROUTES: dict[str, list] = {
     "ui_open_panel": _UI_EVENT,
     "ui_set_snapshot": _UI_EVENT,
     "ask_user": _UI_EVENT,
+    "project_readiness": _SERVICE_CALL,
+    "wait_for_job": _SERVICE_CALL,
+    "get_study_evidence": _SERVICE_CALL,
+    "run_sensitivity_sweep": _SERVICE_CALL,
+    "use_toolset": _SERVICE_CALL,
     "use_skill": _SERVICE_CALL,
     "start_workflow": _SERVICE_CALL,
     "advance_workflow": _SERVICE_CALL,

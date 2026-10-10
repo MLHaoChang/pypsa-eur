@@ -4148,6 +4148,7 @@ def _save_agent_export(data: bytes, filename: str, mime: str) -> dict:
     Requires a loaded project (the artifact lives in that project's uploads dir);
     the HTTP export routes still stream to the browser without one.
     """
+    from urllib.parse import quote
     from services import upload_service
     from services.pypsa_service import PyPSAService
     name = PyPSAService.get_loaded_project()
@@ -4164,13 +4165,24 @@ def _save_agent_export(data: bytes, filename: str, mime: str) -> dict:
     # derived gate cannot cover them as a family, and re-tiering them would
     # change their confirmation behaviour for unrelated reasons.
     _check_foreign_lock("export")
-    meta = upload_service.add_upload(name, data, filename, mime, kind="agent_export")
+    if len(data) > upload_service.MAX_FILE_BYTES:
+        raise HTTPException(413, {"error_kind": "file_too_large", "message": "Export exceeds 25 MB."})
+    ctx = PyPSAService.get_active_context()
+    if ctx.project_uuid:
+        from services.assistant_tools import _project
+        project, directory, _owner = _project()
+        meta = upload_service.add_upload(project.name, data, filename, mime, kind="agent_export", project_dir=directory)
+    else:
+        meta = upload_service.add_upload(name, data, filename, mime, kind="agent_export")
     return {
         "file_id": meta.file_id,
         "filename": meta.filename,
         "mime": meta.mime,
         "size": meta.size,
         "kind": meta.kind,
+        "sha256": meta.sha256,
+        "project_id": PyPSAService.get_active_context().project_uuid,
+        "download_url": f"/api/projects/{ctx.project_uuid or quote(name, safe='')}/uploads/{meta.file_id}/blob",
         "message": (
             f"Exported '{meta.filename}' ({meta.size} bytes). It's available as a "
             "downloadable file in the chat panel's file strip."
@@ -6873,7 +6885,35 @@ PRE_DISPATCH_VALIDATORS: dict[str, Any] = {
 # Single source of truth for the (tool_name → callable) mapping. The Phase 2
 # chat session loop iterates this dict to dispatch incoming tool_use blocks.
 # Tools NOT in this dict are NOT exposed to the LLM.
+from services.workflow_tools import (
+    project_readiness, wait_for_job, get_study_evidence, run_sensitivity_sweep, use_toolset,
+)
+
+from services.assistant_tasks import list_tasks, start_task, get_task, resume_task, cancel_task, resolve_task_step
+from services.assistant_tools import (find_capabilities, get_file_delivery, inspect_import, import_uploaded_network,
+                                      preview_project_changes, apply_project_changes, create_chart, build_delivery)
+
 DISPATCHERS: dict[str, Any] = {
+    "list_tasks": list_tasks,
+    "find_capabilities": find_capabilities,
+    "start_task": start_task,
+    "get_task": get_task,
+    "resume_task": resume_task,
+    "cancel_task": cancel_task,
+    "resolve_task_step": resolve_task_step,
+    "get_file_delivery": get_file_delivery,
+    "inspect_import": inspect_import,
+    "import_uploaded_network": import_uploaded_network,
+    "preview_project_changes": preview_project_changes,
+    "apply_project_changes": apply_project_changes,
+    "create_chart": create_chart,
+    "build_delivery": build_delivery,
+
+    "project_readiness": project_readiness,
+    "wait_for_job": wait_for_job,
+    "get_study_evidence": get_study_evidence,
+    "run_sensitivity_sweep": run_sensitivity_sweep,
+    "use_toolset": use_toolset,
     # read (22)
     "list_components": list_components,
     "diagnose_network": diagnose_network,
@@ -7224,6 +7264,7 @@ _LOCK_GATE_WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 # routed ones — `batch_delete_components` more so than most. The undo capture
 # (`_undo_captured_tool_names`) needs the same list for the same reason.
 _NETWORK_SERVICE_CALL_MUTATORS = frozenset({
+    "apply_project_changes", "import_uploaded_network",
     "batch_create_components",
     "batch_delete_components",
     "generate_exemplary_timeseries",
@@ -7232,6 +7273,7 @@ _NETWORK_SERVICE_CALL_MUTATORS = frozenset({
 })
 
 _LOCK_GATE_SERVICE_CALL_MUTATORS = _NETWORK_SERVICE_CALL_MUTATORS | frozenset({
+    "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery",
     # Write edges into the PROJECT DIRECTORY that call their service layer
     # directly, so they never reach the REST handler that checks the lock.
     # `routers/uploads.py` decided this question the other way and said so:

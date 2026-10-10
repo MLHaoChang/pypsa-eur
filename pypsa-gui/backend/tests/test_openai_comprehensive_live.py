@@ -4,7 +4,6 @@ import json
 import os
 from pathlib import Path
 
-import httpx
 import pytest
 from jsonschema import Draft202012Validator
 
@@ -39,6 +38,20 @@ def test_dollar_settlement_and_cache_conservative_price():
     assert meter.cost_nanodollars == 100 * 250 + 20 * 750
 
 
+def test_unlimited_tokens_retain_spending_and_request_gates():
+    meter = TokenBudget(None, charged=5000000, request_limit=1, dollar_limit=5)
+    record = meter.reserve(100, 100, "continued", "gpt-6-luna")
+    meter.settle(record, {"input_tokens": 100, "output_tokens": 20})
+    assert meter.charged == 5000120
+    with pytest.raises(ProviderError, match="test budget"):
+        meter.reserve(1, 1, "request-cap", "gpt-6-luna")
+    assert meter.requests == 1
+    exhausted = TokenBudget(None, charged=5000000, dollar_limit=5, cost_nanodollars=5000000000)
+    with pytest.raises(ProviderError, match="dollar budget"):
+        exhausted.reserve(1, 1, "spending-cap", "gpt-6-luna")
+    assert exhausted.requests == 0 and exhausted.charged == 5000000
+
+
 LIVE = bool(os.environ.get("OPENAI_API_KEY") and os.environ.get("PYPSA_GUI_TEST_LIVE_COMPREHENSIVE") == "1")
 paid = pytest.mark.skipif(not LIVE, reason="Requires key and PYPSA_GUI_TEST_LIVE_COMPREHENSIVE=1")
 
@@ -47,19 +60,22 @@ paid = pytest.mark.skipif(not LIVE, reason="Requires key and PYPSA_GUI_TEST_LIVE
 def comprehensive_run():
     import tiktoken
     path = Path(os.environ.get("PYPSA_GUI_COMPREHENSIVE_REPORT", "/tmp/openai-comprehensive.json"))
+    request_limit = int(os.environ.get("PYPSA_GUI_COMPREHENSIVE_REQUEST_CAP", "700"))
     if path.is_file():
         data = json.loads(path.read_text())
-        meter = TokenBudget(data["token_limit"], request_limit=700,
+        meter = TokenBudget(data["token_limit"], request_limit=request_limit,
                             charged=data["charged_tokens"], dollar_limit=data["dollar_limit"],
                             cost_nanodollars=data["cost_nanodollars"], records=data["requests"],
                             requests=len(data["requests"]))
     else:
-        meter = TokenBudget(1000000, request_limit=700, charged=19744,
+        meter = TokenBudget(1000000, request_limit=request_limit, charged=19744,
                             dollar_limit=5, cost_nanodollars=50000000)
         data = {"token_limit": meter.limit, "dollar_limit": meter.dollar_limit,
                 "carried_tokens": meter.charged, "carried_dollars": 0.05,
                 "cases": {}, "requests": meter.records}
-    requested_cap = int(os.environ.get("PYPSA_GUI_COMPREHENSIVE_TOKEN_CAP", str(meter.limit)))
+    cap_override = os.environ.get("PYPSA_GUI_COMPREHENSIVE_TOKEN_CAP")
+    requested_cap = (meter.limit if cap_override is None else
+                     None if cap_override.lower() in ("unlimited", "none") else int(cap_override))
     if requested_cap != meter.limit:
         data.setdefault("budget_changes", []).append({"from": meter.limit, "to": requested_cap,
                                                        "charged_at_change": meter.charged})

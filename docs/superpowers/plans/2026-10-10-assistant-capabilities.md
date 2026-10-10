@@ -61,3 +61,31 @@ At this checkpoint the only reviewed artifact is this spec. Work-in-progress cod
 Use `/workspace/chat-compat-venv/bin/python` for backend tests and `MPLCONFIGDIR=/tmp/chat-mpl`. Backend commands use `pytest -o addopts=''`; frontend uses its existing Vitest and build scripts. Do not edit production source while a pytest run is active because source-inspection tests use imported function offsets.
 
 The previous failed environment is excluded. Credentials remain managed secrets; do not paste or log them. Prior live-test ledger `/tmp/openai-comprehensive.json` records 632 requests, 3,990,215 charged tokens and a conservative upper cost of $1.05118925. Current authorization is a 5,000,000-token ceiling and a $5 spending cap. This temporary ledger may not survive a new environment: carry the cumulative totals forward before making further calls. Actual live Anthropic coverage is blocked by missing credentials; official Responses-API coverage was blocked by the environment proxy. Mocked native provider streams are not evidence of live provider access.
+
+## Implementation refinements after testing
+
+The feature branch now also has `list_tasks(limit)` so a new chat/provider can discover owned task IDs. Each step's raw arguments are bounded to 1800 characters; references resolving to larger arguments block with guidance to use file IDs. Task views preserve next-step/count metadata while clipping step details to the existing result budget. Optional default arguments compare canonically.
+
+Timeout workers are tracked separately from chat-turn lifetime. Reconciliation refuses an unfinished worker even if its chat turn has already ended. Native export tools are treated as effectful for recovery despite their existing read tier, because they create upload artifacts.
+
+Charts require both aligned dispatch axes and a matching solve-input fingerprint. The common solve service records the canonical input fingerprint under its existing network lock after restoring modelling transforms; it travels with netCDF metadata. Networks solved before this metadata existed must be solved again before using the new result-chart tool. Safe cloning excludes the solver-model edge only on the private copy; the live model is retained.
+
+The chat upload picker and MIME allowlist include native netCDF/HDF network files, CSV ZIP bundles and MATPOWER text. Binary uploads enter the conversation as file metadata and IDs, never inline bytes. Native import verifies the stored content hash and bounds ZIP expansion before invoking the existing importer.
+
+Task outcome gates also recognize terminal failed/aborted jobs, explicit failure payloads and partial submissions. A failed wait cannot complete a result-dependent plan. Partial writes require review. Failed or uncertain steps can receive explicit confirmed reconciliation after independent verification. Interactive `ask_user` calls run outside durable action steps; their answers are user messages, not completed tool results.
+
+Applying a preview shows the immutable server-side old/new/unit diff in the normal confirmation card, without changing the handler's actual `preview_id` arguments. The preceding preview also renders as a table in chat. Reservation occurs before dirty/undo side effects, so refusing a replay does not create a false edit.
+
+## Follow-up live-test handoff
+
+`tests/test_assistant_recovery_live.py` extends acceptance with new-chat recovery without artifact replay, stale-preview refusal/recovery, and native Excel transport with a new saved project and result interpretation. Independent scientific oracles use dynamic demand and objective weights; useful extra read calls are allowed while required action order/counts remain exact. NC, CSV ZIP and Excel offline dynamic round trips pass. At the first follow-up checkpoint, two recovery conversations passed live; Excel artifacts and the original model reply matched the expected objective, but the corrected Excel pytest still needed a fresh live rerun. See the companion assessment for those historical assertion/request-limit failures and the successful superseding continuation below.
+
+At that checkpoint cumulative budget was **4988990/5000000 tokens**, **685 requests**, conservative upper cost **$1.3018635/$5**. Only **11010 tokens** remained, insufficient for another complete production-catalogue Excel conversation. Preserve `/tmp/openai-comprehensive.json` or carry cumulative totals into any replacement ledger. Do not reset the meter. The extra token authorization and completed rerun are recorded below. No production/frontend changes were required by those initial follow-up checks.
+
+## Superseding continuation handoff
+
+The user subsequently authorized ignoring the token ceiling. Set `PYPSA_GUI_COMPREHENSIVE_TOKEN_CAP=unlimited`; the meter persists a null token limit and continues recording all usage. Retain the **$5 cumulative spending cap**, confirmed rates and before-send reservations. `PYPSA_GUI_COMPREHENSIVE_REQUEST_CAP` bounds a new batch against cumulative request count; allow enough slots for the selected per-case maximum without resetting prior usage.
+
+The corrected Excel case now **passes live**, including final interpretation, saved objective 120, dynamic demand/dispatch 5/7 MW, two snapshots, authenticated export/hash and unchanged baseline. All three recovery conversations have passed and replay from source-keyed caches without API calls. Latest cumulative accounting is **698 requests**, **5272406 tokens**, **$1.372893** conservative upper cost. This supersedes the earlier 11010-token/pending-test blocker; preserve these totals across workspace replacement.
+
+The live reply also exposed explanatory text inside a Markdown download destination. `ChatMarkdown` now repairs only the exact observed label followed by a complete relative authenticated artifact route, while keeping the library's default URL transform for every other destination. Regression tests cover the observed plain/encoded forms, normal destinations, scripts, external prefixes, traversal and query suffixes. The shared frontend renderer works for every provider; backend tool handlers and provider protocols are unchanged. See the companion assessment for validation and remaining external-provider blockers.

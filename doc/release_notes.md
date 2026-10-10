@@ -6,6 +6,8 @@
 <!-- Upcoming Release -->
 <!-- ================= -->
 
+* Feat(pypsa-gui): Add chatbot project readiness checks, bounded local job waits with progress, cached and filtered study evidence, baseline-preserving queued sensitivity sweeps with solved-case reuse, and dynamic toolset views. Catalogue eligibility refreshes after project activation within a turn while preserving confirmations and dispatch allowlists. Add a project-refinement skill and real workflow/API regression coverage.
+
 * Fix(pypsa-gui): Bound official OpenAI tool catalogues to 128 declarations while retaining every tool's eligibility and dispatch allowlists; expose authenticated download metadata instead of HTTP response objects; and bind networkless GridSpine studies to backend sessions so chat follows the visible project. Added budgeted, resumable live coverage for every tool contract, real multi-turn conversations, and autonomous project/sensitivity/GridSpine workflows. Added offline-tested Responses transport for Sol/Astra tools; live validation remains dependent on endpoint authentication.
 
 * Fix(pypsa-gui): OpenAI chat tools work with `gpt-6-luna` using the supported reasoning mode. Connection tests keep their client open through token-parameter retries, incomplete streams and invalid tool arguments are refused before execution, and the model picker includes current Astra/Sol API IDs. Anthropic and tool handlers are preserved.

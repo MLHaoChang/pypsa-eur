@@ -513,3 +513,20 @@ it('still follows a rebind to a named project (control)', async () => {
   ])
   await waitFor(() => expect(useUIStore.getState().currentProject).toBe('Other'))
 })
+
+it('renders structured task checkpoints and downloads from real tool_result frames', async () => {
+  renderPanel()
+  await sendAndScript([
+    { event: 'session_init', data: { session_id: 'sess-task' } },
+    { event: 'tool_request', data: { tool_use_id: 'chart-result', tool_name: 'create_chart', args: {}, safety_tier: 'write' } },
+    { event: 'tool_result', data: { tool_use_id: 'chart-result', tool_name: 'create_chart', result: {
+      filename: 'chart.png', download_url: '/api/projects/Demo/uploads/0123456789abcdef/blob',
+      _task: { task_id: '0ba037fe-bc46-43d3-a9c2-9b587c9cd50e', title: 'Deliver study', status: 'ready', completed_steps: 3, total_steps: 4,
+        next_step: { tool: 'build_delivery', status: 'pending' } },
+    } } },
+    { event: 'turn_done', data: { usage_acc: { input_tokens: 10, output_tokens: 10 } } },
+  ])
+  expect(await screen.findByText('ready · 3 / 4 steps')).toBeTruthy()
+  expect(screen.getByText('Next: build_delivery (pending)')).toBeTruthy()
+  expect(screen.getByTestId('assistant-file-download').getAttribute('href')).toBe('/api/projects/Demo/uploads/0123456789abcdef/blob')
+})

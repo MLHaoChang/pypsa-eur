@@ -2156,7 +2156,8 @@ def test_solver_tools_excluded_from_timeout_wrapper():
     assert 'if tool_name in ("run_simulation", "run_ac_pf_stage"):' in src
     assert "result = handler(**(args or {}))" in src
     # The timeout is read live from harness.budget (chat harness issue 08).
-    assert "future.result(timeout=harness_budget.PER_TOOL_TIMEOUT_SECONDS)" in src
+    assert "tool_deadline = time.monotonic() + harness_budget.PER_TOOL_TIMEOUT_SECONDS" in src
+    assert "future.result(timeout=max(0, tool_deadline - time.monotonic()))" in src
 
 
 # ─────────────────────────────────────────────────────────────────────────
