@@ -43,10 +43,11 @@ describe('live results walk', () => {
       stepMs: 0,
     })
     expect(seen).toEqual([KEY_RESULT_TABS[0].id])
+    expect(queued).toHaveLength(1)
     expect(useUIStore.getState().activeSlidePanel).toBe('results')
     expect(useUIStore.getState().assistantDockOpen).toBe(false)
     expect(useUIStore.getState().uiMode).toBe('expert')
-    for (const fn of queued) fn()
+    while (queued.length > 0) queued.shift()?.()
     expect(seen).toEqual(KEY_RESULT_TABS.map((tab) => tab.id))
     expect(useUIStore.getState().resultsTabRequest).toBe('investment')
     cancel()

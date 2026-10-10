@@ -20,7 +20,7 @@ export const KEY_RESULT_TABS = [
 
 export type KeyResultTab = (typeof KEY_RESULT_TABS)[number]
 
-export const KEY_RESULT_STEP_MS = 1200
+export const KEY_RESULT_STEP_MS = 1800
 
 export function keyResultsWalkRequested(text: string): boolean {
   const t = text.toLowerCase()
@@ -38,8 +38,9 @@ export function openProjectRequested(text: string): boolean {
 /**
  * Open each key results tab through `applyUiNavigate` — the same function
  * ChatPanel runs when the harness tool `ui_open_panel` emits a ui_event.
- * The first tab is applied immediately so a caller can observe it without
- * waiting; the rest are spaced so each request can be consumed.
+ *
+ * Steps are chained. Scheduling every timeout up front lets a long Results
+ * render hold the thread until they are all due, so only the last tab paints.
  */
 export function startKeyResultsWalk(opts?: {
   schedule?: (fn: () => void, ms: number) => number
@@ -50,16 +51,20 @@ export function startKeyResultsWalk(opts?: {
   const stepMs = opts?.stepMs ?? KEY_RESULT_STEP_MS
   // Session-only. setUiMode would persist a mode the user did not choose.
   useUIStore.setState({ uiMode: 'expert' })
+  let cancelled = false
   const handles: number[] = []
-  const apply = (tab: KeyResultTab, index: number) => {
+  const apply = (index: number) => {
+    if (cancelled || index >= KEY_RESULT_TABS.length) return
+    const tab = KEY_RESULT_TABS[index]
     applyUiNavigate({ kind: 'navigate', panel_id: 'results', results_tab: tab.id })
     opts?.onStep?.(tab, index, index === KEY_RESULT_TABS.length - 1)
+    if (index + 1 < KEY_RESULT_TABS.length) {
+      handles.push(schedule(() => apply(index + 1), stepMs))
+    }
   }
-  KEY_RESULT_TABS.forEach((tab, index) => {
-    if (index === 0) apply(tab, index)
-    else handles.push(schedule(() => apply(tab, index), index * stepMs))
-  })
+  apply(0)
   return () => {
+    cancelled = true
     for (const handle of handles) window.clearTimeout(handle)
   }
 }

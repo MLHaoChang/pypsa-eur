@@ -4,7 +4,7 @@ import { useUIStore } from '../store/uiStore'
 import { useChatProfiles, useChatReadiness } from '../hooks/useChatProfiles'
 import ChatPanel from './ChatPanel'
 import CompanionLauncher, { type CompanionPresence } from './CompanionLauncher'
-import { keyResultsWalkRequested, openProjectList, openProjectRequested, startKeyResultsWalk } from './liveWalk'
+import { KEY_RESULT_TABS, keyResultsWalkRequested, openProjectList, openProjectRequested, startKeyResultsWalk } from './liveWalk'
 import { ErrorBoundary } from './ErrorBoundary'
 
 /**
@@ -58,8 +58,8 @@ export default function AssistantDock() {
       setPresence('thinking')
       setLiveCaption('Opening each results tab.')
       walkCancel.current = startKeyResultsWalk({
-        onStep: (tab, _index, last) => {
-          setLiveCaption(`${tab.label}. ${tab.blurb}`)
+        onStep: (tab, index, last) => {
+          setLiveCaption(`Tab ${index + 1} of ${KEY_RESULT_TABS.length}. ${tab.label}. ${tab.blurb}`)
           setPresence(last ? 'speaking' : 'thinking')
         },
       })
