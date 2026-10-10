@@ -1,0 +1,115 @@
+<!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
+# Assistant assurance continuation handoff
+
+Status: transferred original design/tests reviewed; current reliability additions
+proposed and pending independent review. Publication pending; no assurance gate
+implemented. Historical tranche details follow; current continuation is below.
+Baseline: master d43809ae. Dictation PR 106 has merged; existing Claude/tool
+behavior remains the baseline. Do not reuse the old failed environment.
+
+Read [spec](spec.md), [tests](test-plan.md), [implementation plan](../../docs/superpowers/plans/2026-10-10-assistant-answer-assurance.md),
+and harness README. Use existing immutable-run/durable-thread/job/UI designs in
+`.scratch/live-voice/`; assurance is a shared publication layer over those services.
+
+## Current source findings and observed controls
+
+Ordinary text/thinking streams without review; tool-return success and navigation
+acknowledgement are not equivalent to completed effects/view state. Reports have
+a diagnostic value-matching audit, not admission. Charts already validate finite
+data/units/current input provenance but need exact dataset/render manifests.
+
+On baseline, relevant existing controls passed **60 tests**: stream-attempt seam,
+pre-dispatch validation, numeric audit and report generator. Command:
+`python -m pytest -o addopts='' -q backend/tests/test_chat_stream_attempt_seam.py
+backend/tests/test_chat_pre_dispatch_validation.py backend/tests/test_number_audit.py
+backend/tests/test_report_generator.py` (paths relative to pypsa-gui).
+Those passes do not establish the proposed gate. No paid APIs needed for planning.
+
+## Next actions
+
+The following numbered actions describe the transferred session. The current
+continuation below supersedes its credential/worktree assumptions and adds
+review requirements; do not treat archived paths as current worktrees.
+
+1. Publish reviewed docs branch `docs/assistant-answer-assurance` (commits
+   `55ce946b`, `34dbb3f3`) once GitHub access is restored. Last authenticated
+   repository API check returned HTTP 401; git fetch has no usable credentials.
+   A missing replacement `PYPSA_GUI_GITHUB_TOKEN` is not evidence of readiness.
+   Do not repeat dictation PR 106, delete locks, or alter another worker's config.
+2. Acceptance worktree `/workspace/assistant-assurance-tests` is on
+   `test/assistant-assurance-acceptance`, based on the local reviewed docs branch.
+   After docs merge, transplant only the acceptance commit onto fetched master
+   (especially if docs squash-merge). Preserve local files and other worktrees.
+3. Opt-in baseline: backend **43 expected failures / 4 controls pass** (47 cases);
+   frontend **11 expected failures / 1 availability control passes** (12 cases).
+   No collection/setup errors or paid APIs. These are new missing-feature tests,
+   not evidence of regressions introduced by an assurance implementation.
+4. Backend relevant regressions: **321 passed, 48 skipped**. Skips are the 47
+   opt-in acceptance cases plus the deliberate golden-record generation helper.
+   Existing provider/tool/confirmation/history/ownership/contracts remain green.
+   Full frontend **3,529 passed, 12 acceptance skips**; TypeScript/Vite build
+   passed. See the results assessment and coverage ledger. Do not count skips
+   as coverage.
+5. Publish tests separately with this ledger. Implementation starts the strict
+   admission/unsafe-stream tracer, then verified input facts and progressive phase
+   tickets. Use vertical red -> minimal implementation -> green -> regressions;
+   complete the pending per-domain/reviewer/race/browser fixtures explicitly.
+6. No master publication/PR is claimed until an authenticated push/API confirms
+   it. Design and initial-test reviews do not establish runtime release readiness.
+
+Credentials, recorded audio and usage ledgers must not enter commits. Preserve
+configured proxy/CA and current shared spend caps for any later opt-in live work.
+
+## Independent review completed
+
+The separate reviewer approved publication/test creation after P2 public-channel
+gating, frozen protocol-v1 and commit-before-emission/idempotent-fetch corrections.
+Final caution: strict pre-approval tool cards cannot expose unchecked prose or
+unapproved artifact links. Approval is a design verdict, not runtime certification.
+
+
+## Test review resolved
+
+Independent re-review approved the first RED tranche after requiring real provider
+requests (no empty-stream pass), persisted nonempty approved history, event order,
+positive mismatched ACK generations, exact canonical chart hashes and explicitly
+labeling the legacy sidecar corruption fixture. Reviewer/restart/revocation races,
+all-domain journeys, performance and real-device coverage remain requirements.
+
+## Current reliability assessment continuation
+
+User requested assessment and improvement of reliability plans/specifications;
+application implementation and publication were not performed in this tranche.
+Restored 16 documentation files from the transfer into the repository, preserving
+the archive as historical source. Current branch: `docs/assurance-reliability-review`
+on `d43809ae`; transferred acceptance source remains in the archive, not installed.
+The old docs/test branches and worktree paths above are not present here.
+
+GitHub repository API and `git ls-remote origin HEAD` succeeded in this session;
+API permissions include push. OpenAI `/v1/models` returned HTTP 200. These checks
+supersede the transfer's HTTP401 blocker, without claiming publication or paid
+generation capability. Runtime readiness metadata reported unknown; observed API
+checks establish access for those requests only. Activation script:
+`source /workspace/activate-assurance-env.sh`; no credentials saved to files.
+
+Read [reliability contract](reliability-contract.md) and the
+[source assessment](../../docs/superpowers/assessments/2026-10-10-assistant-assurance-reliability.md).
+Added required request-slot/key-results checks, versioned metric/calculation
+definitions, raw validity masks, independent numerical oracles and mandatory
+effect guards/read-back/idempotent reconciliation. Tickets 09–11 and added
+matrix groups are proposed, unimplemented and have no new acceptance coverage.
+The original independent review does not approve them. Review/freeze proposed
+observable contracts and compatibility before writing their fixtures.
+
+Next implementation tracers: unsafe-publication buffering, then the worked
+request-scoped energy/cost summary with positive and invalid-interval cases.
+Keep first-tranche counts historical and new groups pending in the ledger.
+
+Current validation (this session):
+
+- `MPLCONFIGDIR=/tmp/chat-mpl /workspace/chat-compat-venv/bin/python -m pytest -o addopts='' -q backend/tests/test_chat_stream_attempt_seam.py backend/tests/test_chat_pre_dispatch_validation.py backend/tests/test_number_audit.py backend/tests/test_report_generator.py` from `pypsa-gui`: **60 passed**, two existing FastAPI lifecycle deprecation warnings.
+- `/workspace/chat-compat-venv/bin/python pypsa-gui/backend/smoke/assistant_inventory.py --check`: **220 tools / 14 tabs / 17 panels** match; behavioral mapping remains pending.
+- Local Markdown check: **21 documentation files / 125 local links**, no broken links/trailing whitespace; ten added case groups uniquely defined and pending coverage explicit.
+- No application/test source changed and no paid model calls ran. These checks do not implement or certify the new guardrails.
