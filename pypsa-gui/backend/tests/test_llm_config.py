@@ -143,6 +143,20 @@ def test_presets_catalogue_shape():
     assert by_id["xai"]["vision"] is False
 
 
+def test_every_shipped_preset_key_env_is_a_managed_key():
+    """Every catalogue preset with a shared key must be storable via app_secrets."""
+    from services import app_secrets, llm_config
+
+    for preset in llm_config.load_presets():
+        key_env = preset.get("key_env")
+        if key_env is None:
+            continue
+        assert app_secrets.is_managed_key(key_env), (
+            f"preset {preset['id']!r} declares key_env {key_env!r}, which "
+            f"app_secrets refuses — keys for this preset cannot be stored"
+        )
+
+
 def test_local_presets_are_keyless():
     from services import llm_config
     by_id = {p["id"]: p for p in llm_config.load_presets()}
