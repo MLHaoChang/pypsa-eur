@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { useEffect } from 'react'
 import { useUIStore } from '../store/uiStore'
+import { slidePanelClickShouldClose } from '../utils/slidePanelDismiss'
 
 vi.mock('./ChatPanel', () => ({
   default: () => <div data-testid="chat-panel-stub">chat</div>,
@@ -90,17 +91,14 @@ describe('the assistant survives its own navigation', () => {
   })
 })
 
-/** Mirrors App.tsx's capture-phase mousedown panel-close listener. */
+/** App.tsx's capture-phase listener, using the same dismiss rule. */
 function PanelCloseHarness() {
   const activeSlidePanel = useUIStore((s) => s.activeSlidePanel)
   const setSlidePanel = useUIStore((s) => s.setSlidePanel)
   useEffect(() => {
     if (!activeSlidePanel) return
     const onPointerDown = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null
-      if (!target || !document.body.contains(target)) return
-      if (target.closest('[data-no-panel-close]')) return
-      setSlidePanel(null)
+      if (slidePanelClickShouldClose(e.target, null)) setSlidePanel(null)
     }
     document.addEventListener('mousedown', onPointerDown, true)
     return () => document.removeEventListener('mousedown', onPointerDown, true)

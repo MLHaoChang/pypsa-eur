@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { slidePanelClickShouldClose } from './utils/slidePanelDismiss'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { FailureInfo } from './api/types'
 import AppHeader from './layout/AppHeader'
@@ -612,12 +613,7 @@ export default function App() {
   useEffect(() => {
     if (!activeSlidePanel) return
     const onPointerDown = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null
-      if (!target || !document.body.contains(target)) return
-      if (panelRef.current?.contains(target)) return
-      if (target.closest('aside')) return
-      if (target.closest('[data-no-panel-close]')) return
-      setSlidePanel(null)
+      if (slidePanelClickShouldClose(e.target, panelRef.current)) setSlidePanel(null)
     }
     document.addEventListener('mousedown', onPointerDown, true)
     return () => document.removeEventListener('mousedown', onPointerDown, true)
