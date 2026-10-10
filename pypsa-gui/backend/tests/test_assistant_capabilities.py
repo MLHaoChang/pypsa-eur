@@ -418,3 +418,37 @@ def test_matpower_roundtrip_reactive_demand_and_impedance_units(baseline, sessio
     assert imported.lines.r.iloc[0] == pytest.approx(0.1)
     assert imported.lines.x.iloc[0] == pytest.approx(0.2)
     assert imported.lines.b.iloc[0] == pytest.approx(0.00001)
+
+
+@pytest.mark.parametrize('format,exporter', [
+    ('netcdf', 'export_network_nc'), ('csv_bundle', 'export_csv_bundle'), ('excel', 'export_excel'),
+])
+def test_native_dynamic_roundtrip_solves_and_persists_evidence(baseline, session, format, exporter):
+    import pandas as pd
+    from services import project_registry
+    before = (baseline[2] / 'network.nc').read_bytes()
+    n = PyPSAService.get_network()
+    n.loads_t.p_set = pd.DataFrame({'L1': [5., 7.]}, index=n.snapshots)
+    n.snapshot_weightings.loc[:, 'objective'] = [2., 3.]
+    artifact = getattr(chat_tools, exporter)()
+    imported = dispatch(session, 'import_uploaded_network', {'file_id': artifact['file_id'], 'format': format})
+    assert not [d for e, d in imported if e == 'tool_error'], imported
+    n = PyPSAService.get_network()
+    assert n.loads_t.p_set['L1'].tolist() == [5, 7]
+    assert n.snapshot_weightings.objective.tolist() == [2, 3]
+    name = 'Dynamic Roundtrip ' + format
+    output(dispatch(session, 'save_project_as', {'name': name}))
+    solved = dispatch(session, 'run_simulation', {})
+    assert not [d for e, d in solved if e == 'tool_error'], solved
+    # 10 currency/MWh * (5 MW * 2 hours + 7 MW * 3 hours).
+    assert PyPSAService.get_network().objective == pytest.approx(310)
+    output(dispatch(session, 'save_project', {'name': name}))
+    evidence = chat_tools.get_study_evidence(section='simulation')
+    assert evidence['available'] and evidence['objective'] == pytest.approx(310)
+    assert evidence['project_id'] != baseline[1]
+    with chat_tools._acting() as (db, user):
+        project = project_registry.resolve_project(db, user, name)
+        import pypsa
+        saved = pypsa.Network(project_registry.project_dir(project) / 'network.nc')
+    assert saved.objective == pytest.approx(310) and saved.loads_t.p_set['L1'].tolist() == [5, 7]
+    assert (baseline[2] / 'network.nc').read_bytes() == before
