@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Mic, Pencil } from 'lucide-react'
 
+// Clears toasts above the chip (max-w 12rem) plus bottom-6 / right-6 (24px).
 export const COMPANION_TOAST_OFFSET = 220
 
 export type CompanionPresence = 'idle' | 'listening' | 'thinking' | 'speaking'
@@ -37,6 +38,7 @@ export default function CompanionLauncher({
     <div
       className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-2"
       data-testid="companion-launcher"
+      data-no-panel-close
       data-presence={presence}
       data-motion={reduce ? 'off' : 'on'}
     >
@@ -79,7 +81,6 @@ export default function CompanionLauncher({
           onClick={onSpeak}
           data-testid="companion-speak"
           aria-label="Open reviewed dictation"
-          aria-pressed="false"
           title="Open the assistant and review dictation"
           className="px-3 py-2 text-text hover:text-accent"
         >

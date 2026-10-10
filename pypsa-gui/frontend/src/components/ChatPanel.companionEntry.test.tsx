@@ -65,6 +65,8 @@ vi.mock('../api/llmSettings', async (importOriginal) => {
   }
 })
 
+import { getChatProfiles } from '../api/llmSettings'
+
 function renderPanel() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -126,4 +128,64 @@ it('profiles focuses the existing model select and does not start dictation', as
   })
   expect(screen.queryByTestId('dictation-panel')).toBeNull()
   expect(recording.current!.getUserMedia).not.toHaveBeenCalled()
+  expect(useUIStore.getState().assistantEntry).toBeNull()
+})
+
+it('profiles clears the entry when the profile list failed to load', async () => {
+  vi.mocked(getChatProfiles).mockRejectedValueOnce(new Error('profiles unavailable'))
+  renderPanel()
+  act(() => {
+    useUIStore.setState({ assistantDockOpen: true, assistantEntry: 'profiles' })
+  })
+  await waitFor(() => {
+    expect(screen.getByTestId('chat-model-select').getAttribute('data-profiles-state')).toBe('error')
+  })
+  await waitFor(() => {
+    expect(useUIStore.getState().assistantEntry).toBeNull()
+  })
+  act(() => {
+    useUIStore.setState({ assistantDockOpen: false })
+  })
+  act(() => {
+    useUIStore.setState({ assistantDockOpen: true, assistantEntry: 'compose' })
+  })
+  await waitFor(() => {
+    expect(document.activeElement).toBe(screen.getByTestId('chat-input'))
+  })
+})
+
+it('profiles clears the entry when no profiles are configured', async () => {
+  vi.mocked(getChatProfiles).mockResolvedValueOnce({
+    profiles: [],
+    active_profile_id: null,
+  })
+  renderPanel()
+  act(() => {
+    useUIStore.setState({ assistantDockOpen: true, assistantEntry: 'profiles' })
+  })
+  await waitFor(() => {
+    expect(screen.getByTestId('chat-model-select').getAttribute('data-profiles-state')).toBe('empty')
+  })
+  await waitFor(() => {
+    expect(useUIStore.getState().assistantEntry).toBeNull()
+  })
+  act(() => {
+    useUIStore.setState({ assistantDockOpen: false })
+  })
+  act(() => {
+    useUIStore.setState({ assistantDockOpen: true, assistantEntry: 'compose' })
+  })
+  await waitFor(() => {
+    expect(document.activeElement).toBe(screen.getByTestId('chat-input'))
+  })
+})
+
+it('drops a pending entry when the dock is closed', async () => {
+  renderPanel()
+  act(() => {
+    useUIStore.setState({ assistantDockOpen: false, assistantEntry: 'profiles' })
+  })
+  await waitFor(() => {
+    expect(useUIStore.getState().assistantEntry).toBeNull()
+  })
 })

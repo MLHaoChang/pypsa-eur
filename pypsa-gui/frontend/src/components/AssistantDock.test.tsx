@@ -114,8 +114,8 @@ describe('AssistantDock', () => {
 // "I do not see the prominent button for the assistant when the app is
 // launched." The dock shipped default-collapsed to a 40px strip holding a
 // single 16px muted icon — which is the opt-in panel the spec exists to
-// replace, wearing a different shape. The spec's collapsed state is "a slim
-// always-visible strip carrying the launcher button AND THE MICROPHONE".
+// replace, wearing a different shape. The spec's collapsed state is the
+// floating companion (compose, speak, Live, profile chip) on every surface.
 
 describe('assistant dock prominence', () => {
   beforeEach(() => {

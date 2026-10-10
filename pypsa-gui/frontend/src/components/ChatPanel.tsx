@@ -3033,7 +3033,11 @@ export default function ChatPanel() {
   const modelSelectRef = useRef<HTMLSelectElement>(null)
 
   useEffect(() => {
-    if (!assistantDockOpen || assistantEntry == null) return
+    if (!assistantDockOpen) {
+      if (assistantEntry != null) useUIStore.getState().setAssistantEntry(null)
+      return
+    }
+    if (assistantEntry == null) return
     if (assistantEntry === 'speak') {
       setDictationPanelRequested(true)
       useUIStore.getState().setAssistantEntry(null)
@@ -3044,12 +3048,21 @@ export default function ChatPanel() {
       return
     }
     if (assistantEntry !== 'profiles') return
-    if (streaming || profilesQuery.data == null) return
+    if (streaming) return
+    if (profilesQuery.isError) {
+      useUIStore.getState().setAssistantEntry(null)
+      return
+    }
+    if (profilesQuery.data == null) return
+    if (profilesQuery.data.profiles.length === 0) {
+      useUIStore.getState().setAssistantEntry(null)
+      return
+    }
     const select = modelSelectRef.current
     if (select == null || select.disabled) return
     select.focus()
     useUIStore.getState().setAssistantEntry(null)
-  }, [assistantDockOpen, assistantEntry, profilesQuery.data, streaming])
+  }, [assistantDockOpen, assistantEntry, profilesQuery.data, profilesQuery.isError, streaming])
 
   const chatProfiles = profilesQuery.data?.profiles ?? []
   const activeProfileId = profilesQuery.data?.active_profile_id ?? null

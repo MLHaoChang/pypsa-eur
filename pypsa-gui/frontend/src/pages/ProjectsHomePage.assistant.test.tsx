@@ -84,9 +84,9 @@ describe('the assistant on the projects home', () => {
   })
 
   // Collapsed is a legitimate state — the user's choice persists across
-  // surfaces — but the strip has to still be there, or the landing page loses
-  // the affordance entirely the first time someone collapses it in the
-  // workbench.
+  // surfaces — but the floating companion has to still be there, or the landing
+  // page loses the affordance entirely the first time someone collapses it in
+  // the workbench.
   it('keeps its launcher strip when the user has collapsed it', async () => {
     useUIStore.setState({ assistantDockOpen: false })
     renderPage()
