@@ -46,6 +46,9 @@ merged into master as `19e6e5fdfedff6b706212d8bf23f7c0f937c0879`.
 Implementation branch: `feat/assistant-capability-coverage`, fresh worktree at
 `/workspace/assistant-implementation`; the dictation branch and earlier environment
 were not modified. No paid APIs, subscription changes or test credentials needed.
+Implementation publication: [PR 108](https://github.com/MLHaoChang/pypsa-eur/pull/108),
+with code/test commit `2e4c919c830786a5cf57e40ee2824a4fa92067df`.
+Local test evidence is recorded below; check the PR for remote merge/check status.
 
 TDD evidence:
 
