@@ -111,7 +111,7 @@ def test_presets_catalogue_shape():
     presets = llm_config.load_presets()
     ids = {p["id"] for p in presets}
     assert ids == {"anthropic", "openai", "moonshot", "dashscope",
-                   "ollama", "lmstudio"}
+                   "ollama", "lmstudio", "xai"}
     for p in presets:
         assert set(p) == {"id", "label", "wire", "base_url", "auth",
                           "key_env", "token_param", "tools", "vision",
@@ -131,8 +131,16 @@ def test_presets_catalogue_shape():
     # else — local servers and the OpenAI-compatible vendors — takes the
     # original, which is also the fallback for `custom`.
     assert by_id["openai"]["token_param"] == "max_completion_tokens"
-    for other in ("moonshot", "dashscope", "ollama", "lmstudio"):
+    for other in ("moonshot", "dashscope", "ollama", "lmstudio", "xai"):
         assert by_id[other]["token_param"] == "max_tokens"
+    assert by_id["moonshot"]["wire"] == "openai"
+    assert by_id["moonshot"]["base_url"] == "https://api.moonshot.ai/v1"
+    assert by_id["moonshot"]["key_env"] == "MOONSHOT_API_KEY"
+    assert by_id["xai"]["wire"] == "openai"
+    assert by_id["xai"]["base_url"] == "https://api.x.ai/v1"
+    assert by_id["xai"]["key_env"] == "XAI_API_KEY"
+    assert by_id["xai"]["auth"] == "bearer"
+    assert by_id["xai"]["vision"] is False
 
 
 def test_local_presets_are_keyless():
@@ -306,6 +314,7 @@ def test_every_loaded_profiles_key_env_is_a_managed_key(appdata):
 _SHARED_PROVIDER_KEYS = frozenset({
     "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
     "MOONSHOT_API_KEY", "DASHSCOPE_API_KEY",
+    "XAI_API_KEY",
 })
 
 
@@ -368,6 +377,7 @@ def test_a_spoofed_preset_can_never_inherit_a_shared_provider_key(
         ("openai", "openai"),
         ("moonshot", "openai"),
         ("dashscope", "openai"),
+        ("xai", "openai"),
     ],
 )
 def test_an_exact_bearer_preset_is_locked_to_its_own_base_url(appdata, preset, wire):
@@ -508,6 +518,7 @@ def test_a_profile_may_not_contradict_its_presets_declared_wire(appdata):
         ("dashscope", "openai"),
         ("ollama", "openai"),
         ("lmstudio", "openai"),
+        ("xai", "openai"),
     ],
 )
 def test_every_shipped_preset_accepts_its_own_declared_wire(appdata, preset, wire):
