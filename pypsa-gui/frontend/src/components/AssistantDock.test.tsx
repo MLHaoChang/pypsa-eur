@@ -25,12 +25,23 @@ vi.mock('./ChatPanel', () => ({
   },
 }))
 
+vi.mock('../hooks/useChatProfiles', () => ({
+  useChatProfiles: () => ({
+    data: {
+      profiles: [{ id: 'claude', label: 'Claude', wire: 'anthropic' as const }],
+      active_profile_id: 'claude',
+    },
+    isError: false,
+  }),
+  useChatReadiness: () => ({ effectiveProfileId: 'claude', ready: true }),
+}))
+
 import AssistantDock from './AssistantDock'
 
 describe('AssistantDock', () => {
   beforeEach(() => {
     localStorage.clear()
-    useUIStore.setState({ assistantDockOpen: false })
+    useUIStore.setState({ assistantDockOpen: false, assistantEntry: null })
     chatPanelMounts.current = 0
   })
 
@@ -40,7 +51,7 @@ describe('AssistantDock', () => {
     // *.test.tsx) — getByTestId already throws if the node is absent, so
     // toBeTruthy() (built into vitest's expect) confirms the query
     // succeeded, matching this codebase's convention.
-    expect(screen.getByTestId('assistant-dock-launcher')).toBeTruthy()
+    expect(screen.getByTestId('companion-compose')).toBeTruthy()
   })
 
   it('keeps ChatPanel mounted while collapsed', () => {
@@ -51,8 +62,9 @@ describe('AssistantDock', () => {
   it('expands when the launcher is clicked', async () => {
     const user = userEvent.setup()
     render(<AssistantDock />)
-    await user.click(screen.getByTestId('assistant-dock-launcher'))
+    await user.click(screen.getByTestId('companion-compose'))
     expect(useUIStore.getState().assistantDockOpen).toBe(true)
+    expect(useUIStore.getState().assistantEntry).toBe('compose')
     // No jest-dom toBeVisible() here either; this repo's own convention for
     // CSS-class-driven visibility is a className check (see
     // CommandPalette.test.tsx's ArrowDown highlight assertions, which match
@@ -87,7 +99,7 @@ describe('AssistantDock', () => {
     render(<AssistantDock />)
     expect(chatPanelMounts.current).toBe(1)
 
-    await user.click(screen.getByTestId('assistant-dock-launcher'))
+    await user.click(screen.getByTestId('companion-compose'))
     expect(useUIStore.getState().assistantDockOpen).toBe(true)
     expect(chatPanelMounts.current).toBe(1)
 
@@ -108,20 +120,42 @@ describe('AssistantDock', () => {
 describe('assistant dock prominence', () => {
   beforeEach(() => {
     localStorage.clear()
-    useUIStore.setState({ assistantDockOpen: false })
+    useUIStore.setState({ assistantDockOpen: false, assistantEntry: null })
   })
 
-  it('labels the collapsed launcher rather than showing a bare icon', () => {
+  it('offers reviewed dictation from the collapsed companion', async () => {
+    const user = userEvent.setup()
     render(<AssistantDock />)
-    const launcher = screen.getByTestId('assistant-dock-launcher')
-    // An unlabelled glyph in a 40px gutter is indistinguishable from a
-    // decoration. The word is what makes it findable at a glance.
-    expect(launcher.textContent).toMatch(/assistant/i)
+    expect(screen.getByTestId('companion-speak')).toBeTruthy()
+    await user.click(screen.getByTestId('companion-speak'))
+    expect(useUIStore.getState().assistantDockOpen).toBe(true)
+    expect(useUIStore.getState().assistantEntry).toBe('speak')
   })
 
-  it('carries the microphone in the collapsed strip, as the spec requires', () => {
+  it('does not open the console when Live is clicked', async () => {
+    const user = userEvent.setup()
     render(<AssistantDock />)
-    expect(screen.getByTestId('assistant-dock-mic')).toBeTruthy()
+    await user.click(screen.getByTestId('companion-live'))
+    expect(useUIStore.getState().assistantDockOpen).toBe(false)
+    expect(useUIStore.getState().assistantEntry).toBeNull()
+  })
+
+  it('reserves no column width while collapsed', () => {
+    render(<AssistantDock />)
+    const dock = screen.getByTestId('assistant-dock')
+    const classes = dock.className.split(/\s+/)
+    expect(classes).toContain('w-0')
+    expect(classes).not.toContain('w-10')
+    expect(dock.style.width).toBe('')
+  })
+
+  it('hides the floating companion while the console is open', () => {
+    useUIStore.setState({ assistantDockOpen: true })
+    render(<AssistantDock />)
+    expect(screen.queryByTestId('companion-launcher')).toBeNull()
+    const handle = screen.getByTestId('assistant-dock-resize')
+    expect(handle.getAttribute('role')).toBe('separator')
+    expect(handle.getAttribute('aria-orientation')).toBe('vertical')
   })
 
   it('offers a resize handle when open', () => {

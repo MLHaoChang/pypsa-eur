@@ -6,6 +6,17 @@ vi.mock('./ChatPanel', () => ({
   default: () => <div data-testid="chat-panel-stub">chat</div>,
 }))
 
+vi.mock('../hooks/useChatProfiles', () => ({
+  useChatProfiles: () => ({
+    data: {
+      profiles: [{ id: 'claude', label: 'Claude', wire: 'anthropic' as const }],
+      active_profile_id: 'claude',
+    },
+    isError: false,
+  }),
+  useChatReadiness: () => ({ effectiveProfileId: 'claude', ready: true }),
+}))
+
 import AssistantDock from './AssistantDock'
 
 // The reported bug, as a guard rail.

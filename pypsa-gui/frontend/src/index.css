@@ -343,3 +343,14 @@ html {
 .leaflet-interactive:focus,
 .leaflet-interactive:focus-visible,
 .leaflet-container svg path:focus { outline: none; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .companion-idle {
+    animation: companion-bob 2.4s ease-in-out infinite;
+  }
+}
+
+@keyframes companion-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
