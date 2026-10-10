@@ -54,6 +54,16 @@ vi.mock('../api/simulation', () => ({
     }),
   },
 }))
+vi.mock('../api/llmSettings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/llmSettings')>()
+  return {
+    ...actual,
+    getChatProfiles: vi.fn().mockResolvedValue({
+      profiles: [{ id: 'claude', label: 'Claude', wire: 'anthropic', chat_ready: true }],
+      active_profile_id: 'claude',
+    }),
+  }
+})
 
 function renderPanel() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -101,4 +111,19 @@ it('speak opens the review panel and does not start a recording or a chat turn',
   expect(recording.current!.getUserMedia).not.toHaveBeenCalled()
   expect(vi.mocked(createChatStream)).not.toHaveBeenCalled()
   expect(useUIStore.getState().assistantEntry).toBeNull()
+})
+
+it('profiles focuses the existing model select and does not start dictation', async () => {
+  renderPanel()
+  act(() => {
+    useUIStore.setState({ assistantDockOpen: true, assistantEntry: 'profiles' })
+  })
+  await waitFor(() => {
+    expect(screen.getByTestId('chat-model-select').getAttribute('data-profiles-state')).toBe('ready')
+  })
+  await waitFor(() => {
+    expect(document.activeElement).toBe(screen.getByTestId('chat-model-select'))
+  })
+  expect(screen.queryByTestId('dictation-panel')).toBeNull()
+  expect(recording.current!.getUserMedia).not.toHaveBeenCalled()
 })

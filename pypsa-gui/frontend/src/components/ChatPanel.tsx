@@ -2994,15 +2994,9 @@ export default function ChatPanel() {
     const opened = assistantDockOpen && !prevDockOpenRef.current
     prevDockOpenRef.current = assistantDockOpen
     if (!opened) return
+    if (useUIStore.getState().assistantEntry === 'profiles') return
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [assistantDockOpen])
-
-  useEffect(() => {
-    if (!assistantDockOpen || assistantEntry == null || assistantEntry === 'profiles') return
-    const entry = assistantEntry
-    useUIStore.getState().setAssistantEntry(null)
-    if (entry === 'speak') setDictationPanelRequested(true)
-  }, [assistantDockOpen, assistantEntry])
 
   const onClearHistory = useCallback(() => {
     // Clear UI state in-place (does NOT trigger the project-switch reset
@@ -3036,6 +3030,27 @@ export default function ChatPanel() {
   // loading (`!profilesQuery.data`), refused (`profilesQuery.isError`), and
   // empty (`data.profiles.length === 0`).
   const profilesQuery = useChatProfiles()
+  const modelSelectRef = useRef<HTMLSelectElement>(null)
+
+  useEffect(() => {
+    if (!assistantDockOpen || assistantEntry == null) return
+    if (assistantEntry === 'speak') {
+      setDictationPanelRequested(true)
+      useUIStore.getState().setAssistantEntry(null)
+      return
+    }
+    if (assistantEntry === 'compose') {
+      useUIStore.getState().setAssistantEntry(null)
+      return
+    }
+    if (assistantEntry !== 'profiles') return
+    if (streaming || profilesQuery.data == null) return
+    const select = modelSelectRef.current
+    if (select == null || select.disabled) return
+    select.focus()
+    useUIStore.getState().setAssistantEntry(null)
+  }, [assistantDockOpen, assistantEntry, profilesQuery.data, streaming])
+
   const chatProfiles = profilesQuery.data?.profiles ?? []
   const activeProfileId = profilesQuery.data?.active_profile_id ?? null
   // `profileId` (the store's explicit pick) wins; `null` falls back to
@@ -3119,6 +3134,7 @@ export default function ChatPanel() {
           // "zero profiles exist", a materially different fact from
           // "couldn't find out".
           <select
+            ref={modelSelectRef}
             disabled
             data-profiles-state="error"
             className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px] text-danger"
@@ -3129,6 +3145,7 @@ export default function ChatPanel() {
           </select>
         ) : !profilesQuery.data ? (
           <select
+            ref={modelSelectRef}
             disabled
             data-profiles-state="loading"
             className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px] text-muted"
@@ -3138,6 +3155,7 @@ export default function ChatPanel() {
           </select>
         ) : chatProfiles.length === 0 ? (
           <select
+            ref={modelSelectRef}
             disabled
             data-profiles-state="empty"
             className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px] text-muted"
@@ -3148,6 +3166,7 @@ export default function ChatPanel() {
           </select>
         ) : (
           <select
+            ref={modelSelectRef}
             value={selectedProfileId ?? ''}
             onChange={(e) => onPickProfile(e.target.value)}
             disabled={streaming}
