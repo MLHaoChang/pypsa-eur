@@ -79,9 +79,9 @@ export function startKeyResultsWalk(opts?: {
 /**
  * Delay the next tab on a worker timer.
  *
- * The page's own timers and animation frames can all become due during the
- * first Results render, which paints only the last tab. A worker timer is a
- * separate queue, so each tab stays up for `ms` before the next navigate.
+ * The page's own timers can all become due during the first Results render,
+ * which paints only the last tab. This worker waits on the wall clock so
+ * each tab stays visible for `ms` before the next navigate.
  */
 function scheduleOnWorker(fn: () => void, ms: number): () => void {
   if (typeof Worker === 'undefined') {
@@ -89,7 +89,7 @@ function scheduleOnWorker(fn: () => void, ms: number): () => void {
     return () => window.clearTimeout(id)
   }
   const worker = new Worker(URL.createObjectURL(new Blob([
-    'self.onmessage=function(e){setTimeout(function(){self.postMessage(0)},e.data)}',
+    'self.onmessage=function(e){var end=Date.now()+Number(e.data);while(Date.now()<end){}self.postMessage(0)}',
   ], { type: 'application/javascript' })))
   let done = false
   worker.onmessage = () => {
