@@ -35,6 +35,13 @@ remaining blockers and next runnable tracer to [handoff](../session-handoff.md).
 
 ## Comments
 
+### First implementation continuation
+
+Current-input capture, owned persistence, exact component/metric/unit matching and
+fresh source/ACL checks are implemented for a static-input pilot. This ticket is
+not complete: retained runs, coverage masks, all-domain adapters and recovery/race
+fixtures remain required. See [implementation status](../implementation-status.md).
+
 ### Proposed reliability revision
 
 P1 also requires A1.7: preserve raw validity/missing masks before sanitization and apply numerical validity/coverage rules. Coordinate ticket 10; matching a sanitized service response cannot certify calculation correctness.

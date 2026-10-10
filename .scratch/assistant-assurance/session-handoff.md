@@ -3,9 +3,10 @@
 
 # Assistant assurance continuation handoff
 
-Status: transferred original design/tests reviewed; current reliability additions
-proposed and pending independent review. Publication pending; no assurance gate
-implemented. Historical tranche details follow; current continuation is below.
+Status: first local publication/static-input pilot implemented; current reliability
+additions proposed and pending independent review. Publication pending. Read
+[implementation status](implementation-status.md) for current supported behavior.
+Historical tranche details follow; current continuation is below.
 Baseline: master d43809ae. Dictation PR 106 has merged; existing Claude/tool
 behavior remains the baseline. Do not reuse the old failed environment.
 
@@ -78,7 +79,7 @@ positive mismatched ACK generations, exact canonical chart hashes and explicitly
 labeling the legacy sidecar corruption fixture. Reviewer/restart/revocation races,
 all-domain journeys, performance and real-device coverage remain requirements.
 
-## Current reliability assessment continuation
+## Documentation assessment continuation (before implementation)
 
 User requested assessment and improvement of reliability plans/specifications;
 application implementation and publication were not performed in this tranche.
@@ -113,3 +114,33 @@ Current validation (this session):
 - `/workspace/chat-compat-venv/bin/python pypsa-gui/backend/smoke/assistant_inventory.py --check`: **220 tools / 14 tabs / 17 panels** match; behavioral mapping remains pending.
 - Local Markdown check: **21 documentation files / 125 local links**, no broken links/trailing whitespace; ten added case groups uniquely defined and pending coverage explicit.
 - No application/test source changed and no paid model calls ran. These checks do not implement or certify the new guardrails.
+
+## First implementation continuation
+
+The subsequent user request authorized starting implementation as well as review.
+Created `feat/assistant-assurance-publication` from documentation commit `f533feda`;
+restored acceptance source without applying the archived patches. Implemented the
+[static-input/publication pilot](implementation-status.md), with default mode
+disabled. Whole P0–P7 and proposed reliability tickets remain open. No paid model
+calls, deployment, push or pull request is claimed.
+
+Observed baseline before implementation: **43 failures / 4 passes**, reproducing
+the original 47-case backend RED result. After implementation the original suite
+has **44 passes / 3 pending P4 failures**. The initial combined run also exposed a
+quota-fixture isolation failure, corrected without weakening its reclamation check.
+
+Final checks (venv `/workspace/chat-compat-venv`, local loopback networking enabled
+for TestClient and frontend tooling):
+
+- From backend: `PYPSA_GUI_ANSWER_ASSURANCE_MODE=disabled python -m pytest -o addopts='' tests/test_answer_assurance.py tests/assurance_acceptance -q --tb=short`: **68 passed, 3 skipped**. Only unimplemented P4 artifact cases are opt-in; implemented acceptance and 24 new boundary cases run by default.
+- From backend: `PYPSA_GUI_ANSWER_ASSURANCE_MODE=disabled python -m pytest -o addopts='' tests/test_answer_assurance.py tests/test_chat_*.py tests/test_harness_*.py tests/test_number_audit.py tests/test_report_generator.py -q --tb=short`: **1,851 passed, 2 deliberate skips**. Before final strict-only precision formatting and extra fixtures; final assurance suite verifies those changes.
+- From frontend: `npm test -- --maxWorkers=2`: **3,543 passed / 299 files**. Before final callback guards.
+- Final frontend: `npm test -- ChatPanel AssistantResultCard --maxWorkers=2`: **574 passed / 23 files**, including 17 assurance cases. The new guard initially blocked legitimate multi-project rebinds; it now tracks server-issued ordinary-chat rebinds while rejecting callbacks after user changes, and the existing lock/rebind regression passes.
+- `npm run build`: TypeScript and Vite pass; existing large-chunk warning. Final post-guard build also checked.
+- Ruff lint/format on new assurance modules and restored acceptance files pass; source inventory remains **220 tools / 14 tabs / 17 panels**; local documentation links and `git diff --check` pass.
+
+Next tracer: freeze/review the proposed computed-block and request-slot additions,
+then implement independently checked weighted energy/cost summaries with raw
+invalid-interval coverage. P4 manifests/download admission and positive UI ACKs
+remain separate incomplete tranches. This editing-agent review does not replace
+the required independent/domain/release reviews.

@@ -19,6 +19,7 @@
 import { client } from './client'
 import { rawFetchHeaders } from './csrf'
 import type { UiContext } from '../utils/uiContext'
+import type { AnswerReceipt } from '../utils/answerAssurance'
 
 /**
  * A model id. Deliberately a bare `string`, no longer a closed union.
@@ -76,6 +77,7 @@ export interface ChatStreamRequest {
   // guesswork — and speech reciprocity (a spoken turn gets a spoken answer)
   // depends on getting it right.
   input_mode?: 'voice' | 'text'
+  assurance?: { version: 1; mode: 'strict' }
 }
 
 export interface ChatFrame {
@@ -346,6 +348,8 @@ export interface ChatTurn {
   /** Which profile produced the turn. Absent on records written before
    *  profiles existed; the reader falls back to resolving `model`. */
   profile_id?: string
+  answer_id?: string
+  receipt?: AnswerReceipt
   user: string
   assistant: Array<Record<string, unknown>>
   usage: {

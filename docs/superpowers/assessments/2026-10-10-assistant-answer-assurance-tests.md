@@ -8,7 +8,9 @@ revision. Current source audit/access and pending added requirements are recorde
 in the [reliability assessment](2026-10-10-assistant-assurance-reliability.md).
 
 The comprehensive design and initial acceptance tests passed independent review.
-**The assurance gate remains unimplemented.** This assessment records an intentional
+**Historical pre-implementation assessment.** Current pilot behavior and validation
+are recorded in the [implementation status](../../../.scratch/assistant-assurance/implementation-status.md).
+At the time of this assessment the gate was unimplemented. It records an intentional
 RED baseline and existing regression controls, not a successful assurance release.
 The [coverage ledger](../../../.scratch/assistant-assurance/coverage-ledger.md)
 maps every requirement group to executable coverage or explicit remaining work.

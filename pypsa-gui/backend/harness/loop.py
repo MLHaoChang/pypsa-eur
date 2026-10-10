@@ -499,10 +499,12 @@ def _stream_assistant_message(
                     )
                 if ev.type == "text_delta":
                     emitted_this_attempt = True
-                    yield "token", {"delta": ev.text}
+                    if session.assurance_turn is None:
+                        yield "token", {"delta": ev.text}
                 elif ev.type == "thinking_delta":
                     emitted_this_attempt = True
-                    yield "thinking", {"delta": ev.text}
+                    if session.assurance_turn is None:
+                        yield "thinking", {"delta": ev.text}
                 # Tool-arg streaming is silent on `token` — without a signal
                 # the UI looks frozen after "I'll create them…". Emit as soon
                 # as the model opens a tool_use block.
@@ -979,6 +981,7 @@ def run_turn(
     ui_context: dict[str, Any] | None = None,
     wire_conflict: bool = False,
     unknown_profile_id: str | None = None,
+    strict_assurance: bool = False,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
     """
     Provider-driven turn driver (Phase 3 replacement for the Phase 2 stub):
@@ -1121,7 +1124,10 @@ def run_turn(
         # in-flight flag + records the duration on EVERY exit path (normal
         # return, error return, GeneratorExit on client disconnect) without
         # re-indenting the 480-line body. #19 + #20 share this single finally.
-        yield from _run_turn_body(
+        from harness import assurance
+        if strict_assurance or assurance.strict_configured():
+            session.assurance_turn = assurance.Turn(session, PyPSAService.get_active_context())
+        for event, payload in _run_turn_body(
             session,
             message,
             client=client,
@@ -1129,12 +1135,18 @@ def run_turn(
             message_history=message_history,
             attachment_file_ids=attachment_file_ids,
             ui_context=ui_context,
-        )
+        ):
+            if session.assurance_turn is not None:
+                payload = session.assurance_turn.project_frame(event, payload)
+                if payload is None:
+                    continue
+            yield event, payload
     finally:
         _metric_record_duration(time.monotonic() - _t_start)
         with session._lock:
             session._turn_in_flight = False
             session._undo_snapshotted = []
+            session.assurance_turn = None
         # C-3 — the turn's profile must not outlive the turn. A tool invoked
         # OUTSIDE a turn (a direct call, a test) has no profile to honour and
         # must take the pre-profile path; leaving a stale value bound would
@@ -1372,6 +1384,8 @@ def _run_turn_body(
     else:
         with session._lock:
             seed = list(session.messages)
+    if session.assurance_turn is not None:
+        seed = session.assurance_turn.history_seed(seed)
     # Sanitise the SEED, not every append: this local list is the array that
     # actually goes to the API, and this is its only external input. Entries
     # appended later (below, and at the tool-result / cap sites) are freshly
@@ -1529,6 +1543,9 @@ def _run_turn_body(
         live_meta=_format_live_network_meta(turn_ctx),
         include_tools=profile.tools,
     )
+    if session.assurance_turn is not None:
+        from harness.assurance import PROMPT
+        system_prompt += "\n" + PROMPT
 
     # A8 — at most one fallback-model downgrade after rate_limited retries
     # are exhausted, PER TURN (public cost/availability escape hatch).
@@ -1621,6 +1638,21 @@ def _run_turn_body(
         # assistant turn to both the outbound array and the session history
         # for the next iteration.
         assistant_blocks = final_blocks
+        if session.assurance_turn is not None:
+            if any(b.get("type") == "tool_use" for b in assistant_blocks):
+                # Retain tool protocol pairing, never private preamble/thinking.
+                assistant_blocks = [b for b in assistant_blocks if b.get("type") == "tool_use"]
+            else:
+                yield "answer_progress", {"version": 1, "turn_id": session.assurance_turn.turn_id,
+                                          "stage": "checking_claims", "status": "running"}
+                try:
+                    assistant_blocks = session.assurance_turn.commit(assistant_blocks, turn_ctx)
+                except Exception:  # noqa: BLE001 — fail closed, including uncertain storage
+                    logger.exception("checked answer could not be committed")
+                    yield "error", {"error_kind": "assurance_publication_failed",
+                                    "message": "The checked answer could not be saved. No answer was published."}
+                    yield "session_done", {"reason": "assurance_publication_failed"}
+                    return
         # One rule for both arrays: a turn with no blocks the API accepts is
         # not replayed at all. `final_blocks` comes back EMPTY on a refused
         # or aborted generation, and `{"role": "assistant", "content": []}`
@@ -1635,7 +1667,10 @@ def _run_turn_body(
             messages.append(assistant_msg)
             # Persist to session for next-turn rehydration (E2E QA: INT-001).
             with session._lock:
-                session.append_history_message(assistant_msg)
+                history_msg = assistant_msg
+                if session.assurance_turn is not None and session.assurance_turn.approved:
+                    history_msg = {**assistant_msg, "_approved_answer_id": session.assurance_turn.approved["answer_id"]}
+                session.append_history_message(history_msg)
 
         tool_uses = [b for b in assistant_blocks if b.get("type") == "tool_use"]
 
@@ -1692,12 +1727,35 @@ def _run_turn_body(
                 # round-trip cleanly through `extra="ignore"` readers.
                 if attachment_file_ids:
                     turn_record["attachment_file_ids"] = list(attachment_file_ids)
+                if session.assurance_turn is not None:
+                    turn_record.update(answer_id=session.assurance_turn.approved["answer_id"],
+                                       receipt=session.assurance_turn.approved["receipt"])
                 append_turn(ctx, turn_record)
             except Exception:  # noqa: BLE001 — persistence is best-effort
                 logger.exception(
                     "chat: failed to persist turn to chat.jsonl"
                 )
-            yield "turn_done", {"usage": usage_snapshot}
+                if session.assurance_turn is not None:
+                    yield "error", {"error_kind": "assurance_publication_failed",
+                                    "message": "The checked answer could not be saved to history."}
+                    yield "session_done", {"reason": "assurance_publication_failed"}
+                    return
+            if session.assurance_turn is not None:
+                if session.abort_event.is_set() or _project_switched():
+                    yield "session_done", {"reason": "aborted"}
+                    return
+                from services import assurance_records
+                assurance_records.answer(session.assurance_turn.owner, session.assurance_turn.approved["answer_id"])
+                yield "answer_approved", session.assurance_turn.approval()
+                assurance_records.answer(session.assurance_turn.owner, session.assurance_turn.approved["answer_id"])
+                if session.abort_event.is_set() or _project_switched():
+                    yield "session_done", {"reason": "aborted"}
+                    return
+                yield "token", {"delta": session.assurance_turn.approved["text"]}
+                yield "turn_done", {"usage": usage_snapshot,
+                                    "answer_id": session.assurance_turn.approved["answer_id"]}
+            else:
+                yield "turn_done", {"usage": usage_snapshot}
             return
 
         # M7: parallel-destructive pre-scan across THIS assistant message.
@@ -1965,6 +2023,19 @@ def _dispatch_real_tool_call(
             "content": "unknown_tool",
         })
         return
+
+    if session.assurance_turn is not None:
+        try:
+            admitted = session.assurance_turn.tool_guard(tool_name, args)
+        except Exception:  # noqa: BLE001 — required guard failures never abstain
+            admitted = False
+        if not admitted:
+            yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
+                                 "error_kind": "capability_unsupported",
+                                 "message": "This operation is outside the checked-input pilot."}
+            tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
+                                           "is_error": True, "content": "Unsupported in strict checked-input mode; no effect executed."})
+            return
 
     # #19 — argument validation BEFORE the confirmation gate. The gate below
     # takes the user's authorisation for an operation the dispatcher may then
@@ -2278,6 +2349,9 @@ def _dispatch_real_tool_call(
     if task_state is not None:
         result = {**result, "_task": task_state} if isinstance(result, dict) else {"result": result, "_task": task_state}
 
+    if session.assurance_turn is not None:
+        session.assurance_turn.capture(tool_name, args or {}, result, tool_use_id)
+
     # UI-control tools (and compare_scenarios with open_compare_rail) return a
     # marker dict with `_ui_event: True`. Emit a dedicated SSE frame so the
     # ChatPanel can drive uiStore / Results tabs / compare rail; strip the
@@ -2326,6 +2400,12 @@ def _dispatch_real_tool_call(
             },
         }
         yield "ui_event", ui_event_payload
+
+    if session.assurance_turn is not None:
+        projection = session.assurance_turn.result_projection(tool_name, result_for_model, tool_use_id)
+        result_for_model = {**result_for_model, "_assurance": projection["_assurance"]} if isinstance(result_for_model, dict) else projection
+        if tool_name == "ui_open_panel":
+            result_for_model["ui_navigated"] = False
 
     # Success — push into result_refs (small summary) and emit tool_result.
     session.push_result_ref({

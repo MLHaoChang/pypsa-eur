@@ -38,6 +38,14 @@ remaining blockers and next runnable tracer to [handoff](../session-handoff.md).
 
 ## Comments
 
+### First implementation continuation
+
+Strict text/thinking buffering, typed static facts, software fallback, durable
+answer/receipt and checked UI/history/export/TTS are implemented in the first
+pilot. This ticket is not complete: derived claims, request fulfillment, complete
+surface mappings and release fixtures remain required. See
+[implementation status](../implementation-status.md).
+
 ### Proposed reliability revision
 
 P2 also requires A2.8–A2.10: request-slot fulfillment, versioned formulas with independently computed values, and complete-population predicates. Coordinate tickets 09–10; valid facts answering a different question fail.

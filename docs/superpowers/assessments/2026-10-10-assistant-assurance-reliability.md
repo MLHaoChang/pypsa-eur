@@ -3,7 +3,9 @@
 
 # Assistant reliability plan assessment and proposed additions
 
-Status: source audit and proposed documentation revision; no application changes.
+Status: source audit and proposed documentation revision, completed before application
+changes. The subsequent [first implementation](../../../.scratch/assistant-assurance/implementation-status.md)
+uses the reviewed v1 subset; the proposed reliability contracts remain pending review.
 Baseline: `d43809aed8728c844cc4d5119785b68801c91a8e`.
 Original handoff/design review is historical evidence. This assessment is by the
 editing agent; it is not a separate independent review or release certification.

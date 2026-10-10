@@ -13,6 +13,7 @@
  */
 import { create } from 'zustand'
 import { useUIStore } from './uiStore'
+import type { AnswerReceipt } from '../utils/answerAssurance'
 
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'system'
 
@@ -40,6 +41,8 @@ export interface ChatMessage {
   // string) on every turn the model didn't emit extended thinking for, so
   // the UI can gate the `<details>` on presence rather than length.
   thinking?: string
+  answer_id?: string
+  receipt?: AnswerReceipt
   ts: number
 }
 

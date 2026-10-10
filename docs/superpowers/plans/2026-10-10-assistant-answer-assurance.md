@@ -4,7 +4,9 @@
 # Evidence-backed assistant: implementation and TDD plan
 
 Status: original design independently reviewed; reliability revision proposed and
-pending independent review. Design only; no implementation or release approval.
+pending independent review. First publication/static-input pilot implemented
+locally; no implementation review or release approval is claimed. See
+[implementation status](../../../.scratch/assistant-assurance/implementation-status.md).
 AI-generated plan against master `d43809ae`; dictation PR 106 is merged.
 Contract: [spec](../../../.scratch/assistant-assurance/spec.md).
 Acceptance: [test matrix](../../../.scratch/assistant-assurance/test-plan.md).
@@ -120,7 +122,8 @@ required coverage warnings and marks unavailable slots/partial coverage limited.
 Inject a plausible erroneous handler aggregate to ensure it cannot validate itself.
 Positive companion: the same fully valid fixture returns all requested results.
 
-Frozen minimum public API (all new/unimplemented):
+Frozen minimum public API (first pilot now supplies answer/evidence lookups and
+negative-only ACK admission; full contracts remain incomplete):
 
 Read [protocol-v1](../../../.scratch/assistant-assurance/protocol-v1.md) for fields,
 status codes, error kinds, event ordering and source reference rules. The P0

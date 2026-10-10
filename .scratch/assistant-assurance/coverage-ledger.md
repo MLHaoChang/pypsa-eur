@@ -3,11 +3,13 @@
 
 # Answer-assurance acceptance coverage ledger
 
-Status: first reviewed executable RED tranche; assurance implementation absent.
+Status: first publication/static-input pilot implemented locally. See
+[implementation boundary](implementation-status.md). The initial results below
+are historical; current implementation results are recorded separately below.
 Reliability additions are proposed and pending review. Their requirement groups
 A0.4, A1.7, A2.8–A2.10, A3.5–A3.6, A4.6, A6.6 and A7.7 have no new executable
-coverage or recorded passes. This session restored documentation only; the
-archived test files remain in the transfer bundle and have not been rerun.
+coverage or recorded passes. The documentation assessment restored documentation
+only; the implementation continuation restored and reran the archived tests.
 Source baseline: local origin/master `d43809ae` (dictation PR 106 already merged).
 Reviewed transferred specification commits: `55ce946b`, `34dbb3f3`; publication
 was blocked by GitHub HTTP 401 in that session. Current access is recorded in the
@@ -56,7 +58,7 @@ metadata tampering is accepted, while existing byte checks remain separate contr
 An aggregated TestClient response proves frame ordering and fetched identity,
 not commit-before-first-byte under a crash/concurrent-revocation race.
 
-## Passing regression checks
+## Historical passing regression checks
 
 Relevant backend selection: **321 passed, 48 skipped** (47 opt-in acceptance plus
 one deliberate golden-record generation helper), no failures/errors. Full default
@@ -67,6 +69,10 @@ Commands and limitations are in the [results assessment](../../docs/superpowers/
 These controls preserve existing behavior; skipped proposed tests remain unverified.
 
 ## Comprehensive requirement mapping and remaining work
+
+The table describes the transferred tranche's requirement mapping. The current
+implementation additions below extend specific rows; no complete phase verdict
+is implied by the table or current passing counts.
 
 A partial row means useful executable cases exist, with explicitly named pending
 requirements. No row is a complete phase/release gate. References below are file
@@ -121,7 +127,7 @@ Passing existing harness regressions preserves the baseline; it does not convert
 those families into checked-answer coverage. Shared source inventory is discovery
 coverage, not complete tool/UI or engineering validation.
 
-## Implementation continuation
+## Original implementation continuation
 
 Before implementation, review/freeze the [reliability contract](reliability-contract.md)
 and map its added case groups to fixtures. Original independent review and RED
@@ -140,3 +146,43 @@ and mandatory-guard requirements cannot inherit those approvals/counts.
    assertions, silently bypassing strict mode, xfail, or treating skips as passes.
 5. Do not claim user confidence guarantees or release readiness until all required
    phase/family/race/domain/browser/calibration gates have evidence.
+
+## Current implementation results
+
+Branch: `feat/assistant-assurance-publication`, documentation base `f533feda`.
+Supported scope and open release requirements are in
+[implementation status](implementation-status.md). No new independent review.
+
+| Selection | Result | Boundary |
+| --- | --- | --- |
+| Original 47 backend acceptance cases, strict opt-in | 44 passed; 3 artifact cases remain RED | P4 manifests/provenance/delivery chain unimplemented; other passes do not complete whole phases |
+| Final default backend assurance selection | **68 passed, 3 skipped** | 44 implemented transferred cases plus 24 new cases; only the three P4 cases skip |
+| Broad existing chat/harness/report selection plus initial 19 new cases | **1,851 passed, 2 skipped** | Deliberate golden-record helper and empty known-broken-import sentinel skip; ran before final strict-only numeric rendering/extra fixtures |
+| Full frontend before final stale-stream guard | **3,543 passed / 299 files** | Includes the first 14 UI boundary cases |
+| Final affected ChatPanel/AssistantResultCard selection | **574 passed / 23 files** | Includes all 17 assurance UI cases; preserves legitimate ordinary-chat project rebinds |
+
+Production TypeScript/Vite build, new Python lint/format, inventory and local
+documentation links pass. No paid model calls. Existing framework/numerical
+warnings remain; no setup/collection errors. The final build is recorded in the
+handoff. Do not count skipped or expected RED artifact cases as coverage.
+
+New default backend cases add disabled-server/script/null admission boundaries,
+handler-value disagreement, raw nonfinite values, full float precision,
+missing/changed/corrupt evidence across fetch/history/export, storage failure,
+required-guard exceptions, blocked effects, publication-time source changes,
+identity disablement, quota reclamation, strict history seed revalidation and
+schema/trust-field spoof rejection. UI adds exact digest mismatch, wrong/missing
+turn identity, aborted callbacks and user project switches. These extend A0.1,
+A0.3, A1.2/A1.4, A2.1/A2.2/A2.6/A2.7 and A6.3/A6.5 in the narrow pilot.
+They do not establish proposed A1.7 result validity masks or any full added group.
+
+Default command from `pypsa-gui/backend`:
+
+```bash
+PYPSA_GUI_ANSWER_ASSURANCE_MODE=disabled python -m pytest -o addopts='' \
+  tests/test_answer_assurance.py tests/assurance_acceptance -q --tb=short
+```
+
+The explicit disabled server tests prove admission refusal; remaining implemented
+tests set strict within their fixtures. The pending artifact RED cases remain
+available with `PYPSA_GUI_TEST_ASSURANCE_ACCEPTANCE=1`.
