@@ -5,6 +5,8 @@ Type: task
 Blocked by: 02, 08, 09 (typed UI); 01, 11 (media/monitoring acceptance)
 
 Implement steps 2 and 4's UI in [the plan](../../../docs/superpowers/plans/2026-10-10-live-voice-conversation.md).
+The floating Compose/Speak presence is [issue 12](12-companion-launcher.md) and
+can land before media. This issue owns the open dock and continuous conversation.
 Begin the persistent assistant dock redesign using typed chat after issue 02;
 media-dependent acceptance requires issue 01. Add project/run context, inline
 evidence/progress/download/confirmation cards and natural request-driven navigation.

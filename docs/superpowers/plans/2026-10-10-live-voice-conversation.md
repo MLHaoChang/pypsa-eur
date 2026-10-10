@@ -84,7 +84,10 @@ resume; history replay is not a distributed lock/confirmation implementation.
 
 ## 2. Redesign the persistent assistant interface
 
-Keep a persistent conversation dock with project/run context, ongoing text,
+The closed state is the floating companion in
+[the companion plan](2026-10-10-assistant-companion.md): Compose opens this dock,
+Speak opens reviewed dictation, and live conversation stays a control inside the
+open dock. Keep a persistent conversation dock with project/run context, ongoing text,
 inline status/evidence/download/confirmation cards, clear composer and one
 Start conversation control. Support compact and expanded layouts; preserve the
 conversation while navigating panels. Speak concise findings and show detailed

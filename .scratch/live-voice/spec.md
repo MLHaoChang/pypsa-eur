@@ -73,6 +73,29 @@ a single Start conversation control. Ordinary reads/navigation do not become
 a wizard. Every authorized/project-eligible harness tool remains reachable through
 the existing toolsets; there is no reduced voice-only engineering catalogue.
 
+### Companion launcher
+
+The closed assistant is a floating presence over the canvas, not a reserved
+column and not a slide-panel tab. It shows one character and a two-action
+control: Compose and Speak. Compose opens the existing dock and focuses the
+typed composer. Speak opens that same dock and the existing reviewed-dictation
+panel; a transcript is inserted only after the user accepts it. Neither action
+starts a continuous live conversation or a paid media session.
+
+Live conversation stays an explicit control inside the open dock. Its listening,
+thinking and speaking states may drive the character. Idle motion is decorative,
+honors reduced motion, and never implies the microphone is open. The character
+is not a second chat surface and does not cover results, confirmation cards or
+the composer.
+
+A small chip on the companion shows the active LLM profile and opens the
+existing profile picker. Switching profiles uses the current session rules.
+“Another agent” means another profile on the shared harness, not a second tool
+planner. New hosted models that speak the OpenAI chat-completions wire, including
+Kimi (already the Moonshot preset) and Grok, are catalogue presets. Cursor’s
+agent APIs run a separate workspace agent and are not a chat provider for this
+dock.
+
 Add a bounded read-tier load-flow summary over shared aggregation services; use
 the actual `results_tab='loadflow'` and line asset details for navigation. Retain
 run/source/window/asset references; the bottom Lines editing table is not a result

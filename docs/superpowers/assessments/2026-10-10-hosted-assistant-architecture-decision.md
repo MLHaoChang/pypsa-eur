@@ -90,7 +90,7 @@ navigation omits adequacy/FMEA IDs from the tool enum; record and close such gap
 
 | Requirement | Concrete behavior |
 | --- | --- |
-| Personal assistant UI | Persistent assistant dock, ongoing conversation, project/run context, compact progress and result cards; expand when needed |
+| Personal assistant UI | Floating companion when closed (Compose opens the dock, Speak opens reviewed dictation); persistent dock for the conversation, project/run context, progress and result cards; live conversation is an explicit control inside the dock |
 | Natural requests | “Open project X”, “summarize current load flow”, “show critical lines”, “try a sensitivity”, “export this” invoke real harness operations |
 | Full tool reachability | All existing authorized/project-eligible catalogue tools remain reachable; offer relevant toolsets on demand rather than a separate reduced voice catalogue |
 | Project awareness | Server-authoritative project binding plus current result source, section, period/window and selected asset identifiers; revalidate ACL at use |
