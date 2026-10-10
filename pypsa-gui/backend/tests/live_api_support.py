@@ -8,7 +8,7 @@ from harness.providers.openai_compat import OpenAICompatProvider
 
 @dataclass
 class TokenBudget:
-    limit: int
+    limit: int | None
     request_limit: int = 24
     charged: int = 0
     requests: int = 0
@@ -36,7 +36,7 @@ class TokenBudget:
             cost = input_allowance * input_rate + output_limit * output_rate
             if self.cost_nanodollars + cost > int(self.dollar_limit * 1e9):
                 raise ProviderError("invalid_request", "live dollar budget exhausted before send")
-        if self.requests >= self.request_limit or self.charged + amount > self.limit:
+        if self.requests >= self.request_limit or (self.limit is not None and self.charged + amount > self.limit):
             raise ProviderError("invalid_request", "live test budget exhausted before send")
         self.charged += amount
         self.requests += 1
