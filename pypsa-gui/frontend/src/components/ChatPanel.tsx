@@ -1707,6 +1707,11 @@ export default function ChatPanel() {
   // comment there for why AssistantDock's collapsed state has to be visible
   // here at all.
   const assistantDockOpen = useUIStore((s) => s.assistantDockOpen)
+  const assistantEntry = useUIStore((s) => s.assistantEntry)
+  const [dictationPanelRequested, setDictationPanelRequested] = useState(false)
+  const consumeDictationRequest = useCallback(() => {
+    setDictationPanelRequested(false)
+  }, [])
   const assistantSpeakEnabled = useUIStore((s) => s.assistantSpeakEnabled)
   const toggleAssistantSpeak = useUIStore((s) => s.toggleAssistantSpeak)
   const resetChatForProjectSwitch = useChatStore((s) => s.resetForProjectSwitch)
@@ -2992,6 +2997,13 @@ export default function ChatPanel() {
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [assistantDockOpen])
 
+  useEffect(() => {
+    if (!assistantDockOpen || assistantEntry == null || assistantEntry === 'profiles') return
+    const entry = assistantEntry
+    useUIStore.getState().setAssistantEntry(null)
+    if (entry === 'speak') setDictationPanelRequested(true)
+  }, [assistantDockOpen, assistantEntry])
+
   const onClearHistory = useCallback(() => {
     // Clear UI state in-place (does NOT trigger the project-switch reset
     // path, and does NOT null sessionId or call startNewChat — the server
@@ -3559,6 +3571,8 @@ export default function ChatPanel() {
               speech={speech} language={dictationLanguage} onLanguage={setDictationLanguage}
               onInsert={onSpeechFinal} streaming={streaming} dockOpen={assistantDockOpen}
               project={currentProject} coarsePointer={isCoarsePointer}
+              panelRequested={dictationPanelRequested}
+              onPanelRequestConsumed={consumeDictationRequest}
             />
           </div>
           <div className="flex-1 min-w-0 min-h-0 flex flex-col">

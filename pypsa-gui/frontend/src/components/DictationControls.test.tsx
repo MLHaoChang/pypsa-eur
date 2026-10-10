@@ -13,7 +13,7 @@ vi.mock('../api/dictation', () => ({ getDictationConfig: vi.fn(), transcribeReco
 const speech = { available: true, supported: true, listening: false, interim: '', permissionDenied: false, toggle: vi.fn(), stop: vi.fn() }
 const insert = vi.fn()
 let recording: ReturnType<typeof installRecordingMocks>
-const defaults = { speech, language: 'auto', onLanguage: vi.fn(), onInsert: insert, streaming: false, dockOpen: true, project: 'Demo', coarsePointer: false }
+const defaults = { speech, language: 'auto', onLanguage: vi.fn(), onInsert: insert, streaming: false, dockOpen: true, project: 'Demo', coarsePointer: false, panelRequested: false, onPanelRequestConsumed: vi.fn() }
 
 function mount(overrides = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -34,6 +34,15 @@ beforeEach(() => {
   vi.mocked(transcribeRecording).mockResolvedValue('Bus A-12: 7.5 MW; not 75 MWh.')
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+
+it('opens the review panel when asked and does not start the microphone', async () => {
+  const consumed = vi.fn()
+  mount({ panelRequested: true, onPanelRequestConsumed: consumed })
+  expect(await screen.findByTestId('dictation-panel')).toBeTruthy()
+  expect(speech.toggle).not.toHaveBeenCalled()
+  expect(recording.getUserMedia).not.toHaveBeenCalled()
+  expect(consumed).toHaveBeenCalledOnce()
+})
 
 it('records, pauses, reviews and explicitly inserts an editable transcript', async () => {
   mount()
