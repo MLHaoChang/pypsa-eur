@@ -3,7 +3,8 @@
 
 # Assistant implementation session handoff
 
-Status: design approved; implementation starting with phase A.
+Status: design published to master; phase A navigation/inventory slice implemented
+and locally verified. Whole-application/live-voice implementation still pending.
 Date: 2026-10-10.
 
 Read [spec](spec.md), [coverage](application-coverage.md), [test plan](test-plan.md),
@@ -37,3 +38,53 @@ Current backend venv /workspace/chat-compat-venv is ephemeral; reproduce setup
 with repository guidance in a fresh environment. Frontend uses npm/Vitest/TypeScript.
 Append publication PR/commit, implementation branch, red/green commands/results,
 covered cases, next runnable slice and remaining blockers below after each phase.
+
+## 2026-10-10 session — first typed coverage slice
+
+Publication completed: [PR 107](https://github.com/MLHaoChang/pypsa-eur/pull/107)
+merged into master as `19e6e5fdfedff6b706212d8bf23f7c0f937c0879`.
+Implementation branch: `feat/assistant-capability-coverage`, fresh worktree at
+`/workspace/assistant-implementation`; the dictation branch and earlier environment
+were not modified. No paid APIs, subscription changes or test credentials needed.
+Implementation publication: [PR 108](https://github.com/MLHaoChang/pypsa-eur/pull/108),
+with code/test commit `2e4c919c830786a5cf57e40ee2824a4fa92067df`.
+Local test evidence is recorded below; check the PR for remote merge/check status.
+
+TDD evidence:
+
+| Cases | Executable seam/tests | Observed red | Verified green |
+| --- | --- | --- | --- |
+| A-U2 | `backend/tests/test_assistant_navigation_coverage.py` | 12 failures: missing two tabs/five panels and malformed navigation accepted; three later type cases also failed before fixing | 43 cases: every actual tab/panel, legacy aliases and invalid inputs |
+| A-I2 | `backend/tests/test_assistant_navigation_provider_parity.py` | All 8 transport cases failed at unavailable schema targets | Anthropic, official OpenAI, compatible remote/local adapters; 124 actual navigation calls with fragmented arguments, IDs, continuation and UI events |
+| A-I1 | `backend/tests/test_assistant_tool_reachability.py` | Existing reachability passed after correcting fixture activation/tool name; no provider selection change needed | 7 cases; 1,320 synthetic model requests cover every tool across network/study contexts and three profiles, plus unbound study ineligibility; offering is not handler certification |
+| A-U1/A-C1 source portion | `backend/tests/test_assistant_inventory.py` | CLI absent; later dependency-free/multiline/unknown-target cases failed before correction | 12 cases; standard-library CLI, stale schema/route/toolset/target/missing-tool rejection, mixed quotes/multiline targets and refusal to silently omit unrecognized IDs |
+| A-I2 UI | `frontend/src/components/ChatPanel.applicationNavigation.test.tsx` | 10 failures for five missing panels in Expert/Guided modes | 62 cases covering panel state, every requested tab and compare-rail route |
+
+Broad regression command: `/workspace/chat-compat-venv/bin/python -m pytest -q`
+with the four new backend modules plus schema-panels/schema-match/endpoint-map/
+dispatch/OpenAI-compatibility/profile-binding/stream-ownership/workflow-tools/
+workflow-provider-parity/layout/frame-contract modules. Result: **745 passed,
+2 opt-in skips** (paid OpenAI probe and deliberate frame recording), zero failures.
+After strengthening the reader,
+its final 12-case suite passed separately; three added reader cases make the
+combined unique tested set 748 passed plus the same two skips. JUnit evidence:
+`/tmp/assistant-phase-a-backend.xml`, `/tmp/assistant-phase-a-inventory.xml`.
+
+Full frontend: `npm test -- --maxWorkers=2 --reporter=default --reporter=junit
+--outputFile=/tmp/assistant-phase-a-frontend.xml` — **3,496 passed in 295 files**.
+Production `npm run build` passed; existing large-bundle/mixed-import warnings
+remain. Backend emitted existing scientific/FastAPI warnings; frontend emitted
+existing incomplete-query fixture warnings, with no test failures.
+
+`python -S pypsa-gui/backend/smoke/assistant_inventory.py --check` passes without
+site packages. A separate runtime parity check matched all 220 imported schemas,
+required inputs/routes/safety/toolsets against the dependency-free source reader.
+Inventory CI watches both tool/UI definitions and imported schema-cap sources.
+
+Next runnable slice: finish issue 08's actual GUI control/parameter and per-family
+behavioral-fixture matrix, then implement issue 09's durable parent-thread/owner
+contract with B-U/B-I/B-C tests written first. Shared bridge extraction can proceed
+alongside those prerequisites; integrated acceptance depends on completing them.
+All runtime tool fixtures, acknowledged view/run/source/window mapping, durable
+conversation, nonblocking adapters, experiments, speech and device/latency gates
+remain pending. Do not mark issue 08 or the entire assistant complete.

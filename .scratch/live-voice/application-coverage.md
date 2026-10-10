@@ -16,8 +16,14 @@ tool records toolset membership, route mapping, input keys and schema digest.
 Behavioral fixture mapping is explicitly pending. These counts do not establish
 that every UI control is exposed or that every tool works through live voice.
 
-The source snapshot identifies a real navigation gap: the actual Results view
-has `adequacy` and `fmea` tabs, but `RESULTS_TAB_ENUM` does not offer those IDs.
+The initial source audit identified a navigation gap: the actual Results view
+has `adequacy` and `fmea` tabs, but `RESULTS_TAB_ENUM` did not offer those IDs.
+Phase A's first implementation adds those IDs and the five missing panel targets
+(workspace/settings/GridSpine/reports/campus electrical) to shared schema and UI
+handling. The inventory now regenerates through
+`python pypsa-gui/backend/smoke/assistant_inventory.py --write`; `--check` verifies
+source drift and navigation schema parity in CI. This is source/navigation
+coverage only: behavioral fixtures and editable-control mapping remain pending.
 Audit the rest of the panel aliases, subviews, filters and editable controls too.
 AR is a requested label without an exact match in this inventory; map it to the
 actual module/UI vocabulary during the audit instead of inventing its expansion.

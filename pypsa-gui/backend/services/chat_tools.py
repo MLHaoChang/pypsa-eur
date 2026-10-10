@@ -4267,6 +4267,30 @@ def ui_open_panel(
     ChatPanel applies to uiStore — slide panels, Results sub-tabs, bottom
     asset tabs, and the A|B compare rail.
     """
+    from harness.catalogue import (
+        BOTTOM_TAB_ENUM, COMPARE_TAB_ENUM, RESULTS_TAB_ENUM, SAFETY_PANEL_ENUM,
+    )
+    for key, value, allowed in (
+        ("panel_id", panel_id, SAFETY_PANEL_ENUM),
+        ("results_tab", results_tab, RESULTS_TAB_ENUM),
+        ("bottom_tab", bottom_tab, BOTTOM_TAB_ENUM),
+        ("compare_tab", compare_tab, COMPARE_TAB_ENUM),
+    ):
+        if (key == "panel_id" or value is not None) and (not isinstance(value, str) or value not in allowed):
+            raise HTTPException(400, detail={
+                "error_kind": "invalid_navigation", "field": key,
+                "message": f"Choose a supported {key} from the tool schema.",
+            })
+    for key, value, valid in (
+        ("compare_rail", compare_rail, type(compare_rail) is bool),
+        ("compare_a", compare_a, isinstance(compare_a, str)),
+        ("compare_b", compare_b, isinstance(compare_b, str)),
+    ):
+        if value is not None and not valid:
+            raise HTTPException(400, detail={
+                "error_kind": "invalid_navigation", "field": key,
+                "message": f"Use the declared {key} type from the tool schema.",
+            })
     event: dict[str, Any] = {
         "_ui_event": True,
         "kind": "navigate",
