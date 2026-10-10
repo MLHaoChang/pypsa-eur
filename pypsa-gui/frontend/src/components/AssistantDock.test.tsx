@@ -155,6 +155,9 @@ describe('assistant dock prominence', () => {
         request(tab)
       },
     })
+    // The dev pause must not reject during this assertion. A hanging request
+    // keeps the first caption on screen until unmount cancels the walk.
+    vi.stubGlobal('fetch', () => new Promise(() => {}))
     const view = render(<AssistantDock />)
     await user.click(screen.getByTestId('companion-live'))
     await user.type(
@@ -169,6 +172,7 @@ describe('assistant dock prominence', () => {
     expect(screen.getByTestId('companion-live-caption').textContent).toContain('Tab 1 of')
     expect(screen.getByTestId('companion-live-caption').textContent).toContain('Overview')
     view.unmount()
+    vi.unstubAllGlobals()
   })
 
   it('reserves no column width while collapsed', () => {

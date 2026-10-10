@@ -24,7 +24,9 @@ function pacePlugin(): Plugin {
           res.statusCode = 200
           res.setHeader('content-type', 'text/plain')
           res.setHeader('cache-control', 'no-store')
-          res.end('ok')
+          // The client accepts only this body. A fast HTML 200 from another
+          // handler must not count as a finished pause.
+          res.end(`paced:${ms}`)
         }, ms)
       })
     },

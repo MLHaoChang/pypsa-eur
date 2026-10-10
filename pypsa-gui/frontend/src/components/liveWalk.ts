@@ -46,12 +46,13 @@ export function startKeyResultsWalk(opts?: {
   schedule?: (fn: () => void, ms: number) => number
   stepMs?: number
   onStep?: (tab: KeyResultTab, index: number, last: boolean) => void
+  onPaceMiss?: (detail: string) => void
 }): () => void {
   // Each step waits out its own pause. Page timers queued during the first
   // Results render all become due together and only the last tab paints.
   const stops: Array<() => void> = []
   const schedule = opts?.schedule ?? ((fn: () => void, ms: number) => {
-    stops.push(scheduleStep(fn, ms))
+    stops.push(scheduleStep(fn, ms, opts.onPaceMiss))
     return 0
   })
   const stepMs = opts?.stepMs ?? KEY_RESULT_STEP_MS
@@ -79,28 +80,42 @@ export function startKeyResultsWalk(opts?: {
 /**
  * Pause before the next tab.
  *
- * In dev, Vite's `/__pace` handler sleeps on the server. The page's own
- * timers can all become due during the first Results render and paint only
- * the last tab. A production build uses the page timer.
+ * In dev, Vite's `/__pace` handler sleeps on the server and answers
+ * `paced:<ms>`. Any other body — including a fast HTTP 200 of login HTML —
+ * must not advance the walk, and must not fall back to the page timer. That
+ * timer collapses in this environment and paints only the last tab.
+ * A production build uses the page timer.
  */
-function scheduleStep(fn: () => void, ms: number): () => void {
+function scheduleStep(
+  fn: () => void,
+  ms: number,
+  onMiss?: (detail: string) => void,
+): () => void {
   let timer = 0
   let aborted = false
   const ctrl = new AbortController()
-  const usePageTimer = () => {
+  const miss = (detail: string) => {
     if (aborted) return
-    timer = window.setTimeout(fn, ms)
+    onMiss?.(detail)
   }
   if (import.meta.env.DEV && typeof fetch === 'function') {
     fetch(`/__pace?ms=${ms}`, { cache: 'no-store', signal: ctrl.signal })
-      .then((res) => {
+      .then(async (res) => {
+        const body = (await res.text()).trim()
         if (aborted) return
-        if (!res.ok) usePageTimer()
-        else fn()
+        if (body === `paced:${ms}`) fn()
+        else miss('pause body was not a server sleep')
       })
-      .catch(() => { if (!aborted) usePageTimer() })
+      .catch((err: unknown) => {
+        if (aborted) return
+        const name = err && typeof err === 'object' && 'name' in err
+          ? String((err as { name: string }).name)
+          : ''
+        if (name === 'AbortError') return
+        miss('pause request failed')
+      })
   } else {
-    usePageTimer()
+    timer = window.setTimeout(fn, ms)
   }
   return () => {
     aborted = true

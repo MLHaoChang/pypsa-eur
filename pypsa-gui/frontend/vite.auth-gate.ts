@@ -19,6 +19,9 @@ export type GateDecision =
   | { kind: 'redirect'; location: string }
 
 export function isStaticAsset(urlPath: string): boolean {
+  // The results walk pauses on this dev route. Classifying it as a document
+  // makes the auth gate answer with login HTML before the pause can run.
+  if (urlPath === '/__pace') return true
   if (urlPath.startsWith('/src/')) return true
   if (urlPath.startsWith('/@')) return true
   if (urlPath.startsWith('/node_modules/')) return true

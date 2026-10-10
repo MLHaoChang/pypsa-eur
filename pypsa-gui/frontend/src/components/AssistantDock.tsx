@@ -62,6 +62,10 @@ export default function AssistantDock() {
           setLiveCaption(`Tab ${index + 1} of ${KEY_RESULT_TABS.length}. ${tab.label}. ${tab.blurb}`)
           setPresence(last ? 'speaking' : 'thinking')
         },
+        onPaceMiss: () => {
+          setPresence('listening')
+          setLiveCaption('Could not hold the tab. The pause did not come from the dev server.')
+        },
       })
       forwardToHarness(text)
       return
