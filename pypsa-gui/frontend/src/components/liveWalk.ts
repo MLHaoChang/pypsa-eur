@@ -47,12 +47,11 @@ export function startKeyResultsWalk(opts?: {
   stepMs?: number
   onStep?: (tab: KeyResultTab, index: number, last: boolean) => void
 }): () => void {
-  // Frame pacing, not a pile of timeouts. A long Results render makes every
-  // already-queued timeout due at once, so the tour used to paint only the
-  // last tab. Each step starts its own wait after the previous one has run.
+  // Each step waits on its own worker timer. Page timers queued during the
+  // first Results render all become due together and only the last tab paints.
   const stops: Array<() => void> = []
   const schedule = opts?.schedule ?? ((fn: () => void, ms: number) => {
-    stops.push(scheduleAfterFrames(fn, ms))
+    stops.push(scheduleOnWorker(fn, ms))
     return 0
   })
   const stepMs = opts?.stepMs ?? KEY_RESULT_STEP_MS
@@ -77,21 +76,32 @@ export function startKeyResultsWalk(opts?: {
   }
 }
 
-/** Wait about `ms` of presented frames, then run `fn`. */
-function scheduleAfterFrames(fn: () => void, ms: number): () => void {
-  let left = Math.max(1, Math.round(ms / 16))
-  let id = 0
-  let stopped = false
-  const tick = () => {
-    if (stopped) return
-    left -= 1
-    if (left <= 0) fn()
-    else id = window.requestAnimationFrame(tick)
+/**
+ * Delay the next tab on a worker timer.
+ *
+ * The page's own timers and animation frames can all become due during the
+ * first Results render, which paints only the last tab. A worker timer is a
+ * separate queue, so each tab stays up for `ms` before the next navigate.
+ */
+function scheduleOnWorker(fn: () => void, ms: number): () => void {
+  if (typeof Worker === 'undefined') {
+    const id = window.setTimeout(fn, ms)
+    return () => window.clearTimeout(id)
   }
-  id = window.requestAnimationFrame(tick)
+  const worker = new Worker(URL.createObjectURL(new Blob([
+    'self.onmessage=function(e){setTimeout(function(){self.postMessage(0)},e.data)}',
+  ], { type: 'application/javascript' })))
+  let done = false
+  worker.onmessage = () => {
+    if (done) return
+    done = true
+    worker.terminate()
+    fn()
+  }
+  worker.postMessage(ms)
   return () => {
-    stopped = true
-    window.cancelAnimationFrame(id)
+    done = true
+    worker.terminate()
   }
 }
 
