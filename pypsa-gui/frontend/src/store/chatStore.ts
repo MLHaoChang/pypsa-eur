@@ -26,6 +26,8 @@ export interface ChatMessage {
   // produced this row so confirmation cards / progress can attach.
   tool_use_id?: string
   tool_name?: string
+  // Bounded structured result metadata for task state and authenticated files.
+  tool_result?: unknown
   // Phase D — file_ids that were attached to this user turn (for replay).
   // Read-only chip strip renders below the message bubble.
   attachment_file_ids?: string[]

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 CONTROL_TOOLS = frozenset({
+    "list_tasks", "find_capabilities", "start_task", "get_task", "resume_task", "cancel_task", "resolve_task_step",
+    "get_file_delivery", "inspect_import", "preview_project_changes", "apply_project_changes", "create_chart", "build_delivery",
     "ask_user", "use_skill", "start_workflow", "advance_workflow", "end_workflow",
     "use_toolset", "project_readiness", "wait_for_job", "get_study_evidence",
 })

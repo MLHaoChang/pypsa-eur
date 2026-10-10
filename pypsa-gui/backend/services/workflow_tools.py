@@ -359,7 +359,7 @@ def _network_input_fingerprint(ctx):
     # PyPSA assigns a slack control while solving. Canonicalise controls on a
     # private copy, retaining user PV/slack choices, rather than mistaking the
     # deterministic PQ→Slack assignment for a parameter edit.
-    n = ctx.network.copy()
+    n = _network_copy(ctx.network)
     n.determine_network_topology()
     for subnet in n.sub_networks.obj:
         subnet.find_bus_controls()
@@ -497,3 +497,26 @@ def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
                     "note": "Baseline and active project are unchanged. After jobs finish, read simulation evidence with compare_to=baseline_project_id. Static parameter changes preserve existing time-series overrides."}
     finally:
         _SWEEP_LOCK.release()
+
+
+def _network_copy(network):
+    """Clone inputs/results without copying or detaching a native solver model."""
+    model = getattr(network, "_model", None)
+    if model is None:
+        return network.copy()
+    # deepcopy's memo cuts the model edge on the PRIVATE copy; live model and
+    # component→network references are preserved on the original.
+    return copy.deepcopy(network, {id(model): None})
+
+
+def _record_solve_inputs(network, config):
+    """Called under the existing solve lock, after modelling inputs restore."""
+    active = PyPSAService.get_active_context()
+    if active.network is network:
+        ctx = copy.copy(active)
+        ctx.solver_state = {**active.solver_state, "solver_config": config}
+    else:
+        ctx = PyPSAService.build_context()
+        ctx.network = network
+        ctx.solver_state["solver_config"] = config
+    network.meta["assistant_solve_input_fingerprint"] = _network_input_fingerprint(ctx)

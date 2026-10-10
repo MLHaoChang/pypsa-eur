@@ -3093,6 +3093,25 @@ TOOLS: list[dict[str, Any]] = [
 
 # v4-NIT-1 / v6-F4: derive the count from the registry length at module
 # import. NEVER pre-state the count anywhere in code or docs.
+# Provider-neutral assistant operations. Every action uses normal dispatch.
+_ENGINEERING_CHANGES = next(t for t in TOOLS if t["name"] == "run_sensitivity_sweep")["input_schema"]["properties"]["cases"]["items"]["properties"]["changes"]
+TOOLS.extend([
+    _t("list_tasks", "List up to 20 most recently updated durable tasks owned by you in the active project. Use a returned ID to resume in a new chat or provider. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
+    _t("find_capabilities", "Find relevant supported tools for a goal. Returns required inputs, safety and current project/toolset eligibility. Cached catalogue search grants no authority. Safety: read.", {"goal": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 8}}, ["goal"]),
+    _t("start_task", "Persist a project/user-scoped plan of 1–12 ordinary tools. Create/activate the project first; rebinding and task-control tools cannot be steps. Each step has unique id, tool, args. Whole-value $earlier_step.path references resolve saved results. Stable request_id deduplicates identical plans. Returns task_id, status, next_step. Execute next_step via an ordinary offered call; this tool runs no hidden actions. Safety: write.", {"title": {"type": "string", "maxLength": 120}, "request_id": {"type": "string", "maxLength": 64}, "steps": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "object", "additionalProperties": False, "properties": {"id": {"type": "string"}, "tool": {"type": "string"}, "args": {"type": "object"}}, "required": ["id", "tool", "args"]}}}, ["title", "steps", "request_id"]),
+    _t("get_task", "Read a durable task in the active project owned by the caller. Returns completed steps and the next exact call; no completed step is replayed. Safety: read.", {"task_id": {"type": "string"}}, ["task_id"]),
+    _t("resume_task", "Attach a durable task to this chat and return next_step. Execute it as an ordinary offered tool call; all normal gates apply. Interrupted writes become uncertain and require explicit review. No implicit tool execution or job polling. Safety: write.", {"task_id": {"type": "string"}}, ["task_id"]),
+    _t("cancel_task", "Stop future task steps; retain its checkpoint. Does not abort a running queue job or solver. Use solve_queue_abort separately for a job. Safety: write.", {"task_id": {"type": "string"}}, ["task_id"]),
+    _t("resolve_task_step", "After verifying an uncertain step's actual effects, explicitly mark completed with a compact verified result or authorize retry. Refuses a still-running originating session. Normal destructive confirmation required. Safety: destructive.", {"task_id": {"type": "string"}, "outcome": {"type": "string", "enum": ["completed", "retry"]}, "result": {"type": "object"}}, ["task_id", "outcome"]),
+    _t("get_file_delivery", "Get a file's authenticated browser download link, content hash, size and project provenance by upload ID. Never returns binary bytes or server paths. Safety: read.", {"file_id": {"type": "string"}}, ["file_id"]),
+    _t("inspect_import", "Inspect uploaded CSV/Excel metadata: up to five sheets, 200 sampled rows and 20 columns. Returns missing-value/time-axis diagnostics, explicit sample limits and native import format. Units and column mappings require user confirmation; never guessed. Other native formats receive format guidance. Safety: read.", {"file_id": {"type": "string"}}, ["file_id"]),
+    _t("import_uploaded_network", "Replace the current network using an authorized upload ID and the existing native import handler. Binary bytes stay server-side. Rebinds to an unsaved draft; save under a chosen project afterward. Normal destructive confirmation and locks apply. Safety: destructive.", {"file_id": {"type": "string"}, "format": {"type": "string", "enum": ["netcdf", "csv_bundle", "excel", "matpower"]}}, ["file_id", "format"]),
+    _t("preview_project_changes", "Preview 1–20 typed engineering parameter changes on an isolated network. Returns immutable preview_id, old/new values with units, validation and fingerprint; stores a preview but does not modify network inputs. Existing time-series overrides remain. Topology edits use existing CRUD tools. Safety: write.", {"changes": _ENGINEERING_CHANGES}, ["changes"]),
+    _t("apply_project_changes", "Apply a reviewed typed preview atomically to unchanged active-project inputs. Refuses stale, foreign, busy or interrupted previews. Normal execution confirmation, lock/study guards and undo capture apply. Repeated successful application returns reused. Leaves changes unsaved. Safety: execution.", {"preview_id": {"type": "string"}}, ["preview_id"]),
+    _t("create_chart", "Generate a downloadable PNG from server-side numeric component data. Select 1–8 asset names and an input/output attribute; max 5000 rows. source=result requires fresh solved data. Returns file metadata and coverage/provenance; no arbitrary expression/code. Safety: write.", {"component": {"type": "string", "enum": ["Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"]}, "attribute": {"type": "string"}, "names": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "string"}}, "source": {"type": "string", "enum": ["input", "result"]}}, ["component", "attribute", "names"]),
+    _t("build_delivery", "Bundle 1–20 authorized upload IDs into a downloadable ZIP (25 MB max) with content hashes and a provenance manifest. Reuse existing exports, charts and reports; no file bytes in model context. Safety: write.", {"file_ids": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}}, "filename": {"type": "string"}}, ["file_ids"]),
+])
+
 TOOL_COUNT: int = len(TOOLS)
 
 
@@ -3164,6 +3183,21 @@ _COMP_DELETE_ROUTES = [
 
 
 TOOL_ROUTES: dict[str, list] = {
+    "list_tasks": _SERVICE_CALL,
+    "find_capabilities": _SERVICE_CALL,
+    "start_task": _SERVICE_CALL,
+    "get_task": _SERVICE_CALL,
+    "resume_task": _SERVICE_CALL,
+    "cancel_task": _SERVICE_CALL,
+    "resolve_task_step": _SERVICE_CALL,
+    "get_file_delivery": _SERVICE_CALL,
+    "inspect_import": _SERVICE_CALL,
+    "import_uploaded_network": _SERVICE_CALL,
+    "preview_project_changes": _SERVICE_CALL,
+    "apply_project_changes": _SERVICE_CALL,
+    "create_chart": _SERVICE_CALL,
+    "build_delivery": _SERVICE_CALL,
+
     # read (22)
     "list_components": _COMP_LIST_ROUTES,
     "get_component": _SERVICE_CALL,

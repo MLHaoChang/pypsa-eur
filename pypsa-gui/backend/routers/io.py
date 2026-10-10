@@ -92,6 +92,9 @@ def _export_excel_bytes() -> bytes:
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
         tmp = pathlib.Path(f.name)
     try:
+        # PyPSA appends when the path already exists. An empty mktemp file
+        # is not a workbook; let its writer create the file instead.
+        tmp.unlink()
         n.export_to_excel(str(tmp))
         data = tmp.read_bytes()
     except AttributeError:
@@ -133,14 +136,15 @@ def _export_matpower_text() -> str:
 
     buses = []
     for name, row in n.buses.iterrows():
-        Pd = 0.0
+        Pd, Qd = 0.0, 0.0
         if not n.loads.empty:
             bus_loads = n.loads[n.loads.bus == name]
             Pd = float(bus_loads["p_set"].sum()) if not bus_loads.empty else 0.0
+            Qd = float(bus_loads["q_set"].sum()) if not bus_loads.empty else 0.0
         buses.append({
             "bus_i": bus_idx[name],
             "type": control_map.get(getattr(row, "control", "PQ"), 1),
-            "Pd": round(Pd, 4),
+            "Pd": round(Pd, 4), "Qd": round(Qd, 4),
             "baseKV": float(row.get("v_nom", 1.0)),
         })
 
@@ -150,18 +154,19 @@ def _export_matpower_text() -> str:
             "bus_i": bus_idx.get(row.bus, 1),
             "Pg": round(float(row.get("p_nom", 0)) * 0.5, 4),
             "Pmax": round(float(row.get("p_nom", 0)), 4),
-            "Pmin": round(float(row.get("p_nom_min", 0)), 4),
+            "Pmin": round(float(row.get("p_min_pu", 0)) * float(row.get("p_nom", 0)), 4),
             "marginal_cost": round(float(row.get("marginal_cost", 0)), 4),
         })
 
     branches = []
     for name, row in n.lines.iterrows():
+        impedance_base = float(n.buses.at[row.bus0, "v_nom"]) ** 2 / 100
         branches.append({
             "fbus": bus_idx.get(row.bus0, 1),
             "tbus": bus_idx.get(row.bus1, 2),
-            "r": round(float(row.get("r", 0)), 6),
-            "x": round(float(row.get("x", 0.01)), 6),
-            "b": round(float(row.get("b", 0)), 6),
+            "r": float(row.get("r", 0)) / impedance_base,
+            "x": float(row.get("x", 0.01)) / impedance_base,
+            "b": float(row.get("b", 0)) * impedance_base,
             "rateA": round(float(row.get("s_nom", 0)), 4),
         })
 
@@ -306,20 +311,29 @@ async def import_excel(
     with PyPSAService.get_lock():
         _reset_with_ts_clear()
         n = PyPSAService.get_network()
-        for sheet_name in wb.sheetnames:
-            comp_class = component_map.get(sheet_name)
-            if comp_class is None:
-                continue
-            ws = wb[sheet_name]
-            headers = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
-            for row in ws.iter_rows(min_row=2, values_only=True):
-                row_dict = dict(zip(headers, row))
-                name = row_dict.pop("name", row_dict.pop(headers[0], None))
-                if name:
-                    try:
-                        n.add(comp_class, str(name), **{k: v for k, v in row_dict.items() if v is not None})
-                    except Exception:
-                        pass
+        if "network" in wb.sheetnames:
+            # Native PyPSA exports include network/snapshot/dynamic sheets.
+            # Keep their horizon and series; legacy custom component sheets
+            # continue through the existing parser below.
+            with tempfile.TemporaryDirectory() as directory:
+                native_file = pathlib.Path(directory) / "network.xlsx"
+                native_file.write_bytes(data)
+                n.import_from_excel(str(native_file), engine="openpyxl")
+        else:
+            for sheet_name in wb.sheetnames:
+                comp_class = component_map.get(sheet_name)
+                if comp_class is None:
+                    continue
+                ws = wb[sheet_name]
+                headers = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
+                for row in ws.iter_rows(min_row=2, values_only=True):
+                    row_dict = dict(zip(headers, row))
+                    name = row_dict.pop("name", row_dict.pop(headers[0], None))
+                    if name:
+                        try:
+                            n.add(comp_class, str(name), **{k: v for k, v in row_dict.items() if v is not None})
+                        except Exception:
+                            pass
         _refuse_reserved_buses(n)
         # P14: typed eh_* tags (a sheet's TRUE/1/blank → bool; netCDF-safe).
         from services.adequacy.eh_columns import normalise_eh_columns
@@ -370,6 +384,11 @@ def _parse_matpower(n, text: str) -> None:
                 rows.append([float(x) for x in line.split()])
         return rows
 
+    match = re.search(r"mpc\.baseMVA\s*=\s*([0-9.eE+-]+)", text)
+    base_mva = float(match[1]) if match else 100.0
+    import math
+    if not math.isfinite(base_mva) or base_mva <= 0:
+        raise HTTPException(422, "MATPOWER baseMVA must be positive and finite")
     buses_data = _section("bus")
     bus_map = {}
     for row in buses_data:
@@ -377,18 +396,29 @@ def _parse_matpower(n, text: str) -> None:
         bus_name = f"bus_{bus_i}"
         bus_map[bus_i] = bus_name
         n.add("Bus", bus_name, v_nom=float(row[9]) if len(row) > 9 else 1.0)
+        # MATPOWER embeds demand at the bus rather than in a separate table.
+        pd, qd = (float(row[2]) if len(row) > 2 else 0), (float(row[3]) if len(row) > 3 else 0)
+        if pd or qd:
+            n.add("Load", f"load_{bus_i}", bus=bus_name, p_set=pd, q_set=qd)
 
+    costs = _section("gencost")
     for i, row in enumerate(_section("gen")):
         bus_i = int(row[0])
+        p_nom = float(row[8]) if len(row) > 8 else 0
+        p_min = float(row[9]) if len(row) > 9 else 0
+        cost = costs[i] if i < len(costs) else []
+        marginal_cost = cost[4] if len(cost) >= 6 and int(cost[0]) == 2 and int(cost[3]) == 2 else 0
         n.add("Generator", f"gen_{i+1}",
               bus=bus_map.get(bus_i, f"bus_{bus_i}"),
-              p_nom=float(row[8]) if len(row) > 8 else 0.0,
-              p_nom_min=float(row[9]) if len(row) > 9 else 0.0)
+              p_nom=p_nom, p_min_pu=p_min / p_nom if p_nom else 0,
+              marginal_cost=marginal_cost)
 
     for i, row in enumerate(_section("branch")):
         fbus, tbus = int(row[0]), int(row[1])
+        impedance_base = float(n.buses.at[bus_map[fbus], "v_nom"]) ** 2 / base_mva
         n.add("Line", f"line_{i+1}",
               bus0=bus_map.get(fbus, f"bus_{fbus}"),
               bus1=bus_map.get(tbus, f"bus_{tbus}"),
-              r=float(row[2]), x=float(row[3]),
+              r=float(row[2]) * impedance_base, x=float(row[3]) * impedance_base,
+              b=float(row[4]) / impedance_base if len(row) > 4 else 0,
               s_nom=float(row[5]) if len(row) > 5 else 0.0)

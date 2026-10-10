@@ -233,3 +233,65 @@ agents and the app.
 | `events` | the tripwire test; `choice_request` is what `ask_user` emits, `workflow_state` what the workflow tools emit | — |
 | `workflows` | `GET /api/chat/workflows` (the start menu the panel renders), the `start_workflow` / `advance_workflow` / `end_workflow` tools, `chat_service._workflow_addendum` (the per-turn step), `_guided_mode_addendum` (the `hub-design` preamble) | — |
 | `skills` | `chat_service._skills_block` (the catalogue in the tools-on prompt), the `use_skill` tool | — |
+
+## Durable assistant tasks and file delivery
+
+`find_capabilities(goal)` searches the shared catalogue and explains required
+arguments, safety, project eligibility and reduced-toolset visibility.
+Discovery is advisory: dispatch still checks the exact catalogue offered to
+that model request. Metadata searches cache the catalogue index; normal tool
+selection keeps original catalogue order for prefix reuse.
+
+`start_task(title, steps, request_id)` persists an owner/project-scoped plan
+with 1–12 ordinary calls. Create/activate/import a project first: rebinding
+and task-control tools cannot be steps. `list_tasks`, `get_task` and
+`resume_task` discover and recover plans across chat sessions and providers.
+`resume_task` returns the next exact call; it does not execute hidden actions.
+The normal dispatch seam reserves and checkpoints matching calls. Completed
+steps are retained, and `$earlier_step.path` references resolve their results.
+Defaults compare canonically. Each step's arguments are limited to 1800
+characters; large results should be referenced through existing file/result
+IDs. Task views stay within the ordinary result budget.
+
+A denied confirmation leaves a step pending. An interrupted effectful call
+requires review; native exports count as effectful despite their legacy read
+tier. `resolve_task_step` requires ordinary destructive confirmation to
+record verified completion or an explicit retry. Reconciliation refuses a
+still-running originating session or detached timeout worker. `cancel_task`
+stops future task steps and retains checkpoints; it never aborts a queued job.
+Tasks live in the authorized project directory, are atomically replaced,
+and recheck project access/account status/owner on every operation.
+
+`inspect_import` samples CSV/Excel columns, missing values and time axes.
+Units and mappings are not guessed. `import_uploaded_network` reads native
+network files by upload ID and invokes the existing NC/CSV/Excel/MATPOWER
+importers through normal destructive confirmation and project rebinding.
+Native binary files are tool-accessible attachments, represented as metadata.
+
+`preview_project_changes` validates typed engineering inputs on an isolated
+copy and stores an owner/project-bound preview. `apply_project_changes`
+requires normal execution confirmation, unchanged inputs, an idle project,
+and the existing foreign-lock/study/undo gates. It commits a validated private
+candidate, retains unsaved work, and refuses interrupted application replay.
+Topology operations remain the existing CRUD/batch tools.
+
+`create_chart` renders bounded numeric input/result data as PNG. Result
+charts require aligned dispatch and matching solve-input provenance;
+parameter edits invalidate the fingerprint even when component axes match.
+The solve service records that provenance under the existing solve lock and
+netCDF preserves it. Older imported solved files need a new solve before
+result charting. Private cloning skips the native solver model without
+changing the live model. `build_delivery` bundles selected authorized
+artifacts and a content-hash/provenance manifest within the 25 MB limit.
+All existing agent exports now include authenticated download metadata.
+The frontend renders task progress, ordinary resume/cancel requests and safe
+file links from existing `tool_result` frames; no new stream vocabulary or
+provider-specific handlers are introduced.
+
+A terminal failed/aborted job leaves its wait step incomplete. Explicit failure
+payloads are not counted as successful steps, and partial writes require
+review. Verified failed/uncertain steps may be explicitly reconciled through
+the normal confirmation gate. Interactive `ask_user` answers are user messages,
+so choice requests run outside durable action steps. Preview application
+confirmation includes the immutable old/new/unit diff while the actual handler
+still receives only its catalogue arguments; chat renders the preview table.

@@ -1,3 +1,4 @@
+import AssistantResultCard from './AssistantResultCard'
 /**
  * Phase 3 chatbot integration v6 — ChatPanel.
  *
@@ -65,7 +66,7 @@ import { UploadProgressToast } from './UploadProgressToast'
 
 // Phase D — extensions accepted by the file picker / drag-drop overlay.
 // Matches the upload_service.ALLOWED_MIME_TYPES allowlist.
-const UPLOAD_ACCEPT = '.xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp,.gif,.docx'
+const UPLOAD_ACCEPT = '.xlsx,.xls,.csv,.nc,.zip,.m,.pdf,.png,.jpg,.jpeg,.webp,.gif,.docx'
 const UPLOAD_MAX_BYTES = 25 * 1024 * 1024
 
 // F2 — every localStorage touch in this panel is a UI PREFERENCE: a dismissed
@@ -2430,7 +2431,7 @@ export default function ChatPanel() {
         break
       }
       case 'tool_result': {
-        const d = _frame_data<{ tool_name: string; tool_use_id: string }>(frame)
+        const d = _frame_data<{ tool_name: string; tool_use_id: string; result?: unknown }>(frame)
         // The chat-staleness fix: a completed tool whose tier is not `read`
         // may have changed any component, and the caches MUST follow — a
         // stale row here is spread into the user's next manual PUT and the
@@ -2448,6 +2449,7 @@ export default function ChatPanel() {
         appendMessage({
           role: 'tool',
           content: `✓ ${d.tool_name}`,
+          tool_result: d.result,
           tool_use_id: d.tool_use_id, tool_name: d.tool_name,
         })
         break
@@ -3423,7 +3425,11 @@ export default function ChatPanel() {
               )
               : <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>}
             {m.role === 'tool' && m.tool_use_id && (
-              <ToolProgressDetails toolUseId={m.tool_use_id} />
+              <>
+                <AssistantResultCard result={m.tool_result} disabled={streaming || notReady || Boolean(mismatchLine)}
+                  onRequest={(text) => useChatStore.getState().sendRequest(text, { source: 'assistant-task' })} />
+                <ToolProgressDetails toolUseId={m.tool_use_id} />
+              </>
             )}
             {m.role === 'user' && m.attachment_file_ids && m.attachment_file_ids.length > 0 && (
               <ReplayAttachmentChips fileIds={m.attachment_file_ids} />

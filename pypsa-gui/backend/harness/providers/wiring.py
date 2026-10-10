@@ -325,12 +325,20 @@ def _bounded_tools(tools: list[dict[str, Any]], query: str = "", history=None) -
         if message.get("role") == "assistant" and isinstance(content, list):
             recent.extend(b.get("name") for b in content if isinstance(b, dict) and b.get("type") == "tool_use")
     recent = set(recent[-8:])
+    from services import assistant_tasks, chat_tools
+    session = chat_tools.chat_session()
+    task_tool = None
+    if getattr(session, "task_id", None):
+        try:
+            task_tool = assistant_tasks.get_task(session.task_id).get("next_step", {}).get("tool")
+        except Exception:
+            pass  # Ordinary dispatch rechecks authority; selection cannot grant it.
     def rank(pair):
         index, tool = pair
         name = tool["name"]
         explicit = bool(re.search(r"(?<![a-z0-9_])" + re.escape(name) + r"(?![a-z0-9_])", query))
         name_words, description_words = _tool_vocabulary(name, tool.get("description", ""))
-        return (int(name in _HARNESS_TOOL_NAMES), int(explicit), int(name in recent),
+        return (int(name in _HARNESS_TOOL_NAMES), int(name == task_tool), int(explicit), int(name in recent),
                 4 * len(words & name_words) + len(words & description_words), -index)
     chosen = {i for i, _ in sorted(enumerate(tools), key=rank, reverse=True)[:_OPENAI_TOOL_LIMIT]}
     return [tool for i, tool in enumerate(tools) if i in chosen]

@@ -80,6 +80,8 @@ MAX_MULTIMODAL_BLOCKS = 20
 # parse server-side (Phase B). CSV is text/plain but worth allowing as a
 # poor-man's tabular input.
 ALLOWED_MIME_TYPES = frozenset({
+    # Native network files are tool-accessible attachments, never model bytes.
+    "application/x-netcdf", "application/x-hdf", "application/x-hdf5", "application/zip",
     # Images (Phase C multimodal)
     "image/png", "image/jpeg", "image/webp", "image/gif",
     # PDFs (Phase C multimodal)

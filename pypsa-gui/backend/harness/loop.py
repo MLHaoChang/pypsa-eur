@@ -129,6 +129,7 @@ PROJECT_REBINDING_TOOLS = frozenset([
     "import_csv_bundle",
     "import_excel",
     "import_matpower",
+    "import_uploaded_network",
 ])
 
 # Default + selectable models: `DEFAULT_MODEL` / `OPUS_MODEL` are imported
@@ -936,6 +937,8 @@ def _build_user_content(
                     "wordprocessingml.document"
                 ):
                     hint = "read_upload_meta (then use the file_id with future tools)"
+                elif m["mime"] in ("application/x-netcdf", "application/x-hdf", "application/x-hdf5", "application/zip"):
+                    hint = "inspect_import / import_uploaded_network"
                 else:
                     hint = "read_upload_meta"
                 # Routed through the shared neutraliser even though it is a
@@ -1808,7 +1811,8 @@ def _run_turn_body(
         # A tool may change the catalogue view or bind a newly created study.
         # Refresh only AFTER this batch has been checked against the catalogue
         # it actually received. New tools are eligible on the next request.
-        if any(t.get("name") in PROJECT_REBINDING_TOOLS or t.get("name") == "use_toolset" for t in tool_uses):
+        if any(t.get("name") in PROJECT_REBINDING_TOOLS or t.get("name") in {"use_toolset", "start_task", "resume_task", "resolve_task_step"} or getattr(session, "task_id", None) for t in tool_uses):
+            _chat_tools.set_chat_session(session)
             tools = _tools_payload_for_profile(profile, message, history=messages)
             offered_tool_names = {t["name"] for t in tools}
 
@@ -2009,11 +2013,24 @@ def _dispatch_real_tool_call(
     # monkeypatches it) and defaults empty → existing confirmation behaviour.
     # The M7 parallel-destructive pre-scan is upstream of this and is NOT
     # relaxed — auto-approve drops the human round-trip, not the serialisation.
+    confirmation_args = args
+    if tool_name == "apply_project_changes":
+        try:
+            from services.assistant_tools import preview_confirmation
+            confirmation_args = preview_confirmation(args.get("preview_id"))
+        except Exception as exc:
+            detail = getattr(exc, "detail", None)
+            kind = detail.get("error_kind", "invalid_preview") if isinstance(detail, dict) else "invalid_preview"
+            yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
+                                 "error_kind": kind, "message": _redact_for_log(detail or exc)}
+            tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
+                                           "is_error": True, "content": _error_result_content(detail, exc, kind)})
+            return
     approved = yield from _confirm_destructive_tool(
         session,
         tool_use_id=tool_use_id,
         tool_name=tool_name,
-        args=args,
+        args=confirmation_args,
         tier=tier,
         tool_results_collector=tool_results_collector,
         guided=guided,
@@ -2021,51 +2038,54 @@ def _dispatch_real_tool_call(
     if not approved:
         return
 
-    yield "tool_running", {"tool_use_id": tool_use_id, "tool_name": tool_name}
-    # Chat edits reach the same handlers as HTTP, but call them DIRECTLY —
-    # so `undo_snapshot_middleware` never runs and, before this, NOTHING
-    # recorded that the project now held unsaved work. depth stayed 0 and
-    # `unsaved` stayed False, so every destructive-action guard treated a
-    # chat-edited project as clean and could discard the edit with no prompt.
-    #
-    # Marked HERE, at the single dispatch site, rather than in
-    # `routers.network._update_component`: generic classes reach that helper
-    # but Transformer, GlobalConstraint and Bus-rename dispatch to dedicated
-    # handlers (chat_tools.py:730-740), so marking there would look complete
-    # and leave those three silently invisible.
-    #
-    # AFTER the confirmation gate on purpose. Every denial/expiry path above
-    # returns before reaching this line, so a declined destructive tool does
-    # not leave the project marked dirty for work the user refused.
-    #
-    # Before the handler runs, not after, and that is deliberate: a tool that
-    # fails partway can still have mutated the network, so marking on success
-    # only would under-report. Over-marking costs a prompt about already-clean
-    # work; under-marking costs the work itself.
-    if tier != "read" and tool_name != "run_sensitivity_sweep":
-        from services import dirty_state
-        dirty_state.mark_dirty()
-    # Same seam, same reason: the HTTP middleware's undo snapshot never runs
-    # for an in-process call either. After the confirmation gate, so a refused
-    # tool costs no snapshot. See `_snapshot_for_turn_undo`.
-    _snapshot_for_turn_undo(session, tool_name)
-
-    # Execute via the chat_tools dispatcher. `handler` was resolved above the
-    # confirmation gate — see Improvement #19 there.
-
-    # #16 — per-tool execution deadline for NON-solver tools. A hung read/write
-    # handler would otherwise freeze this SSE worker thread forever. We run it
-    # on a shared worker pool and abandon it after PER_TOOL_TIMEOUT_SECONDS,
-    # emitting tool_timeout. Solver tools (run_simulation / run_ac_pf_stage)
-    # are EXCLUDED — they return immediately (spawning their own worker) and
-    # the solver_log_bridge below owns their long-running lifecycle, so a
-    # timeout here would be wrong. A timed-out worker stays detached (a Python
-    # thread can't be force-killed): the SSE thread is freed, the orphan
-    # finishes or hangs harmlessly. CAVEAT (documented): an orphan that LATER
-    # acquires PyPSAService.get_lock() and mutates the network after we emitted
-    # tool_timeout will still land + autosave — the 30s default is generous so
-    # legitimate writes finish well inside it.
+    task_ticket = None
     try:
+        from services import assistant_tasks
+        task_ticket = assistant_tasks.begin_step(session, tool_name, args or {})
+        yield "tool_running", {"tool_use_id": tool_use_id, "tool_name": tool_name}
+        # Chat edits reach the same handlers as HTTP, but call them DIRECTLY —
+        # so `undo_snapshot_middleware` never runs and, before this, NOTHING
+        # recorded that the project now held unsaved work. depth stayed 0 and
+        # `unsaved` stayed False, so every destructive-action guard treated a
+        # chat-edited project as clean and could discard the edit with no prompt.
+        #
+        # Marked HERE, at the single dispatch site, rather than in
+        # `routers.network._update_component`: generic classes reach that helper
+        # but Transformer, GlobalConstraint and Bus-rename dispatch to dedicated
+        # handlers (chat_tools.py:730-740), so marking there would look complete
+        # and leave those three silently invisible.
+        #
+        # AFTER the confirmation gate on purpose. Every denial/expiry path above
+        # returns before reaching this line, so a declined destructive tool does
+        # not leave the project marked dirty for work the user refused.
+        #
+        # Before the handler runs, not after, and that is deliberate: a tool that
+        # fails partway can still have mutated the network, so marking on success
+        # only would under-report. Over-marking costs a prompt about already-clean
+        # work; under-marking costs the work itself.
+        if tier != "read" and tool_name not in {"run_sensitivity_sweep", "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery"}:
+            from services import dirty_state
+            dirty_state.mark_dirty()
+        # Same seam, same reason: the HTTP middleware's undo snapshot never runs
+        # for an in-process call either. After the confirmation gate, so a refused
+        # tool costs no snapshot. See `_snapshot_for_turn_undo`.
+        _snapshot_for_turn_undo(session, tool_name)
+
+        # Execute via the chat_tools dispatcher. `handler` was resolved above the
+        # confirmation gate — see Improvement #19 there.
+
+        # #16 — per-tool execution deadline for NON-solver tools. A hung read/write
+        # handler would otherwise freeze this SSE worker thread forever. We run it
+        # on a shared worker pool and abandon it after PER_TOOL_TIMEOUT_SECONDS,
+        # emitting tool_timeout. Solver tools (run_simulation / run_ac_pf_stage)
+        # are EXCLUDED — they return immediately (spawning their own worker) and
+        # the solver_log_bridge below owns their long-running lifecycle, so a
+        # timeout here would be wrong. A timed-out worker stays detached (a Python
+        # thread can't be force-killed): the SSE thread is freed, the orphan
+        # finishes or hangs harmlessly. CAVEAT (documented): an orphan that LATER
+        # acquires PyPSAService.get_lock() and mutates the network after we emitted
+        # tool_timeout will still land + autosave — the 30s default is generous so
+        # legitimate writes finish well inside it.
         if tool_name in ("run_simulation", "run_ac_pf_stage"):
             result = handler(**(args or {}))
         else:
@@ -2087,6 +2107,7 @@ def _dispatch_real_tool_call(
             future = _TOOL_EXECUTOR.submit(
                 lambda: _ctx_snapshot.run(lambda: handler(**(args or {})))
             )
+            assistant_tasks.register_worker(task_ticket, future)
             try:
                 tool_deadline = time.monotonic() + harness_budget.PER_TOOL_TIMEOUT_SECONDS
                 if tool_name == "wait_for_job":
@@ -2138,6 +2159,10 @@ def _dispatch_real_tool_call(
 
                 _PyPSAService.adopt_active_from(_ctx_snapshot)
             except concurrent.futures.TimeoutError:
+                try:
+                    assistant_tasks.finish_step(task_ticket, error="tool_timeout")
+                except Exception:
+                    logger.exception("Task timeout checkpoint unavailable")
                 # Anthropic requires a tool_result for every tool_use_id in the
                 # next user message (same invariant the project_switched and
                 # handler-exception paths honour) — emit the is_error result so
@@ -2165,6 +2190,11 @@ def _dispatch_real_tool_call(
         # force-overwrite / cascade choices. The agent layer just forwards.
         # For non-solver tools the worker exception re-raises here via
         # future.result(), so this block still owns handler failures.
+        if task_ticket is not None:
+            try:
+                assistant_tasks.finish_step(task_ticket, error=type(exc).__name__)
+            except Exception:
+                logger.exception("Task failure checkpoint unavailable")
         error_kind = "tool_error"
         detail = getattr(exc, "detail", None)
         if isinstance(detail, dict) and "error_kind" in detail:
@@ -2233,6 +2263,20 @@ def _dispatch_real_tool_call(
                 "chat: solver_log_bridge for %s failed: %s",
                 tool_name, _redact_for_log(exc),
             )
+
+    try:
+        task_state = assistant_tasks.finish_step(task_ticket, result=result)
+    except Exception as exc:
+        # The action may have completed. Keep its running checkpoint uncertain,
+        # pair the real tool ID, and forbid a silent automatic repeat.
+        yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
+                             "error_kind": "task_checkpoint_failed",
+                             "message": "The action returned but its checkpoint could not be saved. Inspect effects before resuming."}
+        tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
+                                       "is_error": True, "content": "task_checkpoint_failed; inspect effects before retrying"})
+        return
+    if task_state is not None:
+        result = {**result, "_task": task_state} if isinstance(result, dict) else {"result": result, "_task": task_state}
 
     # UI-control tools (and compare_scenarios with open_compare_rail) return a
     # marker dict with `_ui_event: True`. Emit a dedicated SSE frame so the
