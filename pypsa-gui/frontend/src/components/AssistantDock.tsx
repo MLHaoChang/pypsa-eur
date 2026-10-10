@@ -1,9 +1,10 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { PanelRightClose } from 'lucide-react'
 import { useUIStore } from '../store/uiStore'
 import { useChatProfiles, useChatReadiness } from '../hooks/useChatProfiles'
 import ChatPanel from './ChatPanel'
-import CompanionLauncher from './CompanionLauncher'
+import CompanionLauncher, { type CompanionPresence } from './CompanionLauncher'
+import { keyResultsWalkRequested, openProjectList, openProjectRequested, startKeyResultsWalk } from './liveWalk'
 import { ErrorBoundary } from './ErrorBoundary'
 
 /**
@@ -34,7 +35,54 @@ export default function AssistantDock() {
   const dragRef = useRef<{ startX: number; startW: number } | null>(null)
 
   const profilesQuery = useChatProfiles()
-  const { effectiveProfileId } = useChatReadiness()
+  const { effectiveProfileId, ready } = useChatReadiness()
+  const [presence, setPresence] = useState<CompanionPresence>('idle')
+  const [liveOpen, setLiveOpen] = useState(false)
+  const [liveCaption, setLiveCaption] = useState('')
+  const walkCancel = useRef<(() => void) | null>(null)
+  useEffect(() => () => { walkCancel.current?.() }, [])
+
+  const stopWalk = useCallback(() => {
+    walkCancel.current?.()
+    walkCancel.current = null
+  }, [])
+
+  const forwardToHarness = useCallback((text: string) => {
+    if (ready !== true) return
+    window.dispatchEvent(new CustomEvent('companion:live-utterance', { detail: text }))
+  }, [ready])
+
+  const onLiveSubmit = useCallback((text: string) => {
+    if (keyResultsWalkRequested(text)) {
+      stopWalk()
+      setPresence('thinking')
+      setLiveCaption('Opening each results tab.')
+      walkCancel.current = startKeyResultsWalk({
+        onStep: (tab, _index, last) => {
+          setLiveCaption(`${tab.label}. ${tab.blurb}`)
+          setPresence(last ? 'speaking' : 'thinking')
+        },
+      })
+      forwardToHarness(text)
+      return
+    }
+    if (openProjectRequested(text)) {
+      stopWalk()
+      openProjectList()
+      setPresence('speaking')
+      setLiveCaption('Opening the project list.')
+      forwardToHarness(text)
+      return
+    }
+    if (ready === true) {
+      setPresence('thinking')
+      setLiveCaption('Sent to the assistant.')
+      forwardToHarness(text)
+      return
+    }
+    setPresence('listening')
+    setLiveCaption('Ask to walk through the key results in each tab, or to open a project.')
+  }, [forwardToHarness, ready, stopWalk])
   const profileLabel =
     profilesQuery.data?.profiles.find((p) => p.id === effectiveProfileId)?.label
     ?? profilesQuery.data?.profiles.find((p) => p.id === profilesQuery.data.active_profile_id)?.label
@@ -80,7 +128,7 @@ export default function AssistantDock() {
   return (
     <>
       <div
-        className={`relative flex flex-col min-h-0 bg-bg shrink-0 ${
+        className={`relative flex flex-col min-h-0 bg-bg shrink-0 transition-[width] duration-300 ease-out motion-reduce:transition-none ${
           assistantDockOpen
             ? 'border-l border-border'
             : 'w-0 overflow-visible border-0'
@@ -153,19 +201,38 @@ export default function AssistantDock() {
       </div>
       {!assistantDockOpen && (
         <CompanionLauncher
+          presence={presence}
           profileLabel={profileLabel}
+          liveOpen={liveOpen}
+          liveCaption={liveCaption}
+          modelKeyMissing={ready === false}
+          onLiveSubmit={onLiveSubmit}
           onCompose={() => {
+            stopWalk()
             useUIStore.getState().setAssistantEntry('compose')
             setAssistantDockOpen(true)
           }}
           onSpeak={() => {
+            stopWalk()
             useUIStore.getState().setAssistantEntry('speak')
             setAssistantDockOpen(true)
           }}
           onLive={() => {
-            // Issue 03 connects the session on this page. This click must not open the console.
+            // Stays on this page. A model key sends the turn through the
+            // chat harness; without one, the walk still calls applyUiNavigate.
+            if (liveOpen) {
+              stopWalk()
+              setLiveOpen(false)
+              setPresence('idle')
+              setLiveCaption('')
+              return
+            }
+            setLiveOpen(true)
+            setPresence('listening')
+            setLiveCaption('Listening. Ask to walk through the key results in each tab, or to open a project.')
           }}
           onProfiles={() => {
+            stopWalk()
             useUIStore.getState().setAssistantEntry('profiles')
             setAssistantDockOpen(true)
           }}

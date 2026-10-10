@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import CompanionLauncher from './CompanionLauncher'
 
@@ -60,6 +60,29 @@ describe('CompanionLauncher', () => {
     )
     expect(screen.getByTestId('companion-launcher').getAttribute('data-motion')).toBe('off')
     expect(screen.getByTestId('companion-character').className.split(/\s+/)).not.toContain('companion-idle')
+  })
+
+  it('grows on hover and reveals the actions from a larger character', () => {
+    mockMotion(false)
+    render(
+      <CompanionLauncher
+        profileLabel="Model"
+        onCompose={vi.fn()}
+        onSpeak={vi.fn()}
+        onLive={vi.fn()}
+        onProfiles={vi.fn()}
+      />,
+    )
+    const root = screen.getByTestId('companion-launcher')
+    const svg = screen.getByTestId('companion-character').querySelector('svg')
+    expect(svg?.getAttribute('width')).toBe('112')
+    expect(svg?.getAttribute('height')).toBe('112')
+    expect(root.getAttribute('data-hovered')).toBe('false')
+    expect(screen.getByTestId('companion-actions').className.split(/\s+/)).toContain('companion-actions')
+    fireEvent.mouseEnter(root)
+    expect(root.getAttribute('data-hovered')).toBe('true')
+    fireEvent.mouseLeave(root)
+    expect(root.getAttribute('data-hovered')).toBe('false')
   })
 
   it('marks a listening presence only when that presence is passed in', () => {

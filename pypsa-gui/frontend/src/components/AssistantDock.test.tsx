@@ -138,6 +138,36 @@ describe('assistant dock prominence', () => {
     await user.click(screen.getByTestId('companion-live'))
     expect(useUIStore.getState().assistantDockOpen).toBe(false)
     expect(useUIStore.getState().assistantEntry).toBeNull()
+    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('listening')
+    expect(screen.getByTestId('companion-live-input')).toBeTruthy()
+  })
+
+  it('walks the results tabs from the live composer and leaves the console closed', async () => {
+    const user = userEvent.setup()
+    const seen: string[] = []
+    const request = useUIStore.getState().requestResultsTab
+    useUIStore.setState({
+      activeSlidePanel: null,
+      resultsTabRequest: null,
+      uiMode: 'guided',
+      requestResultsTab: (tab: string) => {
+        seen.push(tab)
+        request(tab)
+      },
+    })
+    const view = render(<AssistantDock />)
+    await user.click(screen.getByTestId('companion-live'))
+    await user.type(
+      screen.getByTestId('companion-live-input'),
+      'Walk me through the key results in each tab',
+    )
+    await user.click(screen.getByTestId('companion-live-send'))
+    expect(useUIStore.getState().assistantDockOpen).toBe(false)
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+    expect(useUIStore.getState().uiMode).toBe('expert')
+    expect(seen[0]).toBe('overview')
+    expect(screen.getByTestId('companion-live-caption').textContent).toContain('Overview')
+    view.unmount()
   })
 
   it('reserves no column width while collapsed', () => {
