@@ -68,7 +68,7 @@
 - Produces:
   - `assistantEntry: 'compose' | 'speak' | 'profiles' | null`
   - `setAssistantEntry(entry: 'compose' | 'speak' | 'profiles' | null): void`
-  - `COMPANION_TOAST_OFFSET = 128`
+  - `COMPANION_TOAST_OFFSET = 220`
   - `CompanionPresence = 'idle' | 'listening' | 'thinking' | 'speaking'`
   - `CompanionLauncher` props: `presence?: CompanionPresence`, `profileLabel: string`, `onCompose: () => void`, `onSpeak: () => void`, `onLive: () => void`, `onProfiles: () => void`
   - Test ids: `companion-launcher`, `companion-character`, `companion-compose`, `companion-speak`, `companion-live`, `companion-profile`
@@ -156,7 +156,8 @@ describe('CompanionLauncher', () => {
       />,
     )
     expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('listening')
-    expect(screen.getByTestId('companion-speak').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('companion-live').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('companion-speak').getAttribute('aria-pressed')).toBe('false')
   })
 })
 ```
@@ -167,35 +168,9 @@ Run: `cd pypsa-gui/frontend && npm test -- src/components/CompanionLauncher.test
 
 Expected: FAIL because `CompanionLauncher` is not defined.
 
-- [ ] **Step 3: Add the one-shot entry to the UI store**
+- [ ] **Step 3: Implement only the launcher, then confirm its tests pass**
 
-In the `UIStore` type, next to `assistantDockOpen`:
-
-```ts
-  assistantEntry: 'compose' | 'speak' | 'profiles' | null
-```
-
-Next to `setAssistantDockOpen`:
-
-```ts
-  setAssistantEntry: (entry: 'compose' | 'speak' | 'profiles' | null) => void
-```
-
-In the store initializer, next to `assistantDockOpen: storedAssistantDockOpen()`:
-
-```ts
-  assistantEntry: null,
-```
-
-Next to the `setAssistantDockOpen` implementation:
-
-```ts
-  setAssistantEntry: (entry) => set({ assistantEntry: entry }),
-```
-
-Do not persist `assistantEntry`. A reload must not reopen dictation or steal focus.
-
-Update the comment above `storedAssistantDockOpen` so it no longer describes a 40px gutter as the closed state. Default-open stays as it is. The closed state is the overlay from this task.
+Create `CompanionLauncher.tsx` and the CSS in Step 4. Do not edit `uiStore.ts`, `AssistantDock.tsx`, or `ToasterHost.tsx` in this step.
 
 - [ ] **Step 4: Implement the launcher**
 
@@ -205,7 +180,7 @@ Create `pypsa-gui/frontend/src/components/CompanionLauncher.tsx`:
 import { useEffect, useState } from 'react'
 import { Mic, Pencil } from 'lucide-react'
 
-export const COMPANION_TOAST_OFFSET = 128
+export const COMPANION_TOAST_OFFSET = 220
 
 export type CompanionPresence = 'idle' | 'listening' | 'thinking' | 'speaking'
 
@@ -283,7 +258,7 @@ export default function CompanionLauncher({
           onClick={onSpeak}
           data-testid="companion-speak"
           aria-label="Open reviewed dictation"
-          aria-pressed={presence === 'listening'}
+          aria-pressed="false"
           title="Open the assistant and review dictation"
           className="px-3 py-2 text-text hover:text-accent"
         >
@@ -295,6 +270,7 @@ export default function CompanionLauncher({
           onClick={onLive}
           data-testid="companion-live"
           aria-label="Start a live conversation on this page"
+          aria-pressed={presence === 'listening'}
           title="Talk with the assistant here. This stays on the current page."
           className="px-3 py-2 text-text hover:text-accent"
         >
@@ -321,7 +297,60 @@ Append to `pypsa-gui/frontend/src/index.css`:
 }
 ```
 
-- [ ] **Step 5: Mount it from the dock and stop reserving a column**
+Run: `cd pypsa-gui/frontend && npm test -- src/components/CompanionLauncher.test.tsx`
+
+Expected: PASS. No other frontend file has changed.
+
+- [ ] **Step 5: Write the failing dock, toast, and landing-page tests**
+
+Do this before editing `AssistantDock.tsx`, `ToasterHost.tsx`, or `App.tsx`.
+
+At the top of both `AssistantDock.test.tsx` and `AssistantDock.eviction.test.tsx`, above the `AssistantDock` import, add:
+
+```tsx
+vi.mock('../hooks/useChatProfiles', () => ({
+  useChatProfiles: () => ({
+    data: {
+      profiles: [{ id: 'claude', label: 'Claude', wire: 'anthropic' as const }],
+      active_profile_id: 'claude',
+    },
+    isError: false,
+  }),
+  useChatReadiness: () => ({ effectiveProfileId: 'claude', ready: true }),
+}))
+```
+
+`AssistantDock.eviction.test.tsx` renders `<AssistantDock />` with no query client. Without this mock, the later production change throws "No QueryClient set" instead of failing on behavior.
+
+Replace the collapsed-launcher assertions in `AssistantDock.test.tsx`:
+
+- `assistant-dock-launcher` becomes `companion-compose`. Clicking it sets `assistantDockOpen` true and `assistantEntry` to `'compose'`.
+- Delete the test that requires the microphone inside a collapsed strip. Replace it with: while collapsed, `companion-speak` is present; clicking it sets `assistantDockOpen` true and `assistantEntry` to `'speak'`.
+- Clicking `companion-live` leaves `assistantDockOpen` false and `assistantEntry` null. Live does not open the console.
+- While collapsed, `assistant-dock` class names include `w-0` and do not include `w-10`, and `style.width` is `''`.
+- While open, `companion-launcher` is absent (`queryByTestId` returns null) and the resize handle still exists.
+- The mount-identity test clicks `companion-compose` instead of `assistant-dock-launcher`.
+- `beforeEach` also sets `assistantEntry: null`.
+
+In `ProjectsHomePage.assistant.test.tsx`, the collapsed test expects `companion-compose` instead of `assistant-dock-launcher`. The dock node stays inside the brand-dark surface. Mock `../hooks/useChatProfiles` the same way so the page test does not call the network.
+
+In `ToasterHost.test.tsx`, the collapse step on `/app` expects `${COMPANION_TOAST_OFFSET + TOAST_GAP}px`, not `${TOAST_GAP}px`. Login and admin stay at `TOAST_GAP` whether the stored dock flag is open or closed. Import `COMPANION_TOAST_OFFSET` from `./CompanionLauncher` in the test. That import is valid once Step 4 has created the launcher.
+
+Run:
+
+```bash
+cd pypsa-gui/frontend && npm test -- \
+  src/components/AssistantDock.test.tsx \
+  src/components/AssistantDock.eviction.test.tsx \
+  src/components/ToasterHost.test.tsx \
+  src/pages/ProjectsHomePage.assistant.test.tsx
+```
+
+Expected: `AssistantDock.eviction.test.tsx` still PASS. The other three FAIL because `companion-compose` is missing, the dock class still contains `w-10`, and the collapsed toast offset is still `16px`. A "No QueryClient set" failure is the wrong failure; fix the mock and rerun.
+
+- [ ] **Step 6: Mount the companion and stop reserving a column**
+
+Only after Step 5 failed for the reasons above.
 
 In `AssistantDock.tsx`:
 
@@ -364,34 +393,14 @@ In `AssistantDock.tsx`:
 
 `presence` stays at its default `idle`. Issue 03 is what later passes `listening`, `thinking`, or `speaking`. This task does not import LiveKit.
 
-- [ ] **Step 6: Update the dock tests**
+In `uiStore.ts`, add the one-shot entry. Do not persist it.
 
-At the top of `AssistantDock.test.tsx`, mock the profile hooks so the dock does not need a query client:
-
-```tsx
-vi.mock('../hooks/useChatProfiles', () => ({
-  useChatProfiles: () => ({
-    data: {
-      profiles: [{ id: 'claude', label: 'Claude', wire: 'anthropic' as const }],
-      active_profile_id: 'claude',
-    },
-    isError: false,
-  }),
-  useChatReadiness: () => ({ effectiveProfileId: 'claude', ready: true }),
-}))
+```ts
+  assistantEntry: 'compose' | 'speak' | 'profiles' | null
+  setAssistantEntry: (entry: 'compose' | 'speak' | 'profiles' | null) => void
 ```
 
-Replace the collapsed-launcher assertions:
-
-- `assistant-dock-launcher` becomes `companion-compose`. Clicking it sets `assistantDockOpen` true and `assistantEntry` to `'compose'`.
-- Delete the test that requires the microphone inside a collapsed strip. Replace it with: while collapsed, `companion-speak` is present; clicking it sets `assistantDockOpen` true and `assistantEntry` to `'speak'`.
-- Clicking `companion-live` leaves `assistantDockOpen` false and `assistantEntry` null. Live does not open the console.
-- While collapsed, `assistant-dock` class names include `w-0` and do not include `w-10`, and `style.width` is `''`.
-- While open, `companion-launcher` is absent (`queryByTestId` returns null) and the resize handle still exists.
-- The mount-identity test clicks `companion-compose` instead of `assistant-dock-launcher`.
-- `beforeEach` also sets `assistantEntry: null`.
-
-In `ProjectsHomePage.assistant.test.tsx`, the collapsed test expects `companion-compose` instead of `assistant-dock-launcher`. The dock node stays inside the brand-dark surface.
+Initializer: `assistantEntry: null`. Implementation: `setAssistantEntry: (entry) => set({ assistantEntry: entry })`. Update the comment above `storedAssistantDockOpen` so the closed state is this overlay. Default-open stays as it is.
 
 In `ToasterHost.tsx`, import `COMPANION_TOAST_OFFSET` and set `right` to:
 
@@ -402,8 +411,6 @@ In `ToasterHost.tsx`, import `COMPANION_TOAST_OFFSET` and set `right` to:
       ? dockWidth + TOAST_GAP
       : COMPANION_TOAST_OFFSET + TOAST_GAP
 ```
-
-In `ToasterHost.test.tsx`, the collapse step on `/app` expects `${COMPANION_TOAST_OFFSET + TOAST_GAP}px`, not `${TOAST_GAP}px`. Login and admin stay at `TOAST_GAP` whether the stored dock flag is open or closed.
 
 In `App.tsx`, change the Zone 5 comment so the collapsed dock is a zero-width column and the companion is `position: fixed`. The open width is still the stored width.
 
@@ -422,6 +429,8 @@ cd pypsa-gui/frontend && npm test -- \
 
 Expected: PASS.
 
+Then run `cd pypsa-gui/frontend && npm run build`. Expected: exit 0. Vitest does not type-check, and `panelRequested` is a required prop.
+
 - [ ] **Step 8: Commit**
 
 ```bash
@@ -430,6 +439,7 @@ git add pypsa-gui/frontend/src/store/uiStore.ts \
   pypsa-gui/frontend/src/components/CompanionLauncher.test.tsx \
   pypsa-gui/frontend/src/components/AssistantDock.tsx \
   pypsa-gui/frontend/src/components/AssistantDock.test.tsx \
+  pypsa-gui/frontend/src/components/AssistantDock.eviction.test.tsx \
   pypsa-gui/frontend/src/components/ToasterHost.tsx \
   pypsa-gui/frontend/src/components/ToasterHost.test.tsx \
   pypsa-gui/frontend/src/pages/ProjectsHomePage.assistant.test.tsx \
@@ -482,7 +492,7 @@ Extend `Props`:
   onPanelRequestConsumed: () => void
 ```
 
-Add the prop to the function signature. Add this effect beside the effect that closes the panel when the dock is closed or a turn is streaming:
+Add the prop to the function signature. Place this effect after the project-reset effect (the one whose dependency list is `[project]` and which calls `setOpen(false)` on mount). Placing it earlier lets that reset close the panel again and the new test stays red for the wrong reason.
 
 ```tsx
   useEffect(() => {
@@ -494,39 +504,11 @@ Add the prop to the function signature. Add this effect beside the effect that c
 
 This effect calls `setOpen(true)` only. It does not call `audio.start`, `speech.toggle`, or `mic`. If a turn is streaming, the request is consumed and the panel stays closed. The existing close effect still cancels audio when the dock collapses.
 
-Pass `panelRequested: false` and `onPanelRequestConsumed: () => {}` from every current test `defaults` object.
+`defaults` already gained `panelRequested: false` and `onPanelRequestConsumed: vi.fn()` in Step 1. Keep that `vi.fn()`. Do not replace it with an empty function.
 
-- [ ] **Step 4: Consume `speak` and `compose` in ChatPanel**
+- [ ] **Step 4: Write the failing ChatPanel entry test**
 
-Near the other chat state:
-
-```tsx
-  const assistantEntry = useUIStore((s) => s.assistantEntry)
-  const [dictationPanelRequested, setDictationPanelRequested] = useState(false)
-  const consumeDictationRequest = useCallback(() => {
-    setDictationPanelRequested(false)
-  }, [])
-```
-
-Add this effect next to the existing focus-on-open effect. Do not remove that effect: opening the dock, including from Compose, still focuses `chat-input`.
-
-```tsx
-  useEffect(() => {
-    if (!assistantDockOpen || assistantEntry == null) return
-    const entry = assistantEntry
-    useUIStore.getState().setAssistantEntry(null)
-    if (entry === 'speak') setDictationPanelRequested(true)
-  }, [assistantDockOpen, assistantEntry])
-```
-
-On `DictationControls`:
-
-```tsx
-  panelRequested={dictationPanelRequested}
-  onPanelRequestConsumed={consumeDictationRequest}
-```
-
-- [ ] **Step 5: Write the panel-level entry test**
+Do this before editing `ChatPanel.tsx`.
 
 Create `pypsa-gui/frontend/src/components/ChatPanel.companionEntry.test.tsx`. Copy the `vi.mock` blocks for `../api/dictation`, `../hooks/useSpeechToText`, `../api/chat`, `../api/uploads`, `../api/network`, and `../api/simulation` from `ChatPanel.speech.test.tsx`, including `installRecordingMocks()` in `beforeEach`. Add:
 
@@ -571,6 +553,44 @@ it('speak opens the review panel and does not start a recording or a chat turn',
 ```
 
 Import `createChatStream` from `../api/chat` so the assertion type-checks against the mock.
+
+Run: `cd pypsa-gui/frontend && npm test -- src/components/ChatPanel.companionEntry.test.tsx`
+
+Expected: the speak test FAIL because `dictation-panel` is missing and `assistantEntry` stays `'speak'`. The compose test's focus assertion can already pass because of the existing open effect. Its entry-cleared assertion must fail. A passing speak test means the test is not exercising new behavior.
+
+- [ ] **Step 5: Consume `speak` and `compose` in ChatPanel**
+
+Only after Step 4 failed as specified.
+
+Near the other chat state:
+
+```tsx
+  const assistantEntry = useUIStore((s) => s.assistantEntry)
+  const [dictationPanelRequested, setDictationPanelRequested] = useState(false)
+  const consumeDictationRequest = useCallback(() => {
+    setDictationPanelRequested(false)
+  }, [])
+```
+
+Add this effect next to the existing focus-on-open effect. Do not remove that effect: opening the dock, including from Compose, still focuses `chat-input`.
+
+```tsx
+  useEffect(() => {
+    if (!assistantDockOpen || assistantEntry == null || assistantEntry === 'profiles') return
+    const entry = assistantEntry
+    useUIStore.getState().setAssistantEntry(null)
+    if (entry === 'speak') setDictationPanelRequested(true)
+  }, [assistantDockOpen, assistantEntry])
+```
+
+Leave `'profiles'` in the store. Task 3 clears it after the model select is focused.
+
+On `DictationControls`:
+
+```tsx
+  panelRequested={dictationPanelRequested}
+  onPanelRequestConsumed={consumeDictationRequest}
+```
 
 - [ ] **Step 6: Run the speech and dictation tests**
 
@@ -648,43 +668,27 @@ it('profiles focuses the existing model select and does not start dictation', as
 
 Run: `cd pypsa-gui/frontend && npm test -- src/components/ChatPanel.companionEntry.test.tsx`
 
-Expected: FAIL because the model select is not focused. The entry is cleared and dictation stays closed, so the assertion that fails is `document.activeElement`.
+Expected: FAIL because the model select is not the active element. The composer focus effect runs on the same open transition and will steal focus on the next animation frame unless Step 3 skips it for `'profiles'`. A pass on the first run means the test did not catch that race.
 
 - [ ] **Step 3: Focus the select when the entry is profiles**
 
-In `ChatPanel.tsx`:
+In the existing focus-on-open effect, skip the composer when the entry is profiles:
+
+```tsx
+  useEffect(() => {
+    const opened = assistantDockOpen && !prevDockOpenRef.current
+    prevDockOpenRef.current = assistantDockOpen
+    if (!opened) return
+    if (useUIStore.getState().assistantEntry === 'profiles') return
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [assistantDockOpen])
+```
+
+Replace the Task 2 entry effect with this one. Do not add a second effect.
 
 ```tsx
   const modelSelectRef = useRef<HTMLSelectElement>(null)
-```
 
-Extend the Task 2 entry effect:
-
-```tsx
-  useEffect(() => {
-    if (!assistantDockOpen || assistantEntry == null) return
-    const entry = assistantEntry
-    useUIStore.getState().setAssistantEntry(null)
-    if (entry === 'speak') setDictationPanelRequested(true)
-    if (entry === 'profiles') {
-      requestAnimationFrame(() => modelSelectRef.current?.focus())
-    }
-  }, [assistantDockOpen, assistantEntry])
-```
-
-Put `ref={modelSelectRef}` on every `chat-model-select` element (loading, error, empty, and ready). Only the ready select accepts focus; the test waits until `data-profiles-state` is `ready`, then a second animation frame focuses it. If the first frame runs while the select is still disabled, focus again when the profiles query resolves:
-
-```tsx
-  useEffect(() => {
-    if (assistantEntry !== 'profiles' || !assistantDockOpen) return
-    if (profilesQuery.data == null) return
-    requestAnimationFrame(() => modelSelectRef.current?.focus())
-  }, [assistantEntry, assistantDockOpen, profilesQuery.data])
-```
-
-Clearing `assistantEntry` in the first effect races this one. Keep the entry until the ready select has been focused:
-
-```tsx
   useEffect(() => {
     if (!assistantDockOpen || assistantEntry == null) return
     if (assistantEntry === 'speak') {
@@ -696,17 +700,16 @@ Clearing `assistantEntry` in the first effect races this one. Keep the entry unt
       useUIStore.getState().setAssistantEntry(null)
       return
     }
-    if (profilesQuery.data == null) return
+    if (assistantEntry !== 'profiles') return
+    if (streaming || profilesQuery.data == null) return
     const select = modelSelectRef.current
     if (select == null || select.disabled) return
     select.focus()
     useUIStore.getState().setAssistantEntry(null)
-  }, [assistantDockOpen, assistantEntry, profilesQuery.data])
+  }, [assistantDockOpen, assistantEntry, profilesQuery.data, streaming])
 ```
 
-Delete the two-effect version if you added it in an earlier step. One effect is the contract. Compose still gets its caret from the existing focus-on-open effect.
-
-Do not call `onPickProfile` from the chip. Choosing a row in the select keeps the current session rules.
+`streaming` is already a ChatPanel state. Put `ref={modelSelectRef}` on every `chat-model-select`. When a turn is streaming the select stays disabled, the entry stays `'profiles'`, and the effect runs again when `streaming` becomes false. Do not call `onPickProfile` from the chip.
 
 - [ ] **Step 4: Run the entry tests**
 
@@ -826,7 +829,7 @@ Spec coverage:
 - Floating presence, not a column or a slide tab: Task 1.
 - Compose opens the dock and focuses the composer: Tasks 1 and 2. Focus is the existing open effect; Task 2 pins it.
 - Speak opens reviewed dictation and does not insert or record: Task 2.
-- Live is a third control and does not open the console: Task 1. Connecting the session, lighting the character, navigating, creating, confirming, and announcing downloads on the current page is issue 03.
+- Live is a third control and does not open the console: Task 1. `aria-pressed` for listening is on `companion-live`, never on `companion-speak`. Connecting the session, lighting the character, navigating, creating, confirming, and announcing downloads on the current page is issue 03.
 - Idle motion and reduced motion: Task 1. Listening is a prop only; nothing in this plan sets it.
 - Companion hidden while the dock is open: Task 1.
 - Profile chip opens the existing picker: Tasks 1 and 3.
