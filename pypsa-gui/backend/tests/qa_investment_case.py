@@ -76,6 +76,15 @@ from the product's code; the product is only the thing under test.
      2,199,084.18 and the project NPV = (saving − LP annuity) × af(7 %, 25);
      `scale_capex` moves parts and total; a fixed entry for a `part_lifetimes`
      asset refused `replacement_rule_conflict:bess`.
+  N. IC G1, G2 by hand (plan `2026-10-07-ic-g1-g2-campus-equipment.md`): the
+     defaults pack 2026-10-07 prices a 132/33 kV 40 MVA transformer at
+     1,800,000 EUR/unit (lump, 40 y, FOM 1.5 %) in 2026 EUR and keeps every
+     2026-10-05 row; that transformer and a 25-y capacitor bank (90 k) as
+     extra owner assets beside a 1 MEUR battery on 30 years under
+     `part_lifetimes` + `remaining_life_annuity`: the capex with 10 %
+     contingency, the FOM lines escalated by opex, the bank re-bought in 2054
+     and its remaining 20 years valued; a grant on every asset excludes the
+     extras; a case without extras hashes as it did before G2.
 
 (The P1–P3 drivers — `qa_commercial_lp.py`, `qa_billing_contracts.py`,
 `qa_value_flows.py` — run beside this one in `tests/run_qa_drivers.py`.)
@@ -722,6 +731,96 @@ def scenario_m() -> None:
         refused = exc.code
     _step("M: a fixed entry for a part_lifetimes asset is refused (double counting)",
           refused == "replacement_rule_conflict:bess", f"{refused}")
+
+
+def scenario_n() -> None:
+    print("\n[N] IC G1, G2 by hand: campus equipment in the pack and as extra owner assets")
+    from models.finance import FinanceInputs
+    from services.asset_schema.access import UpfrontPart
+    from services.finance.case import (
+        AssetFinance, ExtraOwnerAsset, FinanceCase, LpBasis, Template, TemplateLine,
+    )
+    from services.finance.engine import run_case
+    from services.library.defaults_pack.loader import load_defaults_pack
+    from services.results.finance_case import finance_case_hash
+
+    new, old = load_defaults_pack("2026-10-07"), load_defaults_pack("2026-10-05")
+    (tr,) = new.cost_parts("transformer.tr_132_33_40")
+    _step("N: pack 2026-10-07 — transformer.tr_132_33_40 is one lump part, 1,800,000 EUR/unit, "
+          "40 y, FOM 0.015, 2026 EUR, illustrative",
+          (tr.part, tr.basis, tr.overnight.value, tr.overnight.unit, tr.lifetime.value,
+           tr.fom_share.value, tr.overnight.currency_year, tr.overnight.illustrative) ==
+          ("investment", "lump", 1_800_000.0, "EUR/unit", 40.0, 0.015, 2026, True))
+    _step("N: pack 2026-10-07 keeps every 2026-10-05 row unchanged; 2026-10-05's hash is unchanged",
+          [v.model_dump() for v in new.cost_values[:len(old.cost_values)]] ==
+          [v.model_dump() for v in old.cost_values]
+          and old.hash == "962a0184861c1c594fdf4029ed5e7d55e241ab1aadfad5d52412df76ad2a4f78")
+
+    def ext(name, kind, cost, life, fom):
+        return ExtraOwnerAsset(name=name, kind=kind, basis="lump", quantity=1,
+                               parts=(UpfrontPart("investment", cost, life, fom),),
+                               build_year=2030, source="qa campus study",
+                               source_hash="0123456789abcdef")
+
+    extras = (ext("trf", "transformer", 1_800_000.0, 40.0, 0.015),
+              ext("cap", "capacitor_bank", 90_000.0, 25.0, 0.02))
+    bess = AssetFinance("bess", "StorageUnit", 1_000_000.0, 40.0, "battery")
+    fom = tuple(TemplateLine(f"extra_asset_fom:{e.name}", "fom",
+                             -e.parts[0].fom_share * e.parts[0].upfront_per_unit, "opex",
+                             source="extra_asset_fom", source_id=e.name, money_year=2030)
+                for e in extras)
+
+    def case(**over):
+        kw = dict(financial_close=date(2029, 1, 1), cod_by_asset={}, analysis_years=30,
+                  contingency_share=0.1, capex_phasing=[1.0],
+                  escalation={"opex": 0.02, "tariff": 0.0, "capex": 0.02},
+                  tax_losses="offset_other_income", financing_fee_tax="not_deducted",
+                  wacc_nominal=0.07, cost_of_equity=0.07, inflation=0.0,
+                  replacement_rule="part_lifetimes",
+                  terminal_value={"method": "remaining_life_annuity"},
+                  incentives=[{"kind": "grant", "rate": 0.3, "grant_tax_treatment": "taxable"}])
+        kw.update(over)
+        return FinanceCase(
+            inputs=FinanceInputs(**kw), owner="o", base_year=2030, cod=date(2030, 1, 1),
+            templates=(Template(2030, (TemplateLine("bill", "energy_import", 500_000.0,
+                                                    "tariff"),) + fom),),
+            assets=(bess,) + tuple(e.asset_finance() for e in extras), extra_assets=extras,
+            lp_basis=LpBasis(discount_rate=0.07))
+
+    r = run_case(case())
+    tl = r.tl
+    _step("N: capex = (1 MEUR battery + 1.8 MEUR transformer + 90 k bank) × 1.1 contingency",
+          r.op.capex is not None and _cent(float(r.op.capex.sum()), 2_890_000.0 * 1.1),
+          f"{None if r.op.capex is None else float(r.op.capex.sum())}")
+    _step("N: the transformer's FOM = 0.015 × 1.8 M a year, escalated by opex 2 % from 2030",
+          all(_cent(float(r.op.lines["extra_asset_fom:trf"][tl.index(y)]),
+                    -27_000.0 * 1.02 ** (y - 2030)) for y in (2030, 2045, 2059)))
+    items = [(x.year, v) for x, v in r.op.replacement_items if x.asset == "cap"]
+    _step("N: the 25-y bank is re-bought in 2054 (its last service year) at 90 k × 1.02^24",
+          len(items) == 1 and items[0][0] == 2054 and _cent(items[0][1], 90_000.0 * 1.02 ** 24),
+          f"{items}")
+    crf = 0.07 / (1 - 1.07 ** -25)
+    apf = (1 - 1.07 ** -20) / 0.07
+    term = [t for t in r.op.terminal_terms if t.asset == "cap"]
+    _step("N: its purchase serves 2055–2079: 20 years left, valued 90 k × 1.02^24 × crf × af(7 %, 20)",
+          len(term) == 1 and term[0].remaining_years == 20.0
+          and _cent(term[0].value, 90_000.0 * 1.02 ** 24 * crf * apf),
+          f"{[(t.remaining_years, t.value) for t in term]}")
+    _step("N: a grant on every asset excludes the extras (disclosed); its basis is the battery's",
+          r.incentives.established() and "incentive_excludes_extra_asset:trf" in r.flags
+          and r.incentives.lines[0].assets == ("bess",)
+          and _cent(float(r.incentives.grant.sum()), 0.3 * 1_000_000.0 * 1.1),
+          f"{float(r.incentives.grant.sum())}")
+    plain = dataclasses.replace(case(), assets=(bess,), extra_assets=())
+    _step("N: the case hash covers the extras and omits an empty extra_assets (pre-G2 hash shape)",
+          finance_case_hash(case()) != finance_case_hash(plain)
+          and "extra_assets" not in _canon_keys(plain) and "extra_assets" in _canon_keys(case()))
+
+
+def _canon_keys(case) -> list[str]:
+    from services.results.finance_case import _canon
+
+    return sorted(_canon(case))
 
 
 # ── through the routes ─────────────────────────────────────────────────────
@@ -1546,7 +1645,7 @@ def main() -> int:
     started = time.monotonic()
     for fn in (scenario_a, scenario_b, scenario_c, scenario_d, scenario_e, scenario_f,
                scenario_g, scenario_h, scenario_i, scenario_j, scenario_k, scenario_i_pack,
-               scenario_l, scenario_m):
+               scenario_l, scenario_m, scenario_n):
         try:
             fn()
         except Exception as exc:  # noqa: BLE001 — a crashed scenario is a failure

@@ -323,6 +323,9 @@ def _project_payload(result, case) -> dict[str, Any]:
         # The terminal value's method and, for `remaining_life_annuity`, its
         # per-part terms (IC S0b plan S6).
         "terminal_value": _terminal_block(result, case),
+        # Campus equipment bought as owner capex, under its own heading (IC G2 plan
+        # G-10); readers use `.get` (older payloads lack the key).
+        "extra_assets": _extra_assets_block(case),
         "flags": list(result.flags),
     }
 
@@ -336,6 +339,52 @@ TERMINAL_BASE_BASIS = ("a part's base is what its last purchase cost: the part's
                        "LP's. Under replacement_rule fixed, a single-part asset's last "
                        "replacement_capex entry is valued as a full re-purchase, so a partial "
                        "overhaul replaces the initial purchase's remaining value")
+
+
+TERMINAL_EXTRA_ASSETS_BASIS = (
+    "; the extra (campus) assets' terms are valued at the case's LP basis but were never "
+    "charged by the LP, so the guided study's by-construction identity (NPV = LP saving x the "
+    "annuity factor) does not hold with extra assets")
+
+
+def _extra_assets_block(case) -> list[dict[str, Any]]:
+    """Each extra asset (IC G2 plan G-10): what it is, its quantity and parts, its
+    overnight cost READ FROM `case.assets` (so `scale_capex` is reflected) — per
+    part too, beside the per-unit cost as passed (review note 1) — its build
+    year, its source and `source_hash`, and its money year and COD (typed in
+    `cod_by_asset`, or within its build year — review note 2)."""
+    fin = case.inputs
+    assets = {a.name: a for a in case.assets}
+    if fin.currency_year is not None:
+        money = (f"upfront costs in the case's money, {fin.currency_year} {fin.currency}: the "
+                 "caller converted them from the campus library's currency and price year")
+    else:
+        # IC G2 gate r1 note 5 (flag `extra_asset_money_year_unstated`): nothing to claim.
+        money = (f"upfront costs as passed, read as {fin.currency}; the case's currency year is "
+                 "not stated, so their money year is not checked against it")
+    out = []
+    for e in getattr(case, "extra_assets", ()) or ():
+        a = assets.get(e.name)
+        scaled = {} if a is None else {p.name: p.overnight_cost for p in a.parts}
+        if e.name in fin.cod_by_asset:
+            cod = (f"taken at the case COD {case.cod.isoformat()}, typed in cod_by_asset "
+                   f"(build year {e.build_year})")
+        else:
+            cod = (f"taken at the case COD {case.cod.isoformat()}, within its build year "
+                   f"{e.build_year}")
+        out.append({
+            "name": e.name, "kind": e.kind, "basis": e.basis, "quantity": e.quantity,
+            "overnight_cost": None if a is None else _num(a.overnight_cost),
+            "parts": [{"name": p.name,
+                       "upfront_per_unit_as_passed": _num(p.upfront_per_unit),
+                       "overnight_cost": _num(scaled.get(p.name)),
+                       "lifetime": _num(p.lifetime), "fom_share": _num(p.fom_share)}
+                      for p in e.parts],
+            "build_year": e.build_year, "source": e.source, "source_hash": e.source_hash,
+            "money_year": money,
+            "cod": cod,
+        })
+    return out
 
 
 def _terminal_block(result, case) -> dict[str, Any]:
@@ -358,7 +407,8 @@ def _terminal_block(result, case) -> dict[str, Any]:
                   for t in getattr(result.op, "terminal_terms", ()) or ()],
     }
     if tv.method == "remaining_life_annuity":
-        out["rate_basis"] = TERMINAL_RATE_BASIS
+        out["rate_basis"] = TERMINAL_RATE_BASIS + (TERMINAL_EXTRA_ASSETS_BASIS
+                                                   if getattr(case, "extra_assets", ()) else "")
         out["base_basis"] = TERMINAL_BASE_BASIS
     return out
 
