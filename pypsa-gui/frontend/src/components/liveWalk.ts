@@ -47,7 +47,14 @@ export function startKeyResultsWalk(opts?: {
   stepMs?: number
   onStep?: (tab: KeyResultTab, index: number, last: boolean) => void
 }): () => void {
-  const schedule = opts?.schedule ?? ((fn, ms) => window.setTimeout(fn, ms))
+  // Frame pacing, not a pile of timeouts. A long Results render makes every
+  // already-queued timeout due at once, so the tour used to paint only the
+  // last tab. Each step starts its own wait after the previous one has run.
+  const stops: Array<() => void> = []
+  const schedule = opts?.schedule ?? ((fn: () => void, ms: number) => {
+    stops.push(scheduleAfterFrames(fn, ms))
+    return 0
+  })
   const stepMs = opts?.stepMs ?? KEY_RESULT_STEP_MS
   // Session-only. setUiMode would persist a mode the user did not choose.
   useUIStore.setState({ uiMode: 'expert' })
@@ -65,7 +72,26 @@ export function startKeyResultsWalk(opts?: {
   apply(0)
   return () => {
     cancelled = true
+    for (const stop of stops) stop()
     for (const handle of handles) window.clearTimeout(handle)
+  }
+}
+
+/** Wait about `ms` of presented frames, then run `fn`. */
+function scheduleAfterFrames(fn: () => void, ms: number): () => void {
+  let left = Math.max(1, Math.round(ms / 16))
+  let id = 0
+  let stopped = false
+  const tick = () => {
+    if (stopped) return
+    left -= 1
+    if (left <= 0) fn()
+    else id = window.requestAnimationFrame(tick)
+  }
+  id = window.requestAnimationFrame(tick)
+  return () => {
+    stopped = true
+    window.cancelAnimationFrame(id)
   }
 }
 
