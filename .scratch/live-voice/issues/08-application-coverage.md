@@ -24,3 +24,9 @@ mapping and passing contract, every family has a real journey assigned to issue
 05, and remaining limitations block the full-coverage claim explicitly.
 
 ## Comments
+
+2026-10-10: First TDD slice implements missing tab/panel navigation, rejects invalid
+inputs, proves provider-neutral discovery/offer/continuation and adds regeneratable
+source inventory plus CI drift checks. See [handoff](../session-handoff.md) for
+red/green commands/counts. Editable-control mapping, eligibility-aware UI targeting
+and all-family behavioral fixtures remain open; this issue is not complete.

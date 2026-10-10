@@ -149,6 +149,11 @@ function _normalizePanelId(raw: string): string {
     NewProjectWizard: 'new_project',
     // Guided-mode spec §3.6 — the hub-design panel slot.
     HubDesign: 'hubDesign', hubDesign: 'hubDesign', hub_design: 'hubDesign',
+    Workspace: 'workspace', workspace: 'workspace',
+    Settings: 'settings', settings: 'settings',
+    GridSpine: 'gridspine', gridspine: 'gridspine',
+    Reports: 'reports', reports: 'reports',
+    CampusElectrical: 'campusElectrical', campusElectrical: 'campusElectrical',
   }
   return aliases[key] ?? key
 }
@@ -228,6 +233,8 @@ function applyUiNavigate(d: {
     || panel === 'capacityBounds' || panel === 'overview' || panel === 'issues'
     || panel === 'scenarios' || panel === 'snapshots' || panel === 'horizon'
     || panel === 'solveQueue' || panel === 'hubDesign'
+    || panel === 'workspace' || panel === 'settings' || panel === 'gridspine'
+    || panel === 'reports' || panel === 'campusElectrical'
   ) {
     ui.setSlidePanel(panel)
   }

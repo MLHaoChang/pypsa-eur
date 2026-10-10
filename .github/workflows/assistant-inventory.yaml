@@ -1,0 +1,43 @@
+name: Assistant capability inventory
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.scratch/live-voice/capability-inventory.json'
+      - 'pypsa-gui/backend/harness/catalogue.py'
+      - 'pypsa-gui/backend/harness/toolsets.py'
+      - 'pypsa-gui/backend/models/energy_hub.py'
+      - 'pypsa-gui/backend/services/adequacy/mc.py'
+      - 'pypsa-gui/backend/smoke/assistant_inventory.py'
+      - 'pypsa-gui/frontend/src/pages/Results.tsx'
+      - 'pypsa-gui/frontend/src/store/uiStore.ts'
+      - '.github/workflows/assistant-inventory.yaml'
+  push:
+    branches: [master]
+    paths:
+      - '.scratch/live-voice/capability-inventory.json'
+      - 'pypsa-gui/backend/harness/catalogue.py'
+      - 'pypsa-gui/backend/harness/toolsets.py'
+      - 'pypsa-gui/backend/models/energy_hub.py'
+      - 'pypsa-gui/backend/services/adequacy/mc.py'
+      - 'pypsa-gui/backend/smoke/assistant_inventory.py'
+      - 'pypsa-gui/frontend/src/pages/Results.tsx'
+      - 'pypsa-gui/frontend/src/store/uiStore.ts'
+      - '.github/workflows/assistant-inventory.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Check source inventory and shared navigation coverage
+        run: python pypsa-gui/backend/smoke/assistant_inventory.py --check
