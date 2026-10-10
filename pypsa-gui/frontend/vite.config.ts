@@ -11,11 +11,30 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { authHtmlGatePlugin } from './vite.auth-gate'
+import type { Plugin } from 'vite'
+
+/** Dev-only pause so a results walk can show each tab. Not part of the build. */
+function pacePlugin(): Plugin {
+  return {
+    name: 'results-walk-pace',
+    configureServer(server) {
+      server.middlewares.use('/__pace', (req, res) => {
+        const ms = Math.max(0, Math.min(3000, Number(new URL(req.url ?? '', 'http://127.0.0.1').searchParams.get('ms')) || 0))
+        setTimeout(() => {
+          res.statusCode = 200
+          res.setHeader('content-type', 'text/plain')
+          res.setHeader('cache-control', 'no-store')
+          res.end('ok')
+        }, ms)
+      })
+    },
+  }
+}
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), authHtmlGatePlugin()],
+  plugins: [pacePlugin(), react(), tailwindcss(), authHtmlGatePlugin()],
   appType: 'mpa',
   build: {
     rollupOptions: {

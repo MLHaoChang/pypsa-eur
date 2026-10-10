@@ -47,11 +47,11 @@ export function startKeyResultsWalk(opts?: {
   stepMs?: number
   onStep?: (tab: KeyResultTab, index: number, last: boolean) => void
 }): () => void {
-  // Each step waits on its own worker timer. Page timers queued during the
-  // first Results render all become due together and only the last tab paints.
+  // Each step waits out its own pause. Page timers queued during the first
+  // Results render all become due together and only the last tab paints.
   const stops: Array<() => void> = []
   const schedule = opts?.schedule ?? ((fn: () => void, ms: number) => {
-    stops.push(scheduleOnWorker(fn, ms))
+    stops.push(scheduleStep(fn, ms))
     return 0
   })
   const stepMs = opts?.stepMs ?? KEY_RESULT_STEP_MS
@@ -77,31 +77,35 @@ export function startKeyResultsWalk(opts?: {
 }
 
 /**
- * Delay the next tab on a worker timer.
+ * Pause before the next tab.
  *
- * The page's own timers can all become due during the first Results render,
- * which paints only the last tab. This worker waits on the wall clock so
- * each tab stays visible for `ms` before the next navigate.
+ * In dev, Vite's `/__pace` handler sleeps on the server. The page's own
+ * timers can all become due during the first Results render and paint only
+ * the last tab. A production build uses the page timer.
  */
-function scheduleOnWorker(fn: () => void, ms: number): () => void {
-  if (typeof Worker === 'undefined') {
-    const id = window.setTimeout(fn, ms)
-    return () => window.clearTimeout(id)
+function scheduleStep(fn: () => void, ms: number): () => void {
+  let timer = 0
+  let aborted = false
+  const ctrl = new AbortController()
+  const usePageTimer = () => {
+    if (aborted) return
+    timer = window.setTimeout(fn, ms)
   }
-  const worker = new Worker(URL.createObjectURL(new Blob([
-    'self.onmessage=function(e){var end=Date.now()+Number(e.data);while(Date.now()<end){}self.postMessage(0)}',
-  ], { type: 'application/javascript' })))
-  let done = false
-  worker.onmessage = () => {
-    if (done) return
-    done = true
-    worker.terminate()
-    fn()
+  if (import.meta.env.DEV && typeof fetch === 'function') {
+    fetch(`/__pace?ms=${ms}`, { cache: 'no-store', signal: ctrl.signal })
+      .then((res) => {
+        if (aborted) return
+        if (!res.ok) usePageTimer()
+        else fn()
+      })
+      .catch(() => { if (!aborted) usePageTimer() })
+  } else {
+    usePageTimer()
   }
-  worker.postMessage(ms)
   return () => {
-    done = true
-    worker.terminate()
+    aborted = true
+    ctrl.abort()
+    window.clearTimeout(timer)
   }
 }
 
