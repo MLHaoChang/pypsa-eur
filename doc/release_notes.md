@@ -6,6 +6,8 @@
 <!-- Upcoming Release -->
 <!-- ================= -->
 
+* Feat(pypsa-gui): Add multilingual AI dictation independently of the selected chat provider, with automatic or manual language selection, microphone selection and metering, pause/resume, terminology hints and editable transcript review. Retain browser dictation with selectable language. Bound temporary audio requests, sanitize authentication/service errors and stop microphones on cancellation or context changes. Add recorder/UI/backend regressions, a real Chromium smoke and an opt-in live transcription test.
+
 * Feat(pypsa-gui): Add chatbot project readiness checks, bounded local job waits with progress, cached and filtered study evidence, baseline-preserving queued sensitivity sweeps with solved-case reuse, and dynamic toolset views. Catalogue eligibility refreshes after project activation within a turn while preserving confirmations and dispatch allowlists. Add a project-refinement skill and real workflow/API regression coverage.
 
 * Fix(pypsa-gui): Bound official OpenAI tool catalogues to 128 declarations while retaining every tool's eligibility and dispatch allowlists; expose authenticated download metadata instead of HTTP response objects; and bind networkless GridSpine studies to backend sessions so chat follows the visible project. Added budgeted, resumable live coverage for every tool contract, real multi-turn conversations, and autonomous project/sensitivity/GridSpine workflows. Added offline-tested Responses transport for Sol/Astra tools; live validation remains dependent on endpoint authentication.

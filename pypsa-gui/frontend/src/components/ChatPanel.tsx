@@ -1,4 +1,5 @@
 import AssistantResultCard from './AssistantResultCard'
+import DictationControls from './DictationControls'
 /**
  * Phase 3 chatbot integration v6 — ChatPanel.
  *
@@ -2207,8 +2208,10 @@ export default function ChatPanel() {
     })
   }, [])
 
+  const [dictationLanguage, setDictationLanguage] = useState('auto')
   const speech = useSpeechToText({
     enabled: !streaming,
+    language: dictationLanguage === 'auto' ? (navigator.language || 'en-US') : dictationLanguage,
     onFinal: onSpeechFinal,
     onError: (msg) => toast.error(msg),
   })
@@ -3077,7 +3080,7 @@ export default function ChatPanel() {
           data-testid="chat-drop-overlay"
         >
           <div className="text-accent text-sm font-medium px-4 py-2 bg-bg-2 rounded shadow">
-            Drop to upload — Excel, PDF, images (≤ 25 MB each)
+            Drop documents, tables, images or network files (≤ 25 MB each)
           </div>
         </div>
       )}
@@ -3503,7 +3506,7 @@ export default function ChatPanel() {
         >
           <div className="w-8 h-[2px] rounded-full bg-border group-hover:bg-accent/60 transition-colors" />
         </div>
-        <div className="flex items-stretch gap-2 px-2 pb-2 flex-1 min-h-0">
+        <div className="relative flex items-stretch gap-2 px-2 pb-2 flex-1 min-h-0">
           <div className="flex flex-col gap-1 self-end pb-0.5">
             {/* Phase D polish #5 — 44×44 px touch targets on coarse pointers
                 (WCAG 2.5.5). Desktop stays compact. */}
@@ -3518,7 +3521,7 @@ export default function ChatPanel() {
               disabled={streaming || !currentProject}
               title={
                 currentProject
-                  ? 'Upload a file (Excel / PDF / image, ≤25 MB)'
+                ? 'Upload documents, tables, images or network files (≤25 MB)'
                   : 'Load a project first'
               }
               aria-label="Upload a file"
@@ -3545,34 +3548,11 @@ export default function ChatPanel() {
             >
               📋
             </button>
-            <button
-              className={
-                (isCoarsePointer
-                  ? 'min-w-[44px] min-h-[44px] text-lg '
-                  : 'px-2 py-1 text-[10px] ') +
-                'rounded border ' +
-                (speech.listening
-                  ? 'bg-accent/15 border-accent text-accent'
-                  : 'bg-bg-3/40 hover:bg-bg-3 border-border text-muted') +
-                (speech.available && !streaming ? '' : ' opacity-50')
-              }
-              onClick={speech.toggle}
-              disabled={!speech.available || streaming}
-              title={
-                !speech.supported
-                  ? 'Voice input needs Chrome or Edge'
-                  : speech.permissionDenied
-                    ? 'Microphone access denied — allow it in System Settings → Privacy & Security → Microphone'
-                    : speech.listening
-                      ? 'Stop voice input (Esc)'
-                      : 'Start voice input (English)'
-              }
-              aria-label={speech.listening ? 'Stop voice input' : 'Start voice input'}
-              aria-pressed={speech.listening}
-              data-testid="chat-mic"
-            >
-              {speech.listening ? '■' : '🎙'}
-            </button>
+            <DictationControls
+              speech={speech} language={dictationLanguage} onLanguage={setDictationLanguage}
+              onInsert={onSpeechFinal} streaming={streaming} dockOpen={assistantDockOpen}
+              project={currentProject} coarsePointer={isCoarsePointer}
+            />
           </div>
           <div className="flex-1 min-w-0 min-h-0 flex flex-col">
             <textarea

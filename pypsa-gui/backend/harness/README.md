@@ -236,6 +236,17 @@ agents and the app.
 
 ## Durable assistant tasks and file delivery
 
+Dictation is independent of the turn loop and chat profiles. Authenticated
+`/api/dictation/config` and `/api/dictation/transcribe` accept temporary recorded
+audio through ordinary session/CSRF checks; the isolated `providers/transcription`
+adapter reads a server-managed credential at call time. The neutral validation
+service bounds bytes, language/glossary inputs, concurrency and per-user attempts.
+No audio, glossary or project context enters tool dispatch or chat history.
+Only the user's reviewed insertion enters the composer, then the normal chat
+provider receives it. Browser dictation remains an explicit fallback. See
+`docs/superpowers/plans/2026-10-10-multilingual-dictation.md` and the results
+assessment for the automated, real-browser and live-API validation boundaries.
+
 `find_capabilities(goal)` searches the shared catalogue and explains required
 arguments, safety, project eligibility and reduced-toolset visibility.
 Discovery is advisory: dispatch still checks the exact catalogue offered to
