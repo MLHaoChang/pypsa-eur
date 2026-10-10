@@ -1,7 +1,10 @@
-import { useCallback, useRef } from 'react'
-import { MessageSquare, Mic, PanelRightClose } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { PanelRightClose } from 'lucide-react'
 import { useUIStore } from '../store/uiStore'
+import { useChatProfiles, useChatReadiness } from '../hooks/useChatProfiles'
 import ChatPanel from './ChatPanel'
+import CompanionLauncher, { type CompanionPresence } from './CompanionLauncher'
+import { KEY_RESULT_TABS, keyResultsWalkRequested, openProjectList, openProjectRequested, startKeyResultsWalk } from './liveWalk'
 import { ErrorBoundary } from './ErrorBoundary'
 
 /**
@@ -30,6 +33,64 @@ export default function AssistantDock() {
   const assistantDockWidth = useUIStore((s) => s.assistantDockWidth)
   const setAssistantDockWidth = useUIStore((s) => s.setAssistantDockWidth)
   const dragRef = useRef<{ startX: number; startW: number } | null>(null)
+
+  const profilesQuery = useChatProfiles()
+  const { effectiveProfileId, ready } = useChatReadiness()
+  const [presence, setPresence] = useState<CompanionPresence>('idle')
+  const [liveOpen, setLiveOpen] = useState(false)
+  const [liveCaption, setLiveCaption] = useState('')
+  const walkCancel = useRef<(() => void) | null>(null)
+  useEffect(() => () => { walkCancel.current?.() }, [])
+
+  const stopWalk = useCallback(() => {
+    walkCancel.current?.()
+    walkCancel.current = null
+  }, [])
+
+  const forwardToHarness = useCallback((text: string) => {
+    if (ready !== true) return
+    window.dispatchEvent(new CustomEvent('companion:live-utterance', { detail: text }))
+  }, [ready])
+
+  const onLiveSubmit = useCallback((text: string) => {
+    if (keyResultsWalkRequested(text)) {
+      stopWalk()
+      setPresence('thinking')
+      setLiveCaption('Opening each results tab.')
+      walkCancel.current = startKeyResultsWalk({
+        onStep: (tab, index, last) => {
+          setLiveCaption(`Tab ${index + 1} of ${KEY_RESULT_TABS.length}. ${tab.label}. ${tab.blurb}`)
+          setPresence(last ? 'speaking' : 'thinking')
+        },
+        onPaceMiss: () => {
+          setPresence('listening')
+          setLiveCaption('Could not hold the tab. The pause did not come from the dev server.')
+        },
+      })
+      forwardToHarness(text)
+      return
+    }
+    if (openProjectRequested(text)) {
+      stopWalk()
+      openProjectList()
+      setPresence('speaking')
+      setLiveCaption('Opening the project list.')
+      forwardToHarness(text)
+      return
+    }
+    if (ready === true) {
+      setPresence('thinking')
+      setLiveCaption('Sent to the assistant.')
+      forwardToHarness(text)
+      return
+    }
+    setPresence('listening')
+    setLiveCaption('Ask to walk through the key results in each tab, or to open a project.')
+  }, [forwardToHarness, ready, stopWalk])
+  const profileLabel =
+    profilesQuery.data?.profiles.find((p) => p.id === effectiveProfileId)?.label
+    ?? profilesQuery.data?.profiles.find((p) => p.id === profilesQuery.data.active_profile_id)?.label
+    ?? 'Model'
 
   // Drag to resize. The store keeps the width the user ASKED for and is
   // written once, at release — not per mousemove, and never with a value the
@@ -69,108 +130,118 @@ export default function AssistantDock() {
   // AssistantDock.eviction.test.tsx; its keyboard twin is the editable-target
   // guard on App.tsx's global Escape handler.
   return (
-    <div
-      className={`relative flex flex-col min-h-0 border-l border-border bg-bg shrink-0 ${
-        assistantDockOpen ? '' : 'w-10'
-      }`}
-      style={assistantDockOpen ? { width: `${assistantDockWidth}px` } : undefined}
-      data-testid="assistant-dock"
-      data-no-panel-close
-    >
-      {assistantDockOpen ? (
-        <div className="flex items-center gap-2 px-3 h-9 border-b border-border bg-bg-2 shrink-0">
-          <span className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-accent">
-            ASSISTANT
-          </span>
-          <span className="flex-1" />
-          <button
-            onClick={() => setAssistantDockOpen(false)}
-            title="Collapse the assistant"
-            aria-label="Collapse the assistant"
-            aria-expanded={assistantDockOpen}
-            data-testid="assistant-dock-collapse"
-            className="text-muted hover:text-text p-1 rounded hover:bg-panel transition-colors"
-          >
-            <PanelRightClose size={14} />
-          </button>
-        </div>
-      ) : (
-        <div className="flex flex-col items-center gap-1 pt-2">
-          <button
-            onClick={() => setAssistantDockOpen(true)}
-            title="Open the assistant"
-            aria-label="Open the assistant"
-            aria-expanded={assistantDockOpen}
-            data-testid="assistant-dock-launcher"
-            className="flex flex-col items-center gap-2 w-full py-2 text-muted hover:text-accent hover:bg-panel transition-colors"
-          >
-            <MessageSquare size={18} />
-            {/* An unlabelled glyph in a 40px gutter reads as decoration. The
-                word is what makes it findable without hunting. */}
-            <span
-              className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-accent"
-              style={{ writingMode: 'vertical-rl' }}
-            >
-              Assistant
+    <>
+      <div
+        className={`relative flex flex-col min-h-0 bg-bg shrink-0 transition-[width] duration-300 ease-out motion-reduce:transition-none ${
+          assistantDockOpen
+            ? 'border-l border-border'
+            : 'w-0 overflow-visible border-0'
+        }`}
+        style={assistantDockOpen ? { width: `${assistantDockWidth}px` } : undefined}
+        data-testid="assistant-dock"
+        data-no-panel-close
+      >
+        {assistantDockOpen ? (
+          <div className="flex items-center gap-2 px-3 h-9 border-b border-border bg-bg-2 shrink-0">
+            <span className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-accent">
+              ASSISTANT
             </span>
-          </button>
-          {/* The spec's collapsed strip carries "the launcher button and the
-              microphone" — voice is the affordance most devalued by being
-              buried, since it exists to save the trip to the keyboard. */}
-          <button
-            onClick={() => setAssistantDockOpen(true)}
-            title="Open the assistant and dictate"
-            aria-label="Open the assistant and dictate"
-            data-testid="assistant-dock-mic"
-            className="flex items-center justify-center w-full py-2 text-muted hover:text-accent hover:bg-panel transition-colors"
-          >
-            <Mic size={16} />
-          </button>
-        </div>
-      )}
+            <span className="flex-1" />
+            <button
+              onClick={() => setAssistantDockOpen(false)}
+              title="Collapse the assistant"
+              aria-label="Collapse the assistant"
+              aria-expanded={assistantDockOpen}
+              data-testid="assistant-dock-collapse"
+              className="text-muted hover:text-text p-1 rounded hover:bg-panel transition-colors"
+            >
+              <PanelRightClose size={14} />
+            </button>
+          </div>
+        ) : null}
 
-      {assistantDockOpen && (
+        {assistantDockOpen && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize the assistant"
+            data-testid="assistant-dock-resize"
+            onMouseDown={onResizeDown}
+            className="absolute left-0 top-0 h-full w-1 cursor-col-resize hover:bg-accent/40 z-10"
+          />
+        )}
+
+        {/* Never unmounted — see the module docstring. */}
         <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize the assistant"
-          data-testid="assistant-dock-resize"
-          onMouseDown={onResizeDown}
-          className="absolute left-0 top-0 h-full w-1 cursor-col-resize hover:bg-accent/40 z-10"
+          className={`flex-1 min-h-0 overflow-hidden ${assistantDockOpen ? '' : 'hidden'}`}
+          data-testid="assistant-dock-body"
+        >
+          {/*
+            No `key` here, unlike App.tsx's ErrorBoundary around `FullPageTab`
+            (keyed on `${activeSlidePanel}-${currentProject}` so navigating away
+            and back clears a stuck error). That one wraps a
+            *conditionally-mounted* panel, where a remount is a normal,
+            frequent event driven by navigation. This dock's true sibling is
+            App.tsx's always-mounted canvas column — the div whose className
+            toggles `hidden` for a full-screen tab rather than unmounting the
+            canvas — which also has no key, and for the same reason: this
+            subtree is deliberately never remounted by anything, so there is no
+            navigation event a key could hook into. (Do not "fix" this by
+            keying on `assistantDockOpen` — that reintroduces a remount on
+            every collapse/expand, which kills a streaming turn exactly like
+            the unmount this component exists to prevent; see
+            AssistantDock.test.tsx's mount-identity test.)
+
+            Residual: if a crash is deterministic from persisted chat state
+            (e.g. a malformed message replayed from chat.jsonl), Retry
+            re-renders that same state and can re-throw immediately — there is
+            no navigation-driven remount to fall back on here, unlike the
+            slide-panel case. Acceptable for now; revisit if that shows up.
+          */}
+          <ErrorBoundary label="The assistant crashed">
+            <ChatPanel />
+          </ErrorBoundary>
+        </div>
+      </div>
+      {!assistantDockOpen && (
+        <CompanionLauncher
+          presence={presence}
+          profileLabel={profileLabel}
+          liveOpen={liveOpen}
+          liveCaption={liveCaption}
+          modelKeyMissing={ready === false}
+          onLiveSubmit={onLiveSubmit}
+          onCompose={() => {
+            stopWalk()
+            useUIStore.getState().setAssistantEntry('compose')
+            setAssistantDockOpen(true)
+          }}
+          onSpeak={() => {
+            stopWalk()
+            useUIStore.getState().setAssistantEntry('speak')
+            setAssistantDockOpen(true)
+          }}
+          onLive={() => {
+            // Stays on this page. A model key sends the turn through the
+            // chat harness; without one, the walk still calls applyUiNavigate.
+            if (liveOpen) {
+              stopWalk()
+              setLiveOpen(false)
+              setPresence('idle')
+              setLiveCaption('')
+              return
+            }
+            setLiveOpen(true)
+            setPresence('listening')
+            setLiveCaption('Listening. Ask to walk through the key results in each tab, or to open a project.')
+          }}
+          onProfiles={() => {
+            stopWalk()
+            useUIStore.getState().setAssistantEntry('profiles')
+            setAssistantDockOpen(true)
+          }}
         />
       )}
-
-      {/* Never unmounted — see the module docstring. */}
-      <div
-        className={`flex-1 min-h-0 overflow-hidden ${assistantDockOpen ? '' : 'hidden'}`}
-        data-testid="assistant-dock-body"
-      >
-        {/*
-          No `key` here, unlike App.tsx's ErrorBoundary around `FullPageTab`
-          (keyed on `${activeSlidePanel}-${currentProject}` so navigating away
-          and back clears a stuck error). That one wraps a
-          *conditionally-mounted* panel, where a remount is a normal,
-          frequent event driven by navigation. This dock's true sibling is
-          App.tsx's always-mounted canvas column — the div whose className
-          toggles `hidden` for a full-screen tab rather than unmounting the
-          canvas — which also has no key, and for the same reason: this
-          subtree is deliberately never remounted by anything, so there is no
-          navigation event a key could hook into. (Do not "fix" this by
-          keying on `assistantDockOpen` — that reintroduces a remount on
-          every collapse/expand, which kills a streaming turn exactly like
-          the unmount this component exists to prevent; see
-          AssistantDock.test.tsx's mount-identity test.)
-
-          Residual: if a crash is deterministic from persisted chat state
-          (e.g. a malformed message replayed from chat.jsonl), Retry
-          re-renders that same state and can re-throw immediately — there is
-          no navigation-driven remount to fall back on here, unlike the
-          slide-panel case. Acceptable for now; revisit if that shows up.
-        */}
-        <ErrorBoundary label="The assistant crashed">
-          <ChatPanel />
-        </ErrorBoundary>
-      </div>
-    </div>
+    </>
   )
 }

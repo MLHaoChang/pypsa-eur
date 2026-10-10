@@ -912,7 +912,8 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   const initialCenter: [number, number] = [50.0, 10.0]
 
   return (
-    <div className="relative h-full w-full">
+    // isolate: local stacking context so z-40 companion isn't buried under Leaflet panes (see placement-strip z-index note below).
+    <div className="relative isolate h-full w-full">
       <MapContainer
         center={initialCenter}
         zoom={5}

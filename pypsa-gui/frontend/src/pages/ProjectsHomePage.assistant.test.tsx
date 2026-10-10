@@ -43,6 +43,16 @@ vi.mock('../api/projects', async (importOriginal) => {
 vi.mock('../components/ChatPanel', () => ({
   default: () => <div data-testid="chat-panel-stub" />,
 }))
+vi.mock('../hooks/useChatProfiles', () => ({
+  useChatProfiles: () => ({
+    data: {
+      profiles: [{ id: 'claude', label: 'Claude', wire: 'anthropic' as const }],
+      active_profile_id: 'claude',
+    },
+    isError: false,
+  }),
+  useChatReadiness: () => ({ effectiveProfileId: 'claude', ready: true }),
+}))
 
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -74,16 +84,16 @@ describe('the assistant on the projects home', () => {
   })
 
   // Collapsed is a legitimate state — the user's choice persists across
-  // surfaces — but the strip has to still be there, or the landing page loses
-  // the affordance entirely the first time someone collapses it in the
-  // workbench.
+  // surfaces — but the floating companion has to still be there, or the landing
+  // page loses the affordance entirely the first time someone collapses it in
+  // the workbench.
   it('keeps its launcher strip when the user has collapsed it', async () => {
     useUIStore.setState({ assistantDockOpen: false })
     renderPage()
     await screen.findByRole('navigation', { name: 'Account' })
 
     expect(screen.getByTestId('assistant-dock')).toBeTruthy()
-    expect(screen.getByTestId('assistant-dock-launcher')).toBeTruthy()
+    expect(screen.getByTestId('companion-compose')).toBeTruthy()
   })
 
   // The page is `data-pypsa-surface="brand-dark"` on purpose (see its own

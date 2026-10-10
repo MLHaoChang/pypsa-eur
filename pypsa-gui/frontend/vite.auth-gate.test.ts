@@ -73,6 +73,7 @@ describe('auth HTML gate', () => {
       expect(decide('/api/health', backend)).toEqual({ kind: 'pass' })
       expect(decide('/assets/index-abc.js', backend)).toEqual({ kind: 'pass' })
       expect(decide('/login.html', backend)).toEqual({ kind: 'pass' })
+      expect(decide('/__pace', backend)).toEqual({ kind: 'pass' })
     }
   })
 
@@ -83,5 +84,6 @@ describe('auth HTML gate', () => {
     expect(isStaticAsset('/projects')).toBe(false)
     expect(isStaticAsset('/')).toBe(false)
     expect(isStaticAsset('/spa.html')).toBe(false)
+    expect(isStaticAsset('/__pace')).toBe(true)
   })
 })

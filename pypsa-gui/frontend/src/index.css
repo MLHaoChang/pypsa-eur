@@ -343,3 +343,60 @@ html {
 .leaflet-interactive:focus,
 .leaflet-interactive:focus-visible,
 .leaflet-container svg path:focus { outline: none; }
+
+.companion-actions {
+  opacity: 1;
+  transform: none;
+}
+
+.companion-character-wrap {
+  transform-origin: center bottom;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .companion-idle {
+    animation: companion-bob 2.4s ease-in-out infinite;
+  }
+
+  .companion-launcher[data-hovered='true'] .companion-idle {
+    animation: companion-react 0.55s ease-out;
+  }
+
+  .companion-character-wrap {
+    transition: transform 180ms ease;
+  }
+
+  .companion-launcher[data-hovered='true'] .companion-character-wrap {
+    transform: scale(1.12);
+  }
+
+  .companion-actions {
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 180ms ease, transform 180ms ease;
+  }
+
+  .companion-launcher[data-hovered='true'] .companion-actions,
+  .companion-launcher:focus-within .companion-actions,
+  .companion-launcher[data-live='open'] .companion-actions {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.companion-launcher[data-presence='listening'] .companion-character-wrap,
+.companion-launcher[data-presence='thinking'] .companion-character-wrap,
+.companion-launcher[data-presence='speaking'] .companion-character-wrap {
+  filter: drop-shadow(0 0 14px var(--color-accent));
+}
+
+@keyframes companion-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+@keyframes companion-react {
+  0% { transform: translateY(0) scale(1); }
+  40% { transform: translateY(-10px) scale(1.06); }
+  100% { transform: translateY(0) scale(1); }
+}

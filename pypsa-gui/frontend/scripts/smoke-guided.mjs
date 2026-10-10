@@ -446,10 +446,10 @@ async function phaseP229(browser, { reviewChecks = false } = {}) {
     const input = byId('chat-input')
     // The dock remembers its open state; wait for whichever is on screen.
     await page.waitForSelector(
-      '[data-testid="chat-input"]:visible, [data-testid="assistant-dock-launcher"]:visible',
+      '[data-testid="chat-input"]:visible, [data-testid="companion-compose"]:visible',
       { timeout: 30_000 })
     if (!(await input.isVisible().catch(() => false))) {
-      await byId('assistant-dock-launcher').click()
+      await byId('companion-compose').click()
     }
     await input.waitFor({ state: 'visible', timeout: 15_000 })
     await input.fill('hello')
@@ -2216,9 +2216,9 @@ async function phaseP27a(browser) {
     const newName = `p27a-${Date.now().toString(36)}`
     const input = byId('chat-input')
     await page.waitForSelector(
-      '[data-testid="chat-input"]:visible, [data-testid="assistant-dock-launcher"]:visible',
+      '[data-testid="chat-input"]:visible, [data-testid="companion-compose"]:visible',
       { timeout: 30_000 })
-    if (!(await input.isVisible().catch(() => false))) await byId('assistant-dock-launcher').click()
+    if (!(await input.isVisible().catch(() => false))) await byId('companion-compose').click()
     await input.waitFor({ state: 'visible', timeout: 15_000 })
     await input.fill(`Create a project from the ${args.template} template called ${newName}`)
     await byId('chat-send').click()
@@ -2411,8 +2411,8 @@ async function p27bRestart(browser, dc, other) {
     step('Enter in the dock → chat-send-gate with the sentence, no /api/chat/stream')
     const input = byId('chat-input')
     await page.waitForSelector(
-      '[data-testid="chat-input"]:visible, [data-testid="assistant-dock-launcher"]:visible', { timeout: 30_000 })
-    if (!(await input.isVisible().catch(() => false))) await byId('assistant-dock-launcher').click()
+      '[data-testid="chat-input"]:visible, [data-testid="companion-compose"]:visible', { timeout: 30_000 })
+    if (!(await input.isVisible().catch(() => false))) await byId('companion-compose').click()
     await input.waitFor({ state: 'visible', timeout: 15_000 })
     const w2 = writes.length
     await input.fill('Please change a bus')
@@ -2511,8 +2511,8 @@ async function p27bMidStudySwitch(browser, dc) {
     ok(`project 2: ${p2}`)
     await byId('hub-card-site').waitFor({ state: 'visible', timeout: 60_000 })
     await page.waitForSelector(
-      '[data-testid="chat-launch-solve"]:visible, [data-testid="assistant-dock-launcher"]:visible', { timeout: 30_000 })
-    if (!(await byId('chat-launch-solve').isVisible().catch(() => false))) await byId('assistant-dock-launcher').click()
+      '[data-testid="chat-launch-solve"]:visible, [data-testid="companion-compose"]:visible', { timeout: 30_000 })
+    if (!(await byId('chat-launch-solve').isVisible().catch(() => false))) await byId('companion-compose').click()
     // P28 C6: a never-solved project's Guided greeting says where to start.
     await page.waitForFunction(w =>
       document.querySelector('[data-testid="chat-launch-solve"]')?.textContent === w,
@@ -2585,9 +2585,9 @@ async function p32Branch7(browser, { project, explicit }) {
     const newName = `p32-${label}-${Date.now().toString(36)}`
     const input = byId('chat-input')
     await page.waitForSelector(
-      '[data-testid="chat-input"]:visible, [data-testid="assistant-dock-launcher"]:visible',
+      '[data-testid="chat-input"]:visible, [data-testid="companion-compose"]:visible',
       { timeout: 30_000 })
-    if (!(await input.isVisible().catch(() => false))) await byId('assistant-dock-launcher').click()
+    if (!(await input.isVisible().catch(() => false))) await byId('companion-compose').click()
     await input.waitFor({ state: 'visible', timeout: 15_000 })
     await input.fill(`Create a project from the ${args.template} template called ${newName}`)
     await byId('chat-send').click()
@@ -2672,9 +2672,9 @@ async function p28Context(browser, project, mode) {
   await byId('ui-mode-switch').waitFor({ state: 'visible', timeout: 60_000 })
   async function openDock() {
     await page.waitForSelector(
-      '[data-testid="chat-input"]:visible, [data-testid="assistant-dock-launcher"]:visible',
+      '[data-testid="chat-input"]:visible, [data-testid="companion-compose"]:visible',
       { timeout: 30_000 })
-    if (!(await byId('chat-input').isVisible().catch(() => false))) await byId('assistant-dock-launcher').click()
+    if (!(await byId('chat-input').isVisible().catch(() => false))) await byId('companion-compose').click()
     await byId('chat-input').waitFor({ state: 'visible', timeout: 15_000 })
     await page.waitForSelector('[data-testid="chat-model-select"][data-profiles-state="ready"]', { timeout: 30_000 })
   }

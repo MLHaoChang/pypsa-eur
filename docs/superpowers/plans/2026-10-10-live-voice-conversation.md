@@ -84,11 +84,15 @@ resume; history replay is not a distributed lock/confirmation implementation.
 
 ## 2. Redesign the persistent assistant interface
 
-Keep a persistent conversation dock with project/run context, ongoing text,
-inline status/evidence/download/confirmation cards, clear composer and one
-Start conversation control. Support compact and expanded layouts; preserve the
-conversation while navigating panels. Speak concise findings and show detailed
-charts/tables in the requested view. Ordinary reads/navigation require no wizard.
+The closed state is the floating companion in
+[the companion plan](2026-10-10-assistant-companion.md): Compose and Dictate open
+this console; Live stays on the current page, lights the companion, and runs the
+same harness there. Keep a persistent conversation console with project/run context, ongoing text,
+inline status/evidence/download/confirmation cards, and a clear composer. That console
+is what Compose and Dictate open. Live does not open it: the companion lights up
+on the current page, and detailed charts and tables open in the requested view.
+Support compact and expanded layouts and preserve the conversation while navigating
+panels. Ordinary reads and navigation require no wizard.
 
 Support all eligible panels, result tabs, parameter editors, filters and selections
 in the coverage matrix. `ui_open_panel(results_tab='loadflow')` is one example;

@@ -67,11 +67,50 @@ results and return unavailable for unpreserved artifacts. Current application
 results tabs are supported; new workspace tabs require explicit run-aware views.
 Speech projection must preserve evidence-backed numbers, units and status.
 
-Redesign the UI as a persistent assistant dock with project/run context, streamed
-conversation, inline progress/evidence/download/confirmation cards, typed input and
-a single Start conversation control. Ordinary reads/navigation do not become
-a wizard. Every authorized/project-eligible harness tool remains reachable through
-the existing toolsets; there is no reduced voice-only engineering catalogue.
+The assistant console is the persistent dock: project/run context, streamed
+conversation, file uploads, history, inline progress/evidence/download/confirmation
+cards, and typed input. Ordinary reads/navigation do not become a wizard. Every
+authorized/project-eligible harness tool remains reachable through the existing
+toolsets; there is no reduced voice-only engineering catalogue. Live voice does
+not open this console. It uses the same tools on the page the user is already on.
+
+### Companion launcher
+
+The closed assistant is a floating presence over the canvas, not a reserved
+column and not a slide-panel tab. It shows one character, the active profile
+chip, and three actions: Compose, Dictate, and Live.
+
+Compose (the pencil) opens the existing assistant console and focuses the
+typed composer. Dictate opens that same console and the reviewed-dictation
+panel; a transcript is inserted only after the user accepts it. The console
+holds the composer, file uploads, and conversation history. Compose and
+Dictate do not start a continuous live conversation or a paid media session.
+
+Live starts a voice conversation in place. It does not open the console and
+does not replace the page the user is on. The companion stays over the canvas
+and lights up through listening, thinking, and speaking. The same harness
+works behind that presence: it opens the requested project, panel, or result,
+creates what the user asked for, and says when a file is ready to download.
+Those outcomes appear in the tool the user is looking at. A short caption
+beside the companion carries what was heard and the latest outcome. The full
+transcript, uploads, and composer stay in the console until the user opens it.
+
+Writes still wait for confirmation. The confirmation is a card beside the
+companion, on the page being changed. Opening the console during a live
+session keeps the session; the live state moves into the console header so
+the character does not cover the composer.
+
+Idle motion is decorative, honors reduced motion, and never implies the
+microphone is open. Listening, thinking, and speaking are the only states
+that light the character.
+
+A small chip on the companion shows the active LLM profile and opens the
+existing profile picker. Switching profiles uses the current session rules.
+“Another agent” means another profile on the shared harness, not a second tool
+planner. New hosted models that speak the OpenAI chat-completions wire, including
+Kimi (already the Moonshot preset) and Grok, are catalogue presets. Cursor’s
+agent APIs run a separate workspace agent and are not a chat provider for this
+dock.
 
 Add a bounded read-tier load-flow summary over shared aggregation services; use
 the actual `results_tab='loadflow'` and line asset details for navigation. Retain

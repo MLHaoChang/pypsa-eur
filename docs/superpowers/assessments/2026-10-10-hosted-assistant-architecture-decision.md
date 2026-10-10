@@ -90,7 +90,7 @@ navigation omits adequacy/FMEA IDs from the tool enum; record and close such gap
 
 | Requirement | Concrete behavior |
 | --- | --- |
-| Personal assistant UI | Persistent assistant dock, ongoing conversation, project/run context, compact progress and result cards; expand when needed |
+| Personal assistant UI | Floating companion. Compose and Dictate open the console (composer, uploads, history, reviewed dictation). Live stays on the current page: the companion lights up, and the same harness navigates, creates, confirms, and announces downloads there |
 | Natural requests | “Open project X”, “summarize current load flow”, “show critical lines”, “try a sensitivity”, “export this” invoke real harness operations |
 | Full tool reachability | All existing authorized/project-eligible catalogue tools remain reachable; offer relevant toolsets on demand rather than a separate reduced voice catalogue |
 | Project awareness | Server-authoritative project binding plus current result source, section, period/window and selected asset identifiers; revalidate ACL at use |
@@ -100,7 +100,7 @@ navigation omits adequacy/FMEA IDs from the tool enum; record and close such gap
 | Correctness | Software-computed metrics, explicit units/source/solver validity; stale or missing evidence is visible and never reported as zero |
 | Natural interruption | Stop playback promptly; distinguish speech interruption from task/job cancellation and preserve already completed effects |
 | Reliability | Bounded queues, single turn lease, idempotency/generations, authenticated recovery, visible typed fallback and no replayed writes |
-| Easy setup | One Start conversation control, language/microphone setting when needed, clear mute/end controls and a compact readiness page |
+| Easy setup | Live is the companion's third action and starts in place. Language and microphone settings when needed, clear mute/end controls, and a short caption beside the companion |
 | Import/export and studies | Use existing file/report/scenario/GridSpine tools through the same ownership and confirmation rules |
 | Whole application | Include all result tabs and settings/editors, Library/investment/participants, time series/multi-period inputs, adequacy/FMEA/health/frontier/Monte Carlo, reports, audit/undo and workflows; inventory exposes missing interfaces |
 | Cross-domain experimentation | Typed parameter variants, isolated baselines, domain-specific execution, stop conditions, partial outcomes, provenance and compatible comparisons |
