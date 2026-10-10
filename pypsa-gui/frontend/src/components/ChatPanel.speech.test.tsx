@@ -6,6 +6,10 @@ import { useChatStore } from '../store/chatStore'
 import { createChatStream } from '../api/chat'
 import * as speechOut from '../utils/speechOut'
 import ChatPanel from './ChatPanel'
+import { getDictationConfig, transcribeRecording } from '../api/dictation'
+import { installRecordingMocks } from '../utils/audioRecorder.testHelpers'
+
+vi.mock('../api/dictation', () => ({ getDictationConfig: vi.fn(), transcribeRecording: vi.fn() }))
 
 // Modal reciprocity.
 //
@@ -21,11 +25,12 @@ import ChatPanel from './ChatPanel'
 // talks at you unprompted on every launch is the fastest way to get the
 // assistant switched off for good."
 
-const speechOpts: { onFinal?: (t: string) => void } = {}
+const speechOpts: { onFinal?: (t: string) => void; language?: string } = {}
 
 vi.mock('../hooks/useSpeechToText', () => ({
-  useSpeechToText: (opts: { onFinal?: (t: string) => void }) => {
+  useSpeechToText: (opts: { onFinal?: (t: string) => void; language?: string }) => {
     speechOpts.onFinal = opts.onFinal
+    speechOpts.language = opts.language
     return {
       available: true, supported: true, listening: false, interim: '',
       permissionDenied: false, toggle: vi.fn(), stop: vi.fn(),
@@ -110,6 +115,7 @@ let cancelSpy: ReturnType<typeof vi.spyOn>
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(getDictationConfig).mockResolvedValue({ available: false, model: '', languages: ['en', 'de', 'zh'], max_bytes: 10485760, max_recording_seconds: 120 })
   // jsdom has no speech synthesis, and the mute control deliberately hides
   // itself where the platform has none — a dead toggle is worse than no
   // toggle. So the environment has to claim it exists before the control can
@@ -124,6 +130,7 @@ beforeEach(() => {
   })
   useChatStore.setState({
     sessionId: 'sess-1', pending: null, messages: [], error: null,
+    profileId: null,
     streaming: false, streamCleanup: null,
     usage: {
       input_tokens: 0, output_tokens: 0,
@@ -133,6 +140,35 @@ beforeEach(() => {
 })
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+it('reviews AI dictation and sends it through the unchanged Claude chat profile', async () => {
+  const recording = installRecordingMocks()
+  vi.mocked(getDictationConfig).mockResolvedValue({ available: true, model: 'gpt-4o-mini-transcribe', languages: ['en', 'de', 'zh'], max_bytes: 10485760, max_recording_seconds: 120 })
+  vi.mocked(transcribeRecording).mockResolvedValue('Create a 7.5 MW load; not 75 MWh.')
+  useUIStore.setState({ assistantDockOpen: true })
+  useChatStore.setState({ profileId: 'anthropic-sonnet' })
+  renderPanel()
+  fireEvent.click(screen.getByTestId('dictation-settings'))
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Record' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.change(screen.getByLabelText('Dictation language'), { target: { value: 'de' } })
+  expect(speechOpts.language).toBe('de')
+  fireEvent.click(screen.getByRole('button', { name: 'Record' }))
+  await screen.findByRole('button', { name: 'Pause / transcribe' })
+  fireEvent.click(screen.getByRole('button', { name: 'Pause / transcribe' }))
+  await waitFor(() => expect((screen.getByLabelText('Review transcript') as HTMLTextAreaElement).value).toContain('7.5 MW'))
+  expect(vi.mocked(createChatStream)).not.toHaveBeenCalled()
+  expect((screen.getByTestId('chat-input') as HTMLTextAreaElement).value).toBe('')
+  fireEvent.click(screen.getByRole('button', { name: 'Insert into chat' }))
+  expect((screen.getByTestId('chat-input') as HTMLTextAreaElement).value).toContain('7.5 MW')
+  expect(vi.mocked(createChatStream)).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByTestId('chat-send'))
+  await waitFor(() => expect(vi.mocked(createChatStream)).toHaveBeenCalled())
+  const payload = vi.mocked(createChatStream).mock.calls[0][0]
+  expect(payload.profile_id).toBe('anthropic-sonnet')
+  expect(payload.input_mode).toBe('voice')
+  expect(payload.message).toBe('Create a 7.5 MW load; not 75 MWh.')
+  expect(recording.track.stop).toHaveBeenCalled()
+})
 
 it('answers a dictated turn aloud', async () => {
   renderPanel()

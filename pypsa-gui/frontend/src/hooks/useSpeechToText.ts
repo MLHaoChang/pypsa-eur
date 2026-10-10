@@ -9,6 +9,8 @@ import {
 export type UseSpeechToTextOptions = {
   /** When false, start/toggle are no-ops (e.g. while chat is streaming). */
   enabled?: boolean
+  /** Browser recognition needs an explicit locale; it cannot auto-detect. */
+  language?: string
   /** Committed final transcript chunk (may be called multiple times). */
   onFinal: (text: string) => void
   /** User-facing error string (toast). `aborted` is suppressed upstream. */
@@ -35,6 +37,7 @@ export type UseSpeechToTextResult = {
 export function useSpeechToText(opts: UseSpeechToTextOptions): UseSpeechToTextResult {
   const {
     enabled = true,
+    language = 'en-US',
     onFinal,
     onError,
     speechWindow,
@@ -81,9 +84,9 @@ export function useSpeechToText(opts: UseSpeechToTextOptions): UseSpeechToTextRe
       onListeningChange: setListening,
       onError: (msg) => onErrorRef.current?.(msg),
       onPermissionDenied: () => setPermissionDenied(true),
-    })
+    }, language)
     return sessionRef.current
-  }, [Ctor])
+  }, [Ctor, language])
 
   const toggle = useCallback(() => {
     if (!available || !enabled) return
@@ -95,6 +98,8 @@ export function useSpeechToText(opts: UseSpeechToTextOptions): UseSpeechToTextRe
   useEffect(() => {
     if (!enabled) stop()
   }, [enabled, stop])
+
+  useEffect(() => { stop() }, [language, stop])
 
   useEffect(() => () => stop(), [stop])
 
