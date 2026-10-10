@@ -1,0 +1,4326 @@
+{
+  "generated_at": "2026-10-10",
+  "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
+  "sources": [
+    "pypsa-gui/backend/harness/catalogue.py",
+    "pypsa-gui/backend/harness/toolsets.py",
+    "pypsa-gui/frontend/src/pages/Results.tsx",
+    "pypsa-gui/frontend/src/store/uiStore.ts"
+  ],
+  "tool_count": 220,
+  "tools": [
+    {
+      "name": "list_components",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/network/buses"
+        ],
+        [
+          "GET",
+          "/api/network/carriers"
+        ],
+        [
+          "GET",
+          "/api/network/lines"
+        ],
+        [
+          "GET",
+          "/api/network/links"
+        ],
+        [
+          "GET",
+          "/api/network/transformers"
+        ],
+        [
+          "GET",
+          "/api/network/generators"
+        ],
+        [
+          "GET",
+          "/api/network/storage_units"
+        ],
+        [
+          "GET",
+          "/api/network/stores"
+        ],
+        [
+          "GET",
+          "/api/network/loads"
+        ],
+        [
+          "GET",
+          "/api/network/shunt_impedances"
+        ],
+        [
+          "GET",
+          "/api/network/global_constraints"
+        ]
+      ],
+      "input_keys": [
+        "component_class",
+        "offset",
+        "limit"
+      ],
+      "schema_sha256": "6e4521eb8f8ac1bc72ab54928c82adbab7b47bf4bb8f627ff00b10ceb2dfa353",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_component",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "component_class",
+        "name"
+      ],
+      "schema_sha256": "8fcf1af620907ec9eea2e325e5981fd665785455bab256b5ead3f13987acf2b3",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "diagnose_network",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_meta",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/network/meta"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_snapshots",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/network/snapshots"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_carriers",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/network/carriers"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_global_constraints",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/network/global_constraints"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_timeseries_profiles",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/network/loads/profiles"
+        ],
+        [
+          "GET",
+          "/api/network/generators/profiles"
+        ],
+        [
+          "GET",
+          "/api/network/links/profiles"
+        ]
+      ],
+      "input_keys": [
+        "profile_kind"
+      ],
+      "schema_sha256": "0be3304f1c11797d3340b1c742273faf746c7d4ce78ca3a3fb8487a2e3afa663",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_transformer_types",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/network/transformers/types"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "download_timeseries_template",
+      "toolsets": [
+        "project",
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/network/loads/template"
+        ],
+        [
+          "GET",
+          "/api/network/generators/template"
+        ],
+        [
+          "GET",
+          "/api/network/links/template"
+        ]
+      ],
+      "input_keys": [
+        "kind"
+      ],
+      "schema_sha256": "b5c33f4dd5f60b1654b21678b01b6ceaeb4706afb973cc6eaecea282ab6ca392",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "download_snapshot_weightings_csv",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/network/snapshots/weightings.csv"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_investment_periods",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/network/investment_periods"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_vintage_bounds",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/network/vintage_bounds"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_vintage_results",
+      "toolsets": [
+        "network",
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/network/vintage_results"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_timeseries",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/network/timeseries/{component}/{attribute}"
+        ]
+      ],
+      "input_keys": [
+        "component",
+        "name",
+        "attribute",
+        "period"
+      ],
+      "schema_sha256": "65030552c88cbc4e2f67c6b7798eb92c40a774dd7ccaa5664345d89c891f0e41",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_all_timeseries",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/network/timeseries"
+        ]
+      ],
+      "input_keys": [
+        "offset",
+        "limit"
+      ],
+      "schema_sha256": "44773c45b2ba2d795c978e7ec0078f02ef1206656b57614f5be2f060c5040db1",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_solver_config",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/simulation/solver_config"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_solver_capabilities",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/simulation/capabilities"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_asset_costs",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/simulation/asset_costs"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_simulation_status",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/simulation/status"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_simulation_lock_status",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/simulation/lock_status"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_simulation_log_history",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/simulation/log_history"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_results",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/results/cost_breakdown"
+        ],
+        [
+          "GET",
+          "/api/results/objective_decomposition"
+        ],
+        [
+          "GET",
+          "/api/results/economics_by_carrier"
+        ],
+        [
+          "GET",
+          "/api/results/statistics"
+        ],
+        [
+          "GET",
+          "/api/results/generators"
+        ],
+        [
+          "GET",
+          "/api/results/storage_dispatch"
+        ],
+        [
+          "GET",
+          "/api/results/store_dispatch"
+        ],
+        [
+          "GET",
+          "/api/results/store_energy"
+        ],
+        [
+          "GET",
+          "/api/results/storage"
+        ],
+        [
+          "GET",
+          "/api/results/lines"
+        ],
+        [
+          "GET",
+          "/api/results/links"
+        ],
+        [
+          "GET",
+          "/api/results/lcoh"
+        ],
+        [
+          "GET",
+          "/api/results/losses"
+        ],
+        [
+          "GET",
+          "/api/results/carrier_kpis"
+        ],
+        [
+          "GET",
+          "/api/results/emissions"
+        ],
+        [
+          "GET",
+          "/api/results/transformers"
+        ],
+        [
+          "GET",
+          "/api/results/unit_commitment"
+        ],
+        [
+          "GET",
+          "/api/results/line_duals"
+        ],
+        [
+          "GET",
+          "/api/results/voltages"
+        ],
+        [
+          "GET",
+          "/api/results/line_reactive"
+        ],
+        [
+          "GET",
+          "/api/results/transformer_reactive"
+        ],
+        [
+          "GET",
+          "/api/results/prices"
+        ],
+        [
+          "GET",
+          "/api/results/price_drivers"
+        ],
+        [
+          "GET",
+          "/api/results/curtailment"
+        ],
+        [
+          "GET",
+          "/api/results/lost_load"
+        ],
+        [
+          "GET",
+          "/api/results/loads"
+        ],
+        [
+          "GET",
+          "/api/results/asset_economics"
+        ],
+        [
+          "GET",
+          "/api/results/billing"
+        ],
+        [
+          "GET",
+          "/api/results/cfe_score"
+        ],
+        [
+          "GET",
+          "/api/results/value_flows"
+        ],
+        [
+          "GET",
+          "/api/results/ac_pf/status"
+        ]
+      ],
+      "input_keys": [
+        "result_kind",
+        "source",
+        "detail",
+        "offset",
+        "limit"
+      ],
+      "schema_sha256": "93630057d488ce9c3daaddedf55ff1892830d78f8753bba9f3cc9b5a78f0d6ad",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_aggregate_load",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/network/loads/aggregate"
+        ]
+      ],
+      "input_keys": [
+        "section",
+        "names"
+      ],
+      "schema_sha256": "49cd7d3066d8405553280d53afeea4b809936b2157ae9e0670f4bba89eeb66a2",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "create_component",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/network/buses"
+        ],
+        [
+          "POST",
+          "/api/network/carriers"
+        ],
+        [
+          "POST",
+          "/api/network/lines"
+        ],
+        [
+          "POST",
+          "/api/network/links"
+        ],
+        [
+          "POST",
+          "/api/network/transformers"
+        ],
+        [
+          "POST",
+          "/api/network/generators"
+        ],
+        [
+          "POST",
+          "/api/network/storage_units"
+        ],
+        [
+          "POST",
+          "/api/network/stores"
+        ],
+        [
+          "POST",
+          "/api/network/loads"
+        ],
+        [
+          "POST",
+          "/api/network/shunt_impedances"
+        ],
+        [
+          "POST",
+          "/api/network/global_constraints"
+        ]
+      ],
+      "input_keys": [
+        "component_class",
+        "name",
+        "attrs"
+      ],
+      "schema_sha256": "a39b621bdd1f2bf6351d6edd23fad3feda486bd31b0a6ac2c9827fbc4f9530ee",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "update_component",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "PUT",
+          "/api/network/buses/{name}"
+        ],
+        [
+          "POST",
+          "/api/network/buses/{name}/rename"
+        ],
+        [
+          "PUT",
+          "/api/network/carriers/{name}"
+        ],
+        [
+          "PUT",
+          "/api/network/lines/{name}"
+        ],
+        [
+          "PUT",
+          "/api/network/links/{name}"
+        ],
+        [
+          "PUT",
+          "/api/network/transformers/{name}"
+        ],
+        [
+          "PUT",
+          "/api/network/generators/{name}"
+        ],
+        [
+          "PUT",
+          "/api/network/storage_units/{name}"
+        ],
+        [
+          "PUT",
+          "/api/network/stores/{name}"
+        ],
+        [
+          "PUT",
+          "/api/network/loads/{name}"
+        ],
+        [
+          "PUT",
+          "/api/network/shunt_impedances/{name}"
+        ],
+        [
+          "PUT",
+          "/api/network/global_constraints/{name}"
+        ]
+      ],
+      "input_keys": [
+        "component_class",
+        "name",
+        "attrs",
+        "new_name"
+      ],
+      "schema_sha256": "fca6ea6c681833bf188c73ca455fb15c66d77c168938e3e411b2d17b2fa69c5d",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "delete_component",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "DELETE",
+          "/api/network/buses/{name}"
+        ],
+        [
+          "DELETE",
+          "/api/network/carriers/{name}"
+        ],
+        [
+          "DELETE",
+          "/api/network/lines/{name}"
+        ],
+        [
+          "DELETE",
+          "/api/network/links/{name}"
+        ],
+        [
+          "DELETE",
+          "/api/network/transformers/{name}"
+        ],
+        [
+          "DELETE",
+          "/api/network/generators/{name}"
+        ],
+        [
+          "DELETE",
+          "/api/network/storage_units/{name}"
+        ],
+        [
+          "DELETE",
+          "/api/network/stores/{name}"
+        ],
+        [
+          "DELETE",
+          "/api/network/loads/{name}"
+        ],
+        [
+          "DELETE",
+          "/api/network/shunt_impedances/{name}"
+        ],
+        [
+          "DELETE",
+          "/api/network/global_constraints/{name}"
+        ]
+      ],
+      "input_keys": [
+        "component_class",
+        "name"
+      ],
+      "schema_sha256": "8fcf1af620907ec9eea2e325e5981fd665785455bab256b5ead3f13987acf2b3",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "cascade_delete_bus",
+      "toolsets": [],
+      "route": [
+        [
+          "DELETE",
+          "/api/network/buses/{name}/cascade"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "bulk_update_components",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "PATCH",
+          "/api/network/_bulk"
+        ]
+      ],
+      "input_keys": [
+        "component_class",
+        "names",
+        "updates"
+      ],
+      "schema_sha256": "b9d29d6a115f86582ef642db3006a34974a740d6ea90bd8e0d72620e916ea166",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "batch_create_components",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "component_class",
+        "components"
+      ],
+      "schema_sha256": "c1602ef31e52f656e63f4991bcb5a6dc77fd200abc8adddbfae713ace3ba0a5a",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "batch_delete_components",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "component_class",
+        "names"
+      ],
+      "schema_sha256": "dd46d854563c4fc35a4059dbb67006b6a35129216f5cb3c18620b7c6f388a050",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "create_carrier",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/network/carriers"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "color",
+        "co2_emissions",
+        "nice_name"
+      ],
+      "schema_sha256": "e4097bec70c4054e3a4df78acfefcab9003bf9f1f2fb7f7db90b38e53f085ee1",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "update_meta",
+      "toolsets": [],
+      "route": [
+        [
+          "PUT",
+          "/api/network/meta"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "cluster_network",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/network/cluster"
+        ]
+      ],
+      "input_keys": [
+        "mode",
+        "algorithm",
+        "n_clusters"
+      ],
+      "schema_sha256": "f8a44735700fff3de234826b59274317a846af1a7ec883b0ae0d8c9230136968",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "recalculate_line_lengths",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/network/lines/recalculate_lengths"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "set_snapshots",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/network/snapshots"
+        ]
+      ],
+      "input_keys": [
+        "start",
+        "end",
+        "freq"
+      ],
+      "schema_sha256": "b01dbaa816e6d342c072be43c795d435e0781d8a4317872f7dbac32b46104e04",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "set_snapshot_weightings",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "PATCH",
+          "/api/network/snapshots/weightings"
+        ]
+      ],
+      "input_keys": [
+        "updates"
+      ],
+      "schema_sha256": "d9144a83ca48f527f3cb4034b65a16cfbe328c0fd8da32c43dc3684b12d9ec64",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "upload_snapshot_weightings_csv",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/network/snapshots/weightings.csv"
+        ]
+      ],
+      "input_keys": [
+        "csv_content_b64",
+        "filename"
+      ],
+      "schema_sha256": "d762f0bc54359b09d3626d3e60095ca4f68c05629a59ca04bd445051c78a28f2",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "sample_representative_weeks",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/network/snapshots/sample_weeks"
+        ]
+      ],
+      "input_keys": [
+        "n_weeks"
+      ],
+      "schema_sha256": "20c94a9661c6b9b61013313776e7c104fdd3d0584d751c4cd91897f5d119b083",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "set_multi_period_snapshots",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/network/snapshots/multi_period"
+        ]
+      ],
+      "input_keys": [
+        "periods",
+        "operational_from",
+        "operational_to",
+        "freq"
+      ],
+      "schema_sha256": "0555da73676e0b782929d8e46f95f50bda5c1ceb0c543a58fb689d1b02547879",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "set_investment_periods",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/network/investment_periods"
+        ]
+      ],
+      "input_keys": [
+        "periods"
+      ],
+      "schema_sha256": "7bf18001e3d42ba123edec8b4d9c30555d273d10842c253c9965c84015a8b4ab",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "set_investment_period_weightings",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "PATCH",
+          "/api/network/investment_period_weightings"
+        ]
+      ],
+      "input_keys": [
+        "updates"
+      ],
+      "schema_sha256": "d9144a83ca48f527f3cb4034b65a16cfbe328c0fd8da32c43dc3684b12d9ec64",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "set_vintage_bounds",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "PUT",
+          "/api/network/vintage_bounds/{component_class}/{name}"
+        ]
+      ],
+      "input_keys": [
+        "component_class",
+        "name",
+        "period_bounds"
+      ],
+      "schema_sha256": "8b9cc3c145173998abc16cb85ace86a4ef10a7eb4b27fbf45e55a60aa52d68a7",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "delete_vintage_bounds",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "DELETE",
+          "/api/network/vintage_bounds/{component_class}/{name}"
+        ]
+      ],
+      "input_keys": [
+        "component_class",
+        "name"
+      ],
+      "schema_sha256": "8fcf1af620907ec9eea2e325e5981fd665785455bab256b5ead3f13987acf2b3",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "cleanup_orphan_vintages",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/network/vintage_bounds/_cleanup_orphans"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "upload_timeseries",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "PUT",
+          "/api/network/timeseries/{component}/{attribute}"
+        ]
+      ],
+      "input_keys": [
+        "component",
+        "name",
+        "attribute",
+        "csv_content"
+      ],
+      "schema_sha256": "c94cfd16e46f5a3526fac28454e619cc3cc7abdfd13a5f2606f686e7d20d16f3",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "generate_exemplary_timeseries",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "component",
+        "name",
+        "attribute",
+        "profile",
+        "peak"
+      ],
+      "schema_sha256": "148f63924be899d8b1171c526359180d515759a0a968f957fb9ec429b5d1df85",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "delete_timeseries",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "DELETE",
+          "/api/network/timeseries"
+        ]
+      ],
+      "input_keys": [
+        "component",
+        "name",
+        "attribute"
+      ],
+      "schema_sha256": "3926677cfc445e05044b8baa8b0ecbcba72b6575a77b00278adadf4ffade6e96",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "upload_load_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/network/loads/upload_profile"
+        ]
+      ],
+      "input_keys": [
+        "csv_content_b64",
+        "filename"
+      ],
+      "schema_sha256": "d762f0bc54359b09d3626d3e60095ca4f68c05629a59ca04bd445051c78a28f2",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "upload_generator_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/network/generators/upload_profile"
+        ]
+      ],
+      "input_keys": [
+        "csv_content_b64",
+        "filename",
+        "attribute"
+      ],
+      "schema_sha256": "aaff7099e0fa0e8c283c6dc92277ef410ff7bd20f4704dea636890355433a41c",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "upload_link_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/network/links/upload_profile"
+        ]
+      ],
+      "input_keys": [
+        "csv_content_b64",
+        "filename",
+        "attribute"
+      ],
+      "schema_sha256": "aaff7099e0fa0e8c283c6dc92277ef410ff7bd20f4704dea636890355433a41c",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "update_solver_config",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "PUT",
+          "/api/simulation/solver_config"
+        ]
+      ],
+      "input_keys": [
+        "partial"
+      ],
+      "schema_sha256": "12752067d0ca181167728aca1b848aee68322e074cfa3ebaeaff38fd515ee522",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "validate_network",
+      "toolsets": [
+        "network",
+        "simulation"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/simulation/preflight"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "check_solver_availability",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/simulation/check_solvers"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "dispatch_status",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "run_simulation",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/simulation/run"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "run_ac_pf_stage",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/simulation/run_ac_pf"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "abort_simulation",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/simulation/abort"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "force_reset_simulation",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/simulation/force_reset"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_asset_health",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/asset_health"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "record_asset_health",
+      "toolsets": [],
+      "route": [
+        [
+          "PUT",
+          "/api/projects/{name}/asset_health"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "entries"
+      ],
+      "schema_sha256": "0cc7e96ecec534e315cddf9cbe7de385d7f3a8f408c8f822a9582e5c835575b5",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "explain_investment",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        "_derived_"
+      ],
+      "input_keys": [
+        "component_class",
+        "name"
+      ],
+      "schema_sha256": "f85b0c3bc0c24c78e4fe5f105c40171b37a9953c032d21e75976891330280b5a",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_adequacy_results",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/results/copt"
+        ],
+        [
+          "GET",
+          "/api/results/fmea_modes"
+        ],
+        [
+          "GET",
+          "/api/results/fmea_sweep"
+        ],
+        [
+          "GET",
+          "/api/results/frontier"
+        ],
+        [
+          "GET",
+          "/api/results/mc"
+        ],
+        [
+          "GET",
+          "/api/results/coupling_loop"
+        ],
+        [
+          "GET",
+          "/api/results/margin_loop"
+        ],
+        [
+          "GET",
+          "/api/results/adequacy"
+        ],
+        [
+          "GET",
+          "/api/results/reserve_margin"
+        ],
+        [
+          "GET",
+          "/api/results/eh_study"
+        ],
+        [
+          "GET",
+          "/api/results/eh_reference_design"
+        ],
+        [
+          "GET",
+          "/api/results/eh_redundancy"
+        ],
+        [
+          "GET",
+          "/api/results/eh_levers"
+        ],
+        [
+          "GET",
+          "/api/results/eh_dtc"
+        ],
+        [
+          "GET",
+          "/api/results/eh_dtc_planning"
+        ],
+        [
+          "GET",
+          "/api/results/mc/elcc_candidates"
+        ]
+      ],
+      "input_keys": [
+        "kind"
+      ],
+      "schema_sha256": "03c205fe47bc6d2185453223bdf83d82f0cccdb1e10ba3b4adf52ac0d2671d47",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_fmea_worksheet",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/worksheet"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_stress_scenarios",
+      "toolsets": [
+        "project"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/stress_scenarios"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "put_stress_scenarios",
+      "toolsets": [
+        "project"
+      ],
+      "route": [
+        [
+          "PUT",
+          "/api/projects/{name}/stress_scenarios"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "scenarios"
+      ],
+      "schema_sha256": "e0863fe434ae6077f1e0da7078e994ba0e7b6d1b4538ffc84eadd85f92d35125",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_eh_template",
+      "toolsets": [
+        "project"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/eh_template"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_feature_guide",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/guides/{topic}"
+        ]
+      ],
+      "input_keys": [
+        "tour",
+        "field"
+      ],
+      "schema_sha256": "2bbd66eb3f27959ee535054e2b92f926966f3073067b4ae7b27ecba003df8954",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "review_eh_study",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/results/eh_review"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "suggest_eh_setup",
+      "toolsets": [],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "archetype"
+      ],
+      "schema_sha256": "e10f55f123a66ce6e0cb028eb85bd9c4d452dd9fbf852d5f7e5b39d124ea3d8f",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "run_fmea_sweep",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/results/fmea_sweep"
+        ]
+      ],
+      "input_keys": [
+        "scenarios"
+      ],
+      "schema_sha256": "c0a8421a7d2f1d937cd32ef706e27a3415adbc14d3ece8c9a8861e00b85e4f31",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "run_frontier_study",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/results/frontier"
+        ]
+      ],
+      "input_keys": [
+        "targets_permyriad"
+      ],
+      "schema_sha256": "128e828201e6d7371ee8a5f2a0675577af5c5598a55b50999790a6418966a8b6",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "run_mc_study",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/results/mc"
+        ]
+      ],
+      "input_keys": [
+        "draws",
+        "seed",
+        "cov_target",
+        "elcc_assets",
+        "elcc_portfolio"
+      ],
+      "schema_sha256": "dae666cbc9dfcc20047a19432d9f4a8082be13b3be02b311e1d60876e4aa7f69",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "run_coupling_loop",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/results/coupling_loop"
+        ]
+      ],
+      "input_keys": [
+        "target_lole_h",
+        "draws",
+        "seed",
+        "eps0",
+        "max_solves",
+        "restore"
+      ],
+      "schema_sha256": "e01317c1dae21150ff3d374a5e36f5aaa21f5c7a33a28c00de88e1a268b4b3f8",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "run_margin_loop",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/results/margin_loop"
+        ]
+      ],
+      "input_keys": [
+        "target_lole_h",
+        "draws",
+        "seed",
+        "max_solves",
+        "restore"
+      ],
+      "schema_sha256": "ddc64ca2dfc995139ce4f81648c8d424699876fd378a763f6ed2503ccc7e104e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "run_eh_study",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/results/eh_study"
+        ]
+      ],
+      "input_keys": [
+        "archetype",
+        "stages",
+        "budget_solves",
+        "pack_overrides",
+        "dtc_config",
+        "dtc_attribution",
+        "dsr_buses",
+        "mc"
+      ],
+      "schema_sha256": "6b687b1aa90682edb3b9a1f9cd8fab696b9a6a3e7ad93a0a295948f6988f350c",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "build_study_report",
+      "toolsets": [
+        "simulation",
+        "results"
+      ],
+      "route": [
+        "_derived_"
+      ],
+      "input_keys": [
+        "project"
+      ],
+      "schema_sha256": "bc7c98e84d76eb63ce0f4645829bddd0c3e35aa098ac4f569d20deb5b095277c",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "start_campaign",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "objective",
+        "budget_solves"
+      ],
+      "schema_sha256": "86eb7cd9574a0748ddc38058099bdaeec50318ee6e7d537a506a97bf3cda80a5",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campaign_status",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "end_campaign",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "note"
+      ],
+      "schema_sha256": "eba412cf406ba67f8f44ab7309b83e010712aad97e655cdf49bdc895713df992",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "abort_adequacy_study",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/results/fmea_sweep/abort"
+        ],
+        [
+          "POST",
+          "/api/results/frontier/abort"
+        ],
+        [
+          "POST",
+          "/api/results/mc/abort"
+        ],
+        [
+          "POST",
+          "/api/results/coupling_loop/abort"
+        ],
+        [
+          "POST",
+          "/api/results/margin_loop/abort"
+        ],
+        [
+          "POST",
+          "/api/results/eh_study/abort"
+        ]
+      ],
+      "input_keys": [
+        "study"
+      ],
+      "schema_sha256": "67ee627b53bfcedf5f90e7154f23edaca403c8e98e8681c7610557585feddc1e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "solve_queue_enqueue",
+      "toolsets": [
+        "simulation",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/simulation/queue"
+        ]
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "solve_queue_list",
+      "toolsets": [
+        "simulation",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/simulation/queue"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "solve_queue_abort",
+      "toolsets": [
+        "simulation",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/simulation/queue/{job_id}/abort"
+        ]
+      ],
+      "input_keys": [
+        "job_id"
+      ],
+      "schema_sha256": "f5530c9c1ffa2d6e18e530480f1ae9fdbd93fde0302fd760e13dbb29f50813b4",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "solve_queue_clear_finished",
+      "toolsets": [
+        "simulation",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/simulation/queue/clear_finished"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_projects",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "load_project",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "activate_project",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{project_id}/activate"
+        ]
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "save_project",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "force",
+        "expect"
+      ],
+      "schema_sha256": "40acf6a4da226bbc5ba0ec1be571635ef8c97e307679138a87bccd327274733f",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "save_project_as",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "save_project_a_copy",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "rename_project",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/rename"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "new_name"
+      ],
+      "schema_sha256": "9ec0ac5fa23ac474680db7a47962f80e5a7546037248c3950c47fc0b0af84bb9",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "delete_project",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "DELETE",
+          "/api/projects/{name}"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "cascade"
+      ],
+      "schema_sha256": "837acb31387a7297e08e7a792950a51f61eadfd5d1eea3fb4175a0b35d011fac",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "create_scenario",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{base}/scenarios"
+        ]
+      ],
+      "input_keys": [
+        "base",
+        "new_name",
+        "description"
+      ],
+      "schema_sha256": "7846ee633c2f1f480f769bf0f94fade76b5cc49a02f3947164c7f50f200c4f0e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_scenarios",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_derived_"
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_project_results_bundle",
+      "toolsets": [
+        "project",
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/results_bundle"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_project_layout",
+      "toolsets": [
+        "project"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/layout"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "update_project_layout",
+      "toolsets": [
+        "project"
+      ],
+      "route": [
+        [
+          "PUT",
+          "/api/projects/{name}/layout"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "layout"
+      ],
+      "schema_sha256": "fb5671ab4916b8b45622f4f62226977136150f959e8a0e3a57aec8d645349da2",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "download_project_bundle",
+      "toolsets": [
+        "project"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/bundle"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_project_statistics",
+      "toolsets": [
+        "project"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/statistics"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_project_network_meta",
+      "toolsets": [
+        "project",
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{project_id}/network/meta"
+        ]
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_project_network_component",
+      "toolsets": [
+        "project",
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{project_id}/network/{component_class}"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "component_class"
+      ],
+      "schema_sha256": "e141a7e4bd5fecd474d9c2cfc73c217efe67fcabd3295e06625b592d67efd6d1",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "import_project_bundle",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/import_bundle"
+        ]
+      ],
+      "input_keys": [
+        "bundle_bytes_b64",
+        "filename"
+      ],
+      "schema_sha256": "6e035e962e72ee290e3fb8525da99a4c21225918ec37c318fb9e1960df3fe5ac",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "create_project_from_template",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/from_template/{template_id}"
+        ]
+      ],
+      "input_keys": [
+        "template_id",
+        "new_name"
+      ],
+      "schema_sha256": "f21134e1e811f85640595d87b728e732c77d2082ffea9a097c3aedd75cc9c4c4",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_project_compare_state",
+      "toolsets": [
+        "project",
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/compare-state"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_project_results_summary",
+      "toolsets": [
+        "project",
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/results-summary"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "create_project_snapshot",
+      "toolsets": [
+        "project",
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/snapshots"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "label",
+        "message"
+      ],
+      "schema_sha256": "1532dc27a6d2b4fbc14ace9dad79a1263f7137cca04507089ea7ac3013584416",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_project_snapshots",
+      "toolsets": [
+        "project",
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/snapshots"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "restore_project_snapshot",
+      "toolsets": [
+        "project",
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/snapshots/{snapshot_id}/restore"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "snapshot_id"
+      ],
+      "schema_sha256": "d9d9108cb4391b211127607243064bf50efc9e22be4065711fa4213b07122dd8",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "delete_project_snapshot",
+      "toolsets": [
+        "project",
+        "network"
+      ],
+      "route": [
+        [
+          "DELETE",
+          "/api/projects/{name}/snapshots/{snapshot_id}"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "snapshot_id"
+      ],
+      "schema_sha256": "d9d9108cb4391b211127607243064bf50efc9e22be4065711fa4213b07122dd8",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "import_network_nc",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/io/import/netcdf"
+        ]
+      ],
+      "input_keys": [
+        "bytes_b64",
+        "filename"
+      ],
+      "schema_sha256": "2e946bc2fbdaf93b1f260fa1fe80c71762d3ae12e2a84f98e305d95f24bf9a00",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "import_csv_bundle",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/io/import/csv"
+        ]
+      ],
+      "input_keys": [
+        "bytes_b64",
+        "filename"
+      ],
+      "schema_sha256": "2e946bc2fbdaf93b1f260fa1fe80c71762d3ae12e2a84f98e305d95f24bf9a00",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "import_excel",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/io/import/excel"
+        ]
+      ],
+      "input_keys": [
+        "bytes_b64",
+        "filename"
+      ],
+      "schema_sha256": "2e946bc2fbdaf93b1f260fa1fe80c71762d3ae12e2a84f98e305d95f24bf9a00",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "import_matpower",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/io/import/matpower"
+        ]
+      ],
+      "input_keys": [
+        "bytes_b64",
+        "filename"
+      ],
+      "schema_sha256": "2e946bc2fbdaf93b1f260fa1fe80c71762d3ae12e2a84f98e305d95f24bf9a00",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "export_network_nc",
+      "toolsets": [
+        "network",
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/io/export/netcdf"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "export_csv_bundle",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/io/export/csv"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "export_excel",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/io/export/excel"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "export_matpower",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/io/export/matpower"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "audit_log",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/changelog/"
+        ]
+      ],
+      "input_keys": [
+        "limit"
+      ],
+      "schema_sha256": "57470f87de8905ee7ade69a85ef8ab08b81b54a77f6b37ff95229a2b8849aedf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "clear_audit_log",
+      "toolsets": [],
+      "route": [
+        [
+          "DELETE",
+          "/api/changelog/"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "undo_last",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/network/undo"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "undo_status",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/network/undo/info"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "ui_select_component",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        "_ui_event_"
+      ],
+      "input_keys": [
+        "component_class",
+        "name"
+      ],
+      "schema_sha256": "8fcf1af620907ec9eea2e325e5981fd665785455bab256b5ead3f13987acf2b3",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "ui_open_panel",
+      "toolsets": [],
+      "route": [
+        "_ui_event_"
+      ],
+      "input_keys": [
+        "panel_id",
+        "results_tab",
+        "bottom_tab",
+        "compare_rail",
+        "compare_a",
+        "compare_b",
+        "compare_tab"
+      ],
+      "schema_sha256": "043fb3be62a36896754adfb81693a300027d136dedad088dbcdbc9d39918b443",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "compare_scenarios",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_derived_"
+      ],
+      "input_keys": [
+        "project_a",
+        "project_b",
+        "focus",
+        "open_compare_rail"
+      ],
+      "schema_sha256": "d7247789b6bfe3500ba63e87f81caca1358ea33c30dc39ff19bade0d661e4a8a",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "ui_set_snapshot",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        "_ui_event_"
+      ],
+      "input_keys": [
+        "snapshot_iso",
+        "period"
+      ],
+      "schema_sha256": "c9c65b8e3883d438a2612d2f4fd4f160b6325cef72ce3656100fdb11338a7d83",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "project_readiness",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "schema_sha256": "2165a55898677e2040f0621b8fb46dbf8bf02b8c8301193d6371c43fa9c7a100",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "wait_for_job",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "job_id",
+        "timeout_seconds"
+      ],
+      "schema_sha256": "d3721ae19b621988324a82d8dc4c971f2d3659c8e325dc9a9bbf8ed3276c9939",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_study_evidence",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "section",
+        "check",
+        "status",
+        "hour",
+        "assessment_id",
+        "bus",
+        "compare_to",
+        "offset",
+        "limit"
+      ],
+      "schema_sha256": "4f98b5bc92adc5e0421d13eeadf86c5d483c69c6dc8b5c2da505af46ae3647cf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "run_sensitivity_sweep",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "baseline_project_id",
+        "cases"
+      ],
+      "schema_sha256": "1bfb6701f7b93e7cc7eda41603ea006e52aa7ab890d78f7e4f6f57342b60aed9",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "use_toolset",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "domain"
+      ],
+      "schema_sha256": "689282210c314a481dd1926e924606909bcabb0cb5d142186bfe8c2f26cadc9a",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "ask_user",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_ui_event_"
+      ],
+      "input_keys": [
+        "title",
+        "question",
+        "options",
+        "allow_free_text"
+      ],
+      "schema_sha256": "401a910990c4816884b1954644fbb19ce83762746df1d9fe5b94792b6be412f4",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "use_skill",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "schema_sha256": "ed6154741bf6499e62775bc9acc684b6dd14cc479a4f0acf8be32ea80b847b87",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "start_workflow",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "workflow_id"
+      ],
+      "schema_sha256": "76b559b6a3f2e90deab0ee13126fc440d83186a74b20d4c1ad583d836d0bdbd2",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "advance_workflow",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "step"
+      ],
+      "schema_sha256": "d1813ff25f1bd94df452830661de29186bc0b9913f2b3baa203960018024a87b",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "end_workflow",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_chat_history",
+      "toolsets": [],
+      "route": [
+        "_chat_jsonl_"
+      ],
+      "input_keys": [
+        "limit"
+      ],
+      "schema_sha256": "57470f87de8905ee7ade69a85ef8ab08b81b54a77f6b37ff95229a2b8849aedf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "clear_chat_history",
+      "toolsets": [],
+      "route": [
+        "_chat_jsonl_"
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_uploads",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/uploads"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "read_upload_meta",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/uploads/{file_id}/meta"
+        ]
+      ],
+      "input_keys": [
+        "file_id"
+      ],
+      "schema_sha256": "44ef5aaf76e0b3fa602217a6344683300d5915767181a315b4d38889bbb0b106",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "read_excel_sheet",
+      "toolsets": [],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "file_id",
+        "sheet_name",
+        "max_rows"
+      ],
+      "schema_sha256": "556a0a4a7bd9fa57efb6d4dec6e926f155a9993a72a90da97c2ae0916147a842",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_demand_from_excel",
+      "toolsets": [],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "file_id",
+        "sheet_name",
+        "time_col",
+        "value_col",
+        "load_name"
+      ],
+      "schema_sha256": "8aa3afacd4bd2fe6addc882e434d47e4e65ec9b53544726f3817e4c54bf621fc",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "delete_upload",
+      "toolsets": [],
+      "route": [
+        [
+          "DELETE",
+          "/api/projects/{name}/uploads/{file_id}"
+        ]
+      ],
+      "input_keys": [
+        "file_id"
+      ],
+      "schema_sha256": "44ef5aaf76e0b3fa602217a6344683300d5915767181a315b4d38889bbb0b106",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "reconstruct_network_from_image",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "file_id",
+        "origin_x",
+        "origin_y",
+        "scale_x",
+        "scale_y"
+      ],
+      "schema_sha256": "bbdb9cc1e6babd509642db10845652e03dc47742870c8d21f0225ad57ac1d320",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "export_to_excel",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "sheets",
+        "filename"
+      ],
+      "schema_sha256": "d6c7782d94d5acb96a4ea92ec48a48a21f058a922366ef829233013b625f8d4e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "export_to_csv",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "columns",
+        "rows",
+        "filename"
+      ],
+      "schema_sha256": "fe33939d7ea2cee5a99960b3d2d8ff08a9c0d668f99b20a3d93f2e37b0f2e311",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "export_preview_png",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "filename",
+        "png_bytes_b64"
+      ],
+      "schema_sha256": "1f1a70f7272f2c42148b180fe85024eec43b9883522470a91eb1b003420c1046",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "clear_uploads",
+      "toolsets": [],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "export_chat_summary",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "format",
+        "since_turn",
+        "filename"
+      ],
+      "schema_sha256": "86e1968d4c5704a151a21d7011304bbe53cfd6f9dd2312e8502ee3b72545763d",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "export_eh_report_docx",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "filename"
+      ],
+      "schema_sha256": "55701aea901f042162b1a827a08ec9ef01173193b22492e2d934a8a4d0070792",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "generate_report",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/reports/generate"
+        ]
+      ],
+      "input_keys": [
+        "title",
+        "language",
+        "sections",
+        "instruction",
+        "template_file_id"
+      ],
+      "schema_sha256": "1bfb561ce5cf1d09bacce1814709d426c95d88f3a14ec76aa08e54dac6e19d82",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_report_status",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/reports/generate/status"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "abort_report_generation",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/reports/generate/abort"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_reports",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/reports"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_report",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/reports/{report_id}"
+        ]
+      ],
+      "input_keys": [
+        "report_id",
+        "version",
+        "section_id"
+      ],
+      "schema_sha256": "f3590056c157bdf52702e5833774bf72636d0378e9cab506dcec01cfbe0d8738",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_report_table",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/reports/{report_id}"
+        ]
+      ],
+      "input_keys": [
+        "report_id",
+        "table_id",
+        "version",
+        "offset",
+        "limit"
+      ],
+      "schema_sha256": "a57cbf2466909ae2d67d6cbdb920df0ab24e942447e81ebf8222581a8a1a24b9",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "regenerate_report_section",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/reports/{report_id}/sections/{section_id}/regenerate"
+        ]
+      ],
+      "input_keys": [
+        "report_id",
+        "section_id",
+        "instruction",
+        "language"
+      ],
+      "schema_sha256": "6acae38f81dd2522be6fc6bbe1fe4c810644eb115694991f7d548c142702c273",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "export_report_docx",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/reports/{report_id}/export"
+        ]
+      ],
+      "input_keys": [
+        "report_id",
+        "version",
+        "filename"
+      ],
+      "schema_sha256": "286be60f210ee34ec4f2ce620da90ec9df7743948e62a058a082aa91af929c5a",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "delete_report",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "DELETE",
+          "/api/projects/{name}/reports/{report_id}"
+        ]
+      ],
+      "input_keys": [
+        "report_id"
+      ],
+      "schema_sha256": "21fa9a9a69b79f9ac9737d17fa6ac7cee38b8b75d71cd6b2a0454cd5cad5e86a",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_report_templates",
+      "toolsets": [
+        "project",
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/uploads"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "set_report_template",
+      "toolsets": [
+        "project",
+        "results"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/reports/{report_id}/template"
+        ]
+      ],
+      "input_keys": [
+        "report_id",
+        "file_id"
+      ],
+      "schema_sha256": "66238bb5dacac86b2d4f90dec030dddf7505af4d356e59e035a3c76411dc46c9",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_report_template",
+      "toolsets": [
+        "project",
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/reports/{report_id}/template"
+        ]
+      ],
+      "input_keys": [
+        "report_id"
+      ],
+      "schema_sha256": "4cf3c0008071a59f144050575370d72376b0b59b1324dfa346e326bf18c0c4a1",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "propose_report_mapping",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/reports/{report_id}/template/plan"
+        ]
+      ],
+      "input_keys": [
+        "report_id",
+        "language"
+      ],
+      "schema_sha256": "b4a8de25d40c1ab654e561466acfe2c38fcba3c16f8517b7f9da0ffd8880dd03",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "set_report_mapping",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "PUT",
+          "/api/projects/{name}/reports/{report_id}/template/plan"
+        ]
+      ],
+      "input_keys": [
+        "report_id",
+        "plan",
+        "strict"
+      ],
+      "schema_sha256": "aaf3ce71ea9cbd9c1f6b7c3f02176a03d239d956c7ab72e0b64493afbf8eee72",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_report_roundtrips",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/uploads"
+        ]
+      ],
+      "input_keys": [],
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "import_edited_report",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/reports/{report_id}/roundtrip"
+        ]
+      ],
+      "input_keys": [
+        "report_id",
+        "file_id",
+        "bind_as_template"
+      ],
+      "schema_sha256": "238398196d7f9e1d5bbee52d38efff669e338ab5a2323837e11a5e9ded47837d",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "diff_report_versions",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/reports/{report_id}/versions/{a}/diff/{b}"
+        ]
+      ],
+      "input_keys": [
+        "report_id",
+        "a",
+        "b"
+      ],
+      "schema_sha256": "6225dc7c917a0f21960a10dd4b4e7411c94e84e614b7567272bceac50adf66c9",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "export_report_pdf",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/reports/{report_id}/export"
+        ]
+      ],
+      "input_keys": [
+        "report_id",
+        "version",
+        "filename"
+      ],
+      "schema_sha256": "286be60f210ee34ec4f2ce620da90ec9df7743948e62a058a082aa91af929c5a",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "set_active_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "profile_id"
+      ],
+      "schema_sha256": "c79a08c8ec3d79707d38595f7a8b1b3547079d4507157123f98d024cb0ee3b74",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_asset_results",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "component_class",
+        "name",
+        "category",
+        "metrics",
+        "source",
+        "from_iso",
+        "to_iso",
+        "period",
+        "resolution",
+        "max_rows"
+      ],
+      "schema_sha256": "08c6bb196aa2d3077e3ae01b6e37324816423f701e8b0407e8e47f293912f476",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "ui_open_asset_detail",
+      "toolsets": [],
+      "route": [
+        "_ui_event_"
+      ],
+      "input_keys": [
+        "component_class",
+        "name",
+        "category",
+        "metrics",
+        "mode",
+        "chart"
+      ],
+      "schema_sha256": "fb457dfa21c66e018027ab8c65583c80fd839df0a4c8af880a7944bb970f187f",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "export_asset_results",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "component_class",
+        "name",
+        "scope",
+        "category",
+        "metrics",
+        "filename",
+        "source",
+        "mode"
+      ],
+      "schema_sha256": "7d315ac52f9a424743bfa666c63b4c6bfae46e31af856156e55538da4882b8c7",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "gridspine_create_study",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "name",
+        "config"
+      ],
+      "schema_sha256": "2438bd5fde8df1d4266432885e2c691bdb32b1966d67ee3ad778f21a25e1d0c5",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "gridspine_set_dispatch_source",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "from_dispatch",
+        "from_project"
+      ],
+      "schema_sha256": "b9a77ab3e2116d7b5ae9081c80cf4dc99c94da523469496c115b03423d70dcc3",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "gridspine_get_config",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "gridspine_update_config",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "hours",
+        "k",
+        "window",
+        "overlap",
+        "screen",
+        "n2_prune_threshold_pct"
+      ],
+      "schema_sha256": "a41e5959914bef493e4f5829094b3cfea683e1c8a71106ae7aaac9e3b0bf570c",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "gridspine_run_pipeline",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "gridspine_get_stage_status",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "gridspine_list_ranked_snapshots",
+      "toolsets": [
+        "network",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "gridspine_get_assumption_ledger",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "gridspine_edit_template_param",
+      "toolsets": [
+        "project",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "unit_id",
+        "param",
+        "value",
+        "source"
+      ],
+      "schema_sha256": "d29c34969ed1e7f0e15ece46e01f68e3554ec9a2f7b805f28953e97613deda99",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "gridspine_export_handoff_bundle",
+      "toolsets": [
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "hour"
+      ],
+      "schema_sha256": "7f12fdcd64a4299a21dd048f900445442657a5f4f1600de388257df80cc0153e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "gridspine_get_readback",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "gridspine_get_capacity",
+      "toolsets": [
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "bus",
+        "kind",
+        "hour"
+      ],
+      "schema_sha256": "7e65aa813f378c6c04524fa4597fbdd2fcdd2984a7123694ce185cd9476114ef",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "gridspine_compute_capacity",
+      "toolsets": [
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "bus",
+        "kind"
+      ],
+      "schema_sha256": "e4b49439d242e13f1ff7845f030d2b3060cffb886a1db1de420b2d696b736030",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_get_study",
+      "toolsets": [
+        "simulation",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_draft_campus",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "overwrite"
+      ],
+      "schema_sha256": "825f9ebf480c66bad28019849e8c76fe874f6e860ad4f17a0c3ea37494afb943",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_run_study",
+      "toolsets": [
+        "simulation",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "k",
+        "pf",
+        "profile",
+        "margin",
+        "n_minus_1",
+        "invest",
+        "pcc_switchgear_by_operator"
+      ],
+      "schema_sha256": "9ac24dc57ea0c2a97a397558f6c3126632cddb3c4af1a3dc4efcf4697423640c",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_get_library",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_set_library",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "yaml"
+      ],
+      "schema_sha256": "fe9d2ba36d0bf4c21379a9ea4e5bf91d6545fa39905e997494f46a0ecede8ef0",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_get_investment",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_list_grid_codes",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_extract_grid_code",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "document_id"
+      ],
+      "schema_sha256": "c48b6138d378f30a360404e46c541a4b8fb739291856736d9bdfaeec64587b86",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "gridspine_assess_connection",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "bus",
+        "load_mw",
+        "load_pf",
+        "onsite_mw",
+        "onsite_converter",
+        "profile"
+      ],
+      "schema_sha256": "aaa0bdf7e5927ebf462a278943e938db65e923cabdc36fa7aaad91d4e8f076d1",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "gridspine_get_connection_assessments",
+      "toolsets": [
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "assessment_id",
+        "hour"
+      ],
+      "schema_sha256": "723471724cc7e355bde44a03cf36904d5448c168bf00f5f8147dc9f9705ccb9e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "gridspine_fetch_result_figure",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "hour",
+        "name"
+      ],
+      "schema_sha256": "f3b9d34cb270dd00dbae42bab665df74ba31cd243789f510068dae08d3b25e16",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_library_items",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/library/items/{kind}"
+        ]
+      ],
+      "input_keys": [
+        "kind",
+        "offset",
+        "limit"
+      ],
+      "schema_sha256": "ee9db02edce37f746f9439c7e50c87c773ee3b7f104f4e6815bf55d276fe8460",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_library_item",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/library/items/{kind}/{name}"
+        ]
+      ],
+      "input_keys": [
+        "kind",
+        "name",
+        "version",
+        "detail",
+        "item_id"
+      ],
+      "schema_sha256": "691c79bfad7957e77f5810a30519bad0fa4c077c64d4a3a63b04c1d5b0174ef7",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "import_urdb_tariff",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/library/items/tariff/import_urdb"
+        ]
+      ],
+      "input_keys": [
+        "file_id",
+        "name",
+        "cyclic_year",
+        "accept_partial",
+        "valid_from",
+        "item_index",
+        "tariff_id",
+        "jurisdiction"
+      ],
+      "schema_sha256": "c5cd663d0e28376e9825738f4ab9b6f74bf50f4db4843060a0b108825af3ee22",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "attach_tariff",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/library/items/{kind}/{name}"
+        ],
+        [
+          "PUT",
+          "/api/simulation/solver_config"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "version",
+        "replace_inline"
+      ],
+      "schema_sha256": "743228dbe166990a2f0fad7a884cde9ec2e264b826a0ce7f163b03a5006611ac",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "set_site_connection",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/simulation/solver_config"
+        ],
+        [
+          "PUT",
+          "/api/simulation/solver_config"
+        ]
+      ],
+      "input_keys": [
+        "poc_link",
+        "export_link",
+        "timezone"
+      ],
+      "schema_sha256": "a80e937c3ac37ec3d286c0be71d509f16aa19942af9a9d5ab9f67cff8a0c46b1",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "define_participants",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/simulation/value_flows/template"
+        ],
+        [
+          "GET",
+          "/api/simulation/commercial/value_flows"
+        ],
+        [
+          "PUT",
+          "/api/simulation/commercial/value_flows"
+        ]
+      ],
+      "input_keys": [
+        "template",
+        "config",
+        "clear",
+        "replace"
+      ],
+      "schema_sha256": "2c53fbf57c84cc557557b9d75c76802cd5582b34603a0814c810a27e11ef30bf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "run_investment_case",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/results/investment_case"
+        ]
+      ],
+      "input_keys": [
+        "owner"
+      ],
+      "schema_sha256": "e916d9592329c4170e51d6e5d0cbd6a5672f1d0b5865ca702a2adc09050d4483",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_investment_case",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/results/investment_case"
+        ],
+        [
+          "GET",
+          "/api/results/investment_case/report"
+        ]
+      ],
+      "input_keys": [
+        "detail",
+        "page"
+      ],
+      "schema_sha256": "2f78a321fabbb3fef8ad27878d4f84de8d402acc6a68e7ca4989d47febd44d08",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "solve_ppa_price",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/simulation/finance"
+        ]
+      ],
+      "input_keys": [
+        "target_irr",
+        "target_year",
+        "contract_id",
+        "owner"
+      ],
+      "schema_sha256": "b81bc9e8099876f804b2488f0306c7a660140fc5c1ab4d408516e45f7175326f",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "explain_cashflow",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/results/investment_case"
+        ],
+        [
+          "GET",
+          "/api/results/investment_case/report"
+        ]
+      ],
+      "input_keys": [
+        "detail"
+      ],
+      "schema_sha256": "0255989cd003852e2a25c3efca98367e6e231a2e69aa3456b05cde6c544499a9",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_tasks",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "limit"
+      ],
+      "schema_sha256": "440e1ce843e6a44f64517d8f7540084aa5e990bea1fe374afd091fca0a73ee09",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "find_capabilities",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "goal",
+        "limit"
+      ],
+      "schema_sha256": "4cade8bec0b912c42d97bdb4df00b6889e3e29c2cd1b891da542afd30043f418",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "start_task",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "title",
+        "request_id",
+        "steps"
+      ],
+      "schema_sha256": "68f6c7fd7e6c05dd31f17824b4aeb905514c5f1a8b1f73ceeb25eded58ae40a2",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_task",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "task_id"
+      ],
+      "schema_sha256": "0030340a5c7321f52ddf73fffe190c98c0986f67cbb0328ed8c75ba56856ec7c",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "resume_task",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "task_id"
+      ],
+      "schema_sha256": "0030340a5c7321f52ddf73fffe190c98c0986f67cbb0328ed8c75ba56856ec7c",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "cancel_task",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "task_id"
+      ],
+      "schema_sha256": "0030340a5c7321f52ddf73fffe190c98c0986f67cbb0328ed8c75ba56856ec7c",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "resolve_task_step",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "task_id",
+        "outcome",
+        "result"
+      ],
+      "schema_sha256": "7e24ff3de66e691a6953f90d29b562209e8f00cc2cd9ba2fe20560c5cee671bc",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_file_delivery",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "file_id"
+      ],
+      "schema_sha256": "44ef5aaf76e0b3fa602217a6344683300d5915767181a315b4d38889bbb0b106",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "inspect_import",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "file_id"
+      ],
+      "schema_sha256": "44ef5aaf76e0b3fa602217a6344683300d5915767181a315b4d38889bbb0b106",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "import_uploaded_network",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "file_id",
+        "format"
+      ],
+      "schema_sha256": "8f7c794420ae0aa9176945867c1bb34e63fa6cd81593f38220419a1c3f117f40",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "preview_project_changes",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "changes"
+      ],
+      "schema_sha256": "731c50cedf7e04663a8aebb987527dba54481727489042a1ff071b4e90e37fbb",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_project_changes",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "preview_id"
+      ],
+      "schema_sha256": "fd9d04d2b6d85650af94f0faaa0ba416750edcdda9639ee701678ccb46265f61",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "create_chart",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "component",
+        "attribute",
+        "names",
+        "source"
+      ],
+      "schema_sha256": "c4f3fb3cd967745aeb5b744ee76678dfe1edc83272ad0277e2a2b568a29f08f9",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "build_delivery",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "file_ids",
+        "filename"
+      ],
+      "schema_sha256": "03068bc75969f2330c68781e3c718de251ca87e12e5a76ea329ad3f6d3849f1d",
+      "behavioral_fixture": "pending"
+    }
+  ],
+  "result_tabs": [
+    {
+      "id": "overview",
+      "label": "Overview"
+    },
+    {
+      "id": "capex",
+      "label": "Capacity Expansion"
+    },
+    {
+      "id": "dispatch",
+      "label": "Dispatch"
+    },
+    {
+      "id": "loadflow",
+      "label": "Load Flow"
+    },
+    {
+      "id": "prices",
+      "label": "Prices"
+    },
+    {
+      "id": "economics",
+      "label": "Economics"
+    },
+    {
+      "id": "emissions",
+      "label": "Emissions"
+    },
+    {
+      "id": "curtailment",
+      "label": "Curtailment"
+    },
+    {
+      "id": "lostload",
+      "label": "Lost load"
+    },
+    {
+      "id": "adequacy",
+      "label": "Adequacy"
+    },
+    {
+      "id": "storage",
+      "label": "Storage cycling"
+    },
+    {
+      "id": "fmea",
+      "label": "FMEA"
+    },
+    {
+      "id": "investment",
+      "label": "Investment"
+    },
+    {
+      "id": "asset",
+      "label": "Asset Detail"
+    }
+  ],
+  "tool_result_tabs": [
+    "overview",
+    "capex",
+    "dispatch",
+    "loadflow",
+    "prices",
+    "economics",
+    "emissions",
+    "curtailment",
+    "lostload",
+    "storage",
+    "asset",
+    "investment"
+  ],
+  "result_tabs_not_in_tool_enum": [
+    "adequacy",
+    "fmea"
+  ],
+  "slide_panels": [
+    "timeseries",
+    "simparams",
+    "horizon",
+    "results",
+    "snapshots",
+    "issues",
+    "overview",
+    "scenarios",
+    "compare",
+    "capacityBounds",
+    "solveQueue",
+    "workspace",
+    "settings",
+    "gridspine",
+    "hubDesign",
+    "reports",
+    "campusElectrical"
+  ],
+  "tool_panel_enum": [
+    "Results",
+    "results",
+    "Topology",
+    "topology",
+    "MapCanvas",
+    "map",
+    "BottomPanel",
+    "PropertiesPanel",
+    "properties",
+    "TimeSeriesManager",
+    "timeseries",
+    "LoadProfileManager",
+    "VintagePeriodBoundsModal",
+    "capacityBounds",
+    "OverviewPanel",
+    "overview",
+    "GenerationStack",
+    "ImportExport",
+    "import_export",
+    "SolverSettings",
+    "simparams",
+    "Compare",
+    "compare",
+    "IssuesPanel",
+    "issues",
+    "CommandPalette",
+    "palette",
+    "Chat",
+    "chat",
+    "Scenarios",
+    "scenarios",
+    "Snapshots",
+    "snapshots",
+    "Horizon",
+    "horizon",
+    "SolveQueue",
+    "solveQueue",
+    "ProjectPicker",
+    "project_picker",
+    "OpenProject",
+    "NewProject",
+    "new_project",
+    "NewProjectWizard",
+    "HubDesign",
+    "hubDesign"
+  ],
+  "requested_aliases": {
+    "AR": "unresolved label; map against actual UI/module vocabulary during coverage audit, do not infer expansion"
+  }
+}
