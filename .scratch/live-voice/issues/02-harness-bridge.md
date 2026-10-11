@@ -29,3 +29,13 @@ obsolete lease+generation projections. No `run_turn`/SSE/media wiring yet.
 Tests: `tests/test_utterance_admission_c_u1.py` (8 passed). Next: wrap stream
 admission so only admitted leases start turns; wire Live busy path to queue
 instead of dropping; sync generation with issue 09 rebind.
+
+2026-10-11: C-I1 stream gate — optional `StreamRequest.utterance_id` +
+`generation` (both required together) admit via the coordinator inside
+`run_turn` before the `#19` in-flight guard. Non-admitted statuses yield
+existing `error` + `session_done` frames (`duplicate` / `queued` /
+`stale_generation` / `rejected_empty` classified inline in
+`tool-error-kinds.json`). Lease release uses `promote=False` so pending is
+not left hanging without a turn. Omitting fields preserves prior behaviour.
+Tests: `tests/test_utterance_admission_stream_c_i1.py` (6 passed). Still open:
+auto-drain pending after release; Live busy path; generation sync with issue 09.

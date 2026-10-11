@@ -32,9 +32,10 @@ def _reset(tmp_path, monkeypatch):
     chat_service._reset_sessions_for_tests()
 
 
-def _seed_facts(thread_id: str) -> dict:
+def _seed_facts(thread_id: str, *, generation: int = 1) -> dict:
     return dc.checkpoint_thread(
         thread_id,
+        generation=generation,
         goals=['Limit battery to 7.5 MW'],
         constraints=['Do not extend lines'],
         units={'power': 'MW', 'energy': 'MWh'},
@@ -114,11 +115,11 @@ def test_wrong_actor_cannot_checkpoint_or_resume(tmp_path, monkeypatch):
 
     monkeypatch.setattr(dc, '_authority', other_authority)
     with pytest.raises(HTTPException) as failure:
-        dc.checkpoint_thread(tid, goals=['hijack'])
+        dc.checkpoint_thread(tid, generation=1, goals=['hijack'])
     assert failure.value.status_code == 404
     assert failure.value.detail['error_kind'] == 'thread_not_found'
     with pytest.raises(HTTPException) as failure:
-        dc.resume_episode(tid)
+        dc.resume_episode(tid, generation=1)
     assert failure.value.status_code == 404
     monkeypatch.setattr(
         dc, '_authority',
@@ -156,9 +157,11 @@ def test_resume_mints_new_episode_and_clears_child_approvals():
         safety_tier='destructive',
     )
     assert pc.token in old.pending_confirmations
-    dc.checkpoint_thread(thread['thread_id'], episode_id=old.session_id)
+    dc.checkpoint_thread(
+        thread['thread_id'], generation=1, episode_id=old.session_id,
+    )
 
-    updated, new_session = dc.resume_episode(thread['thread_id'])
+    updated, new_session = dc.resume_episode(thread['thread_id'], generation=1)
     assert updated['episode_id'] == new_session.session_id
     assert updated['episode_id'] != old.session_id
     assert updated['generation'] == 2
@@ -167,6 +170,23 @@ def test_resume_mints_new_episode_and_clears_child_approvals():
     assert chat_service.get_session(old.session_id) is None
     assert pc.token not in getattr(new_session, 'pending_confirmations', {})
     assert new_session.owner_user_id == OWNER
+
+
+def test_stale_generation_rejected_on_checkpoint_and_resume():
+    thread = dc.create_thread()
+    tid = thread['thread_id']
+    _seed_facts(tid)
+    dc.resume_episode(tid, generation=1)
+    with pytest.raises(HTTPException) as failure:
+        dc.checkpoint_thread(tid, generation=1, goals=['stale'])
+    assert failure.value.status_code == 409
+    assert failure.value.detail['error_kind'] == 'stale_generation'
+    assert failure.value.detail['generation'] == 2
+    with pytest.raises(HTTPException) as failure:
+        dc.resume_episode(tid, generation=1)
+    assert failure.value.detail['error_kind'] == 'stale_generation'
+    assert dc.get_thread(tid)['generation'] == 2
+    assert dc.get_thread(tid)['goals'] == ['Limit battery to 7.5 MW']
 
 
 def test_ownerless_or_forged_owner_is_refused(tmp_path):
@@ -209,7 +229,7 @@ def test_parent_budget_reserve_settle_counts_once_across_resume():
     assert parent['budgets']['reservations'] == []
 
     # Resume must not replay or double-count settled charges.
-    updated, _session = dc.resume_episode(tid)
+    updated, _session = dc.resume_episode(tid, generation=1)
     assert updated['budgets']['final_charges'] == [{
         'key': 'turn-1', 'kind': 'llm', 'amount': 80, 'unit': 'tokens',
     }]

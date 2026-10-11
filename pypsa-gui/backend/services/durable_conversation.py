@@ -23,8 +23,24 @@ from services.pypsa_service import PyPSAService
 _LOCK = threading.RLock()
 
 
-def _refuse(kind: str, message: str, status: int = 409) -> None:
-    raise HTTPException(status, {'error_kind': kind, 'message': message})
+def _refuse(kind: str, message: str, status: int = 409, **extra) -> None:
+    detail = {'error_kind': kind, 'message': message}
+    detail.update(extra)
+    raise HTTPException(status, detail)
+
+
+def _require_generation(thread: dict[str, Any], generation: int) -> None:
+    current = int(thread.get('generation', 1))
+    try:
+        expected = int(generation)
+    except (TypeError, ValueError):
+        _refuse('invalid_generation', 'generation must be an integer.', 422)
+    if current != expected:
+        _refuse(
+            'stale_generation',
+            'Thread generation has advanced; reload and retry.',
+            generation=current,
+        )
 
 
 def _authority() -> tuple[Path, str, str]:
@@ -128,7 +144,12 @@ def get_thread(thread_id: str) -> dict[str, Any]:
         return _view(thread)
 
 
-def checkpoint_thread(thread_id: str, **fields: Any) -> dict[str, Any]:
+def checkpoint_thread(
+    thread_id: str,
+    *,
+    generation: int,
+    **fields: Any,
+) -> dict[str, Any]:
     """Update structured parent facts. Compaction must never call this for budgets."""
     allowed = {
         'goals', 'constraints', 'units', 'refs', 'task_ids', 'job_ids',
@@ -140,6 +161,7 @@ def checkpoint_thread(thread_id: str, **fields: Any) -> dict[str, Any]:
         _refuse('invalid_thread_field', f'Unsupported fields: {sorted(unknown)}', 422)
     with _LOCK:
         path, thread = _read(thread_id)
+        _require_generation(thread, generation)
         for key, value in fields.items():
             thread[key] = copy.deepcopy(value)
         thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
@@ -170,12 +192,13 @@ def compact_model_context(
         return _view(after)
 
 
-def resume_episode(thread_id: str):
+def resume_episode(thread_id: str, *, generation: int):
     """Mint a new ChatSession episode; drop the prior episode and its approvals."""
     from services import chat_service
 
     with _LOCK:
         path, thread = _read(thread_id)
+        _require_generation(thread, generation)
         old_episode = thread.get('episode_id')
         if old_episode:
             chat_service.drop_session(old_episode)
