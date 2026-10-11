@@ -122,3 +122,12 @@ The companion decision is now in [spec.md](spec.md) under Companion launcher,
 
 Issue 12 can land before media. The next coverage slice is unchanged: finish
 issue 08's GUI control/parameter matrix, then issue 09's durable thread.
+
+## 2026-10-11 handover — Kimi key lives in the next session
+
+Companion launcher and the typed harness bridge are on master `b8bc079fd`
+(PR 113). This session had no `KIMI_KPI_KEY`. The continuation prompt for the
+session that boots with that Runtime Secret is
+`docs/superpowers/runbooks/2026-10-11-kimi-companion-handoff.md`.
+The moonshot preset reads `MOONSHOT_API_KEY`. Copy the secret across before
+uvicorn starts, then prove `chat_ready` and one read-only live sentence.
