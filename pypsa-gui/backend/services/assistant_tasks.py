@@ -296,6 +296,12 @@ def finish_step(ticket, result=None, error=None):
                 or result.get("timed_out") or result.get("wait_cancelled")):
             step["status"] = "uncertain" if result.get("status") == "partial" and not _retryable_read(step["tool"]) else "failed"
             step["error"] = "Operation did not complete; inspect the existing job/solver before retrying."
+        elif step["tool"] in ("run_simulation", "run_ac_pf_stage") and isinstance(result, dict) and (
+            result.get("running") is True
+            or result.get("status") == "started" and result.get("final_status") != "completed"
+        ):
+            step["status"] = "uncertain"
+            step["error"] = "Solver start is not completion; inspect its outcome before advancing or retrying."
         else:
             step["status"] = "completed"
             # Retain references without replaying these bytes in every prompt.

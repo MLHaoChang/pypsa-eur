@@ -2458,6 +2458,31 @@ def _dispatch_real_tool_call(
             from services.pypsa_service import PyPSAService
             from harness.solver_bridge import start_detached_solver_monitor
             active_ctx = turn_ctx or PyPSAService.get_active_context()
+            if task_ticket is not None:
+                # Sequential task steps cannot advance from a start receipt.
+                # Preserve their outcome wait, bounded by the shared deadline;
+                # ordinary foreground solves still release the turn immediately.
+                deadline = time.monotonic() + harness_budget.PER_TOOL_TIMEOUT_SECONDS
+
+                def _task_solver_done():
+                    with active_ctx.solver_state_lock:
+                        terminal = active_ctx.solver_state.get("status") != "running"
+                    return terminal or time.monotonic() >= deadline
+
+                for progress in solver_log_bridge(
+                    session, active_ctx, poll_interval=0.1,
+                    is_solver_done=_task_solver_done,
+                ):
+                    yield "tool_progress", {
+                        "tool_use_id": tool_use_id, "tool_name": tool_name, **progress,
+                    }
+                with active_ctx.solver_state_lock:
+                    result = {
+                        **(result if isinstance(result, dict) else {"result": result}),
+                        "final_status": active_ctx.solver_state.get("status"),
+                        "objective": active_ctx.solver_state.get("objective"),
+                        "solve_time": active_ctx.solver_state.get("solve_time"),
+                    }
             with active_ctx.solver_state_lock:
                 kind = active_ctx.solver_state.get("kind")
                 status = active_ctx.solver_state.get("status")
@@ -2468,7 +2493,7 @@ def _dispatch_real_tool_call(
                 "running": status == "running",
                 "kind": kind,
                 "monitor": "get_simulation_status",
-                "detached_progress": True,
+                "detached_progress": task_ticket is None or status == "running",
             }
             if status == "running":
                 start_detached_solver_monitor(
