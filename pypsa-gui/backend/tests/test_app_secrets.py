@@ -170,6 +170,29 @@ def test_a_shell_supplied_value_is_never_overwritten():
     assert reported["overridden_by_environment"] is True
 
 
+def test_kimi_kpi_key_aliases_moonshot_when_unset():
+    """Cloud agents may inject KIMI_KPI_KEY; the moonshot preset reads MOONSHOT_API_KEY."""
+    os.environ.pop("MOONSHOT_API_KEY", None)
+    os.environ["KIMI_KPI_KEY"] = "sk-kimi-alias-value-for-tests"
+    try:
+        app_secrets.bootstrap_environment()
+        assert os.environ["MOONSHOT_API_KEY"] == "sk-kimi-alias-value-for-tests"
+    finally:
+        os.environ.pop("KIMI_KPI_KEY", None)
+        os.environ.pop("MOONSHOT_API_KEY", None)
+
+
+def test_explicit_moonshot_key_is_not_replaced_by_kimi_alias():
+    os.environ["MOONSHOT_API_KEY"] = "sk-moonshot-explicit"
+    os.environ["KIMI_KPI_KEY"] = "sk-kimi-should-not-win"
+    try:
+        app_secrets.bootstrap_environment()
+        assert os.environ["MOONSHOT_API_KEY"] == "sk-moonshot-explicit"
+    finally:
+        os.environ.pop("KIMI_KPI_KEY", None)
+        os.environ.pop("MOONSHOT_API_KEY", None)
+
+
 def test_user_env_beats_a_developer_backend_dotenv(tmp_path):
     """
     The stated precedence, and the trap it exists to avoid.
