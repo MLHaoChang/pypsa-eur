@@ -17,7 +17,7 @@ export default function CompanionOutcome({ hidden = false }: Props) {
   const download = [...messages].reverse().map((m) => downloadHref(m.tool_result)).find((href) => href)
   if (!latest || hidden) return null
   return (
-    <div className="pointer-events-auto max-w-xs rounded-xl bg-surface px-3 py-2 text-sm text-text shadow-lg" data-no-panel-close>
+    <div className="fixed bottom-44 right-6 z-40 pointer-events-auto max-w-xs rounded-xl bg-surface px-3 py-2 text-sm text-text shadow-lg" data-no-panel-close>
       <p data-testid="companion-outcome">{latest.content}</p>
       {download ? (
         <a data-testid="companion-download" href={download}>Download</a>

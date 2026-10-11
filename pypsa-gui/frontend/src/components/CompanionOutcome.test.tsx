@@ -15,6 +15,8 @@ describe('CompanionOutcome', () => {
       ],
     })
     render(<CompanionOutcome />)
+    const root = screen.getByTestId('companion-outcome').parentElement
+    expect(root?.className.split(/\s+/)).toContain('fixed')
     expect(screen.getByTestId('companion-outcome').textContent).toBe('The network file is ready.')
     expect(screen.getByTestId('companion-download').getAttribute('href')).toBe('/api/files/abc')
   })
