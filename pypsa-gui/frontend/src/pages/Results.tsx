@@ -535,6 +535,7 @@ export default function Results() {
       className="flex flex-col h-full text-sm"
       data-testid="results-active-tab"
       data-active-results-tab={effectiveTab}
+      data-assurance-tab={effectiveTab}
     >
       <PageHeader
         eyebrow={uiMode === 'guided' ? 'HUB DESIGN · RESULTS' : 'SIMULATION · RESULTS'}

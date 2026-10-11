@@ -41,3 +41,14 @@ P5 must visibly preserve required-slot limitations, per-metric validity and part
 
 See the [reliability contract](../reliability-contract.md). Original approval
 does not cover these additions; review/freeze them before implementation.
+
+### 2026-10-11 — shared harness implementation
+
+The evidence card now exposes requested metrics, coverage/unavailable reasons, retained/current scope, review limitations and authenticated downloads. Supported full-page navigation issues an owner/project/input/turn/generation-bound action; a visible mounted page/tab triggers an authenticated browser ACK, while stale/superseded actions remain submitted. Popup/complex navigation, displayed cached-data revision proof and full browser/device/accessibility journeys remain pending.
+
+See [implementation status](../implementation-status.md), [contracts](../harness-contracts.md) and [coverage ledger](../coverage-ledger.md). The whole ticket remains open; no independent review verdict is inherited by this extension.
+
+Networkless study contexts have no network revision adapter: their view action
+remains submitted without issuing an ACK rather than failing navigation or
+fabricating a fingerprint. The new regression and all eight existing navigation
+cases pass.

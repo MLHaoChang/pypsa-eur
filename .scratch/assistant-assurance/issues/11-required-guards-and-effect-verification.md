@@ -39,3 +39,9 @@ and [handoff](../session-handoff.md). Added guard requirements are currently pen
 Existing advisory validator exceptions do not establish unsafe handler behavior;
 handlers retain their own checks. This ticket adds explicit required policy gates
 and outcome verification without promoting a courtesy check into the authority.
+
+### 2026-10-11 — shared harness implementation
+
+The strict allowlist now admits only an exact enabled static-input update contract, with argument snapshot, confirmation, project/input revision checks, pre-handler durable reservation and independently prepared/read-back postconditions. Late-worker tests prohibit hidden replay and publication while an effect is pending; completed-ID retries avoid extra dirty/undo work. All other unmapped strict mutations are refused. General per-tool guard maps, durable jobs/outboxes and distributed runtime remain pending.
+
+See [implementation status](../implementation-status.md), [contracts](../harness-contracts.md) and [coverage ledger](../coverage-ledger.md). The whole ticket remains open; no independent review verdict is inherited by this extension.

@@ -157,7 +157,7 @@ it('profiles clears the entry when the profile list failed to load', async () =>
 it('profiles clears the entry when no profiles are configured', async () => {
   vi.mocked(getChatProfiles).mockResolvedValueOnce({
     profiles: [],
-    active_profile_id: null,
+    active_profile_id: '',
   })
   renderPanel()
   act(() => {

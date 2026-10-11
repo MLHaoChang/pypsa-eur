@@ -232,3 +232,114 @@ pass. The **106-case assurance selection** has no artifact skips. GitHub reports
 Actions disabled for this repository and refused dispatch with HTTP 422; normal
 merge rules apply and the complete locked-environment local run is the validation
 gate. These results do not complete pending domain/reviewer/release requirements.
+
+## 2026-10-11 — shared harness reliability contracts
+
+Current branch `feat/harness-reliability-contracts`; default deployment unchanged.
+The explicit-profile implementation now covers required scopes/slots/windows,
+retained immutable runs and same-basis comparisons, server-owned cost formulas
+and physical masks, durable confirmed static-input updates/reconciliation,
+issued mounted-view ACKs, optional bounded read-only qualitative review,
+authenticated checked-answer JSON/ZIP parity and profile/effect/shadow controls.
+These are bounded slices of A0.4, A1.7, A2.8–A2.10, A3, A4, A5, A6 and A7;
+all-domain/release tickets remain open. Earlier statements that 230 EUR total,
+positive ACKs, retained runs or every effect/reviewer are unimplemented describe
+the preceding pilot and are superseded for the documented narrow contracts.
+
+New independent/adversarial regressions use real HiGHS fixtures, fake providers
+and five real adapters with HTTP mocks: 230 EUR vs fabricated 999; exact-window
+7 MWh; same-basis 260-to-230 signed delta; missing/unsupported quantities;
+stale/corrupt retained/current evidence; confirmed exact effects, wrong success
+JSON/unintended mutation and late workers without repeat; issued visible versus
+stale/forged navigation; review tooling/schema/usage/timeout and quantitative
+prose refusal; cross-process quota/atomic files; JSON/ZIP value/byte parity;
+profile/effect rollback and unchanged ordinary shadow output. No paid APIs.
+
+Final focused selection: **197 passed**, no assurance skips. Full frontend:
+**3,567 passed / 301 files**; production TypeScript/Vite build passed. Upstream
+unit tests: **36 passed**. Ruff, inventory and diff checks pass. Commands are in
+[handoff](session-handoff.md). Final full backend and 31-driver results will be
+recorded before PR/merge. No independent expert approval, measured production
+false-acceptance rate or distributed project-runtime test is claimed.
+
+Integrated master `b8bc079f` and preserved both companion and reliability view
+markers. Supplementary passive-branch oracle: **3 passed**, independently checking
+80 EUR/year / 250 EUR total, branch overload and in-capacity imbalance. Production
+build and integrated upstream **36 tests** pass. The frontend's initial integrated
+run had **3,604 passed / 1 five-second DOM timeout** under concurrent load; the
+unchanged affected rerun passes **98 tests**, and a fresh full run is required.
+Ruff passes new modules/records/tests; loop/session match the same seven findings
+already present on master and routers add none. GitHub dispatch recheck returns
+422 Actions disabled. Final full results follow before merge.
+
+Final integrated frontend rerun: **3,605 passed / 307 files**, unchanged timeout
+and assertions, 501.87 seconds. The initial concurrent timeout is resolved. Full
+backend and fresh integrated QA remain running.
+
+Final focused backend selection on the integrated source: **200 passed**
+(140.27 seconds), including all passive-branch cases and explicit static-setting/
+time-series effect disclosure. Final receipt-parser tightening refuses array-shaped
+verdict/review-status enums; its focused UI selection passes **26 tests**. New
+module/fixture Ruff checks pass. A fresh final full frontend/build follows this
+last parser change; no broad quantitative-prose or reviewer-proof claim is made.
+
+A new networkless-study navigation case initially failed because ACK issuance
+called the PyPSA fingerprint helper with no network. The shared navigation guard
+now keeps the UI action submitted without inventing a revision or aborting
+navigation. Final navigation selection: **9 passed / 52 deselected**, 7.83 seconds,
+including the new case and all stale/forged ACK cases. This supplements the
+**200-case** focused gate with one new acceptance case. Fresh integrated QA:
+**all 31 drivers passed**; final TypeScript/Vite build passed. Full backend and
+final frontend remain in progress.
+
+
+### Final harness regression gate
+
+Shadow preparation is now failure-isolated: a malformed declared price year
+previously interrupted ordinary chat before provider output in shadow mode.
+The new authenticated stream regression first failed, then passed after the
+shared loop catch; shadow failure cannot create an approval or alter ordinary
+text. Final focused selection includes `tests/test_chat_stream_attempt_seam.py`
+in addition to the command above: **213 passed / 65 warnings**, 93.70 seconds.
+It covers the final loop, static-write wording, networkless navigation and all
+new cases added after full backend collection; these overlapping selections
+must not be summed as independent test counts.
+
+Final frontend: **3,606 passed / 307 files**, 501.95 seconds. Final production
+TypeScript/Vite build passed (existing chunk-size warning). Integrated QA:
+**all 31 drivers passed**. Upstream units: **36 passed**. No frontend changes
+followed those final gates. Ruff passes new modules/records/tests; modified
+legacy loop/session retain baseline findings only. Inventory and diff checks
+pass. Full backend completion is recorded separately below.
+
+
+### Backend completion and corrected failures
+
+Full integrated backend run completed: **11,103 passed / 269 skipped / 5 failed**,
+8856 warnings, 4186.05 seconds. Four failures were stale prompt hashes/one stance
+paragraph from companion PR 113: all four reproduce on an untouched detached
+master `b8bc079f` worktree (**4 failed**, 1.24 seconds). Production prompt text
+is unchanged by this branch. Only the two stance hashes and the tools fixture's
+stance paragraph are re-pinned from that independently loaded master text;
+all byte-equality assertions remain. The fifth failure caught the new checked
+export interpolating a filename header; it now uses the existing
+`services.http_filenames.content_disposition()` helper.
+
+Fresh correction gate on final source: **348 passed / 65 warnings**, no skips,
+99.99 seconds. It runs every affected file and the entire final harness selection:
+
+```sh
+# from pypsa-gui/backend, with the cache variables described above
+../../.pixi/envs/test/bin/python -m pytest tests/test_chat_profile_binding.py tests/test_guided_mode_prompt.py tests/test_harness_prompts.py tests/test_download_headers.py tests/test_assurance_metrics.py tests/test_answer_assurance.py tests/test_harness_reliability.py tests/test_reliability_transport.py tests/test_assurance_storage.py tests/assurance_acceptance tests/test_harness_layout.py tests/test_chat_stream_attempt_seam.py -q -o addopts='' --tb=short
+```
+
+No failures remain in the correction gate. The full run predates the final
+localized shadow/navigation/header corrections and added cases; this fresh gate
+covers them. This is a full regression run followed by a successful correction
+gate, **not a second clean full backend run**. Overlapping counts are not summed.
+Final frontend/build/31 QA drivers/36 upstream tests remain passed as above.
+All 19 assurance documents / 128 local links and inventory/diff checks pass.
+Ruff passes new modules/records/tests/router; legacy loop/session add no findings.
+GitHub master was rechecked at `b8bc079f`; dispatch still returns 422 Actions
+repository-wide disabled. Default deployment and open domain/release limitations
+remain unchanged.

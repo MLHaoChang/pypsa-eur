@@ -26,7 +26,7 @@ import threading
 from typing import Any, Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from starlette.responses import StreamingResponse
 
 from db.models import Session as SessionRow
@@ -87,6 +87,9 @@ class StreamRequest(BaseModel):
     input_mode: str | None = None
     # Validate explicitly to preserve the protocol's typed admission errors.
     assurance: Any = None
+    checked_scope: Any = None
+    checked_operation: Any = None
+    binding_generation: StrictInt = Field(default=0, ge=0, le=2**31 - 1)
 
 
 class ConfirmRequest(BaseModel):
@@ -1009,19 +1012,88 @@ def checked_evidence(evidence_id: str, actor: User | None = Depends(optional_use
     return assurance_records.public(assurance_records.evidence(str(actor.id), evidence_id))
 
 
-@router.post("/ui-ack")
-def checked_ui_ack(body: Any = Body(...)):
-    # No expected actions are issued by the input-only pilot. Refuse forged or
-    # unissued ACKs; positive view-state acknowledgement remains a later ticket.
-    required = {"version", "action_id", "turn_id", "binding_generation", "target"}
-    if (not isinstance(body, dict) or set(body) != required
-            or type(body.get("version")) is not int or body["version"] != 1
-            or type(body.get("binding_generation")) is not int
-            or not isinstance(body.get("target"), dict)
-            or not all(isinstance(body.get(k), str) and 1 <= len(body[k]) <= 128
-                       for k in ("action_id", "turn_id"))):
+@router.get("/answers/{answer_id}/export")
+def export_checked_answer(answer_id: str, format: Literal["json", "zip"] = "json",
+                          actor: User | None = Depends(optional_user)):
+    import hashlib
+    from starlette.responses import Response
+    from harness.publication import export
+    from services.http_filenames import content_disposition
+    if actor is None:
+        raise HTTPException(401, "Authentication required")
+    data, media_type, filename = export(str(actor.id), answer_id, format)
+    return Response(data, media_type=media_type, headers={
+        "Content-Disposition": content_disposition(filename),
+        "X-Content-SHA256": hashlib.sha256(data).hexdigest(),
+        "Cache-Control": "no-store",
+    })
+
+
+@router.get("/reliability/context")
+def checked_context(actor: User | None = Depends(optional_user)):
+    from harness.durable import network_guard
+    from services import assurance_records, workflow_tools
+    from services.pypsa_service import PyPSAService
+    if actor is None:
+        raise HTTPException(401, "Authentication required")
+    with network_guard():
+        ctx = PyPSAService.get_active_context()
+        assurance_records.authorize(str(actor.id), ctx.project_uuid)
+        return {"version": 1, "project_id": ctx.project_uuid,
+                "input_sha256": workflow_tools._network_input_fingerprint(ctx)}
+
+
+@router.get("/reliability/capabilities")
+def checked_capabilities():
+    from harness.rollout import capabilities
+    return capabilities()
+
+
+@router.get("/reliability/contracts")
+def checked_contracts():
+    from harness.assurance_scope import RequestScope
+    from harness.assurance import Draft, ProfileDraft
+    return {"version": 1, "request_scope": RequestScope.model_json_schema(),
+            "observed_draft": Draft.model_json_schema(), "computed_draft": ProfileDraft.model_json_schema()}
+
+
+@router.get("/operations/{operation_id}")
+def checked_operation_record(operation_id: str, actor: User | None = Depends(optional_user)):
+    from harness.effects import operation
+    from services.assurance_records import public
+    if actor is None:
+        raise HTTPException(401, "Authentication required")
+    return public(operation(str(actor.id), operation_id))
+
+
+@router.post("/operations/{operation_id}/reconcile")
+def reconcile_checked_operation(operation_id: str, body: Any = Body(...),
+                                actor: User | None = Depends(optional_user)):
+    from harness.effects import reconcile
+    from services.assurance_records import public
+    if actor is None:
+        raise HTTPException(401, "Authentication required")
+    if (not isinstance(body, dict) or set(body) != {"version", "contract_sha256"}
+            or type(body["version"]) is not int or body["version"] != 1
+            or not isinstance(body["contract_sha256"], str)):
         raise HTTPException(422, {"error_kind": "invalid_assurance_request"})
-    raise HTTPException(409, {"error_kind": "ui_ack_mismatch"})
+    return public(reconcile(str(actor.id), operation_id, body["contract_sha256"]))
+
+
+@router.post("/ui-ack")
+def checked_ui_ack(body: Any = Body(...), actor: User | None = Depends(optional_user)):
+    from harness.navigation import acknowledge
+    if actor is None:
+        raise HTTPException(401, "Authentication required")
+    return acknowledge(str(actor.id), body)
+
+
+@router.get("/navigation/{action_id}")
+def checked_navigation(action_id: str, actor: User | None = Depends(optional_user)):
+    from services import assurance_records
+    if actor is None:
+        raise HTTPException(401, "Authentication required")
+    return assurance_records.public(assurance_records.load(str(actor.id), action_id, "ui_action"))
 
 
 @router.get("/metrics")
@@ -1258,6 +1330,22 @@ async def chat_stream(
     # still sync and still runs off-loop in the threadpool.
     from harness import assurance
     strict_assurance = assurance.admission(body.assurance)
+    if body.checked_scope is not None:
+        from harness.assurance_scope import validate
+        try:
+            validate(body.checked_scope)
+        except (ValueError, TypeError):
+            raise HTTPException(422, {"error_kind": "invalid_assurance_request"}) from None
+        if not strict_assurance or body.attachment_file_ids:
+            raise HTTPException(422, {"error_kind": "invalid_assurance_request"})
+    if body.checked_operation is not None:
+        from harness.effects import validate
+        try:
+            validate(body.checked_operation)
+        except (ValueError, TypeError, KeyError, AttributeError):
+            raise HTTPException(422, {"error_kind": "invalid_assurance_request"}) from None
+        if not strict_assurance or body.checked_scope is not None or body.attachment_file_ids:
+            raise HTTPException(422, {"error_kind": "invalid_assurance_request"})
     if "assurance" in body.model_fields_set and body.assurance is None:
         raise HTTPException(422, {"error_kind": "invalid_assurance_request"})
     if strict_assurance and body.script:
@@ -1486,6 +1574,9 @@ async def chat_stream(
                     attachment_file_ids=body.attachment_file_ids,
                     ui_context=body.ui_context,
                     strict_assurance=strict_assurance,
+                    checked_scope=body.checked_scope,
+                    checked_operation=body.checked_operation,
+                    binding_generation=body.binding_generation,
                 )
             for event_name, payload in events:
                 yield chat_service.sse_frame(event_name, payload)
