@@ -48,3 +48,9 @@ drains the detached ring as existing `tool_progress` frames; stays open while
 the monitor is active; ownership/replica gates match /confirm. Tests:
 `tests/test_nonblocking_progress_observer_d_i1c.py` (3 passed). Still open:
 frontend observer subscription, domain adapters, wait_for_job, D-I2/D-C1.
+
+2026-10-11: Frontend progress subscription — `createChatProgressStream` GETs
+the observer; ChatPanel opens it on `tool_result.detached_progress` and
+appends `tool_progress` into the store. Cleared on project switch / new chat /
+unmount. Tests: `chat.test.ts` + `ChatPanel.detachedProgress.test.tsx`. Still
+open: domain adapters, wait_for_job, D-I2/D-C1.
