@@ -181,9 +181,9 @@ describe('assistant dock prominence', () => {
     window.removeEventListener('companion:live-utterance', onUtterance)
   })
 
-  it('does not send a live sentence while the assistant is already streaming', async () => {
+  it('queues a live sentence while the assistant is already streaming without opening the console', async () => {
     const user = userEvent.setup()
-    useChatStore.setState({ streaming: true })
+    useChatStore.setState({ streaming: true, requestQueue: [] })
     const heard: string[] = []
     const onUtterance = (ev: Event) => {
       heard.push((ev as CustomEvent<string>).detail)
@@ -194,9 +194,32 @@ describe('assistant dock prominence', () => {
     await user.type(screen.getByTestId('companion-live-input'), 'List the generators')
     await user.click(screen.getByTestId('companion-live-send'))
     expect(heard).toEqual([])
-    expect(screen.getByTestId('companion-live-caption').textContent).toContain('Nothing new was sent.')
+    const queue = useChatStore.getState().requestQueue
+    expect(queue).toHaveLength(1)
+    expect(queue[0]).toMatchObject({ text: 'List the generators', source: 'live' })
+    expect(useUIStore.getState().assistantDockOpen).toBe(false)
+    expect(screen.getByTestId('companion-live-caption').textContent).toContain(
+      'Queued — will send when the assistant is free.',
+    )
     window.removeEventListener('companion:live-utterance', onUtterance)
-    useChatStore.setState({ streaming: false })
+    useChatStore.setState({ streaming: false, requestQueue: [] })
+  })
+
+  it('keeps only the latest live correction while busy', async () => {
+    const user = userEvent.setup()
+    useChatStore.setState({ streaming: true, requestQueue: [] })
+    render(<AssistantDock />)
+    await user.click(screen.getByTestId('companion-live'))
+    await user.type(screen.getByTestId('companion-live-input'), 'First correction')
+    await user.click(screen.getByTestId('companion-live-send'))
+    await user.clear(screen.getByTestId('companion-live-input'))
+    await user.type(screen.getByTestId('companion-live-input'), 'Latest correction')
+    await user.click(screen.getByTestId('companion-live-send'))
+    const queue = useChatStore.getState().requestQueue
+    expect(queue).toHaveLength(1)
+    expect(queue[0].text).toBe('Latest correction')
+    expect(useUIStore.getState().assistantDockOpen).toBe(false)
+    useChatStore.setState({ streaming: false, requestQueue: [] })
   })
 
   it('walks the results tabs from the live composer and leaves the console closed', async () => {

@@ -3,7 +3,7 @@
 
 # Nonblocking domain jobs, recoverable monitoring and results refresh
 
-Status: ready-for-agent
+Status: claimed
 Type: task
 Blocked by: 02, 08, 09
 
@@ -28,3 +28,23 @@ recovery, event gaps/duplicates recover, stale updates cannot cross projects/vie
 and UI/results match authoritative artifacts for every workload.
 
 ## Comments
+
+2026-10-11: D-I1 first slice — `_dispatch_real_tool_call` no longer awaits
+`solver_log_bridge` for `run_simulation` / `run_ac_pf_stage`. Tool result is the
+started handle (`status=started`, `running`, `monitor=get_simulation_status`);
+the turn and utterance lease release while the worker continues. Tests:
+`tests/test_nonblocking_foreground_solve_d_i1.py` (3 passed). Still open: detached
+progress SSE, full domain adapters, wait_for_job for foreground solves, D-I2
+cursor recovery, D-C1 multi-family monitoring.
+
+2026-10-11: Detached progress buffer — `start_detached_solver_monitor` runs
+`solver_log_bridge` on a daemon thread into a session ring (tool_progress-shaped
+payloads); drain via `session.drain_detached_progress()`. No new SSE frame names.
+Tests: `tests/test_nonblocking_detached_progress_d_i1b.py` (3 passed). Still open:
+emitting progress on an open stream, domain adapters, wait_for_job, D-I2/D-C1.
+
+2026-10-11: Progress observer SSE — `GET /api/chat/{session_id}/progress`
+drains the detached ring as existing `tool_progress` frames; stays open while
+the monitor is active; ownership/replica gates match /confirm. Tests:
+`tests/test_nonblocking_progress_observer_d_i1c.py` (3 passed). Still open:
+frontend observer subscription, domain adapters, wait_for_job, D-I2/D-C1.

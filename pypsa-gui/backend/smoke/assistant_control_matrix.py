@@ -1,0 +1,435 @@
+"""Regenerate/check the editable-control and family-journey matrix (issue 08).
+
+Reads CreationForm FIELD_MAP and attributeCatalog editability/closed sets without
+importing the React app. Maps each control to create_component / update_component
+or an explicit gap. Resolves the requested AR alias against real inventory IDs.
+Assigns one issue-05 journey id per coverage family (fixtures still pending).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_OUTPUT = ROOT / '.scratch/live-voice/capability-matrix.json'
+INVENTORY = ROOT / '.scratch/live-voice/capability-inventory.json'
+CREATION_FORM = ROOT / 'pypsa-gui/frontend/src/layout/CreationForm.tsx'
+ATTR_CATALOG = ROOT / 'pypsa-gui/frontend/src/utils/attributeCatalog.ts'
+
+# Palette id → PyPSA component_class accepted by create_component / update_component.
+PALETTE_TO_CLASS: dict[str, str] = {
+    'bus': 'Bus',
+    'line': 'Line',
+    'transformer': 'Transformer',
+    'electrolyzer': 'Link',
+    'fuel_cell': 'Link',
+    'power_to_heat': 'Link',
+    'chp': 'Link',
+    'thermal': 'Generator',
+    'renewable': 'Generator',
+    'battery': 'StorageUnit',
+    'psh': 'StorageUnit',
+    'hydrogen': 'StorageUnit',
+    'caes': 'StorageUnit',
+    'flywheel': 'StorageUnit',
+    'thermal_storage': 'Store',
+    'load_elec': 'Load',
+    'load_h2': 'Load',
+    'load_heat': 'Load',
+}
+
+# Application-coverage.md family table → issue-05 journey assignment ids.
+FAMILY_JOURNEYS: list[dict[str, str]] = [
+    {
+        'family': 'Projects/scenarios/templates',
+        'journey_id': 'pending:issue-05-projects',
+        'status': 'assigned',
+    },
+    {
+        'family': 'Network/topology/asset parameters',
+        'journey_id': 'pending:issue-05-network-topology',
+        'status': 'assigned',
+    },
+    {
+        'family': 'Time series/horizon/multi-period',
+        'journey_id': 'pending:issue-05-timeseries-horizon',
+        'status': 'assigned',
+    },
+    {
+        'family': 'Solver/simulation',
+        'journey_id': 'pending:issue-05-solver-simulation',
+        'status': 'assigned',
+    },
+    {
+        'family': 'All results',
+        'journey_id': 'pending:issue-05-all-results',
+        'status': 'assigned',
+    },
+    {
+        'family': 'Reliability/health/adequacy',
+        'journey_id': 'pending:issue-05-reliability-adequacy',
+        'status': 'assigned',
+    },
+    {
+        'family': 'GridSpine/campus electrical',
+        'journey_id': 'pending:issue-05-gridspine-campus',
+        'status': 'assigned',
+    },
+    {
+        'family': 'Economics/investment/Library',
+        'journey_id': 'pending:issue-05-economics-investment',
+        'status': 'assigned',
+    },
+    {
+        'family': 'Experiments/sensitivity',
+        'journey_id': 'pending:issue-05-experiments',
+        'status': 'assigned',
+    },
+    {
+        'family': 'Import/export/delivery',
+        'journey_id': 'pending:issue-05-import-export',
+        'status': 'assigned',
+    },
+    {
+        'family': 'Reports/templates/edit round trip',
+        'journey_id': 'pending:issue-05-reports',
+        'status': 'assigned',
+    },
+    {
+        'family': 'Audit/undo/checkpoints',
+        'journey_id': 'pending:issue-05-audit-undo',
+        'status': 'assigned',
+    },
+    {
+        'family': 'Harness/workflows/providers',
+        'journey_id': 'pending:issue-05-harness-workflows',
+        'status': 'assigned',
+    },
+    {
+        'family': 'UI/preferences/monitoring',
+        'journey_id': 'pending:issue-05-ui-monitoring',
+        'status': 'assigned',
+    },
+]
+
+# User-requested "AR" label → real modules/tools (never invent "Ardat").
+AR_RESOLUTION = {
+    'label': 'AR',
+    'status': 'mapped',
+    'expansion': 'Asset Reliability',
+    'maps_to': {
+        'tools': [
+            'get_asset_health',
+            'record_asset_health',
+            'get_adequacy_results',
+            'get_fmea_worksheet',
+            'run_fmea_sweep',
+        ],
+        'result_tabs': ['adequacy', 'fmea'],
+        'modules': [
+            'pypsa-gui/backend/services/adequacy/asset_health.py',
+            'pypsa-gui/backend/services/adequacy/',
+        ],
+    },
+    'note': (
+        'Requested AR label maps to Asset Reliability (health assumptions) plus '
+        'adequacy/FMEA result surfaces. No separate module exists for that acronym.'
+    ),
+}
+
+
+def _parse_fields_from_block(block: str, *, carrier: str | None = None, hours: str | None = None) -> list[dict]:
+    """Parse `{ key, label, type, ... }` objects; single- or multi-line."""
+    fields = []
+    for fm in re.finditer(
+        r"\{\s*key:\s*'([^']+)'\s*,\s*label:\s*'((?:\\'|[^'])*)'\s*,\s*type:\s*'([^']+)'"
+        r"(.*?)\}",
+        block,
+        re.S,
+    ):
+        rest = fm.group(4)
+        unit_m = re.search(r"unit:\s*'([^']+)'", rest)
+        default_m = re.search(r"defaultValue:\s*([^,\n}]+)", rest)
+        default = None
+        if default_m:
+            raw = default_m.group(1).strip()
+            if raw in ('carrier',) and carrier is not None:
+                default = carrier
+            elif raw in ('hours',) and hours is not None:
+                default = hours
+            elif raw.startswith("'") and raw.endswith("'"):
+                default = raw[1:-1]
+        fields.append({
+            'key': fm.group(1),
+            'label': fm.group(2).replace("\\'", "'"),
+            'parameter_type': fm.group(3),
+            'unit': unit_m.group(1) if unit_m else None,
+            'default': default,
+        })
+    return fields
+
+
+def _helper_fields(source: str, name: str, carrier: str, hours: str | None = None) -> list[dict]:
+    m = re.search(
+        rf'const {re.escape(name)}\s*=\s*\([^)]*\)\s*:\s*[^\n]*=>\s*\[(.*?)\n\]',
+        source,
+        re.S,
+    )
+    if m is None:
+        raise ValueError(f'Cannot find helper {name}; update the control-matrix reader.')
+    return _parse_fields_from_block(m.group(1), carrier=carrier, hours=hours)
+
+
+def _parse_field_map(source: str) -> dict[str, list[dict]]:
+    """Extract palette_id → field specs from CreationForm FIELD_MAP."""
+    start = source.find('const FIELD_MAP')
+    if start < 0:
+        raise ValueError('Cannot find FIELD_MAP; update the control-matrix reader.')
+    brace = source.find('{', start)
+    depth = 0
+    end = None
+    for i, ch in enumerate(source[brace:], brace):
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                end = i
+                break
+    if end is None:
+        raise ValueError('Cannot close FIELD_MAP; update the control-matrix reader.')
+    body = source[brace + 1:end]
+    out: dict[str, list[dict]] = {}
+    # Digits allowed (load_h2); indent-2 keys only so comments/fields are skipped.
+    for m in re.finditer(r'\n  ([a-z0-9_]+):\s*(.+)', body):
+        key, rhs = m.group(1), m.group(2).strip()
+        if rhs.startswith('['):
+            # Inline array until the matching close at indent 2
+            rest = body[m.end(2) - len(rhs):]
+            depth = 0
+            close = None
+            for i, ch in enumerate(rest):
+                if ch == '[':
+                    depth += 1
+                elif ch == ']':
+                    depth -= 1
+                    if depth == 0:
+                        close = i
+                        break
+            if close is None:
+                raise ValueError(f'Cannot close FIELD_MAP[{key!r}]; update the reader.')
+            fields = _parse_fields_from_block(rest[1:close])
+        elif rhs.startswith('genFields('):
+            args = re.findall(r"'([^']+)'", rhs)
+            fields = _helper_fields(source, 'genFields', carrier=args[0])
+        elif rhs.startswith('storFields('):
+            args = re.findall(r"'([^']+)'", rhs)
+            hours = args[1] if len(args) > 1 else '4'
+            fields = _helper_fields(source, 'storFields', carrier=args[0], hours=hours)
+        else:
+            raise ValueError(f'Unsupported FIELD_MAP[{key!r}] rhs {rhs!r}; update the reader.')
+        if not fields:
+            raise ValueError(f'FIELD_MAP[{key!r}] has no fields; update the reader.')
+        out[key] = fields
+    if not out:
+        raise ValueError('FIELD_MAP has no palette entries; update the reader.')
+    return out
+
+
+def _parse_string_record(source: str, name: str) -> dict[str, str | list]:
+    """Read a TypeScript `export const NAME: Record<...> = { ... }` object."""
+    m = re.search(rf'export const {re.escape(name)}\s*[^=]*=\s*\{{(.*?)\n\}}', source, re.S)
+    if m is None:
+        raise ValueError(f'Cannot find {name}; update the control-matrix reader.')
+    body = m.group(1)
+    # Arrays: 'Key': ['a', 'b']
+    arrays = {
+        k: re.findall(r"'([^']+)'", vals)
+        for k, vals in re.findall(r"'([^']+)':\s*\[(.*?)\]", body, re.S)
+    }
+    scalars = dict(re.findall(r"'([^']+)':\s*'([^']+)'", body))
+    # Prefer arrays when both match a key (CLOSED_SETS)
+    out: dict[str, str | list] = dict(scalars)
+    out.update(arrays)
+    if not out:
+        raise ValueError(f'{name} is empty; update the control-matrix reader.')
+    return out
+
+
+def _inventory_tool_names() -> set[str]:
+    data = json.loads(INVENTORY.read_text(encoding='utf-8'))
+    return {t['name'] for t in data['tools']}
+
+
+def build_matrix() -> dict:
+    form_src = CREATION_FORM.read_text(encoding='utf-8')
+    attr_src = ATTR_CATALOG.read_text(encoding='utf-8')
+    field_map = _parse_field_map(form_src)
+    overrides = _parse_string_record(attr_src, 'EDITABILITY_OVERRIDES')
+    closed = _parse_string_record(attr_src, 'CLOSED_SETS')
+    tools = _inventory_tool_names()
+    for name in AR_RESOLUTION['maps_to']['tools']:
+        if name not in tools:
+            raise ValueError(f'AR maps_to tool {name!r} missing from inventory; update AR_RESOLUTION.')
+
+    controls = []
+    gaps = []
+    for palette_id, fields in sorted(field_map.items()):
+        component_class = PALETTE_TO_CLASS.get(palette_id)
+        if component_class is None:
+            gaps.append({
+                'ui_surface': 'creation_form',
+                'palette_id': palette_id,
+                'reason': 'no palette→component_class mapping',
+            })
+            continue
+        for field in fields:
+            # Form-only helpers that are not PyPSA attrs (voltage-step preset).
+            if palette_id == 'transformer' and field['key'] == 'type':
+                tool = None
+                gap = 'ui_helper_not_pypsa_attr'
+            elif field['key'].endswith('_per_km'):
+                # Submitted as absolute r/x/b via SUBMIT_TRANSFORM — covered by create_component attrs.
+                tool = 'create_component'
+                gap = None
+            else:
+                tool = 'create_component'
+                gap = None
+            controls.append({
+                'family': 'Network/topology/asset parameters',
+                'ui_surface': 'creation_form',
+                'ui_target': f'palette:{palette_id}.{field["key"]}',
+                'palette_id': palette_id,
+                'field_key': field['key'],
+                'label': field['label'],
+                'parameter_type': field['parameter_type'],
+                'unit': field['unit'],
+                'component_class': component_class,
+                'tool': tool,
+                'attrs_path': None if tool is None else f'attrs.{field["key"]}',
+                'eligibility': {
+                    'project_kinds': ['capacity_expansion', None],
+                    'ui_modes': ['expert', 'guided'],
+                    'requires_project': True,
+                },
+                'gap': gap,
+                'behavioral_fixture': 'pending:issue-05-network-topology',
+            })
+
+    edit_rows = []
+    for key, status in sorted(overrides.items()):
+        if not isinstance(status, str):
+            continue
+        component_class, _, column = key.partition('.')
+        tool = 'update_component' if status == 'editable' else None
+        edit_rows.append({
+            'family': 'Network/topology/asset parameters',
+            'ui_surface': 'attribute_grid',
+            'ui_target': f'catalog:{key}',
+            'component_class': component_class,
+            'field_key': column,
+            'editability': status,
+            'tool': tool,
+            'eligibility': {
+                'project_kinds': ['capacity_expansion', None],
+                'ui_modes': ['expert'],
+                'requires_project': True,
+            },
+            'behavioral_fixture': 'pending:issue-05-network-topology',
+        })
+
+    closed_rows = []
+    for key, values in sorted(closed.items()):
+        if not isinstance(values, list):
+            continue
+        component_class, _, column = key.partition('.')
+        closed_rows.append({
+            'ui_target': f'catalog:{key}',
+            'component_class': component_class,
+            'field_key': column,
+            'parameter_type': 'enum',
+            'values': values,
+            'tool': 'update_component',
+        })
+
+    return {
+        'format_version': 1,
+        'generated_at': datetime.now(timezone.utc).date().isoformat(),
+        'status': (
+            'control/parameter matrix for Network/topology; '
+            'behavioral journeys remain pending on issue 05'
+        ),
+        'sources': [
+            'pypsa-gui/frontend/src/layout/CreationForm.tsx',
+            'pypsa-gui/frontend/src/utils/attributeCatalog.ts',
+            '.scratch/live-voice/capability-inventory.json',
+            '.scratch/live-voice/application-coverage.md',
+        ],
+        'controls': controls,
+        'editability_overrides': edit_rows,
+        'closed_sets': closed_rows,
+        'control_gaps': gaps,
+        'ar_resolution': AR_RESOLUTION,
+        'family_journeys': FAMILY_JOURNEYS,
+        'counts': {
+            'creation_controls': len(controls),
+            'editability_overrides': len(edit_rows),
+            'closed_sets': len(closed_rows),
+            'family_journeys': len(FAMILY_JOURNEYS),
+            'unmapped_palette_ids': len(gaps),
+        },
+    }
+
+
+def _stable(obj: object) -> object:
+    """Drop generated_at for drift comparison."""
+    if isinstance(obj, dict):
+        return {k: _stable(v) for k, v in obj.items() if k != 'generated_at'}
+    if isinstance(obj, list):
+        return [_stable(v) for v in obj]
+    return obj
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--check', action='store_true')
+    mode.add_argument('--write', action='store_true')
+    parser.add_argument('--output', type=Path, default=DEFAULT_OUTPUT)
+    args = parser.parse_args(argv)
+    built = build_matrix()
+    if args.write:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(built, indent=2) + '\n', encoding='utf-8')
+        print(f'wrote {args.output} controls={built["counts"]["creation_controls"]}')
+        return 0
+    if not args.output.is_file():
+        print(f'missing matrix {args.output}; run --write')
+        return 1
+    committed = json.loads(args.output.read_text(encoding='utf-8'))
+    if _stable(committed) != _stable(built):
+        print('capability-matrix.json is stale relative to CreationForm/attributeCatalog/inventory')
+        return 1
+    if committed.get('ar_resolution', {}).get('status') != 'mapped':
+        print('AR alias is still unresolved')
+        return 1
+    if len(committed.get('family_journeys', [])) != 14:
+        print('family_journeys must assign all 14 coverage families')
+        return 1
+    if any(c.get('tool') is None and c.get('gap') is None for c in committed.get('controls', [])):
+        print('every creation control needs a tool or an explicit gap')
+        return 1
+    print(
+        'ok',
+        f'controls={committed["counts"]["creation_controls"]}',
+        f'families={committed["counts"]["family_journeys"]}',
+        'ar=mapped',
+    )
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

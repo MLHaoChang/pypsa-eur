@@ -1,6 +1,6 @@
 # Shared harness delegation bridge
 
-Status: ready-for-agent
+Status: claimed
 Type: task
 Blocked by: 08, 09 (integrated acceptance; bridge extraction can start earlier)
 
@@ -21,3 +21,34 @@ contract. The pending queue handles overlapping utterances; issue 11 must releas
 long-job turns and provide independent observation before workflow acceptance.
 
 ## Comments
+
+2026-10-11: C-U1 unit slice — `services/utterance_admission.py` admits a stable
+utterance once, holds one turn lease per session, queues at most one pending
+correction (latest wins), rejects blank/stale-generation input, and marks
+obsolete lease+generation projections. No `run_turn`/SSE/media wiring yet.
+Tests: `tests/test_utterance_admission_c_u1.py` (8 passed). Next: wrap stream
+admission so only admitted leases start turns; wire Live busy path to queue
+instead of dropping; sync generation with issue 09 rebind.
+
+2026-10-11: C-I1 stream gate — optional `StreamRequest.utterance_id` +
+`generation` (both required together) admit via the coordinator inside
+`run_turn` before the `#19` in-flight guard. Non-admitted statuses yield
+existing `error` + `session_done` frames (`duplicate` / `queued` /
+`stale_generation` / `rejected_empty` classified inline in
+`tool-error-kinds.json`). Lease release uses `promote=False` so pending is
+not left hanging without a turn. Omitting fields preserves prior behaviour.
+Tests: `tests/test_utterance_admission_stream_c_i1.py` (6 passed). Still open:
+auto-drain pending after release; Live busy path; generation sync with issue 09.
+
+2026-10-11: Live busy→queue — Companion Live queues one pending correction via
+`sendRequest({ source: 'live', openDock: false })` instead of dropping; latest
+wins; console stays closed. Project mismatch still refuses. Frontend tests in
+`AssistantDock.test.tsx`. Still open: wire Live stream with utterance_id/
+generation; backend auto-drain after promote.
+
+2026-10-11: Live stream IDs — idle `companion:live-utterance` and queued
+`source: 'live'` drains send optional `utterance_id` + `generation` on
+`ChatStreamRequest` (store `utteranceGeneration`, default 1). Typed and
+hub-card sends omit both. Tests: `ChatPanel.liveUtteranceAdmission.test.tsx`
+(4 passed). Still open: backend auto-drain after promote; frontend sync of
+generation from durable rebind.

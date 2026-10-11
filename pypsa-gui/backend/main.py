@@ -76,6 +76,7 @@ from routers import (
     changelog,
     chat,
     dictation,
+    durable_conversation,
     clustering,
     adequacy_worksheet,
     compare,
@@ -1228,6 +1229,11 @@ app.include_router(uploads.router, prefix="/api/projects", tags=["uploads"])
 # /api/chat; Phase 3 wires the real LLM call without changing route shapes.
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(dictation.router, prefix="/api/dictation", tags=["dictation"])
+app.include_router(
+    durable_conversation.router,
+    prefix="/api/durable-conversations",
+    tags=["durable-conversations"],
+)
 # In-app guides (P21): static tour / field-help catalogue, read-only.
 app.include_router(guides.router, prefix="/api/guides", tags=["guides"])
 # Desktop-only. Every route 404s in web mode; see routers/local_settings.py.

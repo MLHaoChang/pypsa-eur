@@ -113,6 +113,10 @@ class ChatSession:
     # creation and never reassigned: letting a later caller claim an existing
     # session would be the hole this closes.
     owner_user_id: str | None = None
+    # Issue 09 / B-I3 — which app replica minted this in-memory session.
+    # Stream/confirm/abort/progress refuse when the current process is not
+    # that replica (failover without distributed coordination).
+    owner_replica_id: str | None = None
     created_at: float = field(default_factory=time.monotonic)
     # Monotonic stamp of the last time this session was touched (created or
     # resolved via get_or_create_session). Drives idle eviction.
@@ -174,6 +178,12 @@ class ChatSession:
     # real value" shape ADR-0001 forbids. This wire is new on this branch,
     # so the state is new too.
     usage_reported: bool = False
+    # Issue 11 — capped ring of detached solver progress frames collected after
+    # a foreground solve handoff (same keys as tool_progress payloads).
+    _detached_progress: collections.deque = field(
+        default_factory=lambda: collections.deque(maxlen=200),
+    )
+    _detached_monitor: dict[str, Any] | None = None
     # W-3 — turns started on this session, the fallback bound for an endpoint
     # that never reports usage. See the ceiling in `_run_turn_body`.
     turns_started: int = 0
@@ -399,6 +409,44 @@ class ChatSession:
         with self._lock:
             self.result_refs.append(ref)
 
+    def mark_detached_monitor(
+        self, tool_use_id: str, tool_name: str, *, active: bool,
+    ) -> None:
+        with self._lock:
+            if active:
+                self._detached_monitor = {
+                    'tool_use_id': tool_use_id,
+                    'tool_name': tool_name,
+                    'active': True,
+                }
+            elif (
+                self._detached_monitor
+                and self._detached_monitor.get('tool_use_id') == tool_use_id
+            ):
+                self._detached_monitor = {
+                    **self._detached_monitor,
+                    'active': False,
+                }
+
+    def detached_monitor_active(self, tool_use_id: str | None = None) -> bool:
+        with self._lock:
+            mon = self._detached_monitor
+            if not mon or not mon.get('active'):
+                return False
+            if tool_use_id is None:
+                return True
+            return mon.get('tool_use_id') == tool_use_id
+
+    def append_detached_progress(self, payload: dict[str, Any]) -> None:
+        with self._lock:
+            self._detached_progress.append(payload)
+
+    def drain_detached_progress(self) -> list[dict[str, Any]]:
+        with self._lock:
+            items = list(self._detached_progress)
+            self._detached_progress.clear()
+            return items
+
 
 _SESSIONS: dict[str, ChatSession] = {}
 
@@ -471,6 +519,21 @@ def session_owner_allows(sess: "ChatSession", user_id: str | None) -> bool:
     return sess.owner_user_id == str(user_id)
 
 
+def session_replica_allows(sess: "ChatSession") -> bool:
+    """Is this process the authoritative replica that owns ``sess``?
+
+    Sessions without a pin (legacy / pre-B-I3) are allowed so existing tests
+    and in-flight clients are not locked out. Once stamped at create, only
+    the matching ``security.replica_id()`` may act.
+    """
+    pinned = getattr(sess, 'owner_replica_id', None)
+    if not pinned:
+        return True
+    import security
+
+    return pinned == security.replica_id()
+
+
 def _evict_idle_sessions_locked(now: float) -> None:
     """
     Drop idle-past-TTL sessions, then enforce the LRU resident cap.
@@ -529,6 +592,9 @@ def get_or_create_session_reporting(
         # second caller overwrite the owner would let anyone adopt a live
         # session just by naming its id.
         sess.owner_user_id = owner_user_id
+        import security
+
+        sess.owner_replica_id = security.replica_id()
         if session_id:
             sess.session_id = session_id
         sess.last_activity = now

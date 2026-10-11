@@ -91,6 +91,49 @@ All runtime tool fixtures, acknowledged view/run/source/window mapping, durable
 conversation, nonblocking adapters, experiments, speech and device/latency gates
 remain pending. Do not mark issue 08 or the entire assistant complete.
 
+## 2026-10-11 session — control matrix + durable parent thread
+
+Branch: `cursor/assistant-coverage-matrix-a604` (draft PR).
+
+Issue 08 control/parameter matrix:
+- `python -S pypsa-gui/backend/smoke/assistant_control_matrix.py --check` →
+  `ok controls=165 families=14 ar=mapped`
+- `pytest tests/test_assistant_control_matrix.py` → 9 passed
+- Artifact: `.scratch/live-voice/capability-matrix.json`; CI workflow
+  `assistant-control-matrix.yaml`. Behavioral fixtures remain on issue 05.
+
+Issue 09 first slices (B-U1, ownership, minimal B-I2 resume, B-U2 ledger):
+- `pytest tests/test_durable_conversation_parent_thread.py` → 9 passed
+- Module: `services/durable_conversation.py` (no HTTP/worker pin yet)
+
+Issue 02 C-U1 admission coordinator:
+- `pytest tests/test_utterance_admission_c_u1.py` → 8 passed
+- Module: `services/utterance_admission.py` (not yet wired into `/stream`)
+
+2026-10-11 continued:
+- Issue 02 C-I1: optional `utterance_id`+`generation` on `/stream` → `run_turn`
+  admission gate; `pytest tests/test_utterance_admission_stream_c_i1.py` → 6 passed
+- Issue 09 B-I1 HTTP: `/api/durable-conversations` + generation CAS;
+  `pytest tests/test_durable_conversation_http_b_i1.py` → 4 passed
+
+Issue 11 D-I1 first slice: foreground solve handoff without bridge wait;
+`pytest tests/test_nonblocking_foreground_solve_d_i1.py` → 3 passed.
+
+2026-10-11 continued again:
+- Issue 11 detached progress buffer (3 passed)
+- Issue 02 Live busy→queue (AssistantDock tests)
+- Issue 09 B-I2 rebind credentials (5 passed)
+
+2026-10-11 continued again:
+- Live stream `utterance_id`/`generation` (ChatPanel + chatStore; 4 vitest)
+- `GET /api/chat/{id}/progress` observer SSE (3 pytest)
+- B-I3 worker pin via `owner_replica_id` (5 pytest)
+
+Next runnable slice: frontend progress observer subscription; sync
+`utteranceGeneration` from durable rebind; domain job adapters; LiveKit
+credentials/deployment smoke; B-C1 prolonged journey. Do not claim
+whole-application coverage or live voice done.
+
 ## 2026-10-10 design amendment — floating companion
 
 PRs 107 and 108 stay the hosted-voice architecture and the navigation/inventory
