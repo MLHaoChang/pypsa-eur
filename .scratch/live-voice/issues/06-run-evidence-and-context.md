@@ -91,5 +91,10 @@ bound, and emits ui_event `kind=open_run_result`. Frontend `requestRunResult`
 opens Results with sticky discussed-run chrome (no historical input restore).
 Catalogue/dispatcher/route/toolset/inventory parity. Tests:
 `tests/test_discuss_project_run.py`, `runResultRequest.test.ts`, navigation
-vitest. Still open: export bound to discussed run; full three-run acceptance
+vitest.
+
+2026-10-11: `export_run_evidence(run_id?, section?)` — exports JSON via
+agent_export for a named run or the session's discussed run; never substitutes
+newest/current results. `discussed_run_required` when neither is set. Tests:
+`tests/test_export_run_evidence.py`. Still open: full three-run acceptance
 journey with ACL/restart/stale-binding fixtures.

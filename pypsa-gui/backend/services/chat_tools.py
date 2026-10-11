@@ -4414,6 +4414,46 @@ def discuss_project_run(
     return event
 
 
+def export_run_evidence(
+    run_id: str | None = None,
+    section: str | None = None,
+) -> dict:
+    """
+    Export immutable evidence for a named run, or the session's discussed run
+    when ``run_id`` is omitted. Never substitutes another/newer run.
+    """
+    import json as _json
+
+    from services import run_evidence as re_
+
+    resolved = run_id
+    if resolved is None:
+        session = chat_session()
+        refs = getattr(session, "discussed_refs", None) if session is not None else None
+        if not isinstance(refs, dict) or not refs.get("run_id"):
+            raise HTTPException(409, detail={
+                "error_kind": "discussed_run_required",
+                "message": (
+                    "No run_id was given and no discussed run is bound. "
+                    "Call discuss_project_run or pass run_id from list_project_runs."
+                ),
+            })
+        resolved = str(refs["run_id"])
+
+    evidence = re_.get_run_evidence(resolved, section=section)
+    filename = (
+        f"run_{resolved}_{section}.json" if section else f"run_{resolved}.json"
+    )
+    payload = _json.dumps(evidence, allow_nan=False, sort_keys=True, indent=2).encode("utf-8")
+    meta = _save_agent_export(payload, filename, "application/json")
+    return {
+        **meta,
+        "run_id": resolved,
+        "section": section,
+        "note": "Exported the named (or discussed) run only; current network results were not substituted.",
+    }
+
+
 # ── Harness: ask the user (chat harness issue 04) ──────────────────────────
 
 ASK_USER_MAX_OPTIONS = 8
@@ -7023,6 +7063,7 @@ DISPATCHERS: dict[str, Any] = {
     "get_run_evidence": get_run_evidence,
     "compare_project_runs": compare_project_runs,
     "discuss_project_run": discuss_project_run,
+    "export_run_evidence": export_run_evidence,
     "get_loadflow_summary": get_loadflow_summary,
     "list_tasks": list_tasks,
     "find_capabilities": find_capabilities,

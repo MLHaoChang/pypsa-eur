@@ -71,6 +71,10 @@
       "surface": "banner",
       "why": "A destructive project operation was refused. The user chooses cascade or rename."
     },
+    "discussed_run_required": {
+      "surface": "inline",
+      "why": "export_run_evidence (or a follow-up) needs a discussed or named run_id. The model calls discuss_project_run or list_project_runs within the turn."
+    },
     "empty_file": {
       "surface": "banner",
       "why": "Upload rejected. The user must supply a different file."
