@@ -81,8 +81,8 @@ and the [bounded acceptance plan](checked-opt-in-plan.md).
 ## Validation and reproduction
 
 The [validation record](checked-opt-in-validation.json) lists the exact selected
-backend suite and source hashes. The gate passes 1,045 cases / seven skips;
-the fresh complete frontend passes 3,678 in 312 files, including 37 new pilot/API
+backend suite and source hashes. The gate passes 1,097 cases / seven skips;
+the fresh complete frontend passes 3,686 in 313 files, including 38 new pilot/API
 cases. The focused 81-case UI gate and five pilot backend cases overlap those
 larger suites. TypeScript/Vite build, inventory and touched-file Ruff pass.
 

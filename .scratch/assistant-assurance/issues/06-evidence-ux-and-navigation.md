@@ -52,3 +52,22 @@ Networkless study contexts have no network revision adapter: their view action
 remains submitted without issuing an ACK rather than failing navigation or
 fabricating a fingerprint. The new regression and all eight existing navigation
 cases pass.
+
+
+### User-facing checked pilot (2026-10-11)
+
+The user selected an explicit chat opt-in. The control reads current server
+capabilities, requests the existing strict publication contract and retains
+checking through retry/edit/clarification/queue/Live paths. It cannot disable
+server-required strict mode or silently downgrade after rollback. Unavailable
+checked history has a conservative retry requirement without approval; async
+rewinds reject changed generations, including project round trips.
+
+Final source integrates master `baa3a95e`. The selected shared backend gate
+passes 1,097 / seven skips; complete frontend passes 3,686 / 313 files. Native
+Chromium with mocked API responses checks keyboard/SSE/digest/rollback at a
+380-pixel panel width. Build, 229-tool inventory and touched-file style pass.
+See [validation](../checked-opt-in-validation.json), [coverage ledger](../coverage-ledger.md)
+and [activation/rollback](../checked-opt-in-runbook.md). No paid calls, full-backend
+fresh run, independent domain approval or full-device/calibration release claim.
+Global deployment remains disabled and this whole phase issue stays open.

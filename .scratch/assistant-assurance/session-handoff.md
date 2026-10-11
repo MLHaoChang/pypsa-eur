@@ -678,3 +678,46 @@ Temporary logs are executor-local, while selections and commands are committed.
 Next scope is broader storage models/accounting, adequacy/FMEA/GridSpine,
 checked charts/reports, arbitrary-language completeness and independent
 calibration/release enablement. Whole phase tickets remain open.
+
+## User-facing checked pilot continuation (2026-10-11)
+
+The user selected “Add user-facing opt-in checked answers”. Implemented on
+`feat/harness-checked-answer-opt-in`, integrating master `baa3a95e` (PRs
+126/127/129) after initial base `73e11fdc` / PR 128. The persistent instruction
+authorizes a PR after required checks pass and ordinary merge to master.
+
+The chat **Check answers** control reads server capabilities and sends the
+existing version-1 strict option in pilot mode. Server strict mode stays required;
+new pilot chats/projects/reloads default off. Publication is armed before sending
+and refuses missing/downgraded/duplicate acknowledgement, unapproved text/thinking
+and invalid digest. Retry/edit/clarification/queued/Live paths preserve checking;
+unavailable history retains only a conservative retry hint, never approval.
+Rollback cannot silently send an ordinary request. Typed drafts survive a refusal;
+queued refusals cannot replay on recovery. Monotonic binding generations protect
+rewind, including project round trips. Writes/review remain separate switches.
+
+Final source `38404196` passes **1,097 / seven skips** in the selected 71-entry
+backend/provider/auth/history/recovery/run/experiment gate. Fresh integrated
+frontend **3,686 / 313 files** passes, covering 38 new pilot/API cases. Native
+Chromium with mocked API responses passes keyboard/SSE/digest/rollback at
+380-pixel panel width; independent real backend checks include the 51-EUR LP.
+Build, 229-tool inventory, two-file Ruff and docs/diff checks pass. Only docs and
+validation change after these gates. No fresh full backend, paid model, remote
+CI, independent review or all-device/domain certification is claimed.
+
+Initial 1,045/7 backend and 3,678/312 frontend checkpoints are historical and
+overlap the final gates. First fixture-error runs are not feature-red proof.
+The absent checkbox has a genuine isolated-master red, and the round-trip rewind
+case has a genuine wrong-conversation red before the generation check. Earlier
+browser mock-route overmatching was corrected before counting its pass.
+
+Read [activation/rollback](checked-opt-in-runbook.md) and
+[exact validation/reproduction](checked-opt-in-validation.json). Set backend
+`PYPSA_GUI_ANSWER_ASSURANCE_MODE=pilot`, restart and explicitly choose **Check
+answers** to use it. The PR does not activate a global/production server.
+From frontend: `npm test -- --maxWorkers=2`, `npm run build`, and
+`CHROMIUM_BIN=/usr/bin/chromium node scripts/smoke-checked-answers.mjs`.
+The JSON record contains the exact backend selection and cache/thread settings.
+Broader economics, domains, arbitrary-language/interrupt recovery, full-device
+journeys and independent calibration/release remain pending; whole phase tickets
+stay open.

@@ -24,6 +24,30 @@ CSRF checks apply; client scope and model drafts are data, never proof.
 unsupported categories. `GET /reliability/contracts` returns request/draft JSON
 schemas. These capabilities do not declare independent domain approval.
 
+The chat **Check answers** control consumes capabilities and sends the existing
+explicit version-1 strict option in pilot mode. It defaults off for new chats,
+project bindings and application reload; server strict mode is always checked
+and cannot be disabled. Disabled/shadow/invalid/unavailable configuration cannot
+advertise available opt-in. A failed/rolled-back request never automatically
+retries as ordinary chat; an explicit opt-out applies to new pilot messages.
+
+The browser arms publication before dispatch and requires a version-1 strict
+`session_init` acknowledgement with bounded session/turn identifiers and
+`state: "checking"` before accepting other frames. Missing/downgraded/duplicate
+acknowledgement or a turn ending without valid approval withholds output.
+Native digest verification remains mandatory before display or speech.
+
+Checked retry/edit/clarification policy survives the user's opt-out for new
+turns. Public history projection adds optional `requires_checked: true` for known
+checked answer references, including unavailable ones. This is a conservative
+retry requirement, never an approval/evidence flag; unavailable history still
+omits its answer identity/receipt. Imported flags cannot grant checked facts or
+tool permission. Asynchronous rewinds recheck the browser binding generation
+before changing local history or resending. Queued, Live and dictated requests
+use the same dispatcher. Refused queued requests are dropped, not replayed when
+availability recovers; a typed draft is preserved. Checked writes and qualitative
+review remain independently controlled. See the [pilot runbook](checked-opt-in-runbook.md).
+
 ## Calculations
 
 A `/stream` body can include the following, alongside ordinary `session_id`,

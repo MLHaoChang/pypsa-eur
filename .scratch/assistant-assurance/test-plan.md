@@ -154,3 +154,19 @@ previous distinct runs and native restart recovery exercise public shared paths.
 Fabricated numbers/units/formulas/omitted slots/narrative stay withheld. UI
 digest approval, voice and incomplete unsupported-NPV slots use the same receipt.
 The adapter is opt-in; independent review and broader economics remain pending.
+
+## User-facing checked pilot acceptance
+
+`ChatPanel.checkedOptIn.test.tsx`, `api/reliability.test.ts` and
+`test_checked_answer_pilot.py` exercise explicit admission, ordinary companion
+behavior, required strict mode, malformed/unavailable capabilities, rollback,
+pre-ack suppression, digest/voice publication, absent/downgraded/duplicate
+acknowledgement and conservative retry/edit/clarification/queue/Live policy.
+History unavailable hints cannot grant approved badges. A round-trip project
+change during an asynchronous rewind cannot clear/resend another conversation.
+
+`scripts/smoke-checked-answers.mjs` uses native Chromium, the real chat UI and
+fetch/SSE/digest path with mocked HTTP responses. It checks keyboard opt-in,
+approved publication, suppression, HTTP rollback and choice/draft preservation,
+then explicit ordinary opt-out. Real backend numeric/auth paths are separate
+pytest gates; no paid model call or whole-device/domain certificate is implied.
