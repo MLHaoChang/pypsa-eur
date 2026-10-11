@@ -81,6 +81,26 @@ describe('implemented assurance publication boundary', () => {
   })
   afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+  it('shows a software clarification and sends its choice as the next ordinary user request', async () => {
+    await start()
+    const text = 'Which cost quantity do you mean?'
+    emit('answer_approved', { version: 1, answer_id: 'approved-1', turn_id: 'turn-1', verdict: 'limited',
+      receipt: { policy_version: '1', content_sha256: createHash('sha256').update(text).digest('hex'),
+        evidence_ids: [], checked_block_ids: [], limitations: ['cost_quantity_required'],
+        reviewer_status: 'not_required', request_complete: false,
+        request_scope: { profile: 'generator-cost/1', entity_id: 'G1' },
+        result_slots: [{ metric: 'total_cost', disposition: 'needs_clarification', reason: 'cost_quantity_required' }] } })
+    emit('token', { delta: text })
+    emit('choice_request', { tool_use_id: 'turn-1', title: 'Cost quantity', question: text,
+      options: [{ label: 'Marginal dispatch expenditure' }, { label: 'Total declared-basis cost' }], allow_free_text: true })
+    emit('turn_done', { answer_id: 'approved-1' })
+    expect(await screen.findByText('Clarification needed')).toBeTruthy()
+    expect(screen.queryByText('Requested results checked')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Total declared-basis cost/ }))
+    await waitFor(() => expect(vi.mocked(createChatStream)).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(createChatStream).mock.calls[1][0].message).toBe('Total declared-basis cost')
+  })
+
   it.each(['token', 'thinking'])('P2: withholds unapproved %s frames from visible text', async event => {
     await start()
     emit(event, { delta: unsafe })

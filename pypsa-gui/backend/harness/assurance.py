@@ -122,6 +122,9 @@ class Turn:
         self.session = session
         self.request_scope = None
         self.request_evidence = None
+        self.clarification = None
+        self.pending_scope = None
+        self.conversation_state = None
         self.operation_contract = None
         self.operations = {}
         self.navigation_actions = []
@@ -132,6 +135,8 @@ class Turn:
         self.reservation_nonce = None
 
     def review_interpretations(self, blocks, provider, model, ctx):
+        if self.clarification is not None:
+            return
         try:
             from harness.history import _redact_for_persist
 
@@ -202,10 +207,18 @@ class Turn:
             self.operation_contract = validate(value)
 
     def prepare_request(self, message, ui_context, ctx, explicit_scope=None):
-        if explicit_scope is None:
+        if self.session.assurance_turn is self:
+            from harness.assurance_conversation import resolve
+
+            explicit_scope = resolve(self, message, ui_context, explicit_scope)
+        elif explicit_scope is None:
             from harness.assurance_scope import from_message
 
             explicit_scope = from_message(message, self.project_id, ui_context)
+        if self.clarification is not None:
+            self.request_scope = explicit_scope
+            self.request_scope["reason"] = self.clarification["reason"]
+            return
         if explicit_scope is not None:
             from harness.assurance_scope import validate
 
@@ -272,6 +285,8 @@ class Turn:
         return PROMPT
 
     def request_content(self):
+        if self.clarification is not None:
+            return ""
         if self.operation_contract is not None:
             from harness.fence import _neutralise_untrusted_delimiters
 
@@ -546,6 +561,8 @@ class Turn:
         }
 
     def validate(self, blocks):
+        if self.clarification is not None:
+            return self.clarification["question"], [], []
         if self.operation_contract is not None:
             from harness.effects import operation
 
@@ -670,7 +687,11 @@ class Turn:
             text, public_blocks, evidence_ids = self.validate(blocks)
             if self.request_scope is not None:
                 if self.request_evidence is None:
-                    limitations = [self.request_scope["reason"]]
+                    limitations = [
+                        self.clarification["question"]
+                        if self.clarification
+                        else self.request_scope["reason"]
+                    ]
                 else:
                     limitations = [
                         s["metric"] + ": " + s["reason"]
@@ -740,7 +761,13 @@ class Turn:
                     else self.request_scope["reason"]
                 )
                 receipt["result_slots"] = [
-                    {"metric": metric, "disposition": "unavailable", "reason": reason}
+                    {
+                        "metric": metric,
+                        "disposition": "needs_clarification"
+                        if self.clarification
+                        else "unavailable",
+                        "reason": reason,
+                    }
                     for metric in requested_metrics(self.request_scope)
                 ]
             else:
@@ -781,6 +808,36 @@ class Turn:
         self.approved = record
         return [{"type": "text", "text": text}]
 
+    def remember_scope(self):
+        from harness.assurance_conversation import remember
+
+        try:
+            from harness.durable import network_guard
+
+            with network_guard(), self.session._lock:
+                remember(self)
+        except (ValueError, KeyError, TypeError, HTTPException, OSError):
+            # Snapshot retention is optional; failure cannot seed an older scope.
+            with self.session._lock:
+                self.session.assurance_context = None
+
+    def clarification_choice(self):
+        if (
+            not self.clarification
+            or self.clarification["reason"] != "cost_quantity_required"
+        ):
+            return None
+        from harness.assurance_conversation import CHOICES
+
+        return {
+            "tool_use_id": self.turn_id,
+            "kind": "choice",
+            "title": "Cost quantity",
+            "question": self.clarification["question"],
+            "options": [{"label": label} for label in CHOICES],
+            "allow_free_text": True,
+        }
+
     def approval(self):
         return {
             k: self.approved[k]
@@ -801,7 +858,13 @@ class Turn:
                     payload["tool_name"], payload.get("result"), payload["tool_use_id"]
                 ),
             }
-        if event in {"choice_request", "workflow_state"}:
+        if event == "choice_request":
+            return (
+                payload
+                if self.approved and payload == self.clarification_choice()
+                else None
+            )
+        if event == "workflow_state":
             return None
         if event == "tool_progress":
             return {

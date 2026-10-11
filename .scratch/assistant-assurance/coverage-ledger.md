@@ -3,13 +3,15 @@
 
 # Answer-assurance acceptance coverage ledger
 
-Status: checked publication, one generator numerical profile and exact chart
-integrity implemented in the bounded pilot. See
+Status: bounded shared-harness contracts implemented for scoped generator/network
+calculations, retained runs/comparisons, checked publication/artifacts, confirmed
+static-input effects, mounted-view acknowledgements and live conversation carryover. See
 [implementation boundary](implementation-status.md). Initial results below are
 historical. Added request-slot, validity-mask and formula groups have partial
-prototype coverage through `generator-dispatch/1`; they remain pending independent
-review and full domain mapping. Effects, retained runs, complete arbitrary requests,
-reviewer/browser/calibration and rollout requirements remain open. The documentation
+coverage through `generator-dispatch/1`, `generator-cost/1` and
+`network-linear-cost/1`; they remain pending independent review and full domain
+mapping. Unmapped effects, complete arbitrary requests, independent
+reviewer/browser/calibration and release activation remain open. The documentation
 assessment restored documentation only; subsequent implementation restored and
 reran the archived tests.
 Source baseline: local origin/master `d43809ae` (dictation PR 106 already merged).
@@ -343,3 +345,121 @@ Ruff passes new modules/records/tests/router; legacy loop/session add no finding
 GitHub master was rechecked at `b8bc079f`; dispatch still returns 422 Actions
 repository-wide disabled. Default deployment and open domain/release limitations
 remain unchanged.
+
+
+## 2026-10-11 — live conversational scope continuation
+
+Branch `feat/harness-conversation-scope`, based on merged PR 119 (`9b987371`).
+The user authorized continuing the next implementation slice and retained the
+instruction to create/merge a PR after validation. Attached design review notes
+are context, not new instructions requiring another approval.
+
+Added `harness.assurance_conversation` and private bounded session state. Only
+published checked results seed exact selectors and two distinct immutable raw
+run references. Repeats retain entity/window/metrics/basis/current-vs-retained
+selection; snapshot growth cannot silently expand the original window. Cost
+comparisons choose the previous distinct compatible checked source, not a prior
+repeated answer. Software cost-quantity/basis questions call no provider, keep
+ordinary budget/auth/history/cancellation gates and assign needs-clarification
+slots with no checked facts. The existing choice frame is admitted only for
+that exact software-generated question. Frontend rejects contradictory receipts,
+labels clarification and hides checked-value downloads. No SDK, new frame name,
+effect grant or deployment activation was added.
+
+Initial public-stream tracers: **14 failed**, then **14 passed**. Expanded final
+scope cases: **30 passed** / 34 warnings, 27.89 seconds. Initial broad gate exposed
+one network-cost basis omission (fixed in the resolver) and two test isolation/
+old-behavior assumptions: the corruption fixture now restores its own bytes, the
+new shadow fixture uses isolated app data, and the prior missing-basis case now
+asserts its stronger typed clarification/no-provider-call contract. Assertions
+for checked values, false completion, provider neutrality and byte equality were
+not weakened. Final focused gate: **274 passed / 1 existing deliberate frame-
+recording skip**, 96 warnings, 119.58 seconds. It includes scope, calculation,
+publication, storage, acceptance, real adapter HTTP mocks, layout, stream attempt,
+rewind, history-owner, live-history race, budget and frame-contract files.
+Final UI selection: **27 passed / 3 files**; TypeScript/Vite build passed (existing
+chunk-size warning). New module/assurance/tests pass Ruff; legacy loop/session/
+history add no findings. Inventory matches **220 tools / 14 tabs / 17 panels**;
+**19 docs / 129 local links** and diff checks pass.
+
+The final source is frozen for broad checks. Full backend collection reports
+**11,412 cases / 527 files**. To use the managed environment's two CPU cores
+without installing a test plugin, all collected files are partitioned into two
+disjoint 5,706-case subprocess selections; their union equals the collection.
+Each pytest process has its own conftest-created app-data directory/DB, runs from
+backend cwd, and uses the locked `.pixi/envs/test/bin/python`. Threads are bounded
+with OMP_NUM_THREADS=OPENBLAS_NUM_THREADS=MKL_NUM_THREADS=1. The ordinary `-q -o
+addopts='' --tb=short` flags are used. Counts/exit codes will be recorded when both
+shards finish; pending runs are not treated as passed. Full frontend and 31 QA
+drivers are also running. No paid model calls are used.
+
+Boundaries: live-session state only; restart/new chat requires explicit scope or
+owned retained IDs. Arbitrary language and durable constraint recovery, additional
+domains, independent expert/calibration/browser journeys and release activation
+remain pending. Existing storage TTL/byte/quota limits apply to private snapshots;
+active project runtime remains one application worker. Issue 09 is still open.
+
+
+### Broad-validation checkpoint: conversation continuation
+
+The 31 QA drivers (`/tmp/conversation-qa.log`) and all 36 upstream unit tests
+(`/tmp/conversation-upstream.log`, 30.90 seconds) passed. The first full frontend
+run passed 3,609 assertions across 307 files but exited unsuccessfully because an
+uncaught tagging-tour polling timer accessed the global document after teardown;
+that run is not a passing gate. A regression reproduced the teardown failure
+before the fix. Capturing the original document resolves it; the final targeted
+selection passed 41 tests across three files (11.70 seconds). The production
+TypeScript/Vite build passed on the fixed source (19.19 seconds, existing chunk
+warning). The fresh complete frontend run and both complete backend selections
+are pending; no pending result is treated as passed. Source is `a7b0e3ee` (backend
+implementation `24023b81`); only documentation is being updated during those runs.
+
+A fresh `gh workflow run assistant-inventory.yaml --ref master` returned HTTP 422:
+Actions has been disabled for this repository. Remote CI is unavailable; this is
+not a failed remote test run or an approval-rule bypass.
+
+
+The fresh full frontend rerun on the fixed source finished cleanly: **3,610 passed
+across 307 files**, exit 0, no uncaught errors (729.68 seconds). Command:
+`cd pypsa-gui/frontend && npm test -- --run`; log:
+`/tmp/conversation-frontend-final.log`. Final production build also exited 0.
+The complete backend selections remain pending at this checkpoint.
+
+
+### Final conversation-continuation validation (2026-10-11)
+
+All required local gates passed on frozen source `a7b0e3ee`; backend source is
+unchanged from `24023b81`. The fresh complete backend run is **11,143 passed /
+269 skipped / zero failures**, covering all **11,412 collected tests in 527
+files**. Both isolated subprocess selections exited 0:
+
+| Selection | Passed | Skipped | Warnings | Duration |
+| --- | ---: | ---: | ---: | --- |
+| Backend shard 1 | 5,694 | 12 | 3,020 | 2,573.09 s |
+| Backend shard 2 | 5,449 | 257 | 5,885 | 2,858.17 s |
+
+Total orchestration wall time: 2,874.81 seconds. Warnings are recorded, not counted
+as passes. Skipped cases are not claimed as coverage. Collection uses
+`python -m pytest tests --collect-only -q -o addopts=''` from backend cwd. Whole
+files are assigned greedily in descending collected-case count (filename tie
+break), choosing the lower-count shard (first shard on ties). Both contain 5,706
+cases; their file sets are disjoint and their union equals the collection. Each
+subprocess runs the locked `.pixi/envs/test/bin/python -m pytest <selected files>
+-q -o addopts='' --tb=short` with independent conftest app data and
+OMP_NUM_THREADS=OPENBLAS_NUM_THREADS=MKL_NUM_THREADS=1. To reproduce the complete
+selection serially, use the same interpreter/flags with `tests` as the selection.
+
+Final evidence: `/tmp/conversation-backend-collection.log`,
+`/tmp/conversation-backend-shard-1.log`, `/tmp/conversation-backend-shard-2.log`,
+`/tmp/conversation-backend-manifest.json`, `/tmp/conversation-validation-result.json`.
+The fresh complete frontend is **3,610 passed / 307 files**, exit 0, no uncaught
+errors. Final production build, **31 QA drivers**, **36 upstream unit tests**,
+**274-case focused gate** (one deliberate recording skip), **30 conversation
+cases**, **41 tour regression cases**, inventory and documentation checks pass.
+The focused selections overlap the full suites and are not added to their totals.
+
+This clean full run supersedes the earlier PR 119 full-run-plus-correction result
+as current validation. No paid model calls or remote CI success is claimed:
+GitHub workflow dispatch confirms Actions is disabled (HTTP 422). Context remains
+live-session, bounded and opt-in; durable recovery, arbitrary-language scope,
+unmapped domains and independent domain/release certification remain pending.

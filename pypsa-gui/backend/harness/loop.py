@@ -1423,7 +1423,8 @@ def _run_turn_body(
     _chat_tools.set_turn_profile(profile)
     _chat_tools.set_chat_session(session)
 
-    if provider is None:
+    clarifying_scope = session.assurance_turn is not None and session.assurance_turn.clarification is not None
+    if provider is None and not clarifying_scope:
         # `_provider_for_profile` reproduces the exact priority this branch
         # always had: an injected `client` wins (wrapped, anthropic wire
         # only) over building one, and building one for the profile's
@@ -1457,7 +1458,7 @@ def _run_turn_body(
 
     with session._lock:
         selection_history = list(session.messages)
-    selected_tools = _tools_payload_for_profile(profile, message, history=selection_history)
+    selected_tools = [] if clarifying_scope else _tools_payload_for_profile(profile, message, history=selection_history)
     yield "session_init", {
         "session_id": session.session_id,
         "session6": session.session6(),
@@ -1710,17 +1711,20 @@ def _run_turn_body(
         # OpenAI-compatible endpoints. `model_fallback_used` goes in and comes
         # back out: the A8 downgrade is bounded per TURN, and this helper runs
         # once per assistant STEP — see its docstring.
-        stream_outcome = yield from _stream_assistant_message(
-            session, provider,
-            request=request,
-            profile=profile,
-            model_fallback_used=model_fallback_used,
-        )
-        model_fallback_used = stream_outcome.model_fallback_used
-        if stream_outcome.stop_turn:
-            return
-        final_blocks = stream_outcome.final_blocks
-        final_usage = stream_outcome.final_usage
+        if clarifying_scope:
+            final_blocks, final_usage = [], {}
+        else:
+            stream_outcome = yield from _stream_assistant_message(
+                session, provider,
+                request=request,
+                profile=profile,
+                model_fallback_used=model_fallback_used,
+            )
+            model_fallback_used = stream_outcome.model_fallback_used
+            if stream_outcome.stop_turn:
+                return
+            final_blocks = stream_outcome.final_blocks
+            final_usage = stream_outcome.final_usage
 
         if final_usage:
             session.accrue_usage(
@@ -1853,12 +1857,16 @@ def _run_turn_body(
                     return
                 from services import assurance_records
                 assurance_records.answer(session.assurance_turn.owner, session.assurance_turn.approved["answer_id"])
+                session.assurance_turn.remember_scope()
                 yield "answer_approved", session.assurance_turn.approval()
                 assurance_records.answer(session.assurance_turn.owner, session.assurance_turn.approved["answer_id"])
                 if session.abort_event.is_set() or _project_switched():
                     yield "session_done", {"reason": "aborted"}
                     return
                 yield "token", {"delta": session.assurance_turn.approved["text"]}
+                choice = session.assurance_turn.clarification_choice()
+                if choice is not None:
+                    yield "choice_request", choice
                 yield "turn_done", {"usage": usage_snapshot,
                                     "answer_id": session.assurance_turn.approved["answer_id"]}
             else:

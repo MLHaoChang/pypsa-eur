@@ -145,6 +145,8 @@ class ChatSession:
     # Private turn-local checked-answer state; cleared on every exit.
     assurance_turn: Any | None = None
     shadow_turn: Any | None = None
+    # Server-only bounded checked scope; never populated from model/client history.
+    assurance_context: dict[str, Any] | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
     pending_confirmations: dict[str, PendingConfirmation] = field(default_factory=dict)
     confirmation_decisions: dict[str, str] = field(default_factory=dict)

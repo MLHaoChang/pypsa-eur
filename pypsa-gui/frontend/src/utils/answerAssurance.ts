@@ -8,7 +8,7 @@ export interface AnswerReceipt {
   reviewer_status: string
   request_complete?: boolean
   request_scope?: { profile: string; entity_id?: string; project_id?: string; start?: string; end?: string; retain?: boolean }
-  result_slots?: { metric: string; disposition: 'answered' | 'unavailable'; reason?: string; valid_snapshots?: number; requested_snapshots?: number }[]
+  result_slots?: { metric: string; disposition: 'answered' | 'unavailable' | 'needs_clarification'; reason?: string; valid_snapshots?: number; requested_snapshots?: number }[]
 }
 
 const REVIEW_STATUSES = new Set(['not_required', 'passed', 'failed', 'unavailable',
@@ -44,7 +44,7 @@ export function parseApproval(value: Record<string, unknown>): ApprovedAnswerFra
       }) || (scope.retain !== undefined && typeof scope.retain !== 'boolean')))
     || (receipt.result_slots !== undefined && (!Array.isArray(receipt.result_slots) || receipt.result_slots.length > 20
       || receipt.result_slots.some(s => !s || typeof s.metric !== 'string' || s.metric.length > 64
-        || !['answered', 'unavailable'].includes(s.disposition)
+        || (typeof s.disposition !== 'string' || !['answered', 'unavailable', 'needs_clarification'].includes(s.disposition))
         || (s.reason !== undefined && (typeof s.reason !== 'string' || s.reason.length > 4096))
         || [s.valid_snapshots, s.requested_snapshots].some(v => v !== undefined
           && (!Number.isInteger(v) || v < 0 || v > 512)))))
@@ -53,6 +53,10 @@ export function parseApproval(value: Record<string, unknown>): ApprovedAnswerFra
       return Array.isArray(values) && values.length <= 20
         && values.every(v => typeof v === 'string' && v.length <= 4096)
     })) return null
+  const clarifying = receipt.result_slots?.some(s => s.disposition === 'needs_clarification')
+  if (clarifying && (value.verdict !== 'limited' || receipt.request_complete !== false
+    || receipt.checked_block_ids!.length > 0 || receipt.evidence_ids!.length > 0
+    || receipt.result_slots!.some(s => s.disposition !== 'needs_clarification'))) return null
   return value as unknown as ApprovedAnswerFrame
 }
 
