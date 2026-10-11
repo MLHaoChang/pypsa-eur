@@ -142,6 +142,23 @@ describe('assistant dock prominence', () => {
     expect(screen.getByTestId('companion-live-input')).toBeTruthy()
   })
 
+  it('sends a live sentence other than the walk through the chat stream and leaves the console closed', async () => {
+    const user = userEvent.setup()
+    const heard: string[] = []
+    const onUtterance = (ev: Event) => {
+      heard.push((ev as CustomEvent<string>).detail)
+    }
+    window.addEventListener('companion:live-utterance', onUtterance)
+    render(<AssistantDock />)
+    await user.click(screen.getByTestId('companion-live'))
+    await user.type(screen.getByTestId('companion-live-input'), 'List the generators')
+    await user.click(screen.getByTestId('companion-live-send'))
+    expect(useUIStore.getState().assistantDockOpen).toBe(false)
+    expect(heard).toEqual(['List the generators'])
+    expect(screen.getByTestId('companion-live-caption').textContent).toContain('Sent to the assistant.')
+    window.removeEventListener('companion:live-utterance', onUtterance)
+  })
+
   it('walks the results tabs from the live composer and leaves the console closed', async () => {
     const user = userEvent.setup()
     const seen: string[] = []

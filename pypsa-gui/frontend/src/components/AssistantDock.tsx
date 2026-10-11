@@ -85,7 +85,7 @@ export default function AssistantDock() {
       return
     }
     setPresence('listening')
-    setLiveCaption('Ask to walk through the key results in each tab, or to open a project.')
+    setLiveCaption('Add an API key for the assistant first. Tab changes and opening a project still work without one.')
   }, [forwardToHarness, ready, stopWalk])
   const profileLabel =
     profilesQuery.data?.profiles.find((p) => p.id === effectiveProfileId)?.label
