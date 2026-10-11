@@ -59,3 +59,21 @@ Evidence/replay/export/recovery use existing owned contracts. The whole issue
 remains open; broader storage economics and independent domain approval remain
 pending. See [implementation status](../implementation-status.md) and
 [coverage ledger](../coverage-ledger.md).
+
+
+### Bounded StorageUnit economics continuation (2026-10-11)
+
+The user authorized the next implementation scope. `storage-unit-cost/1`
+adds direct objective-weighted discharge/holding expenditure and declared
+installed-power fixed charges, with an independent 51-EUR LP oracle. Missing or
+unsupported dependencies cannot become complete totals; unavailable costs no
+longer borrow physical trajectory counts as cost-data coverage. Shared retained
+comparison, restart clarification, publication and export preserve exact facts.
+
+The shared gate passes 1,029 / six skips; the final overlapping 40 cost cases
+pass after the metadata correction. Fresh frontend passes 3,641 / 310 files;
+build, inventory and style/documentation gates pass. Exact source qualifications
+and selections are in [validation](../storage-economics-validation.json) and
+[coverage ledger](../coverage-ledger.md). No paid model calls or independent
+domain approval. This whole issue stays open for broader storage economics,
+other domain adapters, arbitrary-language completeness and calibration/release.

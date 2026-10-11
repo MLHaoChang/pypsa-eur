@@ -153,7 +153,26 @@ calibration/load budgets and release enablement. Unmapped strict tools fail
 closed. This implementation does not guarantee hallucination-free arbitrary
 answers or all-application correctness.
 
-## StorageUnit validation
+## StorageUnit economics validation
+
+The shared backend/provider/auth/history/recovery/run-evidence gate passes
+1,029 cases / six skips at `50499693`. The final 40 cost cases pass at `360b8cea`
+after strengthening an assertion and correcting unavailable-cost coverage
+metadata. Those 40 cases overlap the wider gate; the only subsequent Python
+changes are the covered metadata/assertion changes. No fresh complete backend
+run at the final head is claimed. Independent literal LP values, missing and
+unsupported dependencies, fabrication, exact windows, signed prices, retained
+comparisons/exports and restart clarification exercise public contracts.
+
+The fresh complete frontend passes 3,641 cases in 310 files. Production build,
+224-tool inventory, eight-file Ruff and documentation/diff checks pass. No paid
+model calls or remote CI success. Exact selections and source qualifications are
+in the [durable validation record](storage-economics-validation.json) and
+[coverage ledger](coverage-ledger.md). QA/upstream and earlier complete backend
+results below remain historical. Independent review, browser/device journeys,
+calibration and release enablement remain open.
+
+## Historical StorageUnit dispatch validation
 
 The 40 storage cases use independent LP and hand-worked values, with current and
 retained evidence, exports, restart recovery and model-fabrication refusals.

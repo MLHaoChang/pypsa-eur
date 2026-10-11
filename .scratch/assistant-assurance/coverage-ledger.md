@@ -696,3 +696,53 @@ use the `/tmp/storage-` prefix; `finalize-storage-coverage.py` checks the exact
 node union and equivalent backend source. These executor-local files are not
 committed artifacts and should not be assumed to survive a new environment.
 The source tests and commands below are the durable reproduction path.
+
+## StorageUnit direct-cost continuation validation (2026-10-11)
+
+Base master `b51563e9` includes PRs 124/125. The user authorized this bounded
+continuation. The [plan](storage-economics-plan.md) defines direct asset accounting
+and independent literal arithmetic; no independent engineering/domain review
+or broader production release is claimed.
+
+- Initial public 51-EUR oracle: **one failed / 32 deselected**, because
+  `storage-unit-cost/1` was not yet an admitted profile. Initial implemented
+  cost suite: **33 passed**, 65.22 seconds, exit 0.
+- Seven additional acceptance cases cover static-price fallback, simultaneous
+  operation, zero-baseline percentage refusal, operating-cost clarification,
+  declared-basis key-results grammar, previous distinct runs and assets named
+  `network`. Defaults are 12 metrics; quantities/units/formulas are independently
+  specified, not copied as expected values from service aggregates.
+- The wider backend gate at `50499693` passes **1,029 / six skips**, 538.29
+  seconds, exit 0, with 63 selections (including the acceptance directory).
+  It includes common provider transports, authentication, tool schemas, history,
+  native recovery, budgets, frame contracts and master PR 124's run-evidence
+  domain regressions. Paid-live and deliberate frame-recording skips are not
+  coverage. This is a selected gate, not a fresh full backend run.
+- An isolated metadata assertion fails **one / 39 deselected** before correction:
+  unavailable cost dependencies incorrectly borrowed `3/3` physical-trajectory
+  coverage. The final fix omits that count for unavailable cost/unsupported
+  slots. **All 40 cost cases pass**, 74.13 seconds, exit 0 at `360b8cea`,
+  including all nine invalid-cost dependency cases with the stronger assertion.
+  The original checkout stayed frozen for the wider run. The only subsequent
+  Python differences are these metadata/assertion changes. The 40 cases overlap
+  the 1,029-pass gate; do not sum them as unique tests or claim a full fresh run
+  at the final head.
+- Fresh complete frontend: **3,641 passed / 310 files**, 342.16 seconds,
+  exit 0, no failures/unhandled errors. Source frontend tree
+  `12109ddca0ab043958b0d15f547fcef2bbea3eaa` is unchanged by the metadata fix.
+  Two new UI cases cover checked direct-cost text, voice, declared basis and
+  unsupported-NPV incompleteness. The base's expanded error-kind manifest also
+  contributes cases relative to earlier historical frontend totals.
+- Production TypeScript/Vite build passes with its existing chunk-size warning.
+  Inventory matches **224 tools / 14 tabs / 17 panels**. All eight touched Python
+  files pass Ruff without findings. Documentation/local links and diff checks
+  pass. Previous complete-backend, QA and upstream results stay historical;
+  they are not claimed as fresh storage-economics validations.
+
+Exact selection, source hashes, commands, environment and numerical counts are
+committed in [storage-economics-validation.json](storage-economics-validation.json).
+Executor-local detailed logs use `/tmp/storage-cost-` (red, first-green, metadata
+red, final-focused, backend-gate, frontend and build); they are not durable
+artifacts. No paid model calls or remote CI success. Deployment stays opt-in;
+Stores/Links, charging purchases/revenues, overnight/FOM derivation, multi-period
+economics/NPV, other domain adapters and independent calibration remain open.
