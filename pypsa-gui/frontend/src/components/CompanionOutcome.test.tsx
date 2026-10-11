@@ -34,4 +34,20 @@ describe('CompanionOutcome', () => {
     render(<CompanionOutcome />)
     expect(screen.queryByTestId('companion-download')).toBeNull()
   })
+
+  it('renders nothing when hidden', () => {
+    useChatStore.setState({
+      messages: [
+        { id: '1', role: 'assistant', content: 'Ready.', ts: 1 },
+      ],
+    })
+    render(<CompanionOutcome hidden />)
+    expect(screen.queryByTestId('companion-outcome')).toBeNull()
+  })
+
+  it('renders nothing when there is no assistant message', () => {
+    useChatStore.setState({ messages: [] })
+    render(<CompanionOutcome />)
+    expect(screen.queryByTestId('companion-outcome')).toBeNull()
+  })
 })
