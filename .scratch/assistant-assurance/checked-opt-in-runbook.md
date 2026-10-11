@@ -51,7 +51,7 @@ retry-policy hints survive an unavailable/expired answer; they cannot create
 evidence, verified labels or permission to execute an operation. Interrupted
 messages restored manually from the existing pending-turn banner still require
 the user's current explicit choice; no generic task/interrupt recovery is added.
-New chats, project changes and reopening the panel reset the optional choice.
+New chats, project changes and application reload reset the optional choice.
 Strict server mode always requires checks and cannot be opted out in the UI.
 
 ## Rollback and failures
@@ -77,3 +77,28 @@ NPV, arbitrary-language completeness, other domain adapters, independent review,
 full browser/device coverage and measured release calibration remain pending.
 See [contracts](harness-contracts.md), [implementation status](implementation-status.md)
 and the [bounded acceptance plan](checked-opt-in-plan.md).
+
+## Validation and reproduction
+
+The [validation record](checked-opt-in-validation.json) lists the exact selected
+backend suite and source hashes. The gate passes 1,045 cases / seven skips;
+the fresh complete frontend passes 3,678 in 312 files, including 37 new pilot/API
+cases. The focused 81-case UI gate and five pilot backend cases overlap those
+larger suites. TypeScript/Vite build, inventory and touched-file Ruff pass.
+
+From the frontend directory, `npm test -- --maxWorkers=2` runs the complete UI
+suite, and `npm run build` builds it. With Playwright available to Node and local
+Chromium installed, run:
+
+```sh
+CHROMIUM_BIN=/usr/bin/chromium node scripts/smoke-checked-answers.mjs
+```
+
+This isolated native-browser probe uses mocked HTTP API responses with the real
+chat UI, fetch/SSE parser and browser digest implementation. It exercises keyboard
+opt-in, pre-ack/private-text suppression, approved publication, HTTP rollback,
+draft/choice preservation and explicit opt-out at a 380-pixel panel width. It
+does not exercise a paid model or real backend authentication/evidence stores;
+those backend numerical/auth paths are independently covered by pytest. Temporary
+screenshots/JSON are executor-local; the script and commands are committed.
+Broader browser/device/domain/calibration journeys remain pending.

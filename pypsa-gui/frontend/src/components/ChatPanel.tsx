@@ -2627,6 +2627,7 @@ export default function ChatPanel() {
   const withdrawTurn = useCallback(async (userIdx: number) => {
     const project = useUIStore.getState().currentProject
     const sequence = useChatStore.getState().newChatSeq
+    const generation = streamGenerationRef.current
     const sid = useChatStore.getState().sessionId
     if (sid) {
       try {
@@ -2639,7 +2640,8 @@ export default function ChatPanel() {
         return false
       }
     }
-    if (useUIStore.getState().currentProject !== project || useChatStore.getState().newChatSeq !== sequence) return false
+    if (useUIStore.getState().currentProject !== project || useChatStore.getState().newChatSeq !== sequence
+      || streamGenerationRef.current !== generation) return false
     useChatStore.setState((st) => ({
       messages: st.messages.slice(0, userIdx),
       toolProgress: {},

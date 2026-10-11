@@ -247,7 +247,7 @@ it('a retriable checked failure retries the original question with checks', asyn
   expect(vi.mocked(createChatStream).mock.calls[1][0].assurance).toEqual({ version: 1, mode: 'strict' })
 })
 
-it('does not clear or resend another project while a retry rewind is pending', async () => {
+it.each(['project', 'roundtrip'])('does not clear or resend a changed %s binding while a retry rewind is pending', async binding => {
   let resolve!: () => void
   vi.mocked(postChatRewind).mockImplementationOnce(() => new Promise(done => {
     resolve = () => done({ ok: true, dropped: 2 })
@@ -256,6 +256,7 @@ it('does not clear or resend another project while a retry rewind is pending', a
   const assistant = useChatStore.getState().messages.find(m => m.answer_id === 'answer-1')!
   fireEvent.click(screen.getByTestId(`chat-retry-${assistant.id}`))
   act(() => useUIStore.setState({ currentProject: 'Other' }))
+  if (binding === 'roundtrip') act(() => useUIStore.setState({ currentProject: 'Demo' }))
   act(() => useChatStore.setState({ messages: [{ id: 'other', role: 'user', content: 'Other project question', ts: 1 }] }))
   await act(async () => resolve())
   expect(useChatStore.getState().messages[0].content).toBe('Other project question')
