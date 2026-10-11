@@ -124,8 +124,14 @@ Issue 11 D-I1 first slice: foreground solve handoff without bridge wait;
 - Issue 02 Live busy→queue (AssistantDock tests)
 - Issue 09 B-I2 rebind credentials (5 passed)
 
-Next runnable slice: emit detached progress to an open observer stream; wire
-Live `utterance_id`/`generation`; worker pin; domain job adapters. Do not claim
+2026-10-11 continued again:
+- Live stream `utterance_id`/`generation` (ChatPanel + chatStore; 4 vitest)
+- `GET /api/chat/{id}/progress` observer SSE (3 pytest)
+- B-I3 worker pin via `owner_replica_id` (5 pytest)
+
+Next runnable slice: frontend progress observer subscription; sync
+`utteranceGeneration` from durable rebind; domain job adapters; LiveKit
+credentials/deployment smoke; B-C1 prolonged journey. Do not claim
 whole-application coverage or live voice done.
 
 ## 2026-10-10 design amendment — floating companion

@@ -42,3 +42,9 @@ cursor recovery, D-C1 multi-family monitoring.
 payloads); drain via `session.drain_detached_progress()`. No new SSE frame names.
 Tests: `tests/test_nonblocking_detached_progress_d_i1b.py` (3 passed). Still open:
 emitting progress on an open stream, domain adapters, wait_for_job, D-I2/D-C1.
+
+2026-10-11: Progress observer SSE — `GET /api/chat/{session_id}/progress`
+drains the detached ring as existing `tool_progress` frames; stays open while
+the monitor is active; ownership/replica gates match /confirm. Tests:
+`tests/test_nonblocking_progress_observer_d_i1c.py` (3 passed). Still open:
+frontend observer subscription, domain adapters, wait_for_job, D-I2/D-C1.

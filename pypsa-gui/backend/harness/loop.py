@@ -79,7 +79,7 @@ from harness.history import (  # noqa: E402, F401 — moved (issue 08); re-expor
 
 
 from harness.session import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    RESULT_REFS_MAXLEN, PendingConfirmation, ChatSession, _SESSIONS, _SESSIONS_LOCK, get_session, session_owner_allows, _evict_idle_sessions_locked, get_or_create_session_reporting, get_or_create_session, drop_session, _reset_sessions_for_tests, TURN_AUTHOR_KEY, turn_is_callers,
+    RESULT_REFS_MAXLEN, PendingConfirmation, ChatSession, _SESSIONS, _SESSIONS_LOCK, get_session, session_owner_allows, session_replica_allows, _evict_idle_sessions_locked, get_or_create_session_reporting, get_or_create_session, drop_session, _reset_sessions_for_tests, TURN_AUTHOR_KEY, turn_is_callers,
 )
 
 

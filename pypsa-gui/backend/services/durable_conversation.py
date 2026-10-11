@@ -57,13 +57,33 @@ def _authority() -> tuple[Path, str, str]:
         return project_registry.project_dir(project), str(project.id), str(user.id)
 
 
+def _require_authoritative_replica(thread: dict[str, Any]) -> None:
+    """Refuse controls when this process is not the thread's pinned replica."""
+    import security
+
+    pinned = thread.get('owner_replica_id')
+    if not pinned:
+        return
+    current = security.replica_id()
+    if pinned != current:
+        _refuse(
+            'wrong_replica',
+            'This durable thread is pinned to another application worker.',
+            409,
+            owner_replica_id=pinned,
+        )
+
+
 def _empty_thread(thread_id: str, *, owner_id: str, project_id: str) -> dict[str, Any]:
+    import security
+
     now = datetime.now(timezone.utc).isoformat()
     return {
         'version': 1,
         'thread_id': thread_id,
         'owner_id': owner_id,
         'project_id': project_id,
+        'owner_replica_id': security.replica_id(),
         'generation': 1,
         'episode_id': None,
         'goals': [],
@@ -141,6 +161,7 @@ def create_thread() -> dict[str, Any]:
 def get_thread(thread_id: str) -> dict[str, Any]:
     with _LOCK:
         _, thread = _read(thread_id)
+        _require_authoritative_replica(thread)
         return _view(thread)
 
 
@@ -161,6 +182,7 @@ def checkpoint_thread(
         _refuse('invalid_thread_field', f'Unsupported fields: {sorted(unknown)}', 422)
     with _LOCK:
         path, thread = _read(thread_id)
+        _require_authoritative_replica(thread)
         _require_generation(thread, generation)
         for key, value in fields.items():
             thread[key] = copy.deepcopy(value)
@@ -198,6 +220,7 @@ def resume_episode(thread_id: str, *, generation: int):
 
     with _LOCK:
         path, thread = _read(thread_id)
+        _require_authoritative_replica(thread)
         _require_generation(thread, generation)
         old_episode = thread.get('episode_id')
         if old_episode:
@@ -238,6 +261,7 @@ def authorize_bridge_credentials(thread_id: str, token: str) -> dict[str, Any]:
     """Validate a previously minted bridge token against the current generation."""
     with _LOCK:
         _, thread = _read(thread_id)
+        _require_authoritative_replica(thread)
         creds = thread.get('bridge_credentials') or {}
         if not token or creds.get('token') != token:
             _refuse('bridge_credentials_invalid', 'Bridge credentials are not valid.', 401)
@@ -258,6 +282,7 @@ def rebind_scope(thread_id: str, *, generation: int) -> dict[str, Any]:
 
     with _LOCK:
         path, thread = _read(thread_id)
+        _require_authoritative_replica(thread)
         _require_generation(thread, generation)
         thread['generation'] = int(thread.get('generation', 1)) + 1
         thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1

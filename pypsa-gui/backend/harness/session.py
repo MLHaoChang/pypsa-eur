@@ -113,6 +113,10 @@ class ChatSession:
     # creation and never reassigned: letting a later caller claim an existing
     # session would be the hole this closes.
     owner_user_id: str | None = None
+    # Issue 09 / B-I3 — which app replica minted this in-memory session.
+    # Stream/confirm/abort/progress refuse when the current process is not
+    # that replica (failover without distributed coordination).
+    owner_replica_id: str | None = None
     created_at: float = field(default_factory=time.monotonic)
     # Monotonic stamp of the last time this session was touched (created or
     # resolved via get_or_create_session). Drives idle eviction.
@@ -510,6 +514,21 @@ def session_owner_allows(sess: "ChatSession", user_id: str | None) -> bool:
     return sess.owner_user_id == str(user_id)
 
 
+def session_replica_allows(sess: "ChatSession") -> bool:
+    """Is this process the authoritative replica that owns ``sess``?
+
+    Sessions without a pin (legacy / pre-B-I3) are allowed so existing tests
+    and in-flight clients are not locked out. Once stamped at create, only
+    the matching ``security.replica_id()`` may act.
+    """
+    pinned = getattr(sess, 'owner_replica_id', None)
+    if not pinned:
+        return True
+    import security
+
+    return pinned == security.replica_id()
+
+
 def _evict_idle_sessions_locked(now: float) -> None:
     """
     Drop idle-past-TTL sessions, then enforce the LRU resident cap.
@@ -568,6 +587,9 @@ def get_or_create_session_reporting(
         # second caller overwrite the owner would let anyone adopt a live
         # session just by naming its id.
         sess.owner_user_id = owner_user_id
+        import security
+
+        sess.owner_replica_id = security.replica_id()
         if session_id:
             sess.session_id = session_id
         sess.last_activity = now

@@ -56,3 +56,10 @@ mints opaque bridge credentials, invalidates prior tokens, clears episode
 pending approvals, and bumps utterance-admission generation. Parent facts
 preserved. Tests: `tests/test_durable_conversation_rebind_b_i2.py` (5 passed).
 Still open: worker pin, real LiveKit credentials, deployment smoke, B-C1.
+
+2026-10-11: B-I3 worker pin — durable threads stamp `owner_replica_id` at
+create; checkpoint/resume/rebind/get/bridge-auth refuse `wrong_replica` 409
+on another process. ChatSession pins the creating replica; stream/confirm/
+abort/rewind/progress refuse failover without clearing pending work. Tests:
+`tests/test_durable_conversation_worker_pin_b_i3.py` (5 passed). Still open:
+real LiveKit credentials, deployment smoke, B-C1, multi-worker coordination.
