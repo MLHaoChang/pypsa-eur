@@ -22,9 +22,11 @@ type Props = {
   dockOpen: boolean
   project: string | null
   coarsePointer: boolean
+  panelRequested: boolean
+  onPanelRequestConsumed: () => void
 }
 
-export default function DictationControls({ speech, language, onLanguage, onInsert, streaming, dockOpen, project, coarsePointer }: Props) {
+export default function DictationControls({ speech, language, onLanguage, onInsert, streaming, dockOpen, project, coarsePointer, panelRequested, onPanelRequestConsumed }: Props) {
   const [open, setOpen] = useState(false)
   const [engine, setEngine] = useState<'ai' | 'browser'>('ai')
   const [glossary, setGlossary] = useState('PyPSA, GridSpine, MW, MWh')
@@ -44,6 +46,11 @@ export default function DictationControls({ speech, language, onLanguage, onInse
   // Reset on project identity, even when the panel remains mounted.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project])
+  useEffect(() => {
+    if (!panelRequested) return
+    if (dockOpen && !streaming) setOpen(true)
+    onPanelRequestConsumed()
+  }, [panelRequested, dockOpen, streaming, onPanelRequestConsumed])
   useEffect(() => {
     if (!dockOpen || streaming) { audio.cancel(); setOpen(false) }
   }, [dockOpen, streaming, audio.cancel])

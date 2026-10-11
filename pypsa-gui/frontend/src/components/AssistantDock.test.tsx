@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useUIStore } from '../store/uiStore'
+import { useChatStore } from '../store/chatStore'
 
 // Mutable counter reachable from inside the vi.mock factory below. Plain
 // top-level `let`/`const` bindings are off-limits there (the factory is
@@ -25,12 +26,24 @@ vi.mock('./ChatPanel', () => ({
   },
 }))
 
+vi.mock('../hooks/useChatProfiles', () => ({
+  useChatProfiles: () => ({
+    data: {
+      profiles: [{ id: 'claude', label: 'Claude', wire: 'anthropic' as const }],
+      active_profile_id: 'claude',
+    },
+    isError: false,
+  }),
+  useChatReadiness: () => ({ effectiveProfileId: 'claude', ready: true }),
+}))
+
 import AssistantDock from './AssistantDock'
 
 describe('AssistantDock', () => {
   beforeEach(() => {
     localStorage.clear()
-    useUIStore.setState({ assistantDockOpen: false })
+    useUIStore.setState({ assistantDockOpen: false, assistantEntry: null })
+    useChatStore.setState({ pending: null })
     chatPanelMounts.current = 0
   })
 
@@ -40,7 +53,7 @@ describe('AssistantDock', () => {
     // *.test.tsx) — getByTestId already throws if the node is absent, so
     // toBeTruthy() (built into vitest's expect) confirms the query
     // succeeded, matching this codebase's convention.
-    expect(screen.getByTestId('assistant-dock-launcher')).toBeTruthy()
+    expect(screen.getByTestId('companion-compose')).toBeTruthy()
   })
 
   it('keeps ChatPanel mounted while collapsed', () => {
@@ -51,8 +64,9 @@ describe('AssistantDock', () => {
   it('expands when the launcher is clicked', async () => {
     const user = userEvent.setup()
     render(<AssistantDock />)
-    await user.click(screen.getByTestId('assistant-dock-launcher'))
+    await user.click(screen.getByTestId('companion-compose'))
     expect(useUIStore.getState().assistantDockOpen).toBe(true)
+    expect(useUIStore.getState().assistantEntry).toBe('compose')
     // No jest-dom toBeVisible() here either; this repo's own convention for
     // CSS-class-driven visibility is a className check (see
     // CommandPalette.test.tsx's ArrowDown highlight assertions, which match
@@ -82,12 +96,32 @@ describe('AssistantDock', () => {
   // assistantDockOpen. A same-position remount kills a streaming turn the
   // same way an unmount does (see ChatPanel.tsx's SSE-cleanup effect), so
   // instance identity across a toggle is itself load-bearing.
+  it('shows the pending confirmation beside the companion while the console is closed', () => {
+    useUIStore.setState({ assistantDockOpen: false })
+    useChatStore.setState({
+      pending: {
+        tool_use_id: 'tu1',
+        tool_name: 'update_component',
+        args: { name: 'bus-a' },
+        safety_tier: 'write',
+        confirmation_token: 'tok',
+        ttl_seconds: 60,
+        expires_at_epoch_ms: Date.now() + 60_000,
+      },
+    })
+    render(<AssistantDock />)
+    const card = screen.getByTestId('companion-confirmation')
+    expect(card.textContent).toContain('update_component')
+    expect(screen.getByTestId('assistant-dock-body').className.split(/\s+/)).toContain('hidden')
+    expect(screen.getAllByTestId('companion-confirmation')).toHaveLength(1)
+  })
+
   it('keeps the same ChatPanel instance across a collapse/expand cycle', async () => {
     const user = userEvent.setup()
     render(<AssistantDock />)
     expect(chatPanelMounts.current).toBe(1)
 
-    await user.click(screen.getByTestId('assistant-dock-launcher'))
+    await user.click(screen.getByTestId('companion-compose'))
     expect(useUIStore.getState().assistantDockOpen).toBe(true)
     expect(chatPanelMounts.current).toBe(1)
 
@@ -102,26 +136,118 @@ describe('AssistantDock', () => {
 // "I do not see the prominent button for the assistant when the app is
 // launched." The dock shipped default-collapsed to a 40px strip holding a
 // single 16px muted icon — which is the opt-in panel the spec exists to
-// replace, wearing a different shape. The spec's collapsed state is "a slim
-// always-visible strip carrying the launcher button AND THE MICROPHONE".
+// replace, wearing a different shape. The spec's collapsed state is the
+// floating companion (compose, speak, Live, profile chip) on every surface.
 
 describe('assistant dock prominence', () => {
   beforeEach(() => {
     localStorage.clear()
-    useUIStore.setState({ assistantDockOpen: false })
+    useUIStore.setState({ assistantDockOpen: false, assistantEntry: null })
   })
 
-  it('labels the collapsed launcher rather than showing a bare icon', () => {
+  it('offers reviewed dictation from the collapsed companion', async () => {
+    const user = userEvent.setup()
     render(<AssistantDock />)
-    const launcher = screen.getByTestId('assistant-dock-launcher')
-    // An unlabelled glyph in a 40px gutter is indistinguishable from a
-    // decoration. The word is what makes it findable at a glance.
-    expect(launcher.textContent).toMatch(/assistant/i)
+    expect(screen.getByTestId('companion-speak')).toBeTruthy()
+    await user.click(screen.getByTestId('companion-speak'))
+    expect(useUIStore.getState().assistantDockOpen).toBe(true)
+    expect(useUIStore.getState().assistantEntry).toBe('speak')
   })
 
-  it('carries the microphone in the collapsed strip, as the spec requires', () => {
+  it('does not open the console when Live is clicked', async () => {
+    const user = userEvent.setup()
     render(<AssistantDock />)
-    expect(screen.getByTestId('assistant-dock-mic')).toBeTruthy()
+    await user.click(screen.getByTestId('companion-live'))
+    expect(useUIStore.getState().assistantDockOpen).toBe(false)
+    expect(useUIStore.getState().assistantEntry).toBeNull()
+    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('listening')
+    expect(screen.getByTestId('companion-live-input')).toBeTruthy()
+  })
+
+  it('sends a live sentence other than the walk through the chat stream and leaves the console closed', async () => {
+    const user = userEvent.setup()
+    const heard: string[] = []
+    const onUtterance = (ev: Event) => {
+      heard.push((ev as CustomEvent<string>).detail)
+    }
+    window.addEventListener('companion:live-utterance', onUtterance)
+    render(<AssistantDock />)
+    await user.click(screen.getByTestId('companion-live'))
+    await user.type(screen.getByTestId('companion-live-input'), 'List the generators')
+    await user.click(screen.getByTestId('companion-live-send'))
+    expect(useUIStore.getState().assistantDockOpen).toBe(false)
+    expect(heard).toEqual(['List the generators'])
+    expect(screen.getByTestId('companion-live-caption').textContent).toContain('Sent to the assistant.')
+    window.removeEventListener('companion:live-utterance', onUtterance)
+  })
+
+  it('does not send a live sentence while the assistant is already streaming', async () => {
+    const user = userEvent.setup()
+    useChatStore.setState({ streaming: true })
+    const heard: string[] = []
+    const onUtterance = (ev: Event) => {
+      heard.push((ev as CustomEvent<string>).detail)
+    }
+    window.addEventListener('companion:live-utterance', onUtterance)
+    render(<AssistantDock />)
+    await user.click(screen.getByTestId('companion-live'))
+    await user.type(screen.getByTestId('companion-live-input'), 'List the generators')
+    await user.click(screen.getByTestId('companion-live-send'))
+    expect(heard).toEqual([])
+    expect(screen.getByTestId('companion-live-caption').textContent).toContain('Nothing new was sent.')
+    window.removeEventListener('companion:live-utterance', onUtterance)
+    useChatStore.setState({ streaming: false })
+  })
+
+  it('walks the results tabs from the live composer and leaves the console closed', async () => {
+    const user = userEvent.setup()
+    const seen: string[] = []
+    const request = useUIStore.getState().requestResultsTab
+    useUIStore.setState({
+      activeSlidePanel: null,
+      resultsTabRequest: null,
+      uiMode: 'guided',
+      requestResultsTab: (tab: string) => {
+        seen.push(tab)
+        request(tab)
+      },
+    })
+    // The dev pause must not reject during this assertion. A hanging request
+    // keeps the first caption on screen until unmount cancels the walk.
+    vi.stubGlobal('fetch', () => new Promise(() => {}))
+    const view = render(<AssistantDock />)
+    await user.click(screen.getByTestId('companion-live'))
+    await user.type(
+      screen.getByTestId('companion-live-input'),
+      'Walk me through the key results in each tab',
+    )
+    await user.click(screen.getByTestId('companion-live-send'))
+    expect(useUIStore.getState().assistantDockOpen).toBe(false)
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+    expect(useUIStore.getState().uiMode).toBe('expert')
+    expect(seen).toEqual(['overview'])
+    expect(screen.getByTestId('companion-live-caption').textContent).toContain('Tab 1 of')
+    expect(screen.getByTestId('companion-live-caption').textContent).toContain('Overview')
+    view.unmount()
+    vi.unstubAllGlobals()
+  })
+
+  it('reserves no column width while collapsed', () => {
+    render(<AssistantDock />)
+    const dock = screen.getByTestId('assistant-dock')
+    const classes = dock.className.split(/\s+/)
+    expect(classes).toContain('w-0')
+    expect(classes).not.toContain('w-10')
+    expect(dock.style.width).toBe('')
+  })
+
+  it('hides the floating companion while the console is open', () => {
+    useUIStore.setState({ assistantDockOpen: true })
+    render(<AssistantDock />)
+    expect(screen.queryByTestId('companion-launcher')).toBeNull()
+    const handle = screen.getByTestId('assistant-dock-resize')
+    expect(handle.getAttribute('role')).toBe('separator')
+    expect(handle.getAttribute('aria-orientation')).toBe('vertical')
   })
 
   it('offers a resize handle when open', () => {

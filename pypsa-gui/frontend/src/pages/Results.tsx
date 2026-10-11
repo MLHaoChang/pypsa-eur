@@ -170,14 +170,19 @@ export default function Results() {
   // the pointer, but following is not choosing, and only the release chooses.
   const [dragWidth, setDragWidth] = useState<number | null>(null)
 
-  // Chat / agent navigation — switch Results sub-tab on request.
+  // Apply the assistant's tab in this render, before paint. Waiting for an
+  // effect lets a burst of requests overwrite `resultsTabRequest` so only
+  // the last tab is ever shown.
+  if (
+    resultsTabRequest
+    && TABS.some((item) => item.id === resultsTabRequest)
+    && resultsTabRequest !== tab
+  ) {
+    setTab(resultsTabRequest as ResultsTab)
+    setRequestedTab(resultsTabRequest as ResultsTab)
+  }
   useEffect(() => {
     if (!resultsTabRequest) return
-    const allowed = new Set(TABS.map(x => x.id))
-    if (allowed.has(resultsTabRequest as ResultsTab)) {
-      setTab(resultsTabRequest as ResultsTab)
-      setRequestedTab(resultsTabRequest as ResultsTab)
-    }
     clearResultsTabRequest()
   }, [resultsTabRequest, clearResultsTabRequest])
 
@@ -526,7 +531,11 @@ export default function Results() {
   }
 
   return (
-    <div className="flex flex-col h-full text-sm">
+    <div
+      className="flex flex-col h-full text-sm"
+      data-testid="results-active-tab"
+      data-active-results-tab={effectiveTab}
+    >
       <PageHeader
         eyebrow={uiMode === 'guided' ? 'HUB DESIGN · RESULTS' : 'SIMULATION · RESULTS'}
         title={uiMode === 'guided' ? 'Reliability results' : 'Optimization results'}
