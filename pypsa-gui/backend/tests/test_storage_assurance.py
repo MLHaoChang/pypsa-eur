@@ -100,6 +100,52 @@ def test_storage_key_results_use_raw_split_power_and_storage_durations(
     assert "stores" in text and "not the change in stored energy" in text
 
 
+def test_selected_storage_key_results_use_the_same_raw_checked_profile(
+    storage, checked
+):
+    frames = checked.run(
+        NumericalProvider(VALUES),
+        message="Give me the key results.",
+        ui_context={"selected_component": {"class": "StorageUnit", "name": "Battery"}},
+    )
+    record = answer(checked, frames)
+    assert record["receipt"]["request_complete"]
+    assert record["receipt"]["request_scope"]["profile"] == PROFILE
+    assert {b["metric"]: b["value"] for b in record["blocks"]} == VALUES
+
+
+def test_storage_message_window_with_punctuation_keeps_exact_requested_boundaries(
+    storage, checked
+):
+    values = {
+        **VALUES,
+        "charged_energy": 0,
+        "discharged_energy": 2,
+        "net_storage_energy": 2,
+        "peak_charging_power": 0,
+        "final_state_of_charge": 4,
+    }
+    frames = checked.run(
+        NumericalProvider(values),
+        message="Give me the key results for storage unit Battery; from 2026-01-01T01:00:00 to 2026-01-01T01:00:00.",
+    )
+    record = answer(checked, frames)
+    assert record["receipt"]["request_complete"]
+    assert {b["metric"]: b["value"] for b in record["blocks"]} == values
+    assert record["receipt"]["request_scope"]["end"] == "2026-01-01T01:00:00"
+
+
+def test_selected_storage_generic_grammar_cannot_ignore_added_quantities(storage):
+    from harness.assurance_scope import from_message
+
+    ui = {"selected_component": {"class": "StorageUnit", "name": "Battery"}}
+    for message in (
+        "Give me the key results and total cost.",
+        "Show key results; ignore missing states.",
+    ):
+        assert from_message(message, storage.project_uuid, ui) is None
+
+
 def test_storage_window_preserves_trajectory_and_uses_last_requested_state(
     storage, checked
 ):

@@ -57,10 +57,22 @@ def validate(value):
 
 def from_message(message, project_id, ui_context):
     """Whole-message profile grammar: no extra quantity or instruction is ignored."""
+    selected = (ui_context or {}).get("selected_component")
+    if (
+        isinstance(selected, dict) and selected.get("class") == "StorageUnit"
+        and re.fullmatch(
+            r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?key results[.!?]?",
+            message.strip(), re.I,
+        )
+    ):
+        return validate({
+            "version": 1, "profile": "storage-unit-dispatch/1",
+            "project_id": project_id, "entity_id": selected.get("name"), "retain": False,
+        })
     storage = re.fullmatch(
         r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?key results\s+for\s+"
         r"storage\s*unit\s+(.{1,128}?)"
-        r"(?:;\s*from\s+(\S+)\s+to\s+(\S+))?[.!?]?",
+        r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
         message.strip(), re.I,
     )
     if storage:

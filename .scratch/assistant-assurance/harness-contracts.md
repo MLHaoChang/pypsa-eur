@@ -341,3 +341,9 @@ comparison scopes are rejected before provider execution.
 Whole-message example: `Give me the key results for storage unit Battery.`
 An optional exact window is `; from 2026-01-01T00:00:00 to 2026-01-01T02:00:00`.
 The same profile may be supplied through version-1 `checked_scope`.
+
+A whole-message `Give me the key results` also selects this profile when the
+current UI identifies a StorageUnit. Its name binds only scope; authorization,
+source provenance and the complete raw trajectory still establish the facts.
+Additional requested quantities or suffix instructions cannot silently collapse
+into that generic key-results grammar.
