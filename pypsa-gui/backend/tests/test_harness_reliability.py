@@ -224,6 +224,41 @@ def test_network_population_cost_and_supported_component_boundaries(solved, chec
     assert "230 EUR" not in public_text(frames)
 
 
+@pytest.mark.parametrize("fault", [None, "capacity", "balance"])
+def test_passive_branch_cost_and_physical_limits_have_independent_oracle(
+    solved, checked, fault
+):
+    n = solved.network
+    n.add("Bus", "B2")
+    n.add("Line", "feeder", bus0="B1", bus1="B2", x=0.1, s_nom=10, capital_cost=2)
+    n.loads.at["L1", "bus"] = "B2"
+    assert n.optimize(solver_name="highs") == ("ok", "optimal")
+    workflow_tools._record_solve_inputs(n, solved.solver_state["solver_config"])
+    # Independent accounting: generator 20*3 plus feeder 10*2 = 80 annual;
+    # declared fraction 1 and dispatch 170 give 250 total. Both terminals carry
+    # the original 5/7 MW load, not handler-derived summaries.
+    expected = {
+        **VALUES,
+        "annual_fixed_cost": 80,
+        "allocated_fixed_cost": 80,
+        "total_cost": 250,
+    }
+    if fault:
+        flow = 11 if fault == "capacity" else 8
+        n.lines_t.p0.at[n.snapshots[1], "feeder"] = flow
+        n.lines_t.p1.at[n.snapshots[1], "feeder"] = -flow
+        expected = {"annual_fixed_cost": 80, "allocated_fixed_cost": 80}
+    frames = checked.run(
+        NumericalProvider(expected),
+        checked_scope=scope(
+            solved, profile="network-linear-cost/1", entity_id="network"
+        ),
+    )
+    assert approval(frames)["verdict"] == ("limited" if fault else "passed")
+    assert approval(frames)["receipt"]["request_complete"] is (fault is None)
+    assert ("250 EUR" in public_text(frames)) is (fault is None)
+
+
 def test_retained_raw_corruption_is_rejected(solved, checked):
     frames = checked.run(
         NumericalProvider(VALUES), checked_scope=scope(solved, retain=True)

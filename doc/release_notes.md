@@ -6,6 +6,8 @@
 <!-- Upcoming Release -->
 <!-- ================= -->
 
+* Feat(pypsa-gui): Extend opt-in checked chat with scoped calculation and cost profiles, required-result coverage, immutable retained evidence and same-basis comparisons in the shared harness. Add separately enabled confirmed static-input writes with durable deduplication/read-back, issued mounted-view acknowledgements, bounded qualitative review, checked JSON/ZIP exports, evidence cards and rollback/shadow controls. Unsupported domains remain unavailable; deployment defaults stay disabled.
+
 * Feat(pypsa-gui): Add multilingual AI dictation independently of the selected chat provider, with automatic or manual language selection, microphone selection and metering, pause/resume, terminology hints and editable transcript review. Retain browser dictation with selectable language. Bound temporary audio requests, sanitize authentication/service errors and stop microphones on cancellation or context changes. Add recorder/UI/backend regressions, a real Chromium smoke and an opt-in live transcription test.
 
 * Feat(pypsa-gui): Add chatbot project readiness checks, bounded local job waits with progress, cached and filtered study evidence, baseline-preserving queued sensitivity sweeps with solved-case reuse, and dynamic toolset views. Catalogue eligibility refreshes after project activation within a turn while preserving confirmations and dispatch allowlists. Add a project-refinement skill and real workflow/API regression coverage.
