@@ -78,6 +78,9 @@ export interface ChatStreamRequest {
   // depends on getting it right.
   input_mode?: 'voice' | 'text'
   assurance?: { version: 1; mode: 'strict' }
+  binding_generation?: number
+  checked_scope?: Record<string, unknown>
+  checked_operation?: Record<string, unknown>
 }
 
 export interface ChatFrame {

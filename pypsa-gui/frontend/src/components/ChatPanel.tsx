@@ -26,6 +26,8 @@ import DictationControls from './DictationControls'
  *     never leaks a setInterval.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { acknowledgeMountedView, type NavigationAcknowledgement } from '../utils/verifiedNavigation'
+import { CheckedEvidenceCard } from './CheckedEvidenceCard'
 import toast from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
@@ -1668,6 +1670,7 @@ export default function ChatPanel() {
   const assuranceRef = useRef<{
     strict: boolean; text: string; approved: ApprovedAnswerFrame | null;
     turnId?: string; sessionId?: string; project: string | null; completed: boolean;
+    navigationCompleted?: Set<string>;
   }>({ strict: false, text: '', approved: null, project: null, completed: false })
   const sessionId = useChatStore((s) => s.sessionId)
   const setSessionId = useChatStore((s) => s.setSessionId)
@@ -2523,7 +2526,8 @@ export default function ChatPanel() {
           content: (() => {
             const metadata = (d.result as { _assurance?: { outcome?: string } } | undefined)?._assurance
             if (metadata || assuranceRef.current.strict) {
-              return `${metadata?.outcome === 'completed' ? '✓' : '…'} ${d.tool_name} (${metadata?.outcome ?? 'uncertain'})`
+              const outcome = assuranceRef.current.navigationCompleted?.has(d.tool_use_id) ? 'completed' : metadata?.outcome ?? 'uncertain'
+              return `${outcome === 'completed' ? '✓' : '…'} ${d.tool_name} (${outcome})`
             }
             return `✓ ${d.tool_name}`
           })(),
@@ -2585,6 +2589,8 @@ export default function ChatPanel() {
       }
       case 'ui_event': {
         const d = _frame_data<{
+          acknowledgement?: NavigationAcknowledgement
+          tool_use_id?: string
           kind?: string
           panel_id?: string
           results_tab?: string
@@ -2604,6 +2610,20 @@ export default function ChatPanel() {
         }>(frame)
         try {
           applyUiNavigate(d)
+          if (d.acknowledgement && assuranceRef.current.strict) {
+            const expected = d.acknowledgement
+            const state = assuranceRef.current
+            acknowledgeMountedView(expected, () => assuranceRef.current === state
+              && streamGenerationRef.current === expected.binding_generation
+              && useUIStore.getState().currentProject === expected.project_name, () => {
+              if (!d.tool_use_id) return
+              state.navigationCompleted ??= new Set()
+              state.navigationCompleted.add(d.tool_use_id)
+              useChatStore.setState(s => ({ messages: s.messages.map(m =>
+                m.role === 'tool' && m.tool_use_id === d.tool_use_id
+                  ? { ...m, content: '✓ ui_open_panel (completed)' } : m) }))
+            })
+          }
         } catch (e) {
           console.warn('ui_event apply failed', e)
         }
@@ -2819,6 +2839,7 @@ export default function ChatPanel() {
         // after dispatchSend has already reset the composer, so reading
         // the composer flag here always yields 'text'.
         input_mode: voiceTurnRef.current ? 'voice' : 'text',
+        binding_generation: generation,
       },
       (frame) => {
         if (!isCurrentStream()) return
@@ -3558,6 +3579,7 @@ export default function ChatPanel() {
                 </>
               )
               : <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>}
+            {m.role === 'assistant' && m.answer_id && m.receipt && <CheckedEvidenceCard answerId={m.answer_id} receipt={m.receipt} />}
             {m.role === 'tool' && m.tool_use_id && (
               <>
                 <AssistantResultCard result={m.tool_result} disabled={streaming || notReady || Boolean(mismatchLine)}

@@ -526,7 +526,7 @@ export default function Results() {
   }
 
   return (
-    <div className="flex flex-col h-full text-sm">
+    <div className="flex flex-col h-full text-sm" data-assurance-tab={effectiveTab}>
       <PageHeader
         eyebrow={uiMode === 'guided' ? 'HUB DESIGN · RESULTS' : 'SIMULATION · RESULTS'}
         title={uiMode === 'guided' ? 'Reliability results' : 'Optimization results'}

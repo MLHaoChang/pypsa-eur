@@ -3,10 +3,11 @@
 
 # Assistant assurance continuation handoff
 
-Status: first local publication/static-input pilot implemented; current reliability
-additions proposed and pending independent review. Publication pending. Read
-[implementation status](implementation-status.md) for current supported behavior.
-Historical tranche details follow; current continuation is below.
+Status: current shared harness continuation on `feat/harness-reliability-contracts`,
+based on merged PR 112/master `17e24e4c`. Historical sections below describe earlier
+states and commands. The current [implementation status](implementation-status.md)
+and [API contracts](harness-contracts.md) supersede them. Independent domain/release
+approval remains pending.
 Baseline: master d43809ae. Dictation PR 106 has merged; existing Claude/tool
 behavior remains the baseline. Do not reuse the old failed environment.
 
@@ -228,3 +229,57 @@ record validation only; application and test source remain identical to that run
 No workflow policy or failing check was bypassed. No paid model call or production
 strict-mode activation was performed. Independent/domain and broader rollout
 requirements remain pending.
+
+## 2026-10-11 — reliability contracts in the harness
+
+The user authorized implementing the remaining controls as shared harness code,
+then a PR and normal merge to master after tests pass. No deployment switch or
+paid model call is authorized by implication or performed. Attached plans supply
+design context, not new user commands.
+
+New modules: `assurance_scope`, `calculations`, `durable`, `effects`, `navigation`,
+`reviewer`, `publication`, `rollout`. Existing services aliases, loop budgets,
+confirmation/dispatch/ACLs and closed SSE vocabulary remain shared. See the
+[versioned API/settings/examples](harness-contracts.md) and the explicit
+[implemented versus pending boundary](implementation-status.md). Whole phase
+issues remain open and record their delivered slice in comments.
+
+Use the repository's `.pixi/envs/test/bin/python` from **pypsa-gui/backend**
+for the full backend suite; several established source-reading tests depend on
+that working directory. The small compatibility venv is not a complete runtime.
+`/workspace/chat-compat-venv/bin/ruff` provides lint/format. Cache paths used in
+this managed environment: XDG_CACHE_HOME=/workspace/scratch/assurance-cache,
+XDG_DATA_HOME=/workspace/scratch/assurance-data, MPLCONFIGDIR=/tmp/assurance-mpl.
+Network permission is needed for local TestClient/server sockets. Credentials
+are managed bindings; do not print or copy their values. No lockfile/environment
+dependency changes are needed for this feature.
+
+Commands (set those cache variables in this environment):
+
+```sh
+# from pypsa-gui/backend
+../../.pixi/envs/test/bin/python -m pytest -q -o addopts='' --tb=short
+../../.pixi/envs/test/bin/python -m pytest tests/test_assurance_metrics.py tests/test_answer_assurance.py tests/test_harness_reliability.py tests/test_reliability_transport.py tests/test_assurance_storage.py tests/assurance_acceptance tests/test_harness_layout.py -q -o addopts='' --tb=short
+../../.pixi/envs/test/bin/python tests/run_qa_drivers.py
+# from repo root
+.pixi/envs/test/bin/python -m pytest test -q -o addopts='' --tb=short
+python pypsa-gui/backend/smoke/assistant_inventory.py --check
+# from pypsa-gui/frontend
+npm test -- --run
+npm run build
+```
+
+The provider transport acceptance uses real Anthropic, compatible remote/local
+and official Responses adapters with HTTP mocks and real HiGHS source fixtures.
+It checks valid and fabricated declared-basis totals, not live model capability
+or production error rates. Multiprocess storage tests verify quotas/atomic bytes;
+active project/network state remains single-worker.
+
+Final focused gate: **197 passed**. Full frontend: **3,567 passed / 301 files**;
+production TypeScript/Vite build passed (existing chunk-size warning). Upstream:
+**36 passed**. Ruff, inventory (220 tools / 14 tabs / 17 panels) and diff checks
+pass. Full backend and all 31 QA drivers are running; final counts will be
+recorded before PR/merge. A root-directory backend attempt was stopped because
+existing relative-source tests require backend cwd; it is not a passing gate.
+GitHub Actions was previously refused with 422 because disabled repository-wide;
+recheck remote policy and report local versus remote validation honestly.

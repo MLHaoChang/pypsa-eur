@@ -232,3 +232,32 @@ pass. The **106-case assurance selection** has no artifact skips. GitHub reports
 Actions disabled for this repository and refused dispatch with HTTP 422; normal
 merge rules apply and the complete locked-environment local run is the validation
 gate. These results do not complete pending domain/reviewer/release requirements.
+
+## 2026-10-11 — shared harness reliability contracts
+
+Current branch `feat/harness-reliability-contracts`; default deployment unchanged.
+The explicit-profile implementation now covers required scopes/slots/windows,
+retained immutable runs and same-basis comparisons, server-owned cost formulas
+and physical masks, durable confirmed static-input updates/reconciliation,
+issued mounted-view ACKs, optional bounded read-only qualitative review,
+authenticated checked-answer JSON/ZIP parity and profile/effect/shadow controls.
+These are bounded slices of A0.4, A1.7, A2.8–A2.10, A3, A4, A5, A6 and A7;
+all-domain/release tickets remain open. Earlier statements that 230 EUR total,
+positive ACKs, retained runs or every effect/reviewer are unimplemented describe
+the preceding pilot and are superseded for the documented narrow contracts.
+
+New independent/adversarial regressions use real HiGHS fixtures, fake providers
+and five real adapters with HTTP mocks: 230 EUR vs fabricated 999; exact-window
+7 MWh; same-basis 260-to-230 signed delta; missing/unsupported quantities;
+stale/corrupt retained/current evidence; confirmed exact effects, wrong success
+JSON/unintended mutation and late workers without repeat; issued visible versus
+stale/forged navigation; review tooling/schema/usage/timeout and quantitative
+prose refusal; cross-process quota/atomic files; JSON/ZIP value/byte parity;
+profile/effect rollback and unchanged ordinary shadow output. No paid APIs.
+
+Final focused selection: **197 passed**, no assurance skips. Full frontend:
+**3,567 passed / 301 files**; production TypeScript/Vite build passed. Upstream
+unit tests: **36 passed**. Ruff, inventory and diff checks pass. Commands are in
+[handoff](session-handoff.md). Final full backend and 31-driver results will be
+recorded before PR/merge. No independent expert approval, measured production
+false-acceptance rate or distributed project-runtime test is claimed.

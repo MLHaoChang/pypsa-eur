@@ -41,3 +41,9 @@ P3 also requires A3.5–A3.6: required guards separate from courtesy checks, exa
 
 See the [reliability contract](../reliability-contract.md). Original approval
 does not cover these additions; review/freeze them before implementation.
+
+### 2026-10-11 — shared harness implementation
+
+The shared effect adapter now reserves exact confirmed static-input update contracts before execution, compares actual complete input read-back against a private candidate, checkpoints completion and refuses live/uncertain replay. Read-only reconciliation can settle verified after/before states without executing again. This is only `checked-input-update/1`; queue jobs, other mutations, partial-output maps and distributed project runtime remain pending.
+
+See [implementation status](../implementation-status.md), [contracts](../harness-contracts.md) and [coverage ledger](../coverage-ledger.md). The whole ticket remains open; no independent review verdict is inherited by this extension.

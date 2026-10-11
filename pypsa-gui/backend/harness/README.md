@@ -12,6 +12,14 @@ harness/
   toolsets.py     ordered provider-neutral catalogue views and always-available controls
   events.py       the closed vocabulary of frames the turn loop yields to the UI
   assurance.py    opt-in checked input/result drafts and publication gate
+  assurance_scope.py  typed requested metrics, windows, cost basis and retained/comparison IDs
+  calculations.py  bounded formula/unit registry, raw masks and cost dependencies
+  durable.py      bounded network locks and cross-process owner-store transactions
+  effects.py      exact confirmed input-write reservations, read-back and reconciliation
+  navigation.py   issued view actions and owner/project/turn/generation-bound browser ACKs
+  reviewer.py     optional single bounded read-only review of qualitative interpretations
+  publication.py  JSON/ZIP from the same validated answer, facts and evidence
+  rollout.py      capabilities, profile/effect rollback and bounded shadow observation
   workflows/      the start menu and the step-by-step flows (Markdown + front matter)
   skills/         procedures the model loads on demand (<name>/SKILL.md)
   prompts/        the system-prompt fragments as Markdown, byte-identical to the old constants
@@ -72,22 +80,36 @@ Borrowed designs under consideration: `docs/superpowers/assessments/2026-10-06-d
 
 ## The harness tools
 
-### Checked-answer pilot
+### Checked-answer contracts
 
 `PYPSA_GUI_ANSWER_ASSURANCE_MODE=strict` withholds model prose/thinking and gates
-publication through `assurance.py`. Only whitelisted static component inputs are
-checked against raw project data and rendered in software. A bounded generator
-key-results profile additionally recalculates weighted energy, marginal
-expenditure and peak dispatch with explicit full/partial coverage. Unsupported requests
-receive a limited fallback; effects are blocked except existing panel navigation,
-which is reported as submitted. The default is `disabled`; `pilot` admits an
-explicit version-1 strict request. Chart downloads/delivery separately verify exact data/render/byte bindings.
-Other result profiles, completed effects and arbitrary full-request coverage
-remain unsupported. See the
+publication through `assurance.py`; the default remains `disabled`. `pilot`
+admits an explicit version-1 strict request. Shared scope and calculation modules
+own project/entity/window/metric constraints, required-slot dispositions, units,
+formulas and coverage. Three bounded profiles support generator dispatch,
+declared-basis generator costs and a linear network subset. Missing cost basis,
+unsupported components and quantities receive unavailable slots. Software renders
+exact checked values; a model cannot replace them with narrative or its own numbers.
+
+Immutable retained evidence and exact same-basis comparison IDs support replay
+without rerunning a model. Optional qualitative interpretations need one bounded
+read-only review; quantitative prose is withheld before review. The separately
+opt-in effect adapter requires an exact confirmed static-input update contract,
+durable ID reservation and independent input read-back. Live/uncertain writes
+never silently retry. Supported navigation stays submitted until an issued,
+current browser mounted-view ACK arrives. Authenticated JSON/ZIP exports and the
+evidence card consume the same answer/receipt; existing PNG integrity is separate.
+
+Profile rollback, effect rollback and bounded shadow observations live in the
+shared harness. No new stream vocabulary or provider-specific guard path is used.
+The actor-owned record store uses bounded cross-process transactions, but the live
+project runtime still supports one application worker. These checks do not certify
+all engineering domains, arbitrary request completeness or independent expert
+approval. Unmapped strict tools fail closed; deployment remains opt-in. Read the
+[implemented API and settings](../../../.scratch/assistant-assurance/harness-contracts.md),
 [implementation boundary](../../../.scratch/assistant-assurance/implementation-status.md)
-and [reliability contract](../../../.scratch/assistant-assurance/reliability-contract.md)
-before extending adapters. Approved records live in the bounded, actor-owned
-`services/assurance_records.py` store and are revalidated for public replay.
+and [reliability design](../../../.scratch/assistant-assurance/reliability-contract.md)
+before extending adapters.
 
 ### Existing workflow controls
 
