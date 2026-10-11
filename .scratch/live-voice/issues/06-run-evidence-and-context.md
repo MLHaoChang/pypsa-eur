@@ -98,3 +98,12 @@ agent_export for a named run or the session's discussed run; never substitutes
 newest/current results. `discussed_run_required` when neither is set. Tests:
 `tests/test_export_run_evidence.py`. Still open: full three-run acceptance
 journey with ACL/restart/stale-binding fixtures.
+
+2026-10-11: Three-run acceptance — `tests/test_run_evidence_acceptance.py`
+covers list/pagination, get+section drill, discuss→`open_run_result`,
+incomparable failed compare, export of discussed completed (never
+failed/running), compatible compare after a sibling completed run, ACL
+revocation, session restart clearing refs, and durable `resume_episode`
+rehydration of `discussed_refs` (plus stale-generation refuse after rebind).
+`durable_conversation.resume_episode` now hydrates discussed identifiers
+(and live status/mode/fingerprint when evidence is still readable).

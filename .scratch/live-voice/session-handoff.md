@@ -158,12 +158,21 @@ Landed on master via PR #126.
 
 2026-10-11: branch `cursor/experiment-adapters-a604` — issue 10 first slice:
 persist typed experiments without execution (`start_experiment` /
-`list_experiments` / `get_experiment`). Merged master (discuss/export +
-Moonshot alias) into this branch; local pytest green.
+`list_experiments` / `get_experiment`). Landed on master via PR #127.
+
+2026-10-11: Moonshot/Kimi companion closed-console live proof — profile
+`moonshot-probe` `chat_ready=true`, probe verdict=ok (kimi-k3). Closed dock:
+Live composer sent “Reply with exactly one short sentence confirming you can
+hear me.” → companion outcome “I can hear you loud and clear — ready when you
+are.” Artifacts: `/opt/cursor/artifacts/kimi-companion-closed-*.webp`,
+`kimi-stream-live-sentence.log`.
+
+2026-10-11: branch `cursor/run-evidence-acceptance-a604` — issue 06 three-run
+acceptance + `resume_episode` discussed_refs rehydration. Pytest:
+`test_run_evidence_acceptance.py` + discuss/export suites green.
 
 Next runnable (no credentials / Moonshot): mocked issue 03/04 scaffolding;
-issue 10 case advancement adapters; issue 06 three-run acceptance fixtures;
-Kimi companion closed-console live sentence per handoff.
+issue 10 case advancement adapters.
 
 **Credential / release blockers (cannot close without external access):**
 LiveKit Build + hosted STT/TTS live probe (01/02/09 deployment smoke);
