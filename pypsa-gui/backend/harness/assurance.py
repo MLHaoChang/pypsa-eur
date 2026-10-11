@@ -498,8 +498,8 @@ class Turn:
                 and 1 <= len(args["name"]) <= 128
             )
         if tool_name == "ui_open_panel":
-            # Existing typed handler owns target validation. No acknowledgement
-            # or completion claim is issued by this tranche.
+            # The existing typed handler owns target validation. Supported
+            # mounts subsequently receive a separate issued browser ACK.
             return True
         return False
 
