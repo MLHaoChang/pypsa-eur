@@ -235,6 +235,7 @@ it('renders tool_request and tool_result frames in the transcript', async () => 
 })
 
 it('renders an approve/reject control for tool_pending_confirmation and calls postChatConfirm with confirmation_token on approve', async () => {
+  useUIStore.setState({ assistantDockOpen: true })
   renderPanel()
   await sendAndScript([
     { event: 'session_init', data: { session_id: 'sess-2' } },
@@ -253,7 +254,7 @@ it('renders an approve/reject control for tool_pending_confirmation and calls po
   const card = await screen.findByTestId('chat-confirmation-card')
   expect(card).toBeTruthy()
   const approve = screen.getByTestId('chat-confirm-approve')
-  // 'delete_component' is not in ChatPanel.tsx's TYPED_CONFIRMATION_TOOLS
+  // 'delete_component' is not in ConfirmationCard.tsx's TYPED_CONFIRMATION_TOOLS
   // set (only delete_project/save_project/save_project_as/
   // restore_project_snapshot/cascade_delete_bus require typed confirmation),
   // so Approve is enabled immediately with no typed input needed.
@@ -271,6 +272,7 @@ it('renders an approve/reject control for tool_pending_confirmation and calls po
 // open project, Approve is disabled and the card says why; Deny writes
 // nothing and stays available.
 it('while the tab is mismatched, Approve is disabled with the banner sentence; Deny still works', async () => {
+  useUIStore.setState({ assistantDockOpen: true })
   renderPanel()
   await sendAndScript([
     { event: 'session_init', data: { session_id: 'sess-mm' } },
@@ -299,6 +301,24 @@ it('while the tab is mismatched, Approve is disabled with the banner sentence; D
   } finally {
     act(() => { useUIStore.setState({ projectMismatch: null }) })
   }
+})
+
+it('does not render the confirmation card while the dock is closed', () => {
+  useUIStore.setState({ assistantDockOpen: false })
+  useChatStore.setState({
+    sessionId: 'sess-closed',
+    pending: {
+      tool_use_id: 'tu-closed',
+      tool_name: 'delete_component',
+      args: { component_class: 'Generator', name: 'SmokeSolar' },
+      safety_tier: 'write',
+      confirmation_token: 'tok-closed',
+      ttl_seconds: 120,
+      expires_at_epoch_ms: Date.now() + 120_000,
+    },
+  })
+  renderPanel()
+  expect(screen.queryByTestId('chat-confirmation-card')).toBeNull()
 })
 
 // ── An unmount mid-turn must not kill the turn ────────────────────────────

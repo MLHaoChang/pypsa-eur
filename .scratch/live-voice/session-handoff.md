@@ -15,9 +15,11 @@ and backend/harness/README.md. Design approval is not production certification.
 
 - Publication branch docs/whole-application-assistant starts from master 3fd3c32a.
   It contains reviewed documentation only.
-- Existing dictation remains in separate open draft
+- Existing dictation was, at publication, a separate open draft
   [PR 106](https://github.com/MLHaoChang/pypsa-eur/pull/106). Preserve it; integrate
   this prerequisite later without claiming its local baseline is already on master.
+  Superseded 2026-10-10: PR 106 merged as `d43809aed`. It is reviewed dictation,
+  not continuous live voice. See the companion amendment below.
 - Inventory: 220 tools, 14 result tabs, 17 panels. Behavioral/editor mapping is
   pending. Known first fix: adequacy/FMEA navigation tool enum gaps.
 - First phase: issue 08; write/run failing navigation tests and exhaustive
@@ -88,3 +90,35 @@ alongside those prerequisites; integrated acceptance depends on completing them.
 All runtime tool fixtures, acknowledged view/run/source/window mapping, durable
 conversation, nonblocking adapters, experiments, speech and device/latency gates
 remain pending. Do not mark issue 08 or the entire assistant complete.
+
+## 2026-10-10 design amendment — floating companion
+
+PRs 107 and 108 stay the hosted-voice architecture and the navigation/inventory
+slice. They do not ship a live voice agent. The closed assistant in the product
+is still a reserved column, and its microphone button only expands that column.
+
+The companion decision is now in [spec.md](spec.md) under Companion launcher,
+[issue 12](issues/12-companion-launcher.md), and
+[the companion plan](../../docs/superpowers/plans/2026-10-10-assistant-companion.md).
+
+- Closed state: a floating character over the canvas, with Compose, Dictate, and Live.
+  It does not reserve the 40px column and it is not a slide-panel tab.
+- Compose opens the existing console and focuses the typed composer. Dictate
+  opens that console and the reviewed dictation panel from PR 106. The console
+  is where uploads, history, and the composer live. Neither action starts the
+  microphone, a recording, or a LiveKit session. A transcript is inserted only
+  after the user accepts it.
+- Live stays on the page the user is already using. The companion lights up
+  through listening, thinking, and speaking. The same harness navigates to the
+  right project, panel, or result, creates what was asked, asks for confirmation
+  beside the companion, and says when a file is ready to download. Live does
+  not open the console.
+- Idle motion must not look like listening.
+- The profile chip opens the existing model select. Another agent is another
+  profile on the shared harness, not a second planner.
+- Kimi is already the `moonshot` preset on the OpenAI-compatible wire. Grok
+  joins that wire as the `xai` preset. Neither needs a new provider class.
+  Cursor's agent APIs are not a chat provider for this dock.
+
+Issue 12 can land before media. The next coverage slice is unchanged: finish
+issue 08's GUI control/parameter matrix, then issue 09's durable thread.

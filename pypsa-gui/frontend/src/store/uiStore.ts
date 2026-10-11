@@ -261,10 +261,10 @@ function storedCompareRailWidth(): number {
 }
 
 // Default OPEN. The spec's headline is an assistant "present when the tool
-// launches", and a 40px muted icon is not presence — it is the opt-in panel
-// the dock exists to replace, in a different shape. Only an explicit
-// 'closed' collapses it, so a user who asked for the width back keeps it;
-// re-opening on every launch is how a feature gets switched off for good.
+// launches"; when closed the floating companion overlay carries that presence
+// while the dock column takes no width. Only an explicit 'closed' collapses
+// it, so a user who asked for the width back keeps it; re-opening on every
+// launch is how a feature gets switched off for good.
 const ASSISTANT_DOCK_WIDTH_KEY = 'network-diagram:assistant-dock-width'
 export const DOCK_MIN_W = 320
 export const DOCK_DEFAULT_W = 420
@@ -401,6 +401,7 @@ interface UIStore {
   // regression test and the 2026-08-05 presence spec.
   assistantDockOpen: boolean
   assistantDockWidth: number
+  assistantEntry: 'compose' | 'speak' | 'profiles' | null
   // True while a project switch/load is mid-flight (between the moment the
   // backend starts swapping the in-memory network and the moment
   // currentProject is updated to the new project). Autosave checks this and
@@ -530,6 +531,7 @@ interface UIStore {
   setCanvasView: (view: CanvasView) => void
   setSlidePanel: (p: SlidePanel | null) => void
   setAssistantDockOpen: (open: boolean) => void
+  setAssistantEntry: (entry: 'compose' | 'speak' | 'profiles' | null) => void
   toggleAssistantDock: () => void
   setAssistantDockWidth: (px: number) => void
   assistantSpeakEnabled: boolean
@@ -607,6 +609,7 @@ export const useUIStore = create<UIStore>((set) => ({
   activeSlidePanel: null,
   assistantDockOpen: storedAssistantDockOpen(),
   assistantDockWidth: storedAssistantDockWidth(),
+  assistantEntry: null,
   assistantSpeakEnabled: storedAssistantSpeak(),
   projectSwitchInProgress: false,
   projectSwitchDepth: 0,
@@ -760,6 +763,7 @@ export const useUIStore = create<UIStore>((set) => ({
     persistAssistantDockOpen(open)
     set({ assistantDockOpen: open })
   },
+  setAssistantEntry: (entry) => set({ assistantEntry: entry }),
   toggleAssistantDock: () => set(s => {
     const next = !s.assistantDockOpen
     persistAssistantDockOpen(next)

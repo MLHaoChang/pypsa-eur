@@ -68,6 +68,7 @@ KNOWN_PROVIDER_KEYS: tuple[str, ...] = (
     "OPENAI_API_KEY",
     "MOONSHOT_API_KEY",
     "DASHSCOPE_API_KEY",
+    "XAI_API_KEY",
 )
 
 # Alias kept for existing callers (`local_settings.py`, `routers/`) that refer

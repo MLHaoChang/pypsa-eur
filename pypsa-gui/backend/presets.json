@@ -71,6 +71,21 @@
     "help": "Alibaba Cloud Model Studio, OpenAI-compatible mode. This preset's endpoint is the Virginia (US) region. DashScope's other international regions are WORKSPACE-scoped (https://<WorkspaceId>.<region>.maas.aliyuncs.com/compatible-mode/v1 for Singapore / Hong Kong / Tokyo), so there is no single correct URL for every account — if yours differs, add it as a Custom OpenAI-compatible profile instead, which gets its own key slot. Get an API key at modelstudio.console.alibabacloud.com and set DASHSCOPE_API_KEY."
   },
   {
+    "id": "xai",
+    "label": "xAI (Grok)",
+    "wire": "openai",
+    "base_url": "https://api.x.ai/v1",
+    "auth": "bearer",
+    "token_param": "max_tokens",
+    "key_env": "XAI_API_KEY",
+    "tools": true,
+    "vision": false,
+    "suggested_models": [
+      "grok-4"
+    ],
+    "help": "Chat completions at api.x.ai. Set XAI_API_KEY. xAI's newer Responses API is a different adapter and is not this preset. Vision is off until a live probe confirms the model accepts images through this wire."
+  },
+  {
     "id": "ollama",
     "label": "Ollama (local)",
     "wire": "openai",
