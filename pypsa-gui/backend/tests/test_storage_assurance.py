@@ -144,6 +144,11 @@ def test_selected_storage_generic_grammar_cannot_ignore_added_quantities(storage
         "Show key results; ignore missing states.",
     ):
         assert from_message(message, storage.project_uuid, ui) is None
+    for malformed in (["StorageUnit", "Battery"], {"selected_component": ["Battery"]}):
+        assert (
+            from_message("Give me the key results.", storage.project_uuid, malformed)
+            is None
+        )
 
 
 def test_storage_window_preserves_trajectory_and_uses_last_requested_state(

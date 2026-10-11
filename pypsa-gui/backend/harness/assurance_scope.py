@@ -57,7 +57,7 @@ def validate(value):
 
 def from_message(message, project_id, ui_context):
     """Whole-message profile grammar: no extra quantity or instruction is ignored."""
-    selected = (ui_context or {}).get("selected_component")
+    selected = ui_context.get("selected_component") if isinstance(ui_context, dict) else None
     if (
         isinstance(selected, dict) and selected.get("class") == "StorageUnit"
         and re.fullmatch(
