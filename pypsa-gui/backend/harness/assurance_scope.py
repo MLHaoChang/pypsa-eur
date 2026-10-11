@@ -19,7 +19,8 @@ class RequestScope(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     version: Literal[1]
     profile: Literal[
-        "generator-dispatch/1", "generator-cost/1", "network-linear-cost/1"
+        "generator-dispatch/1", "generator-cost/1", "network-linear-cost/1",
+        "storage-unit-dispatch/1",
     ]
     project_id: str = Field(min_length=1, max_length=128)
     entity_id: str = Field(min_length=1, max_length=128)
@@ -47,11 +48,29 @@ def validate(value):
             raise ValueError("invalid_required_metrics")
     if scope["profile"] == "network-linear-cost/1" and scope["entity_id"] != "network":
         raise ValueError("network_scope_required")
+    if scope["profile"] == "storage-unit-dispatch/1" and (
+        scope.get("cost_basis") or scope.get("comparison_evidence_id")
+    ):
+        raise ValueError("unsupported_storage_cost_scope")
     return scope
 
 
 def from_message(message, project_id, ui_context):
-    """Whole-message cost grammar: no extra quantity or instruction is ignored."""
+    """Whole-message profile grammar: no extra quantity or instruction is ignored."""
+    storage = re.fullmatch(
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?key results\s+for\s+"
+        r"storage\s*unit\s+(.{1,128}?)"
+        r"(?:;\s*from\s+(\S+)\s+to\s+(\S+))?[.!?]?",
+        message.strip(), re.I,
+    )
+    if storage:
+        value = {
+            "version": 1, "profile": "storage-unit-dispatch/1",
+            "project_id": project_id, "entity_id": storage[1], "retain": False,
+        }
+        if storage[2]:
+            value.update(start=storage[2], end=storage[3])
+        return validate(value)
     match = re.fullmatch(
         r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?"
         r"(total cost|key results)\s+for\s+(generator\s+(.{1,128}?)|network)"

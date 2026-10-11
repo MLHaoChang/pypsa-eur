@@ -52,10 +52,12 @@ def _state(turn, ui):
     selected = (ui or {}).get("selected_component")
     scope = state["scope"]
     conflict = (
-        scope["entity_id"] != "network"
+        scope["profile"] != "network-linear-cost/1"
         and isinstance(selected, dict)
         and (
-            selected.get("class") != "Generator"
+            selected.get("class") != (
+                "StorageUnit" if scope["profile"] == "storage-unit-dispatch/1" else "Generator"
+            )
             or selected.get("name") != scope["entity_id"]
         )
     )
@@ -151,7 +153,7 @@ def resolve(turn, message, ui, explicit):
             return _needs(turn, None, state_reason)
         if (
             pending not in {None, "explicit_cost_basis_required"}
-            or state["scope"]["profile"] == calculations.PROFILE
+            or state["scope"]["profile"] not in calculations.COST_PROFILES
         ):
             return _needs(turn, state["scope"], "unsupported_followup")
         scope = deepcopy(state["scope"])
@@ -186,7 +188,7 @@ def resolve(turn, message, ui, explicit):
     except ValueError:
         return _needs(turn, None, "unsupported_followup")
     if scope:
-        if scope["profile"] != calculations.PROFILE and not scope.get("cost_basis"):
+        if scope["profile"] in calculations.COST_PROFILES and not scope.get("cost_basis"):
             return _needs(turn, scope, "explicit_cost_basis_required")
         return scope
     repeat, compare = _match(REPEAT, message), _match(COMPARE, message)

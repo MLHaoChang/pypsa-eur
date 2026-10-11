@@ -8,6 +8,7 @@ from numbers import Real
 import pandas as pd
 
 from services import workflow_tools
+from harness import storage_calculations as storage
 
 PROFILE = "generator-dispatch/1"
 MAX_SNAPSHOTS = 512
@@ -65,11 +66,13 @@ COMPARISON_METRICS = {
         "dependencies": ("cost_delta",),
     },
 }
-DEFINITIONS = {**METRICS, **COST_METRICS, **COMPARISON_METRICS}
+DEFINITIONS = {**METRICS, **COST_METRICS, **COMPARISON_METRICS, **storage.METRICS}
+COST_PROFILES = frozenset({"generator-cost/1", "network-linear-cost/1"})
 PROFILES = {
     PROFILE: tuple(METRICS),
     "generator-cost/1": tuple(METRICS) + tuple(COST_METRICS),
     "network-linear-cost/1": tuple(METRICS) + tuple(COST_METRICS),
+    storage.PROFILE: tuple(storage.METRICS),
 }
 DISCLOSURE = (
     "Energy uses generator snapshot weights; expenditure uses objective snapshot weights. "
@@ -275,6 +278,8 @@ def _window(raw, scope):
 
 def scoped_source(ctx, scope, owner=None):
     """Capture complete raw populations under the existing project lock."""
+    if scope["profile"] == storage.PROFILE:
+        return {"storage_unit": storage.source(ctx, scope["entity_id"])}
     if scope["profile"] != "network-linear-cost/1":
         return _comparison(
             {
@@ -443,6 +448,8 @@ def _comparison(raw, scope, owner):
 
 def scoped_calculate(raw, scope):
     """A bounded calculation DAG; missing dependencies never become zero."""
+    if scope["profile"] == storage.PROFILE:
+        return storage.calculate(raw["storage_unit"], scope)
     metrics = requested_metrics(scope)
     generators = raw["generators"]
     if "balance" in raw:
@@ -581,6 +588,8 @@ def scoped_calculate(raw, scope):
 
 
 def disclosure(scope):
+    if scope["profile"] == storage.PROFILE:
+        return storage.DISCLOSURE
     if scope["profile"] == PROFILE:
         return DISCLOSURE
     basis = scope.get("cost_basis")

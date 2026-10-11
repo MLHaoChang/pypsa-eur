@@ -366,7 +366,7 @@ def capture_scoped(owner, scope):
     with network_guard():
         raw = calculations.scoped_source(ctx, scope, owner)
         facts, slots = calculations.scoped_calculate(raw, scope)
-        first = next(iter(raw["generators"].values()))
+        first = raw["storage_unit"] if scope["profile"] == "storage-unit-dispatch/1" else next(iter(raw["generators"].values()))
         record = {
             "version": 1,
             "record_kind": "evidence",

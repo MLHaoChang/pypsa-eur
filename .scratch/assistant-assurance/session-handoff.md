@@ -3,8 +3,8 @@
 
 # Assistant assurance continuation handoff
 
-Status: current shared harness continuation on `feat/harness-durable-conversation-scope`,
-based on merged PR 122/master `1970db27` (including PRs 118, 120 and 121). Historical sections below describe earlier
+Status: current StorageUnit reliability continuation on `feat/harness-checked-storage-results`,
+based on merged PR 123/master `fabda836`. Historical sections below describe earlier
 states and commands. The current [implementation status](implementation-status.md)
 and [API contracts](harness-contracts.md) supersede them. Independent domain/release
 approval remains pending.

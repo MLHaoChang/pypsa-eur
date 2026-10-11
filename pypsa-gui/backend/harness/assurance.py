@@ -355,7 +355,7 @@ class Turn:
             if draft.blocks:
                 raise ValueError("unavailable request")
             return (
-                "Select a generator with verified current LP results and an exact supported scope to check its key results.",
+                "Select a generator or StorageUnit with verified current LP results and an exact supported scope to check its key results.",
                 [],
                 [],
             )
@@ -394,8 +394,12 @@ class Turn:
                 }
             )
         scoped = record["source_kind"] == "scoped_result"
+        entity_kind = (
+            "StorageUnit" if self.request_scope["profile"] == "storage-unit-dispatch/1"
+            else "Network" if record["scope"]["entity_id"] == "network" else "Generator"
+        )
         lines = [
-            f"{'Network' if record['scope']['entity_id'] == 'network' else 'Generator'} {_label(record['scope']['entity_id'])}; "
+            f"{entity_kind} {_label(record['scope']['entity_id'])}; "
             f"{'retained run' if self.request_scope.get('retain') else 'requested snapshots' if scoped else 'all current snapshots'} "
             f"({record['scope']['start']} to {record['scope']['end']})."
         ]

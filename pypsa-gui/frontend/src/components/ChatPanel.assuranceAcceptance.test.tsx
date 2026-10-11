@@ -125,6 +125,32 @@ describe('implemented assurance publication boundary', () => {
     await waitFor(() => expect(speechOut.speak).toHaveBeenCalledWith(text))
   })
 
+  it.each([true, false])('publishes checked storage text and voice with completeness %s', async complete => {
+    await start(true)
+    const text = complete ? 'StorageUnit Battery: charging energy 10 MWh.'
+      : 'StorageUnit Battery: charging energy 10 MWh. Storage cost is unavailable.'
+    emit('answer_approved', { version: 1, answer_id: 'approved-storage', turn_id: 'turn-1',
+      verdict: complete ? 'passed' : 'limited', receipt: {
+        policy_version: '1', content_sha256: createHash('sha256').update(text).digest('hex'),
+        evidence_ids: ['storage-evidence'], checked_block_ids: ['charged_energy'],
+        limitations: ['Storage durations are used; engineering certification is not established.'],
+        reviewer_status: 'not_required', request_complete: complete,
+        request_scope: { profile: 'storage-unit-dispatch/1', entity_id: 'Battery', retain: false },
+        result_slots: [{ metric: 'charged_energy', disposition: 'answered', requested_snapshots: 3, valid_snapshots: 3 },
+          ...(!complete ? [{ metric: 'total_cost', disposition: 'unavailable', reason: 'unsupported_metric' }] : [])],
+      } })
+    emit('token', { delta: text })
+    emit('turn_done', { answer_id: 'approved-storage' })
+    expect(await screen.findByText(text)).toBeTruthy()
+    await waitFor(() => expect(speechOut.speak).toHaveBeenCalledWith(text))
+    expect(screen.getByText(/storage-unit-dispatch\/1/)).toBeTruthy()
+    if (complete) expect(screen.getByText('Requested results checked')).toBeTruthy()
+    else {
+      expect(screen.queryByText('Requested results checked')).toBeNull()
+      expect(screen.getByText(/total cost: unavailable/)).toBeTruthy()
+    }
+  })
+
   it.each(['submitted', 'running', 'partial', 'failed', 'uncertain', 'cancel_requested'])('P3: %s tool outcomes never get a completion checkmark', async status => {
     await start()
     emit('tool_result', { tool_use_id: 'job-call', tool_name: 'run_simulation',

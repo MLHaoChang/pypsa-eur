@@ -299,3 +299,45 @@ Arbitrary-language understanding, general task/effect resumption, persistent
 billing reservations and distributed project workers remain outside this scope.
 Default deployment activation is unchanged; independent release/domain approval
 is not claimed.
+
+## StorageUnit dispatch profile contract
+
+`storage-unit-dispatch/1` binds one named StorageUnit, the authorized project and
+an exact inclusive datetime snapshot window (at most 512 ordered unique steps).
+Default slots: `charged_energy`, `discharged_energy`, `net_storage_energy`,
+`peak_charging_power`, `peak_discharging_power`, `final_state_of_charge`.
+Energy uses `snapshot_weightings.stores` as storage-operation durations, never
+generator or objective weights. Net energy is discharged minus charged grid-side
+energy; it is not the change in stored energy. Peaks use the separate raw charging
+and discharging power, including simultaneous operation, rather than clipped net
+power. Final state is the last requested snapshot's raw stored energy.
+
+Admission requires a matching completed optimal LP source, unique aligned raw
+`p_store`, `p_dispatch`, `p` and `state_of_charge` populations, finite positive
+durations, nonnegative capacities/power, applicable time-varying power bounds,
+valid efficiencies and standing losses. Software validates power splitting,
+capacity/energy bounds and the chronological storage energy recurrence from the
+declared initial state. Missing/invalid prior state propagates into later windows;
+checking a suffix cannot hide a broken trajectory. Invalid selected steps never
+produce complete energy or peak claims, including when only the final metric is
+requested. Formula version, masks, source identity and disclosures are retained
+in the same existing evidence/publication/replay/export/recovery path.
+
+Version 1 supports noncyclic StorageUnits with zero inflow/spill and ordinary
+single-period datetime snapshots. Stores, cyclic/periodic boundary conditions,
+inflow/spill, multi-investment periods, storage costs, round-trip efficiency
+estimation, degradation and engineering certification remain unsupported.
+Unsupported requested metrics receive unavailable slots. No model numeric prose,
+alternate tool response, imported history or caller flags can grant approval.
+Deployment remains opt-in and profile rollback applies. This contract records
+the editing agent's bounded design; independent domain review remains pending.
+
+Power splitting and state recurrence use absolute tolerance `1e-7` and relative
+tolerance `1e-8`; capacity inequalities use absolute tolerance `1e-7`. No missing
+dispatch/state output is replaced with zero. Absent spill is a structural zero
+only within the zero-inflow supported model. Explicit storage cost-basis and
+comparison scopes are rejected before provider execution.
+
+Whole-message example: `Give me the key results for storage unit Battery.`
+An optional exact window is `; from 2026-01-01T00:00:00 to 2026-01-01T02:00:00`.
+The same profile may be supplied through version-1 `checked_scope`.

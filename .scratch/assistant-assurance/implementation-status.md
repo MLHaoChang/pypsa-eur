@@ -3,8 +3,8 @@
 
 # Reliability contracts in the shared harness
 
-Current continuation: `feat/harness-durable-conversation-scope`, based on master
-`bd761721` (PR 118, including PR 120 and earlier assurance additions). The user's instruction authorizes implementing these additions.
+Current continuation: `feat/harness-checked-storage-results`, based on master
+`fabda836` (merged PR 123 and earlier assurance additions). The user's instruction authorizes implementing these additions.
 Attached plans are design context, not additional user instructions. This is an
 opt-in, bounded implementation; P0–P7 and all-domain certification remain open.
 The editing agent performed the code review. No independent domain approval or
@@ -40,6 +40,12 @@ measured production false-acceptance rate is claimed.
   `network-linear-cost/1` aggregates bounded generator/Line/Transformer capacity
   charges and generator dispatch, with raw nodal power-balance and branch-capacity
   checks. Storage, Links and other unmapped components refuse a complete cost.
+- `storage-unit-dispatch/1` independently checks raw split charging/discharging,
+  net power, state bounds and chronological efficiency/standing-loss balance
+  before calculating six exact-window metrics. A broken prior state invalidates
+  later windows. Only noncyclic StorageUnits with zero inflow/spill are supported;
+  retained evidence, restart recovery, publication, exports and profile rollback
+  use the existing shared path. Storage costs and other storage models stay open.
 - Comparison slots compute candidate-minus-baseline cost and percentage change
   against an immutable retained run on the same entity/window/basis. Zero baseline
   percentage denominators and incompatible bases are unavailable.
@@ -86,6 +92,14 @@ fraction of 1 produces **230 EUR declared-basis total**. A 260 EUR retained
 baseline gives a **−30 EUR / approximately −11.54%** change. Different objective
 weights alter expenditure without altering generator-weighted energy.
 
+The independent storage LP fixture charges 5 MW for 2 storage-duration hours,
+then discharges 2 MW for each of two hours. Charging/discharging efficiencies
+0.8/0.5 give states **8, 4, 0 MWh** and grid-side totals **10 MWh charged,
+4 MWh discharged, −6 MWh net discharged**. Generator/objective weights differ
+intentionally. Hand-worked standing-loss and simultaneous-operation fixtures
+check the recurrence and separate power columns. These are local storage
+trajectory checks, not whole-network feasibility or independent certification.
+
 These accounting profiles assume the provided `capital_cost` is an annual charge
 and the declared EUR price year is consistent. They do not perform FX/price-year
 conversion, calculate NPV or reproduce the solver objective. A matching solve
@@ -130,7 +144,7 @@ calibration/load budgets and release enablement. Unmapped strict tools fail
 closed. This implementation does not guarantee hallucination-free arbitrary
 answers or all-application correctness.
 
-## Current recovery validation
+## Historical recovery validation
 
 The recovery continuation includes 55 native history/control cases and nine
 solver task-outcome cases. It integrates parent resume/rebind revocation and

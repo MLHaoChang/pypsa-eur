@@ -9,7 +9,7 @@ static-input effects, mounted-view acknowledgements and live conversation carryo
 [implementation boundary](implementation-status.md). Initial results below are
 historical. Added request-slot, validity-mask and formula groups have partial
 coverage through `generator-dispatch/1`, `generator-cost/1` and
-`network-linear-cost/1`; they remain pending independent review and full domain
+`network-linear-cost/1` and `storage-unit-dispatch/1`; they remain pending independent review and full domain
 mapping. Unmapped effects, complete arbitrary requests, independent
 reviewer/browser/calibration and release activation remain open. The documentation
 assessment restored documentation only; subsequent implementation restored and
