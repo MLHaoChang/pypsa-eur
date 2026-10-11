@@ -279,6 +279,7 @@ def apply_project_changes(preview_id: str) -> dict:
 
 def create_chart(component: str, attribute: str, names: list[str], source: str = "input") -> dict:
     from services import chat_tools
+    from services.assurance_artifacts import canonical_sha256
     project, chart_root, _ = _project()
     if component not in ("Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer") or source not in ("input", "result") or not isinstance(names, list) or not 1 <= len(names) <= 8 or any(not isinstance(n, str) or not n for n in names) or len(set(names)) != len(names):
         workflow._refuse("invalid_chart", "Choose a component, input/result source, and 1–8 unique asset names.")
@@ -309,33 +310,66 @@ def create_chart(component: str, attribute: str, names: list[str], source: str =
         if table.empty or not np.isfinite(table.to_numpy()).all():
             workflow._refuse("chart_invalid_data", "Chart data must contain finite numeric values.")
         unit = str(defaults.at[attribute, "unit"])
+        dataset = {"index": [list(map(str, i)) if isinstance(i, tuple) else str(i) for i in table.index],
+                   "columns": list(map(str, table.columns)), "values": table.to_numpy().tolist(),
+                   "units": {str(column): unit for column in table.columns}}
+        bar = len(table) == len(names) and list(table.columns) == [attribute]
+        render_spec = {"kind": "bar" if bar else "line", "title": f"{component}: {attribute}",
+                       "x_label": "Asset" if bar else "Snapshot index", "y_label": unit,
+                       "series": dataset["columns"], "x_values": dataset["index"] if bar else list(range(len(table))),
+                       "size_inches": [8, 4], "dpi": 120}
     with _CHART_LOCK:
         from matplotlib.figure import Figure
         from matplotlib.backends.backend_agg import FigureCanvasAgg
         figure = Figure(figsize=(8, 4), dpi=120)
         FigureCanvasAgg(figure)
         axis = figure.subplots()
-        if len(table) == len(names) and list(table.columns) == [attribute]:
+        if bar:
             axis.bar(list(map(str, table.index)), table[attribute].values)
         else:
             for name in table.columns:
                 axis.plot(range(len(table)), table[name].values, label=str(name))
             axis.legend()
-            axis.set_xlabel("Snapshot index")
-        axis.set_title(f"{component}: {attribute}")
-        axis.set_ylabel(unit)
+        axis.set_xlabel(render_spec["x_label"])
+        axis.set_title(render_spec["title"])
+        axis.set_ylabel(render_spec["y_label"])
         figure.tight_layout()
         buffer = io.BytesIO()
         figure.savefig(buffer, format="png")
     if str(PyPSAService.get_active_context().project_uuid) != str(project.id):
         workflow._refuse("project_changed", "Active project changed while rendering the chart; retry in the intended project.", 409)
-    artifact = chat_tools._save_agent_export(buffer.getvalue(), f"{component}_{attribute}.png", "image/png")
+    data = buffer.getvalue()
+    byte_hash = hashlib.sha256(data).hexdigest()
+    manifest = {"schema_version": 1, "project_id": str(project.id),
+                "source_kind": "configured_input" if source == "input" else "captured_result",
+                "dataset": dataset, "render_spec": render_spec,
+                "dataset_sha256": canonical_sha256(dataset), "render_spec_sha256": canonical_sha256(render_spec),
+                "artifact_sha256": byte_hash,
+                "validity": {"coverage": "captured_rows", "input_fingerprint": fingerprint,
+                             "limitations": ["Data/render/byte integrity; this does not certify engineering validity."]}}
     provenance = {"component": component, "attribute": attribute, "names": names, "source": source,
                   "rows": len(table), "unit": unit, "input_fingerprint": fingerprint,
                   "dispatch": freshness, "first_index": str(table.index[0]), "last_index": str(table.index[-1])}
+    provenance["manifest"] = manifest
     # Sidecar lives with the content-addressed artifact, outside the model prompt.
-    tasks._save(chart_root / "assistant_artifacts" / (artifact["file_id"] + ".json"), provenance)
-    return {**artifact, "provenance": provenance}
+    # Commit before blob_ready becomes visible; a missing sidecar fails closed.
+    with PyPSAService.get_lock():
+        current = PyPSAService.get_active_context()
+        if current is not ctx or workflow._network_input_fingerprint(current) != fingerprint:
+            workflow._refuse("chart_source_changed", "Chart inputs changed while rendering; retry.", 409)
+        current_comp = current.network.components[component]
+        current_dynamic = current_comp.dynamic.get(attribute)
+        if dynamic is not None and not dynamic.empty and set(names) <= set(dynamic.columns):
+            unchanged = current_dynamic is not None and current_dynamic[names].equals(table)
+        else:
+            unchanged = current_comp.static.loc[names, [attribute]].equals(table)
+        if not unchanged or str(current_comp.defaults.at[attribute, "unit"]) != unit:
+            workflow._refuse("chart_source_changed", "Chart data changed while rendering; retry.", 409)
+        _project()  # Fresh owner/project authorization before publishing bytes.
+        tasks._save(chart_root / "assistant_artifacts" / (byte_hash[:16] + ".json"), provenance)
+        artifact = chat_tools._save_agent_export(data, f"{component}_{attribute}.png", "image/png",
+                                                 assurance_sha256=canonical_sha256(provenance))
+    return {**artifact, "provenance": provenance, "manifest": manifest}
 
 
 def build_delivery(file_ids: list[str], filename: str = "delivery.zip") -> dict:
@@ -366,8 +400,14 @@ def build_delivery(file_ids: list[str], filename: str = "delivery.zip") -> dict:
             item = {"file_id": meta.file_id, "archive_path": entry, "filename": meta.filename,
                     "sha256": meta.sha256, "size": len(data), "mime": meta.mime}
             sidecar = root / "assistant_artifacts" / (meta.file_id + ".json")
-            if sidecar.is_file():
+            from services.assurance_artifacts import verify_chart
+            checked = verify_chart(root, meta, data, str(project.id), provenance=True)
+            if checked is not None:
+                item["assurance"] = checked["manifest"]
+                item["provenance"] = checked
+            elif sidecar.is_file():
                 item["provenance"] = workflow._read_json(sidecar)
+                item["provenance_status"] = "unvalidated"
             manifest["files"].append(item)
         archive.writestr("manifest.json", json.dumps(manifest, indent=2))
     if buffer.tell() > upload_service.MAX_FILE_BYTES:

@@ -31,7 +31,7 @@ from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session as DBSession
-from starlette.responses import FileResponse, JSONResponse
+from starlette.responses import FileResponse, JSONResponse, Response
 
 from db.models import User
 from db.session import get_db
@@ -300,7 +300,7 @@ def get_upload_meta_route(
 @router.get("/{name}/uploads/{file_id}/blob")
 def get_upload_blob(
     file_id: str, project: AuthorizedProject = ProjectAccessDep
-) -> FileResponse:
+) -> Response:
     """
     Stream the blob. Content-Disposition: inline so a browser previews
     images/PDFs in a new tab instead of forcing a download dialog. The
@@ -313,6 +313,18 @@ def get_upload_blob(
     meta = upload_service.get_upload_meta(
         project.name, file_id, project_dir=project.directory
     )
+    if meta.kind == "agent_export" or meta.assurance_sha256 is not None:
+        import hashlib
+        from services.assurance_artifacts import verify_chart
+        if path.stat().st_size > upload_service.MAX_FILE_BYTES:
+            raise HTTPException(413, {"error_kind": "file_too_large"})
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != meta.sha256:
+            raise HTTPException(409, {"error_kind": "artifact_evidence_unavailable"})
+        verify_chart(project.directory, meta, data, project.uuid)
+        # Send the exact checked bytes, avoiding a second file open after validation.
+        return Response(content=data, media_type=meta.mime,
+                        headers={"Content-Disposition": content_disposition(meta.filename, disposition="inline")})
     return FileResponse(
         path=str(path),
         media_type=meta.mime,

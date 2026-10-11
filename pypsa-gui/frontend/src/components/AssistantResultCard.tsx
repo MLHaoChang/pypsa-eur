@@ -9,6 +9,9 @@ export default function AssistantResultCard({ result, disabled, onRequest }: {
 }) {
   const data = object(result)
   if (!data) return null
+  // Raw checked-mode cards cannot bypass answer/artifact admission. The current
+  // pilot has no approved artifact/task-card contract.
+  if (object(data._assurance)) return null
   const task = object(data._task) ?? (typeof data.task_id === 'string' ? data : null)
   const taskId = typeof task?.task_id === 'string' && /^[0-9a-f-]{36}$/.test(task.task_id) ? task.task_id : null
   const status = typeof task?.status === 'string' ? task.status : ''
