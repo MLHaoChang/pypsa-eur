@@ -17,8 +17,11 @@ newest run. The model supplies run ids and section names only — never paths.
 
 Authority is the active project resolved through the project ACL on every read
 (``_authority``), the same pattern as ``assistant_tasks`` / ``durable_conversation``.
-Not in this slice: wiring the solve completion paths, ``compare_project_runs``,
-conversational run references and the result UI.
+``compare_project_runs`` computes deltas in software from recorded metrics only.
+Two runs are comparable only when both completed, share a mode, and share an input
+fingerprint (or the caller opts in with ``allow_input_changes``); otherwise the
+answer is ``comparable: false`` with reasons and no deltas. Not in this slice: other
+completion paths, conversational run references and the result UI.
 """
 from __future__ import annotations
 
@@ -368,4 +371,113 @@ def get_run_evidence(run_id: str, section: str | None = None) -> dict:
                                         if _section_state(root, record, n)[1] is None])
         out['section'] = section
         out['data'] = json.loads(blob)
+        return out
+
+
+MAX_COMPARE_METRICS = 20
+
+
+def _require_run(root: Path, project_id: str, run_id: Any, role: str) -> dict:
+    record = _load_run(root, project_id, run_id)
+    if record is None:
+        _refuse('run_not_found', f'{role} {run_id!r} was not found in this project.', 404,
+                run_id=run_id)
+    return record
+
+
+def _require_verified_evidence(root: Path, record: dict) -> None:
+    for name in list((record.get('sections') or {})):
+        reason = _section_state(root, record, name)[1]
+        if reason is not None:
+            _refuse('evidence_unavailable',
+                    'The recorded evidence for this run is not available, so it cannot be compared.',
+                    run_id=record['run_id'], section=name, reason=reason,
+                    run_status=record['status'])
+
+
+def compare_project_runs(run_id: str, baseline_run_id: str, metrics: list[str] | None = None,
+                         allow_input_changes: bool = False) -> dict:
+    """Software-computed metric deltas ``run - baseline`` between two runs of the active project.
+
+    Only recorded metrics are used; a metric missing on either side or recorded with
+    different units is reported, never estimated. Incomparable runs return
+    ``comparable: false`` and an empty ``deltas`` mapping.
+    """
+    if run_id == baseline_run_id:
+        _refuse('invalid_run_comparison', 'Choose two different runs to compare.', 422)
+    if metrics is not None:
+        if (not isinstance(metrics, list) or not 1 <= len(metrics) <= MAX_COMPARE_METRICS
+                or any(not isinstance(m, str) or not _METRIC.fullmatch(m) for m in metrics)):
+            _refuse('invalid_run_metrics',
+                    f'metrics must be 1-{MAX_COMPARE_METRICS} recorded metric names.', 422)
+    if not isinstance(allow_input_changes, bool):
+        _refuse('invalid_run_comparison', 'allow_input_changes must be true or false.', 422)
+    for role, value in (('run_id', run_id), ('baseline_run_id', baseline_run_id)):
+        if not _valid_run_id(value):
+            _refuse('invalid_run_comparison', f'{role} must be a run_id from list_project_runs.', 422)
+    root, project_id, _owner = _authority()
+    with _LOCK:
+        run = _require_run(root, project_id, run_id, 'run_id')
+        base = _require_run(root, project_id, baseline_run_id, 'baseline_run_id')
+        reasons: list[dict] = []
+        for role, record in (('run', run), ('baseline', base)):
+            if record['status'] != 'completed':
+                reasons.append({'reason': 'run_not_completed', 'role': role,
+                                'run_id': record['run_id'], 'status': record['status']})
+        if not reasons:
+            _require_verified_evidence(root, run)
+            _require_verified_evidence(root, base)
+        mode_run, mode_base = run.get('mode'), base.get('mode')
+        if not mode_run or not mode_base:
+            reasons.append({'reason': 'mode_unknown', 'run': mode_run, 'baseline': mode_base})
+        elif mode_run != mode_base:
+            reasons.append({'reason': 'mode_mismatch', 'run': mode_run, 'baseline': mode_base})
+        fp_run, fp_base = run.get('fingerprint'), base.get('fingerprint')
+        fingerprints_match = fp_run is not None and fp_run == fp_base
+        if not fingerprints_match and not allow_input_changes:
+            reasons.append({'reason': 'fingerprint_mismatch' if fp_run and fp_base
+                            else 'fingerprint_unknown',
+                            'run': fp_run, 'baseline': fp_base})
+        out: dict[str, Any] = {
+            'run': _summary(root, run),
+            'baseline': _summary(root, base),
+            'comparable': not reasons,
+            'incomparable_reasons': reasons,
+            'mode': mode_run if mode_run == mode_base else None,
+            'fingerprints_match': fingerprints_match,
+            'inputs_differ': bool(fp_run and fp_base and fp_run != fp_base),
+            'warnings': {'run': list(run.get('warnings') or []),
+                         'baseline': list(base.get('warnings') or [])},
+            'deltas': {},
+            'unmatched_metrics': [],
+        }
+        if reasons:
+            out['note'] = ('No deltas are computed for incomparable runs. Inspect each run with '
+                           'get_run_evidence instead.')
+            return out
+        run_metrics = run.get('metrics') or {}
+        base_metrics = base.get('metrics') or {}
+        names = list(metrics) if metrics is not None else sorted(set(run_metrics) | set(base_metrics))
+        for name in names:
+            a, b = run_metrics.get(name), base_metrics.get(name)
+            if a is None or b is None:
+                out['unmatched_metrics'].append({
+                    'metric': name,
+                    'reason': 'not_recorded_in_both',
+                    'recorded_in': [r for r, m in (('run', a), ('baseline', b)) if m is not None]})
+                continue
+            if a['unit'] != b['unit']:
+                out['unmatched_metrics'].append({
+                    'metric': name, 'reason': 'units_differ',
+                    'run_unit': a['unit'], 'baseline_unit': b['unit']})
+                continue
+            delta = a['value'] - b['value']
+            out['deltas'][name] = {
+                'run': {'value': a['value'], 'unit': a['unit']},
+                'baseline': {'value': b['value'], 'unit': b['unit']},
+                'delta': {'value': delta, 'unit': a['unit']},
+                'delta_pct': (delta / b['value'] * 100.0) if b['value'] else None,
+            }
+        out['note'] = ('delta = run - baseline, computed from recorded metrics only; '
+                       'delta_pct is null when the baseline value is zero.')
         return out
