@@ -2529,6 +2529,44 @@ def _dispatch_real_tool_call(
                 tool_name, _redact_for_log(exc),
             )
 
+    # Issue 11 — adequacy/study mesh handoff. Starters already return
+    # {"status": "running"} after publish_study; mint an ad:… handle so
+    # wait_for_job can observe without model-polling get_adequacy_results.
+    from harness.job_adapters import STUDY_TOOL_KEYS as _STUDY_TOOL_KEYS
+    if tool_name in _STUDY_TOOL_KEYS and isinstance(result, dict):
+        try:
+            from services.pypsa_service import PyPSAService
+            from harness import job_adapters as ja
+            from services import chat_tools as _ct
+            study_key = _STUDY_TOOL_KEYS[tool_name]
+            if result.get("status") == "running":
+                active_ctx = turn_ctx or PyPSAService.get_active_context()
+                owner = getattr(session, "owner_user_id", None) or _ct.acting_user_id()
+                job_id = ja.register_study_job(
+                    study_key=study_key,
+                    tool_name=tool_name,
+                    tool_use_id=tool_use_id,
+                    owner_user_id=str(owner) if owner else None,
+                    project_uuid=getattr(active_ctx, "project_uuid", None),
+                )
+                monitor = (
+                    "get_investment_case"
+                    if study_key == "investment_case"
+                    else f"get_adequacy_results('{study_key}')"
+                )
+                result = {
+                    **result,
+                    "job_id": job_id,
+                    "study_key": study_key,
+                    "family": ja.STUDY_FAMILY,
+                    "monitor": monitor,
+                }
+        except Exception as exc:  # noqa: BLE001 — enrich is best-effort
+            logger.exception(
+                "chat: study handoff enrich for %s failed: %s",
+                tool_name, _redact_for_log(exc),
+            )
+
     try:
         task_state = assistant_tasks.finish_step(task_ticket, result=result)
     except Exception as exc:

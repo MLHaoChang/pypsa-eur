@@ -137,10 +137,11 @@ Issue 11 D-I1 first slice: foreground solve handoff without bridge wait;
 2026-10-11 (post-#121 merge): branch `cursor/live-drain-adapters-a604`
 - Backend auto-drain of pending utterance after lease release (pytest)
 - Live open creates/rebinds durable parent thread (vitest)
+- Adequacy/study `ad:…` wait_for_job adapter (pytest)
 
-Next runnable slice: remaining domain adapters (queue/AC-PF families
-beyond simulation, GridSpine/FMEA/…); LiveKit credentials/deployment
-smoke; B-C1. Do not claim whole-application coverage or live voice done.
+Next runnable slice: report-job adapter; D-I2 cursor recovery; D-C1;
+LiveKit credentials/deployment smoke; B-C1. Do not claim whole-application
+coverage or live voice done.
 
 ## 2026-10-10 design amendment — floating companion
 

@@ -60,3 +60,10 @@ open: domain adapters, wait_for_job, D-I2/D-C1.
 bounded contract as queue jobs (timeout/cancel leave the solve running).
 Tests: `tests/test_nonblocking_wait_for_foreground_d_i1d.py` (4 passed).
 Still open: other domain adapters, D-I2 cursor recovery, D-C1.
+
+2026-10-11: Adequacy/study `wait_for_job` — handoff mints `ad:…` handles for
+`run_fmea_sweep` / frontier / mc / coupling / margin / eh / investment_case;
+`wait_for_job` polls `solver_state[study_key]` (terminal done/failed/aborted/
+refused). GridSpine remains on solve-queue UUIDs. Tests:
+`tests/test_nonblocking_wait_for_study_d_i1e.py` (4 passed). Still open:
+report-job adapter (`rpt:`), D-I2 cursor recovery, D-C1.

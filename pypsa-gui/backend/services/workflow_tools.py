@@ -75,17 +75,22 @@ def wait_for_job(job_id: str, timeout_seconds: float = 20) -> dict:
     if session is not None:
         with session._lock:
             session.job_wait_progress = None
-    # Issue 11 — foreground simulation/AC-PF handles (fg:…) use the neutral
-    # adapter; solve-queue UUIDs keep the existing ACL path.
-    if ja.is_foreground_job_id(job_id):
+    # Issue 11 — fg:… (simulation/AC-PF) and ad:… (adequacy/study mesh) use
+    # neutral adapters; solve-queue UUIDs (incl. GridSpine) keep the ACL path.
+    if ja.is_foreground_job_id(job_id) or ja.is_study_job_id(job_id):
         progress: dict = {}
         actor_id = chat_tools.acting_user_id()
         if session is not None:
             # Share the same progress dict the loop polls for tool_progress.
             with session._lock:
                 session.job_wait_progress = progress
+        waiter = (
+            ja.wait_foreground_job
+            if ja.is_foreground_job_id(job_id)
+            else ja.wait_study_job
+        )
         try:
-            return ja.wait_foreground_job(
+            return waiter(
                 job_id, timeout_seconds,
                 actor_id=actor_id,
                 stop=stop,
