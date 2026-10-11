@@ -21,8 +21,8 @@ CHOICES = ("Marginal dispatch expenditure", "Total declared-basis cost")
 QUESTIONS = {
     "cost_quantity_required": "Which quantity do you mean: Marginal dispatch expenditure or Total declared-basis cost?",
     "explicit_cost_basis_required": "Please provide the EUR price year and annual fixed cost fraction. Reply: Price year YYYY; annual fixed cost fraction F (between 0 and 1).",
-    "conversation_scope_required": "Please specify the generator or network and the results to check; there is no available checked scope in this chat.",
-    "conversation_scope_changed": "The project, browser binding or selected component changed. Please specify the generator or network and results again.",
+    "conversation_scope_required": "Please specify the generator, StorageUnit or network and the results to check; there is no available checked scope in this chat.",
+    "conversation_scope_changed": "The project, browser binding or selected component changed. Please specify the generator, StorageUnit or network and results again.",
     "previous_compatible_run_required": "No previous distinct checked run has the same entity, time window and cost basis. Check a compatible baseline first or provide an explicit retained comparison scope.",
     "baseline_unavailable": "The selected previous run is unavailable or could not be verified. Please check a compatible baseline again.",
     "unsupported_followup": "That follow-up contains constraints outside the supported scope grammar. Please specify an exact result scope; no constraint has been ignored.",
@@ -52,10 +52,12 @@ def _state(turn, ui):
     selected = (ui or {}).get("selected_component")
     scope = state["scope"]
     conflict = (
-        scope["entity_id"] != "network"
+        scope["profile"] != "network-linear-cost/1"
         and isinstance(selected, dict)
         and (
-            selected.get("class") != "Generator"
+            selected.get("class") != (
+                "StorageUnit" if scope["profile"] == "storage-unit-dispatch/1" else "Generator"
+            )
             or selected.get("name") != scope["entity_id"]
         )
     )
@@ -129,13 +131,13 @@ def resolve(turn, message, ui, explicit):
         scope["profile"] = (
             (
                 "network-linear-cost/1"
-                if scope["entity_id"] == "network"
+                if scope["profile"] == "network-linear-cost/1"
                 else calculations.PROFILE
             )
             if marginal
             else (
                 "network-linear-cost/1"
-                if scope["entity_id"] == "network"
+                if scope["profile"] == "network-linear-cost/1"
                 else "generator-cost/1"
             )
         )
@@ -151,7 +153,7 @@ def resolve(turn, message, ui, explicit):
             return _needs(turn, None, state_reason)
         if (
             pending not in {None, "explicit_cost_basis_required"}
-            or state["scope"]["profile"] == calculations.PROFILE
+            or state["scope"]["profile"] not in calculations.COST_PROFILES
         ):
             return _needs(turn, state["scope"], "unsupported_followup")
         scope = deepcopy(state["scope"])
@@ -186,7 +188,7 @@ def resolve(turn, message, ui, explicit):
     except ValueError:
         return _needs(turn, None, "unsupported_followup")
     if scope:
-        if scope["profile"] != calculations.PROFILE and not scope.get("cost_basis"):
+        if scope["profile"] in calculations.COST_PROFILES and not scope.get("cost_basis"):
             return _needs(turn, scope, "explicit_cost_basis_required")
         return scope
     repeat, compare = _match(REPEAT, message), _match(COMPARE, message)

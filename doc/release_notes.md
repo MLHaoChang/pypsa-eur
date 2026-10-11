@@ -6,6 +6,14 @@
 <!-- Upcoming Release -->
 <!-- ================= -->
 
+* Fix(pypsa-gui): Keep asset type bound to the checked calculation profile during cost clarification and rendering. A generator named `network` cannot silently become a network-wide cost request.
+
+* Fix(pypsa-gui): Capture typed contract-draft prices before deferred state updates and verify successive edits in the application’s StrictMode. Preserve the latest value before saving contracts.
+
+* Fix(pypsa-gui): Remove a duplicate worker-pin error-manifest entry so its declared banner surface agrees with the chat UI.
+
+* Feat(pypsa-gui): Add opt-in checked StorageUnit key results to the shared chat harness. Validate raw charging/discharging, duration weights, power/state bounds and chronological energy balance before publishing six exact-window metrics. Missing prior states, unsupported storage models and fabricated model claims fail closed; owned evidence, exports and restart recovery reuse the existing contracts. Storage costs and independent engineering certification remain unsupported.
+
 * Feat(pypsa-gui): Recover bounded checked-result scope and pending cost clarification from owned private checkpoints after native chat-history rehydration. Revalidate exact sources and bindings; durably revoke context before new strict turns, rewind and parent resume/rebind so interrupted or failed publication cannot revive old scope. Imported/copied/stale history cannot grant recovery; deployment remains opt-in.
 
 * Fix(pypsa-gui): Require a terminal solver outcome before sequential durable tasks advance to chart/export, with a bounded deadline and cancellation. Solver start or contradictory still-running receipts cannot complete a task; ordinary foreground solves remain detached.

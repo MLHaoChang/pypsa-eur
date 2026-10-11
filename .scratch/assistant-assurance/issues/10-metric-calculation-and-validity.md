@@ -46,3 +46,16 @@ Implementation continuation (2026-10-10): The generator-dispatch/1 candidate now
 The shared calculation registry/DAG supports generator dispatch/cost and bounded linear network cost, raw masks/solve-input provenance, nodal power balance and passive-branch limits, plus signed retained-baseline deltas. Independent real-LP oracles cover 17 MWh, 170 EUR marginal cost, 7 MW peak, explicit 60 EUR allocation/230 EUR total and 260 EUR comparison. Annual capital charges and EUR price year are declared assumptions, not verified conversion, NPV, objective parity or independent scientific certification. Storage/Links/multi-period and other engineering domains remain pending.
 
 See [implementation status](../implementation-status.md), [contracts](../harness-contracts.md) and [coverage ledger](../coverage-ledger.md). The whole ticket remains open; no independent review verdict is inherited by this extension.
+
+### 2026-10-11 — bounded StorageUnit dispatch continuation
+
+The shared harness adds `storage-unit-dispatch/1` with six checked metrics,
+whole-message selection, exact windows and predecessor-state validity. Raw split
+power, storage durations, bounds and chronological efficiency/loss balance are
+validated before publication. Unsupported storage costs remain unavailable;
+cyclic units, nonzero inflow/spill, Stores and investment periods are refused.
+The independent LP oracle gives 10/4/−6 MWh grid-side energy and states 8/4/0 MWh.
+Evidence/replay/export/recovery use existing owned contracts. The whole issue
+remains open; broader storage economics and independent domain approval remain
+pending. See [implementation status](../implementation-status.md) and
+[coverage ledger](../coverage-ledger.md).

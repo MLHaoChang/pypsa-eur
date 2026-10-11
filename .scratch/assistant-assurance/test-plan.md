@@ -128,3 +128,15 @@ Publish test commands, baseline commit, mode/case count, red/green/skip reasons,
 JUnit/log paths and provenance in the handoff after each slice. Proposed latency
 limits in the spec require environment/model-specific measured results. Full
 release is blocked by any unmapped family or unresolved required negative case.
+
+## Bounded StorageUnit dispatch acceptance
+
+`test_storage_assurance.py` extends A0.4/A1.7/A2.8–A2.10/A6.6/A7.7 with an
+independent HiGHS LP (10/4/−6 MWh; states 8/4/0), differing storage/generator/
+objective weights, exact windows and raw chronological validity. It rejects
+missing prior states, impossible balance/net power/bounds, invalid durations,
+unsupported cyclic/inflow/spill sources and fabricated model quantities/units/
+formulas. Retained JSON/ZIP, current-source invalidation and native restart
+recovery exercise the existing public seam. UI cases verify digest-approved
+storage text/voice and unavailable-cost completeness. Broader storage economics,
+all-domain adapters and independent review remain pending.
