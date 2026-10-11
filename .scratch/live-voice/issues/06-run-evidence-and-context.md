@@ -72,6 +72,13 @@ input fingerprint, `summary` section), failed (typed error, no sections) or
 aborted (`interrupted`). Best-effort: no project authority means no record and
 the solve is unaffected. Tests: `tests/test_run_evidence_publish_foreground.py`
 (7 passed). Still open: solve-queue/GridSpine, study and report completion
+
+2026-10-11: Domain completion publish — `start_queue_run`/`publish_queue_run`
+on solve-queue claim/_finish (incl. GridSpine); `watch_study_run` from
+`_publish_study`; report `_set`/mapping/`_launch` call start/publish. Status
+map covers done/met/failed/budget_exhausted/refused/aborted. Tests:
+`tests/test_run_evidence_publish_domains.py`. Still open: conversational run
+refs and result-UI selection.
 paths; a monitor cancelled by a session abort before the solve ends leaves a
 `running` marker; objective unit is assumed EUR (no per-project currency yet);
 fingerprint is computed at completion; conversational run references, result UI
