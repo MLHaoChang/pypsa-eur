@@ -1,0 +1,371 @@
+"""Immutable run evidence (live-voice issue 06, first slice).
+
+Each run is one directory under ``<project>/run_evidence/<run_id>/``:
+
+* ``running.json`` — optional marker written by ``start_run``.
+* ``sections/<name>.json`` — bounded result artifacts, published first.
+* ``manifest.json`` — the terminal record, published LAST and atomically, then
+  never rewritten. Its presence is what makes a run terminal; a crash before it
+  leaves at most a ``running.json`` marker and orphan sections, never a manifest
+  that references missing bytes.
+
+A manifest records identifiers, mode, fingerprint, timestamps, software-computed
+metrics (value + unit) and a SHA-256 per section artifact. Reads re-verify the
+artifact hash, so an old run whose artifacts were pruned, lost or altered gets a
+typed ``evidence_unavailable`` for THAT run id; no reader ever falls back to the
+newest run. The model supplies run ids and section names only — never paths.
+
+Authority is the active project resolved through the project ACL on every read
+(``_authority``), the same pattern as ``assistant_tasks`` / ``durable_conversation``.
+Not in this slice: wiring the solve completion paths, ``compare_project_runs``,
+conversational run references and the result UI.
+"""
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+import os
+import re
+import shutil
+import threading
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from fastapi import HTTPException
+
+from services.pypsa_service import PyPSAService
+
+MANIFEST_VERSION = 1
+MAX_SECTION_BYTES = 16 * 1024
+MAX_RUNS_WITH_ARTIFACTS = 20
+MAX_MANIFESTS = 200
+DEFAULT_LIMIT = 10
+MAX_LIMIT = 50
+TERMINAL_STATUSES = frozenset({'completed', 'failed', 'interrupted'})
+STATUSES = TERMINAL_STATUSES | {'running'}
+
+_LOCK = threading.RLock()
+_RUN_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
+_SECTION = re.compile(r'^[a-z][a-z0-9_]{0,31}$')
+_METRIC = re.compile(r'^[A-Za-z][A-Za-z0-9_.-]{0,63}$')
+
+
+def _refuse(kind: str, message: str, status: int = 409, **extra: Any) -> None:
+    detail = {'error_kind': kind, 'message': message}
+    detail.update(extra)
+    raise HTTPException(status, detail)
+
+
+def _authority() -> tuple[Path, str, str]:
+    from services import chat_tools, project_registry
+
+    ctx = PyPSAService.get_active_context()
+    if not ctx.loaded_project or not ctx.project_uuid:
+        _refuse('run_project_required',
+                'Create, save and activate a project before reading run evidence.')
+    with chat_tools._acting() as (db, user):
+        project = project_registry.resolve_project(db, user, ctx.project_uuid)
+        return project_registry.project_dir(project), str(project.id), str(user.id)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _json_bytes(value: Any) -> bytes:
+    try:
+        return json.dumps(value, allow_nan=False, sort_keys=True).encode('utf-8')
+    except (TypeError, ValueError):
+        _refuse('invalid_run_evidence', 'Run evidence must be finite, JSON-serialisable values.', 422)
+    raise AssertionError  # pragma: no cover
+
+
+def _valid_run_id(run_id: Any) -> bool:
+    return isinstance(run_id, str) and _RUN_ID.fullmatch(run_id) is not None
+
+
+def _run_dir(root: Path, run_id: str) -> Path:
+    return root / 'run_evidence' / run_id
+
+
+def _atomic_write(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
+    try:
+        with temp.open('wb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def _check_metrics(metrics: dict | None) -> dict:
+    out: dict[str, dict] = {}
+    for name, entry in (metrics or {}).items():
+        if (not isinstance(name, str) or not _METRIC.fullmatch(name)
+                or not isinstance(entry, dict) or set(entry) != {'value', 'unit'}
+                or isinstance(entry['value'], bool)
+                or not isinstance(entry['value'], (int, float))
+                or not isinstance(entry['unit'], str)):
+            _refuse('invalid_run_evidence',
+                    'Each metric must be {"value": number, "unit": string}.', 422)
+        out[name] = {'value': entry['value'], 'unit': entry['unit']}
+    _json_bytes(out)
+    return out
+
+
+def _header(*, project_id: str, run_id: str, kind: str, started_at: str | None,
+            mode: str | None, fingerprint: str | None, job_id: str | None,
+            unsaved_inputs: bool, warnings: list[str] | None, actor_id: str | None) -> dict:
+    if not _valid_run_id(run_id):
+        _refuse('invalid_run_evidence', 'run_id must be 1-64 letters, digits, "_" or "-".', 422)
+    if not isinstance(kind, str) or not kind:
+        _refuse('invalid_run_evidence', 'kind is required.', 422)
+    return {
+        'version': MANIFEST_VERSION,
+        'run_id': run_id,
+        'project_id': project_id,
+        'actor_id': actor_id,
+        'kind': kind,
+        'job_id': job_id,
+        'mode': mode,
+        'fingerprint': fingerprint,
+        'unsaved_inputs': bool(unsaved_inputs),
+        'warnings': [str(w) for w in (warnings or [])][:20],
+        'started_at': started_at or _now(),
+    }
+
+
+def start_run(root: Path, project_id: str, *, run_id: str, kind: str,
+              started_at: str | None = None, mode: str | None = None,
+              fingerprint: str | None = None, job_id: str | None = None,
+              unsaved_inputs: bool = False, warnings: list[str] | None = None,
+              actor_id: str | None = None) -> dict:
+    """Record that a run is in flight. A terminal manifest always wins over this marker."""
+    marker = _header(project_id=project_id, run_id=run_id, kind=kind, started_at=started_at,
+                     mode=mode, fingerprint=fingerprint, job_id=job_id,
+                     unsaved_inputs=unsaved_inputs, warnings=warnings, actor_id=actor_id)
+    marker['status'] = 'running'
+    with _LOCK:
+        run_dir = _run_dir(root, run_id)
+        if (run_dir / 'manifest.json').exists():
+            _refuse('run_already_finalized', 'This run already has a terminal manifest.',
+                    run_id=run_id)
+        _atomic_write(run_dir / 'running.json', _json_bytes(marker))
+    return copy.deepcopy(marker)
+
+
+def publish_run(root: Path, project_id: str, *, run_id: str, kind: str, status: str,
+                finished_at: str | None = None, started_at: str | None = None,
+                mode: str | None = None, fingerprint: str | None = None,
+                job_id: str | None = None, unsaved_inputs: bool = False,
+                warnings: list[str] | None = None, actor_id: str | None = None,
+                metrics: dict | None = None, sections: dict[str, Any] | None = None,
+                error: dict | None = None) -> dict:
+    """Publish the immutable terminal manifest (sections first, manifest last).
+
+    A repeat with identical content returns the stored manifest; a repeat that
+    differs is refused with ``run_already_finalized`` and nothing is changed.
+    """
+    if status not in TERMINAL_STATUSES:
+        _refuse('invalid_run_evidence', f'status must be one of {sorted(TERMINAL_STATUSES)}.', 422)
+    manifest = _header(project_id=project_id, run_id=run_id, kind=kind, started_at=started_at,
+                       mode=mode, fingerprint=fingerprint, job_id=job_id,
+                       unsaved_inputs=unsaved_inputs, warnings=warnings, actor_id=actor_id)
+    manifest['status'] = status
+    manifest['finished_at'] = finished_at or _now()
+    manifest['metrics'] = _check_metrics(metrics)
+    manifest['error'] = copy.deepcopy(error) if error else None
+    _json_bytes(manifest['error'])
+
+    blobs: dict[str, bytes] = {}
+    refs: dict[str, dict] = {}
+    for name, payload in (sections or {}).items():
+        if not isinstance(name, str) or not _SECTION.fullmatch(name):
+            _refuse('invalid_run_evidence', 'Section names are lowercase snake_case.', 422)
+        blob = _json_bytes(payload)
+        if len(blob) > MAX_SECTION_BYTES:
+            _refuse('evidence_too_large',
+                    f'Section {name!r} exceeds {MAX_SECTION_BYTES} bytes.', 413,
+                    section=name)
+        blobs[name] = blob
+        refs[name] = {'sha256': hashlib.sha256(blob).hexdigest(), 'bytes': len(blob)}
+    manifest['sections'] = refs
+
+    with _LOCK:
+        run_dir = _run_dir(root, run_id)
+        existing = _read_manifest_file(run_dir / 'manifest.json')
+        if existing is not None:
+            if _same_completion(existing, manifest, started_at, finished_at):
+                return existing
+            _refuse('run_already_finalized',
+                    'This run already has a different terminal manifest; manifests are immutable.',
+                    run_id=run_id)
+        marker = _read_json(run_dir / 'running.json')
+        if marker and not started_at:
+            manifest['started_at'] = marker.get('started_at', manifest['started_at'])
+        for name, blob in blobs.items():
+            _atomic_write(run_dir / 'sections' / (name + '.json'), blob)
+        _atomic_write(run_dir / 'manifest.json', _json_bytes(manifest))
+        (run_dir / 'running.json').unlink(missing_ok=True)
+        _enforce_retention(root)
+    return copy.deepcopy(manifest)
+
+
+def _same_completion(existing: dict, new: dict, started_at: str | None,
+                     finished_at: str | None) -> bool:
+    keys = ['project_id', 'kind', 'status', 'mode', 'fingerprint', 'job_id',
+            'unsaved_inputs', 'metrics', 'error', 'sections']
+    if started_at:
+        keys.append('started_at')
+    if finished_at:
+        keys.append('finished_at')
+    return all(existing.get(k) == new.get(k) for k in keys)
+
+
+def _read_json(path: Path) -> dict | None:
+    try:
+        value = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _read_manifest_file(path: Path) -> dict | None:
+    return _read_json(path)
+
+
+def _load_run(root: Path, project_id: str, run_id: str) -> dict | None:
+    """Manifest (terminal) or running marker for THIS project; None otherwise."""
+    if not _valid_run_id(run_id):
+        return None
+    run_dir = _run_dir(root, run_id)
+    record = _read_manifest_file(run_dir / 'manifest.json') or _read_json(run_dir / 'running.json')
+    if record is None or record.get('project_id') != project_id or record.get('run_id') != run_id:
+        return None
+    return record
+
+
+def _section_state(root: Path, record: dict, name: str) -> tuple[bytes | None, str | None]:
+    """(bytes, None) when the artifact verifies, else (None, reason)."""
+    ref = (record.get('sections') or {}).get(name)
+    if ref is None:
+        return None, 'section_not_recorded'
+    path = _run_dir(root, record['run_id']) / 'sections' / (name + '.json')
+    try:
+        blob = path.read_bytes()
+    except OSError:
+        return None, 'artifact_missing'
+    if hashlib.sha256(blob).hexdigest() != ref.get('sha256') or len(blob) != ref.get('bytes'):
+        return None, 'artifact_corrupt'
+    return blob, None
+
+
+def _evidence_available(root: Path, record: dict) -> bool:
+    names = list((record.get('sections') or {}))
+    return bool(names) and all(_section_state(root, record, n)[1] is None for n in names)
+
+
+def _all_records(root: Path, project_id: str) -> list[dict]:
+    base = root / 'run_evidence'
+    records = []
+    if not base.is_dir():
+        return records
+    for child in base.iterdir():
+        if child.is_dir():
+            record = _load_run(root, project_id, child.name)
+            if record is not None:
+                records.append(record)
+    records.sort(key=lambda r: (r.get('started_at') or '', r['run_id']), reverse=True)
+    return records
+
+
+def _enforce_retention(root: Path) -> None:
+    base = root / 'run_evidence'
+    entries = []
+    for child in base.iterdir():
+        record = _read_manifest_file(child / 'manifest.json') if child.is_dir() else None
+        if record is not None:
+            entries.append((record.get('started_at') or '', child.name, child))
+    entries.sort(reverse=True)
+    for _, _, child in entries[MAX_MANIFESTS:]:
+        shutil.rmtree(child, ignore_errors=True)
+    for _, _, child in entries[MAX_RUNS_WITH_ARTIFACTS:MAX_MANIFESTS]:
+        shutil.rmtree(child / 'sections', ignore_errors=True)
+
+
+def _summary(root: Path, record: dict) -> dict:
+    return {
+        'run_id': record['run_id'],
+        'kind': record.get('kind'),
+        'status': record['status'],
+        'started_at': record.get('started_at'),
+        'finished_at': record.get('finished_at'),
+        'mode': record.get('mode'),
+        'fingerprint': record.get('fingerprint'),
+        'job_id': record.get('job_id'),
+        'unsaved_inputs': bool(record.get('unsaved_inputs')),
+        'evidence_available': _evidence_available(root, record),
+    }
+
+
+def list_project_runs(limit: int = DEFAULT_LIMIT, offset: int = 0, status: str | None = None) -> dict:
+    if type(limit) is not int or not 1 <= limit <= MAX_LIMIT:
+        _refuse('invalid_run_limit', f'Choose a run limit of 1-{MAX_LIMIT}.', 422)
+    if type(offset) is not int or offset < 0:
+        _refuse('invalid_run_offset', 'offset must be a non-negative integer.', 422)
+    if status is not None and status not in STATUSES:
+        _refuse('invalid_run_status', f'status must be one of {sorted(STATUSES)}.', 422)
+    root, project_id, _owner = _authority()
+    with _LOCK:
+        records = _all_records(root, project_id)
+        if status is not None:
+            records = [r for r in records if r['status'] == status]
+        page = records[offset:offset + limit]
+        return {
+            'items': [_summary(root, r) for r in page],
+            'total_count': len(records),
+            'limit': limit,
+            'offset': offset,
+            'has_more': offset + len(page) < len(records),
+            'note': 'Most recent first, scoped to the active project. Use get_run_evidence with a run_id for detail.',
+        }
+
+
+def get_run_evidence(run_id: str, section: str | None = None) -> dict:
+    if section is not None and (not isinstance(section, str) or not _SECTION.fullmatch(section)):
+        _refuse('invalid_run_section', 'section must be a lowercase snake_case name.', 422)
+    root, project_id, _owner = _authority()
+    with _LOCK:
+        record = _load_run(root, project_id, run_id)
+        if record is None:
+            _refuse('run_not_found', 'Run not found in this project.', 404)
+        out = _summary(root, record)
+        out['warnings'] = list(record.get('warnings') or [])
+        out['metrics'] = copy.deepcopy(record.get('metrics') or {})
+        out['error'] = copy.deepcopy(record.get('error'))
+        declared = list((record.get('sections') or {}))
+        if section is None:
+            out['sections'] = [
+                {'name': n, 'available': _section_state(root, record, n)[1] is None}
+                for n in declared
+            ]
+            return out
+        if record['status'] == 'running':
+            _refuse('evidence_unavailable', 'This run has not finished.', run_id=run_id,
+                    section=section, reason='run_not_finished', status='running')
+        blob, reason = _section_state(root, record, section)
+        if reason is not None:
+            _refuse('evidence_unavailable',
+                    'The requested evidence is not available for this run.',
+                    run_id=run_id, section=section, reason=reason, status=record['status'],
+                    available_sections=[n for n in declared
+                                        if _section_state(root, record, n)[1] is None])
+        out['section'] = section
+        out['data'] = json.loads(blob)
+        return out

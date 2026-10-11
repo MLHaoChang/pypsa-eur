@@ -6914,11 +6914,14 @@ from services.workflow_tools import (
     project_readiness, wait_for_job, get_study_evidence, run_sensitivity_sweep, use_toolset,
 )
 
+from services.run_evidence import list_project_runs, get_run_evidence
 from services.assistant_tasks import list_tasks, start_task, get_task, resume_task, cancel_task, resolve_task_step
 from services.assistant_tools import (find_capabilities, get_file_delivery, inspect_import, import_uploaded_network,
                                       preview_project_changes, apply_project_changes, create_chart, build_delivery)
 
 DISPATCHERS: dict[str, Any] = {
+    "list_project_runs": list_project_runs,
+    "get_run_evidence": get_run_evidence,
     "list_tasks": list_tasks,
     "find_capabilities": find_capabilities,
     "start_task": start_task,
