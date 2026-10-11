@@ -41,3 +41,11 @@ describe.each(['expert', 'guided'] as const)('assistant application navigation i
     expect(useUIStore.getState().compareRailOpen).toBe(true)
   })
 })
+
+it('applies a results tab while the companion console is closed', () => {
+  useUIStore.setState({ assistantDockOpen: false, activeSlidePanel: null, resultsTabRequest: null })
+  applyUiNavigate({ kind: 'navigate', panel_id: 'results', results_tab: 'economics' })
+  expect(useUIStore.getState().assistantDockOpen).toBe(false)
+  expect(useUIStore.getState().activeSlidePanel).toBe('results')
+  expect(useUIStore.getState().resultsTabRequest).toBe('economics')
+})
