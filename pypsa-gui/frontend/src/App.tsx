@@ -703,7 +703,9 @@ export default function App() {
                     instead of whitescreening the app, and navigating to another
                     tab or switching project remounts it (clearing the error). */}
                 <ErrorBoundary key={`${activeSlidePanel}-${currentProject ?? ''}`} label="This panel crashed">
-                  <FullPageTab panel={activeSlidePanel} onClose={() => setSlidePanel(null)} />
+                  <div className="flex flex-col flex-1 min-h-0" data-assurance-panel={activeSlidePanel} data-assurance-project={currentProject ?? ''}>
+                    <FullPageTab panel={activeSlidePanel} onClose={() => setSlidePanel(null)} />
+                  </div>
                 </ErrorBoundary>
               </div>
             )}

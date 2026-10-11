@@ -83,6 +83,9 @@ export interface ChatStreamRequest {
   // hub-card sends omit both fields and keep pre-admission /stream behaviour.
   utterance_id?: string
   generation?: number
+  binding_generation?: number
+  checked_scope?: Record<string, unknown>
+  checked_operation?: Record<string, unknown>
 }
 
 export interface ChatFrame {

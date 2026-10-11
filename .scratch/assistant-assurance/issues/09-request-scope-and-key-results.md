@@ -38,3 +38,9 @@ Original plan review does not approve this added ticket. Freeze contracts before
 coding acceptance fixtures; do not weaken the transferred v1 tests.
 
 Implementation continuation (2026-10-10): The generator-dispatch/1 candidate now assigns all three required result slots, rejects omitted available metrics, and records bounded project/entity/full-current-horizon scope. Arbitrary questions, retained runs, conversational constraints and other domain profiles remain pending. See [implementation status](../implementation-status.md). This is editing-agent prototype coverage, not inherited independent approval or whole-ticket completion.
+
+### 2026-10-11 — shared harness implementation
+
+Version-1 scope now binds project/entity/profile/required metrics, exact inclusive snapshot boundaries, declared cost basis and explicit retained/comparison evidence IDs. All requested slots receive a disposition and missing slots prevent request-complete claims. Whole-message generator/network cost grammar is bounded. This closes the explicit-profile slice, not arbitrary natural-language completeness, material clarification, broad conversational carryover or all-domain summaries.
+
+See [implementation status](../implementation-status.md), [contracts](../harness-contracts.md) and [coverage ledger](../coverage-ledger.md). The whole ticket remains open; no independent review verdict is inherited by this extension.

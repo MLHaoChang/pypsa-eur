@@ -41,3 +41,9 @@ P7 also requires A7.7: per-required-operation/metric independent fixtures, zero 
 
 See the [reliability contract](../reliability-contract.md). Original approval
 does not cover these additions; review/freeze them before implementation.
+
+### 2026-10-11 — shared harness implementation
+
+Implemented shared capabilities/contracts, profile rollback, separately disabled checked writes and bounded shadow observations that do not change ordinary text or store drafts. Deterministic publication/provider/UI/storage/timeout regressions are executable. Production false-acceptance calibration, load measurement, independent domain review, full real-browser journeys and release enablement remain pending. Deployment defaults stay disabled; GitHub Actions was disabled on the preceding PR.
+
+See [implementation status](../implementation-status.md), [contracts](../harness-contracts.md) and [coverage ledger](../coverage-ledger.md). The whole ticket remains open; no independent review verdict is inherited by this extension.

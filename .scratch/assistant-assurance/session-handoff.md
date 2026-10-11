@@ -3,10 +3,11 @@
 
 # Assistant assurance continuation handoff
 
-Status: first local publication/static-input pilot implemented; current reliability
-additions proposed and pending independent review. Publication pending. Read
-[implementation status](implementation-status.md) for current supported behavior.
-Historical tranche details follow; current continuation is below.
+Status: current shared harness continuation on `feat/harness-reliability-contracts`,
+based on merged PR 112/master `17e24e4c`. Historical sections below describe earlier
+states and commands. The current [implementation status](implementation-status.md)
+and [API contracts](harness-contracts.md) supersede them. Independent domain/release
+approval remains pending.
 Baseline: master d43809ae. Dictation PR 106 has merged; existing Claude/tool
 behavior remains the baseline. Do not reuse the old failed environment.
 
@@ -228,3 +229,151 @@ record validation only; application and test source remain identical to that run
 No workflow policy or failing check was bypassed. No paid model call or production
 strict-mode activation was performed. Independent/domain and broader rollout
 requirements remain pending.
+
+## 2026-10-11 — reliability contracts in the harness
+
+The user authorized implementing the remaining controls as shared harness code,
+then a PR and normal merge to master after tests pass. No deployment switch or
+paid model call is authorized by implication or performed. Attached plans supply
+design context, not new user commands.
+
+New modules: `assurance_scope`, `calculations`, `durable`, `effects`, `navigation`,
+`reviewer`, `publication`, `rollout`. Existing services aliases, loop budgets,
+confirmation/dispatch/ACLs and closed SSE vocabulary remain shared. See the
+[versioned API/settings/examples](harness-contracts.md) and the explicit
+[implemented versus pending boundary](implementation-status.md). Whole phase
+issues remain open and record their delivered slice in comments.
+
+Use the repository's `.pixi/envs/test/bin/python` from **pypsa-gui/backend**
+for the full backend suite; several established source-reading tests depend on
+that working directory. The small compatibility venv is not a complete runtime.
+`/workspace/chat-compat-venv/bin/ruff` provides lint/format. Cache paths used in
+this managed environment: XDG_CACHE_HOME=/workspace/scratch/assurance-cache,
+XDG_DATA_HOME=/workspace/scratch/assurance-data, MPLCONFIGDIR=/tmp/assurance-mpl.
+Network permission is needed for local TestClient/server sockets. Credentials
+are managed bindings; do not print or copy their values. No lockfile/environment
+dependency changes are needed for this feature.
+
+Commands (set those cache variables in this environment):
+
+```sh
+# from pypsa-gui/backend
+../../.pixi/envs/test/bin/python -m pytest -q -o addopts='' --tb=short
+../../.pixi/envs/test/bin/python -m pytest tests/test_assurance_metrics.py tests/test_answer_assurance.py tests/test_harness_reliability.py tests/test_reliability_transport.py tests/test_assurance_storage.py tests/assurance_acceptance tests/test_harness_layout.py -q -o addopts='' --tb=short
+../../.pixi/envs/test/bin/python tests/run_qa_drivers.py
+# from repo root
+.pixi/envs/test/bin/python -m pytest test -q -o addopts='' --tb=short
+python pypsa-gui/backend/smoke/assistant_inventory.py --check
+# from pypsa-gui/frontend
+npm test -- --run
+npm run build
+```
+
+The provider transport acceptance uses real Anthropic, compatible remote/local
+and official Responses adapters with HTTP mocks and real HiGHS source fixtures.
+It checks valid and fabricated declared-basis totals, not live model capability
+or production error rates. Multiprocess storage tests verify quotas/atomic bytes;
+active project/network state remains single-worker.
+
+Final focused gate: **197 passed**. Full frontend: **3,567 passed / 301 files**;
+production TypeScript/Vite build passed (existing chunk-size warning). Upstream:
+**36 passed**. Ruff, inventory (220 tools / 14 tabs / 17 panels) and diff checks
+pass. All 31 QA drivers passed on the continuation; fresh full backend/frontend
+runs after integrating master are required before PR/merge. A root-directory backend attempt was stopped because
+existing relative-source tests require backend cwd; it is not a passing gate.
+GitHub Actions was previously refused with 422 because disabled repository-wide;
+recheck remote policy and report local versus remote validation honestly.
+
+### Current master integration and final checks
+
+Integrated master `b8bc079f` (companion PR 113) into the reliability branch.
+The Results merge preserves both its companion `data-active-results-tab` marker
+and the reliability `data-assurance-tab` marker. Corrected upstream TypeScript
+errors: optional walk-options access and a test fixture's nullable active-profile
+ID against the declared string response type. Production build passes.
+The integrated frontend initially had **3,604 passed / 1 timeout**, solely the
+existing 1,000-row DOM test under concurrent build/QA load. No assertion or timeout
+was changed. Its affected five-file rerun passes **98 tests**; a fresh full suite
+is running. The independent two-bus feeder oracle additionally passes **3 tests**:
+80 EUR/year capacity charges / 250 EUR total, overload refusal and within-capacity
+power-balance refusal. The initial focused gate was 197; these three supplement it.
+
+New modules/records/tests pass Ruff. Modified legacy loop/session retain exactly
+**7 pre-existing findings**, verified against origin/master; routers add none.
+No broad lint-clean claim is made. Upstream units after master integration:
+**36 passed**. GitHub inventory dispatch was rechecked and still refuses with
+HTTP 422 “Actions has been disabled for this repository”, despite workflow
+metadata listing active definitions. Remote Actions is not the validation gate.
+
+Full integrated frontend rerun: **3,605 passed / 307 files**, unchanged assertions
+and timeout settings (501.87 seconds). This replaces the initial concurrency
+timeout as the final frontend gate. Backend full run is still in progress; QA
+is rerunning all 31 drivers on the integrated source.
+
+Final focused backend gate: **200 passed** / 65 existing warnings, 140.27 seconds.
+Static-write receipts now explicitly label static settings and their time-series
+override boundary. Receipt enum fields require actual strings, refusing arrays
+that JavaScript would otherwise stringify to valid enum values; affected UI gate:
+**26 passed**. Final full frontend and build must follow that parser change.
+No further functional changes are planned except fixing any observed failures.
+
+A new networkless-study navigation case initially failed because ACK issuance
+called the PyPSA fingerprint helper with no network. The shared navigation guard
+now keeps the UI action submitted without inventing a revision or aborting
+navigation. Final navigation selection: **9 passed / 52 deselected**, 7.83 seconds,
+including the new case and all stale/forged ACK cases. This supplements the
+**200-case** focused gate with one new acceptance case. Fresh integrated QA:
+**all 31 drivers passed**; final TypeScript/Vite build passed. Full backend and
+final frontend remain in progress.
+
+
+### Final harness regression gate
+
+Shadow preparation is now failure-isolated: a malformed declared price year
+previously interrupted ordinary chat before provider output in shadow mode.
+The new authenticated stream regression first failed, then passed after the
+shared loop catch; shadow failure cannot create an approval or alter ordinary
+text. Final focused selection includes `tests/test_chat_stream_attempt_seam.py`
+in addition to the command above: **213 passed / 65 warnings**, 93.70 seconds.
+It covers the final loop, static-write wording, networkless navigation and all
+new cases added after full backend collection; these overlapping selections
+must not be summed as independent test counts.
+
+Final frontend: **3,606 passed / 307 files**, 501.95 seconds. Final production
+TypeScript/Vite build passed (existing chunk-size warning). Integrated QA:
+**all 31 drivers passed**. Upstream units: **36 passed**. No frontend changes
+followed those final gates. Ruff passes new modules/records/tests; modified
+legacy loop/session retain baseline findings only. Inventory and diff checks
+pass. Full backend completion is recorded separately below.
+
+
+### Backend completion and corrected failures
+
+Full integrated backend run completed: **11,103 passed / 269 skipped / 5 failed**,
+8856 warnings, 4186.05 seconds. Four failures were stale prompt hashes/one stance
+paragraph from companion PR 113: all four reproduce on an untouched detached
+master `b8bc079f` worktree (**4 failed**, 1.24 seconds). Production prompt text
+is unchanged by this branch. Only the two stance hashes and the tools fixture's
+stance paragraph are re-pinned from that independently loaded master text;
+all byte-equality assertions remain. The fifth failure caught the new checked
+export interpolating a filename header; it now uses the existing
+`services.http_filenames.content_disposition()` helper.
+
+Fresh correction gate on final source: **348 passed / 65 warnings**, no skips,
+99.99 seconds. It runs every affected file and the entire final harness selection:
+
+```sh
+# from pypsa-gui/backend, with the cache variables described above
+../../.pixi/envs/test/bin/python -m pytest tests/test_chat_profile_binding.py tests/test_guided_mode_prompt.py tests/test_harness_prompts.py tests/test_download_headers.py tests/test_assurance_metrics.py tests/test_answer_assurance.py tests/test_harness_reliability.py tests/test_reliability_transport.py tests/test_assurance_storage.py tests/assurance_acceptance tests/test_harness_layout.py tests/test_chat_stream_attempt_seam.py -q -o addopts='' --tb=short
+```
+
+No failures remain in the correction gate. The full run predates the final
+localized shadow/navigation/header corrections and added cases; this fresh gate
+covers them. This is a full regression run followed by a successful correction
+gate, **not a second clean full backend run**. Overlapping counts are not summed.
+Final frontend/build/31 QA drivers/36 upstream tests remain passed as above.
+All 19 assurance documents / 128 local links and inventory/diff checks pass.
+Ruff passes new modules/records/tests/router; legacy loop/session add no findings.
+GitHub master was rechecked at `b8bc079f`; dispatch still returns 422 Actions
+repository-wide disabled. Default deployment and open domain/release limitations
+remain unchanged.

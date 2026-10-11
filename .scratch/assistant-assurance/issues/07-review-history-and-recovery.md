@@ -41,3 +41,9 @@ P6 also requires A6.6: preserve request constraints and metric/formula/profile v
 
 See the [reliability contract](../reliability-contract.md). Original approval
 does not cover these additions; review/freeze them before implementation.
+
+### 2026-10-11 — shared harness implementation
+
+Immutable retained raw evidence now recalculates after disk reload and foreground edits, with fresh ownership/ACL checks and exact historical scope. A single optional bounded read-only reviewer can admit qualitative cited interpretations only after deterministic checks; numeric prose is withheld. Failures preserve checked facts. The configured model is not an independent expert, and unknown/late usage lacks a durable billing reservation. General conversational constraint recovery and independent domain review remain pending.
+
+See [implementation status](../implementation-status.md), [contracts](../harness-contracts.md) and [coverage ledger](../coverage-ledger.md). The whole ticket remains open; no independent review verdict is inherited by this extension.

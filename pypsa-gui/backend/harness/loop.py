@@ -1016,6 +1016,9 @@ def run_turn(
     strict_assurance: bool = False,
     utterance_id: str | None = None,
     generation: int | None = None,
+    checked_scope: dict | None = None,
+    checked_operation: dict | None = None,
+    binding_generation: int = 0,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
     """
     Provider-driven turn driver (Phase 3 replacement for the Phase 2 stub):
@@ -1194,8 +1197,19 @@ def run_turn(
         from harness import assurance
         if strict_assurance or assurance.strict_configured():
             session.assurance_turn = assurance.Turn(session, PyPSAService.get_active_context())
-            if not attachment_file_ids:
-                session.assurance_turn.prepare_request(message, ui_context, PyPSAService.get_active_context())
+            from harness.navigation import begin_turn
+            begin_turn(session.assurance_turn, binding_generation)
+            session.assurance_turn.prepare_operation(checked_operation)
+            if not attachment_file_ids and checked_operation is None:
+                session.assurance_turn.prepare_request(message, ui_context, PyPSAService.get_active_context(), checked_scope)
+        elif assurance.shadow_configured():
+            try:
+                session.shadow_turn = assurance.Turn(session, PyPSAService.get_active_context())
+                if not attachment_file_ids:
+                    session.shadow_turn.prepare_request(message, ui_context, PyPSAService.get_active_context())
+            except Exception:
+                logger.exception("Shadow scope could not be prepared")
+                session.shadow_turn = None
         for event, payload in _run_turn_body(
             session,
             message,
@@ -1216,6 +1230,7 @@ def run_turn(
             session._turn_in_flight = False
             session._undo_snapshotted = []
             session.assurance_turn = None
+            session.shadow_turn = None
         if _admission_lease is not None and _admission_generation is not None:
             from services import utterance_admission as _ua
             # Do not auto-promote pending into a hanging lease; drain is a
@@ -1651,6 +1666,9 @@ def _run_turn_body(
         if session.abort_event.is_set():
             yield "session_done", {"reason": "aborted"}
             return
+        if session.assurance_turn is not None and session.assurance_turn.effect_pending:
+            yield "session_done", {"reason": "assurance_context_changed"}
+            return
 
         # Anthropic prompt caching — the system prompt + 100-tool catalog are
         # the bulk of every turn's input tokens (~12k tokens). Caching them
@@ -1720,6 +1738,12 @@ def _run_turn_body(
         # assistant turn to both the outbound array and the session history
         # for the next iteration.
         assistant_blocks = final_blocks
+        if session.shadow_turn is not None and not any(b.get("type") == "tool_use" for b in assistant_blocks):
+            try:
+                from harness.rollout import observe
+                observe(session.shadow_turn, assistant_blocks)
+            except Exception:
+                logger.exception("Shadow observation could not be saved")
         if session.assurance_turn is not None:
             if any(b.get("type") == "tool_use" for b in assistant_blocks):
                 # Retain tool protocol pairing, never private preamble/thinking.
@@ -1728,6 +1752,7 @@ def _run_turn_body(
                 yield "answer_progress", {"version": 1, "turn_id": session.assurance_turn.turn_id,
                                           "stage": "checking_claims", "status": "running"}
                 try:
+                    session.assurance_turn.review_interpretations(assistant_blocks, provider, session.model, turn_ctx)
                     assistant_blocks = session.assurance_turn.commit(assistant_blocks, turn_ctx)
                 except Exception:  # noqa: BLE001 — fail closed, including uncertain storage
                     logger.exception("checked answer could not be committed")
@@ -2060,6 +2085,18 @@ def _dispatch_real_tool_call(
     tool_use_id = tu.get("id") or uuid.uuid4().hex
     tool_name = tu.get("name") or "<missing-name>"
     args = tu.get("input") or {}
+    if session.assurance_turn is not None:
+        # Confirmation and execution share an immutable argument snapshot.
+        import json
+        try:
+            args = json.loads(json.dumps(args, allow_nan=False))
+        except (ValueError, TypeError, OverflowError):
+            yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
+                                 "error_kind": "validation_error",
+                                 "message": "Checked tool arguments must be finite JSON values."}
+            tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
+                                           "is_error": True, "content": "validation_error"})
+            return
     tier = _safety_tier_for(tool_name)
 
     yield "tool_request", {
@@ -2186,13 +2223,17 @@ def _dispatch_real_tool_call(
         args=confirmation_args,
         tier=tier,
         tool_results_collector=tool_results_collector,
-        guided=guided,
+        guided=guided or (session.assurance_turn is not None and tool_name == "update_component"),
     )
     if not approved:
         return
 
     task_ticket = None
     try:
+        effect_fresh = True
+        if session.assurance_turn is not None and tool_name == "update_component":
+            from harness.effects import reserve
+            effect_fresh = reserve(session.assurance_turn, args)
         from services import assistant_tasks
         task_ticket = assistant_tasks.begin_step(session, tool_name, args or {})
         yield "tool_running", {"tool_use_id": tool_use_id, "tool_name": tool_name}
@@ -2216,13 +2257,14 @@ def _dispatch_real_tool_call(
         # fails partway can still have mutated the network, so marking on success
         # only would under-report. Over-marking costs a prompt about already-clean
         # work; under-marking costs the work itself.
-        if tier != "read" and tool_name not in {"run_sensitivity_sweep", "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery"}:
+        if effect_fresh and tier != "read" and tool_name not in {"run_sensitivity_sweep", "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery"}:
             from services import dirty_state
             dirty_state.mark_dirty()
         # Same seam, same reason: the HTTP middleware's undo snapshot never runs
         # for an in-process call either. After the confirmation gate, so a refused
         # tool costs no snapshot. See `_snapshot_for_turn_undo`.
-        _snapshot_for_turn_undo(session, tool_name)
+        if effect_fresh:
+            _snapshot_for_turn_undo(session, tool_name)
 
         # Execute via the chat_tools dispatcher. `handler` was resolved above the
         # confirmation gate — see Improvement #19 there.
@@ -2257,9 +2299,18 @@ def _dispatch_real_tool_call(
             # HTTP on both wires while the direct-call tests passed.
             _chat_tools.set_chat_session(session)
             _ctx_snapshot = contextvars.copy_context()
+            checked_turn = session.assurance_turn
+            def invoke_handler():
+                if checked_turn is not None and tool_name == "update_component":
+                    from harness.effects import execute
+                    return execute(checked_turn, tool_name, args, handler)
+                return handler(**(args or {}))
             future = _TOOL_EXECUTOR.submit(
-                lambda: _ctx_snapshot.run(lambda: handler(**(args or {})))
+                lambda: _ctx_snapshot.run(invoke_handler)
             )
+            if checked_turn is not None and tool_name == "update_component":
+                from harness.effects import register_worker
+                register_worker(checked_turn, future)
             assistant_tasks.register_worker(task_ticket, future)
             try:
                 tool_deadline = time.monotonic() + harness_budget.PER_TOOL_TIMEOUT_SECONDS
@@ -2312,6 +2363,8 @@ def _dispatch_real_tool_call(
 
                 _PyPSAService.adopt_active_from(_ctx_snapshot)
             except concurrent.futures.TimeoutError:
+                if checked_turn is not None:
+                    checked_turn.effect_pending = True
                 try:
                     assistant_tasks.finish_step(task_ticket, error="tool_timeout")
                 except Exception:
@@ -2426,6 +2479,11 @@ def _dispatch_real_tool_call(
 
     if session.assurance_turn is not None:
         session.assurance_turn.capture(tool_name, args or {}, result, tool_use_id)
+    elif session.shadow_turn is not None:
+        try:
+            session.shadow_turn.capture(tool_name, args or {}, result, tool_use_id)
+        except Exception:
+            logger.exception("Shadow evidence could not be captured")
 
     # UI-control tools (and compare_scenarios with open_compare_rail) return a
     # marker dict with `_ui_event: True`. Emit a dedicated SSE frame so the
@@ -2474,6 +2532,8 @@ def _dispatch_real_tool_call(
                 if k in result
             },
         }
+        if session.assurance_turn is not None:
+            ui_event_payload["tool_use_id"] = tool_use_id
         yield "ui_event", ui_event_payload
 
     if session.assurance_turn is not None:

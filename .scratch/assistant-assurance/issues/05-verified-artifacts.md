@@ -41,3 +41,9 @@ P4 also requires A4.6: preserve the same metric/formula/raw-validity/coverage se
 
 See the [reliability contract](../reliability-contract.md). Original approval
 does not cover these additions; review/freeze them before implementation.
+
+### 2026-10-11 — shared harness implementation
+
+Authenticated checked-answer JSON/ZIP now exports the same approved facts, request scope, slots, limitations and revalidated evidence. ZIP binds answer JSON and spreadsheet-safe facts CSV by SHA-256/bytes. Existing PNG integrity is unchanged. Checked chart/report/import and other delivery adapters remain pending; an export does not establish scientific certification.
+
+See [implementation status](../implementation-status.md), [contracts](../harness-contracts.md) and [coverage ledger](../coverage-ledger.md). The whole ticket remains open; no independent review verdict is inherited by this extension.
