@@ -16,7 +16,7 @@ function mockMotion(matches: boolean) {
 describe('CompanionLauncher', () => {
   afterEach(() => cleanup())
 
-  it('offers compose and speak without claiming the microphone is open', async () => {
+  it('offers Write, Dictate, and Live without claiming the microphone is open', async () => {
     mockMotion(false)
     const onCompose = vi.fn()
     const onSpeak = vi.fn()
@@ -35,7 +35,11 @@ describe('CompanionLauncher', () => {
     const root = screen.getByTestId('companion-launcher')
     expect(root.getAttribute('data-presence')).toBe('idle')
     expect(root.getAttribute('data-motion')).toBe('on')
-    expect(screen.getByTestId('companion-speak').getAttribute('aria-pressed')).toBeNull()
+    expect(screen.getByTestId('companion-character').getAttribute('data-shape')).toBe('robot')
+    expect(screen.getByTestId('companion-compose').textContent).toContain('Write')
+    expect(screen.getByTestId('companion-speak').textContent).toContain('Dictate')
+    expect(screen.getByTestId('companion-live').textContent).toContain('Live')
+    expect(screen.getByTestId('companion-live').getAttribute('aria-pressed')).toBe('false')
     await user.click(screen.getByTestId('companion-compose'))
     await user.click(screen.getByTestId('companion-speak'))
     await user.click(screen.getByTestId('companion-live'))
@@ -62,9 +66,9 @@ describe('CompanionLauncher', () => {
     expect(screen.getByTestId('companion-character').className.split(/\s+/)).not.toContain('companion-idle')
   })
 
-  it('grows on hover and reveals the actions from a grid node', () => {
+  it('shows a robot while closed and morphs to the live node when Live is open', () => {
     mockMotion(false)
-    render(
+    const { rerender } = render(
       <CompanionLauncher
         profileLabel="Model"
         onCompose={vi.fn()}
@@ -74,34 +78,30 @@ describe('CompanionLauncher', () => {
       />,
     )
     const root = screen.getByTestId('companion-launcher')
-    const character = screen.getByTestId('companion-character')
-    const svg = character.querySelector('svg')
-    expect(character.getAttribute('data-shape')).toBe('grid-node')
-    expect(svg?.getAttribute('width')).toBe('96')
-    expect(svg?.getAttribute('height')).toBe('96')
-    expect(root.getAttribute('data-hovered')).toBe('false')
-    expect(screen.getByTestId('companion-actions').className.split(/\s+/)).toContain('companion-actions')
+    let character = screen.getByTestId('companion-character')
+    expect(character.getAttribute('data-shape')).toBe('robot')
+    expect(character.querySelector('svg')?.getAttribute('width')).toBe('112')
     fireEvent.mouseEnter(root)
     expect(root.getAttribute('data-hovered')).toBe('true')
     fireEvent.mouseLeave(root)
     expect(root.getAttribute('data-hovered')).toBe('false')
-  })
 
-  it('marks a listening presence only when that presence is passed in', () => {
-    mockMotion(false)
-    render(
+    rerender(
       <CompanionLauncher
         presence="listening"
         profileLabel="Model"
+        liveOpen
         onCompose={vi.fn()}
         onSpeak={vi.fn()}
         onLive={vi.fn()}
         onProfiles={vi.fn()}
       />,
     )
-    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('listening')
+    character = screen.getByTestId('companion-character')
+    expect(character.getAttribute('data-shape')).toBe('live-node')
+    expect(character.querySelector('svg')?.getAttribute('width')).toBe('96')
     expect(screen.getByTestId('companion-live').getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByTestId('companion-speak').getAttribute('aria-pressed')).toBeNull()
+    expect(screen.queryByTestId('companion-profile')).toBeNull()
   })
 
   it('flashes the live echo and clears it without keeping a transcript card', () => {

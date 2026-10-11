@@ -362,6 +362,12 @@ html {
     animation: companion-bob 2.8s ease-in-out infinite;
   }
 
+  .companion-launcher[data-live='closed'] .companion-robot-eye {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: companion-blink 5.2s ease-in-out infinite;
+  }
+
   .companion-launcher[data-hovered='true'] .companion-idle {
     animation: companion-react 0.55s ease-out;
   }
@@ -436,4 +442,9 @@ html {
   0% { opacity: 1; }
   70% { opacity: 1; }
   100% { opacity: 0; }
+}
+
+@keyframes companion-blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  94%, 96% { transform: scaleY(0.15); }
 }

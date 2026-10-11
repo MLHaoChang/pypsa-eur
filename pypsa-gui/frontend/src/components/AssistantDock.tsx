@@ -7,8 +7,11 @@ import ChatPanel from './ChatPanel'
 import { ConfirmationCard } from './ConfirmationCard'
 import CompanionLauncher, { type CompanionPresence } from './CompanionLauncher'
 import CompanionOutcome from './CompanionOutcome'
+import { speakLiveLine, stopLiveSpeech } from './companionVoice'
 import { KEY_RESULT_TABS, keyResultsWalkRequested, openProjectList, openProjectRequested, startKeyResultsWalk } from './liveWalk'
 import { ErrorBoundary } from './ErrorBoundary'
+
+const LIVE_GREETING = 'How can I help you?'
 
 /**
  * The assistant's own column, mounted beside the main area rather than inside
@@ -53,6 +56,7 @@ export default function AssistantDock() {
     walkCancel.current?.()
     if (echoClear.current != null) window.clearTimeout(echoClear.current)
     if (speakHold.current != null) window.clearTimeout(speakHold.current)
+    stopLiveSpeech()
   }, [])
 
   const stopWalk = useCallback(() => {
@@ -91,6 +95,9 @@ export default function AssistantDock() {
     if (!sawStream.current) return
     sawStream.current = false
     setPresence('speaking')
+    const latest = [...useChatStore.getState().messages].reverse()
+      .find((m) => m.role === 'assistant')
+    if (latest?.content) speakLiveLine(latest.content)
     if (speakHold.current != null) window.clearTimeout(speakHold.current)
     speakHold.current = window.setTimeout(() => {
       setPresence((current) => (current === 'speaking' ? 'listening' : current))
@@ -99,6 +106,10 @@ export default function AssistantDock() {
   }, [streaming, liveOpen, walking])
 
   const onLiveSubmit = useCallback((text: string) => {
+    if (speakHold.current != null) {
+      window.clearTimeout(speakHold.current)
+      speakHold.current = null
+    }
     if (keyResultsWalkRequested(text)) {
       stopWalk()
       setLiveEcho('')
@@ -280,10 +291,10 @@ export default function AssistantDock() {
             setAssistantDockOpen(true)
           }}
           onLive={() => {
-            // Stays on this page. A model key sends the turn through the
-            // chat harness; without one, the walk still calls applyUiNavigate.
+            // Stays on this page. Write/Dictate open the console; Live does not.
             if (liveOpen) {
               stopWalk()
+              stopLiveSpeech()
               setLiveOpen(false)
               setPresence('idle')
               setLiveCaption('')
@@ -292,9 +303,16 @@ export default function AssistantDock() {
               return
             }
             setLiveOpen(true)
-            setPresence('listening')
-            setLiveCaption('')
             setLiveEcho('')
+            setLiveCaption(LIVE_GREETING)
+            setPresence('speaking')
+            speakLiveLine(LIVE_GREETING)
+            if (speakHold.current != null) window.clearTimeout(speakHold.current)
+            speakHold.current = window.setTimeout(() => {
+              setLiveCaption('')
+              setPresence('listening')
+              speakHold.current = null
+            }, 2_200)
           }}
           onProfiles={() => {
             stopWalk()

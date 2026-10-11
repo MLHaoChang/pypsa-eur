@@ -161,12 +161,25 @@ describe('assistant dock prominence', () => {
 
   it('does not open the console when Live is clicked', async () => {
     const user = userEvent.setup()
+    const speak = vi.fn()
+    vi.stubGlobal('speechSynthesis', { speak, cancel: vi.fn() })
+    vi.stubGlobal('SpeechSynthesisUtterance', class {
+      text: string
+      rate = 1
+      pitch = 1
+      constructor(text: string) { this.text = text }
+    })
     render(<AssistantDock />)
+    expect(screen.getByTestId('companion-character').getAttribute('data-shape')).toBe('robot')
     await user.click(screen.getByTestId('companion-live'))
     expect(useUIStore.getState().assistantDockOpen).toBe(false)
     expect(useUIStore.getState().assistantEntry).toBeNull()
-    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('listening')
+    expect(screen.getByTestId('companion-character').getAttribute('data-shape')).toBe('live-node')
+    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('speaking')
+    expect(screen.getByTestId('companion-live-caption').textContent).toBe('How can I help you?')
+    expect(speak).toHaveBeenCalled()
     expect(screen.getByTestId('companion-live-input')).toBeTruthy()
+    vi.unstubAllGlobals()
   })
 
   it('sends a live sentence other than the walk through the chat stream and leaves the console closed', async () => {
