@@ -261,3 +261,24 @@ unit tests: **36 passed**. Ruff, inventory and diff checks pass. Commands are in
 [handoff](session-handoff.md). Final full backend and 31-driver results will be
 recorded before PR/merge. No independent expert approval, measured production
 false-acceptance rate or distributed project-runtime test is claimed.
+
+Integrated master `b8bc079f` and preserved both companion and reliability view
+markers. Supplementary passive-branch oracle: **3 passed**, independently checking
+80 EUR/year / 250 EUR total, branch overload and in-capacity imbalance. Production
+build and integrated upstream **36 tests** pass. The frontend's initial integrated
+run had **3,604 passed / 1 five-second DOM timeout** under concurrent load; the
+unchanged affected rerun passes **98 tests**, and a fresh full run is required.
+Ruff passes new modules/records/tests; loop/session match the same seven findings
+already present on master and routers add none. GitHub dispatch recheck returns
+422 Actions disabled. Final full results follow before merge.
+
+Final integrated frontend rerun: **3,605 passed / 307 files**, unchanged timeout
+and assertions, 501.87 seconds. The initial concurrent timeout is resolved. Full
+backend and fresh integrated QA remain running.
+
+Final focused backend selection on the integrated source: **200 passed**
+(140.27 seconds), including all passive-branch cases and explicit static-setting/
+time-series effect disclosure. Final receipt-parser tightening refuses array-shaped
+verdict/review-status enums; its focused UI selection passes **26 tests**. New
+module/fixture Ruff checks pass. A fresh final full frontend/build follows this
+last parser change; no broad quantitative-prose or reviewer-proof claim is made.

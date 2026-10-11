@@ -104,7 +104,8 @@ Scope and operation contracts cannot be combined or attached to uploads. The
 supported attributes are Load `p_set/q_set`, Generator/StorageUnit `p_nom`,
 Line/Transformer `s_nom`, Store `e_nom`. Values must be finite and physically
 nonnegative except signed Load reactive power. All other strict effects are
-blocked. Existing confirmation remains mandatory, including Expert mode.
+blocked. Completion describes a static input write; time-series values can still
+override those settings. Existing confirmation remains mandatory, including Expert mode.
 
 Reservation happens before execution. Exact completed repeats return the stored
 receipt; live/uncertain/conflicting repeats are refused. Publication requires
@@ -136,7 +137,10 @@ supersede them. Mounted-view completion is not displayed-result numerical proof.
 
 A final typed draft may have at most two qualitative interpretations, each
 with a unique ID and citations to checked block IDs. Quantitative claims belong
-in computed blocks; numeric prose is withheld before review. One optional
+in computed blocks; the numeric-prose guard rejects digits, English number words and common
+engineering/currency units before review. This lexical guard is not a proof
+against every possible numerical paraphrase; reviewed interpretations remain
+model judgments, separate from deterministically verified facts. One optional
 read-only call can pass or withhold all interpretations; it cannot change facts,
 use tools, fetch evidence, repair drafts or publish its own prose. The call is
 bounded to 512 output tokens, 128 events, a 16 KiB packet, a 4 KiB verdict and

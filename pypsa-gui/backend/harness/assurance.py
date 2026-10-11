@@ -567,7 +567,9 @@ class Turn:
                 for k, v in args["attrs"].items()
             )
             return (
-                f"Verified update of {_label(args['component_class'])} {_label(args['name'])}: {rendered}. Read-back matched the authorized changed paths and model inputs.",
+                f"Verified static input update of {_label(args['component_class'])} {_label(args['name'])}: {rendered}. "
+                "Read-back matched the authorized changed paths and model inputs. "
+                "Time-series values can override these static settings.",
                 [],
                 [],
             )

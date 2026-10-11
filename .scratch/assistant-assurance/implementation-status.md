@@ -40,7 +40,8 @@ measured production false-acceptance rate is claimed.
   `update_component` contract. It reserves a durable operation ID after ordinary
   confirmation and before dirty flags/undo/handler execution. Server read-back
   compares the entire input fingerprint against an independently prepared
-  candidate. A handler's success JSON cannot establish completion. Completed
+  candidate. A handler's success JSON cannot establish completion. Completion
+  refers to static settings; time-series values can override them. Completed
   retries return the checkpoint; live or uncertain operations never auto-repeat.
   Read-only reconciliation refuses live workers and records verified postconditions.
 - `harness.navigation` issues short-lived owner/project/input/turn/generation
@@ -49,8 +50,9 @@ measured production false-acceptance rate is claimed.
   submission until that independent browser acknowledgement arrives.
 - `harness.reviewer` optionally checks at most two qualitative interpretations
   using one bounded, read-only provider call with no tools/history/evidence fetch.
-  Deterministic validation runs first and quantitative prose is rejected in favor
-  of typed computed blocks. Missing usage, malformed verdicts, tools, timeout or
+  Deterministic validation runs first; a numeric-prose guard rejects digits,
+  English number words and common units in favor of typed computed blocks.
+  Reviewed interpretation is still a model judgment, not deterministic proof. Missing usage, malformed verdicts, tools, timeout or
   review failure withhold interpretations while preserving checked facts.
 - `harness.publication` exports authenticated JSON or ZIP from the same approved
   answer and revalidated evidence. ZIP contains answer JSON, facts CSV and byte

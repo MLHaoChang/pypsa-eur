@@ -31,10 +31,10 @@ export function parseApproval(value: Record<string, unknown>): ApprovedAnswerFra
     || value.answer_id.length > 128
     || typeof value.turn_id !== 'string' || !value.turn_id
     || value.turn_id.length > 128
-    || !['passed', 'limited'].includes(String(value.verdict)) || !receipt
+    || typeof value.verdict !== 'string' || !['passed', 'limited'].includes(value.verdict) || !receipt
     || typeof receipt.content_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(receipt.content_sha256)
     || receipt.policy_version !== '1'
-    || !REVIEW_STATUSES.has(String(receipt.reviewer_status))
+    || typeof receipt.reviewer_status !== 'string' || !REVIEW_STATUSES.has(receipt.reviewer_status)
     || (receipt.request_complete !== undefined && typeof receipt.request_complete !== 'boolean')
     || (scope !== undefined && (!scope || typeof scope !== 'object' || Array.isArray(scope)
       || typeof scope.profile !== 'string' || scope.profile.length > 64

@@ -28,3 +28,8 @@ it('accepts bounded withheld review receipts but rejects malformed scope/coverag
   expect(parseApproval({ ...frame, receipt: { ...receipt, request_complete: 'yes' } })).toBeNull()
   expect(parseApproval({ ...frame, receipt: { ...receipt, result_slots: [{ metric: 'cost', disposition: 'answered', requested_snapshots: -1 }] } })).toBeNull()
 })
+it('refuses array-shaped verdict and review status even with an otherwise valid receipt', () => {
+  const frame = { version: 1, answer_id: 'a', turn_id: 't', verdict: 'limited', receipt }
+  expect(parseApproval({ ...frame, verdict: ['limited'] })).toBeNull()
+  expect(parseApproval({ ...frame, receipt: { ...receipt, reviewer_status: ['passed'] } })).toBeNull()
+})

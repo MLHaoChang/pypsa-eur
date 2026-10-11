@@ -278,8 +278,41 @@ active project/network state remains single-worker.
 Final focused gate: **197 passed**. Full frontend: **3,567 passed / 301 files**;
 production TypeScript/Vite build passed (existing chunk-size warning). Upstream:
 **36 passed**. Ruff, inventory (220 tools / 14 tabs / 17 panels) and diff checks
-pass. Full backend and all 31 QA drivers are running; final counts will be
-recorded before PR/merge. A root-directory backend attempt was stopped because
+pass. All 31 QA drivers passed on the continuation; fresh full backend/frontend
+runs after integrating master are required before PR/merge. A root-directory backend attempt was stopped because
 existing relative-source tests require backend cwd; it is not a passing gate.
 GitHub Actions was previously refused with 422 because disabled repository-wide;
 recheck remote policy and report local versus remote validation honestly.
+
+### Current master integration and final checks
+
+Integrated master `b8bc079f` (companion PR 113) into the reliability branch.
+The Results merge preserves both its companion `data-active-results-tab` marker
+and the reliability `data-assurance-tab` marker. Corrected upstream TypeScript
+errors: optional walk-options access and a test fixture's nullable active-profile
+ID against the declared string response type. Production build passes.
+The integrated frontend initially had **3,604 passed / 1 timeout**, solely the
+existing 1,000-row DOM test under concurrent build/QA load. No assertion or timeout
+was changed. Its affected five-file rerun passes **98 tests**; a fresh full suite
+is running. The independent two-bus feeder oracle additionally passes **3 tests**:
+80 EUR/year capacity charges / 250 EUR total, overload refusal and within-capacity
+power-balance refusal. The initial focused gate was 197; these three supplement it.
+
+New modules/records/tests pass Ruff. Modified legacy loop/session retain exactly
+**7 pre-existing findings**, verified against origin/master; routers add none.
+No broad lint-clean claim is made. Upstream units after master integration:
+**36 passed**. GitHub inventory dispatch was rechecked and still refuses with
+HTTP 422 “Actions has been disabled for this repository”, despite workflow
+metadata listing active definitions. Remote Actions is not the validation gate.
+
+Full integrated frontend rerun: **3,605 passed / 307 files**, unchanged assertions
+and timeout settings (501.87 seconds). This replaces the initial concurrency
+timeout as the final frontend gate. Backend full run is still in progress; QA
+is rerunning all 31 drivers on the integrated source.
+
+Final focused backend gate: **200 passed** / 65 existing warnings, 140.27 seconds.
+Static-write receipts now explicitly label static settings and their time-series
+override boundary. Receipt enum fields require actual strings, refusing arrays
+that JavaScript would otherwise stringify to valid enum values; affected UI gate:
+**26 passed**. Final full frontend and build must follow that parser change.
+No further functional changes are planned except fixing any observed failures.

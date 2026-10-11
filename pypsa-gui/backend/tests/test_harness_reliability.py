@@ -310,10 +310,16 @@ def test_effect_confirmation_readback_and_idempotent_replay(
         return handler(**args)
 
     monkeypatch.setitem(chat_tools.DISPATCHERS, "update_component", observed)
+    original_series = baseline[0].network.loads_t.p_set.copy()
     frames = checked.run(effect_turns(contract), checked_operation=contract)
     assert any(event == "tool_pending_confirmation" for event, _ in frames)
     assert approval(frames)["verdict"] == "passed"
     assert baseline[0].network.loads.at["L1", "p_set"] == 8
+    assert baseline[0].network.loads_t.p_set.equals(original_series)
+    assert "Verified static input update" in public_text(frames)
+    assert "Time-series values can override these static settings." in public_text(
+        frames
+    )
     result = checked.client.get("/api/chat/operations/" + contract["operation_id"])
     assert result.status_code == 200
     assert result.json()["outcome"] == "completed"
