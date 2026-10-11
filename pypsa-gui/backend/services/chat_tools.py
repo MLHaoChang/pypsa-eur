@@ -4317,6 +4317,143 @@ def ui_set_snapshot(snapshot_iso: str, period: int | None = None) -> dict:
             "snapshot_iso": snapshot_iso, "period": period}
 
 
+def discuss_project_run(
+    run_id: str,
+    results_tab: str | None = None,
+    section: str | None = None,
+    baseline_run_id: str | None = None,
+    open_ui: bool = True,
+) -> dict:
+    """
+    Bind conversation follow-ups to a recorded run and optionally open it in
+    the Results chrome. Emits ``open_run_result`` (kind) when ``open_ui``;
+    never restores historical inputs onto the live network.
+    """
+    from harness.catalogue import RESULTS_TAB_ENUM
+    from services import durable_conversation as dc
+    from services import run_evidence as re_
+
+    if results_tab is not None and (
+        not isinstance(results_tab, str) or results_tab not in RESULTS_TAB_ENUM
+    ):
+        raise HTTPException(400, detail={
+            "error_kind": "invalid_navigation",
+            "field": "results_tab",
+            "message": "Choose a supported results_tab from the tool schema.",
+        })
+    if open_ui is not True and open_ui is not False:
+        raise HTTPException(422, detail={
+            "error_kind": "invalid_discussed_run",
+            "message": "open_ui must be true or false.",
+        })
+
+    session = chat_session()
+    if session is None:
+        raise HTTPException(409, detail={
+            "error_kind": "no_chat_session",
+            "message": "Discussing a run requires an active chat session.",
+        })
+
+    summary = re_.get_run_evidence(run_id)
+    if baseline_run_id is not None:
+        re_.get_run_evidence(baseline_run_id)
+
+    root, project_id, _owner = re_._authority()
+    del root  # authority revalidated; project_id is the discussed scope
+    discussed = {
+        "project_id": project_id,
+        "run_id": run_id,
+        "status": summary.get("status"),
+        "mode": summary.get("mode"),
+        "fingerprint": summary.get("fingerprint"),
+        "evidence_available": bool(summary.get("evidence_available")),
+    }
+    if results_tab:
+        discussed["source"] = results_tab
+    if section:
+        discussed["section"] = section
+    if baseline_run_id:
+        discussed["baseline_run_id"] = baseline_run_id
+
+    with session._lock:
+        session.discussed_refs = dict(discussed)
+
+    thread_id = dc.find_thread_for_episode(session.session_id)
+    if thread_id:
+        thread = dc.get_thread(thread_id)
+        dc.set_discussed_run(
+            thread_id,
+            generation=int(thread["generation"]),
+            run_id=run_id,
+            project_id=project_id,
+            baseline_run_id=baseline_run_id,
+            section=section,
+            source=results_tab,
+            clear_baseline=baseline_run_id is None,
+        )
+
+    if not open_ui:
+        return {"ok": True, "discussed": discussed, "ui_navigated": False}
+
+    event: dict[str, Any] = {
+        "_ui_event": True,
+        "kind": "open_run_result",
+        "run_id": run_id,
+        "status": summary.get("status"),
+        "mode": summary.get("mode"),
+        "fingerprint": summary.get("fingerprint"),
+        "evidence_available": bool(summary.get("evidence_available")),
+        "discussed": discussed,
+    }
+    if results_tab:
+        event["results_tab"] = results_tab
+    if section:
+        event["section"] = section
+    if baseline_run_id:
+        event["baseline_run_id"] = baseline_run_id
+    return event
+
+
+def export_run_evidence(
+    run_id: str | None = None,
+    section: str | None = None,
+) -> dict:
+    """
+    Export immutable evidence for a named run, or the session's discussed run
+    when ``run_id`` is omitted. Never substitutes another/newer run.
+    """
+    import json as _json
+
+    from services import run_evidence as re_
+
+    resolved = run_id
+    if resolved is None:
+        session = chat_session()
+        refs = getattr(session, "discussed_refs", None) if session is not None else None
+        if not isinstance(refs, dict) or not refs.get("run_id"):
+            raise HTTPException(409, detail={
+                "error_kind": "discussed_run_required",
+                "message": (
+                    "No run_id was given and no discussed run is bound. "
+                    "Call discuss_project_run or pass run_id from list_project_runs."
+                ),
+            })
+        resolved = str(refs["run_id"])
+
+    evidence = re_.get_run_evidence(resolved, section=section)
+    filename = (
+        f"run_{resolved}_{section}.json" if section else f"run_{resolved}.json"
+    )
+    payload = _json.dumps(evidence, allow_nan=False, sort_keys=True, indent=2).encode("utf-8")
+    meta = _save_agent_export(payload, filename, "application/json")
+    return {
+        **meta,
+        "run_id": resolved,
+        "section": section,
+        "note": "Exported the named (or discussed) run only; current network results were not substituted.",
+    }
+
+
 # ── Harness: ask the user (chat harness issue 04) ──────────────────────────
 
 ASK_USER_MAX_OPTIONS = 8
@@ -6915,6 +7052,7 @@ from services.workflow_tools import (
 )
 
 from services.run_evidence import list_project_runs, get_run_evidence, compare_project_runs
+# discuss_project_run is defined above with the UI-control tools.
 from services.loadflow_summary import get_loadflow_summary
 from services.assistant_tasks import list_tasks, start_task, get_task, resume_task, cancel_task, resolve_task_step
 from services.assistant_tools import (find_capabilities, get_file_delivery, inspect_import, import_uploaded_network,
@@ -6924,6 +7062,8 @@ DISPATCHERS: dict[str, Any] = {
     "list_project_runs": list_project_runs,
     "get_run_evidence": get_run_evidence,
     "compare_project_runs": compare_project_runs,
+    "discuss_project_run": discuss_project_run,
+    "export_run_evidence": export_run_evidence,
     "get_loadflow_summary": get_loadflow_summary,
     "list_tasks": list_tasks,
     "find_capabilities": find_capabilities,

@@ -2702,12 +2702,18 @@ def _dispatch_real_tool_call(
             "compare_a": ui_event_payload.get("compare_a"),
             "compare_b": ui_event_payload.get("compare_b"),
             "compare_tab": ui_event_payload.get("compare_tab"),
+            # Issue 06 — open_run_result acknowledges the discussed run id.
+            "run_id": ui_event_payload.get("run_id"),
+            "section": ui_event_payload.get("section"),
+            "baseline_run_id": ui_event_payload.get("baseline_run_id"),
             # Preserve compare_scenarios numeric payload when present.
             **{
                 k: result[k]
                 for k in (
                     "project_a", "project_b", "focus", "a", "b",
                     "delta_b_minus_a", "focus_section", "note",
+                    "discussed", "status", "mode", "fingerprint",
+                    "evidence_available",
                 )
                 if k in result
             },

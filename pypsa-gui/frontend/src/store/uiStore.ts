@@ -361,6 +361,19 @@ export interface AssetDetailRequest {
   chart?: boolean
 }
 
+// Issue 06 — discussed historical run selected in Results chrome. Sticky
+// until cleared or the project switches; does not restore run inputs.
+export interface RunResultRequest {
+  runId: string
+  status?: string
+  resultsTab?: string
+  section?: string
+  baselineRunId?: string
+  mode?: string
+  fingerprint?: string
+  evidenceAvailable?: boolean
+}
+
 interface UIStore {
   sidebarExpanded: boolean
   sidebarMode: SidebarMode
@@ -451,6 +464,9 @@ interface UIStore {
   // Deep-link into the Asset Detail tab (Task 13). Consumed then cleared by
   // AssetDetail.tsx's effect. Set only via `requestAssetDetail`.
   assetDetailRequest: AssetDetailRequest | null
+  // Issue 06 — discussed run shown in Results chrome. Sticky (not consumed);
+  // cleared by clearDiscussedRun or project switch.
+  discussedRun: RunResultRequest | null
   // Chat / agent: seed CompareView A/B + tab (consumed then cleared).
   compareNavRequest: { a?: string; b?: string; tab?: string } | null
   // Chat / agent: open Import/Export modal ('import' | 'export').
@@ -560,6 +576,9 @@ interface UIStore {
   // the selection all move together, so none of them can drift out of step.
   requestAssetDetail: (req: AssetDetailRequest) => void
   clearAssetDetailRequest: () => void
+  // Issue 06 — open Results on a discussed historical run (identifiers only).
+  requestRunResult: (req: RunResultRequest) => void
+  clearDiscussedRun: () => void
   requestCompareNav: (nav: { a?: string; b?: string; tab?: string }) => void
   clearCompareNavRequest: () => void
   requestIoModal: (tab: 'import' | 'export') => void
@@ -623,6 +642,7 @@ export const useUIStore = create<UIStore>((set) => ({
   propertiesEditRequest: null,
   ehReportRequest: false,
   assetDetailRequest: null,
+  discussedRun: null,
   compareNavRequest: null,
   ioModalRequest: null,
   readOnly: false,
@@ -830,6 +850,12 @@ export const useUIStore = create<UIStore>((set) => ({
     resultsTabRequest: 'asset',
   }),
   clearAssetDetailRequest: () => set({ assetDetailRequest: null }),
+  requestRunResult: (req) => set({
+    discussedRun: req,
+    activeSlidePanel: 'results',
+    ...(req.resultsTab ? { resultsTabRequest: req.resultsTab } : {}),
+  }),
+  clearDiscussedRun: () => set({ discussedRun: null }),
   requestCompareNav: (nav) => set({ compareNavRequest: nav }),
   clearCompareNavRequest: () => set({ compareNavRequest: null }),
   requestIoModal: (tab) => set({ ioModalRequest: tab }),
@@ -874,6 +900,8 @@ export const useUIStore = create<UIStore>((set) => ({
         selectedComponent: null,
         highlightedComponent: null,
         assetDetailRequest: null,
+        // Issue 06 — discussed run ids are project-scoped; drop on switch.
+        discussedRun: null,
         // P30 gate S-2: the same hazard for a pending Edit request — it must
         // not open project B's same-named bus in Edit.
         propertiesEditRequest: null,

@@ -2114,8 +2114,14 @@ export default function ChatPanel() {
           period?: number | null
           category?: string
           metrics?: string[]
-          mode?: 'chronological' | 'duration' | 'monthly'
+          mode?: 'chronological' | 'duration' | 'monthly' | string
           chart?: boolean
+          run_id?: string
+          section?: string
+          baseline_run_id?: string
+          status?: string
+          fingerprint?: string
+          evidence_available?: boolean
         }>(frame)
         try {
           applyUiNavigate(d)
