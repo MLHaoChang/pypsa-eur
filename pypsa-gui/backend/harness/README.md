@@ -28,6 +28,7 @@ harness/
   providers/      anthropic, openai_compat, openai_responses, fake, and wiring (profile → provider, tools payload, history portability) — the only place a wire is named
   loop.py         the turn loop: the stream seam and tool dispatch (the former services/chat_service.py)
   solver_bridge.py  the solver log → tool_progress bridge for a running run_simulation / run_ac_pf_stage call
+  job_adapters.py foreground (fg:…) and later domain job handles for wait_for_job without holding the turn
   compose.py      the system prompt for a turn, the live network line, and the per-turn ui-context / Guided / workflow-step blocks
   budget.py       the per-turn / per-session / daily caps, the retry schedule, the per-tool timeout, the budget gate
   stub.py         the scripted stub loop behind StreamRequest.script

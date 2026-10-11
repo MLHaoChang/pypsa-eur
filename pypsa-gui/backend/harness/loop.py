@@ -2457,6 +2457,7 @@ def _dispatch_real_tool_call(
         try:
             from services.pypsa_service import PyPSAService
             from harness.solver_bridge import start_detached_solver_monitor
+            from harness import job_adapters as ja
             active_ctx = turn_ctx or PyPSAService.get_active_context()
             if task_ticket is not None:
                 # Sequential task steps cannot advance from a start receipt.
@@ -2487,6 +2488,22 @@ def _dispatch_real_tool_call(
                 kind = active_ctx.solver_state.get("kind")
                 status = active_ctx.solver_state.get("status")
             base = result if isinstance(result, dict) else {"result": result}
+            job_id = None
+            if status == "running":
+                from services import chat_tools as _ct
+                owner = getattr(session, "owner_user_id", None) or _ct.acting_user_id()
+                job_id = ja.register_foreground_solve(
+                    tool_name=tool_name,
+                    tool_use_id=tool_use_id,
+                    owner_user_id=str(owner) if owner else None,
+                    project_uuid=getattr(active_ctx, "project_uuid", None),
+                    kind=kind,
+                )
+                start_detached_solver_monitor(
+                    session, active_ctx,
+                    tool_use_id=tool_use_id,
+                    tool_name=tool_name,
+                )
             result = {
                 **base,
                 "status": base.get("status") or "started",
@@ -2494,13 +2511,8 @@ def _dispatch_real_tool_call(
                 "kind": kind,
                 "monitor": "get_simulation_status",
                 "detached_progress": task_ticket is None or status == "running",
+                **({"job_id": job_id} if job_id else {}),
             }
-            if status == "running":
-                start_detached_solver_monitor(
-                    session, active_ctx,
-                    tool_use_id=tool_use_id,
-                    tool_name=tool_name,
-                )
         except Exception as exc:  # noqa: BLE001 — enrich is best-effort
             logger.exception(
                 "chat: foreground solve handoff enrich for %s failed: %s",

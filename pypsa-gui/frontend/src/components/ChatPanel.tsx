@@ -33,6 +33,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
   createChatStream,
+  createChatProgressStream,
   getChatHistory,
   postChatAbort,
   postChatConfirm,
@@ -1135,6 +1136,13 @@ export default function ChatPanel() {
   const toolTierRef = useRef(new Map<string, string>())
   const streamGenerationRef = useRef(0)
   const streamProjectRef = useRef(useUIStore.getState().currentProject)
+  // Issue 11 — detached solver progress observer (GET …/progress). Independent
+  // of the turn SSE so reads can continue while the solve still emits lines.
+  const progressCleanupRef = useRef<(() => void) | null>(null)
+  const stopProgressObserver = useCallback(() => {
+    try { progressCleanupRef.current?.() } catch { /* idempotent */ }
+    progressCleanupRef.current = null
+  }, [])
   const assuranceRef = useRef<{
     strict: boolean; text: string; approved: ApprovedAnswerFrame | null;
     turnId?: string; sessionId?: string; project: string | null; completed: boolean;
@@ -1218,6 +1226,7 @@ export default function ChatPanel() {
   useEffect(() => {
     if (prevProjectRef.current !== undefined && prevProjectRef.current !== currentProject) {
       if (streamProjectRef.current !== currentProject) streamGenerationRef.current += 1
+      stopProgressObserver()
       resetChatForProjectSwitch()
       // N-1 — the recovery banners describe ONE hydration of ONE project, as
       // their declaration comment says. They were only ever reassigned inside
@@ -1231,7 +1240,7 @@ export default function ChatPanel() {
     }
     prevProjectRef.current = currentProject
     streamProjectRef.current = currentProject
-  }, [currentProject, resetChatForProjectSwitch])
+  }, [currentProject, resetChatForProjectSwitch, stopProgressObserver])
 
   // N-1 — same for "start a new chat": the banners are about the transcript
   // being replaced, so they must not outlive it. `newChatSeq` is the counter
@@ -1241,11 +1250,12 @@ export default function ChatPanel() {
   useEffect(() => {
     if (prevNewChatSeqRef.current !== newChatSeq) {
       streamGenerationRef.current += 1
+      stopProgressObserver()
       prevNewChatSeqRef.current = newChatSeq
       setHistoryGap(0)
       setInterruptedTurn(null)
     }
-  }, [newChatSeq])
+  }, [newChatSeq, stopProgressObserver])
 
   // Hydrate from chat.jsonl whenever a project becomes active. The backend
   // also rehydrates `session.messages` so subsequent turns can thread prior
@@ -2008,6 +2018,32 @@ export default function ChatPanel() {
           tool_result: assuranceRef.current.strict ? undefined : d.result,
           tool_use_id: d.tool_use_id, tool_name: d.tool_name,
         })
+        // Issue 11 — foreground solve handoff: subscribe to the detached
+        // progress ring so PHASE/VALIDATION lines keep arriving after the
+        // turn SSE closes. Same tool_progress frames as an in-turn bridge.
+        {
+          const result = d.result as { detached_progress?: unknown } | undefined
+          if (result?.detached_progress === true) {
+            const sid = useChatStore.getState().sessionId
+            if (sid) {
+              stopProgressObserver()
+              progressCleanupRef.current = createChatProgressStream(
+                sid,
+                (progressFrame) => {
+                  if (progressFrame.event !== 'tool_progress') return
+                  const p = progressFrame.data as {
+                    tool_use_id?: string; kind?: string; line?: string
+                  }
+                  if (p.tool_use_id && typeof p.kind === 'string' && typeof p.line === 'string') {
+                    useChatStore.getState().appendToolProgress(
+                      p.tool_use_id, { kind: p.kind, line: p.line },
+                    )
+                  }
+                },
+              )
+            }
+          }
+        }
         break
       }
       case 'tool_error': {
@@ -2237,7 +2273,8 @@ export default function ChatPanel() {
       }
     }
   }, [qc, setSessionId, appendMessage, appendTokenDelta, appendThinkingDelta, setPending,
-      appendToolProgress, accrueUsage, setStreaming, setError, closeStream])
+      appendToolProgress, accrueUsage, setStreaming, setError, closeStream,
+      stopProgressObserver])
 
   // Phase D polish #3 — auto-uncheck-after-send opt-in setting.
   // Stored in localStorage; OFF by default (matches sticky-chip intent).
@@ -2513,11 +2550,12 @@ export default function ChatPanel() {
   // panel. An idle stream is still closed here.
   useEffect(() => {
     return () => {
+      stopProgressObserver()
       const { streaming, streamCleanup } = useChatStore.getState()
       if (streaming) return
       try { streamCleanup?.() } catch { /* idempotent */ }
     }
-  }, [])
+  }, [stopProgressObserver])
 
   // ── per-message actions ───────────────────────────────────────────────
   //
