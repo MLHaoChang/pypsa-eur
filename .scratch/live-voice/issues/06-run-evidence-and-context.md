@@ -83,3 +83,13 @@ paths; a monitor cancelled by a session abort before the solve ends leaves a
 `running` marker; objective unit is assumed EUR (no per-project currency yet);
 fingerprint is computed at completion; conversational run references, result UI
 selection/export of the discussed run, restart and stale-binding cases.
+
+2026-10-11: Conversational run refs + result UI — `discuss_project_run` validates
+a recorded run, stores identifiers on `ChatSession.discussed_refs`, syncs
+`refs.discussed` via `durable_conversation.set_discussed_run` when an episode is
+bound, and emits ui_event `kind=open_run_result`. Frontend `requestRunResult`
+opens Results with sticky discussed-run chrome (no historical input restore).
+Catalogue/dispatcher/route/toolset/inventory parity. Tests:
+`tests/test_discuss_project_run.py`, `runResultRequest.test.ts`, navigation
+vitest. Still open: export bound to discussed run; full three-run acceptance
+journey with ACL/restart/stale-binding fixtures.

@@ -139,6 +139,10 @@
       "surface": "inline",
       "why": "A confirm request carried something other than approve/deny — a client bug, not a user-actionable state."
     },
+    "invalid_discussed_run": {
+      "surface": "inline",
+      "why": "discuss_project_run / set_discussed_run received a malformed run_id or open_ui flag. The model corrects arguments within the turn."
+    },
     "invalid_filename": {
       "surface": "banner",
       "why": "Upload rejected on the filename. The user must rename."
@@ -202,6 +206,10 @@
     "no_active_project": {
       "surface": "inline",
       "why": "Most tools need a project; the model recovers by asking which one, in prose, inside the same turn. Promoting it would banner a question the assistant is already asking."
+    },
+    "no_chat_session": {
+      "surface": "inline",
+      "why": "A session-bound control tool (discuss_project_run, use_toolset, start/resume_task) ran without an active ChatSession. The turn framework normally supplies one; when it does not, the model reports the refusal and does not invent session state."
     },
     "no_active_workflow": {
       "surface": "inline",

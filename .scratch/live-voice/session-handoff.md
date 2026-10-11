@@ -151,8 +151,14 @@ issue 08 full-coverage limitation block; issue 12 companion done.
 2026-10-11: branch `cursor/run-publish-paths-a604` — queue/GridSpine, study,
 and report completion paths publish run evidence (pytest domains suite).
 
-Next runnable (no credentials): issue 06 conversational run refs + result UI;
-mocked issue 03/04 scaffolding; issue 10 experiment adapters.
+2026-10-11: branch `cursor/run-refs-ui-a604` — issue 06 conversational run refs
++ result UI (`discuss_project_run`, durable `set_discussed_run`,
+`open_run_result` chrome). Local: discuss/run-evidence/inventory/endpoint-map
+pytest + vitest navigation/runResultRequest green.
+
+Next runnable (no credentials): mocked issue 03/04 scaffolding; issue 10
+experiment adapters; discussed-run export binding; issue 06 three-run
+acceptance fixtures.
 
 **Credential / release blockers (cannot close without external access):**
 LiveKit Build + hosted STT/TTS live probe (01/02/09 deployment smoke);
