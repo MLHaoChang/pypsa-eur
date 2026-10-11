@@ -110,9 +110,18 @@ Issue 02 C-U1 admission coordinator:
 - `pytest tests/test_utterance_admission_c_u1.py` → 8 passed
 - Module: `services/utterance_admission.py` (not yet wired into `/stream`)
 
-Next runnable slice: wire utterance admission into `run_turn`/stream (C-I1),
-finish issue 09 HTTP/rebind/worker-pin, then 11 long-job lease release. Do not
-claim whole-application coverage or live voice done.
+2026-10-11 continued:
+- Issue 02 C-I1: optional `utterance_id`+`generation` on `/stream` → `run_turn`
+  admission gate; `pytest tests/test_utterance_admission_stream_c_i1.py` → 6 passed
+- Issue 09 B-I1 HTTP: `/api/durable-conversations` + generation CAS;
+  `pytest tests/test_durable_conversation_http_b_i1.py` → 4 passed
+
+Issue 11 D-I1 first slice: foreground solve handoff without bridge wait;
+`pytest tests/test_nonblocking_foreground_solve_d_i1.py` → 3 passed.
+
+Next runnable slice: issue 11 detached progress / adapters; issue 09 rebind +
+worker pin; Live busy→queue path. Do not claim whole-application coverage or
+live voice done.
 
 ## 2026-10-10 design amendment — floating companion
 

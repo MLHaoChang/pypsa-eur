@@ -3,7 +3,7 @@
 
 # Nonblocking domain jobs, recoverable monitoring and results refresh
 
-Status: ready-for-agent
+Status: claimed
 Type: task
 Blocked by: 02, 08, 09
 
@@ -28,3 +28,11 @@ recovery, event gaps/duplicates recover, stale updates cannot cross projects/vie
 and UI/results match authoritative artifacts for every workload.
 
 ## Comments
+
+2026-10-11: D-I1 first slice — `_dispatch_real_tool_call` no longer awaits
+`solver_log_bridge` for `run_simulation` / `run_ac_pf_stage`. Tool result is the
+started handle (`status=started`, `running`, `monitor=get_simulation_status`);
+the turn and utterance lease release while the worker continues. Tests:
+`tests/test_nonblocking_foreground_solve_d_i1.py` (3 passed). Still open: detached
+progress SSE, full domain adapters, wait_for_job for foreground solves, D-I2
+cursor recovery, D-C1 multi-family monitoring.

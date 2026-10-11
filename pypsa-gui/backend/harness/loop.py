@@ -2232,7 +2232,7 @@ def _dispatch_real_tool_call(
         # on a shared worker pool and abandon it after PER_TOOL_TIMEOUT_SECONDS,
         # emitting tool_timeout. Solver tools (run_simulation / run_ac_pf_stage)
         # are EXCLUDED — they return immediately (spawning their own worker) and
-        # the solver_log_bridge below owns their long-running lifecycle, so a
+        # issue 11 hands the turn off without awaiting that worker, so a
         # timeout here would be wrong. A timed-out worker stays detached (a Python
         # thread can't be force-killed): the SSE thread is freed, the orphan
         # finishes or hangs harmlessly. CAVEAT (documented): an orphan that LATER
@@ -2376,44 +2376,30 @@ def _dispatch_real_tool_call(
     if tool_name == "undo_last":
         _forget_turn_undo(session)
 
-    # Long-running execution tier: bridge solver log lines into tool_progress
-    # frames between tool_running and tool_result. run_simulation /
-    # run_ac_pf_stage return immediately (they spawn a worker thread); we
-    # poll the active solver_state until status flips to a terminal state,
-    # streaming [PHASE] / [VALIDATION] / TRACEBACK lines as they arrive
-    # (F10: ctx + log_queue captured under solver_state_lock).
+    # Issue 11 / D-I1 — foreground solve/AC-PF handoff. The handlers already
+    # return {"status": "started"} after spawning a worker. Holding this turn
+    # on solver_log_bridge until terminal status blocked every other read
+    # (turn_already_in_flight / utterance lease). Emit the started handle and
+    # release the turn; observe via get_simulation_status (detached progress
+    # SSE and full job adapters are later slices).
     if tool_name in ("run_simulation", "run_ac_pf_stage"):
         try:
             from services.pypsa_service import PyPSAService
             active_ctx = turn_ctx or PyPSAService.get_active_context()
-
-            def _solver_done() -> bool:
-                with active_ctx.solver_state_lock:
-                    status = active_ctx.solver_state.get("status")
-                return status in ("completed", "failed", "aborted", "idle")
-
-            for prog in solver_log_bridge(
-                session, active_ctx,
-                poll_interval=0.1,
-                is_solver_done=_solver_done,
-            ):
-                yield "tool_progress", {
-                    "tool_use_id": tool_use_id,
-                    "tool_name": tool_name,
-                    **prog,
-                }
-            # Re-read final status into the tool_result payload so the agent
-            # learns whether the solve succeeded.
             with active_ctx.solver_state_lock:
-                result = {
-                    **(result if isinstance(result, dict) else {"result": result}),
-                    "final_status": active_ctx.solver_state.get("status"),
-                    "objective": active_ctx.solver_state.get("objective"),
-                    "solve_time": active_ctx.solver_state.get("solve_time"),
-                }
-        except Exception as exc:  # noqa: BLE001 — bridge failure is non-fatal
+                kind = active_ctx.solver_state.get("kind")
+                status = active_ctx.solver_state.get("status")
+            base = result if isinstance(result, dict) else {"result": result}
+            result = {
+                **base,
+                "status": base.get("status") or "started",
+                "running": status == "running",
+                "kind": kind,
+                "monitor": "get_simulation_status",
+            }
+        except Exception as exc:  # noqa: BLE001 — enrich is best-effort
             logger.exception(
-                "chat: solver_log_bridge for %s failed: %s",
+                "chat: foreground solve handoff enrich for %s failed: %s",
                 tool_name, _redact_for_log(exc),
             )
 

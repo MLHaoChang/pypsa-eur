@@ -39,7 +39,14 @@ without rewriting parent facts. Wrong owner/project → 404 `thread_not_found`.
 `resume_episode` drops the prior episode (and its pending approvals), mints a new
 owned ChatSession, bumps generation. B-U2 ledger: `reserve_budget` /
 `settle_budget` count once across resume. Tests:
-`tests/test_durable_conversation_parent_thread.py` (9 passed). Still open for 09:
+`tests/test_durable_conversation_parent_thread.py` (10 passed). Still open for 09:
 checkpoint/resume HTTP + stale generation rejection, rebind credential refresh,
 worker pin / deployment smoke, B-C1 prolonged journey. Do not integrate issue 02
 media acceptance until those land.
+
+2026-10-11: B-I1 HTTP — `routers/durable_conversation.py` at
+`/api/durable-conversations` (create/get/checkpoint/resume) with
+`require_user` + generation compare-and-swap (`stale_generation` 409). Wrong
+actor/project stays 404 `thread_not_found`. Tests:
+`tests/test_durable_conversation_http_b_i1.py` (4 passed). Still open: rebind
+credential refresh, worker pin, deployment smoke, B-C1.
