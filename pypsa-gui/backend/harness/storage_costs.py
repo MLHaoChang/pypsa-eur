@@ -200,8 +200,11 @@ def calculate(raw, scope):
             "metric": metric,
             "disposition": "answered" if answered else "unavailable",
             "requested_snapshots": requested,
-            "valid_snapshots": valid,
         }
+        # The physical trajectory count does not validate missing/unsupported
+        # cost dependencies. Do not display it as complete cost-data coverage.
+        if metric in storage.METRICS or answered:
+            slot["valid_snapshots"] = valid
         if answered:
             d = calc.definition(metric, PROFILE)
             facts.append(

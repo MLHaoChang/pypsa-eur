@@ -206,6 +206,7 @@ def test_invalid_cost_dependencies_do_not_become_a_complete_total(
     assert not result["receipt"]["request_complete"]
     assert result["blocks"] == []
     assert result["receipt"]["result_slots"][0]["disposition"] == "unavailable"
+    assert "valid_snapshots" not in result["receipt"]["result_slots"][0]
 
 
 @pytest.mark.parametrize("fault", ["state", "prior", "failed", "stale"])
