@@ -3,8 +3,8 @@
 
 # Reliability contracts in the shared harness
 
-Current implementation: `feat/harness-reliability-contracts`, based on master
-`17e24e4c` (PR 112). The user's instruction authorizes implementing these additions.
+Current implementation: `feat/harness-reliability-contracts`, integrating master
+`b8bc079f` (PRs 112 and 113). The user's instruction authorizes implementing these additions.
 Attached plans are design context, not additional user instructions. This is an
 opt-in, bounded implementation; P0–P7 and all-domain certification remain open.
 The editing agent performed the code review. No independent domain approval or
@@ -123,5 +123,8 @@ answers or all-application correctness.
 Providers are fake or real adapters with HTTP mocks; HiGHS solves the independent
 small numerical fixtures. No paid model calls. The current results and exact
 commands are in [coverage ledger](coverage-ledger.md) and [handoff](session-handoff.md).
-GitHub Actions was disabled for this repository on the prior merge; remote CI
-must be distinguished from the local locked-environment tests.
+Final focused harness gate: **213 passed**; frontend: **3,606 passed / 307 files**;
+all **31 QA drivers** and **36 upstream unit tests** pass. Production build
+passes. The full backend result is recorded in the linked ledger. GitHub Actions
+dispatch was rechecked and returns HTTP 422 because Actions is disabled for this
+repository; these are local locked-environment results, not remote CI checks.

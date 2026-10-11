@@ -1136,9 +1136,13 @@ def run_turn(
             if not attachment_file_ids and checked_operation is None:
                 session.assurance_turn.prepare_request(message, ui_context, PyPSAService.get_active_context(), checked_scope)
         elif assurance.shadow_configured():
-            session.shadow_turn = assurance.Turn(session, PyPSAService.get_active_context())
-            if not attachment_file_ids:
-                session.shadow_turn.prepare_request(message, ui_context, PyPSAService.get_active_context())
+            try:
+                session.shadow_turn = assurance.Turn(session, PyPSAService.get_active_context())
+                if not attachment_file_ids:
+                    session.shadow_turn.prepare_request(message, ui_context, PyPSAService.get_active_context())
+            except Exception:
+                logger.exception("Shadow scope could not be prepared")
+                session.shadow_turn = None
         for event, payload in _run_turn_body(
             session,
             message,

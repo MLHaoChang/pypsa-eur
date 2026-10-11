@@ -649,6 +649,28 @@ def test_shadow_observes_without_changing_public_output(baseline, checked, monke
     assert "text" not in observations[0]
 
 
+def test_shadow_scope_failure_preserves_ordinary_response(
+    baseline, checked, monkeypatch
+):
+    import uuid
+    from tests.assurance_acceptance.support import parse_sse
+
+    monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_MODE", "shadow")
+    provider = checked.install([text_turn("Please provide a supported price year.")])
+    response = checked.client.post(
+        "/api/chat/stream",
+        json={
+            "session_id": "shadow-" + uuid.uuid4().hex,
+            "message": "Show me total cost for generator G1; price year 0020; annual fixed cost fraction 1",
+        },
+    )
+    frames = parse_sse(response.text)
+    assert response.status_code == 200
+    assert public_text(frames) == "Please provide a supported price year."
+    assert len(provider.requests) == 1
+    assert not any(event in {"answer_approved", "stream_error"} for event, _ in frames)
+
+
 def test_cost_grammar_is_useful_without_client_scope(solved, checked):
     frames = checked.run(
         NumericalProvider({"total_cost": 230}),

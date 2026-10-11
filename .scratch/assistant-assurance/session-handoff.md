@@ -325,3 +325,23 @@ including the new case and all stale/forged ACK cases. This supplements the
 **200-case** focused gate with one new acceptance case. Fresh integrated QA:
 **all 31 drivers passed**; final TypeScript/Vite build passed. Full backend and
 final frontend remain in progress.
+
+
+### Final harness regression gate
+
+Shadow preparation is now failure-isolated: a malformed declared price year
+previously interrupted ordinary chat before provider output in shadow mode.
+The new authenticated stream regression first failed, then passed after the
+shared loop catch; shadow failure cannot create an approval or alter ordinary
+text. Final focused selection includes `tests/test_chat_stream_attempt_seam.py`
+in addition to the command above: **213 passed / 65 warnings**, 93.70 seconds.
+It covers the final loop, static-write wording, networkless navigation and all
+new cases added after full backend collection; these overlapping selections
+must not be summed as independent test counts.
+
+Final frontend: **3,606 passed / 307 files**, 501.95 seconds. Final production
+TypeScript/Vite build passed (existing chunk-size warning). Integrated QA:
+**all 31 drivers passed**. Upstream units: **36 passed**. No frontend changes
+followed those final gates. Ruff passes new modules/records/tests; modified
+legacy loop/session retain baseline findings only. Inventory and diff checks
+pass. Full backend completion is recorded separately below.
