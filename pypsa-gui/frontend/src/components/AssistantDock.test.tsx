@@ -37,14 +37,23 @@ vi.mock('../hooks/useChatProfiles', () => ({
   useChatReadiness: () => ({ effectiveProfileId: 'claude', ready: true }),
 }))
 
+const { ensureLiveDurableThread } = vi.hoisted(() => ({
+  ensureLiveDurableThread: vi.fn(() => Promise.resolve({ thread_id: 't-live', generation: 1 })),
+}))
+
+vi.mock('../api/durableConversations', () => ({
+  ensureLiveDurableThread,
+}))
+
 import AssistantDock from './AssistantDock'
 
 describe('AssistantDock', () => {
   beforeEach(() => {
     localStorage.clear()
     useUIStore.setState({ assistantDockOpen: false, assistantEntry: null })
-    useChatStore.setState({ pending: null })
+    useChatStore.setState({ pending: null, durableThreadId: null, utteranceGeneration: 1 })
     chatPanelMounts.current = 0
+    ensureLiveDurableThread.mockClear()
   })
 
   it('shows the launcher when collapsed', () => {
@@ -143,6 +152,8 @@ describe('assistant dock prominence', () => {
   beforeEach(() => {
     localStorage.clear()
     useUIStore.setState({ assistantDockOpen: false, assistantEntry: null })
+    useChatStore.setState({ pending: null, durableThreadId: null, utteranceGeneration: 1 })
+    ensureLiveDurableThread.mockClear()
   })
 
   it('offers reviewed dictation from the collapsed companion', async () => {
@@ -162,6 +173,13 @@ describe('assistant dock prominence', () => {
     expect(useUIStore.getState().assistantEntry).toBeNull()
     expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('listening')
     expect(screen.getByTestId('companion-live-input')).toBeTruthy()
+  })
+
+  it('binds a durable conversation when Live opens', async () => {
+    const user = userEvent.setup()
+    render(<AssistantDock />)
+    await user.click(screen.getByTestId('companion-live'))
+    expect(ensureLiveDurableThread).toHaveBeenCalled()
   })
 
   it('sends a live sentence other than the walk through the chat stream and leaves the console closed', async () => {

@@ -134,9 +134,12 @@ Issue 11 D-I1 first slice: foreground solve handoff without bridge wait;
 - Durable rebind syncs `utteranceGeneration` (vitest)
 - Foreground `wait_for_job` via `fg:…` job adapters (4 pytest)
 
+2026-10-11 (post-#121 merge): branch `cursor/live-drain-adapters-a604`
+- Backend auto-drain of pending utterance after lease release (pytest)
+- Live open creates/rebinds durable parent thread (vitest)
+
 Next runnable slice: remaining domain adapters (queue/AC-PF families
-beyond simulation, GridSpine/FMEA/…); Live UI that creates/rebinds durable
-threads; backend auto-drain after promote; LiveKit credentials/deployment
+beyond simulation, GridSpine/FMEA/…); LiveKit credentials/deployment
 smoke; B-C1. Do not claim whole-application coverage or live voice done.
 
 ## 2026-10-10 design amendment — floating companion

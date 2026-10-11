@@ -79,3 +79,15 @@ export async function resumeDurableConversation(
   applyDurableThreadGeneration(thread)
   return thread
 }
+
+/**
+ * Live entry (issue 02/09): create a durable parent thread when none is
+ * bound, otherwise rebind so generation and credentials stay current.
+ */
+export async function ensureLiveDurableThread(): Promise<DurableThread | DurableRebindResult> {
+  const { durableThreadId, utteranceGeneration } = useChatStore.getState()
+  if (!durableThreadId) {
+    return createDurableConversation()
+  }
+  return rebindDurableConversation(durableThreadId, utteranceGeneration)
+}
