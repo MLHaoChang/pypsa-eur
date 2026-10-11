@@ -67,3 +67,15 @@ Still open: other domain adapters, D-I2 cursor recovery, D-C1.
 refused). GridSpine remains on solve-queue UUIDs. Tests:
 `tests/test_nonblocking_wait_for_study_d_i1e.py` (4 passed). Still open:
 report-job adapter (`rpt:`), D-I2 cursor recovery, D-C1.
+
+2026-10-11: D-C1 multi-family monitoring — fake slow `fg:`, `ad:` and `rpt:`
+handles run together. A `wait_for_job` on any one family completes only that
+family; the others stay `running` and time out on `timeout_seconds=0` probes. While
+the wait is in flight `get_simulation_status`, `ui_open_panel` (navigate event) and
+`list_project_runs` answer immediately through `_dispatch_real_tool_call`.
+Cancelling the wait (`wait_cancelled`) stops no family. Tests:
+`tests/test_nonblocking_multi_family_d_c1.py` (5 passed, repeated for
+flakiness). No real solves. Foreground completion now also publishes a run
+(issue 06). Still open: GridSpine/solve-queue family in the same matrix,
+real-worker (not state-flip) multi-family run, D-I2 recovery across families,
+UI/result matching per workload.

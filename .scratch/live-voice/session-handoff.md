@@ -143,6 +143,15 @@ Next runnable slice: report-job adapter; D-I2 cursor recovery; D-C1;
 LiveKit credentials/deployment smoke; B-C1. Do not claim whole-application
 coverage or live voice done.
 
+2026-10-11 (same branch, later): issue 06 `compare_project_runs` + foreground
+solve publication (`start_foreground_run` / `publish_foreground_run` via the
+detached monitor's `on_terminal` hook), and issue 11 D-C1 multi-family test
+(`tests/test_nonblocking_multi_family_d_c1.py`). Run evidence is still
+foreground-only: queue/GridSpine, studies and reports do not publish runs yet.
+Remaining runnable: other completion paths, conversational run references and
+result-UI selection (issue 06); GridSpine in D-C1 and D-I2 across families
+(issue 11); LiveKit credentials/deployment smoke; B-C1.
+
 ## 2026-10-10 design amendment — floating companion
 
 PRs 107 and 108 stay the hosted-voice architecture and the navigation/inventory
