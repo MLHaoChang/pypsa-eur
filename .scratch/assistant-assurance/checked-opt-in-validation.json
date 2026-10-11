@@ -1,5 +1,5 @@
 {
-  "base_master": "baa3a95e9390e73e179c51fb121c23edc98f62c0",
+  "base_master": "8a4927f9d4c0e57ce2107e441db6ea48730f4cc9",
   "source_head": "38404196d1499129f72fa1eb32f38c4847832497",
   "backend_gate": {
     "passed": 1097,
@@ -124,7 +124,8 @@
     "Only documentation/validation records change after the final gates.",
     "Native browser uses the real UI/fetch/SSE/digest implementation with mocked API responses; backend numerical/auth validation is independent pytest coverage.",
     "No independent domain review, all-device certification, measured calibration, paid-model result or remote CI success is claimed.",
-    "Deployment settings remain disabled by default; implementation does not activate a production server."
+    "Deployment settings remain disabled by default; implementation does not activate a production server.",
+    "After the 1097/7 shared gate, master PR130 changes only durable resume/backend tests/docs. The 220-case resume/recovery/storage gate passes at 693257be; it overlaps the shared gate. Frontend src tree is unchanged, so the fresh 3686-case result and build/browser checks remain applicable."
   ],
   "reproduction": {
     "backend_cwd": "pypsa-gui/backend",
@@ -218,5 +219,30 @@
       "MPLCONFIGDIR": "/tmp/assurance-mpl"
     },
     "note": "Original backend run added --maxfail=1 and an executor-local failure-printing plugin; reproduction omits that observational plugin."
+  },
+  "final_source_head": "693257be2c7670a8dda45cbf88a4ac805a1ee191",
+  "latest_resume_gate": {
+    "source_head": "693257be2c7670a8dda45cbf88a4ac805a1ee191",
+    "selection": [
+      "tests/test_run_evidence_acceptance.py",
+      "tests/test_discuss_project_run.py",
+      "tests/test_export_run_evidence.py",
+      "tests/test_conversation_recovery.py",
+      "tests/test_conversation_scope.py",
+      "tests/test_checked_answer_pilot.py",
+      "tests/test_durable_conversation_parent_thread.py",
+      "tests/test_durable_conversation_rebind_b_i2.py",
+      "tests/test_durable_conversation_http_b_i1.py",
+      "tests/test_durable_conversation_worker_pin_b_i3.py",
+      "tests/test_history_does_not_clobber_a_live_session.py",
+      "tests/test_assurance_storage.py",
+      "tests/test_storage_assurance.py",
+      "tests/test_storage_cost_assurance.py",
+      "tests/test_durable_conversation_prolonged_b_c1.py"
+    ],
+    "passed": 220,
+    "skipped": 0,
+    "duration_seconds": 195.32,
+    "exit_code": 0
   }
 }

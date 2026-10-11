@@ -102,3 +102,16 @@ does not exercise a paid model or real backend authentication/evidence stores;
 those backend numerical/auth paths are independently covered by pytest. Temporary
 screenshots/JSON are executor-local; the script and commands are committed.
 Broader browser/device/domain/calibration journeys remain pending.
+
+
+### Final backend-only master integration
+
+Master subsequently advanced to `8a4927f9` / PR 130 (discussed-run resume).
+It changes durable resume, its tests and docs; the tested frontend `src` tree
+remains `750426e67a60c289cd14467e472619d8439f72a0`. Integrated source `693257be`
+passes the 15-entry resume/recovery/parent/run/history/pilot/storage gate:
+**220 passed / zero skipped**, 195.32 seconds, exit 0. These cases overlap the
+1,097-pass gate; no counts are summed and no fresh full backend result is claimed.
+The 3,686-case complete frontend, build, browser and 229-tool inventory retain
+identical relevant source. Only documentation/validation records change afterward.
+Exact final base/source/selection are in [validation](checked-opt-in-validation.json).

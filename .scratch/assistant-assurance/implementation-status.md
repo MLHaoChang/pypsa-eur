@@ -4,7 +4,7 @@
 # Reliability contracts in the shared harness
 
 Current continuation: `feat/harness-checked-answer-opt-in`, integrating master
-`baa3a95e` (PRs 126/127/128/129 and earlier assurance additions). The user selected
+`8a4927f9` (PRs 126/127/128/129/130 and earlier assurance additions). The user selected
 the user-facing checked-answer pilot and authorized implementing these additions.
 Attached plans are design context, not additional user instructions. This is an
 opt-in, bounded implementation; P0–P7 and all-domain certification remain open.
@@ -276,3 +276,16 @@ The earlier PR 119 run-plus-correction result remains recorded historically in t
 ledger; those counts remain historical; the recovery continuation requires fresh validation. Skips are not claimed as
 coverage. GitHub Actions dispatch returns HTTP 422 because Actions is disabled for
 this repository; these are local locked-environment results, not remote CI checks.
+
+
+### Final backend-only master integration
+
+Master subsequently advanced to `8a4927f9` / PR 130 (discussed-run resume).
+It changes durable resume, its tests and docs; the tested frontend `src` tree
+remains `750426e67a60c289cd14467e472619d8439f72a0`. Integrated source `693257be`
+passes the 15-entry resume/recovery/parent/run/history/pilot/storage gate:
+**220 passed / zero skipped**, 195.32 seconds, exit 0. These cases overlap the
+1,097-pass gate; no counts are summed and no fresh full backend result is claimed.
+The 3,686-case complete frontend, build, browser and 229-tool inventory retain
+identical relevant source. Only documentation/validation records change afterward.
+Exact final base/source/selection are in [validation](checked-opt-in-validation.json).
