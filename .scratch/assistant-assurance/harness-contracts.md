@@ -287,6 +287,13 @@ chart/export steps cannot run on a start receipt. A still-running, missing-queue
 cancelled or contradictory completion receipt leaves the task uncertain instead
 of completed. Full asynchronous durable-task step resumption remains pending.
 
+Promoted queued utterances do not inherit the preceding request's explicit scope.
+They resolve their own text against validated conversation context. A safe repeat
+can retain its exact window/basis, but an unsupported added constraint requires
+software clarification without a provider call or checked numerical blocks. Such
+a refusal revokes the prior checkpoint instead of retaining the original answer
+as the correction's authority.
+
 This recovers bounded checked results and pending software clarification only.
 Arbitrary-language understanding, general task/effect resumption, persistent
 billing reservations and distributed project workers remain outside this scope.

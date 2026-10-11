@@ -1306,7 +1306,9 @@ def run_turn(
             strict_assurance=strict_assurance,
             utterance_id=_drain_utt.utterance_id,
             generation=_drain_utt.generation,
-            checked_scope=checked_scope,
+            # A queued utterance carries its own text, not the preceding
+            # request's explicit scope. Resolve validated carryover afresh.
+            checked_scope=None,
             checked_operation=None,
             binding_generation=binding_generation,
             _held_lease=_drain_lease,

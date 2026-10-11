@@ -107,6 +107,8 @@ gaps, source drift, unavailable checkpoints and unmatched anchors cannot resume
 scope. Strict admission revokes the old checkpoint before execution; rewind
 revokes it before dropping messages. Existing live history reads do not replace
 context. Default/shadow modes do not recover checked context.
+Queued corrections resolve their own checked scope; the previous utterance's
+explicit scope is never forwarded to silently discard new constraints.
 
 Immutable retained evidence and exact same-basis comparison IDs support replay
 without rerunning a model. Optional qualitative interpretations need one bounded
