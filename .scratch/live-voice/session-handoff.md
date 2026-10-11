@@ -91,6 +91,25 @@ All runtime tool fixtures, acknowledged view/run/source/window mapping, durable
 conversation, nonblocking adapters, experiments, speech and device/latency gates
 remain pending. Do not mark issue 08 or the entire assistant complete.
 
+## 2026-10-11 session — control matrix + durable parent thread
+
+Branch: `cursor/assistant-coverage-matrix-a604` (draft PR).
+
+Issue 08 control/parameter matrix:
+- `python -S pypsa-gui/backend/smoke/assistant_control_matrix.py --check` →
+  `ok controls=165 families=14 ar=mapped`
+- `pytest tests/test_assistant_control_matrix.py` → 9 passed
+- Artifact: `.scratch/live-voice/capability-matrix.json`; CI workflow
+  `assistant-control-matrix.yaml`. Behavioral fixtures remain on issue 05.
+
+Issue 09 first slices (B-U1, ownership, minimal B-I2 resume, B-U2 ledger):
+- `pytest tests/test_durable_conversation_parent_thread.py` → 9 passed
+- Module: `services/durable_conversation.py` (no HTTP/worker pin yet)
+
+Next runnable slice: finish issue 09 HTTP/rebind/worker-pin or start issue 02
+shared harness bridge; then 11/03 as plan allows. Do not claim whole-application
+coverage or live voice done.
+
 ## 2026-10-10 design amendment — floating companion
 
 PRs 107 and 108 stay the hosted-voice architecture and the navigation/inventory
