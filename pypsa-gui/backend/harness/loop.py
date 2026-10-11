@@ -2509,10 +2509,18 @@ def _dispatch_real_tool_call(
                     project_uuid=getattr(active_ctx, "project_uuid", None),
                     kind=kind,
                 )
+                from services import run_evidence as _run_evidence
+                run_token = _run_evidence.start_foreground_run(
+                    active_ctx, job_id=job_id, tool_name=tool_name, kind=kind,
+                )
                 start_detached_solver_monitor(
                     session, active_ctx,
                     tool_use_id=tool_use_id,
                     tool_name=tool_name,
+                    on_terminal=(
+                        (lambda: _run_evidence.publish_foreground_run(run_token, active_ctx))
+                        if run_token else None
+                    ),
                 )
             result = {
                 **base,

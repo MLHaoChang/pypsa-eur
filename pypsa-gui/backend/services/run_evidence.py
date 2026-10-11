@@ -20,8 +20,14 @@ Authority is the active project resolved through the project ACL on every read
 ``compare_project_runs`` computes deltas in software from recorded metrics only.
 Two runs are comparable only when both completed, share a mode, and share an input
 fingerprint (or the caller opts in with ``allow_input_changes``); otherwise the
-answer is ``comparable: false`` with reasons and no deltas. Not in this slice: other
-completion paths, conversational run references and the result UI.
+answer is ``comparable: false`` with reasons and no deltas.
+
+Completion wiring: a foreground ``run_simulation`` / ``run_ac_pf_stage`` handoff in the
+chat harness calls ``start_foreground_run`` (writes ``running.json`` under the
+turn's resolved authority) and, when the detached solver monitor sees a terminal
+solver state, ``publish_foreground_run`` publishes the immutable manifest. Not in
+this slice: solve-queue / study / report completion paths, runs whose monitor is
+cancelled before the solve ends, conversational run references and the result UI.
 """
 from __future__ import annotations
 
@@ -481,3 +487,102 @@ def compare_project_runs(run_id: str, baseline_run_id: str, metrics: list[str] |
         out['note'] = ('delta = run - baseline, computed from recorded metrics only; '
                        'delta_pct is null when the baseline value is zero.')
         return out
+
+
+_FOREGROUND_KINDS = {'lopf': 'simulation', 'ac_pf': 'ac_pf'}
+OBJECTIVE_UNIT = 'EUR'
+
+
+def foreground_run_id(job_id: str) -> str:
+    """``fg:<hex>`` job handle -> a run id that satisfies the run-id grammar."""
+    return 'fg-' + str(job_id).split(':', 1)[-1]
+
+
+def _solver_mode(ctx: Any, kind: str | None) -> str | None:
+    if kind == 'ac_pf':
+        return 'ac_pf'
+    config = ctx.solver_state.get('solver_config')
+    mode = getattr(config, 'mode', None)
+    return mode if isinstance(mode, str) and mode else kind
+
+
+def start_foreground_run(ctx: Any, *, job_id: str, tool_name: str,
+                         kind: str | None) -> dict | None:
+    """Mark a foreground solve as running and return the token for publication.
+
+    Best-effort: returns None when no project/identity authority is available
+    (e.g. an unsaved scratch network), so a solve never fails because it cannot
+    be recorded.
+    """
+    from services import chat_tools, dirty_state
+
+    try:
+        root, project_id, owner = _authority()
+        token = {
+            'root': root, 'project_id': project_id, 'actor_id': owner,
+            'run_id': foreground_run_id(job_id), 'job_id': job_id,
+            'kind': _FOREGROUND_KINDS.get(kind or '', 'simulation'),
+            'solver_kind': kind, 'tool_name': tool_name,
+            'started_at': _now(), 'unsaved_inputs': dirty_state.is_dirty(ctx),
+        }
+        start_run(root, project_id, run_id=token['run_id'], kind=token['kind'],
+                  started_at=token['started_at'], mode=_solver_mode(ctx, kind),
+                  job_id=job_id, unsaved_inputs=token['unsaved_inputs'], actor_id=owner)
+        return token
+    except HTTPException:
+        return None
+    except Exception:  # noqa: BLE001 — recording must never break a solve
+        import logging
+        logging.getLogger(__name__).exception('run evidence start failed')
+        return None
+
+
+def _input_fingerprint(ctx: Any) -> str | None:
+    try:
+        from services.workflow_tools import _network_input_fingerprint
+        return _network_input_fingerprint(ctx)
+    except Exception:  # noqa: BLE001 — unknown beats a wrong fingerprint
+        return None
+
+
+def publish_foreground_run(token: dict | None, ctx: Any) -> dict | None:
+    """Publish the terminal manifest once the solver state is terminal; else do nothing."""
+    if not token:
+        return None
+    with ctx.solver_state_lock:
+        state = dict(ctx.solver_state)
+    status = state.get('status')
+    if status not in ('completed', 'failed', 'aborted', 'idle'):
+        return None
+    kind = state.get('kind')
+    metrics: dict[str, dict] = {}
+    summary: dict[str, Any] = {'solver_kind': kind, 'condition': state.get('condition')}
+    run_status = 'completed' if status == 'completed' else (
+        'failed' if status == 'failed' else 'interrupted')
+    error = None
+    if run_status == 'completed':
+        objective = state.get('objective')
+        if isinstance(objective, (int, float)) and not isinstance(objective, bool):
+            metrics['objective'] = {'value': objective, 'unit': OBJECTIVE_UNIT}
+        solve_time = state.get('solve_time')
+        if isinstance(solve_time, (int, float)) and not isinstance(solve_time, bool):
+            metrics['solve_seconds'] = {'value': solve_time, 'unit': 's'}
+        for key in ('ac_pf_converged_count', 'ac_pf_total_snapshots'):
+            value = state.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                metrics[key] = {'value': value, 'unit': 'snapshots'}
+        summary['metrics'] = copy.deepcopy(metrics)
+    elif run_status == 'failed':
+        error = {'error_kind': 'solver_failed',
+                 'message': str(state.get('condition') or 'The solve failed.')[:500]}
+    try:
+        return publish_run(
+            token['root'], token['project_id'], run_id=token['run_id'], kind=token['kind'],
+            status=run_status, started_at=token['started_at'],
+            mode=_solver_mode(ctx, token['solver_kind']),
+            fingerprint=_input_fingerprint(ctx) if run_status == 'completed' else None,
+            job_id=token['job_id'], unsaved_inputs=token['unsaved_inputs'],
+            actor_id=token['actor_id'], metrics=metrics, error=error,
+            sections={'summary': summary} if run_status == 'completed' else None)
+    except HTTPException:
+        return None
