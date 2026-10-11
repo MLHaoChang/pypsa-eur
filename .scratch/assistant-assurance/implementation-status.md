@@ -3,8 +3,8 @@
 
 # Reliability contracts in the shared harness
 
-Current continuation: `feat/harness-conversation-scope`, based on master
-`9b987371` (PR 119, following PRs 112 and 113). The user's instruction authorizes implementing these additions.
+Current continuation: `feat/harness-durable-conversation-scope`, based on master
+`d94ee631` (PR 120, following PRs 119, 112 and 113). The user's instruction authorizes implementing these additions.
 Attached plans are design context, not additional user instructions. This is an
 opt-in, bounded implementation; P0–P7 and all-domain certification remain open.
 The editing agent performed the code review. No independent domain approval or
@@ -27,8 +27,12 @@ measured production false-acceptance rate is claimed.
   ambiguity without a model call. Two distinct immutable run references prevent
   repeated answers from replacing the previous baseline; changed binding,
   selection, rewind, unavailable context or incompatible basis require clarification.
-  Historical repeats retain the selected run. This is live-session state; durable
-  restart recovery and arbitrary language remain pending.
+  Historical repeats retain the selected run. `harness.assurance_recovery` stores
+  one private bounded checkpoint per owned project/chat and restores it only from
+  its latest native approved history anchor into a freshly recreated session.
+  Admission and rewind durably revoke prior scope; missing/corrupt/stale state,
+  imported/copied histories and history races cannot restore it. Arbitrary
+  language and general task/effect recovery remain pending.
 - `harness.calculations` owns formulas, units, dependency evaluation, coverage
   masks and disclosures. The original `generator-dispatch/1` computes weighted
   energy, marginal expenditure and peak dispatch. `generator-cost/1` adds annual
@@ -117,8 +121,8 @@ No production deployment setting is changed by this PR.
 
 Whole phase tickets stay open: storage/Links/multi-period economics and NPV;
 adequacy, FMEA, GridSpine and other domain adapters; arbitrary natural-language
-completeness/material clarification outside the bounded grammar and durable
-conversational constraint recovery;
+completeness/material clarification outside the bounded grammar and general
+conversational/task constraint recovery;
 more operation/job mappings and a distributed project runtime; displayed-data
 revision proof and complete browser/device/accessibility journeys; checked
 chart/report/import/general-export adapters; independent domain review, measured

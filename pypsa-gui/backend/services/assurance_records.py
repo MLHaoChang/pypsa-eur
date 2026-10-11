@@ -94,7 +94,11 @@ def save(record, record_id):
         unavailable("assurance_record_too_large")
     with transaction(path.parent):
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if path.exists() and record["record_kind"] not in {"operation", "ui_action"}:
+        if path.exists() and record["record_kind"] not in {
+            "operation",
+            "ui_action",
+            "conversation_context",
+        }:
             if path.read_bytes() != encoded:
                 unavailable("evidence_unavailable")
             return

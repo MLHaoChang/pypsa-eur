@@ -62,3 +62,18 @@ corrupt/expired baselines, history isolation, budgets, shadow behavior and UI
 choice publication. Final regression counts are recorded in the handoff/ledger.
 Whole issue remains open: arbitrary language, durable session recovery and all
 domain profiles are not completed. See [contracts](../harness-contracts.md).
+
+
+### 2026-10-11 — durable checked conversation recovery
+
+The shared harness now checkpoints the bounded scope and two distinct retained
+sources privately per owner/project/chat. Only a freshly recreated session's
+latest native approved history anchor may recover it; imported/copied/stale/gapped
+history and unavailable records require explicit scope. Recovery revalidates the
+exact source/adapter/basis/window and adopts a new browser generation once.
+Strict admission and rewind durably revoke the previous checkpoint; interrupted
+or failed publication cannot restore an older scope. Existing live history reads
+cannot replace in-flight or newly completed stream state. No public protocol or
+provider SDK path changes. Scope remains bounded to the released numerical
+profiles and software clarification; broader language and task/effect memory
+remain open. See the checkpoint contract and final validation ledger.

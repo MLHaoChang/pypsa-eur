@@ -14,6 +14,7 @@ harness/
   assurance.py    opt-in checked input/result drafts and publication gate
   assurance_scope.py  typed requested metrics, windows, cost basis and retained/comparison IDs
   assurance_conversation.py  bounded checked-scope carryover, cost clarification and previous-run selection
+  assurance_recovery.py  private owned checkpoints, durable invalidation and native history recovery
   calculations.py  bounded formula/unit registry, raw masks and cost dependencies
   durable.py      bounded network locks and cross-process owner-store transactions
   effects.py      exact confirmed input-write reservations, read-back and reconciliation
@@ -97,6 +98,14 @@ repeat/window/comparison follow-ups. Material cost ambiguity prompts a software
 question with no provider call; only successfully checked results seed context.
 Project/generation/selection changes, rewind, expiration or missing context
 require a fresh explicit scope. Historical repeats keep their retained run.
+A freshly recreated session can recover the same bounded scope from a private
+owned checkpoint tied to its latest native approved history record. Recovery
+revalidates every retained reference and admits one new browser generation;
+subsequent generation changes retain the ordinary refusal. Imported histories,
+gaps, source drift, unavailable checkpoints and unmatched anchors cannot resume
+scope. Strict admission revokes the old checkpoint before execution; rewind
+revokes it before dropping messages. Existing live history reads do not replace
+context. Default/shadow modes do not recover checked context.
 
 Immutable retained evidence and exact same-basis comparison IDs support replay
 without rerunning a model. Optional qualitative interpretations need one bounded

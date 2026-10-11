@@ -1102,25 +1102,8 @@ def run_turn(
     _metric_incr("turns")
     _t_start = time.monotonic()
 
-    # #20 — pending-turn WAL. Written HERE, before the body runs, because the
-    # window it protects opens the moment we start talking to the model and
-    # `append_turn` does not fire until the turn has already succeeded. The
-    # context is resolved the same way `_run_turn_body` resolves its P0 pin,
-    # and on the same `next()`, so both see the same project.
     from services.pypsa_service import PyPSAService
     _wal_ctx: ProjectContext | None = None
-    try:
-        _wal_ctx = PyPSAService.get_active_context()
-        begin_pending_turn(_wal_ctx, {
-            "ts": time.time(),
-            "session_id": session.session_id,
-            "model": session.model,
-            # Redacted like the durable record in `append_turn` — this file is
-            # equally on-disk and equally reaches snapshot/copy bundles.
-            "user": _redact_for_persist(message),
-        })
-    except Exception:  # noqa: BLE001 — the WAL must never block the turn
-        logger.exception("chat: failed to open the pending-turn record")
 
     try:
         # The body is a separate generator so this one try/finally clears the
@@ -1132,6 +1115,13 @@ def run_turn(
             session.assurance_turn = assurance.Turn(session, PyPSAService.get_active_context())
             from harness.navigation import begin_turn
             begin_turn(session.assurance_turn, binding_generation)
+            try:
+                session.assurance_turn.suspend_scope()
+            except (HTTPException, OSError, ValueError):
+                yield "error", {"error_kind": "assurance_context_persistence_failed",
+                                "message": "Checked conversation state could not be saved. Try again when storage is available."}
+                yield "session_done", {"reason": "assurance_context_persistence_failed"}
+                return
             session.assurance_turn.prepare_operation(checked_operation)
             if not attachment_file_ids and checked_operation is None:
                 session.assurance_turn.prepare_request(message, ui_context, PyPSAService.get_active_context(), checked_scope)
@@ -1143,6 +1133,23 @@ def run_turn(
             except Exception:
                 logger.exception("Shadow scope could not be prepared")
                 session.shadow_turn = None
+        # #20 — pending-turn WAL. Written HERE, before the body runs, because the
+        # window it protects opens the moment we start talking to the model and
+        # `append_turn` does not fire until the turn has already succeeded. The
+        # context is resolved the same way `_run_turn_body` resolves its P0 pin,
+        # and on the same `next()`, so both see the same project.
+        try:
+            _wal_ctx = PyPSAService.get_active_context()
+            begin_pending_turn(_wal_ctx, {
+                "ts": time.time(),
+                "session_id": session.session_id,
+                "model": session.model,
+                # Redacted like the durable record in `append_turn` — this file is
+                # equally on-disk and equally reaches snapshot/copy bundles.
+                "user": _redact_for_persist(message),
+            })
+        except Exception:  # noqa: BLE001 — the WAL must never block the turn
+            logger.exception("chat: failed to open the pending-turn record")
         for event, payload in _run_turn_body(
             session,
             message,
@@ -1162,6 +1169,10 @@ def run_turn(
         with session._lock:
             session._turn_in_flight = False
             session._undo_snapshotted = []
+            if session.assurance_turn is not None and session.assurance_context:
+                approved = session.assurance_turn.approved
+                if not approved or session.assurance_context["anchor"] != approved["answer_id"]:
+                    session.assurance_context = None
             session.assurance_turn = None
             session.shadow_turn = None
         # C-3 — the turn's profile must not outlive the turn. A tool invoked

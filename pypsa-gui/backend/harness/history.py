@@ -515,6 +515,10 @@ def rewind_session(session: "ChatSession", turns: int = 1) -> int:
         if session._turn_in_flight:
             return 0
         before = len(session.messages)
+        # The audit log stays intact; revocation prevents reload from undoing rewind.
+        if any(_is_turn_start(m) for m in session.messages):
+            from harness.assurance_recovery import invalidate
+            invalidate(session)
         for _ in range(turns):
             # Walk back to the most recent turn start and cut there.
             cut: int | None = None
