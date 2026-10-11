@@ -1,6 +1,7 @@
 """Long conversations through unchanged handlers, with real state/UI oracles."""
 import json
 import os
+import threading
 
 import pandas as pd
 import pypsa
@@ -105,6 +106,14 @@ def assert_oracle(case, session, net, frames, *, check_text=True):
         assert failures[0]["error_kind"] == oracle
     elif oracle in ("solved", "solved_status"):
         from services.pypsa_service import PyPSAService
+        ctx = PyPSAService.get_active_context()
+        with ctx.solver_state_lock:
+            worker = ctx.solver_state.get("thread")
+        assert isinstance(worker, threading.Thread)
+        worker.join(timeout=10)
+        assert not worker.is_alive(), "The real solve did not finish within the test deadline"
+        with ctx.solver_state_lock:
+            assert ctx.solver_state["status"] == "completed"
         solved = PyPSAService.get_network()
         assert solved.objective is not None and abs(float(solved.objective) - 200) < 1e-5
     if check_text:
