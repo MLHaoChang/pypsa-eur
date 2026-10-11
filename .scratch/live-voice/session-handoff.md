@@ -148,6 +148,12 @@ solve publication; issue 11 `rpt:` + D-I2 cursors + D-C1; issue 01 F-U1 mocked
 STT/TTS; issue 09 B-C1 prolonged durable journey; issue 07 `get_loadflow_summary`;
 issue 08 full-coverage limitation block; issue 12 companion done.
 
+2026-10-11: branch `cursor/run-publish-paths-a604` — queue/GridSpine, study,
+and report completion paths publish run evidence (pytest domains suite).
+
+Next runnable (no credentials): issue 06 conversational run refs + result UI;
+mocked issue 03/04 scaffolding; issue 10 experiment adapters.
+
 **Credential / release blockers (cannot close without external access):**
 LiveKit Build + hosted STT/TTS live probe (01/02/09 deployment smoke);
 issue 03 continuous media UX; issue 04 real vendor billing units;
