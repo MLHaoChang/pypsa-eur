@@ -132,11 +132,12 @@ Issue 11 D-I1 first slice: foreground solve handoff without bridge wait;
 2026-10-11 (post-#118 merge): branch `cursor/live-progress-rebind-a604`
 - Frontend progress observer subscription (vitest)
 - Durable rebind syncs `utteranceGeneration` (vitest)
+- Foreground `wait_for_job` via `fg:…` job adapters (4 pytest)
 
-Next runnable slice: domain job adapters; wait_for_job for foreground
-solves; Live UI that creates/rebinds durable threads; backend auto-drain
-after promote; LiveKit credentials/deployment smoke; B-C1. Do not claim
-whole-application coverage or live voice done.
+Next runnable slice: remaining domain adapters (queue/AC-PF families
+beyond simulation, GridSpine/FMEA/…); Live UI that creates/rebinds durable
+threads; backend auto-drain after promote; LiveKit credentials/deployment
+smoke; B-C1. Do not claim whole-application coverage or live voice done.
 
 ## 2026-10-10 design amendment — floating companion
 

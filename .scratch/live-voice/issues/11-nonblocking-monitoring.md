@@ -54,3 +54,9 @@ the observer; ChatPanel opens it on `tool_result.detached_progress` and
 appends `tool_progress` into the store. Cleared on project switch / new chat /
 unmount. Tests: `chat.test.ts` + `ChatPanel.detachedProgress.test.tsx`. Still
 open: domain adapters, wait_for_job, D-I2/D-C1.
+
+2026-10-11: Foreground `wait_for_job` — handoff mints `fg:…` handles via
+`harness/job_adapters.py`; `wait_for_job` polls solver status with the same
+bounded contract as queue jobs (timeout/cancel leave the solve running).
+Tests: `tests/test_nonblocking_wait_for_foreground_d_i1d.py` (4 passed).
+Still open: other domain adapters, D-I2 cursor recovery, D-C1.

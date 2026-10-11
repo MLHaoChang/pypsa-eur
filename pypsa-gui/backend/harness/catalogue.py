@@ -1785,10 +1785,11 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "wait_for_job",
-        "Wait locally for a solve-queue or GridSpine job, avoiding repeated model status polls. "
+        "Wait locally for a solve-queue, GridSpine, or foreground simulation/AC-PF job "
+        "(fg:… handles from run_simulation / run_ac_pf_stage), avoiding repeated model status polls. "
         "Returns job, terminal, completed, timed_out, wait_cancelled, waited_seconds. "
         "Default 20 seconds, maximum 25. On timeout report pending and end the turn; never busy-poll. "
-        "A cancelled wait leaves the job running; solve_queue_abort stops it. Safety: read.",
+        "A cancelled wait leaves the job running; solve_queue_abort or abort_simulation stops it. Safety: read.",
         {"job_id": {"type": "string"}, "timeout_seconds": {"type": "number", "minimum": 0, "maximum": 25}}, ["job_id"],
     ),
     _t(
