@@ -394,6 +394,8 @@ export async function deleteApiKeySettings(): Promise<ApiKeySettings> {
 }
 
 export interface ChatTurn {
+  /** Retry policy only; this flag never establishes checked evidence/approval. */
+  requires_checked?: boolean
   ts: number
   session_id: string
   /** Resolved model id. Kept alongside `profile_id`, never replaced by it —

@@ -746,3 +746,73 @@ red, final-focused, backend-gate, frontend and build); they are not durable
 artifacts. No paid model calls or remote CI success. Deployment stays opt-in;
 Stores/Links, charging purchases/revenues, overnight/FOM derivation, multi-period
 economics/NPV, other domain adapters and independent calibration remain open.
+
+## User-facing checked pilot validation (2026-10-11)
+
+The user explicitly selected the user-facing opt-in scope. Initial base is
+`73e11fdc`; final source `38404196` integrates master `baa3a95e` (PRs 126/127/129).
+The [pilot plan](checked-opt-in-plan.md) and [activation/rollback guide](checked-opt-in-runbook.md)
+describe the bounded contract. Global production deployment is not activated.
+
+- The first new UI invocation had an incomplete greeting fixture and was not
+  counted as feature-red evidence. After correcting it, the isolated master
+  checkout fails **one / 17 filtered-out cases** because the opt-in checkbox is absent.
+  Initial implemented UI runs exposed test-fixture mismatches (selection `type`,
+  retry-button identity, project-effect timing and simulated server capabilities),
+  corrected without relaxing checks. The focused six-file gate passes **81**;
+  the original five backend pilot cases pass with the independent 51-EUR LP and
+  real authenticated publication/history paths. These overlap larger suites.
+- An additional round-trip project change during pending rewind has a genuine
+  red: **one failed / one passed / 27 filtered-out cases**, clearing/re-asking the wrong
+  conversation. The final guard rechecks the monotonic browser generation,
+  alongside project/chat binding; the final complete frontend covers the stronger
+  38-case pilot/API collection. Checked retries, edit, clarification, queue/Live,
+  failure/rollback, acknowledgement and ordinary companion behavior all pass.
+- Initial checkpoint `428be5f9`: selected backend **1,045 passed / seven skips**,
+  669.24 seconds, exit 0; complete frontend **3,678 / 312 files**, 431.70 seconds,
+  exit 0. Master subsequently advanced; these are historical overlapping results,
+  not final-source proof or additive unique coverage.
+- Final `38404196`: selected **71-entry** shared backend gate **1,097 passed /
+  seven skips**, 660.77 seconds, exit 0. This covers common provider transports,
+  auth, history/recovery, tool schemas, budgets, frames and imported master's
+  run discussion/export, experiment-plan and credential-alias regressions.
+  Skips are five opt-in paid-live cases, deliberate frame recording and an empty
+  `KNOWN_BROKEN` delegation list; skips are not coverage. No fresh full backend
+  suite at final head is claimed.
+- Fresh complete integrated frontend **3,686 passed / 313 files**, 436.42 seconds,
+  exit 0, without failures/unhandled errors. Source `src` tree
+  `750426e67a60c289cd14467e472619d8439f72a0` remains unchanged after final checks.
+  Production TypeScript/Vite build passes with its existing chunk-size warning.
+- Native Chromium smoke passes at the integrated source, **three requests**,
+  zero model calls, keyboard opt-in, actual fetch/SSE/native digest, withheld
+  pre-ack and unapproved text, HTTP rollback with retained choice/draft and
+  explicit ordinary opt-out. Earlier probe attempts failed because the mock
+  route matched Vite `/src/api/*.ts` module imports; the final route matches
+  actual `/api/` paths and the upload fixture matches the array contract.
+  The real UI runs with mocked HTTP responses, not a paid provider or real
+  backend auth/evidence stores. Numerical/auth backend gates are independent.
+  The editing agent inspected its 380-pixel screenshot; this is not all-device
+  or independent accessibility/domain certification.
+- Inventory matches **229 tools / 14 tabs / 17 panels**; both touched Python
+  files pass Ruff with no findings. Local documentation/link and diff checks
+  pass. Release notes, contracts, handoff and issue comments are updated.
+
+Reproduce with [checked-opt-in-validation.json](checked-opt-in-validation.json)
+and `frontend/scripts/smoke-checked-answers.mjs`. Detailed logs/manifests use
+`/tmp/checked-opt-in-`; browser artifacts are executor-local. Commands/selections
+are committed. Only docs/validation change after the final gates. No paid model
+calls, remote CI success or independent domain approval. Full backend, broader
+browser/device/domain/calibration and production enablement remain separate scopes.
+
+
+### Final backend-only master integration
+
+Master subsequently advanced to `8a4927f9` / PR 130 (discussed-run resume).
+It changes durable resume, its tests and docs; the tested frontend `src` tree
+remains `750426e67a60c289cd14467e472619d8439f72a0`. Integrated source `693257be`
+passes the 15-entry resume/recovery/parent/run/history/pilot/storage gate:
+**220 passed / zero skipped**, 195.32 seconds, exit 0. These cases overlap the
+1,097-pass gate; no counts are summed and no fresh full backend result is claimed.
+The 3,686-case complete frontend, build, browser and 229-tool inventory retain
+identical relevant source. Only documentation/validation records change afterward.
+Exact final base/source/selection are in [validation](checked-opt-in-validation.json).

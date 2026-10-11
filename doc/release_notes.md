@@ -6,6 +6,8 @@
 <!-- Upcoming Release -->
 <!-- ================= -->
 
+* Feat(pypsa-gui): Add an explicit "Check answers" chat option for the bounded assurance pilot. Keep checking on retries, edits, clarification choices and queued/voice requests; withhold output until the server acknowledges the requested checks and approves the exact answer. Availability rollback cannot silently send an ordinary request. Preserve a conservative retry-policy hint for unavailable checked history; deployment defaults remain disabled.
+
 * Fix(pypsa-gui): Rehydrate discussed run references onto a new chat episode when resuming a durable parent thread, so export and follow-ups still target the discussed run after restart instead of requiring a fresh `discuss_project_run`.
 
 * Feat(pypsa-gui): Persist typed cross-domain experiment plans from chat (`start_experiment` / `list_experiments` / `get_experiment`) without executing cases or hidden solves. Cases stay `executed=false` until a later slice advances them through ordinary harness tools and approvals.

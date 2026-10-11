@@ -3,8 +3,9 @@
 
 # Reliability contracts in the shared harness
 
-Current continuation: `feat/harness-checked-storage-economics`, based on master
-`b51563e9` (merged PRs 124/125 and earlier assurance additions). The user's instruction authorizes implementing these additions.
+Current continuation: `feat/harness-checked-answer-opt-in`, integrating master
+`8a4927f9` (PRs 126/127/128/129/130 and earlier assurance additions). The user selected
+the user-facing checked-answer pilot and authorized implementing these additions.
 Attached plans are design context, not additional user instructions. This is an
 opt-in, bounded implementation; P0–P7 and all-domain certification remain open.
 The editing agent performed the code review. No independent domain approval or
@@ -17,6 +18,16 @@ measured production false-acceptance rate is claimed.
   the answer. Approval, history, browser digest verification, TTS and replay use
   the same answer. Ordinary confirmation, access, cancellation and budget gates
   remain in the shared loop, independent of provider choice.
+- The chat's **Check answers** control requests version-1 checked publication
+  when the server enables pilot mode. New chats/project bindings/reloads default
+  off; server strict mode cannot be opted out. Publication is armed before
+  dispatch and refuses missing/downgraded acknowledgement, unapproved output or
+  failed digest. Typed/voice/queued/Live sends share policy; checked retries,
+  edits, software choices and known checked history preserve it. A history retry
+  hint can require checks after an answer becomes unavailable, but cannot create
+  approval. Capability failure/rollback retains the choice and cannot silently
+  resend an ordinary request. Async rewinds reject changed binding generations,
+  including a project round trip. See the [pilot guide](checked-opt-in-runbook.md).
 - `harness.assurance_scope` validates explicit project/entity/profile/metrics,
   exact snapshot windows, declared cost basis and optional retained/comparison
   evidence IDs. Every requested metric receives an answered or unavailable slot.
@@ -139,6 +150,10 @@ checked-write switch can narrow admission. Review defaults to disabled; requeste
 interpretations are withheld unless review is explicitly required and passes.
 No production deployment setting is changed by this PR.
 
+The browser exposes pilot opt-in through the existing per-request API; it does
+not grant profile availability or enable writes/review. See the [activation and
+rollback guide](checked-opt-in-runbook.md) for backend restart and allowlist steps.
+
 ## Still pending
 
 Whole phase tickets stay open: broader storage/Stores/Links/multi-period economics
@@ -153,7 +168,27 @@ calibration/load budgets and release enablement. Unmapped strict tools fail
 closed. This implementation does not guarantee hallucination-free arbitrary
 answers or all-application correctness.
 
-## StorageUnit economics validation
+## Checked pilot validation
+
+At `38404196`, integrated master `baa3a95e` plus the pilot passes the selected
+71-entry backend/provider/auth/history/recovery/run/experiment gate:
+1,097 passed / seven skips. Fresh complete frontend passes 3,686 in 313 files;
+38 new pilot/API cases include a genuine red/green round-trip rewind regression.
+Native Chromium verifies keyboard opt-in, real fetch/SSE/digest publication,
+withheld private text and rollback/draft/explicit-opt-out behavior using mocked
+API responses. Backend numerical/auth cases separately exercise real handlers
+and the independent 51-EUR LP oracle. Build, 229-tool inventory, two-file Ruff,
+documentation/diff checks pass. The editing agent reviewed code and the
+380-pixel layout; no independent domain approval is claimed.
+
+Exact selections, source hashes, commands and qualifications are in
+[checked-opt-in-validation.json](checked-opt-in-validation.json) and
+[coverage ledger](coverage-ledger.md). Initial 1,045/7 backend and 3,678/312
+frontend results are earlier overlapping checkpoints. No fresh complete backend,
+paid model or remote CI result is claimed. Only docs/validation change after
+the final gates. Activation is documented but production remains disabled.
+
+## Historical StorageUnit economics validation
 
 The shared backend/provider/auth/history/recovery/run-evidence gate passes
 1,029 cases / six skips at `50499693`. The final 40 cost cases pass at `360b8cea`
@@ -241,3 +276,16 @@ The earlier PR 119 run-plus-correction result remains recorded historically in t
 ledger; those counts remain historical; the recovery continuation requires fresh validation. Skips are not claimed as
 coverage. GitHub Actions dispatch returns HTTP 422 because Actions is disabled for
 this repository; these are local locked-environment results, not remote CI checks.
+
+
+### Final backend-only master integration
+
+Master subsequently advanced to `8a4927f9` / PR 130 (discussed-run resume).
+It changes durable resume, its tests and docs; the tested frontend `src` tree
+remains `750426e67a60c289cd14467e472619d8439f72a0`. Integrated source `693257be`
+passes the 15-entry resume/recovery/parent/run/history/pilot/storage gate:
+**220 passed / zero skipped**, 195.32 seconds, exit 0. These cases overlap the
+1,097-pass gate; no counts are summed and no fresh full backend result is claimed.
+The 3,686-case complete frontend, build, browser and 229-tool inventory retain
+identical relevant source. Only documentation/validation records change afterward.
+Exact final base/source/selection are in [validation](checked-opt-in-validation.json).
