@@ -43,6 +43,8 @@ export interface ChatMessage {
   thinking?: string
   answer_id?: string
   receipt?: AnswerReceipt
+  /** Retrying a checked question must not silently become ordinary chat. */
+  requiresChecked?: boolean
   ts: number
 }
 
@@ -61,6 +63,7 @@ export interface WorkflowState {
 }
 
 export interface PendingChoiceCard {
+  requiresChecked?: boolean
   tool_use_id?: string
   title: string
   question: string
@@ -112,6 +115,7 @@ export interface ChatErrorState {
  *  (guided-mode spec §6.1). ChatPanel dispatches it through the typed-message
  *  path; nothing here talks to the backend. */
 export interface QueuedRequest {
+  requiresChecked?: boolean
   id: string
   text: string
   source?: string
@@ -232,7 +236,7 @@ interface ChatState {
    * REQUEST_DEDUPE_MS. Live busy corrections pass `openDock: false` so the
    * console stays closed. */
   sendRequest: (text: string,
-    opts?: { source?: string; label?: string; group?: string; openDock?: boolean }) => string | null
+    opts?: { source?: string; label?: string; group?: string; openDock?: boolean; requiresChecked?: boolean }) => string | null
   /** ChatPanel only: remove and return the oldest queued request; it
    *  becomes `activeRequest`. */
   takeNextRequest: () => QueuedRequest | null
@@ -418,6 +422,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const req: QueuedRequest = { id, text, source: opts?.source, queuedAt: now }
     if (opts?.label) req.label = opts.label
     if (opts?.group) req.group = opts.group
+    if (opts?.requiresChecked) req.requiresChecked = true
     const openDock = opts?.openDock !== false
     set((s) => {
       // Live: at most one pending correction (latest wins), matching the

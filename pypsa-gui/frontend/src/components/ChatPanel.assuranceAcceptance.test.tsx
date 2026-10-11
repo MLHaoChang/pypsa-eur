@@ -11,6 +11,11 @@ import ChatPanel from './ChatPanel'
 
 const unsafe = 'Ghost-9 is safe at 75 MW and the simulation completed.'
 const speech: { onFinal?: (text: string) => void } = {}
+vi.mock('../api/reliability', () => ({
+  CHECKED_ANSWERS_QUERY_KEY: ['chat', 'checked-answer-capabilities'],
+  getCheckedAnswerCapabilities: vi.fn().mockResolvedValue({ version: 1, mode: 'strict',
+    profiles: { 'storage-unit-dispatch/1': { enabled: true } } }),
+}))
 vi.mock('../hooks/useSpeechToText', () => ({
   useSpeechToText: (options: { onFinal?: (text: string) => void }) => {
     speech.onFinal = options.onFinal
@@ -81,7 +86,7 @@ describe('implemented assurance publication boundary', () => {
   })
   afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-  it('shows a software clarification and sends its choice as the next ordinary user request', async () => {
+  it('shows a software clarification and sends its choice as the next checked user request', async () => {
     await start()
     const text = 'Which cost quantity do you mean?'
     emit('answer_approved', { version: 1, answer_id: 'approved-1', turn_id: 'turn-1', verdict: 'limited',
@@ -99,6 +104,7 @@ describe('implemented assurance publication boundary', () => {
     fireEvent.click(screen.getByRole('button', { name: /Total declared-basis cost/ }))
     await waitFor(() => expect(vi.mocked(createChatStream)).toHaveBeenCalledTimes(2))
     expect(vi.mocked(createChatStream).mock.calls[1][0].message).toBe('Total declared-basis cost')
+    expect(vi.mocked(createChatStream).mock.calls[1][0].assurance).toEqual({ version: 1, mode: 'strict' })
   })
 
   it.each(['token', 'thinking'])('P2: withholds unapproved %s frames from visible text', async event => {

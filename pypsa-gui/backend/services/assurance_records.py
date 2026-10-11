@@ -449,6 +449,7 @@ def history_projection(turns, owner, *, strict=False):
                 projected.append(
                     {
                         **turn,
+                        "requires_checked": True,
                         "assistant": [{"type": "text", "text": checked["text"]}],
                         "receipt": checked["receipt"],
                     }
@@ -461,6 +462,9 @@ def history_projection(turns, owner, *, strict=False):
                             for k, v in turn.items()
                             if k not in {"assistant", "receipt", "answer_id"}
                         },
+                        # An expired/unavailable answer still cannot silently
+                        # downgrade its retry. This is policy, never evidence.
+                        "requires_checked": True,
                         "assistant": [
                             {
                                 "type": "text",

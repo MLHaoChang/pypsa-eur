@@ -6,6 +6,8 @@
 <!-- Upcoming Release -->
 <!-- ================= -->
 
+* Feat(pypsa-gui): Add an explicit "Check answers" chat option for the bounded assurance pilot. Keep checking on retries, edits, clarification choices and queued/voice requests; withhold output until the server acknowledges the requested checks and approves the exact answer. Availability rollback cannot silently send an ordinary request. Preserve a conservative retry-policy hint for unavailable checked history; deployment defaults remain disabled.
+
 * Feat(pypsa-gui): Add opt-in checked direct StorageUnit economics in the shared harness. Verify raw trajectories and objective-weighted discharge/holding expenditure, require a declared EUR price year and fixed-charge allocation, and preserve checked values through comparison, restart recovery and JSON/ZIP export. Missing or unsupported costs remain unavailable; charging purchases, revenues, annuity/FOM derivation and other storage models stay outside the contract.
 
 * Fix(pypsa-gui): Keep asset type bound to the checked calculation profile during cost clarification and rendering. A generator named `network` cannot silently become a network-wide cost request.

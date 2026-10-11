@@ -90,6 +90,14 @@ Borrowed designs under consideration: `docs/superpowers/assessments/2026-10-06-d
 `PYPSA_GUI_ANSWER_ASSURANCE_MODE=strict` withholds model prose/thinking and gates
 publication through `assurance.py`; the default remains `disabled`. `pilot`
 admits an explicit version-1 strict request. Shared scope and calculation modules
+are used by the chat's **Check answers** option when the server enables pilot
+mode. Checking defaults off for new pilot chats and project bindings; strict
+server mode requires it. Browser publication is armed before dispatch and refuses
+an omitted/downgraded acknowledgement. Retries, edits and clarification choices
+preserve checked policy, including a conservative history hint when an earlier
+answer is unavailable. That hint is never approval. Read the
+[pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
+Shared scope and calculation modules
 own project/entity/window/metric constraints, required-slot dispositions, units,
 formulas and coverage. Five bounded profiles support generator dispatch,
 declared-basis generator costs, a linear network subset, StorageUnit dispatch
