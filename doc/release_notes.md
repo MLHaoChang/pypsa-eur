@@ -8,6 +8,8 @@
 
 * Feat(pypsa-gui): Preserve exact checked result scope across bounded chat follow-ups and compare with the previous distinct compatible run. Clarify cost quantity and basis in software without a model call; refuse stale bindings and missing context, retain historical selections, and show clarification without a checked-results badge. Context remains live-session and opt-in.
 
+* Fix(pypsa-gui): Keep pending tagging-tour target polling bound to its original document so teardown cannot cause an uncaught timer error.
+
 * Feat(pypsa-gui): Extend opt-in checked chat with scoped calculation and cost profiles, required-result coverage, immutable retained evidence and same-basis comparisons in the shared harness. Add separately enabled confirmed static-input writes with durable deduplication/read-back, issued mounted-view acknowledgements, bounded qualitative review, checked JSON/ZIP exports, evidence cards and rollback/shadow controls. Unsupported domains remain unavailable; deployment defaults stay disabled.
 
 * Feat(pypsa-gui): Add multilingual AI dictation independently of the selected chat provider, with automatic or manual language selection, microphone selection and metering, pause/resume, terminology hints and editable transcript review. Retain browser dictation with selectable language. Bound temporary audio requests, sanitize authentication/service errors and stop microphones on cancellation or context changes. Add recorder/UI/backend regressions, a real Chromium smoke and an opt-in live transcription test.

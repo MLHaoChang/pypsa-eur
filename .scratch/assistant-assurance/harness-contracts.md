@@ -165,6 +165,10 @@ or provider-specific reliability path is introduced.
 
 Strict/pilot checked turns also recognize whole-message follow-ups:
 
+This resolver runs on attachment-free turns without a checked operation contract,
+under the existing shared-loop selection boundary. Attached-input workflows and
+effect contracts do not use conversational result carryover.
+
 ```
 Show those results again.
 Show those results from 2026-01-01T01:00:00 to 2026-01-01T01:00:00.
