@@ -74,6 +74,10 @@ def test_release_promotes_pending_to_lease():
     assert promoted.lease_id != first.lease_id
     assert coord.active_lease('sess-1') == promoted.lease_id
     assert coord.pending_utterance_id('sess-1') is None
+    active = coord.active_utterance('sess-1')
+    assert active is not None
+    assert active.utterance_id == 'u2'
+    assert active.text == 'follow-up'
 
 
 def test_stale_generation_cannot_admit():

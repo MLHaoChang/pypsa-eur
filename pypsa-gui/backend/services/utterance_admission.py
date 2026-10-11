@@ -43,13 +43,17 @@ class AdmissionDecision:
 class _SessionState:
     generation: int = 1
     lease_id: str | None = None
-    active_utterance_id: str | None = None
+    active: StableUtterance | None = None
     pending: StableUtterance | None = None
     seen_ids: set[str] | None = None
 
     def __post_init__(self) -> None:
         if self.seen_ids is None:
             self.seen_ids = set()
+
+    @property
+    def active_utterance_id(self) -> str | None:
+        return self.active.utterance_id if self.active else None
 
 
 class TurnCoordinator:
@@ -70,6 +74,10 @@ class TurnCoordinator:
     def active_lease(self, session_id: str) -> str | None:
         with self._lock:
             return self._state(session_id).lease_id
+
+    def active_utterance(self, session_id: str) -> StableUtterance | None:
+        with self._lock:
+            return self._state(session_id).active
 
     def pending_utterance_id(self, session_id: str) -> str | None:
         with self._lock:
@@ -109,7 +117,7 @@ class TurnCoordinator:
             if state.lease_id is None:
                 lease_id = uuid.uuid4().hex
                 state.lease_id = lease_id
-                state.active_utterance_id = utterance.utterance_id
+                state.active = utterance
                 state.seen_ids.add(utterance.utterance_id)
                 return AdmissionDecision(
                     status='admitted',
@@ -144,7 +152,7 @@ class TurnCoordinator:
             if state.lease_id != lease_id or state.generation != generation:
                 return None
             state.lease_id = None
-            state.active_utterance_id = None
+            state.active = None
             if not promote:
                 return None
             pending = state.pending
@@ -157,7 +165,7 @@ class TurnCoordinator:
             # without treating it as a duplicate.
             new_lease = uuid.uuid4().hex
             state.lease_id = new_lease
-            state.active_utterance_id = pending.utterance_id
+            state.active = pending
             return AdmissionDecision(
                 status='admitted',
                 lease_id=new_lease,
@@ -170,7 +178,7 @@ class TurnCoordinator:
             state = self._state(session_id)
             state.generation += 1
             state.lease_id = None
-            state.active_utterance_id = None
+            state.active = None
             state.pending = None
             return state.generation
 

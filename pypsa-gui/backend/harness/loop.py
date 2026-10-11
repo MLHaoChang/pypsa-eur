@@ -1019,6 +1019,8 @@ def run_turn(
     checked_scope: dict | None = None,
     checked_operation: dict | None = None,
     binding_generation: int = 0,
+    _held_lease: str | None = None,
+    _held_generation: int | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
     """
     Provider-driven turn driver (Phase 3 replacement for the Phase 2 stub):
@@ -1119,9 +1121,14 @@ def run_turn(
 
     # Issue 02 / C-I1 — optional shared utterance admission. Both fields must
     # be present; omitting either preserves the pre-admission path (#19 alone).
+    # A promoted pending correction re-enters with `_held_lease` so we do not
+    # re-admit an id already in `seen_ids`.
     _admission_lease: str | None = None
     _admission_generation: int | None = None
-    if utterance_id is not None and generation is not None:
+    if _held_lease is not None and _held_generation is not None:
+        _admission_lease = _held_lease
+        _admission_generation = _held_generation
+    elif utterance_id is not None and generation is not None:
         from services.utterance_admission import StableUtterance, admit_utterance
         decision = admit_utterance(StableUtterance(
             utterance_id=utterance_id,
@@ -1189,6 +1196,8 @@ def run_turn(
     except Exception:  # noqa: BLE001 — the WAL must never block the turn
         logger.exception("chat: failed to open the pending-turn record")
 
+    _drain_utt = None
+    _drain_lease: str | None = None
     try:
         # The body is a separate generator so this one try/finally clears the
         # in-flight flag + records the duration on EVERY exit path (normal
@@ -1233,14 +1242,31 @@ def run_turn(
             session.shadow_turn = None
         if _admission_lease is not None and _admission_generation is not None:
             from services import utterance_admission as _ua
-            # Do not auto-promote pending into a hanging lease; drain is a
-            # later slice that starts the follow-up turn explicitly.
-            _ua._DEFAULT.release_lease(
+            # Promote pending into a new lease, then start that follow-up turn
+            # on this same stream (auto-drain). Leaving a promoted lease
+            # without a turn would hang admission.
+            promoted = _ua._DEFAULT.release_lease(
                 session_id=session.session_id,
                 lease_id=_admission_lease,
                 generation=_admission_generation,
-                promote=False,
+                promote=True,
             )
+            if (
+                promoted is not None
+                and promoted.status == 'admitted'
+                and promoted.lease_id is not None
+            ):
+                active = _ua._DEFAULT.active_utterance(session.session_id)
+                if active is not None:
+                    _drain_utt = active
+                    _drain_lease = promoted.lease_id
+                else:
+                    _ua._DEFAULT.release_lease(
+                        session_id=session.session_id,
+                        lease_id=promoted.lease_id,
+                        generation=promoted.generation,
+                        promote=False,
+                    )
         # C-3 — the turn's profile must not outlive the turn. A tool invoked
         # OUTSIDE a turn (a direct call, a test) has no profile to honour and
         # must take the pre-profile path; leaving a stale value bound would
@@ -1255,6 +1281,26 @@ def run_turn(
         # record behind. Only a crash skips this line — which is the point.
         if _wal_ctx is not None:
             clear_pending_turn(_wal_ctx)
+
+    if _drain_utt is not None and _drain_lease is not None:
+        yield from run_turn(
+            session,
+            _drain_utt.text,
+            client=client,
+            provider=provider,
+            message_history=message_history,
+            ui_context=ui_context,
+            wire_conflict=wire_conflict,
+            unknown_profile_id=unknown_profile_id,
+            strict_assurance=strict_assurance,
+            utterance_id=_drain_utt.utterance_id,
+            generation=_drain_utt.generation,
+            checked_scope=checked_scope,
+            checked_operation=None,
+            binding_generation=binding_generation,
+            _held_lease=_drain_lease,
+            _held_generation=_drain_utt.generation,
+        )
 
 
 def _outbound_vision_block_kinds(

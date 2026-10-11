@@ -253,6 +253,95 @@ def test_queued_while_lease_held_does_not_start_turn(
     t.join()
 
 
+def test_queued_pending_auto_drains_after_turn(
+    tmp_projects_dir, install_network, monkeypatch,
+):
+    """After the leased turn ends, the pending correction runs on the same
+    stream without a second client call (issue 02 / C-I1 auto-drain)."""
+    import harness.session as harness_session
+    import pypsa
+
+    monkeypatch.setattr(harness_session, 'CONFIRMATION_TTL_SECONDS', 5.0)
+    n = pypsa.Network()
+    n.add('Bus', 'B1')
+    n.add('Bus', 'B2')
+    install_network(n, name=None)
+
+    session = chat_service.ChatSession()
+    turn1_events = [
+        _tool_use_event('tu-d', 'delete_component',
+                        {'component_class': 'Bus', 'name': 'B2'}),
+    ]
+    turn1_final = _FakeFinalMessage(
+        content=[_tool_use_block('tu-d', 'delete_component',
+                                 {'component_class': 'Bus', 'name': 'B2'})],
+        usage=_FakeUsage(),
+    )
+    turn2_events = [_text_event('deleted.')]
+    turn2_final = _FakeFinalMessage(
+        content=[_text_block('deleted.')], usage=_FakeUsage(),
+    )
+    drain_events = [_text_event('correction applied.')]
+    drain_final = _FakeFinalMessage(
+        content=[_text_block('correction applied.')], usage=_FakeUsage(),
+    )
+    client1 = FakeAnthropicClient([
+        (turn1_events, turn1_final),
+        (turn2_events, turn2_final),
+        (drain_events, drain_final),
+    ])
+
+    streamed1: list = []
+    done1 = threading.Event()
+
+    def _run1():
+        for ev in chat_service.run_turn(
+            session, 'delete B2',
+            client=client1,
+            utterance_id='u1',
+            generation=1,
+        ):
+            streamed1.append(ev)
+        done1.set()
+
+    t = threading.Thread(target=_run1)
+    t.start()
+    deadline = time.monotonic() + 3.0
+    token = None
+    while time.monotonic() < deadline:
+        with session._lock:
+            if session._turn_in_flight and session.pending_confirmations:
+                token = next(iter(session.pending_confirmations))
+                break
+        time.sleep(0.02)
+    assert token
+    assert ua._DEFAULT.active_lease(session.session_id)
+
+    client2 = FakeAnthropicClient([])
+    events2 = list(chat_service.run_turn(
+        session, 'correction',
+        client=client2,
+        utterance_id='u2',
+        generation=1,
+    ))
+    assert [p.get('error_kind') for ev, p in events2 if ev == 'error'] == ['queued']
+    assert ua._DEFAULT.pending_utterance_id(session.session_id) == 'u2'
+    assert not client2.calls
+
+    session.record_decision(token, 'approve')
+    assert done1.wait(5.0)
+    t.join()
+
+    assert not client2.calls
+    assert len(client1.calls) == 3
+    tokens = [p.get('delta') for ev, p in streamed1 if ev == 'token']
+    assert 'correction applied.' in tokens
+    assert ua._DEFAULT.pending_utterance_id(session.session_id) is None
+    assert ua._DEFAULT.active_lease(session.session_id) is None
+    with session._lock:
+        assert session._turn_in_flight is False
+
+
 def test_blank_text_with_utterance_fields_is_rejected_empty(
     tmp_projects_dir, install_network,
 ):
