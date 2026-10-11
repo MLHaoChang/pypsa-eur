@@ -311,3 +311,35 @@ TypeScript/Vite build passed (existing chunk-size warning). Integrated QA:
 followed those final gates. Ruff passes new modules/records/tests; modified
 legacy loop/session retain baseline findings only. Inventory and diff checks
 pass. Full backend completion is recorded separately below.
+
+
+### Backend completion and corrected failures
+
+Full integrated backend run completed: **11,103 passed / 269 skipped / 5 failed**,
+8856 warnings, 4186.05 seconds. Four failures were stale prompt hashes/one stance
+paragraph from companion PR 113: all four reproduce on an untouched detached
+master `b8bc079f` worktree (**4 failed**, 1.24 seconds). Production prompt text
+is unchanged by this branch. Only the two stance hashes and the tools fixture's
+stance paragraph are re-pinned from that independently loaded master text;
+all byte-equality assertions remain. The fifth failure caught the new checked
+export interpolating a filename header; it now uses the existing
+`services.http_filenames.content_disposition()` helper.
+
+Fresh correction gate on final source: **348 passed / 65 warnings**, no skips,
+99.99 seconds. It runs every affected file and the entire final harness selection:
+
+```sh
+# from pypsa-gui/backend, with the cache variables described above
+../../.pixi/envs/test/bin/python -m pytest tests/test_chat_profile_binding.py tests/test_guided_mode_prompt.py tests/test_harness_prompts.py tests/test_download_headers.py tests/test_assurance_metrics.py tests/test_answer_assurance.py tests/test_harness_reliability.py tests/test_reliability_transport.py tests/test_assurance_storage.py tests/assurance_acceptance tests/test_harness_layout.py tests/test_chat_stream_attempt_seam.py -q -o addopts='' --tb=short
+```
+
+No failures remain in the correction gate. The full run predates the final
+localized shadow/navigation/header corrections and added cases; this fresh gate
+covers them. This is a full regression run followed by a successful correction
+gate, **not a second clean full backend run**. Overlapping counts are not summed.
+Final frontend/build/31 QA drivers/36 upstream tests remain passed as above.
+All 19 assurance documents / 128 local links and inventory/diff checks pass.
+Ruff passes new modules/records/tests/router; legacy loop/session add no findings.
+GitHub master was rechecked at `b8bc079f`; dispatch still returns 422 Actions
+repository-wide disabled. Default deployment and open domain/release limitations
+remain unchanged.

@@ -123,8 +123,12 @@ answers or all-application correctness.
 Providers are fake or real adapters with HTTP mocks; HiGHS solves the independent
 small numerical fixtures. No paid model calls. The current results and exact
 commands are in [coverage ledger](coverage-ledger.md) and [handoff](session-handoff.md).
-Final focused harness gate: **213 passed**; frontend: **3,606 passed / 307 files**;
+Final correction gate (every affected file plus the whole harness selection):
+**348 passed**; frontend: **3,606 passed / 307 files**;
 all **31 QA drivers** and **36 upstream unit tests** pass. Production build
-passes. The full backend result is recorded in the linked ledger. GitHub Actions
+passes. The full backend run had **11,103 passed / 269 skipped / 5 failed**;
+all five were corrected and their full files pass in the fresh 348-case gate.
+This is a full run plus correction gate, not a second clean full run; see the
+linked ledger for exact reproduction and source-coverage boundaries. GitHub Actions
 dispatch was rechecked and returns HTTP 422 because Actions is disabled for this
 repository; these are local locked-environment results, not remote CI checks.

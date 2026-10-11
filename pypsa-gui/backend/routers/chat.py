@@ -1018,11 +1018,12 @@ def export_checked_answer(answer_id: str, format: Literal["json", "zip"] = "json
     import hashlib
     from starlette.responses import Response
     from harness.publication import export
+    from services.http_filenames import content_disposition
     if actor is None:
         raise HTTPException(401, "Authentication required")
     data, media_type, filename = export(str(actor.id), answer_id, format)
     return Response(data, media_type=media_type, headers={
-        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Content-Disposition": content_disposition(filename),
         "X-Content-SHA256": hashlib.sha256(data).hexdigest(),
         "Cache-Control": "no-store",
     })
