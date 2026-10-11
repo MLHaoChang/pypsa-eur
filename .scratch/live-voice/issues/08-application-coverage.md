@@ -41,3 +41,15 @@ adequacy+FMEA inventory IDs (not a invented module). All 14 coverage families ha
 `tests/test_assistant_control_matrix.py` (9 passed). Remaining for issue 08 close-out:
 behavioral fixtures on issue 05, any still-missing typed tools over services, and an
 explicit full-coverage limitation block — do not mark the whole-application claim done.
+
+2026-10-11: Full-coverage limitation block landed. `capability-matrix.json` now carries
+`full_coverage` (`claimed: false`, `status: not_established`, 14 of 14 family journeys
+pending, one blocker per `pending:issue-05-*` journey plus standing blockers for pending
+behavioral fixtures, unaudited UI-control/tool parity and hosted gates), and
+`application-coverage.md` has a matching "Full-coverage limitation block" section.
+`assistant_control_matrix.py --check` fails if the matrix claims coverage while any journey is
+pending or any blocker remains, or if `journeys_pending` drifts; passing journeys alone do
+not flip the claim because standing blockers need an explicit edit. Tests:
+`tests/test_assistant_control_matrix.py` (17 passed, 8 new). Issue 08 stays `claimed`: it is
+done only when issue 05 journeys pass and the blockers are cleared with evidence.
+

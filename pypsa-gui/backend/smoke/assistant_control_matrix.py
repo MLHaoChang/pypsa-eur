@@ -115,6 +115,43 @@ FAMILY_JOURNEYS: list[dict[str, str]] = [
     },
 ]
 
+# Blockers that stay until a human closes them with evidence; never derived away.
+STANDING_BLOCKERS: list[dict[str, str]] = [
+    {'id': 'behavioral-fixtures-pending', 'issue': '08',
+     'summary': 'Every matrix row still carries a pending:issue-05-* behavioral fixture; no per-family real journey has passed.'},
+    {'id': 'ui-control-tool-parity-unaudited', 'issue': '08',
+     'summary': 'Panel/subview/filter/editor controls beyond creation-form fields and catalogue closed sets are not mapped to a typed tool or a declared gap.'},
+    {'id': 'hosted-gates-pending', 'issue': '05',
+     'summary': 'Hosted profile, device and latency gates and the prolonged mixed-domain conversation are not run; an architecture review does not certify production behavior.'},
+]
+
+
+def _full_coverage(journeys: list[dict[str, str]]) -> dict:
+    """The explicit limitation block: whole-application coverage is NOT claimed
+    until every family journey is a real issue-05 journey and no blocker remains."""
+    pending = [j for j in journeys if str(j['journey_id']).startswith('pending:')]
+    blockers = [
+        {'id': f'family-journey:{j["journey_id"]}', 'issue': '05', 'family': j['family'],
+         'summary': 'Representative real journey not yet passing.'}
+        for j in pending
+    ] + STANDING_BLOCKERS
+    return {
+        'claimed': not blockers,
+        'status': 'established' if not blockers else 'not_established',
+        'rule': (
+            'Whole-application coverage may be claimed only when every family journey is a passing '
+            'issue-05 journey (journey_id not "pending:") and no blocker remains. Load flow, '
+            'sensitivity and GridSpine fixtures are examples, not the scope.'
+        ),
+        'journeys_total': len(journeys),
+        'journeys_pending': len(pending),
+        'blockers': blockers,
+        'permitted_statement': (
+            'Tested subsets only, labelled accordingly; no whole-application coverage claim.'
+        ),
+    }
+
+
 # User-requested "AR" label → real modules/tools (never invent "Ardat").
 AR_RESOLUTION = {
     'label': 'AR',
@@ -374,6 +411,7 @@ def build_matrix() -> dict:
         'control_gaps': gaps,
         'ar_resolution': AR_RESOLUTION,
         'family_journeys': FAMILY_JOURNEYS,
+        'full_coverage': _full_coverage(FAMILY_JOURNEYS),
         'counts': {
             'creation_controls': len(controls),
             'editability_overrides': len(edit_rows),
@@ -391,6 +429,22 @@ def _stable(obj: object) -> object:
     if isinstance(obj, list):
         return [_stable(v) for v in obj]
     return obj
+
+
+def _full_coverage_problem(matrix: dict) -> str | None:
+    """CI guard: a claim must be backed by passing journeys and zero blockers."""
+    block = matrix.get('full_coverage')
+    if not isinstance(block, dict):
+        return 'full_coverage limitation block is missing'
+    pending = [j for j in matrix.get('family_journeys', [])
+               if str(j.get('journey_id', '')).startswith('pending:')]
+    if block.get('claimed') is True and (pending or block.get('blockers')):
+        return 'full_coverage.claimed is true while family journeys are pending or blockers remain'
+    if pending and (block.get('claimed') is not False or block.get('status') != 'not_established'):
+        return 'full_coverage must be claimed=false/not_established while issue-05 journeys are pending'
+    if block.get('journeys_pending') != len(pending):
+        return 'full_coverage.journeys_pending disagrees with family_journeys'
+    return None
 
 
 def main(argv=None) -> int:
@@ -419,6 +473,10 @@ def main(argv=None) -> int:
     if len(committed.get('family_journeys', [])) != 14:
         print('family_journeys must assign all 14 coverage families')
         return 1
+    problem = _full_coverage_problem(committed)
+    if problem:
+        print(problem)
+        return 1
     if any(c.get('tool') is None and c.get('gap') is None for c in committed.get('controls', [])):
         print('every creation control needs a tool or an explicit gap')
         return 1
@@ -427,6 +485,7 @@ def main(argv=None) -> int:
         f'controls={committed["counts"]["creation_controls"]}',
         f'families={committed["counts"]["family_journeys"]}',
         'ar=mapped',
+        f'full_coverage={committed["full_coverage"]["status"]}',
     )
     return 0
 
