@@ -2,6 +2,7 @@
 
 # ruff: noqa: F811 -- imported shared fixtures.
 import json
+import uuid
 import pytest
 from services import chat_service, workflow_tools
 from tests.assurance_acceptance.support import approval, public_text
@@ -10,6 +11,30 @@ from tests.test_assurance_metrics import solved  # noqa: F401
 from tests.test_workflow_tools import baseline  # noqa: F401
 from tests.test_conversation_scope import conversation, clarified  # noqa: F401
 from tests.test_harness_reliability import scope, VALUES
+
+
+@pytest.mark.parametrize("control", ["resume", "rebind"])
+def test_parent_cannot_control_foreign_episode_without_checked_state(
+    baseline, checked, control
+):
+    foreign = chat_service.get_or_create_session(
+        "foreign-" + uuid.uuid4().hex, owner_user_id=str(uuid.uuid4())
+    )
+    checked.session_ids.append(foreign.session_id)
+    assert foreign.assurance_context is None
+    parent = checked.client.post("/api/durable-conversations").json()
+    tid = parent["thread_id"]
+    checked.client.post(
+        f"/api/durable-conversations/{tid}/checkpoint",
+        json={"generation": 1, "episode_id": foreign.session_id},
+    ).raise_for_status()
+    response = checked.client.post(
+        f"/api/durable-conversations/{tid}/{control}", json={"generation": 1}
+    )
+    assert response.status_code == 404
+    assert chat_service.get_session(foreign.session_id) is foreign
+    current = checked.client.get(f"/api/durable-conversations/{tid}").json()
+    assert current["generation"] == 1 and current["episode_id"] == foreign.session_id
 
 
 @pytest.mark.parametrize("control", ["resume", "rebind"])

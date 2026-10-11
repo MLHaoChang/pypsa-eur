@@ -225,6 +225,8 @@ def _revoke_checked_episode(thread: dict[str, Any]) -> None:
     if not episode_id:
         return
     session = chat_service.get_session(episode_id)
+    if session is not None and session.owner_user_id != thread['owner_id']:
+        _refuse('thread_not_found', 'Episode is outside this parent scope.', 404)
     identifier = recovery.checkpoint_id(
         thread['owner_id'], thread['project_id'], episode_id,
     )
