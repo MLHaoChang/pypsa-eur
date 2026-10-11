@@ -6916,6 +6916,7 @@ from services.workflow_tools import (
 
 from services.run_evidence import list_project_runs, get_run_evidence, compare_project_runs
 from services.loadflow_summary import get_loadflow_summary
+from services.experiments import start_experiment, list_experiments, get_experiment
 from services.assistant_tasks import list_tasks, start_task, get_task, resume_task, cancel_task, resolve_task_step
 from services.assistant_tools import (find_capabilities, get_file_delivery, inspect_import, import_uploaded_network,
                                       preview_project_changes, apply_project_changes, create_chart, build_delivery)
@@ -6925,6 +6926,9 @@ DISPATCHERS: dict[str, Any] = {
     "get_run_evidence": get_run_evidence,
     "compare_project_runs": compare_project_runs,
     "get_loadflow_summary": get_loadflow_summary,
+    "start_experiment": start_experiment,
+    "list_experiments": list_experiments,
+    "get_experiment": get_experiment,
     "list_tasks": list_tasks,
     "find_capabilities": find_capabilities,
     "start_task": start_task,

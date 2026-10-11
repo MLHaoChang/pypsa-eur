@@ -27,3 +27,13 @@ plus typed parameters, approval, isolation, partial failure and interruption/exp
 Unsupported required domains block a full experiment claim.
 
 ## Comments
+
+2026-10-11: First slice — `services/experiments.py` persists typed experiment
+plans (`start_experiment` / `list_experiments` / `get_experiment`) under
+`<project>/experiments/` with domain adapters (network/commercial/reliability/
+gridspine), typed changes (number/boolean/string/enum + optional unit),
+request_id dedupe, owner/ACL fail-closed. `executed=false`; no hidden solves.
+Catalogue/dispatcher/route/toolset/inventory. Tests:
+`tests/test_experiments_persist.py`. Still open: advance cases through ordinary
+tools/queues, partial failure, compare, cancel/resume, commercial/reliability/
+GridSpine execution adapters.
