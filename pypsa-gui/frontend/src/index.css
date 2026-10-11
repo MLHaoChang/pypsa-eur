@@ -353,9 +353,13 @@ html {
   transform-origin: center bottom;
 }
 
+.companion-live-echo {
+  animation: companion-echo-fade 1.6s ease forwards;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .companion-idle {
-    animation: companion-bob 2.4s ease-in-out infinite;
+    animation: companion-bob 2.8s ease-in-out infinite;
   }
 
   .companion-launcher[data-hovered='true'] .companion-idle {
@@ -367,7 +371,7 @@ html {
   }
 
   .companion-launcher[data-hovered='true'] .companion-character-wrap {
-    transform: scale(1.12);
+    transform: scale(1.08);
   }
 
   .companion-actions {
@@ -382,21 +386,54 @@ html {
     opacity: 1;
     transform: translateY(0);
   }
+
+  .companion-launcher[data-presence='listening'] .companion-node-halo {
+    animation: companion-listen-ring 1.8s ease-in-out infinite;
+  }
+
+  .companion-launcher[data-presence='thinking'] .companion-node-sector {
+    transform-origin: 48px 48px;
+    animation: companion-think-spin 1.1s linear infinite;
+  }
+
+  .companion-launcher[data-presence='speaking'] .companion-node-ring {
+    animation: companion-speak-pulse 1s ease-in-out infinite;
+  }
 }
 
-.companion-launcher[data-presence='listening'] .companion-character-wrap,
-.companion-launcher[data-presence='thinking'] .companion-character-wrap,
-.companion-launcher[data-presence='speaking'] .companion-character-wrap {
-  filter: drop-shadow(0 0 14px var(--color-accent));
+@media (prefers-reduced-motion: reduce) {
+  .companion-live-echo {
+    animation: none;
+  }
 }
 
 @keyframes companion-bob {
   0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-4px); }
+  50% { transform: translateY(-3px); }
 }
 
 @keyframes companion-react {
   0% { transform: translateY(0) scale(1); }
-  40% { transform: translateY(-10px) scale(1.06); }
+  40% { transform: translateY(-8px) scale(1.04); }
   100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes companion-listen-ring {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 0.55; }
+}
+
+@keyframes companion-think-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes companion-speak-pulse {
+  0%, 100% { stroke-opacity: 0.45; }
+  50% { stroke-opacity: 0.95; }
+}
+
+@keyframes companion-echo-fade {
+  0% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
 }

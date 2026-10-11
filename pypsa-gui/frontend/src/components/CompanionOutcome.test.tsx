@@ -7,7 +7,7 @@ const BLOB = '/api/projects/Demo/uploads/0123456789abcdef/blob'
 const LATER_BLOB = '/api/projects/Demo/uploads/fedcba9876543210/blob'
 
 describe('CompanionOutcome', () => {
-  it('shows the latest assistant sentence and a download from the tool result', () => {
+  it('keeps a download chip and never parks the assistant sentence beside Live', () => {
     useChatStore.setState({
       messages: [
         { id: '1', role: 'assistant', content: 'The network file is ready.', ts: 1 },
@@ -18,7 +18,7 @@ describe('CompanionOutcome', () => {
       ],
     })
     render(<CompanionOutcome />)
-    expect(screen.getByTestId('companion-outcome').textContent).toBe('The network file is ready.')
+    expect(screen.queryByTestId('companion-outcome')).toBeNull()
     const anchor = screen.getByTestId('companion-download')
     expect(anchor.getAttribute('href')).toBe(BLOB)
     expect(anchor.getAttribute('download')).toBe('chart.png')
@@ -37,6 +37,7 @@ describe('CompanionOutcome', () => {
       })
       const view = render(<CompanionOutcome />)
       expect(screen.queryByTestId('companion-download')).toBeNull()
+      expect(screen.queryByTestId('companion-outcome')).toBeNull()
       view.unmount()
     }
   })
@@ -61,6 +62,7 @@ describe('CompanionOutcome', () => {
     const anchor = screen.getByTestId('companion-download')
     expect(anchor.getAttribute('href')).toBe(LATER_BLOB)
     expect(anchor.getAttribute('download')).toBe('chart.png')
+    expect(screen.queryByTestId('companion-outcome')).toBeNull()
     shown.unmount()
 
     useChatStore.setState({
@@ -75,22 +77,31 @@ describe('CompanionOutcome', () => {
     })
     render(<CompanionOutcome />)
     expect(screen.queryByTestId('companion-download')).toBeNull()
-    expect(screen.getByTestId('companion-outcome').textContent).toBe('Nothing to download.')
+    expect(screen.queryByTestId('companion-outcome')).toBeNull()
   })
 
   it('renders nothing when hidden', () => {
     useChatStore.setState({
       messages: [
         { id: '1', role: 'assistant', content: 'Ready.', ts: 1 },
+        {
+          id: '2', role: 'tool', content: '→ build_delivery', ts: 2,
+          tool_result: { download_url: BLOB, filename: 'chart.png' },
+        },
       ],
     })
     render(<CompanionOutcome hidden />)
-    expect(screen.queryByTestId('companion-outcome')).toBeNull()
+    expect(screen.queryByTestId('companion-download')).toBeNull()
   })
 
-  it('renders nothing when there is no assistant message', () => {
-    useChatStore.setState({ messages: [] })
+  it('renders nothing when there is no downloadable result', () => {
+    useChatStore.setState({
+      messages: [
+        { id: '1', role: 'assistant', content: 'Ready.', ts: 1 },
+      ],
+    })
     render(<CompanionOutcome />)
+    expect(screen.queryByTestId('companion-download')).toBeNull()
     expect(screen.queryByTestId('companion-outcome')).toBeNull()
   })
 })

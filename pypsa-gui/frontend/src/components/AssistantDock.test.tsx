@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { useEffect } from 'react'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
@@ -143,6 +143,11 @@ describe('assistant dock prominence', () => {
   beforeEach(() => {
     localStorage.clear()
     useUIStore.setState({ assistantDockOpen: false, assistantEntry: null })
+    useChatStore.setState({ streaming: false, pending: null, messages: [] })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('offers reviewed dictation from the collapsed companion', async () => {
@@ -177,8 +182,38 @@ describe('assistant dock prominence', () => {
     await user.click(screen.getByTestId('companion-live-send'))
     expect(useUIStore.getState().assistantDockOpen).toBe(false)
     expect(heard).toEqual(['List the generators'])
-    expect(screen.getByTestId('companion-live-caption').textContent).toContain('Sent to the assistant.')
+    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('thinking')
+    expect(screen.getByTestId('companion-live-echo').textContent).toBe('List the generators')
+    expect(screen.queryByTestId('companion-outcome')).toBeNull()
     window.removeEventListener('companion:live-utterance', onUtterance)
+  })
+
+  it('clears the live echo and returns to listening after the stream finishes', async () => {
+    const user = userEvent.setup()
+    render(<AssistantDock />)
+    await user.click(screen.getByTestId('companion-live'))
+    await user.type(screen.getByTestId('companion-live-input'), 'List the generators')
+    await user.click(screen.getByTestId('companion-live-send'))
+    expect(screen.getByTestId('companion-live-echo').textContent).toBe('List the generators')
+    await act(async () => {
+      useChatStore.setState({ streaming: true })
+    })
+    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('thinking')
+    await act(async () => {
+      useChatStore.setState({
+        streaming: false,
+        messages: [
+          { id: 'u1', role: 'user', content: 'List the generators', ts: 1 },
+          { id: 'a1', role: 'assistant', content: 'There is one generator.', ts: 2 },
+        ],
+      })
+    })
+    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('speaking')
+    expect(screen.queryByTestId('companion-outcome')).toBeNull()
+    await waitFor(() => {
+      expect(screen.queryByTestId('companion-live-echo')).toBeNull()
+      expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('listening')
+    }, { timeout: 3_000 })
   })
 
   it('does not send a live sentence while the assistant is already streaming', async () => {

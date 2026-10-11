@@ -62,7 +62,7 @@ describe('CompanionLauncher', () => {
     expect(screen.getByTestId('companion-character').className.split(/\s+/)).not.toContain('companion-idle')
   })
 
-  it('grows on hover and reveals the actions from a larger character', () => {
+  it('grows on hover and reveals the actions from a grid node', () => {
     mockMotion(false)
     render(
       <CompanionLauncher
@@ -74,9 +74,11 @@ describe('CompanionLauncher', () => {
       />,
     )
     const root = screen.getByTestId('companion-launcher')
-    const svg = screen.getByTestId('companion-character').querySelector('svg')
-    expect(svg?.getAttribute('width')).toBe('112')
-    expect(svg?.getAttribute('height')).toBe('112')
+    const character = screen.getByTestId('companion-character')
+    const svg = character.querySelector('svg')
+    expect(character.getAttribute('data-shape')).toBe('grid-node')
+    expect(svg?.getAttribute('width')).toBe('96')
+    expect(svg?.getAttribute('height')).toBe('96')
     expect(root.getAttribute('data-hovered')).toBe('false')
     expect(screen.getByTestId('companion-actions').className.split(/\s+/)).toContain('companion-actions')
     fireEvent.mouseEnter(root)
@@ -100,5 +102,36 @@ describe('CompanionLauncher', () => {
     expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('listening')
     expect(screen.getByTestId('companion-live').getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByTestId('companion-speak').getAttribute('aria-pressed')).toBeNull()
+  })
+
+  it('flashes the live echo and clears it without keeping a transcript card', () => {
+    mockMotion(false)
+    const { rerender } = render(
+      <CompanionLauncher
+        presence="thinking"
+        profileLabel="Model"
+        liveOpen
+        liveEcho="List the projects"
+        onCompose={vi.fn()}
+        onSpeak={vi.fn()}
+        onLive={vi.fn()}
+        onProfiles={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId('companion-live-echo').textContent).toBe('List the projects')
+    expect(screen.queryByTestId('companion-outcome')).toBeNull()
+    rerender(
+      <CompanionLauncher
+        presence="listening"
+        profileLabel="Model"
+        liveOpen
+        liveEcho=""
+        onCompose={vi.fn()}
+        onSpeak={vi.fn()}
+        onLive={vi.fn()}
+        onProfiles={vi.fn()}
+      />,
+    )
+    expect(screen.queryByTestId('companion-live-echo')).toBeNull()
   })
 })

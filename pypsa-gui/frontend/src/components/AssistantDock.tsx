@@ -39,12 +39,21 @@ export default function AssistantDock() {
 
   const profilesQuery = useChatProfiles()
   const { effectiveProfileId, ready } = useChatReadiness()
+  const streaming = useChatStore((s) => s.streaming)
   const [presence, setPresence] = useState<CompanionPresence>('idle')
   const [liveOpen, setLiveOpen] = useState(false)
   const [liveCaption, setLiveCaption] = useState('')
+  const [liveEcho, setLiveEcho] = useState('')
   const [walking, setWalking] = useState(false)
   const walkCancel = useRef<(() => void) | null>(null)
-  useEffect(() => () => { walkCancel.current?.() }, [])
+  const echoClear = useRef<number | null>(null)
+  const sawStream = useRef(false)
+  const speakHold = useRef<number | null>(null)
+  useEffect(() => () => {
+    walkCancel.current?.()
+    if (echoClear.current != null) window.clearTimeout(echoClear.current)
+    if (speakHold.current != null) window.clearTimeout(speakHold.current)
+  }, [])
 
   const stopWalk = useCallback(() => {
     walkCancel.current?.()
@@ -52,14 +61,47 @@ export default function AssistantDock() {
     setWalking(false)
   }, [])
 
+  const flashEcho = useCallback((text: string) => {
+    if (echoClear.current != null) window.clearTimeout(echoClear.current)
+    setLiveEcho(text)
+    echoClear.current = window.setTimeout(() => {
+      setLiveEcho('')
+      echoClear.current = null
+    }, 1_600)
+  }, [])
+
   const forwardToHarness = useCallback((text: string) => {
     if (ready !== true) return
     window.dispatchEvent(new CustomEvent('companion:live-utterance', { detail: text }))
   }, [ready])
 
+  // Live is presence-led. The transcript stays in the console; here the node
+  // thinks while the stream is open and speaks briefly when it closes.
+  useEffect(() => {
+    if (!liveOpen || walking) return
+    if (streaming) {
+      sawStream.current = true
+      if (speakHold.current != null) {
+        window.clearTimeout(speakHold.current)
+        speakHold.current = null
+      }
+      setPresence('thinking')
+      return
+    }
+    if (!sawStream.current) return
+    sawStream.current = false
+    setPresence('speaking')
+    if (speakHold.current != null) window.clearTimeout(speakHold.current)
+    speakHold.current = window.setTimeout(() => {
+      setPresence((current) => (current === 'speaking' ? 'listening' : current))
+      speakHold.current = null
+    }, 1_800)
+  }, [streaming, liveOpen, walking])
+
   const onLiveSubmit = useCallback((text: string) => {
     if (keyResultsWalkRequested(text)) {
       stopWalk()
+      setLiveEcho('')
       setWalking(true)
       setPresence('thinking')
       setLiveCaption('Opening each results tab.')
@@ -80,6 +122,7 @@ export default function AssistantDock() {
     }
     if (openProjectRequested(text)) {
       stopWalk()
+      setLiveEcho('')
       openProjectList()
       setPresence('speaking')
       setLiveCaption('Opening the project list.')
@@ -92,14 +135,15 @@ export default function AssistantDock() {
         return
       }
       stopWalk()
+      setLiveCaption('')
+      flashEcho(text)
       setPresence('thinking')
-      setLiveCaption('Sent to the assistant.')
       forwardToHarness(text)
       return
     }
     setPresence('listening')
     setLiveCaption('Add an API key for the assistant first. Tab changes and opening a project still work without one.')
-  }, [forwardToHarness, ready, stopWalk])
+  }, [flashEcho, forwardToHarness, ready, stopWalk])
   const profileLabel =
     profilesQuery.data?.profiles.find((p) => p.id === effectiveProfileId)?.label
     ?? profilesQuery.data?.profiles.find((p) => p.id === profilesQuery.data.active_profile_id)?.label
@@ -222,6 +266,7 @@ export default function AssistantDock() {
           profileLabel={profileLabel}
           liveOpen={liveOpen}
           liveCaption={liveCaption}
+          liveEcho={liveEcho}
           modelKeyMissing={ready === false}
           onLiveSubmit={onLiveSubmit}
           onCompose={() => {
@@ -242,11 +287,14 @@ export default function AssistantDock() {
               setLiveOpen(false)
               setPresence('idle')
               setLiveCaption('')
+              setLiveEcho('')
+              sawStream.current = false
               return
             }
             setLiveOpen(true)
             setPresence('listening')
-            setLiveCaption('Listening. Ask to walk through the key results in each tab, or to open a project.')
+            setLiveCaption('')
+            setLiveEcho('')
           }}
           onProfiles={() => {
             stopWalk()
