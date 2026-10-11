@@ -396,7 +396,7 @@ class Turn:
         scoped = record["source_kind"] == "scoped_result"
         entity_kind = (
             "StorageUnit" if self.request_scope["profile"] == "storage-unit-dispatch/1"
-            else "Network" if record["scope"]["entity_id"] == "network" else "Generator"
+            else "Network" if self.request_scope["profile"] == "network-linear-cost/1" else "Generator"
         )
         lines = [
             f"{entity_kind} {_label(record['scope']['entity_id'])}; "

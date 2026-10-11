@@ -347,3 +347,8 @@ current UI identifies a StorageUnit. Its name binds only scope; authorization,
 source provenance and the complete raw trajectory still establish the facts.
 Additional requested quantities or suffix instructions cannot silently collapse
 into that generic key-results grammar.
+
+Entity class is determined by the requested profile, never by the spelling of
+an asset name. A generator or StorageUnit named `network` stays an asset during
+clarification, follow-ups and rendering; only the network-cost profile selects
+network-wide calculations.

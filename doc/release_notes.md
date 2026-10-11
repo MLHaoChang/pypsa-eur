@@ -6,6 +6,8 @@
 <!-- Upcoming Release -->
 <!-- ================= -->
 
+* Fix(pypsa-gui): Keep asset type bound to the checked calculation profile during cost clarification and rendering. A generator named `network` cannot silently become a network-wide cost request.
+
 * Fix(pypsa-gui): Capture typed contract-draft prices before deferred state updates and verify successive edits in the application’s StrictMode. Preserve the latest value before saving contracts.
 
 * Fix(pypsa-gui): Remove a duplicate worker-pin error-manifest entry so its declared banner surface agrees with the chat UI.
