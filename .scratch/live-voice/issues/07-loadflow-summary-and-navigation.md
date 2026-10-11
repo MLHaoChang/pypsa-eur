@@ -3,7 +3,7 @@
 
 # Fast critical-line evidence and precise assistant navigation
 
-Status: ready-for-agent
+Status: claimed
 Type: task
 
 This is one illustrative domain fixture under the mandatory
@@ -40,3 +40,25 @@ ACL, stale generation and tool parity. The same flow must work from every suppor
 harness provider before connecting voice. UI and assistant share the metric source.
 
 ## Comments
+
+2026-10-11: First slice landed: read-tier `get_loadflow_summary` over the CURRENT results
+(`services/loadflow_summary.py`, catalogue + `DISPATCHERS` + `TOOL_ROUTES`, results toolset;
+tests `tests/test_loadflow_summary.py`, 43 passed). It aggregates the Results-tab sources
+(`routers.results._result_df` LOPF/AC PF snapshot, `dispatch_status` freshness, `s_nom_opt`/`s_nom`
+rating, `period_utils.snapshot_weights`, parity-checked against Compare's loading summary). Returns
+exact project/source/window, freshness/solve state, ranked lines and transformers by peak
+utilisation = flow / (rating * s_max_pu) over both terminals (time-varying `s_max_pu`, optimized
+rating, weighted hours at/over limit), skipped branches (zero/missing rating, no flow data),
+`missing_evidence`, and `claims.full_ac_thermal_compliance=false`. LOPF is labelled an
+active-power proxy; `source='ac_pf'` uses apparent power only where reactive flows exist and
+excludes unconverged snapshots. Unsolved/stale/running/infeasible/failed results and a missing AC
+PF give typed `status: unavailable` payloads (`unavailable_kind`), never earlier numbers.
+`run_id` (historical) resolves through the issue 06 store and answers
+`historical_loadflow_unavailable` (`depends_on: issue-06 run evidence`) until a `loadflow` section
+exists. Payload is bounded under the 4000-char per-result cap and carries an `evidence_token` for
+cache invalidation. Inventory regenerated (223 tools).
+
+Still open: the typed UI navigation (open `results_tab='loadflow'`, same source/window,
+highlight/scroll to a line, ACK with project/run/source/section/generation, hidden-tab route),
+the live-chat acceptance journey on every harness provider, and a shared client/server metric
+source (the tab still computes loading in the browser from the same inputs and convention).

@@ -34,6 +34,6 @@ def filter_tools(tools, domain="all"):
             return any(word in name for word in ("component", "carrier", "network", "timeseries", "snapshot", "profile", "constraint", "investment_period", "vintage", "tariff", "site_connection", "participants"))
         if domain == "simulation":
             return any(word in name for word in ("simulation", "solver", "solve_queue", "validate", "dispatch_status", "sensitivity", "campaign", "study", "sweep", "loop")) or name == "run_ac_pf_stage"
-        return any(word in name for word in ("results", "compare", "explain", "report", "export", "capacity", "assessment"))
+        return any(word in name for word in ("results", "compare", "explain", "report", "export", "capacity", "assessment", "loadflow"))
 
     return [tool for tool in tools if included(tool["name"])]
