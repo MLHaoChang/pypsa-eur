@@ -13,6 +13,7 @@ harness/
   events.py       the closed vocabulary of frames the turn loop yields to the UI
   assurance.py    opt-in checked input/result drafts and publication gate
   assurance_scope.py  typed requested metrics, windows, cost basis and retained/comparison IDs
+  assurance_conversation.py  bounded checked-scope carryover, cost clarification and previous-run selection
   calculations.py  bounded formula/unit registry, raw masks and cost dependencies
   durable.py      bounded network locks and cross-process owner-store transactions
   effects.py      exact confirmed input-write reservations, read-back and reconciliation
@@ -90,6 +91,12 @@ formulas and coverage. Three bounded profiles support generator dispatch,
 declared-basis generator costs and a linear network subset. Missing cost basis,
 unsupported components and quantities receive unavailable slots. Software renders
 exact checked values; a model cannot replace them with narrative or its own numbers.
+
+Live sessions retain at most two distinct checked run references for bounded
+repeat/window/comparison follow-ups. Material cost ambiguity prompts a software
+question with no provider call; only successfully checked results seed context.
+Project/generation/selection changes, rewind, expiration or missing context
+require a fresh explicit scope. Historical repeats keep their retained run.
 
 Immutable retained evidence and exact same-basis comparison IDs support replay
 without rerunning a model. Optional qualitative interpretations need one bounded

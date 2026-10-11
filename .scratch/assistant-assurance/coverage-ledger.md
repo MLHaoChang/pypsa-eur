@@ -343,3 +343,56 @@ Ruff passes new modules/records/tests/router; legacy loop/session add no finding
 GitHub master was rechecked at `b8bc079f`; dispatch still returns 422 Actions
 repository-wide disabled. Default deployment and open domain/release limitations
 remain unchanged.
+
+
+## 2026-10-11 — live conversational scope continuation
+
+Branch `feat/harness-conversation-scope`, based on merged PR 119 (`9b987371`).
+The user authorized continuing the next implementation slice and retained the
+instruction to create/merge a PR after validation. Attached design review notes
+are context, not new instructions requiring another approval.
+
+Added `harness.assurance_conversation` and private bounded session state. Only
+published checked results seed exact selectors and two distinct immutable raw
+run references. Repeats retain entity/window/metrics/basis/current-vs-retained
+selection; snapshot growth cannot silently expand the original window. Cost
+comparisons choose the previous distinct compatible checked source, not a prior
+repeated answer. Software cost-quantity/basis questions call no provider, keep
+ordinary budget/auth/history/cancellation gates and assign needs-clarification
+slots with no checked facts. The existing choice frame is admitted only for
+that exact software-generated question. Frontend rejects contradictory receipts,
+labels clarification and hides checked-value downloads. No SDK, new frame name,
+effect grant or deployment activation was added.
+
+Initial public-stream tracers: **14 failed**, then **14 passed**. Expanded final
+scope cases: **30 passed** / 34 warnings, 27.89 seconds. Initial broad gate exposed
+one network-cost basis omission (fixed in the resolver) and two test isolation/
+old-behavior assumptions: the corruption fixture now restores its own bytes, the
+new shadow fixture uses isolated app data, and the prior missing-basis case now
+asserts its stronger typed clarification/no-provider-call contract. Assertions
+for checked values, false completion, provider neutrality and byte equality were
+not weakened. Final focused gate: **274 passed / 1 existing deliberate frame-
+recording skip**, 96 warnings, 119.58 seconds. It includes scope, calculation,
+publication, storage, acceptance, real adapter HTTP mocks, layout, stream attempt,
+rewind, history-owner, live-history race, budget and frame-contract files.
+Final UI selection: **27 passed / 3 files**; TypeScript/Vite build passed (existing
+chunk-size warning). New module/assurance/tests pass Ruff; legacy loop/session/
+history add no findings. Inventory matches **220 tools / 14 tabs / 17 panels**;
+**19 docs / 129 local links** and diff checks pass.
+
+The final source is frozen for broad checks. Full backend collection reports
+**11,412 cases / 527 files**. To use the managed environment's two CPU cores
+without installing a test plugin, all collected files are partitioned into two
+disjoint 5,706-case subprocess selections; their union equals the collection.
+Each pytest process has its own conftest-created app-data directory/DB, runs from
+backend cwd, and uses the locked `.pixi/envs/test/bin/python`. Threads are bounded
+with OMP_NUM_THREADS=OPENBLAS_NUM_THREADS=MKL_NUM_THREADS=1. The ordinary `-q -o
+addopts='' --tb=short` flags are used. Counts/exit codes will be recorded when both
+shards finish; pending runs are not treated as passed. Full frontend and 31 QA
+drivers are also running. No paid model calls are used.
+
+Boundaries: live-session state only; restart/new chat requires explicit scope or
+owned retained IDs. Arbitrary language and durable constraint recovery, additional
+domains, independent expert/calibration/browser journeys and release activation
+remain pending. Existing storage TTL/byte/quota limits apply to private snapshots;
+active project runtime remains one application worker. Issue 09 is still open.

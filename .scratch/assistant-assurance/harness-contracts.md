@@ -62,7 +62,9 @@ Show me total cost for generator G1; price year 2026; annual fixed cost fraction
 Show me key results for network; from 2026-01-01T00:00:00 to 2026-01-01T01:00:00; price year 2026; annual fixed cost fraction 1
 ```
 
-Ambiguous cost basis is unavailable, never silently replaced with the objective.
+An explicit API scope with a missing cost basis remains unavailable. A recognized
+natural-language cost request without that basis prompts clarification; no
+solver objective or assumed price year silently substitutes for it.
 Arbitrary prose instructions are not parsed into complete scientific requests.
 
 An approved answer's receipt carries `request_scope`, `result_slots` and
@@ -157,3 +159,61 @@ and SHA-256/byte bindings. Chart/report/import/general exports do not acquire
 checked status from this API. Existing checked PNG integrity remains separate.
 The evidence card offers these authenticated downloads. No new SSE frame type
 or provider-specific reliability path is introduced.
+
+
+## Bounded conversational scope (2026-10-11)
+
+Strict/pilot checked turns also recognize whole-message follow-ups:
+
+```
+Show those results again.
+Show those results from 2026-01-01T01:00:00 to 2026-01-01T01:00:00.
+Compare that with the previous run.
+Use price year 2026; annual fixed cost fraction 0.5.
+```
+
+A completed checked result preserves its exact project, entity, required metrics,
+time window, cost basis and current/retained mode in the **live server session**.
+An original all-current-snapshots default becomes the actual explicit boundaries
+for follow-ups, so later snapshot additions cannot silently extend the window.
+Repeat of a comparison retains its baseline and delta slots; repeat of a retained
+run retains that evidence ID even when current inputs have changed. Changing a
+historical/comparison window or basis requires a new explicit scope.
+
+`previous run` means the previous distinct checked source for the same profile,
+entity, exact window and declared basis in this chat, not the previous answer.
+If current source inputs/results have changed since the last checked answer,
+that last checked source is the baseline; if they match it, the preceding distinct
+checked source is the baseline. At most two distinct references are kept, without
+searching older runs or substituting another basis. Snapshots use the existing
+owned immutable raw-evidence store, its 24-hour retention, 128 KiB limit and
+512-record quota. Live references expire no later than their retained evidence;
+retention failure clears carryover and cannot revive an older scope.
+
+`Show me cost for generator G1` (or `network`, optionally with `; from ... to ...`)
+asks a software-generated choice between **Marginal dispatch expenditure** and
+**Total declared-basis cost**. A missing required cost basis prompts a question;
+`Price year YYYY; annual fixed cost fraction F` supplies it. Generator dispatch
+expenditure uses its existing dispatch profile; network accounting requires its
+explicit EUR basis. No model is called for these clarifications. Ordinary auth,
+project membership, cancellation, profile selection, turn/session/daily budgets
+and durable answer/history publication still apply. There is no effect grant.
+
+Clarification receipts are `limited`, with `request_complete: false`, empty
+checked-block/evidence IDs and `needs_clarification` dispositions/reasons for all
+required slots. The existing `choice_request` frame is admitted only for the
+exact software-generated cost choice after checked publication. Provider-authored
+choice/tool payloads remain suppressed. The UI labels the question **Clarification
+needed**, hides checked-value downloads and rejects contradictory completion
+receipts. No new frame name or provider SDK is introduced.
+
+Context is private server state, bound to owner/project/browser generation and
+the latest approved assistant message. It is never rebuilt from model prose,
+imported transcripts or caller-supplied histories. Rewind, missing/expired context,
+conflicting generator selection or a changed binding require clarification.
+A later unverified/unavailable answer cannot seed or restore an earlier result.
+Network scope does not shrink when one generator is selected in the UI.
+Process restart/new chat requires an explicit scope or owned retained evidence IDs;
+automatic durable session-context recovery remains pending. Whole-message parsing
+rejects added constraints on recognized follow-ups instead of dropping them.
+This does not certify understanding of arbitrary language or cover new domains.

@@ -44,3 +44,21 @@ Implementation continuation (2026-10-10): The generator-dispatch/1 candidate now
 Version-1 scope now binds project/entity/profile/required metrics, exact inclusive snapshot boundaries, declared cost basis and explicit retained/comparison evidence IDs. All requested slots receive a disposition and missing slots prevent request-complete claims. Whole-message generator/network cost grammar is bounded. This closes the explicit-profile slice, not arbitrary natural-language completeness, material clarification, broad conversational carryover or all-domain summaries.
 
 See [implementation status](../implementation-status.md), [contracts](../harness-contracts.md) and [coverage ledger](../coverage-ledger.md). The whole ticket remains open; no independent review verdict is inherited by this extension.
+
+
+### 2026-10-11 — bounded conversational scope continuation
+
+Implemented live-session checked-scope carryover for whole-message repeats,
+explicit window/basis follow-ups and previous-distinct-run cost comparisons.
+Only successful checked results seed two immutable raw-source references;
+project/generation/selection changes, rewind, missing/expired context and
+incompatible baselines require software clarification. Historical repeats keep
+the retained selection. Cost-quantity/basis questions do not call a model and
+carry explicit needs-clarification slots, with no checked-result UI badge.
+
+The initial 14 public-stream acceptance cases failed before implementation and
+then passed. Further cases cover actual LP source changes, window growth,
+corrupt/expired baselines, history isolation, budgets, shadow behavior and UI
+choice publication. Final regression counts are recorded in the handoff/ledger.
+Whole issue remains open: arbitrary language, durable session recovery and all
+domain profiles are not completed. See [contracts](../harness-contracts.md).
