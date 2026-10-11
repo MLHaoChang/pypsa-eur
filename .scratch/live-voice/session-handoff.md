@@ -144,13 +144,15 @@ LiveKit credentials/deployment smoke; B-C1. Do not claim whole-application
 coverage or live voice done.
 
 2026-10-11 (same branch, later): issue 06 `compare_project_runs` + foreground
-solve publication (`start_foreground_run` / `publish_foreground_run` via the
-detached monitor's `on_terminal` hook), and issue 11 D-C1 multi-family test
-(`tests/test_nonblocking_multi_family_d_c1.py`). Run evidence is still
-foreground-only: queue/GridSpine, studies and reports do not publish runs yet.
-Remaining runnable: other completion paths, conversational run references and
-result-UI selection (issue 06); GridSpine in D-C1 and D-I2 across families
-(issue 11); LiveKit credentials/deployment smoke; B-C1.
+solve publication; issue 11 `rpt:` + D-I2 cursors + D-C1; issue 01 F-U1 mocked
+STT/TTS; issue 09 B-C1 prolonged durable journey; issue 07 `get_loadflow_summary`;
+issue 08 full-coverage limitation block; issue 12 companion done.
+
+**Credential / release blockers (cannot close without external access):**
+LiveKit Build + hosted STT/TTS live probe (01/02/09 deployment smoke);
+issue 03 continuous media UX; issue 04 real vendor billing units;
+issue 05 release journeys / feature-flag gate; issue 10 full experiment
+orchestration. Do not claim whole-application coverage or live voice done.
 
 ## 2026-10-10 design amendment — floating companion
 

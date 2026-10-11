@@ -201,16 +201,24 @@ export function createChatProgressStream(
   sessionId: string,
   onFrame: (frame: ChatFrame) => void,
   onError?: (err: unknown) => void,
+  options?: { afterCursor?: number },
 ): () => void {
   const controller = new AbortController()
 
   ;(async () => {
     try {
-      const resp = await fetch(`/api/chat/${encodeURIComponent(sessionId)}/progress`, {
-        method: 'GET',
-        headers: { ...rawFetchHeaders('GET') },
-        signal: controller.signal,
-      })
+      const qs =
+        typeof options?.afterCursor === 'number' && options.afterCursor >= 0
+          ? `?cursor=${encodeURIComponent(String(options.afterCursor))}`
+          : ''
+      const resp = await fetch(
+        `/api/chat/${encodeURIComponent(sessionId)}/progress${qs}`,
+        {
+          method: 'GET',
+          headers: { ...rawFetchHeaders('GET') },
+          signal: controller.signal,
+        },
+      )
       await readSseResponse(resp, onFrame, onError, 'chat progress')
     } catch (err) {
       if ((err as { name?: string }).name === 'AbortError') return
