@@ -638,3 +638,43 @@ Inventory: `python pypsa-gui/backend/smoke/assistant_inventory.py --check`.
 Next scope remains storage economics/Stores/Links, other domain adapters,
 arbitrary-language completeness and independent calibration/release enablement.
 Deployment remains opt-in; whole phase tickets remain open.
+
+## StorageUnit economics continuation (2026-10-11)
+
+Implemented `storage-unit-cost/1` on `feat/harness-checked-storage-economics`,
+base master `b51563e9` including PRs 124/125. The user authorized implementation,
+a PR after required checks pass and merge to master. Attached plans remain
+design context. Shared scope, calculations, publication, owned retained evidence,
+same-basis comparison, native recovery, exports and rollout now cover bounded
+direct StorageUnit economics; default deployment remains disabled.
+
+Independent LP accounting gives 20 EUR discharge + 16 EUR holding + 15 EUR
+explicitly allocated fixed charge = 51 EUR. The exact middle window gives
+39 EUR; solved 5-MW extendable power gives 43.5 EUR. Charging purchases/revenues,
+annuity/FOM derivation, Stores/Links and NPV remain unsupported. All cost claims
+require the existing valid noncyclic zero-inflow/spill trajectory, matching solve
+provenance and declared EUR price year/fraction. Missing/unsupported dependencies
+cannot yield complete cost or borrow a full trajectory count as cost coverage.
+
+Initial feature red: one failure for an unrecognized profile; initial green:
+33 passed. Metadata red: one failure for misleading unavailable-cost `3/3`
+coverage. The shared gate at `50499693` passes 1,029 / six skips. The final
+40 overlapping cost cases at `360b8cea` pass after the isolated metadata fix;
+only that metadata/assertion changed after the shared gate. No fresh full
+backend result at the final head is claimed. Frontend: 3,641 / 310 files pass;
+build, inventory, eight-file Ruff and documentation/diff checks pass. No paid
+model calls, independent domain approval or remote CI success.
+
+Reproduce the exact selected backend suite from
+[storage-economics-validation.json](storage-economics-validation.json): from
+`pypsa-gui/backend`, load `reproduction.backend_args` with the locked test Python
+and listed cache/thread environment. Final focused command:
+`/workspace/pypsa-eur/.pixi/envs/test/bin/python -m pytest tests/test_storage_cost_assurance.py -q -o addopts='' --tb=short`
+(working directory is backend; adjust the executor-specific Python path as needed). Frontend:
+`npm test -- --maxWorkers=2`; build: `npm run build`. The detailed
+[coverage ledger](coverage-ledger.md) records overlap and source qualifications.
+Temporary logs are executor-local, while selections and commands are committed.
+
+Next scope is broader storage models/accounting, adequacy/FMEA/GridSpine,
+checked charts/reports, arbitrary-language completeness and independent
+calibration/release enablement. Whole phase tickets remain open.

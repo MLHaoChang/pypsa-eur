@@ -18,6 +18,7 @@ COMPARE = (
 )
 BASIS = r"(?:use\s+)?price year\s+(\d{4});\s*annual fixed cost fraction\s+(0(?:\.\d+)?|1(?:\.0+)?)"
 CHOICES = ("Marginal dispatch expenditure", "Total declared-basis cost")
+STORAGE_CHOICES = ("Direct StorageUnit operating expenditure", "Total declared-basis cost")
 QUESTIONS = {
     "cost_quantity_required": "Which quantity do you mean: Marginal dispatch expenditure or Total declared-basis cost?",
     "explicit_cost_basis_required": "Please provide the EUR price year and annual fixed cost fraction. Reply: Price year YYYY; annual fixed cost fraction F (between 0 and 1).",
@@ -56,7 +57,7 @@ def _state(turn, ui):
         and isinstance(selected, dict)
         and (
             selected.get("class") != (
-                "StorageUnit" if scope["profile"] == "storage-unit-dispatch/1" else "Generator"
+                "StorageUnit" if scope["profile"] in calculations.STORAGE_PROFILES else "Generator"
             )
             or selected.get("name") != scope["entity_id"]
         )
@@ -82,6 +83,8 @@ def _state(turn, ui):
 
 def _needs(turn, scope, reason):
     turn.clarification = {"reason": reason, "question": QUESTIONS[reason]}
+    if reason == "cost_quantity_required" and scope["profile"] in calculations.STORAGE_PROFILES:
+        turn.clarification["question"] = "Which quantity do you mean: Direct StorageUnit operating expenditure or Total declared-basis cost?"
     turn.pending_scope = (
         deepcopy(scope)
         if reason in {"cost_quantity_required", "explicit_cost_basis_required"}
@@ -113,6 +116,10 @@ def _compatible(scope):
     }
 
 
+def cost_choices(scope):
+    return STORAGE_CHOICES if scope["profile"] in calculations.STORAGE_PROFILES else CHOICES
+
+
 def resolve(turn, message, ui, explicit):
     """Resolve only whole-message forms. Unknown suffixes never lose constraints."""
     if explicit is not None:
@@ -122,12 +129,13 @@ def resolve(turn, message, ui, explicit):
     turn.conversation_state = state
     pending = state.get("pending") if state else None
     if pending and message.strip().rstrip(".!?").lower() in {
-        c.lower() for c in CHOICES
+        c.lower() for c in cost_choices(state["scope"])
     }:
         scope = deepcopy(state["scope"])
         if pending != "cost_quantity_required":
             return _needs(turn, scope, "unsupported_followup")
-        marginal = message.strip().lower().startswith("marginal")
+        storage_cost = scope["profile"] in calculations.STORAGE_PROFILES
+        marginal = message.strip().lower().startswith(("marginal", "direct"))
         scope["profile"] = (
             (
                 "network-linear-cost/1"
@@ -142,6 +150,9 @@ def resolve(turn, message, ui, explicit):
             )
         )
         scope["metrics"] = ["marginal_expenditure" if marginal else "total_cost"]
+        if storage_cost:
+            scope["profile"] = "storage-unit-cost/1"
+            scope["metrics"] = ["storage_operating_expenditure" if marginal else "total_cost"]
         if marginal and scope["profile"] == calculations.PROFILE:
             scope.pop("cost_basis", None)
         elif "cost_basis" not in scope:
@@ -168,7 +179,7 @@ def resolve(turn, message, ui, explicit):
             return _needs(turn, scope, "explicit_cost_basis_required")
         return assurance_scope.validate(scope)
     ambiguous = _match(
-        r"(?:please\s+)?(?:show me|give me|show)\s+(?:the\s+)?cost\s+for\s+(generator\s+(.{1,128}?)|network)(?:;\s*from\s+(\S+)\s+to\s+(\S+))?",
+        r"(?:please\s+)?(?:show me|give me|show)\s+(?:the\s+)?cost\s+for\s+(?:(generator|storage\s*unit)\s+(.{1,128}?)|(network))(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?",
         message,
     )
     if ambiguous:
@@ -176,12 +187,15 @@ def resolve(turn, message, ui, explicit):
             "version": 1,
             "project_id": turn.project_id,
             "retain": False,
-            "profile": "generator-cost/1" if ambiguous[2] else "network-linear-cost/1",
+            "profile": (
+                "storage-unit-cost/1" if ambiguous[1] and ambiguous[1].lower() != "generator"
+                else "generator-cost/1" if ambiguous[1] else "network-linear-cost/1"
+            ),
             "entity_id": ambiguous[2] or "network",
             "metrics": ["total_cost"],
         }
-        if ambiguous[3]:
-            scope.update(start=ambiguous[3], end=ambiguous[4])
+        if ambiguous[4]:
+            scope.update(start=ambiguous[4], end=ambiguous[5])
         return _needs(turn, assurance_scope.validate(scope), "cost_quantity_required")
     try:
         scope = assurance_scope.from_message(message, turn.project_id, ui)

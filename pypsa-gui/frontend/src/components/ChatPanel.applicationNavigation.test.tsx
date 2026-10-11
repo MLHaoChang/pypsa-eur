@@ -49,3 +49,25 @@ it('applies a results tab while the companion console is closed', () => {
   expect(useUIStore.getState().activeSlidePanel).toBe('results')
   expect(useUIStore.getState().resultsTabRequest).toBe('economics')
 })
+
+it('selects a discussed run via open_run_result without opening the console', () => {
+  useUIStore.setState({
+    assistantDockOpen: false, activeSlidePanel: null, resultsTabRequest: null,
+    discussedRun: null,
+  })
+  applyUiNavigate({
+    kind: 'open_run_result',
+    run_id: 'fg-abc',
+    results_tab: 'dispatch',
+    section: 'summary',
+    status: 'completed',
+    mode: 'lopf',
+  })
+  expect(useUIStore.getState().assistantDockOpen).toBe(false)
+  expect(useUIStore.getState().activeSlidePanel).toBe('results')
+  expect(useUIStore.getState().resultsTabRequest).toBe('dispatch')
+  expect(useUIStore.getState().discussedRun).toMatchObject({
+    runId: 'fg-abc', status: 'completed', resultsTab: 'dispatch',
+    section: 'summary', mode: 'lopf',
+  })
+})
