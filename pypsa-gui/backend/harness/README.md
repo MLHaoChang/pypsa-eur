@@ -11,6 +11,7 @@ harness/
   catalogue.py    the tool declarations, their Safety tiers, TOOL_ROUTES
   toolsets.py     ordered provider-neutral catalogue views and always-available controls
   events.py       the closed vocabulary of frames the turn loop yields to the UI
+  assurance.py    opt-in checked input/result drafts and publication gate
   workflows/      the start menu and the step-by-step flows (Markdown + front matter)
   skills/         procedures the model loads on demand (<name>/SKILL.md)
   prompts/        the system-prompt fragments as Markdown, byte-identical to the old constants
@@ -70,6 +71,25 @@ Borrowed designs under consideration: `docs/superpowers/assessments/2026-10-06-d
    `providers/`, not into the loop.
 
 ## The harness tools
+
+### Checked-answer pilot
+
+`PYPSA_GUI_ANSWER_ASSURANCE_MODE=strict` withholds model prose/thinking and gates
+publication through `assurance.py`. Only whitelisted static component inputs are
+checked against raw project data and rendered in software. A bounded generator
+key-results profile additionally recalculates weighted energy, marginal
+expenditure and peak dispatch with explicit full/partial coverage. Unsupported requests
+receive a limited fallback; effects are blocked except existing panel navigation,
+which is reported as submitted. The default is `disabled`; `pilot` admits an
+explicit version-1 strict request. Chart downloads/delivery separately verify exact data/render/byte bindings.
+Other result profiles, completed effects and arbitrary full-request coverage
+remain unsupported. See the
+[implementation boundary](../../../.scratch/assistant-assurance/implementation-status.md)
+and [reliability contract](../../../.scratch/assistant-assurance/reliability-contract.md)
+before extending adapters. Approved records live in the bounded, actor-owned
+`services/assurance_records.py` store and are revalidated for public replay.
+
+### Existing workflow controls
 
 Read-tier tools exist only for the harness (catalogue banner "Harness"):
 `ask_user` (a Choice card; the pick is the next user message, the turn does

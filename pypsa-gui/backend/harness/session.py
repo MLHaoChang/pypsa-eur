@@ -138,6 +138,8 @@ class ChatSession:
     toolset: str = "all"
     task_id: str | None = None
     job_wait_progress: dict[str, Any] | None = None
+    # Private turn-local checked-answer state; cleared on every exit.
+    assurance_turn: Any | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
     pending_confirmations: dict[str, PendingConfirmation] = field(default_factory=dict)
     confirmation_decisions: dict[str, str] = field(default_factory=dict)
@@ -215,6 +217,11 @@ class ChatSession:
         array is itself a 400, so admitting one would swap the bug this
         branch fixes for a neighbouring one.
         """
+        if self.assurance_turn is not None:
+            content = msg.get("content")
+            if (msg.get("role") == "user" and isinstance(content, list) and content
+                    and all(b.get("type") == "tool_result" for b in content)):
+                msg = {**msg, "content": [{**b, "content": "Previous diagnostic result; retrieve current evidence before answering."} for b in content]}
         sanitised = _sanitise_history_message(msg)
         if sanitised is None:
             return

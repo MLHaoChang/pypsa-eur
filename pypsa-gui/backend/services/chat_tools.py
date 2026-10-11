@@ -4135,7 +4135,7 @@ def import_matpower(bytes_b64: str, filename: str = "case.m") -> dict:
     return _import_raw(_h, upload)
 
 
-def _save_agent_export(data: bytes, filename: str, mime: str) -> dict:
+def _save_agent_export(data: bytes, filename: str, mime: str, *, assurance_sha256: str | None = None) -> dict:
     """
     Persist agent-generated export bytes as an `agent_export` upload artifact and
     return lightweight metadata. The frontend's chat file strip renders
@@ -4171,7 +4171,8 @@ def _save_agent_export(data: bytes, filename: str, mime: str) -> dict:
     if ctx.project_uuid:
         from services.assistant_tools import _project
         project, directory, _owner = _project()
-        meta = upload_service.add_upload(project.name, data, filename, mime, kind="agent_export", project_dir=directory)
+        meta = upload_service.add_upload(project.name, data, filename, mime, kind="agent_export", project_dir=directory,
+                                         **({"assurance_sha256": assurance_sha256} if assurance_sha256 is not None else {}))
     else:
         meta = upload_service.add_upload(name, data, filename, mime, kind="agent_export")
     return {

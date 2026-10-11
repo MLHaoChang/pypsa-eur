@@ -31,6 +31,8 @@ FRAME_PAYLOADS: dict[str, tuple[str, ...]] = {
     # Model output
     "token": ("delta",),
     "thinking": ("delta",),
+    "answer_progress": ("version", "turn_id", "stage", "status"),
+    "answer_approved": ("version", "answer_id", "turn_id", "verdict", "receipt"),
     # Tool lifecycle, in order
     "tool_request": ("tool_use_id", "tool_name", "args", "safety_tier"),
     "tool_pending_confirmation": (

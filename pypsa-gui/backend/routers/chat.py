@@ -25,7 +25,7 @@ import logging
 import threading
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 from starlette.responses import StreamingResponse
 
@@ -85,6 +85,8 @@ class StreamRequest(BaseModel):
     # reciprocity depends on it and reconstructing it later from timing or
     # content is guesswork. Carried now; the spoken-reply half is not built.
     input_mode: str | None = None
+    # Validate explicitly to preserve the protocol's typed admission errors.
+    assurance: Any = None
 
 
 class ConfirmRequest(BaseModel):
@@ -794,6 +796,13 @@ def chat_history(limit: int = 200,
     # cap and the #27 export route. read_all_turns returns ONLY parsed turns
     # (no session rebuild side-effect); the rehydration below stays local.
     turns, history_gap = chat_service.read_all_turns_with_gap(ctx)
+    from harness import assurance
+    from services import assurance_records
+    if assurance.strict_configured() or any(t.get("answer_id") for t in turns):
+        turns = assurance_records.history_projection(
+            turns, str(actor.id) if actor is not None else assurance_records.actor_id(),
+            strict=assurance.strict_configured(),
+        )
     pending_turn = _recover_pending_turn(ctx)
     if not turns:
         return {"turns": [], "last_session_id": None,
@@ -964,6 +973,8 @@ def chat_history(limit: int = 200,
                                 "content": chat_service._filter_non_portable_blocks(
                                     assistant_blocks, resolved_profile.wire,
                                 ),
+                                **({"_approved_answer_id": rec["answer_id"]}
+                                   if rec.get("answer_id") else {}),
                             })
 
     return {
@@ -982,6 +993,37 @@ def chat_history(limit: int = 200,
     }
 
 
+@router.get("/answers/{answer_id}")
+def checked_answer(answer_id: str, actor: User | None = Depends(optional_user)):
+    from services import assurance_records
+    if actor is None:
+        raise HTTPException(401, "Authentication required")
+    return assurance_records.public(assurance_records.answer(str(actor.id), answer_id))
+
+
+@router.get("/evidence/{evidence_id}")
+def checked_evidence(evidence_id: str, actor: User | None = Depends(optional_user)):
+    from services import assurance_records
+    if actor is None:
+        raise HTTPException(401, "Authentication required")
+    return assurance_records.public(assurance_records.evidence(str(actor.id), evidence_id))
+
+
+@router.post("/ui-ack")
+def checked_ui_ack(body: Any = Body(...)):
+    # No expected actions are issued by the input-only pilot. Refuse forged or
+    # unissued ACKs; positive view-state acknowledgement remains a later ticket.
+    required = {"version", "action_id", "turn_id", "binding_generation", "target"}
+    if (not isinstance(body, dict) or set(body) != required
+            or type(body.get("version")) is not int or body["version"] != 1
+            or type(body.get("binding_generation")) is not int
+            or not isinstance(body.get("target"), dict)
+            or not all(isinstance(body.get(k), str) and 1 <= len(body[k]) <= 128
+                       for k in ("action_id", "turn_id"))):
+        raise HTTPException(422, {"error_kind": "invalid_assurance_request"})
+    raise HTTPException(409, {"error_kind": "ui_ack_mismatch"})
+
+
 @router.get("/metrics")
 def chat_metrics() -> dict[str, Any]:
     """
@@ -995,7 +1037,7 @@ def chat_metrics() -> dict[str, Any]:
 
 
 @router.get("/export")
-def chat_export() -> dict[str, Any]:
+def chat_export(actor: User | None = Depends(optional_user)) -> dict[str, Any]:
     """
     Export the active project's chat transcript as a portable envelope (#27).
 
@@ -1008,6 +1050,13 @@ def chat_export() -> dict[str, Any]:
     import time as _time
     ctx = PyPSAService.get_active_context()
     turns = chat_service.read_all_turns(ctx)
+    from harness import assurance
+    from services import assurance_records
+    if assurance.strict_configured() or any(t.get("answer_id") for t in turns):
+        turns = assurance_records.history_projection(
+            turns, str(actor.id) if isinstance(actor, User) else assurance_records.actor_id(),
+            strict=assurance.strict_configured(),
+        )
     return {
         "schema": "pypsa-gui-chat-export/1",
         "exported_at": _time.time(),
@@ -1207,6 +1256,13 @@ async def chat_stream(
     # from, so it survives all of them. Corollary: nothing blocking may be added
     # to this handler body — it runs on the event loop now. `_gen()` itself is
     # still sync and still runs off-loop in the threadpool.
+    from harness import assurance
+    strict_assurance = assurance.admission(body.assurance)
+    if "assurance" in body.model_fields_set and body.assurance is None:
+        raise HTTPException(422, {"error_kind": "invalid_assurance_request"})
+    if strict_assurance and body.script:
+        raise HTTPException(422, {"error_kind": "invalid_assurance_request",
+                                 "message": "Strict mode does not accept scripted public frames."})
     from services import chat_tools as _chat_tools
     _chat_tools.set_acting_user(getattr(getattr(request.state, "auth_user", None), "id", None))
     # STEP 0b: the SESSION too, so a chat-driven save or activate moves the
@@ -1429,6 +1485,7 @@ async def chat_stream(
                     session, body.message or "",
                     attachment_file_ids=body.attachment_file_ids,
                     ui_context=body.ui_context,
+                    strict_assurance=strict_assurance,
                 )
             for event_name, payload in events:
                 yield chat_service.sse_frame(event_name, payload)

@@ -43,6 +43,7 @@ import { nk } from '../utils/queryKeys'
 import { mismatchSentence } from '../utils/projectMismatch'
 import { moveProjectLock } from '../utils/projectActions'
 import { invalidateAssetQueries, isMutatingTier } from '../utils/assetWrite'
+import { parseApproval, verifyApprovedText, type ApprovedAnswerFrame } from '../utils/answerAssurance'
 import {
   deleteUpload,
   getUploadBlobUrl,
@@ -127,6 +128,8 @@ interface SessionInitFrame {
   // admin changes / A8 fallbacks.
   profile_id?: string
   profile_label?: string
+  turn_id?: string
+  assurance?: { version: number; mode: string; state: string }
 }
 
 interface TokenFrame {
@@ -271,6 +274,7 @@ interface ToolErrorFrame {
 }
 
 interface TurnDoneFrame {
+  answer_id?: string
   usage?: {
     input_tokens?: number
     output_tokens?: number
@@ -498,6 +502,13 @@ export const KIND_COPY: Record<
   // RETRYABLE_ERROR_KINDS above — the file knew the kind in one constant and
   // not the other, so the retry button appeared under a raw snake_case title.
   internal_error: { title: 'Something went wrong on the server' },
+  assurance_unavailable: { title: 'Checked answers are unavailable' },
+  assurance_context_changed: { title: 'The project changed while checking the answer' },
+  assurance_publication_failed: { title: 'The checked answer could not be published' },
+  task_checkpoint_failed: {
+    title: 'Task progress could not be saved',
+    body: 'Inspect the task before retrying.',
+  },
   turn_already_in_flight: { title: 'A turn is already running' },
   project_switched_mid_turn: { title: 'The active project changed mid-turn' },
   unknown_session: { title: 'That chat session is no longer known' },
@@ -586,6 +597,8 @@ export const TOOL_ERROR_BANNER_KINDS = new Set([
   'inactive_acting_user',
   'solver_in_flight', 'parallel_destructive_not_allowed',
   'tool_call_cap_exceeded',
+  'assurance_unavailable', 'assurance_context_changed', 'assurance_publication_failed',
+  'task_checkpoint_failed',
   // `set_active_profile` raises these as HTTPExceptions, which the dispatcher
   // converts to `tool_error` frames — so copy alone was unreachable and the
   // user got the truncated gray tool line. Same shape as the
@@ -1115,6 +1128,12 @@ export default function ChatPanel() {
   // tool_result / tool_error. `tool_result` frames don't carry the tier, so
   // this map is how a completion knows whether it mutated (assetWrite fix).
   const toolTierRef = useRef(new Map<string, string>())
+  const streamGenerationRef = useRef(0)
+  const streamProjectRef = useRef(useUIStore.getState().currentProject)
+  const assuranceRef = useRef<{
+    strict: boolean; text: string; approved: ApprovedAnswerFrame | null;
+    turnId?: string; sessionId?: string; project: string | null; completed: boolean;
+  }>({ strict: false, text: '', approved: null, project: null, completed: false })
   const sessionId = useChatStore((s) => s.sessionId)
   const setSessionId = useChatStore((s) => s.setSessionId)
   const profileId = useChatStore((s) => s.profileId)
@@ -1192,6 +1211,7 @@ export default function ChatPanel() {
   // Reset chat state on project switch (mirrors simulationStore pattern).
   useEffect(() => {
     if (prevProjectRef.current !== undefined && prevProjectRef.current !== currentProject) {
+      if (streamProjectRef.current !== currentProject) streamGenerationRef.current += 1
       resetChatForProjectSwitch()
       // N-1 — the recovery banners describe ONE hydration of ONE project, as
       // their declaration comment says. They were only ever reassigned inside
@@ -1204,6 +1224,7 @@ export default function ChatPanel() {
       setInterruptedTurn(null)
     }
     prevProjectRef.current = currentProject
+    streamProjectRef.current = currentProject
   }, [currentProject, resetChatForProjectSwitch])
 
   // N-1 — same for "start a new chat": the banners are about the transcript
@@ -1213,6 +1234,7 @@ export default function ChatPanel() {
   const prevNewChatSeqRef = useRef<number>(newChatSeq)
   useEffect(() => {
     if (prevNewChatSeqRef.current !== newChatSeq) {
+      streamGenerationRef.current += 1
       prevNewChatSeqRef.current = newChatSeq
       setHistoryGap(0)
       setInterruptedTurn(null)
@@ -1325,6 +1347,8 @@ export default function ChatPanel() {
             id: `replay-a-${counter++}`,
             role: 'assistant',
             content: assistantText,
+            answer_id: t.answer_id,
+            receipt: t.receipt,
             ts: Math.round((t.ts || 0) * 1000),
           })
         }
@@ -1826,6 +1850,11 @@ export default function ChatPanel() {
     switch (frame.event) {
       case 'session_init': {
         const d = _frame_data<SessionInitFrame>(frame)
+        assuranceRef.current = {
+          strict: d.assurance?.mode === 'strict', text: '', approved: null,
+          turnId: d.turn_id, sessionId: d.session_id,
+          project: useUIStore.getState().currentProject, completed: false,
+        }
         setSessionId(d.session_id)
         // A new turn answers (or moves past) any Choice card still showing.
         setChoice(null)
@@ -1844,6 +1873,16 @@ export default function ChatPanel() {
       }
       case 'token': {
         const d = _frame_data<TokenFrame>(frame)
+        if (assuranceRef.current.strict) {
+          const state = assuranceRef.current
+          if (!state.completed && state.approved && typeof d.delta === 'string') {
+            if (state.text.length + d.delta.length > 65536) {
+              state.approved = null
+              state.text = ''
+            } else state.text += d.delta
+          }
+          break
+        }
         // Accumulate into the active assistant bubble instead of spawning
         // one bubble per delta — keeps the message list readable when
         // Sonnet streams 2k tokens of output.
@@ -1851,8 +1890,31 @@ export default function ChatPanel() {
         break
       }
       case 'thinking': {
+        if (assuranceRef.current.strict) break
         const d = _frame_data<ThinkingFrame>(frame)
         appendThinkingDelta(d.delta)
+        break
+      }
+      case 'answer_approved': {
+        const state = assuranceRef.current
+        if (!state.strict || state.completed) break
+        const approved = parseApproval(frame.data)
+        if (!approved || state.approved || !state.turnId || approved.turn_id !== state.turnId) {
+          state.approved = null
+          state.completed = true
+          state.text = ''
+          break
+        }
+        state.approved = approved
+        break
+      }
+      case 'answer_progress': {
+        if (!assuranceRef.current.strict) break
+        const state = assuranceRef.current
+        if (state.turnId && frame.data.turn_id !== state.turnId) break
+        if (frame.data.version === 1 && frame.data.stage === 'checking_claims' && frame.data.status === 'running') {
+          appendMessage({ role: 'system', content: 'Checking answer against project evidence.' })
+        }
         break
       }
       case 'model_fallback': {
@@ -1928,8 +1990,15 @@ export default function ChatPanel() {
         }
         appendMessage({
           role: 'tool',
-          content: `✓ ${d.tool_name}`,
-          tool_result: d.result,
+          content: (() => {
+            const metadata = (d.result as { _assurance?: { outcome?: string } } | undefined)?._assurance
+            if (metadata || assuranceRef.current.strict) {
+              return `${metadata?.outcome === 'completed' ? '✓' : '…'} ${d.tool_name} (${metadata?.outcome ?? 'uncertain'})`
+            }
+            return `✓ ${d.tool_name}`
+          })(),
+          // Checked artifacts/task projections are not implemented in this pilot.
+          tool_result: assuranceRef.current.strict ? undefined : d.result,
           tool_use_id: d.tool_use_id, tool_name: d.tool_name,
         })
         break
@@ -2075,17 +2144,42 @@ export default function ChatPanel() {
         break
       }
       case 'turn_done': {
+        const d = _frame_data<TurnDoneFrame>(frame)
+        const state = assuranceRef.current
+        if (state.strict) {
+          const speak = voiceTurnRef.current
+          if (!state.completed && state.approved && d.answer_id === state.approved.answer_id) {
+            state.completed = true
+            const approved = state.approved
+            const generation = streamGenerationRef.current
+            void verifyApprovedText(state.text, approved.receipt.content_sha256).then(matches => {
+              if (assuranceRef.current !== state
+                || streamGenerationRef.current !== generation
+                || useUIStore.getState().currentProject !== state.project
+                || useChatStore.getState().sessionId !== state.sessionId) return
+              if (!matches) {
+                setError({ error_kind: 'assurance_publication_failed',
+                  message: 'The checked answer could not be verified. Reload to recover the saved answer.' })
+                return
+              }
+              appendMessage({ role: 'assistant', content: state.text,
+                answer_id: approved.answer_id, receipt: approved.receipt })
+              if (speak && useUIStore.getState().assistantSpeakEnabled) {
+                speechOut.speak(speechOut.plainTextForSpeech(state.text))
+              }
+            })
+          }
+        }
         // Modal reciprocity: a turn begun with the microphone is answered
         // aloud. Decided by `voiceTurnRef`, captured at SEND — `dictatedRef`
         // is cleared by the send itself, and the mute is read live so
         // muting mid-turn takes effect on this answer rather than the next.
-        if (voiceTurnRef.current && useUIStore.getState().assistantSpeakEnabled) {
+        if (!state.strict && voiceTurnRef.current && useUIStore.getState().assistantSpeakEnabled) {
           const last = useChatStore.getState().messages
             .filter((m) => m.role === 'assistant').slice(-1)[0]
           if (last) speechOut.speak(speechOut.plainTextForSpeech(last.content))
         }
         voiceTurnRef.current = false
-        const d = _frame_data<TurnDoneFrame>(frame)
         if (d.usage) {
           // M10: server reports token counts; client renders them as-is.
           accrueUsage({
@@ -2103,10 +2197,16 @@ export default function ChatPanel() {
         break
       }
       case 'session_done': {
+        assuranceRef.current = { strict: assuranceRef.current.strict, text: '', approved: null,
+          project: null, completed: true }
+        voiceTurnRef.current = false
         closeStream()
         break
       }
       case 'error': {
+        assuranceRef.current = { strict: assuranceRef.current.strict, text: '', approved: null,
+          project: null, completed: true }
+        voiceTurnRef.current = false
         const d = _frame_data<{ error_kind: string; message: string }>(frame)
         setError({ error_kind: d.error_kind, message: d.message })
         closeStream()
@@ -2140,6 +2240,14 @@ export default function ChatPanel() {
   // typed one.
   const dispatchSend = useCallback((text: string, attachIds: string[],
     opts?: { fromCard?: boolean; label?: string }) => {
+    const generation = ++streamGenerationRef.current
+    streamProjectRef.current = useUIStore.getState().currentProject
+    const chatSequence = useChatStore.getState().newChatSeq
+    const isCurrentStream = () => streamGenerationRef.current === generation
+      && useUIStore.getState().currentProject === streamProjectRef.current
+      && useChatStore.getState().newChatSeq === chatSequence
+    assuranceRef.current = { strict: assuranceRef.current.strict, text: '', approved: null,
+      project: useUIStore.getState().currentProject, completed: false }
     // FIRST, before the composer reset four lines below clears `dictatedRef`.
     // Reading it later — say, next to the createChatStream call that consumes
     // `input_mode` — always yields false, and the bug is invisible: the
@@ -2182,8 +2290,21 @@ export default function ChatPanel() {
         // the composer flag here always yields 'text'.
         input_mode: voiceTurnRef.current ? 'voice' : 'text',
       },
-      handleFrame,
+      (frame) => {
+        if (!isCurrentStream()) return
+        // Ordinary chat can deliberately change projects within a turn. Track
+        // that server-issued rebind while rejecting callbacks after user changes.
+        if (frame.event === 'project_rebound' && !assuranceRef.current.strict) {
+          streamProjectRef.current = typeof frame.data.to === 'string' ? frame.data.to : null
+        }
+        handleFrame(frame)
+      },
       (err) => {
+        if (!isCurrentStream()) return
+        streamGenerationRef.current += 1
+        assuranceRef.current = { strict: assuranceRef.current.strict, text: '', approved: null,
+          project: null, completed: true }
+        voiceTurnRef.current = false
         // A session that belongs to someone else is recoverable, and retrying
         // the same id never will be: the server refuses it every time. Drop it
         // and start a fresh conversation so the next send mints one owned by
@@ -2299,6 +2420,9 @@ export default function ChatPanel() {
   }, [notReady, streaming, dispatchSend])
 
   const onAbort = useCallback(async () => {
+    streamGenerationRef.current += 1
+    assuranceRef.current = { strict: assuranceRef.current.strict, text: '', approved: null,
+      project: null, completed: true }
     // Stopping a turn has to stop the VOICE as well. A synthesiser that keeps
     // reading an answer the user just cancelled is the single most alarming
     // way this feature can fail — there is no visible progress bar to explain
