@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 CONTROL_TOOLS = frozenset({
+    "list_project_runs", "get_run_evidence", "compare_project_runs",
     "list_tasks", "find_capabilities", "start_task", "get_task", "resume_task", "cancel_task", "resolve_task_step",
     "get_file_delivery", "inspect_import", "preview_project_changes", "apply_project_changes", "create_chart", "build_delivery",
     "ask_user", "use_skill", "start_workflow", "advance_workflow", "end_workflow",
@@ -33,6 +34,6 @@ def filter_tools(tools, domain="all"):
             return any(word in name for word in ("component", "carrier", "network", "timeseries", "snapshot", "profile", "constraint", "investment_period", "vintage", "tariff", "site_connection", "participants"))
         if domain == "simulation":
             return any(word in name for word in ("simulation", "solver", "solve_queue", "validate", "dispatch_status", "sensitivity", "campaign", "study", "sweep", "loop")) or name == "run_ac_pf_stage"
-        return any(word in name for word in ("results", "compare", "explain", "report", "export", "capacity", "assessment"))
+        return any(word in name for word in ("results", "compare", "explain", "report", "export", "capacity", "assessment", "loadflow"))
 
     return [tool for tool in tools if included(tool["name"])]

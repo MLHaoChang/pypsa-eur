@@ -24,3 +24,16 @@ TTS profile/API contract before production; the legacy OpenAI standalone TTS
 models are scheduled for retirement on January 6, 2027. No silent model migration.
 
 ## Comments
+
+2026-10-11: F-U1 mocked transport — `harness/providers/live_media.py` adds
+provider-isolated `SttAdapter`/`TtsAdapter` protocols, a vendor-free
+`SpeechProfile`, `CancelToken`, and generic `HttpSttAdapter`/`HttpTtsAdapter`
+over an injected httpx client factory (no vendor endpoint/model baked in; no
+redirects/retries/fallback; keys never in errors). Contracts in
+`tests/test_live_transport_contracts_f_u1.py` (35 passed, `MockTransport` only,
+real transport patched to fail): final utterance with exact numbers/units,
+partial results refused, empty/malformed/oversize (input, body, header, text,
+audio) refused before or after the call, pinned explicit language (auto/invalid
+refused; response-language mismatch refused), cancel before and during an
+in-flight request. Still open: real vendor adapters, WebRTC/LiveKit, token
+routes, and the budgeted live probe with sanitized usage evidence.

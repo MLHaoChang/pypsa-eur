@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[3]
 SMOKE = ROOT / 'pypsa-gui/backend/smoke/assistant_control_matrix.py'
 MATRIX = ROOT / '.scratch/live-voice/capability-matrix.json'
 INVENTORY = ROOT / '.scratch/live-voice/capability-inventory.json'
+COVERAGE_DOC = ROOT / '.scratch/live-voice/application-coverage.md'
 
 EXPECTED_FAMILIES = {
     'Projects/scenarios/templates',
@@ -143,3 +144,70 @@ def test_matrix_rejects_stale_palette_digest(tmp_path, matrix):
     proc = _run('--check', '--output', str(path))
     assert proc.returncode != 0
     assert 'stale' in (proc.stdout + proc.stderr).lower()
+
+
+# ── issue 08 close-out: explicit full-coverage limitation block ─────────
+
+def test_full_coverage_is_explicitly_not_claimed_while_journeys_are_pending(matrix):
+    block = matrix['full_coverage']
+    pending = [r for r in matrix['family_journeys'] if r['journey_id'].startswith('pending:')]
+    assert pending, 'update this guard together with the claim once issue 05 journeys pass'
+    assert block['claimed'] is False and block['status'] == 'not_established'
+    assert block['journeys_total'] == 14 and block['journeys_pending'] == len(pending)
+    assert 'Tested subsets only' in block['permitted_statement']
+    blocker_ids = {b['id'] for b in block['blockers']}
+    for row in pending:
+        assert f'family-journey:{row["journey_id"]}' in blocker_ids
+    assert {'behavioral-fixtures-pending', 'ui-control-tool-parity-unaudited',
+            'hosted-gates-pending'} <= blocker_ids
+    for blocker in block['blockers']:
+        assert blocker['issue'] in {'05', '08'} and blocker['summary']
+
+
+def test_matrix_never_asserts_whole_application_coverage_elsewhere(matrix):
+    assert matrix['full_coverage']['claimed'] is False
+    text = json.dumps(matrix).lower()
+    for phrase in ('whole-application coverage is complete', 'full coverage established',
+                   'every tool is covered'):
+        assert phrase not in text
+    doc = COVERAGE_DOC.read_text(encoding='utf-8')
+    assert 'Whole-application coverage is NOT claimed.' in doc
+    assert (f'Pending family journeys: {matrix["full_coverage"]["journeys_pending"]} of '
+            f'{matrix["full_coverage"]["journeys_total"]}') in doc
+
+
+@pytest.mark.parametrize('mutate, expected', [
+    (lambda m: m['full_coverage'].update(claimed=True, status='established'), 'claimed is true'),
+    (lambda m: m['full_coverage'].update(claimed=True), 'claimed is true'),
+    (lambda m: m['full_coverage'].update(status='established'), 'claimed=false/not_established'),
+    (lambda m: m['full_coverage'].update(journeys_pending=0), 'journeys_pending disagrees'),
+    (lambda m: m.pop('full_coverage'), 'missing'),
+])
+def test_ci_rejects_a_full_coverage_claim_without_passing_journeys(tmp_path, matrix, mutate, expected):
+    tampered = json.loads(json.dumps(matrix))
+    mutate(tampered)
+    path = tmp_path / 'capability-matrix.json'
+    path.write_text(json.dumps(tampered, indent=2) + '\n', encoding='utf-8')
+    proc = _run('--check', '--output', str(path))
+    assert proc.returncode != 0
+    output = proc.stdout + proc.stderr
+    assert 'stale' in output.lower() or expected in output
+
+
+def test_claim_guard_rejects_claim_even_if_artifact_was_regenerated():
+    sys.path.insert(0, str(SMOKE.parent))
+    try:
+        import assistant_control_matrix as gen
+    finally:
+        sys.path.remove(str(SMOKE.parent))
+    built = gen.build_matrix()
+    assert gen._full_coverage_problem(built) is None
+    forged = json.loads(json.dumps(built))
+    forged['full_coverage'].update(claimed=True, status='established')
+    assert 'claimed is true' in gen._full_coverage_problem(forged)
+    journeys = [dict(r, journey_id=r['journey_id'].replace('pending:', '')) for r in built['family_journeys']]
+    block = gen._full_coverage(journeys)
+    assert block['journeys_pending'] == 0
+    # Passing journeys alone are not enough: standing blockers need an explicit edit.
+    assert block['claimed'] is False
+    assert {b['id'] for b in block['blockers']} == {b['id'] for b in gen.STANDING_BLOCKERS}

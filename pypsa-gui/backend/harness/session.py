@@ -183,6 +183,12 @@ class ChatSession:
     _detached_progress: collections.deque = field(
         default_factory=lambda: collections.deque(maxlen=200),
     )
+    # Issue 11 / D-I2 — durable cursor log for gap/duplicate recovery. Entries
+    # keep a monotonic ``cursor``; drains clear the unread ring only.
+    _progress_seq: int = 0
+    _progress_log: collections.deque = field(
+        default_factory=lambda: collections.deque(maxlen=500),
+    )
     _detached_monitor: dict[str, Any] | None = None
     # W-3 — turns started on this session, the fallback bound for an endpoint
     # that never reports usage. See the ceiling in `_run_turn_body`.
@@ -439,10 +445,43 @@ class ChatSession:
 
     def append_detached_progress(self, payload: dict[str, Any]) -> None:
         with self._lock:
-            self._detached_progress.append(payload)
+            self._progress_seq += 1
+            item = {**payload, 'cursor': self._progress_seq}
+            self._detached_progress.append(item)
+            self._progress_log.append(item)
 
-    def drain_detached_progress(self) -> list[dict[str, Any]]:
+    def progress_cursor(self) -> int:
         with self._lock:
+            return self._progress_seq
+
+    def drain_detached_progress(
+        self, *, after_cursor: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return unread progress, or replay the log after ``after_cursor``.
+
+        When ``after_cursor`` is set (D-I2 recovery), return every logged
+        frame with ``cursor > after_cursor`` and trim the unread ring through
+        that cursor so a follow-up ordinary drain does not re-emit them.
+        When omitted, drain the unread ring (existing observer path).
+        """
+        with self._lock:
+            if after_cursor is not None:
+                after = int(after_cursor)
+                items = [
+                    item for item in self._progress_log
+                    if int(item.get('cursor') or 0) > after
+                ]
+                if items:
+                    high = max(int(i.get('cursor') or 0) for i in items)
+                else:
+                    high = after
+                kept = [
+                    item for item in self._detached_progress
+                    if int(item.get('cursor') or 0) > high
+                ]
+                self._detached_progress.clear()
+                self._detached_progress.extend(kept)
+                return items
             items = list(self._detached_progress)
             self._detached_progress.clear()
             return items

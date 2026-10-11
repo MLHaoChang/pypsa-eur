@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-10",
+  "generated_at": "2026-10-11",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 220,
+  "tool_count": 224,
   "tools": [
     {
       "name": "list_components",
@@ -4676,6 +4676,97 @@
       "required": [],
       "safety_tier": "read",
       "schema_sha256": "0255989cd003852e2a25c3efca98367e6e231a2e69aa3456b05cde6c544499a9",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_project_runs",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "limit",
+        "offset",
+        "status"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "6589c8ed23a3e16ce50017dfb20fc21f85798d73b376db7f43aa12ad7299fc5c",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_run_evidence",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "run_id",
+        "section"
+      ],
+      "required": [
+        "run_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "4abaac2419832365fa560a3c15252f7900510c90f2b42c052298b438a97032cb",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "compare_project_runs",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "run_id",
+        "baseline_run_id",
+        "metrics",
+        "allow_input_changes"
+      ],
+      "required": [
+        "run_id",
+        "baseline_run_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "5ff81e9828bdd6ccb997ace8ad45a83d40efafd2ac4860887ca0f17247238a5f",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_loadflow_summary",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "source",
+        "limit",
+        "window_from",
+        "window_to",
+        "run_id"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "0344962bfc2c5846a2638d1651823621d12841a3fd3ccc2b9b906a16daf96f74",
       "behavioral_fixture": "pending"
     },
     {

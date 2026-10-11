@@ -1789,15 +1789,18 @@ def chat_abort(session_id: str,
 async def chat_progress(
     session_id: str,
     request: Request,
+    cursor: int | None = None,
     actor: User | None = Depends(optional_user),
 ) -> StreamingResponse:
     """
     Issue 11 — observe detached solver progress after a foreground handoff.
 
     Drains the session's detached progress ring and emits existing
-    ``tool_progress`` SSE frames (no new frame names). Stays open while a
-    detached monitor is active; exits once the ring is empty and the monitor
-    is inactive. Ownership/replica gates match /confirm.
+    ``tool_progress`` SSE frames (no new frame names). Each payload carries
+    a monotonic ``cursor`` (D-I2). Pass ``?cursor=N`` to replay frames after
+    N from the session log (gap recovery) without clearing the unread ring.
+    Stays open while a detached monitor is active; exits once the ring is
+    empty and the monitor is inactive. Ownership/replica gates match /confirm.
     """
     try:
         session = _resolve_owned_session(session_id, actor)
@@ -1811,15 +1814,31 @@ async def chat_progress(
                 "message": f"no chat session bound to {session_id!r}",
             },
         )
+    if cursor is not None and cursor < 0:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_kind": "invalid_progress_cursor",
+                "message": "cursor must be a non-negative integer",
+            },
+        )
 
     async def _gen():
         # First drain is immediate so a short-lived ring is not held for a
-        # full poll interval before the client sees it.
+        # full poll interval before the client sees it. A resume cursor
+        # replays from the log once, then falls through to unread drains.
         idle_rounds = 0
+        resume_cursor = cursor
         while True:
             if await request.is_disconnected():
                 return
-            payloads = session.drain_detached_progress()
+            if resume_cursor is not None:
+                payloads = session.drain_detached_progress(
+                    after_cursor=resume_cursor,
+                )
+                resume_cursor = None
+            else:
+                payloads = session.drain_detached_progress()
             for payload in payloads:
                 yield chat_service.sse_frame("tool_progress", payload)
             if session.detached_monitor_active():
