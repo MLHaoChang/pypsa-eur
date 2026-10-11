@@ -175,6 +175,37 @@ describe('assistant dock prominence', () => {
     expect(screen.getByTestId('companion-live-input')).toBeTruthy()
   })
 
+  it('opens the console on the profile list from the profile chip', async () => {
+    const user = userEvent.setup()
+    render(<AssistantDock />)
+    await user.click(screen.getByTestId('companion-profile'))
+    expect(useUIStore.getState().assistantDockOpen).toBe(true)
+    expect(useUIStore.getState().assistantEntry).toBe('profiles')
+  })
+
+  it('does not start the microphone, a recording or a media session when Live is clicked', async () => {
+    const getUserMedia = vi.fn()
+    const fetchSpy = vi.fn(() => Promise.reject(new Error('no network in this test')))
+    vi.stubGlobal('fetch', fetchSpy)
+    vi.stubGlobal('MediaRecorder', vi.fn())
+    vi.stubGlobal('RTCPeerConnection', vi.fn())
+    Object.defineProperty(navigator, 'mediaDevices', { value: { getUserMedia }, configurable: true })
+    try {
+      const user = userEvent.setup()
+      render(<AssistantDock />)
+      await user.click(screen.getByTestId('companion-live'))
+      expect(getUserMedia).not.toHaveBeenCalled()
+      expect(MediaRecorder).not.toHaveBeenCalled()
+      expect(RTCPeerConnection).not.toHaveBeenCalled()
+      expect(fetchSpy).not.toHaveBeenCalled()
+      expect(screen.queryByTestId('dictation-panel')).toBeNull()
+      expect(useUIStore.getState().assistantDockOpen).toBe(false)
+    } finally {
+      vi.unstubAllGlobals()
+      Reflect.deleteProperty(navigator, 'mediaDevices')
+    }
+  })
+
   it('binds a durable conversation when Live opens', async () => {
     const user = userEvent.setup()
     render(<AssistantDock />)
