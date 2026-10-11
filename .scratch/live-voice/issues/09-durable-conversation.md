@@ -63,3 +63,14 @@ on another process. ChatSession pins the creating replica; stream/confirm/
 abort/rewind/progress refuse failover without clearing pending work. Tests:
 `tests/test_durable_conversation_worker_pin_b_i3.py` (5 passed). Still open:
 real LiveKit credentials, deployment smoke, B-C1, multi-worker coordination.
+
+2026-10-11: B-C1 prolonged journey — `tests/test_durable_conversation_prolonged_b_c1.py`
+(4 passed; fake/mock only, no LiveKit). HTTP create → checkpoint → rebind →
+resume → resume → rebind plus service-ledger reserve/settle: goals/units/
+current+discussed refs/evidence revisions survive every generation bump, open
+reservations carry across resume, a key settles once (re-settle/re-reserve →
+`budget_already_settled`), six compaction+resume/rebind cycles keep refs and
+sum final charges exactly, and a stale-generation checkpoint/rebind after the
+journey is 409 without clobbering facts. Pre-rebind bridge token is 401 after
+resume. Still open: real LiveKit credentials, deployment smoke, multi-worker
+coordination.
