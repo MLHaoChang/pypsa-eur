@@ -218,6 +218,78 @@ def authorize_thread(thread_id: str) -> dict[str, Any]:
     return get_thread(thread_id)
 
 
+def _mint_bridge_credentials(thread: dict[str, Any]) -> dict[str, Any]:
+    """Opaque stub credentials scoped to actor/project/generation (no media SDK)."""
+    token = uuid.uuid4().hex
+    return {
+        'token': token,
+        'owner_id': thread['owner_id'],
+        'project_id': thread['project_id'],
+        'thread_id': thread['thread_id'],
+        'generation': int(thread.get('generation', 1)),
+        'episode_id': thread.get('episode_id'),
+        'expires_at': (
+            datetime.now(timezone.utc).timestamp() + 3600
+        ),
+    }
+
+
+def authorize_bridge_credentials(thread_id: str, token: str) -> dict[str, Any]:
+    """Validate a previously minted bridge token against the current generation."""
+    with _LOCK:
+        _, thread = _read(thread_id)
+        creds = thread.get('bridge_credentials') or {}
+        if not token or creds.get('token') != token:
+            _refuse('bridge_credentials_invalid', 'Bridge credentials are not valid.', 401)
+        if int(creds.get('generation', -1)) != int(thread.get('generation', 1)):
+            _refuse('bridge_credentials_stale', 'Bridge credentials were revoked by rebind.', 401)
+        if creds.get('owner_id') != thread.get('owner_id'):
+            _refuse('bridge_credentials_invalid', 'Bridge credentials are not valid.', 401)
+        return copy.deepcopy(creds)
+
+
+def rebind_scope(thread_id: str, *, generation: int) -> dict[str, Any]:
+    """Bump generation, mint scoped bridge credentials, invalidate prior token.
+
+    Clears pending approvals on the bound episode and bumps utterance-admission
+    generation so stale Live/stream generations cannot admit. Parent facts stay.
+    """
+    from services import chat_service, utterance_admission as ua
+
+    with _LOCK:
+        path, thread = _read(thread_id)
+        _require_generation(thread, generation)
+        thread['generation'] = int(thread.get('generation', 1)) + 1
+        thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
+        thread['updated_at'] = datetime.now(timezone.utc).isoformat()
+        creds = _mint_bridge_credentials(thread)
+        thread['bridge_credentials'] = creds
+        episode_id = thread.get('episode_id')
+        if episode_id:
+            sess = chat_service.get_session(episode_id)
+            if sess is not None:
+                with sess._lock:
+                    sess.pending_confirmations.clear()
+                    sess.confirmation_decisions.clear()
+                    sess._decision_events.clear()
+            ua._DEFAULT.bump_generation(session_id=episode_id)
+        _save(path, thread)
+        view = _view(thread)
+        # Return credentials once; disk retains them for authorize_bridge_credentials.
+        return {
+            **view,
+            'credentials': {
+                'token': creds['token'],
+                'generation': creds['generation'],
+                'expires_at': creds['expires_at'],
+                'thread_id': creds['thread_id'],
+                'project_id': creds['project_id'],
+                'owner_id': creds['owner_id'],
+                'episode_id': creds.get('episode_id'),
+            },
+        }
+
+
 def reserve_budget(
     thread_id: str,
     *,

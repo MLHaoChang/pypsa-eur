@@ -36,6 +36,12 @@ class ResumeBody(BaseModel):
     generation: int = Field(..., ge=1)
 
 
+class RebindBody(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    generation: int = Field(..., ge=1)
+
+
 def _bind_actor(user: User) -> None:
     chat_tools.set_acting_user(str(user.id))
 
@@ -72,3 +78,13 @@ def resume_thread(
     _bind_actor(user)
     thread, _session = dc.resume_episode(thread_id, generation=body.generation)
     return thread
+
+
+@router.post('/{thread_id}/rebind')
+def rebind_thread(
+    thread_id: str,
+    body: RebindBody,
+    user: User = Depends(require_user),
+):
+    _bind_actor(user)
+    return dc.rebind_scope(thread_id, generation=body.generation)

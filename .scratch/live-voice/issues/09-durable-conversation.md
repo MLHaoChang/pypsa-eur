@@ -50,3 +50,9 @@ media acceptance until those land.
 actor/project stays 404 `thread_not_found`. Tests:
 `tests/test_durable_conversation_http_b_i1.py` (4 passed). Still open: rebind
 credential refresh, worker pin, deployment smoke, B-C1.
+
+2026-10-11: B-I2 rebind — `rebind_scope` + `POST …/rebind` bumps generation,
+mints opaque bridge credentials, invalidates prior tokens, clears episode
+pending approvals, and bumps utterance-admission generation. Parent facts
+preserved. Tests: `tests/test_durable_conversation_rebind_b_i2.py` (5 passed).
+Still open: worker pin, real LiveKit credentials, deployment smoke, B-C1.

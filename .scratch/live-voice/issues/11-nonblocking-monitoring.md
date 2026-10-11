@@ -36,3 +36,9 @@ the turn and utterance lease release while the worker continues. Tests:
 `tests/test_nonblocking_foreground_solve_d_i1.py` (3 passed). Still open: detached
 progress SSE, full domain adapters, wait_for_job for foreground solves, D-I2
 cursor recovery, D-C1 multi-family monitoring.
+
+2026-10-11: Detached progress buffer — `start_detached_solver_monitor` runs
+`solver_log_bridge` on a daemon thread into a session ring (tool_progress-shaped
+payloads); drain via `session.drain_detached_progress()`. No new SSE frame names.
+Tests: `tests/test_nonblocking_detached_progress_d_i1b.py` (3 passed). Still open:
+emitting progress on an open stream, domain adapters, wait_for_job, D-I2/D-C1.

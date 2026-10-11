@@ -119,9 +119,14 @@ Issue 02 C-U1 admission coordinator:
 Issue 11 D-I1 first slice: foreground solve handoff without bridge wait;
 `pytest tests/test_nonblocking_foreground_solve_d_i1.py` → 3 passed.
 
-Next runnable slice: issue 11 detached progress / adapters; issue 09 rebind +
-worker pin; Live busy→queue path. Do not claim whole-application coverage or
-live voice done.
+2026-10-11 continued again:
+- Issue 11 detached progress buffer (3 passed)
+- Issue 02 Live busy→queue (AssistantDock tests)
+- Issue 09 B-I2 rebind credentials (5 passed)
+
+Next runnable slice: emit detached progress to an open observer stream; wire
+Live `utterance_id`/`generation`; worker pin; domain job adapters. Do not claim
+whole-application coverage or live voice done.
 
 ## 2026-10-10 design amendment — floating companion
 

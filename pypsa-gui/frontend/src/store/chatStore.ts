@@ -219,10 +219,12 @@ interface ChatState {
   requestQueue: QueuedRequest[]
   /** Dedupe memory (queue only): set on every accepted send and every take. */
   lastRequest: { text: string; at: number } | null
-  /** Queue `text` and open the dock. Returns the id, or null when the text
-   * is blank or repeats the last request within REQUEST_DEDUPE_MS. */
+  /** Queue `text` and open the dock (unless `openDock: false`). Returns the
+   * id, or null when the text is blank or repeats the last request within
+   * REQUEST_DEDUPE_MS. Live busy corrections pass `openDock: false` so the
+   * console stays closed. */
   sendRequest: (text: string,
-    opts?: { source?: string; label?: string; group?: string }) => string | null
+    opts?: { source?: string; label?: string; group?: string; openDock?: boolean }) => string | null
   /** ChatPanel only: remove and return the oldest queued request; it
    *  becomes `activeRequest`. */
   takeNextRequest: () => QueuedRequest | null
@@ -404,11 +406,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const req: QueuedRequest = { id, text, source: opts?.source, queuedAt: now }
     if (opts?.label) req.label = opts.label
     if (opts?.group) req.group = opts.group
-    set((s) => ({
-      requestQueue: [...s.requestQueue, req],
-      lastRequest: { text, at: now },
-    }))
-    useUIStore.getState().setAssistantDockOpen(true)
+    const openDock = opts?.openDock !== false
+    set((s) => {
+      // Live: at most one pending correction (latest wins), matching the
+      // backend utterance admission capacity of one.
+      const base = opts?.source === 'live'
+        ? s.requestQueue.filter((r) => r.source !== 'live')
+        : s.requestQueue
+      return {
+        requestQueue: [...base, req],
+        lastRequest: { text, at: now },
+      }
+    })
+    if (openDock) useUIStore.getState().setAssistantDockOpen(true)
     return id
   },
   takeNextRequest: () => {

@@ -39,3 +39,9 @@ existing `error` + `session_done` frames (`duplicate` / `queued` /
 not left hanging without a turn. Omitting fields preserves prior behaviour.
 Tests: `tests/test_utterance_admission_stream_c_i1.py` (6 passed). Still open:
 auto-drain pending after release; Live busy path; generation sync with issue 09.
+
+2026-10-11: Live busy→queue — Companion Live queues one pending correction via
+`sendRequest({ source: 'live', openDock: false })` instead of dropping; latest
+wins; console stays closed. Project mismatch still refuses. Frontend tests in
+`AssistantDock.test.tsx`. Still open: wire Live stream with utterance_id/
+generation; backend auto-drain after promote.
