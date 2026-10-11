@@ -74,6 +74,30 @@ def test_followup_preserves_entity_exact_window_and_cost_basis(solved, conversat
     assert "7 MWh" in public_text(frames) and "17 MWh" not in public_text(frames)
 
 
+def test_generator_named_network_cannot_become_a_network_cost_request(
+    solved, conversation
+):
+    component = solved.network.components["Generator"]
+    component.static = component.static.rename(index={"G1": "network"})
+    for attribute, values in component.dynamic.items():
+        component.dynamic[attribute] = values.rename(columns={"G1": "network"})
+    workflow_tools._record_solve_inputs(
+        solved.network, solved.solver_state["solver_config"]
+    )
+    frames, provider = conversation("Show cost for generator network.")
+    clarified(frames, provider, "cost_quantity_required")
+    frames, provider = conversation("Total declared-basis cost")
+    clarified(frames, provider, "explicit_cost_basis_required")
+    assert approval(frames)["receipt"]["request_scope"]["profile"] == "generator-cost/1"
+    frames, _ = conversation(
+        "Use price year 2026; annual fixed cost fraction 1", {"total_cost": 230}
+    )
+    assert approval(frames)["receipt"]["request_complete"]
+    assert approval(frames)["receipt"]["request_scope"]["profile"] == "generator-cost/1"
+    assert "Generator network" in public_text(frames)
+    assert "Network network" not in public_text(frames)
+
+
 def test_previous_run_is_latest_distinct_checked_run_not_latest_answer(
     solved, conversation
 ):

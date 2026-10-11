@@ -78,3 +78,16 @@ provider SDK path changes. Scope remains bounded to the released numerical
 profiles and software clarification; broader language and task/effect memory
 remain open. Parent goals/refs are not assurance authority; a new parent episode
 starts without checked scope, and a rebind requires fresh explicit scope. See the checkpoint contract and final validation ledger.
+
+### 2026-10-11 — bounded StorageUnit dispatch continuation
+
+The shared harness adds `storage-unit-dispatch/1` with six checked metrics,
+whole-message selection, exact windows and predecessor-state validity. Raw split
+power, storage durations, bounds and chronological efficiency/loss balance are
+validated before publication. Unsupported storage costs remain unavailable;
+cyclic units, nonzero inflow/spill, Stores and investment periods are refused.
+The independent LP oracle gives 10/4/−6 MWh grid-side energy and states 8/4/0 MWh.
+Evidence/replay/export/recovery use existing owned contracts. The whole issue
+remains open; broader storage economics and independent domain approval remain
+pending. See [implementation status](../implementation-status.md) and
+[coverage ledger](../coverage-ledger.md).

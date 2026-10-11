@@ -602,10 +602,6 @@
     "unsupported_assurance_version": {
       "surface": "inline",
       "why": "Admission rejects an unsupported checked-answer protocol version before model/tool execution; the client must use a supported version."
-    },
-    "wrong_replica": {
-      "surface": "inline",
-      "why": "HTTP/session pin refusal when a chat or durable thread is owned by another app worker; route-level 409, not a tool completion failure."
     }
   }
 }
