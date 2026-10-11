@@ -131,12 +131,17 @@ answers or all-application correctness.
 Providers are fake or real adapters with HTTP mocks; HiGHS solves the independent
 small numerical fixtures. No paid model calls. The current results and exact
 commands are in [coverage ledger](coverage-ledger.md) and [handoff](session-handoff.md).
-Final correction gate (every affected file plus the whole harness selection):
-**348 passed**; frontend: **3,606 passed / 307 files**;
-all **31 QA drivers** and **36 upstream unit tests** pass. Production build
-passes. The full backend run had **11,103 passed / 269 skipped / 5 failed**;
-all five were corrected and their full files pass in the fresh 348-case gate.
-This is a full run plus correction gate, not a second clean full run; see the
-linked ledger for exact reproduction and source-coverage boundaries. GitHub Actions
-dispatch was rechecked and returns HTTP 422 because Actions is disabled for this
-repository; these are local locked-environment results, not remote CI checks.
+Current conversation continuation: a fresh complete backend run has **11,143
+passed / 269 skipped / zero failures** across all **11,412 collected cases**.
+Two disjoint whole-file subprocess selections both exit 0; exact counts, warnings,
+commands and reproduction are in the linked ledger. The fresh complete frontend
+has **3,610 passed / 307 files**, exit 0 and no uncaught errors. All **31 QA
+drivers** and **36 upstream unit tests** pass; production build, documentation,
+inventory and diff checks pass. The focused harness/transport/history/budget/frame
+gate has **274 passed / one deliberate recording skip**; the final scope cases
+have **30 passed**. These focused selections overlap the complete suites.
+
+The earlier PR 119 run-plus-correction result remains recorded historically in the
+ledger; this fresh clean full run is the current result. Skips are not claimed as
+coverage. GitHub Actions dispatch returns HTTP 422 because Actions is disabled for
+this repository; these are local locked-environment results, not remote CI checks.

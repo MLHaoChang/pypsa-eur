@@ -3,8 +3,8 @@
 
 # Assistant assurance continuation handoff
 
-Status: current shared harness continuation on `feat/harness-reliability-contracts`,
-based on merged PR 112/master `17e24e4c`. Historical sections below describe earlier
+Status: current shared harness continuation on `feat/harness-conversation-scope`,
+based on merged PR 119/master `9b987371`. Historical sections below describe earlier
 states and commands. The current [implementation status](implementation-status.md)
 and [API contracts](harness-contracts.md) supersede them. Independent domain/release
 approval remains pending.
@@ -15,7 +15,7 @@ Read [spec](spec.md), [tests](test-plan.md), [implementation plan](../../docs/su
 and harness README. Use existing immutable-run/durable-thread/job/UI designs in
 `.scratch/live-voice/`; assurance is a shared publication layer over those services.
 
-## Current source findings and observed controls
+## Transferred baseline findings and observed controls
 
 Ordinary text/thinking streams without review; tool-return success and navigation
 acknowledgement are not equivalent to completed effects/view state. Reports have
@@ -29,7 +29,7 @@ backend/tests/test_chat_pre_dispatch_validation.py backend/tests/test_number_aud
 backend/tests/test_report_generator.py` (paths relative to pypsa-gui).
 Those passes do not establish the proposed gate. No paid APIs needed for planning.
 
-## Next actions
+## Transferred next actions (historical)
 
 The following numbered actions describe the transferred session. The current
 continuation below supersedes its credential/worktree assumptions and adds
@@ -430,3 +430,68 @@ owned retained IDs. Arbitrary language and durable constraint recovery, addition
 domains, independent expert/calibration/browser journeys and release activation
 remain pending. Existing storage TTL/byte/quota limits apply to private snapshots;
 active project runtime remains one application worker. Issue 09 is still open.
+
+
+### Broad-validation checkpoint: conversation continuation
+
+The 31 QA drivers (`/tmp/conversation-qa.log`) and all 36 upstream unit tests
+(`/tmp/conversation-upstream.log`, 30.90 seconds) passed. The first full frontend
+run passed 3,609 assertions across 307 files but exited unsuccessfully because an
+uncaught tagging-tour polling timer accessed the global document after teardown;
+that run is not a passing gate. A regression reproduced the teardown failure
+before the fix. Capturing the original document resolves it; the final targeted
+selection passed 41 tests across three files (11.70 seconds). The production
+TypeScript/Vite build passed on the fixed source (19.19 seconds, existing chunk
+warning). The fresh complete frontend run and both complete backend selections
+are pending; no pending result is treated as passed. Source is `a7b0e3ee` (backend
+implementation `24023b81`); only documentation is being updated during those runs.
+
+A fresh `gh workflow run assistant-inventory.yaml --ref master` returned HTTP 422:
+Actions has been disabled for this repository. Remote CI is unavailable; this is
+not a failed remote test run or an approval-rule bypass.
+
+
+The fresh full frontend rerun on the fixed source finished cleanly: **3,610 passed
+across 307 files**, exit 0, no uncaught errors (729.68 seconds). Command:
+`cd pypsa-gui/frontend && npm test -- --run`; log:
+`/tmp/conversation-frontend-final.log`. Final production build also exited 0.
+The complete backend selections remain pending at this checkpoint.
+
+
+### Final conversation-continuation validation (2026-10-11)
+
+All required local gates passed on frozen source `a7b0e3ee`; backend source is
+unchanged from `24023b81`. The fresh complete backend run is **11,143 passed /
+269 skipped / zero failures**, covering all **11,412 collected tests in 527
+files**. Both isolated subprocess selections exited 0:
+
+| Selection | Passed | Skipped | Warnings | Duration |
+| --- | ---: | ---: | ---: | --- |
+| Backend shard 1 | 5,694 | 12 | 3,020 | 2,573.09 s |
+| Backend shard 2 | 5,449 | 257 | 5,885 | 2,858.17 s |
+
+Total orchestration wall time: 2,874.81 seconds. Warnings are recorded, not counted
+as passes. Skipped cases are not claimed as coverage. Collection uses
+`python -m pytest tests --collect-only -q -o addopts=''` from backend cwd. Whole
+files are assigned greedily in descending collected-case count (filename tie
+break), choosing the lower-count shard (first shard on ties). Both contain 5,706
+cases; their file sets are disjoint and their union equals the collection. Each
+subprocess runs the locked `.pixi/envs/test/bin/python -m pytest <selected files>
+-q -o addopts='' --tb=short` with independent conftest app data and
+OMP_NUM_THREADS=OPENBLAS_NUM_THREADS=MKL_NUM_THREADS=1. To reproduce the complete
+selection serially, use the same interpreter/flags with `tests` as the selection.
+
+Final evidence: `/tmp/conversation-backend-collection.log`,
+`/tmp/conversation-backend-shard-1.log`, `/tmp/conversation-backend-shard-2.log`,
+`/tmp/conversation-backend-manifest.json`, `/tmp/conversation-validation-result.json`.
+The fresh complete frontend is **3,610 passed / 307 files**, exit 0, no uncaught
+errors. Final production build, **31 QA drivers**, **36 upstream unit tests**,
+**274-case focused gate** (one deliberate recording skip), **30 conversation
+cases**, **41 tour regression cases**, inventory and documentation checks pass.
+The focused selections overlap the full suites and are not added to their totals.
+
+This clean full run supersedes the earlier PR 119 full-run-plus-correction result
+as current validation. No paid model calls or remote CI success is claimed:
+GitHub workflow dispatch confirms Actions is disabled (HTTP 422). Context remains
+live-session, bounded and opt-in; durable recovery, arbitrary-language scope,
+unmapped domains and independent domain/release certification remain pending.
