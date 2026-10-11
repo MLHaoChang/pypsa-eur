@@ -58,3 +58,14 @@ create/get/rebind/resume call `applyDurableThreadGeneration`, which sets
 `durableThreadId` and `utteranceGeneration` from the thread response. Tests:
 `durableConversations.test.ts`. Still open: backend auto-drain after promote;
 UI entry that creates/rebinds a durable thread from Live.
+
+2026-10-11: Backend auto-drain — after an admitted turn ends, `release_lease`
+promotes the pending correction and `run_turn` continues on the same stream
+with `_held_lease` (no re-admit of a seen id). Tests:
+`test_utterance_admission_stream_c_i1.py::test_queued_pending_auto_drains_after_turn`.
+Still open: Live UI durable create/rebind entry.
+
+2026-10-11: Live durable bind — opening Companion Live calls
+`ensureLiveDurableThread()` (create if unbound, else rebind). Generation sync
+reuses `applyDurableThreadGeneration`. Tests: `durableConversations.test.ts`,
+`AssistantDock.test.tsx`. Still open: LiveKit credentials/deployment smoke.

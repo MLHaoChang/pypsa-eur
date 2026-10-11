@@ -1785,11 +1785,16 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "wait_for_job",
-        "Wait locally for a solve-queue, GridSpine, or foreground simulation/AC-PF job "
-        "(fg:… handles from run_simulation / run_ac_pf_stage), avoiding repeated model status polls. "
+        "Wait locally for a solve-queue/GridSpine UUID, foreground simulation/AC-PF "
+        "(fg:… from run_simulation / run_ac_pf_stage), adequacy/study job "
+        "(ad:… from run_fmea_sweep / frontier / mc / coupling / margin / eh / "
+        "investment_case), or report job (rpt:… from generate_report / "
+        "regenerate_report_section / propose_report_mapping), "
+        "avoiding repeated model status polls. "
         "Returns job, terminal, completed, timed_out, wait_cancelled, waited_seconds. "
         "Default 20 seconds, maximum 25. On timeout report pending and end the turn; never busy-poll. "
-        "A cancelled wait leaves the job running; solve_queue_abort or abort_simulation stops it. Safety: read.",
+        "A cancelled wait leaves the job running; solve_queue_abort, abort_simulation, "
+        "abort_adequacy_study, or abort_report_generation stops it. Safety: read.",
         {"job_id": {"type": "string"}, "timeout_seconds": {"type": "number", "minimum": 0, "maximum": 25}}, ["job_id"],
     ),
     _t(
@@ -3103,6 +3108,10 @@ TOOLS: list[dict[str, Any]] = [
 # Provider-neutral assistant operations. Every action uses normal dispatch.
 _ENGINEERING_CHANGES = next(t for t in TOOLS if t["name"] == "run_sensitivity_sweep")["input_schema"]["properties"]["cases"]["items"]["properties"]["changes"]
 TOOLS.extend([
+    _t("list_project_runs", "List recorded runs of the active project, newest first, with status (running, completed, failed, interrupted), start/finish timestamps, mode, fingerprint and whether result evidence is still available. Pages of 10 by default, max 50; optional status filter. Returns items, total_count, limit, offset, has_more. Reads immutable run records only; activates nothing. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 50}, "offset": {"type": "integer", "minimum": 0}, "status": {"type": "string", "enum": ["running", "completed", "failed", "interrupted"]}}, []),
+    _t("get_run_evidence", "Read one recorded run of the active project by run_id from list_project_runs. Without section: status, timestamps, mode, fingerprint, warnings, error and software-computed metrics (value + unit) and the section list with availability. With section (lowercase name from that list): the stored section data. Never substitutes another run: missing, pruned, altered or unfinished evidence returns error_kind evidence_unavailable naming this run_id and a reason; an unknown id returns run_not_found. Safety: read.", {"run_id": {"type": "string", "maxLength": 64}, "section": {"type": "string", "maxLength": 32}}, ["run_id"]),
+    _t("compare_project_runs", "Compare two recorded runs of the active project by run_id (from list_project_runs): run minus baseline for each recorded metric, with both values, the unit and the delta computed in software (delta_pct is null for a zero baseline). Runs are comparable only when both completed, have the same mode and the same input fingerprint (set allow_input_changes=true to compare runs whose inputs differ; the result then carries inputs_differ=true). Otherwise comparable=false with incomparable_reasons and no deltas. A metric missing on one run or recorded in different units is listed in unmatched_metrics, never estimated. Optional metrics restricts the names. Missing or pruned evidence returns evidence_unavailable naming that run; an unknown id returns run_not_found. Safety: read.", {"run_id": {"type": "string", "maxLength": 64}, "baseline_run_id": {"type": "string", "maxLength": 64}, "metrics": {"type": "array", "items": {"type": "string", "maxLength": 64}, "minItems": 1, "maxItems": 20}, "allow_input_changes": {"type": "boolean"}}, ["run_id", "baseline_run_id"]),
+    _t("get_loadflow_summary", "Summarise the CURRENT load-flow results of the active project: lines and transformers ranked by peak utilisation = flow / (rating * s_max_pu), computed by software from the same results the Load flow tab reads. Per branch (default 5, max 25, trimmed to a bounded payload): both-terminal peak flow, rating (optimized s_nom_opt or configured s_nom), s_max_pu range, peak/mean utilisation, weighted hours at/over the limit. Returns the exact source, snapshot window, freshness, solve state, ranking convention, skipped branches (missing or zero rating, no flow data) and missing_evidence. LOPF results are an ACTIVE-POWER PROXY, not an AC apparent-power assessment; source='ac_pf' uses apparent power where reactive flows exist and excludes unconverged snapshots. Never proof of full AC thermal compliance (no N-1, no voltage limits). Unsolved, stale, running, infeasible or failed results return status unavailable with a typed unavailable_kind; never invent values. window_from/window_to are inclusive snapshot indexes for follow-ups. run_id (historical) returns unavailable until run evidence artifacts exist (issue 06). Safety: read.", {"source": {"type": "string", "enum": ["lopf", "ac_pf"]}, "limit": {"type": "integer", "minimum": 1, "maximum": 25}, "window_from": {"type": "integer", "minimum": 0}, "window_to": {"type": "integer", "minimum": 0}, "run_id": {"type": "string", "maxLength": 64}}, []),
     _t("list_tasks", "List up to 20 most recently updated durable tasks owned by you in the active project. Use a returned ID to resume in a new chat or provider. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
     _t("find_capabilities", "Find relevant supported tools for a goal. Returns required inputs, safety and current project/toolset eligibility. Cached catalogue search grants no authority. Safety: read.", {"goal": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 8}}, ["goal"]),
     _t("start_task", "Persist a project/user-scoped plan of 1–12 ordinary tools. Create/activate the project first; rebinding and task-control tools cannot be steps. Each step has unique id, tool, args. Whole-value $earlier_step.path references resolve saved results. Stable request_id deduplicates identical plans. Returns task_id, status, next_step. Execute next_step via an ordinary offered call; this tool runs no hidden actions. Safety: write.", {"title": {"type": "string", "maxLength": 120}, "request_id": {"type": "string", "maxLength": 64}, "steps": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "object", "additionalProperties": False, "properties": {"id": {"type": "string"}, "tool": {"type": "string"}, "args": {"type": "object"}}, "required": ["id", "tool", "args"]}}}, ["title", "steps", "request_id"]),
@@ -3190,6 +3199,10 @@ _COMP_DELETE_ROUTES = [
 
 
 TOOL_ROUTES: dict[str, list] = {
+    "list_project_runs": _SERVICE_CALL,
+    "get_run_evidence": _SERVICE_CALL,
+    "compare_project_runs": _SERVICE_CALL,
+    "get_loadflow_summary": _SERVICE_CALL,
     "list_tasks": _SERVICE_CALL,
     "find_capabilities": _SERVICE_CALL,
     "start_task": _SERVICE_CALL,

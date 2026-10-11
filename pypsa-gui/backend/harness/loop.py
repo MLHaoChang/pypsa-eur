@@ -1019,6 +1019,8 @@ def run_turn(
     checked_scope: dict | None = None,
     checked_operation: dict | None = None,
     binding_generation: int = 0,
+    _held_lease: str | None = None,
+    _held_generation: int | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
     """
     Provider-driven turn driver (Phase 3 replacement for the Phase 2 stub):
@@ -1119,9 +1121,14 @@ def run_turn(
 
     # Issue 02 / C-I1 — optional shared utterance admission. Both fields must
     # be present; omitting either preserves the pre-admission path (#19 alone).
+    # A promoted pending correction re-enters with `_held_lease` so we do not
+    # re-admit an id already in `seen_ids`.
     _admission_lease: str | None = None
     _admission_generation: int | None = None
-    if utterance_id is not None and generation is not None:
+    if _held_lease is not None and _held_generation is not None:
+        _admission_lease = _held_lease
+        _admission_generation = _held_generation
+    elif utterance_id is not None and generation is not None:
         from services.utterance_admission import StableUtterance, admit_utterance
         decision = admit_utterance(StableUtterance(
             utterance_id=utterance_id,
@@ -1189,6 +1196,8 @@ def run_turn(
     except Exception:  # noqa: BLE001 — the WAL must never block the turn
         logger.exception("chat: failed to open the pending-turn record")
 
+    _drain_utt = None
+    _drain_lease: str | None = None
     try:
         # The body is a separate generator so this one try/finally clears the
         # in-flight flag + records the duration on EVERY exit path (normal
@@ -1233,14 +1242,31 @@ def run_turn(
             session.shadow_turn = None
         if _admission_lease is not None and _admission_generation is not None:
             from services import utterance_admission as _ua
-            # Do not auto-promote pending into a hanging lease; drain is a
-            # later slice that starts the follow-up turn explicitly.
-            _ua._DEFAULT.release_lease(
+            # Promote pending into a new lease, then start that follow-up turn
+            # on this same stream (auto-drain). Leaving a promoted lease
+            # without a turn would hang admission.
+            promoted = _ua._DEFAULT.release_lease(
                 session_id=session.session_id,
                 lease_id=_admission_lease,
                 generation=_admission_generation,
-                promote=False,
+                promote=True,
             )
+            if (
+                promoted is not None
+                and promoted.status == 'admitted'
+                and promoted.lease_id is not None
+            ):
+                active = _ua._DEFAULT.active_utterance(session.session_id)
+                if active is not None:
+                    _drain_utt = active
+                    _drain_lease = promoted.lease_id
+                else:
+                    _ua._DEFAULT.release_lease(
+                        session_id=session.session_id,
+                        lease_id=promoted.lease_id,
+                        generation=promoted.generation,
+                        promote=False,
+                    )
         # C-3 — the turn's profile must not outlive the turn. A tool invoked
         # OUTSIDE a turn (a direct call, a test) has no profile to honour and
         # must take the pre-profile path; leaving a stale value bound would
@@ -1255,6 +1281,26 @@ def run_turn(
         # record behind. Only a crash skips this line — which is the point.
         if _wal_ctx is not None:
             clear_pending_turn(_wal_ctx)
+
+    if _drain_utt is not None and _drain_lease is not None:
+        yield from run_turn(
+            session,
+            _drain_utt.text,
+            client=client,
+            provider=provider,
+            message_history=message_history,
+            ui_context=ui_context,
+            wire_conflict=wire_conflict,
+            unknown_profile_id=unknown_profile_id,
+            strict_assurance=strict_assurance,
+            utterance_id=_drain_utt.utterance_id,
+            generation=_drain_utt.generation,
+            checked_scope=checked_scope,
+            checked_operation=None,
+            binding_generation=binding_generation,
+            _held_lease=_drain_lease,
+            _held_generation=_drain_utt.generation,
+        )
 
 
 def _outbound_vision_block_kinds(
@@ -2463,10 +2509,18 @@ def _dispatch_real_tool_call(
                     project_uuid=getattr(active_ctx, "project_uuid", None),
                     kind=kind,
                 )
+                from services import run_evidence as _run_evidence
+                run_token = _run_evidence.start_foreground_run(
+                    active_ctx, job_id=job_id, tool_name=tool_name, kind=kind,
+                )
                 start_detached_solver_monitor(
                     session, active_ctx,
                     tool_use_id=tool_use_id,
                     tool_name=tool_name,
+                    on_terminal=(
+                        (lambda: _run_evidence.publish_foreground_run(run_token, active_ctx))
+                        if run_token else None
+                    ),
                 )
             result = {
                 **base,
@@ -2480,6 +2534,74 @@ def _dispatch_real_tool_call(
         except Exception as exc:  # noqa: BLE001 — enrich is best-effort
             logger.exception(
                 "chat: foreground solve handoff enrich for %s failed: %s",
+                tool_name, _redact_for_log(exc),
+            )
+
+    # Issue 11 — adequacy/study mesh handoff. Starters already return
+    # {"status": "running"} after publish_study; mint an ad:… handle so
+    # wait_for_job can observe without model-polling get_adequacy_results.
+    from harness.job_adapters import (
+        REPORT_TOOL_NAMES as _REPORT_TOOL_NAMES,
+        STUDY_TOOL_KEYS as _STUDY_TOOL_KEYS,
+    )
+    if tool_name in _STUDY_TOOL_KEYS and isinstance(result, dict):
+        try:
+            from services.pypsa_service import PyPSAService
+            from harness import job_adapters as ja
+            from services import chat_tools as _ct
+            study_key = _STUDY_TOOL_KEYS[tool_name]
+            if result.get("status") == "running":
+                active_ctx = turn_ctx or PyPSAService.get_active_context()
+                owner = getattr(session, "owner_user_id", None) or _ct.acting_user_id()
+                job_id = ja.register_study_job(
+                    study_key=study_key,
+                    tool_name=tool_name,
+                    tool_use_id=tool_use_id,
+                    owner_user_id=str(owner) if owner else None,
+                    project_uuid=getattr(active_ctx, "project_uuid", None),
+                )
+                monitor = (
+                    "get_investment_case"
+                    if study_key == "investment_case"
+                    else f"get_adequacy_results('{study_key}')"
+                )
+                result = {
+                    **result,
+                    "job_id": job_id,
+                    "study_key": study_key,
+                    "family": ja.STUDY_FAMILY,
+                    "monitor": monitor,
+                }
+        except Exception as exc:  # noqa: BLE001 — enrich is best-effort
+            logger.exception(
+                "chat: study handoff enrich for %s failed: %s",
+                tool_name, _redact_for_log(exc),
+            )
+
+    if tool_name in _REPORT_TOOL_NAMES and isinstance(result, dict):
+        try:
+            from services.pypsa_service import PyPSAService
+            from harness import job_adapters as ja
+            from services import chat_tools as _ct
+            if result.get("status") == "running":
+                active_ctx = turn_ctx or PyPSAService.get_active_context()
+                owner = getattr(session, "owner_user_id", None) or _ct.acting_user_id()
+                job_id = ja.register_report_job(
+                    tool_name=tool_name,
+                    tool_use_id=tool_use_id,
+                    report_id=result.get("report_id"),
+                    owner_user_id=str(owner) if owner else None,
+                    project_uuid=getattr(active_ctx, "project_uuid", None),
+                )
+                result = {
+                    **result,
+                    "job_id": job_id,
+                    "family": ja.REPORT_FAMILY,
+                    "monitor": "get_report_status",
+                }
+        except Exception as exc:  # noqa: BLE001 — enrich is best-effort
+            logger.exception(
+                "chat: report handoff enrich for %s failed: %s",
                 tool_name, _redact_for_log(exc),
             )
 

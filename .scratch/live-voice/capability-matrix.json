@@ -4496,6 +4496,115 @@
       "status": "assigned"
     }
   ],
+  "full_coverage": {
+    "claimed": false,
+    "status": "not_established",
+    "rule": "Whole-application coverage may be claimed only when every family journey is a passing issue-05 journey (journey_id not \"pending:\") and no blocker remains. Load flow, sensitivity and GridSpine fixtures are examples, not the scope.",
+    "journeys_total": 14,
+    "journeys_pending": 14,
+    "blockers": [
+      {
+        "id": "family-journey:pending:issue-05-projects",
+        "issue": "05",
+        "family": "Projects/scenarios/templates",
+        "summary": "Representative real journey not yet passing."
+      },
+      {
+        "id": "family-journey:pending:issue-05-network-topology",
+        "issue": "05",
+        "family": "Network/topology/asset parameters",
+        "summary": "Representative real journey not yet passing."
+      },
+      {
+        "id": "family-journey:pending:issue-05-timeseries-horizon",
+        "issue": "05",
+        "family": "Time series/horizon/multi-period",
+        "summary": "Representative real journey not yet passing."
+      },
+      {
+        "id": "family-journey:pending:issue-05-solver-simulation",
+        "issue": "05",
+        "family": "Solver/simulation",
+        "summary": "Representative real journey not yet passing."
+      },
+      {
+        "id": "family-journey:pending:issue-05-all-results",
+        "issue": "05",
+        "family": "All results",
+        "summary": "Representative real journey not yet passing."
+      },
+      {
+        "id": "family-journey:pending:issue-05-reliability-adequacy",
+        "issue": "05",
+        "family": "Reliability/health/adequacy",
+        "summary": "Representative real journey not yet passing."
+      },
+      {
+        "id": "family-journey:pending:issue-05-gridspine-campus",
+        "issue": "05",
+        "family": "GridSpine/campus electrical",
+        "summary": "Representative real journey not yet passing."
+      },
+      {
+        "id": "family-journey:pending:issue-05-economics-investment",
+        "issue": "05",
+        "family": "Economics/investment/Library",
+        "summary": "Representative real journey not yet passing."
+      },
+      {
+        "id": "family-journey:pending:issue-05-experiments",
+        "issue": "05",
+        "family": "Experiments/sensitivity",
+        "summary": "Representative real journey not yet passing."
+      },
+      {
+        "id": "family-journey:pending:issue-05-import-export",
+        "issue": "05",
+        "family": "Import/export/delivery",
+        "summary": "Representative real journey not yet passing."
+      },
+      {
+        "id": "family-journey:pending:issue-05-reports",
+        "issue": "05",
+        "family": "Reports/templates/edit round trip",
+        "summary": "Representative real journey not yet passing."
+      },
+      {
+        "id": "family-journey:pending:issue-05-audit-undo",
+        "issue": "05",
+        "family": "Audit/undo/checkpoints",
+        "summary": "Representative real journey not yet passing."
+      },
+      {
+        "id": "family-journey:pending:issue-05-harness-workflows",
+        "issue": "05",
+        "family": "Harness/workflows/providers",
+        "summary": "Representative real journey not yet passing."
+      },
+      {
+        "id": "family-journey:pending:issue-05-ui-monitoring",
+        "issue": "05",
+        "family": "UI/preferences/monitoring",
+        "summary": "Representative real journey not yet passing."
+      },
+      {
+        "id": "behavioral-fixtures-pending",
+        "issue": "08",
+        "summary": "Every matrix row still carries a pending:issue-05-* behavioral fixture; no per-family real journey has passed."
+      },
+      {
+        "id": "ui-control-tool-parity-unaudited",
+        "issue": "08",
+        "summary": "Panel/subview/filter/editor controls beyond creation-form fields and catalogue closed sets are not mapped to a typed tool or a declared gap."
+      },
+      {
+        "id": "hosted-gates-pending",
+        "issue": "05",
+        "summary": "Hosted profile, device and latency gates and the prolonged mixed-domain conversation are not run; an architecture review does not certify production behavior."
+      }
+    ],
+    "permitted_statement": "Tested subsets only, labelled accordingly; no whole-application coverage claim."
+  },
   "counts": {
     "creation_controls": 165,
     "editability_overrides": 3,

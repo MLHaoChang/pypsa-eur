@@ -134,10 +134,25 @@ Issue 11 D-I1 first slice: foreground solve handoff without bridge wait;
 - Durable rebind syncs `utteranceGeneration` (vitest)
 - Foreground `wait_for_job` via `fg:…` job adapters (4 pytest)
 
-Next runnable slice: remaining domain adapters (queue/AC-PF families
-beyond simulation, GridSpine/FMEA/…); Live UI that creates/rebinds durable
-threads; backend auto-drain after promote; LiveKit credentials/deployment
-smoke; B-C1. Do not claim whole-application coverage or live voice done.
+2026-10-11 (post-#121 merge): branch `cursor/live-drain-adapters-a604`
+- Backend auto-drain of pending utterance after lease release (pytest)
+- Live open creates/rebinds durable parent thread (vitest)
+- Adequacy/study `ad:…` wait_for_job adapter (pytest)
+
+Next runnable slice: report-job adapter; D-I2 cursor recovery; D-C1;
+LiveKit credentials/deployment smoke; B-C1. Do not claim whole-application
+coverage or live voice done.
+
+2026-10-11 (same branch, later): issue 06 `compare_project_runs` + foreground
+solve publication; issue 11 `rpt:` + D-I2 cursors + D-C1; issue 01 F-U1 mocked
+STT/TTS; issue 09 B-C1 prolonged durable journey; issue 07 `get_loadflow_summary`;
+issue 08 full-coverage limitation block; issue 12 companion done.
+
+**Credential / release blockers (cannot close without external access):**
+LiveKit Build + hosted STT/TTS live probe (01/02/09 deployment smoke);
+issue 03 continuous media UX; issue 04 real vendor billing units;
+issue 05 release journeys / feature-flag gate; issue 10 full experiment
+orchestration. Do not claim whole-application coverage or live voice done.
 
 ## 2026-10-10 design amendment — floating companion
 
