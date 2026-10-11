@@ -78,6 +78,11 @@ export interface ChatStreamRequest {
   // depends on getting it right.
   input_mode?: 'voice' | 'text'
   assurance?: { version: 1; mode: 'strict' }
+  // Issue 02 / C-I1 — Live companion turns only. Both must be set together so
+  // the server can admit via the shared utterance coordinator. Typed and
+  // hub-card sends omit both fields and keep pre-admission /stream behaviour.
+  utterance_id?: string
+  generation?: number
 }
 
 export interface ChatFrame {

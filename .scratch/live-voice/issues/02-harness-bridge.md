@@ -45,3 +45,10 @@ auto-drain pending after release; Live busy path; generation sync with issue 09.
 wins; console stays closed. Project mismatch still refuses. Frontend tests in
 `AssistantDock.test.tsx`. Still open: wire Live stream with utterance_id/
 generation; backend auto-drain after promote.
+
+2026-10-11: Live stream IDs — idle `companion:live-utterance` and queued
+`source: 'live'` drains send optional `utterance_id` + `generation` on
+`ChatStreamRequest` (store `utteranceGeneration`, default 1). Typed and
+hub-card sends omit both. Tests: `ChatPanel.liveUtteranceAdmission.test.tsx`
+(4 passed). Still open: backend auto-drain after promote; frontend sync of
+generation from durable rebind.

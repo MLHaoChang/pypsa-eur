@@ -182,6 +182,11 @@ interface ChatState {
   // Stream state
   streaming: boolean
   error: ChatErrorState | null
+  // Issue 02 / 09 — Live utterance admission generation. Starts at 1; bumped
+  // when a durable rebind advances the parent thread so stale Live streams
+  // cannot admit. Typed/card sends do not read this field.
+  utteranceGeneration: number
+  setUtteranceGeneration: (n: number) => void
   // The cleanup function returned by createChatStream. Set when a stream
   // is open; cleared (and called) on abort/close/project switch.
   streamCleanup: (() => void) | null
@@ -388,6 +393,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   streaming: false,
   error: null,
+  utteranceGeneration: 1,
+  setUtteranceGeneration: (n) => set({ utteranceGeneration: Math.max(1, Math.floor(n)) }),
   streamCleanup: null,
   uploads: [],
   attachedFileIds: [],
@@ -591,6 +598,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streaming: false,
       error: null,
       streamCleanup: null,
+      utteranceGeneration: 1,
       uploads: [],
       attachedFileIds: [],
       unseenExportCount: 0,
@@ -613,6 +621,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       workflow: null,
       toolProgress: {},
       error: null,
+      utteranceGeneration: 1,
       usage: {
         input_tokens: 0, output_tokens: 0,
         cache_read_tokens: 0, cache_create_tokens: 0, reported: false,
