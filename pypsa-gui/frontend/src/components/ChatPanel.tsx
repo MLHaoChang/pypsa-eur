@@ -506,6 +506,8 @@ export const KIND_COPY: Record<
   internal_error: { title: 'Something went wrong on the server' },
   assurance_unavailable: { title: 'Checked answers are unavailable' },
   assurance_context_changed: { title: 'The project changed while checking the answer' },
+  assurance_context_persistence_failed: { title: 'Checked conversation state could not be saved' },
+  wrong_replica: { title: 'This chat belongs to another application worker' },
   assurance_publication_failed: { title: 'The checked answer could not be published' },
   task_checkpoint_failed: {
     title: 'Task progress could not be saved',
@@ -599,7 +601,8 @@ export const TOOL_ERROR_BANNER_KINDS = new Set([
   'inactive_acting_user',
   'solver_in_flight', 'parallel_destructive_not_allowed',
   'tool_call_cap_exceeded',
-  'assurance_unavailable', 'assurance_context_changed', 'assurance_publication_failed',
+  'assurance_unavailable', 'assurance_context_changed', 'assurance_context_persistence_failed', 'assurance_publication_failed',
+  'wrong_replica',
   'task_checkpoint_failed',
   // `set_active_profile` raises these as HTTPExceptions, which the dispatcher
   // converts to `tool_error` frames — so copy alone was unreachable and the
