@@ -85,6 +85,10 @@ class StreamRequest(BaseModel):
     # reciprocity depends on it and reconstructing it later from timing or
     # content is guesswork. Carried now; the spoken-reply half is not built.
     input_mode: str | None = None
+    # Issue 02 / C-I1 — optional shared utterance admission. Both must be set
+    # together; omitting either keeps the pre-admission /stream behaviour.
+    utterance_id: str | None = None
+    generation: int | None = None
     # Validate explicitly to preserve the protocol's typed admission errors.
     assurance: Any = None
     checked_scope: Any = None
@@ -1193,6 +1197,41 @@ def chat_import(body: ImportRequest) -> dict[str, Any]:
 # will read, not by cost. Module-level so a test can shorten it.
 DISCONNECT_POLL_SECONDS = 2.0
 
+# Issue 11 — how often GET /{session_id}/progress drains the detached ring.
+# Module-level so tests can shorten it without sleeping for a full second.
+PROGRESS_POLL_SECONDS = 0.25
+
+
+def _resolve_owned_session(
+    session_id: str,
+    actor: User | None,
+    *,
+    hide_foreign: bool = True,
+):
+    """Load a session the actor may use on this replica, or None / raise.
+
+    ``hide_foreign`` matches /confirm and /abort: a foreign owner is treated
+    as unknown. Wrong-replica is always a distinct refusal so failover cannot
+    clear another worker's pending work.
+    """
+    session = chat_service.get_session(session_id)
+    if session is None:
+        return None
+    if not chat_service.session_owner_allows(session, getattr(actor, "id", None)):
+        return None if hide_foreign else session
+    if not chat_service.session_replica_allows(session):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "wrong_replica",
+                "message": (
+                    "this chat session is pinned to another application worker"
+                ),
+                "owner_replica_id": session.owner_replica_id,
+            },
+        )
+    return session
+
 
 class _DisconnectWatcher:
     """
@@ -1418,6 +1457,17 @@ async def chat_stream(
                 ),
             },
         )
+    if not _session_created and not chat_service.session_replica_allows(session):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "wrong_replica",
+                "message": (
+                    "this chat session is pinned to another application worker"
+                ),
+                "owner_replica_id": session.owner_replica_id,
+            },
+        )
 
     # #26 — in-memory token-bucket rate limit, keyed per session_id (a session
     # is one conversation = one rate-limit subject). Disabled by default
@@ -1574,6 +1624,8 @@ async def chat_stream(
                     attachment_file_ids=body.attachment_file_ids,
                     ui_context=body.ui_context,
                     strict_assurance=strict_assurance,
+                    utterance_id=body.utterance_id,
+                    generation=body.generation,
                     checked_scope=body.checked_scope,
                     checked_operation=body.checked_operation,
                     binding_generation=body.binding_generation,
@@ -1617,7 +1669,6 @@ def chat_confirm(session_id: str, body: ConfirmRequest,
     decisions return 400 `error_kind='invalid_decision'` and keep the token
     alive so the caller can retry with the correct value.
     """
-    session = chat_service.get_session(session_id)
     # Authorization, not just authentication. `_SESSIONS` is a process global and
     # this route used to consult no owner at all, so any signed-in caller who knew
     # a session id could act on a stranger's conversation -- verified cross-ORG.
@@ -1626,11 +1677,9 @@ def chat_confirm(session_id: str, body: ConfirmRequest,
     #
     # A foreign session is made INDISTINGUISHABLE from an unknown one rather than
     # answered with a 403: that keeps this route from confirming the session
-    # exists, and matches the existing never-404 contract below.
-    if session is not None and not chat_service.session_owner_allows(
-        session, getattr(actor, "id", None),
-    ):
-        session = None
+    # exists, and matches the existing never-404 contract below. Wrong-replica
+    # is a distinct 409 so failover cannot clear another worker's tokens.
+    session = _resolve_owned_session(session_id, actor)
     if session is None:
         raise HTTPException(
             status_code=404,
@@ -1670,13 +1719,19 @@ def chat_rewind(session_id: str, body: RewindRequest,
     turn is in flight — see rewind_session for why refusing is the only safe
     answer there.
     """
-    session = chat_service.get_session(session_id)
-    # Same guard and same reasoning as /confirm and /abort above: a foreign
-    # session is made indistinguishable from an unknown one.
-    if session is not None and not chat_service.session_owner_allows(
-        session, getattr(actor, "id", None),
-    ):
-        session = None
+    try:
+        session = _resolve_owned_session(session_id, actor)
+    except HTTPException as exc:
+        if exc.status_code == 409 and (
+            (exc.detail or {}).get("error_kind") == "wrong_replica"
+        ):
+            return {
+                "ok": False,
+                "reason": "wrong_replica",
+                "dropped": 0,
+                "owner_replica_id": (exc.detail or {}).get("owner_replica_id"),
+            }
+        raise
     if session is None:
         return {"ok": False, "reason": "unknown_session", "dropped": 0}
     dropped = chat_service.rewind_session(session, turns=body.turns)
@@ -1691,7 +1746,6 @@ def chat_abort(session_id: str,
     worker shut down. Idempotent: safe to call on an unknown session
     (returns ok=false rather than 404, so a quick double-click is harmless).
     """
-    session = chat_service.get_session(session_id)
     # Authorization, not just authentication. `_SESSIONS` is a process global and
     # this route used to consult no owner at all, so any signed-in caller who knew
     # a session id could act on a stranger's conversation -- verified cross-ORG.
@@ -1700,12 +1754,84 @@ def chat_abort(session_id: str,
     #
     # A foreign session is made INDISTINGUISHABLE from an unknown one rather than
     # answered with a 403: that keeps this route from confirming the session
-    # exists, and matches the existing never-404 contract below.
-    if session is not None and not chat_service.session_owner_allows(
-        session, getattr(actor, "id", None),
-    ):
-        session = None
+    # exists, and matches the existing never-404 contract below. Wrong-replica
+    # returns ok=false without setting abort_event.
+    try:
+        session = _resolve_owned_session(session_id, actor)
+    except HTTPException as exc:
+        if exc.status_code == 409 and (
+            (exc.detail or {}).get("error_kind") == "wrong_replica"
+        ):
+            return {
+                "ok": False,
+                "reason": "wrong_replica",
+                "owner_replica_id": (exc.detail or {}).get("owner_replica_id"),
+            }
+        raise
     if session is None:
         return {"ok": False, "reason": "unknown_session"}
     session.abort_event.set()
     return {"ok": True}
+
+
+@router.get("/{session_id}/progress")
+async def chat_progress(
+    session_id: str,
+    request: Request,
+    actor: User | None = Depends(optional_user),
+) -> StreamingResponse:
+    """
+    Issue 11 — observe detached solver progress after a foreground handoff.
+
+    Drains the session's detached progress ring and emits existing
+    ``tool_progress`` SSE frames (no new frame names). Stays open while a
+    detached monitor is active; exits once the ring is empty and the monitor
+    is inactive. Ownership/replica gates match /confirm.
+    """
+    try:
+        session = _resolve_owned_session(session_id, actor)
+    except HTTPException:
+        raise
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_kind": "unknown_session",
+                "message": f"no chat session bound to {session_id!r}",
+            },
+        )
+
+    async def _gen():
+        # First drain is immediate so a short-lived ring is not held for a
+        # full poll interval before the client sees it.
+        idle_rounds = 0
+        while True:
+            if await request.is_disconnected():
+                return
+            payloads = session.drain_detached_progress()
+            for payload in payloads:
+                yield chat_service.sse_frame("tool_progress", payload)
+            if session.detached_monitor_active():
+                idle_rounds = 0
+                await asyncio.sleep(PROGRESS_POLL_SECONDS)
+                continue
+            if payloads:
+                idle_rounds = 0
+                await asyncio.sleep(PROGRESS_POLL_SECONDS)
+                continue
+            # Monitor gone and ring empty — one extra short wait for a late
+            # append, then close.
+            idle_rounds += 1
+            if idle_rounds >= 2:
+                return
+            await asyncio.sleep(PROGRESS_POLL_SECONDS)
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )

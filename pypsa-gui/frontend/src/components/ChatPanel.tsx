@@ -2259,7 +2259,13 @@ export default function ChatPanel() {
   // user's draft (and its dictation flag) stays as it is, and the turn is a
   // typed one.
   const dispatchSend = useCallback((text: string, attachIds: string[],
-    opts?: { fromCard?: boolean; label?: string }) => {
+    opts?: {
+      fromCard?: boolean
+      label?: string
+      /** Live admission only — omit for typed / hub-card sends. */
+      utterance_id?: string
+      generation?: number
+    }) => {
     const generation = ++streamGenerationRef.current
     streamProjectRef.current = useUIStore.getState().currentProject
     const chatSequence = useChatStore.getState().newChatSeq
@@ -2287,6 +2293,13 @@ export default function ChatPanel() {
     }
     setStreaming(true)
     setError(null)
+    const admission = (
+      typeof opts?.utterance_id === 'string'
+      && opts.utterance_id.length > 0
+      && typeof opts?.generation === 'number'
+    )
+      ? { utterance_id: opts.utterance_id, generation: opts.generation }
+      : {}
     const cleanup = createChatStream(
       {
         session_id: sessionId ?? undefined,
@@ -2309,6 +2322,7 @@ export default function ChatPanel() {
         // after dispatchSend has already reset the composer, so reading
         // the composer flag here always yields 'text'.
         input_mode: voiceTurnRef.current ? 'voice' : 'text',
+        ...admission,
         binding_generation: generation,
       },
       (frame) => {
@@ -2421,7 +2435,13 @@ export default function ChatPanel() {
     if (streaming || pendingCard != null || pendingSendText != null) return
     const req = useChatStore.getState().takeNextRequest()
     if (!req) return
-    dispatchSend(req.text, [], { fromCard: true, label: req.label })
+    const liveAdmission = req.source === 'live'
+      ? {
+          utterance_id: req.id,
+          generation: useChatStore.getState().utteranceGeneration,
+        }
+      : {}
+    dispatchSend(req.text, [], { fromCard: true, label: req.label, ...liveAdmission })
   }, [requestCount, streaming, pendingCard, pendingSendText, notReady, mismatchLine, dispatchSend])
 
   // Live companion turns use this same send. The dock only dispatches the
@@ -2434,7 +2454,13 @@ export default function ChatPanel() {
       if (notReady || streaming) return
       if (useChatStore.getState().pending) return
       if (useUIStore.getState().projectMismatch) return
-      dispatchSend(text.trim(), [], { fromCard: true })
+      const utterance_id = globalThis.crypto?.randomUUID?.()
+        ?? `live-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      dispatchSend(text.trim(), [], {
+        fromCard: true,
+        utterance_id,
+        generation: useChatStore.getState().utteranceGeneration,
+      })
     }
     window.addEventListener('companion:live-utterance', onUtterance)
     return () => window.removeEventListener('companion:live-utterance', onUtterance)

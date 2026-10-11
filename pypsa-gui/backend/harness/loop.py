@@ -79,7 +79,7 @@ from harness.history import (  # noqa: E402, F401 — moved (issue 08); re-expor
 
 
 from harness.session import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    RESULT_REFS_MAXLEN, PendingConfirmation, ChatSession, _SESSIONS, _SESSIONS_LOCK, get_session, session_owner_allows, _evict_idle_sessions_locked, get_or_create_session_reporting, get_or_create_session, drop_session, _reset_sessions_for_tests, TURN_AUTHOR_KEY, turn_is_callers,
+    RESULT_REFS_MAXLEN, PendingConfirmation, ChatSession, _SESSIONS, _SESSIONS_LOCK, get_session, session_owner_allows, session_replica_allows, _evict_idle_sessions_locked, get_or_create_session_reporting, get_or_create_session, drop_session, _reset_sessions_for_tests, TURN_AUTHOR_KEY, turn_is_callers,
 )
 
 
@@ -970,6 +970,38 @@ def _build_user_content(
 
 
 
+# Literal error_kind values so tool-error-kinds.json's AST scan sees them.
+_ADMISSION_ERRORS: dict[str, dict[str, str]] = {
+    'duplicate': {
+        'error_kind': 'duplicate',
+        'message': (
+            'this utterance was already admitted; the duplicate was ignored so '
+            'effects are not repeated.'
+        ),
+    },
+    'queued': {
+        'error_kind': 'queued',
+        'message': (
+            'a turn is already running on this chat session; this message was kept '
+            'as the single pending correction (latest wins).'
+        ),
+    },
+    'stale_generation': {
+        'error_kind': 'stale_generation',
+        'message': (
+            'this utterance belongs to an older conversation generation and was '
+            'not admitted.'
+        ),
+    },
+    'rejected_empty': {
+        'error_kind': 'rejected_empty',
+        'message': (
+            'the utterance text is empty, so nothing was sent.'
+        ),
+    },
+}
+
+
 def run_turn(
     session: ChatSession,
     message: str,
@@ -982,6 +1014,8 @@ def run_turn(
     wire_conflict: bool = False,
     unknown_profile_id: str | None = None,
     strict_assurance: bool = False,
+    utterance_id: str | None = None,
+    generation: int | None = None,
     checked_scope: dict | None = None,
     checked_operation: dict | None = None,
     binding_generation: int = 0,
@@ -1083,10 +1117,43 @@ def run_turn(
     # and the panel appears frozen (E2E QA: INT-004).
     session.abort_event.clear()
 
+    # Issue 02 / C-I1 — optional shared utterance admission. Both fields must
+    # be present; omitting either preserves the pre-admission path (#19 alone).
+    _admission_lease: str | None = None
+    _admission_generation: int | None = None
+    if utterance_id is not None and generation is not None:
+        from services.utterance_admission import StableUtterance, admit_utterance
+        decision = admit_utterance(StableUtterance(
+            utterance_id=utterance_id,
+            text=message,
+            generation=generation,
+            session_id=session.session_id,
+        ))
+        if decision.status != 'admitted':
+            detail = _ADMISSION_ERRORS.get(decision.status) or {
+                'error_kind': 'internal_error',
+                'message': 'this utterance was not admitted.',
+            }
+            yield "error", detail
+            yield "session_done", {"reason": detail['error_kind']}
+            return
+        _admission_lease = decision.lease_id
+        _admission_generation = decision.generation
+
     # #19 — single in-flight-turn guard. Under _lock so two concurrent
     # run_turn calls on one session can't BOTH claim the slot.
     with session._lock:
         if session._turn_in_flight:
+            # Drop a just-minted admission lease so a concurrent reject cannot
+            # leave the coordinator holding a lease with no turn body.
+            if _admission_lease is not None and _admission_generation is not None:
+                from services import utterance_admission as _ua
+                _ua._DEFAULT.release_lease(
+                    session_id=session.session_id,
+                    lease_id=_admission_lease,
+                    generation=_admission_generation,
+                    promote=False,
+                )
             yield "error", {
                 "error_kind": "turn_already_in_flight",
                 "message": (
@@ -1164,6 +1231,16 @@ def run_turn(
             session._undo_snapshotted = []
             session.assurance_turn = None
             session.shadow_turn = None
+        if _admission_lease is not None and _admission_generation is not None:
+            from services import utterance_admission as _ua
+            # Do not auto-promote pending into a hanging lease; drain is a
+            # later slice that starts the follow-up turn explicitly.
+            _ua._DEFAULT.release_lease(
+                session_id=session.session_id,
+                lease_id=_admission_lease,
+                generation=_admission_generation,
+                promote=False,
+            )
         # C-3 — the turn's profile must not outlive the turn. A tool invoked
         # OUTSIDE a turn (a direct call, a test) has no profile to honour and
         # must take the pre-profile path; leaving a stale value bound would
@@ -2205,7 +2282,7 @@ def _dispatch_real_tool_call(
         # on a shared worker pool and abandon it after PER_TOOL_TIMEOUT_SECONDS,
         # emitting tool_timeout. Solver tools (run_simulation / run_ac_pf_stage)
         # are EXCLUDED — they return immediately (spawning their own worker) and
-        # the solver_log_bridge below owns their long-running lifecycle, so a
+        # issue 11 hands the turn off without awaiting that worker, so a
         # timeout here would be wrong. A timed-out worker stays detached (a Python
         # thread can't be force-killed): the SSE thread is freed, the orphan
         # finishes or hangs harmlessly. CAVEAT (documented): an orphan that LATER
@@ -2360,44 +2437,37 @@ def _dispatch_real_tool_call(
     if tool_name == "undo_last":
         _forget_turn_undo(session)
 
-    # Long-running execution tier: bridge solver log lines into tool_progress
-    # frames between tool_running and tool_result. run_simulation /
-    # run_ac_pf_stage return immediately (they spawn a worker thread); we
-    # poll the active solver_state until status flips to a terminal state,
-    # streaming [PHASE] / [VALIDATION] / TRACEBACK lines as they arrive
-    # (F10: ctx + log_queue captured under solver_state_lock).
+    # Issue 11 / D-I1 — foreground solve/AC-PF handoff. The handlers already
+    # return {"status": "started"} after spawning a worker. Holding this turn
+    # on solver_log_bridge until terminal status blocked every other read
+    # (turn_already_in_flight / utterance lease). Emit the started handle,
+    # start a detached monitor for log lines, and release the turn.
     if tool_name in ("run_simulation", "run_ac_pf_stage"):
         try:
             from services.pypsa_service import PyPSAService
+            from harness.solver_bridge import start_detached_solver_monitor
             active_ctx = turn_ctx or PyPSAService.get_active_context()
-
-            def _solver_done() -> bool:
-                with active_ctx.solver_state_lock:
-                    status = active_ctx.solver_state.get("status")
-                return status in ("completed", "failed", "aborted", "idle")
-
-            for prog in solver_log_bridge(
-                session, active_ctx,
-                poll_interval=0.1,
-                is_solver_done=_solver_done,
-            ):
-                yield "tool_progress", {
-                    "tool_use_id": tool_use_id,
-                    "tool_name": tool_name,
-                    **prog,
-                }
-            # Re-read final status into the tool_result payload so the agent
-            # learns whether the solve succeeded.
             with active_ctx.solver_state_lock:
-                result = {
-                    **(result if isinstance(result, dict) else {"result": result}),
-                    "final_status": active_ctx.solver_state.get("status"),
-                    "objective": active_ctx.solver_state.get("objective"),
-                    "solve_time": active_ctx.solver_state.get("solve_time"),
-                }
-        except Exception as exc:  # noqa: BLE001 — bridge failure is non-fatal
+                kind = active_ctx.solver_state.get("kind")
+                status = active_ctx.solver_state.get("status")
+            base = result if isinstance(result, dict) else {"result": result}
+            result = {
+                **base,
+                "status": base.get("status") or "started",
+                "running": status == "running",
+                "kind": kind,
+                "monitor": "get_simulation_status",
+                "detached_progress": True,
+            }
+            if status == "running":
+                start_detached_solver_monitor(
+                    session, active_ctx,
+                    tool_use_id=tool_use_id,
+                    tool_name=tool_name,
+                )
+        except Exception as exc:  # noqa: BLE001 — enrich is best-effort
             logger.exception(
-                "chat: solver_log_bridge for %s failed: %s",
+                "chat: foreground solve handoff enrich for %s failed: %s",
                 tool_name, _redact_for_log(exc),
             )
 

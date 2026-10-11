@@ -87,8 +87,23 @@ export default function AssistantDock() {
       return
     }
     if (ready === true) {
-      if (useChatStore.getState().streaming || useChatStore.getState().pending || useUIStore.getState().projectMismatch) {
+      if (useUIStore.getState().projectMismatch) {
         setLiveCaption('The assistant is busy. Nothing new was sent.')
+        return
+      }
+      if (useChatStore.getState().streaming || useChatStore.getState().pending) {
+        // Keep one pending Live correction without opening the console
+        // (issue 02). ChatPanel drains requestQueue when the turn ends.
+        const queued = useChatStore.getState().sendRequest(text, {
+          source: 'live',
+          openDock: false,
+        })
+        setPresence('listening')
+        setLiveCaption(
+          queued
+            ? 'Queued — will send when the assistant is free.'
+            : 'The assistant is busy. Nothing new was sent.',
+        )
         return
       }
       stopWalk()

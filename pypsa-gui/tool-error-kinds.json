@@ -423,6 +423,22 @@
       "surface": "inline",
       "why": "A second turn arrived while one was running. Route-level, on an `error` frame, and the composer state already says so."
     },
+    "duplicate": {
+      "surface": "inline",
+      "why": "Shared utterance admission (issue 02): the same utterance_id was already seen. Emitted on an `error` frame before the turn starts; the composer can show the refusal inline."
+    },
+    "queued": {
+      "surface": "inline",
+      "why": "Shared utterance admission (issue 02): a turn lease is held and this utterance became the single pending correction. Not a second turn."
+    },
+    "stale_generation": {
+      "surface": "inline",
+      "why": "Shared utterance admission (issue 02): the client generation no longer matches the coordinator after rebind/restart."
+    },
+    "rejected_empty": {
+      "surface": "inline",
+      "why": "Shared utterance admission (issue 02): blank utterance text with admission fields set. Nothing reached the model."
+    },
     "unknown_confirmation_token": {
       "surface": "inline",
       "why": "A confirm arrived for a token this session does not know — a stale tab or a double-submit, not a user-actionable state."
