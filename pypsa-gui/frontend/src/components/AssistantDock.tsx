@@ -4,6 +4,7 @@ import { useUIStore } from '../store/uiStore'
 import { useChatProfiles, useChatReadiness } from '../hooks/useChatProfiles'
 import ChatPanel, { ConfirmationCard } from './ChatPanel'
 import CompanionLauncher, { type CompanionPresence } from './CompanionLauncher'
+import CompanionOutcome from './CompanionOutcome'
 import { KEY_RESULT_TABS, keyResultsWalkRequested, openProjectList, openProjectRequested, startKeyResultsWalk } from './liveWalk'
 import { ErrorBoundary } from './ErrorBoundary'
 
@@ -39,12 +40,14 @@ export default function AssistantDock() {
   const [presence, setPresence] = useState<CompanionPresence>('idle')
   const [liveOpen, setLiveOpen] = useState(false)
   const [liveCaption, setLiveCaption] = useState('')
+  const [walking, setWalking] = useState(false)
   const walkCancel = useRef<(() => void) | null>(null)
   useEffect(() => () => { walkCancel.current?.() }, [])
 
   const stopWalk = useCallback(() => {
     walkCancel.current?.()
     walkCancel.current = null
+    setWalking(false)
   }, [])
 
   const forwardToHarness = useCallback((text: string) => {
@@ -55,16 +58,19 @@ export default function AssistantDock() {
   const onLiveSubmit = useCallback((text: string) => {
     if (keyResultsWalkRequested(text)) {
       stopWalk()
+      setWalking(true)
       setPresence('thinking')
       setLiveCaption('Opening each results tab.')
       walkCancel.current = startKeyResultsWalk({
         onStep: (tab, index, last) => {
           setLiveCaption(`Tab ${index + 1} of ${KEY_RESULT_TABS.length}. ${tab.label}. ${tab.blurb}`)
           setPresence(last ? 'speaking' : 'thinking')
+          if (last) setWalking(false)
         },
         onPaceMiss: () => {
           setPresence('listening')
           setLiveCaption('Could not hold the tab. The pause did not come from the dev server.')
+          setWalking(false)
         },
       })
       forwardToHarness(text)
@@ -204,6 +210,7 @@ export default function AssistantDock() {
         </div>
       </div>
       {!assistantDockOpen ? <ConfirmationCard /> : null}
+      {liveOpen && !assistantDockOpen ? <CompanionOutcome hidden={walking} /> : null}
       {!assistantDockOpen && (
         <CompanionLauncher
           presence={presence}
