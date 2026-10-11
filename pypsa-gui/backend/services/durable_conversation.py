@@ -260,7 +260,14 @@ def _revoke_checked_episode(thread: dict[str, Any]) -> None:
 
 
 def resume_episode(thread_id: str, *, generation: int):
-    """Mint a new ChatSession episode; drop the prior episode and its approvals."""
+    """Mint a new ChatSession episode; drop the prior episode and its approvals.
+
+    Rehydrates ``discussed_refs`` from durable ``refs.discussed`` so a restart
+    can still export or continue the discussed run without rebinding. Live
+    evidence fields (status/mode/fingerprint) are refreshed when the run is
+    still readable under the current ACL; otherwise the durable identifiers
+    alone are restored.
+    """
     from services import chat_service
 
     with _LOCK:
@@ -279,7 +286,33 @@ def resume_episode(thread_id: str, *, generation: int):
         thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
         thread['updated_at'] = datetime.now(timezone.utc).isoformat()
         _save(path, thread)
+        _hydrate_discussed_refs(new_session, thread)
         return _view(thread), new_session
+
+
+def _hydrate_discussed_refs(session, thread: dict[str, Any]) -> None:
+    discussed = dict((thread.get('refs') or {}).get('discussed') or {})
+    run_id = discussed.get('run_id')
+    if not isinstance(run_id, str) or not run_id:
+        return
+    hydrated = {
+        'project_id': discussed.get('project_id') or thread.get('project_id'),
+        'run_id': run_id,
+    }
+    for key in ('section', 'source', 'baseline_run_id', 'window', 'asset_id'):
+        if discussed.get(key) is not None:
+            hydrated[key] = discussed[key]
+    try:
+        from services import run_evidence as re_
+
+        summary = re_.get_run_evidence(run_id)
+        hydrated['status'] = summary.get('status')
+        hydrated['mode'] = summary.get('mode')
+        hydrated['fingerprint'] = summary.get('fingerprint')
+        hydrated['evidence_available'] = bool(summary.get('evidence_available'))
+    except HTTPException:
+        pass
+    session.discussed_refs = hydrated
 
 
 def authorize_thread(thread_id: str) -> dict[str, Any]:
