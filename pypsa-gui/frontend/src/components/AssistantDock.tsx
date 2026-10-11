@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PanelRightClose } from 'lucide-react'
+import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { useChatProfiles, useChatReadiness } from '../hooks/useChatProfiles'
-import ChatPanel, { ConfirmationCard } from './ChatPanel'
+import ChatPanel from './ChatPanel'
+import { ConfirmationCard } from './ConfirmationCard'
 import CompanionLauncher, { type CompanionPresence } from './CompanionLauncher'
 import CompanionOutcome from './CompanionOutcome'
 import { KEY_RESULT_TABS, keyResultsWalkRequested, openProjectList, openProjectRequested, startKeyResultsWalk } from './liveWalk'
@@ -85,6 +87,11 @@ export default function AssistantDock() {
       return
     }
     if (ready === true) {
+      if (useChatStore.getState().streaming || useChatStore.getState().pending || useUIStore.getState().projectMismatch) {
+        setLiveCaption('The assistant is busy. Nothing new was sent.')
+        return
+      }
+      stopWalk()
       setPresence('thinking')
       setLiveCaption('Sent to the assistant.')
       forwardToHarness(text)
@@ -209,8 +216,6 @@ export default function AssistantDock() {
           </ErrorBoundary>
         </div>
       </div>
-      {!assistantDockOpen ? <ConfirmationCard /> : null}
-      {liveOpen && !assistantDockOpen ? <CompanionOutcome hidden={walking} /> : null}
       {!assistantDockOpen && (
         <CompanionLauncher
           presence={presence}
@@ -248,7 +253,12 @@ export default function AssistantDock() {
             useUIStore.getState().setAssistantEntry('profiles')
             setAssistantDockOpen(true)
           }}
-        />
+        >
+          <ErrorBoundary label="The assistant crashed">
+            <ConfirmationCard />
+            {liveOpen ? <CompanionOutcome hidden={walking} /> : null}
+          </ErrorBoundary>
+        </CompanionLauncher>
       )}
     </>
   )

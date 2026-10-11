@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Mic, Pencil } from 'lucide-react'
 
 // Clears toasts above the chip (max-w 12rem) plus bottom-6 / right-6 (24px).
@@ -17,6 +17,7 @@ type Props = {
   liveCaption?: string
   modelKeyMissing?: boolean
   onLiveSubmit?: (text: string) => void
+  children?: ReactNode
 }
 
 function useReducedMotion(): boolean {
@@ -37,6 +38,7 @@ function useReducedMotion(): boolean {
 export default function CompanionLauncher({
   presence = 'idle', profileLabel, onCompose, onSpeak, onLive, onProfiles,
   liveOpen = false, liveCaption = '', modelKeyMissing = false, onLiveSubmit,
+  children,
 }: Props) {
   const reduce = useReducedMotion()
   const [hovered, setHovered] = useState(false)
@@ -58,6 +60,7 @@ export default function CompanionLauncher({
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHovered(false)
       }}
     >
+      {children}
       {liveOpen && (
         <form
           className="w-72 rounded-2xl border border-border bg-bg-2 p-3 shadow-lg"

@@ -24,11 +24,6 @@ vi.mock('./ChatPanel', () => ({
     }, [])
     return <div data-testid="chat-panel-stub">chat</div>
   },
-  ConfirmationCard: () => {
-    const pending = useChatStore.getState().pending
-    if (!pending) return null
-    return <div data-testid="companion-confirmation">{pending.tool_name}</div>
-  },
 }))
 
 vi.mock('../hooks/useChatProfiles', () => ({
@@ -184,6 +179,24 @@ describe('assistant dock prominence', () => {
     expect(heard).toEqual(['List the generators'])
     expect(screen.getByTestId('companion-live-caption').textContent).toContain('Sent to the assistant.')
     window.removeEventListener('companion:live-utterance', onUtterance)
+  })
+
+  it('does not send a live sentence while the assistant is already streaming', async () => {
+    const user = userEvent.setup()
+    useChatStore.setState({ streaming: true })
+    const heard: string[] = []
+    const onUtterance = (ev: Event) => {
+      heard.push((ev as CustomEvent<string>).detail)
+    }
+    window.addEventListener('companion:live-utterance', onUtterance)
+    render(<AssistantDock />)
+    await user.click(screen.getByTestId('companion-live'))
+    await user.type(screen.getByTestId('companion-live-input'), 'List the generators')
+    await user.click(screen.getByTestId('companion-live-send'))
+    expect(heard).toEqual([])
+    expect(screen.getByTestId('companion-live-caption').textContent).toContain('Nothing new was sent.')
+    window.removeEventListener('companion:live-utterance', onUtterance)
+    useChatStore.setState({ streaming: false })
   })
 
   it('walks the results tabs from the live composer and leaves the console closed', async () => {

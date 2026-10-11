@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { useEffect } from 'react'
+import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { slidePanelClickShouldClose } from '../utils/slidePanelDismiss'
 
@@ -110,6 +111,7 @@ describe('the floating companion survives click-outside-to-close', () => {
   beforeEach(() => {
     localStorage.clear()
     useUIStore.setState({ assistantDockOpen: false, activeSlidePanel: 'results' })
+    useChatStore.setState({ pending: null })
   })
 
   const companionClickIds = [
@@ -131,4 +133,22 @@ describe('the floating companion survives click-outside-to-close', () => {
       expect(useUIStore.getState().activeSlidePanel).toBe('results')
     },
   )
+
+  it('keeps the slide panel open when the confirmation card is pressed', () => {
+    useChatStore.setState({
+      pending: {
+        tool_use_id: 'tu1',
+        tool_name: 'update_component',
+        args: { name: 'bus-a' },
+        safety_tier: 'write',
+        confirmation_token: 'tok',
+        ttl_seconds: 60,
+        expires_at_epoch_ms: Date.now() + 60_000,
+      },
+    })
+    render(<PanelCloseHarness />)
+    const card = screen.getByTestId('companion-confirmation')
+    fireEvent.mouseDown(card, { bubbles: true })
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+  })
 })
