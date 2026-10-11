@@ -187,6 +187,9 @@ interface ChatState {
   // cannot admit. Typed/card sends do not read this field.
   utteranceGeneration: number
   setUtteranceGeneration: (n: number) => void
+  /** Parent durable thread id when one is bound for Live/rebind (issue 09). */
+  durableThreadId: string | null
+  setDurableThreadId: (id: string | null) => void
   // The cleanup function returned by createChatStream. Set when a stream
   // is open; cleared (and called) on abort/close/project switch.
   streamCleanup: (() => void) | null
@@ -395,6 +398,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   error: null,
   utteranceGeneration: 1,
   setUtteranceGeneration: (n) => set({ utteranceGeneration: Math.max(1, Math.floor(n)) }),
+  durableThreadId: null,
+  setDurableThreadId: (id) => set({ durableThreadId: id }),
   streamCleanup: null,
   uploads: [],
   attachedFileIds: [],
@@ -599,6 +604,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       error: null,
       streamCleanup: null,
       utteranceGeneration: 1,
+      durableThreadId: null,
       uploads: [],
       attachedFileIds: [],
       unseenExportCount: 0,
@@ -622,6 +628,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       toolProgress: {},
       error: null,
       utteranceGeneration: 1,
+      durableThreadId: null,
       usage: {
         input_tokens: 0, output_tokens: 0,
         cache_read_tokens: 0, cache_create_tokens: 0, reported: false,

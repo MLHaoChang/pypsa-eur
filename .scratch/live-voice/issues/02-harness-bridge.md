@@ -52,3 +52,9 @@ generation; backend auto-drain after promote.
 hub-card sends omit both. Tests: `ChatPanel.liveUtteranceAdmission.test.tsx`
 (4 passed). Still open: backend auto-drain after promote; frontend sync of
 generation from durable rebind.
+
+2026-10-11: Durable rebind → Live generation — `api/durableConversations.ts`
+create/get/rebind/resume call `applyDurableThreadGeneration`, which sets
+`durableThreadId` and `utteranceGeneration` from the thread response. Tests:
+`durableConversations.test.ts`. Still open: backend auto-drain after promote;
+UI entry that creates/rebinds a durable thread from Live.

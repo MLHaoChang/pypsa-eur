@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createChatStream, type ChatFrame } from './chat'
+import { createChatProgressStream, createChatStream, type ChatFrame } from './chat'
 
 // Improvement #13 — the SSE frame parser.
 //
@@ -203,5 +203,23 @@ describe('createChatStream', () => {
     // Without a live abort the fetch outlives the panel, and the server
     // keeps generating a turn nobody will read — the client half of QA #14.
     expect(init.signal?.aborted).toBe(true)
+  })
+})
+
+describe('createChatProgressStream', () => {
+  it('GETs /api/chat/{id}/progress and parses tool_progress frames', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(streamingResponse([
+      'event: tool_progress\ndata: {"tool_use_id":"tu-sim","kind":"PHASE","line":"Optimising"}\n\n',
+    ]))
+    const frames: ChatFrame[] = []
+    createChatProgressStream('sess-1', (f) => frames.push(f))
+    await vi.waitFor(() => expect(frames).toHaveLength(1))
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toBe('/api/chat/sess-1/progress')
+    const init = vi.mocked(globalThis.fetch).mock.calls[0][1] as RequestInit
+    expect(init.method).toBe('GET')
+    expect(frames[0]).toEqual({
+      event: 'tool_progress',
+      data: { tool_use_id: 'tu-sim', kind: 'PHASE', line: 'Optimising' },
+    })
   })
 })
