@@ -686,8 +686,11 @@ def test_ambiguous_cost_request_disposes_requested_slot(solved, checked):
         NumericalProvider({}), message="Show me total cost for generator G1"
     )
     assert approval(frames)["verdict"] == "limited"
-    assert "explicit_cost_basis_required" in public_text(frames)
-    assert approval(frames)["receipt"]["result_slots"][0]["metric"] == "total_cost"
+    assert "price year" in public_text(frames)
+    slot = approval(frames)["receipt"]["result_slots"][0]
+    assert slot == {"metric": "total_cost", "disposition": "needs_clarification",
+                    "reason": "explicit_cost_basis_required"}
+    assert not checked.provider.requests
 
 
 def test_navigation_stream_issues_ack_and_never_claims_unconfirmed_completion(

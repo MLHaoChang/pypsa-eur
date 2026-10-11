@@ -526,6 +526,8 @@ def rewind_session(session: "ChatSession", turns: int = 1) -> int:
                 break
             while len(session.messages) > cut:
                 session.messages.pop()
+        if before != len(session.messages):
+            session.assurance_context = None
         return before - len(session.messages)
 
 
