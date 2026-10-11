@@ -586,3 +586,55 @@ No paid model calls, remote CI success, deployment activation or independent
 domain certification is claimed. Actions dispatch returns HTTP 422 because
 Actions is disabled. General language/domain assurance and asynchronous task
 resumption remain open.
+
+### Final master integration: PR 122 and queued correction guard
+
+Master advanced to `1970db27` / PR 122 after the completed PR-121 validation.
+Merge `02646474` preserves new live-media/admission auto-drain, progress cursors,
+study/report adapters, recorded-run tools and load-flow summaries. The integrated
+gate reruns all changed backend test modules and the existing recovery/parent/
+task/progress/workflow gate: **869 passed / six skipped**, exit 0 (461 warnings,
+342.38 seconds). All **47 affected frontend cases / six files** pass, exit 0
+(15.87 seconds), and the production build passes. The complete **3,627-test**
+frontend run above precedes this merge; no new full frontend run at this head is
+claimed.
+
+Review found the new auto-drain reusing the preceding utterance's explicit scope:
+a queued "Show those results again, but only for 2025" could receive a checked
+2026 answer. Two authenticated stream cases assert independent values and scopes,
+lease release and private checkpoint state. Before the fix, the constrained case
+fails and safe repeat passes. Setup/fixture corrections are excluded from this
+missing-guard proof. `cd1ba70e` drops the prior explicit scope at promotion so the
+existing grammar resolves validated context afresh. The constrained correction
+now clarifies without a second model call, checked blocks, a numerical answer or
+a retained checkpoint; the safe repeat preserves exact scope and its new approved
+anchor. The post-fix admission/recovery/scope/task/frame selection passes **107
+cases / one deliberate skip**, exit 0 (97 warnings, 83.26 seconds).
+
+The new tool catalogue also expands generated test parametrizations. All 36
+additional contract cases run: **32 passed / four deliberate paid-live skips**
+(2,052 deselected, 4.45 seconds). A handler-signature node includes a source line
+number in its identifier; that one old node retires and its complete module
+passes **176 cases**, exit 0 (16.16 seconds). These generated cases are explicitly
+included in final collection coverage instead of assuming unchanged file lists.
+
+Final collection contains **11,751 cases / 551 files**. Compared with the prior
+11,536-case checkpoint, PR 122 adds 213 cases and this change adds two drain
+cases. One old passed line-based node is replaced, leaving 216 added/renamed node
+IDs; all are covered by the above selections. Four additions are paid-live skips.
+Unique final accounting is therefore **11,478 passed / 273 skipped / no missing
+collected cases**. Selections overlap; their totals are never summed. This is
+multi-revision baseline-plus-correction coverage, not a fresh full backend run at
+the final head. The prior 31 post-correction QA drivers and 36 upstream tests
+remain passed historical results; latest affected paths have their fresh gates.
+
+Inventory now matches **224 tools / 14 tabs / 17 panels**. The control matrix
+matches **165 controls / 14 families**, with complete behavioral coverage still
+not established. Documentation remains **21 files / 152 local links / zero broken
+links**. Ruff adds **zero findings** across **15 touched Python files** relative
+to `1970db27` (**46 inherited findings**). Diff checks pass. Evidence adds
+`/tmp/recovery-pr122-{backend-gate,frontend-gate,build,final-collection,argshape,new-tool-contracts}.log`,
+`/tmp/recovery-pr122-backend-selection.json`, and
+`/tmp/recovery-checked-drain-{red,final}.log`. The final JSON accounting artifact
+is updated with these sources, generated node IDs and exclusions. No paid model
+calls, remote CI success or release activation occurred.

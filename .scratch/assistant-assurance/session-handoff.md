@@ -4,7 +4,7 @@
 # Assistant assurance continuation handoff
 
 Status: current shared harness continuation on `feat/harness-durable-conversation-scope`,
-based on merged PR 121/master `c6b9128f` (including PRs 118 and 120). Historical sections below describe earlier
+based on merged PR 122/master `1970db27` (including PRs 118, 120 and 121). Historical sections below describe earlier
 states and commands. The current [implementation status](implementation-status.md)
 and [API contracts](harness-contracts.md) supersede them. Independent domain/release
 approval remains pending.
@@ -499,7 +499,7 @@ unmapped domains and independent domain/release certification remain pending.
 
 ## 2026-10-11 — checked conversation recovery continuation
 
-Source `75e6afd1` integrates master `c6b9128f` / PR 121. Bounded native-history
+Source `cd1ba70e` integrates master `1970db27` / PR 122. Bounded native-history
 recovery now uses private owner/project/chat checkpoints, fresh authorization
 and exact approved-anchor/source validation. Required revocation precedes
 execution, rewind and parent resume/rebind; failed or aborted publication
@@ -525,6 +525,26 @@ unchanged full rerun without those backend jobs passes **3,627 tests / 310 files
 exit 0, with no unhandled errors (419.28 seconds). Do not count the failed run or
 the older 3,623-test run as current success. Read the latest coverage ledger for exact
 sources, partitions and reproduction; evidence is `/tmp/recovery-*`.
+
+The final PR-122 integration gate passes 869 / six skips; all 213 cases added by
+that master change are covered by new-module and generated tool-contract checks.
+One line-based signature node changed its identifier; its complete module passes
+176 cases. Four newly generated paid-live cases are skipped deliberately. Two
+additional checked auto-drain cases exposed the original scope being reused for a
+queued correction (a 2025 constraint incorrectly received checked 2026 results).
+The correction drops the prior utterance's explicit scope and resolves validated
+carryover afresh. The affected admission/recovery/scope/task/frame gate passes
+107 / one skip; safe repeat scope remains exact and unsupported constraints
+clarify without another model call or an old checkpoint.
+
+Final collection is **11,751 cases / 551 files**, accounted for across revisions:
+**11,478 passed / 273 skipped / no missing cases**. Latest frontend affected paths
+pass **47 cases / six files** and the production build passes. The complete
+3,627-test frontend run precedes PR 122; no full run at the last head is claimed.
+Current inventory has 224 tools / 14 tabs / 17 panels, controls remain 165 / 14
+families, and Ruff adds zero findings across 15 files (46 inherited).
+The latest ledger entry and `/tmp/recovery-final-validation-result.json` supersede
+the earlier 11,536-case checkpoint above.
 
 All local gates are complete. Remaining release steps: commit final docs,
 fast-forward the feature branch to this validated integration, push/create PR

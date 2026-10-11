@@ -139,20 +139,28 @@ foreground solves remain detached; fully asynchronous task-step recovery remains
 open. The initial full backend run exposed an inherited detached-solver
 regression, which was corrected without relaxing numerical assertions.
 
-The updated-master recovery/parent/task/progress/workflow gate passes 587 cases
-with two deliberate skips. Final collection contains 11,536 backend cases in 540
-files. Disjoint completed baseline selections, the corrected remaining selection
-and six added cases cover that collection: 11,267 passed and 269 skipped. This is
-multi-revision coverage with affected tests rerun on integrated master, not a fresh
-full run at the final head. The linked ledger records exact partitions and sources.
+The final continuation integrates master `1970db27` / PR 122. Final collection
+contains 11,751 backend cases in 551 files. The completed baseline partitions,
+corrected remainder, added cases and latest affected-path gates account for that
+collection: 11,478 passed and 273 skipped. This is multi-revision coverage, not a
+fresh full run at the final head. The linked ledger records sources and exclusions.
+The latest recovery/parent/task/progress/workflow/new-domain gate passes 869 cases
+with six skips. A queued-correction scope regression fails before correction;
+the post-fix admission/recovery/scope/task/frame gate passes 107 cases / one skip.
+Two new cases prove safe repeats and refusal of added constraints without a second
+model call or retention of stale authority. The handler-signature gate passes 176
+cases; new tool-contract cases pass 32 / four paid-live skips.
 
-All 31 post-correction QA drivers and 36 upstream unit tests pass. The updated
-production build, inventory, control matrix and documentation checks pass. Across
-14 touched Python files Ruff adds no findings to master's 45 existing findings.
+All 31 post-correction QA drivers and 36 upstream unit tests previously passed.
+The latest production build, inventory (224 tools), control matrix and
+documentation checks pass. Across 15 touched Python files Ruff adds no findings
+to master's 46 existing findings.
 The first updated-master frontend run had one existing large-table test timeout;
 the unchanged full rerun without concurrent backend jobs passes all 3,627 tests
 in 310 files, exit 0, without unhandled errors. Earlier 3,623-test frontend
-results are historical.
+results are historical. After PR 122's subsequent merge, all 47 affected frontend
+cases in six files and the production build pass; no fresh full frontend run at
+the last head is claimed.
 
 ## Historical verification
 
