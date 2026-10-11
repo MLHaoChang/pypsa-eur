@@ -39,6 +39,53 @@ def _classify_solver_line(line: str) -> str:
     return "INFO"
 
 
+DETACHED_PROGRESS_MAXLEN: int = 200
+
+
+def start_detached_solver_monitor(
+    session: ChatSession,
+    ctx: ProjectContext,
+    *,
+    tool_use_id: str,
+    tool_name: str,
+    poll_interval: float = 0.1,
+) -> None:
+    """Run ``solver_log_bridge`` on a daemon thread after turn handoff (issue 11).
+
+    Progress is buffered on the session (same payload keys as ``tool_progress``)
+    so the turn can return immediately. Callers drain via
+    ``session.drain_detached_progress()``.
+    """
+    import threading
+
+    def _done() -> bool:
+        with ctx.solver_state_lock:
+            status = ctx.solver_state.get("status")
+        return status in ("completed", "failed", "aborted", "idle")
+
+    def _run() -> None:
+        session.mark_detached_monitor(tool_use_id, tool_name, active=True)
+        try:
+            for prog in solver_log_bridge(
+                session, ctx,
+                poll_interval=poll_interval,
+                is_solver_done=_done,
+            ):
+                session.append_detached_progress({
+                    "tool_use_id": tool_use_id,
+                    "tool_name": tool_name,
+                    **prog,
+                })
+        finally:
+            session.mark_detached_monitor(tool_use_id, tool_name, active=False)
+
+    threading.Thread(
+        target=_run,
+        name=f"detached-solver-{tool_use_id[:8]}",
+        daemon=True,
+    ).start()
+
+
 def solver_log_bridge(
     session: ChatSession,
     ctx: ProjectContext,

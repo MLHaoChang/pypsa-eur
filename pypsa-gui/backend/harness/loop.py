@@ -2379,12 +2379,12 @@ def _dispatch_real_tool_call(
     # Issue 11 / D-I1 — foreground solve/AC-PF handoff. The handlers already
     # return {"status": "started"} after spawning a worker. Holding this turn
     # on solver_log_bridge until terminal status blocked every other read
-    # (turn_already_in_flight / utterance lease). Emit the started handle and
-    # release the turn; observe via get_simulation_status (detached progress
-    # SSE and full job adapters are later slices).
+    # (turn_already_in_flight / utterance lease). Emit the started handle,
+    # start a detached monitor for log lines, and release the turn.
     if tool_name in ("run_simulation", "run_ac_pf_stage"):
         try:
             from services.pypsa_service import PyPSAService
+            from harness.solver_bridge import start_detached_solver_monitor
             active_ctx = turn_ctx or PyPSAService.get_active_context()
             with active_ctx.solver_state_lock:
                 kind = active_ctx.solver_state.get("kind")
@@ -2396,7 +2396,14 @@ def _dispatch_real_tool_call(
                 "running": status == "running",
                 "kind": kind,
                 "monitor": "get_simulation_status",
+                "detached_progress": True,
             }
+            if status == "running":
+                start_detached_solver_monitor(
+                    session, active_ctx,
+                    tool_use_id=tool_use_id,
+                    tool_name=tool_name,
+                )
         except Exception as exc:  # noqa: BLE001 — enrich is best-effort
             logger.exception(
                 "chat: foreground solve handoff enrich for %s failed: %s",
