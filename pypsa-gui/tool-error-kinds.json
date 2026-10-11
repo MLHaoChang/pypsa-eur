@@ -305,7 +305,7 @@
     },
     "session_not_yours": {
       "surface": "inline",
-      "why": "Raised by the chat STREAM route when the caller-supplied session_id belongs to another user \u2014 sibling of unknown_session, and route-only for the same reason: the refusal happens before a turn starts, so it cannot arrive on a tool_error frame. Not a banner because the client already recovers from it without asking the user to do anything: api/chat.ts carries the error_kind onto the Error and ChatPanel calls startNewChat(), because a legitimate user can meet this through no fault of their own and must not be left retrying an id the server will refuse forever. Since CH-6, GET /history hands each user only their OWN session, so the remaining route here is a transcript written before turns recorded their author."
+      "why": "Raised by the chat STREAM route when the caller-supplied session_id belongs to another user — sibling of unknown_session, and route-only for the same reason: the refusal happens before a turn starts, so it cannot arrive on a tool_error frame. Not a banner because the client already recovers from it without asking the user to do anything: api/chat.ts carries the error_kind onto the Error and ChatPanel calls startNewChat(), because a legitimate user can meet this through no fault of their own and must not be left retrying an id the server will refuse forever. Since CH-6, GET /history hands each user only their OWN session, so the remaining route here is a transcript written before turns recorded their author."
     },
     "site_connection_invalid": {
       "surface": "inline",
@@ -526,6 +526,42 @@
     "vision_invalid_json": {
       "surface": "banner",
       "why": "The vision response did not parse. Nothing usable came back."
+    },
+    "artifact_evidence_unavailable": {
+      "surface": "inline",
+      "why": "The requested artifact could not pass data/render/byte integrity checks; the file operation is refused with its own actionable message."
+    },
+    "assurance_context_changed": {
+      "surface": "banner",
+      "why": "The checked turn lost its project binding before publication, so the answer cannot safely appear for the currently selected project."
+    },
+    "assurance_publication_failed": {
+      "surface": "banner",
+      "why": "The owned answer or public stream could not be committed and verified; no checked answer is available for the turn."
+    },
+    "assurance_unavailable": {
+      "surface": "banner",
+      "why": "The requested checked-answer mode is not available on this server; the turn cannot proceed under its requested publication policy."
+    },
+    "invalid_assurance_request": {
+      "surface": "inline",
+      "why": "Admission rejects a malformed checked-answer option payload before model/tool execution; this REST refusal is not a tool completion failure."
+    },
+    "invalid_navigation": {
+      "surface": "inline",
+      "why": "The navigation tool named an invalid application panel or tab; the specific tool fails without changing the active view."
+    },
+    "task_checkpoint_failed": {
+      "surface": "banner",
+      "why": "Durable task progress could not be saved, so the user must inspect task state before retrying any potentially effectful operation."
+    },
+    "ui_ack_mismatch": {
+      "surface": "inline",
+      "why": "The acknowledgement endpoint refuses an unissued or mismatched view acknowledgement; no completed-view assertion is created."
+    },
+    "unsupported_assurance_version": {
+      "surface": "inline",
+      "why": "Admission rejects an unsupported checked-answer protocol version before model/tool execution; the client must use a supported version."
     }
   }
 }

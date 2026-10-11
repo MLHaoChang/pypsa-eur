@@ -1037,6 +1037,13 @@ export const KIND_COPY: Record<
   // RETRYABLE_ERROR_KINDS above — the file knew the kind in one constant and
   // not the other, so the retry button appeared under a raw snake_case title.
   internal_error: { title: 'Something went wrong on the server' },
+  assurance_unavailable: { title: 'Checked answers are unavailable' },
+  assurance_context_changed: { title: 'The project changed while checking the answer' },
+  assurance_publication_failed: { title: 'The checked answer could not be published' },
+  task_checkpoint_failed: {
+    title: 'Task progress could not be saved',
+    body: 'Inspect the task before retrying.',
+  },
   turn_already_in_flight: { title: 'A turn is already running' },
   project_switched_mid_turn: { title: 'The active project changed mid-turn' },
   unknown_session: { title: 'That chat session is no longer known' },
@@ -1125,6 +1132,8 @@ export const TOOL_ERROR_BANNER_KINDS = new Set([
   'inactive_acting_user',
   'solver_in_flight', 'parallel_destructive_not_allowed',
   'tool_call_cap_exceeded',
+  'assurance_unavailable', 'assurance_context_changed', 'assurance_publication_failed',
+  'task_checkpoint_failed',
   // `set_active_profile` raises these as HTTPExceptions, which the dispatcher
   // converts to `tool_error` frames — so copy alone was unreachable and the
   // user got the truncated gray tool line. Same shape as the

@@ -38,3 +38,5 @@ metrics explicitly in [ledger](../coverage-ledger.md) and [handoff](../session-h
 Initial source targets: `services/results/losses.py` zero-filling and denominator
 handling; `routers/results.py` cost/objective definitions; report value-only audit.
 This is a planning ticket, not a claim those application paths have been fixed.
+
+Implementation continuation (2026-10-10): The generator-dispatch/1 candidate now independently calculates energy, marginal expenditure and peak output from raw per-metric masks, capacity bounds and matching optimal-LP provenance. Full cost accounting, the proposed 230 EUR same-basis fixture, cross-domain/report parity and independent domain review remain pending. See [implementation status](../implementation-status.md). This is editing-agent prototype coverage, not inherited independent approval or whole-ticket completion.

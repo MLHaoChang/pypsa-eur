@@ -235,6 +235,15 @@ def evidence(owner, evidence_id):
     try:
         with PyPSAService.get_lock():
             scope = record["scope"]
+            if record["source_kind"] == "calculated_result":
+                from services import assurance_metrics
+                raw = assurance_metrics.source(ctx, scope["entity_id"])
+                if digest(raw) != record["source_sha256"]:
+                    unavailable("evidence_unavailable")
+                facts, slots = assurance_metrics.calculate(raw, scope["entity_id"])
+                if facts != record["facts"] or slots != record["slots"]:
+                    unavailable("evidence_unavailable")
+                return record
             if ctx.solver_state.get("status") == "running":
                 unavailable("evidence_unavailable")
             if (
@@ -245,6 +254,29 @@ def evidence(owner, evidence_id):
     except (KeyError, ValueError, TypeError):
         unavailable("evidence_unavailable")
     return record
+
+
+def capture_dispatch(owner, entity):
+    from services import assurance_metrics
+    ctx = PyPSAService.get_active_context()
+    authorize(owner, ctx.project_uuid)
+    with PyPSAService.get_lock():
+        raw = assurance_metrics.source(ctx, entity)
+        facts, slots = assurance_metrics.calculate(raw, entity)
+        record = {
+            "version": 1, "record_kind": "evidence", "evidence_id": str(uuid.uuid4()),
+            "owner_id": owner, "project_id": ctx.project_uuid, "org_id": ctx.org_id,
+            "source_kind": "calculated_result", "adapter_version": assurance_metrics.PROFILE,
+            "scope": {"component_class": "Generator", "entity_id": entity, "kind": "full_horizon",
+                      "start": raw["index"][0], "end": raw["index"][-1]},
+            "facts": facts, "slots": slots, "raw": raw, "source_sha256": digest(raw),
+            "validity": {"outcome": "completed" if all(s["disposition"] == "answered" for s in slots) else "partial",
+                         "coverage": "full_horizon", "as_of": time.time(),
+                         "warnings": [assurance_metrics.DISCLOSURE]},
+            "expires_at": time.time() + RETENTION_SECONDS,
+        }
+        save(record, record["evidence_id"])
+        return record
 
 
 def public(record):

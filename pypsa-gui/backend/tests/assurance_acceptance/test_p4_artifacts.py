@@ -91,3 +91,71 @@ def test_existing_unsolved_result_chart_refusal_remains_enforced(baseline):
     with pytest.raises(HTTPException) as failure:
         chat_tools.create_chart("Generator", "p", ["G1"], source="result")
     assert failure.value.status_code == 409
+
+
+@pytest.mark.parametrize("fault", ["dataset", "render", "delete", "bytes", "unit"])
+def test_download_and_delivery_reject_chart_corruption(baseline, client, fault):
+    from services import upload_service
+
+    chart = chat_tools.create_chart("Generator", "p_nom", ["G1"])
+    sidecar = baseline[2] / "assistant_artifacts" / (chart["file_id"] + ".json")
+    if fault == "delete":
+        sidecar.unlink()
+    elif fault == "bytes":
+        upload_service.get_upload_path(
+            "Tool Baseline", chart["file_id"], project_dir=baseline[2]
+        ).write_bytes(b"forged png")
+    else:
+        record = json.loads(sidecar.read_text())
+        if fault == "dataset":
+            record["manifest"]["dataset"]["values"][0][0] = 999
+        elif fault == "render":
+            record["manifest"]["render_spec"]["title"] = "Everything is safe"
+        else:
+            record["unit"] = "MWh"
+        sidecar.write_text(json.dumps(record))
+    assert client.get(chart["download_url"]).status_code == 409
+    with pytest.raises(HTTPException) as caught:
+        chat_tools.build_delivery([chart["file_id"]])
+    assert caught.value.status_code == 409
+
+
+def test_source_changes_during_render_are_not_published(baseline, monkeypatch):
+    from matplotlib.figure import Figure
+
+    savefig = Figure.savefig
+
+    def change_source(figure, *args, **kwargs):
+        savefig(figure, *args, **kwargs)
+        baseline[0].network.generators.at["G1", "p_nom"] = 21
+
+    monkeypatch.setattr(Figure, "savefig", change_source)
+    with pytest.raises(HTTPException) as caught:
+        chat_tools.create_chart("Generator", "p_nom", ["G1"])
+    assert caught.value.status_code == 409
+
+
+def test_delivery_copies_the_same_validated_provenance(baseline, client, monkeypatch):
+    from services import assurance_artifacts
+
+    chart = chat_tools.create_chart("Generator", "p_nom", ["G1"])
+    verify = assurance_artifacts.verify_chart
+
+    def change_after_validation(*args, **kwargs):
+        checked = verify(*args, **kwargs)
+        sidecar = baseline[2] / "assistant_artifacts" / (chart["file_id"] + ".json")
+        record = json.loads(sidecar.read_text())
+        record["unit"] = "MWh"
+        sidecar.write_text(json.dumps(record))
+        return checked
+
+    monkeypatch.setattr(assurance_artifacts, "verify_chart", change_after_validation)
+    bundle = chat_tools.build_delivery([chart["file_id"]])
+    # Disable injection while downloading the ordinary bundle.
+    monkeypatch.setattr(assurance_artifacts, "verify_chart", verify)
+    response = client.get(bundle["download_url"])
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        item = json.loads(archive.read("manifest.json"))["files"][0]
+        assert item["provenance"] == chart["provenance"]
+        assert item["assurance"] == chart["manifest"]

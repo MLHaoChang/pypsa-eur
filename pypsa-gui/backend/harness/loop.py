@@ -1127,6 +1127,8 @@ def run_turn(
         from harness import assurance
         if strict_assurance or assurance.strict_configured():
             session.assurance_turn = assurance.Turn(session, PyPSAService.get_active_context())
+            if not attachment_file_ids:
+                session.assurance_turn.prepare_request(message, ui_context, PyPSAService.get_active_context())
         for event, payload in _run_turn_body(
             session,
             message,
@@ -1420,6 +1422,10 @@ def _run_turn_body(
     wf_block = _workflow_addendum(session, ui_context)
     if wf_block:
         ui_block = f"{ui_block}\n\n{wf_block}" if ui_block else wf_block
+    if session.assurance_turn is not None:
+        assurance_block = session.assurance_turn.request_content()
+        if assurance_block:
+            ui_block = f"{ui_block}\n\n{assurance_block}" if ui_block else assurance_block
     if ui_block:
         if isinstance(user_content, str):
             user_content = f"{ui_block}\n\n{user_content}"
@@ -1544,8 +1550,7 @@ def _run_turn_body(
         include_tools=profile.tools,
     )
     if session.assurance_turn is not None:
-        from harness.assurance import PROMPT
-        system_prompt += "\n" + PROMPT
+        system_prompt += "\n" + session.assurance_turn.prompt()
 
     # A8 — at most one fallback-model downgrade after rate_limited retries
     # are exhausted, PER TURN (public cost/availability escape hatch).

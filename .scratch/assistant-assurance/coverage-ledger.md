@@ -3,13 +3,15 @@
 
 # Answer-assurance acceptance coverage ledger
 
-Status: first publication/static-input pilot implemented locally. See
-[implementation boundary](implementation-status.md). The initial results below
-are historical; current implementation results are recorded separately below.
-Reliability additions are proposed and pending review. Their requirement groups
-A0.4, A1.7, A2.8–A2.10, A3.5–A3.6, A4.6, A6.6 and A7.7 have no new executable
-coverage or recorded passes. The documentation assessment restored documentation
-only; the implementation continuation restored and reran the archived tests.
+Status: checked publication, one generator numerical profile and exact chart
+integrity implemented in the bounded pilot. See
+[implementation boundary](implementation-status.md). Initial results below are
+historical. Added request-slot, validity-mask and formula groups have partial
+prototype coverage through `generator-dispatch/1`; they remain pending independent
+review and full domain mapping. Effects, retained runs, complete arbitrary requests,
+reviewer/browser/calibration and rollout requirements remain open. The documentation
+assessment restored documentation only; subsequent implementation restored and
+reran the archived tests.
 Source baseline: local origin/master `d43809ae` (dictation PR 106 already merged).
 Reviewed transferred specification commits: `55ce946b`, `34dbb3f3`; publication
 was blocked by GitHub HTTP 401 in that session. Current access is recorded in the
@@ -147,7 +149,7 @@ and mandatory-guard requirements cannot inherit those approvals/counts.
 5. Do not claim user confidence guarantees or release readiness until all required
    phase/family/race/domain/browser/calibration gates have evidence.
 
-## Current implementation results
+## Historical static-publication implementation results
 
 Branch: `feat/assistant-assurance-publication`, documentation base `f533feda`.
 Supported scope and open release requirements are in
@@ -186,3 +188,39 @@ PYPSA_GUI_ANSWER_ASSURANCE_MODE=disabled python -m pytest -o addopts='' \
 The explicit disabled server tests prove admission refusal; remaining implemented
 tests set strict within their fixtures. The pending artifact RED cases remain
 available with `PYPSA_GUI_TEST_ASSURANCE_ACCEPTANCE=1`.
+
+## Numerical and chart-integrity continuation
+
+Branch: `feat/assistant-assurance-calculations`, based on `eaeae8ad`.
+No new independent/domain review or paid model calls. Default mode stays disabled.
+The original three P4 failures now pass and no longer skip. New chart tests reject
+altered data, render parameters, units, absent sidecars and changed bytes; the
+same validated provenance is copied into bundles. Inputs changed during rendering
+refuse publication. This covers bounded data/render/byte integrity, not engineering
+certification or arbitrary artifact/report/import correctness.
+
+`tests/test_assurance_metrics.py` exercises an independently specified real LP:
+17 MWh, 170 EUR marginal expenditure and 7 MW peak; separate objective weights
+produce 120 EUR with unchanged 17 MWh. It checks nonfinite/out-of-bounds dispatch,
+metric-specific masks, invalid weights, overflow, missing selection, wrong entity,
+unsupported/misaligned axes, selected UI context, stale solve/input/output provenance,
+provider fabrication/omission and public replay invalidation. Coverage is partial
+for A0.4, A1.7, A2.8–A2.10 and A7.7, limited to the explicit three-slot profile.
+The proposed 230 EUR same-basis total-cost example remains unimplemented.
+
+Validation uses the repository's locked Pixi `test` environment. Initial full
+backend run: **11,028 passed, 4 failed, 269 skipped**. All four failures were
+corrected without weakening assertions: classify nine emitted error kinds in the
+shared manifest and add arguments for both existing mutating tools to the sweep
+refusal matrix. Targeted rerun: **37 passed / 28 deselected**. Every formerly
+failing backend case passes. Skips in the full run are existing optional/platform
+coverage and are not counted as assurance coverage. Full backend CI must pass
+on the PR's final commit before merge.
+
+Full frontend: **3,546 passed / 299 files**. After adding manifest-required banner
+routing/copy, affected ChatPanel selection: **582 passed / 22 files**. Production
+TypeScript/Vite build passes. Upstream unit suite: **36 passed**. Final assurance suite: **106 passed**, with no P4 skips. All **31 QA drivers
+passed** after binding the authenticated identity in the phase-0 in-process
+export journey. Exact commands and limitations are recorded in the handoff. Inventory:
+**220 tools / 14 tabs / 17 panels**. New Python modules and fixtures pass Ruff;
+local documentation links and `git diff --check` pass.

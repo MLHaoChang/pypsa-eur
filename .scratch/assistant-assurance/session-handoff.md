@@ -144,3 +144,68 @@ then implement independently checked weighted energy/cost summaries with raw
 invalid-interval coverage. P4 manifests/download admission and positive UI ACKs
 remain separate incomplete tranches. This editing-agent review does not replace
 the required independent/domain/release reviews.
+
+## Numerical/chart continuation and publication request
+
+The user explicitly authorized creating a PR after tests pass and merging to
+master after CI passes. `feat/assistant-assurance-calculations` builds on the two
+local documentation/static-publication commits. This section records local
+validation before publication; GitHub checks on the final PR commit govern merge.
+No paid provider calls, independent/domain reviewer verdict or production-mode
+activation is claimed. See the updated [implementation boundary](implementation-status.md).
+
+Implemented a candidate `generator-dispatch/1` profile: server-owned three-slot
+scope, weighted raw energy/marginal expenditure and peak, matching optimal LP
+provenance, exact axis/finite/bounds checks, per-metric masks, explicit unavailable
+full horizons and labelled valid subsets. Draft omission/fabrication fails closed.
+Dynamic ledgers are fenced per-turn data. Changed outputs/inputs/solve status or
+access revoke replay. The real-LP oracle is 17 MWh/170 EUR/7 MW; objective weights
+[1,1] independently yield 120 EUR expenditure. This does not implement the proposed
+230 EUR total-cost example or certify whole-network engineering validity.
+
+Charts commit exact dataset/units/render/PNG and complete-provenance hashes before
+release. Download/delivery refuse corrupt bytes/sidecars. Capture is rechecked
+under the network lock after rendering. Bundles copy the same validated provenance
+rather than reopening it; immutable captured-chart integrity is not current-run
+scientific certification. Generic/legacy files have no checked chart assertion.
+
+Locked runtime: `/workspace/scratch/assurance-pixi/pixi` v0.68.1;
+`pixi install --environment test --locked`. Set `XDG_CACHE_HOME` and
+`PIXI_CACHE_DIR` to `/workspace/scratch/assurance-cache`, `XDG_DATA_HOME` to
+`/workspace/scratch/assurance-data` and `MPLCONFIGDIR` to a writable `/tmp` path.
+Loopback/network permission is needed for TestClient and standalone QA servers.
+The earlier lightweight venv lacks upstream runtime packages; its collection
+errors are environment setup failures, not passes. No lockfile/dependency pins
+were changed to install the repository's already-pinned environment.
+
+Validation:
+
+- Repository root: `pixi run --environment test --locked gui-tests`:
+  **11,028 passed, 4 failed, 269 existing skips**. Corrected every failure:
+  missing shared error-manifest entries and missing argument fixtures for both
+  existing mutating tools in the derived sweep guard. Backend production logic
+  was not weakened to satisfy these checks. A backend full-CI pass remains
+  required on the final PR commit before merge.
+- Backend directory: `pixi run --environment test --locked python -m pytest
+  tests/test_tool_error_kind_manifest.py tests/test_live_network_untouched.py
+  -k 'derived_chat_write_list or every_chat_network_write or seam_study_gate or
+  manifest or forwarder or derivation'`: **37 passed / 28 deselected**.
+  All four previously failing backend cases are included and pass.
+- Backend directory: `pixi run --environment test --locked python -m pytest
+  tests/test_assurance_metrics.py tests/test_answer_assurance.py
+  tests/assurance_acceptance`: **106 passed**, no artifact skips. Includes raw
+  axis faults, UI-selected Generator, unsupported periods and wrong entity.
+- Repository root: `pixi run --environment test --locked unit-tests`:
+  **36 passed**. `gui-qa-drivers`: **all 31 passed** after correcting the phase-0
+  driver's authenticated identity binding; the initial run had one failure.
+- Frontend: `npm test -- --run`: **3,546 passed / 299 files**. After shared
+  manifest-required banner/copy changes, `npm test -- ChatPanel --maxWorkers=2`:
+  **582 passed / 22 files**. Final `npm run build` passes.
+- Ruff on new assurance modules/fixtures, inventory **220 tools / 14 tabs /
+  17 panels**, **20 docs / 98 local links** and `git diff --check` pass.
+
+Original independent approval remains limited to its transferred design/test
+tranche. Broader domains, total-cost semantics, retained runs, effects/ACKs,
+report/import assurance, reviewer/browser/performance/calibration and rollout
+remain open. Default checked-answer mode remains disabled. Existing optional
+suite skips do not count as coverage; the original P4 failures now always run.

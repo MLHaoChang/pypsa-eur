@@ -30,9 +30,11 @@ No golden request may pass by always returning unavailable.
 Done only when reviewed contracts, required cases and affected public consumers
 pass, mappings cover every released domain profile and required slot dispositions
 appear in receipts. Record exact commands/counts/dependencies in [handoff](../session-handoff.md)
-and [ledger](../coverage-ledger.md). New requirements currently have no executable coverage.
+and [ledger](../coverage-ledger.md). The full added requirement groups remain incomplete; the bounded generator profile has executable coverage.
 
 ## Comments
 
 Original plan review does not approve this added ticket. Freeze contracts before
 coding acceptance fixtures; do not weaken the transferred v1 tests.
+
+Implementation continuation (2026-10-10): The generator-dispatch/1 candidate now assigns all three required result slots, rejects omitted available metrics, and records bounded project/entity/full-current-horizon scope. Arbitrary questions, retained runs, conversational constraints and other domain profiles remain pending. See [implementation status](../implementation-status.md). This is editing-agent prototype coverage, not inherited independent approval or whole-ticket completion.
