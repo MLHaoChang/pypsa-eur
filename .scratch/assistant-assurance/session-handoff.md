@@ -3,7 +3,7 @@
 
 # Assistant assurance continuation handoff
 
-Status: current StorageUnit reliability continuation on `feat/harness-checked-storage-results`,
+Status: delivered StorageUnit reliability continuation on `feat/harness-checked-storage-results`,
 based on merged PR 123/master `fabda836`. Historical sections below describe earlier
 states and commands. The current [implementation status](implementation-status.md)
 and [API contracts](harness-contracts.md) supersede them. Independent domain/release
@@ -553,3 +553,88 @@ creation and merge after tests pass. GitHub Actions remains disabled (dispatch
 HTTP 422); do not claim remote CI or bypass branch protection. Broader adapters,
 arbitrary language, distributed runtime, asynchronous task resumption and release
 certification remain future scopes; recovery remains opt-in.
+
+## StorageUnit continuation validation (2026-10-11)
+
+Implementation source: `9f6a4363`, based on merged PR 123/master `fabda836`.
+The profile supports six metrics for named or currently selected noncyclic,
+zero-inflow/spill StorageUnits. Exact windows preserve the predecessor state
+chain. Asset class is bound to the profile: a generator named `network` cannot
+become a network-wide cost request or acquire a network header. Clarification
+also names StorageUnits. The existing error manifest's duplicate worker-pin
+entry is removed. Contract draft edits capture their typed value before deferred
+updates; the pricing test exercises successive edits in application StrictMode
+and still requires exactly 50,000 before saving, with no participant auto-save.
+
+- The initial 11 storage acceptance cases fail before implementation. The
+  completed storage file has **40 cases**, covered by the final gate. Independent
+  LP and hand-worked fixtures cover 10/4/−6 MWh grid-side energy, states 8/4/0,
+  standing loss and simultaneous operation. Missing/invalid trajectories,
+  model fabrication, current-source drift, retained JSON/ZIP and native restart
+  recovery are checked through authenticated public routes.
+- Selected-StorageUnit admission has a genuine one-case red run, then the
+  storage/generator/scope/recovery gate passes **153 cases**. The reserved-name
+  generator case separately fails on the wrong profile before correction and
+  passes after it. No independent domain approval or production error-rate
+  measurement is claimed.
+- Complete backend baseline `58a4b5a4`: **11,515 passed / 273 skipped**, covering
+  all **11,788 collected cases in 552 files**. Two disjoint whole-file shards
+  exit 0: 5,875/19 and 5,640/254 (passed/skipped). Subsequent source changes use
+  the final **54-file gate at `9f6a4363`: 912 passed / six skipped**, exit 0.
+  Final collection has **11,792 cases**; the four added cases and final affected
+  paths account for **11,519 passed / 273 skipped**, with no uncovered nodes.
+  This is complete-baseline-plus-affected-path coverage, **not a fresh full
+  backend run at the final head**. Skips are not coverage; gate counts overlap.
+- Fresh complete frontend at `9f6a4363`: **3,637 passed / 310 files**, exit 0,
+  473.71 seconds and no unhandled errors. The first full run had the inherited
+  duplicate-manifest failure (3,635 passed / one failed); the next had an
+  intermittent immediate button-state assertion (3,636 passed / one failed).
+  The final run includes the manifest correction, captured input value and
+  asynchronous enabled-button check, preserving the exact price/API assertions.
+  Corrected manifest/storage UI gate: **200 passed / three files**; pricing
+  gate: **11 passed / one file**. The rapid-edit/StrictMode test also passed
+  before the input capture change; it is not claimed as a failing red oracle.
+- **All 31 QA drivers accounted for**: 30 pass initially; the self-hosted phase-4
+  driver initially times out during server startup under contention and then
+  passes unchanged across two scenarios at normal priority. **36 upstream unit
+  tests** pass. Final TypeScript/Vite build passes (existing chunk-size warning).
+  Frontend source is identical between its build source `19351c9e` and `9f6a4363`.
+- Inventory matches **224 tools / 14 tabs / 17 panels**. Ruff adds no findings
+  across **eight touched Python files**. Documentation links and diff checks
+  pass. Providers are scripted or HTTP-mocked; no paid model calls. Repository
+  Actions remains disabled, so these are local results, not remote CI success.
+
+Current reproducible evidence is in `/tmp/storage-backend-manifest.json`,
+`/tmp/storage-final-backend-gate-manifest.json` and
+`/tmp/storage-final-validation-result.json`. Baseline/final collections and logs
+use the `/tmp/storage-` prefix; `finalize-storage-coverage.py` checks the exact
+node union and equivalent backend source. These executor-local files are not
+committed artifacts and should not be assumed to survive a new environment.
+The source tests and commands below are the durable reproduction path.
+
+Reproduction from repository root uses the locked test interpreter
+`.pixi/envs/test/bin/python`, with `OMP_NUM_THREADS=OPENBLAS_NUM_THREADS=MKL_NUM_THREADS=1`
+and writable XDG/Matplotlib cache directories. Backend commands run from
+`pypsa-gui/backend`:
+
+```sh
+../../.pixi/envs/test/bin/python -m pytest --collect-only -q -o addopts=''
+../../.pixi/envs/test/bin/python -m pytest tests/test_storage_assurance.py tests/test_assurance_metrics.py tests/test_conversation_scope.py tests/test_conversation_recovery.py -q -o addopts='' --tb=short
+../../.pixi/envs/test/bin/python -m pytest tests -q -o addopts='' --tb=short
+../../.pixi/envs/test/bin/python tests/run_qa_drivers.py
+../../.pixi/envs/test/bin/python tests/qa_phase4_compare.py
+```
+
+The historical full execution partitions all collected files into two disjoint
+selections; the equivalent single-process `tests` command above preserves the
+collection and takes longer. The recorded final 54-file affected selection is
+in the executor manifest; its groups include assurance acceptance, scope/history/
+recovery, parent controls, tasks/progress/workflows, provider parity, load flow
+and run evidence. Paid suites remain opt-in and were not enabled.
+
+Frontend commands (`pypsa-gui/frontend`): `npm test` and `npm run build`.
+Upstream (`repository root`): `.pixi/envs/test/bin/python -m pytest test -q -o addopts=''`.
+Inventory: `python pypsa-gui/backend/smoke/assistant_inventory.py --check`.
+Next scope remains storage economics/Stores/Links, other domain adapters,
+arbitrary-language completeness and independent calibration/release enablement.
+Deployment remains opt-in; whole phase tickets remain open.

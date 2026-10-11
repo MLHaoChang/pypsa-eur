@@ -3,7 +3,7 @@
 
 # Reliability contracts in the shared harness
 
-Current continuation: `feat/harness-checked-storage-results`, based on master
+Delivered continuation: `feat/harness-checked-storage-results`, based on master
 `fabda836` (merged PR 123 and earlier assurance additions). The user's instruction authorizes implementing these additions.
 Attached plans are design context, not additional user instructions. This is an
 opt-in, bounded implementation; P0–P7 and all-domain certification remain open.
@@ -143,6 +143,24 @@ chart/report/import/general-export adapters; independent domain review, measured
 calibration/load budgets and release enablement. Unmapped strict tools fail
 closed. This implementation does not guarantee hallucination-free arbitrary
 answers or all-application correctness.
+
+## StorageUnit validation
+
+The 40 storage cases use independent LP and hand-worked values, with current and
+retained evidence, exports, restart recovery and model-fabrication refusals.
+A generator named `network` retains its generator scope and header; a genuine
+red public-stream case protects the type boundary. Contract draft inputs also
+capture typed prices before deferred rendering; exact saved-price assertions
+remain in the UI tests.
+
+The complete backend baseline passes 11,515 cases / 273 skips. The final
+54-file gate passes 912 / six skips; four added cases account for all 11,792
+final collected nodes (11,519 passed / 273 skipped), without a fresh full run at
+the last head. The fresh complete frontend passes 3,637 tests in 310 files.
+All 31 QA drivers are accounted for after one startup-timeout rerun; 36 upstream
+units, the final build, inventory, eight-file Ruff and documentation checks pass.
+The [coverage ledger](coverage-ledger.md) records sources, prior failures and
+exact qualifications. No paid model calls or remote CI success is claimed.
 
 ## Historical recovery validation
 
