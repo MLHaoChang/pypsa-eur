@@ -190,6 +190,28 @@ def test_preview_apply_atomic_stale_refusal_and_undo(baseline, session):
     assert PyPSAService.get_network().generators.at['G1', 'marginal_cost'] == 10
 
 
+def test_apply_drops_the_previous_solve(baseline, session):
+    import pandas as pd
+    from services.dispatch_status import dispatch_status
+
+    ctx = baseline[0]
+    ctx.network.generators_t.p = pd.DataFrame({"G1": [7.0, 7.0]}, index=ctx.network.snapshots)
+    ctx.network._objective = 100.0
+    ctx.solver_state.update(status="completed", condition="optimal", objective=100.0, solve_time=1.0)
+    preview = chat_tools.preview_project_changes(case()['changes'])
+    applied = output(dispatch(session, 'apply_project_changes', {'preview_id': preview['preview_id']}))
+    network = PyPSAService.get_network()
+    assert applied['applied'] is True
+    assert network.generators.at['G1', 'marginal_cost'] == 20
+    assert dispatch_status(network) == "none"
+    assert network.generators_t.p.empty
+    assert not network.is_solved
+    state = PyPSAService.get_active_context().solver_state
+    assert state["status"] == "idle"
+    assert state["objective"] is None
+    assert state["condition"] is None
+
+
 @pytest.mark.parametrize('changes', [
     [{'component_class': 'Generator', 'names': ['missing'], 'attribute': 'marginal_cost', 'value': 20}],
     [{'component_class': 'Generator', 'names': ['G1'], 'attribute': 'bus', 'value': 20}],
