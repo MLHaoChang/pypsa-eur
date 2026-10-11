@@ -970,6 +970,38 @@ def _build_user_content(
 
 
 
+# Literal error_kind values so tool-error-kinds.json's AST scan sees them.
+_ADMISSION_ERRORS: dict[str, dict[str, str]] = {
+    'duplicate': {
+        'error_kind': 'duplicate',
+        'message': (
+            'this utterance was already admitted; the duplicate was ignored so '
+            'effects are not repeated.'
+        ),
+    },
+    'queued': {
+        'error_kind': 'queued',
+        'message': (
+            'a turn is already running on this chat session; this message was kept '
+            'as the single pending correction (latest wins).'
+        ),
+    },
+    'stale_generation': {
+        'error_kind': 'stale_generation',
+        'message': (
+            'this utterance belongs to an older conversation generation and was '
+            'not admitted.'
+        ),
+    },
+    'rejected_empty': {
+        'error_kind': 'rejected_empty',
+        'message': (
+            'the utterance text is empty, so nothing was sent.'
+        ),
+    },
+}
+
+
 def run_turn(
     session: ChatSession,
     message: str,
@@ -982,6 +1014,8 @@ def run_turn(
     wire_conflict: bool = False,
     unknown_profile_id: str | None = None,
     strict_assurance: bool = False,
+    utterance_id: str | None = None,
+    generation: int | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
     """
     Provider-driven turn driver (Phase 3 replacement for the Phase 2 stub):
@@ -1080,10 +1114,43 @@ def run_turn(
     # and the panel appears frozen (E2E QA: INT-004).
     session.abort_event.clear()
 
+    # Issue 02 / C-I1 — optional shared utterance admission. Both fields must
+    # be present; omitting either preserves the pre-admission path (#19 alone).
+    _admission_lease: str | None = None
+    _admission_generation: int | None = None
+    if utterance_id is not None and generation is not None:
+        from services.utterance_admission import StableUtterance, admit_utterance
+        decision = admit_utterance(StableUtterance(
+            utterance_id=utterance_id,
+            text=message,
+            generation=generation,
+            session_id=session.session_id,
+        ))
+        if decision.status != 'admitted':
+            detail = _ADMISSION_ERRORS.get(decision.status) or {
+                'error_kind': 'internal_error',
+                'message': 'this utterance was not admitted.',
+            }
+            yield "error", detail
+            yield "session_done", {"reason": detail['error_kind']}
+            return
+        _admission_lease = decision.lease_id
+        _admission_generation = decision.generation
+
     # #19 — single in-flight-turn guard. Under _lock so two concurrent
     # run_turn calls on one session can't BOTH claim the slot.
     with session._lock:
         if session._turn_in_flight:
+            # Drop a just-minted admission lease so a concurrent reject cannot
+            # leave the coordinator holding a lease with no turn body.
+            if _admission_lease is not None and _admission_generation is not None:
+                from services import utterance_admission as _ua
+                _ua._DEFAULT.release_lease(
+                    session_id=session.session_id,
+                    lease_id=_admission_lease,
+                    generation=_admission_generation,
+                    promote=False,
+                )
             yield "error", {
                 "error_kind": "turn_already_in_flight",
                 "message": (
@@ -1149,6 +1216,16 @@ def run_turn(
             session._turn_in_flight = False
             session._undo_snapshotted = []
             session.assurance_turn = None
+        if _admission_lease is not None and _admission_generation is not None:
+            from services import utterance_admission as _ua
+            # Do not auto-promote pending into a hanging lease; drain is a
+            # later slice that starts the follow-up turn explicitly.
+            _ua._DEFAULT.release_lease(
+                session_id=session.session_id,
+                lease_id=_admission_lease,
+                generation=_admission_generation,
+                promote=False,
+            )
         # C-3 — the turn's profile must not outlive the turn. A tool invoked
         # OUTSIDE a turn (a direct call, a test) has no profile to honour and
         # must take the pre-profile path; leaving a stale value bound would

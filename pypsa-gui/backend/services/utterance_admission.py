@@ -133,13 +133,20 @@ class TurnCoordinator:
         session_id: str,
         lease_id: str,
         generation: int,
+        promote: bool = True,
     ) -> AdmissionDecision | None:
+        """Clear the active lease. When ``promote`` is True, admit the pending
+        correction as the next lease (caller must start that turn). When False,
+        clear the lease only and leave pending in place for a later drain.
+        """
         with self._lock:
             state = self._state(session_id)
             if state.lease_id != lease_id or state.generation != generation:
                 return None
             state.lease_id = None
             state.active_utterance_id = None
+            if not promote:
+                return None
             pending = state.pending
             state.pending = None
             if pending is None:

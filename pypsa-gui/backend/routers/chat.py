@@ -85,6 +85,10 @@ class StreamRequest(BaseModel):
     # reciprocity depends on it and reconstructing it later from timing or
     # content is guesswork. Carried now; the spoken-reply half is not built.
     input_mode: str | None = None
+    # Issue 02 / C-I1 — optional shared utterance admission. Both must be set
+    # together; omitting either keeps the pre-admission /stream behaviour.
+    utterance_id: str | None = None
+    generation: int | None = None
     # Validate explicitly to preserve the protocol's typed admission errors.
     assurance: Any = None
 
@@ -1486,6 +1490,8 @@ async def chat_stream(
                     attachment_file_ids=body.attachment_file_ids,
                     ui_context=body.ui_context,
                     strict_assurance=strict_assurance,
+                    utterance_id=body.utterance_id,
+                    generation=body.generation,
                 )
             for event_name, payload in events:
                 yield chat_service.sse_frame(event_name, payload)
