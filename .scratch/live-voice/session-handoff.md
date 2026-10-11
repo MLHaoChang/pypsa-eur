@@ -154,11 +154,16 @@ and report completion paths publish run evidence (pytest domains suite).
 2026-10-11: branch `cursor/run-refs-ui-a604` — issue 06 conversational run refs
 + result UI (`discuss_project_run`, durable `set_discussed_run`,
 `open_run_result` chrome) and `export_run_evidence` for discussed/named runs.
-Local: discuss/export/inventory/endpoint-map pytest + vitest
-navigation/runResultRequest green. Draft PR #126.
+Landed on master via PR #126.
 
-Next runnable (no credentials): mocked issue 03/04 scaffolding; issue 10
-experiment adapters; issue 06 three-run acceptance fixtures.
+2026-10-11: branch `cursor/experiment-adapters-a604` — issue 10 first slice:
+persist typed experiments without execution (`start_experiment` /
+`list_experiments` / `get_experiment`). Merged master (discuss/export +
+Moonshot alias) into this branch; local pytest green.
+
+Next runnable (no credentials / Moonshot): mocked issue 03/04 scaffolding;
+issue 10 case advancement adapters; issue 06 three-run acceptance fixtures;
+Kimi companion closed-console live sentence per handoff.
 
 **Credential / release blockers (cannot close without external access):**
 LiveKit Build + hosted STT/TTS live probe (01/02/09 deployment smoke);

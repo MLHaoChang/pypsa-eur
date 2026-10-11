@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 226,
+  "tool_count": 229,
   "tools": [
     {
       "name": "list_components",
@@ -4794,6 +4794,77 @@
       "required": [],
       "safety_tier": "write",
       "schema_sha256": "90b9ba2879c5659cbe8d1cfbe93242c14dc785c354308d151cf77acd572e812f",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "start_experiment",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "title",
+        "request_id",
+        "domain",
+        "baseline_run_id",
+        "limits",
+        "cases"
+      ],
+      "required": [
+        "title",
+        "cases",
+        "request_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "d45a684b4a5d122878af81db42a3256450f391da06ae29ad1695d8208bfb9c59",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_experiments",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "limit"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "440e1ce843e6a44f64517d8f7540084aa5e990bea1fe374afd091fca0a73ee09",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_experiment",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "experiment_id"
+      ],
+      "required": [
+        "experiment_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "8141d78f100db6a8a9c0e566273a6a97fe92d94493d1912c0d50d2f30462899d",
       "behavioral_fixture": "pending"
     },
     {
