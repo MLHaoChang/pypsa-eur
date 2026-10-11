@@ -2532,7 +2532,10 @@ def _dispatch_real_tool_call(
     # Issue 11 — adequacy/study mesh handoff. Starters already return
     # {"status": "running"} after publish_study; mint an ad:… handle so
     # wait_for_job can observe without model-polling get_adequacy_results.
-    from harness.job_adapters import STUDY_TOOL_KEYS as _STUDY_TOOL_KEYS
+    from harness.job_adapters import (
+        REPORT_TOOL_NAMES as _REPORT_TOOL_NAMES,
+        STUDY_TOOL_KEYS as _STUDY_TOOL_KEYS,
+    )
     if tool_name in _STUDY_TOOL_KEYS and isinstance(result, dict):
         try:
             from services.pypsa_service import PyPSAService
@@ -2564,6 +2567,33 @@ def _dispatch_real_tool_call(
         except Exception as exc:  # noqa: BLE001 — enrich is best-effort
             logger.exception(
                 "chat: study handoff enrich for %s failed: %s",
+                tool_name, _redact_for_log(exc),
+            )
+
+    if tool_name in _REPORT_TOOL_NAMES and isinstance(result, dict):
+        try:
+            from services.pypsa_service import PyPSAService
+            from harness import job_adapters as ja
+            from services import chat_tools as _ct
+            if result.get("status") == "running":
+                active_ctx = turn_ctx or PyPSAService.get_active_context()
+                owner = getattr(session, "owner_user_id", None) or _ct.acting_user_id()
+                job_id = ja.register_report_job(
+                    tool_name=tool_name,
+                    tool_use_id=tool_use_id,
+                    report_id=result.get("report_id"),
+                    owner_user_id=str(owner) if owner else None,
+                    project_uuid=getattr(active_ctx, "project_uuid", None),
+                )
+                result = {
+                    **result,
+                    "job_id": job_id,
+                    "family": ja.REPORT_FAMILY,
+                    "monitor": "get_report_status",
+                }
+        except Exception as exc:  # noqa: BLE001 — enrich is best-effort
+            logger.exception(
+                "chat: report handoff enrich for %s failed: %s",
                 tool_name, _redact_for_log(exc),
             )
 
