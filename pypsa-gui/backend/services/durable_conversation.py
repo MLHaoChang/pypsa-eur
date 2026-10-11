@@ -403,6 +403,72 @@ def reserve_budget(
         return {'status': 'reserved', 'key': key}
 
 
+def find_thread_for_episode(episode_id: str) -> str | None:
+    """Return the parent thread_id bound to ``episode_id`` in this project, if any."""
+    if not episode_id:
+        return None
+    root, project_id, owner = _authority()
+    base = root / 'durable_conversations'
+    if not base.is_dir():
+        return None
+    for path in base.glob('*.json'):
+        try:
+            thread = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        if (
+            thread.get('episode_id') == episode_id
+            and thread.get('project_id') == project_id
+            and thread.get('owner_id') == owner
+        ):
+            return thread.get('thread_id')
+    return None
+
+
+def set_discussed_run(
+    thread_id: str,
+    *,
+    generation: int,
+    run_id: str,
+    project_id: str | None = None,
+    baseline_run_id: str | None = None,
+    section: str | None = None,
+    source: str | None = None,
+    window: str | None = None,
+    asset_id: str | None = None,
+    clear_baseline: bool = False,
+) -> dict[str, Any]:
+    """Patch ``refs.discussed`` under generation CAS. Does not bump generation."""
+    if not isinstance(run_id, str) or not run_id:
+        _refuse('invalid_discussed_run', 'run_id is required.', 422)
+    with _LOCK:
+        path, thread = _read(thread_id)
+        _require_authoritative_replica(thread)
+        _require_generation(thread, generation)
+        refs = thread.setdefault('refs', {'current': {}, 'discussed': {}})
+        discussed = dict(refs.get('discussed') or {})
+        discussed['run_id'] = run_id
+        discussed['project_id'] = project_id if project_id is not None else thread['project_id']
+        for key, value in (
+            ('section', section),
+            ('source', source),
+            ('window', window),
+            ('asset_id', asset_id),
+        ):
+            if value is not None:
+                discussed[key] = value
+        if baseline_run_id is not None:
+            discussed['baseline_run_id'] = baseline_run_id
+        elif clear_baseline:
+            discussed.pop('baseline_run_id', None)
+        refs['discussed'] = discussed
+        thread['refs'] = refs
+        thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
+        thread['updated_at'] = datetime.now(timezone.utc).isoformat()
+        _save(path, thread)
+        return _view(thread)
+
+
 def settle_budget(
     thread_id: str,
     *,

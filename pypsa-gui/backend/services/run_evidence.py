@@ -31,7 +31,8 @@ Completion wiring:
 * Adequacy/study mesh — watcher started from ``_publish_study``.
 * Report jobs — ``_set`` / mapping terminal updates call ``publish_report_run``.
 
-Still open: conversational run references and the result UI.
+Conversational refs / result UI: see ``discuss_project_run`` (chat_tools) and
+``durable_conversation.set_discussed_run``.
 """
 from __future__ import annotations
 

@@ -307,6 +307,15 @@ def bootstrap_environment(backend_env: Path | None = None) -> None:
             continue
         os.environ[name] = value
 
+    # Operator / cloud-agent alias: some environments inject the Kimi product
+    # key as KIMI_KPI_KEY while the moonshot preset reads MOONSHOT_API_KEY.
+    # Fill the preset slot only when it is unset so an explicit MOONSHOT_API_KEY
+    # (shell or user.env) still wins.
+    if not os.environ.get("MOONSHOT_API_KEY"):
+        alias = os.environ.get("KIMI_KPI_KEY")
+        if alias:
+            os.environ["MOONSHOT_API_KEY"] = alias
+
 
 def get_stored(name: str = "ANTHROPIC_API_KEY") -> str | None:
     """

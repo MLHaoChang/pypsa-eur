@@ -204,6 +204,9 @@ class ChatSession:
     result_refs: collections.deque = field(
         default_factory=lambda: collections.deque(maxlen=RESULT_REFS_MAXLEN)
     )
+    # Issue 06 — discussed project/run/baseline/section identifiers for
+    # follow-ups. Identifiers only; numerical truth always comes from tools.
+    discussed_refs: dict[str, Any] | None = None
     # Multi-turn message history for the Anthropic Messages API. Each entry
     # is a dict matching the SDK's message shape ({role, content}). Run_turn
     # appends user + assistant + tool_result messages per turn so subsequent
