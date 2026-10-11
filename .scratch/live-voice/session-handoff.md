@@ -106,9 +106,13 @@ Issue 09 first slices (B-U1, ownership, minimal B-I2 resume, B-U2 ledger):
 - `pytest tests/test_durable_conversation_parent_thread.py` → 9 passed
 - Module: `services/durable_conversation.py` (no HTTP/worker pin yet)
 
-Next runnable slice: finish issue 09 HTTP/rebind/worker-pin or start issue 02
-shared harness bridge; then 11/03 as plan allows. Do not claim whole-application
-coverage or live voice done.
+Issue 02 C-U1 admission coordinator:
+- `pytest tests/test_utterance_admission_c_u1.py` → 8 passed
+- Module: `services/utterance_admission.py` (not yet wired into `/stream`)
+
+Next runnable slice: wire utterance admission into `run_turn`/stream (C-I1),
+finish issue 09 HTTP/rebind/worker-pin, then 11 long-job lease release. Do not
+claim whole-application coverage or live voice done.
 
 ## 2026-10-10 design amendment — floating companion
 
