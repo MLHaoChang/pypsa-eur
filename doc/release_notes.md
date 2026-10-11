@@ -6,6 +6,8 @@
 <!-- Upcoming Release -->
 <!-- ================= -->
 
+* Fix(pypsa-gui): Capture typed contract-draft prices before deferred state updates and verify successive edits in the application’s StrictMode. Preserve the latest value before saving contracts.
+
 * Fix(pypsa-gui): Remove a duplicate worker-pin error-manifest entry so its declared banner surface agrees with the chat UI.
 
 * Feat(pypsa-gui): Add opt-in checked StorageUnit key results to the shared chat harness. Validate raw charging/discharging, duration weights, power/state bounds and chronological energy balance before publishing six exact-window metrics. Missing prior states, unsupported storage models and fabricated model claims fail closed; owned evidence, exports and restart recovery reuse the existing contracts. Storage costs and independent engineering certification remain unsupported.
