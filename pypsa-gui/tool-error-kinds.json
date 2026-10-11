@@ -363,9 +363,17 @@
       "surface": "inline",
       "why": "solve_ppa_price on a contract whose price is not established in the case. The model says the contract needs a price first."
     },
+    "report_failed": {
+      "surface": "inline",
+      "why": "Recorded on a published run-evidence manifest when a report job ends failed; get_run_evidence surfaces the typed error field."
+    },
     "solver_failed": {
       "surface": "inline",
       "why": "Recorded on a published run-evidence manifest when a foreground solve ends failed; not a user-facing tool_error banner — get_run_evidence surfaces the typed error field."
+    },
+    "study_failed": {
+      "surface": "inline",
+      "why": "Recorded on a published run-evidence manifest when an adequacy/study worker ends failed; get_run_evidence surfaces the typed error field."
     },
     "solver_in_flight": {
       "surface": "banner",

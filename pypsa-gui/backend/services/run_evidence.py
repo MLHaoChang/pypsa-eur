@@ -22,12 +22,16 @@ Two runs are comparable only when both completed, share a mode, and share an inp
 fingerprint (or the caller opts in with ``allow_input_changes``); otherwise the
 answer is ``comparable: false`` with reasons and no deltas.
 
-Completion wiring: a foreground ``run_simulation`` / ``run_ac_pf_stage`` handoff in the
-chat harness calls ``start_foreground_run`` (writes ``running.json`` under the
-turn's resolved authority) and, when the detached solver monitor sees a terminal
-solver state, ``publish_foreground_run`` publishes the immutable manifest. Not in
-this slice: solve-queue / study / report completion paths, runs whose monitor is
-cancelled before the solve ends, conversational run references and the result UI.
+Completion wiring:
+
+* Foreground ``run_simulation`` / ``run_ac_pf_stage`` — harness handoff +
+  detached solver monitor (``start_foreground_run`` / ``publish_foreground_run``).
+* Solve-queue / GridSpine — ``start_queue_run`` on claim, ``publish_queue_run``
+  on terminal finish.
+* Adequacy/study mesh — watcher started from ``_publish_study``.
+* Report jobs — ``_set`` / mapping terminal updates call ``publish_report_run``.
+
+Still open: conversational run references and the result UI.
 """
 from __future__ import annotations
 
@@ -38,6 +42,7 @@ import os
 import re
 import shutil
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -585,4 +590,329 @@ def publish_foreground_run(token: dict | None, ctx: Any) -> dict | None:
             actor_id=token['actor_id'], metrics=metrics, error=error,
             sections={'summary': summary} if run_status == 'completed' else None)
     except HTTPException:
+        return None
+
+
+# ── Solve-queue / study / report publication (issue 06 continuation) ─────────
+
+_STUDY_KIND = {
+    'fmea_sweep': 'fmea_sweep',
+    'frontier': 'frontier',
+    'mc': 'monte_carlo',
+    'coupling_loop': 'coupling_loop',
+    'margin_loop': 'margin_loop',
+    'eh_study': 'eh_study',
+    'investment_case': 'investment_case',
+}
+
+_WORKER_COMPLETED = frozenset({'completed', 'done', 'met'})
+_WORKER_FAILED = frozenset({'failed', 'budget_exhausted', 'refused'})
+_WORKER_INTERRUPTED = frozenset({'aborted', 'interrupted', 'idle'})
+
+
+def map_worker_status(status: str | None) -> str | None:
+    """Map family-specific terminal labels onto run-evidence statuses."""
+    if status in _WORKER_COMPLETED:
+        return 'completed'
+    if status in _WORKER_FAILED:
+        return 'failed'
+    if status in _WORKER_INTERRUPTED:
+        return 'interrupted'
+    return None
+
+
+def queue_run_id(job_id: Any) -> str:
+    raw = str(job_id).replace('-', '')
+    return 'q-' + raw[:60]
+
+
+def study_run_id(study_key: str, nonce: str | None = None) -> str:
+    suffix = (nonce or uuid.uuid4().hex)[:12]
+    key = re.sub(r'[^a-z0-9_]', '', study_key.lower())[:24] or 'study'
+    return f'ad-{key}-{suffix}'[:64]
+
+
+def report_run_id(report_id: str | None, nonce: str | None = None) -> str:
+    base = re.sub(r'[^A-Za-z0-9_-]', '', str(report_id or ''))[:40]
+    if not base:
+        base = (nonce or uuid.uuid4().hex)[:12]
+    return ('rpt-' + base)[:64]
+
+
+def _root_for_project(
+    project_id: str | None, storage_dir: str | None = None,
+) -> Path | None:
+    if storage_dir:
+        return Path(storage_dir)
+    if not project_id:
+        return None
+    try:
+        ctx = PyPSAService.get_active_context()
+        if (
+            ctx.project_uuid
+            and str(ctx.project_uuid) == str(project_id)
+            and ctx.storage_dir
+        ):
+            return Path(ctx.storage_dir)
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def _queue_project_id(job: Any) -> str:
+    """SolveJob.project_id is the display name; the UUID lives in project_key."""
+    key = getattr(job, 'project_key', None)
+    if isinstance(key, str) and ':' in key:
+        return key.split(':', 1)[1]
+    return str(getattr(job, 'project_id', '') or '')
+
+
+def start_queue_run(job: Any) -> dict | None:
+    """Best-effort running marker when a solve-queue job is claimed."""
+    try:
+        project_id = _queue_project_id(job)
+        root = _root_for_project(project_id, getattr(job, 'storage_dir', None))
+        if root is None or not project_id:
+            return None
+        job_id = str(getattr(job, 'id', '') or '')
+        run_id = queue_run_id(job_id)
+        kind = 'gridspine' if getattr(job, 'kind', None) == 'gridspine' else 'solve_queue'
+        actor = getattr(job, 'enqueued_by_user_id', None)
+        started = _now()
+        start_run(
+            root, project_id, run_id=run_id, kind=kind, started_at=started,
+            mode=kind, job_id=job_id,
+            actor_id=str(actor) if actor is not None else None,
+        )
+        token = {
+            'root': root, 'project_id': project_id, 'run_id': run_id,
+            'job_id': job_id, 'kind': kind, 'started_at': started,
+            'actor_id': str(actor) if actor is not None else None,
+        }
+        try:
+            job.run_evidence_token = token  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001
+            pass
+        return token
+    except HTTPException:
+        return None
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception('queue run evidence start failed')
+        return None
+
+
+def publish_queue_run(job: Any) -> dict | None:
+    """Publish a terminal solve-queue / GridSpine run from the job record."""
+    try:
+        token = getattr(job, 'run_evidence_token', None)
+        project_id = (token or {}).get('project_id') or _queue_project_id(job)
+        root = (
+            Path(token['root']) if token and token.get('root')
+            else _root_for_project(project_id, getattr(job, 'storage_dir', None))
+        )
+        if root is None or not project_id:
+            return None
+        status = map_worker_status(getattr(job, 'status', None))
+        if status is None:
+            return None
+        job_id = str(getattr(job, 'id', '') or '')
+        run_id = (token or {}).get('run_id') or queue_run_id(job_id)
+        kind = (token or {}).get('kind') or (
+            'gridspine' if getattr(job, 'kind', None) == 'gridspine' else 'solve_queue'
+        )
+        metrics: dict[str, dict] = {}
+        summary: dict[str, Any] = {
+            'queue_kind': getattr(job, 'kind', None),
+            'condition': getattr(job, 'condition', None),
+        }
+        error = None
+        if status == 'completed':
+            objective = getattr(job, 'objective', None)
+            if isinstance(objective, (int, float)) and not isinstance(objective, bool):
+                metrics['objective'] = {'value': objective, 'unit': OBJECTIVE_UNIT}
+            solve_time = getattr(job, 'solve_time', None)
+            if isinstance(solve_time, (int, float)) and not isinstance(solve_time, bool):
+                metrics['solve_seconds'] = {'value': solve_time, 'unit': 's'}
+            summary['metrics'] = copy.deepcopy(metrics)
+        elif status == 'failed':
+            err = getattr(job, 'error', None)
+            error = {
+                'error_kind': 'solver_failed',
+                'message': str(err or 'The queued job failed.')[:500],
+            }
+        return publish_run(
+            root, project_id, run_id=run_id, kind=kind, status=status,
+            started_at=(token or {}).get('started_at'),
+            mode=kind, job_id=job_id,
+            actor_id=(token or {}).get('actor_id'),
+            metrics=metrics, error=error,
+            sections={'summary': summary} if status == 'completed' else None,
+        )
+    except HTTPException:
+        return None
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception('queue run evidence publish failed')
+        return None
+
+
+def start_study_run(study_key: str, record: dict) -> dict | None:
+    """Mark an adequacy/study mesh worker as a running evidence run."""
+    try:
+        root, project_id, owner = _authority()
+        run_id = study_run_id(study_key)
+        kind = _STUDY_KIND.get(study_key, study_key)
+        started = _now()
+        start_run(
+            root, project_id, run_id=run_id, kind=kind, started_at=started,
+            mode=study_key, job_id=run_id, actor_id=owner,
+        )
+        token = {
+            'root': root, 'project_id': project_id, 'actor_id': owner,
+            'run_id': run_id, 'kind': kind, 'study_key': study_key,
+            'started_at': started,
+        }
+        record['_run_evidence'] = token
+        return token
+    except HTTPException:
+        return None
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception('study run evidence start failed')
+        return None
+
+
+def publish_study_run(study_key: str, record: dict) -> dict | None:
+    """Publish when a study record leaves the running state."""
+    try:
+        status = map_worker_status(record.get('status'))
+        if status is None:
+            return None
+        token = record.get('_run_evidence')
+        if not token:
+            # Late publish without a start marker — still attempt under authority.
+            try:
+                root, project_id, owner = _authority()
+            except HTTPException:
+                return None
+            token = {
+                'root': root, 'project_id': project_id, 'actor_id': owner,
+                'run_id': study_run_id(study_key),
+                'kind': _STUDY_KIND.get(study_key, study_key),
+                'started_at': _now(),
+            }
+        summary = {
+            'study_key': study_key,
+            'status': record.get('status'),
+            'stage': record.get('stage'),
+        }
+        error = None
+        if status == 'failed':
+            error = {
+                'error_kind': 'study_failed',
+                'message': str(record.get('error') or 'The study failed.')[:500],
+            }
+        return publish_run(
+            token['root'], token['project_id'], run_id=token['run_id'],
+            kind=token['kind'], status=status, started_at=token.get('started_at'),
+            mode=study_key, job_id=token['run_id'], actor_id=token.get('actor_id'),
+            error=error,
+            sections={'summary': summary} if status == 'completed' else None,
+        )
+    except HTTPException:
+        return None
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception('study run evidence publish failed')
+        return None
+
+
+def watch_study_run(study_key: str, record: dict) -> None:
+    """Daemon: wait until ``record['status']`` is terminal, then publish."""
+    start_study_run(study_key, record)
+
+    def _watch() -> None:
+        deadline = time.monotonic() + 6 * 60 * 60
+        while time.monotonic() < deadline:
+            if map_worker_status(record.get('status')) is not None:
+                publish_study_run(study_key, record)
+                return
+            time.sleep(0.25)
+        # Timed out still running — leave the running marker; do not invent a terminal.
+
+    threading.Thread(
+        target=_watch, daemon=True, name=f'run-evidence-{study_key}',
+    ).start()
+
+
+def start_report_run(record: dict) -> dict | None:
+    try:
+        root, project_id, owner = _authority()
+        report_id = record.get('report_id')
+        run_id = report_run_id(report_id if isinstance(report_id, str) else None)
+        started = _now()
+        start_run(
+            root, project_id, run_id=run_id, kind='report', started_at=started,
+            mode=record.get('mode') if isinstance(record.get('mode'), str) else 'report',
+            job_id=run_id, actor_id=owner,
+        )
+        token = {
+            'root': root, 'project_id': project_id, 'actor_id': owner,
+            'run_id': run_id, 'kind': 'report', 'started_at': started,
+            'report_id': report_id,
+        }
+        record['_run_evidence'] = token
+        return token
+    except HTTPException:
+        return None
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception('report run evidence start failed')
+        return None
+
+
+def publish_report_run(record: dict) -> dict | None:
+    try:
+        status = map_worker_status(record.get('status'))
+        if status is None:
+            return None
+        token = record.get('_run_evidence')
+        if not token:
+            try:
+                root, project_id, owner = _authority()
+            except HTTPException:
+                return None
+            token = {
+                'root': root, 'project_id': project_id, 'actor_id': owner,
+                'run_id': report_run_id(
+                    record.get('report_id')
+                    if isinstance(record.get('report_id'), str) else None
+                ),
+                'kind': 'report', 'started_at': _now(),
+            }
+        summary = {
+            'report_id': record.get('report_id'),
+            'mode': record.get('mode'),
+            'version': record.get('version'),
+            'status': record.get('status'),
+        }
+        error = None
+        if status == 'failed':
+            error = {
+                'error_kind': 'report_failed',
+                'message': str(record.get('error') or 'The report job failed.')[:500],
+            }
+        return publish_run(
+            token['root'], token['project_id'], run_id=token['run_id'],
+            kind='report', status=status, started_at=token.get('started_at'),
+            mode=summary.get('mode') or 'report', job_id=token['run_id'],
+            actor_id=token.get('actor_id'), error=error,
+            sections={'summary': summary} if status == 'completed' else None,
+        )
+    except HTTPException:
+        return None
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception('report run evidence publish failed')
         return None

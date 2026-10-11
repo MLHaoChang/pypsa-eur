@@ -23,7 +23,9 @@ _FG_TERMINAL = frozenset({'completed', 'failed', 'aborted'})
 
 STUDY_PREFIX = 'ad:'
 STUDY_FAMILY = 'adequacy_study'
-_STUDY_TERMINAL = frozenset({'done', 'failed', 'aborted', 'refused'})
+_STUDY_TERMINAL = frozenset({
+    'done', 'failed', 'aborted', 'refused', 'met', 'budget_exhausted',
+})
 
 REPORT_PREFIX = 'rpt:'
 REPORT_FAMILY = 'report_job'
