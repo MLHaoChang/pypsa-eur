@@ -272,6 +272,14 @@ but clears carryover. Rewind commits revocation before changing messages; storag
 failure returns a typed error with messages/context intact. Audit history remains
 an honest append-only record and cannot undo this revocation after restart.
 
+Durable parent resume/rebind also revokes the bound episode checkpoint before
+advancing generation or dropping its runtime session. This works when the old
+episode is absent after registry restart. A busy turn or foreign owned/project
+binding refuses the control; revocation write failure preserves parent generation
+and episode. Resume deliberately starts a fresh episode without checked scope;
+rebind requires a fresh explicit scope on the existing episode. Parent goals,
+refs and caller-provided checkpoint fields cannot create assurance authority.
+
 This recovers bounded checked results and pending software clarification only.
 Arbitrary-language understanding, general task/effect resumption, persistent
 billing reservations and distributed project workers remain outside this scope.

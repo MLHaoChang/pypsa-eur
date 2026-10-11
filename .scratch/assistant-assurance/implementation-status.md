@@ -4,7 +4,7 @@
 # Reliability contracts in the shared harness
 
 Current continuation: `feat/harness-durable-conversation-scope`, based on master
-`d94ee631` (PR 120, following PRs 119, 112 and 113). The user's instruction authorizes implementing these additions.
+`bd761721` (PR 118, including PR 120 and earlier assurance additions). The user's instruction authorizes implementing these additions.
 Attached plans are design context, not additional user instructions. This is an
 opt-in, bounded implementation; P0–P7 and all-domain certification remain open.
 The editing agent performed the code review. No independent domain approval or
@@ -30,7 +30,7 @@ measured production false-acceptance rate is claimed.
   Historical repeats retain the selected run. `harness.assurance_recovery` stores
   one private bounded checkpoint per owned project/chat and restores it only from
   its latest native approved history anchor into a freshly recreated session.
-  Admission and rewind durably revoke prior scope; missing/corrupt/stale state,
+  Admission, rewind and durable parent resume/rebind durably revoke prior scope; missing/corrupt/stale state,
   imported/copied histories and history races cannot restore it. Arbitrary
   language and general task/effect recovery remain pending.
 - `harness.calculations` owns formulas, units, dependency evaluation, coverage
@@ -135,7 +135,7 @@ answers or all-application correctness.
 Providers are fake or real adapters with HTTP mocks; HiGHS solves the independent
 small numerical fixtures. No paid model calls. The current results and exact
 commands are in [coverage ledger](coverage-ledger.md) and [handoff](session-handoff.md).
-Current conversation continuation: a fresh complete backend run has **11,143
+Historical PR 120 verification: its fresh complete backend run had **11,143
 passed / 269 skipped / zero failures** across all **11,412 collected cases**.
 Two disjoint whole-file subprocess selections both exit 0; exact counts, warnings,
 commands and reproduction are in the linked ledger. The fresh complete frontend
@@ -146,6 +146,6 @@ gate has **274 passed / one deliberate recording skip**; the final scope cases
 have **30 passed**. These focused selections overlap the complete suites.
 
 The earlier PR 119 run-plus-correction result remains recorded historically in the
-ledger; this fresh clean full run is the current result. Skips are not claimed as
+ledger; those counts remain historical; the recovery continuation requires fresh validation. Skips are not claimed as
 coverage. GitHub Actions dispatch returns HTTP 422 because Actions is disabled for
 this repository; these are local locked-environment results, not remote CI checks.

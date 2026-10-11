@@ -4,7 +4,7 @@
 # Assistant assurance continuation handoff
 
 Status: current shared harness continuation on `feat/harness-durable-conversation-scope`,
-based on merged PR 120/master `d94ee631`. Historical sections below describe earlier
+based on merged PR 118/master `bd761721` (including PR 120). Historical sections below describe earlier
 states and commands. The current [implementation status](implementation-status.md)
 and [API contracts](harness-contracts.md) supersede them. Independent domain/release
 approval remains pending.

@@ -12,9 +12,110 @@ from tests.test_conversation_scope import conversation, clarified  # noqa: F401
 from tests.test_harness_reliability import scope, VALUES
 
 
+@pytest.mark.parametrize("control", ["resume", "rebind"])
+@pytest.mark.parametrize("registry_restart", [False, True])
+def test_parent_generation_change_revokes_checked_episode_scope(
+    solved, checked, conversation, control, registry_restart
+):
+    conversation("Check this run.", VALUES, checked_scope=scope(solved))
+    parent = checked.client.post("/api/durable-conversations").json()
+    tid = parent["thread_id"]
+    bound = checked.client.post(
+        f"/api/durable-conversations/{tid}/checkpoint",
+        json={"generation": 1, "episode_id": conversation.sid},
+    )
+    assert bound.status_code == 200, bound.text
+    if registry_restart:
+        chat_service.drop_session(conversation.sid)
+    response = checked.client.post(
+        f"/api/durable-conversations/{tid}/{control}", json={"generation": 1}
+    )
+    assert response.status_code == 200, response.text
+    if control == "resume":
+        new_session = chat_service.get_session(response.json()["episode_id"])
+        assert new_session.assurance_context is None
+        checked.session_ids.append(new_session.session_id)
+    elif not registry_restart:
+        assert chat_service.get_session(conversation.sid).assurance_context is None
+    restart(checked, conversation)
+    frames, provider = conversation("Show those results again.")
+    clarified(frames, provider, "conversation_scope_required")
+
+
+@pytest.mark.parametrize("control", ["resume", "rebind"])
+def test_parent_revocation_failure_preserves_generation_and_episode(
+    solved, checked, conversation, monkeypatch, control
+):
+    from services import assurance_records
+
+    conversation("Check this run.", VALUES, checked_scope=scope(solved))
+    session = chat_service.get_session(conversation.sid)
+    state = session.assurance_context
+    parent = checked.client.post("/api/durable-conversations").json()
+    tid = parent["thread_id"]
+    checked.client.post(
+        f"/api/durable-conversations/{tid}/checkpoint",
+        json={"generation": 1, "episode_id": conversation.sid},
+    ).raise_for_status()
+    original_save = assurance_records.save
+
+    def fail(record, identifier):
+        if record["record_kind"] == "conversation_context":
+            raise OSError("fixture revocation failure")
+        return original_save(record, identifier)
+
+    monkeypatch.setattr(assurance_records, "save", fail)
+    response = checked.client.post(
+        f"/api/durable-conversations/{tid}/{control}", json={"generation": 1}
+    )
+    assert response.status_code == 409
+    assert (
+        response.json()["detail"]["error_kind"]
+        == "assurance_context_persistence_failed"
+    )
+    current = checked.client.get(f"/api/durable-conversations/{tid}").json()
+    assert current["generation"] == 1 and current["episode_id"] == conversation.sid
+    assert chat_service.get_session(conversation.sid) is session
+    assert session.assurance_context is state
+
+
 @pytest.fixture(autouse=True)
 def private_store(tmp_path, monkeypatch):
     monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
+
+
+@pytest.mark.parametrize("control", ["resume", "rebind"])
+@pytest.mark.parametrize("boundary", ["in_flight", "owner", "project"])
+def test_parent_controls_refuse_busy_or_foreign_checked_episode(
+    solved, checked, conversation, control, boundary
+):
+    conversation("Check this run.", VALUES, checked_scope=scope(solved))
+    session = chat_service.get_session(conversation.sid)
+    state = session.assurance_context
+    checkpoint = checkpoint_path(conversation, solved)
+    before = checkpoint.read_bytes()
+    parent = checked.client.post("/api/durable-conversations").json()
+    tid = parent["thread_id"]
+    checked.client.post(
+        f"/api/durable-conversations/{tid}/checkpoint",
+        json={"generation": 1, "episode_id": conversation.sid},
+    ).raise_for_status()
+    if boundary == "in_flight":
+        session._turn_in_flight = True
+    elif boundary == "owner":
+        session.owner_user_id = "00000000-0000-0000-0000-000000000001"
+    else:
+        session.assurance_checkpoint_project = "00000000-0000-0000-0000-000000000001"
+    try:
+        response = checked.client.post(
+            f"/api/durable-conversations/{tid}/{control}", json={"generation": 1}
+        )
+        assert response.status_code == (409 if boundary == "in_flight" else 404)
+        current = checked.client.get(f"/api/durable-conversations/{tid}").json()
+        assert current["generation"] == 1 and current["episode_id"] == conversation.sid
+        assert session.assurance_context is state and checkpoint.read_bytes() == before
+    finally:
+        session._turn_in_flight = False
 
 
 def restart(checked, conversation):
