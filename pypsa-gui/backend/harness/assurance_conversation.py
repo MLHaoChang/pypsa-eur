@@ -59,12 +59,22 @@ def _state(turn, ui):
             or selected.get("name") != scope["entity_id"]
         )
     )
-    if tuple(state["binding"]) != _binding(turn) or conflict:
+    resumed = state.get("resumed") and tuple(state["binding"]) == (
+        turn.owner,
+        turn.project_id,
+        None,
+    )
+    if (tuple(state["binding"]) != _binding(turn) and not resumed) or conflict:
         with turn.session._lock:
             turn.session.assurance_context = None
         return None, "conversation_scope_changed"
     # Fresh membership/account checks on every lookup; UI selections confer no ACL.
     records.authorize(turn.owner, turn.project_id)
+    if resumed:
+        state["binding"] = _binding(turn)
+        state.pop("resumed", None)
+        with turn.session._lock:
+            turn.session.assurance_context = deepcopy(state)
     return state, None
 
 

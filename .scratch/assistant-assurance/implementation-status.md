@@ -3,8 +3,8 @@
 
 # Reliability contracts in the shared harness
 
-Current continuation: `feat/harness-conversation-scope`, based on master
-`9b987371` (PR 119, following PRs 112 and 113). The user's instruction authorizes implementing these additions.
+Current continuation: `feat/harness-durable-conversation-scope`, based on master
+`bd761721` (PR 118, including PR 120 and earlier assurance additions). The user's instruction authorizes implementing these additions.
 Attached plans are design context, not additional user instructions. This is an
 opt-in, bounded implementation; P0–P7 and all-domain certification remain open.
 The editing agent performed the code review. No independent domain approval or
@@ -27,8 +27,12 @@ measured production false-acceptance rate is claimed.
   ambiguity without a model call. Two distinct immutable run references prevent
   repeated answers from replacing the previous baseline; changed binding,
   selection, rewind, unavailable context or incompatible basis require clarification.
-  Historical repeats retain the selected run. This is live-session state; durable
-  restart recovery and arbitrary language remain pending.
+  Historical repeats retain the selected run. `harness.assurance_recovery` stores
+  one private bounded checkpoint per owned project/chat and restores it only from
+  its latest native approved history anchor into a freshly recreated session.
+  Admission, rewind and durable parent resume/rebind durably revoke prior scope; missing/corrupt/stale state,
+  imported/copied histories and history races cannot restore it. Arbitrary
+  language and general task/effect recovery remain pending.
 - `harness.calculations` owns formulas, units, dependency evaluation, coverage
   masks and disclosures. The original `generator-dispatch/1` computes weighted
   energy, marginal expenditure and peak dispatch. `generator-cost/1` adds annual
@@ -117,8 +121,8 @@ No production deployment setting is changed by this PR.
 
 Whole phase tickets stay open: storage/Links/multi-period economics and NPV;
 adequacy, FMEA, GridSpine and other domain adapters; arbitrary natural-language
-completeness/material clarification outside the bounded grammar and durable
-conversational constraint recovery;
+completeness/material clarification outside the bounded grammar and general
+conversational/task constraint recovery;
 more operation/job mappings and a distributed project runtime; displayed-data
 revision proof and complete browser/device/accessibility journeys; checked
 chart/report/import/general-export adapters; independent domain review, measured
@@ -126,12 +130,44 @@ calibration/load budgets and release enablement. Unmapped strict tools fail
 closed. This implementation does not guarantee hallucination-free arbitrary
 answers or all-application correctness.
 
-## Verification
+## Current recovery validation
+
+The recovery continuation includes 55 native history/control cases and nine
+solver task-outcome cases. It integrates parent resume/rebind revocation and
+requires a terminal solver outcome before a sequential task advances. Ordinary
+foreground solves remain detached; fully asynchronous task-step recovery remains
+open. The initial full backend run exposed an inherited detached-solver
+regression, which was corrected without relaxing numerical assertions.
+
+The final continuation integrates master `1970db27` / PR 122. Final collection
+contains 11,751 backend cases in 551 files. The completed baseline partitions,
+corrected remainder, added cases and latest affected-path gates account for that
+collection: 11,478 passed and 273 skipped. This is multi-revision coverage, not a
+fresh full run at the final head. The linked ledger records sources and exclusions.
+The latest recovery/parent/task/progress/workflow/new-domain gate passes 869 cases
+with six skips. A queued-correction scope regression fails before correction;
+the post-fix admission/recovery/scope/task/frame gate passes 107 cases / one skip.
+Two new cases prove safe repeats and refusal of added constraints without a second
+model call or retention of stale authority. The handler-signature gate passes 176
+cases; new tool-contract cases pass 32 / four paid-live skips.
+
+All 31 post-correction QA drivers and 36 upstream unit tests previously passed.
+The latest production build, inventory (224 tools), control matrix and
+documentation checks pass. Across 15 touched Python files Ruff adds no findings
+to master's 46 existing findings.
+The first updated-master frontend run had one existing large-table test timeout;
+the unchanged full rerun without concurrent backend jobs passes all 3,627 tests
+in 310 files, exit 0, without unhandled errors. Earlier 3,623-test frontend
+results are historical. After PR 122's subsequent merge, all 47 affected frontend
+cases in six files and the production build pass; no fresh full frontend run at
+the last head is claimed.
+
+## Historical verification
 
 Providers are fake or real adapters with HTTP mocks; HiGHS solves the independent
 small numerical fixtures. No paid model calls. The current results and exact
 commands are in [coverage ledger](coverage-ledger.md) and [handoff](session-handoff.md).
-Current conversation continuation: a fresh complete backend run has **11,143
+Historical PR 120 verification: its fresh complete backend run had **11,143
 passed / 269 skipped / zero failures** across all **11,412 collected cases**.
 Two disjoint whole-file subprocess selections both exit 0; exact counts, warnings,
 commands and reproduction are in the linked ledger. The fresh complete frontend
@@ -142,6 +178,6 @@ gate has **274 passed / one deliberate recording skip**; the final scope cases
 have **30 passed**. These focused selections overlap the complete suites.
 
 The earlier PR 119 run-plus-correction result remains recorded historically in the
-ledger; this fresh clean full run is the current result. Skips are not claimed as
+ledger; those counts remain historical; the recovery continuation requires fresh validation. Skips are not claimed as
 coverage. GitHub Actions dispatch returns HTTP 422 because Actions is disabled for
 this repository; these are local locked-environment results, not remote CI checks.

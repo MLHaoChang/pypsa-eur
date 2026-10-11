@@ -3,8 +3,8 @@
 
 # Assistant assurance continuation handoff
 
-Status: current shared harness continuation on `feat/harness-conversation-scope`,
-based on merged PR 119/master `9b987371`. Historical sections below describe earlier
+Status: current shared harness continuation on `feat/harness-durable-conversation-scope`,
+based on merged PR 122/master `1970db27` (including PRs 118, 120 and 121). Historical sections below describe earlier
 states and commands. The current [implementation status](implementation-status.md)
 and [API contracts](harness-contracts.md) supersede them. Independent domain/release
 approval remains pending.
@@ -495,3 +495,61 @@ as current validation. No paid model calls or remote CI success is claimed:
 GitHub workflow dispatch confirms Actions is disabled (HTTP 422). Context remains
 live-session, bounded and opt-in; durable recovery, arbitrary-language scope,
 unmapped domains and independent domain/release certification remain pending.
+
+
+## 2026-10-11 — checked conversation recovery continuation
+
+Source `cd1ba70e` integrates master `1970db27` / PR 122. Bounded native-history
+recovery now uses private owner/project/chat checkpoints, fresh authorization
+and exact approved-anchor/source validation. Required revocation precedes
+execution, rewind and parent resume/rebind; failed or aborted publication
+cannot revive an older checkpoint. Resume starts a new episode without checked
+scope; rebind requires fresh explicit scope. Broader language, domain coverage,
+task/effect/billing memory and independent certification remain open.
+
+New recovery tests contain 55 cases. Initial missing-feature cases failed, then
+passed; merging PR 118 exposed four parent-control cases which failed before
+revocation integration and passed afterward. Final collection has 11,536 backend
+cases in 540 files. Disjoint completed baseline selections plus the corrected
+remainder and six new cases cover that collection: 11,267 passed / 269 skipped.
+This is multi-revision coverage, not a fresh full run at the final head; affected
+recovery/parent/progress/task/workflow seams were rerun against updated master
+(587 passed / two skipped). Both detached solver numerical oracles now wait for
+the actual worker and preserve their original objective/source assertions.
+
+All 31 post-correction QA drivers, 36 upstream tests, updated-master production
+build, inventory and control checks pass. Ruff adds zero findings across 14 touched
+Python files (45 inherited findings). The first updated-master frontend run had
+one existing 1,200-row select-all timeout under concurrent backend load. The
+unchanged full rerun without those backend jobs passes **3,627 tests / 310 files**,
+exit 0, with no unhandled errors (419.28 seconds). Do not count the failed run or
+the older 3,623-test run as current success. Read the latest coverage ledger for exact
+sources, partitions and reproduction; evidence is `/tmp/recovery-*`.
+
+The final PR-122 integration gate passes 869 / six skips; all 213 cases added by
+that master change are covered by new-module and generated tool-contract checks.
+One line-based signature node changed its identifier; its complete module passes
+176 cases. Four newly generated paid-live cases are skipped deliberately. Two
+additional checked auto-drain cases exposed the original scope being reused for a
+queued correction (a 2025 constraint incorrectly received checked 2026 results).
+The correction drops the prior utterance's explicit scope and resolves validated
+carryover afresh. The affected admission/recovery/scope/task/frame gate passes
+107 / one skip; safe repeat scope remains exact and unsupported constraints
+clarify without another model call or an old checkpoint.
+
+Final collection is **11,751 cases / 551 files**, accounted for across revisions:
+**11,478 passed / 273 skipped / no missing cases**. Latest frontend affected paths
+pass **47 cases / six files** and the production build passes. The complete
+3,627-test frontend run precedes PR 122; no full run at the last head is claimed.
+Current inventory has 224 tools / 14 tabs / 17 panels, controls remain 165 / 14
+families, and Ruff adds zero findings across 15 files (46 inherited).
+The latest ledger entry and `/tmp/recovery-final-validation-result.json` supersede
+the earlier 11,536-case checkpoint above.
+
+All local gates are complete. Remaining release steps: commit final docs,
+fast-forward the feature branch to this validated integration, push/create PR
+and merge normally after checking its head. The user already authorized
+creation and merge after tests pass. GitHub Actions remains disabled (dispatch
+HTTP 422); do not claim remote CI or bypass branch protection. Broader adapters,
+arbitrary language, distributed runtime, asynchronous task resumption and release
+certification remain future scopes; recovery remains opt-in.

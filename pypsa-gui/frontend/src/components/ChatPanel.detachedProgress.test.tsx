@@ -85,7 +85,7 @@ beforeEach(() => {
   })
   useUIStore.setState({
     currentProject: 'Demo', activeSlidePanel: null, assistantDockOpen: true,
-    projectMismatch: false,
+    projectMismatch: null,
   })
   useChatStore.setState({
     sessionId: 'sess-detached', pending: null, messages: [], error: null,

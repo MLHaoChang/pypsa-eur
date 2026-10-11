@@ -219,7 +219,83 @@ imported transcripts or caller-supplied histories. Rewind, missing/expired conte
 conflicting generator selection or a changed binding require clarification.
 A later unverified/unavailable answer cannot seed or restore an earlier result.
 Network scope does not shrink when one generator is selected in the UI.
-Process restart/new chat requires an explicit scope or owned retained evidence IDs;
-automatic durable session-context recovery remains pending. Whole-message parsing
+A new chat requires an explicit scope or owned retained evidence IDs. After a
+backend restart, authenticated native-history recovery may restore the exact
+bounded scope under the private checkpoint contract below. Whole-message parsing
 rejects added constraints on recognized follow-ups instead of dropping them.
 This does not certify understanding of arbitrary language or cover new domains.
+
+
+## Owned conversation checkpoints (2026-10-11)
+
+The shared harness stores at most one private version-1 conversation checkpoint
+per owner/project/chat using the existing owned record store. It carries the exact
+scope, pending software cost clarification, latest approved answer anchor and at
+most two distinct retained run references. Its owner/project/chat key is software
+generated, not a client field. The mutable checkpoint grants no effect authority;
+evidence and approved answer records remain immutable. Existing atomic writes,
+owner-store transactions, 24-hour retention, 128 KiB record limit and 512-record
+owner quota apply. Checkpoint expiration never exceeds its approved anchor or
+latest retained source. No model prose, imported history or client scope flags
+can construct a checkpoint.
+
+Only authenticated `GET /api/chat/history` that freshly recreates the recorded
+chat may recover context, in strict/pilot mode. Its latest owned native turn must
+carry the exact saved answer anchor. The public history must include that anchor
+as its last assistant message, with no unreadable-history gap. Software checks
+owner/project/chat/schema/expiry, the still-valid approved answer, exact scope and
+all retained raw references by recalculation, including their declared adapter
+versions. Missing, expired, corrupt, mismatched, duplicate or unavailable state
+requires explicit scope; there is no earlier-checkpoint/transcript fallback.
+An imported record lacks the native author binding even if it copies a real owned
+answer ID. Copied projects/chats and older restored transcripts cannot adopt the
+original checkpoint. Current source drift still invalidates current answers;
+historical retained answers remain replayable against their immutable source.
+
+Recovery grants a new live browser-generation binding once, at the first strict
+turn. The original owner/project and ordinary selection/authorization/profile
+checks still apply. Later live generation or selection changes require explicit
+scope. Existing live sessions are not recovered or rebound by history reads.
+History rebuild and scope adoption recheck the session under its lock; a stream
+that starts/completes while this GET prepares recovery is never overwritten.
+Checkpoint/evidence validation takes the network lock before the session lock.
+No new public payload field, SSE frame, provider path or SDK is introduced;
+private checkpoint IDs/state are not exposed by history/export/evidence APIs.
+
+A strict turn first durably revokes any previous checkpoint before scope
+preparation, the pending-turn WAL and model/tool execution. Failure to persist a
+required revocation emits `assurance_context_persistence_failed` and stops before
+execution. Only checked, durably saved final publication replaces it with a new
+checkpoint; aborted/interrupted/failed publication cannot revive older scope.
+Optional final checkpoint retention failure preserves independently checked facts
+but clears carryover. Rewind commits revocation before changing messages; storage
+failure returns a typed error with messages/context intact. Audit history remains
+an honest append-only record and cannot undo this revocation after restart.
+
+Durable parent resume/rebind also revokes the bound episode checkpoint before
+advancing generation or dropping its runtime session. This works when the old
+episode is absent after registry restart. A busy turn or foreign owned/project
+binding refuses the control; revocation write failure preserves parent generation
+and episode. Resume deliberately starts a fresh episode without checked scope;
+rebind requires a fresh explicit scope on the existing episode. Parent goals,
+refs and caller-provided checkpoint fields cannot create assurance authority.
+
+The merged detached-solver path preserves start receipts for ordinary foreground
+calls. An explicitly started sequential durable task retains a bounded solver
+outcome wait (the shared per-tool deadline and cancellation apply), so downstream
+chart/export steps cannot run on a start receipt. A still-running, missing-queue,
+cancelled or contradictory completion receipt leaves the task uncertain instead
+of completed. Full asynchronous durable-task step resumption remains pending.
+
+Promoted queued utterances do not inherit the preceding request's explicit scope.
+They resolve their own text against validated conversation context. A safe repeat
+can retain its exact window/basis, but an unsupported added constraint requires
+software clarification without a provider call or checked numerical blocks. Such
+a refusal revokes the prior checkpoint instead of retaining the original answer
+as the correction's authority.
+
+This recovers bounded checked results and pending software clarification only.
+Arbitrary-language understanding, general task/effect resumption, persistent
+billing reservations and distributed project workers remain outside this scope.
+Default deployment activation is unchanged; independent release/domain approval
+is not claimed.

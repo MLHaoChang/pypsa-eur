@@ -147,6 +147,8 @@ class ChatSession:
     shadow_turn: Any | None = None
     # Server-only bounded checked scope; never populated from model/client history.
     assurance_context: dict[str, Any] | None = None
+    # Private checkpoint binding; never supplied by client histories or imports.
+    assurance_checkpoint_project: str | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
     pending_confirmations: dict[str, PendingConfirmation] = field(default_factory=dict)
     confirmation_decisions: dict[str, str] = field(default_factory=dict)

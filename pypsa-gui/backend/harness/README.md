@@ -14,6 +14,7 @@ harness/
   assurance.py    opt-in checked input/result drafts and publication gate
   assurance_scope.py  typed requested metrics, windows, cost basis and retained/comparison IDs
   assurance_conversation.py  bounded checked-scope carryover, cost clarification and previous-run selection
+  assurance_recovery.py  private owned checkpoints, durable invalidation and native history recovery
   calculations.py  bounded formula/unit registry, raw masks and cost dependencies
   durable.py      bounded network locks and cross-process owner-store transactions
   effects.py      exact confirmed input-write reservations, read-back and reconciliation
@@ -98,6 +99,16 @@ repeat/window/comparison follow-ups. Material cost ambiguity prompts a software
 question with no provider call; only successfully checked results seed context.
 Project/generation/selection changes, rewind, expiration or missing context
 require a fresh explicit scope. Historical repeats keep their retained run.
+A freshly recreated session can recover the same bounded scope from a private
+owned checkpoint tied to its latest native approved history record. Recovery
+revalidates every retained reference and admits one new browser generation;
+subsequent generation changes retain the ordinary refusal. Imported histories,
+gaps, source drift, unavailable checkpoints and unmatched anchors cannot resume
+scope. Strict admission revokes the old checkpoint before execution; rewind
+revokes it before dropping messages. Existing live history reads do not replace
+context. Default/shadow modes do not recover checked context.
+Queued corrections resolve their own checked scope; the previous utterance's
+explicit scope is never forwarded to silently discard new constraints.
 
 Immutable retained evidence and exact same-basis comparison IDs support replay
 without rerunning a model. Optional qualitative interpretations need one bounded
@@ -366,3 +377,9 @@ the normal confirmation gate. Interactive `ask_user` answers are user messages,
 so choice requests run outside durable action steps. Preview application
 confirmation includes the immutable old/new/unit diff while the actual handler
 still receives only its catalogue arguments; chat renders the preview table.
+
+Sequential durable tasks wait for a terminal solver outcome before advancing
+chart/export steps, bounded by the per-tool deadline and cancellation. Ordinary
+foreground solver calls retain the detached start receipt. A start or
+contradictory still-running receipt cannot complete a task; fully asynchronous
+durable-task step resumption remains outside the checked-scope recovery tranche.

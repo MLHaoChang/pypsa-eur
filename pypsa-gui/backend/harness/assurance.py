@@ -808,14 +808,23 @@ class Turn:
         self.approved = record
         return [{"type": "text", "text": text}]
 
+    def suspend_scope(self):
+        from harness.assurance_recovery import suspend
+        from harness.durable import network_guard
+
+        with network_guard(), self.session._lock:
+            suspend(self)
+
     def remember_scope(self):
         from harness.assurance_conversation import remember
+        from harness.assurance_recovery import persist
 
         try:
             from harness.durable import network_guard
 
             with network_guard(), self.session._lock:
                 remember(self)
+                persist(self)
         except (ValueError, KeyError, TypeError, HTTPException, OSError):
             # Snapshot retention is optional; failure cannot seed an older scope.
             with self.session._lock:

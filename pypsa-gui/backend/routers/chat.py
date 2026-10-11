@@ -957,32 +957,43 @@ def chat_history(limit: int = 200,
             # The transcript is also the wrong source mid-turn: it holds only
             # COMPLETED turns, so rebuilding from it discards the in-flight one
             # wholesale even when the clear itself is survivable.
-            turn_in_flight = True
+            recovered_scope = None
+            if sess is not None and session_was_freshly_minted and history_gap == 0:
+                from harness.assurance_recovery import candidate
+                from harness.durable import network_guard
+                # Validate with the network lock before taking the session lock.
+                with network_guard():
+                    recovered_scope = candidate(sess, ctx, last_rec)
             if sess is not None:
                 with sess._lock:
-                    turn_in_flight = sess._turn_in_flight
-            if not turn_in_flight:
-                with sess._lock:
-                    sess.messages.clear()
-                    for rec in turns:
-                        user_text = rec.get("user")
-                        assistant_blocks = rec.get("assistant")
-                        if user_text is not None:
-                            sess.append_history_message({
-                                "role": "user",
-                                "content": chat_service._filter_non_portable_blocks(
-                                    user_text, resolved_profile.wire,
-                                ),
-                            })
-                        if isinstance(assistant_blocks, list):
-                            sess.append_history_message({
-                                "role": "assistant",
-                                "content": chat_service._filter_non_portable_blocks(
-                                    assistant_blocks, resolved_profile.wire,
-                                ),
-                                **({"_approved_answer_id": rec["answer_id"]}
-                                   if rec.get("answer_id") else {}),
-                            })
+                    # A stream can start after this GET minted its session.
+                    fresh_and_idle = not sess.messages and sess.turns_started == 0
+                    if not sess._turn_in_flight and (not session_was_freshly_minted or fresh_and_idle):
+                        sess.messages.clear()
+                        for rec in turns:
+                            user_text = rec.get("user")
+                            assistant_blocks = rec.get("assistant")
+                            if user_text is not None:
+                                sess.append_history_message({
+                                    "role": "user",
+                                    "content": chat_service._filter_non_portable_blocks(
+                                        user_text, resolved_profile.wire,
+                                    ),
+                                })
+                            if isinstance(assistant_blocks, list):
+                                sess.append_history_message({
+                                    "role": "assistant",
+                                    "content": chat_service._filter_non_portable_blocks(
+                                        assistant_blocks, resolved_profile.wire,
+                                    ),
+                                    **({"_approved_answer_id": rec["answer_id"]}
+                                       if rec.get("answer_id") else {}),
+                                })
+                        if recovered_scope is not None:
+                            assistants = [m for m in sess.messages if m.get("role") == "assistant"]
+                            if assistants and assistants[-1].get("_approved_answer_id") == recovered_scope["anchor"]:
+                                sess.assurance_context = recovered_scope
+                                sess.assurance_checkpoint_project = ctx.project_uuid
 
     return {
         # The author key is how THIS route picks a session; it is not part of

@@ -214,6 +214,51 @@ def compact_model_context(
         return _view(after)
 
 
+def _revoke_checked_episode(thread: dict[str, Any]) -> None:
+    """A new parent generation cannot revive an old checked history anchor."""
+    from harness import assurance_recovery as recovery
+    from harness.durable import network_guard
+    from harness.session import ChatSession
+    from services import chat_service
+
+    episode_id = thread.get('episode_id')
+    if not episode_id:
+        return
+    session = chat_service.get_session(episode_id)
+    if session is not None and session.owner_user_id != thread['owner_id']:
+        _refuse('thread_not_found', 'Episode is outside this parent scope.', 404)
+    identifier = recovery.checkpoint_id(
+        thread['owner_id'], thread['project_id'], episode_id,
+    )
+    try:
+        checkpoint_exists = recovery.records._path(thread['owner_id'], identifier).exists()
+    except HTTPException:
+        # Assurance records require UUID actors; legacy non-assurance adapters
+        # cannot have a private checked checkpoint under such an actor.
+        if session is None or session.assurance_context is None:
+            return
+        raise
+    if not checkpoint_exists and (session is None or session.assurance_context is None):
+        return
+    with network_guard():
+        session = chat_service.get_session(episode_id)
+        if session is None:
+            # Revoke the private pointer even after process/registry restart.
+            session = ChatSession(session_id=episode_id, owner_user_id=thread['owner_id'])
+        with session._lock:
+            if session.owner_user_id != thread['owner_id'] or (
+                session.assurance_checkpoint_project
+                and session.assurance_checkpoint_project != thread['project_id']
+            ):
+                _refuse('thread_not_found', 'Episode is outside this parent scope.', 404)
+            if session._turn_in_flight:
+                _refuse('turn_already_in_flight', 'Wait for the episode turn to finish.')
+            if recovery.records._path(thread['owner_id'], identifier).exists():
+                session.assurance_checkpoint_project = thread['project_id']
+                recovery.invalidate(session)
+            session.assurance_context = None
+
+
 def resume_episode(thread_id: str, *, generation: int):
     """Mint a new ChatSession episode; drop the prior episode and its approvals."""
     from services import chat_service
@@ -223,6 +268,7 @@ def resume_episode(thread_id: str, *, generation: int):
         _require_authoritative_replica(thread)
         _require_generation(thread, generation)
         old_episode = thread.get('episode_id')
+        _revoke_checked_episode(thread)
         if old_episode:
             chat_service.drop_session(old_episode)
         new_session = chat_service.get_or_create_session(
@@ -284,6 +330,7 @@ def rebind_scope(thread_id: str, *, generation: int) -> dict[str, Any]:
         path, thread = _read(thread_id)
         _require_authoritative_replica(thread)
         _require_generation(thread, generation)
+        _revoke_checked_episode(thread)
         thread['generation'] = int(thread.get('generation', 1)) + 1
         thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
         thread['updated_at'] = datetime.now(timezone.utc).isoformat()

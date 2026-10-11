@@ -555,6 +555,14 @@
       "surface": "banner",
       "why": "The checked turn lost its project binding before publication, so the answer cannot safely appear for the currently selected project."
     },
+    "assurance_context_persistence_failed": {
+      "surface": "banner",
+      "why": "The prior checked conversation checkpoint could not be durably revoked. The turn or parent control stops before execution or changing generation; retry when storage is available."
+    },
+    "wrong_replica": {
+      "surface": "banner",
+      "why": "The chat or durable parent is pinned to another application worker. Admission refuses this worker before execution and returns the owning replica identity."
+    },
     "assurance_publication_failed": {
       "surface": "banner",
       "why": "The owned answer or public stream could not be committed and verified; no checked answer is available for the turn."

@@ -1176,25 +1176,8 @@ def run_turn(
     _metric_incr("turns")
     _t_start = time.monotonic()
 
-    # #20 — pending-turn WAL. Written HERE, before the body runs, because the
-    # window it protects opens the moment we start talking to the model and
-    # `append_turn` does not fire until the turn has already succeeded. The
-    # context is resolved the same way `_run_turn_body` resolves its P0 pin,
-    # and on the same `next()`, so both see the same project.
     from services.pypsa_service import PyPSAService
     _wal_ctx: ProjectContext | None = None
-    try:
-        _wal_ctx = PyPSAService.get_active_context()
-        begin_pending_turn(_wal_ctx, {
-            "ts": time.time(),
-            "session_id": session.session_id,
-            "model": session.model,
-            # Redacted like the durable record in `append_turn` — this file is
-            # equally on-disk and equally reaches snapshot/copy bundles.
-            "user": _redact_for_persist(message),
-        })
-    except Exception:  # noqa: BLE001 — the WAL must never block the turn
-        logger.exception("chat: failed to open the pending-turn record")
 
     _drain_utt = None
     _drain_lease: str | None = None
@@ -1208,6 +1191,13 @@ def run_turn(
             session.assurance_turn = assurance.Turn(session, PyPSAService.get_active_context())
             from harness.navigation import begin_turn
             begin_turn(session.assurance_turn, binding_generation)
+            try:
+                session.assurance_turn.suspend_scope()
+            except (HTTPException, OSError, ValueError):
+                yield "error", {"error_kind": "assurance_context_persistence_failed",
+                                "message": "Checked conversation state could not be saved. Try again when storage is available."}
+                yield "session_done", {"reason": "assurance_context_persistence_failed"}
+                return
             session.assurance_turn.prepare_operation(checked_operation)
             if not attachment_file_ids and checked_operation is None:
                 session.assurance_turn.prepare_request(message, ui_context, PyPSAService.get_active_context(), checked_scope)
@@ -1219,6 +1209,23 @@ def run_turn(
             except Exception:
                 logger.exception("Shadow scope could not be prepared")
                 session.shadow_turn = None
+        # #20 — pending-turn WAL. Written HERE, before the body runs, because the
+        # window it protects opens the moment we start talking to the model and
+        # `append_turn` does not fire until the turn has already succeeded. The
+        # context is resolved the same way `_run_turn_body` resolves its P0 pin,
+        # and on the same `next()`, so both see the same project.
+        try:
+            _wal_ctx = PyPSAService.get_active_context()
+            begin_pending_turn(_wal_ctx, {
+                "ts": time.time(),
+                "session_id": session.session_id,
+                "model": session.model,
+                # Redacted like the durable record in `append_turn` — this file is
+                # equally on-disk and equally reaches snapshot/copy bundles.
+                "user": _redact_for_persist(message),
+            })
+        except Exception:  # noqa: BLE001 — the WAL must never block the turn
+            logger.exception("chat: failed to open the pending-turn record")
         for event, payload in _run_turn_body(
             session,
             message,
@@ -1238,6 +1245,10 @@ def run_turn(
         with session._lock:
             session._turn_in_flight = False
             session._undo_snapshotted = []
+            if session.assurance_turn is not None and session.assurance_context:
+                approved = session.assurance_turn.approved
+                if not approved or session.assurance_context["anchor"] != approved["answer_id"]:
+                    session.assurance_context = None
             session.assurance_turn = None
             session.shadow_turn = None
         if _admission_lease is not None and _admission_generation is not None:
@@ -1295,7 +1306,9 @@ def run_turn(
             strict_assurance=strict_assurance,
             utterance_id=_drain_utt.utterance_id,
             generation=_drain_utt.generation,
-            checked_scope=checked_scope,
+            # A queued utterance carries its own text, not the preceding
+            # request's explicit scope. Resolve validated carryover afresh.
+            checked_scope=None,
             checked_operation=None,
             binding_generation=binding_generation,
             _held_lease=_drain_lease,
@@ -2494,6 +2507,31 @@ def _dispatch_real_tool_call(
             from harness.solver_bridge import start_detached_solver_monitor
             from harness import job_adapters as ja
             active_ctx = turn_ctx or PyPSAService.get_active_context()
+            if task_ticket is not None:
+                # Sequential task steps cannot advance from a start receipt.
+                # Preserve their outcome wait, bounded by the shared deadline;
+                # ordinary foreground solves still release the turn immediately.
+                deadline = time.monotonic() + harness_budget.PER_TOOL_TIMEOUT_SECONDS
+
+                def _task_solver_done():
+                    with active_ctx.solver_state_lock:
+                        terminal = active_ctx.solver_state.get("status") != "running"
+                    return terminal or time.monotonic() >= deadline
+
+                for progress in solver_log_bridge(
+                    session, active_ctx, poll_interval=0.1,
+                    is_solver_done=_task_solver_done,
+                ):
+                    yield "tool_progress", {
+                        "tool_use_id": tool_use_id, "tool_name": tool_name, **progress,
+                    }
+                with active_ctx.solver_state_lock:
+                    result = {
+                        **(result if isinstance(result, dict) else {"result": result}),
+                        "final_status": active_ctx.solver_state.get("status"),
+                        "objective": active_ctx.solver_state.get("objective"),
+                        "solve_time": active_ctx.solver_state.get("solve_time"),
+                    }
             with active_ctx.solver_state_lock:
                 kind = active_ctx.solver_state.get("kind")
                 status = active_ctx.solver_state.get("status")
@@ -2528,7 +2566,7 @@ def _dispatch_real_tool_call(
                 "running": status == "running",
                 "kind": kind,
                 "monitor": "get_simulation_status",
-                "detached_progress": True,
+                "detached_progress": task_ticket is None or status == "running",
                 **({"job_id": job_id} if job_id else {}),
             }
         except Exception as exc:  # noqa: BLE001 — enrich is best-effort
