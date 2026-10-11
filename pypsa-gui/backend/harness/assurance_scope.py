@@ -20,7 +20,7 @@ class RequestScope(BaseModel):
     version: Literal[1]
     profile: Literal[
         "generator-dispatch/1", "generator-cost/1", "network-linear-cost/1",
-        "storage-unit-dispatch/1",
+        "storage-unit-dispatch/1", "storage-unit-cost/1",
     ]
     project_id: str = Field(min_length=1, max_length=128)
     entity_id: str = Field(min_length=1, max_length=128)
@@ -71,7 +71,7 @@ def from_message(message, project_id, ui_context):
         })
     storage = re.fullmatch(
         r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?key results\s+for\s+"
-        r"storage\s*unit\s+(.{1,128}?)"
+        r"storage\s*unit\s+([^;]{1,128}?)"
         r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
         message.strip(), re.I,
     )
@@ -82,6 +82,28 @@ def from_message(message, project_id, ui_context):
         }
         if storage[2]:
             value.update(start=storage[2], end=storage[3])
+        return validate(value)
+    storage_cost = re.fullmatch(
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?"
+        r"(total cost|key results)\s+for\s+storage\s*unit\s+(.{1,128}?)"
+        r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?"
+        r"(?:;\s*price year\s+(\d{4});\s*annual fixed cost fraction\s+(0(?:\.\d+)?|1(?:\.0+)?))?[.!?]?",
+        message.strip(), re.I,
+    )
+    if storage_cost:
+        value = {
+            "version": 1, "profile": "storage-unit-cost/1",
+            "project_id": project_id, "entity_id": storage_cost[2], "retain": False,
+        }
+        if storage_cost[1].lower() == "total cost":
+            value["metrics"] = ["total_cost"]
+        if storage_cost[3]:
+            value.update(start=storage_cost[3], end=storage_cost[4])
+        if storage_cost[5]:
+            value["cost_basis"] = {
+                "currency": "EUR", "price_year": int(storage_cost[5]),
+                "annual_fixed_cost_fraction": float(storage_cost[6]),
+            }
         return validate(value)
     match = re.fullmatch(
         r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?"

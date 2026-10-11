@@ -140,3 +140,17 @@ formulas. Retained JSON/ZIP, current-source invalidation and native restart
 recovery exercise the existing public seam. UI cases verify digest-approved
 storage text/voice and unavailable-cost completeness. Broader storage economics,
 all-domain adapters and independent review remain pending.
+
+## Bounded StorageUnit economics acceptance
+
+`test_storage_cost_assurance.py` uses independent literals from a real LP:
+20 EUR discharge, 16 EUR holding and 15 EUR allocated fixed cost give 51 EUR
+direct cost; an exact middle window gives 39 EUR. Distinct storage/generator/
+objective weights, static/dynamic prices, signed costs, solved extendable power,
+simultaneous operation, missing dependencies, unsupported cost models and
+overflow exercise the numerical boundary. Zero-baseline and same-basis retained
+comparisons, exports/replay, current-source invalidation, typed cost choices,
+previous distinct runs and native restart recovery exercise public shared paths.
+Fabricated numbers/units/formulas/omitted slots/narrative stay withheld. UI
+digest approval, voice and incomplete unsupported-NPV slots use the same receipt.
+The adapter is opt-in; independent review and broader economics remain pending.

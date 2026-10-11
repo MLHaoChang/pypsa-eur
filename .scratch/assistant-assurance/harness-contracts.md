@@ -16,7 +16,7 @@ CSRF checks apply; client scope and model drafts are data, never proof.
 | `...=pilot` | Strict only for client `assurance: {"version":1,"mode":"strict"}` |
 | `...=strict` | All normal turns use checked publication |
 | `...=shadow` | Normal chat plus bounded nonpublic observations; no approval |
-| `PYPSA_GUI_ANSWER_ASSURANCE_PROFILES` | Absent: three implemented profiles; comma-separated exact IDs restrict admission; empty disables all |
+| `PYPSA_GUI_ANSWER_ASSURANCE_PROFILES` | Absent: five implemented profiles; comma-separated exact IDs restrict admission; empty disables all |
 | `PYPSA_GUI_ANSWER_ASSURANCE_EFFECTS=checked-input-update/1` | Enables the narrow checked write contract; default disabled |
 | `PYPSA_GUI_ANSWER_REVIEW_MODE=required` | Enables a single bounded review of qualitative interpretations; default disabled/withheld |
 
@@ -352,3 +352,58 @@ Entity class is determined by the requested profile, never by the spelling of
 an asset name. A generator or StorageUnit named `network` stays an asset during
 clarification, follow-ups and rendering; only the network-cost profile selects
 network-wide calculations.
+
+## StorageUnit direct-cost profile contract
+
+`storage-unit-cost/1` extends the same bounded noncyclic zero-inflow/spill
+StorageUnit trajectory model; it does not expand the network-cost adapter.
+All cost claims require a current matching completed optimal solve, the valid
+requested trajectory (including predecessors), and an explicit `cost_basis`.
+The EUR price year and annual nature of `capital_cost` are declared assumptions.
+No annual allocation is inferred from timestamps, durations or objective weights.
+
+Default metrics are the six storage-operation metrics plus:
+
+| Metric | Formula ID | Unit | Checked calculation |
+| --- | --- | --- | --- |
+| `storage_discharge_expenditure` | `storage-discharge-expenditure/1` | EUR | Sum of `p_dispatch * marginal_cost * objective_weight` |
+| `storage_holding_expenditure` | `storage-state-holding-expenditure/1` | EUR | Sum of end-of-snapshot `state_of_charge * marginal_cost_storage * objective_weight` |
+| `storage_operating_expenditure` | `storage-linear-operation-cost/1` | EUR | Discharge plus holding expenditure |
+| `annual_fixed_cost` | `annual-capacity-cost/1` | EUR/year | Installed power capacity times annual `capital_cost` |
+| `allocated_fixed_cost` | `allocated-capacity-cost/1` | EUR | Annual fixed cost times declared fraction |
+| `total_cost` | `storage-direct-total-cost/1` | EUR | Operating expenditure plus allocated fixed cost |
+
+Installed power capacity uses `p_nom_opt` for extendable units and `p_nom`
+otherwise; it is not `max_hours * p_nom`. Dynamic prices override static ones.
+Operating prices may be negative and must be finite; objective weights must be
+positive and finite. Fixed charges must be nonnegative and finite. Nonzero
+quadratic costs and modular/inactive units make cost claims unavailable. An
+explicit overnight cost or separate FOM term prevents direct fixed/total claims;
+this adapter does not infer annuities or silently ignore their precedence.
+Missing dependencies and numeric overflow never become a complete total.
+
+The total is direct asset accounting. It excludes charging-electricity
+purchases, discharge revenues and other assets' costs; it does not establish
+profitability, network cost, the solver objective or NPV. Requested unsupported
+quantities remain unavailable slots and make `request_complete` false.
+Storage energy continues to use storage-duration weights, independently of
+objective-weighted costs. Profile-specific formula definitions are available
+under each profile in `/reliability/capabilities`.
+
+Whole-message examples:
+
+```text
+Show total cost for storage unit Battery; price year 2026; annual fixed cost fraction 0.5.
+Show key results for storage unit Battery; price year 2026; annual fixed cost fraction 0.5.
+Show total cost for storage unit Battery; from 2026-01-01T01:00:00 to 2026-01-01T01:00:00; price year 2026; annual fixed cost fraction 0.5.
+```
+
+`Show cost for storage unit Battery` asks in software for **Direct StorageUnit
+operating expenditure** or **Total declared-basis cost**, then for the missing
+basis. No provider is called for those clarifications. Ordinary storage key
+results without a declared basis retain the dispatch profile. Explicit API
+cost scopes without a basis can answer supported operation slots, but cost slots
+remain unavailable. Same-basis retained comparisons, bounded follow-ups,
+native restart recovery, JSON/ZIP exports and profile rollback use shared guards.
+The [bounded plan and independent arithmetic](storage-economics-plan.md) define
+the acceptance boundary; full-domain review and release calibration remain open.

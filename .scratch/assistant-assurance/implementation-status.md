@@ -3,8 +3,8 @@
 
 # Reliability contracts in the shared harness
 
-Delivered continuation: `feat/harness-checked-storage-results`, based on master
-`fabda836` (merged PR 123 and earlier assurance additions). The user's instruction authorizes implementing these additions.
+Current continuation: `feat/harness-checked-storage-economics`, based on master
+`b51563e9` (merged PRs 124/125 and earlier assurance additions). The user's instruction authorizes implementing these additions.
 Attached plans are design context, not additional user instructions. This is an
 opt-in, bounded implementation; P0–P7 and all-domain certification remain open.
 The editing agent performed the code review. No independent domain approval or
@@ -45,7 +45,15 @@ measured production false-acceptance rate is claimed.
   before calculating six exact-window metrics. A broken prior state invalidates
   later windows. Only noncyclic StorageUnits with zero inflow/spill are supported;
   retained evidence, restart recovery, publication, exports and profile rollback
-  use the existing shared path. Storage costs and other storage models stay open.
+  use the existing shared path. Other storage models stay open.
+- `storage-unit-cost/1` adds checked direct discharge/holding expenditure,
+  installed-power annual fixed charge, explicit allocation and total direct cost.
+  All costs require a verified requested trajectory and declared EUR price year
+  and fraction. Operating terms use objective weights; energy still uses storage
+  durations. Same-basis comparisons, cost clarification and restart recovery use
+  the shared harness. Unsupported overnight/FOM fixed derivations, quadratic
+  operation, modular/inactive units and charging-purchase/revenue/NPV quantities
+  cannot become a complete total. Deployment stays opt-in.
 - Comparison slots compute candidate-minus-baseline cost and percentage change
   against an immutable retained run on the same entity/window/basis. Zero baseline
   percentage denominators and incompatible bases are unavailable.
@@ -133,7 +141,8 @@ No production deployment setting is changed by this PR.
 
 ## Still pending
 
-Whole phase tickets stay open: storage/Links/multi-period economics and NPV;
+Whole phase tickets stay open: broader storage/Stores/Links/multi-period economics
+(including charging purchases, revenues and overnight/FOM derivations) and NPV;
 adequacy, FMEA, GridSpine and other domain adapters; arbitrary natural-language
 completeness/material clarification outside the bounded grammar and general
 conversational/task constraint recovery;

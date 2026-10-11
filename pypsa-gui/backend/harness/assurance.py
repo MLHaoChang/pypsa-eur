@@ -395,7 +395,7 @@ class Turn:
             )
         scoped = record["source_kind"] == "scoped_result"
         entity_kind = (
-            "StorageUnit" if self.request_scope["profile"] == "storage-unit-dispatch/1"
+            "StorageUnit" if self.request_scope["profile"] in assurance_metrics.STORAGE_PROFILES
             else "Network" if self.request_scope["profile"] == "network-linear-cost/1" else "Generator"
         )
         lines = [
@@ -404,7 +404,7 @@ class Turn:
             f"({record['scope']['start']} to {record['scope']['end']})."
         ]
         for slot in record["slots"]:
-            definition = assurance_metrics.definition(slot["metric"])
+            definition = assurance_metrics.definition(slot["metric"], self.request_scope["profile"])
             fact = next(
                 (f for f in record["facts"] if f["metric"] == slot["metric"]), None
             )
@@ -840,14 +840,14 @@ class Turn:
             or self.clarification["reason"] != "cost_quantity_required"
         ):
             return None
-        from harness.assurance_conversation import CHOICES
+        from harness.assurance_conversation import cost_choices
 
         return {
             "tool_use_id": self.turn_id,
             "kind": "choice",
             "title": "Cost quantity",
             "question": self.clarification["question"],
-            "options": [{"label": label} for label in CHOICES],
+            "options": [{"label": label} for label in cost_choices(self.pending_scope)],
             "allow_free_text": True,
         }
 
