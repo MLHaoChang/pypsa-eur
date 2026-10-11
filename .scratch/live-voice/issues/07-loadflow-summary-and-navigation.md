@@ -56,7 +56,7 @@ PF give typed `status: unavailable` payloads (`unavailable_kind`), never earlier
 `run_id` (historical) resolves through the issue 06 store and answers
 `historical_loadflow_unavailable` (`depends_on: issue-06 run evidence`) until a `loadflow` section
 exists. Payload is bounded under the 4000-char per-result cap and carries an `evidence_token` for
-cache invalidation. Inventory regenerated (223 tools).
+cache invalidation. Inventory regenerated (224 tools).
 
 Still open: the typed UI navigation (open `results_tab='loadflow'`, same source/window,
 highlight/scroll to a line, ACK with project/run/source/section/generation, hidden-tab route),
