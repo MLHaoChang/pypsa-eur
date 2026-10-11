@@ -209,3 +209,22 @@ tranche. Broader domains, total-cost semantics, retained runs, effects/ACKs,
 report/import assurance, reviewer/browser/performance/calibration and rollout
 remain open. Default checked-answer mode remains disabled. Existing optional
 suite skips do not count as coverage; the original P4 failures now always run.
+
+### Final full validation and GitHub limitation
+
+The initial backend failures are resolved in a fresh full run on the final
+implementation source: **11,037 passed, 269 existing optional/platform skips**,
+no failures (61 minutes). Final full frontend: **3,559 passed / 299 files**.
+The **36 upstream unit tests**, **31 QA drivers**, production build and focused
+**106 assurance cases** also pass. Existing skips are not new assurance coverage.
+
+PR: https://github.com/MLHaoChang/pypsa-eur/pull/112. GitHub's workflow dispatch
+returned HTTP 422, “Actions has been disabled for this repository”; no PR check
+runs were generated. This supersedes the expectation above of final backend CI.
+The user-authorized merge uses the fresh complete local result in the locked Pixi
+test environment, with `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS` and
+`MKL_NUM_THREADS` set to 1 and normal repository merge rules. These last changes
+record validation only; application and test source remain identical to that run.
+No workflow policy or failing check was bypassed. No paid model call or production
+strict-mode activation was performed. Independent/domain and broader rollout
+requirements remain pending.

@@ -115,3 +115,11 @@ All providers are fake or HTTP-mocked; no paid model calls. Current commands,
 counts and limitations are recorded in [coverage ledger](coverage-ledger.md) and
 [handoff](session-handoff.md). Neither an initial RED baseline nor a skipped test
 counts as implemented coverage. Whole phase tickets remain open.
+
+Final complete local validation: **11,037 backend tests passed / 269 existing
+optional-platform skips; 3,559 frontend tests passed / 299 files; 36 upstream
+unit tests passed; all 31 QA drivers passed**. Production build, targeted assurance,
+lint, inventory and documentation checks pass. GitHub refused workflow dispatch
+with HTTP 422 because Actions is disabled for this repository. The user-authorized
+merge therefore uses the fresh complete locked-environment local result and normal
+repository merge rules; no failing check or branch rule is bypassed.

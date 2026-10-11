@@ -214,8 +214,8 @@ corrected without weakening assertions: classify nine emitted error kinds in the
 shared manifest and add arguments for both existing mutating tools to the sweep
 refusal matrix. Targeted rerun: **37 passed / 28 deselected**. Every formerly
 failing backend case passes. Skips in the full run are existing optional/platform
-coverage and are not counted as assurance coverage. Full backend CI must pass
-on the PR's final commit before merge.
+coverage and are not counted as assurance coverage. A fresh complete backend result is required before merge; the final local
+result and GitHub Actions limitation are recorded below.
 
 Full frontend: **3,546 passed / 299 files**. After adding manifest-required banner
 routing/copy, affected ChatPanel selection: **582 passed / 22 files**. Production
@@ -224,3 +224,11 @@ passed** after binding the authenticated identity in the phase-0 in-process
 export journey. Exact commands and limitations are recorded in the handoff. Inventory:
 **220 tools / 14 tabs / 17 panels**. New Python modules and fixtures pass Ruff;
 local documentation links and `git diff --check` pass.
+
+Final full rerun on the implementation source: **11,037 passed / 269 existing
+skips**, no failures. Final full frontend after banner/manifest changes:
+**3,559 passed / 299 files**. All **31 QA drivers** and **36 upstream unit tests**
+pass. The **106-case assurance selection** has no artifact skips. GitHub reports
+Actions disabled for this repository and refused dispatch with HTTP 422; normal
+merge rules apply and the complete locked-environment local run is the validation
+gate. These results do not complete pending domain/reviewer/release requirements.
