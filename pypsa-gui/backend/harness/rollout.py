@@ -27,7 +27,8 @@ def capabilities():
         "version": 1,
         "mode": os.environ.get("PYPSA_GUI_ANSWER_ASSURANCE_MODE", "disabled"),
         "profiles": {
-            p: {"enabled": profile_enabled(p), "default_metrics": list(m)}
+            p: {"enabled": profile_enabled(p), "default_metrics": list(m),
+                "metric_definitions": {metric: calculations.definition(metric, p) for metric in m}}
             for p, m in calculations.PROFILES.items()
         },
         "metric_definitions": calculations.DEFINITIONS,
@@ -44,7 +45,9 @@ def capabilities():
         "independent_domain_approval": False,
         "unsupported": [
             "multi_investment_periods",
-            "storage_and_link_costs",
+            "store_and_link_costs",
+            "storage_charging_purchases_and_revenues",
+            "storage_overnight_annuity_and_separate_fom",
             "nonlinear_costs",
             "NPV",
             "arbitrary_request_completeness",

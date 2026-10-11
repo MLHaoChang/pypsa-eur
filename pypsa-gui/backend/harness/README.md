@@ -17,6 +17,7 @@ harness/
   assurance_recovery.py  private owned checkpoints, durable invalidation and native history recovery
   calculations.py  bounded formula/unit registry, raw masks and cost dependencies
   storage_calculations.py  raw StorageUnit power, state and chronological balance checks
+  storage_costs.py  declared-basis direct StorageUnit discharge, holding and fixed costs
   durable.py      bounded network locks and cross-process owner-store transactions
   effects.py      exact confirmed input-write reservations, read-back and reconciliation
   navigation.py   issued view actions and owner/project/turn/generation-bound browser ACKs
@@ -90,12 +91,17 @@ Borrowed designs under consideration: `docs/superpowers/assessments/2026-10-06-d
 publication through `assurance.py`; the default remains `disabled`. `pilot`
 admits an explicit version-1 strict request. Shared scope and calculation modules
 own project/entity/window/metric constraints, required-slot dispositions, units,
-formulas and coverage. Four bounded profiles support generator dispatch,
-declared-basis generator costs, a linear network subset and StorageUnit dispatch.
+formulas and coverage. Five bounded profiles support generator dispatch,
+declared-basis generator costs, a linear network subset, StorageUnit dispatch
+and declared-basis direct StorageUnit costs.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,
-nonzero inflow/spill and storage costs. Missing cost basis,
+nonzero inflow/spill. The separate storage-cost profile uses objective weights
+for discharge and end-of-snapshot holding expenditure, and an explicit allocation
+of the annual installed-power charge. It excludes charging-electricity purchases,
+revenues, overnight/FOM derivations, nonlinear costs and other storage models.
+Missing cost basis,
 unsupported components and quantities receive unavailable slots. Software renders
 exact checked values; a model cannot replace them with narrative or its own numbers.
 

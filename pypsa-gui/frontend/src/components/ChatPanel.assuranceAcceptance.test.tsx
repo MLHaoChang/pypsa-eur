@@ -158,6 +158,34 @@ describe('implemented assurance publication boundary', () => {
     expect(useChatStore.getState().messages.some(m => m.role === 'tool' && m.content.startsWith('✓'))).toBe(false)
   })
 
+  it.each([true, false])('publishes checked storage economics and voice with completeness %s', async complete => {
+    await start(true)
+    const text = 'StorageUnit Battery: total direct cost 51 EUR. Charging electricity purchases are excluded.'
+      + (complete ? '' : ' NPV is unavailable.')
+    emit('answer_approved', { version: 1, answer_id: 'approved-storage-cost', turn_id: 'turn-1',
+      verdict: complete ? 'passed' : 'limited', receipt: {
+        policy_version: '1', content_sha256: createHash('sha256').update(text).digest('hex'),
+        evidence_ids: ['storage-cost-evidence'], checked_block_ids: ['total_cost'],
+        limitations: ['Declared EUR price year 2026; annual fixed-cost fraction 0.5.'],
+        reviewer_status: 'not_required', request_complete: complete,
+        request_scope: { profile: 'storage-unit-cost/1', entity_id: 'Battery', retain: false,
+          cost_basis: { currency: 'EUR', price_year: 2026, annual_fixed_cost_fraction: 0.5 } },
+        result_slots: [{ metric: 'total_cost', disposition: 'answered', requested_snapshots: 3, valid_snapshots: 3 },
+          ...(!complete ? [{ metric: 'NPV', disposition: 'unavailable', reason: 'unsupported_metric' }] : [])],
+      } })
+    emit('token', { delta: text })
+    emit('turn_done', { answer_id: 'approved-storage-cost' })
+    expect(await screen.findByText(text)).toBeTruthy()
+    await waitFor(() => expect(speechOut.speak).toHaveBeenCalledWith(text))
+    expect(screen.getByText(/storage-unit-cost\/1/)).toBeTruthy()
+    expect(screen.getByText(/Declared EUR price year 2026/)).toBeTruthy()
+    if (complete) expect(screen.getByText('Requested results checked')).toBeTruthy()
+    else {
+      expect(screen.queryByText('Requested results checked')).toBeNull()
+      expect(screen.getByText(/NPV: unavailable/)).toBeTruthy()
+    }
+  })
+
   it('P4/P5: unapproved artifact links are not downloadable from a tool card', async () => {
     await start()
     emit('tool_result', { tool_use_id: 'chart-call', tool_name: 'create_chart', result: {

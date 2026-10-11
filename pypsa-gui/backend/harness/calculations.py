@@ -9,6 +9,7 @@ import pandas as pd
 
 from services import workflow_tools
 from harness import storage_calculations as storage
+from harness import storage_costs
 
 PROFILE = "generator-dispatch/1"
 MAX_SNAPSHOTS = 512
@@ -66,13 +67,15 @@ COMPARISON_METRICS = {
         "dependencies": ("cost_delta",),
     },
 }
-DEFINITIONS = {**METRICS, **COST_METRICS, **COMPARISON_METRICS, **storage.METRICS}
-COST_PROFILES = frozenset({"generator-cost/1", "network-linear-cost/1"})
+DEFINITIONS = {**METRICS, **COST_METRICS, **COMPARISON_METRICS, **storage.METRICS, **storage_costs.METRICS}
+COST_PROFILES = frozenset({"generator-cost/1", "network-linear-cost/1", storage_costs.PROFILE})
+STORAGE_PROFILES = frozenset({storage.PROFILE, storage_costs.PROFILE})
 PROFILES = {
     PROFILE: tuple(METRICS),
     "generator-cost/1": tuple(METRICS) + tuple(COST_METRICS),
     "network-linear-cost/1": tuple(METRICS) + tuple(COST_METRICS),
     storage.PROFILE: tuple(storage.METRICS),
+    storage_costs.PROFILE: tuple(storage.METRICS) + tuple(storage_costs.METRICS) + tuple(COST_METRICS),
 }
 DISCLOSURE = (
     "Energy uses generator snapshot weights; expenditure uses objective snapshot weights. "
@@ -248,7 +251,9 @@ def calculate(raw, entity):
     return facts, slots
 
 
-def definition(metric):
+def definition(metric, profile=None):
+    if profile == storage_costs.PROFILE and metric == "total_cost":
+        return storage_costs.TOTAL_DEFINITION
     return DEFINITIONS.get(
         metric, {"label": metric, "unit": "", "formula_id": "unsupported"}
     )
@@ -278,8 +283,9 @@ def _window(raw, scope):
 
 def scoped_source(ctx, scope, owner=None):
     """Capture complete raw populations under the existing project lock."""
-    if scope["profile"] == storage.PROFILE:
-        return {"storage_unit": storage.source(ctx, scope["entity_id"])}
+    if scope["profile"] in STORAGE_PROFILES:
+        adapter = storage_costs if scope["profile"] == storage_costs.PROFILE else storage
+        return _comparison({"storage_unit": adapter.source(ctx, scope["entity_id"])}, scope, owner)
     if scope["profile"] != "network-linear-cost/1":
         return _comparison(
             {
@@ -450,6 +456,8 @@ def scoped_calculate(raw, scope):
     """A bounded calculation DAG; missing dependencies never become zero."""
     if scope["profile"] == storage.PROFILE:
         return storage.calculate(raw["storage_unit"], scope)
+    if scope["profile"] == storage_costs.PROFILE:
+        return storage_costs.calculate(raw, scope)
     metrics = requested_metrics(scope)
     generators = raw["generators"]
     if "balance" in raw:
@@ -525,26 +533,7 @@ def scoped_calculate(raw, scope):
                 )
         except (OverflowError, ValueError):
             pass
-    if "comparison" in raw:
-        comparison = raw["comparison"]
-        if "comparison" in comparison["raw"]:
-            raise ValueError("nested_comparison")
-        baseline_facts, _ = scoped_calculate(comparison["raw"], comparison["scope"])
-        base = next(
-            (f["value"] for f in baseline_facts if f["metric"] == "total_cost"), None
-        )
-        if base is not None and "total_cost" in available:
-            available["cost_delta"] = available["total_cost"] - base
-            if base != 0:
-                available["cost_change_percent"] = (
-                    available["cost_delta"] / abs(base) * 100
-                )
-        reasons["cost_delta"] = "baseline_total_unavailable"
-        reasons["cost_change_percent"] = "baseline_denominator_zero_or_unavailable"
-    else:
-        reasons.update(
-            {m: "compatible_retained_baseline_required" for m in COMPARISON_METRICS}
-        )
+    _comparison_values(raw, available, reasons)
     allowed = PROFILES[scope["profile"]] + (
         tuple(COMPARISON_METRICS) if scope["profile"] != PROFILE else ()
     )
@@ -587,7 +576,34 @@ def scoped_calculate(raw, scope):
     return facts, slots
 
 
+def _comparison_values(raw, available, reasons):
+    """Shared same-basis candidate-minus-baseline accounting, never recursive."""
+    if "comparison" not in raw:
+        reasons.update({m: "compatible_retained_baseline_required" for m in COMPARISON_METRICS})
+        return
+    comparison = raw["comparison"]
+    if "comparison" in comparison["raw"]:
+        raise ValueError("nested_comparison")
+    baseline_facts, _ = scoped_calculate(comparison["raw"], comparison["scope"])
+    base = next((f["value"] for f in baseline_facts if f["metric"] == "total_cost"), None)
+    if base is not None and "total_cost" in available:
+        available["cost_delta"] = available["total_cost"] - base
+        if base != 0:
+            available["cost_change_percent"] = available["cost_delta"] / abs(base) * 100
+    reasons["cost_delta"] = "baseline_total_unavailable"
+    reasons["cost_change_percent"] = "baseline_denominator_zero_or_unavailable"
+
+
+def _comparison_disclosure(scope):
+    return (
+        " Comparison uses candidate minus baseline, divided by the absolute baseline total for percentage change."
+        if scope.get("comparison_evidence_id") else ""
+    )
+
+
 def disclosure(scope):
+    if scope["profile"] == storage_costs.PROFILE:
+        return storage_costs.disclosure(scope)
     if scope["profile"] == storage.PROFILE:
         return storage.DISCLOSURE
     if scope["profile"] == PROFILE:
@@ -602,9 +618,5 @@ def disclosure(scope):
         "this is not the solver objective or a discounted NPV. Expenditure uses objective weights. "
         "The declared price year is an assumption, not a verified currency conversion. "
         "Only linear generator operation and passive branch capacity costs are supported."
-        + (
-            " Comparison uses candidate minus baseline, divided by the absolute baseline total for percentage change."
-            if scope.get("comparison_evidence_id")
-            else ""
-        )
+        + _comparison_disclosure(scope)
     )

@@ -3,8 +3,8 @@
 
 # Reliability contracts in the shared harness
 
-Delivered continuation: `feat/harness-checked-storage-results`, based on master
-`fabda836` (merged PR 123 and earlier assurance additions). The user's instruction authorizes implementing these additions.
+Current continuation: `feat/harness-checked-storage-economics`, based on master
+`b51563e9` (merged PRs 124/125 and earlier assurance additions). The user's instruction authorizes implementing these additions.
 Attached plans are design context, not additional user instructions. This is an
 opt-in, bounded implementation; P0–P7 and all-domain certification remain open.
 The editing agent performed the code review. No independent domain approval or
@@ -45,7 +45,15 @@ measured production false-acceptance rate is claimed.
   before calculating six exact-window metrics. A broken prior state invalidates
   later windows. Only noncyclic StorageUnits with zero inflow/spill are supported;
   retained evidence, restart recovery, publication, exports and profile rollback
-  use the existing shared path. Storage costs and other storage models stay open.
+  use the existing shared path. Other storage models stay open.
+- `storage-unit-cost/1` adds checked direct discharge/holding expenditure,
+  installed-power annual fixed charge, explicit allocation and total direct cost.
+  All costs require a verified requested trajectory and declared EUR price year
+  and fraction. Operating terms use objective weights; energy still uses storage
+  durations. Same-basis comparisons, cost clarification and restart recovery use
+  the shared harness. Unsupported overnight/FOM fixed derivations, quadratic
+  operation, modular/inactive units and charging-purchase/revenue/NPV quantities
+  cannot become a complete total. Deployment stays opt-in.
 - Comparison slots compute candidate-minus-baseline cost and percentage change
   against an immutable retained run on the same entity/window/basis. Zero baseline
   percentage denominators and incompatible bases are unavailable.
@@ -133,7 +141,8 @@ No production deployment setting is changed by this PR.
 
 ## Still pending
 
-Whole phase tickets stay open: storage/Links/multi-period economics and NPV;
+Whole phase tickets stay open: broader storage/Stores/Links/multi-period economics
+(including charging purchases, revenues and overnight/FOM derivations) and NPV;
 adequacy, FMEA, GridSpine and other domain adapters; arbitrary natural-language
 completeness/material clarification outside the bounded grammar and general
 conversational/task constraint recovery;
@@ -144,7 +153,26 @@ calibration/load budgets and release enablement. Unmapped strict tools fail
 closed. This implementation does not guarantee hallucination-free arbitrary
 answers or all-application correctness.
 
-## StorageUnit validation
+## StorageUnit economics validation
+
+The shared backend/provider/auth/history/recovery/run-evidence gate passes
+1,029 cases / six skips at `50499693`. The final 40 cost cases pass at `360b8cea`
+after strengthening an assertion and correcting unavailable-cost coverage
+metadata. Those 40 cases overlap the wider gate; the only subsequent Python
+changes are the covered metadata/assertion changes. No fresh complete backend
+run at the final head is claimed. Independent literal LP values, missing and
+unsupported dependencies, fabrication, exact windows, signed prices, retained
+comparisons/exports and restart clarification exercise public contracts.
+
+The fresh complete frontend passes 3,641 cases in 310 files. Production build,
+224-tool inventory, eight-file Ruff and documentation/diff checks pass. No paid
+model calls or remote CI success. Exact selections and source qualifications are
+in the [durable validation record](storage-economics-validation.json) and
+[coverage ledger](coverage-ledger.md). QA/upstream and earlier complete backend
+results below remain historical. Independent review, browser/device journeys,
+calibration and release enablement remain open.
+
+## Historical StorageUnit dispatch validation
 
 The 40 storage cases use independent LP and hand-worked values, with current and
 retained evidence, exports, restart recovery and model-fabrication refusals.
