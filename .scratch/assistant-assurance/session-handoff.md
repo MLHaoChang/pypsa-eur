@@ -4,7 +4,7 @@
 # Assistant assurance continuation handoff
 
 Status: current shared harness continuation on `feat/harness-durable-conversation-scope`,
-based on merged PR 118/master `bd761721` (including PR 120). Historical sections below describe earlier
+based on merged PR 121/master `c6b9128f` (including PRs 118 and 120). Historical sections below describe earlier
 states and commands. The current [implementation status](implementation-status.md)
 and [API contracts](harness-contracts.md) supersede them. Independent domain/release
 approval remains pending.
@@ -499,7 +499,7 @@ unmapped domains and independent domain/release certification remain pending.
 
 ## 2026-10-11 — checked conversation recovery continuation
 
-Source `c36a4e1b` integrates master `bd761721` / PR 118. Bounded native-history
+Source `75e6afd1` integrates master `c6b9128f` / PR 121. Bounded native-history
 recovery now uses private owner/project/chat checkpoints, fresh authorization
 and exact approved-anchor/source validation. Required revocation precedes
 execution, rewind and parent resume/rebind; failed or aborted publication
@@ -507,8 +507,29 @@ cannot revive an older checkpoint. Resume starts a new episode without checked
 scope; rebind requires fresh explicit scope. Broader language, domain coverage,
 task/effect/billing memory and independent certification remain open.
 
-New recovery tests contain 53 cases. Initial missing-feature cases failed, then
+New recovery tests contain 55 cases. Initial missing-feature cases failed, then
 passed; merging PR 118 exposed four parent-control cases which failed before
-revocation integration and passed afterward. Complete integrated validation
-is in progress; prior full-suite counts are historical, not results for this
-continuation. Read the latest coverage ledger for final counts and reproduction.
+revocation integration and passed afterward. Final collection has 11,536 backend
+cases in 540 files. Disjoint completed baseline selections plus the corrected
+remainder and six new cases cover that collection: 11,267 passed / 269 skipped.
+This is multi-revision coverage, not a fresh full run at the final head; affected
+recovery/parent/progress/task/workflow seams were rerun against updated master
+(587 passed / two skipped). Both detached solver numerical oracles now wait for
+the actual worker and preserve their original objective/source assertions.
+
+All 31 post-correction QA drivers, 36 upstream tests, updated-master production
+build, inventory and control checks pass. Ruff adds zero findings across 14 touched
+Python files (45 inherited findings). The first updated-master frontend run had
+one existing 1,200-row select-all timeout under concurrent backend load. The
+unchanged full rerun without those backend jobs passes **3,627 tests / 310 files**,
+exit 0, with no unhandled errors (419.28 seconds). Do not count the failed run or
+the older 3,623-test run as current success. Read the latest coverage ledger for exact
+sources, partitions and reproduction; evidence is `/tmp/recovery-*`.
+
+All local gates are complete. Remaining release steps: commit final docs,
+fast-forward the feature branch to this validated integration, push/create PR
+and merge normally after checking its head. The user already authorized
+creation and merge after tests pass. GitHub Actions remains disabled (dispatch
+HTTP 422); do not claim remote CI or bypass branch protection. Broader adapters,
+arbitrary language, distributed runtime, asynchronous task resumption and release
+certification remain future scopes; recovery remains opt-in.

@@ -465,13 +465,13 @@ live-session, bounded and opt-in; durable recovery, arbitrary-language scope,
 unmapped domains and independent domain/release certification remain pending.
 
 
-## 2026-10-11 — bounded checked conversation recovery (validation in progress)
+## 2026-10-11 — bounded checked conversation recovery
 
-The continuation integrates master `bd761721` / PR 118 with the checked scope
+The continuation integrates master `c6b9128f` / PR 121 with the checked scope
 from PR 120. Earlier complete-suite counts above are historical. The editing
 agent reviewed this change; no independent domain certification is claimed.
 
-New `tests/test_conversation_recovery.py` has 53 cases. Public authenticated
+New `tests/test_conversation_recovery.py` has 55 cases. Public authenticated
 history and stream tests use real HiGHS fixtures and fake providers, asserting
 7 MWh exact-window dispatch, 230 EUR declared-basis cost and the distinct
 260 EUR comparison baseline (−30 EUR / approximately −11.54%). Cases cover
@@ -482,7 +482,7 @@ retained-source recalculation and adapter versions, imported/copied/gapped/
 older/peer history, rewind, abort, publication and storage failures, inactive
 modes, private-store exposure and history-versus-stream interleavings.
 
-Twelve cases exercise parent resume/rebind, absent runtime episodes, revocation
+Fourteen cases exercise parent resume/rebind, absent runtime episodes, revocation
 write failures and busy/foreign actor/project boundaries. New episodes start
 without checked scope. Parent refs/goals and user-supplied checkpoints grant no
 assurance authority. These seams do not certify distributed resume, arbitrary
@@ -502,11 +502,25 @@ state; its four behavioral assertions pass. No assertion was relaxed. Earlier
 complete runs were stopped before completion for these corrections; their
 partial results are not counted.
 
-The full frontend passes **3,623 tests / 308 files**, with no unhandled errors; all **31 QA drivers** pass. The production build passes. Inventory matches 220 tools / 14 tabs / 17 panels;
-the control matrix matches 165 controls / 14 families. All 36 upstream tests
-pass. A local documentation check finds no broken links across 21 files and
-152 local links. New-module Ruff checks pass; the touched legacy modules add
-zero findings relative to master `bd761721` (22 existing findings).
+The earlier frontend run passed **3,623 tests / 308 files** before PR 121 and is
+historical. The updated-master focused UI gate passes **21 tests / four files**;
+the production build passes after correcting the same typed `null` no-mismatch
+state in the new detached-progress fixture. The first full updated-master UI run
+had **3,626 passes / one failure**: the existing 1,200-row select-all test exceeded
+its 5-second timeout under concurrent backend load, without reporting an incorrect
+selection. The unchanged fresh complete frontend rerun without those backend jobs
+passes **3,627 tests / 310 files**, exit 0, with no unhandled errors (419.28
+seconds). No assertion or test timeout was relaxed. Its log is
+`/tmp/recovery-integrated-frontend-final.log`; the failed earlier run remains
+recorded in `/tmp/recovery-integrated-frontend-full.log`.
+
+All **31 post-correction QA drivers** and **36 upstream unit tests** pass. Inventory
+matches **220 tools / 14 tabs / 17 panels**; the control matrix matches **165 controls
+/ 14 families**. Documentation has **21 files / 152 local links / zero broken links**.
+Ruff across all **14 touched Python files** adds **zero findings** relative to
+master `c6b9128f` (**45 inherited findings**, including legacy test fixtures).
+The comparison normalizes moved line numbers in diagnostic messages; it retains
+file, rule, diagnostic text, source line and multiplicity.
 
 The first complete backend attempt then exposed the inherited solver-handoff
 regression: sequential tasks advanced chart export before solve completion;
@@ -520,7 +534,55 @@ provider/task/file/progress selection passes **58 cases** (25 warnings, 44.23
 seconds), including original real-HiGHS four-provider delivery assertions.
 Partial stopped runs and setup mistakes are not counted as final validation.
 
-Final complete validation is running from the locked Python environment and
-the repository's frontend dependencies. Final collection will include the nine additional task-outcome cases. Two disjoint whole-file subprocess selections cover their
-union; final counts and exit codes remain pending. Evidence paths use the prefix
-`/tmp/recovery-`; final results will replace this in-progress entry.
+Final collection at `75e6afd1` contains **11,536 backend cases / 540 files**.
+Coverage is **multi-revision**, with affected seams rerun on updated master; this
+is not a fresh complete run at the final head. Original collection at `3c24ba5d`
+had 11,530 cases / 539 files, balanced into two disjoint whole-file selections
+(descending case count and filename tie-break). The first selection stopped on
+the detached-solver conversation oracle; its entire failing file and remaining
+files were rerun after waiting for the real terminal worker. The old failure and
+three partial passes from that file are excluded from final totals.
+
+| Completed selection | Source | Passed | Skipped | Cases |
+| --- | --- | ---: | ---: | ---: |
+| Shard 1 whole-file prefix before the corrected conversation file | `3c24ba5d` | 3,499 | 9 | 3,508 |
+| Shard 2, complete, exit 0 | `3c24ba5d` | 5,509 | 256 | 5,765 |
+| Corrected conversation file and remaining shard-1 files, exit 0 | `75e6afd1` | 2,253 | 4 | 2,257 |
+| Six added owner/foreground cases in the updated-master gate, exit 0 | `a7556fcd` | 6 | 0 | 6 |
+| Unique final collection accounted for | Multiple revisions | **11,267** | **269** | **11,536** |
+
+The coverage check compares final collected node IDs to those three disjoint
+file selections plus six additions: two foreign-owner resume/rebind refusals and
+four foreground-job wait tests. **No final collected case is missing.** Skips
+remain exclusions, not correctness coverage. The baseline runner warned that
+`durable_conversation.py` changed during its run for the owner correction; all
+55 recovery cases and affected parent seams were subsequently rerun serially at
+the integrated head. The updated-master recovery/history/parent/admission/task/
+foreground/workflow gate passes **587 cases / two skips** (454 warnings, 598.70
+seconds), including all additions. The corrected conversation oracle file also
+passes **five cases / four paid-live skips**. Focused gates overlap the table and
+are not added to its totals.
+
+Evidence: `/tmp/recovery-backend-manifest.json`,
+`/tmp/recovery-remainder-manifest.json`,
+`/tmp/recovery-integrated-final-collection.log`,
+`/tmp/recovery-final-validation-result.json`,
+`/tmp/recovery-integrated-backend-selection.json`, and corresponding logs.
+The remainder took 438.08 seconds; shard 2 took 2,852.59 seconds. Earlier stopped
+runs, diagnostic/setup failures and the superseded oracle failure are retained
+in logs and excluded from passed totals.
+
+Reproduce from `pypsa-gui/backend` with the locked Pixi interpreter:
+
+```sh
+XDG_CACHE_HOME=/workspace/scratch/assurance-cache \
+XDG_DATA_HOME=/workspace/scratch/assurance-data MPLCONFIGDIR=/tmp/assurance-mpl \
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+/workspace/pypsa-eur/.pixi/envs/test/bin/python -m pytest tests -q -o addopts='' --tb=short
+```
+
+Run frontend `npm test -- --run` and `npm run build` from `pypsa-gui/frontend`.
+No paid model calls, remote CI success, deployment activation or independent
+domain certification is claimed. Actions dispatch returns HTTP 422 because
+Actions is disabled. General language/domain assurance and asynchronous task
+resumption remain open.

@@ -132,18 +132,27 @@ answers or all-application correctness.
 
 ## Current recovery validation
 
-The recovery continuation includes 53 native history/control cases and nine
+The recovery continuation includes 55 native history/control cases and nine
 solver task-outcome cases. It integrates parent resume/rebind revocation and
 requires a terminal solver outcome before a sequential task advances. Ordinary
 foreground solves remain detached; fully asynchronous task-step recovery remains
 open. The initial full backend run exposed an inherited detached-solver
 regression, which was corrected without relaxing numerical assertions.
 
-The integrated recovery gate passes 474 cases with one recording skip; the
-provider/task/native-file/progress gate passes 58 cases. Complete frontend
-validation passes 3,623 tests in 308 files. Build, upstream, inventory, control
-matrix and documentation checks pass. Final complete backend and post-correction
-QA validation are running; their final counts remain pending in the linked ledger.
+The updated-master recovery/parent/task/progress/workflow gate passes 587 cases
+with two deliberate skips. Final collection contains 11,536 backend cases in 540
+files. Disjoint completed baseline selections, the corrected remaining selection
+and six added cases cover that collection: 11,267 passed and 269 skipped. This is
+multi-revision coverage with affected tests rerun on integrated master, not a fresh
+full run at the final head. The linked ledger records exact partitions and sources.
+
+All 31 post-correction QA drivers and 36 upstream unit tests pass. The updated
+production build, inventory, control matrix and documentation checks pass. Across
+14 touched Python files Ruff adds no findings to master's 45 existing findings.
+The first updated-master frontend run had one existing large-table test timeout;
+the unchanged full rerun without concurrent backend jobs passes all 3,627 tests
+in 310 files, exit 0, without unhandled errors. Earlier 3,623-test frontend
+results are historical.
 
 ## Historical verification
 
