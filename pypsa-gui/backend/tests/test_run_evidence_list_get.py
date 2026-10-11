@@ -301,10 +301,10 @@ def test_failed_publication_leaves_no_partial_run(roots, monkeypatch):
     def boom(*a, **k):
         raise OSError('disk full')
 
-    monkeypatch.setattr(re_.os, 'replace', boom)
-    with pytest.raises(OSError):
-        _publish_completed(root)
-    monkeypatch.undo()
+    with monkeypatch.context() as patch:
+        patch.setattr(re_.os, 'replace', boom)
+        with pytest.raises(OSError):
+            _publish_completed(root)
     assert re_.list_project_runs()['items'] == []
     assert not list((root / 'run_evidence').rglob('*.tmp'))
 
@@ -358,7 +358,7 @@ def test_tools_registered_in_catalogue_dispatchers_and_endpoint_map(name):
     tool = next(t for t in catalogue.TOOLS if t['name'] == name)
     assert tool['input_schema']['type'] == 'object'
     assert callable(chat_tools.DISPATCHERS[name])
-    assert name in catalogue.TOOL_ENDPOINT_MAP
+    assert name in catalogue.TOOL_ROUTES
     assert catalogue.safety_tier_for(name) == 'read'
 
 

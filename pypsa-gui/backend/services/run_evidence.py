@@ -358,12 +358,12 @@ def get_run_evidence(run_id: str, section: str | None = None) -> dict:
             return out
         if record['status'] == 'running':
             _refuse('evidence_unavailable', 'This run has not finished.', run_id=run_id,
-                    section=section, reason='run_not_finished', status='running')
+                    section=section, reason='run_not_finished', run_status='running')
         blob, reason = _section_state(root, record, section)
         if reason is not None:
             _refuse('evidence_unavailable',
                     'The requested evidence is not available for this run.',
-                    run_id=run_id, section=section, reason=reason, status=record['status'],
+                    run_id=run_id, section=section, reason=reason, run_status=record['status'],
                     available_sections=[n for n in declared
                                         if _section_state(root, record, n)[1] is None])
         out['section'] = section
