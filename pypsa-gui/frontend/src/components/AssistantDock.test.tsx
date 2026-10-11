@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useUIStore } from '../store/uiStore'
+import { useChatStore } from '../store/chatStore'
 
 // Mutable counter reachable from inside the vi.mock factory below. Plain
 // top-level `let`/`const` bindings are off-limits there (the factory is
@@ -23,6 +24,11 @@ vi.mock('./ChatPanel', () => ({
     }, [])
     return <div data-testid="chat-panel-stub">chat</div>
   },
+  ConfirmationCard: () => {
+    const pending = useChatStore.getState().pending
+    if (!pending) return null
+    return <div data-testid="companion-confirmation">{pending.tool_name}</div>
+  },
 }))
 
 vi.mock('../hooks/useChatProfiles', () => ({
@@ -42,6 +48,7 @@ describe('AssistantDock', () => {
   beforeEach(() => {
     localStorage.clear()
     useUIStore.setState({ assistantDockOpen: false, assistantEntry: null })
+    useChatStore.setState({ pending: null })
     chatPanelMounts.current = 0
   })
 
@@ -94,6 +101,26 @@ describe('AssistantDock', () => {
   // assistantDockOpen. A same-position remount kills a streaming turn the
   // same way an unmount does (see ChatPanel.tsx's SSE-cleanup effect), so
   // instance identity across a toggle is itself load-bearing.
+  it('shows the pending confirmation beside the companion while the console is closed', () => {
+    useUIStore.setState({ assistantDockOpen: false })
+    useChatStore.setState({
+      pending: {
+        tool_use_id: 'tu1',
+        tool_name: 'update_component',
+        args: { name: 'bus-a' },
+        safety_tier: 'write',
+        confirmation_token: 'tok',
+        ttl_seconds: 60,
+        expires_at_epoch_ms: Date.now() + 60_000,
+      },
+    })
+    render(<AssistantDock />)
+    const card = screen.getByTestId('companion-confirmation')
+    expect(card.textContent).toContain('update_component')
+    expect(screen.getByTestId('assistant-dock-body').className.split(/\s+/)).toContain('hidden')
+    expect(screen.getAllByTestId('companion-confirmation')).toHaveLength(1)
+  })
+
   it('keeps the same ChatPanel instance across a collapse/expand cycle', async () => {
     const user = userEvent.setup()
     render(<AssistantDock />)

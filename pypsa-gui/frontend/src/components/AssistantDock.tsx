@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { PanelRightClose } from 'lucide-react'
 import { useUIStore } from '../store/uiStore'
 import { useChatProfiles, useChatReadiness } from '../hooks/useChatProfiles'
-import ChatPanel from './ChatPanel'
+import ChatPanel, { ConfirmationCard } from './ChatPanel'
 import CompanionLauncher, { type CompanionPresence } from './CompanionLauncher'
 import { KEY_RESULT_TABS, keyResultsWalkRequested, openProjectList, openProjectRequested, startKeyResultsWalk } from './liveWalk'
 import { ErrorBoundary } from './ErrorBoundary'
@@ -203,6 +203,7 @@ export default function AssistantDock() {
           </ErrorBoundary>
         </div>
       </div>
+      {!assistantDockOpen ? <ConfirmationCard /> : null}
       {!assistantDockOpen && (
         <CompanionLauncher
           presence={presence}

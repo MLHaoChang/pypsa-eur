@@ -589,8 +589,9 @@ export function ChoiceCard() {
   )
 }
 
-function ConfirmationCard() {
+export function ConfirmationCard() {
   const pending = useChatStore((s) => s.pending)
+  const assistantDockOpen = useUIStore((s) => s.assistantDockOpen)
   const setPending = useChatStore((s) => s.setPending)
   const setError = useChatStore((s) => s.setError)
   const sessionId = useChatStore((s) => s.sessionId)
@@ -723,7 +724,7 @@ function ConfirmationCard() {
       aria-modal="false"
       aria-labelledby="chat-confirmation-title"
       className="border border-amber-500/60 bg-amber-500/5 rounded p-3 mx-3 my-2"
-      data-testid="chat-confirmation-card"
+      data-testid={assistantDockOpen ? 'chat-confirmation-card' : 'companion-confirmation'}
       data-tool-name={pending.tool_name}
       data-safety-tier={pending.safety_tier}
     >
@@ -3370,7 +3371,7 @@ export default function ChatPanel() {
           )
         })}
         <ChoiceCard />
-        <ConfirmationCard />
+        {assistantDockOpen ? <ConfirmationCard /> : null}
         <div ref={messagesEndRef} />
         </div>
         {showJumpLatest && (
