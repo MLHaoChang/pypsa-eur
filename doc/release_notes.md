@@ -6,7 +6,9 @@
 <!-- Upcoming Release -->
 <!-- ================= -->
 
-* Feat(pypsa-gui): Recover bounded checked-result scope and pending cost clarification from owned private checkpoints after native chat-history rehydration. Revalidate exact sources and bindings; durably revoke context before new strict turns and rewind so interrupted or failed publication cannot revive old scope. Imported/copied/stale history cannot grant recovery; deployment remains opt-in.
+* Feat(pypsa-gui): Recover bounded checked-result scope and pending cost clarification from owned private checkpoints after native chat-history rehydration. Revalidate exact sources and bindings; durably revoke context before new strict turns, rewind and parent resume/rebind so interrupted or failed publication cannot revive old scope. Imported/copied/stale history cannot grant recovery; deployment remains opt-in.
+
+* Fix(pypsa-gui): Require a terminal solver outcome before sequential durable tasks advance to chart/export, with a bounded deadline and cancellation. Solver start or contradictory still-running receipts cannot complete a task; ordinary foreground solves remain detached.
 
 * Feat(pypsa-gui): Preserve exact checked result scope across bounded chat follow-ups and compare with the previous distinct compatible run. Clarify cost quantity and basis in software without a model call; refuse stale bindings and missing context, retain historical selections, and show clarification without a checked-results badge. Context remains live-session and opt-in.
 

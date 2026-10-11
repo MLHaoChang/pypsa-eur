@@ -130,7 +130,22 @@ calibration/load budgets and release enablement. Unmapped strict tools fail
 closed. This implementation does not guarantee hallucination-free arbitrary
 answers or all-application correctness.
 
-## Verification
+## Current recovery validation
+
+The recovery continuation includes 53 native history/control cases and nine
+solver task-outcome cases. It integrates parent resume/rebind revocation and
+requires a terminal solver outcome before a sequential task advances. Ordinary
+foreground solves remain detached; fully asynchronous task-step recovery remains
+open. The initial full backend run exposed an inherited detached-solver
+regression, which was corrected without relaxing numerical assertions.
+
+The integrated recovery gate passes 474 cases with one recording skip; the
+provider/task/native-file/progress gate passes 58 cases. Complete frontend
+validation passes 3,623 tests in 308 files. Build, upstream, inventory, control
+matrix and documentation checks pass. Final complete backend and post-correction
+QA validation are running; their final counts remain pending in the linked ledger.
+
+## Historical verification
 
 Providers are fake or real adapters with HTTP mocks; HiGHS solves the independent
 small numerical fixtures. No paid model calls. The current results and exact

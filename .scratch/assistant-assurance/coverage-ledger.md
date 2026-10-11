@@ -463,3 +463,64 @@ as current validation. No paid model calls or remote CI success is claimed:
 GitHub workflow dispatch confirms Actions is disabled (HTTP 422). Context remains
 live-session, bounded and opt-in; durable recovery, arbitrary-language scope,
 unmapped domains and independent domain/release certification remain pending.
+
+
+## 2026-10-11 — bounded checked conversation recovery (validation in progress)
+
+The continuation integrates master `bd761721` / PR 118 with the checked scope
+from PR 120. Earlier complete-suite counts above are historical. The editing
+agent reviewed this change; no independent domain certification is claimed.
+
+New `tests/test_conversation_recovery.py` has 53 cases. Public authenticated
+history and stream tests use real HiGHS fixtures and fake providers, asserting
+7 MWh exact-window dispatch, 230 EUR declared-basis cost and the distinct
+260 EUR comparison baseline (−30 EUR / approximately −11.54%). Cases cover
+pending quantity/basis clarification, all three released profiles, retained
+historical sources after input edits, one new generation after recovery,
+corrupt/expired/unknown-version/overlarge/duplicate/mismatched checkpoints,
+retained-source recalculation and adapter versions, imported/copied/gapped/
+older/peer history, rewind, abort, publication and storage failures, inactive
+modes, private-store exposure and history-versus-stream interleavings.
+
+Twelve cases exercise parent resume/rebind, absent runtime episodes, revocation
+write failures and busy/foreign actor/project boundaries. New episodes start
+without checked scope. Parent refs/goals and user-supplied checkpoints grant no
+assurance authority. These seams do not certify distributed resume, arbitrary
+language or general task/effect/billing memory.
+
+Before implementation, the initial recovery selection failed five positive
+cases (six refusal cases already passed). It then passed all 11. After merging
+PR 118, four new parent-control cases failed before the integration and passed
+afterward. Intermediate selections overlap the complete suite; no skipped test
+or pending process is counted as a pass.
+
+The integrated harness/history/parent/admission/progress gate passes **474 cases
+with one recording skip** (151 warnings, 366.90 seconds). All four error-registry
+checks pass after adding the new persistence refusal and the inherited worker
+refusal. The inherited Live test fixture now uses the typed `null` no-mismatch
+state; its four behavioral assertions pass. No assertion was relaxed. Earlier
+complete runs were stopped before completion for these corrections; their
+partial results are not counted.
+
+The full frontend passes **3,623 tests / 308 files**, with no unhandled errors; all **31 QA drivers** pass. The production build passes. Inventory matches 220 tools / 14 tabs / 17 panels;
+the control matrix matches 165 controls / 14 families. All 36 upstream tests
+pass. A local documentation check finds no broken links across 21 files and
+152 local links. New-module Ruff checks pass; the touched legacy modules add
+zero findings relative to master `bd761721` (22 existing findings).
+
+The first complete backend attempt then exposed the inherited solver-handoff
+regression: sequential tasks advanced chart export before solve completion;
+standalone native-file tests also assumed the earlier synchronous contract.
+Those numerical assertions remain intact: standalone tests now join the real
+solver and verify terminal success before reading source values. Sequential
+durable tasks retain a bounded outcome wait; ordinary foreground solves remain
+detached. Nine new task-outcome refusal cases cover both solver kinds,
+contradictory receipts, deadline, missing queue and cancellation. The focused
+provider/task/file/progress selection passes **58 cases** (25 warnings, 44.23
+seconds), including original real-HiGHS four-provider delivery assertions.
+Partial stopped runs and setup mistakes are not counted as final validation.
+
+Final complete validation is running from the locked Python environment and
+the repository's frontend dependencies. Final collection will include the nine additional task-outcome cases. Two disjoint whole-file subprocess selections cover their
+union; final counts and exit codes remain pending. Evidence paths use the prefix
+`/tmp/recovery-`; final results will replace this in-progress entry.

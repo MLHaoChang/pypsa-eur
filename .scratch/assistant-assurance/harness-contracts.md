@@ -280,6 +280,13 @@ and episode. Resume deliberately starts a fresh episode without checked scope;
 rebind requires a fresh explicit scope on the existing episode. Parent goals,
 refs and caller-provided checkpoint fields cannot create assurance authority.
 
+The merged detached-solver path preserves start receipts for ordinary foreground
+calls. An explicitly started sequential durable task retains a bounded solver
+outcome wait (the shared per-tool deadline and cancellation apply), so downstream
+chart/export steps cannot run on a start receipt. A still-running, missing-queue,
+cancelled or contradictory completion receipt leaves the task uncertain instead
+of completed. Full asynchronous durable-task step resumption remains pending.
+
 This recovers bounded checked results and pending software clarification only.
 Arbitrary-language understanding, general task/effect resumption, persistent
 billing reservations and distributed project workers remain outside this scope.

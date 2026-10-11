@@ -495,3 +495,20 @@ as current validation. No paid model calls or remote CI success is claimed:
 GitHub workflow dispatch confirms Actions is disabled (HTTP 422). Context remains
 live-session, bounded and opt-in; durable recovery, arbitrary-language scope,
 unmapped domains and independent domain/release certification remain pending.
+
+
+## 2026-10-11 — checked conversation recovery continuation
+
+Source `c36a4e1b` integrates master `bd761721` / PR 118. Bounded native-history
+recovery now uses private owner/project/chat checkpoints, fresh authorization
+and exact approved-anchor/source validation. Required revocation precedes
+execution, rewind and parent resume/rebind; failed or aborted publication
+cannot revive an older checkpoint. Resume starts a new episode without checked
+scope; rebind requires fresh explicit scope. Broader language, domain coverage,
+task/effect/billing memory and independent certification remain open.
+
+New recovery tests contain 53 cases. Initial missing-feature cases failed, then
+passed; merging PR 118 exposed four parent-control cases which failed before
+revocation integration and passed afterward. Complete integrated validation
+is in progress; prior full-suite counts are historical, not results for this
+continuation. Read the latest coverage ledger for final counts and reproduction.

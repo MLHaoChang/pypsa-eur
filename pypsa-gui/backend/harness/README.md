@@ -374,3 +374,9 @@ the normal confirmation gate. Interactive `ask_user` answers are user messages,
 so choice requests run outside durable action steps. Preview application
 confirmation includes the immutable old/new/unit diff while the actual handler
 still receives only its catalogue arguments; chat renders the preview table.
+
+Sequential durable tasks wait for a terminal solver outcome before advancing
+chart/export steps, bounded by the per-tool deadline and cancellation. Ordinary
+foreground solver calls retain the detached start receipt. A start or
+contradictory still-running receipt cannot complete a task; fully asynchronous
+durable-task step resumption remains outside the checked-scope recovery tranche.

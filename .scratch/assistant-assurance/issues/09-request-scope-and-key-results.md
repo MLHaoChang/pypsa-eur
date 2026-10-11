@@ -71,9 +71,10 @@ sources privately per owner/project/chat. Only a freshly recreated session's
 latest native approved history anchor may recover it; imported/copied/stale/gapped
 history and unavailable records require explicit scope. Recovery revalidates the
 exact source/adapter/basis/window and adopts a new browser generation once.
-Strict admission and rewind durably revoke the previous checkpoint; interrupted
+Strict admission, rewind and durable parent resume/rebind revoke the previous checkpoint; interrupted
 or failed publication cannot restore an older scope. Existing live history reads
 cannot replace in-flight or newly completed stream state. No public protocol or
 provider SDK path changes. Scope remains bounded to the released numerical
 profiles and software clarification; broader language and task/effect memory
-remain open. See the checkpoint contract and final validation ledger.
+remain open. Parent goals/refs are not assurance authority; a new parent episode
+starts without checked scope, and a rebind requires fresh explicit scope. See the checkpoint contract and final validation ledger.
