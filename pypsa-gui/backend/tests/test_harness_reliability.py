@@ -430,6 +430,28 @@ def test_issued_navigation_ack_is_authenticated_expiring_and_idempotent(
     assert stored["binding_generation"] == 7
 
 
+def test_networkless_navigation_is_submitted_without_fabricated_revision(
+    baseline, checked
+):
+    from harness import assurance, navigation
+    from harness.session import ChatSession
+
+    ctx = baseline[0]
+    ctx.network = None
+    turn = assurance.Turn(ChatSession(owner_user_id=assurance_records.actor_id()), ctx)
+    navigation.begin_turn(turn, 7)
+    payload = {"kind": "navigate", "panel_id": "gridspine", "tool_use_id": "study-view"}
+    projected = turn.project_frame("ui_event", payload)
+    assert projected == payload
+    assert turn.navigation_actions == []
+    assert (
+        turn.result_projection("ui_open_panel", {}, "study-view")["_assurance"][
+            "outcome"
+        ]
+        == "submitted"
+    )
+
+
 @pytest.mark.parametrize(
     "fault", ["target", "generation", "turn", "revision", "superseded", "expired"]
 )

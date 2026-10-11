@@ -282,3 +282,12 @@ time-series effect disclosure. Final receipt-parser tightening refuses array-sha
 verdict/review-status enums; its focused UI selection passes **26 tests**. New
 module/fixture Ruff checks pass. A fresh final full frontend/build follows this
 last parser change; no broad quantitative-prose or reviewer-proof claim is made.
+
+A new networkless-study navigation case initially failed because ACK issuance
+called the PyPSA fingerprint helper with no network. The shared navigation guard
+now keeps the UI action submitted without inventing a revision or aborting
+navigation. Final navigation selection: **9 passed / 52 deselected**, 7.83 seconds,
+including the new case and all stale/forged ACK cases. This supplements the
+**200-case** focused gate with one new acceptance case. Fresh integrated QA:
+**all 31 drivers passed**; final TypeScript/Vite build passed. Full backend and
+final frontend remain in progress.

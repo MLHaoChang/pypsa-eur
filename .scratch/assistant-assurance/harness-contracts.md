@@ -129,7 +129,8 @@ frames. `binding_generation` is the client's nonnegative integer generation.
 The browser posts exact version/action/turn/generation/target fields to `/ui-ack`
 after the expected visible page/tab mounts. It checks current browser project,
 turn and generation before posting and before rendering completion. Unsupported
-popups/complex navigation remain submitted. `GET /navigation/{id}` reads the
+popups/complex navigation and networkless study contexts remain submitted
+without an issued network-revision ACK. `GET /navigation/{id}` reads the
 owned outcome. Issued ACKs expire after 30 seconds; later turns and newer actions
 supersede them. Mounted-view completion is not displayed-result numerical proof.
 
@@ -137,7 +138,7 @@ supersede them. Mounted-view completion is not displayed-result numerical proof.
 
 A final typed draft may have at most two qualitative interpretations, each
 with a unique ID and citations to checked block IDs. Quantitative claims belong
-in computed blocks; the numeric-prose guard rejects digits, English number words and common
+in computed blocks; the numeric-prose guard rejects digits, common English number words and
 engineering/currency units before review. This lexical guard is not a proof
 against every possible numerical paraphrase; reviewed interpretations remain
 model judgments, separate from deterministically verified facts. One optional

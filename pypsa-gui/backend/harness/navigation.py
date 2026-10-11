@@ -68,6 +68,11 @@ def issue(turn, payload):
     ):
         return None
     ctx = PyPSAService.get_active_context()
+    if ctx.network is None:
+        # Networkless study navigation remains submitted until a study-specific
+        # revision adapter exists. Do not invent a network fingerprint or abort
+        # an otherwise valid navigation while trying to issue its ACK.
+        return None
     oid = str(uuid.uuid4())
     cursor = cursor_id(turn.owner, turn.session.session_id)
     with network_guard(), transaction(records._path(turn.owner, oid).parent):

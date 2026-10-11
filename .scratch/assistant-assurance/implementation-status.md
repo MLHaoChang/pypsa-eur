@@ -47,11 +47,12 @@ measured production false-acceptance rate is claimed.
 - `harness.navigation` issues short-lived owner/project/input/turn/generation
   bound actions. The browser ACKs only after the expected visible page/tab mounts.
   Stale, superseded, mismatched and unissued ACKs are refused. Submission remains
-  submission until that independent browser acknowledgement arrives.
+  submission until that independent browser acknowledgement arrives. Networkless
+  studies navigate without inventing a network-revision ACK.
 - `harness.reviewer` optionally checks at most two qualitative interpretations
   using one bounded, read-only provider call with no tools/history/evidence fetch.
   Deterministic validation runs first; a numeric-prose guard rejects digits,
-  English number words and common units in favor of typed computed blocks.
+  common English number words and units in favor of typed computed blocks.
   Reviewed interpretation is still a model judgment, not deterministic proof. Missing usage, malformed verdicts, tools, timeout or
   review failure withhold interpretations while preserving checked facts.
 - `harness.publication` exports authenticated JSON or ZIP from the same approved

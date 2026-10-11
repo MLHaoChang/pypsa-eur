@@ -316,3 +316,12 @@ override boundary. Receipt enum fields require actual strings, refusing arrays
 that JavaScript would otherwise stringify to valid enum values; affected UI gate:
 **26 passed**. Final full frontend and build must follow that parser change.
 No further functional changes are planned except fixing any observed failures.
+
+A new networkless-study navigation case initially failed because ACK issuance
+called the PyPSA fingerprint helper with no network. The shared navigation guard
+now keeps the UI action submitted without inventing a revision or aborting
+navigation. Final navigation selection: **9 passed / 52 deselected**, 7.83 seconds,
+including the new case and all stale/forged ACK cases. This supplements the
+**200-case** focused gate with one new acceptance case. Fresh integrated QA:
+**all 31 drivers passed**; final TypeScript/Vite build passed. Full backend and
+final frontend remain in progress.
