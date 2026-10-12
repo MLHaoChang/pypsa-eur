@@ -80,6 +80,7 @@ from routers import (
     compare,
     gridspine,
     campus_electrical,
+    geocode,
     guides,
     io,
     library,
@@ -1220,6 +1221,9 @@ app.include_router(uploads.router, prefix="/api/projects", tags=["uploads"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 # In-app guides (P21): static tour / field-help catalogue, read-only.
 app.include_router(guides.router, prefix="/api/guides", tags=["guides"])
+# Address lookup for the map's click-to-place mode (visual layers plan 2,
+# M3): a proxy over `PYPSAGUI_GEOCODER_URL`, 503 until it is set.
+app.include_router(geocode.router, prefix="/api/geocode", tags=["geocode"])
 # Desktop-only. Every route 404s in web mode; see routers/local_settings.py.
 app.include_router(
     local_settings.router, prefix="/api/local-settings", tags=["local-settings"],

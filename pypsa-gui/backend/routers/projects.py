@@ -15,7 +15,7 @@ import zipfile
 from dataclasses import asdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 import local_mode
@@ -3854,6 +3854,151 @@ def put_map_layout(
     except map_layout_service.MapLayoutTooLarge as exc:
         raise HTTPException(413, str(exc)) from exc
     return {"saved": name, "routes": len(layout["routes"]), "bubbles": len(layout["bubbles"])}
+
+
+def _require_active_project(dest: pathlib.Path, name: str) -> None:
+    """
+    The geometry import and the OSM suggestions read the LIVE network (bus
+    coordinates, branch names) — that is the active project's. A project
+    that is not the one open answers 409 rather than a report against the
+    wrong network.
+    """
+    from services import network_lengths
+
+    active = network_lengths.active_project_dir()
+    if active is None or os.path.realpath(active) != os.path.realpath(dest):
+        raise HTTPException(409, f"Open project '{name}' first: geometry is matched against the loaded network.")
+
+
+def _placed_buses_and_branches(n) -> tuple[dict[str, tuple[float, float]], list]:
+    from services.map_geometry_import import Branch
+    from services.network_geometry import _bus_coord
+
+    buses: dict[str, tuple[float, float]] = {}
+    for b in n.buses.index:
+        c = _bus_coord(n, str(b))
+        if c is not None:
+            buses[str(b)] = c
+    branches = []
+    for kind, attr in (("line", "lines"), ("link", "links"), ("tr", "transformers")):
+        df = getattr(n, attr, None)
+        if df is None or df.empty:
+            continue
+        for nm in df.index:
+            branches.append(Branch(kind, str(nm), str(df.at[nm, "bus0"]), str(df.at[nm, "bus1"])))
+    return buses, branches
+
+
+@router.post("/{name}/map_layout/import")
+async def import_map_geometry(
+    name: str,
+    request: Request,
+    apply: bool = False,
+    tolerance_m: float = 50.0,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    Adopt routes and site boundaries from a GeoJSON FeatureCollection or a
+    KML document (plan 2, M3). The body is the file itself (JSON) or a
+    multipart upload under `file`. LineStrings match a branch by `name`, else
+    by their ends snapping to two placed buses within `tolerance_m`; Polygons
+    become sites. The answer is the MATCH REPORT and nothing is written
+    unless `apply=true`: then routes land with `source: 'import'`, sites are
+    appended, and — with "Derive lengths from geometry" on — the applied
+    Lines and Links get their length from the geometry, the rescale previews
+    coming back under `lengths`. Lock-CHECKED on apply (409), 413 over the
+    cap, 422 on malformed GeoJSON/KML.
+    """
+    from services import map_geometry_import as mgi
+    from services import map_layout_service, network_lengths, project_registry, project_settings, site_service
+
+    dest, name = _resolve_project_src(name, db, user)
+    if not dest.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    if not (0 < tolerance_m <= mgi.MAX_TOLERANCE_M):
+        raise HTTPException(422, f"tolerance_m must be between 0 and {mgi.MAX_TOLERANCE_M:g} m")
+    cap_msg = f"Geometry upload exceeds the {mgi.MAX_IMPORT_BYTES // (1024 * 1024)} MB cap."
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > mgi.MAX_IMPORT_BYTES:
+        raise HTTPException(413, cap_msg)
+    filename: str | None = None
+    if request.headers.get("content-type", "").startswith("multipart/form-data"):
+        form = await request.form()
+        upload = form.get("file")
+        if upload is None or not hasattr(upload, "read"):
+            raise HTTPException(422, "Multipart body needs a `file` part holding GeoJSON or KML.")
+        data = await upload.read()
+        filename = getattr(upload, "filename", None)
+    else:
+        data = await request.body()
+    if len(data) > mgi.MAX_IMPORT_BYTES:
+        raise HTTPException(413, cap_msg)
+    try:
+        features = mgi.parse_features(data, filename)
+    except mgi.GeometryImportInvalid as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if apply:
+        # The lock is checked BEFORE anything is matched: a refusal must not
+        # depend on whose network happens to be loaded.
+        lock_project = project_registry.find_project(db, user, name)
+        _check_project_lock(db, lock_project, user)
+
+    _require_active_project(dest, name)
+    n = PyPSAService.get_network()
+    with PyPSAService.get_lock():
+        buses, branches = _placed_buses_and_branches(n)
+    try:
+        existing_ids = {s.get("id") for s in site_service.read_sites(dest)["sites"] if isinstance(s, dict)}
+    except PermissionError as exc:
+        raise _access_denied(dest / site_service.SITES_FILE) from exc
+    report = mgi.match_features(features, branches, buses, tolerance_m=tolerance_m, existing_site_ids=existing_ids)
+    report["applied"] = False
+    if not apply:
+        return report
+    try:
+        written = mgi.apply_report(dest, report)
+    except (map_layout_service.MapLayoutInvalid, site_service.SitesInvalid) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    report["applied"] = True
+    report["written"] = written
+    change_log_service.log(
+        "import", "MapLayout", name,
+        f"Imported geometry: {len(written['routes'])} route(s), {len(written['sites'])} site(s)",
+    )
+    length_keys = [k for k in written["routes"] if k.split(":", 1)[0] in network_lengths.LENGTH_KINDS]
+    if length_keys and project_settings.derive_lengths_enabled(dest):
+        report["lengths"] = network_lengths.apply_lengths_from_geometry(length_keys)
+    return report
+
+
+@router.get("/{name}/map_layout/osm_suggestions")
+def osm_suggestions(
+    name: str,
+    bbox: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    OSM power ways and substations in `bbox` (`min_lng,min_lat,max_lng,max_lat`)
+    for the map's suggestion layer (plan 2, M3). Read-only — the suggestions
+    live in memory with a TTL, never in the project. 422 for a malformed or
+    district-sized bbox; a refusal upstream answers 429 (rate limited) or 504
+    (timed out) with the setting to change, else 502.
+    """
+    from services import osm_suggestions as osm
+
+    src, name = _resolve_project_src(name, db, user)
+    if not src.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    try:
+        box = osm.parse_bbox(bbox)
+    except osm.OsmBboxInvalid as exc:
+        raise HTTPException(422, str(exc)) from exc
+    try:
+        return osm.fetch_suggestions(box)
+    except osm.OsmUnavailable as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
 
 
 def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:
