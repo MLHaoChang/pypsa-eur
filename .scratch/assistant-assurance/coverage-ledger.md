@@ -823,3 +823,29 @@ passes the 15-entry resume/recovery/parent/run/history/pilot/storage gate:
 The 3,686-case complete frontend, build, browser and 229-tool inventory retain
 identical relevant source. Only documentation/validation records change afterward.
 Exact final base/source/selection are in [validation](checked-opt-in-validation.json).
+
+
+## Pilot evaluation validation (2026-10-12)
+
+At `8e5a26d0`, integrated master `bf0b6b5f`, the standalone 53-case gate passes
+with no skips: false acceptance 0/48 adversarial requests, false rejection 0/5
+valid golden requests, incorrect calculations 0/66, supported-slot fulfillment
+66/66 and unchecked publication 0/53. This is the finite labelled suite, not a
+population estimate. Five positive-only cases deliberately selected together
+still produce gate exit 1 with 48 missing required cases. Counter mutation
+regressions require zero errors even when reason strings are empty.
+
+The 79-selection shared/backend/current-master gate passes **1,362 / 12 skipped**,
+800.47 pytest seconds, exit 0. Its evaluation/scorer cases overlap the standalone
+run; it is not a fresh complete backend run. Fresh complete frontend passes
+**3,687 / 313 files**, 451.24 seconds; TypeScript/Vite build passes. The incoming
+master island integration passes 31 / zero skipped. Ruff, workflow/task parsing,
+229-tool / 14-tab / 17-panel inventory, docs and diff checks pass. The backend
+control-matrix fixture's generated-date-only rewrite was restored after testing.
+
+See [validation](pilot-evaluation-validation.json) for exact commands, selection,
+source hash, metrics and limits, and [the evaluation runbook](pilot-evaluation-runbook.md).
+No paid inference ran. Live golden evaluation is `pending_opt_in`; qualitative/
+population calibration, broader domain/surface coverage, independent review and
+production release remain pending. The CI job is wired to run/upload the gate;
+no remote CI success is claimed. Only documentation/evidence changes afterward.

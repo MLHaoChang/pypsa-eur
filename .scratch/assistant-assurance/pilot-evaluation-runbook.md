@@ -71,3 +71,5 @@ Without `--live`, live evaluation is explicitly `pending_opt_in`.
 This is a finite-suite acceptance gate, not a population error estimate,
 qualitative calibration or independent engineering approval. Broader language,
 domain/browser/voice/report coverage and production release remain pending.
+
+See the committed [validation record](pilot-evaluation-validation.json) for the first integrated run and its explicit remaining scope.
