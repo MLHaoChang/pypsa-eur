@@ -68,7 +68,12 @@ import main
 
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _LOCK_PRIMITIVES = frozenset({"_check_project_lock", "_enforce_project_lock"})
-_LOCK_ATTR_PRIMITIVES = frozenset({"project_locks.get_lock"})
+# The same two primitives reached as `projects.<name>` (a function-local
+# `from routers import projects`), as `run_sensitivity_sweep` does.
+_LOCK_ATTR_PRIMITIVES = frozenset({
+    "project_locks.get_lock",
+    "projects._check_project_lock", "projects._enforce_project_lock",
+})
 _OUR_MODULES = ("routers.", "services.")
 # Any canonical uuid: `_foreign_lock_gate_exempt` matches REAL request paths,
 # and its job-scoped patterns are anchored to the dashed-uuid shape.
