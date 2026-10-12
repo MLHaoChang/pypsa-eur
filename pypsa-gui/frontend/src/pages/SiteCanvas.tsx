@@ -17,17 +17,28 @@
 // Frames. Everything in the scene is metres east/north of the SITE ORIGIN
 // (the boundary's stored centroid); the layout is built in that frame.
 //
+// Distances (S3, owner decision O1). Every member branch's site distance —
+// along its map route, else Manhattan × the routing factor — is computed
+// once per layout (`site3d/siteDistances.ts`), shown on its hover label and
+// in the results readout, and its flow chevrons run along the route. With
+// the project's "Derive lengths from geometry" on, a placement change that
+// moves either end of a branch writes a straight two-point `site` route
+// into the map document (never over a route the user drew) and queues the
+// branch's length to follow once that PUT has landed, exactly as a route
+// edit on the map does; the rescale previews reach the same dialog host.
+//
 // This module is loaded lazily (App.tsx) and is the only importer of three.js
 // (and of the site3d modules that import it).
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls, Line, PivotControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { networkApi } from '../api/network'
+import { projectsApi } from '../api/projects'
 import { busLatLng } from '../utils/geo'
 import { tileRangeAround, mosaicExtent, zoomFor, tileCount, fromLocal, type LngLat, type LocalExtent } from '../site3d/geo'
 import { buildGroundMosaic, ESRI_ATTRIBUTION } from '../site3d/imagery'
@@ -65,8 +76,14 @@ import { placementFindings, findingKeys } from '../site3d/placementCheck'
 import { usePlacementFindings } from '../site3d/placementFindingsStore'
 import SiteLayoutFindings from '../components/SiteLayoutFindings'
 import SiteEmptyState from '../components/SiteEmptyState'
-import type { Bus } from '../api/types'
+import type { Bus, ProjectInfo } from '../api/types'
 import type { Site, SiteContext } from '../site3d/types'
+import { queueLengthFromGeometry, setLengthsDerivedSink, useMapLayoutLifecycle, useMapLayoutStore } from './mapLayoutStore'
+import {
+  affectedBranches, distanceLabel, distanceTitle, edgeKeyOf, flowAnchorsAlong, siteDistances, siteRoutePoints, yardsOf,
+  type SiteDistance, type XY,
+} from '../site3d/siteDistances'
+import { applyLengthsDerived } from '../utils/lengthsDerived'
 
 /** The one empty list the component queries fall back to (stable identity). */
 const NONE: never[] = []
@@ -96,8 +113,10 @@ function geometrySignature(o: SiteObject): string {
  * outside-the-boundary warning glow through the emissive channel only
  * (`emissiveFor`); vertex colours keep each part's own colour.
  */
-const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hovered, outside, warn, pivot, onHover, onSelect }: {
+const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hovered, outside, warn, pivot, flowPath = null, onHover, onSelect }: {
   obj: SiteObject
+  /** A branch's map route in site metres (S3): its flow chevrons run along it instead of its own anchor. */
+  flowPath?: XY[] | null
   selected: boolean
   hovered: boolean
   /** The red outline: sticks out of the site boundary (fit check, D9) or stands inside a keep-out (S2). */
@@ -129,8 +148,11 @@ const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hover
   const glow = emissiveFor({ selected, hovered, outside, warn }, obj.color)
   // The results layer drives this group per frame (gauge, glow, spin, flow).
   const groupRef = useRef<THREE.Group>(null)
-  const registered = useMemo(() => ({ type: obj.type, name: obj.name, kind: obj.kind, bus: obj.bus, color: obj.color, anchors: obj.anchors }),
-    [obj.type, obj.name, obj.kind, obj.bus, obj.color, obj.anchors])
+  // The flow anchor along the route, in the object's frame — computed when the layout or the route changes, never per frame.
+  const anchors = useMemo(() => flowAnchorsAlong(obj, flowPath),
+    [obj.anchors, flowPath, obj.origin[0], obj.origin[1], obj.heading]) // eslint-disable-line react-hooks/exhaustive-deps
+  const registered = useMemo(() => ({ type: obj.type, name: obj.name, kind: obj.kind, bus: obj.bus, color: obj.color, anchors }),
+    [obj.type, obj.name, obj.kind, obj.bus, obj.color, anchors])
   useRegisterObject(objectKey(obj), groupRef, registered, selected || hovered || outside || warn)
   const material = (
     <meshStandardMaterial vertexColors emissive={glow.color} emissiveIntensity={glow.intensity} roughness={0.7} metalness={0.1} />
@@ -168,10 +190,18 @@ const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hover
   )
 }, (a, b) =>
   a.selected === b.selected && a.hovered === b.hovered && a.outside === b.outside && a.warn === b.warn && a.pivot === b.pivot &&
-  a.onHover === b.onHover && a.onSelect === b.onSelect &&
+  a.onHover === b.onHover && a.onSelect === b.onSelect && samePath(a.flowPath, b.flowPath) &&
   // The same object if the layout rebuilt it with the same content and place.
   (a.obj === b.obj || (objectKey(a.obj) === objectKey(b.obj) && a.obj.origin[0] === b.obj.origin[0] && a.obj.origin[1] === b.obj.origin[1] &&
     a.obj.heading === b.obj.heading && a.obj.elevation === b.obj.elevation && a.obj.summary === b.obj.summary && geometrySignature(a.obj) === geometrySignature(b.obj))))
+
+/** The same flow path (by content: the layout hands out new arrays each build). */
+function samePath(a: XY[] | null | undefined, b: XY[] | null | undefined): boolean {
+  if (a === b) return true
+  if (!a || !b || a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i][0] !== b[i][0] || a[i][1] !== b[i][1]) return false
+  return true
+}
 
 // ── Hover / selection labels: plain DOM over the canvas ──────────────────────
 //
@@ -781,6 +811,49 @@ function SiteCanvas() {
   useEffect(() => () => { hillshadeTexture?.dispose() }, [hillshadeTexture])
   const groundTexture = mode === 'imagery' ? texture : mode === 'hillshade' ? hillshadeTexture : null
 
+  // ── Site distances (S3) ──────────────────────────────────────────────────
+  // The map document holds the routes; the lifecycle loads it (and flushes a
+  // pending write when the view closes), the distances follow it and the layout.
+  useMapLayoutLifecycle(currentProject)
+  const mapDoc = useMapLayoutStore(s => s.docFor(currentProject))
+  const setSiteRoute = useMapLayoutStore(s => s.setSiteRoute)
+  const distances = useMemo(
+    () => (siteOrigin ? siteDistances(objects, mapDoc.routes, siteOrigin) : new Map<string, SiteDistance>()),
+    [objects, mapDoc, siteOrigin],
+  )
+  const distanceOf = (o: SiteObject): SiteDistance | undefined => { const k = edgeKeyOf(o); return k ? distances.get(k) : undefined }
+  // The project setting (metadata.json, through the list query every project
+  // surface shares); every derivation's result goes where the map's go.
+  const qc = useQueryClient()
+  const { data: projects = [] } = useQuery({
+    queryKey: ['projects'], queryFn: () => projectsApi.list(), staleTime: 30_000, enabled: !!currentProject,
+  })
+  const deriveLengths = (projects as ProjectInfo[]).find(p => p.name === currentProject)?.settings?.derive_lengths_from_geometry ?? false
+  useEffect(() => {
+    setLengthsDerivedSink((_project, r) => applyLengthsDerived(qc, r, 'site geometry'))
+    return () => setLengthsDerivedSink(null)
+  }, [qc])
+  // A placement change (a gizmo drag settling, Arrange, Arrange all) notes the
+  // keys it wrote; once the layout has rebuilt from them, every member branch
+  // at a moved end gets its straight site route — unless the user drew one —
+  // and, with the setting on, its length follows after the PUT. A transformer
+  // gets the route (the map shows it) and no length (PyPSA has none).
+  const movedKeys = useRef(new Set<string>())
+  const notePlacementChange = useCallback((keys: Iterable<string>) => { for (const k of keys) movedKeys.current.add(k) }, [])
+  useEffect(() => {
+    if (movedKeys.current.size === 0 || !layout || !siteOrigin) return
+    const moved = movedKeys.current
+    movedKeys.current = new Set()
+    if (!deriveLengths || !currentProject) return
+    const yards = yardsOf(objects)
+    for (const o of affectedBranches(objects, moved)) {
+      const key = edgeKeyOf(o)
+      const pts = siteRoutePoints(o, yards, siteOrigin)
+      if (!key || !pts) continue
+      if (setSiteRoute(currentProject, key, pts) && !key.startsWith('tr:')) queueLengthFromGeometry(currentProject, key)
+    }
+  }, [layout]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const [hovered, setHovered] = useState<string | null>(null)
   // Stable, so the memoised object meshes re-render only when their own props change.
   const onSelectObject = useCallback((obj: SiteObject) => setSelectedComponent({ type: obj.type, name: obj.name }), [setSelectedComponent])
@@ -859,6 +932,7 @@ function SiteCanvas() {
               outside={redSet.has(key)}
               warn={amberSet.has(key)}
               pivot={isSelected}
+              flowPath={distanceOf(o)?.path ?? null}
               onHover={setHovered}
               onSelect={onSelectObject}
             />
@@ -874,7 +948,7 @@ function SiteCanvas() {
             <group key={`lift:${key}`} position={[0, lift, 0]}>
               {/* An object on a roof follows its hall; it has no placement of its own to move. */}
               <SelectedPivot obj={o} enabled={!readOnly && !o.elevation}
-                onCommit={p => setPlacement(currentProject, site.id, key, p)}>
+                onCommit={p => { setPlacement(currentProject, site.id, key, p); notePlacementChange([key]) }}>
                 {mesh}
               </SelectedPivot>
             </group>
@@ -906,6 +980,8 @@ function SiteCanvas() {
               style={{ visibility: 'hidden' }}>
               <div className="font-semibold">{o.name}{fit.outside.includes(key) ? <span className="ml-2 text-[10px] text-accent">outside the boundary</span> : null}</div>
               <div className="text-muted">{o.summary}</div>
+              {/* A branch's site distance (S3): "TR1 → Campus 33 kV · 86 m". */}
+              {(() => { const d = distanceOf(o); return d ? <div data-testid="site-distance" className="text-muted" title={distanceTitle(d)}>{distanceLabel(o, d)}</div> : null })()}
               {/* The layout findings about this object, in words (S2: never outline-only). */}
               {findings.filter(f => f.key === key && f.kind !== 'outsideBoundary').map(f => (
                 <div key={`${f.kind}:${f.other ?? ''}`} className="text-[10px] text-accent">{f.message}</div>
@@ -930,13 +1006,19 @@ function SiteCanvas() {
           dispatchFresh={solved}
           selectedPlacedKey={selectedPlacedKey}
           canArrange={allLoaded}
-          onArrange={() => arrangeAll(currentProject, site.id, objects.filter(o => !o.elevation).map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading })), layout.orphans)}
+          onArrange={() => {
+            const placed = objects.filter(o => !o.elevation).map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading }))
+            arrangeAll(currentProject, site.id, placed, layout.orphans)
+            notePlacementChange(placed.map(p => p.key))
+          }}
           placedCount={layout.placed.length}
           onArrangeAll={() => {
             // Everything by the rules, as if nothing had ever been moved: the
             // layout rebuilt with no placements, written as the new placements.
             const fresh = buildSiteLayout({ buses: memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, busCarrier, sizing })
-            rearrangeAll(currentProject, site.id, fresh.objects.filter(o => !o.elevation).map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading })))
+            const placed = fresh.objects.filter(o => !o.elevation).map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading }))
+            rearrangeAll(currentProject, site.id, placed)
+            notePlacementChange(placed.map(p => p.key))
           }}
           onResetPlacement={() => { if (selectedPlacedKey) removePlacement(currentProject, site.id, selectedPlacedKey) }}
         />
@@ -949,7 +1031,7 @@ function SiteCanvas() {
             not hover-only). In this column it never covers the control strip;
             collapsed by default in a narrow pane so it does not cover the scene. */}
         <div className="w-[min(22rem,100%)]">
-          <SiteResultsReadout store={resultsStore} objects={objects} />
+          <SiteResultsReadout store={resultsStore} objects={objects} distances={distances} />
         </div>
       </div>
 

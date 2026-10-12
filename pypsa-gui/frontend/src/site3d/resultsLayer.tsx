@@ -12,7 +12,8 @@
 //  - spin: each parametric rotor group, and each hero blade instance, about
 //    its own hub;
 //  - flow: chevrons along the flow anchor, owner side → far side (or back),
-//    in the loading band's colour.
+//    in the loading band's colour — along the anchor's `via` polyline when
+//    the branch has a map route (S3), else its own straight segment.
 // Gauges and chevrons are added to the object's group imperatively and
 // marked as decorations, so the glow skips them.
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
@@ -21,7 +22,7 @@ import * as THREE from 'three'
 import type { Anchors } from './templates'
 import { toScene } from './scene'
 import { siteVisuals, type Visual } from './resultStyle'
-import { anchorsSignature, chevronPath, gaugeBar, resultGlow } from './resultsDecor'
+import { anchorsSignature, chevronPolyline, gaugeBar, polylineLength, resultGlow } from './resultsDecor'
 import { easeTowards, motionFor, rotorStep, useReducedMotion } from './motion'
 import type { ResultsStore } from './resultsStore'
 import type { SiteResults } from './useSiteResults'
@@ -57,7 +58,11 @@ export function useRegisterObject(key: string, group: React.RefObject<THREE.Grou
 // ── Decorations ─────────────────────────────────────────────────────────────
 
 const DECOR = 'site3dDecor'
+/** Chevrons on a flow path: four on an object's own anchor, one more per 12 m of a route, at most 24. */
 const CHEVRONS = 4
+const CHEVRON_PITCH_M = 12
+const MAX_CHEVRONS = 24
+const chevronCount = (lengthM: number): number => Math.max(CHEVRONS, Math.min(MAX_CHEVRONS, Math.round(lengthM / CHEVRON_PITCH_M)))
 const GAUGE_TRACK = '#1f2937'
 
 interface Decor {
@@ -69,8 +74,8 @@ interface Decor {
   flow: THREE.Group | null
   chevrons: THREE.Mesh<THREE.ShapeGeometry, THREE.MeshStandardMaterial>[]
   chevronColor: string
-  from: [number, number, number]
-  to: [number, number, number]
+  /** The flow path in the group's frame (scene axes): two points, or the route's polyline. */
+  path: [number, number, number][]
 }
 
 const mark = <T extends THREE.Object3D>(o: T): T => { o.traverse(c => { c.userData[DECOR] = true }); return o }
@@ -85,7 +90,7 @@ function arrowhead(size: number): THREE.ShapeGeometry {
 }
 
 function makeDecor(group: THREE.Group, anchors: Anchors | undefined): Decor {
-  const d: Decor = { sig: anchorsSignature(anchors), gauge: null, gaugeFill: null, gaugeWidth: 0, gaugeColor: '', flow: null, chevrons: [], chevronColor: '', from: [0, 0, 0], to: [0, 0, 0] }
+  const d: Decor = { sig: anchorsSignature(anchors), gauge: null, gaugeFill: null, gaugeWidth: 0, gaugeColor: '', flow: null, chevrons: [], chevronColor: '', path: [] }
   const fill = anchors?.fill
   if (fill) {
     const [w, depth, h] = fill.size
@@ -99,11 +104,12 @@ function makeDecor(group: THREE.Group, anchors: Anchors | undefined): Decor {
   }
   const flow = anchors?.flow
   if (flow) {
-    d.from = toScene(...flow.from); d.to = toScene(...flow.to)
+    d.path = [flow.from, ...(flow.via ?? []), flow.to].map(p => toScene(...p))
     const g = new THREE.Group(); g.name = 'flow'; g.visible = false
-    const len = Math.hypot(d.to[0] - d.from[0], d.to[1] - d.from[1], d.to[2] - d.from[2])
-    const geom = arrowhead(Math.max(0.6, len / 10))
-    for (let k = 0; k < CHEVRONS; k++) {
+    const len = polylineLength(d.path)
+    // Arrowheads grow with a short anchor and are capped on a long route (a 200 m run must not carry 20 m arrows).
+    const geom = arrowhead(Math.min(3, Math.max(0.6, len / 10)))
+    for (let k = 0; k < chevronCount(len); k++) {
       const c = new THREE.Mesh(k === 0 ? geom : geom.clone(), new THREE.MeshStandardMaterial({ color: '#16a34a', emissive: '#16a34a', emissiveIntensity: 0.5, side: THREE.DoubleSide }))
       g.add(c); d.chevrons.push(c)
     }
@@ -264,14 +270,14 @@ export function ResultsLayer({ store, registry, debug }: ResultsLayerProps) {
         if (show) {
           const speed = 0.25 + Math.min(1, (s.loading ?? 50) / 100) * 0.75       // laps per second along the segment
           if (motion.spin) s.phase = (s.phase + speed * dt / 1000) % 1
-          const path = chevronPath(dec.d.from, dec.d.to, s.flow, s.phase, CHEVRONS)
-          const yaw = Math.atan2(-path.heading[2], path.heading[0])                // arrow along +x turned to the heading
+          const path = chevronPolyline(dec.d.path, s.flow, s.phase, dec.d.chevrons.length)
           const color = v?.color ?? '#94a3b8'
           const recolour = color !== dec.d.chevronColor
           dec.d.chevronColor = color
           dec.d.chevrons.forEach((c, k) => {
+            const h = path.headings[k]
             c.position.set(...path.points[k])
-            c.rotation.set(0, yaw, 0)
+            c.rotation.set(0, Math.atan2(-h[2], h[0]), 0)                             // arrow along +x turned to its segment's heading
             if (recolour) { c.material.color.set(color); c.material.emissive.set(color) }
           })
         }
