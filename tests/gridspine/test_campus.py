@@ -161,7 +161,8 @@ def test_inverters_feed_fault_current_up_to_their_k_and_raise_the_mv_level():
     assert with_units["MV1"] > without["MV1"]
     sgen = camp.net.sgen.set_index("name")
     assert sgen.at["BESS1", "k"] == 1.2 and sgen.at["PV1", "k"] == 1.1
-    # a genset is screened as a source of 1/x''d times its rated current (ledgered)
+    # the campus net carries a genset as k = 1/x''d; IEC 60909 models it as a
+    # synchronous machine instead (island_sc.machine_net, island plan I5)
     assert sgen.at["GEN1", "k"] == pytest.approx(1 / 0.15)
 
 
@@ -179,7 +180,7 @@ def test_the_units_table_carries_kind_bus_ratings_and_every_value_keeps_its_tag(
     assert p.at[("PCC", "sk_max_mva"), "source"] == "measured"
     assert p.at[("TR1", "vk_percent"), "source"] == "datasheet"
     assert p.at[("BESS1", "k_sc"), "source"] == "assumed"
-    assert set(UNIT_KINDS) == {"load", "bess", "pv", "wind", "genset"}
+    assert set(UNIT_KINDS) == {"load", "bess", "pv", "wind", "genset", "ups"}   # ups: island plan I1
 
 
 def test_the_registry_names_the_grid_and_every_generating_unit_by_kind():

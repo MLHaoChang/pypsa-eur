@@ -61,8 +61,9 @@ DE, TOU = "de_industrial_illustrative", "tou_reference_illustrative"
 
 def _pack():
     from services.library.defaults_pack.loader import load_defaults_pack
+    from services.study.library import PACK_VERSION
 
-    return load_defaults_pack()
+    return load_defaults_pack(PACK_VERSION)  # the study's pin, never the newest
 
 
 def pack_tariff(tariff_id: str, *, settlement: str | None = "h", valid_from: str | None = None

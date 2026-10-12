@@ -134,7 +134,7 @@ def test_rows_21_to_34_follow_with_engine_paths_and_the_pack_rule_as_provenance(
     # production seeds from the pack). The pack's stamp is never the source.
     from services.library.defaults_pack.loader import load_defaults_pack
 
-    stamp = load_defaults_pack().stamp
+    stamp = load_defaults_pack(_L().PACK_VERSION).stamp
     for key in ROWS_21_34:
         if key == "export_series":
             continue                                   # the tariff's own source
@@ -191,7 +191,7 @@ def test_a_numeric_engine_row_is_editable_within_its_domain(defaults):
 def test_the_ledger_version_names_the_pack_version_and_hash(defaults):
     from services.library.defaults_pack.loader import load_defaults_pack
 
-    pack = load_defaults_pack()
+    pack = load_defaults_pack(_L().PACK_VERSION)
     led = _L().seed_ledger(_Q(), _intake(DE), defaults)
     assert led.ledger_version == f"generic-defaults {pack.version} {pack.hash[:12]}"
     assert defaults.version == led.ledger_version

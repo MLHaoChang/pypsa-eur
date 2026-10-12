@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { slidePanelClickShouldClose } from './utils/slidePanelDismiss'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { FailureInfo } from './api/types'
 import AppHeader from './layout/AppHeader'
@@ -11,6 +12,11 @@ import MapModeSwitcher from './components/MapModeSwitcher'
 import SnapshotPicker from './components/SnapshotPicker'
 import TopologyCanvas from './pages/TopologyCanvas'
 import MapCanvas from './pages/MapCanvas'
+// The 3D site view is the only lazily-loaded canvas: three.js and its React
+// bindings are ~300 kB gzipped that a user who never opens it should never
+// download. Vite splits the dynamic import into its own chunk on its own.
+import { useSitesLifecycle } from './site3d/sitesStore'
+const SiteCanvas = React.lazy(() => import('./pages/SiteCanvas'))
 import TimeSeriesManager from './pages/TimeSeriesManager'
 import SolverSettings from './pages/SolverSettings'
 import ModelHorizon from './pages/ModelHorizon'
@@ -206,6 +212,8 @@ export default function App() {
     lastProjectId, lastSavedByProject, markProjectSaved, pruneRecents, recents, setLastProjectId,
     theme, density, compareRailOpen, setCompareRailOpen, uiMode, guidedTourHolds,
   } = useUIStore()
+  // The 3D site sidecar: load per project, persist on unload (WP1, Task 1.5).
+  useSitesLifecycle(currentProject)
 
   // Results + Time Series take the whole main area (see FULL_SCREEN_TABS);
   // every other sidebar tab opens as a half-width panel beside the canvas.
@@ -615,12 +623,7 @@ export default function App() {
   useEffect(() => {
     if (!activeSlidePanel) return
     const onPointerDown = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null
-      if (!target || !document.body.contains(target)) return
-      if (panelRef.current?.contains(target)) return
-      if (target.closest('aside')) return
-      if (target.closest('[data-no-panel-close]')) return
-      setSlidePanel(null)
+      if (slidePanelClickShouldClose(e.target, panelRef.current)) setSlidePanel(null)
     }
     document.addEventListener('mousedown', onPointerDown, true)
     return () => document.removeEventListener('mousedown', onPointerDown, true)
@@ -678,7 +681,13 @@ export default function App() {
                 <ErrorBoundary label="Canvas crashed">
                   {canvasView === 'blank'
                     ? <TopologyCanvas />
-                    : <MapCanvas mode={canvasView} />}
+                    : canvasView === 'site'
+                      ? (
+                        <React.Suspense fallback={<div className="flex h-full items-center justify-center text-[12px] text-muted">Loading 3D view…</div>}>
+                          <SiteCanvas />
+                        </React.Suspense>
+                      )
+                      : <MapCanvas mode={canvasView} />}
                 </ErrorBoundary>
                 {/* Mode switcher floats over whichever canvas is active */}
                 <MapModeSwitcher />
@@ -710,7 +719,9 @@ export default function App() {
                     instead of whitescreening the app, and navigating to another
                     tab or switching project remounts it (clearing the error). */}
                 <ErrorBoundary key={`${activeSlidePanel}-${currentProject ?? ''}`} label="This panel crashed">
-                  <FullPageTab panel={activeSlidePanel} onClose={() => setSlidePanel(null)} />
+                  <div className="flex flex-col flex-1 min-h-0" data-assurance-panel={activeSlidePanel} data-assurance-project={currentProject ?? ''}>
+                    <FullPageTab panel={activeSlidePanel} onClose={() => setSlidePanel(null)} />
+                  </div>
                 </ErrorBoundary>
               </div>
             )}
@@ -724,7 +735,8 @@ export default function App() {
               it must stay on screen while a full-screen tab owns the main
               area, because it is what put that tab there. A direct flex child
               of this row (not nested inside the `flex-1` zone above) so its
-              fixed 380px / 40px width isn't fought over by the flex
+              open width (stored) / zero-width collapsed column (companion is
+              position: fixed) isn't fought over by the flex
               algorithm. */}
           <AssistantDock />
         </div>

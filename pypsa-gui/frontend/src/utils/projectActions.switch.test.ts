@@ -121,17 +121,8 @@ describe('switchToProject on a 409 from activate', () => {
 
 // ── A planning → dynamics study has no network to activate ─────────────────
 //
-// Found by driving the real app in Chromium, which no component test could:
-// a study opened from the Projects page came up as "No project open" with a
-// "Project '<id>' not found" toast. `/activate` hydrates a network context from
-// `network.nc`, and a study deliberately has none — it is a config and a run
-// directory — so the backend 404s for every study, and has since increment 4.
-// It went unnoticed because the ONE path that ever opened a study, the
-// new-project wizard, never calls `/activate`: it sets the current project and
-// opens the study panel directly. So a study could be created and never
-// re-opened. These hold `switchToProject` — which every other entry point uses
-// (the project card, tabs, sidebar, command palette, workspace panel) — to what
-// the wizard does.
+// Opening a networkless study must bind the backend session too: changing
+// only the UI left chat on the previous project's network and tool catalogue.
 
 const STUDY = { id: 's-uuid-1', name: 'Study S', project_kind: 'planning_dynamics' }
 const NETWORK = { id: 'b-uuid-2', name: 'B', project_kind: null }
@@ -142,9 +133,11 @@ const cached = (projects: unknown[]) => ({
 }) as never
 
 describe('switchToProject with a planning → dynamics study', () => {
-  it('opens a study by id without asking the backend to activate a network', async () => {
+  beforeEach(() => { activate.mockResolvedValue({ activated: 'Study S', evicted: [] }) })
+
+  it('binds a study by id before opening its panel', async () => {
     const r = await switchToProject('s-uuid-1', cached([STUDY, NETWORK]))
-    expect(activate).not.toHaveBeenCalled()
+    expect(activate).toHaveBeenCalledWith('s-uuid-1')
     expect(r).toEqual({ status: 'switched' })
     expect(useUIStore.getState().currentProject).toBe('Study S')
     expect(useUIStore.getState().activeSlidePanel).toBe('gridspine')
@@ -152,7 +145,7 @@ describe('switchToProject with a planning → dynamics study', () => {
 
   it('opens a study by name the same way', async () => {
     await switchToProject('Study S', cached([STUDY, NETWORK]))
-    expect(activate).not.toHaveBeenCalled()
+    expect(activate).toHaveBeenCalledWith('s-uuid-1')
     expect(useUIStore.getState().currentProject).toBe('Study S')
   })
 
@@ -162,9 +155,17 @@ describe('switchToProject with a planning → dynamics study', () => {
     list.mockResolvedValue([STUDY, NETWORK])
     const r = await switchToProject('s-uuid-1', qc)
     expect(list).toHaveBeenCalledTimes(1)
-    expect(activate).not.toHaveBeenCalled()
+    expect(activate).toHaveBeenCalledWith('s-uuid-1')
     expect(r).toEqual({ status: 'switched' })
     expect(useUIStore.getState().currentProject).toBe('Study S')
+  })
+
+  it('keeps the prior UI binding when study activation is refused', async () => {
+    useUIStore.setState({ currentProject: 'Study Old' })
+    activate.mockRejectedValue(reject409({ error_kind: 'solver_in_flight' }))
+    const old = { id: 'old', name: 'Study Old', project_kind: 'planning_dynamics' }
+    expect(await switchToProject('s-uuid-1', cached([STUDY, old]))).toEqual({ status: 'busy-solve' })
+    expect(useUIStore.getState().currentProject).toBe('Study Old')
   })
 
   it("does not save a network under a study's name on the way out", async () => {

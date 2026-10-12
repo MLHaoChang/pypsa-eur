@@ -18,6 +18,10 @@ keeps everything under ``<project dir>/campus_electrical/``:
     The project's copy of the asset library (plan C9), once the user has saved
     one. Until then the shipped default is used. Validated by the engine's
     loader before it is kept.
+``run_milp/``
+    The joint optimisation's run directory (plan C12): the least-cost run's
+    inputs, copied, and the MILP's investment files. The least-cost files in
+    ``run/`` are never written by it.
 ``grid_codes/``
     The project's own grid codes: uploaded documents, drafts and published
     profiles (``services/campus_grid_code_service.py``, plan C10). A
@@ -38,6 +42,20 @@ The functions:
   The library a run used is kept as ``run/campus_assets_used.yaml``, so a
   later change to the library flags the results as stale.
 * ``get_library``, ``save_library``, ``reset_library``: the asset library.
+* ``extra_owner_assets``: what the last investment run bought, as the extra
+  owner assets of the investment case (plan, part three D2), in the shape of the
+  IC's ``ExtraOwnerAsset`` (``services/finance/case.py``, to be added by the IC
+  session). ``campus_study_hash`` identifies the study they come from;
+  ``owner_assets_response`` is the route's body (assets, hash, stale). Read only;
+  ``get_state`` carries only the count, ``owner_assets_count``.
+* ``start_milp_job``, ``milp_job_status``, ``cancel_milp_job``: the joint
+  optimisation (plan C11's MILP) as a background job, in the report job's
+  shape (``services/reports/report_job.py``): one job at a time on a daemon
+  thread, a ``record`` the status route serves without its ``thread`` and
+  ``stop_event``, the stop event honoured between iterations, a slot that
+  refuses a second job. The least-cost run is made first (or reused when it
+  is fresh), in the request, so the thread never reads the NetCDF; the MILP
+  then runs into ``run_milp/``. ``get_state`` carries ``milp``.
 * ``hub_cost``, in ``get_state``: the solved hub's own system cost, from the
   helper the results pages use, for the panel to show beside the electrical
   annualised cost. It never fails the state: when it cannot be computed it is
@@ -49,12 +67,16 @@ unsolved network, a description that does not build, and bad settings are
 422s, each naming what to fix. A pypsa NetCDF read happens under
 ``PyPSAService.get_netcdf_io_lock()``, and the run under a per-project lock.
 """
+import contextvars
 import hashlib
 import json
+import logging
 import math
 import os
+import shutil
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -91,6 +113,7 @@ NETWORK_FILE = "network.nc"
 GRID_CODES_SUBDIR = "grid_codes"
 LIBRARY_FILE = "campus_assets.yaml"
 USED_LIBRARY_FILE = "campus_assets_used.yaml"
+COST_BASIS_FILE = "campus_cost_basis.json"
 SOLVER_CONFIG_FILE = "solver_config.json"
 MAX_CAMPUS_BYTES = 1_000_000
 MAX_LIBRARY_BYTES = 1_000_000
@@ -99,6 +122,7 @@ DEFAULTS = {"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce", "margin": 0.2, "n_mi
 
 _LOCKS: dict = {}
 _LOCKS_GUARD = threading.Lock()
+logger = logging.getLogger(__name__)
 
 
 def _lock(path: Path) -> threading.Lock:
@@ -206,6 +230,10 @@ def _results(run: Path):
         # Who buys the PCC switchgear: {"pcc_switchgear": "campus" | "grid_operator"}.
         "scope": (json.loads((run / cs.INVEST_SCOPE_JSON).read_text())
                   if investment is not None and (run / cs.INVEST_SCOPE_JSON).is_file() else None),
+        # Part three D1a: the rate, money year and currency the costs were annualised on, and where
+        # each came from. None when the run did not invest.
+        "cost_basis": (json.loads((run / COST_BASIS_FILE).read_text())
+                       if investment is not None and (run / COST_BASIS_FILE).is_file() else None),
     }
 
 
@@ -223,12 +251,101 @@ def _effective_library(d: Path) -> Path:
     return own if own.is_file() else Path(cs.ASSET_LIBRARY_PATH)
 
 
-def _library_stale(d: Path) -> bool:
-    """A run that invested kept the library it used; the results are stale when
-    the library a run would use now is another one. A run that did not invest
-    kept none, and does not depend on the library."""
+# ── the discount rate and the price year come from the project (part three, D1a) ──
+
+FROM_SOLVER_CONFIG = "project solver config"
+FROM_FINANCE_INPUTS = "project finance inputs"
+FROM_LIBRARY = "asset library"
+
+
+def _saved_solver_config(project):
+    """The project's saved solver config, or None when it has none (the
+    default is then not "the project's")."""
+    if not (project_registry.project_dir(project) / SOLVER_CONFIG_FILE).is_file():
+        return None
+    return _solver_config(project)
+
+
+def _money_year(cfg):
+    """``FinanceInputs.currency_year`` of the project's stored finance inputs
+    (``SolverConfig.finance``, the dict ``PUT /api/simulation/finance``
+    validated), or None when there are none or the year is not stated."""
+    fin = getattr(cfg, "finance", None)
+    year = fin.get("currency_year") if isinstance(fin, dict) else None
+    return year if isinstance(year, int) and not isinstance(year, bool) else None
+
+
+def _states_discount_rate(project) -> bool:
+    """Whether the saved solver config file itself holds a ``discount_rate``.
+    The loader fills a missing one with its 0.07 default, which is not a rate
+    the project stated, so it must not replace the library's."""
+    import json
+    try:
+        raw = json.loads((project_registry.project_dir(project) / SOLVER_CONFIG_FILE).read_text())
+    except (OSError, ValueError):
+        return False
+    return isinstance(raw, dict) and "discount_rate" in raw
+
+
+def _project_rate(cfg) -> float:
+    rate = getattr(cfg, "discount_rate", None)
+    if isinstance(rate, bool) or not isinstance(rate, (int, float)) or not 0 <= rate < 1:
+        raise HTTPException(
+            status_code=422,
+            detail=f"the project's discount rate {rate!r} (solver config) must lie in [0, 1) for the campus "
+                   "asset library; change it in the solver settings")
+    return float(rate)
+
+
+def _engine_library(project, d: Path) -> tuple:
+    """``(text, overridden, cost_basis)``: the library a run would hand to the
+    engine now, and what its costs are annualised on.
+
+    The library is the project's copy, else the shipped one. When the project
+    has a saved solver config that states a ``discount_rate``, that rate replaces the library's
+    (the library's own value is a stand-alone default for gridspine-only use);
+    otherwise the library is handed over byte for byte. When the project has
+    finance inputs with a ``currency_year``, that is the price year reported;
+    it is never used to convert a cost: the library's costs stay in the
+    library's price year, with no escalation, and ``price_year_mismatch`` says
+    when the two differ. Raises ``ContractError`` when the library does not load."""
+    path = _effective_library(d)
+    lib = cs.load_asset_library(path)
+    cfg = _saved_solver_config(project)
+    rate, rate_from, text = lib["discount_rate"]["value"], FROM_LIBRARY, path.read_bytes().decode()
+    overridden = cfg is not None and _states_discount_rate(project)
+    if overridden:
+        rate, rate_from = _project_rate(cfg), FROM_SOLVER_CONFIG
+        data = yaml.safe_load(text)
+        data["discount_rate"] = {"value": rate, "source": "assumed", "note": "the project's solver config discount rate"}
+        text = yaml.safe_dump(data, sort_keys=False)
+    year = _money_year(cfg) if cfg is not None else None
+    library_year = lib["price_year"]
+    basis = {"discount_rate": rate, "discount_rate_from": rate_from,
+             "price_year": library_year if year is None else year,
+             "price_year_from": FROM_LIBRARY if year is None else FROM_FINANCE_INPUTS,
+             "library_price_year": library_year,
+             "price_year_mismatch": year is not None and year != library_year,
+             "currency": lib["currency"]}
+    return text, overridden, basis
+
+
+def _library_stale(project, d: Path) -> bool:
+    """A run that invested kept the library it used and the basis it was
+    costed on; the results are stale when the library a run would hand over
+    now, or that basis, is another one. A run that did not invest kept
+    neither, and does not depend on the library. A side file that cannot be
+    read now means a rerun would not reproduce the run, so: stale."""
     used = d / "run" / USED_LIBRARY_FILE
-    return used.is_file() and _sha256_file(_effective_library(d)) != _sha256_file(used)
+    if not used.is_file():
+        return False
+    try:
+        text, _overridden, basis = _engine_library(project, d)
+        kept = d / "run" / COST_BASIS_FILE
+        return (text.encode() != used.read_bytes()
+                or (kept.is_file() and json.loads(kept.read_text()) != basis))
+    except Exception:                                          # noqa: BLE001 - see the docstring
+        return True
 
 
 def _stale(project, d: Path) -> bool:
@@ -241,7 +358,7 @@ def _stale(project, d: Path) -> bool:
     text = yaml.safe_dump(yaml.safe_load(campus.read_text()), sort_keys=False)
     return (hashlib.sha256(text.encode()).hexdigest() != m.get("campus_sha256")
             or _sha256_file(nc) != m.get("network_sha256")
-            or _library_stale(d))
+            or _library_stale(project, d))
 
 
 # ── the hub's own system cost ────────────────────────────────────────────────
@@ -327,6 +444,7 @@ def get_state(project) -> dict:
     results = _results(d / "run")
     cost, reason = hub_cost(project) if results else (None, "no study has run yet")
     return {
+        "owner_assets_count": len(extra_owner_assets(project)),
         "campus_yaml": campus.read_text() if campus.is_file() else None,
         "skipped": json.loads(notes.read_text()) if notes.is_file() else [],
         "profiles": profiles(project),
@@ -335,6 +453,7 @@ def get_state(project) -> dict:
         "stale": bool(results) and _stale(project, d),
         "hub_cost": cost,
         "hub_cost_reason": reason,
+        "milp": _milp_state(project, d),
     }
 
 
@@ -366,9 +485,154 @@ def get_investment(project) -> dict:
         "investment": res["investment"], "cost": res["cost"], "unresolved": res["unresolved"],
         "history": res["history"], "compliance_invested": res["compliance_invested"], "scope": res["scope"],
         "hub_cost": state["hub_cost"], "hub_cost_reason": state["hub_cost_reason"],
-        "library_is_default": _library_text(campus_dir(project))[1],
+        "library_is_default": _library_text(campus_dir(project))[1], "cost_basis": res["cost_basis"],
         "stale": state["stale"], "notes": list(INVESTMENT_NOTES),
     }
+
+
+def _priced(lib: dict) -> dict:
+    """``{library id: (entry, cost field)}`` across all the kinds of a library;
+    the cost field is ``capex_eur_per_km`` for a cable, else ``capex_eur``."""
+    return {e["id"]: (e, "capex_eur_per_km" if "capex_eur_per_km" in e else "capex_eur")
+            for entries in lib.values() if isinstance(entries, list) for e in entries}
+
+
+#: The kinds the investment table writes (``gridspine/static/campus_invest.py``: the item kind of a
+#: candidate, one row per item) mapped to the investment case's vocabulary. Explicit, so that a kind the
+#: engine adds later is refused (422) rather than passed on under a name the IC does not know.
+IC_KIND = {
+    "transformer": "transformer",
+    "cable": "cable",
+    "capacitor_bank": "capacitor_bank",
+    "shunt_reactor": "shunt_reactor",
+    "statcom": "statcom",
+    "switchgear": "switchgear",
+}
+#: ``kind`` to the IC's ``basis``; anything not listed is a ``lump``.
+_BASIS = {"cable": "per_km", "switchgear": "per_bay"}
+OWNER_ASSET_SOURCE = "campus_study"
+
+
+def campus_study_hash(project):
+    """The first 16 hex characters of a sha256 over the files of the last
+    investment run, or None when the project has no investment run. In this
+    order: ``campus_investment.csv``, ``campus_assets_used.yaml``, the run's
+    campus file (``campus.yaml``, what ``prepare_campus`` writes) and, when
+    present, ``campus_cost_basis.json``; each as its file name, a NUL byte and
+    its bytes, so file boundaries are unambiguous. The campus file is hashed
+    when present (a real run always has it). The same for every entry of a
+    run; another study, library, rate or campus gives another one."""
+    require_capacity_expansion(project)
+    run_dir = campus_dir(project) / "run"
+    names = (cs.INVESTMENT_CSV, USED_LIBRARY_FILE, cs.CAMPUS_YAML, COST_BASIS_FILE)
+    if not (run_dir / names[0]).is_file() or not (run_dir / names[1]).is_file():
+        return None
+    h = hashlib.sha256()
+    for name in names:
+        path = run_dir / name
+        if path.is_file():
+            h.update(name.encode() + b"\0" + path.read_bytes())
+    return h.hexdigest()[:16]
+
+
+def extra_owner_assets(project) -> list:
+    """What the last investment run bought, as the extra owner assets of the
+    investment case (IC): one dict per purchased item that is neither existing
+    (sunk) nor unresolved. ``[]`` when the project has no investment run (no
+    study, or a run with ``invest`` off); a project of another kind is refused
+    like every other action here.
+
+    The TOP-LEVEL keys of an entry are exactly the fields of the IC's
+    ``ExtraOwnerAsset`` (``services/finance/case.py``, a frozen dataclass; the
+    type is the IC's and is added by the IC session, not here), so the IC builds
+    it with ``ExtraOwnerAsset(**{k: d[k] for k in fields})``::
+
+        {"name": "campus:<library_id>#<k>",   # k counts that library id among the entries, from 1
+         "kind": "transformer" | "cable" | "capacitor_bank" | "shunt_reactor" | "statcom" | "switchgear",
+         "basis": "lump" | "per_km" | "per_bay",
+         "quantity": float,   # lump: units; per_km: units x length_km; per_bay: bays (the table's units)
+         "parts": [{"name": "investment", "upfront_per_unit": EUR per basis unit,
+                    "lifetime": years, "fom_share": share}],      # asset_schema.access.UpfrontPart
+         "build_year": int,   # the campus invest_period
+         "source": "campus_study",
+         "source_hash": str,  # campus_study_hash(project): the same for every entry
+         "meta": {"need", "library_id", "units", "length_km", "currency", "price_year",
+                  "provenance", "illustrative"}}
+
+    ``quantity x upfront_per_unit`` is the item's total overnight cost in the
+    library's currency, in the library's price year (no escalation).
+    ``upfront_per_unit`` is the library's ``capex_eur_per_km`` for a cable and
+    ``capex_eur`` otherwise. ``meta`` is what the IC does not take:
+    ``provenance`` is the source tag of that cost in the library (``measured``,
+    ``datasheet`` or ``assumed``) and ``illustrative`` is True when it is
+    ``assumed``. An engine kind that ``IC_KIND`` does not list is refused with
+    422 naming it.
+
+    Read from the run directory: ``campus_investment.csv`` (the items, their
+    units, cable length and investment period) and ``campus_assets_used.yaml``
+    (the library the run bought from, kept beside the results: its costs,
+    lifetimes, fixed-O&M shares and cost tags are the run's, not those of a
+    library saved since). Who owns the PCC switchgear
+    (``campus_invest_scope.json``) is already settled in the table: when the
+    grid operator owns it the engine writes no row for it, so none appears here.
+    The IC route refuses a stale study (``owner_assets_response``'s ``stale``)."""
+    require_capacity_expansion(project)
+    run_dir = campus_dir(project) / "run"
+    table, used = run_dir / cs.INVESTMENT_CSV, run_dir / USED_LIBRARY_FILE
+    if not table.is_file() or not used.is_file():
+        return []
+    lib = cs.load_asset_library(used)
+    priced = _priced(lib)
+    digest = campus_study_hash(project)
+    seen: dict = {}
+    out = []
+    for r in pd.read_csv(table).to_dict(orient="records"):
+        if bool(r["existing"]) or r["status"] == "unresolved" or not isinstance(r["library_id"], str):
+            continue
+        if r["library_id"] not in priced:
+            raise HTTPException(status_code=422, detail=f"{r['need']}: {r['library_id']} is not in the library the run used")
+        if r["kind"] not in IC_KIND:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{r['need']}: the investment table has an item of kind {r['kind']!r}, which the investment "
+                       f"case does not know (known: {', '.join(IC_KIND)})")
+        kind = IC_KIND[r["kind"]]
+        basis = _BASIS.get(kind, "lump")
+        entry, _ = priced[r["library_id"]]
+        cost = "capex_eur_per_km" if basis == "per_km" else "capex_eur"
+        if cost not in entry:
+            raise HTTPException(status_code=422, detail=f"{r['need']}: {r['library_id']} has no {cost} in the library the run used")
+        units = int(r["units"])
+        length = r["length_km"]
+        if basis == "per_km" and (not isinstance(length, (int, float)) or math.isnan(length)):
+            raise HTTPException(status_code=422, detail=f"{r['need']}: a cable row has no length_km")
+        quantity = units * float(length) if basis == "per_km" else float(units)
+        source = entry[cost]["source"]
+        seen[r["library_id"]] = seen.get(r["library_id"], 0) + 1
+        out.append({
+            "name": f"campus:{r['library_id']}#{seen[r['library_id']]}", "kind": kind, "basis": basis,
+            "quantity": quantity,
+            "parts": [{"name": "investment", "upfront_per_unit": float(entry[cost]["value"]),
+                       "lifetime": float(entry["lifetime_a"]["value"]),
+                       "fom_share": float(entry["opex_frac"]["value"])}],
+            "build_year": int(r["invest_period"]), "source": OWNER_ASSET_SOURCE, "source_hash": digest,
+            "meta": {"need": r["need"], "library_id": r["library_id"], "units": units,
+                     "length_km": float(length) if basis == "per_km" else None,
+                     "currency": lib["currency"], "price_year": lib["price_year"],
+                     "provenance": source, "illustrative": source == "assumed"},
+        })
+    return out
+
+
+def owner_assets_response(project) -> dict:
+    """The body of ``GET /api/campus-electrical/{name}/owner-assets``:
+    ``{"assets": extra_owner_assets, "source_hash": campus_study_hash or None,
+    "stale": the results-stale flag of get_state}``. The assets of a stale study
+    are still listed, flagged: the IC refuses to build a case on them."""
+    require_capacity_expansion(project)
+    d = campus_dir(project)
+    return {"assets": extra_owner_assets(project), "source_hash": campus_study_hash(project),
+            "stale": bool(_results(d / "run")) and _stale(project, d)}
 
 
 def draft(project, overwrite: bool = False) -> dict:
@@ -480,7 +744,8 @@ def _clear_investment(run_dir: Path) -> None:
     """Remove the investment files of an earlier run, so that a run that does
     not invest, or fails part way, never sits beside another run's purchases."""
     for name in (cs.INVESTMENT_CSV, cs.COST_CSV, cs.INVESTED_YAML, cs.COMPLIANCE_INVESTED_CSV,
-                 cs.INVEST_HISTORY_CSV, cs.INVEST_DISPATCH_CSV, cs.INVEST_SCOPE_JSON, USED_LIBRARY_FILE):
+                 cs.INVEST_HISTORY_CSV, cs.INVEST_DISPATCH_CSV, cs.INVEST_SCOPE_JSON, USED_LIBRARY_FILE,
+                 COST_BASIS_FILE):
         (run_dir / name).unlink(missing_ok=True)
 
 
@@ -509,13 +774,14 @@ def run(project, settings: dict) -> dict:
                 # The library is read once and kept: the engine buys from this
                 # copy, and a later change to the library is then a different
                 # file from the one the results were made with.
-                own = d / LIBRARY_FILE
                 used = run_dir / USED_LIBRARY_FILE
                 try:
-                    used.write_bytes(_effective_library(d).read_bytes())
-                    cs.invest_campus(run_dir, used if own.is_file() else None, criteria=criteria,
-                                     profile=s["profile"], pf=s["pf"], profile_dirs=profile_dirs,
-                                     pcc_switchgear=not s["pcc_switchgear_by_operator"])
+                    text, overridden, basis = _engine_library(project, d)
+                    used.write_bytes(text.encode())
+                    cs.invest_campus(run_dir, used if overridden or (d / LIBRARY_FILE).is_file() else None,
+                                     criteria=criteria, profile=s["profile"], pf=s["pf"],
+                                     profile_dirs=profile_dirs, pcc_switchgear=not s["pcc_switchgear_by_operator"])
+                    (run_dir / COST_BASIS_FILE).write_text(json.dumps(basis))
                 except BaseException:
                     _clear_investment(run_dir)       # never half a purchase beside the new sizing
                     raise
@@ -523,3 +789,270 @@ def run(project, settings: dict) -> dict:
             raise _unprocessable(exc)
         (d / SETTINGS_FILE).write_text(json.dumps(s))
     return get_state(project)
+
+
+# ── the joint optimisation (MILP) as a background job (plan C12) ────────────
+#
+# The report job's shape (``services/reports/report_job.py``): a ``record``
+# per project, published in ``_MILP_JOBS`` and served without ``thread`` and
+# ``stop_event``; one job at a time in the process (``_MILP_SLOT``); the stop
+# event is the loop's ``should_stop``, asked before each iteration and
+# between the finite-difference solves. The record is in memory: after a
+# restart there is no status, and the results on disk still read back.
+
+MILP_SUBDIR = "run_milp"
+MILP_SUMMARY_FILE = "campus_milp_summary.json"
+MILP_BASIS_FILE = "campus_milp_basis.json"
+THREAD_NAME = "campus-milp"
+
+_MILP_LOCK = threading.Lock()
+_MILP_SLOT: dict = {"active": None}
+_MILP_JOBS: dict = {}
+
+
+def _milp_key(project) -> str:
+    return str(campus_dir(project))
+
+
+def _milp_engine(run_dir, library, **kw):
+    """The engine call the job makes (a seam for the tests)."""
+    return cs.invest_campus(run_dir, library, method="milp", **kw)
+
+
+def _milp_inputs() -> tuple:
+    """The least-cost run's files the MILP is made from: the prepared and
+    ranked campus, the library it bought from and the basis it was costed
+    on, and its investment (the comparison is against it)."""
+    return (cs.CAMPUS_YAML, cs.CAMPUS_MANIFEST, cs.HOURLY_CSV, cs.PCC_CSV, cs.METRICS_CSV, cs.SELECTED_CSV,
+            USED_LIBRARY_FILE, COST_BASIS_FILE, cs.INVESTMENT_CSV)
+
+
+def _record_running(record) -> bool:
+    if not record or record.get("state") != "running":
+        return False
+    t = record.get("thread")
+    return t is None or t.ident is None or t.is_alive()
+
+
+def _public(record):
+    if not record:
+        return None
+    with _MILP_LOCK:
+        return {k: v for k, v in record.items() if k not in ("thread", "stop_event")}
+
+
+def _least_cost_total(run_dir: Path) -> float:
+    inv = pd.read_csv(run_dir / cs.INVESTMENT_CSV)
+    return float(inv.loc[inv["status"].isin(["chosen", "kept"]), "annualised_eur_per_a"].sum())
+
+
+def _least_cost_fresh(project, d: Path, s: dict) -> bool:
+    """A least-cost run the job can stand on: it invested, with these
+    settings, and nothing it was made from has changed."""
+    run_dir, saved = d / "run", d / SETTINGS_FILE
+    if not (run_dir / cs.COMPLIANCE_CSV).is_file() or not (run_dir / cs.INVESTMENT_CSV).is_file():
+        return False
+    if not saved.is_file() or json.loads(saved.read_text()) != s:
+        return False
+    return not _stale(project, d)
+
+
+def _milp_results(milp_dir: Path):
+    """The MILP's results, or None until a job has finished (the summary is
+    written last)."""
+    summary = milp_dir / MILP_SUMMARY_FILE
+    if not summary.is_file():
+        return None
+    meta = json.loads(summary.read_text())
+    return {
+        "investment": _read_csv(milp_dir / cs.INVESTMENT_CSV),
+        "cost": _read_csv(milp_dir / cs.COST_CSV),
+        "compliance_invested": _read_csv(milp_dir / cs.COMPLIANCE_INVESTED_CSV),
+        "history": _read_csv(milp_dir / cs.MILP_HISTORY_CSV),
+        "comparison": _read_csv(milp_dir / cs.MILP_COMPARISON_CSV),
+        "summary": meta["summary"],
+        "fallback": meta["fallback"],
+        "stop": meta["summary"]["stop"],
+    }
+
+
+def _milp_stale(project, d: Path) -> bool:
+    """Stale when the least-cost run is (campus, network, library, cost
+    basis), or when the least-cost run it was made from has been made again
+    with other settings or other results: the files it copied are compared
+    by hash with ``run/`` now. A basis that cannot be read: stale."""
+    if _stale(project, d):
+        return True
+    try:
+        basis = json.loads((d / MILP_SUBDIR / MILP_BASIS_FILE).read_text())
+        saved = json.loads((d / SETTINGS_FILE).read_text())
+        if saved != basis["settings"]:
+            return True
+        for name, digest in basis["inputs"].items():
+            path = d / "run" / name
+            if (_sha256_file(path) if path.is_file() else None) != digest:
+                return True
+    except Exception:                                          # noqa: BLE001 - see the docstring
+        return True
+    return False
+
+
+def _milp_state(project, d: Path) -> dict:
+    results = _milp_results(d / MILP_SUBDIR)
+    return {"status": _public(_MILP_JOBS.get(str(d))), "results": results,
+            "stale": bool(results) and _milp_stale(project, d)}
+
+
+MILP_NOTES = (
+    "The joint optimisation (a MILP) chooses every asset together, starting from the least-cost choice and "
+    "re-checking each step by AC load flow. It is started and cancelled in the panel; it takes minutes.",
+    "The design margin is the owner's rule: it is judged on the least-cost dispatch and is never met by extra "
+    "inverter reactive power; inverter Q may serve only the 100 % loading, the PCC band and the voltages.",
+    "When nothing AC-feasible is cheaper, the least-cost choice is kept (fallback, with its reason); a cancelled "
+    "job keeps the best choice it had found.",
+    INVESTMENT_NOTES[0],
+)
+
+
+def get_milp(project) -> dict:
+    """The joint optimisation, for the copilot: the job's record (None when
+    none has run since the backend started), the last finished job's summary,
+    why it stopped, its fallback reason, the comparison per need with the
+    least-cost choice, and whether it is stale, with the caveats."""
+    require_capacity_expansion(project)
+    m = _milp_state(project, campus_dir(project))
+    res = m["results"] or {}
+    return {"status": m["status"], "summary": res.get("summary"), "stop": res.get("stop"),
+            "fallback": res.get("fallback"), "comparison": res.get("comparison"), "stale": m["stale"],
+            "notes": list(MILP_NOTES)}
+
+
+def milp_job_status(project):
+    """The project's job record, without its thread and stop event; None
+    when no job has run for it since the backend started."""
+    require_capacity_expansion(project)
+    return _public(_MILP_JOBS.get(_milp_key(project)))
+
+
+def cancel_milp_job(project) -> dict:
+    """Ask the running job to stop. The loop ends before its next iteration
+    (or between two finite-difference solves) and the job keeps the best
+    point it has: state ``cancelled``. Idempotent once the job has ended;
+    404 when no job has run for the project."""
+    require_capacity_expansion(project)
+    record = _MILP_JOBS.get(_milp_key(project))
+    if record is None:
+        raise HTTPException(status_code=404, detail="no joint optimisation has run for this project since the backend started")
+    with _MILP_LOCK:
+        running = _record_running(record)
+        if running:
+            record["stop_event"].set()
+            record["message"] = "cancelling: the loop stops before its next iteration"
+        return {"state": record["state"], "cancelling": running}
+
+
+def _prepare_milp_dir(d: Path, s: dict) -> Path:
+    """``run_milp/`` afresh: the least-cost run's inputs copied, and the
+    basis (their hashes and the settings) the staleness test reads."""
+    run_dir, milp_dir = d / "run", d / MILP_SUBDIR
+    with _lock(run_dir):
+        if milp_dir.exists():
+            shutil.rmtree(milp_dir)
+        milp_dir.mkdir()
+        inputs = {}
+        for name in _milp_inputs():
+            shutil.copyfile(run_dir / name, milp_dir / name)
+            inputs[name] = _sha256_file(milp_dir / name)
+    (milp_dir / MILP_BASIS_FILE).write_text(json.dumps({"settings": s, "inputs": inputs}))
+    return milp_dir
+
+
+def _clear_milp_results(milp_dir: Path) -> None:
+    for name in (cs.INVESTMENT_CSV, cs.COST_CSV, cs.INVESTED_YAML, cs.COMPLIANCE_INVESTED_CSV, cs.INVEST_HISTORY_CSV,
+                 cs.INVEST_DISPATCH_CSV, cs.INVEST_SCOPE_JSON, cs.MILP_HISTORY_CSV, cs.MILP_COMPARISON_CSV,
+                 MILP_SUMMARY_FILE):
+        (milp_dir / name).unlink(missing_ok=True)
+
+
+def _run_milp_job(record: dict, milp_dir: Path, kw: dict) -> None:
+    """The worker body: the MILP into ``run_milp/``, its progress published
+    on the record. Reads and writes only ``run_milp/``."""
+    stop = record["stop_event"]
+
+    def progress(iteration, max_iter, summary):
+        with _MILP_LOCK:
+            record.update(iteration=int(iteration), max_iter=int(max_iter), best_cost=summary.get("best_cost"),
+                          c8_cost=summary.get("c8_cost"))
+            if not stop.is_set():
+                record["message"] = ("the least-cost pick re-solved, the warm start" if iteration == 0
+                                     else f"iteration {iteration} of {max_iter}")
+
+    try:
+        out = _milp_engine(milp_dir, milp_dir / USED_LIBRARY_FILE, progress=progress, should_stop=stop.is_set, **kw)
+        summary = {k: (v.item() if hasattr(v, "item") else v) for k, v in out["summary"].items()}
+        (milp_dir / MILP_SUMMARY_FILE).write_text(json.dumps({"summary": summary, "fallback": out["fallback"]}))
+        cancelled = summary["stop"] == "cancelled"
+        with _MILP_LOCK:
+            record.update(state="cancelled" if cancelled else "done", finished_at=time.time(), stop=summary["stop"],
+                          best_cost=summary["milp_cost"], c8_cost=summary["c8_cost"],
+                          message=("cancelled: the best point found so far is kept" if cancelled else
+                                   "done: the least-cost choice is kept" if out["fallback"] else "done"))
+    except Exception as exc:                                    # noqa: BLE001 - recorded on the job
+        logger.exception("campus MILP job failed")
+        _clear_milp_results(milp_dir)
+        with _MILP_LOCK:
+            record.update(state="failed", finished_at=time.time(), error=str(exc) or type(exc).__name__,
+                          message="failed")
+
+
+def start_milp_job(project, settings: dict) -> dict:
+    """Start the joint optimisation (plan C11) for the project as a
+    background job and answer its record (``state`` ``running``).
+
+    In the request: the settings are checked as ``run`` checks them (and
+    must invest); the slot is claimed, so a second job, for this project or
+    any other, is a 409 while one runs; the least-cost run is made, unless
+    one with these settings is there and fresh; and ``run_milp/`` is set up
+    from it. A refusal on the way frees the slot and leaves no record. The
+    thread then runs only the MILP, which reads ``run_milp/`` alone: no
+    NetCDF, no PyPSA lock."""
+    require_capacity_expansion(project)
+    d = campus_dir(project)
+    s = _settings(settings, profiles(project))
+    if not s["invest"]:
+        raise HTTPException(status_code=422, detail="the joint optimisation chooses what to buy: run it with invest on")
+    key = str(d)
+    record = {"state": "running", "project": project.name, "started_at": time.time(), "finished_at": None,
+              "iteration": None, "max_iter": None, "best_cost": None, "c8_cost": None, "stop": None, "error": None,
+              "message": "the least-cost run first", "thread": None, "stop_event": threading.Event()}
+    with _MILP_LOCK:
+        if _record_running(_MILP_SLOT["active"]):
+            other = _MILP_SLOT["active"]["project"]
+            raise HTTPException(status_code=409, detail=f"a joint optimisation (MILP) is already running for project "
+                                                        f"'{other}'; wait for it to finish or cancel it")
+        previous = _MILP_JOBS.get(key)
+        _MILP_JOBS[key] = record
+        _MILP_SLOT["active"] = record
+    try:
+        if not _least_cost_fresh(project, d, s):
+            run(project, s)
+        milp_dir = _prepare_milp_dir(d, s)
+        record["c8_cost"] = _least_cost_total(milp_dir)
+        record["message"] = "starting: the least-cost pick is re-solved as the warm start"
+        kw = {"criteria": SizingCriteria(margin=float(s["margin"]), n_minus_1=s["n_minus_1"]), "profile": s["profile"],
+              "pf": s["pf"], "profile_dirs": (grid_codes_dir(project),),
+              "pcc_switchgear": not s["pcc_switchgear_by_operator"]}
+        ctx = contextvars.copy_context()
+        thread = threading.Thread(target=lambda: ctx.run(_run_milp_job, record, milp_dir, kw), daemon=True,
+                                  name=THREAD_NAME)
+        record["thread"] = thread
+        thread.start()
+    except BaseException:
+        with _MILP_LOCK:
+            if previous is None:
+                _MILP_JOBS.pop(key, None)
+            else:
+                _MILP_JOBS[key] = previous
+            _MILP_SLOT["active"] = None
+        raise
+    return _public(record)

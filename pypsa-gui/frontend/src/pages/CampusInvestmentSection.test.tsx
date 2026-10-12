@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { CampusState, CampusResults, InvestmentRow } from '../api/campusElectrical'
+import type { CampusMilp, CampusState, CampusResults, CostBasis, InvestmentRow, MilpResults } from '../api/campusElectrical'
 import CampusElectricalPanel from './CampusElectricalPanel'
 import { formatEur } from './CampusInvestmentSection'
 
@@ -24,6 +24,7 @@ vi.mock('../store/uiStore', () => ({
 const api = vi.hoisted(() => ({
   state: vi.fn(), draft: vi.fn(), save: vi.fn(), run: vi.fn(), gridCodes: vi.fn(),
   library: vi.fn(), saveLibrary: vi.fn(), resetLibrary: vi.fn(),
+  startMilp: vi.fn(), milpStatus: vi.fn(), cancelMilp: vi.fn(),
 }))
 vi.mock('../api/campusElectrical', async () => {
   const real = await vi.importActual<typeof import('../api/campusElectrical')>('../api/campusElectrical')
@@ -91,6 +92,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   api.state.mockResolvedValue(stateWith(results()))
   api.gridCodes.mockResolvedValue({ shipped: {}, published: [], drafts: [], documents: [], extraction_available: false })
+  api.milpStatus.mockResolvedValue(null)
   api.library.mockResolvedValue({ yaml: 'x: 1', is_default: true })
 })
 afterEach(() => cleanup())
@@ -170,6 +172,53 @@ describe('investment: what was bought', () => {
     renderPanel()
     await screen.findByTestId('compliance-pcc_reactive')
     expect(screen.queryByTestId('campus-investment')).toBeNull()
+  })
+})
+
+// Part three, D1a: the rate and the money year the costs stand on, in one plain line.
+const basis = (over: Partial<CostBasis> = {}): CostBasis => ({
+  discount_rate: 0.07, discount_rate_from: 'asset library', price_year: 2026, price_year_from: 'asset library',
+  library_price_year: 2026, price_year_mismatch: false, currency: 'EUR', ...over,
+})
+
+describe('investment: the cost basis', () => {
+  it('says the rate and the price year, and where each came from', async () => {
+    api.state.mockResolvedValue(stateWith(results({ cost_basis: basis() })))
+    renderPanel()
+    expect((await screen.findByTestId('invest-cost-basis')).textContent)
+      .toBe('Annualised at 7 % (from asset library); costs in 2026 money (from asset library).')
+    expect(screen.queryByTestId('invest-price-year-mismatch')).toBeNull()
+  })
+
+  it('names the project as the source of the rate and the year', async () => {
+    api.state.mockResolvedValue(stateWith(results({ cost_basis: basis({
+      discount_rate: 0.035, discount_rate_from: 'project solver config',
+      price_year_from: 'project finance inputs',
+    }) })))
+    renderPanel()
+    expect((await screen.findByTestId('invest-cost-basis')).textContent)
+      .toBe('Annualised at 3.5 % (from project solver config); costs in 2026 money (from project finance inputs).')
+  })
+
+  it('warns when the project states another money year, and says no escalation is applied', async () => {
+    api.state.mockResolvedValue(stateWith(results({ cost_basis: basis({
+      discount_rate_from: 'project solver config', price_year: 2024, price_year_from: 'project finance inputs',
+      price_year_mismatch: true,
+    }) })))
+    renderPanel()
+    const line = await screen.findByTestId('invest-cost-basis')
+    expect(line.textContent).toContain('costs in 2026 money (from asset library)')   // what the library's costs are in
+    const warn = screen.getByTestId('invest-price-year-mismatch')
+    expect(warn.textContent).toContain('2024')
+    expect(warn.textContent).toContain('2026')
+    expect(warn.textContent).toMatch(/no escalation/i)
+  })
+
+  it('shows no line when the backend sent no basis', async () => {
+    api.state.mockResolvedValue(stateWith(results({ cost_basis: null })))
+    renderPanel()
+    await screen.findByTestId('campus-investment')
+    expect(screen.queryByTestId('invest-cost-basis')).toBeNull()
   })
 })
 
@@ -308,5 +357,109 @@ describe('compliance with the investment', () => {
   it('says in the header that the with-assets column is an AC re-solve', async () => {
     renderPanel()
     expect((await screen.findByText(/With the assets \(AC re-solved\)/))).toBeTruthy()
+  })
+})
+
+
+describe('the joint optimisation beside the least-cost choice', () => {
+  const milpResults = (over: Partial<MilpResults> = {}): MilpResults => ({
+    investment: [row({ library_id: 'TR_110_20_50', capex_eur: 1_800_000, annualised_eur_per_a: 150_000 }),
+                 row({ need: 'reactive', library_id: null, kind: 'none', units: 0, capex_eur: 0,
+                       annualised_eur_per_a: 0, status: 'not_needed' })],
+    cost: [{ period: 2030, capex_eur: 1_800_000, annualised_eur_per_a: 150_000 }],
+    compliance_invested: [],
+    history: [
+      { iteration: 0, cost: 261_526.96, feasible: true, accepted: true, choice: 'transformer GRID_IMPORT: 1 x TR63',
+        note: "C8's result, the warm start" },
+      { iteration: 1, cost: 150_000, feasible: true, accepted: true, choice: 'transformer GRID_IMPORT: 1 x TR50', note: '' },
+    ],
+    comparison: [
+      { need: 'transformer GRID_IMPORT', c8_choice: '1 x TR_110_20_63', milp_choice: '1 x TR_110_20_50',
+        c8_annualised_eur_per_a: 193_519.65, milp_annualised_eur_per_a: 150_000 },
+      { need: 'reactive', c8_choice: 'none', milp_choice: 'none', c8_annualised_eur_per_a: 0,
+        milp_annualised_eur_per_a: 0 },
+    ],
+    summary: { method: 'milp', fallback: false, reason: '', stop: 'converged', c8_cost: 261_526.96,
+               milp_cost: 150_000, c8_feasible: true, iterations: 1 },
+    fallback: null,
+    stop: 'converged',
+    ...over,
+  })
+  const withMilp = (milp: Partial<CampusMilp> & { results: MilpResults | null }) =>
+    stateWith(results(), { milp: { status: null, stale: false, ...milp } })
+
+  it('is absent before a joint optimisation has finished', async () => {
+    api.state.mockResolvedValue(withMilp({ results: null }))
+    renderPanel()
+    await screen.findByTestId('campus-investment')
+    expect(screen.queryByTestId('campus-milp')).toBeNull()
+  })
+
+  it('shows its cost against the least cost, need by need, and its purchases', async () => {
+    api.state.mockResolvedValue(withMilp({ results: milpResults() }))
+    renderPanel()
+    const block = await screen.findByTestId('campus-milp')
+    expect(within(block).getByTestId('milp-summary').textContent)
+      .toMatch(/Joint optimisation €150,000\/a against least cost €261,527\/a, €111,527\/a less\. 1 iteration, converged/)
+    const t = within(block).getByTestId('milp-compare-transformer GRID_IMPORT').textContent!
+    expect(t).toContain('1 x TR_110_20_63')
+    expect(t).toContain('€193,520')
+    expect(t).toContain('1 x TR_110_20_50')
+    expect(t).toContain('€150,000')
+    expect(within(block).getByTestId('milp-invest-transformer GRID_IMPORT').textContent).toContain('TR_110_20_50')
+    // the least-cost table is untouched
+    expect(screen.getByTestId('invest-transformer GRID_IMPORT').textContent).toContain('TR_110_20_63')
+    expect(within(block).queryByTestId('milp-fallback')).toBeNull()
+    expect(within(block).queryByTestId('milp-cancelled')).toBeNull()
+  })
+
+  it("says the margin rule is the owner's, never met by inverter Q, and that costs are placeholders", async () => {
+    api.state.mockResolvedValue(withMilp({ results: milpResults() }))
+    renderPanel()
+    const block = await screen.findByTestId('campus-milp')
+    expect(block.textContent).toMatch(/20 % design margin is the owner's rule/)
+    expect(block.textContent).toMatch(/never met\s+by extra inverter reactive power/)
+    expect(block.textContent).toMatch(/placeholders/)
+  })
+
+  it('labels a fallback to the least-cost choice with its reason', async () => {
+    const reason = "no AC-feasible point is cheaper than C8's (261,527 against 261,527 per year)"
+    api.state.mockResolvedValue(withMilp({ results: milpResults({
+      fallback: reason, summary: { ...milpResults().summary, fallback: true, milp_cost: 261_526.96 } }) }))
+    renderPanel()
+    const fb = await screen.findByTestId('milp-fallback')
+    expect(fb.textContent).toContain('least-cost choice kept')
+    expect(fb.textContent).toContain(reason)
+    expect(screen.getByTestId('milp-summary').textContent).not.toMatch(/less/)
+  })
+
+  it('labels a cancelled job, with the best choice found or the least-cost one kept', async () => {
+    api.state.mockResolvedValue(withMilp({ results: milpResults({ stop: 'cancelled',
+      summary: { ...milpResults().summary, stop: 'cancelled' } }) }))
+    const first = renderPanel()
+    expect((await screen.findByTestId('milp-cancelled')).textContent).toMatch(/best choice found so far/)
+    expect(screen.getByTestId('milp-summary').textContent).toMatch(/cancelled/)
+    first.unmount()
+    api.state.mockResolvedValue(withMilp({ results: milpResults({ stop: 'cancelled', fallback: 'cancelled after 0 iteration(s)',
+      summary: { ...milpResults().summary, stop: 'cancelled', fallback: true } }) }))
+    renderPanel()
+    expect((await screen.findByTestId('milp-cancelled')).textContent).toMatch(/least-cost choice is kept/)
+  })
+
+  it('keeps the iteration history collapsed, with its count, until opened', async () => {
+    api.state.mockResolvedValue(withMilp({ results: milpResults() }))
+    renderPanel()
+    const details = (await screen.findByTestId('milp-history')) as HTMLDetailsElement
+    expect(details.open).toBe(false)
+    expect(details.textContent).toContain('Iteration history (2)')
+    await userEvent.click(within(details).getByText('Iteration history (2)'))
+    expect(details.open).toBe(true)
+    expect(details.textContent).toContain('1. €150,000/a, AC-feasible, accepted — transformer GRID_IMPORT: 1 x TR50')
+  })
+
+  it('warns when the least-cost run it was based on has changed', async () => {
+    api.state.mockResolvedValue(withMilp({ results: milpResults(), stale: true }))
+    renderPanel()
+    expect((await screen.findByTestId('milp-stale')).textContent).toMatch(/has changed since/)
   })
 })
