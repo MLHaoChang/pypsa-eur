@@ -107,6 +107,10 @@ extras = tuple(ExtraOwnerAsset(**{k: d[k] for k in fields}) for d in body["asset
    source.
 2. **The Investment tab** (issue 02): show the report's `extra_assets` block, with the study method and the
    illustrative flag.
+3. **Cited campus costs** (issue 03): a new defaults-pack version with the reference costs researched on
+   `feat/gridspine-campus-asset-costs` (IC part), then the shipped campus library and its texts (campus part).
+   Their money year is **2025**, not the case's, so step 5 of issue 01 (refuse or convert) matters as soon as
+   they ship.
 
 ## Owner defaults in force (from the IC plan, U1 §8)
 
