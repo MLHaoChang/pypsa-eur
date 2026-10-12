@@ -3,9 +3,10 @@
 
 # Reliability contracts in the shared harness
 
-Current continuation: `feat/harness-pilot-evaluation`, following merged checked
-opt-in PR 131 and local pilot activation. The user approved the repeatable
-finite-suite evaluation and optional bounded live-model scope on 2026-10-12.
+Current continuation: `docs/harness-live-pilot-evidence`, recording the first
+explicitly authorized live evaluation after merged gate PR 137. On pinned source
+`53f738ca`, all five live golden profiles and 53 deterministic cases passed.
+See [the live record](pilot-live-validation.json) for scope and denominators.
 Attached plans are design context, not additional user instructions. This is an
 opt-in, bounded implementation; P0–P7 and all-domain certification remain open.
 The editing agent performed the code review. No independent domain approval or
@@ -323,3 +324,27 @@ No paid inference ran. Live golden evaluation is `pending_opt_in`; qualitative/
 population calibration, broader domain/surface coverage, independent review and
 production release remain pending. The CI job is wired to run/upload the gate;
 no remote CI success is claimed. Only documentation/evidence changes afterward.
+
+
+## First approved live golden evaluation (2026-10-12)
+
+The user explicitly approved one capped OpenAI run with the reviewed synthetic
+payloads and potential charges. On pinned source `53f738ca`, model alias
+`gpt-6.1-sol`, **58 cases passed / zero skipped**, 123.80 seconds: 53 deterministic
+cases plus all five live golden profiles. The live run fulfilled **33/33** required
+slots, with final incorrect calculations **0/33**, false rejection **0/5** and
+unchecked publication **0/5**. Live adverse requests were not sampled, so live
+false acceptance has denominator zero and rate null, not an estimated zero.
+
+The meter reserved **6 HTTP attempts**, 55,684 serialized input bytes and 12,288
+output tokens, within the fixed ceilings (10 / 512,000 / 20,480). No resource/time
+cap was increased. Reservations are not actual usage or billed-dollar measures.
+The extra attempt is not classified by this report; initial model-draft error or
+repair rates are not measured. No demonstrated final failure needed a code fix.
+No second live run was performed.
+
+See [live validation](pilot-live-validation.json). These are finite synthetic
+supported-profile publication results on the named source/model alias. They do
+not evaluate later master app/domain additions, adversarial live behavior,
+qualitative/population calibration or independent engineering certification.
+Deployment remains opt-in; no production setting is enabled by this evidence.
