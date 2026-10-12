@@ -5,6 +5,7 @@
 // app's read-only vocabulary: `disabled` + `title={readOnlyMessage(...)}`.
 import { useUIStore } from '../store/uiStore'
 import { readOnlyMessage, READ_ONLY_MUTATION_MESSAGE } from '../utils/mutationGuard'
+import { confirmToast } from '../utils/toasts'
 import { formatHa, type FitReport } from '../site3d/fit'
 import type { Site } from '../site3d/types'
 import { effectiveSizing } from '../site3d/sizing'
@@ -21,12 +22,23 @@ interface Props {
   /** False while a component list is still loading: Arrange would write a partial site. */
   canArrange: boolean
   onArrange: () => void
+  /** Arrange all (S2): every object re-placed by the rules, moved ones included — runs only after the user confirms. */
+  onArrangeAll?: () => void
+  /** How many objects have a placement (what Arrange all would discard). */
+  placedCount?: number
   onResetPlacement: () => void
   /** The solver's dispatch matches the network: the as built / optimised switch is offered only then (spec E6). */
   dispatchFresh?: boolean
+  /** The library-gap status (S4): "'x' Generator drawn as a generic block"; null when every object has a specific type. */
+  libraryGaps?: string | null
+  /** Snapshot (S5): capture the site from the south as its thumbnail now. Absent without a saved project (nowhere to store it). */
+  onSnapshot?: () => void
+  /** Walk the campus (S5): first-person mode on/off. Absent where the mode is not offered. */
+  walking?: boolean
+  onToggleWalk?: () => void
 }
 
-export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, unplacedMembers, selectedPlacedKey, canArrange, onArrange, onResetPlacement, dispatchFresh = false }: Props) {
+export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, unplacedMembers, selectedPlacedKey, canArrange, onArrange, onArrangeAll, placedCount = 0, onResetPlacement, dispatchFresh = false, libraryGaps = null, onSnapshot, walking = false, onToggleWalk }: Props) {
   const readOnly = useUIStore(s => s.readOnly)
   const siteSizing = useUIStore(s => s.siteSizing)
   const setSiteSizing = useUIStore(s => s.setSiteSizing)
@@ -52,6 +64,12 @@ export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, 
       {fit.outside.length > 0 && <span className="text-accent" title={fit.outside.join(', ')}>· {fit.outside.length} outside</span>}
       {unplacedMembers.length > 0 && (
         <span className="text-accent" title={unplacedMembers.join(', ')}>· {unplacedMembers.length} member bus{unplacedMembers.length === 1 ? '' : 'es'} not placed</span>
+      )}
+      {libraryGaps && (
+        // The library, not the model, is the limit (S4): said once, in words.
+        <span data-testid="library-gaps" className="text-muted" title="The asset library has no specific type for this carrier, so its class's generic shape stands in. The model is fine; add a type to the library to draw it (src/site3d/library/README.md).">
+          · {libraryGaps}
+        </span>
       )}
       {dispatchFresh && (
         // A view setting: enabled when read-only too.
@@ -81,6 +99,21 @@ export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, 
       >
         Arrange
       </button>
+      {onArrangeAll && (
+        <button
+          type="button"
+          onClick={() => confirmToast(
+            `Arrange every asset by the placement rules? ${placedCount === 1 ? 'The 1 position you moved' : `The ${placedCount} positions you moved`} will be replaced.`,
+            onArrangeAll,
+            { confirmLabel: 'Arrange all', danger: true },
+          )}
+          disabled={readOnly || !canArrange}
+          title={blocked ?? (canArrange ? 'Re-place everything by the placement rules, moved assets included (asks first)' : 'Waiting for the network to load')}
+          className="px-1.5 py-0.5 rounded border border-border text-text hover:bg-accent/5 disabled:opacity-50"
+        >
+          Arrange all
+        </button>
+      )}
       <button
         type="button"
         onClick={onResetPlacement}
@@ -90,6 +123,31 @@ export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, 
       >
         Reset placement
       </button>
+      {onSnapshot && (
+        <button
+          type="button"
+          data-testid="site-snapshot"
+          onClick={onSnapshot}
+          disabled={readOnly}
+          title={blocked ?? 'Take the site picture now (from the south): the hub-design Site map card and the report figure show it'}
+          className="px-1.5 py-0.5 rounded border border-border text-text hover:bg-accent/5 disabled:opacity-50"
+        >
+          Snapshot
+        </button>
+      )}
+      {onToggleWalk && (
+        // A view mode, not an edit: available read-only too. Escape leaves it.
+        <button
+          type="button"
+          data-testid="site-walk"
+          aria-pressed={walking}
+          onClick={onToggleWalk}
+          title={walking ? 'Leave the walk (Escape does too)' : 'Walk the campus: click the scene to look around with the mouse, W A S D or the arrows to walk, Escape to leave'}
+          className={`px-1.5 py-0.5 rounded border border-border hover:bg-accent/5 ${walking ? 'bg-accent/10 text-text font-semibold' : 'text-text'}`}
+        >
+          {walking ? 'Walking…' : 'Walk'}
+        </button>
+      )}
     </div>
   )
 }

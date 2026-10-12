@@ -34,6 +34,40 @@ export function chevronPath(from: V3, to: V3, dir: 1 | -1 | 0, phase: number, n:
 }
 
 /**
+ * `chevronPath` along a polyline (S3: a branch's flow runs along its map
+ * route): `n` chevrons spaced evenly by arc length, each pointing along the
+ * segment it sits on; `dir` −1 runs the polyline backwards. Two points is
+ * `chevronPath`. A zero-length polyline puts every chevron at its first point.
+ */
+export function chevronPolyline(points: readonly V3[], dir: 1 | -1 | 0, phase: number, n: number): { points: V3[]; headings: V3[] } {
+  if (dir === 0 || points.length === 0) return { points: [], headings: [] }
+  const pts = dir === 1 ? points : [...points].reverse()
+  const cum: number[] = [0]
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1], pts[i][2] - pts[i - 1][2]))
+  const total = cum[cum.length - 1]
+  const out: V3[] = [], headings: V3[] = []
+  for (let k = 0; k < n; k++) {
+    const s = ((((phase + k / n) % 1) + 1) % 1) * total
+    let i = 1
+    while (i < pts.length - 1 && cum[i] < s) i++
+    const a = pts[i - 1] ?? pts[0], b = pts[i] ?? pts[0]
+    const seg = cum[i] - cum[i - 1] || 0
+    const t = seg > 0 ? (s - cum[i - 1]) / seg : 0
+    out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t])
+    const len = seg || 1
+    headings.push([(b[0] - a[0]) / len, (b[1] - a[1]) / len, (b[2] - a[2]) / len])
+  }
+  return { points: out, headings }
+}
+
+/** The length of a polyline (scene coordinates). */
+export function polylineLength(points: readonly V3[]): number {
+  let total = 0
+  for (let i = 1; i < points.length; i++) total += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1], points[i][2] - points[i - 1][2])
+  return total
+}
+
+/**
  * The glow a result gives an object, or null when selection, hover or the
  * boundary warning own it (precedence, emissiveFor). A share glows in the
  * object's colour at its eased value; a branch in its loading band, brighter

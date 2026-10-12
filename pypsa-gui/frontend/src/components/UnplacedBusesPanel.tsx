@@ -14,10 +14,16 @@ interface UnplacedBusesPanelProps {
   /** True while click-to-place is running; the panel hides so it can't cover the map. */
   placing: boolean
   onStartPlacing: () => void
+  /**
+   * "Place all buses around this point" (plan M4): one click lays the whole
+   * campus out — the first unplaced bus (a template's grid connection) at
+   * the click, the rest 200 m apart around it. Absent = not offered.
+   */
+  onStartPlacingAll?: () => void
 }
 
 export default function UnplacedBusesPanel({
-  unplacedCount, totalCount, placing, onStartPlacing,
+  unplacedCount, totalCount, placing, onStartPlacing, onStartPlacingAll,
 }: UnplacedBusesPanelProps) {
   if (unplacedCount === 0 || placing) return null
 
@@ -59,14 +65,31 @@ export default function UnplacedBusesPanel({
         All {totalCount} buses have no usable location yet — most commonly
         PyPSA&rsquo;s default 0, 0, but also missing or out-of-range values.
       </p>
-      <button
-        type="button"
-        onClick={onStartPlacing}
-        className="mt-3 px-3 py-1.5 rounded-md bg-accent text-white text-xs font-medium
-                   hover:opacity-90 transition-opacity"
-      >
-        Place buses on the map
-      </button>
+      {onStartPlacingAll && (
+        <p className="mt-2 text-xs font-medium text-text">
+          Place your campus: pick the grid connection on the map
+        </p>
+      )}
+      <div className="mt-3 flex items-center justify-center gap-2 flex-wrap">
+        {onStartPlacingAll && (
+          <button
+            type="button"
+            onClick={onStartPlacingAll}
+            title="One click: the first bus lands there, the others 200 m apart around it. Drag them afterwards."
+            className="px-3 py-1.5 rounded-md bg-accent text-white text-xs font-medium hover:opacity-90 transition-opacity"
+          >
+            Place all buses around this point
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onStartPlacing}
+          className={`px-3 py-1.5 rounded-md text-xs font-medium transition-opacity ${
+            onStartPlacingAll ? 'border border-border text-text hover:bg-border/30' : 'bg-accent text-white hover:opacity-90'}`}
+        >
+          {onStartPlacingAll ? 'Place buses one by one' : 'Place buses on the map'}
+        </button>
+      </div>
       <p className="mt-2 text-[10px] text-muted">
         or open a bus and paste a <span className="font-mono">lat, lng</span> pair into its properties
       </p>
