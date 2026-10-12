@@ -1,9 +1,23 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { useEffect } from 'react'
+import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
+import { slidePanelClickShouldClose } from '../utils/slidePanelDismiss'
 
 vi.mock('./ChatPanel', () => ({
   default: () => <div data-testid="chat-panel-stub">chat</div>,
+}))
+
+vi.mock('../hooks/useChatProfiles', () => ({
+  useChatProfiles: () => ({
+    data: {
+      profiles: [{ id: 'claude', label: 'Claude', wire: 'anthropic' as const }],
+      active_profile_id: 'claude',
+    },
+    isError: false,
+  }),
+  useChatReadiness: () => ({ effectiveProfileId: 'claude', ready: true }),
 }))
 
 import AssistantDock from './AssistantDock'
@@ -75,5 +89,66 @@ describe('the assistant survives its own navigation', () => {
     // The body is a descendant, so `closest()` — which is what App.tsx calls —
     // finds the marker from anything the user can actually click.
     expect(screen.getByTestId('assistant-dock-body').closest('[data-no-panel-close]')).toBe(dock)
+  })
+})
+
+/** App.tsx's capture-phase listener, using the same dismiss rule. */
+function PanelCloseHarness() {
+  const activeSlidePanel = useUIStore((s) => s.activeSlidePanel)
+  const setSlidePanel = useUIStore((s) => s.setSlidePanel)
+  useEffect(() => {
+    if (!activeSlidePanel) return
+    const onPointerDown = (e: MouseEvent) => {
+      if (slidePanelClickShouldClose(e.target, null)) setSlidePanel(null)
+    }
+    document.addEventListener('mousedown', onPointerDown, true)
+    return () => document.removeEventListener('mousedown', onPointerDown, true)
+  }, [activeSlidePanel, setSlidePanel])
+  return <AssistantDock />
+}
+
+describe('the floating companion survives click-outside-to-close', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    useUIStore.setState({ assistantDockOpen: false, activeSlidePanel: 'results' })
+    useChatStore.setState({ pending: null })
+  })
+
+  const companionClickIds = [
+    'companion-compose',
+    'companion-speak',
+    'companion-live',
+    'companion-profile',
+  ] as const
+
+  it.each(companionClickIds)(
+    'keeps the slide panel open when %s is clicked',
+    (testId) => {
+      render(<PanelCloseHarness />)
+      const companion = screen.getByTestId('companion-launcher')
+      expect(companion.hasAttribute('data-no-panel-close')).toBe(true)
+      const target = screen.getByTestId(testId)
+      expect(target.closest('[data-no-panel-close]')).toBe(companion)
+      fireEvent.mouseDown(target, { bubbles: true })
+      expect(useUIStore.getState().activeSlidePanel).toBe('results')
+    },
+  )
+
+  it('keeps the slide panel open when the confirmation card is pressed', () => {
+    useChatStore.setState({
+      pending: {
+        tool_use_id: 'tu1',
+        tool_name: 'update_component',
+        args: { name: 'bus-a' },
+        safety_tier: 'write',
+        confirmation_token: 'tok',
+        ttl_seconds: 60,
+        expires_at_epoch_ms: Date.now() + 60_000,
+      },
+    })
+    render(<PanelCloseHarness />)
+    const card = screen.getByTestId('companion-confirmation')
+    fireEvent.mouseDown(card, { bubbles: true })
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
   })
 })

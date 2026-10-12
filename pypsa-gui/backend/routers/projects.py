@@ -2338,7 +2338,7 @@ def _library_pin_issues(db, project, src: pathlib.Path, cfg) -> list[dict]:
     return issues
 
 
-def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
+def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str, *, allow_networkless: bool = False) -> None:
     """
     Populate a (typically OFF-TO-THE-SIDE, background) ProjectContext from the
     on-disk project at ``src`` WITHOUT touching the active pointer or the
@@ -2390,8 +2390,9 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
 
     nc_path = src / "network.nc"
     with ctx.mutation_lock:
-        with PyPSAService.get_netcdf_io_lock():
-            PyPSAService.import_network_from_netcdf(ctx.network, nc_path)
+        if nc_path.exists() or not allow_networkless:
+            with PyPSAService.get_netcdf_io_lock():
+                PyPSAService.import_network_from_netcdf(ctx.network, nc_path)
         ctx.loaded_project = name
 
     # User-uploaded series for THIS project, into THIS context's store.
@@ -2523,7 +2524,9 @@ def activate_project(
     src = project_registry.project_dir(project)
     lock_info = _serialize_project_lock(db, project.id, user)
     registry_id = project_registry.registry_key(project)
-    if not (src / "network.nc").exists():
+    networkless_study = (project.project_kind == "planning_dynamics"
+                        and (src / "gridspine" / "config.json").is_file())
+    if not (src / "network.nc").exists() and not networkless_study:
         raise HTTPException(404, f"Project '{project_id}' not found")
 
     # Foreground-solve guard. Check BEFORE any swap so we never half-move state.
@@ -2585,7 +2588,10 @@ def activate_project(
             # projects evicted to make room — the freshly-activated project is
             # protected (it's the new active id) so it's never its own victim.
             ctx = PyPSAService.build_context()
-            _hydrate_context_from_disk(ctx, src, project.name)
+            if networkless_study:
+                _hydrate_context_from_disk(ctx, src, project.name, allow_networkless=True)
+            else:
+                _hydrate_context_from_disk(ctx, src, project.name)
             project_registry.bind_context(ctx, project)
             evicted = PyPSAService.activate_context(ctx, register=True)
             library_issues = _library_pin_issues(

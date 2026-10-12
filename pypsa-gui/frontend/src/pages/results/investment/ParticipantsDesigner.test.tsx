@@ -3,7 +3,8 @@
 // 412 as "changed elsewhere, reload", and a template's drafts priced in a
 // dialog before anything is saved.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { StrictMode } from 'react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../../store/uiStore'
 import { commercialApi, StaleEditError } from '../../../api/commercial'
@@ -28,9 +29,10 @@ const CTX = {
   tariff_items: [{ id: 'energy', kind: 'energy', default_payee: 'retailer', stream: 'energy_import' }],
 }
 
-function renderDesigner() {
+function renderDesigner(strict = false) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={qc}><ParticipantsDesigner /></QueryClientProvider>)
+  const designer = <QueryClientProvider client={qc}><ParticipantsDesigner /></QueryClientProvider>
+  return render(strict ? <StrictMode>{designer}</StrictMode> : designer)
 }
 
 beforeEach(() => {
@@ -101,15 +103,19 @@ describe('ParticipantsDesigner', () => {
                           annual_payment: null, tenor_years: 10, asset_ids: ['pv'] }],
       notes: ['draft_needs:lease_draft:annual_payment'] })
     api.appendContracts.mockResolvedValue({} as never)
-    renderDesigner()
+    renderDesigner(true)
     await screen.findByTestId('vf-designer')
     fireEvent.change(screen.getByLabelText('Template'), { target: { value: 'landlord_tenant' } })
     fireEvent.click(screen.getByRole('button', { name: 'Build' }))
     const dialog = await screen.findByRole('dialog')
     const use = within(dialog).getByRole('button', { name: 'Save contracts and use' })
     expect(use.hasAttribute('disabled')).toBe(true)              // unpriced: cannot be saved
-    fireEvent.change(within(dialog).getByLabelText('annual payment'), { target: { value: '50000' } })
-    expect(use.hasAttribute('disabled')).toBe(false)
+    const payment = within(dialog).getByLabelText('annual payment')
+    act(() => {
+      fireEvent.change(payment, { target: { value: '40000' } })
+      fireEvent.change(payment, { target: { value: '50000' } })
+    })
+    await waitFor(() => expect(use.hasAttribute('disabled')).toBe(false))
     fireEvent.click(use)
     await waitFor(() => expect(api.appendContracts).toHaveBeenCalledWith([
       expect.objectContaining({ id: 'lease_draft', annual_payment: 50000 })]))

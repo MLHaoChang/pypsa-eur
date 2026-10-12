@@ -5,7 +5,9 @@ prompt is cached by prefix and the default prompt is pinned by hash
 (`test_chat_profile_binding.test_default_prompt_bytes_unchanged`). These
 hashes were captured from the constants BEFORE the move, on 2026-10-05
 (commit 43b36fb), for every fragment and every half — not just the six the
-older test pins.
+older test pins. The stance/chaining pins were updated for the approved
+companion navigation guidance in master b8bc079f (PR 113); all other hashes
+remain the pre-move values.
 """
 from __future__ import annotations
 
@@ -20,8 +22,8 @@ EXPECTED_SHA256 = {
     "_CONFIRMATION_CARD_CONTRACT_TEMPLATE": "b471392537b952c84d95d7af7b379c938ac290c933138e693a145a1fbd007eb9",
     "_STYLE_GUIDANCE": "c31b98f1ea587f1d77e644a5fe721afce4316155b950d6c479c002f120a6912b",
     "_ASSISTANT_STANCE_FACTS": "18137511a7024922e0c648edc3110c39d09621d8fcf3ad1b458ee8374b320cb0",
-    "_ASSISTANT_STANCE_CHAINING": "ec026429da8c202c36d81a4f5343cf5bc0e1653d10e572b107f3f6420d66d354",
-    "_ASSISTANT_STANCE": "1dd77952d0cdec42606c4d269adf31aae9d11ae8ef22cf83103ac0659028889b",
+    "_ASSISTANT_STANCE_CHAINING": "c98f5e856e5325af0d70194ba1d1656cde0c0c3ece50e4c13f4032f81e5fc723",
+    "_ASSISTANT_STANCE": "7f7ad3efbd93136d9ea17fad812d804d4d2b8dce6f104fa68d196acf9f56ae3d",
     "_DOMAIN_GUIDE_FACTS": "8ce3002dae7b4b8897d07f876eb661c700ddfd74707fb7b56208f16190bfd7c8",
     "_DOMAIN_GUIDE_CHAINING": "9cab8c228ba6e980e26d747cb0047d3b515850c8e3f157d3d3b4d79e2700ca50",
     "_DOMAIN_GUIDE": "3e6f420d74fea27240186cc520718dd401fd7b18a6e0fef1262630f053256f8f",

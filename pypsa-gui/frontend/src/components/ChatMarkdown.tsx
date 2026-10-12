@@ -10,10 +10,25 @@
 // destructured OUT before spreading the rest onto the DOM element (otherwise
 // React warns about an unknown `node` attribute).
 import { useCallback, useState, type ReactNode } from 'react'
-import Markdown from 'react-markdown'
+import Markdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Components, Options } from 'react-markdown'
 import { extractCopyText } from '../utils/chatUi'
+
+// Models occasionally include this label inside a Markdown destination rather
+// than outside the link. Repair only a complete authenticated artifact route;
+// all other destinations retain react-markdown's normal URL safety checks.
+function artifactUrlTransform(url: string, key: string): string {
+  if (key === 'href') {
+    try {
+      const match = /^authenticated download link:\s*(\/api\/projects\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/uploads\/[0-9a-f]{16}\/blob)$/i.exec(decodeURI(url))
+      if (match) return defaultUrlTransform(match[1])
+    } catch {
+      // Malformed percent escapes are handled by the default transform below.
+    }
+  }
+  return defaultUrlTransform(url)
+}
 
 function CodeBlockPre({ children, ...rest }: { children?: ReactNode } & Record<string, unknown>) {
   const [copied, setCopied] = useState(false)
@@ -87,7 +102,7 @@ export default function ChatMarkdown({
 }: { children: string; rehypePlugins?: Options['rehypePlugins'] }) {
   return (
     <div className="chat-markdown break-words">
-      <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins ?? undefined} components={components}>
+      <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins ?? undefined} components={components} urlTransform={artifactUrlTransform}>
         {children}
       </Markdown>
     </div>
