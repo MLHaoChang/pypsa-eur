@@ -280,13 +280,51 @@ def test_the_pcc_switchgear_scope_is_a_study_setting_and_is_written(tmp_path, pr
     assert f"switchgear {pcc}" not in set(by_operator["investment"]["need"])
     from gridspine.static.campus_invest import ParallelRules
     rules = ParallelRules().scope()
-    assert json.loads((run / INVEST_SCOPE_JSON).read_text()) == {"pcc_switchgear": "grid_operator", "parallel": rules}
+    assert json.loads((run / INVEST_SCOPE_JSON).read_text()) == {"pcc_switchgear": "grid_operator", "parallel": rules,
+                                                                 "pcc_tap_control": "campus"}
     invest_campus(run)
-    assert json.loads((run / INVEST_SCOPE_JSON).read_text()) == {"pcc_switchgear": "campus", "parallel": rules}
+    assert json.loads((run / INVEST_SCOPE_JSON).read_text()) == {"pcc_switchgear": "campus", "parallel": rules,
+                                                                 "pcc_tap_control": "campus"}
     # the rules for adding units next to existing ones are passed on and written with the run (plan C13)
     invest_campus(run, parallel=ParallelRules(uk_tol=0.075))
     written = json.loads((run / INVEST_SCOPE_JSON).read_text())["parallel"]
     assert written == ParallelRules(uk_tol=0.075).scope() and written["uk_tol"]["value"] == 0.075
+
+
+def test_who_moves_the_pcc_taps_is_a_study_setting_and_the_taps_are_written(tmp_path, project):
+    """Plan C15: ``pcc_tap_control`` reaches the engine and the scope file,
+    and ``campus_invest_taps.csv`` lists every transformer with tap data
+    per hour and case. A drafted campus has no tap data: the file is a
+    header. With on-load taps on every unit, the grid operator's PCC units
+    never move."""
+    import json
+    import pandas as pd
+    from gridspine.drivers.campus_study import INVEST_SCOPE_JSON, INVEST_TAPS_CSV
+    from gridspine.static.campus_taps import TAP_COLUMNS
+    run = tmp_path / "run"
+    spec = draft_from_project(project).spec
+    prepare_campus(run, spec, project)
+    rank_campus(run, k=1)
+    invest_campus(run)
+    assert list(pd.read_csv(run / INVEST_TAPS_CSV).columns) == TAP_COLUMNS
+    assert pd.read_csv(run / INVEST_TAPS_CSV).empty
+    c = spec["campus"]
+    pcc = str(c["pcc"]["bus"])
+    for tr in c["transformers"].values():
+        tr["existing"] = True
+        tr["tap"] = {"changer": "on_load", "side": "hv", "neutral": 0, "min": -9, "max": 9,
+                     "step_percent": {"value": 1.5, "source": "assumed"}}
+    prepare_campus(run, spec, project)
+    rank_campus(run, k=1)
+    with pytest.raises(ContractError, match="pcc_tap_control"):
+        invest_campus(run, pcc_tap_control="operator")
+    assert not (run / INVEST_TAPS_CSV).exists() or pd.read_csv(run / INVEST_TAPS_CSV).empty
+    out = invest_campus(run, pcc_tap_control="grid_operator")
+    assert json.loads((run / INVEST_SCOPE_JSON).read_text())["pcc_tap_control"] == "grid_operator"
+    taps = pd.read_csv(run / INVEST_TAPS_CSV)
+    assert list(taps.columns) == TAP_COLUMNS and len(taps) == len(out["taps"]) > 0
+    at_pcc = {n for n, tr in out["spec"]["campus"]["transformers"].items() if str(tr["hv_bus"]) == pcc}
+    assert at_pcc and set(taps.loc[taps["transformer"].isin(at_pcc), "moved_by"]) == {0}
 
 
 def test_investing_by_milp_writes_c8s_files_and_the_milp_history(tmp_path, project):

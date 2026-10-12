@@ -70,9 +70,19 @@ files. It writes:
 ``campus_invest_dispatch.csv``
     The reactive dispatch per selected hour: inverters, STATCOMs, steps.
 ``campus_invest_scope.json``
-    Who buys the PCC switchgear (``pcc_switchgear``) and the rules a unit
+    Who buys the PCC switchgear (``pcc_switchgear``), the rules a unit
     added next to existing transformers had to meet (``parallel``,
-    ``ParallelRules.scope``: tolerances tagged assumed).
+    ``ParallelRules.scope``: tolerances tagged assumed), and who moves the
+    PCC transformer's taps (``pcc_tap_control``, plan C15).
+``campus_invest_taps.csv``
+    The tap of every transformer with tap data, per selected hour and case
+    of the re-check (plan C15, ``gridspine.static.campus_taps``): ``period,
+    hour, case, transformer, group, tap_pos, ratio_pct, moved_by``. The
+    study moves the on-load taps where a campus voltage is out of its band,
+    per hour and per case (an N-1 case after the tap changers have acted,
+    the Q dispatch held); ``moved_by`` is the change from the file's
+    position, ``ratio_pct`` the ratio against the rated one. Header only
+    when no transformer has tap data.
 
 ``invest_campus(..., method="milp")`` chooses the assets jointly instead
 (plan C11, ``gridspine.static.campus_milp``), warm-started from the
@@ -127,6 +137,7 @@ from gridspine.static.campus_compliance import campus_compliance
 from gridspine.static.campus_invest import ParallelRules, select_assets
 from gridspine.static.campus_milp import select_assets_milp
 from gridspine.static.campus_sc import campus_fault_levels
+from gridspine.static.campus_taps import PCC_TAP_CONTROL  # noqa: F401  (re-exported: the backend's seam)
 from gridspine.templates.campus_assets import DEFAULT_PATH as ASSET_LIBRARY_PATH  # noqa: F401  (the backend's seam)
 from gridspine.templates.campus_assets import load_asset_library
 from gridspine.templates.grid_codes import (  # noqa: F401  (re-exported: the backend's seam)
@@ -161,6 +172,7 @@ COMPLIANCE_INVESTED_CSV = "campus_compliance_invested.csv"
 INVEST_HISTORY_CSV = "campus_invest_history.csv"
 INVEST_DISPATCH_CSV = "campus_invest_dispatch.csv"
 INVEST_SCOPE_JSON = "campus_invest_scope.json"
+INVEST_TAPS_CSV = "campus_invest_taps.csv"
 MILP_HISTORY_CSV = "campus_milp_history.csv"
 MILP_COMPARISON_CSV = "campus_milp_comparison.csv"
 METHODS = ("least_cost", "milp")
@@ -348,7 +360,7 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
 def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,
                   pf: float | None = None, profile_dirs=(), pcc_switchgear: bool = True,
                   method: str = "least_cost", progress=None, should_stop=None,
-                  parallel: ParallelRules = ParallelRules()) -> dict:
+                  parallel: ParallelRules = ParallelRules(), pcc_tap_control: str = "campus") -> dict:
     """Least-cost electrical assets for a ranked run, AC-checked (module
     docstring). ``library`` is a path, or None for the shipped library;
     ``profile`` may be a project profile in ``profile_dirs``, as for
@@ -370,7 +382,13 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
     ``parallel`` are the rules for adding units next to existing
     transformers (plan C13, ``campus_invest.ParallelRules``); the defaults
     are the owner's, all assumed, and are written to
-    ``campus_invest_scope.json`` with the PCC switchgear setting."""
+    ``campus_invest_scope.json`` with the PCC switchgear setting.
+
+    ``pcc_tap_control`` says who moves the taps of the transformers at the
+    PCC (plan C15): ``campus`` (default; the study may move them) or
+    ``grid_operator`` (they stay at the file's taps). It is written to the
+    scope file too, and the taps of the re-check to
+    ``campus_invest_taps.csv``."""
     if method not in METHODS:
         raise ContractError(f"unknown investment method {method!r}; allowed {list(METHODS)}")
     if method != "milp" and (progress is not None or should_stop is not None):
@@ -385,7 +403,7 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
     choose = select_assets_milp if method == "milp" else select_assets
     hooks = {"progress": progress, "should_stop": should_stop} if method == "milp" else {}
     out = choose(spec, hourly, selection, lib, requirement_from(grid_code, p_ref, pf=pf), grid_code, criteria,
-                 pcc_switchgear=pcc_switchgear, parallel=parallel, **hooks)
+                 pcc_switchgear=pcc_switchgear, parallel=parallel, pcc_tap_control=pcc_tap_control, **hooks)
     build_campus(out["spec"])                                # the invested file must build before it is written
     _write_text_atomic(run_dir / INVESTMENT_CSV, out["investment"].to_csv(index=False))
     _write_text_atomic(run_dir / COST_CSV, out["cost"].to_csv(index=False))
@@ -394,6 +412,7 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
     _write_text_atomic(run_dir / INVEST_HISTORY_CSV, out["history"].to_csv(index=False))
     _write_text_atomic(run_dir / INVEST_DISPATCH_CSV, out["dispatch"].to_csv(index=False))
     _write_text_atomic(run_dir / INVEST_SCOPE_JSON, json.dumps(out["scope"], indent=2))
+    _write_text_atomic(run_dir / INVEST_TAPS_CSV, out["taps"].to_csv(index=False))
     if method == "milp":
         _write_text_atomic(run_dir / MILP_HISTORY_CSV, out["milp_history"].to_csv(index=False))
         _write_text_atomic(run_dir / MILP_COMPARISON_CSV, out["comparison"].to_csv(index=False))

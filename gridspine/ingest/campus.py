@@ -232,6 +232,9 @@ CAMPUS_LEDGER = (
     "(assumed); capacitor banks and reactors feed no fault current",
     "campus: a UPS is a storage unit that feeds no fault current upstream "
     "(UPS_K = 0): its rectifier blocks it",
+    "campus: the investment re-check sets on-load taps per hour and per case, "
+    "an N-1 case after the tap changers have acted, the Q dispatch held "
+    "(plan C15, static/campus_taps); off-circuit taps stay at the file's position",
 )
 
 

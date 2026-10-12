@@ -437,7 +437,10 @@ def test_a_voltage_compensation_cannot_lift_is_unresolved_with_the_tap_change_na
     """A 30 % impedance unit carries the flow but leaves MV2 below 0.90 pu
     (solved here). A voltage maps to the reactive need, so a STATCOM is
     tried; it is dispatched to the PCC band, which holds, so it does nothing
-    for the voltage, and the selector says so instead of trying the rest."""
+    for the voltage, and the selector says so instead of trying the rest.
+
+    Plan C15: the unit has no tap data, so the taps cannot act either, and
+    the reason says so in place of the old "(out of scope)"."""
     assert solve_direct(H7, [(60.0, 30.0)]).res_bus["vm_pu"].min() < 0.9
     lib = library(tmp_path, transformers=[tr("T60", 60.0, 1.0e6, vk=30.0)],
                   statcoms=[comp("statcoms", "ST10", 10.0, 400e3), comp("statcoms", "ST20", 20.0, 700e3)])
@@ -447,7 +450,8 @@ def test_a_voltage_compensation_cannot_lift_is_unresolved_with_the_tap_change_na
     assert list(h["need"]) == ["reactive", "reactive"] and list(h["check"]) == ["campus_voltage"] * 2
     assert (h.iloc[0]["from"], h.iloc[0]["to"]) == ("none", "1 x ST10")
     got = row(out, "reactive")
-    assert got["status"] == "unresolved" and "tap change" in got["reason"]
+    assert got["status"] == "unresolved" and "TR1 has no on-load tap data" in got["reason"]
+    assert "MV2" in got["reason"] and "out of scope" not in got["reason"]
     assert row(out, "transformer TR1")["library_id"] == "T60"
     comp_ = out["compliance"].set_index("check")
     assert comp_.at["campus_voltage", "status_with_measures"] == "fail"
@@ -547,10 +551,11 @@ def test_pcc_switchgear_owned_by_the_grid_operator_is_not_bought(tmp_path):
     out = select_assets(wide_cable_spec(), table, sel, lib, WIDE, PROFILE, pcc_switchgear=False)
     assert "switchgear PCC" not in set(out["investment"]["need"])
     assert "ik_rated_ka" not in out["spec"]["campus"]["pcc"]
-    assert out["scope"] == {"pcc_switchgear": "grid_operator", "parallel": ParallelRules().scope()}
+    assert out["scope"] == {"pcc_switchgear": "grid_operator", "parallel": ParallelRules().scope(),
+                            "pcc_tap_control": "campus"}
     assert out["compliance"].set_index("check").at["switchgear", "status_with_measures"] == "not_rated"
     assert select_assets(wide_cable_spec(), table, sel, lib, WIDE, PROFILE)["scope"] == {
-        "pcc_switchgear": "campus", "parallel": ParallelRules().scope()}
+        "pcc_switchgear": "campus", "parallel": ParallelRules().scope(), "pcc_tap_control": "campus"}
 
 
 def test_a_rated_pcc_that_fails_is_reported_not_bought_when_the_operator_owns_it(tmp_path):

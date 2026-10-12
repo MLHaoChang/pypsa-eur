@@ -25,6 +25,9 @@ Translation, in the order the draft is built:
     rounded **up** to the next size in ``STANDARD_MVA``, with typical
     impedance and losses for its size class (``_TRAFO_CLASS``).
   - At the same voltage, a link becomes a short **bus tie**.
+  - A drafted transformer has **no tap block** (plans C13, C15): it sits at
+    its rated ratio, and the investment study never moves its taps until
+    the engineer adds the unit's tap data.
 * **A Link from an AC bus to another carrier** (an electrolyser, a heat
   pump) is power drawn from that bus, so it becomes a **load** at its
   optimised capacity. A Link from another carrier into an AC bus (a fuel

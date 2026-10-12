@@ -82,7 +82,13 @@ A cable or bus that first fails in a re-check becomes a need then.
    re-conductored or paralleled; buses get the ``ik_rated_ka`` chosen.
 3. The copy is built and every selected hour is re-solved, intact and N-1,
    with its reactive dispatch in place (``reactive_need(residual=False)``:
-   inverters, then STATCOMs, then steps; nothing virtual). Fault levels are
+   inverters, then STATCOMs, then steps; nothing virtual). Where a campus
+   voltage is then out of its band, the on-load taps are set (plan C15,
+   ``campus_taps``): searched with that Q held, the Q re-settled, per hour
+   and per case (an N-1 case after the tap changers act, its Q the intact
+   case's); the taps of the PCC transformers only when the study gives
+   them to the campus (``pcc_tap_control``). An hour in band keeps its
+   file taps and today's numbers. Fault levels are
    re-computed with the new transformers, every STATCOM energised in every
    period (conservative).
 4. Every check is run. A failing check escalates the need it maps to:
@@ -102,12 +108,16 @@ A cable or bus that first fails in a re-check becomes a need then.
    ===========================  ===========================================
 
    A voltage is mapped to the reactive need because compensation is the
-   only voltage-acting asset here. That is an honest limit: compensation
-   is dispatched to hold the PCC band, not a voltage, and a voltage problem
-   may need a tap change, which is out of scope (no tap-changer
-   optimisation). So when a reactive escalation made for a voltage does
-   not reduce the worst voltage excursion, the need is reported unresolved
-   rather than walked through the whole library.
+   only voltage-acting asset bought here; the taps have already acted
+   inside the re-check (step 3), so a voltage failure is one the taps could
+   not fix. Compensation is dispatched to hold the PCC band, not a
+   voltage. So when a reactive escalation made for a voltage does not
+   reduce the worst voltage excursion, the need is reported unresolved
+   rather than walked through the whole library, with the taps' reason
+   (``campus_taps.Taps.diagnose``: "range exhausted: TR1+TR2 at +9 (max),
+   MV2 0.893 pu", "TR3 has no on-load tap data", or the grid operator's
+   taps). A PCC voltage is the grid's set-point in this model: it is never
+   sent to the taps, and its reason says it is the operator's voltage.
 5. The loop stops when every check passes, when a need runs out of
    candidates (it is reported unresolved, with the failing check, and the
    state with its last candidate is re-checked once more so the report is
@@ -137,7 +147,12 @@ does: ``buy`` (a new asset), ``add`` (units added next to existing ones),
 beside its ``add`` row) or ``replace`` (a group or cable bought where
 existing ones stood).
 
-Steady state only: no dynamics, no harmonics, no tap-changer optimisation.
+The re-check's taps are returned as ``taps`` (``campus_taps.TAP_COLUMNS``),
+and the compliance detail of the campus voltage names the taps at its
+worst hour when any moved.
+
+Steady state only: no dynamics, no harmonics, no tap-changer dynamics or
+wear, no off-circuit tap optimisation.
 Allowed to import pandapower (``static/``); never pypsa.
 """
 import copy
@@ -154,6 +169,7 @@ from gridspine.static.campus_compliance import CHECKS, Q_TOL, campus_compliance
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases, trafo_groups
 from gridspine.static.campus_reactive import compensation_bus, reactive_need, size_compensation
 from gridspine.static.campus_sc import campus_fault_levels, judge
+from gridspine.static.campus_taps import PCC_TAP_CONTROL, Taps, compliance_note, tap_table
 from gridspine.templates.campus_assets import annualised_cost, library_entries, value
 from gridspine.templates.grid_codes import load_grid_code
 
@@ -260,6 +276,12 @@ class _Study:
     compensation: pd.DataFrame
     short_circuit: pd.DataFrame
     converged: bool
+    #: The taps per hour and case (plan C15, ``campus_taps.TAP_COLUMNS``),
+    #: the rule that set them (None for part one's study, at the file's
+    #: taps) and the hours whose taps were still moving at the cap.
+    taps: pd.DataFrame = dataclasses.field(default_factory=lambda: tap_table([]))
+    tapper: object = None
+    hunted: tuple = ()
 
 
 @dataclasses.dataclass
@@ -297,22 +319,52 @@ def _installed(hourly):
     return {int(p): set(b.loc[b["status"] == 1, "unit_id"]) for p, b in hourly.groupby("period")}
 
 
-def _study(campus, hours, rows_of, installed, req, criteria, recheck) -> _Study:
+def taps_dispatch(campus, rows, req, tapper):
+    """One hour of the re-check (plan C15): C8's dispatch with the taps
+    (``Taps.settle``), then every case solved with it, the taps set per
+    case from the intact case's. ``(ReactiveResult, flows, {case:
+    positions}, hunted)``. Without a searched tap changer this is today's
+    dispatch and solve, unchanged."""
+    if tapper is None or not tapper.active:
+        r = reactive_need(campus, rows, req, residual=False)
+        log = {}
+        retap = tapper.hook(False, log) if tapper is not None and tapper.data else None
+        return r, solve_cases(campus, rows, setpoints=r.setpoints, retap=retap), log, False
+    r, hunted = tapper.settle(campus, rows, req)
+    log = {}
+    flows = solve_cases(campus, rows, setpoints=r.setpoints, retap=tapper.hook(False, log))
+    return r, flows, log, hunted
+
+
+def _study(campus, hours, rows_of, installed, req, criteria, recheck, profile=None,
+           pcc_tap_control="campus") -> _Study:
     """Part one's calculation on ``campus``. ``recheck`` dispatches the real
-    equipment only and solves every case with that dispatch in place."""
-    reactive, flows = {}, {}
+    equipment only and solves every case with that dispatch in place; with
+    ``profile`` it also sets the on-load taps (plan C15, ``campus_taps``)."""
+    reactive, flows, taps, hunted = {}, {}, [], []
+    tapper = Taps(campus, profile, pcc_tap_control) if recheck and profile is not None else None
     for key in hours:
         rows = rows_of[key]
-        r = reactive_need(campus, rows, req, residual=not recheck)
+        if recheck:
+            r, flows[key], log, hunt = taps_dispatch(campus, rows, req, tapper)
+            if tapper is not None:
+                taps += tapper.rows(key, log)
+            if hunt:
+                hunted.append(key)
+        else:
+            r = reactive_need(campus, rows, req, residual=True)
+            flows[key] = solve_cases(campus, rows)
         reactive[key] = r
-        flows[key] = solve_cases(campus, rows, setpoints=r.setpoints if recheck else None)
-    return study_from(campus, reactive, flows, installed, req, criteria, recheck)
+    return study_from(campus, reactive, flows, installed, req, criteria, recheck, tap_table(taps), tapper,
+                      tuple(hunted))
 
 
-def study_from(campus, reactive, flows, installed, req, criteria, recheck=True) -> _Study:
+def study_from(campus, reactive, flows, installed, req, criteria, recheck=True, taps=None, tapper=None,
+               hunted=()) -> _Study:
     """The study tables from solved hours: ``reactive`` and ``flows`` are
     ``{(period, hour): ReactiveResult}`` and ``{(period, hour): solve_cases(...)}``.
-    Shared with the MILP (``campus_milp``), which brings its own dispatch."""
+    Shared with the MILP (``campus_milp``), which brings its own dispatch.
+    ``taps`` is the tap table and ``tapper`` the rule that set it (plan C15)."""
     bus, trafo, line, q = [], [], [], []
     converged = True
     for key in flows:
@@ -338,7 +390,7 @@ def study_from(campus, reactive, flows, installed, req, criteria, recheck=True) 
     return _Study(campus, reactive, flows, pd.DataFrame(bus, columns=cols["bus"]),
                   pd.DataFrame(trafo, columns=cols["trafo"]), pd.DataFrame(line, columns=cols["line"]),
                   pd.DataFrame(q), size_transformers(flows, campus, criteria), size_compensation(reactive, criteria),
-                  sc, converged)
+                  sc, converged, tap_table([]) if taps is None else taps, tapper, tuple(hunted))
 
 
 def _compliance(study, req, profile) -> pd.DataFrame:
@@ -349,6 +401,10 @@ def _compliance(study, req, profile) -> pd.DataFrame:
                                                          "source": req.source},
         profile=profile, pcc_bus=str(net.bus.at[int(net.ext_grid["bus"].iloc[0]), "name"]),
         bus_kv=dict(zip(net.bus["name"].astype(str), net.bus["vn_kv"].astype(float))))
+    note = compliance_note(study.tapper, study.bus, study.taps, study.hunted)
+    if note:
+        at = out.index[out["check"] == "campus_voltage"]
+        out.loc[at, "detail"] = out.loc[at, "detail"] + "; " + note
     line = study.line
     if len(line):
         j = line["loading_pct"].astype(float).idxmax()
@@ -845,6 +901,20 @@ def _failures(study, compliance, needs, req, criteria):
     return out
 
 
+def _voltage_reason(check, study):
+    """Why a voltage that a reactive escalation did not reduce is
+    unresolved (plan C15): the PCC voltage is the grid's set-point; a
+    campus voltage is what the taps could not reach (``Taps.diagnose``)."""
+    if check == "pcc_voltage":
+        return ("the grid set-point is outside the band: the operator's voltage, not a campus measure "
+                "(the PCC voltage is never sent to the taps)")
+    why = ("a reactive escalation did not reduce the excursion. Compensation is dispatched to the PCC band, "
+           "not to a voltage")
+    if study.tapper is None:
+        return why
+    return f"{why}; taps: {study.tapper.diagnose(study.bus, study.taps)}"
+
+
 def _escalate(need, check, direction, lib_by_id):
     """Move ``need`` to its next candidate (see the module docstring); False
     when there is none."""
@@ -956,7 +1026,7 @@ def _dispatch_table(study):
 
 def select_assets(campus_spec, hourly, selection, library, req, profile, criteria: SizingCriteria = SizingCriteria(),
                   max_iter: int = MAX_ITER, pcc_switchgear: bool = True,
-                  parallel: ParallelRules = ParallelRules()) -> dict:
+                  parallel: ParallelRules = ParallelRules(), pcc_tap_control: str = "campus") -> dict:
     """Least-cost assets for ``campus_spec`` at the selected hours, AC-checked
     (module docstring). ``profile`` is a grid-code profile or its name.
 
@@ -969,8 +1039,17 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
     means the grid operator owns it: the PCC bus is never a need, and its
     switchgear row reports what it finds without buying anything. The
     choice is returned as ``scope``, with ``parallel``, the rules for adding
-    units next to existing ones (``ParallelRules.scope``)."""
+    units next to existing ones (``ParallelRules.scope``), and
+    ``pcc_tap_control``.
+
+    The re-check sets the on-load taps (plan C15, ``campus_taps``) per hour
+    and case. ``pcc_tap_control`` says who moves the taps of the
+    transformers at the PCC: ``campus`` (default) or ``grid_operator`` (they
+    stay at the file's taps). The taps are returned as ``taps``
+    (``campus_taps.TAP_COLUMNS``)."""
     profile = load_grid_code(profile) if isinstance(profile, str) else profile
+    if pcc_tap_control not in PCC_TAP_CONTROL:
+        raise ContractError(f"pcc_tap_control is {pcc_tap_control!r}; allowed {list(PCC_TAP_CONTROL)}")
     lib_by_id = {e["id"]: e for kind in ("transformers", "cables", "capacitor_banks", "shunt_reactors", "statcoms",
                                          "switchgear") for e in library[kind]}
     hours = [(int(p), int(h)) for p, h in selection[["period", "hour"]].itertuples(index=False)]
@@ -986,7 +1065,8 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
     history, last_voltage, stop = [], None, any(n.unresolved for n in needs)
     for it in range(1, max_iter + 1):
         spec, added = _apply(campus_spec, needs, lib_by_id)
-        study = _study(build_campus(spec), hours, rows_of, installed, req, criteria, recheck=True)
+        study = _study(build_campus(spec), hours, rows_of, installed, req, criteria, recheck=True, profile=profile,
+                       pcc_tap_control=pcc_tap_control)
         compliance = _compliance(study, req, profile)
         fails = [f for f in _failures(study, compliance, needs, req, criteria)
                  if f[1] != "switchgear" or f[0].split(" ", 1)[1] not in skip]
@@ -1021,9 +1101,7 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
             if check in ("pcc_voltage", "campus_voltage"):
                 now = _excursion(compliance)
                 if last_voltage is not None and now >= last_voltage - V_IMPROVE:
-                    need.unresolved = (f"{check}: {detail}; a reactive escalation did not reduce the excursion. "
-                                       "Compensation is dispatched to the PCC band, not to a voltage: a tap change "
-                                       "or voltage control may be needed (out of scope)")
+                    need.unresolved = f"{check}: {detail}; " + _voltage_reason(check, study)
                     history.append({"iteration": it, "need": key, "from": before, "to": before, "check": check,
                                     "detail": detail})
                     stop = True
@@ -1047,6 +1125,8 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
             "dispatch": _dispatch_table(study), "spec": spec,
             "history": pd.DataFrame(history, columns=["iteration", "need", "from", "to", "check", "detail"]),
             "unresolved": unresolved, "pcc": _pcc_table(study), "short_circuit": study.short_circuit,
-            "scope": {"pcc_switchgear": "campus" if pcc_switchgear else "grid_operator", "parallel": parallel.scope()},
+            "taps": study.taps,
+            "scope": {"pcc_switchgear": "campus" if pcc_switchgear else "grid_operator", "parallel": parallel.scope(),
+                      "pcc_tap_control": pcc_tap_control},
             "state": SelectionState(needs, added, study, hours, rows_of, installed, periods, lib_by_id, profile, as_is,
                                     skip, not fails and not unresolved)}
