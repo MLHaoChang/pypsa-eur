@@ -42,12 +42,15 @@ The functions:
   The library a run used is kept as ``run/campus_assets_used.yaml``, so a
   later change to the library flags the results as stale.
 * ``get_library``, ``save_library``, ``reset_library``: the asset library.
-* ``extra_owner_assets``: what the last investment run bought, as the extra
-  owner assets of the investment case (plan, part three D2), in the shape of the
-  IC's ``ExtraOwnerAsset`` (``services/finance/case.py``, to be added by the IC
-  session). ``campus_study_hash`` identifies the study they come from;
-  ``owner_assets_response`` is the route's body (assets, hash, stale). Read only;
-  ``get_state`` carries only the count, ``owner_assets_count``.
+* ``extra_owner_assets``: what the investment run bought, as the extra owner
+  assets of the investment case (plan, part three D2), in the shape of the IC's
+  ``ExtraOwnerAsset`` (``services/finance/case.py``). The run is the joint
+  optimisation's (``run_milp/``) when it is fresh and has a point of its own,
+  else the least-cost one (owner decision 2026-10-12); ``meta.study_method``
+  says which. ``campus_study_hash`` identifies the study they come from;
+  ``owner_assets_response`` is the route's body (assets, hash, stale, method).
+  Read only; ``get_state`` carries only the count and the method,
+  ``owner_assets_count`` and ``owner_assets_method``.
 * ``start_milp_job``, ``milp_job_status``, ``cancel_milp_job``: the joint
   optimisation (plan C11's MILP) as a background job, in the report job's
   shape (``services/reports/report_job.py``): one job at a time on a daemon
@@ -443,8 +446,11 @@ def get_state(project) -> dict:
     settings = d / SETTINGS_FILE
     results = _results(d / "run")
     cost, reason = hub_cost(project) if results else (None, "no study has run yet")
+    method, source = _owner_source(project)
+    owner_assets = _owner_assets(method, source)
     return {
-        "owner_assets_count": len(extra_owner_assets(project)),
+        "owner_assets_count": len(owner_assets),
+        "owner_assets_method": method if owner_assets else None,
         "campus_yaml": campus.read_text() if campus.is_file() else None,
         "skipped": json.loads(notes.read_text()) if notes.is_file() else [],
         "profiles": profiles(project),
@@ -486,7 +492,8 @@ def get_investment(project) -> dict:
         "history": res["history"], "compliance_invested": res["compliance_invested"], "scope": res["scope"],
         "hub_cost": state["hub_cost"], "hub_cost_reason": state["hub_cost_reason"],
         "library_is_default": _library_text(campus_dir(project))[1], "cost_basis": res["cost_basis"],
-        "stale": state["stale"], "notes": list(INVESTMENT_NOTES),
+        "stale": state["stale"], "owner_assets_method": state["owner_assets_method"],
+        "notes": list(INVESTMENT_NOTES),
     }
 
 
@@ -513,21 +520,40 @@ _BASIS = {"cable": "per_km", "switchgear": "per_bay"}
 OWNER_ASSET_SOURCE = "campus_study"
 
 
-def campus_study_hash(project):
-    """The first 16 hex characters of a sha256 over the files of the last
-    investment run, or None when the project has no investment run. In this
-    order: ``campus_investment.csv``, ``campus_assets_used.yaml``, the run's
-    campus file (``campus.yaml``, what ``prepare_campus`` writes) and, when
-    present, ``campus_cost_basis.json``; each as its file name, a NUL byte and
-    its bytes, so file boundaries are unambiguous. The campus file is hashed
-    when present (a real run always has it). The same for every entry of a
-    run; another study, library, rate or campus gives another one."""
-    require_capacity_expansion(project)
-    run_dir = campus_dir(project) / "run"
+def _milp_has_own_result(milp_dir: Path) -> bool:
+    """The joint optimisation finished (its summary is written last) with a
+    point of its own: not a fallback to the least-cost choice, cancelled or
+    not, and its investment table and the library it bought from are there.
+    A summary that cannot be read is no result."""
+    try:
+        meta = json.loads((milp_dir / MILP_SUMMARY_FILE).read_text())
+        own = meta["fallback"] is None
+    except Exception:                                          # noqa: BLE001 - see the docstring
+        return False
+    return own and (milp_dir / cs.INVESTMENT_CSV).is_file() and (milp_dir / USED_LIBRARY_FILE).is_file()
+
+
+def _owner_source(project) -> tuple:
+    """``(study_method, run directory)`` the investment case's owner assets
+    come from (owner decision 2026-10-12, "MILP when fresh, else least
+    cost"): ``("milp", run_milp/)`` when the joint optimisation has a result
+    of its own (``_milp_has_own_result``) that is not stale by C12's rule
+    (``get_state.milp.stale``, ``_milp_stale``); otherwise
+    ``("least_cost", run/)``."""
+    d = campus_dir(project)
+    milp_dir = d / MILP_SUBDIR
+    if _milp_has_own_result(milp_dir) and not _milp_stale(project, d):
+        return "milp", milp_dir
+    return "least_cost", d / "run"
+
+
+def _study_hash(method: str, run_dir: Path):
     names = (cs.INVESTMENT_CSV, USED_LIBRARY_FILE, cs.CAMPUS_YAML, COST_BASIS_FILE)
     if not (run_dir / names[0]).is_file() or not (run_dir / names[1]).is_file():
         return None
     h = hashlib.sha256()
+    if method != "least_cost":
+        h.update(b"study_method\0" + method.encode())
     for name in names:
         path = run_dir / name
         if path.is_file():
@@ -535,17 +561,45 @@ def campus_study_hash(project):
     return h.hexdigest()[:16]
 
 
+def campus_study_hash(project):
+    """The first 16 hex characters of a sha256 over the files of the
+    investment run the owner assets come from (``_owner_source``: the joint
+    optimisation's ``run_milp/`` when it is fresh and has a result of its own,
+    else the least-cost ``run/``), or None when that run has no investment.
+
+    In this order: ``campus_investment.csv``, ``campus_assets_used.yaml``, the
+    run's campus file (``campus.yaml``, what ``prepare_campus`` writes) and,
+    when present, ``campus_cost_basis.json``; each as its file name, a NUL byte
+    and its bytes, so file boundaries are unambiguous. The campus file is
+    hashed when present (a real run always has it). For the joint optimisation
+    the digest starts with the method, ``study_method``, a NUL byte and
+    ``milp``; for the least-cost run there is no such prefix, so its hash is
+    the one it had before the method was chosen. The same for every entry of a
+    run; another study, library, rate or campus gives another one, and so does
+    a switch of source (a MILP finishing with its own point, or going stale)."""
+    require_capacity_expansion(project)
+    return _study_hash(*_owner_source(project))
+
+
 def extra_owner_assets(project) -> list:
-    """What the last investment run bought, as the extra owner assets of the
-    investment case (IC): one dict per purchased item that is neither existing
-    (sunk) nor unresolved. ``[]`` when the project has no investment run (no
-    study, or a run with ``invest`` off); a project of another kind is refused
-    like every other action here.
+    """What the investment run the case stands on bought, as the extra owner
+    assets of the investment case (IC): one dict per purchased item that is
+    neither existing (sunk) nor unresolved. ``[]`` when that run has no
+    investment (no study, or a run with ``invest`` off); a project of another
+    kind is refused like every other action here.
+
+    Which run (owner decision 2026-10-12, "MILP when fresh, else least cost";
+    ``_owner_source``): the joint optimisation's ``run_milp/`` when its job
+    finished with a point of its own (a cancelled job that had found a cheaper
+    AC-feasible point counts; a fallback to the least-cost choice, cancelled or
+    not, does not, since its choice is the least-cost run's) and it is not stale
+    by C12's rule (``get_state.milp.stale``); otherwise the least-cost ``run/``,
+    as before. ``meta.study_method`` says which: ``"milp"`` or ``"least_cost"``.
 
     The TOP-LEVEL keys of an entry are exactly the fields of the IC's
     ``ExtraOwnerAsset`` (``services/finance/case.py``, a frozen dataclass; the
-    type is the IC's and is added by the IC session, not here), so the IC builds
-    it with ``ExtraOwnerAsset(**{k: d[k] for k in fields})``::
+    type is the IC's), so the IC builds it with
+    ``ExtraOwnerAsset(**{k: d[k] for k in fields})``::
 
         {"name": "campus:<library_id>#<k>",   # k counts that library id among the entries, from 1
          "kind": "transformer" | "cable" | "capacitor_bank" | "shunt_reactor" | "statcom" | "switchgear",
@@ -557,18 +611,18 @@ def extra_owner_assets(project) -> list:
          "source": "campus_study",
          "source_hash": str,  # campus_study_hash(project): the same for every entry
          "meta": {"need", "library_id", "units", "length_km", "currency", "price_year",
-                  "provenance", "illustrative"}}
+                  "provenance", "illustrative", "study_method"}}
 
     ``quantity x upfront_per_unit`` is the item's total overnight cost in the
     library's currency, in the library's price year (no escalation).
     ``upfront_per_unit`` is the library's ``capex_eur_per_km`` for a cable and
     ``capex_eur`` otherwise. ``meta`` is what the IC does not take:
     ``provenance`` is the source tag of that cost in the library (``measured``,
-    ``datasheet`` or ``assumed``) and ``illustrative`` is True when it is
-    ``assumed``. An engine kind that ``IC_KIND`` does not list is refused with
-    422 naming it.
+    ``datasheet`` or ``assumed``), ``illustrative`` is True when it is
+    ``assumed``, and ``study_method`` is the run's method. An engine kind that
+    ``IC_KIND`` does not list is refused with 422 naming it.
 
-    Read from the run directory: ``campus_investment.csv`` (the items, their
+    Read from that run directory: ``campus_investment.csv`` (the items, their
     units, cable length and investment period) and ``campus_assets_used.yaml``
     (the library the run bought from, kept beside the results: its costs,
     lifetimes, fixed-O&M shares and cost tags are the run's, not those of a
@@ -577,13 +631,16 @@ def extra_owner_assets(project) -> list:
     grid operator owns it the engine writes no row for it, so none appears here.
     The IC route refuses a stale study (``owner_assets_response``'s ``stale``)."""
     require_capacity_expansion(project)
-    run_dir = campus_dir(project) / "run"
+    return _owner_assets(*_owner_source(project))
+
+
+def _owner_assets(method: str, run_dir: Path) -> list:
     table, used = run_dir / cs.INVESTMENT_CSV, run_dir / USED_LIBRARY_FILE
     if not table.is_file() or not used.is_file():
         return []
     lib = cs.load_asset_library(used)
     priced = _priced(lib)
-    digest = campus_study_hash(project)
+    digest = _study_hash(method, run_dir)
     seen: dict = {}
     out = []
     for r in pd.read_csv(table).to_dict(orient="records"):
@@ -619,7 +676,8 @@ def extra_owner_assets(project) -> list:
             "meta": {"need": r["need"], "library_id": r["library_id"], "units": units,
                      "length_km": float(length) if basis == "per_km" else None,
                      "currency": lib["currency"], "price_year": lib["price_year"],
-                     "provenance": source, "illustrative": source == "assumed"},
+                     "provenance": source, "illustrative": source == "assumed",
+                     "study_method": method},
         })
     return out
 
@@ -627,12 +685,19 @@ def extra_owner_assets(project) -> list:
 def owner_assets_response(project) -> dict:
     """The body of ``GET /api/campus-electrical/{name}/owner-assets``:
     ``{"assets": extra_owner_assets, "source_hash": campus_study_hash or None,
-    "stale": the results-stale flag of get_state}``. The assets of a stale study
-    are still listed, flagged: the IC refuses to build a case on them."""
+    "stale": bool, "study_method": "milp" | "least_cost" | None}``. ``stale`` is
+    the stale flag of the run the assets come from: the results-stale flag of
+    get_state for the least-cost run (a joint optimisation is used only when it
+    is fresh, so it is False then). ``study_method`` is the run's method, None
+    when there are no assets. The assets of a stale study are still listed,
+    flagged: the IC refuses to build a case on them."""
     require_capacity_expansion(project)
     d = campus_dir(project)
-    return {"assets": extra_owner_assets(project), "source_hash": campus_study_hash(project),
-            "stale": bool(_results(d / "run")) and _stale(project, d)}
+    method, run_dir = _owner_source(project)
+    assets = _owner_assets(method, run_dir)
+    stale = False if method == "milp" else bool(_results(d / "run")) and _stale(project, d)
+    return {"assets": assets, "source_hash": _study_hash(method, run_dir), "stale": stale,
+            "study_method": method if assets else None}
 
 
 def draft(project, overwrite: bool = False) -> dict:
