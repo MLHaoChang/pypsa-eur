@@ -27,6 +27,13 @@ export interface Match {
   hasBus2?: boolean
   /** Links: the port the equipment stands at; that bus must be a site member for this rule to match. */
   port?: Port
+  /**
+   * Fallback rules only (plan 3 S4): the carriers this catch-all is the
+   * SPECIFIC representation of; any other carrier it catches is "drawn as a
+   * generic block" and the 3D view says so. Absent = the fallback is right
+   * for everything it catches (a transformer is a transformer).
+   */
+  genericUnless?: RegExp
 }
 
 /**
@@ -71,6 +78,12 @@ const NON_ELECTRICAL_BUS_RE = new RegExp(`${H2_BUS_RE.source}|${HEAT_BUS_RE.sour
 const SOLAR_PV_RE = /^(?!.*thermal)(?=.*(solar|(^|[^a-z])pv([^a-z]|$)))/i
 /** A load carrying H₂, heat or gas (an offtake, not a data hall). */
 const OFFTAKE_RE = /(^|[^a-z])(h2|hydrogen)([^a-z]|$)|heat|gas/i
+/** Batteries, however spelled. */
+const BATTERY_RE = /batter|li-?ion|bess/i
+/** An electrical carrier (an empty carrier counts as electricity, PyPSA's default). */
+const ELECTRICAL_RE = /^(ac|dc|electricity|electric|el|power)?$/i
+/** Matches nothing: a fallback that is a generic stand-in for every carrier it catches. */
+const NEVER_RE = /(?!)/
 
 // Table order is match order: the first type with a matching rule wins, so
 // each class's fallback (a rule with no carrier) is the last type matching it.
@@ -82,7 +95,7 @@ const TYPES: AssetTypeSpec[] = [
   { id: 'gasTurbine', label: 'Gas turbine plant', color: '#b91c1c', icon: 'thermal', match: [{ cls: 'Generator', carrier: /^(ccgt|ocgt)$/i }] },
   // The Generator fallback: engine gensets for gas, diesel, oil, biogas,
   // biomass; a generic plant block, named by its carrier, for anything else.
-  { id: 'thermal', label: gensetLabel, color: '#dc2626', icon: 'thermal', match: [{ cls: 'Generator' }] },
+  { id: 'thermal', label: gensetLabel, color: '#dc2626', icon: 'thermal', match: [{ cls: 'Generator', genericUnless: GENSET_CARRIERS }] },
 
   // ── Storage ───────────────────────────────────────────────────────────────
   { id: 'flywheel', label: 'Flywheels', color: '#a855f7', icon: 'flywheel', match: [{ cls: 'StorageUnit', carrier: /flywheel/i }] },
@@ -91,9 +104,9 @@ const TYPES: AssetTypeSpec[] = [
   { id: 'h2store', label: 'H₂ storage', color: '#0e7490', icon: 'hydrogen', match: [{ cls: 'Store', carrier: H2_CARRIER_RE }, { cls: 'StorageUnit', carrier: H2_CARRIER_RE }] },
   { id: 'thermalStore', label: 'Thermal store', color: '#ea580c', icon: 'thermal_storage', match: [{ cls: 'Store', carrier: /heat/i }, { cls: 'StorageUnit', carrier: /heat|thermal/i }] },
   // The StorageUnit fallback: battery containers (Phase 1 drew every StorageUnit so).
-  { id: 'bess', label: 'Battery storage', color: '#7c3aed', icon: 'battery', match: [{ cls: 'Store', carrier: /batter|li-?ion|bess/i }, { cls: 'StorageUnit' }] },
-  // The Store fallback: a tank whose volume grows with the energy.
-  { id: 'store', label: 'Energy store', color: '#6d28d9', icon: 'box', match: [{ cls: 'Store' }] },
+  { id: 'bess', label: 'Battery storage', color: '#7c3aed', icon: 'battery', match: [{ cls: 'Store', carrier: BATTERY_RE }, { cls: 'StorageUnit', genericUnless: BATTERY_RE }] },
+  // The Store fallback: a tank whose volume grows with the energy — a generic stand-in for whatever it holds.
+  { id: 'store', label: 'Energy store', color: '#6d28d9', icon: 'box', match: [{ cls: 'Store', genericUnless: NEVER_RE }] },
 
   // ── Conversion (Links) ────────────────────────────────────────────────────
   {
@@ -116,15 +129,16 @@ const TYPES: AssetTypeSpec[] = [
   // ── Demand ────────────────────────────────────────────────────────────────
   { id: 'offtake', label: 'Offtake (H₂ / heat)', color: '#f59e0b', icon: 'factory', match: [{ cls: 'Load', carrier: OFFTAKE_RE }] },
   // The Load fallback: a data hall, sized from its IT load.
-  { id: 'load', label: 'Data hall', color: '#d97706', icon: 'load_elec', match: [{ cls: 'Link', carrier: /data.?cent/i, port: 'bus0' }, { cls: 'Load' }] },
+  { id: 'load', label: 'Data hall', color: '#d97706', icon: 'load_elec', match: [{ cls: 'Link', carrier: /data.?cent/i, port: 'bus0' }, { cls: 'Load', genericUnless: ELECTRICAL_RE }] },
 
   // ── Infrastructure ────────────────────────────────────────────────────────
   { id: 'transformer', label: 'Transformer', color: '#2563eb', icon: 'transformer', match: [{ cls: 'Transformer' }] },
-  // The Line and Link fallbacks: a feeder bay (HVDC links, pipelines, anything unmatched).
-  { id: 'feeder', label: 'Feeder bay', color: '#475569', icon: 'line', match: [{ cls: 'Line' }, { cls: 'Link' }] },
+  // The Line and Link fallbacks: a feeder bay. Every line is one; a link is
+  // one when electrical (HVDC, a tie), a generic stand-in otherwise (a pipeline).
+  { id: 'feeder', label: 'Feeder bay', color: '#475569', icon: 'line', match: [{ cls: 'Line' }, { cls: 'Link', genericUnless: ELECTRICAL_RE }] },
   { id: 'manifold', label: 'Pipe manifold', color: '#0f766e', icon: 'waypoints', match: [{ cls: 'Bus', carrier: NON_ELECTRICAL_BUS_RE }] },
   // The Bus fallback: an AC/DC switchyard.
-  { id: 'switchyard', label: 'Switchyard', color: '#64748b', icon: 'bus', match: [{ cls: 'Bus' }] },
+  { id: 'switchyard', label: 'Switchyard', color: '#64748b', icon: 'bus', match: [{ cls: 'Bus', genericUnless: ELECTRICAL_RE }] },
 ]
 
 export function deepFreeze<T>(o: T): T {
@@ -141,6 +155,15 @@ export function deepFreeze<T>(o: T): T {
 export const isFallbackRule = (m: Match): boolean => !m.carrier && !m.farCarrier && !m.hasBus2 && !m.port
 
 /**
+ * Whether a component matched by `rule` is drawn as a generic stand-in: the
+ * rule is its class's fallback and names carriers it is specific for, and
+ * this carrier is not one of them (plan 3 S4: the library, not the model,
+ * is the limit, and the 3D view says so).
+ */
+export const isGenericMatch = (rule: Match, carrier: string): boolean =>
+  isFallbackRule(rule) && rule.genericUnless !== undefined && !rule.genericUnless.test(carrier)
+
+/**
  * Throws, naming the entry, when the match rules are not usable: a duplicate
  * id, an unknown icon name, a stateful (g/y) carrier regex, or a class with
  * other than exactly one fallback rule, or whose fallback is not the last
@@ -153,9 +176,10 @@ export function validateAssetTypes(types: readonly AssetTypeSpec[]): void {
     ids.add(t.id)
     if (!ASSET_ICON_NAMES.includes(t.icon)) throw new Error(`asset types: ${t.id} names an unknown icon '${t.icon}'`)
     for (const m of t.match) {
-      for (const re of [m.carrier, m.farCarrier?.carrier]) {
+      for (const re of [m.carrier, m.farCarrier?.carrier, m.genericUnless]) {
         if (re && (re.global || re.sticky)) throw new Error(`asset types: ${t.id} has a carrier regex with the g or y flag (${re}) — a frozen stateful regex throws on .test`)
       }
+      if (m.genericUnless && !isFallbackRule(m)) throw new Error(`asset types: ${t.id} sets genericUnless on a rule that is not a fallback`)
     }
   }
   for (const cls of PYPSA_CLASSES) {
@@ -189,6 +213,8 @@ export interface MatchContext {
 
 export interface MatchResult<T extends Matchable = AssetTypeSpec> {
   type: T
+  /** The rule of `type` that matched (`isGenericMatch` reads it). */
+  rule: Match
   /** The member bus the object is drawn from. */
   owner: string
   /** Branches: the bus at the other end. */
@@ -244,7 +270,7 @@ export function matchType<T extends Matchable = AssetTypeSpec>(
         owner = at
       }
       const far = (c === 'Line' || c === 'Transformer' || c === 'Link') ? ports.find(p => p !== owner) : undefined
-      return { type: t, owner, far }
+      return { type: t, rule: m, owner, far }
     }
   }
   return null

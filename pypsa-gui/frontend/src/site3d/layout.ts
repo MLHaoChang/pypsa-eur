@@ -33,6 +33,7 @@ import {
   DEFAULT_LIBRARY, PACKING, validateLibrary, matchType, labelOf,
   type AssetType, type MatchComponent, type MatchContext, type MatchResult, type PlacementRule, type PyPSAClass, type Zone,
 } from './assetLibrary'
+import { isGenericMatch } from '../utils/assetTypes'
 import { runTemplate, type Anchors, type Part, type TemplateInput, type TemplateOutput } from './templates'
 import { sizeOf, type SizingMode } from './sizing'
 import {
@@ -73,6 +74,8 @@ export interface SiteObject {
   areaM2: number
   /** What the results layer animates (Phase 2 spec §4.3, §6.4). */
   anchors: Anchors
+  /** The library has no specific type for this carrier: drawn as its class's generic stand-in (plan 3 S4). */
+  generic?: true
 }
 
 export interface SiteBusInput {
@@ -141,6 +144,7 @@ function objectFrom(cls: PyPSAClass, comp: MatchComponent, m: MatchResult, input
     }) + (size.optimised ? ' (optimised)' : ''),
     areaM2: out.areaM2, anchors: out.anchors,
   }
+  if (isGenericMatch(m.rule, cls === 'Bus' ? (comp.carrier as string | undefined) ?? 'AC' : carrier)) obj.generic = true
   return { obj, out }
 }
 
