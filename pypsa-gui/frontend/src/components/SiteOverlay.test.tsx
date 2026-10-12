@@ -36,6 +36,35 @@ describe('SiteOverlay', () => {
     expect(screen.queryByTestId('library-gaps')).toBeNull()
   })
 
+  it('Snapshot captures on click, is absent without a project to store to, and disabled read-only (S5)', () => {
+    const base = { sites: [site], site, onPickSite: () => {}, assetCount: 1, fit: { ...fit, over: false, outside: [] }, unplacedMembers: [], selectedPlacedKey: null, canArrange: true, onArrange: () => {}, onResetPlacement: () => {} }
+    const onSnapshot = vi.fn()
+    const { rerender } = render(<SiteOverlay {...base} onSnapshot={onSnapshot} />)
+    fireEvent.click(screen.getByTestId('site-snapshot'))
+    expect(onSnapshot).toHaveBeenCalledTimes(1)
+    rerender(<SiteOverlay {...base} />)
+    expect(screen.queryByTestId('site-snapshot')).toBeNull()
+    useUIStore.setState({ readOnly: true, readOnlyReason: 'solving' })
+    rerender(<SiteOverlay {...base} onSnapshot={onSnapshot} />)
+    expect((screen.getByTestId('site-snapshot') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('Walk toggles the first-person mode, reads as pressed while walking, and is offered read-only too (S5)', () => {
+    const base = { sites: [site], site, onPickSite: () => {}, assetCount: 1, fit: { ...fit, over: false, outside: [] }, unplacedMembers: [], selectedPlacedKey: null, canArrange: true, onArrange: () => {}, onResetPlacement: () => {} }
+    const onToggleWalk = vi.fn()
+    const { rerender } = render(<SiteOverlay {...base} onToggleWalk={onToggleWalk} />)
+    const btn = screen.getByTestId('site-walk') as HTMLButtonElement
+    expect(btn.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(btn)
+    expect(onToggleWalk).toHaveBeenCalledTimes(1)
+    useUIStore.setState({ readOnly: true, readOnlyReason: 'solving' })
+    rerender(<SiteOverlay {...base} onToggleWalk={onToggleWalk} walking />)
+    expect((screen.getByTestId('site-walk') as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByTestId('site-walk').getAttribute('aria-pressed')).toBe('true')
+    rerender(<SiteOverlay {...base} />)
+    expect(screen.queryByTestId('site-walk')).toBeNull()
+  })
+
   it('Reset is disabled without a placed selection', () => {
     render(<SiteOverlay sites={[site]} site={site} onPickSite={() => {}} assetCount={1} fit={{ ...fit, over: false, outside: [] }} unplacedMembers={['B2']} selectedPlacedKey={null} canArrange onArrange={() => {}} onResetPlacement={() => {}} />)
     expect((screen.getByRole('button', { name: 'Reset placement' }) as HTMLButtonElement).disabled).toBe(true)

@@ -15,7 +15,7 @@ import zipfile
 from dataclasses import asdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 import local_mode
@@ -3800,6 +3800,70 @@ def delete_site_context(
     _check_project_lock(db, lock_project, user)
     target, _site = _site_context_dir(dest, site_id)
     return {"cleared": site_context.clear_cached(target)}
+
+
+@router.get("/{name}/sites/{site_id}/thumbnail")
+def get_site_thumbnail(
+    name: str,
+    site_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    The site's last capture from the 3D view (`sites/<id>/thumb.png`, plan 3
+    S5), inline PNG; 404 when none was taken. Reads are never lock-gated.
+    `no-store`: the canvas replaces it after every fresh solve and the hub
+    card must show the new one.
+    """
+    from fastapi import Response
+
+    from services import site_service
+
+    src, name = _resolve_project_src(name, db, user)
+    if not src.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    target, _site = _site_context_dir(src, site_id)
+    data = site_service.read_thumbnail(target)
+    if data is None:
+        raise HTTPException(404, f"No thumbnail for site '{site_id}'")
+    return Response(content=data, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@router.put("/{name}/sites/{site_id}/thumbnail")
+async def put_site_thumbnail(
+    name: str,
+    site_id: str,
+    request: Request,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    Store the capture the 3D view took of this site (raw PNG body,
+    `Content-Type: image/png`). 415 for any other content type, 413 over
+    `MAX_THUMB_BYTES`, 422 when the bytes are not a PNG; lock-CHECKED like
+    every other project-dir write (409, never acquiring). The site must be
+    in the document (404 otherwise, the same answer as a traversal probe).
+    """
+    from services import project_registry, site_service
+
+    dest, name = _resolve_project_src(name, db, user)
+    if not dest.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if content_type != "image/png":
+        raise HTTPException(415, "thumbnail must be sent as image/png")
+    lock_project = project_registry.find_project(db, user, name)
+    _check_project_lock(db, lock_project, user)
+    target, _site = _site_context_dir(dest, site_id)
+    data = await request.body()
+    try:
+        site_service.validate_thumbnail(data)
+    except site_service.ThumbnailTooLarge as exc:
+        raise HTTPException(413, str(exc)) from exc
+    except site_service.ThumbnailInvalid as exc:
+        raise HTTPException(422, str(exc)) from exc
+    site_service.write_thumbnail(target, data)
+    return {"saved": name, "site": site_id, "bytes": len(data)}
 
 
 @router.get("/{name}/map_layout")

@@ -75,6 +75,9 @@ import { busOffsets, siteBounds } from '../site3d/siteModel'
 import { fitReport, type FitObject } from '../site3d/fit'
 import { placementFindings, findingKeys } from '../site3d/placementCheck'
 import { libraryGaps, libraryGapLine } from '../site3d/libraryGaps'
+import { thumbSize, captureDue } from '../site3d/thumbnail'
+import WalkControls from '../site3d/WalkControls'
+import { useThumbnailStore } from '../site3d/thumbnailStore'
 import { usePlacementFindings } from '../site3d/placementFindingsStore'
 import SiteLayoutFindings from '../components/SiteLayoutFindings'
 import SiteEmptyState from '../components/SiteEmptyState'
@@ -543,6 +546,47 @@ function DropTargetRegistrar({ siteId }: { siteId: string }) {
   return null
 }
 
+// ── Thumbnail capture (plan 3 S5): the site from the south, on request ───────
+//
+// A bump of `nonce` captures on the next frame: the scene is rendered once
+// through a camera at the fitted south view (the user's orbit is untouched),
+// read straight off the WebGL canvas — `toDataURL` / `drawImage` right after
+// `gl.render` in the same task is what the spike found reliable, where
+// `page.screenshot` lies — scaled to THUMB_MAX_PX and handed over as a PNG
+// blob. The loop's own render follows in the same frame, so nothing of the
+// capture view is ever shown.
+
+function ThumbnailCapture({ nonce, bounds, onPng }: { nonce: number; bounds: Bounds; onPng: (png: Blob) => void }) {
+  const gl = useThree(s => s.gl)
+  const scene = useThree(s => s.scene)
+  const camera = useThree(s => s.camera)
+  const size = useThree(s => s.size)
+  const pending = useRef(0)
+  useEffect(() => { if (nonce > 0) pending.current = nonce }, [nonce])
+  useFrame(() => {
+    if (!pending.current) return
+    pending.current = 0
+    const cam = (camera as THREE.PerspectiveCamera).clone()
+    const fit = fitCamera(bounds, size.width / Math.max(size.height, 1), cam.fov)
+    cam.position.set(...fit.position)
+    cam.far = fit.far
+    cam.updateProjectionMatrix()
+    cam.lookAt(...fit.target)
+    gl.render(scene, cam)
+    const src = gl.domElement
+    const { w, h } = thumbSize(src.width, src.height)
+    if (!w || !h || typeof document === 'undefined') return
+    const out = document.createElement('canvas')
+    out.width = w
+    out.height = h
+    const ctx = out.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(src, 0, 0, w, h)
+    out.toBlob(blob => { if (blob) onPng(blob) }, 'image/png')
+  })
+  return null
+}
+
 // ── The selected object's gizmo ───────────────────────────────────────────────
 
 function SelectedPivot({ obj, enabled, onCommit, children }: {
@@ -684,6 +728,26 @@ function SiteCanvas() {
   const easedRef = useRef(new Map<string, EasedVisual>())
   const siteSizing = useUIStore(s => s.siteSizing)
   const sizing = effectiveSizing(siteSizing, solved)
+
+  // The thumbnail (S5): once per fresh solve, and on demand (Snapshot). The
+  // capture lands in `sites/<id>/thumb.png`; the hub-design card re-reads it
+  // through the store's version. Quiet on failure: a picture, nothing more.
+  const [captureNonce, setCaptureNonce] = useState(0)
+  const capturedFor = useRef(0)
+  useEffect(() => {
+    if (captureDue(solved, freshSince, capturedFor.current)) {
+      capturedFor.current = freshSince
+      setCaptureNonce(n => n + 1)
+    }
+  }, [solved, freshSince])
+  const bumpThumbnail = useThumbnailStore(s => s.bump)
+  const siteIdForPng = site?.id ?? null
+  const onPng = useCallback((png: Blob) => {
+    if (!currentProject || !siteIdForPng) return
+    sitesApi.putThumbnail(currentProject, siteIdForPng, png)
+      .then(() => bumpThumbnail(currentProject, siteIdForPng))
+      .catch(() => { /* read-only, locked or offline: no thumbnail this time */ })
+  }, [currentProject, siteIdForPng, bumpThumbnail])
 
   // The layout is in the SITE frame already: one yard per bus at its
   // offset, placements honoured.
@@ -906,6 +970,10 @@ function SiteCanvas() {
   }, [layout]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [hovered, setHovered] = useState<string | null>(null)
+  // Walk the campus (S5): first-person controls replace the orbit while on;
+  // leaving (Escape releases the pointer) puts the orbit back where it was.
+  const [walking, setWalking] = useState(false)
+  useEffect(() => { setWalking(false) }, [siteId])
   // Stable, so the memoised object meshes re-render only when their own props change.
   const onSelectObject = useCallback((obj: SiteObject) => setSelectedComponent({ type: obj.type, name: obj.name }), [setSelectedComponent])
   const labelRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -1008,14 +1076,23 @@ function SiteCanvas() {
           )
         })}
         </ObjectRegistryContext.Provider>
-        <OrbitControls
-          makeDefault
-          maxPolarAngle={Math.PI / 2 - 0.05}
-          minDistance={20}
-          maxDistance={halfSizeM * 8}
-          enableDamping
-        />
+        {walking ? (
+          <WalkControls
+            start={{ x: (plotExtent.x0 + plotExtent.x1) / 2, y: (plotExtent.y0 + plotExtent.y1) / 2 }}
+            heightAt={heightAt}
+            onExit={() => setWalking(false)}
+          />
+        ) : (
+          <OrbitControls
+            makeDefault
+            maxPolarAngle={Math.PI / 2 - 0.05}
+            minDistance={20}
+            maxDistance={halfSizeM * 8}
+            enableDamping
+          />
+        )}
         <FitCamera bounds={plotExtent} />
+        <ThumbnailCapture nonce={captureNonce} bounds={plotExtent} onPng={onPng} />
         <DropTargetRegistrar siteId={site.id} />
         <LabelTracker keys={labelObjects.map(objectKey)} refs={labelRefs} results={resultsStore} objects={objects} />
         {DEBUG_ENABLED && <Site3dDebugHook objects={objects} site={site} context={context} groundMode={mode} heightAt={heightAt} results={resultsStore} eased={easedRef} />}
@@ -1058,6 +1135,9 @@ function SiteCanvas() {
           unplacedMembers={unplacedMembers}
           dispatchFresh={solved}
           libraryGaps={gapLine}
+          onSnapshot={currentProject ? () => setCaptureNonce(n => n + 1) : undefined}
+          walking={walking}
+          onToggleWalk={() => setWalking(w => !w)}
           selectedPlacedKey={selectedPlacedKey}
           canArrange={allLoaded}
           onArrange={() => {
