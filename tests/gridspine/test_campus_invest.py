@@ -1256,3 +1256,26 @@ def test_an_addition_renews_its_kept_units_and_its_new_ones_on_their_own_lives(t
     assert list(rows_["purchase"]) == [0, 1, 1, 2]
     assert rows_.at[3, "replaces"] == "transformer TR1+TR2|T63|1" and rows_.at[1, "replaces"] == (
         "transformer TR1+TR2|TR1,TR2|0")
+
+
+def test_an_existing_compensation_entry_with_a_library_id_is_kept_and_renewed(tmp_path):
+    """A 3 Mvar bank in the campus file, commissioned in 2020, library CAP3
+    (L = 25): kept at zero, bought again in 2045, inside 2040's span. A bank
+    the study buys is no existing entry and gets no keep row."""
+    table, sel = dark_hours((2030, 20.0), (2040, 20.0), (2050, 20.0))
+    spec = existing_campus(2000, 2000, cable_lid=None)
+    spec["campus"]["compensation"] = [{"name": "CAPX", "bus": "MV1", "kind": "capacitor_bank", "q_mvar": t(3.0),
+                                       "steps": 1, "library_id": "CAP3", "commissioning_year": t(2020, "datasheet")}]
+    lib = library(tmp_path, transformers=[tr("T40", 40.0, 0.95e6, life=40)],
+                  capacitor_banks=[comp("capacitor_banks", "CAP3", 3.0, 120e3)])
+    out = select_assets(spec, table, sel, lib, WIDE, PROFILE, period_years=DECADES)
+    rows_ = out["investment"][out["investment"]["need"] == "compensation CAPX"].reset_index(drop=True)
+    assert list(rows_["action"]) == ["keep", "renew"]
+    assert (rows_.at[0, "library_id"], rows_.at[0, "units"], rows_.at[0, "build_year"], rows_.at[0, "service_to"]) == (
+        "CAP3", 1, 2020, 2045)
+    assert (rows_.at[1, "kind"], rows_.at[1, "build_year"], rows_.at[1, "invest_period"]) == (
+        "capacitor_bank", 2045, 2040)
+    assert rows_.at[1, "capex_eur"] == pytest.approx(120e3)
+    assert row(out, "reactive")["kind"] == "none"
+    cost = out["cost"].set_index("period")
+    assert list(cost["capex_replacement_eur"]) == pytest.approx([0.0, 120e3 + 1.9e6, 0.0])
