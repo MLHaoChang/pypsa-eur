@@ -134,6 +134,16 @@ describe('InvestmentCaseView', () => {
       .toMatch(/a pack, the owner assets' investment columns or the campus study changed/)
   })
 
+  it('names the IC G3 staleness parts as the fallback text does', async () => {
+    api.getInvestmentCase.mockResolvedValue({ status: 'done',
+      report: { present: true, stale: true, changed: ['extra_assets', 'owner_assets'] } })
+    api.getReport.mockResolvedValue(structuredClone(REPORT))
+    renderView()
+    await screen.findByTestId('ic-report')
+    expect(screen.getByTestId('ic-stale').textContent)
+      .toMatch(/Stale: the campus study, the owner assets' investment columns changed/)
+  })
+
   it('renders a report with not-established headlines and the stale marker', async () => {
     api.getInvestmentCase.mockResolvedValue({ status: 'done',
       report: { present: true, stale: true, changed: ['finance', 'value_flows'] } })

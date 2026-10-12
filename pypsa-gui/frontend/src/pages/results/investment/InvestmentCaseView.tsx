@@ -16,7 +16,7 @@ import { downloadCSV } from '../shared'
 import {
   AVOIDED_PREFIX, basisStatement, cashflowPivot, cashTotals, completenessRows, missingLines, counterfactualStatement, fmtCell, fmtHeadline, gateLegs,
   HEADLINE_KEYS, headlines, label, NOT_ESTABLISHED, perYearLists, progressFraction, progressText,
-  reportFlags, reportYears, sectionOf, studyFailure, studyProgress, studyStale, toTable,
+  reportFlags, reportYears, sectionOf, stalePartLabel, studyFailure, studyProgress, studyStale, toTable,
   uncheckableReason, waccGate,
   type GateState, type Table,
 } from './financeModel'
@@ -361,7 +361,7 @@ export default function InvestmentCaseView() {
           {uncheckableReason(staleness.reason)
             ? <>Unconfirmed: {uncheckableReason(staleness.reason)}.</>
             : <>Stale: {staleness.changed.length
-                ? `${staleness.changed.map(label).join(', ')} changed`
+                ? `${staleness.changed.map(stalePartLabel).join(', ')} changed`
                 : 'the finance inputs, the value flows, the commercial config, the solver config, the dispatch, '
                   + "a pack, the owner assets' investment columns or the campus study changed"}
               {' '}since this report was computed. Run the investment case again for current figures.</>}</p>
