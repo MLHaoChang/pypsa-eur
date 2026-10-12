@@ -64,6 +64,8 @@ class UploadMeta(BaseModel):
     # Phase C additions — optional in v1.
     page_count: int | None = None
     truncated_to_100_pages: bool | None = None
+    # Server-written chart sidecar commitment; clients cannot set this on upload.
+    assurance_sha256: str | None = None
 
 
 class DeleteUploadResponse(BaseModel):

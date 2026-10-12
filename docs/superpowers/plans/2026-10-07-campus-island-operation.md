@@ -68,6 +68,8 @@ grid-code checks are a follow-up (see Out of scope).
 | Review findings (2026-10-07, third round) | **All** blocking, should-fix and nit findings are folded in, and a focused re-review follows before coding starts. |
 | Re-review findings (2026-10-07, fourth round) | **All** N1–N14 and nit findings are folded in. **I1 starts without a third review**; each increment's PR keeps its own gates. |
 | Storage weighting (N12) | The hub templates weight storage by 52.14 h per snapshot today. That is fixed in **its own PR before I2a** (S0, below). |
+| UPS re-rate (2026-10-07, fifth round) | The Data Center template's UPS (15 MW against about 36 MW of IT) is re-rated **in the S0 PR**. Both change the template's storage results, so the fixtures are updated and explained once. |
+| Pull requests (2026-10-07, fifth round) | **Two PRs:** the plan to master, and I1 stacked on the plan branch so its diff is code only. |
 
 ### Owner decisions (2026-10-07, second round)
 
@@ -400,6 +402,72 @@ optional earthing transformers as elements (I5b).
   table in the test docstring (no orphan fields);
 - mutations.
 
+### I1 as built (2026-10-07)
+
+**gridspine**
+- **`gridspine/schema/island.py`** is the one schema:
+  - `validate_unit_island` checks one unit's block by kind;
+  - `validate_requirements` checks the study requirements and fills the
+    defaults (N+1, `gfl_min_case` drop, the 1.2 / 1.5 / 2.0 sensitivity),
+    tagged `assumed`;
+  - `check_cross` checks the names a UPS or the requirements point at;
+  - `check_island` checks Σ `pickup_blocks` against the peak critical load;
+  - `check_horizon` checks `sustained_h` against the period, for I2a;
+  - `validate_island_config` validates the whole sidecar.
+- **`FIELD_USERS`** maps every field to the increments that read it, and a
+  test refuses a field nobody reads.
+- **`ingest/campus.py`:**
+  - a unit may carry an `island` block;
+  - the campus may carry `island` requirements;
+  - a transformer may carry `earthing_hv` / `earthing_lv` (with
+    `r_n_*_ohm` when it is `resistance`);
+  - the new `ups` kind is a storage unit built as an `sgen` with
+    `UPS_K = 0`, so it feeds no fault (ledgered, and tested against IEC
+    60909 with and without it). It must carry its island block.
+  - Island numbers join the tagged `params` table.
+  - **A campus without island data builds exactly as before.**
+- **`producers/campus.py`:** `draft_campus(n, island=cfg)` copies the
+  validated sidecar.
+  - A StorageUnit the sidecar calls a `ups` becomes a `ups`.
+  - Names are translated to campus ids. A name the draft skipped is listed
+    in `skipped`, and an emptied list is dropped so its default applies.
+  - A sidecar `xd_pp` replaces the drafted typical value.
+  - A sidecar name the project lacks, or a kind it contradicts, is refused.
+  - Unnamed converters and gensets get `DEFAULT_ISLAND` blocks, every value
+    tagged `assumed`.
+  - Without a sidecar, the draft is unchanged. The hourly producer maps a
+    `ups` like a `bess`.
+- **A consequence worth knowing:** with requirements present, the default
+  N+1 refuses a campus with a single genset. That is the rule working; set
+  `genset_redundancy_n` to 0 to study N+0.
+
+**pypsa-gui**
+- **The loader is `services/adequacy/island_config.py`**
+  (`SIDECAR_NAME = "island_config.json"`, `load_island_config`, `validate`),
+  not `models/energy_hub.py`.
+  - Placing a `SIDECAR_NAME` under `services/adequacy/` makes
+    `test_bundle_sidecars` require the file in `_BUNDLE_FILES`. Bundles,
+    snapshots and forks therefore carry it, which avoids the S7 sidecar loss
+    that has recurred three times.
+  - It is also in `_TEMPLATE_SIDECARS`.
+- **The Data Center template** ships `island_config.json` from
+  `ISLAND_CONFIG` in `eh_templates.py`. It is a plain mapping, because
+  `_build.py` cannot import gridspine.
+  - `tests/test_island_config.py` validates it through gridspine, checks
+    every name against the template network, and drafts the template with
+    it.
+  - It checks the pickup blocks (55 MW) against the template's own peak
+    critical load, and the committed JSON against the builder.
+  - Critical load here is IT plus cooling (Q1). The DtC tags still mark
+    only `it_bus`; the two are separate studies.
+
+**Deferred from I1, with the reason**
+- **Earthing transformers as elements:** to I5b, the only reader. I1 ships
+  the winding earthing.
+- **The UPS re-rate** (15 MW → about 40 MW) moves to S0, by owner
+  decision (fifth round). It changes every Data Center hub result, as S0
+  does.
+
 ### S0: storage weighting in the hub templates (S; owner, before I2a)
 
 This is its own PR, from the queued task "Fix storage weighting in the
@@ -413,6 +481,10 @@ energy-hub templates".
   cost behind I2c's cost of island capability.
 - **The fix:** `stores = 1.0`, keeping `objective` at 52.14. The test is
   written first, and every changed fixture is explained.
+- **The UPS re-rate lands here too** (owner, fifth round). `ups_battery`
+  is re-rated to carry the IT load it protects (about 40 MW, tagged
+  `assumed` in the island sidecar's provenance), with a test that its
+  rating covers the IT peak.
 
 ### I2a: ride-through, fuel and bridge reserve in the hub LP — step 1 (M)
 

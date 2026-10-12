@@ -444,14 +444,9 @@ export async function switchToProject(target: string, qc: QueryClient): Promise<
   const currentProject = ui.currentProject
   if (target === currentProject) return { status: 'noop' }
 
-  // A planning → dynamics STUDY has no network: it is a config and a run
-  // directory, and `/activate` — which hydrates a network context from
-  // `network.nc` — 404s for every one of them. So both ends of a switch treat
-  // a study as network-less, exactly as the new-project wizard always has (it
-  // never calls /activate): entering one sets the current project and opens
-  // the study panel; leaving one skips the save, because the only network the
-  // backend could be holding belongs to some other project, and writing it
-  // under the study's name would put a stray network.nc in the study.
+  // A study has a config and a run directory, without a network.nc. Bind its
+  // backend session so chat follows the visible study. Skip the outgoing
+  // network save when leaving a study.
   const [targetStudy, currentIsStudy] = await Promise.all([
     studyFor(target, qc),
     studyFor(currentProject, qc).then(Boolean),
@@ -475,6 +470,19 @@ export async function switchToProject(target: string, qc: QueryClient): Promise<
       const stopped = await abortRunningSim()
       if (!stopped) return { status: 'abort-failed' }
       await saveProjectQuietly(currentProject)
+    }
+    try {
+      const res = await projectsApi.activate(targetStudy.id ?? targetStudy.name)
+      res.evicted?.forEach(id => dropProjectCache(qc, id))
+    } catch (e) {
+      const err = e as { response?: { status?: number; data?: { detail?: { error_kind?: string; message?: string } } } }
+      if (err.response?.status === 409) {
+        const detail = err.response.data?.detail
+        if (detail?.error_kind === 'study_in_flight' && detail.message) return { status: 'busy-study', message: detail.message }
+        return { status: 'busy-solve' }
+      }
+      if (err.response?.status === 404) return { status: 'not-found' }
+      return { status: 'error', message: String((e as Error)?.message ?? e) }
     }
     useUIStore.getState().setCurrentProject(targetStudy.name, targetStudy.id ?? undefined)
     useUIStore.getState().setProjectName(targetStudy.name)
