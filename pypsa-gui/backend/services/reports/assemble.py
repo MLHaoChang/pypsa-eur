@@ -64,12 +64,20 @@ EH_FIGURE_IDS: dict[str, str] = {
     "sizing": "capacity_mix",
 }
 
+# The 3D site view's capture (visual-layers plan 3 S5): the one place the 3D
+# view enters a customer document. Not an EH section's figure — it is drawn
+# from the model, not from a study — so it sits in the executive summary,
+# after the headline, whenever the project's site has a thumbnail.
+SITE_FIGURE_ID = "site_3d"
+
 FIGURE_CAPTIONS: dict[str, str] = {
     "fmea_pareto": ("Criticality of the ranked residual failure modes (€/yr), "
                     "cumulative share annotated"),
     "frontier": ("Cost-vs-availability frontier, one full expansion solve per "
                  "target; the knee is marked"),
     "capacity_mix": "Installed capacity of the least-cost plan by carrier",
+    SITE_FIGURE_ID: ("The site as generated from the model's assets in the 3D "
+                     "site view, seen from the south"),
 }
 
 EXECUTIVE_SUMMARY_ID = "executive_summary"
@@ -175,7 +183,20 @@ def _figure_block(section_id: str, figure_pngs: dict[str, bytes],
 # ── sections ─────────────────────────────────────────────────────────────
 
 
-def _executive_summary(evidence: Evidence) -> Section:
+def _site_figure_block(figure_pngs: dict[str, bytes],
+                       figures: dict[str, Figure]) -> FigureRef | None:
+    """The 3D site capture, referenced only when its PNG was passed (plan 3 S5)."""
+    if not figure_pngs.get(SITE_FIGURE_ID):
+        return None
+    caption = FIGURE_CAPTIONS[SITE_FIGURE_ID]
+    figures[SITE_FIGURE_ID] = Figure(
+        figure_id=SITE_FIGURE_ID, png_file=f"figures/{SITE_FIGURE_ID}.png",
+        caption=caption, source_path="/sites/0/thumbnail")
+    return FigureRef(figure_id=SITE_FIGURE_ID, caption=caption)
+
+
+def _executive_summary(evidence: Evidence, figure_pngs: dict[str, bytes] | None = None,
+                       figures: dict[str, Figure] | None = None) -> Section:
     blocks: list[Block] = []
     for gap in evidence.evidence_gaps:
         subject = gap.get("subject") or gap.get("kind") or "evidence"
@@ -193,6 +214,11 @@ def _executive_summary(evidence: Evidence) -> Section:
                                    f"{NO_DATA_HINTS['eh_reference_design']}."))
     if "completeness" in evidence.tables:
         blocks.append(TableRef(table_id="completeness"))
+    # Last, after everything numeric: the picture never leads the summary.
+    if figure_pngs is not None and figures is not None:
+        fig = _site_figure_block(figure_pngs, figures)
+        if fig is not None:
+            blocks.append(fig)
     return Section(section_id=EXECUTIVE_SUMMARY_ID, heading="Executive summary",
                    source="code", status=status, blocks=blocks)
 
@@ -291,7 +317,7 @@ def evidence_only_document(evidence: Evidence, *, title: str, report_id: str,
     referenced, and the caller writes them under ``figures/<id>.png``.
     """
     figures: dict[str, Figure] = {}
-    sections: list[Section] = [_executive_summary(evidence)]
+    sections: list[Section] = [_executive_summary(evidence, figure_pngs, figures)]
     for name in REPORT_SECTIONS:
         sections.append(_eh_section(evidence, name, figure_pngs, figures))
     sections.extend(_adequacy_sections(evidence))
