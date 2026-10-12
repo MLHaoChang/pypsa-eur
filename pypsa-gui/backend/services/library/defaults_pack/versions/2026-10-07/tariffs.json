@@ -1,0 +1,122 @@
+{
+  "_comment": "Generic defaults pack 2026-10-07: the two illustrative seed tariffs of the guided study (study_library/tariffs.csv, branch claude/edge-tool-ux-research-n0n2l6), restated as IC Tariffs. Rates are per kWh / per kW-month as the IC model requires; each item's `source_rows` keep the seed row in its own unit (EUR/MWh, EUR/MW/month, EUR/month) and the loader checks rate = price x the closed conversion factor. Export compensation is not an IC tariff item: it is `meta.export.price_per_mwh`, minted into a flat Library series for `export_price_ref` (services/library/export_series.py). `pack_hash` is null here: the loader stamps it on every copy it hands out.",
+  "tariffs": [
+    {
+      "tariff": {
+        "id": "de_industrial_illustrative",
+        "name": "German-style industrial tariff (illustrative)",
+        "jurisdiction": "DE",
+        "dso_or_retailer": null,
+        "valid_from": "2020-01-01",
+        "valid_to": null,
+        "pack_hash": null,
+        "items": [
+          {"id": "energy", "kind": "energy", "unit": "per_kwh", "settlement": "15min",
+           "periods": [{"name": "all_hours", "rate": 0.11}]},
+          {"id": "network:energy", "kind": "energy", "unit": "per_kwh", "settlement": "15min",
+           "periods": [{"name": "all_hours", "rate": 0.02}]},
+          {"id": "demand", "kind": "demand", "unit": "per_kw_month", "settlement": "15min",
+           "measured_on": "import",
+           "periods": [{"name": "all_hours", "rate": 9.0}]},
+          {"id": "fixed", "kind": "fixed", "unit": "per_month",
+           "periods": [{"name": "all_hours", "rate": 400.0}]}
+        ]
+      },
+      "meta": {
+        "currency": "EUR",
+        "currency_year": 2020,
+        "source": "illustrative seed tariff of the guided investment study (study_library/tariffs.csv, S2): plausible order of magnitude, not a published tariff",
+        "source_year": 2026,
+        "source_url": null,
+        "illustrative": true,
+        "billing_period": "month",
+        "default": true,
+        "jurisdiction_rationale": "DE: the seed is modelled on a German industrial bill (Arbeitspreis, Leistungspreis); valid_from 2020-01-01 is the seed's money year and valid_to is open, so the out-of-validity preflight does not fire for future modelled years.",
+        "export": {"price_per_mwh": 40.0, "series": null, "cap_mw": null,
+                   "label": "Export compensation"},
+        "honesty": [
+          {"code": "tariff_illustrative",
+           "help": "Illustrative figures of a plausible order of magnitude, not a published tariff: replace them with the site's own bill."},
+          {"code": "tariff_demand_charge_monthly_peak_not_annual",
+           "help": "German network operators bill the capacity charge on the ANNUAL peak (Jahresleistungspreis); this seed bills each month's peak because MVP-1 models one monthly demand charge."}
+        ],
+        "items": {
+          "energy": [{"component": "energy_band", "label": "Energy (all hours)",
+                      "original_price": 110.0, "original_unit": "EUR/MWh", "basis": null,
+                      "periods": ["all_hours"]}],
+          "network:energy": [{"component": "network_charge",
+                              "label": "Network energy charge (Arbeitspreis)",
+                              "original_price": 20.0, "original_unit": "EUR/MWh",
+                              "basis": "per_mwh", "periods": ["all_hours"]}],
+          "demand": [{"component": "demand_charge",
+                      "label": "Monthly capacity charge on peak import (Leistungspreis)",
+                      "original_price": 9000.0, "original_unit": "EUR/MW/month",
+                      "basis": "billing_period_peak", "periods": ["all_hours"]}],
+          "fixed": [{"component": "fixed_charge", "label": "Metering and account charge",
+                     "original_price": 400.0, "original_unit": "EUR/month", "basis": null,
+                     "periods": ["all_hours"]}]
+        }
+      }
+    },
+    {
+      "tariff": {
+        "id": "tou_reference_illustrative",
+        "name": "Time-of-use reference tariff (illustrative)",
+        "jurisdiction": "generic",
+        "dso_or_retailer": null,
+        "valid_from": "2020-01-01",
+        "valid_to": null,
+        "pack_hash": null,
+        "items": [
+          {"id": "energy", "kind": "energy", "unit": "per_kwh", "settlement": "h",
+           "periods": [
+             {"name": "peak", "rate": 0.16, "weekdays": [0, 1, 2, 3, 4],
+              "start_hour": 8, "end_hour": 20},
+             {"name": "offpeak_weekday_night", "rate": 0.09, "weekdays": [0, 1, 2, 3, 4],
+              "start_hour": 0, "end_hour": 8},
+             {"name": "offpeak_weekday_night", "rate": 0.09, "weekdays": [0, 1, 2, 3, 4],
+              "start_hour": 20, "end_hour": 24},
+             {"name": "offpeak_weekend", "rate": 0.09, "weekdays": [5, 6]}
+           ]},
+          {"id": "fixed", "kind": "fixed", "unit": "per_month",
+           "periods": [{"name": "all_hours", "rate": 50.0}]}
+        ]
+      },
+      "meta": {
+        "currency": "EUR",
+        "currency_year": 2020,
+        "source": "illustrative seed tariff of the guided investment study (study_library/tariffs.csv, S2): a time-of-use reference, not a published tariff",
+        "source_year": 2026,
+        "source_url": null,
+        "illustrative": true,
+        "billing_period": "month",
+        "default": false,
+        "jurisdiction_rationale": "generic: the reference is deliberately jurisdiction-free (it isolates energy time-shift value), so it names no ISO country and joins no tax pack (finance packs bind on the ISO code a tariff carries); valid_from 2020-01-01 is the seed's money year, valid_to open.",
+        "export": {"price_per_mwh": 30.0, "series": null, "cap_mw": null,
+                   "label": "Export compensation"},
+        "honesty": [
+          {"code": "tariff_illustrative",
+           "help": "Illustrative figures, not a published tariff."},
+          {"code": "tariff_isolates_energy_time_shift",
+           "help": "No demand charge: the reference isolates energy time-shift value; the bands partition every hour of the week."}
+        ],
+        "items": {
+          "energy": [
+            {"component": "energy_band", "label": "Peak (weekdays 08:00-20:00)",
+             "original_price": 160.0, "original_unit": "EUR/MWh", "basis": null,
+             "periods": ["peak"]},
+            {"component": "energy_band", "label": "Off-peak (weekday nights)",
+             "original_price": 90.0, "original_unit": "EUR/MWh", "basis": null,
+             "periods": ["offpeak_weekday_night"]},
+            {"component": "energy_band", "label": "Off-peak (weekends)",
+             "original_price": 90.0, "original_unit": "EUR/MWh", "basis": null,
+             "periods": ["offpeak_weekend"]}
+          ],
+          "fixed": [{"component": "fixed_charge", "label": "Account charge",
+                     "original_price": 50.0, "original_unit": "EUR/month", "basis": null,
+                     "periods": ["all_hours"]}]
+        }
+      }
+    }
+  ]
+}
