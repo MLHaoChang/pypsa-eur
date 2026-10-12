@@ -118,14 +118,18 @@ CHP = {
 
 
 def test_a_chp_from_the_palette_keeps_bus2_and_efficiency2(client, install_network):
+    # No "fresh network has no bus2 column" precondition: PyPSA registers extra
+    # ports on the process-wide Link defaults once any network in the process
+    # has used them (test_chat_tools_diagnose adds bus3), so under the full
+    # suite a brand-new Network already carries bus2..bus5. The behaviour under
+    # test is the same either way: the port the palette set survives.
     n = _three_bus_network()
     install_network(n)
-    assert "bus2" not in n.links.columns          # the fresh-network case
     r = client.post("/api/network/links", json=CHP)
     assert r.status_code in (200, 201), r.text
     assert n.links.at["CHP 1", "bus2"] == "heat"
     assert float(n.links.at["CHP 1", "efficiency2"]) == 0.4
-    assert n.components.links.additional_ports == ["2"]
+    assert "2" in n.components.links.additional_ports
 
 
 def test_unset_ports_do_not_grow_empty_columns(client, install_network):
@@ -134,10 +138,20 @@ def test_unset_ports_do_not_grow_empty_columns(client, install_network):
     # `bus3` column PyPSA would then treat as a third port on every link.
     n = _three_bus_network()
     install_network(n)
+    before = set(n.links.columns)
     r = client.post("/api/network/links", json=CHP)
     assert r.status_code in (200, 201), r.text
-    for col in ("bus3", "bus4", "efficiency3"):
-        assert col not in n.links.columns, col
+    # Of the PORT columns, the create may add the one it set and nothing else
+    # (the declared adequacy columns it also adds are master's third arm, not
+    # this test's subject; columns a previous network in this process
+    # registered on the defaults are not this create's doing either — see the
+    # note on the test above).
+    import re
+    port = re.compile(r"^(bus|efficiency)\d+$")
+    assert {c for c in set(n.links.columns) - before if port.match(c)} <= {"bus2", "efficiency2"}
+    for col in ("bus3", "bus4"):
+        if col in n.links.columns:
+            assert n.links.at["CHP 1", col] in ("", None) or n.links.at["CHP 1", col] != n.links.at["CHP 1", col], col
 
 
 def test_a_bogus_key_on_a_link_is_still_dropped(client, install_network):
