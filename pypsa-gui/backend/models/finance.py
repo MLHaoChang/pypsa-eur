@@ -206,10 +206,24 @@ class SolvePpa(BaseModel):
 
 
 class TerminalValueRule(BaseModel):
+    """The terminal value at the last operating year (inside EBITDA, taxed):
+    `fixed` an amount (SAM's salvage), `multiple_of_ebitda` a multiple,
+    `book_value` the remaining tax basis, or `remaining_life_annuity` (IC S0b
+    plan S6, decision D10) — each part's purchase still alive at the horizon
+    valued on the annuity the LP charged for it (GS's salvage); `value` is then
+    unused and must be None."""
     model_config = ConfigDict(extra="forbid")   # a typo is refused, not dropped (review B3)
 
-    method: Literal["none", "book_value", "multiple_of_ebitda", "fixed"] = "none"
+    method: Literal["none", "book_value", "multiple_of_ebitda", "fixed",
+                    "remaining_life_annuity"] = "none"
     value: float | None = None
+
+    @model_validator(mode="after")
+    def _value_unused(self) -> "TerminalValueRule":
+        if self.method == "remaining_life_annuity" and self.value is not None:
+            raise ValueError("remaining_life_annuity values the parts' remaining life from the "
+                             "case; value must be None")
+        return self
 
 
 ESCALATION_CLASSES: tuple[str, ...] = ("opex", "fuel", "tariff", "ppa", "export", "capex")
@@ -268,6 +282,11 @@ class FinanceInputs(BaseModel):
     # fraction, switching to straight-line). Stated by the user (source: user).
     depreciation_class_by_asset: dict[str, str] = Field(default_factory=dict)
     replacement_capex: list[tuple[int, str, float]] = Field(default_factory=list)
+    # How replacements are scheduled (IC S0b plan S5, decision D9): `fixed` =
+    # the `replacement_capex` entries only; `part_lifetimes` = each investment
+    # part re-bought at the end of its lifetime at its current upfront cost (a
+    # `replacement_capex` entry for an asset it replaces is then refused).
+    replacement_rule: Literal["fixed", "part_lifetimes"] = "fixed"
     terminal_value: TerminalValueRule = Field(default_factory=TerminalValueRule)
     wacc_nominal: float | None = Field(default=None, ge=0)
     cost_of_equity: float | None = Field(default=None, ge=0)

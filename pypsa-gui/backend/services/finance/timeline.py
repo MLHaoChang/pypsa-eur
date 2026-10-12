@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from services.finance.case import FinanceCase, FinanceRefused
+from services.finance.replacements import counts_as_replaced, schedule
 
 
 @dataclass(frozen=True)
@@ -54,8 +55,12 @@ def build_timeline(case: FinanceCase) -> Timeline:
     `analysis_years_missing`, `financial_close_after_cod`, `cod_mismatch`,
     `capex_phasing_negative`, `capex_phasing_mismatch`,
     `replacement_unknown_asset`, `asset_lifetime_short`, `template_missing`,
-    `contract_tenor_below_one`. An asset of unknown lifetime is not checked
-    here; `build_operating` flags it (`asset_lifetime_unknown:<asset>`)."""
+    `contract_tenor_below_one`, and the schedule's `replacement_rule_conflict:<asset>`
+    and `part_lifetime_too_short:<asset>:<part>` (IC S0b plan S5). An asset of
+    unknown lifetime is not checked here; `build_operating` flags it
+    (`asset_lifetime_unknown:<asset>`). Under `part_lifetimes` a short-lived
+    asset counts as replaced when every effective part has a known lifetime
+    (`replacements.counts_as_replaced`)."""
     fin = case.inputs
     if not case.templates:
         raise FinanceRefused("template_missing", "the case has no operating-year template")
@@ -94,10 +99,12 @@ def build_timeline(case: FinanceCase) -> Timeline:
     for _, asset, _ in fin.replacement_capex:
         if asset not in names:
             raise FinanceRefused("replacement_unknown_asset", asset)
+    # The one replacement schedule (IC S0b plan S4); it refuses a
+    # `part_lifetimes` conflict or a part lifetime below a year (S5).
+    replacements = schedule(case, tl)
     for a in case.assets:
         if a.lifetime_years is not None and a.lifetime_years < tl.analysis_years:
-            replaced = any(r[1] == a.name for r in fin.replacement_capex)
-            if not replaced:
+            if not counts_as_replaced(case, a, replacements):
                 raise FinanceRefused("asset_lifetime_short",
                                      f"{a.name}: lifetime {a.lifetime_years:g} < analysis period "
                                      f"{tl.analysis_years} with no replacement")

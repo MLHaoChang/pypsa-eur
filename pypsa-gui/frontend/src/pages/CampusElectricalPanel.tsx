@@ -5,11 +5,12 @@
 // - transformer ratings;
 // - reactive compensation at the PCC;
 // - short circuit against the switchgear;
-// - PCC grid-code compliance, at the critical hours, by AC load flow.
+// - PCC grid-code compliance, at the critical hours, by AC load flow;
+// - what to buy from the asset library to meet it, at least cost (plan C9).
 //
 // Thin like GridspinePanel. Everything shown is READ from
 // `GET /api/campus-electrical/{name}`, and every action is one request:
-// draft, save, run. Refusals come back as the backend's message and render
+// draft, save, run (and the library's save and reset). Refusals come back as the backend's message and render
 // inline: another project kind (409), not saved or solved (422), a campus
 // file that does not build (422, naming the field).
 import { useEffect, useState } from 'react'
@@ -17,16 +18,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, RefreshCw, Save, Wand2 } from 'lucide-react'
 import {
   campusApi, errorText, isOtherKind,
-  type CampusSettings, type CampusState, type CheckStatus, type ComplianceRow,
+  type CampusSettings, type CampusState, type CheckStatus, type ComplianceRow, type InvestedComplianceRow,
 } from '../api/campusElectrical'
 import { useUIStore } from '../store/uiStore'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
+import CampusInvestmentSection from './CampusInvestmentSection'
+import CampusLibrarySection from './CampusLibrarySection'
 
 export const CAMPUS_KEY = (name: string) => ['campusElectrical', 'state', name] as const
 
 const INPUT = 'px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20'
-const DEFAULT_SETTINGS: CampusSettings = { k: 3, pf: null, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true }
+const DEFAULT_SETTINGS: CampusSettings = {
+  k: 3, pf: null, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true, invest: true, pcc_switchgear_by_operator: false,
+}
 
 const CHECK_LABEL: Record<ComplianceRow['check'], string> = {
   pcc_reactive: 'PCC reactive power',
@@ -34,6 +39,7 @@ const CHECK_LABEL: Record<ComplianceRow['check'], string> = {
   campus_voltage: 'Voltages inside the campus',
   transformer_loading: 'Transformer loading',
   switchgear: 'Switchgear short circuit',
+  cable_loading: 'Cable loading',
 }
 const STATUS_TEXT: Record<CheckStatus, string> = {
   pass: 'pass', fail: 'fail', not_rated: 'not rated', not_rechecked: 'not re-checked',
@@ -110,6 +116,7 @@ function CampusView({ name }: { name: string }) {
         name={name}
         onProfilesChanged={() => qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })}
       />
+      <CampusLibrarySection name={name} onChanged={() => qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })} />
       {state.data.campus_yaml && <RunSection name={name} state={state.data} onChange={refresh} />}
       {state.data.results && <ResultsSection state={state.data} />}
     </PageBody>
@@ -187,6 +194,9 @@ function RunSection({ name, state, onChange }: {
   const [profile, setProfile] = useState(initial.profile)
   const [margin, setMargin] = useState(String(Math.round(initial.margin * 100)))
   const [n1, setN1] = useState(initial.n_minus_1)
+  // A run saved before these settings existed has neither: the defaults.
+  const [invest, setInvest] = useState(initial.invest ?? DEFAULT_SETTINGS.invest)
+  const [byOperator, setByOperator] = useState(initial.pcc_switchgear_by_operator ?? DEFAULT_SETTINGS.pcc_switchgear_by_operator)
   const [refusal, setRefusal] = useState<string | null>(null)
   // The grid-codes listing says which published profiles still carry
   // unconfirmed limits; the picker names them so a run is never held to one unawares.
@@ -195,6 +205,7 @@ function RunSection({ name, state, onChange }: {
 
   const settings = (): CampusSettings => ({
     k: Number(k), pf: pf.trim() === '' ? null : Number(pf), profile, margin: Number(margin) / 100, n_minus_1: n1,
+    invest, pcc_switchgear_by_operator: byOperator,
   })
   const run = useMutation({
     mutationFn: () => campusApi.run(name, settings()),
@@ -227,6 +238,14 @@ function RunSection({ name, state, onChange }: {
         <Field label="Transformer N-1" row>
           <input type="checkbox" aria-label="Transformer N-1" checked={n1} onChange={e => setN1(e.target.checked)} />
         </Field>
+        <Field label="Buy assets from the library (least cost, AC-checked)" row>
+          <input type="checkbox" aria-label="Buy assets from the library (least cost, AC-checked)" checked={invest}
+                 onChange={e => setInvest(e.target.checked)} />
+        </Field>
+        <Field label="PCC switchgear owned by the grid operator (not costed)" row>
+          <input type="checkbox" aria-label="PCC switchgear owned by the grid operator (not costed)" checked={byOperator}
+                 disabled={!invest} onChange={e => setByOperator(e.target.checked)} />
+        </Field>
         <Btn variant="primary" onClick={() => run.mutate()} disabled={run.isPending}>
           <Play size={13} /> {run.isPending ? 'Running…' : 'Run study'}
         </Btn>
@@ -243,6 +262,10 @@ function StatusTag({ s }: { s: CheckStatus }) {
 function ResultsSection({ state }: { state: CampusState }) {
   const r = state.results!
   const req = r.requirement
+  // The investment's table re-solves every check with the assets in place; without it
+  // the "with measures" column is part one's recommendation, and some checks are not re-checked.
+  const invested = r.compliance_invested != null
+  const rows: ComplianceRow[] = r.compliance_invested ?? r.compliance
   return (
     <>
       {state.stale && (
@@ -250,33 +273,44 @@ function ResultsSection({ state }: { state: CampusState }) {
           The campus file or the project has changed since this run. Run the study again before using these numbers.
         </p>
       )}
-      <PageSection title="PCC compliance" hint={`as the campus is, and with the recommended measures`}>
+      <CampusInvestmentSection state={state} />
+
+      <PageSection
+        title="PCC compliance"
+        hint={invested ? 'as the campus is, and with the purchased assets, re-solved' : 'as the campus is, and with the recommended measures'}
+      >
         <table className="w-full text-[12px]">
           <thead>
             <tr className="text-left text-muted">
               <th className="font-normal pr-3">Check</th><th className="font-normal pr-3">As is</th>
-              <th className="font-normal pr-3">With measures</th><th className="font-normal pr-3">Worst</th>
+              <th className="font-normal pr-3">{invested ? 'With the assets (AC re-solved)' : 'With measures'}</th>
+              <th className="font-normal pr-3">Worst</th>
               <th className="font-normal pr-3">Limit</th><th className="font-normal">Detail · rule</th>
             </tr>
           </thead>
           <tbody>
-            {r.compliance.map(c => (
-              <tr key={c.check} data-testid={`compliance-${c.check}`} className="border-t border-border">
-                <td className="py-1 pr-3 whitespace-nowrap align-top">{CHECK_LABEL[c.check] ?? c.check}</td>
-                <td className="pr-3 align-top"><StatusTag s={c.status_as_is} /></td>
-                <td className="pr-3 align-top"><StatusTag s={c.status_with_measures} /></td>
-                <td className="pr-3 whitespace-nowrap align-top tabular-nums">
-                  {num(c.value, 3)} {c.unit} <span className="text-muted">{where(c.worst_period, c.worst_hour)}</span>
-                </td>
-                <td className="pr-3 whitespace-nowrap align-top tabular-nums text-muted">{num(c.limit, 3)} {c.unit}</td>
-                <td className="align-top">
-                  <div>{c.detail}</div>
-                  <div className="text-[11px] text-muted flex items-start gap-1.5 mt-0.5">
-                    <Tag tone={c.source === 'code' ? 'accent' : 'warn'}>{c.source}</Tag><span>{c.clause}</span>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {rows.map(c => {
+              // With the investment, the "with" side is an AC result of the campus as bought.
+              const value = invested ? (c as InvestedComplianceRow).value_with_measures : c.value
+              const detail = invested ? (c as InvestedComplianceRow).detail_with_measures : c.detail
+              return (
+                <tr key={c.check} data-testid={`compliance-${c.check}`} className="border-t border-border">
+                  <td className="py-1 pr-3 whitespace-nowrap align-top">{CHECK_LABEL[c.check] ?? c.check}</td>
+                  <td className="pr-3 align-top"><StatusTag s={c.status_as_is} /></td>
+                  <td className="pr-3 align-top"><StatusTag s={c.status_with_measures} /></td>
+                  <td className="pr-3 whitespace-nowrap align-top tabular-nums">
+                    {num(value, 3)} {c.unit} <span className="text-muted">{where(c.worst_period, c.worst_hour)}</span>
+                  </td>
+                  <td className="pr-3 whitespace-nowrap align-top tabular-nums text-muted">{num(c.limit, 3)} {c.unit}</td>
+                  <td className="align-top">
+                    <div>{detail}</div>
+                    <div className="text-[11px] text-muted flex items-start gap-1.5 mt-0.5">
+                      <Tag tone={c.source === 'code' ? 'accent' : 'warn'}>{c.source}</Tag><span>{c.clause}</span>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
         <p className="text-[11px] text-muted mt-2">

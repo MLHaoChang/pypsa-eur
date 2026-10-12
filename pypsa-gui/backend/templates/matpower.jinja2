@@ -8,7 +8,7 @@ mpc.baseMVA = {{ baseMVA }};
 %% bus data
 %%  bus_i  type  Pd     Qd     Gs  Bs  area  Vm   Va  baseKV       zone  Vmax  Vmin
 mpc.bus = [
-{% for b in buses %}	{{ b.bus_i }}  {{ b.type }}  {{ b.Pd }}  0  0  0  1  1.0  0  {{ b.baseKV }}  1  1.1  0.9;
+{% for b in buses %}	{{ b.bus_i }}  {{ b.type }}  {{ b.Pd }}  {{ b.Qd }}  0  0  1  1.0  0  {{ b.baseKV }}  1  1.1  0.9;
 {% endfor %}];
 
 %% generator data

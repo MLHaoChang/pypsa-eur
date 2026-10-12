@@ -268,45 +268,22 @@ def cleanup_orphan_vintages():
                 f"cleanup_orphan_vintages: removed {len(victims)} orphan vintage row(s)",
             )
 
-        # Second pass: prune n.meta["vintage_bounds"] entries whose asset
-        # name no longer exists in the network. Walks the saved bounds
-        # bucket directly (not via SUPPORTED_COMPONENTS which is keyed by
-        # the same class names) and drops the orphans via the canonical
-        # delete_bounds_for_asset helper so the meta and any side stores
-        # (vintage_results) stay consistent.
-        from services.vintage_service import (
-            _ensure_meta_bucket,
-            delete_bounds_for_asset,
-        )
-        bounds_bucket = _ensure_meta_bucket(n)
-        # Snapshot keys before iterating — delete_bounds_for_asset mutates
-        # the dict, so we can't iterate it directly without RuntimeError.
-        for cls in list(bounds_bucket.keys()):
-            spec = SUPPORTED_COMPONENTS.get(cls)
-            if spec is None:
-                # Bounds saved against an unknown component class — drop
-                # the whole class bucket, it can't be applied at solve time
-                # anyway.
-                orphans = list(bounds_bucket[cls].keys())
-                bounds_bucket.pop(cls, None)
-                if orphans:
-                    removed_bounds_by_class[cls] = orphans
-                continue
-            df = getattr(n, spec["attr"], None)
-            asset_index = set(df.index) if df is not None else set()
-            orphans = [
-                name for name in list(bounds_bucket[cls].keys())
-                if name not in asset_index
-            ]
-            for name in orphans:
-                delete_bounds_for_asset(n, cls, name)
-            if orphans:
-                removed_bounds_by_class[cls] = orphans
-                change_log_service.log(
-                    "delete", cls, "",
-                    f"cleanup_orphan_vintages: removed {len(orphans)} orphan "
-                    f"vintage_bounds entry(ies)",
-                )
+        # Second pass: prune the saved bounds AND results entries whose asset
+        # no longer exists. Shared with spatial clustering, which faces the
+        # same problem from the other end — PyPSA hands it a component index
+        # it did not choose. This pass used to be a second implementation of
+        # the same walk, and it swept only `vintage_bounds`: an orphaned
+        # `vintage_results` entry with no bounds beside it survived, and
+        # Compare's capacity and economics roll-ups walk that store.
+        from services.vintage_service import prune_orphaned_entries
+
+        removed_bounds_by_class = prune_orphaned_entries(n)
+        for cls, orphans in removed_bounds_by_class.items():
+            change_log_service.log(
+                "delete", cls, "",
+                f"cleanup_orphan_vintages: removed {len(orphans)} orphan "
+                f"vintage_bounds entry(ies)",
+            )
     total = sum(len(v) for v in removed_by_class.values())
     total_bounds = sum(len(v) for v in removed_bounds_by_class.values())
     return {

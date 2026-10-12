@@ -1341,7 +1341,9 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   const initialCenter: [number, number] = [50.0, 10.0]
 
   return (
-    <div className="relative h-full w-full" ref={setCanvasEl}>
+    // isolate: local stacking context so z-40 companion isn't buried under Leaflet panes (see placement-strip z-index note below).
+    // ref: the canvas measures itself for the minimap's fold rule (plan M5).
+    <div className="relative isolate h-full w-full" ref={setCanvasEl}>
       <MapContainer
         center={initialCenter}
         zoom={5}

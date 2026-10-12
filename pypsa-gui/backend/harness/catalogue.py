@@ -76,11 +76,15 @@ SAFETY_PANEL_ENUM = [
     "NewProject", "new_project", "NewProjectWizard",
     # Guided-mode hub-design panel (frontend normalises both to 'hubDesign').
     "HubDesign", "hubDesign",
+    "Workspace", "workspace", "Settings", "settings",
+    "GridSpine", "gridspine", "Reports", "reports",
+    "CampusElectrical", "campusElectrical",
 ]
 RESULTS_TAB_ENUM = [
     "overview", "capex", "dispatch", "loadflow", "prices", "economics",
     "emissions", "curtailment", "lostload", "storage", "asset",
     "investment",   # IC P3 WP3.4 (the Investment tab, WP3.5)
+    "adequacy", "fmea",
 ]
 BOTTOM_TAB_ENUM = [
     "Log", "History", "Buses", "Lines", "Transformers", "Generators",
@@ -271,8 +275,9 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "download_timeseries_template",
-        "CSV template for uploading time-series profiles. The CSV has the "
-        "snapshot index as rows and asset names as columns — fill in values "
+        "Spreadsheet template for uploading time-series profiles. Returns "
+        "filename, media_type and an authenticated download_url. The sheet has "
+        "the snapshot index as rows and asset names as columns — fill in values "
         "and upload via upload_load_profile / upload_generator_profile / "
         "upload_link_profile. Safety: read.",
         {"kind": {"type": "string", "enum": TIMESERIES_KIND_ENUM}},
@@ -280,7 +285,8 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _empty(
         "download_snapshot_weightings_csv",
-        "CSV dump of n.snapshot_weightings (one row per snapshot, columns "
+        "Download metadata (filename, media_type, download_url) for a CSV dump "
+        "of n.snapshot_weightings (one row per snapshot, columns "
         "objective/generators/stores). Round-trips through "
         "upload_snapshot_weightings_csv. Safety: read.",
     ),
@@ -467,8 +473,10 @@ TOOLS: list[dict[str, Any]] = [
     _t(
         "bulk_update_components",
         "Atomic bulk attribute set on N components of one class (PATCH "
-        "/api/network/_bulk). Single lock acquisition, single audit entry, "
-        "single undo snapshot. Backend coerces values against df[col].dtype; "
+        "/api/network/_bulk). Single lock acquisition, single audit entry. "
+        "Undoable as part of this turn (one undo reverts the turn's network "
+        "edits). Backend coerces values against "
+        "df[col].dtype; "
         "all-or-nothing on unknown names. Safety: write.",
         {
             "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
@@ -1688,9 +1696,16 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _empty(
         "undo_last",
-        "Roll back the most recent mutation (pops the per-project undo stack). "
-        "Returns {undone: bool, remaining: int} (remaining = undo-stack depth "
-        "after the pop). Safety: destructive.",
+        "Roll back the most recent step ON THE UNDO STACK (pops the "
+        "per-project stack). The stack holds the user's canvas edits AND your "
+        "turns: before the first network-changing tool of a turn, one "
+        "snapshot is taken, so one undo reverts EVERYTHING you changed in that "
+        "turn — not just your last call. Called later in the same turn, it "
+        "returns the network to how it was when the turn began. If the user "
+        "edited the canvas after your turn, the newest step is theirs and this "
+        "reverts that instead. Refuses when the stack is empty. Returns "
+        "{undone: bool, remaining: int} (remaining = undo-stack depth after "
+        "the pop). Safety: destructive.",
     ),
     _empty(
         "undo_status",
@@ -1720,7 +1735,9 @@ TOOLS: list[dict[str, Any]] = [
         "table tab (Buses, Generators, …), and/or the A|B compare rail with "
         "scenario picks. Use project_picker when the user wants to browse "
         "saved projects without naming one. hubDesign opens the step-by-step "
-        "Energy Hub design panel (Guided mode's main view). Safety: read.",
+        "Energy Hub design panel (Guided mode's main view). workspace, settings, "
+        "gridspine, reports and campusElectrical open their application panels; "
+        "adequacy and fmea select their Results tabs. Safety: read.",
         {
             "panel_id": {"type": "string", "enum": SAFETY_PANEL_ENUM},
             "results_tab": {"type": "string", "enum": RESULTS_TAB_ENUM},
@@ -1759,6 +1776,73 @@ TOOLS: list[dict[str, Any]] = [
     ),
 
     # ── Harness: ask the user (chat harness issue 04) ──────────────────────────
+    _t(
+        "project_readiness",
+        "Check project kind, saved/dirty state, network validation, time-series store, solver availability, "
+        "and result freshness without running a solve. Defaults to the active project. "
+        "Returns ready, blockers, and next_tools; GridSpine returns run/config/source freshness. Safety: read.",
+        {"project_id": {"type": "string"}}, [],
+    ),
+    _t(
+        "wait_for_job",
+        "Wait locally for a solve-queue/GridSpine UUID, foreground simulation/AC-PF "
+        "(fg:… from run_simulation / run_ac_pf_stage), adequacy/study job "
+        "(ad:… from run_fmea_sweep / frontier / mc / coupling / margin / eh / "
+        "investment_case), or report job (rpt:… from generate_report / "
+        "regenerate_report_section / propose_report_mapping), "
+        "avoiding repeated model status polls. "
+        "Returns job, terminal, completed, timed_out, wait_cancelled, waited_seconds. "
+        "Default 20 seconds, maximum 25. On timeout report pending and end the turn; never busy-poll. "
+        "A cancelled wait leaves the job running; solve_queue_abort, abort_simulation, "
+        "abort_adequacy_study, or abort_report_generation stops it. Safety: read.",
+        {"job_id": {"type": "string"}, "timeout_seconds": {"type": "number", "minimum": 0, "maximum": 25}}, ["job_id"],
+    ),
+    _t(
+        "get_study_evidence",
+        "Read bounded evidence from a completed GridSpine run: connection, capacity, or ranked_snapshots. "
+        "Supports check, status, hour, assessment_id, bus filters and offset/limit pagination (default 10, max 50). "
+        "Returns items, total_count, has_more, counts_before_status_filter, failed_count_before_status_filter, "
+        "run_id/fingerprint and freshness. check='connection' counts overall connection outcomes across ALL "
+        "matching rows, before paging. Refuses stale or in-progress evidence; summaries cache by run/config/source. "
+        "Capacity status is preexisting_violation, ac_computed, or dc_only; ranked status is converged or not_converged. "
+        "section='simulation' reads last SAVED network results; compare_to adds a baseline economic comparison. "
+        "No study-row filters in simulation mode. Defaults project_id to active project. Safety: read.",
+        {"project_id": {"type": "string"}, "section": {"type": "string", "enum": ["connection", "capacity", "ranked_snapshots", "simulation"]},
+         "check": {"type": "string"}, "status": {"type": "string"}, "hour": {"type": "integer", "minimum": 0},
+         "assessment_id": {"type": "string"}, "bus": {"type": "string"}, "compare_to": {"type": "string"},
+         "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 50}}, [],
+    ),
+    _t(
+        "run_sensitivity_sweep",
+        "Create and enqueue 1–4 saved sensitivity scenarios from a saved network baseline, preserving the "
+        "baseline and active project. Validate all cases before creation. Each case has new_name and 1–20 "
+        "changes: component_class, names (1–100), attribute, value. Numeric engineering inputs only; "
+        "*_extendable flags require booleans. No solver code or topology rewrites. Existing time-series overrides "
+        "still override static values. Reuses matching, solved cases; refuses name/input conflicts and unsaved "
+        "baseline/case edits. Returns per-case project IDs/jobs or reused objectives, with explicit partial failures. "
+        "After waiting for jobs, get_study_evidence(section='simulation', compare_to=baseline_project_id) "
+        "compares each saved result. Study refinement uses gridspine_update_config and gridspine_run_pipeline. "
+        "The confirmation authorizes these bounded changes and queued solves. Safety: execution.",
+        {"baseline_project_id": {"type": "string"}, "cases": {"type": "array", "minItems": 1, "maxItems": 4,
+            "items": {"type": "object", "additionalProperties": False, "properties": {
+                "new_name": {"type": "string", "minLength": 1, "maxLength": 64},
+                "changes": {"type": "array", "minItems": 1, "maxItems": 20, "items": {
+                    "type": "object", "additionalProperties": False, "properties": {
+                        "component_class": {"type": "string", "enum": ["Generator", "Load", "Line", "Link", "StorageUnit", "Store"]},
+                        "names": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "string"}},
+                        "attribute": {"type": "string", "enum": ["marginal_cost", "capital_cost", "p_nom", "p_nom_min", "p_nom_max", "p_nom_extendable", "p_min_pu", "p_max_pu", "efficiency", "p_set", "q_set", "s_nom", "s_nom_min", "s_nom_max", "s_nom_extendable", "s_max_pu", "r", "x", "max_hours", "efficiency_store", "efficiency_dispatch", "e_nom", "e_nom_min", "e_nom_max", "e_nom_extendable", "e_min_pu", "e_max_pu"]},
+                        "value": {"type": ["number", "boolean"]}},
+                    "required": ["component_class", "names", "attribute", "value"]}}},
+                "required": ["new_name", "changes"]}}}, ["baseline_project_id", "cases"],
+    ),
+    _t(
+        "use_toolset",
+        "Switch the session's catalogue view to all, project, network, simulation, results, or gridspine. "
+        "The next model request in THIS turn receives the refreshed eligible catalogue. Harness controls and "
+        "project navigation remain available. Does not change project access, confirmations, or model profile. "
+        "Use all to restore the full eligible catalogue. Safety: read.",
+        {"domain": {"type": "string", "enum": ["all", "project", "network", "simulation", "results", "gridspine"]}}, ["domain"],
+    ),
     _t(
         "ask_user",
         "Ask the user ONE structured question with options, rendered as a "
@@ -1889,7 +1973,7 @@ TOOLS: list[dict[str, Any]] = [
     _t(
         "apply_demand_from_excel",
         "Write a demand profile from an uploaded Excel/CSV into the named "
-        "Load's p_set time-series. Values are mapped to snapshots POSITIONALLY "
+        "Load's p_set time-series, REPLACING any profile it already has. Values are mapped to snapshots POSITIONALLY "
         "(row 0 → first snapshot, row 1 → second, etc.), so the spreadsheet "
         "order matters. Both FLAT and MULTI-PERIOD networks are supported. "
         "Row-count rules:\n"
@@ -1911,7 +1995,6 @@ TOOLS: list[dict[str, Any]] = [
             "time_col": {"type": "string"},
             "value_col": {"type": "string"},
             "load_name": {"type": "string"},
-            "replace": {"type": "boolean"},
         },
         ["file_id", "time_col", "value_col", "load_name"],
     ),
@@ -2550,8 +2633,8 @@ TOOLS: list[dict[str, Any]] = [
         "gridspine_export_handoff_bundle",
         "Zip one selected hour's handoff bundle (.raw, .dyr, contingencies, "
         "screening, fault levels, ledger) inside the project directory and "
-        "return {path, filename, bytes}. The user downloads it from the "
-        "study view; this tool prepares it. Safety: write.",
+        "return {download_url, filename, bytes}. The user downloads it from "
+        "the study view (or that URL); this tool prepares it. Safety: write.",
         {
             "project_id": {"type": "string"},
             "hour": {"type": "integer"},
@@ -2658,7 +2741,13 @@ TOOLS: list[dict[str, Any]] = [
         "and the PCC compliance report against the grid-code profile. pf is "
         "the connection agreement's power factor; omit it to use the code's "
         "widest range (EU DCC 0.48 Q/Pmax). Seconds of CPU. Returns the "
-        "campus_get_study shape. 422 without a campus file or for a bad "
+        "campus_get_study shape. invest (default true) also buys the "
+        "electrical assets from the project's asset library at least cost, "
+        "re-checked by AC load flow at every critical hour: read the purchase "
+        "with campus_get_investment. pcc_switchgear_by_operator (default "
+        "false) says the grid operator owns the PCC switchgear, so it is "
+        "neither bought nor costed: ask the user who owns it before assuming. "
+        "422 without a campus file or for a bad "
         "setting. Safety: write.",
         {
             "project_id": {"type": "string"},
@@ -2667,7 +2756,65 @@ TOOLS: list[dict[str, Any]] = [
             "profile": {"type": "string"},
             "margin": {"type": "number"},
             "n_minus_1": {"type": "boolean"},
+            "invest": {"type": "boolean"},
+            "pcc_switchgear_by_operator": {"type": "boolean"},
         },
+        ["project_id"],
+    ),
+    _t(
+        "campus_get_library",
+        "The asset library the campus study of a capacity-expansion (hub) "
+        "project buys from: {yaml (the library as text: transformers, cables, "
+        "capacitor banks, shunt reactors, STATCOMs and switchgear, each with "
+        "its ratings, capex, fixed opex fraction and lifetime, every number "
+        "tagged measured|datasheet|assumed), is_default}. is_default is true "
+        "until the user saves a copy for the project. Every cost in the shipped "
+        "library is an assumed placeholder. 409 for a project of another kind. "
+        "Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "campus_set_library",
+        "Save a project's asset library for the campus study: the whole library "
+        "as YAML text, which replaces the project's copy and is used by every "
+        "later run. It is validated by the engine's loader first, so an "
+        "untagged value, a duplicate id or a non-positive rating is refused "
+        "(422, naming the entry and the field; 413 over 1 MB) and nothing is "
+        "saved. Start from campus_get_library, change only what the user "
+        "asked, and keep every value's source tag honest: a price from a quote "
+        "is datasheet or measured, a guess stays assumed. You must ask before replacing "
+        "a library the user already edited (is_default false), because that "
+        "discards their copy. Results of an earlier run turn stale. "
+        "Safety: write.",
+        {"project_id": {"type": "string"}, "yaml": {"type": "string"}},
+        ["project_id", "yaml"],
+    ),
+    _t(
+        "campus_get_investment",
+        "What the last campus run bought: {investment (rows: need, library_id, "
+        "kind, units, length_km, invest_period, capex_eur, opex_eur_per_a, "
+        "annualised_eur_per_a, existing, status chosen|kept|not_needed|"
+        "unresolved, reason), cost (per period: capex_eur and the annualised "
+        "electrical cost per year), hub_cost (the solved hub's own system cost: "
+        "per_period in EUR per year for a multi-period project, else the total "
+        "as solved; null with hub_cost_reason when it cannot be computed), "
+        "unresolved ({need, reason}: needs the library could not meet), history "
+        "(each escalation to a dearer candidate and the check that forced it), "
+        "compliance_invested (the compliance table re-solved with the assets), "
+        "scope ({pcc_switchgear: campus|grid_operator}: whether the PCC switchgear "
+        "was costed to the campus or left to the grid operator, say which), "
+        "library_is_default, stale, notes}. Say these with the numbers: costs "
+        "are placeholders tagged assumed unless the user replaced them with "
+        "quotes, so quote them as orders of magnitude; tap changers are not "
+        "optimised, so a voltage excursion compensation cannot shrink is "
+        "reported unresolved, not fixed; and when stale is true the campus, "
+        "the project or the library changed since the run. Never add the "
+        "electrical cost to the hub's as if it were in the hub's optimisation: "
+        "it is reported alongside, and the PyPSA project is unchanged. "
+        "investment is null with a reason before a run or after a run with "
+        "invest off. 409 for a project of another kind. Safety: read.",
+        {"project_id": {"type": "string"}},
         ["project_id"],
     ),
     _t(
@@ -2958,6 +3105,34 @@ TOOLS: list[dict[str, Any]] = [
 
 # v4-NIT-1 / v6-F4: derive the count from the registry length at module
 # import. NEVER pre-state the count anywhere in code or docs.
+# Provider-neutral assistant operations. Every action uses normal dispatch.
+_ENGINEERING_CHANGES = next(t for t in TOOLS if t["name"] == "run_sensitivity_sweep")["input_schema"]["properties"]["cases"]["items"]["properties"]["changes"]
+TOOLS.extend([
+    _t("list_project_runs", "List recorded runs of the active project, newest first, with status (running, completed, failed, interrupted), start/finish timestamps, mode, fingerprint and whether result evidence is still available. Pages of 10 by default, max 50; optional status filter. Returns items, total_count, limit, offset, has_more. Reads immutable run records only; activates nothing. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 50}, "offset": {"type": "integer", "minimum": 0}, "status": {"type": "string", "enum": ["running", "completed", "failed", "interrupted"]}}, []),
+    _t("get_run_evidence", "Read one recorded run of the active project by run_id from list_project_runs. Without section: status, timestamps, mode, fingerprint, warnings, error and software-computed metrics (value + unit) and the section list with availability. With section (lowercase name from that list): the stored section data. Never substitutes another run: missing, pruned, altered or unfinished evidence returns error_kind evidence_unavailable naming this run_id and a reason; an unknown id returns run_not_found. Safety: read.", {"run_id": {"type": "string", "maxLength": 64}, "section": {"type": "string", "maxLength": 32}}, ["run_id"]),
+    _t("compare_project_runs", "Compare two recorded runs of the active project by run_id (from list_project_runs): run minus baseline for each recorded metric, with both values, the unit and the delta computed in software (delta_pct is null for a zero baseline). Runs are comparable only when both completed, have the same mode and the same input fingerprint (set allow_input_changes=true to compare runs whose inputs differ; the result then carries inputs_differ=true). Otherwise comparable=false with incomparable_reasons and no deltas. A metric missing on one run or recorded in different units is listed in unmatched_metrics, never estimated. Optional metrics restricts the names. Missing or pruned evidence returns evidence_unavailable naming that run; an unknown id returns run_not_found. Safety: read.", {"run_id": {"type": "string", "maxLength": 64}, "baseline_run_id": {"type": "string", "maxLength": 64}, "metrics": {"type": "array", "items": {"type": "string", "maxLength": 64}, "minItems": 1, "maxItems": 20}, "allow_input_changes": {"type": "boolean"}}, ["run_id", "baseline_run_id"]),
+    _t("discuss_project_run", "Bind conversation follow-ups to one recorded run of the active project (run_id from list_project_runs). Stores discussed project/run/baseline/section/source identifiers on the chat session and, when a durable parent thread is bound to this episode, on refs.discussed. With open_ui=true (default), emits a ui_event kind=open_run_result so the Results chrome selects that run and optional results_tab — identifiers only; does NOT restore historical inputs onto the live network. Optional baseline_run_id for later compare_project_runs. Unknown ids return run_not_found; ACL revocation refuses. Safety: write.", {"run_id": {"type": "string", "maxLength": 64}, "results_tab": {"type": "string", "enum": RESULTS_TAB_ENUM}, "section": {"type": "string", "maxLength": 32}, "baseline_run_id": {"type": "string", "maxLength": 64}, "open_ui": {"type": "boolean"}}, ["run_id"]),
+    _t("export_run_evidence", "Export immutable evidence for one recorded run as a downloadable JSON agent_export chip. Omit run_id to export the session's discussed run from discuss_project_run; never substitutes the newest or current network results. Optional section exports that section only (same rules as get_run_evidence). Unknown ids return run_not_found; missing discussed run without run_id returns discussed_run_required; pruned evidence returns evidence_unavailable for THAT run. Use get_file_delivery for the authenticated download link. Safety: write.", {"run_id": {"type": "string", "maxLength": 64}, "section": {"type": "string", "maxLength": 32}}, []),
+    _t("start_experiment", "Persist a typed cross-domain experiment plan for the active project without executing any case. domain selects the adapter family (network, commercial, reliability, gridspine). cases carry unique ids and 1–12 typed changes (path, value, value_type number|boolean|string|enum, optional unit). Optional baseline_run_id and limits. Stable request_id deduplicates. Returns experiment_id, status=planned, cases and executed=false. Advance later through ordinary harness tools/approvals; this tool runs no hidden solves. Safety: write.", {"title": {"type": "string", "maxLength": 120}, "request_id": {"type": "string", "maxLength": 64}, "domain": {"type": "string", "enum": ["network", "commercial", "reliability", "gridspine"]}, "baseline_run_id": {"type": "string", "maxLength": 64}, "limits": {"type": "object"}, "cases": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "object", "additionalProperties": False, "properties": {"id": {"type": "string", "maxLength": 32}, "label": {"type": "string", "maxLength": 120}, "changes": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "object", "additionalProperties": False, "properties": {"path": {"type": "string", "maxLength": 128}, "value": {}, "value_type": {"type": "string", "enum": ["number", "boolean", "string", "enum"]}, "unit": {"type": "string", "maxLength": 24}}, "required": ["path", "value", "value_type"]}}}, "required": ["id", "changes"]}}}, ["title", "cases", "request_id"]),
+    _t("list_experiments", "List up to 20 most recently created experiments you own in the active project. Returns status, domain, baseline_run_id and case_count; use get_experiment for case detail. Does not execute plans. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
+    _t("get_experiment", "Read one persisted experiment by id in the active project. Returns typed cases, limits, job_ids and executed=false until a later slice advances cases through ordinary tools. Safety: read.", {"experiment_id": {"type": "string"}}, ["experiment_id"]),
+    _t("get_loadflow_summary", "Summarise the CURRENT load-flow results of the active project: lines and transformers ranked by peak utilisation = flow / (rating * s_max_pu), computed by software from the same results the Load flow tab reads. Per branch (default 5, max 25, trimmed to a bounded payload): both-terminal peak flow, rating (optimized s_nom_opt or configured s_nom), s_max_pu range, peak/mean utilisation, weighted hours at/over the limit. Returns the exact source, snapshot window, freshness, solve state, ranking convention, skipped branches (missing or zero rating, no flow data) and missing_evidence. LOPF results are an ACTIVE-POWER PROXY, not an AC apparent-power assessment; source='ac_pf' uses apparent power where reactive flows exist and excludes unconverged snapshots. Never proof of full AC thermal compliance (no N-1, no voltage limits). Unsolved, stale, running, infeasible or failed results return status unavailable with a typed unavailable_kind; never invent values. window_from/window_to are inclusive snapshot indexes for follow-ups. run_id (historical) returns unavailable until run evidence artifacts exist (issue 06). Safety: read.", {"source": {"type": "string", "enum": ["lopf", "ac_pf"]}, "limit": {"type": "integer", "minimum": 1, "maximum": 25}, "window_from": {"type": "integer", "minimum": 0}, "window_to": {"type": "integer", "minimum": 0}, "run_id": {"type": "string", "maxLength": 64}}, []),
+    _t("list_tasks", "List up to 20 most recently updated durable tasks owned by you in the active project. Use a returned ID to resume in a new chat or provider. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
+    _t("find_capabilities", "Find relevant supported tools for a goal. Returns required inputs, safety and current project/toolset eligibility. Cached catalogue search grants no authority. Safety: read.", {"goal": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 8}}, ["goal"]),
+    _t("start_task", "Persist a project/user-scoped plan of 1–12 ordinary tools. Create/activate the project first; rebinding and task-control tools cannot be steps. Each step has unique id, tool, args. Whole-value $earlier_step.path references resolve saved results. Stable request_id deduplicates identical plans. Returns task_id, status, next_step. Execute next_step via an ordinary offered call; this tool runs no hidden actions. Safety: write.", {"title": {"type": "string", "maxLength": 120}, "request_id": {"type": "string", "maxLength": 64}, "steps": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "object", "additionalProperties": False, "properties": {"id": {"type": "string"}, "tool": {"type": "string"}, "args": {"type": "object"}}, "required": ["id", "tool", "args"]}}}, ["title", "steps", "request_id"]),
+    _t("get_task", "Read a durable task in the active project owned by the caller. Returns completed steps and the next exact call; no completed step is replayed. Safety: read.", {"task_id": {"type": "string"}}, ["task_id"]),
+    _t("resume_task", "Attach a durable task to this chat and return next_step. Execute it as an ordinary offered tool call; all normal gates apply. Interrupted writes become uncertain and require explicit review. No implicit tool execution or job polling. Safety: write.", {"task_id": {"type": "string"}}, ["task_id"]),
+    _t("cancel_task", "Stop future task steps; retain its checkpoint. Does not abort a running queue job or solver. Use solve_queue_abort separately for a job. Safety: write.", {"task_id": {"type": "string"}}, ["task_id"]),
+    _t("resolve_task_step", "After verifying an uncertain step's actual effects, explicitly mark completed with a compact verified result or authorize retry. Refuses a still-running originating session. Normal destructive confirmation required. Safety: destructive.", {"task_id": {"type": "string"}, "outcome": {"type": "string", "enum": ["completed", "retry"]}, "result": {"type": "object"}}, ["task_id", "outcome"]),
+    _t("get_file_delivery", "Get a file's authenticated browser download link, content hash, size and project provenance by upload ID. Never returns binary bytes or server paths. Safety: read.", {"file_id": {"type": "string"}}, ["file_id"]),
+    _t("inspect_import", "Inspect uploaded CSV/Excel metadata: up to five sheets, 200 sampled rows and 20 columns. Returns missing-value/time-axis diagnostics, explicit sample limits and native import format. Units and column mappings require user confirmation; never guessed. Other native formats receive format guidance. Safety: read.", {"file_id": {"type": "string"}}, ["file_id"]),
+    _t("import_uploaded_network", "Replace the current network using an authorized upload ID and the existing native import handler. Binary bytes stay server-side. Rebinds to an unsaved draft; save under a chosen project afterward. Normal destructive confirmation and locks apply. Safety: destructive.", {"file_id": {"type": "string"}, "format": {"type": "string", "enum": ["netcdf", "csv_bundle", "excel", "matpower"]}}, ["file_id", "format"]),
+    _t("preview_project_changes", "Preview 1–20 typed engineering parameter changes on an isolated network. Returns immutable preview_id, old/new values with units, validation and fingerprint; stores a preview but does not modify network inputs. Existing time-series overrides remain. Topology edits use existing CRUD tools. Safety: write.", {"changes": _ENGINEERING_CHANGES}, ["changes"]),
+    _t("apply_project_changes", "Apply a reviewed typed preview atomically to unchanged active-project inputs. Refuses stale, foreign, busy or interrupted previews. Normal execution confirmation, lock/study guards and undo capture apply. Repeated successful application returns reused. Leaves changes unsaved. Safety: execution.", {"preview_id": {"type": "string"}}, ["preview_id"]),
+    _t("create_chart", "Generate a downloadable PNG from server-side numeric component data. Select 1–8 asset names and an input/output attribute; max 5000 rows. source=result requires fresh solved data. Returns file metadata and coverage/provenance; no arbitrary expression/code. Safety: write.", {"component": {"type": "string", "enum": ["Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"]}, "attribute": {"type": "string"}, "names": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "string"}}, "source": {"type": "string", "enum": ["input", "result"]}}, ["component", "attribute", "names"]),
+    _t("build_delivery", "Bundle 1–20 authorized upload IDs into a downloadable ZIP (25 MB max) with content hashes and a provenance manifest. Reuse existing exports, charts and reports; no file bytes in model context. Safety: write.", {"file_ids": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}}, "filename": {"type": "string"}}, ["file_ids"]),
+])
+
 TOOL_COUNT: int = len(TOOLS)
 
 
@@ -3029,6 +3204,30 @@ _COMP_DELETE_ROUTES = [
 
 
 TOOL_ROUTES: dict[str, list] = {
+    "list_project_runs": _SERVICE_CALL,
+    "get_run_evidence": _SERVICE_CALL,
+    "compare_project_runs": _SERVICE_CALL,
+    "discuss_project_run": _UI_EVENT,
+    "export_run_evidence": _SERVICE_CALL,
+    "start_experiment": _SERVICE_CALL,
+    "list_experiments": _SERVICE_CALL,
+    "get_experiment": _SERVICE_CALL,
+    "get_loadflow_summary": _SERVICE_CALL,
+    "list_tasks": _SERVICE_CALL,
+    "find_capabilities": _SERVICE_CALL,
+    "start_task": _SERVICE_CALL,
+    "get_task": _SERVICE_CALL,
+    "resume_task": _SERVICE_CALL,
+    "cancel_task": _SERVICE_CALL,
+    "resolve_task_step": _SERVICE_CALL,
+    "get_file_delivery": _SERVICE_CALL,
+    "inspect_import": _SERVICE_CALL,
+    "import_uploaded_network": _SERVICE_CALL,
+    "preview_project_changes": _SERVICE_CALL,
+    "apply_project_changes": _SERVICE_CALL,
+    "create_chart": _SERVICE_CALL,
+    "build_delivery": _SERVICE_CALL,
+
     # read (22)
     "list_components": _COMP_LIST_ROUTES,
     "get_component": _SERVICE_CALL,
@@ -3205,6 +3404,11 @@ TOOL_ROUTES: dict[str, list] = {
     "ui_open_panel": _UI_EVENT,
     "ui_set_snapshot": _UI_EVENT,
     "ask_user": _UI_EVENT,
+    "project_readiness": _SERVICE_CALL,
+    "wait_for_job": _SERVICE_CALL,
+    "get_study_evidence": _SERVICE_CALL,
+    "run_sensitivity_sweep": _SERVICE_CALL,
+    "use_toolset": _SERVICE_CALL,
     "use_skill": _SERVICE_CALL,
     "start_workflow": _SERVICE_CALL,
     "advance_workflow": _SERVICE_CALL,
@@ -3300,6 +3504,10 @@ TOOL_ROUTES: dict[str, list] = {
     "campus_get_study": _SERVICE_CALL,
     "campus_draft_campus": _SERVICE_CALL,
     "campus_run_study": _SERVICE_CALL,
+    # campus asset library and investment (3, plan C9) — service calls
+    "campus_get_library": _SERVICE_CALL,
+    "campus_set_library": _SERVICE_CALL,
+    "campus_get_investment": _SERVICE_CALL,
     # campus grid codes (2) — service calls; no publish tool (plan C10)
     "campus_list_grid_codes": _SERVICE_CALL,
     "campus_extract_grid_code": _SERVICE_CALL,

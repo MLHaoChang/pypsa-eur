@@ -11,6 +11,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import NewProjectWizard from './NewProjectWizard'
 import { gridspineApi } from '../api/gridspine'
+import { projectsApi } from '../api/projects'
 import type { ProjectInfo } from '../api/types'
 
 vi.mock('../api/projects')
@@ -64,6 +65,7 @@ describe('NewProjectWizard — Study tab', () => {
       hours: 336, k: 2, window: 168, overlap: 24, screen: false,
     })
     await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(projectsApi.activate).toHaveBeenCalledWith('new-id')
   })
 
   it('renders the backend’s 422 inline and keeps the dialog open', async () => {

@@ -365,6 +365,70 @@ describe('lengths from geometry after a route edit (M2)', () => {
   })
 })
 
+describe('the site\'s routes (S3)', () => {
+  beforeEach(async () => {
+    getMapLayout.mockResolvedValue(doc({ routes: {
+      'line:L1': { points: [[6.83, 53.44]], source: 'user' },
+      'link:K': { points: [[6.80, 53.40]], source: 'import' },
+      'tr:T1': { points: [[6.81, 53.41]], source: 'osm' },
+      'line:S': { points: [[6.82, 53.42], [6.83, 53.43]], source: 'site' },
+    } }))
+    await useMapLayoutStore.getState().ensureLoaded('p')
+  })
+
+  it('writes a two-point route with source site for a branch without one, and PUTs it', async () => {
+    const s = useMapLayoutStore.getState()
+    expect(s.setSiteRoute('p', 'line:NEW', [[53.5, 6.9], [53.6, 7.0]])).toBe(true)
+    expect(s.docFor('p').routes['line:NEW']).toEqual({ points: [[6.9, 53.5], [7.0, 53.6]], source: 'site' })
+    await vi.advanceTimersByTimeAsync(MAP_LAYOUT_SAVE_DEBOUNCE_MS + 1)
+    expect(putMapLayout).toHaveBeenCalledTimes(1)
+    expect((putMapLayout.mock.calls[0][1] as MapLayoutDocument).routes['line:NEW'].source).toBe('site')
+  })
+
+  it('overwrites its own earlier route', () => {
+    const s = useMapLayoutStore.getState()
+    expect(s.setSiteRoute('p', 'line:S', [[53.9, 6.9], [53.95, 6.95]])).toBe(true)
+    expect(s.docFor('p').routes['line:S']).toEqual({ points: [[6.9, 53.9], [6.95, 53.95]], source: 'site' })
+  })
+
+  it.each(['line:L1', 'link:K', 'tr:T1'])('never overwrites a user route (%s): user, import and osm stand', id => {
+    const s = useMapLayoutStore.getState()
+    const before = s.docFor('p')
+    expect(s.setSiteRoute('p', id, [[53.9, 6.9], [53.95, 6.95]])).toBe(false)
+    expect(s.docFor('p')).toBe(before)                               // not even marked dirty
+    expect(s.dirty['p']).toBeUndefined()
+  })
+
+  it('a user edit over a site route makes it the user\'s, and the site then leaves it alone', () => {
+    const s = useMapLayoutStore.getState()
+    s.setRouteWaypoints('p', 'line:S', [[53.7, 6.7]])
+    expect(s.docFor('p').routes['line:S']).toEqual({ points: [[6.7, 53.7]], source: 'user' })
+    expect(s.setSiteRoute('p', 'line:S', [[53.9, 6.9], [53.95, 6.95]])).toBe(false)
+    expect(s.docFor('p').routes['line:S'].source).toBe('user')
+  })
+
+  it('an empty list writes nothing (removal is the user\'s)', () => {
+    const s = useMapLayoutStore.getState()
+    expect(s.setSiteRoute('p', 'line:S', [])).toBe(false)
+    expect(s.docFor('p').routes['line:S'].source).toBe('site')
+  })
+
+  it('a site route is derived like any other once its PUT lands', async () => {
+    const s = useMapLayoutStore.getState()
+    s.setSiteRoute('p', 'line:NEW', [[53.5, 6.9], [53.6, 7.0]])
+    queueLengthFromGeometry('p', 'line:NEW')
+    await vi.advanceTimersByTimeAsync(MAP_LAYOUT_SAVE_DEBOUNCE_MS + 1)
+    expect(lengthsFromGeometry).toHaveBeenCalledWith(['line:NEW'])
+    expect(putMapLayout.mock.invocationCallOrder[0]).toBeLessThan(lengthsFromGeometry.mock.invocationCallOrder[0])
+  })
+
+  it('refuses while read-only', () => {
+    useUIStore.setState({ readOnly: true, readOnlyReason: 'locked-by-user' })
+    expect(useMapLayoutStore.getState().setSiteRoute('p', 'line:NEW', [[53.5, 6.9], [53.6, 7.0]])).toBe(false)
+    expect(useMapLayoutStore.getState().docFor('p').routes['line:NEW']).toBeUndefined()
+  })
+})
+
 describe('read-only', () => {
   beforeEach(async () => {
     getMapLayout.mockResolvedValue(doc())

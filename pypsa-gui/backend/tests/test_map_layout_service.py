@@ -278,6 +278,17 @@ def test_rename_on_disk_swallows_and_logs_failures(tmp_path, monkeypatch, caplog
 # A document without the key (the M1 migration, any pre-M2 file) reads as
 # "unknown", which is treated as `typed` — nothing was ever derived for it.
 
+def test_a_site_route_validates_and_an_unknown_source_does_not():
+    """S3: the 3D site writes two-point routes with source `site`; a route is a route to the length derivation."""
+    d = _doc(routes={"line:L1": {"points": [[6.83, 53.43], [6.84, 53.44]], "source": "site"}})
+    ml.validate_map_layout(d)
+    assert ml.ROUTE_SOURCES == {"user", "import", "osm", "site"}
+    assert ml.route_points(d, "line:L1") == [[6.83, 53.43], [6.84, 53.44]]
+    d["routes"]["line:L1"]["source"] = "map"
+    with pytest.raises(ml.MapLayoutInvalid, match=r"routes\['line:L1'\]\.source"):
+        ml.validate_map_layout(d)
+
+
 def test_length_source_defaults_to_typed_when_absent():
     d = copy.deepcopy(EXAMPLE)
     assert "lengths" not in d

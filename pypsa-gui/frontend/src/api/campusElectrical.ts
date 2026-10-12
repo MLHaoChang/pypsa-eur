@@ -18,10 +18,14 @@ export interface CampusSettings {
   profile: string
   margin: number
   n_minus_1: boolean
+  /** Buy the electrical assets from the library after sizing (plan C9). */
+  invest: boolean
+  /** The grid operator owns the PCC switchgear: it is not bought or costed. */
+  pcc_switchgear_by_operator: boolean
 }
 
 export interface ComplianceRow {
-  check: 'pcc_reactive' | 'pcc_voltage' | 'campus_voltage' | 'transformer_loading' | 'switchgear'
+  check: 'pcc_reactive' | 'pcc_voltage' | 'campus_voltage' | 'transformer_loading' | 'switchgear' | 'cable_loading'
   status_as_is: CheckStatus
   status_with_measures: CheckStatus
   value: number | null
@@ -84,6 +88,66 @@ export interface Requirement {
   p_ref_from: string
 }
 
+// ── the investment step (plan C9) ───────────────────────────────────────────
+
+export type InvestStatus = 'chosen' | 'kept' | 'not_needed' | 'unresolved'
+
+/** One need and the asset bought for it (`campus_investment.csv`). `library_id`
+ *  and `invest_period` are null for a need that needs nothing. */
+export interface InvestmentRow {
+  need: string
+  library_id: string | null
+  kind: string
+  units: number
+  length_km: number | null
+  invest_period: number | null
+  capex_eur: number
+  opex_eur_per_a: number
+  annualised_eur_per_a: number
+  existing: boolean
+  status: InvestStatus
+  reason: string | null
+}
+
+/** The electrical cost of one investment period (`campus_cost.csv`). */
+export interface CostRow { period: number; capex_eur: number; annualised_eur_per_a: number }
+
+/** The compliance table re-solved with the assets: `status_with_measures` and
+ *  `value_with_measures` are an AC result, not a recommendation. */
+export interface InvestedComplianceRow extends ComplianceRow {
+  value_with_measures: number | null
+  detail_with_measures: string
+}
+
+export interface HistoryRow { iteration: number; need: string; from: string; to: string; check: string; detail: string }
+export interface UnresolvedNeed { need: string; reason: string }
+
+/** Who buys the PCC switchgear. */
+export interface InvestScope { pcc_switchgear: 'campus' | 'grid_operator' }
+
+/** The solved hub's own system cost. `per_period` is EUR per year for a
+ *  multi-period project; a single-period project has only `total`, as solved. */
+export interface HubCost {
+  basis: 'per_period' | 'single_period'
+  per_period: Record<string, number> | null
+  total: number
+}
+
+/** What the electrical costs were annualised on (part three, D1a). The rate is
+ *  the project's solver config when it has one, else the library's; the price
+ *  year is the project's finance inputs' `currency_year` when stated. A year
+ *  that differs from the library's is flagged, never converted: the library's
+ *  costs stay in `library_price_year` money. */
+export interface CostBasis {
+  discount_rate: number
+  discount_rate_from: 'project solver config' | 'asset library'
+  price_year: number
+  price_year_from: 'project finance inputs' | 'asset library'
+  library_price_year: number
+  price_year_mismatch: boolean
+  currency: string
+}
+
 export interface CampusResults {
   selection: SelectedHour[]
   transformers: TransformerSizing[]
@@ -91,6 +155,15 @@ export interface CampusResults {
   short_circuit: FaultLevel[]
   compliance: ComplianceRow[]
   requirement: Requirement
+  /** Null throughout when the run did not invest. */
+  investment: InvestmentRow[] | null
+  cost: CostRow[] | null
+  compliance_invested: InvestedComplianceRow[] | null
+  history: HistoryRow[] | null
+  unresolved: UnresolvedNeed[] | null
+  scope: InvestScope | null
+  /** Null when the run did not invest. */
+  cost_basis?: CostBasis | null
 }
 
 export interface CampusState {
@@ -100,7 +173,15 @@ export interface CampusState {
   settings: CampusSettings | null
   results: CampusResults | null
   stale: boolean
+  /** Null, with `hub_cost_reason`, when the hub's cost cannot be computed. */
+  hub_cost: HubCost | null
+  hub_cost_reason: string | null
+  /** How many purchased items the last investment run offers as extra owner assets. */
+  owner_assets_count?: number
 }
+
+/** The asset library: the project's copy, else the shipped default. */
+export interface AssetLibrary { yaml: string; is_default: boolean }
 
 // ── the project's own grid codes (plan C10) ─────────────────────────────────
 // `/api/campus-electrical/{name}/grid-codes/*`, wrapping
@@ -205,6 +286,18 @@ export const campusApi = {
   /** Prepare, rank and size the campus; returns the new state. Seconds of CPU. */
   run: (project: string, settings: CampusSettings) =>
     client.post<CampusState>(`${base(project)}/run`, settings, quiet).then(r => r.data),
+
+  /** The asset library a study buys from. */
+  library: (project: string) =>
+    client.get<AssetLibrary>(`${base(project)}/library`, quiet).then(r => r.data),
+
+  /** Keep the text as the project's copy. 422 names the entry and field, 413 over 1 MB. */
+  saveLibrary: (project: string, yaml: string) =>
+    client.put<AssetLibrary>(`${base(project)}/library`, { yaml }, quiet).then(r => r.data),
+
+  /** Delete the project's copy; the shipped default is used again. */
+  resetLibrary: (project: string) =>
+    client.post<AssetLibrary>(`${base(project)}/library/reset`, undefined, quiet).then(r => r.data),
 
   // grid codes: one thunk per route
   gridCodes: (project: string) =>

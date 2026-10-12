@@ -31,9 +31,14 @@ interface Props {
   dispatchFresh?: boolean
   /** The library-gap status (S4): "'x' Generator drawn as a generic block"; null when every object has a specific type. */
   libraryGaps?: string | null
+  /** Snapshot (S5): capture the site from the south as its thumbnail now. Absent without a saved project (nowhere to store it). */
+  onSnapshot?: () => void
+  /** Walk the campus (S5): first-person mode on/off. Absent where the mode is not offered. */
+  walking?: boolean
+  onToggleWalk?: () => void
 }
 
-export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, unplacedMembers, selectedPlacedKey, canArrange, onArrange, onArrangeAll, placedCount = 0, onResetPlacement, dispatchFresh = false, libraryGaps = null }: Props) {
+export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, unplacedMembers, selectedPlacedKey, canArrange, onArrange, onArrangeAll, placedCount = 0, onResetPlacement, dispatchFresh = false, libraryGaps = null, onSnapshot, walking = false, onToggleWalk }: Props) {
   const readOnly = useUIStore(s => s.readOnly)
   const siteSizing = useUIStore(s => s.siteSizing)
   const setSiteSizing = useUIStore(s => s.setSiteSizing)
@@ -118,6 +123,31 @@ export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, 
       >
         Reset placement
       </button>
+      {onSnapshot && (
+        <button
+          type="button"
+          data-testid="site-snapshot"
+          onClick={onSnapshot}
+          disabled={readOnly}
+          title={blocked ?? 'Take the site picture now (from the south): the hub-design Site map card and the report figure show it'}
+          className="px-1.5 py-0.5 rounded border border-border text-text hover:bg-accent/5 disabled:opacity-50"
+        >
+          Snapshot
+        </button>
+      )}
+      {onToggleWalk && (
+        // A view mode, not an edit: available read-only too. Escape leaves it.
+        <button
+          type="button"
+          data-testid="site-walk"
+          aria-pressed={walking}
+          onClick={onToggleWalk}
+          title={walking ? 'Leave the walk (Escape does too)' : 'Walk the campus: click the scene to look around with the mouse, W A S D or the arrows to walk, Escape to leave'}
+          className={`px-1.5 py-0.5 rounded border border-border hover:bg-accent/5 ${walking ? 'bg-accent/10 text-text font-semibold' : 'text-text'}`}
+        >
+          {walking ? 'Walking…' : 'Walk'}
+        </button>
+      )}
     </div>
   )
 }

@@ -7,6 +7,14 @@ function in ``services/campus_electrical_service.py``, the same functions
 the copilot's tools call. Drafting and running parse a network and solve
 load flows, which takes seconds of CPU, so they run off the event loop.
 
+The asset library the investment step buys from (plan C9) is under
+``/{name}/library``: ``GET``, ``PUT`` (validated by the engine's loader; 422
+names the entry and field, 413 over 1 MB) and ``POST /library/reset``.
+
+``GET /{name}/owner-assets`` (part three D2) lists what the last investment run
+bought as the extra owner assets of the investment case, with the study's
+``source_hash`` and a ``stale`` flag: ``{assets, source_hash, stale}``. Read only.
+
 The project's own grid codes (plan C10) are under ``/{name}/grid-codes``,
 wrapping ``services/campus_grid_code_service.py``:
 
@@ -52,12 +60,22 @@ class CampusText(BaseModel):
     yaml: str = Field(max_length=ce.MAX_CAMPUS_BYTES)
 
 
+class LibraryText(BaseModel):
+    #: No ``max_length``: the service answers 413 over ``MAX_LIBRARY_BYTES``,
+    #: where a model constraint would answer 422.
+    yaml: str
+
+
 class RunSettings(BaseModel):
     k: int = Field(ce.DEFAULTS["k"], ge=1, le=50)
     pf: float | None = Field(None, gt=0, le=1)
     profile: str = Field(ce.DEFAULTS["profile"], min_length=1, max_length=64)
     margin: float = Field(ce.DEFAULTS["margin"], ge=0, le=2)
     n_minus_1: bool = True
+    #: Buy the electrical assets from the library after sizing (plan C9).
+    invest: bool = True
+    #: The grid operator owns the PCC switchgear, so it is not bought or costed.
+    pcc_switchgear_by_operator: bool = False
 
 
 class ExtractRequest(BaseModel):
@@ -139,9 +157,52 @@ async def run(
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ):
-    """Prepare, rank and size the campus at its critical hours."""
+    """Prepare, rank and size the campus at its critical hours, then buy the
+    electrical assets from the library unless ``invest`` is false."""
     _check_lock(proj, db, user)
     return await run_in_threadpool(ce.run, _row(proj, db), body.model_dump())
+
+
+# ── the asset library (plan C9) ────────────────────────────────────────────
+
+@router.get("/{name}/library")
+def get_library(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """The asset library a study buys from: the project's copy, else the shipped default."""
+    return ce.get_library(_row(proj, db))
+
+
+@router.put("/{name}/library")
+def save_library(
+    body: LibraryText,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Keep the user's library as the project's copy, validated by the engine's loader."""
+    _check_lock(proj, db, user)
+    return ce.save_library(_row(proj, db), body.yaml)
+
+
+@router.post("/{name}/library/reset")
+def reset_library(
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Delete the project's copy; the shipped default is used again."""
+    _check_lock(proj, db, user)
+    return ce.reset_library(_row(proj, db))
+
+
+# ── the chosen equipment as owner assets (plan, part three D2) ──────────────
+
+@router.get("/{name}/owner-assets")
+def owner_assets(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """What the last investment run bought, as the extra owner assets of the
+    investment case: ``{"assets": [...], "source_hash": str | None, "stale": bool}``
+    (``owner_assets_response``); no assets and no hash before an investment run.
+    Read only."""
+    return ce.owner_assets_response(_row(proj, db))
 
 
 # ── the project's grid codes (plan C10) ────────────────────────────────────

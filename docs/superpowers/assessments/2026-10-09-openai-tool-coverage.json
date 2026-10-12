@@ -1,0 +1,1368 @@
+{
+  "limits": "Contract cases use dispatch doubles. Offline tests may mock services. Only real-handler live success verifies a live execution.",
+  "summary": {
+    "api_contract_passed": 201,
+    "cached_input_tokens": 2536817,
+    "charged_tokens": 3193727,
+    "offline_handler_success_observed": 95,
+    "real_handler_live_expected_error": 3,
+    "real_handler_live_success": 54,
+    "registered": 201,
+    "upper_cost_dollars": 0.85050025
+  },
+  "tools": {
+    "abort_adequacy_study": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "abort_report_generation": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "abort_simulation": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "activate_project": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "advance_workflow": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "apply_demand_from_excel": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "ask_user": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "attach_tariff": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "audit_log": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "batch_create_components": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "batch_delete_components": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "build_study_report": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 13,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "bulk_update_components": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 5,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "campaign_status": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "campus_draft_campus": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "campus_extract_grid_code": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "campus_get_investment": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "campus_get_library": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "campus_get_study": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "campus_list_grid_codes": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "campus_run_study": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 5,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "campus_set_library": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "cascade_delete_bus": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "check_solver_availability": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "cleanup_orphan_vintages": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "clear_audit_log": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "clear_chat_history": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "clear_uploads": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "cluster_network": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "compare_scenarios": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "create_carrier": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "create_component": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": true,
+      "real_handler_live_success": true
+    },
+    "create_project_from_template": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "create_project_snapshot": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "create_scenario": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "define_participants": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "delete_component": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 3,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "delete_project": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "delete_project_snapshot": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "delete_report": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "delete_timeseries": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "delete_upload": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "delete_vintage_bounds": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "diagnose_network": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 16,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "diff_report_versions": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "dispatch_status": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "download_project_bundle": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "download_snapshot_weightings_csv": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "download_timeseries_template": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "end_campaign": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "end_workflow": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "explain_cashflow": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 6,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "explain_investment": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "export_asset_results": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "export_chat_summary": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 3,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "export_csv_bundle": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "export_eh_report_docx": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "export_excel": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "export_matpower": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "export_network_nc": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "export_preview_png": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "export_report_docx": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "export_report_pdf": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "export_to_csv": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "export_to_excel": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "force_reset_simulation": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "generate_exemplary_timeseries": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "generate_report": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 4,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_adequacy_results": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 34,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_aggregate_load": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "get_asset_costs": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_asset_health": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 13,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_asset_results": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_component": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "get_eh_template": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_feature_guide": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_fmea_worksheet": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_investment_case": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 7,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_library_item": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 3,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_meta": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_project_compare_state": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_project_layout": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_project_network_meta": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_project_results_bundle": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_project_results_summary": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_project_statistics": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_report": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 5,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_report_status": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 5,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_report_table": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_report_template": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_results": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "get_simulation_lock_status": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_simulation_log_history": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_simulation_status": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "get_solver_capabilities": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "get_solver_config": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "get_stress_scenarios": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "get_timeseries": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "get_vintage_results": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "gridspine_assess_connection": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "gridspine_compute_capacity": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "gridspine_create_study": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "gridspine_edit_template_param": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "gridspine_export_handoff_bundle": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "gridspine_fetch_result_figure": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "gridspine_get_assumption_ledger": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "gridspine_get_capacity": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "gridspine_get_config": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "gridspine_get_connection_assessments": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "gridspine_get_readback": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "gridspine_get_stage_status": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "gridspine_list_ranked_snapshots": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "gridspine_run_pipeline": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "gridspine_set_dispatch_source": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "gridspine_update_config": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "import_csv_bundle": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "import_edited_report": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "import_excel": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "import_matpower": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "import_network_nc": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "import_project_bundle": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "import_urdb_tariff": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "list_all_timeseries": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "list_carriers": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "list_chat_history": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 4,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "list_components": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 14,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "list_global_constraints": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "list_investment_periods": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "list_library_items": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "list_project_network_component": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "list_project_snapshots": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "list_projects": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 3,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "list_report_roundtrips": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "list_report_templates": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "list_reports": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 3,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "list_scenarios": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "list_snapshots": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "list_timeseries_profiles": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "list_transformer_types": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "list_uploads": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 3,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "list_vintage_bounds": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "load_project": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "propose_report_mapping": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "put_stress_scenarios": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "read_excel_sheet": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 5,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "read_upload_meta": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "recalculate_line_lengths": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "reconstruct_network_from_image": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "record_asset_health": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "regenerate_report_section": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "rename_project": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "restore_project_snapshot": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "review_eh_study": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "run_ac_pf_stage": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "run_coupling_loop": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "run_eh_study": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "run_fmea_sweep": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "run_frontier_study": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "run_investment_case": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "run_margin_loop": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "run_mc_study": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "run_simulation": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "sample_representative_weeks": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "save_project": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "save_project_a_copy": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "save_project_as": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "set_active_profile": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "set_investment_period_weightings": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "set_investment_periods": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "set_multi_period_snapshots": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "set_report_mapping": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "set_report_template": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 3,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "set_site_connection": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "set_snapshot_weightings": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "set_snapshots": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "set_vintage_bounds": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "solve_ppa_price": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 3,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "solve_queue_abort": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "solve_queue_clear_finished": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "solve_queue_enqueue": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "solve_queue_list": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "start_campaign": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "start_workflow": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 3,
+      "real_handler_live_expected_error": true,
+      "real_handler_live_success": true
+    },
+    "suggest_eh_setup": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "ui_open_asset_detail": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "ui_open_panel": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "ui_select_component": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "ui_set_snapshot": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 1,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "undo_last": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "undo_status": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "update_component": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 6,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "update_meta": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "update_project_layout": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "update_solver_config": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 8,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "upload_generator_profile": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "upload_link_profile": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "upload_load_profile": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "upload_snapshot_weightings_csv": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": false,
+      "remaining_check": "Real-handler live success needs a domain fixture and its prerequisites."
+    },
+    "upload_timeseries": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    },
+    "use_skill": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 2,
+      "real_handler_live_expected_error": true,
+      "real_handler_live_success": true
+    },
+    "validate_network": {
+      "api_contract": "passed",
+      "offline_handler_success_tests": 0,
+      "real_handler_live_expected_error": false,
+      "real_handler_live_success": true
+    }
+  }
+}
