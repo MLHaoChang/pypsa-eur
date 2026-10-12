@@ -22,7 +22,7 @@ import pathlib
 
 try:
     from gridspine.schema.contracts import ContractError
-    from gridspine.schema.island import validate_island_config
+    from gridspine.schema.island import GFM_CONTROLS, check_horizon, validate_island_config
 
     GRIDSPINE_AVAILABLE = True
     GRIDSPINE_IMPORT_ERROR = None
@@ -34,6 +34,8 @@ except ImportError as exc:                      # pragma: no cover - build-shape
         """Stand-in so callers' ``except ContractError`` still works."""
 
     validate_island_config = None
+    GFM_CONTROLS = frozenset()
+    check_horizon = None
 
 SIDECAR_NAME = "island_config.json"
 

@@ -10,7 +10,7 @@ hands back the callback it was given, so the LP is untouched.
 
 Per investment period P, over that period's snapshots (T of them, each Δ
 hours long; Δ comes from the snapshot index, never from
-``snapshot_weightings``, which is 8760/168 on the hub templates):
+``snapshot_weightings``, which is 52.14 on the hub templates):
 
 **(a) Sustained ride-through.** RT is ``ride_through_storage``, L_c the
 critical load, k ``genset_redundancy_n``, U_max the largest genset rating
@@ -219,7 +219,8 @@ def dispatch_only(n) -> str | None:
 def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> dict:
     """Add (a), (b) and (c) to ``n.model`` and record what was built on
     ``n._island_facts``."""
-    from gridspine.schema.island import GFM_CONTROLS, check_horizon
+    # gridspine through the guarded seam (a build without it then says so).
+    from services.adequacy.island_config import GFM_CONTROLS, check_horizon
 
     emit = emit or (lambda msg: None)
     skipped = dispatch_only(n)
