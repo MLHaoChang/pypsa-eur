@@ -22,7 +22,7 @@ import yaml
 
 from gridspine.ingest.campus import build_campus, load_campus
 from gridspine.static.campus_flow import SizingCriteria
-from gridspine.static.campus_invest import INVEST_CHECKS, select_assets
+from gridspine.static.campus_invest import INVEST_CHECKS, ParallelRules, parallel_check, select_assets
 from gridspine.static.campus_reactive import ReactiveRequirement
 from gridspine.templates.campus_assets import load_asset_library
 from gridspine.templates.grid_codes import load_grid_code
@@ -39,10 +39,15 @@ def crf(r, n):
     return r / (1 - (1 + r) ** -n)
 
 
-def tr(i, s, capex, vk=12.0, life=40, opex=0.01):
-    return {"id": i, "hv_kv": t(110.0), "lv_kv": t(20.0), "s_mva": t(s), "vk_percent": t(vk),
-            "vkr_percent": t(0.4), "pfe_kw": t(25.0), "i0_percent": t(0.05), "capex_eur": t(capex),
-            "opex_frac": t(opex), "lifetime_a": t(life)}
+def tr(i, s, capex, vk=12.0, life=40, opex=0.01, vector_group=None, tap=None):
+    e = {"id": i, "hv_kv": t(110.0), "lv_kv": t(20.0), "s_mva": t(s), "vk_percent": t(vk),
+         "vkr_percent": t(0.4), "pfe_kw": t(25.0), "i0_percent": t(0.05), "capex_eur": t(capex),
+         "opex_frac": t(opex), "lifetime_a": t(life)}
+    if vector_group is not None:
+        e["vector_group"] = t(vector_group)
+    if tap is not None:
+        e["tap"] = tap
+    return e
 
 
 def cable(i, max_i, per_km, r=0.1, x=0.1, c=300.0):
@@ -452,17 +457,28 @@ def test_a_voltage_compensation_cannot_lift_is_unresolved_with_the_tap_change_na
 def test_existing_transformers_short_of_the_margin_are_replaced_not_kept(tmp_path):
     """At 30 MW (pf 0.85) a survivor carries about 38.5 MVA (solved here):
     within its 40 MVA, but not with the 20 % margin. The existing pair is
-    not offered, so the library pair is chosen without an escalation."""
+    not offered, so the library pair is chosen without an escalation.
+
+    Plan C13: units may be added next to existing ones, but only when they
+    can run in parallel with them. These existing units are wound 110/21 kV
+    and the library's 110/20 kV, a ratio 5 % apart against the 0.5 %
+    allowed, so nothing can be added and the pair is still replaced whole.
+    (The plan's worked example expected this test's outcome to change; it
+    missed the 21 kV windings. The add is shown on a 110/20 kV pair below.)"""
     hour = {"DC_LOAD": -30.0, "BESS1": 0.0, "PV1": 0.0, "GEN1": 0.0}
     survivor = max(s_hv(solve_direct(hour, [(40.0, 12.0)] * 2, out=0, lv_kv=21.0, pf=0.85)))
     assert survivor < 40.0 < survivor * 1.2
+    assert abs((110.0 / 20.0) / (110.0 / 21.0) - 1) > 0.005                  # the ratio rule, by hand
     lib = library(tmp_path, transformers=[tr("T63", 63.0, 1.2e6)])
     table, sel = dark_hours((2030, 30.0))
     out = select_assets(lowpf_spec(), table, sel, lib, WIDE, PROFILE)
     got = row(out, "transformer TR1+TR2")
     assert (got["library_id"], got["units"], got["status"], bool(got["existing"])) == ("T63", 2, "chosen", False)
     assert got["capex_eur"] == pytest.approx(2 * 1.2e6)
+    assert got["action"] == "replace"
     assert out["history"].empty
+    need = next(n for n in out["state"].needs if n.key == "transformer TR1+TR2")
+    assert need.candidates and not any(c.keep for c in need.candidates)      # nothing could be added
 
 
 def test_the_pcc_switchgear_counts_the_grid_connection_as_a_bay(tmp_path):
@@ -531,9 +547,10 @@ def test_pcc_switchgear_owned_by_the_grid_operator_is_not_bought(tmp_path):
     out = select_assets(wide_cable_spec(), table, sel, lib, WIDE, PROFILE, pcc_switchgear=False)
     assert "switchgear PCC" not in set(out["investment"]["need"])
     assert "ik_rated_ka" not in out["spec"]["campus"]["pcc"]
-    assert out["scope"] == {"pcc_switchgear": "grid_operator"}
+    assert out["scope"] == {"pcc_switchgear": "grid_operator", "parallel": ParallelRules().scope()}
     assert out["compliance"].set_index("check").at["switchgear", "status_with_measures"] == "not_rated"
-    assert select_assets(wide_cable_spec(), table, sel, lib, WIDE, PROFILE)["scope"] == {"pcc_switchgear": "campus"}
+    assert select_assets(wide_cable_spec(), table, sel, lib, WIDE, PROFILE)["scope"] == {
+        "pcc_switchgear": "campus", "parallel": ParallelRules().scope()}
 
 
 def test_a_rated_pcc_that_fails_is_reported_not_bought_when_the_operator_owns_it(tmp_path):
@@ -545,3 +562,384 @@ def test_a_rated_pcc_that_fails_is_reported_not_bought_when_the_operator_owns_it
     assert "switchgear PCC" not in set(out["investment"]["need"])
     assert out["compliance"].set_index("check").at["switchgear", "status_with_measures"] == "fail"
     assert out["history"].empty or "switchgear PCC" not in set(out["history"]["need"])
+
+
+# --------------------------------------------------------------------------
+# plan C13: adding units next to an existing transformer group
+# --------------------------------------------------------------------------
+
+def unit(s=40.0, vk=12.0, hv=110.0, lv=20.0, vector_group=None, tap=None, existing=True):
+    """A campus-file transformer between PCC and MV1."""
+    u = {"hv_bus": "PCC", "lv_bus": "MV1", "sn_mva": t(s), "vn_hv_kv": t(hv), "vn_lv_kv": t(lv),
+         "vk_percent": t(vk), "vkr_percent": t(0.4), "pfe_kw": t(25.0), "i0_percent": t(0.05)}
+    if existing:
+        u["existing"] = True
+    if vector_group:
+        u["vector_group"] = vector_group
+    if tap:
+        u["tap"] = tap
+    return u
+
+
+def taps(changer="on_load", side="hv", neutral=0, lo=-9, hi=9, step=1.5, pos=None):
+    out = {"changer": changer, "side": side, "neutral": neutral, "min": lo, "max": hi, "step_percent": t(step)}
+    if pos is not None:
+        out["pos"] = pos
+    return out
+
+
+def check(entry, *existing, rules=ParallelRules()):
+    return parallel_check(entry, {f"TR{i + 1}": u for i, u in enumerate(existing)}, rules)
+
+
+def test_the_parallel_rules_default_to_the_owners_choices_and_are_tagged_assumed():
+    r = ParallelRules()
+    assert (r.ratio_tol, r.uk_tol, r.step_tol_pct, r.unknown_vector_group) == (0.005, 0.10, 0.1, "assume_compatible")
+    scope = r.scope()
+    assert {k: scope[k]["value"] for k in ("ratio_tol", "uk_tol", "step_tol_pct")} == {
+        "ratio_tol": 0.005, "uk_tol": 0.10, "step_tol_pct": 0.1}
+    assert all(scope[k]["source"] == "assumed" and scope[k]["note"] for k in ("ratio_tol", "uk_tol", "step_tol_pct"))
+    assert scope["unknown_vector_group"] == "assume_compatible" and scope["rating_ratio"] == "not limited"
+
+
+@pytest.mark.parametrize("vk, ok", [(11.0, True), (11.01, False), (9.0, True), (8.99, False)])
+def test_the_impedance_rule_on_its_boundary(vk, ok):
+    why, _flags, _ = check(tr("N", 20.0, 1.0, vk=vk), unit(vk=10.0))
+    assert (why is None) == ok
+    if not ok:
+        assert "impedance" in why and "TR1" in why
+
+
+def test_the_impedance_rule_holds_against_each_existing_unit():
+    # 11 % is within 10 % of 10.5 % but not of 9.9 %
+    assert check(tr("N", 20.0, 1.0, vk=11.0), unit(vk=10.5))[0] is None
+    assert check(tr("N", 20.0, 1.0, vk=11.0), unit(vk=10.5), unit(vk=9.9))[0] is not None
+
+
+def test_a_110_21_kv_unit_and_a_110_20_kv_unit_do_not_share_a_ratio():
+    why, _, _ = check(tr("N", 20.0, 1.0), unit(lv=21.0))
+    assert why is not None and "ratio" in why
+
+
+def test_the_ratio_rule_on_its_boundary():
+    """The deviation is |r_new - r_old| / r_old, restated here; a rule at
+    exactly that deviation accepts, a hair below refuses."""
+    dev = abs(110.0 / 20.0 - 110.0 / 20.1) / (110.0 / 20.1)
+    assert dev == pytest.approx(0.005, abs=1e-6)
+    assert check(tr("N", 20.0, 1.0), unit(lv=20.1), rules=ParallelRules(ratio_tol=dev))[0] is None
+    assert check(tr("N", 20.0, 1.0), unit(lv=20.1), rules=ParallelRules(ratio_tol=dev * (1 - 1e-9)))[0] is not None
+
+
+def test_the_ratio_is_compared_at_the_existing_units_current_tap():
+    """The existing unit sits two 2.5 % steps down on its HV taps: 104.5/20
+    kV in effect, 5 % off a plain 110/20 kV unit. At the neutral they would
+    agree. A unit with the same taps follows it to the same position."""
+    old = unit(tap=taps(changer="off_circuit", lo=-2, hi=2, step=2.5, pos=-2))
+    why, _, _ = check(tr("N", 20.0, 1.0), old)
+    assert why is not None and "ratio" in why
+    same = taps(changer="off_circuit", lo=-2, hi=2, step=2.5)
+    why, _, offset = check(tr("N", 20.0, 1.0, tap=same), old)
+    assert why is None and offset == -2
+
+
+def test_vector_groups_must_share_the_clock_number():
+    assert check(tr("N", 20.0, 1.0, vector_group="Dyn5"), unit(vector_group="Dyn11"))[0] is not None
+    why, flags, _ = check(tr("N", 20.0, 1.0, vector_group="YNd11"), unit(vector_group="Dyn11"))
+    assert why is None and flags == []                       # the clock, not the letters
+    assert check(tr("N", 20.0, 1.0, vector_group="Dyn1"), unit(vector_group="Dyn11"))[0] is not None
+
+
+@pytest.mark.parametrize("new_vg, old_vg", [(None, "Dyn11"), ("Dyn11", None), (None, None)])
+def test_an_unknown_vector_group_is_assumed_compatible_and_flagged(new_vg, old_vg):
+    why, flags, _ = check(tr("N", 20.0, 1.0, vector_group=new_vg), unit(vector_group=old_vg))
+    assert why is None and flags == ["vector group assumed compatible (not given)"]
+    why, _, _ = check(tr("N", 20.0, 1.0, vector_group=new_vg), unit(vector_group=old_vg),
+                      rules=ParallelRules(unknown_vector_group="refuse"))
+    assert why is not None and "vector group" in why
+
+
+@pytest.mark.parametrize("new_tap, old_tap, ok", [
+    (taps(step=1.5), taps(step=1.5), True),
+    (taps(step=1.25), taps(step=1.5), False),                 # the plan's boundary case: 0.25 point apart
+    (taps(step=1.6), taps(step=1.5), True),                   # 0.1 point apart (0.1000...09 in floating point)
+    (taps(step=1.61), taps(step=1.5), False),
+    (taps(side="lv"), taps(side="hv"), False),
+    (taps(lo=-8, hi=9), taps(lo=-9, hi=9), False),            # cannot reach the existing range
+    (taps(neutral=10, lo=1, hi=19), taps(lo=-9, hi=9), True),  # the same range, numbered from 1
+    (taps(neutral=5, lo=1, hi=9), taps(lo=-4, hi=4), True),
+    (None, taps(), False),                                    # an OLTC unit and one that cannot follow it
+    (taps(changer="off_circuit"), taps(changer="on_load"), False),
+    (taps(changer="on_load"), taps(changer="off_circuit"), True),
+    (None, taps(changer="off_circuit"), True),                # the ratio rule alone, at the existing position
+    (taps(), None, True),
+    (None, None, True),
+])
+def test_the_tap_changer_rules(new_tap, old_tap, ok):
+    why, _, _ = check(tr("N", 20.0, 1.0, tap=new_tap), unit(tap=old_tap))
+    assert (why is None) == ok, why
+
+
+def test_the_step_rule_is_inclusive_on_an_exact_boundary():
+    rule = ParallelRules(step_tol_pct=0.25)
+    assert check(tr("N", 20.0, 1.0, tap=taps(step=1.25)), unit(tap=taps(step=1.5)), rules=rule)[0] is None
+    rule = ParallelRules(step_tol_pct=0.2499)
+    assert check(tr("N", 20.0, 1.0, tap=taps(step=1.25)), unit(tap=taps(step=1.5)), rules=rule)[0] is not None
+
+
+def test_the_rating_ratio_is_not_limited():
+    assert check(tr("N", 1.0, 1.0), unit(s=100.0))[0] is None
+
+
+# -- the add candidates, the choice and its rows ------------------------------
+
+def rewound_spec(existing=("TR1", "TR2"), **over):
+    """The test campus, its pair wound 110/20 kV (so library units can join
+    it), the load at pf 0.85."""
+    spec = lowpf_spec(existing=False)
+    for name in ("TR1", "TR2"):
+        spec["campus"]["transformers"][name] = unit(existing=name in existing, **over)
+    return spec
+
+
+def mixed_direct(units, load, out=None):
+    """The rewound campus with ``units`` = ``[(s_mva, vk)]`` in parallel,
+    every inverter off, written directly in pandapower."""
+    net = direct_net()
+    net.trafo.drop(net.trafo.index, inplace=True)
+    for i, (s, vk) in enumerate(units):
+        pp.create_transformer_from_parameters(net, 0, 1, sn_mva=s, vn_hv_kv=110.0, vn_lv_kv=20.0, vkr_percent=0.4,
+                                              vk_percent=vk, pfe_kw=25.0, i0_percent=0.05, name=f"T{i}")
+    if out is not None:
+        net.trafo.at[out, "in_service"] = False
+    net.line.at[0, "max_i_ka"] = 3.0
+    net.load.at[0, "p_mw"] = load
+    net.load.at[0, "q_mvar"] = load * math.tan(math.acos(0.85))
+    net.sgen["in_service"] = False
+    pp.runpp(net)
+    return net
+
+
+def per_unit_feasible(units, load, margin=0.2):
+    """The independent check of a set of parallel units: every case (intact,
+    each unit out) converges, each unit's S x (1 + margin) is within its own
+    rating, every loading within 100 % and every voltage within 0.90-1.10 pu."""
+    for out in [None, *range(len(units))]:
+        try:
+            net = mixed_direct(units, load, out)
+        except pp.LoadflowNotConverged:
+            return False
+        for i in net.trafo.index[net.trafo["in_service"]]:
+            s = math.hypot(net.res_trafo.at[i, "p_hv_mw"], net.res_trafo.at[i, "q_hv_mvar"])
+            if s * (1 + margin) > units[i][0] + 1e-9 or net.res_trafo.at[i, "loading_percent"] > 100.0:
+                return False
+        if not ((net.res_bus["vm_pu"] >= 0.9) & (net.res_bus["vm_pu"] <= 1.1)).all():
+            return False
+    return True
+
+
+#: A small library: three sizes, two impedances, one too far off to be added.
+SMALL = {"T10": (10.0, 12.0, 0.30e6), "T20": (20.0, 12.0, 0.55e6), "T20B": (20.0, 10.8, 0.50e6),
+         "T40": (40.0, 12.0, 0.95e6), "T63": (63.0, 12.0, 1.20e6), "T63X": (63.0, 15.0, 1.10e6)}
+
+
+def test_the_choice_is_the_least_cost_of_every_replacement_and_addition_by_brute_force(tmp_path):
+    """33 MW at pf 0.85: a survivor of the existing pair carries about 43
+    MVA, more than its 40 MVA. Every candidate is listed here (replace by 2
+    or 3 units of a size; keep both and add 1 to 3 of a size within 10 % of
+    their 12 %), each solved directly with the per-unit rule; the cheapest
+    that passes is what the selector buys."""
+    lib = library(tmp_path, transformers=[tr(i, s, c, vk=vk) for i, (s, vk, c) in SMALL.items()])
+    table, sel = dark_hours((2030, 33.0))
+    out = select_assets(rewound_spec(), table, sel, lib, WIDE, PROFILE)
+    annual = lambda capex: capex * (crf(RATE, 40) + 0.01)
+    options = []
+    for i, (s, vk, capex) in SMALL.items():
+        for n in (2, 3):
+            options.append((n * annual(capex), "replace", i, n, [(s, vk)] * n))
+        if abs(vk - 12.0) / 12.0 <= 0.10:                                         # compatible with the pair
+            for k in (1, 2, 3):
+                options.append((k * annual(capex), "add", i, k, [(40.0, 12.0)] * 2 + [(s, vk)] * k))
+    best = min(o for o in options if per_unit_feasible(o[4], 33.0))
+    assert best[1:4] == ("add", "T20B", 1)
+    rows_ = out["investment"][out["investment"]["need"] == "transformer TR1+TR2"]
+    chosen = rows_[rows_["status"] == "chosen"].iloc[0]
+    assert (chosen["action"], chosen["library_id"], chosen["units"]) == best[1:4]
+    assert chosen["annualised_eur_per_a"] == pytest.approx(best[0])
+    assert out["history"].empty                                               # the estimate agreed with AC
+    assert set(out["compliance"]["status_with_measures"]) <= {"pass", "not_rated"}
+
+
+def test_units_are_added_next_to_an_existing_pair_short_of_the_margin(tmp_path):
+    """The plan's worked example on a 110/20 kV pair: one T63 at the same 12 %
+    added in parallel costs half of replacing the pair by two."""
+    hour = {"DC_LOAD": -30.0, "BESS1": 0.0, "PV1": 0.0, "GEN1": 0.0}
+    survivor = max(s_hv(solve_direct(hour, [(40.0, 12.0)] * 2, out=0, lv_kv=20.0, pf=0.85)))
+    assert survivor < 40.0 < survivor * 1.2
+    lib = library(tmp_path, transformers=[tr("T63", 63.0, 1.2e6), tr("T63X", 63.0, 1.0e6, vk=15.0)])
+    table, sel = dark_hours((2030, 30.0))
+    spec = rewound_spec()
+    spec["campus"]["transformers"]["TR1"]["pypsa_name"] = "grid_import"
+    out = select_assets(spec, table, sel, lib, WIDE, PROFILE)
+    inv = out["investment"]
+    rows_ = inv[inv["need"] == "transformer TR1+TR2"].reset_index(drop=True)
+    assert len(rows_) == 2
+    keep, add = rows_.iloc[0], rows_.iloc[1]
+    assert (keep["action"], keep["kind"], keep["units"], keep["status"], bool(keep["existing"])) == (
+        "keep", "keep", 2, "kept", True)
+    assert keep["capex_eur"] == 0.0 and keep["annualised_eur_per_a"] == 0.0 and pd.isna(keep["library_id"])
+    assert (add["action"], add["library_id"], add["units"], add["status"], bool(add["existing"])) == (
+        "add", "T63", 1, "chosen", False)
+    assert add["capex_eur"] == pytest.approx(1.2e6)                          # the new unit only
+    assert add["reason"] == ("added in parallel with TR1, TR2 (existing); "
+                             "vector group assumed compatible (not given)")
+    # the kept units stay byte for byte; one new unit with the library's values
+    trafos = out["spec"]["campus"]["transformers"]
+    assert sorted(trafos) == ["TR1", "TR1_2", "TR2"]
+    assert trafos["TR1"] == spec["campus"]["transformers"]["TR1"]
+    assert trafos["TR2"] == spec["campus"]["transformers"]["TR2"]
+    new = trafos["TR1_2"]
+    assert new["library_id"] == "T63" and new["sn_mva"] == {"value": 63.0, "source": "assumed"}
+    assert "existing" not in new and "pypsa_name" not in new
+    # the per-unit judge on the re-solved flows: every unit within its rating with the margin
+    sizing = out["state"].study.sizing.set_index("group")
+    assert bool(sizing.at["TR1+TR1_2+TR2", "adequate"]) and sizing.at["TR1+TR1_2+TR2", "utilisation"] <= 1.0
+    assert out["cost"]["capex_eur"].sum() == pytest.approx(1.2e6)
+    assert out["history"].empty
+
+
+def test_an_existing_pair_with_only_an_incompatible_unit_in_the_library_is_replaced_whole(tmp_path):
+    """The same pair, a library holding only a T63 at 15 % (25 % off their 12
+    %): nothing can be added, so the pair is replaced, flagged as such."""
+    lib = library(tmp_path, transformers=[tr("T63X", 63.0, 1.0e6, vk=15.0)])
+    table, sel = dark_hours((2030, 30.0))
+    out = select_assets(rewound_spec(), table, sel, lib, WIDE, PROFILE)
+    got = row(out, "transformer TR1+TR2")
+    assert (got["action"], got["library_id"], got["units"], bool(got["existing"])) == ("replace", "T63X", 2, False)
+    assert sorted(out["spec"]["campus"]["transformers"]) == ["TR1", "TR2"]
+    assert all("existing" not in x for x in out["spec"]["campus"]["transformers"].values())
+
+
+def test_the_add_candidates_are_k_units_of_each_compatible_entry_costed_for_the_new_units(tmp_path):
+    """The candidate list, by hand: keep the pair and add k = 1..3 of each
+    compatible entry, priced k times the entry; the shares estimated by
+    S_r / uk decide which pass, with the outage total from the as-is flows."""
+    lib = library(tmp_path, transformers=[tr(i, s, c, vk=vk) for i, (s, vk, c) in SMALL.items()])
+    table, sel = dark_hours((2030, 33.0))
+    out = select_assets(rewound_spec(), table, sel, lib, WIDE, PROFILE)
+    need = next(n for n in out["state"].needs if n.key == "transformer TR1+TR2")
+    adds = {(c.items[0][1], c.items[0][2]): c for c in need.candidates if c.keep}
+    s_out = max(sum(s_hv(mixed_direct([(40.0, 12.0)] * 2, 33.0, out=k))) for k in (0, 1))
+    s_int = sum(s_hv(mixed_direct([(40.0, 12.0)] * 2, 33.0)))
+    want = set()
+    for i, (s, vk, _c) in SMALL.items():
+        if abs(vk - 12.0) / 12.0 > 0.10:
+            continue
+        for k in (1, 2, 3):
+            units = [(40.0, 12.0)] * 2 + [(s, vk)] * k
+            w = [r / u for r, u in units]
+
+            def holds(idx, total):
+                return all(total * w[j] / sum(w[x] for x in idx) * 1.2 <= units[j][0] for j in idx)
+            every = list(range(len(units)))
+            if holds(every, s_int) and all(holds([x for x in every if x != j], s_out) for j in every):
+                want.add((i, k))
+    assert set(adds) == want and ("T10", 1) not in want and ("T10", 2) in want
+    for (i, k), c in adds.items():
+        assert c.keep == ("TR1", "TR2") and c.annual == pytest.approx(k * SMALL[i][2] * (crf(RATE, 40) + 0.01))
+        assert c.label == f"keep TR1, TR2 + {k} x {i}"
+    assert not any(c.items[0][1] == "T63X" for c in need.candidates if c.keep)
+    # replace-whole candidates stay beside them, in one list by annual cost
+    assert any(not c.keep and not c.existing for c in need.candidates)
+    annual = [c.annual for c in need.candidates]
+    assert annual == sorted(annual)
+
+
+def test_a_planned_member_is_dropped_by_an_addition_and_only_existing_units_are_kept(tmp_path):
+    lib = library(tmp_path, transformers=[tr("T63", 63.0, 1.2e6)])
+    table, sel = dark_hours((2030, 30.0))
+    out = select_assets(rewound_spec(existing=("TR1",)), table, sel, lib, WIDE, PROFILE)
+    need = next(n for n in out["state"].needs if n.key == "transformer TR1+TR2")
+    keeps = {c.keep for c in need.candidates if c.keep}
+    assert keeps == {("TR1",)}
+    # with TR1 alone kept, one added T63 leaves TR1 to carry the hour alone: refused; two pass
+    assert {c.items[0][2] for c in need.candidates if c.keep} == {2, 3}
+    # put the addition on the file: TR2 (planned) goes, TR1 stays, two new units
+    from gridspine.static.campus_invest import _apply
+    need.pos = next(i for i, c in enumerate(need.candidates) if c.keep and c.items[0][2] == 2)
+    spec, _ = _apply(rewound_spec(existing=("TR1",)), [need], out["state"].lib_by_id)
+    assert sorted(spec["campus"]["transformers"]) == ["TR1", "TR1_2", "TR1_3"]
+    assert spec["campus"]["transformers"]["TR1"]["existing"] is True
+
+
+def test_an_added_unit_takes_the_library_vector_group_and_taps_at_the_existing_position(tmp_path):
+    tap = taps(changer="on_load", lo=-9, hi=9, step=1.5)
+    lib = library(tmp_path, transformers=[tr("T63", 63.0, 1.2e6, vector_group="Dyn11", tap=tap)])
+    table, sel = dark_hours((2030, 30.0))
+    spec = rewound_spec(vector_group="Dyn11", tap=taps(pos=1))
+    out = select_assets(spec, table, sel, lib, WIDE, PROFILE)
+    add = out["investment"][out["investment"]["action"] == "add"].iloc[0]
+    assert add["reason"] == "added in parallel with TR1, TR2 (existing)"              # no flag: both given
+    new = out["spec"]["campus"]["transformers"]["TR1_2"]
+    assert new["vector_group"] == "Dyn11"
+    assert new["tap"] == {"changer": "on_load", "side": "hv", "neutral": 0, "min": -9, "max": 9,
+                          "step_percent": {"value": 1.5, "source": "assumed"}, "pos": 1}
+    camp = build_campus(out["spec"])
+    assert camp.taps["TR1_2"]["pos"] == 1 and camp.windings["TR1_2"]["clock"] == 11
+
+
+def test_a_fully_existing_adequate_group_keeps_keep_first_and_the_additions_follow(tmp_path):
+    lib = library(tmp_path, transformers=[tr("T63", 63.0, 1.2e6)])
+    table, sel = dark_hours((2030, 20.0))
+    out = select_assets(rewound_spec(), table, sel, lib, WIDE, PROFILE)
+    need = next(n for n in out["state"].needs if n.key == "transformer TR1+TR2")
+    assert need.candidates[0].existing and need.candidates[0].label == "keep (existing)"
+    assert any(c.keep for c in need.candidates[1:])
+    kept = row(out, "transformer TR1+TR2")
+    assert (kept["action"], kept["status"], kept["units"]) == ("keep", "kept", 2)
+
+
+def test_an_addition_to_a_fully_existing_group_is_bought_when_the_existing_units_first_fail(tmp_path):
+    """Three periods: 20 MW in 2030 (a survivor carries about 25 MVA, 30 MVA
+    with the margin: the pair holds), 33 MW in 2040 and 2050 (43 MVA: it
+    does not). The unit is added in 2040, by hand from the hourly loads."""
+    for load, holds in ((20.0, True), (33.0, False)):
+        survivor = max(s_hv(mixed_direct([(40.0, 12.0)] * 2, load, out=0)))
+        assert (survivor * 1.2 <= 40.0) == holds
+    lib = library(tmp_path, transformers=[tr("T20", 20.0, 0.55e6)])
+    table, sel = dark_hours((2030, 20.0), (2040, 33.0), (2050, 33.0))
+    out = select_assets(rewound_spec(), table, sel, lib, WIDE, PROFILE)
+    inv = out["investment"].set_index("action")
+    assert inv.at["keep", "invest_period"] == 2030 and inv.at["add", "invest_period"] == 2040
+    annual = 0.55e6 * (crf(RATE, 40) + 0.01)
+    cost = out["cost"].set_index("period")
+    assert list(cost["annualised_eur_per_a"]) == pytest.approx([0.0, annual, annual])
+    assert list(cost["capex_eur"]) == pytest.approx([0.0, 0.55e6, 0.0])
+    # a replacement of the fully existing pair moves to that period too
+    lib = library(tmp_path, transformers=[tr("T63X", 63.0, 1.0e6, vk=15.0)])
+    out = select_assets(rewound_spec(), table, sel, lib, WIDE, PROFILE)
+    got = row(out, "transformer TR1+TR2")
+    assert (got["action"], got["invest_period"]) == ("replace", 2040)
+    # a group with a planned member is bought in the first period, to energise the campus
+    out = select_assets(rewound_spec(existing=("TR1",)), table, sel, lib, WIDE, PROFILE)
+    assert row(out, "transformer TR1+TR2")["invest_period"] == 2030
+
+
+def test_every_row_says_what_was_done(tmp_path):
+    lib = library(tmp_path, transformers=[tr("T63", 63.0, 1.0e6)], capacitor_banks=[comp("capacitor_banks", "CAP3", 3.0, 120e3)])
+    table, sel = dark_hours((2030, 25.0))
+    out = select_assets(lowpf_spec(existing=False), table, sel, lib, ReactiveRequirement(15.0, "c", "code"), PROFILE)
+    acts = out["investment"].set_index("need")["action"]
+    assert acts["transformer TR1+TR2"] == "buy" and acts["reactive"] == "buy"
+    lib = library(tmp_path, transformers=[tr("T100", 100.0, 1.0e6)])
+    table, sel = hourly((2030, 7, H7, {}))
+    out = select_assets(wide_cable_spec(), table, sel, lib, WIDE, PROFILE)
+    r = row(out, "reactive")
+    assert r["kind"] == "none" and (pd.isna(r["action"]) or r["action"] == "")
+
+
+def test_the_parallel_rules_are_reported_with_the_scope(tmp_path):
+    lib = library(tmp_path, transformers=[tr("T63", 63.0, 1.0e6)])
+    table, sel = dark_hours((2030, 20.0))
+    rules = ParallelRules(uk_tol=0.075)
+    out = select_assets(rewound_spec(), table, sel, lib, WIDE, PROFILE, parallel=rules)
+    assert out["scope"]["parallel"] == rules.scope() and out["scope"]["parallel"]["uk_tol"]["value"] == 0.075

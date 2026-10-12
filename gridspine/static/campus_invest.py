@@ -41,8 +41,23 @@ A cable or bus that first fails in a re-check becomes a need then.
   A group of two or more units keeps its redundancy under N-1, so it gets
   n >= 2 only. A single unit has no N-1 to size for (as in part one).
   ``existing`` units that part one finds adequate are a zero-cost
-  candidate. Partly existing groups are replaced whole; adding units next
-  to the existing ones is not offered.
+  candidate. Replacing a group with existing units buys the whole group.
+* **Adding units next to an existing group** (plan C13): a group with at
+  least one ``existing`` member also gets "keep the existing members and
+  add k = 1..3 units of one library entry", costed for the new units only
+  (planned members that are not existing are dropped, as by a
+  replacement). An entry is offered only when it can run in parallel with
+  every existing member (``parallel_check``, the tolerances in
+  ``ParallelRules``, all assumed): the same bus voltages, the no-load ratio
+  at the current tap positions within ``ratio_tol``, the impedance within
+  ``uk_tol``, the same vector-group clock number (an unknown group is
+  assumed compatible and flagged), and tap changers that can run together.
+  The rating ratio is not limited. Its adequacy pre-filter estimates the
+  sharing as ``S_i = S x (S_r,i / uk_i) / sum_j (S_r,j / uk_j)`` (equal
+  ratios and X/R, no magnetising current), intact and with each unit out
+  in turn, every unit within its own rating with the margin; the AC
+  re-check then judges each unit on the solved flows. These candidates sit
+  beside the replacements in one list by annual cost.
 * **Reactive:** at most one library entry of each kind, each 1..3 units,
   at the compensation bus's voltage, in the combinations STATCOM alone;
   capacitor bank + reactor; capacitor bank alone (inductive gap 0); reactor
@@ -75,9 +90,10 @@ A cable or bus that first fails in a re-check becomes a need then.
    ===========================  ===========================================
    failing check                need escalated
    ===========================  ===========================================
-   transformer loading > 100 %  that group; also when the re-solved flow
-   or the sizing rule           times the margin exceeds the units (the
-                                new units' own losses count)
+   transformer loading > 100 %  that group; also when a unit's re-solved
+   or the sizing rule           flow times the margin exceeds its own
+                                rating (``size_transformers``, per unit;
+                                the new units' own losses count)
    cable loading > 100 %        that cable
    PCC reactive band            the reactive need, to the next candidate
                                 that adds Mvar in the short direction
@@ -100,7 +116,10 @@ A cable or bus that first fails in a re-check becomes a need then.
 **Timing.** Each asset is chosen once for the whole horizon, sized for the
 worst period, and invested in the first period that needs it:
 
-* a transformer group: the first period;
+* a transformer group: the first period; but a replacement of, or an
+  addition to, a group whose members all exist, the first period in which
+  the existing units alone fail (part one's per-period adequacy and
+  loading; the first period if they never do);
 * a compensation item: the first period in which the final re-check
   dispatches it (the first period with a gap in its direction after the
   inverters); the first period if it is never dispatched;
@@ -112,7 +131,11 @@ Its annualised cost counts in every period from that one while the period
 is within its lifetime (``invest <= period < invest + lifetime``; period
 labels are years). Replacement at the end of life is not modelled.
 Existing assets cost nothing. Unresolved needs are priced in the table but
-not added to the cost per period.
+not added to the cost per period. The table's ``action`` says what each row
+does: ``buy`` (a new asset), ``add`` (units added next to existing ones),
+``keep`` (existing units kept, at zero cost; an addition writes one such row
+beside its ``add`` row) or ``replace`` (a group or cable bought where
+existing ones stood).
 
 Steady state only: no dynamics, no harmonics, no tap-changer optimisation.
 Allowed to import pandapower (``static/``); never pypsa.
@@ -126,6 +149,7 @@ import pandas as pd
 from gridspine.ingest.campus import build_campus
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.network import MAX_NAME_LEN
+from gridspine.schema.transformer import check_tap, check_vector_group, ratio as tap_ratio
 from gridspine.static.campus_compliance import CHECKS, Q_TOL, campus_compliance
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases, trafo_groups
 from gridspine.static.campus_reactive import compensation_bus, reactive_need, size_compensation
@@ -146,17 +170,66 @@ _COMP_PREFIX = {"capacitor_bank": "CAP", "shunt_reactor": "REACTOR", "statcom": 
 _COMBOS = (("statcom",), ("capacitor_bank", "shunt_reactor"), ("capacitor_bank",), ("shunt_reactor",),
            ("statcom", "capacitor_bank"))
 COLUMNS = ["need", "library_id", "kind", "units", "length_km", "invest_period", "capex_eur", "opex_eur_per_a",
-           "annualised_eur_per_a", "existing", "status", "reason"]
+           "annualised_eur_per_a", "existing", "status", "reason", "action"]
+#: The flag on an added unit whose vector group, or an existing unit's, is not given.
+VG_ASSUMED = "vector group assumed compatible (not given)"
+_PARALLEL_NOTE = ("A transformer vendor's application note on paralleling (Rex Power Magnetics, read 2026-10-12); "
+                  "IEC 60076-8 not read")
+
+
+@dataclasses.dataclass(frozen=True)
+class ParallelRules:
+    """When a library unit may be added in parallel with existing ones (plan
+    C13, module docstring). The defaults are the owner's choices of
+    2026-10-12, every tolerance assumed:
+
+    * ``ratio_tol``: the no-load ratios at the current tap positions within
+      this fraction of each existing unit's (the note: "within about 0.5 %");
+    * ``uk_tol``: the impedance within this fraction of each existing unit's
+      (owner: 10 %; the note says 7.5 %);
+    * ``step_tol_pct``: tap steps within this many percentage points;
+    * ``unknown_vector_group``: ``assume_compatible`` (offer it, flagged) or
+      ``refuse``, when a vector group is not given on either side.
+
+    The rating ratio of parallel units is not limited (owner)."""
+    ratio_tol: float = 0.005
+    uk_tol: float = 0.10
+    step_tol_pct: float = 0.1
+    unknown_vector_group: str = "assume_compatible"
+
+    def __post_init__(self):
+        for f in ("ratio_tol", "uk_tol", "step_tol_pct"):
+            v = getattr(self, f)
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0:
+                raise ContractError(f"ParallelRules.{f} must be a non-negative number, got {v!r}")
+        if self.unknown_vector_group not in ("assume_compatible", "refuse"):
+            raise ContractError("ParallelRules.unknown_vector_group must be 'assume_compatible' or 'refuse', "
+                                f"got {self.unknown_vector_group!r}")
+
+    def scope(self) -> dict:
+        """The rules as written to ``campus_invest_scope.json``."""
+        tag = lambda v, note: {"value": v, "source": "assumed", "note": note}       # noqa: E731
+        return {"ratio_tol": tag(self.ratio_tol, f"no-load ratio, at the current taps; {_PARALLEL_NOTE}: "
+                                                  "within about 0.5 %"),
+                "uk_tol": tag(self.uk_tol, f"impedance against each existing unit's; owner 2026-10-12: 10 %; "
+                                           f"{_PARALLEL_NOTE}: typically within 7.5 %"),
+                "step_tol_pct": tag(self.step_tol_pct, "tap step, percentage points; assumed"),
+                "unknown_vector_group": self.unknown_vector_group,
+                "rating_ratio": "not limited"}
 
 
 @dataclasses.dataclass(frozen=True)
 class Candidate:
     """One way to meet a need: ``items`` is ``((kind, library_id, units), ...)``
-    (empty for "keep" or "none"); ``annual`` ranks it."""
+    (empty for "keep" or "none"); ``annual`` ranks it. ``keep`` names the
+    existing transformers an addition keeps (plan C13; empty otherwise),
+    and ``note`` is what its row says about it."""
     label: str
     items: tuple
     annual: float
     existing: bool = False
+    keep: tuple = ()
+    note: str = ""
 
 
 @dataclasses.dataclass
@@ -320,6 +393,109 @@ def _trafo_candidates(library, hv_kv, lv_kv, s_tot, s_n1, n_old, criteria):
     return sorted(out, key=lambda c: (c.annual, c.items[0][2]))
 
 
+def _read_tap(block, with_pos):
+    """A tap block already validated (by the library or the campus build)."""
+    return None if not block else check_tap("tap", block, lambda _w, f, spec: float(spec[f]["value"]), with_pos)
+
+
+def parallel_check(entry, existing: dict, rules: ParallelRules = ParallelRules()):
+    """Whether library ``entry`` may run in parallel with the ``existing``
+    campus-file transformers ``{name: spec}`` (plan C13, module docstring):
+    ``(why_not, flags, offset)``. ``why_not`` is None when it may; ``flags``
+    are what its row must say (an unknown vector group); ``offset`` is the
+    tap position the new unit takes, in steps from its neutral: the existing
+    units' own, so that all run on the same position."""
+    lid = entry["id"]
+    new_tap = _read_tap(entry.get("tap"), with_pos=False)
+    new_vg = entry["vector_group"]["value"] if "vector_group" in entry else None
+    old_taps = {n: _read_tap(u.get("tap"), with_pos=True) for n, u in existing.items()}
+    ref = next((tp for tp in old_taps.values() if tp is not None), None)
+    offset = ref["pos"] - ref["neutral"] if new_tap is not None and ref is not None else 0
+    flags = []
+    for name, u in existing.items():
+        old_tap, old_vg = old_taps[name], u.get("vector_group")
+        if new_vg is not None and old_vg is not None:
+            if check_vector_group(f"{lid}.vector_group", new_vg) != check_vector_group(f"{name}.vector_group", old_vg):
+                return f"{lid}: vector group {new_vg} against {name}'s {old_vg} (another phase displacement)", [], 0
+        elif rules.unknown_vector_group == "refuse":
+            return f"{lid}: the vector group of {lid if new_vg is None else name} is not given", [], 0
+        elif VG_ASSUMED not in flags:
+            flags.append(VG_ASSUMED)
+        if old_tap is not None and new_tap is None and old_tap["changer"] == "on_load":
+            return f"{lid}: {name} has an on-load tap changer and {lid} none, so it cannot follow it", [], 0
+        if old_tap is not None and new_tap is not None:
+            if new_tap["side"] != old_tap["side"]:
+                return f"{lid}: taps on the {new_tap['side'].upper()} side against {name}'s {old_tap['side'].upper()}", [], 0
+            if round(abs(new_tap["step_percent"] - old_tap["step_percent"]), 9) > rules.step_tol_pct:
+                return (f"{lid}: tap step {new_tap['step_percent']:g} % against {name}'s "
+                        f"{old_tap['step_percent']:g} %"), [], 0
+            if old_tap["changer"] == "on_load" and new_tap["changer"] != "on_load":
+                return f"{lid}: {name} has an on-load tap changer and {lid} an off-circuit one", [], 0
+            if (new_tap["min"] - new_tap["neutral"] > old_tap["min"] - old_tap["neutral"]
+                    or new_tap["max"] - new_tap["neutral"] < old_tap["max"] - old_tap["neutral"]):
+                return f"{lid}: its tap range does not cover {name}'s", [], 0
+        r_old = tap_ratio(value(u["vn_hv_kv"]), value(u["vn_lv_kv"]), old_tap,
+                          old_tap["pos"] - old_tap["neutral"] if old_tap else 0)
+        r_new = tap_ratio(value(entry["hv_kv"]), value(entry["lv_kv"]), new_tap, offset)
+        if abs(r_new - r_old) / r_old > rules.ratio_tol:
+            return (f"{lid}: ratio {r_new:.4f} against {name}'s {r_old:.4f} "
+                    f"({abs(r_new - r_old) / r_old:.2%}, more than {rules.ratio_tol:.2%})"), [], 0
+        uk_new, uk_old = value(entry["vk_percent"]), value(u["vk_percent"])
+        if abs(uk_new - uk_old) / uk_old > rules.uk_tol:
+            return (f"{lid}: impedance {uk_new:g} % against {name}'s {uk_old:g} % "
+                    f"(more than {rules.uk_tol:.1%} apart)"), [], 0
+    return None, flags, offset
+
+
+def _shares_hold(units, s_int, s_out, criteria):
+    """The pre-filter's estimate (module docstring): ``units`` = ``[(S_r,
+    uk)]`` sharing ``s_int`` intact and ``s_out`` with each unit out in
+    turn (N-1 on), in proportion to ``S_r / uk``; every unit within its own
+    rating with the margin."""
+    w = [r / uk for r, uk in units]
+    m = criteria.margin
+
+    def holds(idx, total):
+        tot_w = sum(w[i] for i in idx)
+        return all(total * w[i] / tot_w * (1 + m) <= units[i][0] + 1e-9 for i in idx)
+    every = list(range(len(units)))
+    if not holds(every, s_int):
+        return False
+    return not (criteria.n_minus_1 and len(units) >= 2) or all(
+        holds([i for i in every if i != j], s_out) for j in every)
+
+
+def _add_candidates(library, hv_kv, lv_kv, existing, s_int, s_out, criteria, rules, adequacy=True):
+    """Keep ``existing`` (``{name: spec}``) and add k = 1..3 units of one
+    compatible entry (module docstring), costed for the new units only.
+    ``adequacy`` False leaves out the sharing pre-filter (the MILP's open
+    set)."""
+    if not existing:
+        return []
+    keep = tuple(existing)
+    old = [(value(u["sn_mva"]), value(u["vk_percent"])) for u in existing.values()]
+    out = []
+    for e in library_entries(library, "transformers", hv_kv=hv_kv, lv_kv=lv_kv):
+        why, flags, _ = parallel_check(e, existing, rules)
+        if why is not None:
+            continue
+        note = "; ".join([f"added in parallel with {', '.join(keep)} (existing)", *flags])
+        for k in range(1, MAX_UNITS + 1):
+            if adequacy and not _shares_hold(old + [(value(e["s_mva"]), value(e["vk_percent"]))] * k,
+                                             s_int, s_out, criteria):
+                continue
+            items = (("transformer", e["id"], k),)
+            out.append(Candidate(f"keep {', '.join(keep)} + {k} x {e['id']}", items,
+                                 k * annualised_cost(e, library), keep=keep, note=note))
+    return out
+
+
+def _rank(cands):
+    """One list by annual cost; at equal cost fewer new units first, and a
+    replacement before an addition (a stable sort keeps their order)."""
+    return sorted(cands, key=lambda c: (c.annual, c.items[0][2]))
+
+
 def _coverage(items, lib_by_id):
     cap = ind = 0.0
     for kind, lid, n in items:
@@ -376,15 +552,17 @@ def _switchgear_candidates(library, kv, ik_ka, ip_ka, f_hz):
 def open_candidates(need, library, lib_by_id, criteria, f_hz):
     """Every candidate of ``need`` the library offers, before C8's adequacy
     filters: the same generators with a requirement of zero. Transformers
-    keep the redundancy rule (a design rule, not a flow) and C8's "keep
-    (existing)"; the reactive need gets "none" and every combination; a
+    keep the redundancy rule (a design rule, not a flow), C8's "keep
+    (existing)" and C13's compatibility rules for additions; the reactive need gets "none" and every combination; a
     cable every section in 1..3 runs; a bus every rating at its voltage.
     The MILP (``campus_milp``) chooses among these with the AC constraints
     linearised, which is where adequacy is decided."""
     t = need.target
     if need.kind == "transformer":
         keep = [c for c in need.candidates if c.existing]
-        return keep + _trafo_candidates(library, *t["kv"], 0.0, 0.0, t["n_old"], criteria)
+        return keep + _rank(_trafo_candidates(library, *t["kv"], 0.0, 0.0, t["n_old"], criteria)
+                            + _add_candidates(library, *t["kv"], t["existing"], 0.0, 0.0, criteria, t["parallel"],
+                                              adequacy=False))
     if need.kind == "reactive":
         return _reactive_candidates(library, t["kv"], 0.0, 0.0, lib_by_id)
     if need.kind == "cable":
@@ -402,7 +580,8 @@ def _cable_need(name, study, library, criteria, spec):
     kv = float(study.campus.net.bus.at[int(study.campus.net.line.loc[
         study.campus.net.line["name"] == name, "from_bus"].iloc[0]), "vn_kv"])
     length = float(cs["length_km"]["value"])
-    return Need(f"cable {name}", "cable", {"cable": name, "i_ka": i_ka, "kv": kv, "length_km": length},
+    return Need(f"cable {name}", "cable", {"cable": name, "i_ka": i_ka, "kv": kv, "length_km": length,
+                                           "existing": bool(cs.get("existing"))},
                 _cable_candidates(library, kv, length, i_ka, criteria), int(bad["period"].min()))
 
 
@@ -414,7 +593,32 @@ def _switchgear_need(bus, study, library, first_period):
                 _switchgear_candidates(library, kv, ik, ip, f_hz), first_period)
 
 
-def _needs(spec, study, library, criteria, periods, lib_by_id, skip_buses=frozenset()):
+def _outage_total(study, members):
+    """The group's largest total flow with one of its units out (the as-is
+    flows), or its largest intact total for a single unit."""
+    t = study.trafo
+    rows = t[t["case"].isin([f"N-1:{m}" for m in members]) & t["trafo"].isin(members)]
+    if not len(rows):
+        rows = t[(t["case"] == "intact") & t["trafo"].isin(members)]
+    return float(rows.groupby(["period", "hour", "case"])["s_mva"].sum().max()) if len(rows) else 0.0
+
+
+def _fail_period(group, members, study, criteria, periods):
+    """The first period in which the group as described fails (part one's
+    per-unit adequacy, or a loading over 100 %), or the first period."""
+    for p in periods:
+        flows = {k: v for k, v in study.flows.items() if k[0] == p}
+        if not flows:
+            continue
+        row = size_transformers(flows, study.campus, criteria).set_index("group").loc[group]
+        t = study.trafo[(study.trafo["period"] == p) & study.trafo["trafo"].isin(members)]
+        if not bool(row["adequate"]) or float(t["loading_pct"].astype(float).max()) > 100.0 + 1e-9:
+            return p
+    return periods[0]
+
+
+def _needs(spec, study, library, criteria, periods, lib_by_id, skip_buses=frozenset(),
+           parallel: ParallelRules = ParallelRules()):
     camp, c = study.campus, spec["campus"]
     first = periods[0]
     needs = []
@@ -426,13 +630,18 @@ def _needs(spec, study, library, criteria, periods, lib_by_id, skip_buses=frozen
         hv, lv = buses[r.group]
         s_tot = float(r.max_s_intact_mva)
         s_n1 = float(r.max_s_n1_mva) * (r.units - 1) if r.units >= 2 else s_tot
-        cands = _trafo_candidates(library, kv[hv], kv[lv], s_tot, s_n1, int(r.units), criteria)
+        existing = {m: copy.deepcopy(trafos[m]) for m in members if trafos[m].get("existing")}
+        cands = _rank(_trafo_candidates(library, kv[hv], kv[lv], s_tot, s_n1, int(r.units), criteria)
+                      + _add_candidates(library, kv[hv], kv[lv], existing, s_tot, _outage_total(study, members),
+                                        criteria, parallel))
         peak = study.trafo.loc[study.trafo["trafo"].isin(members), "loading_pct"].astype(float).max()
-        if all(trafos[m].get("existing") for m in members) and bool(r.adequate) and not peak > 100.0 + 1e-9:
+        whole = len(existing) == len(members)
+        if whole and bool(r.adequate) and not peak > 100.0 + 1e-9:
             cands = [Candidate("keep (existing)", (), 0.0, existing=True), *cands]
         needs.append(Need(f"transformer {r.group}", "transformer",
                           {"members": members, "hv_bus": hv, "lv_bus": lv, "s_tot": s_tot, "s_n1": s_n1,
-                           "n_old": int(r.units), "kv": (kv[hv], kv[lv])}, cands, first))
+                           "n_old": int(r.units), "kv": (kv[hv], kv[lv]), "existing": existing, "parallel": parallel},
+                          cands, _fail_period(r.group, members, study, criteria, periods) if whole else first))
     comp = study.compensation.set_index("direction")
     cap_need = float(comp.at["capacitive", "required_mvar"]) * (1 + criteria.margin)
     ind_need = float(comp.at["inductive", "required_mvar"]) * (1 + criteria.margin)
@@ -503,6 +712,23 @@ def _bays(c, bus):
     return n + (1 if str(c["pcc"]["bus"]) == bus else 0)
 
 
+def _from_library(e, hv_bus, lv_bus, offset=0):
+    """A campus-file transformer of library type ``e``, every value with its
+    tag, and its vector group and tap changer when the library gives them
+    (the taps at ``offset`` steps from neutral)."""
+    tr = {"hv_bus": hv_bus, "lv_bus": lv_bus, "library_id": e["id"],
+          "sn_mva": _tag(e["s_mva"]), "vn_hv_kv": _tag(e["hv_kv"]), "vn_lv_kv": _tag(e["lv_kv"]),
+          **{f: _tag(e[f]) for f in ("vk_percent", "vkr_percent", "pfe_kw", "i0_percent")}}
+    if "vector_group" in e:
+        tr["vector_group"] = e["vector_group"]["value"]
+    if "tap" in e:
+        tap = copy.deepcopy(e["tap"])
+        tap["step_percent"] = _tag(tap["step_percent"])
+        tap["pos"] = tap["neutral"] + offset
+        tr["tap"] = tap
+    return tr
+
+
 def _apply(spec, needs, lib_by_id):
     """A copy of ``spec`` with every need's current choice in place, and
     ``{need key: [compensation names]}`` for the reactive items."""
@@ -514,7 +740,17 @@ def _apply(spec, needs, lib_by_id):
         if cand is None or not cand.items:
             continue
         t = need.target
-        if need.kind == "transformer":
+        if need.kind == "transformer" and cand.keep:
+            (_, lid, n), = cand.items
+            e = lib_by_id[lid]
+            old = c["transformers"]
+            for m in t["members"]:
+                if m not in cand.keep:
+                    del old[m]                                   # a planned unit, dropped
+            _why, _flags, offset = parallel_check(e, {m: old[m] for m in cand.keep}, t["parallel"])
+            for name in _names(cand.keep[0], n, _taken(c)):
+                old[name] = _from_library(e, t["hv_bus"], t["lv_bus"], offset)
+        elif need.kind == "transformer":
             (_, lid, n), = cand.items
             e = lib_by_id[lid]
             old = c["transformers"]
@@ -524,9 +760,7 @@ def _apply(spec, needs, lib_by_id):
             names = t["members"][:n]
             names += _names(t["members"][0], n - len(names), _taken(c) | set(t["members"]))
             for i, name in enumerate(names):
-                tr = {"hv_bus": t["hv_bus"], "lv_bus": t["lv_bus"], "library_id": lid,
-                      "sn_mva": _tag(e["s_mva"]), "vn_hv_kv": _tag(e["hv_kv"]), "vn_lv_kv": _tag(e["lv_kv"]),
-                      **{f: _tag(e[f]) for f in ("vk_percent", "vkr_percent", "pfe_kw", "i0_percent")}}
+                tr = _from_library(e, t["hv_bus"], t["lv_bus"])
                 if i == 0 and first.get("pypsa_name"):
                     tr["pypsa_name"] = first["pypsa_name"]
                 old[name] = tr
@@ -586,8 +820,8 @@ def _failures(study, compliance, needs, req, criteria):
         row = sizing.loc[group]
         if peak > 100.0 + 1e-9 or not bool(row["adequate"]):
             out.append((need.key, "transformer_loading",
-                        f"{group}: loading up to {peak:.1f} %, {row['required_unit_mva']:.1f} MVA per unit needed "
-                        f"with the {criteria.margin:.0%} margin against {row['unit_rating_mva']:g} MVA", 0))
+                        f"{group}: loading up to {peak:.1f} %; with the {criteria.margin:.0%} margin "
+                        f"{row['worst_unit']} carries {row['utilisation']:.1%} of its own rating", 0))
     for name, rows in study.line.groupby("cable", sort=False):
         peak = float(rows["loading_pct"].astype(float).max())
         if peak > 100.0 + 1e-9:
@@ -643,15 +877,25 @@ def _investment(needs, added, spec, study, library, lib_by_id, periods):
     for need in needs:
         status = "unresolved" if need.unresolved else "chosen"
         base = {"need": need.key, "existing": False, "status": status, "reason": need.unresolved or "",
-                "length_km": math.nan}
+                "length_km": math.nan, "action": ""}
         cand = need.choice
+        kept = {"library_id": None, "kind": "keep", "invest_period": periods[0], "capex_eur": 0.0,
+                "opex_eur_per_a": 0.0, "annualised_eur_per_a": 0.0, "existing": True, "action": "keep",
+                "lifetime_a": math.inf}
         if cand is None or not cand.items:
-            kind = "keep" if cand is not None and cand.existing else "none"
-            st = status if need.unresolved else ("kept" if kind == "keep" else "not_needed")
-            rows.append({**base, "library_id": None, "kind": kind, "units": 0, "invest_period": periods[0],
-                         "capex_eur": 0.0, "opex_eur_per_a": 0.0, "annualised_eur_per_a": 0.0,
-                         "existing": kind == "keep", "status": st, "lifetime_a": math.inf})
+            if cand is not None and cand.existing:
+                rows.append({**base, **kept, "units": len(need.target["members"]),
+                             "status": status if need.unresolved else "kept"})
+            else:
+                rows.append({**base, **kept, "kind": "none", "units": 0, "existing": False, "action": "",
+                             "status": status if need.unresolved else "not_needed"})
             continue
+        if cand.keep:                                     # an addition: the kept units, then the new ones
+            rows.append({**base, **kept, "units": len(cand.keep), "status": "kept", "reason": ""})
+            base["reason"] = "; ".join(x for x in (need.unresolved, cand.note) if x)
+        t = need.target
+        base["action"] = ("add" if cand.keep else "replace" if t.get("existing") and need.kind in ("transformer", "cable")
+                          else "buy")
         names = iter(added.get(need.key, []))
         for kind, lid, n in cand.items:
             e = lib_by_id[lid]
@@ -711,7 +955,8 @@ def _dispatch_table(study):
 # --------------------------------------------------------------------------
 
 def select_assets(campus_spec, hourly, selection, library, req, profile, criteria: SizingCriteria = SizingCriteria(),
-                  max_iter: int = MAX_ITER, pcc_switchgear: bool = True) -> dict:
+                  max_iter: int = MAX_ITER, pcc_switchgear: bool = True,
+                  parallel: ParallelRules = ParallelRules()) -> dict:
     """Least-cost assets for ``campus_spec`` at the selected hours, AC-checked
     (module docstring). ``profile`` is a grid-code profile or its name.
 
@@ -723,7 +968,8 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
     2026-10-05: a study setting, costed to the campus by default). False
     means the grid operator owns it: the PCC bus is never a need, and its
     switchgear row reports what it finds without buying anything. The
-    choice is returned as ``scope``."""
+    choice is returned as ``scope``, with ``parallel``, the rules for adding
+    units next to existing ones (``ParallelRules.scope``)."""
     profile = load_grid_code(profile) if isinstance(profile, str) else profile
     lib_by_id = {e["id"]: e for kind in ("transformers", "cables", "capacitor_banks", "shunt_reactors", "statcoms",
                                          "switchgear") for e in library[kind]}
@@ -736,7 +982,7 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
     base = _study(build_campus(campus_spec), hours, rows_of, installed, req, criteria, recheck=False)
     as_is = _compliance(base, req, profile)
     skip = frozenset() if pcc_switchgear else frozenset({str(campus_spec["campus"]["pcc"]["bus"])})
-    needs = _needs(campus_spec, base, library, criteria, periods, lib_by_id, skip)
+    needs = _needs(campus_spec, base, library, criteria, periods, lib_by_id, skip, parallel)
     history, last_voltage, stop = [], None, any(n.unresolved for n in needs)
     for it in range(1, max_iter + 1):
         spec, added = _apply(campus_spec, needs, lib_by_id)
@@ -801,6 +1047,6 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
             "dispatch": _dispatch_table(study), "spec": spec,
             "history": pd.DataFrame(history, columns=["iteration", "need", "from", "to", "check", "detail"]),
             "unresolved": unresolved, "pcc": _pcc_table(study), "short_circuit": study.short_circuit,
-            "scope": {"pcc_switchgear": "campus" if pcc_switchgear else "grid_operator"},
+            "scope": {"pcc_switchgear": "campus" if pcc_switchgear else "grid_operator", "parallel": parallel.scope()},
             "state": SelectionState(needs, added, study, hours, rows_of, installed, periods, lib_by_id, profile, as_is,
                                     skip, not fails and not unresolved)}

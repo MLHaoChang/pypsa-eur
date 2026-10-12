@@ -15,7 +15,11 @@ bound on cost.
 * One binary per candidate of every need, exactly one chosen per need. The
   candidates are C8's generators without C8's adequacy filters
   (``campus_invest.open_candidates``): the reactive need also gets "none",
-  transformers every size in 1..3 units (a redundant group stays redundant),
+  transformers every size in 1..3 units (a redundant group stays redundant)
+  and, next to a group with existing units, every compatible addition of
+  1..3 units (plan C13: C13's parallel rules, not its adequacy estimate;
+  each is one more binary, and its effect a finite difference like any
+  transformer candidate's, so the AC sharing is in the linearisation),
   cables every section in 1..3 runs, switchgear every rating at the bus's
   voltage. Adequacy is decided by the linearised AC constraints instead.
   When C8's point is AC-feasible, a candidate dearer on its own than C8's
@@ -55,12 +59,14 @@ key            g <= limit                                  scale
                ``campus_voltage`` band or the code band
                elsewhere), upper and lower
 ``q``          PCC Q within +- the band, intact only        1 % of it
-``tl``         worst unit of each group: loading x rating   1 % of
-               minus rating (MVA), every class              rating
-``ts``         worst unit: S x (1 + margin) minus rating,   1 % of
-               on C8's dispatch (below): intact; and the    rating
-               survivors in the group's own N-1 class when
-               N-1 is on
+``tl``         worst unit of each group: loading x rating   1 % of the
+               minus rating (MVA), every class              smallest
+                                                            rating in
+                                                            the group
+``ts``         worst unit: S x (1 + margin) minus its own   as ``tl``
+               rating, on C8's dispatch (below): intact;
+               and the survivors in the group's own N-1
+               class when N-1 is on
 ``cl``         every cable: current minus its capacity      1 % of it
                (runs x rating), every class
 ``ik``/``ip``  per period, every rated bus (or switchgear   1 % of
@@ -191,8 +197,8 @@ from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_compliance import Q_TOL
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
 from gridspine.static.campus_invest import (
-    _apply, _bays, _compliance, _dispatch_table, _failures, _investment, _pcc_table, open_candidates, select_assets,
-    study_from, with_measures,
+    ParallelRules, _apply, _bays, _compliance, _dispatch_table, _failures, _investment, _pcc_table, open_candidates,
+    select_assets, study_from, with_measures,
 )
 from gridspine.static.campus_reactive import _SUPPLIERS, ALWAYS_ON, ReactiveResult, compensation_bus, reactive_need
 from gridspine.static.campus_sc import PEAK_FACTOR, campus_fault_levels
@@ -418,6 +424,15 @@ class _Eval:
     ref_r: dict = dataclasses.field(default_factory=dict)      # C8's dispatch per hour, for the margin
 
 
+def _smallest(group_of, rating):
+    """``{group: its smallest unit rating}``: a group's ``tl`` and ``ts`` rows
+    are scaled to 1 % of it, whatever order its units come in (plan C13)."""
+    out = {}
+    for t, gk in group_of.items():
+        out[gk] = min(out.get(gk, math.inf), rating[t])
+    return out
+
+
 class _Problem:
     """Everything that stays fixed through the loop."""
 
@@ -455,7 +470,7 @@ class _Problem:
             cands = open_candidates(need, self.library, self.lib_by_id, self.criteria, self.f_hz)
             want = c8_choice_items[j]
             self.c8_labels.append(need.choice.label if want is not None else "as described")
-            cur = next((i for i, c in enumerate(cands) if (c.items, c.existing) == want), None)
+            cur = next((i for i, c in enumerate(cands) if (c.items, c.existing, c.keep) == want), None)
             if cur is None and want is not None:
                 cands = [need.choice, *cands]
                 cur = 0
@@ -608,6 +623,7 @@ class _Problem:
             gk = f"{name_bus[int(net.trafo.at[i, 'hv_bus'])]}/{name_bus[int(net.trafo.at[i, 'lv_bus'])]}"
             group_of[str(net.trafo.at[i, "name"])] = gk
             rating[str(net.trafo.at[i, "name"])] = float(net.trafo.at[i, "sn_mva"])
+        smallest = _smallest(group_of, rating)
         cap = {str(net.line.at[i, "name"]): float(net.line.at[i, "max_i_ka"]) * float(net.line.at[i, "df"])
                * float(net.line.at[i, "parallel"]) for i in net.line.index}
         pcc_bus = name_bus[int(net.ext_grid["bus"].iloc[0])]
@@ -659,7 +675,7 @@ class _Problem:
                     for t, load in zip(f.trafo["trafo"], f.trafo["loading_pct"]):
                         gk, r = group_of[t], rating[t]
                         put(("tl", key, cls, gk, 1), (float(load) / 100.0 - 1.0) * r, 0.0, key, case,
-                            [(("trafo_load", t), 1.0)], 0.01 * r)
+                            [(("trafo_load", t), 1.0)], 0.01 * smallest[gk])
                     for cb, ika in zip(f.line["cable"], f.line["i_ka"]):
                         put(("cl", key, cls, cb, 1), float(ika) - cap[cb], 0.0, key, case, [(("line_i", cb), 1.0)],
                             0.01 * cap[cb])
@@ -687,6 +703,7 @@ class _Problem:
                 f"{name_bus[int(net.trafo.at[i, 'hv_bus'])]}/{name_bus[int(net.trafo.at[i, 'lv_bus'])]}"
             rating[str(net.trafo.at[i, "name"])] = float(net.trafo.at[i, "sn_mva"])
         m, n1 = self.criteria.margin, self.criteria.n_minus_1
+        smallest = _smallest(group_of, rating)
         out = {}
         for key, cases in ref.items():
             by_cls = {}
@@ -704,7 +721,7 @@ class _Problem:
                         val = float(s_mva) * (1 + m) - r
                         if k not in out or val > out[k]:
                             out[k] = val
-                        self.limit.setdefault(k, (0.0, 0.01 * r))
+                        self.limit.setdefault(k, (0.0, 0.01 * smallest[gk]))
         return out
 
     def fault_only(self, point):
@@ -1085,10 +1102,12 @@ def _label(prob, point):
 def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
                        criteria: SizingCriteria = SizingCriteria(), max_iter: int = MAX_ITER,
                        pcc_switchgear: bool = True, adaptive: bool = True, c8=None,
-                       progress=None, should_stop=None) -> dict:
+                       progress=None, should_stop=None, parallel: ParallelRules = ParallelRules()) -> dict:
     """The joint asset choice (module docstring). ``adaptive=False`` holds
     ``beta`` at 1 and ``Delta`` at its start, for comparison. ``c8`` is
-    C8's result if already computed.
+    C8's result if already computed; else C8 runs with ``parallel``, the
+    rules for adding units next to existing transformers (plan C13), which
+    the MILP's open candidates then follow too.
 
     ``progress(iteration, max_iter, summary)``, when given, is called once
     per row of the history (the warm start is iteration 0), in order;
@@ -1111,11 +1130,11 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
     result is returned)."""
     if c8 is None:
         c8 = select_assets(campus_spec, hourly, selection, library, req, profile, criteria,
-                           pcc_switchgear=pcc_switchgear)
+                           pcc_switchgear=pcc_switchgear, parallel=parallel)
     state = c8["state"]
     prob = _Problem(campus_spec, hourly, library, req, criteria, state)
     prob.should_stop = should_stop
-    c8_items = [((n.choice.items, n.choice.existing) if n.choice is not None and n.pos >= 0 else None)
+    c8_items = [((n.choice.items, n.choice.existing, n.choice.keep) if n.choice is not None and n.pos >= 0 else None)
                 for n in prob.needs]
     inv = c8["investment"]
     c8_cost = float(inv.loc[inv["status"].isin(["chosen", "kept"]), "annualised_eur_per_a"].sum())
