@@ -95,6 +95,17 @@ word replaces the other: Site for the drawn plot and placements, campus study
 for the transformer, compensation, short-circuit and grid-code analysis.
 _Avoid_: campus (unqualified), plant, zone (a zone is the packer's placement band)
 
+**Placement rule**:
+A library entry's statement of where its type stands relative to the others
+on a Site — anchor (in its yard, between its two buses' yards, beyond the far
+yard), neighbours it sits next to, clearance, keep-out distances, which way
+it faces (`frontend/src/site3d/assetLibrary.ts`, `placement`). The packer
+honours it; the **placement check** (`site3d/placementCheck.ts`) reports
+where an arrangement breaks one as a **layout finding** — advisory text in
+the site overlay and the Issues panel and a red or amber outline, never a
+block on saving. A placement the user made always wins over the rule.
+_Avoid_: constraint (as if it blocked), validation error, zoning
+
 **Site results**:
 The 3D site view's per-object values at the selected time step — output,
 state of charge, loading and flow direction — as one map per time step,

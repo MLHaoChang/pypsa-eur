@@ -7,6 +7,7 @@ import { useCallback, useLayoutEffect, useRef } from 'react'
 import { siteVisuals } from '../site3d/resultStyle'
 import { useResultsSelector, type ResultsStore } from '../site3d/resultsStore'
 import type { SiteResults } from '../site3d/useSiteResults'
+import { distanceTitle, fmtMetres, type SiteDistance } from '../site3d/siteDistances'
 
 /** Below this pane width the readout starts collapsed to its summary line (it would cover the scene). */
 export const READOUT_OPEN_MIN_PX = 800
@@ -14,9 +15,15 @@ export const READOUT_OPEN_MIN_PX = 800
 interface Props {
   store: ResultsStore
   objects: readonly { type: string; name: string; kind: string; bus: string }[]
+  /** Site distances keyed as the map keys routes (S3): a branch's line ends with its distance. */
+  distances?: ReadonlyMap<string, SiteDistance>
 }
 
-export default function SiteResultsReadout({ store, objects }: Props) {
+/** The map's route key for an object — `line:L1`, `link:K`, `tr:T1` — or null (no three, no store import here). */
+const routeKeyOf = (o: { type: string; name: string }): string | null =>
+  o.type === 'Line' ? `line:${o.name}` : o.type === 'Link' ? `link:${o.name}` : o.type === 'Transformer' ? `tr:${o.name}` : null
+
+export default function SiteResultsReadout({ store, objects, distances }: Props) {
   const r = useResultsSelector(store, useCallback((x: SiteResults) => x, []))
   const visuals = siteVisuals(r.states, objects)
   const showing = visuals.size > 0
@@ -35,12 +42,17 @@ export default function SiteResultsReadout({ store, objects }: Props) {
     <details ref={ref} className="max-h-[40vh] overflow-auto rounded-md border border-border bg-bg/95 px-2 py-1.5 text-[11px] shadow">
       <summary className="cursor-pointer select-none"><h3 className="inline font-semibold text-text">Results · {r.iso.replace('T', ' ').slice(0, 16)}</h3></summary>
       <ul className="mt-1 space-y-0.5 text-muted" aria-label="Site results">
-        {[...visuals].map(([key, v]) => (
-          <li key={key} className="flex items-center gap-1.5">
-            {(v.color ?? v.fillColor) && <span aria-hidden className="inline-block h-2 w-2 shrink-0 rounded-sm" style={{ background: v.color ?? v.fillColor }} />}
-            {v.label}
-          </li>
-        ))}
+        {[...visuals].map(([key, v]) => {
+          const o = objects.find(x => `${x.type}:${x.name}` === key)
+          const rk = o ? routeKeyOf(o) : null
+          const d = rk ? distances?.get(rk) : undefined
+          return (
+            <li key={key} className="flex items-center gap-1.5">
+              {(v.color ?? v.fillColor) && <span aria-hidden className="inline-block h-2 w-2 shrink-0 rounded-sm" style={{ background: v.color ?? v.fillColor }} />}
+              {v.label}{d && <span data-testid="site-distance" title={distanceTitle(d)}> · {fmtMetres(d.metres)}</span>}
+            </li>
+          )
+        })}
       </ul>
     </details>
   )

@@ -24,7 +24,8 @@ class EvaluationReport:
                 "fault": case.fault, "mode": mode, "scored": False, "failures": ["observation_missing"]}))
             result["execution"] = getattr(item, "pilot_execution", "not_run")
             results.append(result)
-        value = report(results, live=os.environ.get("PYPSA_GUI_PILOT_EVALUATION_LIVE") == "1", execution_failed=failed)
+        value = report(results, live=os.environ.get("PYPSA_GUI_PILOT_EVALUATION_LIVE") == "1", execution_failed=failed,
+                       expanded=os.environ.get("PYPSA_GUI_PILOT_EVALUATION_EXPANDED") == "1")
         value["source"] = json.loads(os.environ["PYPSA_GUI_PILOT_EVALUATION_SOURCE"])
         value["policy_version"] = "1"
         value["model"] = os.environ.get("PYPSA_GUI_PILOT_EVALUATION_MODEL") if value["live_requested"] else None

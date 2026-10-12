@@ -15,7 +15,7 @@ import zipfile
 from dataclasses import asdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 import local_mode
@@ -27,7 +27,9 @@ from models.schemas import (
     ImportFolderRequest,
     ImportSummary,
     ProjectInfo,
+    ProjectSettings,
     RenameProjectRequest,
+    UpdateProjectSettingsRequest,
     UpdateScenarioRequest,
 )
 from services import active_project, change_log_service
@@ -101,6 +103,11 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
                  # services/site_service.py owns it; its cached context lives
                  # under the `sites/` dir below.
                  "sites.json",
+                 # The map view's user geometry: routed branches and dragged
+                 # asset bubbles (visual layers plan 2, M1).
+                 # services/map_layout_service.py owns it; `test_map_layout_routes`
+                 # pins it equal to MAP_LAYOUT_FILE.
+                 "map_layout.json",
                  # The island sidecar (plan 2026-10-07 campus island, I1):
                  # control modes, unit dynamics and island requirements.
                  "island_config.json",
@@ -644,8 +651,24 @@ def _project_info(project_dir: pathlib.Path) -> ProjectInfo:
         objective=meta.get("objective"),
         has_orphan_tmp=has_orphan,
         parent_project=meta.get("parent_project"),
+        settings=_settings_from_meta(meta),
         **_scenario_fields_from_meta(meta),
     )
+
+
+def _settings_from_meta(meta: dict) -> ProjectSettings:
+    """
+    The `settings` table of a metadata.json as the DTO, defaults for anything
+    missing or malformed — the same tolerance `services/project_settings.py`
+    applies on the read side the network routes use.
+    """
+    from services import project_settings
+
+    table = meta.get(project_settings.SETTINGS_KEY)
+    if not isinstance(table, dict):
+        return ProjectSettings()
+    known = {k: v for k, v in table.items() if k in ProjectSettings.model_fields and isinstance(v, bool)}
+    return ProjectSettings(**known)
 
 
 def _project_info_db(db, project) -> ProjectInfo:
@@ -2221,6 +2244,11 @@ def _save_context(
             "parent_project": new_parent,
             "scenario_description": new_desc,
             "scenario_type": new_type,
+            # Per-project settings (plan M2) round-trip from the existing file:
+            # `PATCH /{name}/settings` is their only writer, and a save that
+            # dropped the key would silently reset the user's choice.
+            **({"settings": existing_meta["settings"]}
+               if isinstance(existing_meta.get("settings"), dict) else {}),
         })
     ts_columns_saved = len(user_ts_data) if isinstance(user_ts_data, dict) else 0
     # Flat-count the leaves of the nested {comp: {attr: {col: ...}}} structure.
@@ -3181,6 +3209,66 @@ def update_scenario_metadata(
     return _project_info_db(db, project)
 
 
+@router.patch("/{name}/settings")
+def update_project_settings(
+    name: str,
+    req: UpdateProjectSettingsRequest,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> ProjectInfo:
+    """
+    Edit the project's settings table in `metadata.json` (plan M2: "Derive
+    lengths from geometry"). PARTIAL like `/scenario`: only the keys present
+    are written, so a one-flag PATCH cannot reset its future siblings.
+
+    The file is the only store — there is no DB column — so the project must
+    have a storage directory (it has been saved at least once; 409 otherwise).
+    A metadata.json that is missing or unreadable is NOT invented here: the
+    save path owns the dozen other keys, and writing `{"settings": …}` alone
+    over a lost file would hide the loss `save_project` warns about. The
+    setting changes how edits behave, so it is a write edge: the lock is
+    ENFORCED (acquired) as for the scenario labels.
+
+    Errors: 404 no such project (or not yours); 409 locked by another user,
+    or never saved; 422 a non-boolean flag.
+    """
+    from services import project_registry, project_settings
+
+    project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, name)
+    submitted = req.model_dump(exclude_unset=True)
+    if not submitted:
+        return _project_info_db(db, project)
+    _enforce_project_lock(db, project, user)
+
+    project_dir = project_registry.project_dir(project)
+    if not project_dir.is_dir():
+        raise HTTPException(409, f"Save '{project.name}' before changing its settings.")
+    meta = _read_meta(project_dir)
+    if not meta:
+        raise HTTPException(
+            409,
+            f"metadata.json for '{project.name}' is missing or unreadable; save the project and retry.",
+        )
+    table = meta.get(project_settings.SETTINGS_KEY)
+    if not isinstance(table, dict):
+        table = {}
+    for key, value in submitted.items():
+        if value is None:
+            table.pop(key, None)       # null = back to the default
+        else:
+            table[key] = value
+    meta[project_settings.SETTINGS_KEY] = table
+    _write_meta(project_dir, meta)
+
+    changed = ", ".join(f"{k}={v}" for k, v in submitted.items())
+    change_log_service.log(
+        "update_settings", "Project", project.name,
+        f"Project settings updated on '{project.name}' · {changed}",
+    )
+    return _project_info_db(db, project)
+
+
 def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
     """
     Auth-mode delete. Access is gated by ``can_delete_project`` (org admin,
@@ -3789,6 +3877,269 @@ def delete_site_context(
     _check_project_lock(db, lock_project, user)
     target, _site = _site_context_dir(dest, site_id)
     return {"cleared": site_context.clear_cached(target)}
+
+
+@router.get("/{name}/sites/{site_id}/thumbnail")
+def get_site_thumbnail(
+    name: str,
+    site_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    The site's last capture from the 3D view (`sites/<id>/thumb.png`, plan 3
+    S5), inline PNG; 404 when none was taken. Reads are never lock-gated.
+    `no-store`: the canvas replaces it after every fresh solve and the hub
+    card must show the new one.
+    """
+    from fastapi import Response
+
+    from services import site_service
+
+    src, name = _resolve_project_src(name, db, user)
+    if not src.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    target, _site = _site_context_dir(src, site_id)
+    data = site_service.read_thumbnail(target)
+    if data is None:
+        raise HTTPException(404, f"No thumbnail for site '{site_id}'")
+    return Response(content=data, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@router.put("/{name}/sites/{site_id}/thumbnail")
+async def put_site_thumbnail(
+    name: str,
+    site_id: str,
+    request: Request,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    Store the capture the 3D view took of this site (raw PNG body,
+    `Content-Type: image/png`). 415 for any other content type, 413 over
+    `MAX_THUMB_BYTES`, 422 when the bytes are not a PNG; lock-CHECKED like
+    every other project-dir write (409, never acquiring). The site must be
+    in the document (404 otherwise, the same answer as a traversal probe).
+    """
+    from services import project_registry, site_service
+
+    dest, name = _resolve_project_src(name, db, user)
+    if not dest.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if content_type != "image/png":
+        raise HTTPException(415, "thumbnail must be sent as image/png")
+    lock_project = project_registry.find_project(db, user, name)
+    _check_project_lock(db, lock_project, user)
+    target, _site = _site_context_dir(dest, site_id)
+    data = await request.body()
+    try:
+        site_service.validate_thumbnail(data)
+    except site_service.ThumbnailTooLarge as exc:
+        raise HTTPException(413, str(exc)) from exc
+    except site_service.ThumbnailInvalid as exc:
+        raise HTTPException(422, str(exc)) from exc
+    site_service.write_thumbnail(target, data)
+    return {"saved": name, "site": site_id, "bytes": len(data)}
+
+
+@router.get("/{name}/map_layout")
+def get_map_layout(
+    name: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    The project's map document (`map_layout.json`): routed branches and
+    dragged asset bubbles. Same degrade rules as `/layout`: missing or
+    corrupt → the empty document; a permission denial is surfaced, never
+    reported as "no routes". See services/map_layout_service.py.
+    """
+    from services import map_layout_service
+
+    src, name = _resolve_project_src(name, db, user)
+    if not src.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    try:
+        return map_layout_service.read_map_layout(src)
+    except PermissionError as exc:
+        raise _access_denied(src / map_layout_service.MAP_LAYOUT_FILE) from exc
+
+
+@router.put("/{name}/map_layout")
+def put_map_layout(
+    name: str,
+    layout: dict,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    Persist the map document. Unlike `/layout` the shape is validated (422
+    names the field; unknown keys are kept), capped like the layout (413,
+    the same `_MAX_LAYOUT_BYTES`), lock-CHECKED like the layout (409, never
+    acquiring — the map writes on every waypoint drag-settle).
+    """
+    from services import map_layout_service, project_registry
+
+    dest, name = _resolve_project_src(name, db, user)
+    if not dest.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    lock_project = project_registry.find_project(db, user, name)
+    _check_project_lock(db, lock_project, user)
+    try:
+        map_layout_service.validate_map_layout(layout)
+    except map_layout_service.MapLayoutInvalid as exc:
+        raise HTTPException(422, str(exc)) from exc
+    try:
+        map_layout_service.write_map_layout(dest, layout, max_bytes=_MAX_LAYOUT_BYTES)
+    except map_layout_service.MapLayoutTooLarge as exc:
+        raise HTTPException(413, str(exc)) from exc
+    return {"saved": name, "routes": len(layout["routes"]), "bubbles": len(layout["bubbles"])}
+
+
+def _require_active_project(dest: pathlib.Path, name: str) -> None:
+    """
+    The geometry import and the OSM suggestions read the LIVE network (bus
+    coordinates, branch names) — that is the active project's. A project
+    that is not the one open answers 409 rather than a report against the
+    wrong network.
+    """
+    from services import network_lengths
+
+    active = network_lengths.active_project_dir()
+    if active is None or os.path.realpath(active) != os.path.realpath(dest):
+        raise HTTPException(409, f"Open project '{name}' first: geometry is matched against the loaded network.")
+
+
+def _placed_buses_and_branches(n) -> tuple[dict[str, tuple[float, float]], list]:
+    from services.map_geometry_import import Branch
+    from services.network_geometry import _bus_coord
+
+    buses: dict[str, tuple[float, float]] = {}
+    for b in n.buses.index:
+        c = _bus_coord(n, str(b))
+        if c is not None:
+            buses[str(b)] = c
+    branches = []
+    for kind, attr in (("line", "lines"), ("link", "links"), ("tr", "transformers")):
+        df = getattr(n, attr, None)
+        if df is None or df.empty:
+            continue
+        for nm in df.index:
+            branches.append(Branch(kind, str(nm), str(df.at[nm, "bus0"]), str(df.at[nm, "bus1"])))
+    return buses, branches
+
+
+@router.post("/{name}/map_layout/import")
+async def import_map_geometry(
+    name: str,
+    request: Request,
+    apply: bool = False,
+    tolerance_m: float = 50.0,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    Adopt routes and site boundaries from a GeoJSON FeatureCollection or a
+    KML document (plan 2, M3). The body is the file itself (JSON) or a
+    multipart upload under `file`. LineStrings match a branch by `name`, else
+    by their ends snapping to two placed buses within `tolerance_m`; Polygons
+    become sites. The answer is the MATCH REPORT and nothing is written
+    unless `apply=true`: then routes land with `source: 'import'`, sites are
+    appended, and — with "Derive lengths from geometry" on — the applied
+    Lines and Links get their length from the geometry, the rescale previews
+    coming back under `lengths`. Lock-CHECKED on apply (409), 413 over the
+    cap, 422 on malformed GeoJSON/KML.
+    """
+    from services import map_geometry_import as mgi
+    from services import map_layout_service, network_lengths, project_registry, project_settings, site_service
+
+    dest, name = _resolve_project_src(name, db, user)
+    if not dest.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    if not (0 < tolerance_m <= mgi.MAX_TOLERANCE_M):
+        raise HTTPException(422, f"tolerance_m must be between 0 and {mgi.MAX_TOLERANCE_M:g} m")
+    cap_msg = f"Geometry upload exceeds the {mgi.MAX_IMPORT_BYTES // (1024 * 1024)} MB cap."
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > mgi.MAX_IMPORT_BYTES:
+        raise HTTPException(413, cap_msg)
+    filename: str | None = None
+    if request.headers.get("content-type", "").startswith("multipart/form-data"):
+        form = await request.form()
+        upload = form.get("file")
+        if upload is None or not hasattr(upload, "read"):
+            raise HTTPException(422, "Multipart body needs a `file` part holding GeoJSON or KML.")
+        data = await upload.read()
+        filename = getattr(upload, "filename", None)
+    else:
+        data = await request.body()
+    if len(data) > mgi.MAX_IMPORT_BYTES:
+        raise HTTPException(413, cap_msg)
+    try:
+        features = mgi.parse_features(data, filename)
+    except mgi.GeometryImportInvalid as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if apply:
+        # The lock is checked BEFORE anything is matched: a refusal must not
+        # depend on whose network happens to be loaded.
+        lock_project = project_registry.find_project(db, user, name)
+        _check_project_lock(db, lock_project, user)
+
+    _require_active_project(dest, name)
+    n = PyPSAService.get_network()
+    with PyPSAService.get_lock():
+        buses, branches = _placed_buses_and_branches(n)
+    try:
+        existing_ids = {s.get("id") for s in site_service.read_sites(dest)["sites"] if isinstance(s, dict)}
+    except PermissionError as exc:
+        raise _access_denied(dest / site_service.SITES_FILE) from exc
+    report = mgi.match_features(features, branches, buses, tolerance_m=tolerance_m, existing_site_ids=existing_ids)
+    report["applied"] = False
+    if not apply:
+        return report
+    try:
+        written = mgi.apply_report(dest, report)
+    except (map_layout_service.MapLayoutInvalid, site_service.SitesInvalid) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    report["applied"] = True
+    report["written"] = written
+    change_log_service.log(
+        "import", "MapLayout", name,
+        f"Imported geometry: {len(written['routes'])} route(s), {len(written['sites'])} site(s)",
+    )
+    length_keys = [k for k in written["routes"] if k.split(":", 1)[0] in network_lengths.LENGTH_KINDS]
+    if length_keys and project_settings.derive_lengths_enabled(dest):
+        report["lengths"] = network_lengths.apply_lengths_from_geometry(length_keys)
+    return report
+
+
+@router.get("/{name}/map_layout/osm_suggestions")
+def osm_suggestions(
+    name: str,
+    bbox: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    OSM power ways and substations in `bbox` (`min_lng,min_lat,max_lng,max_lat`)
+    for the map's suggestion layer (plan 2, M3). Read-only — the suggestions
+    live in memory with a TTL, never in the project. 422 for a malformed or
+    district-sized bbox; a refusal upstream answers 429 (rate limited) or 504
+    (timed out) with the setting to change, else 502.
+    """
+    from services import osm_suggestions as osm
+
+    src, name = _resolve_project_src(name, db, user)
+    if not src.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    try:
+        box = osm.parse_bbox(bbox)
+    except osm.OsmBboxInvalid as exc:
+        raise HTTPException(422, str(exc)) from exc
+    try:
+        return osm.fetch_suggestions(box)
+    except osm.OsmUnavailable as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
 
 
 def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:

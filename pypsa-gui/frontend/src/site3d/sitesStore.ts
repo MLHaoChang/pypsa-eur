@@ -94,6 +94,13 @@ interface SitesState {
    * existing placement is kept.
    */
   arrangeAll: (project: string | null, siteId: string, objects: Array<{ key: string; origin: [number, number]; heading: number }>, orphans: string[]) => void
+  /**
+   * Arrange all (S2): replace every placement of the site with the given
+   * positions — the layout rebuilt by the rules with no placements at all.
+   * The caller confirms with the user first; nothing of the old arrangement
+   * survives.
+   */
+  rearrangeAll: (project: string | null, siteId: string, objects: Array<{ key: string; origin: [number, number]; heading: number }>) => void
   /** Replace a project's document wholesale. */
   replaceDocument: (project: string | null, doc: SitesDocument) => void
   resetForTests: () => void
@@ -196,6 +203,10 @@ export const useSitesStore = create<SitesState>((set, get) => {
       for (const o of objects) placements[o.key] ??= { x: o.origin[0], y: o.origin[1], heading: o.heading }
       return { ...s, placements }
     }),
+    rearrangeAll: (project, siteId, objects) => editSite(project, siteId, s => ({
+      ...s,
+      placements: Object.fromEntries(objects.map(o => [o.key, { x: o.origin[0], y: o.origin[1], heading: o.heading }])),
+    })),
     replaceDocument: (project, doc) => {
       doc.sites.forEach(assertSiteValid)
       write(project, () => doc)

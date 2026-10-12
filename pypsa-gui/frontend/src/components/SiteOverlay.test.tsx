@@ -3,6 +3,11 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import SiteOverlay from './SiteOverlay'
 import { useUIStore } from '../store/uiStore'
 import type { Site } from '../site3d/types'
+import { confirmToast } from '../utils/toasts'
+
+// `<Toaster/>` lives in App.tsx, so a confirmToast never renders under this
+// harness — the assertion is on the call (as BottomPanel.test does).
+vi.mock('../utils/toasts', () => ({ confirmToast: vi.fn() }))
 
 const site: Site = { id: 'a', name: 'Campus', buses: ['B1'], boundary: [[0, 0], [0.01, 0], [0.01, 0.01]], origin: { lng: 0.005, lat: 0.003 }, placements: {} }
 const fit = { landM2: 178_000, plotM2: 113_000, over: true, outside: ['Generator:PV field'] }
@@ -20,6 +25,44 @@ describe('SiteOverlay', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reset placement' }))
     expect(onArrange).toHaveBeenCalledTimes(1)
     expect(onReset).toHaveBeenCalledTimes(1)
+  })
+
+  it('says in words when the library drew a component generically, and nothing when every type is specific (S4)', () => {
+    const base = { sites: [site], site, onPickSite: () => {}, assetCount: 1, fit: { ...fit, over: false, outside: [] }, unplacedMembers: [], selectedPlacedKey: null, canArrange: true, onArrange: () => {}, onResetPlacement: () => {} }
+    const { rerender } = render(<SiteOverlay {...base} libraryGaps="'tidal' Generator drawn as a generic block" />)
+    expect(screen.getByTestId('library-gaps').textContent).toContain("'tidal' Generator drawn as a generic block")
+    expect(screen.getByTestId('library-gaps').title).toMatch(/library/)
+    rerender(<SiteOverlay {...base} libraryGaps={null} />)
+    expect(screen.queryByTestId('library-gaps')).toBeNull()
+  })
+
+  it('Snapshot captures on click, is absent without a project to store to, and disabled read-only (S5)', () => {
+    const base = { sites: [site], site, onPickSite: () => {}, assetCount: 1, fit: { ...fit, over: false, outside: [] }, unplacedMembers: [], selectedPlacedKey: null, canArrange: true, onArrange: () => {}, onResetPlacement: () => {} }
+    const onSnapshot = vi.fn()
+    const { rerender } = render(<SiteOverlay {...base} onSnapshot={onSnapshot} />)
+    fireEvent.click(screen.getByTestId('site-snapshot'))
+    expect(onSnapshot).toHaveBeenCalledTimes(1)
+    rerender(<SiteOverlay {...base} />)
+    expect(screen.queryByTestId('site-snapshot')).toBeNull()
+    useUIStore.setState({ readOnly: true, readOnlyReason: 'solving' })
+    rerender(<SiteOverlay {...base} onSnapshot={onSnapshot} />)
+    expect((screen.getByTestId('site-snapshot') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('Walk toggles the first-person mode, reads as pressed while walking, and is offered read-only too (S5)', () => {
+    const base = { sites: [site], site, onPickSite: () => {}, assetCount: 1, fit: { ...fit, over: false, outside: [] }, unplacedMembers: [], selectedPlacedKey: null, canArrange: true, onArrange: () => {}, onResetPlacement: () => {} }
+    const onToggleWalk = vi.fn()
+    const { rerender } = render(<SiteOverlay {...base} onToggleWalk={onToggleWalk} />)
+    const btn = screen.getByTestId('site-walk') as HTMLButtonElement
+    expect(btn.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(btn)
+    expect(onToggleWalk).toHaveBeenCalledTimes(1)
+    useUIStore.setState({ readOnly: true, readOnlyReason: 'solving' })
+    rerender(<SiteOverlay {...base} onToggleWalk={onToggleWalk} walking />)
+    expect((screen.getByTestId('site-walk') as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByTestId('site-walk').getAttribute('aria-pressed')).toBe('true')
+    rerender(<SiteOverlay {...base} />)
+    expect(screen.queryByTestId('site-walk')).toBeNull()
   })
 
   it('Reset is disabled without a placed selection', () => {
@@ -46,6 +89,33 @@ describe('SiteOverlay', () => {
     render(<SiteOverlay sites={[site, other]} site={site} onPickSite={onPick} assetCount={0} fit={{ ...fit, over: false, outside: [] }} unplacedMembers={[]} selectedPlacedKey={null} canArrange onArrange={() => {}} onResetPlacement={() => {}} />)
     fireEvent.change(screen.getByRole('combobox', { name: 'Site' }), { target: { value: 'b' } })
     expect(onPick).toHaveBeenCalledWith('b')
+  })
+})
+
+describe('SiteOverlay — Arrange all (S2)', () => {
+  beforeEach(() => { vi.mocked(confirmToast).mockReset() })
+  it('is offered only when the canvas provides it, asks first naming the moved positions, and runs on confirm', () => {
+    const onArrangeAll = vi.fn()
+    const { unmount } = render(<SiteOverlay sites={[site]} site={site} onPickSite={() => {}} assetCount={1} fit={fit} unplacedMembers={[]} selectedPlacedKey={null} canArrange onArrange={() => {}} onResetPlacement={() => {}} />)
+    expect(screen.queryByRole('button', { name: 'Arrange all' })).toBeNull()
+    unmount()
+    render(<SiteOverlay sites={[site]} site={site} onPickSite={() => {}} assetCount={1} fit={fit} unplacedMembers={[]} selectedPlacedKey={null} canArrange onArrange={() => {}} onArrangeAll={onArrangeAll} placedCount={3} onResetPlacement={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange all' }))
+    expect(onArrangeAll).not.toHaveBeenCalled()
+    expect(confirmToast).toHaveBeenCalledTimes(1)
+    const [message, onConfirm, opts] = vi.mocked(confirmToast).mock.calls[0]
+    expect(message).toMatch(/3 positions you moved/)
+    expect(opts).toMatchObject({ confirmLabel: 'Arrange all', danger: true })
+    onConfirm()
+    expect(onArrangeAll).toHaveBeenCalledTimes(1)
+  })
+  it('is disabled while read-only and while the network loads', () => {
+    useUIStore.setState({ readOnly: true, readOnlyReason: 'locked-by-user' })
+    render(<SiteOverlay sites={[site]} site={site} onPickSite={() => {}} assetCount={1} fit={fit} unplacedMembers={[]} selectedPlacedKey={null} canArrange onArrange={() => {}} onArrangeAll={() => {}} onResetPlacement={() => {}} />)
+    const b = screen.getByRole('button', { name: 'Arrange all' }) as HTMLButtonElement
+    expect(b.disabled).toBe(true)
+    fireEvent.click(b)
+    expect(confirmToast).not.toHaveBeenCalled()
   })
 })
 

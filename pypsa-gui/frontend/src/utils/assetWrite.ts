@@ -18,6 +18,8 @@
 import type { QueryClient } from '@tanstack/react-query'
 
 import { networkApi } from '../api/network'
+import { useMapLayoutStore } from '../pages/mapLayoutStore'
+import { useSitesStore } from '../site3d/sitesStore'
 import { nk } from './queryKeys'
 
 /**
@@ -136,6 +138,38 @@ const ENDPOINTS = {
 
 export type WritableRoot = keyof typeof ENDPOINTS
 
+/** Query-key root → the PyPSA class the sidecars key their entries by. */
+const ROOT_CLASS: Record<WritableRoot, string> = {
+  buses: 'Bus',
+  carriers: 'Carrier',
+  lines: 'Line',
+  links: 'Link',
+  generators: 'Generator',
+  storage_units: 'StorageUnit',
+  stores: 'Store',
+  loads: 'Load',
+  transformers: 'Transformer',
+}
+
+/**
+ * A rename through the PUT re-keys two sidecars on the server
+ * (`map_layout.json` routes, `sites.json` placements — `network_crud.py`'s
+ * `_rename_map_route` / `_rename_site_placement`), but the frontend stores
+ * cache both documents and PUT them whole on their next debounced write. A
+ * cache still holding the OLD key would overwrite the server's re-keyed
+ * route or placement with the stale one — the M1 ledger's stale-document
+ * gap. Re-key the caches here, at the one place every rename passes.
+ * Each store returns false (and writes nothing) when it holds no entry.
+ */
+export function rekeySidecarsAfterRename(
+  project: string | null, cls: WritableRoot, oldName: string, newName: string,
+): void {
+  if (oldName === newName) return
+  const klass = ROOT_CLASS[cls]
+  useMapLayoutStore.getState().renameRoute(project, klass, oldName, newName)
+  useSitesStore.getState().renamePlacement(project, klass, oldName, newName)
+}
+
 /**
  * The Asset-write chokepoint: fetch → spread → PUT → invalidate.
  *
@@ -185,5 +219,9 @@ export async function updateAsset<T extends { name: string } = AssetRow>(
   // and a chokepoint that swallowed it would silently drop that behaviour.
   const resp = await e.put(name, { ...current, ...resolved })
   invalidateAssetQueries(qc, project)
+  // The backend answers `{name: <new name>}`; the patch's `name` is what was
+  // asked. Either says a rename happened, and the sidecar caches follow.
+  const renamed = (resp as { name?: unknown } | null)?.name ?? (resolved as { name?: unknown }).name
+  if (typeof renamed === 'string' && renamed !== name) rekeySidecarsAfterRename(project, cls, name, renamed)
   return resp
 }

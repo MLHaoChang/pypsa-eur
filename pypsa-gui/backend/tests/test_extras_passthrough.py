@@ -92,3 +92,94 @@ def test_input_attributes_reports_the_catalog_inputs():
 def test_input_attributes_is_empty_for_an_unknown_class():
     from services.attribute_catalog import input_attributes
     assert input_attributes(pypsa.Network(), "Widget") == set()
+
+
+# ── Multi-port Links (visual-layers plan 1, A1) ──────────────────────────────
+# PyPSA's Link catalog lists bus0 / bus1 / efficiency only; the extra ports a
+# CHP or heat pump needs (`bus2`, `efficiency2`, …) are columns PyPSA creates
+# on first use and honours by regex (`pypsa.constants.RE_PORTS_GE_2`). The
+# whitelist used to drop them on a network with no prior `bus2` column, so a
+# CHP created from the palette silently lost its heat port.
+
+def _three_bus_network() -> pypsa.Network:
+    n = pypsa.Network()
+    n.add("Bus", "gas", carrier="gas")
+    n.add("Bus", "elec", carrier="AC")
+    n.add("Bus", "heat", carrier="heat")
+    return n
+
+
+# Exactly what `CreationForm`'s `chp` palette item posts (name aside).
+CHP = {
+    "name": "CHP 1", "bus0": "gas", "bus1": "elec", "bus2": "heat", "carrier": "gas",
+    "p_nom": 100.0, "efficiency": 0.4, "efficiency2": 0.4, "p_nom_extendable": False,
+    "capital_cost": 0.0, "marginal_cost": 0.0,
+}
+
+
+def test_a_chp_from_the_palette_keeps_bus2_and_efficiency2(client, install_network):
+    # No "fresh network has no bus2 column" precondition: PyPSA registers extra
+    # ports on the process-wide Link defaults once any network in the process
+    # has used them (test_chat_tools_diagnose adds bus3), so under the full
+    # suite a brand-new Network already carries bus2..bus5. The behaviour under
+    # test is the same either way: the port the palette set survives.
+    n = _three_bus_network()
+    install_network(n)
+    r = client.post("/api/network/links", json=CHP)
+    assert r.status_code in (200, 201), r.text
+    assert n.links.at["CHP 1", "bus2"] == "heat"
+    assert float(n.links.at["CHP 1", "efficiency2"]) == 0.4
+    assert "2" in n.components.links.additional_ports
+
+
+def test_unset_ports_do_not_grow_empty_columns(client, install_network):
+    # LinkCreate declares bus3 / bus4 / efficiency3 with "" / 1.0 defaults and
+    # the route dumps the whole model, so an unset port must not create a
+    # `bus3` column PyPSA would then treat as a third port on every link.
+    n = _three_bus_network()
+    install_network(n)
+    before = set(n.links.columns)
+    r = client.post("/api/network/links", json=CHP)
+    assert r.status_code in (200, 201), r.text
+    # Of the PORT columns, the create may add the one it set and nothing else
+    # (the declared adequacy columns it also adds are master's third arm, not
+    # this test's subject; columns a previous network in this process
+    # registered on the defaults are not this create's doing either — see the
+    # note on the test above).
+    import re
+    port = re.compile(r"^(bus|efficiency)\d+$")
+    assert {c for c in set(n.links.columns) - before if port.match(c)} <= {"bus2", "efficiency2"}
+    for col in ("bus3", "bus4"):
+        if col in n.links.columns:
+            assert n.links.at["CHP 1", col] in ("", None) or n.links.at["CHP 1", col] != n.links.at["CHP 1", col], col
+
+
+def test_a_bogus_key_on_a_link_is_still_dropped(client, install_network):
+    n = _three_bus_network()
+    install_network(n)
+    r = client.post("/api/network/links", json={**CHP, "bogus_key": 1, "bus_two": "heat"})
+    assert r.status_code in (200, 201), r.text
+    assert "bogus_key" not in n.links.columns
+    assert "bus_two" not in n.links.columns
+
+
+def test_a_second_port_edit_through_put_survives(client, install_network):
+    n = _three_bus_network()
+    install_network(n)
+    assert client.post("/api/network/links", json=CHP).status_code in (200, 201)
+    r = client.put("/api/network/links/CHP 1", json={**CHP, "efficiency2": 0.55})
+    assert r.status_code == 200, r.text
+    assert float(n.links.at["CHP 1", "efficiency2"]) == 0.55
+    assert n.links.at["CHP 1", "bus2"] == "heat"
+
+
+def test_link_port_extras_is_a_regex_not_a_list():
+    from services.network_crud import _link_port_extras
+    kept = _link_port_extras({
+        "bus2": "heat", "efficiency2": 0.4,
+        "bus10": "x", "efficiency10": 0.1,       # two-digit ports are ports too
+        "bus3": "", "efficiency3": 1.0,          # unset port: neither key survives
+        "bus1": "elec", "efficiency": 0.4,       # catalog attributes, not this arm's job
+        "p_min_pu2": 0.0,                        # not a PyPSA per-port attribute
+    })
+    assert kept == {"bus2": "heat", "efficiency2": 0.4, "bus10": "x", "efficiency10": 0.1}
