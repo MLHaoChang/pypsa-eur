@@ -12,9 +12,11 @@ Nothing here was run on a real GPU or in the packaged app; §5 lists what UAT mu
 | Check on the final tree | Result |
 |---|---|
 | `tsc -b` | clean |
-| `vitest run` (full) | PENDING |
-| `npm run build` | PENDING (main chunk, `SiteCanvas` chunk) |
+| `vitest run` (full) | 395 files, **4,201 tests, all pass**; 4 files (`ChatPanel.manifest`, `ChatPanel.sendRequest`, `TariffBuilder`, `tariffModel`) timed out at file level under the full parallel load and pass when run alone (368 tests), the same load effect noted in §6 |
+| `npm run build` | clean; main `spa` chunk **1,036.11 kB gzipped** against **1,003.42 kB** for current master built the same way (+32.7 kB for every main-bundle piece of the three plans: asset nodes and moving flow on the schematic, the map's tools, dialogs, legend, minimap, import and OSM layers, the topology check, the shared taxonomy); `SiteCanvas` chunk 319.06 kB gzipped (311.41 kB at the Phase 2 close; S2–S5 live there) |
 | backend `pytest` (full, one process) | PENDING |
+
+**CI did not run on either PR.** GitHub Actions is disabled for the repository (`run_workflow` answers "Actions has been disabled for this repository"; no run exists for any push after 2026-10-06). The figures above and in `notes/2026-10-06-3d-site-view-s0-landing.md` are therefore the only automated gate until Actions is re-enabled; the owner should re-enable it before merging, or run the three suites locally.
 
 ## 2. Layer 1 — the abstract canvas (plan 1)
 
