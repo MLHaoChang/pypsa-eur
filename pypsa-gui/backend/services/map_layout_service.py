@@ -10,7 +10,7 @@ map-view.md, M1).
 
     {
       "version": 1,
-      "routes":  {"<kind>:<name>": {"points": [[lng, lat], ...], "source": "user" | "import" | "osm"}},
+      "routes":  {"<kind>:<name>": {"points": [[lng, lat], ...], "source": "user" | "import" | "osm" | "site"}},
       "bubbles": {"<bus>|<category>": {"dx": px, "dy": px}},
       "lengths": {"<kind>:<name>": {"source": "typed" | "chord" | "route"}}   # optional (M2)
     }
@@ -21,6 +21,14 @@ an import) entered, `chord` the great-circle bus0→bus1 distance, `route` the
 geodesic length of the routed polyline. The table is optional: the M1
 migration wrote none, and a key that is absent reads as `typed` ("unknown,
 and nothing was derived for it"), so every pre-M2 document is valid as is.
+
+A route's `source` says who drew it: the user on the map, a GeoJSON/KML
+import, an OSM adoption, or — `site` (3D plan S3) — the 3D site view, which
+writes a straight two-point route from a branch's connection anchor to its
+far yard when a placement moves and the project derives lengths from
+geometry. The site overwrites only its own routes; the other three are the
+user's and stand until the user edits them. The length derivation treats
+every source alike (a route is a route).
 
 `kind` is one of the map's edge-kind prefixes — `line`, `link`, `tr` — which
 is why `route_key` maps the PyPSA class to it. `points` are the INTERIOR
@@ -53,7 +61,7 @@ MAX_MAP_LAYOUT_BYTES = 4 * 1024 * 1024
 SCHEMA_VERSION = 1
 
 ROUTE_KINDS = frozenset({"line", "link", "tr"})
-ROUTE_SOURCES = frozenset({"user", "import", "osm"})
+ROUTE_SOURCES = frozenset({"user", "import", "osm", "site"})
 LENGTH_SOURCES = frozenset({"typed", "chord", "route"})
 # A branch with no provenance entry: nothing was ever derived for it.
 DEFAULT_LENGTH_SOURCE = "typed"
