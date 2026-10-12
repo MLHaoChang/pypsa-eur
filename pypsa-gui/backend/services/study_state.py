@@ -184,10 +184,15 @@ def edited_since(record, *, revision: int | None = None) -> bool | None:
 def finished_study_record(record) -> dict | None:
     """The on-disk mirror of a FINISHED study record (P33b D-1), or None.
 
-    A deep copy without the worker handle and stop event, for ``status`` in
-    {done, failed, aborted}; anything else (running, absent, malformed) is
-    None. A running record never reaches a save anyway
-    (``_refuse_save_during_study``).
+    A deep copy without the worker handle, the stop event and any private
+    ``_``-prefixed key, for ``status`` in {done, failed, aborted}; anything
+    else (running, absent, malformed) is None. A running record never reaches
+    a save anyway (``_refuse_save_during_study``).
+
+    The private keys are process state riding on the record, not the study's
+    result: ``_run_evidence`` (``services/run_evidence.py``) is the worker's
+    evidence token and holds a ``PosixPath``, which the restricted unpickler
+    refuses — so mirroring it lost the WHOLE ``results_state.pkl`` on load.
     """
     import copy
 
@@ -196,4 +201,5 @@ def finished_study_record(record) -> dict | None:
     if record.get("status") not in ("done", "failed", "aborted"):
         return None
     return copy.deepcopy(
-        {k: v for k, v in record.items() if k not in ("thread", "stop_event")})
+        {k: v for k, v in record.items()
+         if k not in ("thread", "stop_event") and not str(k).startswith("_")})

@@ -123,6 +123,13 @@ so post-tax figures read `not_established`, which the report already discloses.
   GS's `annuity_pv` salvage has no equivalent. Compile uses `fixed`, computed from the remaining
   annuities exactly as GS does today, and the report discloses it. GS's `BY_CONSTRUCTION` finding codes
   ("NPV = LP saving x annuity factor") are re-derived or dropped in `qa_decision_study.py`.
+  **Amended by IC S0b (2026-10-06, `2026-10-06-ic-s0b-replacements-terminal.md` S6, D10):** the engine
+  now computes GS's salvage itself, `TerminalValueRule(method="remaining_life_annuity")` (no `value`), so
+  compile uses `remaining_life_annuity` instead of a hand-computed `fixed`, with
+  `replacement_rule="part_lifetimes"` (D9). With both, financial close one year before COD,
+  `capex_phasing = [1.0]`, `analysis_years` = the horizon, no escalation and no tax, the case NPV is the LP
+  saving × the annuity factor exactly for whole-year part lifetimes, so the `BY_CONSTRUCTION` identity can
+  be kept.
 - **C3 Export.** IC prices export only through `export_price_ref`, a Library series (per org).
   Compile mints a flat export series per study (`series_store.put_series`, using the
   helper from U1 e) and binds it through `PUT /solver_config` → `_bind_commercial` (local "project org"
@@ -132,9 +139,13 @@ so post-tax figures read `not_established`, which the report already discloses.
   `wacc_nominal = the real rate`; the report states "real basis, 2020 EUR" through the basis note from
   U1 d.
 - **C5 Tornado cost.** The adapter builds one `FinanceCase` per option and derives every CAPEX and RATE
-  bound with `dataclasses.replace` on `assets` / `inputs` (as `engine._scaled` does), so no bound
-  re-runs the 8,760-hour value-flow ledger. Rate bounds make `wacc_gate` read `differs`; the adapter
-  accepts that flag for rate rows only (GS used to refuse `discount_rate_differs_from_lp`).
+  bound from it, so no bound re-runs the 8,760-hour value-flow ledger. **CAPEX bounds go only through
+  `finance.case.scale_capex(case, f)`** (it scales the parts, `overnight_cost` and fixed replacement entries
+  together; `dataclasses.replace(asset, overnight_cost=…)` on an asset with parts raises). **RATE bounds replace
+  `case.lp_basis` (`discount_rate`, `asset_discount_rates`) together with `inputs.wacc_nominal`**: the
+  `remaining_life_annuity` terminal value annuitises and discounts on the LP basis, so a WACC-only bound would
+  leave the salvage unchanged (amended 2026-10-06, IC S0b gate). Rate bounds make `wacc_gate` read `differs`;
+  the adapter accepts that flag for rate rows only (GS used to refuse `discount_rate_differs_from_lp`).
 - **C6 Study forks.** U2 verifies that `_bind_commercial` (series pins, FCA registry) works on a
   study-owned fork context (`pypsa_service._study_owned`), since OPEN-ITEMS 1 bites there before U3.
 

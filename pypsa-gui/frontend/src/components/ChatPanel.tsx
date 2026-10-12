@@ -1,3 +1,5 @@
+import AssistantResultCard from './AssistantResultCard'
+import DictationControls from './DictationControls'
 /**
  * Phase 3 chatbot integration v6 — ChatPanel.
  *
@@ -24,11 +26,16 @@
  *     never leaks a setInterval.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { acknowledgeMountedView, type NavigationAcknowledgement } from '../utils/verifiedNavigation'
+import { CheckedEvidenceCard } from './CheckedEvidenceCard'
+import { CheckedAnswerControl } from './CheckedAnswerControl'
+import { CHECKED_ANSWERS_QUERY_KEY, getCheckedAnswerCapabilities } from '../api/reliability'
 import toast from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
   createChatStream,
+  createChatProgressStream,
   getChatHistory,
   postChatAbort,
   postChatConfirm,
@@ -36,10 +43,12 @@ import {
   type InterruptedTurn,
 } from '../api/chat'
 import { useChatProfiles, useChatReadiness, CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
+import { applyUiNavigate } from './uiNavigate'
 import { nk } from '../utils/queryKeys'
 import { mismatchSentence } from '../utils/projectMismatch'
 import { moveProjectLock } from '../utils/projectActions'
 import { invalidateAssetQueries, isMutatingTier } from '../utils/assetWrite'
+import { parseApproval, verifyApprovedText, type ApprovedAnswerFrame } from '../utils/answerAssurance'
 import {
   deleteUpload,
   getUploadBlobUrl,
@@ -62,10 +71,12 @@ import { isNearBottom } from '../utils/chatUi'
 import { insertAtCursor } from '../utils/speechToText'
 import ChatMarkdown from './ChatMarkdown'
 import { UploadProgressToast } from './UploadProgressToast'
+import { ConfirmationCard } from './ConfirmationCard'
+export { guidedCardSummary } from './ConfirmationCard'
 
 // Phase D — extensions accepted by the file picker / drag-drop overlay.
 // Matches the upload_service.ALLOWED_MIME_TYPES allowlist.
-const UPLOAD_ACCEPT = '.xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp,.gif,.docx'
+const UPLOAD_ACCEPT = '.xlsx,.xls,.csv,.nc,.zip,.m,.pdf,.png,.jpg,.jpeg,.webp,.gif,.docx'
 const UPLOAD_MAX_BYTES = 25 * 1024 * 1024
 
 // F2 — every localStorage touch in this panel is a UI PREFERENCE: a dismissed
@@ -110,138 +121,6 @@ function _frame_data<T = Record<string, unknown>>(f: ChatFrame): T {
   return f.data as T
 }
 
-/**
- * Map chat tool panel_id → SlidePanel / special navigation targets.
- *
- * Not every value here is a `SlidePanel`. 'topology', 'map', 'properties',
- * 'palette', 'bottom', 'import_export', 'project_picker', 'new_project' and
- * 'chat' name surfaces that live outside `activeSlidePanel`; applyUiNavigate
- * dispatches on each of them explicitly before falling through to the
- * setSlidePanel branch. 'chat' in particular now resolves to the assistant
- * dock, not to a slide panel.
- */
-function _normalizePanelId(raw: string): string {
-  const key = raw.trim()
-  const aliases: Record<string, string> = {
-    Results: 'results', results: 'results',
-    SolverSettings: 'simparams', simparams: 'simparams',
-    TimeSeriesManager: 'timeseries', LoadProfileManager: 'timeseries', timeseries: 'timeseries',
-    VintagePeriodBoundsModal: 'capacityBounds', capacityBounds: 'capacityBounds',
-    OverviewPanel: 'overview', overview: 'overview',
-    IssuesPanel: 'issues', issues: 'issues',
-    Scenarios: 'scenarios', scenarios: 'scenarios',
-    Snapshots: 'snapshots', snapshots: 'snapshots',
-    Horizon: 'horizon', horizon: 'horizon',
-    SolveQueue: 'solveQueue', solveQueue: 'solveQueue',
-    Chat: 'chat', chat: 'chat',
-    Compare: 'compare', compare: 'compare',
-    Topology: 'topology', topology: 'topology',
-    MapCanvas: 'map', map: 'map',
-    PropertiesPanel: 'properties', properties: 'properties',
-    BottomPanel: 'bottom',
-    CommandPalette: 'palette', palette: 'palette',
-    ImportExport: 'import_export', import_export: 'import_export',
-    GenerationStack: 'results',
-    ProjectPicker: 'project_picker', project_picker: 'project_picker',
-    OpenProject: 'project_picker',
-    NewProject: 'new_project', new_project: 'new_project',
-    NewProjectWizard: 'new_project',
-    // Guided-mode spec §3.6 — the hub-design panel slot.
-    HubDesign: 'hubDesign', hubDesign: 'hubDesign', hub_design: 'hubDesign',
-  }
-  return aliases[key] ?? key
-}
-
-function applyUiNavigate(d: {
-  kind?: string
-  panel_id?: string
-  results_tab?: string
-  bottom_tab?: string
-  compare_rail?: boolean
-  compare_a?: string
-  compare_b?: string
-  compare_tab?: string
-  component_class?: string
-  name?: string
-  snapshot_iso?: string
-  period?: number | null
-  category?: string
-  metrics?: string[]
-  mode?: 'chronological' | 'duration' | 'monthly'
-  chart?: boolean
-}) {
-  const ui = useUIStore.getState()
-  if (d.kind === 'select_component' && d.component_class && d.name) {
-    ui.setSelectedComponent({ type: d.component_class, name: d.name })
-    ui.openRightPanel()
-    return
-  }
-  if (d.kind === 'open_asset_detail' && d.component_class && d.name) {
-    ui.requestAssetDetail({
-      componentClass: d.component_class,
-      name: d.name,
-      category: d.category,
-      metrics: d.metrics,
-      mode: d.mode,
-      chart: d.chart,
-    })
-    return
-  }
-  if (d.kind === 'set_snapshot' && d.snapshot_iso) {
-    // Snapshot picker is driven by ISO + optional period; store the index
-    // is unknown here — open Results so the user sees the picker context.
-    ui.setSlidePanel('results')
-    return
-  }
-  // kind === 'navigate' | legacy 'open_panel'
-  const panel = d.panel_id ? _normalizePanelId(d.panel_id) : null
-  if (panel === 'topology') {
-    ui.setSlidePanel(null)
-    ui.setCanvasView('blank')
-  } else if (panel === 'map') {
-    ui.setSlidePanel(null)
-    ui.setCanvasView('satellite')
-  } else if (panel === 'properties') {
-    ui.openRightPanel()
-  } else if (panel === 'palette') {
-    ui.setPaletteMode('all')
-  } else if (panel === 'import_export') {
-    ui.requestIoModal('import')
-  } else if (panel === 'project_picker') {
-    window.dispatchEvent(new CustomEvent('chat:open-project-picker'))
-  } else if (panel === 'new_project') {
-    window.dispatchEvent(new CustomEvent('chat:open-new-project-wizard'))
-  } else if (panel === 'bottom') {
-    // Expand bottom panel on a default tab if none specified below.
-    if (!d.bottom_tab) ui.requestBottomTab('Buses')
-  } else if (panel === 'compare') {
-    ui.setSlidePanel('results')
-    ui.setCompareRailOpen(true)
-  } else if (panel === 'chat') {
-    // 'chat' is no longer a SlidePanel member — it resolves to the dock. The
-    // agent can still be asked to open the assistant, and doing so no longer
-    // evicts whatever view is currently on screen.
-    ui.setAssistantDockOpen(true)
-  } else if (
-    panel === 'results' || panel === 'simparams' || panel === 'timeseries'
-    || panel === 'capacityBounds' || panel === 'overview' || panel === 'issues'
-    || panel === 'scenarios' || panel === 'snapshots' || panel === 'horizon'
-    || panel === 'solveQueue' || panel === 'hubDesign'
-  ) {
-    ui.setSlidePanel(panel)
-  }
-
-  if (d.results_tab) ui.requestResultsTab(d.results_tab)
-  if (d.bottom_tab) ui.requestBottomTab(d.bottom_tab)
-  if (typeof d.compare_rail === 'boolean') ui.setCompareRailOpen(d.compare_rail)
-  if (d.compare_a || d.compare_b || d.compare_tab) {
-    ui.requestCompareNav({
-      a: d.compare_a,
-      b: d.compare_b,
-      tab: d.compare_tab,
-    })
-  }
-}
 
 interface SessionInitFrame {
   session_id: string
@@ -254,6 +133,8 @@ interface SessionInitFrame {
   // admin changes / A8 fallbacks.
   profile_id?: string
   profile_label?: string
+  turn_id?: string
+  assurance?: { version: number; mode: string; state: string }
 }
 
 interface TokenFrame {
@@ -278,185 +159,6 @@ interface ToolPendingFrame {
   safety_tier: string
   confirmation_token: string
   ttl_seconds: number
-}
-
-// Tools that require an EXTRA typed-confirmation step (Phase 4 polish).
-// v4-MAJOR-1 / v6-F1: save_project force-overwrite needs the user to type
-// the EXISTING project name. v4-MINOR-1 + memory-rule: delete_project on
-// the active project also requires typed confirmation so a misclick can't
-// nuke the user's active work.
-const TYPED_CONFIRMATION_TOOLS = new Set<string>([
-  'delete_project', 'save_project', 'save_project_as',
-  'restore_project_snapshot', 'cascade_delete_bus',
-])
-
-function _typed_confirmation_target(tool: string, args: Record<string, unknown>): string | null {
-  // The user must type this exact string before Approve is unlocked.
-  if (tool === 'delete_project' || tool === 'cascade_delete_bus') {
-    return (args.name as string) ?? null
-  }
-  if (tool === 'save_project' || tool === 'save_project_as') {
-    return (args.name as string) ?? null
-  }
-  if (tool === 'restore_project_snapshot') {
-    return (args.snapshot_id as string) ?? null
-  }
-  return null
-}
-
-// P26 (carried from the P25 gate): in Guided every write-tier call asks for
-// confirmation, but some write-tier tools do not edit the network — they
-// write a file, back the project up, or open another project. The card says
-// what the call is for; "Confirm this change" stays for real edits. Keyed on
-// the tier as well, so a tool that ever moves tier falls back to the tier's
-// wording. Expert never reads this.
-const GUIDED_WRITE_PURPOSE: Record<string, { header: string; note: string }> = {}
-for (const t of ['export_to_csv', 'export_to_excel', 'export_preview_png', 'export_chat_summary',
-  'export_asset_results', 'gridspine_export_handoff_bundle']) {
-  GUIDED_WRITE_PURPOSE[t] = { header: 'Confirm: export a file',
-    note: 'Writes a file you can download. Your network is not changed.' }
-}
-GUIDED_WRITE_PURPOSE.create_project_snapshot = { header: 'Confirm: save a copy',
-  note: 'Saves a backup copy of the project as it is now. Your network is not changed.' }
-for (const t of ['load_project', 'activate_project']) {
-  GUIDED_WRITE_PURPOSE[t] = { header: 'Confirm: open a project',
-    note: 'Switches the workbench to another project. Save first if you have unsaved edits.' }
-}
-
-function guidedConfirmWording(tool: string, tier: string): { header: string; note: string | null } {
-  if (tier !== 'write') return { header: 'Confirm', note: null }
-  return Object.prototype.hasOwnProperty.call(GUIDED_WRITE_PURPOSE, tool)
-    ? GUIDED_WRITE_PURPOSE[tool]
-    : { header: 'Confirm this change', note: null }
-}
-
-// P26 (coordinator item 5): a Guided card leads with one plain sentence
-// about the call; the tool id and its JSON arguments move into a collapsed
-// "Details". Unknown tools fall back to "The assistant wants to use <tool
-// name in words>". Expert never reads this.
-const _str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null)
-const _count = (v: unknown): number | null => (Array.isArray(v) ? v.length : null)
-const GUIDED_CARD_SUMMARY: Record<string, (a: Record<string, unknown>) => string> = {
-  run_eh_study: (a) => {
-    const n = typeof a.budget_solves === 'number' && Number.isFinite(a.budget_solves) ? a.budget_solves : null
-    return n != null
-      ? `Run the reliability study for this site (about ${n} calculation steps)`
-      : 'Run the reliability study for this site'
-  },
-  run_fmea_sweep: () => 'Run the equipment-failure check (FMEA)',
-  run_simulation: () => 'Run a full calculation of the network',
-  update_component: (a) => `Change the settings of ${_str(a.name) ?? 'one component'}`,
-  bulk_update_components: (a) => {
-    const n = _count(a.names)
-    return n != null ? `Change the settings of ${n} components` : 'Change the settings of several components'
-  },
-  update_solver_config: (a) => {
-    const p = (a.partial ?? {}) as Record<string, unknown>
-    return typeof p.voll === 'number' && Number.isFinite(p.voll)
-      ? `Set the price of undelivered energy to €${p.voll.toLocaleString('en-US')} per MWh`
-      : 'Change the study settings'
-  },
-  put_stress_scenarios: (a) => {
-    const n = _count(a.scenarios)
-    return n != null ? `Save the list of hard conditions to test (${n} scenarios)`
-      : 'Save the list of hard conditions to test'
-  },
-  create_project_snapshot: (a) => _str(a.label)
-    ? `Save a backup copy named "${a.label}"` : 'Save a backup copy of the project',
-  load_project: (a) => _str(a.name) ? `Open the project ${a.name}` : 'Open another project',
-  activate_project: (a) => {
-    const n = _str(a.project_id) ?? _str(a.name)
-    return n ? `Open the project ${n}` : 'Open another project'
-  },
-  save_project: (a) => {
-    const n = _str(a.name)
-    const base = n ? `Save the project ${n}` : 'Save the project'
-    return a.force === true ? `${base}, overwriting the saved version` : base
-  },
-  // P26 gate B2: every destructive and execution tool names its target
-  // (BE/services/chat_tools_schema.py safety tiers), because the raw call is
-  // no longer the first thing on the card.
-  delete_component: (a) => `Delete ${_str(a.name) ?? 'a component'} from the network`,
-  cascade_delete_bus: (a) => `Delete the bus ${_str(a.name) ?? '(unnamed)'} and everything connected to it`,
-  batch_delete_components: (a) => {
-    const names = Array.isArray(a.names) ? a.names.map(String) : []
-    if (!names.length) return 'Delete several components from the network'
-    const shown = names.slice(0, 5).join(', ')
-    const rest = names.length - 5
-    return `Delete ${names.length} components from the network: ${shown}${rest > 0 ? ` and ${rest} more` : ''}`
-  },
-  cluster_network: (a) => typeof a.n_clusters === 'number'
-    ? `Simplify the network by merging buses into ${a.n_clusters} groups (replaces the current network)`
-    : 'Simplify the network by merging buses (replaces the current network)',
-  delete_vintage_bounds: (a) => `Remove the build-year limits of ${_str(a.name) ?? 'a component'}`,
-  delete_timeseries: (a) => `Delete ${_str(a.attribute) ? `the ${a.attribute}` : 'a'} time series of ${
-    _str(a.name) ?? 'a component'}`,
-  run_ac_pf_stage: () => 'Run the power-flow check on the network',
-  abort_simulation: () => 'Stop the running calculation',
-  force_reset_simulation: () => 'Force-reset the calculation state (stops anything running)',
-  run_frontier_study: () => 'Run the cost-versus-reliability check',
-  run_mc_study: (a) => typeof a.draws === 'number'
-    ? `Run the reliability simulation (${a.draws} runs)` : 'Run the reliability simulation',
-  run_coupling_loop: (a) => typeof a.target_lole_h === 'number'
-    ? `Size the design to meet ${a.target_lole_h} h/yr of shortfall (repeated calculations)`
-    : 'Size the design to meet the shortfall goal (repeated calculations)',
-  run_margin_loop: (a) => typeof a.target_lole_h === 'number'
-    ? `Size the reserve margin to meet ${a.target_lole_h} h/yr of shortfall (repeated calculations)`
-    : 'Size the reserve margin to meet the shortfall goal (repeated calculations)',
-  abort_adequacy_study: (a) => `Stop the running ${_str(a.study) ?? 'reliability'} study`,
-  solve_queue_enqueue: (a) => `Queue a calculation of the project ${_str(a.project_id) ?? '(current)'}`,
-  solve_queue_abort: (a) => `Stop the queued calculation ${_str(a.job_id) ?? ''}`.trimEnd(),
-  save_project_as: (a) => `Save the project under the new name ${_str(a.name) ?? '(unnamed)'}`,
-  save_project_a_copy: (a) => `Save a copy of the project named ${_str(a.name) ?? '(unnamed)'}`,
-  rename_project: (a) => `Rename the project ${_str(a.name) ?? '(unnamed)'} to ${_str(a.new_name) ?? '(unnamed)'}`,
-  delete_project: (a) => `Delete the project ${_str(a.name) ?? '(unnamed)'}`
-    + (a.cascade === true ? ' and every scenario made from it' : ''),
-  create_scenario: (a) => `Create the scenario ${_str(a.new_name) ?? '(unnamed)'} from ${_str(a.base) ?? 'the project'}`,
-  import_project_bundle: (a) => _str(a.filename)
-    ? `Import a project from the file ${a.filename}` : 'Import a project from a file',
-  create_project_from_template: (a) =>
-    `Create the project ${_str(a.new_name) ?? '(unnamed)'} from the ${_str(a.template_id) ?? ''} template`,
-  restore_project_snapshot: (a) =>
-    `Restore the project ${_str(a.name) ?? '(unnamed)'} to the backup ${_str(a.snapshot_id) ?? ''} (replaces the current network)`,
-  delete_project_snapshot: (a) =>
-    `Delete the backup ${_str(a.snapshot_id) ?? ''} of the project ${_str(a.name) ?? '(unnamed)'}`,
-  clear_audit_log: () => 'Clear the change log of this project',
-  undo_last: () => 'Undo the last change to the network',
-  clear_chat_history: () => "Delete this project's chat history",
-  apply_demand_from_excel: (a) =>
-    `Replace the demand of ${_str(a.load_name) ?? 'a load'} with values from the uploaded file ${_str(a.file_id) ?? ''}`.trimEnd(),
-  delete_upload: (a) => `Delete the uploaded file ${_str(a.file_id) ?? ''}`.trimEnd(),
-  reconstruct_network_from_image: (a) =>
-    `Build the network from the uploaded image ${_str(a.file_id) ?? ''} (replaces the current network)`,
-  clear_uploads: () => "Delete every uploaded file of this project",
-  set_active_profile: (a) => `Switch the assistant to the model profile ${_str(a.profile_id) ?? ''}`.trimEnd(),
-  gridspine_run_pipeline: (a) => `Run the GridSpine pipeline for the project ${_str(a.project_id) ?? '(current)'}`,
-}
-for (const t of ['import_network_nc', 'import_csv_bundle', 'import_excel', 'import_matpower']) {
-  GUIDED_CARD_SUMMARY[t] = (a) => (_str(a.filename)
-    ? `Replace the whole network with the imported file ${a.filename}`
-    : 'Replace the whole network with an imported file')
-}
-// The fallback names the first identifying argument it finds, in this order.
-const IDENTIFYING_ARGS = ['name', 'names', 'component', 'project_id', 'project', 'file_id', 'filename', 'path']
-function _identifying(a: Record<string, unknown>): string | null {
-  for (const k of IDENTIFYING_ARGS) {
-    const v = a[k]
-    if (typeof v === 'string' && v.trim()) return v
-    if (Array.isArray(v) && v.length) return v.map(String).join(', ')
-  }
-  return null
-}
-for (const t of ['export_to_csv', 'export_to_excel', 'export_preview_png', 'export_chat_summary',
-  'export_asset_results', 'gridspine_export_handoff_bundle']) {
-  GUIDED_CARD_SUMMARY[t] = (a) => (_str(a.filename) ? `Export the file ${a.filename}` : 'Export a file')
-}
-
-export function guidedCardSummary(tool: string, args: Record<string, unknown>): string {
-  const f = Object.prototype.hasOwnProperty.call(GUIDED_CARD_SUMMARY, tool) ? GUIDED_CARD_SUMMARY[tool] : null
-  if (f) return f(args ?? {})
-  const target = _identifying(args ?? {})
-  return `The assistant wants to use ${tool.replace(/_/g, ' ')}${target ? ` on ${target}` : ''}`
 }
 
 // P26 (coordinator item 6): after a Deny, Guided shows one plain line. The
@@ -577,6 +279,7 @@ interface ToolErrorFrame {
 }
 
 interface TurnDoneFrame {
+  answer_id?: string
   usage?: {
     input_tokens?: number
     output_tokens?: number
@@ -666,7 +369,8 @@ export function ChoiceCard() {
   const streaming = useChatStore((s) => s.streaming)
   if (!choice) return null
   const pick = (label: string) => {
-    sendRequest(label, { source: 'choice-card', label: `${choice.title}: ${label}` })
+    sendRequest(label, { source: 'choice-card', label: `${choice.title}: ${label}`,
+      ...(choice.requiresChecked ? { requiresChecked: true } : {}) })
     setChoice(null)
   }
   return (
@@ -714,226 +418,6 @@ export function ChoiceCard() {
           Or type your own answer below.
         </div>
       )}
-    </div>
-  )
-}
-
-function ConfirmationCard() {
-  const pending = useChatStore((s) => s.pending)
-  const setPending = useChatStore((s) => s.setPending)
-  const setError = useChatStore((s) => s.setError)
-  const sessionId = useChatStore((s) => s.sessionId)
-  const appendMessage = useChatStore((s) => s.appendMessage)
-  const uiMode = useUIStore((s) => s.uiMode)
-  // P27b gate note 6: approving runs the write on the BACKEND's project — while
-  // this tab and the backend disagree, Approve waits (Deny writes nothing).
-  const projectMismatch = useUIStore((s) => s.projectMismatch)
-  const mismatchLine = projectMismatch ? mismatchSentence(projectMismatch) : null
-  const [secondsLeft, setSecondsLeft] = useState<number>(0)
-  const [typedConfirmation, setTypedConfirmation] = useState<string>('')
-  const timerRef = useRef<number | null>(null)
-
-  // Reset the typed-confirmation field whenever the pending card changes.
-  useEffect(() => { setTypedConfirmation('') }, [pending?.confirmation_token])
-
-  // Countdown timer. Tracked via ref so a re-render or unmount never leaks.
-  useEffect(() => {
-    if (timerRef.current != null) {
-      clearInterval(timerRef.current)
-      timerRef.current = null
-    }
-    if (!pending) {
-      setSecondsLeft(0)
-      return
-    }
-    const tick = () => {
-      const left = Math.max(0, Math.floor((pending.expires_at_epoch_ms - Date.now()) / 1000))
-      setSecondsLeft(left)
-      if (left <= 0 && timerRef.current != null) {
-        clearInterval(timerRef.current)
-        timerRef.current = null
-        // The countdown used to just stop here, leaving a dead card on
-        // screen with Approve still clickable — which 409s
-        // `confirmation_expired`. Teaching a user that confirming an expired
-        // destructive action is harmless is the one lesson this card must
-        // not give. Withdraw it and say why; the agent re-prompts with a
-        // fresh token, which is the flow the backend already implements.
-        // Only this card: a newer one may already be showing (R1).
-        if (useChatStore.getState().pending?.confirmation_token === pending.confirmation_token) {
-          setPending(null)
-        }
-        // P25 re-gate note 1: a card left to lapse ends its card run like a
-        // Deny — the rest of that click's queued actions are dropped.
-        const lapsedGroup = useChatStore.getState().activeRequest?.group
-        if (lapsedGroup) useChatStore.getState().dropRequestGroup(lapsedGroup)
-        setError({
-          error_kind: 'confirmation_expired',
-          message: `The confirmation for ${pending.tool_name} expired before it was answered. Ask again to retry.`,
-        })
-      }
-    }
-    tick()
-    timerRef.current = window.setInterval(tick, 250) as unknown as number
-    return () => {
-      if (timerRef.current != null) {
-        clearInterval(timerRef.current)
-        timerRef.current = null
-      }
-    }
-  }, [pending])
-
-  // P25 re-gate R1: several Guided writes in one response are carded one
-  // after the other, and the NEXT card's SSE frame often lands while this
-  // card's /confirm POST is still in flight. Clear only the card that was
-  // answered — the token is captured before the await.
-  const clearIfStill = useCallback((token: string) => {
-    if (useChatStore.getState().pending?.confirmation_token === token) setPending(null)
-  }, [setPending])
-
-  const onApprove = useCallback(async () => {
-    if (!pending || !sessionId) return
-    if (useUIStore.getState().projectMismatch) return
-    const token = pending.confirmation_token
-    try {
-      await postChatConfirm(sessionId, {
-        token, decision: 'approve',
-      })
-      clearIfStill(token)
-    } catch (err) {
-      toast.error(`confirmation failed: ${(err as Error).message}`)
-    }
-  }, [pending, sessionId, clearIfStill])
-
-  const onDeny = useCallback(async () => {
-    if (!pending || !sessionId) return
-    const token = pending.confirmation_token
-    try {
-      await postChatConfirm(sessionId, {
-        token, decision: 'deny',
-      })
-      // P25 gate: a denial ends that card's run — the card's remaining
-      // queued actions (Improve: one message per action) are dropped.
-      const group = useChatStore.getState().activeRequest?.group
-      if (group) useChatStore.getState().dropRequestGroup(group)
-      appendMessage({
-        role: 'tool', content: `denied: ${pending.tool_name}`,
-        tool_use_id: pending.tool_use_id, tool_name: pending.tool_name,
-      })
-      clearIfStill(token)
-    } catch (err) {
-      toast.error(`confirmation failed: ${(err as Error).message}`)
-    }
-  }, [pending, sessionId, clearIfStill, appendMessage])
-
-  if (!pending) return null
-
-  // Phase 4 — typed confirmation widget for the highest-risk tools.
-  // v4-MAJOR-1 / v6-F1: save_project + save_project_as (force-overwrite path),
-  // v4-MINOR-1: delete_project, restore_project_snapshot, cascade_delete_bus.
-  const requiresTyped = TYPED_CONFIRMATION_TOOLS.has(pending.tool_name)
-  const typedTarget = requiresTyped
-    ? _typed_confirmation_target(pending.tool_name, pending.args)
-    : null
-  const typedSatisfied = !requiresTyped || (typedTarget != null && typedConfirmation === typedTarget)
-  const guidedWording = uiMode === 'guided'
-    ? guidedConfirmWording(pending.tool_name, pending.safety_tier)
-    : null
-
-  return (
-    <div
-      // A destructive action blocking on the user is the strongest reason
-      // this panel has to interrupt a screen reader. `alertdialog` both
-      // interrupts AND says the thing is interactive — `alert` alone would
-      // announce the text and imply there is nothing to do about it.
-      // aria-modal is false because focus is deliberately NOT trapped: the
-      // card sits inline in the transcript and the user must stay free to
-      // scroll back and read what they are approving.
-      role="alertdialog"
-      aria-modal="false"
-      aria-labelledby="chat-confirmation-title"
-      className="border border-amber-500/60 bg-amber-500/5 rounded p-3 mx-3 my-2"
-      data-testid="chat-confirmation-card"
-      data-tool-name={pending.tool_name}
-      data-safety-tier={pending.safety_tier}
-    >
-      <div className={uiMode === 'guided'
-        ? 'text-[12px] font-semibold text-amber-500 mb-1'
-        : 'text-[11px] uppercase tracking-wider text-amber-500 mb-1'}
-        data-testid="chat-confirmation-header">
-        {/* P25 re-gate note 2 / P26: plain words in Guided; Expert unchanged. */}
-        {guidedWording
-          ? guidedWording.header
-          : <>Confirm · {pending.safety_tier}</>}
-      </div>
-      {guidedWording?.note && (
-        <div className="text-[11px] text-muted mb-1" data-testid="chat-confirmation-note">
-          {guidedWording.note}
-        </div>
-      )}
-      {guidedWording ? (
-        <>
-          <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text"
-            data-testid="chat-confirmation-summary">
-            {guidedCardSummary(pending.tool_name, pending.args)}
-          </div>
-          {/* P26 gate B2: a destructive card shows its raw call by default. */}
-          <details className="mb-2 text-[11px] text-muted" data-testid="chat-confirmation-details"
-            open={pending.safety_tier === 'destructive'}>
-            <summary className="cursor-pointer select-none">Details</summary>
-            <div className="font-mono mt-1">{pending.tool_name}</div>
-            <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mt-1 whitespace-pre-wrap break-all">
-              {JSON.stringify(pending.args, null, 2)}
-            </pre>
-          </details>
-        </>
-      ) : (
-        <>
-          <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text">
-            {pending.tool_name}
-          </div>
-          <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mb-2 whitespace-pre-wrap break-all">
-            {JSON.stringify(pending.args, null, 2)}
-          </pre>
-        </>
-      )}
-      {requiresTyped && typedTarget && (
-        <div className="mb-2" data-testid="chat-typed-confirmation">
-          <div className="text-[10px] text-muted mb-1">
-            Type <span className="font-mono text-text">{typedTarget}</span> to confirm:
-          </div>
-          <input
-            className="w-full bg-bg border border-border rounded px-2 py-1 text-xs font-mono"
-            value={typedConfirmation}
-            onChange={(e) => setTypedConfirmation(e.target.value)}
-            placeholder={typedTarget}
-            data-testid="chat-typed-confirmation-input"
-          />
-        </div>
-      )}
-      {mismatchLine && (
-        <div className="mb-2 text-[11px] text-warn" data-testid="chat-confirm-mismatch">{mismatchLine}</div>
-      )}
-      <div className="flex items-center gap-2">
-        <button
-          className="px-2 py-1 text-xs rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 disabled:opacity-40 disabled:cursor-not-allowed"
-          onClick={onApprove}
-          disabled={!typedSatisfied || !!mismatchLine}
-          title={mismatchLine ?? undefined}
-          data-testid="chat-confirm-approve"
-        >
-          Approve
-        </button>
-        <button
-          className="px-2 py-1 text-xs rounded bg-bg-2 hover:bg-bg-3 border border-border"
-          onClick={onDeny}
-          data-testid="chat-confirm-deny"
-        >
-          Deny
-        </button>
-        <span className="font-mono text-[10px] text-muted ml-auto">
-          {secondsLeft}s
-        </span>
-      </div>
     </div>
   )
 }
@@ -1024,6 +508,15 @@ export const KIND_COPY: Record<
   // RETRYABLE_ERROR_KINDS above — the file knew the kind in one constant and
   // not the other, so the retry button appeared under a raw snake_case title.
   internal_error: { title: 'Something went wrong on the server' },
+  assurance_unavailable: { title: 'Checked answers are unavailable' },
+  assurance_context_changed: { title: 'The project changed while checking the answer' },
+  assurance_context_persistence_failed: { title: 'Checked conversation state could not be saved' },
+  wrong_replica: { title: 'This chat belongs to another application worker' },
+  assurance_publication_failed: { title: 'The checked answer could not be published' },
+  task_checkpoint_failed: {
+    title: 'Task progress could not be saved',
+    body: 'Inspect the task before retrying.',
+  },
   turn_already_in_flight: { title: 'A turn is already running' },
   project_switched_mid_turn: { title: 'The active project changed mid-turn' },
   unknown_session: { title: 'That chat session is no longer known' },
@@ -1112,6 +605,9 @@ export const TOOL_ERROR_BANNER_KINDS = new Set([
   'inactive_acting_user',
   'solver_in_flight', 'parallel_destructive_not_allowed',
   'tool_call_cap_exceeded',
+  'assurance_unavailable', 'assurance_context_changed', 'assurance_context_persistence_failed', 'assurance_publication_failed',
+  'wrong_replica',
+  'task_checkpoint_failed',
   // `set_active_profile` raises these as HTTPExceptions, which the dispatcher
   // converts to `tool_error` frames — so copy alone was unreachable and the
   // user got the truncated gray tool line. Same shape as the
@@ -1641,6 +1137,21 @@ export default function ChatPanel() {
   // tool_result / tool_error. `tool_result` frames don't carry the tier, so
   // this map is how a completion knows whether it mutated (assetWrite fix).
   const toolTierRef = useRef(new Map<string, string>())
+  const streamGenerationRef = useRef(0)
+  const streamProjectRef = useRef(useUIStore.getState().currentProject)
+  // Issue 11 — detached solver progress observer (GET …/progress). Independent
+  // of the turn SSE so reads can continue while the solve still emits lines.
+  const progressCleanupRef = useRef<(() => void) | null>(null)
+  const stopProgressObserver = useCallback(() => {
+    try { progressCleanupRef.current?.() } catch { /* idempotent */ }
+    progressCleanupRef.current = null
+  }, [])
+  const assuranceRef = useRef<{
+    strict: boolean; text: string; approved: ApprovedAnswerFrame | null;
+    requested?: boolean;
+    turnId?: string; sessionId?: string; project: string | null; completed: boolean;
+    navigationCompleted?: Set<string>;
+  }>({ strict: false, text: '', approved: null, project: null, completed: false })
   const sessionId = useChatStore((s) => s.sessionId)
   const setSessionId = useChatStore((s) => s.setSessionId)
   const profileId = useChatStore((s) => s.profileId)
@@ -1687,6 +1198,20 @@ export default function ChatPanel() {
   const mismatchLine = projectMismatch ? mismatchSentence(projectMismatch) : null
 
   const currentProject = useUIStore((s) => s.currentProject)
+  const checkedCapabilities = useQuery({ queryKey: CHECKED_ANSWERS_QUERY_KEY,
+    queryFn: getCheckedAnswerCapabilities, retry: false, refetchInterval: 30_000 })
+  const [checkedSelection, setCheckedSelection] = useState<{ project: string | null; chat: number; on: boolean }>(
+    { project: null, chat: -1, on: false },
+  )
+  const optedIntoChecks = checkedSelection.on && checkedSelection.project === currentProject
+    && checkedSelection.chat === newChatSeq
+  useEffect(() => {
+    setCheckedSelection({ project: currentProject, chat: newChatSeq, on: false })
+  }, [currentProject, newChatSeq])
+  const requiredChecks = checkedCapabilities.data?.mode === 'strict'
+  const checksAvailable = !checkedCapabilities.isError && (requiredChecks
+    || (checkedCapabilities.data?.mode === 'pilot'
+      && Object.values(checkedCapabilities.data.profiles).some(p => p.enabled)))
   // The start menu for where the user is (chat harness issue 03). Fetched
   // whenever the panel is mounted so the chips are known by the time the
   // greeting renders; a click goes through `sendRequest` like a card does.
@@ -1698,6 +1223,11 @@ export default function ChatPanel() {
   // comment there for why AssistantDock's collapsed state has to be visible
   // here at all.
   const assistantDockOpen = useUIStore((s) => s.assistantDockOpen)
+  const assistantEntry = useUIStore((s) => s.assistantEntry)
+  const [dictationPanelRequested, setDictationPanelRequested] = useState(false)
+  const consumeDictationRequest = useCallback(() => {
+    setDictationPanelRequested(false)
+  }, [])
   const assistantSpeakEnabled = useUIStore((s) => s.assistantSpeakEnabled)
   const toggleAssistantSpeak = useUIStore((s) => s.toggleAssistantSpeak)
   const resetChatForProjectSwitch = useChatStore((s) => s.resetForProjectSwitch)
@@ -1713,6 +1243,8 @@ export default function ChatPanel() {
   // Reset chat state on project switch (mirrors simulationStore pattern).
   useEffect(() => {
     if (prevProjectRef.current !== undefined && prevProjectRef.current !== currentProject) {
+      if (streamProjectRef.current !== currentProject) streamGenerationRef.current += 1
+      stopProgressObserver()
       resetChatForProjectSwitch()
       // N-1 — the recovery banners describe ONE hydration of ONE project, as
       // their declaration comment says. They were only ever reassigned inside
@@ -1725,7 +1257,8 @@ export default function ChatPanel() {
       setInterruptedTurn(null)
     }
     prevProjectRef.current = currentProject
-  }, [currentProject, resetChatForProjectSwitch])
+    streamProjectRef.current = currentProject
+  }, [currentProject, resetChatForProjectSwitch, stopProgressObserver])
 
   // N-1 — same for "start a new chat": the banners are about the transcript
   // being replaced, so they must not outlive it. `newChatSeq` is the counter
@@ -1734,11 +1267,13 @@ export default function ChatPanel() {
   const prevNewChatSeqRef = useRef<number>(newChatSeq)
   useEffect(() => {
     if (prevNewChatSeqRef.current !== newChatSeq) {
+      streamGenerationRef.current += 1
+      stopProgressObserver()
       prevNewChatSeqRef.current = newChatSeq
       setHistoryGap(0)
       setInterruptedTurn(null)
     }
-  }, [newChatSeq])
+  }, [newChatSeq, stopProgressObserver])
 
   // Hydrate from chat.jsonl whenever a project becomes active. The backend
   // also rehydrates `session.messages` so subsequent turns can thread prior
@@ -1827,6 +1362,7 @@ export default function ChatPanel() {
             role: 'user',
             content: t.user,
             attachment_file_ids: t.attachment_file_ids,
+            ...(t.requires_checked === true || (t.answer_id && t.receipt) ? { requiresChecked: true } : {}),
             ts: Math.round((t.ts || 0) * 1000),
           })
         }
@@ -1846,6 +1382,8 @@ export default function ChatPanel() {
             id: `replay-a-${counter++}`,
             role: 'assistant',
             content: assistantText,
+            answer_id: t.answer_id,
+            receipt: t.receipt,
             ts: Math.round((t.ts || 0) * 1000),
           })
         }
@@ -2206,8 +1744,10 @@ export default function ChatPanel() {
     })
   }, [])
 
+  const [dictationLanguage, setDictationLanguage] = useState('auto')
   const speech = useSpeechToText({
     enabled: !streaming,
+    language: dictationLanguage === 'auto' ? (navigator.language || 'en-US') : dictationLanguage,
     onFinal: onSpeechFinal,
     onError: (msg) => toast.error(msg),
   })
@@ -2345,6 +1885,25 @@ export default function ChatPanel() {
     switch (frame.event) {
       case 'session_init': {
         const d = _frame_data<SessionInitFrame>(frame)
+        const requested = assuranceRef.current.requested === true
+        if (requested && (d.assurance?.version !== 1 || d.assurance.mode !== 'strict'
+          || d.assurance.state !== 'checking' || typeof d.turn_id !== 'string' || !d.turn_id || d.turn_id.length > 128
+          || typeof d.session_id !== 'string' || !d.session_id || d.session_id.length > 128 || assuranceRef.current.turnId)) {
+          streamGenerationRef.current += 1
+          assuranceRef.current = { strict: true, requested: true, text: '', approved: null,
+            completed: true, project: null }
+          voiceTurnRef.current = false
+          setError({ error_kind: 'assurance_publication_failed',
+            message: 'The server did not acknowledge the requested answer checks. No answer was shown.' })
+          closeStream()
+          break
+        }
+        assuranceRef.current = {
+          strict: d.assurance?.mode === 'strict', text: '', approved: null,
+          requested,
+          turnId: d.turn_id, sessionId: d.session_id,
+          project: useUIStore.getState().currentProject, completed: false,
+        }
         setSessionId(d.session_id)
         // A new turn answers (or moves past) any Choice card still showing.
         setChoice(null)
@@ -2363,6 +1922,16 @@ export default function ChatPanel() {
       }
       case 'token': {
         const d = _frame_data<TokenFrame>(frame)
+        if (assuranceRef.current.strict) {
+          const state = assuranceRef.current
+          if (!state.completed && state.approved && typeof d.delta === 'string') {
+            if (state.text.length + d.delta.length > 65536) {
+              state.approved = null
+              state.text = ''
+            } else state.text += d.delta
+          }
+          break
+        }
         // Accumulate into the active assistant bubble instead of spawning
         // one bubble per delta — keeps the message list readable when
         // Sonnet streams 2k tokens of output.
@@ -2370,8 +1939,31 @@ export default function ChatPanel() {
         break
       }
       case 'thinking': {
+        if (assuranceRef.current.strict) break
         const d = _frame_data<ThinkingFrame>(frame)
         appendThinkingDelta(d.delta)
+        break
+      }
+      case 'answer_approved': {
+        const state = assuranceRef.current
+        if (!state.strict || state.completed) break
+        const approved = parseApproval(frame.data)
+        if (!approved || state.approved || !state.turnId || approved.turn_id !== state.turnId) {
+          state.approved = null
+          state.completed = true
+          state.text = ''
+          break
+        }
+        state.approved = approved
+        break
+      }
+      case 'answer_progress': {
+        if (!assuranceRef.current.strict) break
+        const state = assuranceRef.current
+        if (state.turnId && frame.data.turn_id !== state.turnId) break
+        if (frame.data.version === 1 && frame.data.stage === 'checking_claims' && frame.data.status === 'running') {
+          appendMessage({ role: 'system', content: 'Checking answer against project evidence.' })
+        }
         break
       }
       case 'model_fallback': {
@@ -2430,7 +2022,7 @@ export default function ChatPanel() {
         break
       }
       case 'tool_result': {
-        const d = _frame_data<{ tool_name: string; tool_use_id: string }>(frame)
+        const d = _frame_data<{ tool_name: string; tool_use_id: string; result?: unknown }>(frame)
         // The chat-staleness fix: a completed tool whose tier is not `read`
         // may have changed any component, and the caches MUST follow — a
         // stale row here is spread into the user's next manual PUT and the
@@ -2447,9 +2039,44 @@ export default function ChatPanel() {
         }
         appendMessage({
           role: 'tool',
-          content: `✓ ${d.tool_name}`,
+          content: (() => {
+            const metadata = (d.result as { _assurance?: { outcome?: string } } | undefined)?._assurance
+            if (metadata || assuranceRef.current.strict) {
+              const outcome = assuranceRef.current.navigationCompleted?.has(d.tool_use_id) ? 'completed' : metadata?.outcome ?? 'uncertain'
+              return `${outcome === 'completed' ? '✓' : '…'} ${d.tool_name} (${outcome})`
+            }
+            return `✓ ${d.tool_name}`
+          })(),
+          // Checked artifacts/task projections are not implemented in this pilot.
+          tool_result: assuranceRef.current.strict ? undefined : d.result,
           tool_use_id: d.tool_use_id, tool_name: d.tool_name,
         })
+        // Issue 11 — foreground solve handoff: subscribe to the detached
+        // progress ring so PHASE/VALIDATION lines keep arriving after the
+        // turn SSE closes. Same tool_progress frames as an in-turn bridge.
+        {
+          const result = d.result as { detached_progress?: unknown } | undefined
+          if (result?.detached_progress === true) {
+            const sid = useChatStore.getState().sessionId
+            if (sid) {
+              stopProgressObserver()
+              progressCleanupRef.current = createChatProgressStream(
+                sid,
+                (progressFrame) => {
+                  if (progressFrame.event !== 'tool_progress') return
+                  const p = progressFrame.data as {
+                    tool_use_id?: string; kind?: string; line?: string
+                  }
+                  if (p.tool_use_id && typeof p.kind === 'string' && typeof p.line === 'string') {
+                    useChatStore.getState().appendToolProgress(
+                      p.tool_use_id, { kind: p.kind, line: p.line },
+                    )
+                  }
+                },
+              )
+            }
+          }
+        }
         break
       }
       case 'tool_error': {
@@ -2494,6 +2121,7 @@ export default function ChatPanel() {
       case 'choice_request': {
         const d = _frame_data<ChoiceRequestFrame>(frame)
         setChoice({
+          ...(assuranceRef.current.strict ? { requiresChecked: true } : {}),
           tool_use_id: d.tool_use_id,
           title: d.title,
           question: d.question,
@@ -2504,6 +2132,8 @@ export default function ChatPanel() {
       }
       case 'ui_event': {
         const d = _frame_data<{
+          acknowledgement?: NavigationAcknowledgement
+          tool_use_id?: string
           kind?: string
           panel_id?: string
           results_tab?: string
@@ -2518,11 +2148,31 @@ export default function ChatPanel() {
           period?: number | null
           category?: string
           metrics?: string[]
-          mode?: 'chronological' | 'duration' | 'monthly'
+          mode?: 'chronological' | 'duration' | 'monthly' | string
           chart?: boolean
+          run_id?: string
+          section?: string
+          baseline_run_id?: string
+          status?: string
+          fingerprint?: string
+          evidence_available?: boolean
         }>(frame)
         try {
           applyUiNavigate(d)
+          if (d.acknowledgement && assuranceRef.current.strict) {
+            const expected = d.acknowledgement
+            const state = assuranceRef.current
+            acknowledgeMountedView(expected, () => assuranceRef.current === state
+              && streamGenerationRef.current === expected.binding_generation
+              && useUIStore.getState().currentProject === expected.project_name, () => {
+              if (!d.tool_use_id) return
+              state.navigationCompleted ??= new Set()
+              state.navigationCompleted.add(d.tool_use_id)
+              useChatStore.setState(s => ({ messages: s.messages.map(m =>
+                m.role === 'tool' && m.tool_use_id === d.tool_use_id
+                  ? { ...m, content: '✓ ui_open_panel (completed)' } : m) }))
+            })
+          }
         } catch (e) {
           console.warn('ui_event apply failed', e)
         }
@@ -2593,17 +2243,47 @@ export default function ChatPanel() {
         break
       }
       case 'turn_done': {
+        const d = _frame_data<TurnDoneFrame>(frame)
+        const state = assuranceRef.current
+        if (state.strict) {
+          const speak = voiceTurnRef.current
+          if (!state.completed && state.approved && d.answer_id === state.approved.answer_id) {
+            state.completed = true
+            const approved = state.approved
+            const generation = streamGenerationRef.current
+            void verifyApprovedText(state.text, approved.receipt.content_sha256).then(matches => {
+              if (assuranceRef.current !== state
+                || streamGenerationRef.current !== generation
+                || useUIStore.getState().currentProject !== state.project
+                || useChatStore.getState().sessionId !== state.sessionId) return
+              if (!matches) {
+                setError({ error_kind: 'assurance_publication_failed',
+                  message: 'The checked answer could not be verified. Reload to recover the saved answer.' })
+                return
+              }
+              appendMessage({ role: 'assistant', content: state.text,
+                answer_id: approved.answer_id, receipt: approved.receipt })
+              if (speak && useUIStore.getState().assistantSpeakEnabled) {
+                speechOut.speak(speechOut.plainTextForSpeech(state.text))
+              }
+            })
+          } else if (state.requested) {
+            state.completed = true
+            state.text = ''
+            setError({ error_kind: 'assurance_publication_failed',
+              message: 'The checked answer ended without a valid approval. No answer was shown.' })
+          }
+        }
         // Modal reciprocity: a turn begun with the microphone is answered
         // aloud. Decided by `voiceTurnRef`, captured at SEND — `dictatedRef`
         // is cleared by the send itself, and the mute is read live so
         // muting mid-turn takes effect on this answer rather than the next.
-        if (voiceTurnRef.current && useUIStore.getState().assistantSpeakEnabled) {
+        if (!state.strict && voiceTurnRef.current && useUIStore.getState().assistantSpeakEnabled) {
           const last = useChatStore.getState().messages
             .filter((m) => m.role === 'assistant').slice(-1)[0]
           if (last) speechOut.speak(speechOut.plainTextForSpeech(last.content))
         }
         voiceTurnRef.current = false
-        const d = _frame_data<TurnDoneFrame>(frame)
         if (d.usage) {
           // M10: server reports token counts; client renders them as-is.
           accrueUsage({
@@ -2621,10 +2301,16 @@ export default function ChatPanel() {
         break
       }
       case 'session_done': {
+        assuranceRef.current = { strict: assuranceRef.current.strict, text: '', approved: null,
+          project: null, completed: true }
+        voiceTurnRef.current = false
         closeStream()
         break
       }
       case 'error': {
+        assuranceRef.current = { strict: assuranceRef.current.strict, text: '', approved: null,
+          project: null, completed: true }
+        voiceTurnRef.current = false
         const d = _frame_data<{ error_kind: string; message: string }>(frame)
         setError({ error_kind: d.error_kind, message: d.message })
         closeStream()
@@ -2632,7 +2318,8 @@ export default function ChatPanel() {
       }
     }
   }, [qc, setSessionId, appendMessage, appendTokenDelta, appendThinkingDelta, setPending,
-      appendToolProgress, accrueUsage, setStreaming, setError, closeStream])
+      appendToolProgress, accrueUsage, setStreaming, setError, closeStream,
+      stopProgressObserver])
 
   // Phase D polish #3 — auto-uncheck-after-send opt-in setting.
   // Stored in localStorage; OFF by default (matches sticky-chip intent).
@@ -2657,7 +2344,31 @@ export default function ChatPanel() {
   // user's draft (and its dictation flag) stays as it is, and the turn is a
   // typed one.
   const dispatchSend = useCallback((text: string, attachIds: string[],
-    opts?: { fromCard?: boolean; label?: string }) => {
+    opts?: {
+      fromCard?: boolean
+      label?: string
+      /** Live admission only — omit for typed / hub-card sends. */
+      utterance_id?: string
+      generation?: number
+      requiresChecked?: boolean
+    }) => {
+    const requestedChecks = opts?.requiresChecked === true || optedIntoChecks || requiredChecks
+    if (requestedChecks && !checksAvailable) {
+      setError({ error_kind: 'assurance_unavailable',
+        message: 'Answer checks are unavailable. Retry availability, or explicitly turn off checking for a new message.' })
+      if (opts?.fromCard) useChatStore.setState({ requestQueue: [], activeRequest: null })
+      else setInput(text)
+      return
+    }
+    const generation = ++streamGenerationRef.current
+    streamProjectRef.current = useUIStore.getState().currentProject
+    const chatSequence = useChatStore.getState().newChatSeq
+    const isCurrentStream = () => streamGenerationRef.current === generation
+      && useUIStore.getState().currentProject === streamProjectRef.current
+      && useChatStore.getState().newChatSeq === chatSequence
+    assuranceRef.current = { strict: assuranceRef.current.strict, text: '', approved: null,
+      ...(requestedChecks ? { strict: true, requested: true } : {}),
+      project: useUIStore.getState().currentProject, completed: false }
     // FIRST, before the composer reset four lines below clears `dictatedRef`.
     // Reading it later — say, next to the createChatStream call that consumes
     // `input_mode` — always yields false, and the bug is invisible: the
@@ -2668,6 +2379,7 @@ export default function ChatPanel() {
       role: 'user', content: text,
       attachment_file_ids: attachIds.length > 0 ? attachIds : undefined,
       ...(opts?.label ? { display: opts.label } : {}),
+      ...(requestedChecks ? { requiresChecked: true } : {}),
     })
     // A typed turn is nobody's card request: a denial in it drops nothing.
     if (!opts?.fromCard) useChatStore.getState().setActiveRequest(null)
@@ -2677,10 +2389,18 @@ export default function ChatPanel() {
     }
     setStreaming(true)
     setError(null)
+    const admission = (
+      typeof opts?.utterance_id === 'string'
+      && opts.utterance_id.length > 0
+      && typeof opts?.generation === 'number'
+    )
+      ? { utterance_id: opts.utterance_id, generation: opts.generation }
+      : {}
     const cleanup = createChatStream(
       {
         session_id: sessionId ?? undefined,
         message: text,
+        ...(requestedChecks ? { assurance: { version: 1, mode: 'strict' } as const } : {}),
         // Task 13 — `profile_id` is included ONLY when the user actually
         // picked one. `profileId === null` means "the server's active
         // profile", and OMITTING the field (never sending `model` either) is
@@ -2699,9 +2419,46 @@ export default function ChatPanel() {
         // after dispatchSend has already reset the composer, so reading
         // the composer flag here always yields 'text'.
         input_mode: voiceTurnRef.current ? 'voice' : 'text',
+        ...admission,
+        binding_generation: generation,
       },
-      handleFrame,
+      (frame) => {
+        if (!isCurrentStream()) return
+        if (requestedChecks && !assuranceRef.current.turnId
+          && !['session_init', 'error', 'session_done', 'turn_done'].includes(frame.event)) return
+        // Ordinary chat can deliberately change projects within a turn. Track
+        // that server-issued rebind while rejecting callbacks after user changes.
+        if (frame.event === 'project_rebound' && !assuranceRef.current.strict) {
+          streamProjectRef.current = typeof frame.data.to === 'string' ? frame.data.to : null
+        }
+        handleFrame(frame)
+      },
       (err) => {
+        if (!isCurrentStream()) return
+        streamGenerationRef.current += 1
+        assuranceRef.current = { strict: assuranceRef.current.strict, text: '', approved: null,
+          project: null, completed: true }
+        voiceTurnRef.current = false
+        // A session that belongs to someone else is recoverable, and retrying
+        // the same id never will be: the server refuses it every time. Drop it
+        // and start a fresh conversation so the next send mints one owned by
+        // this user. Reachable without anyone doing anything wrong — the id
+        // comes from the project's shared transcript, so a co-member's GET
+        // /history can mint it under their name first.
+        const kind = (err as Error & { kind?: string })?.kind
+        if (requestedChecks) {
+          setError({ error_kind: kind ?? 'assurance_unavailable',
+            message: (err as Error).message || 'The checked answer request failed.' })
+          void qc.invalidateQueries({ queryKey: CHECKED_ANSWERS_QUERY_KEY })
+        }
+        if (kind === 'session_not_yours') {
+          startNewChat()
+          toast.error(
+            'chat: that conversation belongs to another user — started a new one',
+          )
+          setStreaming(false)
+          return
+        }
         toast.error(`chat: connection lost — ${(err as Error).message ?? err}`)
         setStreaming(false)
       },
@@ -2711,7 +2468,8 @@ export default function ChatPanel() {
       setAttachedFileIds([])
     }
   }, [appendMessage, sessionId, profileId, handleFrame, setStreaming, setError,
-      setStreamCleanup, autoUncheckAfterSend, setAttachedFileIds])
+      setStreamCleanup, autoUncheckAfterSend, setAttachedFileIds, startNewChat,
+      optedIntoChecks, requiredChecks, checksAvailable, qc])
 
   const onSend = useCallback(() => {
     const text = input.trim()
@@ -2782,10 +2540,42 @@ export default function ChatPanel() {
     if (streaming || pendingCard != null || pendingSendText != null) return
     const req = useChatStore.getState().takeNextRequest()
     if (!req) return
-    dispatchSend(req.text, [], { fromCard: true, label: req.label })
+    const liveAdmission = req.source === 'live'
+      ? {
+          utterance_id: req.id,
+          generation: useChatStore.getState().utteranceGeneration,
+        }
+      : {}
+    dispatchSend(req.text, [], { fromCard: true, label: req.label, ...liveAdmission,
+      ...(req.requiresChecked ? { requiresChecked: true } : {}) })
   }, [requestCount, streaming, pendingCard, pendingSendText, notReady, mismatchLine, dispatchSend])
 
+  // Live companion turns use this same send. The dock only dispatches the
+  // event when a model key is present; without one it navigates locally and
+  // must not start a stream that would stick on "API key missing".
+  useEffect(() => {
+    const onUtterance = (ev: Event) => {
+      const text = (ev as CustomEvent<string>).detail
+      if (typeof text !== 'string' || !text.trim()) return
+      if (notReady || streaming) return
+      if (useChatStore.getState().pending) return
+      if (useUIStore.getState().projectMismatch) return
+      const utterance_id = globalThis.crypto?.randomUUID?.()
+        ?? `live-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      dispatchSend(text.trim(), [], {
+        fromCard: true,
+        utterance_id,
+        generation: useChatStore.getState().utteranceGeneration,
+      })
+    }
+    window.addEventListener('companion:live-utterance', onUtterance)
+    return () => window.removeEventListener('companion:live-utterance', onUtterance)
+  }, [notReady, streaming, dispatchSend])
+
   const onAbort = useCallback(async () => {
+    streamGenerationRef.current += 1
+    assuranceRef.current = { strict: assuranceRef.current.strict, text: '', approved: null,
+      project: null, completed: true }
     // Stopping a turn has to stop the VOICE as well. A synthesiser that keeps
     // reading an answer the user just cancelled is the single most alarming
     // way this feature can fail — there is no visible progress bar to explain
@@ -2826,11 +2616,12 @@ export default function ChatPanel() {
   // panel. An idle stream is still closed here.
   useEffect(() => {
     return () => {
+      stopProgressObserver()
       const { streaming, streamCleanup } = useChatStore.getState()
       if (streaming) return
       try { streamCleanup?.() } catch { /* idempotent */ }
     }
-  }, [])
+  }, [stopProgressObserver])
 
   // ── per-message actions ───────────────────────────────────────────────
   //
@@ -2840,6 +2631,9 @@ export default function ChatPanel() {
   // against the turn it is clearing space for, and the model would answer with
   // the discarded exchange still in context.
   const withdrawTurn = useCallback(async (userIdx: number) => {
+    const project = useUIStore.getState().currentProject
+    const sequence = useChatStore.getState().newChatSeq
+    const generation = streamGenerationRef.current
     const sid = useChatStore.getState().sessionId
     if (sid) {
       try {
@@ -2852,6 +2646,8 @@ export default function ChatPanel() {
         return false
       }
     }
+    if (useUIStore.getState().currentProject !== project || useChatStore.getState().newChatSeq !== sequence
+      || streamGenerationRef.current !== generation) return false
     useChatStore.setState((st) => ({
       messages: st.messages.slice(0, userIdx),
       toolProgress: {},
@@ -2886,7 +2682,7 @@ export default function ChatPanel() {
     // Withdraw the ANSWER, keeping the question: it is being re-asked, not
     // retracted. dispatchSend re-appends it, so cut at the question's index.
     if (!await withdrawTurn(idx)) return
-    dispatchSend(question.content, attachIds)
+    dispatchSend(question.content, attachIds, { requiresChecked: question.requiresChecked || !!m.receipt })
   }, [precedingUserIndex, withdrawTurn, dispatchSend])
 
   const onEditMessage = useCallback(async (m: ChatMessage) => {
@@ -2904,6 +2700,8 @@ export default function ChatPanel() {
     // leaving the old phrasing above the new one would show them asking twice.
     if (!await withdrawTurn(idx)) return
     setInput(text)
+    if (m.requiresChecked) setCheckedSelection({ project: useUIStore.getState().currentProject,
+      chat: useChatStore.getState().newChatSeq, on: true })
     useChatStore.getState().setAttachedFileIds(files)
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [withdrawTurn])
@@ -2926,7 +2724,7 @@ export default function ChatPanel() {
     if (idx < 0) return
     const question = msgs[idx]
     if (!await withdrawTurn(idx)) return
-    dispatchSend(question.content, question.attachment_file_ids ?? [])
+    dispatchSend(question.content, question.attachment_file_ids ?? [], { requiresChecked: question.requiresChecked })
   }, [withdrawTurn, dispatchSend])
 
   // ⌘/Ctrl-J toggles the assistant, and the OPEN path lands the caret in the
@@ -2962,6 +2760,7 @@ export default function ChatPanel() {
     const opened = assistantDockOpen && !prevDockOpenRef.current
     prevDockOpenRef.current = assistantDockOpen
     if (!opened) return
+    if (useUIStore.getState().assistantEntry === 'profiles') return
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [assistantDockOpen])
 
@@ -2997,6 +2796,40 @@ export default function ChatPanel() {
   // loading (`!profilesQuery.data`), refused (`profilesQuery.isError`), and
   // empty (`data.profiles.length === 0`).
   const profilesQuery = useChatProfiles()
+  const modelSelectRef = useRef<HTMLSelectElement>(null)
+
+  useEffect(() => {
+    if (!assistantDockOpen) {
+      if (assistantEntry != null) useUIStore.getState().setAssistantEntry(null)
+      return
+    }
+    if (assistantEntry == null) return
+    if (assistantEntry === 'speak') {
+      setDictationPanelRequested(true)
+      useUIStore.getState().setAssistantEntry(null)
+      return
+    }
+    if (assistantEntry === 'compose') {
+      useUIStore.getState().setAssistantEntry(null)
+      return
+    }
+    if (assistantEntry !== 'profiles') return
+    if (streaming) return
+    if (profilesQuery.isError) {
+      useUIStore.getState().setAssistantEntry(null)
+      return
+    }
+    if (profilesQuery.data == null) return
+    if (profilesQuery.data.profiles.length === 0) {
+      useUIStore.getState().setAssistantEntry(null)
+      return
+    }
+    const select = modelSelectRef.current
+    if (select == null || select.disabled) return
+    select.focus()
+    useUIStore.getState().setAssistantEntry(null)
+  }, [assistantDockOpen, assistantEntry, profilesQuery.data, profilesQuery.isError, streaming])
+
   const chatProfiles = profilesQuery.data?.profiles ?? []
   const activeProfileId = profilesQuery.data?.active_profile_id ?? null
   // `profileId` (the store's explicit pick) wins; `null` falls back to
@@ -3060,7 +2893,7 @@ export default function ChatPanel() {
           data-testid="chat-drop-overlay"
         >
           <div className="text-accent text-sm font-medium px-4 py-2 bg-bg-2 rounded shadow">
-            Drop to upload — Excel, PDF, images (≤ 25 MB each)
+            Drop documents, tables, images or network files (≤ 25 MB each)
           </div>
         </div>
       )}
@@ -3080,6 +2913,7 @@ export default function ChatPanel() {
           // "zero profiles exist", a materially different fact from
           // "couldn't find out".
           <select
+            ref={modelSelectRef}
             disabled
             data-profiles-state="error"
             className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px] text-danger"
@@ -3090,6 +2924,7 @@ export default function ChatPanel() {
           </select>
         ) : !profilesQuery.data ? (
           <select
+            ref={modelSelectRef}
             disabled
             data-profiles-state="loading"
             className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px] text-muted"
@@ -3099,6 +2934,7 @@ export default function ChatPanel() {
           </select>
         ) : chatProfiles.length === 0 ? (
           <select
+            ref={modelSelectRef}
             disabled
             data-profiles-state="empty"
             className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px] text-muted"
@@ -3109,6 +2945,7 @@ export default function ChatPanel() {
           </select>
         ) : (
           <select
+            ref={modelSelectRef}
             value={selectedProfileId ?? ''}
             onChange={(e) => onPickProfile(e.target.value)}
             disabled={streaming}
@@ -3407,8 +3244,13 @@ export default function ChatPanel() {
                 </>
               )
               : <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>}
+            {m.role === 'assistant' && m.answer_id && m.receipt && <CheckedEvidenceCard answerId={m.answer_id} receipt={m.receipt} />}
             {m.role === 'tool' && m.tool_use_id && (
-              <ToolProgressDetails toolUseId={m.tool_use_id} />
+              <>
+                <AssistantResultCard result={m.tool_result} disabled={streaming || notReady || Boolean(mismatchLine)}
+                  onRequest={(text) => useChatStore.getState().sendRequest(text, { source: 'assistant-task' })} />
+                <ToolProgressDetails toolUseId={m.tool_use_id} />
+              </>
             )}
             {m.role === 'user' && m.attachment_file_ids && m.attachment_file_ids.length > 0 && (
               <ReplayAttachmentChips fileIds={m.attachment_file_ids} />
@@ -3419,7 +3261,7 @@ export default function ChatPanel() {
           )
         })}
         <ChoiceCard />
-        <ConfirmationCard />
+        {assistantDockOpen ? <ConfirmationCard /> : null}
         <div ref={messagesEndRef} />
         </div>
         {showJumpLatest && (
@@ -3450,6 +3292,11 @@ export default function ChatPanel() {
           no uploads exist. Each chip carries a checkbox controlling
           attach-to-next-message + a delete (trash) button. */}
       <WorkflowStrip />
+      <CheckedAnswerControl checked={optedIntoChecks || requiredChecks} required={requiredChecks}
+        available={checksAvailable} loading={checkedCapabilities.isPending} failed={checkedCapabilities.isError}
+        mode={checkedCapabilities.data?.mode} busy={streaming || pendingSendText != null}
+        onChange={on => setCheckedSelection({ project: currentProject, chat: newChatSeq, on })}
+        onRetry={() => { void checkedCapabilities.refetch() }} />
       <UploadChipStrip
         uploads={uploads}
         attachedFileIds={attachedFileIds}
@@ -3482,7 +3329,7 @@ export default function ChatPanel() {
         >
           <div className="w-8 h-[2px] rounded-full bg-border group-hover:bg-accent/60 transition-colors" />
         </div>
-        <div className="flex items-stretch gap-2 px-2 pb-2 flex-1 min-h-0">
+        <div className="relative flex items-stretch gap-2 px-2 pb-2 flex-1 min-h-0">
           <div className="flex flex-col gap-1 self-end pb-0.5">
             {/* Phase D polish #5 — 44×44 px touch targets on coarse pointers
                 (WCAG 2.5.5). Desktop stays compact. */}
@@ -3497,7 +3344,7 @@ export default function ChatPanel() {
               disabled={streaming || !currentProject}
               title={
                 currentProject
-                  ? 'Upload a file (Excel / PDF / image, ≤25 MB)'
+                ? 'Upload documents, tables, images or network files (≤25 MB)'
                   : 'Load a project first'
               }
               aria-label="Upload a file"
@@ -3524,34 +3371,13 @@ export default function ChatPanel() {
             >
               📋
             </button>
-            <button
-              className={
-                (isCoarsePointer
-                  ? 'min-w-[44px] min-h-[44px] text-lg '
-                  : 'px-2 py-1 text-[10px] ') +
-                'rounded border ' +
-                (speech.listening
-                  ? 'bg-accent/15 border-accent text-accent'
-                  : 'bg-bg-3/40 hover:bg-bg-3 border-border text-muted') +
-                (speech.available && !streaming ? '' : ' opacity-50')
-              }
-              onClick={speech.toggle}
-              disabled={!speech.available || streaming}
-              title={
-                !speech.supported
-                  ? 'Voice input needs Chrome or Edge'
-                  : speech.permissionDenied
-                    ? 'Microphone access denied — allow it in System Settings → Privacy & Security → Microphone'
-                    : speech.listening
-                      ? 'Stop voice input (Esc)'
-                      : 'Start voice input (English)'
-              }
-              aria-label={speech.listening ? 'Stop voice input' : 'Start voice input'}
-              aria-pressed={speech.listening}
-              data-testid="chat-mic"
-            >
-              {speech.listening ? '■' : '🎙'}
-            </button>
+            <DictationControls
+              speech={speech} language={dictationLanguage} onLanguage={setDictationLanguage}
+              onInsert={onSpeechFinal} streaming={streaming} dockOpen={assistantDockOpen}
+              project={currentProject} coarsePointer={isCoarsePointer}
+              panelRequested={dictationPanelRequested}
+              onPanelRequestConsumed={consumeDictationRequest}
+            />
           </div>
           <div className="flex-1 min-w-0 min-h-0 flex flex-col">
             <textarea

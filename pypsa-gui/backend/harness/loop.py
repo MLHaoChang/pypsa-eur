@@ -73,13 +73,13 @@ from services.project_context import ProjectContext
 logger = logging.getLogger("pypsa_gui.chat")
 
 from harness.history import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    _message_is_tool_results, _is_turn_start, rewind_session, _drop_oldest_turn_group, TURN_SUMMARY_PREFIX, TURN_SUMMARY_MAX_CHARS, _SUMMARY_LINE_CHARS, _SUMMARY_MAX_LINES, is_turn_summary, _describe_dropped, _render_summary, _parse_summary, trim_session_messages, CHAT_FILENAME, _redact_for_persist, get_persist_path, read_all_turns, read_all_turns_with_gap, append_turn, _pending_turn_path_unlocked, begin_pending_turn, read_pending_turn, clear_pending_turn, flush_to_disk, _rotate_chat_jsonl_unlocked, SAVE_LINEAGE_REBIND_MOVE, SAVE_LINEAGE_COPY, SAVE_LINEAGE_SCENARIO_COPY, _project_chat_paths, handle_save_lineage, handle_rename_lineage, handle_snapshot_lineage,
+    _message_is_tool_results, _is_turn_start, rewind_session, _drop_oldest_turn_group, TURN_SUMMARY_PREFIX, TURN_SUMMARY_MAX_CHARS, _SUMMARY_LINE_CHARS, _SUMMARY_MAX_LINES, is_turn_summary, _describe_dropped, _render_summary, _parse_summary, trim_session_messages, CHAT_FILENAME, _redact_for_persist, get_persist_path, read_all_turns, read_all_turns_with_gap, append_turn, _pending_turn_path_unlocked, begin_pending_turn, read_pending_turn, clear_pending_turn, flush_to_disk, _rotate_chat_jsonl_unlocked, SAVE_LINEAGE_REBIND_MOVE, SAVE_LINEAGE_COPY, SAVE_LINEAGE_SCENARIO_COPY, _project_chat_paths, handle_save_lineage, handle_rename_lineage, handle_snapshot_lineage, _chat_paths_in,
 )
 
 
 
 from harness.session import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    RESULT_REFS_MAXLEN, PendingConfirmation, ChatSession, _SESSIONS, _SESSIONS_LOCK, get_session, session_owner_allows, _evict_idle_sessions_locked, get_or_create_session_reporting, get_or_create_session, drop_session, _reset_sessions_for_tests,
+    RESULT_REFS_MAXLEN, PendingConfirmation, ChatSession, _SESSIONS, _SESSIONS_LOCK, get_session, session_owner_allows, session_replica_allows, _evict_idle_sessions_locked, get_or_create_session_reporting, get_or_create_session, drop_session, _reset_sessions_for_tests, TURN_AUTHOR_KEY, turn_is_callers,
 )
 
 
@@ -108,6 +108,11 @@ from harness.confirm import (  # noqa: E402, F401 — moved (issue 08); re-expor
 # and every later tool in the same turn was refused as a mid-turn switch. The
 # frame still fires only on an actual move, so Save-a-Copy (`rebind=False`)
 # and a save of the already-bound project emit nothing.
+# For the raw imports the stake was larger than a 409: with the panel still on
+# the old name, its autosave sent `expect=<old>` to an UNBOUND backend, which the
+# save guard lets through, and wrote the imported network over the old
+# project. The panel now clears its project on `to: null` (CH-2 in the
+# 2026-09-28 solver-and-chat register).
 PROJECT_REBINDING_TOOLS = frozenset([
     "activate_project",
     "load_project",
@@ -124,6 +129,7 @@ PROJECT_REBINDING_TOOLS = frozenset([
     "import_csv_bundle",
     "import_excel",
     "import_matpower",
+    "import_uploaded_network",
 ])
 
 # Default + selectable models: `DEFAULT_MODEL` / `OPUS_MODEL` are imported
@@ -170,7 +176,7 @@ _TOOL_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 )
 
 from harness.results import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    _RESULT_CONTENT_CAP, _ERROR_DETAIL_CAP, _coerce_jsonable, _truncate_result, _truncation_marker, _apply_turn_tool_result_budget, _error_result_content, _result_to_anthropic_content,
+    _RESULT_CONTENT_CAP, _ERROR_DETAIL_CAP, _coerce_jsonable, _truncate_result, _truncation_marker, _apply_turn_tool_result_budget, _error_result_content, _result_to_anthropic_content, _STORAGE_PLACEHOLDER, _redact_storage_roots, _IDENTIFYING_RESULT_KEYS, _scrub_identities,
 )
 
 
@@ -493,10 +499,12 @@ def _stream_assistant_message(
                     )
                 if ev.type == "text_delta":
                     emitted_this_attempt = True
-                    yield "token", {"delta": ev.text}
+                    if session.assurance_turn is None:
+                        yield "token", {"delta": ev.text}
                 elif ev.type == "thinking_delta":
                     emitted_this_attempt = True
-                    yield "thinking", {"delta": ev.text}
+                    if session.assurance_turn is None:
+                        yield "thinking", {"delta": ev.text}
                 # Tool-arg streaming is silent on `token` — without a signal
                 # the UI looks frozen after "I'll create them…". Emit as soon
                 # as the model opens a tool_use block.
@@ -931,6 +939,8 @@ def _build_user_content(
                     "wordprocessingml.document"
                 ):
                     hint = "read_upload_meta (then use the file_id with future tools)"
+                elif m["mime"] in ("application/x-netcdf", "application/x-hdf", "application/x-hdf5", "application/zip"):
+                    hint = "inspect_import / import_uploaded_network"
                 else:
                     hint = "read_upload_meta"
                 # Routed through the shared neutraliser even though it is a
@@ -960,6 +970,38 @@ def _build_user_content(
 
 
 
+# Literal error_kind values so tool-error-kinds.json's AST scan sees them.
+_ADMISSION_ERRORS: dict[str, dict[str, str]] = {
+    'duplicate': {
+        'error_kind': 'duplicate',
+        'message': (
+            'this utterance was already admitted; the duplicate was ignored so '
+            'effects are not repeated.'
+        ),
+    },
+    'queued': {
+        'error_kind': 'queued',
+        'message': (
+            'a turn is already running on this chat session; this message was kept '
+            'as the single pending correction (latest wins).'
+        ),
+    },
+    'stale_generation': {
+        'error_kind': 'stale_generation',
+        'message': (
+            'this utterance belongs to an older conversation generation and was '
+            'not admitted.'
+        ),
+    },
+    'rejected_empty': {
+        'error_kind': 'rejected_empty',
+        'message': (
+            'the utterance text is empty, so nothing was sent.'
+        ),
+    },
+}
+
+
 def run_turn(
     session: ChatSession,
     message: str,
@@ -971,6 +1013,14 @@ def run_turn(
     ui_context: dict[str, Any] | None = None,
     wire_conflict: bool = False,
     unknown_profile_id: str | None = None,
+    strict_assurance: bool = False,
+    utterance_id: str | None = None,
+    generation: int | None = None,
+    checked_scope: dict | None = None,
+    checked_operation: dict | None = None,
+    binding_generation: int = 0,
+    _held_lease: str | None = None,
+    _held_generation: int | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
     """
     Provider-driven turn driver (Phase 3 replacement for the Phase 2 stub):
@@ -1069,10 +1119,48 @@ def run_turn(
     # and the panel appears frozen (E2E QA: INT-004).
     session.abort_event.clear()
 
+    # Issue 02 / C-I1 — optional shared utterance admission. Both fields must
+    # be present; omitting either preserves the pre-admission path (#19 alone).
+    # A promoted pending correction re-enters with `_held_lease` so we do not
+    # re-admit an id already in `seen_ids`.
+    _admission_lease: str | None = None
+    _admission_generation: int | None = None
+    if _held_lease is not None and _held_generation is not None:
+        _admission_lease = _held_lease
+        _admission_generation = _held_generation
+    elif utterance_id is not None and generation is not None:
+        from services.utterance_admission import StableUtterance, admit_utterance
+        decision = admit_utterance(StableUtterance(
+            utterance_id=utterance_id,
+            text=message,
+            generation=generation,
+            session_id=session.session_id,
+        ))
+        if decision.status != 'admitted':
+            detail = _ADMISSION_ERRORS.get(decision.status) or {
+                'error_kind': 'internal_error',
+                'message': 'this utterance was not admitted.',
+            }
+            yield "error", detail
+            yield "session_done", {"reason": detail['error_kind']}
+            return
+        _admission_lease = decision.lease_id
+        _admission_generation = decision.generation
+
     # #19 — single in-flight-turn guard. Under _lock so two concurrent
     # run_turn calls on one session can't BOTH claim the slot.
     with session._lock:
         if session._turn_in_flight:
+            # Drop a just-minted admission lease so a concurrent reject cannot
+            # leave the coordinator holding a lease with no turn body.
+            if _admission_lease is not None and _admission_generation is not None:
+                from services import utterance_admission as _ua
+                _ua._DEFAULT.release_lease(
+                    session_id=session.session_id,
+                    lease_id=_admission_lease,
+                    generation=_admission_generation,
+                    promote=False,
+                )
             yield "error", {
                 "error_kind": "turn_already_in_flight",
                 "message": (
@@ -1083,36 +1171,62 @@ def run_turn(
             yield "session_done", {"reason": "turn_already_in_flight"}
             return
         session._turn_in_flight = True
+        session._undo_snapshotted = []
 
     _metric_incr("turns")
     _t_start = time.monotonic()
 
-    # #20 — pending-turn WAL. Written HERE, before the body runs, because the
-    # window it protects opens the moment we start talking to the model and
-    # `append_turn` does not fire until the turn has already succeeded. The
-    # context is resolved the same way `_run_turn_body` resolves its P0 pin,
-    # and on the same `next()`, so both see the same project.
     from services.pypsa_service import PyPSAService
     _wal_ctx: ProjectContext | None = None
-    try:
-        _wal_ctx = PyPSAService.get_active_context()
-        begin_pending_turn(_wal_ctx, {
-            "ts": time.time(),
-            "session_id": session.session_id,
-            "model": session.model,
-            # Redacted like the durable record in `append_turn` — this file is
-            # equally on-disk and equally reaches snapshot/copy bundles.
-            "user": _redact_for_persist(message),
-        })
-    except Exception:  # noqa: BLE001 — the WAL must never block the turn
-        logger.exception("chat: failed to open the pending-turn record")
 
+    _drain_utt = None
+    _drain_lease: str | None = None
     try:
         # The body is a separate generator so this one try/finally clears the
         # in-flight flag + records the duration on EVERY exit path (normal
         # return, error return, GeneratorExit on client disconnect) without
         # re-indenting the 480-line body. #19 + #20 share this single finally.
-        yield from _run_turn_body(
+        from harness import assurance
+        if strict_assurance or assurance.strict_configured():
+            session.assurance_turn = assurance.Turn(session, PyPSAService.get_active_context())
+            from harness.navigation import begin_turn
+            begin_turn(session.assurance_turn, binding_generation)
+            try:
+                session.assurance_turn.suspend_scope()
+            except (HTTPException, OSError, ValueError):
+                yield "error", {"error_kind": "assurance_context_persistence_failed",
+                                "message": "Checked conversation state could not be saved. Try again when storage is available."}
+                yield "session_done", {"reason": "assurance_context_persistence_failed"}
+                return
+            session.assurance_turn.prepare_operation(checked_operation)
+            if not attachment_file_ids and checked_operation is None:
+                session.assurance_turn.prepare_request(message, ui_context, PyPSAService.get_active_context(), checked_scope)
+        elif assurance.shadow_configured():
+            try:
+                session.shadow_turn = assurance.Turn(session, PyPSAService.get_active_context())
+                if not attachment_file_ids:
+                    session.shadow_turn.prepare_request(message, ui_context, PyPSAService.get_active_context())
+            except Exception:
+                logger.exception("Shadow scope could not be prepared")
+                session.shadow_turn = None
+        # #20 — pending-turn WAL. Written HERE, before the body runs, because the
+        # window it protects opens the moment we start talking to the model and
+        # `append_turn` does not fire until the turn has already succeeded. The
+        # context is resolved the same way `_run_turn_body` resolves its P0 pin,
+        # and on the same `next()`, so both see the same project.
+        try:
+            _wal_ctx = PyPSAService.get_active_context()
+            begin_pending_turn(_wal_ctx, {
+                "ts": time.time(),
+                "session_id": session.session_id,
+                "model": session.model,
+                # Redacted like the durable record in `append_turn` — this file is
+                # equally on-disk and equally reaches snapshot/copy bundles.
+                "user": _redact_for_persist(message),
+            })
+        except Exception:  # noqa: BLE001 — the WAL must never block the turn
+            logger.exception("chat: failed to open the pending-turn record")
+        for event, payload in _run_turn_body(
             session,
             message,
             client=client,
@@ -1120,11 +1234,50 @@ def run_turn(
             message_history=message_history,
             attachment_file_ids=attachment_file_ids,
             ui_context=ui_context,
-        )
+        ):
+            if session.assurance_turn is not None:
+                payload = session.assurance_turn.project_frame(event, payload)
+                if payload is None:
+                    continue
+            yield event, payload
     finally:
         _metric_record_duration(time.monotonic() - _t_start)
         with session._lock:
             session._turn_in_flight = False
+            session._undo_snapshotted = []
+            if session.assurance_turn is not None and session.assurance_context:
+                approved = session.assurance_turn.approved
+                if not approved or session.assurance_context["anchor"] != approved["answer_id"]:
+                    session.assurance_context = None
+            session.assurance_turn = None
+            session.shadow_turn = None
+        if _admission_lease is not None and _admission_generation is not None:
+            from services import utterance_admission as _ua
+            # Promote pending into a new lease, then start that follow-up turn
+            # on this same stream (auto-drain). Leaving a promoted lease
+            # without a turn would hang admission.
+            promoted = _ua._DEFAULT.release_lease(
+                session_id=session.session_id,
+                lease_id=_admission_lease,
+                generation=_admission_generation,
+                promote=True,
+            )
+            if (
+                promoted is not None
+                and promoted.status == 'admitted'
+                and promoted.lease_id is not None
+            ):
+                active = _ua._DEFAULT.active_utterance(session.session_id)
+                if active is not None:
+                    _drain_utt = active
+                    _drain_lease = promoted.lease_id
+                else:
+                    _ua._DEFAULT.release_lease(
+                        session_id=session.session_id,
+                        lease_id=promoted.lease_id,
+                        generation=promoted.generation,
+                        promote=False,
+                    )
         # C-3 — the turn's profile must not outlive the turn. A tool invoked
         # OUTSIDE a turn (a direct call, a test) has no profile to honour and
         # must take the pre-profile path; leaving a stale value bound would
@@ -1139,6 +1292,28 @@ def run_turn(
         # record behind. Only a crash skips this line — which is the point.
         if _wal_ctx is not None:
             clear_pending_turn(_wal_ctx)
+
+    if _drain_utt is not None and _drain_lease is not None:
+        yield from run_turn(
+            session,
+            _drain_utt.text,
+            client=client,
+            provider=provider,
+            message_history=message_history,
+            ui_context=ui_context,
+            wire_conflict=wire_conflict,
+            unknown_profile_id=unknown_profile_id,
+            strict_assurance=strict_assurance,
+            utterance_id=_drain_utt.utterance_id,
+            generation=_drain_utt.generation,
+            # A queued utterance carries its own text, not the preceding
+            # request's explicit scope. Resolve validated carryover afresh.
+            checked_scope=None,
+            checked_operation=None,
+            binding_generation=binding_generation,
+            _held_lease=_drain_lease,
+            _held_generation=_drain_utt.generation,
+        )
 
 
 def _outbound_vision_block_kinds(
@@ -1307,7 +1482,8 @@ def _run_turn_body(
     _chat_tools.set_turn_profile(profile)
     _chat_tools.set_chat_session(session)
 
-    if provider is None:
+    clarifying_scope = session.assurance_turn is not None and session.assurance_turn.clarification is not None
+    if provider is None and not clarifying_scope:
         # `_provider_for_profile` reproduces the exact priority this branch
         # always had: an injected `client` wins (wrapped, anthropic wire
         # only) over building one, and building one for the profile's
@@ -1339,13 +1515,16 @@ def _run_turn_body(
             yield "session_done", {"reason": "no_client"}
             return
 
+    with session._lock:
+        selection_history = list(session.messages)
+    selected_tools = [] if clarifying_scope else _tools_payload_for_profile(profile, message, history=selection_history)
     yield "session_init", {
         "session_id": session.session_id,
         "session6": session.session6(),
         "model": session.model,
         # Task 8 — the count actually sent this turn (0 for a `tools: false`
         # profile), not the catalogue size. See _tools_payload_for_profile.
-        "tool_count": len(_tools_payload_for_profile(profile)),
+        "tool_count": len(selected_tools),
         "profile_id": profile.id,
         "profile_label": profile.label,
     }
@@ -1359,6 +1538,8 @@ def _run_turn_body(
     else:
         with session._lock:
             seed = list(session.messages)
+    if session.assurance_turn is not None:
+        seed = session.assurance_turn.history_seed(seed)
     # Sanitise the SEED, not every append: this local list is the array that
     # actually goes to the API, and this is its only external input. Entries
     # appended later (below, and at the tool-result / cap sites) are freshly
@@ -1393,6 +1574,10 @@ def _run_turn_body(
     wf_block = _workflow_addendum(session, ui_context)
     if wf_block:
         ui_block = f"{ui_block}\n\n{wf_block}" if ui_block else wf_block
+    if session.assurance_turn is not None:
+        assurance_block = session.assurance_turn.request_content()
+        if assurance_block:
+            ui_block = f"{ui_block}\n\n{assurance_block}" if ui_block else assurance_block
     if ui_block:
         if isinstance(user_content, str):
             user_content = f"{ui_block}\n\n{user_content}"
@@ -1495,7 +1680,7 @@ def _run_turn_body(
     tool_call_count = 0
     # Task 8 — `[]` when the profile's `tools` capability is off; see
     # _tools_payload_for_profile.
-    tools = _tools_payload_for_profile(profile)
+    tools = selected_tools
     # C-1 — the ALLOWLIST the dispatch loop below enforces.
     #
     # Derived from `tools` (what this turn actually SENT), never from the
@@ -1516,6 +1701,8 @@ def _run_turn_body(
         live_meta=_format_live_network_meta(turn_ctx),
         include_tools=profile.tools,
     )
+    if session.assurance_turn is not None:
+        system_prompt += "\n" + session.assurance_turn.prompt()
 
     # A8 — at most one fallback-model downgrade after rate_limited retries
     # are exhausted, PER TURN (public cost/availability escape hatch).
@@ -1538,6 +1725,9 @@ def _run_turn_body(
     while True:
         if session.abort_event.is_set():
             yield "session_done", {"reason": "aborted"}
+            return
+        if session.assurance_turn is not None and session.assurance_turn.effect_pending:
+            yield "session_done", {"reason": "assurance_context_changed"}
             return
 
         # Anthropic prompt caching — the system prompt + 100-tool catalog are
@@ -1580,17 +1770,20 @@ def _run_turn_body(
         # OpenAI-compatible endpoints. `model_fallback_used` goes in and comes
         # back out: the A8 downgrade is bounded per TURN, and this helper runs
         # once per assistant STEP — see its docstring.
-        stream_outcome = yield from _stream_assistant_message(
-            session, provider,
-            request=request,
-            profile=profile,
-            model_fallback_used=model_fallback_used,
-        )
-        model_fallback_used = stream_outcome.model_fallback_used
-        if stream_outcome.stop_turn:
-            return
-        final_blocks = stream_outcome.final_blocks
-        final_usage = stream_outcome.final_usage
+        if clarifying_scope:
+            final_blocks, final_usage = [], {}
+        else:
+            stream_outcome = yield from _stream_assistant_message(
+                session, provider,
+                request=request,
+                profile=profile,
+                model_fallback_used=model_fallback_used,
+            )
+            model_fallback_used = stream_outcome.model_fallback_used
+            if stream_outcome.stop_turn:
+                return
+            final_blocks = stream_outcome.final_blocks
+            final_usage = stream_outcome.final_usage
 
         if final_usage:
             session.accrue_usage(
@@ -1608,6 +1801,28 @@ def _run_turn_body(
         # assistant turn to both the outbound array and the session history
         # for the next iteration.
         assistant_blocks = final_blocks
+        if session.shadow_turn is not None and not any(b.get("type") == "tool_use" for b in assistant_blocks):
+            try:
+                from harness.rollout import observe
+                observe(session.shadow_turn, assistant_blocks)
+            except Exception:
+                logger.exception("Shadow observation could not be saved")
+        if session.assurance_turn is not None:
+            if any(b.get("type") == "tool_use" for b in assistant_blocks):
+                # Retain tool protocol pairing, never private preamble/thinking.
+                assistant_blocks = [b for b in assistant_blocks if b.get("type") == "tool_use"]
+            else:
+                yield "answer_progress", {"version": 1, "turn_id": session.assurance_turn.turn_id,
+                                          "stage": "checking_claims", "status": "running"}
+                try:
+                    session.assurance_turn.review_interpretations(assistant_blocks, provider, session.model, turn_ctx)
+                    assistant_blocks = session.assurance_turn.commit(assistant_blocks, turn_ctx)
+                except Exception:  # noqa: BLE001 — fail closed, including uncertain storage
+                    logger.exception("checked answer could not be committed")
+                    yield "error", {"error_kind": "assurance_publication_failed",
+                                    "message": "The checked answer could not be saved. No answer was published."}
+                    yield "session_done", {"reason": "assurance_publication_failed"}
+                    return
         # One rule for both arrays: a turn with no blocks the API accepts is
         # not replayed at all. `final_blocks` comes back EMPTY on a refused
         # or aborted generation, and `{"role": "assistant", "content": []}`
@@ -1622,7 +1837,10 @@ def _run_turn_body(
             messages.append(assistant_msg)
             # Persist to session for next-turn rehydration (E2E QA: INT-001).
             with session._lock:
-                session.append_history_message(assistant_msg)
+                history_msg = assistant_msg
+                if session.assurance_turn is not None and session.assurance_turn.approved:
+                    history_msg = {**assistant_msg, "_approved_answer_id": session.assurance_turn.approved["answer_id"]}
+                session.append_history_message(history_msg)
 
         tool_uses = [b for b in assistant_blocks if b.get("type") == "tool_use"]
 
@@ -1667,18 +1885,51 @@ def _run_turn_body(
                     "assistant": _redact_for_persist(assistant_blocks),
                     "usage": usage_snapshot,
                 }
+                # CH-6 — who ran this turn, so GET /history can hand each user
+                # back THEIR session rather than whoever spoke last. Omitted
+                # when there is no owner (a direct `run_turn`), which reads as
+                # a legacy record. See `turn_is_callers`.
+                if session.owner_user_id is not None:
+                    turn_record[TURN_AUTHOR_KEY] = session.owner_user_id
                 # Phase C — persist which uploads were attached to this
                 # turn so the chat panel can render their chips on
                 # rehydration. Field omitted when empty so legacy turns
                 # round-trip cleanly through `extra="ignore"` readers.
                 if attachment_file_ids:
                     turn_record["attachment_file_ids"] = list(attachment_file_ids)
+                if session.assurance_turn is not None:
+                    turn_record.update(answer_id=session.assurance_turn.approved["answer_id"],
+                                       receipt=session.assurance_turn.approved["receipt"])
                 append_turn(ctx, turn_record)
             except Exception:  # noqa: BLE001 — persistence is best-effort
                 logger.exception(
                     "chat: failed to persist turn to chat.jsonl"
                 )
-            yield "turn_done", {"usage": usage_snapshot}
+                if session.assurance_turn is not None:
+                    yield "error", {"error_kind": "assurance_publication_failed",
+                                    "message": "The checked answer could not be saved to history."}
+                    yield "session_done", {"reason": "assurance_publication_failed"}
+                    return
+            if session.assurance_turn is not None:
+                if session.abort_event.is_set() or _project_switched():
+                    yield "session_done", {"reason": "aborted"}
+                    return
+                from services import assurance_records
+                assurance_records.answer(session.assurance_turn.owner, session.assurance_turn.approved["answer_id"])
+                session.assurance_turn.remember_scope()
+                yield "answer_approved", session.assurance_turn.approval()
+                assurance_records.answer(session.assurance_turn.owner, session.assurance_turn.approved["answer_id"])
+                if session.abort_event.is_set() or _project_switched():
+                    yield "session_done", {"reason": "aborted"}
+                    return
+                yield "token", {"delta": session.assurance_turn.approved["text"]}
+                choice = session.assurance_turn.clarification_choice()
+                if choice is not None:
+                    yield "choice_request", choice
+                yield "turn_done", {"usage": usage_snapshot,
+                                    "answer_id": session.assurance_turn.approved["answer_id"]}
+            else:
+                yield "turn_done", {"usage": usage_snapshot}
             return
 
         # M7: parallel-destructive pre-scan across THIS assistant message.
@@ -1789,9 +2040,89 @@ def _run_turn_body(
             yield "session_done", {"reason": "project_switched_mid_turn"}
             return
 
+        # A tool may change the catalogue view or bind a newly created study.
+        # Refresh only AFTER this batch has been checked against the catalogue
+        # it actually received. New tools are eligible on the next request.
+        if any(t.get("name") in PROJECT_REBINDING_TOOLS or t.get("name") in {"use_toolset", "start_task", "resume_task", "resolve_task_step"} or getattr(session, "task_id", None) for t in tool_uses):
+            _chat_tools.set_chat_session(session)
+            tools = _tools_payload_for_profile(profile, message, history=messages)
+            offered_tool_names = {t["name"] for t in tools}
 
 
 
+
+
+
+def _snapshot_for_turn_undo(session: ChatSession, tool_name: str) -> None:
+    """
+    CH-3 — push ONE undo snapshot per turn, per project, before the turn's
+    first network-changing tool.
+
+    Undo snapshots are pushed by `main.undo_snapshot_middleware`; a chat tool
+    calls its handler in-process and never passes through it, so a chat edit
+    pushed nothing, and `undo_last` then either refused or — worse — reverted
+    an OLDER canvas edit while reporting `{"undone": true}`.
+
+    Per TURN rather than per tool call, for two reasons. It is what the texts
+    the model reads already promised — "Writes participate in the turn-level
+    undo", and an image reconstruction "created inside one undo snapshot so a
+    misread can be reverted in one click" — and it is the unit a user means by
+    "undo what the assistant just did". And it bounds the cost the register
+    named as the open question: a snapshot is an `export_to_netcdf`
+    round-trip, so a 30-edit turn pays for one, not thirty. (A canvas drag gets
+    the same treatment from the middleware's coalesce window.)
+
+    Kept on failure, not popped the way the middleware pops on a 4xx: the
+    dirty-marking just above makes the same call for the same reason — a tool
+    that fails partway may still have changed the network. An undo step that
+    turns out to change nothing costs less than an edit that cannot be undone.
+    """
+    from services import chat_tools as _chat_tools
+
+    if tool_name not in _chat_tools.UNDO_CAPTURED_TOOLS:
+        return
+    try:
+        from services.pypsa_service import PyPSAService
+
+        stack = PyPSAService.get_active_context().undo
+    except Exception:  # noqa: BLE001 — never block a tool on undo machinery
+        return
+    if any(stack is done for done in session._undo_snapshotted):
+        return
+    # Not while a live-network study runs. Every captured tool is refused then
+    # (the study gate, or the swap refusal for an import or a re-cluster), and
+    # the HTTP middleware returns that refusal BEFORE it snapshots. Snapshotting
+    # first would export a network the study is re-solving between iterates —
+    # holding the network lock against it — for an undo step that changes
+    # nothing.
+    try:
+        from services.project_context import LIVE_NETWORK_STUDIES
+        from services.study_state import study_in_flight_detail
+
+        if study_in_flight_detail(PyPSAService.get_solver_state(),
+                                  "edit the network", keys=LIVE_NETWORK_STUDIES):
+            return
+    except Exception:  # noqa: BLE001 — the gate itself will still refuse
+        pass
+    from services.network_undo import push_undo_snapshot
+
+    push_undo_snapshot()  # logs and swallows its own failures
+    session._undo_snapshotted.append(stack)
+
+
+def _forget_turn_undo(session: ChatSession) -> None:
+    """After an `undo_last` in this turn, the turn's snapshot has been popped:
+    the NEXT network-changing tool must push a fresh one, or the edits after
+    the undo would have no step of their own."""
+    try:
+        from services.pypsa_service import PyPSAService
+
+        stack = PyPSAService.get_active_context().undo
+    except Exception:  # noqa: BLE001
+        return
+    session._undo_snapshotted = [
+        done for done in session._undo_snapshotted if done is not stack
+    ]
 
 
 def _dispatch_real_tool_call(
@@ -1821,6 +2152,18 @@ def _dispatch_real_tool_call(
     tool_use_id = tu.get("id") or uuid.uuid4().hex
     tool_name = tu.get("name") or "<missing-name>"
     args = tu.get("input") or {}
+    if session.assurance_turn is not None:
+        # Confirmation and execution share an immutable argument snapshot.
+        import json
+        try:
+            args = json.loads(json.dumps(args, allow_nan=False))
+        except (ValueError, TypeError, OverflowError):
+            yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
+                                 "error_kind": "validation_error",
+                                 "message": "Checked tool arguments must be finite JSON values."}
+            tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
+                                           "is_error": True, "content": "validation_error"})
+            return
     tier = _safety_tier_for(tool_name)
 
     yield "tool_request", {
@@ -1866,6 +2209,19 @@ def _dispatch_real_tool_call(
             "content": "unknown_tool",
         })
         return
+
+    if session.assurance_turn is not None:
+        try:
+            admitted = session.assurance_turn.tool_guard(tool_name, args)
+        except Exception:  # noqa: BLE001 — required guard failures never abstain
+            admitted = False
+        if not admitted:
+            yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
+                                 "error_kind": "capability_unsupported",
+                                 "message": "This operation is outside the checked-input pilot."}
+            tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
+                                           "is_error": True, "content": "Unsupported in strict checked-input mode; no effect executed."})
+            return
 
     # #19 — argument validation BEFORE the confirmation gate. The gate below
     # takes the user's authorisation for an operation the dispatcher may then
@@ -1914,67 +2270,94 @@ def _dispatch_real_tool_call(
     # monkeypatches it) and defaults empty → existing confirmation behaviour.
     # The M7 parallel-destructive pre-scan is upstream of this and is NOT
     # relaxed — auto-approve drops the human round-trip, not the serialisation.
+    confirmation_args = args
+    if tool_name == "apply_project_changes":
+        try:
+            from services.assistant_tools import preview_confirmation
+            confirmation_args = preview_confirmation(args.get("preview_id"))
+        except Exception as exc:
+            detail = getattr(exc, "detail", None)
+            kind = detail.get("error_kind", "invalid_preview") if isinstance(detail, dict) else "invalid_preview"
+            yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
+                                 "error_kind": kind, "message": _redact_for_log(detail or exc)}
+            tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
+                                           "is_error": True, "content": _error_result_content(detail, exc, kind)})
+            return
     approved = yield from _confirm_destructive_tool(
         session,
         tool_use_id=tool_use_id,
         tool_name=tool_name,
-        args=args,
+        args=confirmation_args,
         tier=tier,
         tool_results_collector=tool_results_collector,
-        guided=guided,
+        guided=guided or (session.assurance_turn is not None and tool_name == "update_component"),
     )
     if not approved:
         return
 
-    yield "tool_running", {"tool_use_id": tool_use_id, "tool_name": tool_name}
-    # Chat edits reach the same handlers as HTTP, but call them DIRECTLY —
-    # so `undo_snapshot_middleware` never runs and, before this, NOTHING
-    # recorded that the project now held unsaved work. depth stayed 0 and
-    # `unsaved` stayed False, so every destructive-action guard treated a
-    # chat-edited project as clean and could discard the edit with no prompt.
-    #
-    # Marked HERE, at the single dispatch site, rather than in
-    # `routers.network._update_component`: generic classes reach that helper
-    # but Transformer, GlobalConstraint and Bus-rename dispatch to dedicated
-    # handlers (chat_tools.py:730-740), so marking there would look complete
-    # and leave those three silently invisible.
-    #
-    # AFTER the confirmation gate on purpose. Every denial/expiry path above
-    # returns before reaching this line, so a declined destructive tool does
-    # not leave the project marked dirty for work the user refused.
-    #
-    # Before the handler runs, not after, and that is deliberate: a tool that
-    # fails partway can still have mutated the network, so marking on success
-    # only would under-report. Over-marking costs a prompt about already-clean
-    # work; under-marking costs the work itself.
-    if tier != "read":
-        from services import dirty_state
-        dirty_state.mark_dirty()
-        # ★ P33b B2: the chat seam of the edit counter. Same placement and
-        # same rationale as the mark above — before the handler, so a handler
-        # that raises part-way or outlives the per-tool deadline (the orphan
-        # may still land) cannot skip it. Only for tools that write the live
-        # network: a study, a Solve, a read or an export is not an edit.
-        from services.chat_tools_schema import tool_edits_network
-        if tool_edits_network(tool_name):
-            dirty_state.bump_revision()
-
-    # Execute via the chat_tools dispatcher. `handler` was resolved above the
-    # confirmation gate — see Improvement #19 there.
-
-    # #16 — per-tool execution deadline for NON-solver tools. A hung read/write
-    # handler would otherwise freeze this SSE worker thread forever. We run it
-    # on a shared worker pool and abandon it after PER_TOOL_TIMEOUT_SECONDS,
-    # emitting tool_timeout. Solver tools (run_simulation / run_ac_pf_stage)
-    # are EXCLUDED — they return immediately (spawning their own worker) and
-    # the solver_log_bridge below owns their long-running lifecycle, so a
-    # timeout here would be wrong. A timed-out worker stays detached (a Python
-    # thread can't be force-killed): the SSE thread is freed, the orphan
-    # finishes or hangs harmlessly. CAVEAT (documented): an orphan that LATER
-    # acquires PyPSAService.get_lock() and mutates the network after we emitted
-    # tool_timeout will still land + autosave — the 30s default is generous so
-    # legitimate writes finish well inside it.
+    task_ticket = None
     try:
+        effect_fresh = True
+        if session.assurance_turn is not None and tool_name == "update_component":
+            from harness.effects import reserve
+            effect_fresh = reserve(session.assurance_turn, args)
+        from services import assistant_tasks
+        task_ticket = assistant_tasks.begin_step(session, tool_name, args or {})
+        yield "tool_running", {"tool_use_id": tool_use_id, "tool_name": tool_name}
+        # Chat edits reach the same handlers as HTTP, but call them DIRECTLY —
+        # so `undo_snapshot_middleware` never runs and, before this, NOTHING
+        # recorded that the project now held unsaved work. depth stayed 0 and
+        # `unsaved` stayed False, so every destructive-action guard treated a
+        # chat-edited project as clean and could discard the edit with no prompt.
+        #
+        # Marked HERE, at the single dispatch site, rather than in
+        # `routers.network._update_component`: generic classes reach that helper
+        # but Transformer, GlobalConstraint and Bus-rename dispatch to dedicated
+        # handlers (chat_tools.py:730-740), so marking there would look complete
+        # and leave those three silently invisible.
+        #
+        # AFTER the confirmation gate on purpose. Every denial/expiry path above
+        # returns before reaching this line, so a declined destructive tool does
+        # not leave the project marked dirty for work the user refused.
+        #
+        # Before the handler runs, not after, and that is deliberate: a tool that
+        # fails partway can still have mutated the network, so marking on success
+        # only would under-report. Over-marking costs a prompt about already-clean
+        # work; under-marking costs the work itself.
+        if effect_fresh and tier != "read" and tool_name not in {"run_sensitivity_sweep", "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery"}:
+            from services import dirty_state
+            dirty_state.mark_dirty()
+            # ★ P33b B2: the chat seam of the edit counter. Same placement and
+            # same rationale as the mark above — before the handler, so a
+            # handler that raises part-way or outlives the per-tool deadline
+            # (the orphan may still land) cannot skip it; and only on a fresh
+            # effect, since a replayed completed operation edits nothing. Only
+            # for tools that write the live network: a study, a Solve, a read
+            # or an export is not an edit.
+            from services.chat_tools_schema import tool_edits_network
+            if tool_edits_network(tool_name):
+                dirty_state.bump_revision()
+        # Same seam, same reason: the HTTP middleware's undo snapshot never runs
+        # for an in-process call either. After the confirmation gate, so a refused
+        # tool costs no snapshot. See `_snapshot_for_turn_undo`.
+        if effect_fresh:
+            _snapshot_for_turn_undo(session, tool_name)
+
+        # Execute via the chat_tools dispatcher. `handler` was resolved above the
+        # confirmation gate — see Improvement #19 there.
+
+        # #16 — per-tool execution deadline for NON-solver tools. A hung read/write
+        # handler would otherwise freeze this SSE worker thread forever. We run it
+        # on a shared worker pool and abandon it after PER_TOOL_TIMEOUT_SECONDS,
+        # emitting tool_timeout. Solver tools (run_simulation / run_ac_pf_stage)
+        # are EXCLUDED — they return immediately (spawning their own worker) and
+        # issue 11 hands the turn off without awaiting that worker, so a
+        # timeout here would be wrong. A timed-out worker stays detached (a Python
+        # thread can't be force-killed): the SSE thread is freed, the orphan
+        # finishes or hangs harmlessly. CAVEAT (documented): an orphan that LATER
+        # acquires PyPSAService.get_lock() and mutates the network after we emitted
+        # tool_timeout will still land + autosave — the 30s default is generous so
+        # legitimate writes finish well inside it.
         if tool_name in ("run_simulation", "run_ac_pf_stage"):
             result = handler(**(args or {}))
         else:
@@ -1993,12 +2376,76 @@ def _dispatch_real_tool_call(
             # HTTP on both wires while the direct-call tests passed.
             _chat_tools.set_chat_session(session)
             _ctx_snapshot = contextvars.copy_context()
+            checked_turn = session.assurance_turn
+            def invoke_handler():
+                if checked_turn is not None and tool_name == "update_component":
+                    from harness.effects import execute
+                    return execute(checked_turn, tool_name, args, handler)
+                return handler(**(args or {}))
             future = _TOOL_EXECUTOR.submit(
-                lambda: _ctx_snapshot.run(lambda: handler(**(args or {})))
+                lambda: _ctx_snapshot.run(invoke_handler)
             )
+            if checked_turn is not None and tool_name == "update_component":
+                from harness.effects import register_worker
+                register_worker(checked_turn, future)
+            assistant_tasks.register_worker(task_ticket, future)
             try:
-                result = future.result(timeout=harness_budget.PER_TOOL_TIMEOUT_SECONDS)
+                tool_deadline = time.monotonic() + harness_budget.PER_TOOL_TIMEOUT_SECONDS
+                if tool_name == "wait_for_job":
+                    # A bounded local wait can publish progress without any
+                    # additional model request. Reuse the existing frame shape.
+                    deadline = tool_deadline
+                    previous_progress = None
+                    while not future.done() and time.monotonic() < deadline:
+                        with session._lock:
+                            progress = session.job_wait_progress
+                        if progress and progress.get("job_id") == args.get("job_id") and progress != previous_progress:
+                            yield "tool_progress", {"tool_use_id": tool_use_id, "tool_name": tool_name,
+                                                    "line": f"Job {progress['job_id']}: {progress['status']}", "kind": "INFO"}
+                            previous_progress = dict(progress)
+                        try:
+                            future.result(timeout=min(0.25, max(0, deadline - time.monotonic())))
+                        except concurrent.futures.TimeoutError:
+                            continue
+                result = future.result(timeout=max(0, tool_deadline - time.monotonic()))
+                # The tool ran inside a COPY of this context, so anything it
+                # published through a contextvar died with that copy. For a
+                # tool whose whole job is to change the active project, that
+                # means the switch never reached this thread: `run_turn`'s
+                # `PROJECT_REBINDING_TOOLS` check re-reads
+                # `get_active_context().loaded_project` here and saw the OLD
+                # name, so it emitted no `project_rebound` frame and never
+                # refreshed `turn_project_holder` — and every later tool in
+                # the turn ran against the previous project while the model
+                # believed it had moved. The frontend kept its old
+                # `currentProject` too, which is the `expect=` 409 the
+                # rebound frame exists to prevent (incident 2026-06-08).
+                #
+                #
+                # In production this is now belt-and-braces: `routers/chat.py`
+                # binds a turn CELL that every context copy shares, so the
+                # tool's publish already reached the turn, and this adopt
+                # finds nothing to do. It is what a caller without a cell (a
+                # direct `run_turn`, a test) relies on, and it adopts for
+                # EVERY tool so both paths agree. That used to be scoped to
+                # `PROJECT_REBINDING_TOOLS`, to keep an import's switch from
+                # tripping `project_switched_mid_turn`; the imports are on that
+                # list now, and a switch only a tool can have made — a copy
+                # nobody else writes to — is never the external one the guard
+                # is for. A switch that changes identity without being on the
+                # list still stops the turn, loudly, which is the safe failure.
+                from services.pypsa_service import (
+                    PyPSAService as _PyPSAService,
+                )
+
+                _PyPSAService.adopt_active_from(_ctx_snapshot)
             except concurrent.futures.TimeoutError:
+                if checked_turn is not None:
+                    checked_turn.effect_pending = True
+                try:
+                    assistant_tasks.finish_step(task_ticket, error="tool_timeout")
+                except Exception:
+                    logger.exception("Task timeout checkpoint unavailable")
                 # Anthropic requires a tool_result for every tool_use_id in the
                 # next user message (same invariant the project_switched and
                 # handler-exception paths honour) — emit the is_error result so
@@ -2026,6 +2473,11 @@ def _dispatch_real_tool_call(
         # force-overwrite / cascade choices. The agent layer just forwards.
         # For non-solver tools the worker exception re-raises here via
         # future.result(), so this block still owns handler failures.
+        if task_ticket is not None:
+            try:
+                assistant_tasks.finish_step(task_ticket, error=type(exc).__name__)
+            except Exception:
+                logger.exception("Task failure checkpoint unavailable")
         error_kind = "tool_error"
         detail = getattr(exc, "detail", None)
         if isinstance(detail, dict) and "error_kind" in detail:
@@ -2049,46 +2501,179 @@ def _dispatch_real_tool_call(
         })
         return
 
-    # Long-running execution tier: bridge solver log lines into tool_progress
-    # frames between tool_running and tool_result. run_simulation /
-    # run_ac_pf_stage return immediately (they spawn a worker thread); we
-    # poll the active solver_state until status flips to a terminal state,
-    # streaming [PHASE] / [VALIDATION] / TRACEBACK lines as they arrive
-    # (F10: ctx + log_queue captured under solver_state_lock).
+    # Only a SUCCESSFUL undo reaches this line (a refused one raised above and
+    # returned), and it popped this turn's snapshot — see `_forget_turn_undo`.
+    if tool_name == "undo_last":
+        _forget_turn_undo(session)
+
+    # Issue 11 / D-I1 — foreground solve/AC-PF handoff. The handlers already
+    # return {"status": "started"} after spawning a worker. Holding this turn
+    # on solver_log_bridge until terminal status blocked every other read
+    # (turn_already_in_flight / utterance lease). Emit the started handle,
+    # start a detached monitor for log lines, and release the turn.
     if tool_name in ("run_simulation", "run_ac_pf_stage"):
         try:
             from services.pypsa_service import PyPSAService
+            from harness.solver_bridge import start_detached_solver_monitor
+            from harness import job_adapters as ja
             active_ctx = turn_ctx or PyPSAService.get_active_context()
+            if task_ticket is not None:
+                # Sequential task steps cannot advance from a start receipt.
+                # Preserve their outcome wait, bounded by the shared deadline;
+                # ordinary foreground solves still release the turn immediately.
+                deadline = time.monotonic() + harness_budget.PER_TOOL_TIMEOUT_SECONDS
 
-            def _solver_done() -> bool:
+                def _task_solver_done():
+                    with active_ctx.solver_state_lock:
+                        terminal = active_ctx.solver_state.get("status") != "running"
+                    return terminal or time.monotonic() >= deadline
+
+                for progress in solver_log_bridge(
+                    session, active_ctx, poll_interval=0.1,
+                    is_solver_done=_task_solver_done,
+                ):
+                    yield "tool_progress", {
+                        "tool_use_id": tool_use_id, "tool_name": tool_name, **progress,
+                    }
                 with active_ctx.solver_state_lock:
-                    status = active_ctx.solver_state.get("status")
-                return status in ("completed", "failed", "aborted", "idle")
-
-            for prog in solver_log_bridge(
-                session, active_ctx,
-                poll_interval=0.1,
-                is_solver_done=_solver_done,
-            ):
-                yield "tool_progress", {
-                    "tool_use_id": tool_use_id,
-                    "tool_name": tool_name,
-                    **prog,
-                }
-            # Re-read final status into the tool_result payload so the agent
-            # learns whether the solve succeeded.
+                    result = {
+                        **(result if isinstance(result, dict) else {"result": result}),
+                        "final_status": active_ctx.solver_state.get("status"),
+                        "objective": active_ctx.solver_state.get("objective"),
+                        "solve_time": active_ctx.solver_state.get("solve_time"),
+                    }
             with active_ctx.solver_state_lock:
-                result = {
-                    **(result if isinstance(result, dict) else {"result": result}),
-                    "final_status": active_ctx.solver_state.get("status"),
-                    "objective": active_ctx.solver_state.get("objective"),
-                    "solve_time": active_ctx.solver_state.get("solve_time"),
-                }
-        except Exception as exc:  # noqa: BLE001 — bridge failure is non-fatal
+                kind = active_ctx.solver_state.get("kind")
+                status = active_ctx.solver_state.get("status")
+            base = result if isinstance(result, dict) else {"result": result}
+            job_id = None
+            if status == "running":
+                from services import chat_tools as _ct
+                owner = getattr(session, "owner_user_id", None) or _ct.acting_user_id()
+                job_id = ja.register_foreground_solve(
+                    tool_name=tool_name,
+                    tool_use_id=tool_use_id,
+                    owner_user_id=str(owner) if owner else None,
+                    project_uuid=getattr(active_ctx, "project_uuid", None),
+                    kind=kind,
+                )
+                from services import run_evidence as _run_evidence
+                run_token = _run_evidence.start_foreground_run(
+                    active_ctx, job_id=job_id, tool_name=tool_name, kind=kind,
+                )
+                start_detached_solver_monitor(
+                    session, active_ctx,
+                    tool_use_id=tool_use_id,
+                    tool_name=tool_name,
+                    on_terminal=(
+                        (lambda: _run_evidence.publish_foreground_run(run_token, active_ctx))
+                        if run_token else None
+                    ),
+                )
+            result = {
+                **base,
+                "status": base.get("status") or "started",
+                "running": status == "running",
+                "kind": kind,
+                "monitor": "get_simulation_status",
+                "detached_progress": task_ticket is None or status == "running",
+                **({"job_id": job_id} if job_id else {}),
+            }
+        except Exception as exc:  # noqa: BLE001 — enrich is best-effort
             logger.exception(
-                "chat: solver_log_bridge for %s failed: %s",
+                "chat: foreground solve handoff enrich for %s failed: %s",
                 tool_name, _redact_for_log(exc),
             )
+
+    # Issue 11 — adequacy/study mesh handoff. Starters already return
+    # {"status": "running"} after publish_study; mint an ad:… handle so
+    # wait_for_job can observe without model-polling get_adequacy_results.
+    from harness.job_adapters import (
+        REPORT_TOOL_NAMES as _REPORT_TOOL_NAMES,
+        STUDY_TOOL_KEYS as _STUDY_TOOL_KEYS,
+    )
+    if tool_name in _STUDY_TOOL_KEYS and isinstance(result, dict):
+        try:
+            from services.pypsa_service import PyPSAService
+            from harness import job_adapters as ja
+            from services import chat_tools as _ct
+            study_key = _STUDY_TOOL_KEYS[tool_name]
+            if result.get("status") == "running":
+                active_ctx = turn_ctx or PyPSAService.get_active_context()
+                owner = getattr(session, "owner_user_id", None) or _ct.acting_user_id()
+                job_id = ja.register_study_job(
+                    study_key=study_key,
+                    tool_name=tool_name,
+                    tool_use_id=tool_use_id,
+                    owner_user_id=str(owner) if owner else None,
+                    project_uuid=getattr(active_ctx, "project_uuid", None),
+                )
+                monitor = (
+                    "get_investment_case"
+                    if study_key == "investment_case"
+                    else f"get_adequacy_results('{study_key}')"
+                )
+                result = {
+                    **result,
+                    "job_id": job_id,
+                    "study_key": study_key,
+                    "family": ja.STUDY_FAMILY,
+                    "monitor": monitor,
+                }
+        except Exception as exc:  # noqa: BLE001 — enrich is best-effort
+            logger.exception(
+                "chat: study handoff enrich for %s failed: %s",
+                tool_name, _redact_for_log(exc),
+            )
+
+    if tool_name in _REPORT_TOOL_NAMES and isinstance(result, dict):
+        try:
+            from services.pypsa_service import PyPSAService
+            from harness import job_adapters as ja
+            from services import chat_tools as _ct
+            if result.get("status") == "running":
+                active_ctx = turn_ctx or PyPSAService.get_active_context()
+                owner = getattr(session, "owner_user_id", None) or _ct.acting_user_id()
+                job_id = ja.register_report_job(
+                    tool_name=tool_name,
+                    tool_use_id=tool_use_id,
+                    report_id=result.get("report_id"),
+                    owner_user_id=str(owner) if owner else None,
+                    project_uuid=getattr(active_ctx, "project_uuid", None),
+                )
+                result = {
+                    **result,
+                    "job_id": job_id,
+                    "family": ja.REPORT_FAMILY,
+                    "monitor": "get_report_status",
+                }
+        except Exception as exc:  # noqa: BLE001 — enrich is best-effort
+            logger.exception(
+                "chat: report handoff enrich for %s failed: %s",
+                tool_name, _redact_for_log(exc),
+            )
+
+    try:
+        task_state = assistant_tasks.finish_step(task_ticket, result=result)
+    except Exception as exc:
+        # The action may have completed. Keep its running checkpoint uncertain,
+        # pair the real tool ID, and forbid a silent automatic repeat.
+        yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
+                             "error_kind": "task_checkpoint_failed",
+                             "message": "The action returned but its checkpoint could not be saved. Inspect effects before resuming."}
+        tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
+                                       "is_error": True, "content": "task_checkpoint_failed; inspect effects before retrying"})
+        return
+    if task_state is not None:
+        result = {**result, "_task": task_state} if isinstance(result, dict) else {"result": result, "_task": task_state}
+
+    if session.assurance_turn is not None:
+        session.assurance_turn.capture(tool_name, args or {}, result, tool_use_id)
+    elif session.shadow_turn is not None:
+        try:
+            session.shadow_turn.capture(tool_name, args or {}, result, tool_use_id)
+        except Exception:
+            logger.exception("Shadow evidence could not be captured")
 
     # UI-control tools (and compare_scenarios with open_compare_rail) return a
     # marker dict with `_ui_event: True`. Emit a dedicated SSE frame so the
@@ -2127,17 +2712,31 @@ def _dispatch_real_tool_call(
             "compare_a": ui_event_payload.get("compare_a"),
             "compare_b": ui_event_payload.get("compare_b"),
             "compare_tab": ui_event_payload.get("compare_tab"),
+            # Issue 06 — open_run_result acknowledges the discussed run id.
+            "run_id": ui_event_payload.get("run_id"),
+            "section": ui_event_payload.get("section"),
+            "baseline_run_id": ui_event_payload.get("baseline_run_id"),
             # Preserve compare_scenarios numeric payload when present.
             **{
                 k: result[k]
                 for k in (
                     "project_a", "project_b", "focus", "a", "b",
                     "delta_b_minus_a", "focus_section", "note",
+                    "discussed", "status", "mode", "fingerprint",
+                    "evidence_available",
                 )
                 if k in result
             },
         }
+        if session.assurance_turn is not None:
+            ui_event_payload["tool_use_id"] = tool_use_id
         yield "ui_event", ui_event_payload
+
+    if session.assurance_turn is not None:
+        projection = session.assurance_turn.result_projection(tool_name, result_for_model, tool_use_id)
+        result_for_model = {**result_for_model, "_assurance": projection["_assurance"]} if isinstance(result_for_model, dict) else projection
+        if tool_name == "ui_open_panel":
+            result_for_model["ui_navigated"] = False
 
     # Success — push into result_refs (small summary) and emit tool_result.
     session.push_result_ref({

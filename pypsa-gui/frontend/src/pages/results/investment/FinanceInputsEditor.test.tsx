@@ -168,6 +168,37 @@ describe('FinanceInputsEditor', () => {
     expect(putBody().price_basis).toBe('real')
   })
 
+  it('offers the part-lifetimes replacement rule and the remaining-life terminal value (IC S0b S8)', async () => {
+    renderEditor()
+    await screen.findByTestId('fi-tranche-1')
+    const rule = screen.getByLabelText('Replacements') as HTMLSelectElement
+    expect(rule.value).toBe('')
+    expect(rule.selectedOptions[0].textContent).toBe('(default: the stated replacement entries)')
+    expect([...rule.options].map(o => o.value)).toEqual(['', 'fixed', 'part_lifetimes'])
+    const tv = screen.getByLabelText('Terminal value method') as HTMLSelectElement
+    expect([...tv.options].map(o => o.value)).toContain('remaining_life_annuity')
+    fireEvent.change(rule, { target: { value: 'part_lifetimes' } })
+    fireEvent.change(tv, { target: { value: 'remaining_life_annuity' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save the finance inputs' }))
+    await waitFor(() => expect(api.putFinance).toHaveBeenCalled())
+    expect(putBody().replacement_rule).toBe('part_lifetimes')
+    expect(putBody().terminal_value).toEqual({ method: 'remaining_life_annuity', value: null })
+  })
+
+  it('switching the terminal value to the remaining life clears its value (no 422)', async () => {
+    api.getFinance.mockResolvedValue({ finance: { ...structuredClone(FINANCE),
+      terminal_value: { method: 'fixed', value: 50000 } }, digest: 'digest-1', status: 'ok' })
+    renderEditor()
+    await screen.findByTestId('fi-tranche-1')
+    expect((screen.getByLabelText('Terminal value') as HTMLInputElement).value).toBe('50000')
+    fireEvent.change(screen.getByLabelText('Terminal value method'),
+      { target: { value: 'remaining_life_annuity' } })
+    expect((screen.getByLabelText('Terminal value') as HTMLInputElement).value).toBe('')
+    fireEvent.click(screen.getByRole('button', { name: 'Save the finance inputs' }))
+    await waitFor(() => expect(api.putFinance).toHaveBeenCalled())
+    expect(putBody().terminal_value).toEqual({ method: 'remaining_life_annuity', value: null })
+  })
+
   it('an emptied currency year is null, never 0', async () => {
     api.getFinance.mockResolvedValue({ finance: { ...structuredClone(FINANCE), currency_year: 2024,
       price_basis: 'nominal' }, digest: 'digest-1', status: 'ok' })

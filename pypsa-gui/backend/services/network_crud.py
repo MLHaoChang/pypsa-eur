@@ -9,6 +9,7 @@ router. Never imports ``routers.*``.
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 from typing import Any
 
 import pandas as pd
@@ -148,19 +149,70 @@ def _meta_payload(n: Any, loaded_project: str | None) -> dict:
         "snapshot_count": len(n.snapshots),
         "bus_count": len(n.buses),
     }
+# The request model each component class is created and updated through. The
+# fields those models DECLARE are the API's published surface, so they are part
+# of the whitelist below — see `_declared_attributes`.
+_CREATE_MODEL_NAMES: dict[str, str] = {
+    "Bus": "BusCreate",
+    "Carrier": "CarrierCreate",
+    "Generator": "GeneratorCreate",
+    "Load": "LoadCreate",
+    "Line": "LineCreate",
+    "Link": "LinkCreate",
+    "StorageUnit": "StorageUnitCreate",
+    "Store": "StoreCreate",
+    "Transformer": "TransformerCreate",
+    "ShuntImpedance": "ShuntImpedanceCreate",
+}
+
+
+@lru_cache(maxsize=None)
+def _declared_attributes(component_class: str) -> frozenset[str]:
+    """The fields the component's Create model declares, minus `name`.
+
+    Cached: the models are immutable once imported, and this is called on
+    every create and update.
+    """
+    import models.schemas as schemas
+
+    model = getattr(schemas, _CREATE_MODEL_NAMES.get(component_class, ""), None)
+    if model is None:
+        return frozenset()
+    return frozenset(model.model_fields) - {"name"}
+
+
 def _drop_unknown_extras(component_class: str, attr: str, kwargs: dict) -> dict:
     """
-    Drop any key PyPSA does not recognise for this component class (spec D21).
+    Drop any key neither PyPSA nor this API recognises for this component class
+    (spec D21).
 
     Pydantic's `extra='allow'` lets an undeclared key survive
     `model_dump(exclude_unset=True)` so a newly-exposed attribute can persist
     instead of being silently ignored. Without a whitelist that same setting
     would let an arbitrary key reach `n.add()`, so the two ship together.
 
-    A key passes if the catalog reports it as an Input attribute, OR it is
-    already a column on the frame. The second arm is what preserves today's
-    behaviour for fields a Create model declares but PyPSA marks Output —
-    narrowing to catalog-Input alone would be a silent behaviour change.
+    Three arms. A key passes if the catalog reports it as an Input attribute,
+    OR it is already a column on the frame, OR the component's Create model
+    DECLARES it.
+
+    The second arm preserves behaviour for fields a Create model declares but
+    PyPSA marks Output. The third arm is the one that was missing, and it cost
+    real data: the GUI adds attributes PyPSA has never heard of — the adequacy
+    occurrence trio (`outage_rate_value`, `outage_rate_basis`, `mttr_hours`),
+    `p_max_pu_includes_outages`, `curtailment_cost`, a bus `country`, a
+    multi-output link's `bus2`/`efficiency2` — and says so in the models'
+    own comments ("Custom GUI columns ... stored on the component DataFrame").
+    On a network that already carries the column the second arm let them
+    through, which is every network imported from PyPSA-Eur; on a network
+    built from scratch the FIRST asset created through the API lost them,
+    silently, behind a 201. A generator created with an explicit outage rate
+    then read back as having none, so the occurrence chain fell through to the
+    per-carrier default library with nothing to show the user's number had
+    ever arrived.
+
+    A declared field is by definition something this API intends to persist,
+    so the model is the right authority — and the whitelist stays a whitelist:
+    an undeclared, uncatalogued key is still dropped.
     """
     from services.adequacy.eh_columns import coerce_eh_value, eh_columns_for
 
@@ -178,7 +230,11 @@ def _drop_unknown_extras(component_class: str, attr: str, kwargs: dict) -> dict:
     if not allowed:
         return {**kwargs, **out_eh}
     columns = set(getattr(n, attr).columns)
-    kept = {k: v for k, v in kwargs.items() if k in allowed or k in columns}
+    declared = _declared_attributes(component_class)
+    kept = {
+        k: v for k, v in kwargs.items()
+        if k in allowed or k in columns or k in declared
+    }
     return {**kept, **out_eh}
 
 
@@ -521,6 +577,28 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
     return {"name": new_name}
 
 
+def purge_component_side_data(n, component_class: str, attr: str, name: str) -> None:
+    """Drop the side data a removed component leaves behind.
+
+    Two stores outlive `n.remove`, and both bite later rather than now:
+
+      * per-period vintage bounds (and any stored vintage results) — stale
+        entries are expanded by the solver for an asset that is gone;
+      * `_user_ts` profile entries — they accumulate forever in project saves,
+        are re-injected on every solve, and a future component reusing the
+        same name inherits the deleted asset's profile.
+
+    EVERY path that removes a component must call this, not just the CRUD
+    delete. It is a free function taking `n` so the cascade delete — which
+    removes up to seven component classes in one call and lives in
+    `services.network_buses` — can share it without either module importing
+    the other's callers. Call it inside the same `PyPSAService.get_lock()`
+    block as the `n.remove` it follows.
+    """
+    vintage_service.delete_bounds_for_asset(n, component_class, name)
+    _user_ts_delete_asset(attr, name)
+
+
 def _delete_component(component_class: str, attr: str, name: str) -> None:
     _refuse_edit_during_live_study()
     n = PyPSAService.get_network()
@@ -529,12 +607,5 @@ def _delete_component(component_class: str, attr: str, name: str) -> None:
         if name not in df.index:
             raise HTTPException(404, f"{component_class} '{name}' not found")
         n.remove(component_class, name)
-        # Drop any saved per-period bounds for the now-gone asset so the
-        # vintage_bounds dict doesn't keep stale entries that the solver would
-        # try (and fail) to expand at next solve.
-        vintage_service.delete_bounds_for_asset(n, component_class, name)
-        # Drop _user_ts entries too — without this they accumulate forever
-        # in project saves and a future component reusing the same name
-        # inherits the deleted asset's profile.
-        _user_ts_delete_asset(attr, name)
+        purge_component_side_data(n, component_class, attr, name)
     change_log_service.log("delete", component_class, name, f"Deleted {component_class.lower()} '{name}'")

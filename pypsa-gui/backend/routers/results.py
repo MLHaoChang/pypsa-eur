@@ -925,6 +925,13 @@ def _publish_study(key: str, record: dict, thread: "_threading.Thread") -> None:
             except BaseException:
                 _state[key] = None
                 raise
+            # Issue 06 — watch the study record for a terminal status and
+            # publish an immutable run manifest (best-effort).
+            try:
+                from services import run_evidence as _re
+                _re.watch_study_run(key, record)
+            except Exception:  # noqa: BLE001
+                pass
     finally:
         lock.release()
 

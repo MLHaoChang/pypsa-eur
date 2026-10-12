@@ -447,6 +447,11 @@ def test_the_mirror_round_trips_through_the_restricted_unpickler(
     mirror = _pkl_data(project_storage_dir, a)["eh_study_record"]
     assert isinstance(mirror["report"], dict)
     assert mirror["status"] == "done"
+    # Master merge (2026-10-12): a study record carries the run-evidence
+    # worker token (`_run_evidence`, with a `PosixPath` root) while it runs.
+    # It is process state, not the study's result: mirrored, it made the
+    # restricted unpickler refuse the WHOLE results_state.pkl on load.
+    assert not [k for k in mirror if k.startswith("_")], sorted(mirror)
 
 
 # ── The smoke's exact path, in local mode (no session) ────────────────────

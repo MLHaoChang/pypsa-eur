@@ -806,8 +806,15 @@ def run_simulation(
                 def _guarded_restore() -> None:
                     if _restore_done["v"]:
                         return
-                    _restore_done["v"] = True
                     _real_restore()
+                    # Marked AFTER the restore, not before. The defensive second
+                    # call in the KeyboardInterrupt handler exists for exactly
+                    # one case — an interrupt landing mid-restore — and with the
+                    # flag set first, that call found it already True and did
+                    # nothing, leaving the network half-restored. Re-running is
+                    # safe: `_run_undo_actions` guards every entry and is
+                    # documented idempotent.
+                    _restore_done["v"] = True
 
                 restore_modelling = _guarded_restore
                 # Clear any stale loss DataFrames from a previous solve. PyPSA
@@ -1390,6 +1397,15 @@ def run_simulation(
                     for line in tb_str.rstrip().split("\n"):
                         log_queue.put(f"TRACEBACK: {line}")
                     condition = f"{condition}; ac_pf_failed: {exc}"
+            if status in ("ok", "optimal"):
+                # Persist input provenance with results under the SAME solve
+                # lock. Axis alignment alone cannot detect parameter edits.
+                try:
+                    from services.workflow_tools import _record_solve_inputs
+                    _record_solve_inputs(network, config)
+                except Exception as exc:
+                    network.meta.pop("assistant_solve_input_fingerprint", None)
+                    phase(f"Result input provenance unavailable: {type(exc).__name__}")
     except KeyboardInterrupt:
         # The abort watcher injected this to cancel the native HiGHS solve mid-
         # iteration (linopy caught it → h.cancelSolve() → PyPSA returned, then

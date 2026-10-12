@@ -80,6 +80,8 @@ MAX_MULTIMODAL_BLOCKS = 20
 # parse server-side (Phase B). CSV is text/plain but worth allowing as a
 # poor-man's tabular input.
 ALLOWED_MIME_TYPES = frozenset({
+    # Native network files are tool-accessible attachments, never model bytes.
+    "application/x-netcdf", "application/x-hdf", "application/x-hdf5", "application/zip",
     # Images (Phase C multimodal)
     "image/png", "image/jpeg", "image/webp", "image/gif",
     # PDFs (Phase C multimodal)
@@ -330,6 +332,7 @@ def add_upload(
     kind: UploadKind = "user_upload",
     quota_bytes: int = DEFAULT_QUOTA_BYTES,
     project_dir: pathlib.Path | None = None,
+    assurance_sha256: str | None = None,
 ) -> UploadMeta:
     """
     Add `file_bytes` to `name`'s uploads dir. Idempotent on bytes — same
@@ -374,6 +377,9 @@ def add_upload(
                 )
             if kind in PROMOTABLE_KINDS and existing.kind == "user_upload":
                 existing = existing.model_copy(update={"kind": kind})
+                _atomic_write_meta(meta_path, existing)
+            if assurance_sha256 is not None and existing.assurance_sha256 != assurance_sha256:
+                existing = existing.model_copy(update={"assurance_sha256": assurance_sha256})
                 _atomic_write_meta(meta_path, existing)
             return existing
 
@@ -422,6 +428,7 @@ def add_upload(
             version=1,
             page_count=page_count,
             truncated_to_100_pages=truncated_flag,
+            assurance_sha256=assurance_sha256,
         )
         # Write meta (blob_ready=false) → write blob → flip meta.blob_ready=true.
         # An orphan blob without a meta is invisible to list_uploads.

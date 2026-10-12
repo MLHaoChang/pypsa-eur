@@ -245,6 +245,12 @@ def test_every_service_call_writer_is_classified_exactly_once(name):
             f"{name} is a {tier} service-call tool and must be classified in "
             "exactly one of _SERVICE_CALL_NETWORK_WRITES / "
             "_SERVICE_CALL_NON_NETWORK_WRITES")
+    elif is_service_call and tier == "execution" and in_net:
+        # Master merge (2026-10-12): `apply_project_changes` is execution
+        # tier (it applies a confirmed preview) and swaps the live network
+        # through `set_network`. The dispatch seam bumps for any non-read
+        # tier, so an execution tool that edits belongs in the network list.
+        assert not in_non
     else:
         assert not (in_net or in_non), (
             f"{name} is listed as a service-call writer but is not one")
@@ -503,3 +509,13 @@ def test_an_io_import_is_an_edit(client, install_network, tmp_path):
     assert r.status_code == 200, r.text
     assert [b["name"] for b in client.get("/api/network/buses").json()] == ["imported"]
     assert _rev(client) == r0 + 1
+
+
+def test_master_assistant_tools_that_replace_the_live_network_edit_it():
+    """Master merge (2026-10-12): the assistant's import of an uploaded network
+    and its apply of a confirmed preview replace the live network, so the chat
+    seam bumps for them; the preview itself is built on a side context."""
+    assert S.tool_edits_network("import_uploaded_network")
+    assert S.tool_edits_network("apply_project_changes")
+    assert not S.tool_edits_network("preview_project_changes")
+    assert not S.tool_edits_network("run_sensitivity_sweep")

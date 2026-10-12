@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { act, cleanup, render } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import ToasterHost, { TOAST_GAP } from './ToasterHost'
+import { COMPANION_TOAST_OFFSET } from './CompanionLauncher'
 import { useUIStore } from '../store/uiStore'
 
 const initial = useUIStore.getState()
@@ -44,7 +45,7 @@ describe('ToasterHost (P31 C2)', () => {
     useUIStore.setState({ assistantDockOpen: true, assistantDockWidth: 420 })
     renderAt('/app')
     act(() => { useUIStore.setState({ assistantDockOpen: false }) })
-    expect(container().style.right).toBe(`${TOAST_GAP}px`)
+    expect(container().style.right).toBe(`${COMPANION_TOAST_OFFSET + TOAST_GAP}px`)
     act(() => { useUIStore.setState({ assistantDockOpen: true }) })
     expect(container().style.right).toBe(`${420 + TOAST_GAP}px`)
     act(() => { useUIStore.setState({ assistantDockWidth: 600 }) })

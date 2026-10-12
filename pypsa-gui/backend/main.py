@@ -75,6 +75,8 @@ from routers import (
     auth,
     changelog,
     chat,
+    dictation,
+    durable_conversation,
     clustering,
     adequacy_worksheet,
     compare,
@@ -219,7 +221,7 @@ _FOREIGN_LOCK_GATE_EXEMPT_EXACT = frozenset({
     "/api/simulation/queue/resume",
     "/api/simulation/queue/cancel_queued",
     "/api/simulation/preflight",
-    # The five adequacy-study ABORTS. Gated prefix `/api/results/` below covers
+    # The six adequacy-study ABORTS. Gated prefix `/api/results/` below covers
     # the study STARTS, which re-solve the shared network; an abort only ever
     # STOPS a running study, so it writes nothing and needs no holder check —
     # the same reason `queue/{id}/abort` and `dismiss` are exempt. Gating an
@@ -230,6 +232,14 @@ _FOREIGN_LOCK_GATE_EXEMPT_EXACT = frozenset({
     "/api/results/fmea_sweep/abort",
     "/api/results/margin_loop/abort",
     "/api/results/coupling_loop/abort",
+    # Added later than the five above, and missed by this list: this comment
+    # said "the five" when the Energy Hub study shipped. Its abort calls the
+    # SAME `_abort_study` helper and its docstring says "Same contract as the
+    # other study abort POSTs" — it only sets a stop event — so every word of
+    # the reasoning above applies, and an EH study could be trapped by a
+    # foreign lock exactly as described. The chat gate mirrors this set and
+    # `tests/test_chat_tools_lock_gate_parity.py` now holds the two together.
+    "/api/results/eh_study/abort",
 })
 #
 # The job-scoped patterns are anchored to the canonical dashed-UUID shape, not
@@ -1243,6 +1253,12 @@ app.include_router(uploads.router, prefix="/api/projects", tags=["uploads"])
 # confirmation card lifecycle + abort endpoint. The router is mounted under
 # /api/chat; Phase 3 wires the real LLM call without changing route shapes.
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+app.include_router(dictation.router, prefix="/api/dictation", tags=["dictation"])
+app.include_router(
+    durable_conversation.router,
+    prefix="/api/durable-conversations",
+    tags=["durable-conversations"],
+)
 # In-app guides (P21): static tour / field-help catalogue, read-only.
 app.include_router(guides.router, prefix="/api/guides", tags=["guides"])
 # Desktop-only. Every route 404s in web mode; see routers/local_settings.py.

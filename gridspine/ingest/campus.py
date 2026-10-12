@@ -119,28 +119,37 @@ import pandas as pd
 import yaml
 
 from gridspine.schema.contracts import ContractError
+from gridspine.schema.island import (
+    EARTHINGS,
+    check_cross,
+    check_island,
+    validate_requirements,
+    validate_unit_island,
+)
 from gridspine.schema.network import validate_canonical
 from gridspine.static.shortcircuit import LINE_ENDTEMP_DEGREE
 
 SOURCES = frozenset({"measured", "datasheet", "assumed"})
-UNIT_KINDS = ("load", "bess", "pv", "wind", "genset")
+UNIT_KINDS = ("load", "bess", "pv", "wind", "genset", "ups")
 COMP_KINDS = ("capacitor_bank", "shunt_reactor", "statcom")
 #: A STATCOM's IEC 60909 screening: a current source of k times its rated
 #: current, the drafted inverter's figures (producers/campus.py), assumed.
 STATCOM_K, STATCOM_RX = 1.2, 0.1
+#: A UPS feeds no fault upstream: its rectifier blocks it (plan I1, I5).
+UPS_K, UPS_RX = 0.0, 0.1
 GRID_NAME = "GRID"
 NET_BASE_MVA = 1.0
 
 #: How each unit kind appears in the registry. ``load`` is absent: loads
 #: travel in loads.csv, by bus.
-REGISTRY_KIND = {"bess": "storage", "pv": "res", "wind": "res", "genset": "genset"}
+REGISTRY_KIND = {"bess": "storage", "ups": "storage", "pv": "res", "wind": "res", "genset": "genset"}
 
 #: A transformer winding may differ from its bus's nominal voltage, because
 #: tap and design voltages are routinely a few percent off (110/21 kV on a
 #: 20 kV busbar). More than this is a wiring mistake.
 WINDING_TOLERANCE = 0.10
 
-_TOP = frozenset({"name", "f_hz", "pcc", "buses", "transformers", "cables", "units", "compensation"})
+_TOP = frozenset({"name", "f_hz", "pcc", "buses", "transformers", "cables", "units", "compensation", "island"})
 _PCC_FIELDS = ("vm_pu", "sk_max_mva", "sk_min_mva", "rx_max", "rx_min")
 #: Optional at the PCC: the contracted connection capacity, the P_ref of the
 #: reactive requirement. Without it the study uses the year's peak import.
@@ -155,7 +164,13 @@ _UNIT_FIELDS = {
     "pv": ("p_mw", "s_mva", "k_sc", "rx_sc"),
     "wind": ("p_mw", "s_mva", "k_sc", "rx_sc"),
     "genset": ("p_mw", "s_mva", "xd_pp", "rx_sc"),
+    "ups": ("p_mw", "e_mwh", "s_mva"),
 }
+#: A transformer winding's neutral earthing (plan I1, read by I5b): untagged
+#: ``earthing_hv`` / ``earthing_lv`` from ``EARTHINGS``, with the tagged
+#: resistance ``r_n_hv_ohm`` / ``r_n_lv_ohm`` when, and only when, it is
+#: ``resistance``.
+_TRAFO_EARTHING = {"hv": ("earthing_hv", "r_n_hv_ohm"), "lv": ("earthing_lv", "r_n_lv_ohm")}
 #: Untagged flags a transformer or cable may carry (see the docstring).
 _ASSET_FLAGS = ("existing", "library_id")
 _COMP_STRUCTURAL = ("name", "bus", "kind", "library_id", "pypsa_name")
@@ -175,6 +190,8 @@ CAMPUS_LEDGER = (
     "campus: a STATCOM is screened for IEC 60909 as a current source of "
     "STATCOM_K = 1.2 times its rated current, the drafted inverter figure "
     "(assumed); capacitor banks and reactors feed no fault current",
+    "campus: a UPS is a storage unit that feeds no fault current upstream "
+    "(UPS_K = 0): its rectifier blocks it",
 )
 
 
@@ -192,6 +209,13 @@ class Campus:
     params: pd.DataFrame
     registry: pd.DataFrame
     compensation: pd.DataFrame = dataclasses.field(default_factory=lambda: _empty_compensation())
+    #: The island data (plan I1): ``units`` maps a unit id to its validated
+    #: block (``schema/island.py``); ``requirements`` is the validated
+    #: campus-level block, or None.
+    island: dict = dataclasses.field(default_factory=lambda: {"units": {}, "requirements": None})
+    #: ``{transformer: {"hv": earthing, "lv": earthing}}`` for the windings
+    #: whose earthing is given.
+    earthing: dict = dataclasses.field(default_factory=dict)
 
 
 _COMP_COLUMNS = ["name", "kind", "bus", "q_mvar", "steps", "library_id", "pypsa_name"]
@@ -328,10 +352,11 @@ def build_campus(spec) -> Campus:
                        s_sc_min_mva=pv["sk_min_mva"], rx_max=pv["rx_max"], rx_min=pv["rx_min"],
                        name=GRID_NAME)
 
-    edges = []
+    edges, earthing = [], {}
     for tname, ts in trafos.items():
         where = f"transformers.{tname}"
-        _fields(where, ts, _TRAFO_FIELDS, ("hv_bus", "lv_bus", "pypsa_name", *_ASSET_FLAGS))
+        _fields(where, ts, _TRAFO_FIELDS,
+                ("hv_bus", "lv_bus", "pypsa_name", *_ASSET_FLAGS, *(f for pair in _TRAFO_EARTHING.values() for f in pair)))
         _flags(where, ts)
         hv, lv = str(ts.get("hv_bus")), str(ts.get("lv_bus"))
         if hv == lv:
@@ -352,6 +377,19 @@ def build_campus(spec) -> Campus:
             vkr_percent=v["vkr_percent"], vk_percent=v["vk_percent"], pfe_kw=v["pfe_kw"],
             i0_percent=v["i0_percent"], name=str(tname))
         edges.append((hv, lv))
+        for side, (field, r_field) in _TRAFO_EARTHING.items():
+            if field not in ts:
+                if r_field in ts:
+                    raise ContractError(f"{where}.{r_field} is given without {field}")
+                continue
+            kind = ts[field]
+            if kind not in EARTHINGS:
+                raise ContractError(f"{where}.{field} is {kind!r}; allowed {list(EARTHINGS)}")
+            if (kind == "resistance") != (r_field in ts):
+                raise ContractError(f"{where}: {r_field} is needed with resistance earthing, and only then")
+            if r_field in ts:
+                _tagged(where, r_field, ts, rows)
+            earthing.setdefault(str(tname), {})[side] = kind
 
     for cname, cs in cables.items():
         where = f"cables.{cname}"
@@ -375,7 +413,7 @@ def build_campus(spec) -> Campus:
     if stranded:
         raise ContractError(f"campus: bus(es) {stranded} are not connected to the PCC {pcc_bus!r}")
 
-    unit_rows, reg_rows = [], [{"unit_id": GRID_NAME, "bus": pcc_bus, "kind": "ext_grid"}]
+    unit_rows, reg_rows, island_units = [], [{"unit_id": GRID_NAME, "bus": pcc_bus, "kind": "ext_grid"}], {}
     for uname, us in units.items():
         where = f"units.{uname}"
         if not isinstance(us, dict):
@@ -384,7 +422,7 @@ def build_campus(spec) -> Campus:
         if kind not in UNIT_KINDS:
             raise ContractError(f"{where}: unknown kind {kind!r}; allowed {list(UNIT_KINDS)}")
         required = _UNIT_FIELDS[kind]
-        _fields(where, us, required, ("kind", "bus", "pypsa_name"))
+        _fields(where, us, required, ("kind", "bus", "pypsa_name", "island"))
         bus = str(us.get("bus"))
         _bus_kv(where, buses, bus)
         v = {f: _tagged(where, f, us, rows) for f in required}
@@ -399,12 +437,20 @@ def build_campus(spec) -> Campus:
         else:
             if v["s_mva"] < v["p_mw"]:
                 raise ContractError(f"{where}: s_mva ({v['s_mva']}) is below p_mw ({v['p_mw']}); the inverter or machine cannot carry its own rating")
-            k = 1.0 / v["xd_pp"] if kind == "genset" else v["k_sc"]
-            pp.create_sgen(net, idx[bus], p_mw=0.0 if kind == "bess" else v["p_mw"], q_mvar=0.0,
-                           sn_mva=v["s_mva"], name=uname, k=k, rx=v["rx_sc"],
+            k = {"genset": lambda: 1.0 / v["xd_pp"], "ups": lambda: UPS_K}.get(kind, lambda: v["k_sc"])()
+            pp.create_sgen(net, idx[bus], p_mw=0.0 if kind in ("bess", "ups") else v["p_mw"], q_mvar=0.0,
+                           sn_mva=v["s_mva"], name=uname, k=k, rx=UPS_RX if kind == "ups" else v["rx_sc"],
                            generator_type="current_source")
             reg_rows.append({"unit_id": uname, "bus": bus, "kind": REGISTRY_KIND[kind]})
         unit_rows.append(row)
+        if "island" in us:
+            block = validate_unit_island(f"{where}.island", kind, us["island"])
+            island_units[uname] = block
+            for f, val in block["values"].items():
+                if not isinstance(val, list):
+                    rows.append({"element": uname, "param": f, "value": float(val), "source": block["sources"][f]})
+        elif kind == "ups":
+            raise ContractError(f"{where}: a ups needs its island block, which names the loads it protects (it_load)")
 
     comp_rows = []
     for cs in comps:
@@ -432,8 +478,34 @@ def build_campus(spec) -> Campus:
 
     units_df = pd.DataFrame(unit_rows).set_index("unit_id")
     registry = pd.DataFrame(reg_rows).set_index("unit_id")
+    island = {"units": island_units, "requirements": _island_requirements(c, units_df, island_units, rows)}
     params = pd.DataFrame(rows, columns=["element", "param", "value", "source"])
-    return Campus(name=name, net=net, units=units_df, params=params, registry=registry, compensation=compensation)
+    return Campus(name=name, net=net, units=units_df, params=params, registry=registry, compensation=compensation,
+                  island=island, earthing=earthing)
+
+
+def _island_requirements(c, units_df, island_units, rows):
+    """The campus-level island requirements, validated and cross-checked
+    against the units, or None when the campus has none. The UPS and
+    redundancy checks run whenever there are island blocks."""
+    kinds = {uid: {"kind": k} for uid, k in units_df["kind"].items()}
+    every = {**kinds, **island_units}
+    req = None
+    if "island" in c:
+        req = validate_requirements(c["island"], "campus.island")
+        for f, val in req["values"].items():
+            if not isinstance(val, list):
+                rows.append({"element": "island", "param": f, "value": float(val), "source": req["sources"][f]})
+        for name, lim in req["frequency_limits"].items():
+            for f, val in lim["values"].items():
+                rows.append({"element": f"island.{name}", "param": f, "value": val, "source": lim["sources"][f]})
+        check_cross(every, req, "campus")
+        critical = [uid for uid, b in island_units.items() if b["kind"] == "load" and b["critical"]]
+        check_island({"requirements": req}, float(units_df.loc[critical, "p_mw"].sum()) if critical else 0.0)
+    elif island_units:
+        dummy = {"values": {"genset_redundancy_n": 0}, "ride_through_storage": []}
+        check_cross(every, dummy, "campus")
+    return req
 
 
 def load_campus(path) -> Campus:
