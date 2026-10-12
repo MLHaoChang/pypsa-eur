@@ -1163,6 +1163,109 @@ earthing.
 - An island that loses its only earth reference is reported as such.
 - Mutations.
 
+### I5b as built (2026-10-12)
+
+**`gridspine/static/island_sc_seq.py`**
+- **One linear system per fault.** It holds the three sequence networks and
+  the fault's own three equations:
+  - Y1·dV1 + e_f·I1 = I_conv, with V1 = c + dV1 (IEC's equivalent source);
+  - Y2·V2 + e_f·I2 = 0;
+  - Y0·V0 + e_f·I0 = 0.
+  - **Not determinable:** a fault the passive network cannot carry is
+    reported as such, never as a number. Example: positive-sequence-only
+    converters with no negative-sequence path.
+  - The fault currents are unique whenever the system is consistent.
+- **`sequence_net(campus, sources, island, case, ...)`** builds the
+  networks:
+  - cables: Z0 from `r0`/`x0`, else drafted as R + 3·0.727 Ω/km and X0 = X
+    (a 25 mm² copper screen, assumed); C0 = C;
+  - transformers: the rated ratio as an off-nominal tap (110/21 kV on a
+    20 kV bus), K_T, and the zero sequence by windings (rules below);
+  - gensets: K_G on Z1, Z2 and Z0, and 3·R_N uncorrected. x2 = x''d and
+    x0 = 0.4·x''d unless given; unearthed without island data;
+  - converters: I5's k, with neg_seq = k2 as an inductive admittance;
+  - the grid: x0x / r0x0, by default X0 = X1 and R0/X0 = R/X;
+  - earthing transformers.
+- **Zero-sequence winding rules:**
+  - earthed star to earthed star: series;
+  - earthed star against a delta: a shunt on the star's bus;
+  - anything else: open.
+- **IEC 60909-0:2016 adds converter currents by magnitude.** Each converter
+  is therefore injected at −arg Z1_fj, so its share of V1 at the fault is in
+  phase with c. That reproduces I5 and pandapower for mixed islands, and
+  IEC's 3·|Z1|/|Z1+Z2+Z0| converter term for earth faults.
+- **neg_seq keeps the converter at its limit:** |I1| + |I2| ≤ k·In, with both
+  scaled together (a fixed point). In a converter-only island this gives
+  Ik1 = 1.5·k·In and Ik2 = (√3/2)·k·In, whatever k2 is.
+  - **Change from the plan's wording:** an uncapped admittance would have
+    given 3·k·In, twice the current limit and optimistic for protection.
+- **Inside a power-station unit** (a fault at the genset's own bus), the
+  genset takes K_G and its unit transformer no correction, as pandapower
+  does.
+- **Studies:**
+  - `unbalanced_fault_levels`: Ik1, Ik2 and Ik3, max and min, per bus,
+    grid-connected or islanded, plus `earth_path`, `earth_assumed`, and
+    `ic_e_ka` (the capacitive earth-fault current √3·ω·C0·Un of an
+    unearthed zone, not IEC 60909);
+  - `earth_reference`: earthed grid-connected, earthed in island, lost on
+    islanding, and earthed only on assumed data;
+  - `earth_fault_relay_check`: the residual 3·I0 through the relay's branch
+    in the island min case, against s × `i_pickup_e_ka`, with the
+    grid-connected value beside it.
+
+**Campus YAML**
+- Transformer `vector_group` (untagged). Without it, Dyn11, or YNyn11 when
+  the HV earthing is given; a neutral brought out without its earthing is
+  solid. Each such default is listed in `Campus.assumptions`.
+- **Refused:** earthing on a delta winding, and solid or resistance earthing
+  on a star without N.
+- New data:
+  - cable `r0_ohm_per_km`, `x0_ohm_per_km`, `c0_nf_per_km`;
+  - PCC `x0x_max/min` and `r0x0_max/min`;
+  - top-level `earthing_transformers`: {bus, x0_ohm, r_n_ohm?};
+  - relay `i_pickup_e_ka` (a relay needs at least one pickup; I5 judges only
+    the relays with a phase pickup);
+  - genset `x2_pu` and `x0_pu`.
+- A campus without the new data builds an identical pandapower net.
+
+**Checked against**
+- **pandapower `1ph` and `2ph`**, max and min, on a solidly earthed net with
+  no converters: equal at every bus to 1e-6.
+- **The 3-phase fault equals I5 and pandapower to 1e-9** on these cases:
+  - genset;
+  - power-station unit with K_SO or K_S, inside and outside the unit,
+    islanded and grid-connected;
+  - converters only;
+  - a mixed feeder;
+  - the off-nominal grid-connected campus;
+  - a STATCOM.
+- **One explained difference:** I5's own min-case solve sends every
+  converter ampere into the fault. IEC's distribution factor sends some into
+  a genset that is not behind the converter. That is 0.5 % at the end of the
+  test feeder.
+- **Hand values:**
+  - Ik1 and Ik2 behind a Dyn11, and with an LV neutral resistor;
+  - off-nominal YNyn with an HV neutral resistor, and YNd on its HV side;
+  - YNy and Yyn passing no zero sequence;
+  - genset earthing: solid, resistance, isolated;
+  - the drafted cable at 20 °C and at 80 °C;
+  - the earthing transformer;
+  - IEC's converter term;
+  - the zero-sequence current divider that blinds an earth-fault relay.
+- **Pinned:** pandapower gives k·In (0.762 kA) for an earth fault on an
+  unearthed delta with a converter (spike 6). The sequence networks give 0.
+
+**Tests and mutations**
+- 87 tests in four files:
+  - `test_island_sc_seq.py`;
+  - `test_island_earth.py`;
+  - `test_campus_sequence_data.py`;
+  - one more in `test_island_relays.py`.
+- **Mutation testing:** 42 of 42 killed. Round 1 left 15 survivors:
+  - two were dead code and were removed: the scale clamp, and the SVD
+    uniqueness check (consistency implies uniqueness, as shown above);
+  - 13 were closed with hand-oracle tests.
+
 ### I6: first-pass frequency check — aggregated inertia and droop — step 4a (M)
 
 **New module: `static/frequency.py`** (numpy/scipy only; no pandapower).

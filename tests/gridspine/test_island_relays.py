@@ -160,3 +160,11 @@ def test_a_far_fault_that_never_exceeds_the_sustained_current_is_not_raised_by_i
     irg = 12.5 / (math.sqrt(3) * 20.0)
     assert r.initial_ka < ISC.PMG_SUSTAINED_PU * irg
     assert r.relay_ka == pytest.approx(r.initial_ka, rel=1e-9)
+
+
+def test_an_earth_fault_relay_without_a_phase_pickup_is_not_judged_here():
+    r = relay("R_E", "F1", "B", 0.1)
+    del r["i_pickup_ka"]
+    r["i_pickup_e_ka"] = t(0.05)
+    camp = build_campus(feeder([relay("R1", "F1", "B", 0.1), r]))
+    assert list(ISC.relay_check(camp)["relay"]) == ["R1"]
