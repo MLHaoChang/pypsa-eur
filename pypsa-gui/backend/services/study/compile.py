@@ -263,6 +263,23 @@ def _refuse_unsupported(form: Tariff) -> None:
                            "it is one or the other")
 
 
+def validate_form(form: Tariff) -> None:
+    """
+    Refuse at intake what the compile refuses at run time (gate S3 N7,
+    N-v2-2; moved from the deleted `tariff.validate_tariff_intake` in U2
+    WP10): a `measured` capacity charge, an `annual_peak` or `ratchet` demand
+    charge, a network-charge basis the study does not price, and an export
+    given as both a price and a series — plus an export cap, which the
+    compile can carry (C3, row 34) but the guided intake does not offer yet,
+    so it stays refused there (`export_cap_unsupported`) as it was before U2.
+    Typed (`CompileError`), so the route answers 422 with the code.
+    """
+    _refuse_unsupported(form)
+    if form.export.cap_mw is not None:
+        raise CompileError("export_cap_unsupported",
+                           "an export cap is not offered by the guided study's intake")
+
+
 def _item(item_id: str, kind: str, unit: str, rate: float, *, name: str = "all",
           measured_on: str = "import") -> dict:
     return {"id": item_id, "kind": kind, "unit": unit, "settlement": SETTLEMENT,
@@ -495,7 +512,7 @@ def commercial_from_ledger(intake: Mapping[str, Any] | None, ledger: Assumptions
     """
     Plan §2 C1: the study's commercial config from its intake (the tariff
     choice or the user's form, the connection), its ledger (rows 16-18) and
-    the defaults (`library.load_defaults()` or the legacy `load_library()`).
+    the defaults (`library.load_defaults()`, the pinned pack).
     A ledger priced on another tariff than the intake chose is refused
     `ledger_tariff_stale` (moved from `packs.effective_tariff`). A pack seed
     takes the pack's `jurisdiction` and `valid_from` (Q9); a user tariff the
@@ -1020,6 +1037,35 @@ def option_finance(ledger: AssumptionsLedger, compiled: CompiledCommercial, n, *
                                study_currency_year=study_currency_year)
 
 
+# ── the two other engine reads the guided study makes (U2 WP10) ───────────
+
+def load_defaults_pack(version: str):
+    """
+    IC's generic defaults pack at `version` (U1 a, frozen facade
+    `defaults_pack.loader.load_defaults_pack`): what `library.load_defaults`
+    reads into the guided `Library` view. Here so the study reaches the
+    engine through its two seams only (plan §2: compile reads the defaults
+    pack loader; `tests/test_study_one_engine.py`).
+    """
+    from services.library.defaults_pack.loader import load_defaults_pack as _load
+
+    return _load(version)
+
+
+def apply_parts(n, cls: str, name: str, parts, *, discount_rate: float) -> None:
+    """
+    WORKAROUND (engine ask N15, WP7: the asset schema's writers are outside the
+    frozen facade): write an asset's upfront parts with S0's
+    `asset_schema.derive.apply_parts` — the battery's two parts (C1), from
+    which it derives the two-annuity `capital_cost`, the FOM and the
+    lifetime, leaving `overnight_cost` empty. `packs.build_site_network`'s
+    one call.
+    """
+    from services.asset_schema import derive
+
+    derive.apply_parts(n, cls, name, parts, discount_rate=discount_rate)
+
+
 # ── C6 / WP6: the option fork's solver config ─────────────────────────────
 
 def solver_config(ledger: AssumptionsLedger | None, compiled: CompiledCommercial, *,
@@ -1031,7 +1077,8 @@ def solver_config(ledger: AssumptionsLedger | None, compiled: CompiledCommercial
     no user code; `discount_rate` and the fallback lifetime from the ledger
     (rows 20 and 6) unless given; `commercial` = the compiled config (C6), so
     the engine prices the PoC at solve time and carries the demand charge in
-    the LP; GS's `demand_charge` is never set. `finance` is WP7's
+    the LP (GS's own `SolverConfig.demand_charge` was deleted in WP10).
+    `finance` is WP7's
     (`compile.finance_from_ledger`). Nothing is inherited from the base
     project. `overrides` set any other `SolverConfig` field (a test's
     objective scale, an Expert's strategy).
@@ -1055,7 +1102,7 @@ def solver_config(ledger: AssumptionsLedger | None, compiled: CompiledCommercial
         solver_name="highs", mode="lopf", multi_investment_periods=False,
         solve_strategy="full", sclopf=False, run_ac_pf_after_lopf=False,
         extra_functionality_code="", discount_rate=float(rate),
-        commercial=compiled.commercial(), demand_charge=None,
+        commercial=compiled.commercial(),
         finance=None if finance is None else dict(finance))
     if life is not None:
         fields["default_lifetime"] = float(life)

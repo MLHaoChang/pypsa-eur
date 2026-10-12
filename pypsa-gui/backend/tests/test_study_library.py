@@ -5,7 +5,11 @@ Plan: docs/superpowers/plans/2026-09-28-guided-investment-study-mvp1-v2.md (S2)
 Spec: docs/superpowers/specs/2026-09-28-guided-investment-study-design.md §4.3
 
 The library is vendored (technology-data v0.14.0 plus two illustrative
-tariffs and the finance defaults); the runtime never downloads. The ledger is
+tariffs and the finance defaults); the runtime never downloads. Since U2 WP10
+it is read from the pinned generic defaults pack (`library.load_defaults`):
+the legacy `study_library` CSVs and their loader are deleted, with the
+loader-only tests (the CSV parser's refusals); the pack loader's own guards
+are IC's. The ledger is
 seeded from it with every row `provenance=library, status=default`, a user
 edit flips a row to `user / customised`, a re-seed refreshes library rows and
 keeps user rows, and the maturity badge reads the key-driver rows and the
@@ -38,7 +42,10 @@ KEY_DRIVERS = ("battery_storage_eur_per_kwh", "battery_inverter_eur_per_kw",
 
 @pytest.fixture(scope="module")
 def library():
-    return lib.load_library()
+    # U2 WP10: the defaults pack (the legacy `study_library` files and their
+    # loader are deleted; the pack's rows 1-20 hold the same values, frozen in
+    # `fixtures/legacy_study_library.json`, gate C8 a).
+    return lib.load_defaults()
 
 
 # A tariff the user supplied (their own bill), as the intake carries it. The
@@ -86,13 +93,14 @@ def _customise_key_drivers(ledger, *, provenance="user"):
 # ── the library ──────────────────────────────────────────────────────────
 
 def test_library_version_is_pinned(library):
-    assert library.version == "technology-data v0.14.0"
-    assert lib.LIBRARY_VERSION == library.version
+    assert library.version.startswith(f"{lib.DEFAULTS_VERSION_PREFIX} {lib.PACK_VERSION} ")
+    # The legacy label stays read-only: a ledger stored before U2 names it.
+    assert lib.LIBRARY_VERSION == "technology-data v0.14.0"
 
 
 def test_an_unknown_library_version_is_refused():
-    with pytest.raises(lib.UnknownLibraryVersion, match="v0.13.4"):
-        lib.load_library("technology-data v0.13.4")
+    with pytest.raises(LookupError, match="1999-01-01"):
+        lib.load_defaults("1999-01-01")
 
 
 def test_every_key_driver_row_carries_source_year_currency_year_and_range(seeded):
@@ -236,8 +244,8 @@ def test_horizon_is_the_storage_lifetime_and_the_inverter_is_replaced_inside_it(
 
 # ── seeding ──────────────────────────────────────────────────────────────
 
-def test_a_seeded_ledger_is_all_library_defaults(seeded):
-    assert seeded.ledger_version == lib.LIBRARY_VERSION
+def test_a_seeded_ledger_is_all_library_defaults(seeded, library):
+    assert seeded.ledger_version == library.version
     assert seeded.rows
     for row in seeded.rows:
         assert row.provenance == "library", row.key
@@ -381,7 +389,7 @@ def test_a_synthetic_load_keeps_a_customised_ledger_at_screening(seeded_user):
 
 def test_one_default_key_row_keeps_it_at_screening_and_is_named(seeded_user):
     led = _customise_key_drivers(seeded_user)
-    led = L.reseed_ledger(led, KEY_DRIVERS, USER_INTAKE, lib.load_library())  # no-op for user rows
+    led = L.reseed_ledger(led, KEY_DRIVERS, USER_INTAKE, lib.load_defaults())  # no-op for user rows
     led = led.model_copy(update={"rows": [
         r.model_copy(update={"provenance": "library", "status": "default"})
         if r.key == "discount_rate" else r for r in led.rows]})
@@ -632,7 +640,9 @@ def test_every_row_carries_its_domain_and_the_defaults_sit_inside(seeded, librar
     assert all(r.domain for r in library.technology), [
         r.key for r in library.technology if not r.domain]
     for row in seeded.rows:
-        if row.key == "tariff":
+        # The tariff descriptor and the guided rules (rows 21-34, U2) carry no
+        # technology domain.
+        if row.key == "tariff" or row.key in lib.ENGINE_ROWS:
             continue
         assert row.domain is not None, row.key
         if row.value is not None:
@@ -739,37 +749,18 @@ def test_each_seed_tariffs_notes_are_digit_free_codes_with_their_prose_kept(
     assert all(len(text) > 25 for text in tariff.honesty_help.values())
 
 
-# ── gate S5 carry G10: the loader refuses a prose honesty-note label ──────
-
-@pytest.mark.parametrize("label", [
-    "Illustrative figures, not a published tariff",   # prose in the code column
-    "tariff_2026_seed",                                # a digit in a code
-    "TariffIllustrative",                              # not snake_case
-])
-def test_the_loader_refuses_a_honesty_note_label_that_is_not_a_digit_free_code(
-        tmp_path, label):
-    """
-    The label column of a `honesty_note` row is a CODE: it travels into the
-    case, the XLSX Provenance sheet and the report, whose prose guard rejects
-    digits, and the sentence belongs in the `note` column (gate S5 BC-S5-3).
-    A prose label must be refused at load, never carried as a note. Mutation
-    G10 (the loader's guard removed) left the suite green before this test.
-    """
-    src = lib.LIBRARY_DIR / "tariffs.csv"
-    rows = list(csv.DictReader(io.StringIO(src.read_text(encoding="utf-8"))))
-    note = next(r for r in rows if r["component"] == "honesty_note")
-    note["label"] = label
-    out = tmp_path / "tariffs.csv"
-    with out.open("w", encoding="utf-8", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(rows[0]))
-        w.writeheader()
-        w.writerows(rows)
-    with pytest.raises(lib.LibraryError, match="snake_case code without digits"):
-        lib._parse_tariffs(out)
-
+# ── gate S5 carry G10: a honesty-note label is a digit-free code ───────────
+#
+# U2 WP10 deleted the legacy CSV loader and with it this file's refusal test
+# of a prose label in `tariffs.csv` (`_parse_tariffs`); the defaults pack's
+# loader refuses the same (`defaults_pack.loader`, IC's). The shipped
+# tariffs' codes are still checked here.
 
 def test_the_shipped_tariffs_parse_with_their_codes(library):
-    """The positive control for the refusal above: the shipped file loads."""
+    """The shipped tariffs' honesty notes are snake_case codes without digits."""
+    import re
+
+    code = re.compile(r"[a-z]+(_[a-z]+)*")
     for tariff in library.tariffs.values():
         assert tariff.honesty_notes
-        assert all(lib._NOTE_CODE_RE.fullmatch(c) for c in tariff.honesty_notes)
+        assert all(code.fullmatch(c) for c in tariff.honesty_notes)

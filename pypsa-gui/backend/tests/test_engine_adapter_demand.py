@@ -1,14 +1,14 @@
 """
 U2 WP6 TARGET — the demand charge on IC's commercial chain (`lp_bindings.
 add_demand_terms` through `run_simulation`), replacing GS's
-`_wrap_with_demand_charge` and `SolverConfig.demand_charge`.
+`_wrap_with_demand_charge` and `SolverConfig.demand_charge` (deleted in WP10).
 
 Plan: docs/superpowers/plans/2026-10-05-guided-study-u2-engine-rewire.md
 §4.7, §5.2, WP2 (port of `test_tariff_demand_charge.py`), WP6. Every target
 goes through `compile.solver_config` (the LP switch, WP6).
 
 The toy is WP0's 3-month network (`tests/u2_record_pre_numbers.py::
-toy_network(gs_prices=False)`: no prices on the Links), priced by the
+toy_network()`: no prices on the Links), priced by the
 compiled toy tariff. WP0's GS-wrapper record is the oracle: objective
 ≤ 1e-7 relative, equal monthly peaks, the same battery size.
 """
@@ -60,7 +60,7 @@ def _run(n, cfg):
 
 
 def _solve(*, demand: bool = True, **over):
-    n = REC.toy_network(gs_prices=False)
+    n = REC.toy_network()
     c = _compiled(n, demand=demand)
     cfg = _C().solver_config(None, c, discount_rate=0.07, **over)
     status, condition, lines = _run(n, cfg)
@@ -86,9 +86,10 @@ def test_the_solver_config_carries_the_commercial_block_through_the_queue_snapsh
 
     from routers.projects import _solver_config_from_dict
 
-    n = REC.toy_network(gs_prices=False)
+    n = REC.toy_network()
     cfg = _C().solver_config(None, _compiled(n), discount_rate=0.07)
-    assert cfg.demand_charge is None and cfg.commercial["poc_link"] == "grid_import"
+    assert not hasattr(cfg, "demand_charge")          # U2 WP10: the GS field is gone
+    assert cfg.commercial["poc_link"] == "grid_import"
     again = _solver_config_from_dict(json.loads(json.dumps(asdict(cfg))))
     assert again.commercial == cfg.commercial
 
@@ -98,7 +99,7 @@ def test_a_partial_put_keeps_the_commercial_block():
     from routers.simulation import _state, update_solver_config
     from services.pypsa_service import PyPSAService
 
-    n = REC.toy_network(gs_prices=False)
+    n = REC.toy_network()
     PyPSAService.set_network(n)
     _state["solver_config"] = _C().solver_config(None, _compiled(n), discount_rate=0.07)
     update_solver_config(SolverConfigSchema(voll=5000.0), db=None, user=None)
@@ -210,7 +211,7 @@ def test_a_failed_solve_leaves_the_previous_record_beside_the_previous_dispatch(
     ({"solve_strategy": "rolling"}, "commercial.binding_invalid"),
 ], ids=["myopic", "rolling"])
 def test_refused_modes(over, code):
-    n = REC.toy_network(gs_prices=False)
+    n = REC.toy_network()
     cfg = _C().solver_config(None, _compiled(n), discount_rate=0.07, **over)
     status, condition, lines = _run(n, cfg)
     assert status not in ("ok", "optimal")

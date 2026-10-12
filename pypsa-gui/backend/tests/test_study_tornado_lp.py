@@ -25,7 +25,7 @@ from __future__ import annotations
 import pytest
 
 from services.study import findings as F
-from services.study import packs, proforma
+from services.study import packs
 from services.study import ledger as L
 from services.study import questions as Q
 from tests.golden import site_fixture as sf
@@ -36,11 +36,12 @@ from tests.u2_targets import ic_solve as lp_solve
 def _not_an_engine_solve(net):
     """
     An identity "solve" returns the centre's dispatch, which the engine did
-    NOT solve under the variant's config: its solve record is dropped, so the
-    case is the pro forma's on GS's bills at the variant tariff (BC-7, these
-    tests' subject). On the engine (U2 WP7) a re-dispatch is a real solve and
-    its bills say so; an identity dispatch would rightly read
-    `config_changed_since_solve` (gate C6).
+    NOT solve under the variant's config: its solve record is dropped, so on
+    a study context the bound is refused `variant_not_engine_solved` (gate
+    U2-WP8a Y2). On the engine (U2 WP7) a re-dispatch is a real solve and its
+    bills say so; an identity dispatch would rightly read
+    `config_changed_since_solve` (gate C6). Since U2 WP10 there is no other
+    calculation (GS's bill calculator and pro forma) to value it with.
     """
     from services.commercial.lp_bindings import META_LINKS
 
@@ -175,7 +176,7 @@ def test_the_discount_rate_bar_reaches_the_ledger_and_the_solver_config():
     assert exc.value.code == "discount_rate_differs_from_lp"
 
 
-def test_an_identity_redispatch_on_a_study_context_is_refused_never_valued_on_gs(monkeypatch):
+def test_an_identity_redispatch_on_a_study_context_is_refused_never_valued_on_gs():
     """
     Gate U2-WP8a Y2 (was BC-7's closed form on GS's bills, the pro forma
     fallback): a re-dispatch that comes back without the engine's solve
@@ -191,11 +192,8 @@ def test_an_identity_redispatch_on_a_study_context_is_refused_never_valued_on_gs
     ctx = _ctx(ledger, {"bess_2h": n}, _question("demand_charge_price"))
     calls = []
     centre = {"storage_units": F.battery_size(n), "generators": F.pv_size(n)}
-
-    def gs(*a, **kw):
-        raise AssertionError("GS's bill was taken on a study context")
-
-    monkeypatch.setattr(F, "_gs_bill_of", gs)
+    # U2 WP10: GS's bill calculator and the pro forma are gone, not bypassed.
+    assert not hasattr(F, "_gs_bill_of") and not hasattr(F, "proforma")
 
     def identity(net, cfg, _vid):
         # BC-S6-3: every sized asset the re-dispatch receives is FIXED at the
@@ -220,7 +218,7 @@ def test_an_identity_redispatch_on_a_study_context_is_refused_never_valued_on_gs
     # SolverConfig (the engine's demand item, EUR/kW-month, U2 WP6).
     [cfg] = calls
     [item] = [i for i in cfg.commercial["import_tariff"]["items"] if i["id"] == "demand"]
-    assert cfg.demand_charge is None
+    assert not hasattr(cfg, "demand_charge")            # U2 WP10: the field is gone
     assert item["periods"][0]["rate"] * 1000.0 == pytest.approx(row.low_value)
 
 
@@ -231,15 +229,17 @@ def test_an_engine_price_bound_bills_the_baseline_at_the_variant_tariff():
     low bound, through `findings._price_bound` on the engine. BC-7 on the
     engine: the bound's baseline is billed at the VARIANT tariff — the
     engine's counterfactual (`engine_adapter.bill_meter` on the served load,
-    export 0) equals GS's bill of the solved `none` fork at that tariff, and
-    is not the centre's baseline bill. The bound's NPV is the pro forma's on
-    the same solved network with GS's bills at the variant tariff, to 1e-9.
+    export 0) — and is not the centre's baseline bill. U2 WP10: GS's bill
+    calculator and pro forma, this test's oracles until then, are deleted;
+    the oracle is the closed form of a grid-only bill at a moved demand
+    price — only the demand line moves, by (low − centre) × the sum of the
+    load's monthly peaks — and the bound's NPV falls below the centre's.
     """
     import numpy as np
 
     from services.study import engine_adapter as A
 
-    n, _cfg = ic_site_option("bess_2h")
+    n, centre_cfg = ic_site_option("bess_2h")
     ledger = sf.site_ledger()
     ctx = _ctx(ledger, {"bess_2h": n}, _question())
     key = "demand_charge_price"
@@ -255,22 +255,21 @@ def test_an_engine_price_bound_bills_the_baseline_at_the_variant_tariff():
     assert (case.engine, case.status) == ("finance_engine", "ok"), case.honesty_notes
 
     vl = F._with_value(ledger, key, low)
-    vt = packs.effective_tariff(ctx.intake, vl, ctx.library, n.snapshots)
-    # The oracle: GS's bill calculator at the variant tariff.
-    base = F._gs_bill_of(ctx.baseline_network, vt, ctx.fidelity)
-    assert abs(base.annual_bill - ctx.baseline_bill.annual_bill) > 1000.0
-    assert case.years[1].bill_baseline == pytest.approx(base.annual_bill, rel=1e-9)
+    centre_price = next(r.value for r in ledger.rows if r.key == key)
+    load = ctx.baseline_network.loads_t.p_set.sum(axis=1)
+    monthly_peaks = float(load.groupby(load.index.month).max().sum())
+    # The oracle: a grid-only bill at a moved demand price moves by exactly
+    # its demand line (the served load, export 0, every other item unchanged).
+    want = ctx.baseline_bill.annual_bill + (low - centre_price) * monthly_peaks
+    assert abs(want - ctx.baseline_bill.annual_bill) > 1000.0
+    assert case.years[1].bill_baseline == pytest.approx(want, rel=1e-9)
     meter = A.bill_meter(net, F._compiled(ctx, vl, n.snapshots), A._served_load(net),
                          np.zeros(len(net.snapshots)), fidelity=ctx.fidelity)
     assert case.years[1].bill_baseline == pytest.approx(meter.annual_bill, rel=1e-12)
-
-    pf = proforma.build_investment_case(
-        net, cfg, None, vl, {"baseline": base, "option": F._gs_bill_of(net, vt, ctx.fidelity)},
-        "bess_2h", study_id=ctx.study_id, tariff=vt, fidelity=ctx.fidelity,
-        question=ctx.question)
-    assert pf.engine == "cash_flow_expander" and pf.status == "ok"
-    assert abs(case.kpis.npv - pf.kpis.npv) <= 1e-9 * abs(pf.kpis.npv), (case.kpis.npv,
-                                                                         pf.kpis.npv)
+    centre_case = F._case(ctx, n, centre_cfg, ledger, {"baseline": ctx.baseline_bill,
+                                                "option": ctx.options["bess_2h"].bill},
+                          "bess_2h", keep=False)
+    assert case.kpis.npv < centre_case.kpis.npv
 
 
 def test_a_zero_size_battery_is_judged_by_its_size_not_its_npv_sign():

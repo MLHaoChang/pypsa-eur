@@ -128,7 +128,7 @@ export const MATURITY_LABELS: Record<MaturityClass, string> = {
   design: 'Design',
 }
 export const MATURITY_SENTENCE: Record<MaturityClass, string> = {
-  screening: 'A first look on library defaults or a typical load: good for deciding whether to look further, not for a budget.',
+  screening: 'A first look on the built-in defaults or a typical load: good for deciding whether to look further, not for a budget.',
   feasibility: 'Your own load and your own key figures: good for a go/no-go on a feasibility study.',
   design: 'Reserved for a design-grade study; this version does not reach it.',
 }
@@ -356,11 +356,19 @@ export const ERROR_COPY: Record<string, ErrorCopy> = {
     action: 'The options were built from the old ones. Run the study again.', rerun: true,
   },
   // U2 WP8 (plan §2 C10): the run was made by an earlier version of the app,
-  // or an option's tariff or finance settings were edited after it (the
-  // message below says which).
+  // or an option's tariff or finance settings were edited after it, or (U2
+  // WP10, gate WP8a N7) an option's network lacks the engine's solve record
+  // (the message below says which).
   engine_inputs_changed_since_run: {
     title: 'This study’s results no longer match how its options are priced and valued.',
-    action: 'Either the app’s calculation was updated since the run, or an option’s tariff or finance settings were edited. Run the study again to refresh them.',
+    action: 'The app’s calculation was updated since the run, an option’s tariff or finance settings were edited, or an option’s solve did not finish its record. Run the study again to refresh them.',
+    rerun: true,
+  },
+  // U2 WP10 (gate U2-WP9 V2): the tornado's centre could not be read before it
+  // started (a run replacing the option networks, or damaged files).
+  findings_unreadable: {
+    title: 'The study’s option networks could not be read.',
+    action: 'If a run is starting, wait for it to finish; otherwise run the study again.',
     rerun: true,
   },
   study_never_run: { title: 'The study has not been run yet.', action: 'Open Run and start it.' },
@@ -432,7 +440,6 @@ export const HELP: Record<string, string> = {
   "salvage_not_computed": "The residual value at the end of the horizon could not be computed.",
   "npv_excludes_uncomputed_salvage": "The NPV leaves out a residual value that could not be computed.",
   "market_revenue_at_duals_excluded_from_cash_flow": "Revenue at the model's prices is reported beside the case and excluded from the cash flow: the bill already prices the same energy.",
-  "lcos_excludes_charging_energy_cost": "The pro forma's levelised cost of storage leaves out the energy bought to charge the battery.",
   "npv_nonnegative_at_optimum_by_construction": "At the optimiser's chosen size the NPV cannot be negative: the optimiser only builds what pays for itself, so the sign restates its choice and is not independent evidence.",
   "irr_and_discounted_payback_bounded_at_optimum_by_construction": "For the same reason the IRR is at least the discount rate and the discounted payback is within the horizon; the magnitudes inform, the bounds do not.",
   "size_zero_no_investment": "The optimiser sized this battery to zero: no investment is worth making, and its NPV is not read for a sign.",
@@ -442,7 +449,7 @@ export const HELP: Record<string, string> = {
   "synthetic_pv_profile": "The PV output is a synthetic clear-sky profile, not measured output.",
   "load_upload_converted_from_kw": "The uploaded load was in kW and was converted to MW.",
   "load_upload_without_timestamps": "The uploaded load has no timestamps; its values were read as the study year's hours in order, from the first hour of January.",
-  "tariff_not_chosen_library_default": "No tariff was chosen, so the library's default tariff was used; replace it with the site's own.",
+  "tariff_not_chosen_library_default": "No tariff was chosen, so the defaults' illustrative tariff was used; replace it with the site's own.",
   "tariff_has_uncoded_notes": "The supplied tariff carries notes that are not codes; read them in the tariff.",
   "partial_billing_period_charged_in_full": "A billing period the modelled hours cover only in part is charged in full.",
   "capacity_charge_prorated_by_hours": "The capacity charge is pro-rated by the modelled hours over a full year.",
@@ -470,6 +477,7 @@ export const HELP: Record<string, string> = {
   "no_battery_option_judged": "No battery option could be judged.",
   "best_battery_npv_not_positive_at_centre": "The best battery's NPV is not positive at the centre, so the tornado was not run.",
   "case_not_established": "The option's investment case could not be established.",
+  "case_by_an_earlier_version": "This option's investment case was valued by an earlier version of the app, so the report does not show it as current. Run the study again to value it on the current engine.",
   "battery_not_solved": "The option's battery was not solved.",
   "uncoded_note_dropped": "A note that was not a clean code was dropped and is named here.",
   "row_missing": "The driver has no row in the assumptions ledger.",
@@ -479,14 +487,13 @@ export const HELP: Record<string, string> = {
   "not_applicable": "The driver does not apply to this tariff or site.",
   "energy_price_level_no_effect_single_band": "The tariff has one flat energy band, so scaling its spread changes nothing.",
   "tariff_has_no_demand_charge": "The tariff has no demand charge to vary.",
-  "range_recentred_on_user_value": "The user's value lies outside the library range, so the range's relative width was centred on it.",
+  "range_recentred_on_user_value": "The user's value lies outside the default range, so the range's relative width was centred on it.",
   "market_revenue_at_duals_zero_profit_at_optimum": "The revenue at the model's prices equals the battery's annualised cost at the optimum: zero profit by construction. It is not a second revenue line and is excluded from the cash flow.",
   "market_revenue_at_duals_exceeds_cost_at_size_limit": "A size limit binds, so the revenue at the model's prices exceeds the annualised cost by the limit's shadow value: this is not zero profit. It is still excluded from the cash flow, because the bill already prices the same energy.",
   "market_revenue_at_duals_relation_not_established": "How the revenue at the model's prices compares with the annualised cost is not established, because the run did not record how each size was limited. It is excluded from the cash flow.",
   "sector_profiles_have_broad_peaks": "The shipped sector profiles have broad peak plateaus, which a battery cannot shave cheaply.",
   "intake_changed_since_findings": "The study's answers (site, load, tariff or PV) changed after the findings were computed; re-run the study.",
   "intake_changed_since_run": "The study's answers changed after the run; re-run the study.",
-  "lcos_two_definitions": "Two levelised costs of storage are shown and they answer different questions: the pro forma's excludes the energy bought to charge the battery, asset economics' includes it.",
   "battery_only_options_sized_to_zero": "Every battery-only option was sized to zero: at this load and on this tariff no battery pays for itself on its own.",
   "synthetic_load_understates_peak_shaving": "A smooth synthetic load lacks the short spikes a real meter records, so the peak-shaving value is likely understated; upload the site's metered load.",
   "value_streams_increment_over_pv_only": "The waterfall shows the battery's increment over the same PV alone, not the option's full saving against the grid-only baseline.",
@@ -557,7 +564,7 @@ export const PREFIX_HELP: ReadonlyArray<readonly [string, string]> = [
   ],
   [
     "user_row_not_in_library",
-    "A user row has no library counterpart."
+    "A user row has no counterpart in the defaults."
   ],
   [
     "key_drivers_without_a_row",

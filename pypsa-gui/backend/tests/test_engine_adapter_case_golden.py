@@ -162,20 +162,44 @@ def test_npv_is_the_lp_saving_annuitised_by_construction(bundles):
         assert abs(bundles[o].view.kpis.npv - want) <= 1e-6 * abs(want)
 
 
+def _import_price(idx, form):
+    """
+    The guided form's import price per snapshot, written here as the test's
+    own oracle (GS's `tariff.band_prices` / `_network_per_mwh`, deleted in
+    U2 WP10, did the same): the first energy band whose rule matches the
+    snapshot, plus every `per_mwh` network charge.
+    """
+    import numpy as np
+
+    price = np.full(len(idx), np.nan)
+    for band in form.energy_bands:
+        a = band.applies
+        m = np.ones(len(idx), dtype=bool)
+        if a.months:
+            m &= np.isin(idx.month, a.months)
+        if a.weekdays:
+            m &= np.isin(idx.weekday, a.weekdays)
+        if a.hours:
+            m &= np.isin(idx.hour, a.hours)
+        price[m & np.isnan(price)] = float(band.price_per_mwh)
+    assert not np.isnan(price).any()
+    return price + sum(float(nc.price) for nc in form.network_charges if nc.basis == "per_mwh")
+
+
 def _charging_per_mwh_discharged(option):
     """
-    The battery's charging cost per MWh it discharged, from GS's own prices
-    on the option's solved dispatch, independent of the engine: per hour,
-    the charge the site imported (up to its import) at GS's import price
-    (`tariff.band_prices` + `tariff._network_per_mwh`), the rest (PV surplus)
-    at the export price it forwent. Returns (cost per MWh discharged, the
-    PV-surplus share of the charge).
+    The battery's charging cost per MWh it discharged, from the guided
+    tariff form's own prices on the option's solved dispatch, independent of
+    the engine: per hour, the charge the site imported (up to its import) at
+    the form's import price (`_import_price`: the first matching energy band
+    plus every per-MWh network charge), the rest (PV surplus) at the export
+    price it forwent. Returns (cost per MWh discharged, the PV-surplus share
+    of the charge).
     """
     import numpy as np
 
     from services.study import library as L
     from services.study import packs
-    from services.study import tariff as T
 
     n, _cfg, _compiled, ledger = _solved_ic(option)
     tariff = packs.effective_tariff(sf.site_intake(), ledger, L.load_defaults(), n.snapshots)
@@ -188,8 +212,7 @@ def _charging_per_mwh_discharged(option):
     from_grid = np.minimum(charge, np.clip(n.links_t.p0["grid_import"].to_numpy(), 0, None))
     from_pv = charge - from_grid
     idx = n.snapshots
-    import_price = (T.band_prices(idx, tariff.energy_bands)
-                    + T._network_per_mwh(idx, tariff)).to_numpy()
+    import_price = _import_price(idx, tariff)
     export_price = float(tariff.export.price_per_mwh or 0.0)
     cost = float(np.sum(w * (from_grid * import_price + from_pv * export_price)))
     return cost / float(np.sum(w * out)), float(np.sum(w * from_pv) / np.sum(w * charge))
@@ -199,9 +222,13 @@ def test_lcos_is_on_discounted_energy(bundles):
     """
     Owner decision 6 (Q8): the guided LCOS is the engine's storage LCOS
     (charging cost included, real basis). Gate U2-WP7 X5 (b), the independent
-    identity: the engine's LCOS = GS's pro forma LCOS (charging excluded, its
-    own code on the same network and bills) + the charging cost per MWh
-    discharged at GS's own prices (`_charging_per_mwh_discharged`), to 1e-9.
+    identity: the engine's LCOS = GS's pro forma LCOS (charging excluded; the
+    WP0 record's `lcos_excl_charging`, since U2 WP10 deleted the pro forma)
+    + the charging cost per MWh discharged at the form's own prices
+    (`_charging_per_mwh_discharged`), to 1e-9. (The pro forma's figure is
+    the battery's levelised costs over its discharged MWh, and both are the
+    engine fork's: equal sizes, C1 parts, C2 salvage, and the same import,
+    export and battery throughput as the GS dispatch it was recorded on.)
     The battery's costs are levelised on the same basis (C1, C2), and a
     charge cost that is constant across the years levelises to itself. Both
     charging branches are covered: `bess_2h` charges from the grid only,
@@ -209,25 +236,19 @@ def test_lcos_is_on_discounted_energy(bundles):
     The recorded delta (`lcos_is_the_engines_storage_metric`) runs from the
     pro forma figure to the engine's.
     """
-    from services.study import library as L
-    from services.study import packs, proforma
-
     for o in OPTIONS:
         b = bundles[o]
-        n, cfg, _compiled, ledger = _solved_ic(o)
-        tariff = packs.effective_tariff(sf.site_intake(), ledger, L.load_defaults(), n.snapshots)
-        pf = proforma.build_investment_case(n, cfg, None, ledger, dict(b.bills), o,
-                                            study_id=sf.SITE_STUDY_ID, tariff=tariff)
+        pf_lcos = _gold(o)["lcos_excl_charging"]
         charging, pv_share = _charging_per_mwh_discharged(o)
         assert b.view.kpis.levelised_cost is not None
-        assert abs(pf.kpis.levelised_cost + charging - b.view.kpis.levelised_cost) <= 1e-9 * b.view.kpis.levelised_cost, \
-            (o, pf.kpis.levelised_cost, charging, b.view.kpis.levelised_cost)
+        assert abs(pf_lcos + charging - b.view.kpis.levelised_cost) <= 1e-9 * b.view.kpis.levelised_cost, \
+            (o, pf_lcos, charging, b.view.kpis.levelised_cost)
         assert (pv_share == 0.0) if o == "bess_2h" else (pv_share > 0.5), (o, pv_share)
         assert "lcos_includes_charging_energy_cost" in b.view.honesty_notes
         rows = [r for r in json.loads((FIXTURES / "u2_deltas.json").read_text())["deltas"]
                 if r.get("figure") == f"golden_s5.{o}.lcos"]
         assert rows and rows[0]["cause"] == "lcos_is_the_engines_storage_metric"
-        assert close(rows[0]["pre"], pf.kpis.levelised_cost, rel=1e-9)
+        assert close(rows[0]["pre"], pf_lcos, rel=1e-9)
         assert close(rows[0]["post"], b.view.kpis.levelised_cost, rel=1e-9)
 
 

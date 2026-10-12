@@ -35,16 +35,16 @@ on the BATTERY's value, not an option's:
   v1 B5). On the best candidate (and its PV-only reference), sizes FIXED at
   ``p_nom_opt`` (``p_nom_extendable=False``), for each key driver of the
   question at its range bounds: the energy-price level and the demand-charge
-  price RE-DISPATCH the fixed-size network at the perturbed tariff
-  (``tariff.tariff_from_ledger``, the one path the pack, the LP and the bill
-  share) and RECOMPUTE the baseline bill at that tariff with the bill
-  calculator (no solve: the baseline has no flexible asset; BC-7); the
+  price RE-DISPATCH the fixed-size network at the perturbed tariff (the
+  variant ledger compiled into the engine's commercial config, the one path
+  the LP and the bill share) and RECOMPUTE the baseline bill at that tariff
+  (the engine's counterfactual, no solve: the baseline has no flexible
+  asset; BC-7); the
   battery cost rows change CAPEX, replacements and the FOM tied to the
   inverter investment only — the case is rebuilt from the variant ledger on
   the already-solved network, whose dispatch is unchanged at fixed sizes; the
-  discount rate changes the discounting and the annuity-basis salvage, and
-  goes to BOTH the variant ledger and the variant ``SolverConfig`` (else the
-  pro forma refuses ``discount_rate_differs_from_lp``).
+  discount rate changes the discounting and the annuity-basis salvage
+  (U2: the engine's WACC and valuation basis move together, C5).
 * **Range semantics** (gate S2 [S5]). A driver's bounds are its ledger
   range; a customised value OUTSIDE that range re-centres the range's
   relative width on the value (``range_recentred_on_user_value``).
@@ -62,9 +62,9 @@ the case's tariff is the baseline). **Since U2 WP8** a stored study whose
 forks are not the engine's (a run before the engine inputs were recorded, a
 fork written before WP7) or whose fork's engine inputs were edited after the
 run is refused by ``load_inputs`` / ``context_from_disk`` (409
-``engine_inputs_changed_since_run``, a re-run offered); the pro forma and
-GS's bill calculator remain only as the fallback for a network the engine did
-not solve in process (a test's identity solve), until WP10.
+``engine_inputs_changed_since_run``, a re-run offered). **Since U2 WP10** the
+engine is the only one: GS's pro forma and bill calculator are deleted, and a
+network the engine did not solve is never valued (``_require_engine``).
 
 Solving is injected (``solve(network, cfg, variant_id)``): the worker
 (``services/study/tornado_runner.py``) solves each variant on a throw-away
@@ -98,10 +98,8 @@ from models.study import (
 )
 from services.study import engine_adapter as study_engine
 from services.study import packs
-from services.study import proforma
 from services.study import questions as Q
 from services.study import run_hashes
-from services.study import tariff as study_tariff
 from services.study.engine_adapter import BILL_COMPONENTS
 
 __all__ = [
@@ -113,16 +111,16 @@ __all__ = [
 ]
 
 # A battery at or below `EPSILON_MW` is "no investment" (gate S5 carry); the
-# threshold and its predicate are the pro forma's, so the case's
+# threshold and its predicate are the engine adapter's (C7), so the case's
 # `size_zero_no_investment` note and the verdict cannot disagree.
-EPSILON_MW = proforma.EPSILON_MW
+EPSILON_MW = study_engine.EPSILON_MW
 # A bound's battery NPV below minus this is a sign flip; within it, break-even.
 NPV_TOL_EUR = 1.0
 
 
 def is_zero_size(p_mw: float | None) -> bool:
-    """The ONE size rule (``proforma.is_zero_size``)."""
-    return proforma.is_zero_size(p_mw)
+    """The ONE size rule (``engine_adapter.is_zero_size``)."""
+    return study_engine.is_zero_size(p_mw)
 
 # The bill's seven components (`engine_adapter.BILL_COMPONENTS`; U2 owner
 # decision 7 adds "Taxes & levies") in the question's streams (gate S3 N8):
@@ -275,6 +273,9 @@ class TornadoContext:
     # (by `id(network)`, the network kept beside it so an id is never reused),
     # so its CAPEX and rate bounds derive from its ONE `FinanceCase` (C5).
     bundles: dict = field(default_factory=dict)
+    # Gate U2-WP9 V2 (b): each option's centre case (by option, the network
+    # kept beside it), so the tornado reuses what its POST's pre-check valued.
+    centre_cases: dict = field(default_factory=dict)
 
 
 def _compiled(ctx: TornadoContext, ledger: AssumptionsLedger, snapshots=None):
@@ -369,21 +370,6 @@ def fixed_size_network(n, *, drop_battery: bool = False):
     return m
 
 
-def _gs_bill_of(n, tariff: Tariff, fidelity=None) -> Bill:
-    """
-    FALLBACK until WP10 (plan §5.1): GS's bill calculator on a dispatch the
-    engine did not solve — a network that is not `engine_ready` (a fork
-    written before WP7, a test's fake or identity solve). Every reader of a
-    stored study refuses such forks first (`load_inputs`,
-    `context_from_disk`: `engine_inputs_changed_since_run`).
-    """
-    p0 = getattr(n.links_t, "p0", None)
-    imp = p0[packs.IMPORT_LINK] if p0 is not None and packs.IMPORT_LINK in p0 else None
-    exp = p0[packs.EXPORT_LINK] if p0 is not None and packs.EXPORT_LINK in p0 else None
-    return study_tariff.BillCalculator().bill(imp, exp, tariff, n.snapshot_weightings,
-                                              fidelity=fidelity)
-
-
 def _on_engine(ctx: TornadoContext, n) -> bool:
     """Whether `n` is valued by the engine (U2 WP7; see the module docstring)."""
     return ctx.export_series is not None and study_engine.engine_ready(n)
@@ -396,36 +382,28 @@ NOT_ENGINE_SOLVED = "variant_not_engine_solved"
 
 def _require_engine(ctx: TornadoContext, n, what: str) -> None:
     """
-    Gate U2-WP8a Y2: on a study context (the run's export series is known) a
-    network is valued on the engine or not at all. A PV-only reference or a
-    price-bound variant the tornado solved that came back without the
-    engine's solve record is `VariantFailed(NOT_ENGINE_SOLVED)` — its bar or
-    reference is not established with that code — never GS's bill and the
-    pro forma beside engine-valued figures. Without a study context (a test's
-    toy context) the fallback stays until WP10 deletes it.
+    Gate U2-WP8a Y2, U2 WP10: a network is valued on the engine or not at
+    all. A PV-only reference or a price-bound variant that came back without
+    the engine's solve record — or any network on a context that knows no
+    export series (the run's engine inputs) — is `VariantFailed(
+    NOT_ENGINE_SOLVED)`: its bar or reference is not established with that
+    code. Since WP10 there is no other engine to fall back on.
     """
-    if ctx.export_series is not None and not study_engine.engine_ready(n):
+    if not _on_engine(ctx, n):
         raise VariantFailed(NOT_ENGINE_SOLVED, (
             f"{what} came back without the investment-case engine's solve record, "
             "so it cannot be valued with the rest of the study"))
 
 
-def _bill_of(ctx: TornadoContext, n, ledger: AssumptionsLedger | None = None,
-             tariff: Tariff | None = None) -> Bill:
+def _bill_of(ctx: TornadoContext, n, ledger: AssumptionsLedger | None = None) -> Bill:
     """
     A solved network's bill at `ledger` (the centre's by default). Gate C6:
-    on the engine it is `engine_adapter.bill` on the solved PoC meter with
-    the config the solve priced (the same compile, the run's export series);
-    otherwise the GS fallback at `tariff` (`_gs_bill_of`).
+    `engine_adapter.bill` on the solved PoC meter with the config the solve
+    priced (the same compile, the run's export series).
     """
     ledger = ledger if ledger is not None else ctx.ledger
-    if _on_engine(ctx, n):
-        return study_engine.bill(n, _compiled(ctx, ledger, n.snapshots), fidelity=ctx.fidelity)
     _require_engine(ctx, n, "a network to bill")
-    if tariff is None:
-        tariff = ctx.tariff if ledger is ctx.ledger else packs.effective_tariff(
-            ctx.intake, ledger, ctx.library, n.snapshots)
-    return _gs_bill_of(n, tariff, ctx.fidelity)
+    return study_engine.bill(n, _compiled(ctx, ledger, n.snapshots), fidelity=ctx.fidelity)
 
 
 def _bundle_of(ctx: TornadoContext, n):
@@ -433,33 +411,27 @@ def _bundle_of(ctx: TornadoContext, n):
     return entry[1] if entry is not None and entry[0] is n else None
 
 
-def _case(ctx: TornadoContext, n, cfg, ledger, tariff, bills, option_id,
+def _case(ctx: TornadoContext, n, cfg, ledger, bills, option_id,
           asset_economics=None, *, keep: bool = True, centre: bool = True) -> InvestmentCase:
     """
-    One option's case: the engine's (`engine_adapter.option_case`, its
-    bundle kept for the bounds) when `n` is engine-valued, else the pro
-    forma. On the engine the bills are the engine's own (the option's solved
+    One option's case: the engine's (`engine_adapter.option_case`, its bundle
+    kept for the bounds). The bills are the engine's own (the option's solved
     meter, the counterfactual at the case's tariff); a bill the caller names
     as None (the run could not bill it) still makes the case not established.
     `keep` keeps the bundle for the network's bounds (not a price bound's);
     `centre=False` (a price bound, gate U2-WP7 N6) leaves the engine's view
     without the `BY_CONSTRUCTION` codes, which hold at the centre only.
     """
-    if _on_engine(ctx, n):
-        missing = {w: None for w, b in (bills or {}).items() if b is None}
-        bundle = study_engine.option_case(
-            n, cfg, ledger, compiled=_compiled(ctx, ledger, n.snapshots), option_id=option_id,
-            study_id=ctx.study_id, fidelity=ctx.fidelity, asset_economics=asset_economics,
-            question=ctx.question, bills=missing or None,
-            study_currency_year=ctx.study_currency_year, centre=centre)
-        if keep:
-            ctx.bundles[id(n)] = (n, bundle)
-        return bundle.view
     _require_engine(ctx, n, f"the network of {option_id}")
-    return proforma.build_investment_case(
-        n, cfg, None, ledger, bills, option_id, study_id=ctx.study_id, tariff=tariff,
-        fidelity=ctx.fidelity, asset_economics=asset_economics,
-        study_currency_year=ctx.study_currency_year, question=ctx.question)
+    missing = {w: None for w, b in (bills or {}).items() if b is None}
+    bundle = study_engine.option_case(
+        n, cfg, ledger, compiled=_compiled(ctx, ledger, n.snapshots), option_id=option_id,
+        study_id=ctx.study_id, fidelity=ctx.fidelity, asset_economics=asset_economics,
+        question=ctx.question, bills=missing or None,
+        study_currency_year=ctx.study_currency_year, centre=centre)
+    if keep:
+        ctx.bundles[id(n)] = (n, bundle)
+    return bundle.view
 
 
 def _npv(case: InvestmentCase | None) -> float | None:
@@ -548,7 +520,7 @@ def attribute(option_id: str, case: InvestmentCase | None, p_bat: float | None, 
     else:
         net = [o.net_cash_flow - r.net_cash_flow
                for o, r in zip(case.years, reference_case.years, strict=True)]
-    pb = study_engine.payback(net) if case.engine == "finance_engine" else proforma.payback(net)
+    pb = study_engine.payback(net)
     return BatteryAttribution(
         **common, status="ok", battery_p_nom_mw=p_bat, battery_npv=option_npv - ref,
         option_npv=option_npv, reference_npv=ref, battery_payback_simple=pb,
@@ -648,17 +620,26 @@ def _price_bound(ctx: TornadoContext, n_centre, option_id: str, key: str, value:
     net = fixed_size_network(n_centre, drop_battery=reference)
     solved = _solved(solve, net, cfg, variant_id)
     _require_engine(ctx, solved, f"the {key} bound's re-dispatch of {option_id}")
-    if _on_engine(ctx, solved):
-        # U2 WP7: the engine's counterfactual IS the baseline at the variant
-        # tariff (the served load rated, export 0 — BC-7 without a solve), and
-        # the option's bill the engine's on the variant's solved meter.
-        return _case(ctx, solved, cfg, vl, None, {}, option_id, keep=False, centre=False)
-    # FALLBACK (`_gs_bill_of`), off a study context only (Y2): BC-7, the
-    # baseline bill at the SAME perturbed tariff (no solve).
-    vt = packs.effective_tariff(ctx.intake, vl, ctx.library, n_centre.snapshots)
-    bills = {"baseline": _gs_bill_of(ctx.baseline_network, vt, ctx.fidelity),
-             "option": _gs_bill_of(solved, vt, ctx.fidelity)}
-    return _case(ctx, solved, cfg, vl, vt, bills, option_id)
+    # U2 WP7: the engine's counterfactual IS the baseline at the variant
+    # tariff (the served load rated, export 0 — BC-7 without a solve), and the
+    # option's bill the engine's on the variant's solved meter.
+    return _case(ctx, solved, cfg, vl, {}, option_id, keep=False, centre=False)
+
+
+def _centre_bundle(ctx: TornadoContext, n_centre, option_id: str):
+    """
+    The centre's ONE `CaseBundle` a cost or rate bound derives from (C5). A
+    centre the engine did not value has none, and its bound is refused
+    (`variant_not_engine_solved`); since U2 WP10 there is no pro forma to
+    rebuild it on.
+    """
+    bundle = _bundle_of(ctx, n_centre)
+    if bundle is None:
+        _require_engine(ctx, n_centre, f"the network of {option_id}")
+        raise VariantFailed(NOT_ENGINE_SOLVED, (
+            f"the centre case of {option_id} was not valued on the investment-case "
+            "engine, so its bounds cannot be derived from it"))
+    return bundle
 
 
 def _capex_bound(ctx: TornadoContext, n_centre, option_id: str, key: str, value: float,
@@ -666,54 +647,23 @@ def _capex_bound(ctx: TornadoContext, n_centre, option_id: str, key: str, value:
     """
     A battery cost bound: CAPEX only, no re-dispatch. The sizes are fixed and
     the dispatch at fixed sizes does not depend on the battery's cost, so the
-    case is rebuilt from the variant ledger on the already-solved network:
-    the year-0 CAPEX, the inverter replacements and their salvage move with
-    the ledger (``packs.battery_upfront_eur_per_mw``), and so does the FOM,
-    which the pack ties to the inverter investment
-    (``packs.battery_fom_eur_per_mw``, read back by asset economics from the
-    network's ``fom_cost``). The bills are the centre's.
+    bound is the centre's ONE `FinanceCase` with the row's upfront part (and
+    the FOM the pack ties to the inverter investment) moved — U2 WP7, C5: no
+    network read. The bills are the centre's.
     """
-    bundle = _bundle_of(ctx, n_centre)
-    if bundle is not None:
-        # U2 WP7 (C5): from the centre's ONE FinanceCase, no network read.
-        return study_engine.bound_case(bundle, {key: float(value)}, kind="capex").view
-    vl = _with_value(ctx.ledger, key, value)
-    net = copy_network(n_centre)
-    if packs.BATTERY_NAME in net.storage_units.index:
-        hours = float(net.storage_units.at[packs.BATTERY_NAME, "max_hours"])
-        net.storage_units.loc[packs.BATTERY_NAME, "capital_cost"] = (
-            packs.battery_capital_cost_eur_per_mw(vl, hours))
-        net.storage_units.loc[packs.BATTERY_NAME, "fom_cost"] = packs.battery_fom_eur_per_mw(vl)
-    cfg = _solver_config(ctx, vl, n_centre.snapshots)
-    return _case(ctx, net, cfg, vl, ctx.tariff, {"baseline": ctx.baseline_bill, "option": bill},
-                 option_id)
+    bundle = _centre_bundle(ctx, n_centre, option_id)
+    return study_engine.bound_case(bundle, {key: float(value)}, kind="capex").view
 
 
 def _rate_bound(ctx: TornadoContext, n_centre, option_id: str, key: str, value: float,
                 bill: Bill, *, reference: bool) -> InvestmentCase:
     """
-    The discount-rate bound: no re-dispatch. The variant rate goes to the
-    ledger AND the ``SolverConfig`` (else `discount_rate_differs_from_lp`),
-    and to the assets' ``discount_rate`` and the battery's two-annuity
-    ``capital_cost``, which the pro forma and asset economics read.
+    The discount-rate bound: no re-dispatch. U2 WP7 (C5 as amended): the
+    centre case's WACC and valuation basis move together, and the WACC gate
+    reads `differs` against the LP's basis (accepted for rate rows only).
     """
-    bundle = _bundle_of(ctx, n_centre)
-    if bundle is not None:
-        # U2 WP7 (C5 as amended): the WACC and the valuation basis move, the
-        # WACC gate reads `differs` against the LP's basis (accepted here only).
-        return study_engine.bound_case(bundle, {key: float(value)}, kind="rate").view
-    vl = _with_value(ctx.ledger, key, value)
-    net = copy_network(n_centre)
-    if packs.BATTERY_NAME in net.storage_units.index:
-        hours = float(net.storage_units.at[packs.BATTERY_NAME, "max_hours"])
-        net.storage_units.loc[packs.BATTERY_NAME, "capital_cost"] = (
-            packs.battery_capital_cost_eur_per_mw(vl, hours))
-        net.storage_units.loc[packs.BATTERY_NAME, "discount_rate"] = float(value)
-    if packs.PV_NAME in net.generators.index:
-        net.generators.loc[packs.PV_NAME, "discount_rate"] = float(value)
-    cfg = _solver_config(ctx, vl, n_centre.snapshots)
-    return _case(ctx, net, cfg, vl, ctx.tariff, {"baseline": ctx.baseline_bill, "option": bill},
-                 option_id)
+    bundle = _centre_bundle(ctx, n_centre, option_id)
+    return study_engine.bound_case(bundle, {key: float(value)}, kind="rate").view
 
 
 @dataclass
@@ -772,18 +722,23 @@ def _centre(ctx: TornadoContext, solve: SolveFn | None):
             continue
         p_bat = battery_size(opt.network)
         case = None
-        if opt.bill is not None and ctx.baseline_bill is not None:
+        cached = ctx.centre_cases.get(oid)
+        if cached is not None and cached[0] is opt.network:
+            case = cached[1]                  # valued once per context (gate U2-WP9 V2 b)
+        elif opt.bill is not None and ctx.baseline_bill is not None:
             try:
-                case = _case(ctx, opt.network, centre_cfg, ctx.ledger, ctx.tariff,
+                case = _case(ctx, opt.network, centre_cfg, ctx.ledger,
                              {"baseline": ctx.baseline_bill, "option": opt.bill}, oid,
                              asset_economics=opt.asset_economics)
+                ctx.centre_cases[oid] = (opt.network, case)
             except study_engine.EngineRefused as exc:
                 # Gate U2-WP8a Y1: the engine refuses the centre case (its
                 # finance does not compile, a lifetime is not whole years, …):
                 # the user is told why, never an uncaught 500.
                 raise FindingsRefused(422, exc.code, exc.message) from None
+        if case is not None:
             cases[oid] = case
-        # The year the CASE was built on (`proforma._one_currency_year`: the
+        # The year the CASE was built on (`compile.currency_year_of`: the
         # ledger's when the tariff states none), never the tariff's optional
         # field (gate S6 BC-S6-2).
         kw: dict[str, Any] = dict(question=ctx.question, fidelity=ctx.fidelity,
@@ -811,7 +766,7 @@ def _centre(ctx: TornadoContext, solve: SolveFn | None):
                     kw["reference_missing"] = f"reference_{exc.code}"
                 else:
                     bill = _bill_of(ctx, solved)
-                    refs[oid] = _case(ctx, solved, centre_cfg, ctx.ledger, ctx.tariff,
+                    refs[oid] = _case(ctx, solved, centre_cfg, ctx.ledger,
                                       {"baseline": ctx.baseline_bill, "option": bill}, oid)
                     kw["reference_case"] = refs[oid]
                     ref_nets[oid] = (solved, bill, False)
@@ -914,8 +869,7 @@ def run_tornado(ctx: TornadoContext, solve: SolveFn, *,
             stopped = True
             pending.append(key)
             continue
-        except (proforma.ProformaError, packs.PackError, study_tariff.TariffError,
-                study_engine.EngineRefused, VariantFailed) as exc:
+        except (packs.PackError, study_engine.EngineRefused, VariantFailed) as exc:
             failed = True
             code = getattr(exc, "code", "tornado_row_failed")
             for side in ("low", "high"):
@@ -1342,9 +1296,11 @@ def context_from_disk(inp: StudyInputs) -> TornadoContext:
             continue
         if not study_engine.engine_ready(n):
             # Gate C6: a fork the engine did not solve, or whose battery has
-            # no upfront parts (written before WP7), is never valued on the
-            # pro forma as current.
-            raise FindingsRefused(409, run_hashes.ENGINE_STALE, run_hashes.EARLIER_VERSION)
+            # no upfront parts, is never valued on another calculation. The
+            # run recorded its engine inputs (`load_inputs`), so the cause is
+            # the fork, not an earlier version (U2 WP10, gate WP8a N7).
+            raise FindingsRefused(409, run_hashes.ENGINE_STALE,
+                                  run_hashes.not_engine_solved([oid]))
         nets[oid] = n
     if "none" not in nets:
         raise FindingsRefused(409, "fork_changed_since_run", (
@@ -1467,9 +1423,7 @@ def assemble_findings(study, base_dir, db, base_uuid: str, *,
     # Gate F1 BC-F1-1: a tariff on which the LP cycles energy through the
     # connection for profit is disclosed by the verdict itself, whatever its
     # class: the battery's value may rest on an export a real meter does not pay.
-    from services.validation_service import EXPORT_CYCLING_CODES
-
-    cycling = [c for c in EXPORT_CYCLING_CODES if c in notes]
+    cycling = [c for c in study_engine.CYCLING_DISCLOSURES if c in notes]
     if cycling:
         v = v.model_copy(update={"disclosures": tuple(dict.fromkeys(
             [*v.disclosures, *cycling]))})

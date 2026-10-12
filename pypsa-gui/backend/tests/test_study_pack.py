@@ -22,7 +22,6 @@ from services.study import ledger as L
 from services.study import library as lib
 from services.study import packs as P
 from services.study import questions as Q
-from services.study import tariff as T
 from services.validation_service import validate_for_run
 
 NOW = pd.Timestamp("2026-09-29T10:00:00Z").to_pydatetime()
@@ -42,7 +41,9 @@ def _intake(**over):
 
 @pytest.fixture(scope="module")
 def library():
-    return lib.load_library()
+    # U2 WP10: the pinned defaults pack (the legacy `study_library` files and
+    # their loader are deleted; rows 1-20 are the same values).
+    return lib.load_defaults()
 
 
 @pytest.fixture(scope="module")
@@ -62,7 +63,7 @@ def _bound(intake, led, option_id, library=None):
     """The option as the runner builds it since U2 WP6: compiled and bound."""
     from tests.u2_targets import bound_option
 
-    return bound_option(intake, led, option_id, library or lib.load_library())
+    return bound_option(intake, led, option_id, library or lib.load_defaults())
 
 
 def _prices(intake, led, option_id="none"):
@@ -219,9 +220,8 @@ def test_option_solver_config_is_explicit_and_from_the_ledger(library, ledger):
     assert cfg.mode == "lopf" and cfg.solve_strategy == "full"
     assert cfg.sclopf is False and cfg.multi_investment_periods is False
     assert cfg.discount_rate == _v(ledger, "discount_rate")
-    assert cfg.default_lifetime == _v(ledger, "battery_storage_lifetime_years")
     # U2 WP6: the demand charge is the engine's monthly demand item, not GS's.
-    assert cfg.demand_charge is None
+    assert not hasattr(cfg, "demand_charge")       # U2 WP10: GS's field is gone
     [d] = [i for i in cfg.commercial["import_tariff"]["items"] if i["id"] == "demand"]
     assert (d["kind"], d["unit"], d["settlement"]) == ("demand", "per_kw_month", "h")
     assert d["periods"][0]["rate"] * 1000.0 == pytest.approx(_v(ledger, "demand_charge_price"))
@@ -338,9 +338,11 @@ def test_an_inactive_import_link_is_a_typed_refusal_not_a_traceback(library, led
 
 def test_the_bills_demand_charge_equals_the_bridges_on_a_solved_pack(library, ledger):
     """
-    Gate S3 [S4]: the LP (via `demand_charge_config`) and the bill take the
-    billing period from the one tariff object, and the objective bridge,
-    reading the config the solve used, closes on the bill's figure.
+    Gate S3 [S4]: the LP and the bill take the billing period from the one
+    compiled tariff, and the objective bridge, reading the config the solve
+    used, closes on the bill's figure. U2 WP10: the bill is the engine's
+    (GS's calculator is deleted), checked against the closed form: the
+    ledger's demand price x the sum of the monthly import peaks.
     """
     from services.results.cost_breakdown import compute_cost_breakdown
     from services.results.objective_decomposition import compute_objective_decomposition
@@ -360,9 +362,12 @@ def test_the_bills_demand_charge_equals_the_bridges_on_a_solved_pack(library, le
     status, _cond = run_simulation(cfg, n, threading.RLock(), threading.Event(),
                                    queue.SimpleQueue())
     assert status in ("ok", "optimal"), status
-    bill = T.BillCalculator().bill(n.links_t.p0["grid_import"], n.links_t.p0["grid_export"],
-                                   tariff, n.snapshot_weightings)
+    bill = engine_adapter.bill(n, c)
     assert bill.billing_periods == ["2025-01", "2025-02"]
+    imp = n.links_t.p0["grid_import"]
+    peaks = float(imp.groupby(imp.index.month).max().sum())
+    assert bill.by_component.demand == pytest.approx(
+        tariff.demand_charge.price_per_mw_per_period * peaks, rel=1e-9)
     # The charge the solve committed (the run record's figure) is the bill's,
     # and the bridge closes with it inside the Commercial component (§5.2).
     assert engine_adapter.demand_charge_eur(n, c) == pytest.approx(

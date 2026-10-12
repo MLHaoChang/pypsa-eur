@@ -8,7 +8,10 @@ WP2 (port of `test_tariff_bill.py`'s bill expectations), WP5.
 
 Every component of both seed tariffs equals the WP0 frozen record
 (`tests/fixtures/u2_pre_numbers.json`, `seed_bills`, billed by GS's
-`BillCalculator` on the golden dispatch) to 1e-9 relative. Where IC's
+`BillCalculator` on the golden dispatch) to 1e-9 relative. Since U2 WP10 the
+golden dispatch is the engine's solve (`u2_targets.golden_dispatch`); under the
+flat DE energy price it ties differently from GS's, so the TOU seed's energy
+line carries a recorded delta (`u2_targets.wp0_seed_bill`). Where IC's
 semantics differ from GS's (a partial month's fixed charge, a contracted
 capacity without a stated limit, a year-billed peak) the test asserts IC's
 figure and the delta is recorded in `tests/fixtures/u2_deltas.json`.
@@ -26,7 +29,17 @@ import pytest
 
 from models.study import Tariff
 from tests.golden import site_fixture as SF
-from tests.u2_targets import DE, FAKE_REF, SEEDS, SIX, WP0, close, flat_resolver, golden_copy
+from tests.u2_targets import (
+    DE,
+    FAKE_REF,
+    SEEDS,
+    SIX,
+    WP0,
+    close,
+    flat_resolver,
+    golden_dispatch,
+    wp0_seed_bill,
+)
 
 JAN_FEB = pd.date_range("2030-01-01", "2030-02-28 23:00", freq="h")
 SEVEN = (*SIX, "taxes_levies")
@@ -370,7 +383,7 @@ def _compiled_seed(tid, snapshots):
 
 
 def _bound_golden(option, tid):
-    n = golden_copy(option)
+    n = golden_dispatch(option)
     c = _compiled_seed(tid, n.snapshots)
     price = _defaults().tariffs[tid].export.price_per_mwh
     c = _C().bind_on_network(n, c, resolve_ref=flat_resolver(price, n.snapshots))
@@ -382,15 +395,17 @@ def _bound_golden(option, tid):
 @pytest.mark.parametrize("tid", SEEDS)
 def test_every_seed_component_equals_wp0_on_the_golden_dispatch(tid, option):
     """
-    WP5 acceptance: on the golden (GS-solved) dispatch, every bill component
-    of both seeds equals WP0's `seed_bills` to 1e-9 relative; the seventh is
-    0. The network was not solved by the engine, so `bill_site` cannot vouch
-    for the dispatch: the total is not established (`solve_provenance_unknown`)
-    while the components still sum to WP0's total.
+    WP5 acceptance: on the golden dispatch, every bill component of both
+    seeds equals WP0's `seed_bills` to 1e-9 relative (the TOU energy line
+    after its recorded tie delta, U2 WP10); the seventh is 0. The dispatch is
+    given as a dispatch only (`golden_dispatch`: no engine solve record), so
+    `bill_site` cannot vouch for it: the total is not established
+    (`solve_provenance_unknown`) while the components still sum to WP0's
+    total.
     """
     n, c = _bound_golden(option, tid)
     bill = _A().bill(n, c)
-    want = WP0["seed_bills"][tid][option]
+    want = wp0_seed_bill(tid, option)
     for k in SIX:
         assert close(getattr(bill.by_component, k), want["by_component"][k]), (
             k, getattr(bill.by_component, k), want["by_component"][k])
@@ -410,7 +425,7 @@ def test_every_seed_bill_totals_wp0(tid):
         n, c = _bound_golden(option, tid)
         bill = _A().bill(n, c)
         got = sum(getattr(bill.by_component, k) for k in SEVEN)
-        assert close(got, WP0["seed_bills"][tid][option]["total"]), (option, got)
+        assert close(got, wp0_seed_bill(tid, option)["total"]), (option, got)
 
 
 @pytest.mark.parametrize("tid", SEEDS)

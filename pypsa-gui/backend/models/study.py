@@ -99,8 +99,8 @@ Engine = Literal[
     # U2 WP7: the Investment Case engine's bill and finance engines (the
     # engine-built case, its bills and value streams). Every default names
     # them since U2 WP8 (§5.4). `bill_calculator` and `cash_flow_expander`
-    # stay as the honest labels of GS's own two engines where they made the
-    # figure: the findings' fallback until WP10, and every figure a study
+    # are READ-ONLY since U2 WP10 deleted GS's own two engines: nothing
+    # writes them, and they stay as the honest labels of every figure a study
     # stored before U2 holds. They are never read as the engine's (plan WP8
     # part B, decision B1).
     "tariff_engine", "finance_engine",
@@ -474,8 +474,8 @@ class Tariff(_Model):
 
 # ── the bill (S3; moved here from `services/study/tariff.py` at S5) ─────
 #
-# `services/study/tariff.py` re-exports both names, so `tariff.Bill` is this
-# class. The calculator that fills them stays there.
+# Filled by the Investment Case engine (`engine_adapter.bill`); GS's own
+# calculator (`services/study/tariff.py`) was deleted in U2 WP10.
 
 class BillComponents(_FigureBlock):
     """
@@ -527,9 +527,9 @@ class Bill(_FigureBlock):
     currency: str = "EUR"
     currency_year: int | None = None
     # U2 WP5: `tariff_engine` is the IC engine's bill (`engine_adapter`), the
-    # default since WP8 (§5.4); GS's calculator (`study.tariff`, the findings'
-    # fallback until WP10, and every bill stored before U2) names itself
-    # `bill_calculator` (decision B1).
+    # default since WP8 (§5.4). `bill_calculator` is read-only since WP10: the
+    # label of every bill GS's deleted calculator stored before U2 (decision
+    # B1).
     engine: Literal["bill_calculator", "tariff_engine"] = "tariff_engine"
     # Gate S3 N3 (carried to S5): which run the dispatch came from; the
     # calculator itself does not know, the runner stamps it.
@@ -940,8 +940,9 @@ class InvestmentCase(_Model):
     basis: FinancialBasis = Field(default_factory=FinancialBasis)
     currency_year: int | None = None
     fidelity: Fidelity | None = None
-    # U2 WP8 (§5.4): the Investment Case engine by default; the pro forma
-    # (the fallback until WP10) names itself `cash_flow_expander`.
+    # U2 WP8 (§5.4): the Investment Case engine by default. A case stored
+    # before U2 keeps the deleted pro forma's `cash_flow_expander` (read-only
+    # since WP10).
     engine: Engine = "finance_engine"
     horizon_years: int = Field(ge=0)
     discount_rate: float

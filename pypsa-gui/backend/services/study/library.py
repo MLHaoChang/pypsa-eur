@@ -1,22 +1,25 @@
 """
-The assumptions library (guided investment study MVP-1, phase S2).
+The assumptions library (guided investment study MVP-1, phase S2; U2 WP3/WP10).
 
-Plan: docs/superpowers/plans/2026-09-28-guided-investment-study-mvp1-v2.md (S2)
+Plan: docs/superpowers/plans/2026-09-28-guided-investment-study-mvp1-v2.md (S2),
+docs/superpowers/plans/2026-10-05-guided-study-u2-engine-rewire.md §6.
 Spec: docs/superpowers/specs/2026-09-28-guided-investment-study-design.md §4.3
 
-Three vendored files under ``backend/study_library/`` (the runtime never
-downloads):
+Every default comes from the Investment Case's generic defaults pack
+(:func:`load_defaults`, U2 WP3; the pinned :data:`PACK_VERSION`), read into
+the :class:`Library` view: the technology rows (the catalogue's units, the
+ledger's keys and labels), the two illustrative seed tariffs as the guided
+form, and the finance rules (discount rate, basis, perspective, currency
+year, horizon and replacement rules).
 
-* ``technology_costs.csv``: rows transcribed from technology-data v0.14.0
-  (``outputs/costs_2030.csv``; the extraction is kept beside the plan as
-  ``docs/superpowers/notes/2026-09-28-mvp1-s2-seed-rows-technology-data-v0.14.0.csv``),
-  with a ±30 % range marked ``assumed``; one derived row (round-trip
-  efficiency = inverter efficiency squared, ``source=derived``) and
-  degradation placeholders (``note=not_used_in_mvp1``, no value).
-* ``tariffs.csv``: two illustrative seed tariffs, one row per component,
-  assembled into :class:`models.study.Tariff`.
-* ``finance_defaults.yaml``: the real discount rate, the basis, the
-  perspective, the currency year and the horizon/replacement rules.
+Until U2 WP10 the same view was also read from three vendored files under
+``backend/study_library/`` (technology-data v0.14.0, ``tariffs.csv``,
+``finance_defaults.yaml``). WP10 deleted them and their loader; their rows
+1-20 are frozen in ``tests/fixtures/legacy_study_library.json`` (gate U2-S1
+C8 a). A ledger a study stored before then still loads, runs and is valued:
+it names :data:`LIBRARY_VERSION` (read-only), and every reader takes the
+pinned pack for what the ledger does not hold. ``study_library/load_profiles/``
+stays: the sector load profiles, which the pack does not carry (Q7).
 
 :func:`seed_ledger` turns the library plus the study's intake into an
 :class:`AssumptionsLedger` whose every row is ``provenance=library,
@@ -24,17 +27,11 @@ status=default``, with ``sensitivity_flag`` set on the question's key drivers.
 """
 from __future__ import annotations
 
-import csv
 import functools
-import math
-import pathlib
-import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
-
-import yaml
 
 from models.study import (
     AssumptionsLedger,
@@ -47,14 +44,15 @@ from models.study import (
 
 __all__ = [
     "BESS_KEY_DRIVERS", "DEFAULTS_VERSION_PREFIX", "DERIVED", "ENGINE_PATHS",
-    "ENGINE_ROWS", "INTAKE_DERIVED_ROWS", "LIBRARY_DIR", "LIBRARY_VERSION", "Library",
-    "LibraryError", "RULE_DESCRIPTOR", "TechnologyRow", "UnknownLibraryVersion",
-    "horizon_and_replacements", "key_drivers_of", "load_defaults", "load_library",
-    "seed_ledger",
+    "ENGINE_ROWS", "INTAKE_DERIVED_ROWS", "LIBRARY_VERSION", "Library",
+    "LibraryError", "RULE_DESCRIPTOR", "TechnologyRow",
+    "horizon_and_replacements", "key_drivers_of", "load_defaults", "seed_ledger",
 ]
 
+#: READ-ONLY since U2 WP10: the `ledger_version` of a ledger seeded from the
+#: deleted `study_library/` files (a study stored before U2 WP8 seeded from
+#: the pack). Nothing seeds it any more.
 LIBRARY_VERSION = "technology-data v0.14.0"
-LIBRARY_DIR = pathlib.Path(__file__).resolve().parents[2] / "study_library"
 
 # The BESS question's key drivers. S4's template
 # (`services/study/questions.py::BESS_AT_SITE.key_drivers`) is THE list and
@@ -65,20 +63,9 @@ BESS_KEY_DRIVERS: tuple[str, ...] = (
     "demand_charge_price", "energy_price_level", "discount_rate",
 )
 
-TECH_COLUMNS = (
-    "technology", "parameter", "value", "unit", "basis", "currency_year",
-    "source", "source_year", "source_url", "range_low", "range_high",
-    "range_source", "domain", "projection_year", "note",
-)
-TARIFF_COLUMNS = (
-    "tariff_id", "name", "source", "source_year", "currency", "currency_year",
-    "billing_period", "component", "label", "price", "unit", "basis",
-    "months", "weekdays", "hours", "note",
-)
-
 # (technology, parameter) -> (ledger key, plain label, technical name).
-# A library row with no entry here is refused at load: a key is a contract
-# the pack (S4), the pro forma (S5) and the tornado (S6) read by name.
+# A pack row with no entry here is refused at load: a key is a contract the
+# network pack (S4), the case (S5) and the tornado (S6) read by name.
 _TECH_KEYS: dict[tuple[str, str], tuple[str, str, str]] = {
     ("battery inverter", "investment"): (
         "battery_inverter_eur_per_kw", "Battery inverter cost",
@@ -161,11 +148,7 @@ ENERGY_PRICE_LEVEL_HELP = (
 
 
 class LibraryError(ValueError):
-    """A vendored library file (or an intake reference into it) is invalid."""
-
-
-class UnknownLibraryVersion(LookupError):
-    """Only the vendored version can be loaded; nothing is downloaded."""
+    """A defaults-pack row (or an intake reference into the library) is invalid."""
 
 
 @dataclass(frozen=True)
@@ -201,205 +184,10 @@ class Library:
     tariffs: Mapping[str, Tariff]
     finance: Mapping[str, Any]
     default_tariff_id: str
-    directory: pathlib.Path = field(default=LIBRARY_DIR, compare=False)
-    # U2 WP3: the generic defaults pack this view was read from (None for the
-    # legacy `study_library/` files), and each pack tariff's `illustrative`.
+    # U2 WP3: the generic defaults pack this view was read from, and each pack
+    # tariff's `illustrative`.
     pack: Any = field(default=None, compare=False)
     tariff_illustrative: Mapping[str, bool] = field(default_factory=dict, compare=False)
-
-
-# ── parsing ───────────────────────────────────────────────────────────────
-
-def _opt_float(text: str, where: str) -> float | None:
-    text = (text or "").strip()
-    if not text:
-        return None
-    try:
-        value = float(text)
-    except ValueError:
-        raise LibraryError(f"{where}: {text!r} is not a number") from None
-    if not math.isfinite(value):
-        raise LibraryError(f"{where}: {text!r} is not finite")
-    return value
-
-
-def _opt_int(text: str, where: str) -> int | None:
-    value = _opt_float(text, where)
-    return None if value is None else int(value)
-
-
-def _read_csv(path: pathlib.Path, columns: tuple[str, ...]) -> list[dict[str, str]]:
-    with path.open(encoding="utf-8", newline="") as fh:
-        reader = csv.DictReader(fh)
-        if tuple(reader.fieldnames or ()) != columns:
-            raise LibraryError(
-                f"{path.name}: header {reader.fieldnames} != {list(columns)}")
-        return list(reader)
-
-
-def _parse_technology(path: pathlib.Path) -> tuple[TechnologyRow, ...]:
-    out: list[TechnologyRow] = []
-    for line, raw in enumerate(_read_csv(path, TECH_COLUMNS), start=2):
-        where = f"{path.name} line {line}"
-        ident = (raw["technology"], raw["parameter"])
-        if ident not in _TECH_KEYS:
-            raise LibraryError(f"{where}: no ledger key for {ident}")
-        key, label, technical = _TECH_KEYS[ident]
-        value = _opt_float(raw["value"], where)
-        note = raw["note"].strip()
-        if value is None and note != NOT_USED:
-            raise LibraryError(f"{where}: {key} has no value and is not "
-                               f"marked {NOT_USED}")
-        if not raw["unit"].strip() or not raw["source"].strip():
-            raise LibraryError(f"{where}: {key} needs a unit and a source")
-        low = _opt_float(raw["range_low"], where)
-        high = _opt_float(raw["range_high"], where)
-        if (low is None) != (high is None):
-            raise LibraryError(f"{where}: {key} has half a range")
-        try:
-            domain = LedgerDomain.parse(raw["domain"])
-        except ValueError as exc:
-            raise LibraryError(f"{where}: {key} domain: {exc}") from None
-        for label_, v in (("value", value), ("range_low", low), ("range_high", high)):
-            if v is not None and not domain.contains(v):
-                raise LibraryError(f"{where}: {key} {label_} {v} is outside {domain}")
-        out.append(TechnologyRow(
-            key=key, label=label, technical_name=technical,
-            technology=ident[0], parameter=ident[1], value=value,
-            unit=raw["unit"].strip(), basis=raw["basis"].strip() or "real",
-            currency_year=_opt_int(raw["currency_year"], where),
-            source=raw["source"].strip(),
-            source_year=_opt_int(raw["source_year"], where),
-            source_url=raw["source_url"].strip() or None,
-            range_low=low, range_high=high,
-            range_source=raw["range_source"].strip() or None, note=note,
-            domain=domain,
-            projection_year=_opt_int(raw["projection_year"], where),
-        ))
-    by_key = {r.key: r for r in out}
-    if len(by_key) != len(out):
-        raise LibraryError(f"{path.name}: duplicate ledger keys")
-    # A derived row in the file must agree with its formula, so the vendored
-    # number and the refresh rule cannot drift apart.
-    for key, (inputs, fn) in DERIVED.items():
-        row = by_key.get(key)
-        if row is None:
-            continue
-        if row.source != "derived":
-            raise LibraryError(f"{path.name}: {key} must be source=derived")
-        expected = fn(*(by_key[i].value for i in inputs))
-        if not math.isclose(row.value, expected, rel_tol=0, abs_tol=5e-5):
-            raise LibraryError(
-                f"{path.name}: {key}={row.value} but its formula gives {expected}")
-    return tuple(out)
-
-
-def _int_list(text: str, where: str) -> list[int]:
-    """``"0-4;7"`` -> ``[0, 1, 2, 3, 4, 7]``; empty means every."""
-    out: list[int] = []
-    for part in (text or "").replace(" ", "").split(";"):
-        if not part:
-            continue
-        try:
-            if "-" in part:
-                a, b = (int(x) for x in part.split("-", 1))
-                out.extend(range(a, b + 1))
-            else:
-                out.append(int(part))
-        except ValueError:
-            raise LibraryError(f"{where}: {text!r} is not a list of integers") from None
-    return out
-
-
-_NOTE_CODE_RE = re.compile(r"[a-z]+(_[a-z]+)*")
-
-
-def _parse_tariffs(path: pathlib.Path) -> dict[str, Tariff]:
-    grouped: dict[str, dict[str, Any]] = {}
-    for line, raw in enumerate(_read_csv(path, TARIFF_COLUMNS), start=2):
-        where = f"{path.name} line {line}"
-        tid = raw["tariff_id"].strip()
-        t = grouped.setdefault(tid, {
-            "tariff_id": tid, "name": raw["name"].strip(),
-            "source": raw["source"].strip(),
-            "source_year": _opt_int(raw["source_year"], where),
-            "currency": raw["currency"].strip(),
-            "currency_year": _opt_int(raw["currency_year"], where),
-            "billing_period": raw["billing_period"].strip(),
-            "energy_bands": [], "network_charges": [], "honesty_notes": [],
-            "honesty_help": {},
-        })
-        kind, label = raw["component"].strip(), raw["label"].strip()
-        price = _opt_float(raw["price"], where)
-        if kind != "honesty_note" and price is None:
-            raise LibraryError(f"{where}: {tid} {kind} has no price")
-        if kind == "energy_band":
-            t["energy_bands"].append({"label": label, "price_per_mwh": price, "applies": {
-                "months": _int_list(raw["months"], where),
-                "weekdays": _int_list(raw["weekdays"], where),
-                "hours": _int_list(raw["hours"], where)}})
-        elif kind == "demand_charge":
-            t["demand_charge"] = {"price_per_mw_per_period": price,
-                                  "basis": raw["basis"].strip()}
-        elif kind == "capacity_charge":
-            t["capacity_charge"] = {"price_per_mw_per_year": price,
-                                    "basis": raw["basis"].strip()}
-        elif kind == "fixed_charge":
-            t["fixed_charge_per_period"] = price
-        elif kind == "network_charge":
-            t["network_charges"].append({"label": label, "price": price,
-                                         "basis": raw["basis"].strip()})
-        elif kind == "export":
-            t["export"] = {"price_per_mwh": price}
-        elif kind == "connection_limit":
-            t["connection_limit_mw"] = price
-        elif kind == "honesty_note":
-            # Gate S5 BC-S5-3: the code (label column) travels into the case
-            # and the report; the sentence (note column) is its help text.
-            if not _NOTE_CODE_RE.fullmatch(label):
-                raise LibraryError(
-                    f"{where}: {tid} honesty_note needs a snake_case code without "
-                    f"digits in the label column, got {label!r}")
-            t["honesty_notes"].append(label)
-            t["honesty_help"][label] = raw["note"].strip()
-        else:
-            raise LibraryError(f"{where}: unknown tariff component {kind!r}")
-    try:
-        return {tid: Tariff.model_validate(data) for tid, data in grouped.items()}
-    except ValueError as exc:
-        raise LibraryError(f"{path.name}: {exc}") from exc
-
-
-@functools.lru_cache(maxsize=4)
-def _load(version: str, directory: pathlib.Path) -> Library:
-    finance = yaml.safe_load((directory / "finance_defaults.yaml").read_text(encoding="utf-8"))
-    if finance.get("library_version") != version:
-        raise LibraryError(
-            f"finance_defaults.yaml is for {finance.get('library_version')!r}, "
-            f"not {version!r}")
-    tariffs = _parse_tariffs(directory / "tariffs.csv")
-    if not tariffs:
-        raise LibraryError("tariffs.csv holds no tariff")
-    return Library(
-        version=version,
-        technology=_parse_technology(directory / "technology_costs.csv"),
-        tariffs=MappingProxyType(tariffs),
-        finance=MappingProxyType(finance),
-        default_tariff_id=next(iter(tariffs)),
-        directory=directory,
-    )
-
-
-def load_library(version: str = LIBRARY_VERSION) -> Library:
-    """
-    The vendored library. Only :data:`LIBRARY_VERSION` exists; any other
-    version is refused rather than fetched.
-    """
-    if version != LIBRARY_VERSION:
-        raise UnknownLibraryVersion(
-            f"assumptions library {version!r} is not vendored; this build "
-            f"carries {LIBRARY_VERSION!r} only")
-    return _load(version, LIBRARY_DIR)
 
 
 # ── the generic defaults pack (U2 WP3) ────────────────────────────────────
@@ -649,9 +437,9 @@ def _finance_spec(v) -> dict[str, Any]:
 
 @functools.lru_cache(maxsize=4)
 def _load_defaults(version: str) -> Library:
-    from services.library.defaults_pack.loader import load_defaults_pack
+    from services.study import compile as C
 
-    pack = load_defaults_pack(version)
+    pack = C.load_defaults_pack(version)
     fin = pack.finance
     label = f"{DEFAULTS_VERSION_PREFIX} {pack.version} {pack.hash[:12]}"
     [rule] = fin.replacement_rules

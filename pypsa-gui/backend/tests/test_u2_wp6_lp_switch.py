@@ -20,7 +20,9 @@ demand basis ask).
 * A fork passes `validate_for_run` with no error and no
   `commercial.demand_resolution` warning (`settlement="h"`).
 * The year-billed demand basis (an IC annual measured peak, `capacity` on
-  `peak_import`) is the GS wrapper's formulation on a toy year (§4.7).
+  `peak_import`) is the GS wrapper's formulation on a toy year (§4.7): its
+  objective, battery and annual peak equal the wrapper's, recorded live at
+  WP6 and frozen (`GS_TOY_YEAR`) since U2 WP10 deleted the wrapper.
 * The guided path no longer reaches GS's demand wrapper, its config field or
   its link prices; `bill_meter` (no solve) is called only by the preview.
 """
@@ -84,7 +86,7 @@ def test_the_option_solver_config_carries_the_compiled_commercial_and_no_gs_dema
     assert (cfg.mode, cfg.solver_name, cfg.solve_strategy) == ("lopf", "highs", "full")
     assert cfg.sclopf is False and cfg.run_ac_pf_after_lopf is False
     assert cfg.multi_investment_periods is False and cfg.extra_functionality_code == ""
-    assert cfg.demand_charge is None
+    assert not hasattr(cfg, "demand_charge")        # U2 WP10: the GS field is gone
     assert cfg.commercial == c.commercial()
     assert cfg.discount_rate == 0.07 and cfg.default_lifetime == 25.0
     assert cfg.finance is None          # WP7
@@ -114,7 +116,15 @@ def test_validate_for_run_on_a_compiled_fork_raises_no_error(option):
 
 # ── the year-billed demand basis (§4.7; stage-1 engine ask) ───────────────
 
-def _toy_year(*, gs_prices: bool):
+#: GS's wrapper on `_toy_year` (one `peak_import` per year, the tariff's
+#: prices written into the Links), recorded live at WP6 (u2_deltas.json rows of
+#: the year-billed test, `year_billed_demand_basis_verified_same_formulation`)
+#: and re-run on a clean copy of 14d0281f before U2 WP10 deleted the wrapper.
+GS_TOY_YEAR = {"objective": 29086152.714819793, "battery_p_nom_mw": 11.87291690270279,
+               "annual_peak_import_mw": 33.80980016880164}
+
+
+def _toy_year():
     from tests import u2_record_pre_numbers as REC
 
     import pypsa
@@ -142,10 +152,6 @@ def _toy_year(*, gs_prices: bool):
         "billing_period": "year",
         "demand_charge": REC.toy_tariff().demand_charge.model_copy(
             update={"price_per_mw_per_period": 120_000.0})})
-    if gs_prices:
-        from services.study.tariff import write_tariff_prices
-
-        write_tariff_prices(n, form, "grid_import", "grid_export")
     return n, form
 
 
@@ -159,24 +165,10 @@ def test_the_year_billed_demand_charge_is_the_gs_wrappers_formulation_on_a_toy_y
     battery and the same annual peak.
     """
     from services.pypsa_service import PyPSAService
-    from services.solver.objective import _wrap_with_demand_charge
-    from services.solver_service import (
-        SolverConfig,
-        run_simulation,
-        with_periodized_cost_defaults,
-    )
-    from services.study.tariff import demand_charge_config
+    from services.solver_service import run_simulation
 
-    gs, form = _toy_year(gs_prices=True)
-    gcfg = SolverConfig(solver_name="highs", discount_rate=0.07,
-                        demand_charge=demand_charge_config(form, ["grid_import"]))
-    with with_periodized_cost_defaults(gs, gcfg):
-        assert gs.optimize(solver_name="highs",
-                           extra_functionality=_wrap_with_demand_charge(gs, None, gcfg)) \
-            == ("ok", "optimal")
-    gs_peak = float(gs.model.variables["peak_import"].solution.sum())
-
-    ic, form = _toy_year(gs_prices=False)
+    gs_peak = GS_TOY_YEAR["annual_peak_import_mw"]
+    ic, form = _toy_year()
     c = _C().commercial_from_form(form, ic.snapshots, export_series=FAKE_REF)
     assert [(i.id, i.kind, i.measured_on, i.unit) for i in c.config.import_tariff.items
             if i.id == "demand"] == [("demand", "capacity", "peak_import", "per_kw_year")]
@@ -186,9 +178,10 @@ def test_the_year_billed_demand_charge_is_the_gs_wrappers_formulation_on_a_toy_y
     status, cond = run_simulation(cfg, ic, PyPSAService.get_lock(), threading.Event(),
                                   queue.SimpleQueue())
     assert (status, cond) == ("ok", "optimal")
-    assert abs(float(ic.objective) - float(gs.objective)) <= 1e-7 * abs(float(gs.objective))
+    gs_objective = GS_TOY_YEAR["objective"]
+    assert abs(float(ic.objective) - gs_objective) <= 1e-7 * abs(gs_objective)
     assert float(ic.storage_units.at["bess", "p_nom_opt"]) == pytest.approx(
-        float(gs.storage_units.at["bess", "p_nom_opt"]), abs=1e-4)
+        GS_TOY_YEAR["battery_p_nom_mw"], abs=1e-4)
     assert float(ic.links_t.p0["grid_import"].max()) == pytest.approx(gs_peak, abs=1e-5)
     # The engine's committed amount is the GS wrapper's term.
     assert _A().demand_charge_eur(ic, c) == pytest.approx(120_000.0 * gs_peak, rel=1e-6)
@@ -339,15 +332,13 @@ def test_billing_vs_lp_gap_leaves_nothing_unattributed_for_energy_and_demand(
 # ── the guided path no longer reaches the GS LP pieces ────────────────────
 
 _GS_LP_NAMES = {"_wrap_with_demand_charge", "demand_charge_config", "write_tariff_prices"}
-#: Removed in WP10 with the code they define or carry (plan §5.1).
-_STILL_DEFINED_IN = {"services/study/tariff.py"}
 
 
 def _guided_modules():
+    # U2 WP10 deleted `services/study/tariff.py`, which defined them: every
+    # study module is scanned.
     for p in sorted((BACKEND / "services" / "study").glob("*.py")):
-        rel = str(p.relative_to(BACKEND))
-        if rel not in _STILL_DEFINED_IN:
-            yield rel, p
+        yield str(p.relative_to(BACKEND)), p
     yield "routers/studies.py", BACKEND / "routers" / "studies.py"
 
 

@@ -221,10 +221,16 @@ def test_a_run_recorded_before_the_engine_inputs_is_stale_with_a_rerun(
 def test_a_fork_without_the_batterys_two_parts_is_stale_not_the_pro_forma(
         client, api_project, studies_on, fake, project_storage_dir, project_row):
     """
-    A fork written before WP7 (the battery priced by `capital_cost` alone):
-    never valued on the pro forma as current — the case answers 409 with the
-    plain reason. The recorded network hash is re-pinned so only the
+    A fork the engine cannot value (here: the battery's two parts stripped,
+    as a fork written before WP7 had them) under a run that DID record its
+    engine inputs: never valued on another calculation — the case and the
+    findings answer 409. The recorded network hash is re-pinned so only the
     engine rule can refuse it.
+
+    U2 WP10 (gate WP8a N7): the run is not "an earlier version" — it recorded
+    its engine inputs — so the reason names the option and says its network
+    has no engine solve record; telling the user an earlier version ran it
+    would loop them on a re-run advice that names the wrong cause.
     """
     import pypsa
 
@@ -242,6 +248,8 @@ def test_a_fork_without_the_batterys_two_parts_is_stale_not_the_pro_forma(
     f["hashes"]["option_network_hashes"][str(fork.id)] = run_hashes.fork_file_hash(fork)
     store.save_aux(base, sid, "findings", f)
 
-    message = _refused(client.get(_url(name, sid, "/options/bess_2h/case")))
-    assert "earlier version" in message
-    _refused(client.get(_url(name, sid, "/findings")))
+    for message in (_refused(client.get(_url(name, sid, "/options/bess_2h/case"))),
+                    _refused(client.get(_url(name, sid, "/findings")))):
+        assert "earlier version" not in message
+        assert "bess_2h" in message and "re-run the study" in message.lower()
+        assert message == run_hashes.not_engine_solved(["bess_2h"])

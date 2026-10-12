@@ -9,7 +9,9 @@ so `seed_ledger` / `reseed_ledger` / `reset_rows` and the pack builder take it
 unchanged. The seeded rows 1-20 equal the WP0 ledger (the vendored
 `study_library`) row for row; rows 21-34 are the finance-engine inputs a
 minimal single-owner case needs, each with its `engine_path` and the pack
-rule as its provenance. Production keeps the legacy library until WP8.
+rule as its provenance. U2 WP10 deleted the legacy library; the WP0 side of
+each comparison is its frozen record (`fixtures/legacy_study_library.json`,
+gate U2-S1 C8 a, written by the deleted loader at 14d0281f).
 """
 from __future__ import annotations
 
@@ -71,17 +73,25 @@ def defaults():
     return _L().load_defaults()
 
 
-def _pair(intake, defaults):
-    legacy = _L().seed_ledger(_Q(), intake, _L().load_library())
-    pack = _L().seed_ledger(_Q(), intake, defaults)
-    return legacy, pack
+def _legacy():
+    import json
+
+    from tests.u2_targets import FIXTURES
+
+    return json.loads((FIXTURES / "legacy_study_library.json").read_text(encoding="utf-8"))
 
 
-@pytest.mark.parametrize("intake", [_intake(DE), _intake(TOU),
-                                    _intake(tariff={"custom": USER_TARIFF})],
+def _pair(name, intake, defaults):
+    from tests.u2_targets import legacy_ledger
+
+    return legacy_ledger(name), _L().seed_ledger(_Q(), intake, defaults)
+
+
+@pytest.mark.parametrize("name,intake", [("de", _intake(DE)), ("tou", _intake(TOU)),
+                                         ("user", _intake(tariff={"custom": USER_TARIFF}))],
                          ids=["de", "tou", "user"])
-def test_rows_1_to_20_equal_the_wp0_ledger_row_for_row(defaults, intake):
-    legacy, pack = _pair(intake, defaults)
+def test_rows_1_to_20_equal_the_wp0_ledger_row_for_row(defaults, name, intake):
+    legacy, pack = _pair(name, intake, defaults)
     n = len(legacy.rows)
     assert [r.key for r in pack.rows[:n]] == [r.key for r in legacy.rows]
     for a, b in zip(legacy.rows, pack.rows[:n]):
@@ -93,11 +103,11 @@ def test_rows_1_to_20_equal_the_wp0_ledger_row_for_row(defaults, intake):
 
 
 def test_the_pack_tariffs_are_the_wp0_seed_tariffs(defaults):
-    legacy = _L().load_library()
-    assert list(defaults.tariffs) == list(legacy.tariffs)
-    for tid, t in legacy.tariffs.items():
-        assert defaults.tariffs[tid].model_dump() == t.model_dump(), tid
-    assert defaults.default_tariff_id == legacy.default_tariff_id
+    legacy = _legacy()
+    assert list(defaults.tariffs) == list(legacy["tariffs"])
+    for tid, t in legacy["tariffs"].items():
+        assert defaults.tariffs[tid].model_dump(mode="json") == t, tid
+    assert defaults.default_tariff_id == legacy["default_tariff_id"]
 
 
 def test_rows_21_to_34_follow_with_engine_paths_and_the_pack_rule_as_provenance(defaults):
@@ -232,7 +242,9 @@ def test_horizon_and_replacements_read_the_pack_rules(defaults):
 def test_the_pack_builds_the_same_site_network(defaults):
     from services.study import packs
 
-    legacy_led = _L().seed_ledger(_Q(), _intake(DE), _L().load_library())
+    from tests.u2_targets import legacy_ledger
+
+    legacy_led = legacy_ledger("de")
     pack_led = _L().seed_ledger(_Q(), _intake(DE), defaults)
     a = packs.build_site_network(_intake(DE), legacy_led, "bess_pv_2h")
     b = packs.build_site_network(_intake(DE), pack_led, "bess_pv_2h", library=defaults)

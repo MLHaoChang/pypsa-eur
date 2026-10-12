@@ -136,7 +136,7 @@
   {% if sid == "appendix" and s.payload %}
   <p>{{ s.payload.model }}</p>
   <table><tbody>
-  {% for k in ("tariff_id", "tariff_name", "library_version", "fidelity", "ledger_hash", "base_network_hash") %}<tr><th>{{ k }}</th><td class="code">{{ s.payload[k] }}</td></tr>{% endfor %}
+  {% for k, label in (("tariff_id", "tariff_id"), ("tariff_name", "tariff_name"), ("library_version", "defaults_version"), ("fidelity", "fidelity"), ("ledger_hash", "ledger_hash"), ("base_network_hash", "base_network_hash")) %}<tr><th>{{ label }}</th><td class="code">{{ s.payload[k] }}</td></tr>{% endfor %}
   {% for fork, h in s.payload.option_network_hashes.items() %}<tr><th>network hash, {{ s.payload.option_forks.get(fork, fork) }}</th><td class="code">{{ h }}</td></tr>{% endfor %}
   <tr><th>generated_at</th><td class="code">{{ report.generated_at }}</td></tr>
   </tbody></table>

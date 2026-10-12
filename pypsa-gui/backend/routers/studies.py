@@ -1065,7 +1065,7 @@ def get_ledger_csv(study_id: str,
     )
 
 
-# ── S5: the investment case (pro forma), JSON and XLSX ────────────────────
+# ── S5: the investment case (the engine's since U2), JSON and XLSX ─────────
 
 def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
                  db: DBSession, user: User | None):
@@ -1150,9 +1150,14 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
     # the engine inputs were recorded, a fork written before WP7 or one whose
     # tariff or finance settings were edited since is refused with the plain
     # reason and a re-run offered — never valued on another calculation.
-    if not run_hashes.engine_recorded(hashes, run) or not study_engine.engine_ready(network):
+    if not run_hashes.engine_recorded(hashes, run):
         raise HTTPException(409, detail={"error_kind": run_hashes.ENGINE_STALE,
                                          "message": run_hashes.EARLIER_VERSION})
+    if not study_engine.engine_ready(network):
+        # U2 WP10 (gate WP8a N7): the run recorded its engine inputs, so the
+        # fork itself lacks the engine's solve record — not an earlier version.
+        raise HTTPException(409, detail={"error_kind": run_hashes.ENGINE_STALE,
+                                         "message": run_hashes.not_engine_solved([option_id])})
     if not run_hashes.compiled_matches(hashes, str(fork.id),
                                        run_hashes.fork_engine_digest(fork)):
         raise HTTPException(409, detail={"error_kind": run_hashes.ENGINE_STALE,

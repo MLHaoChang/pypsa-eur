@@ -417,17 +417,22 @@ def _check_bundle():
 def test_the_decision_studys_template_and_library_are_in_the_spec_and_the_bundle_check():
     """
     `services/study/render_html.py` reads `templates/decision_report.html.j2`
-    and `services/study/library.py` reads `study_library/` (its CSVs, the
-    finance YAML and `load_profiles/`), both `__file__`-relative. A bundle
-    without them launches fine and 500s on the first report or the first
-    study.
+    and `services/study/packs.py` reads `study_library/load_profiles/`, both
+    `__file__`-relative. A bundle without them launches fine and 500s on the
+    first report or the first profile-based study. U2 WP10 deleted the rest of
+    `study_library/` (the defaults are the generic defaults pack, shipped on
+    its own), so neither the spec nor the bundle check names those files.
     """
     datas = _spec_backend_datas()
     assert datas.get("templates/decision_report.html.j2") == "templates", datas
-    assert datas.get("study_library") == "study_library", datas
+    assert datas.get("study_library/load_profiles") == "study_library/load_profiles", datas
+    assert "study_library" not in datas, datas
     expected = set(_check_bundle().EXPECTED)
-    assert {"decision_report.html.j2", "study_library", "technology_costs.csv",
-            "tariffs.csv", "finance_defaults.yaml", "load_profiles"} <= expected
+    assert {"decision_report.html.j2", "study_library", "load_profiles",
+            "commercial_office.csv", "industrial_two_shift.csv"} <= expected
+    assert not {"technology_costs.csv", "tariffs.csv", "finance_defaults.yaml"} & expected
+    shipped = {p.name for p in (BACKEND / "study_library").iterdir()}
+    assert shipped == {"load_profiles"}, shipped
 
 
 def test_the_report_charts_agg_backend_is_a_declared_hidden_import():
@@ -451,7 +456,8 @@ def test_the_decision_studys_data_resolves_in_a_frozen_layout(tmp_path):
     a directory's contents AS the destination). The two modules are loaded
     from that tree, so their `__file__`-relative paths are the frozen ones —
     the `presets.json` and `matpower.jinja2` precedent — and must find the
-    template and every library file there.
+    template and every load profile there (U2 WP10: the rest of the old
+    library is the defaults pack, `test_the_spec_ships_the_generic_defaults_pack_data`).
     """
     import importlib.util
     import shutil
@@ -469,7 +475,7 @@ def test_the_decision_studys_data_resolves_in_a_frozen_layout(tmp_path):
     frozen = meipass / "services" / "study"
     frozen.mkdir(parents=True)
     modules = {}
-    for name in ("render_html", "library"):
+    for name in ("render_html", "packs"):
         shutil.copy2(BACKEND / "services" / "study" / f"{name}.py", frozen / f"{name}.py")
         spec = importlib.util.spec_from_file_location(
             f"_frozen_probe_{name}", frozen / f"{name}.py")
@@ -482,15 +488,13 @@ def test_the_decision_studys_data_resolves_in_a_frozen_layout(tmp_path):
             sys.modules.pop(spec.name, None)
         modules[name] = module
 
-    render_html, library = modules["render_html"], modules["library"]
+    render_html, packs = modules["render_html"], modules["packs"]
     assert render_html.TEMPLATES_DIR == meipass / "templates"
     template = render_html.environment().get_template("decision_report.html.j2")
     assert template.filename == str(meipass / "templates" / "decision_report.html.j2")
 
-    assert library.LIBRARY_DIR == meipass / "study_library"
-    loaded = library.load_library()
-    assert loaded.tariffs and loaded.finance["library_version"] == library.LIBRARY_VERSION
-    profiles = library.LIBRARY_DIR / "load_profiles"
+    profiles = packs._PROFILE_DIR
+    assert profiles == meipass / "study_library" / "load_profiles"
     shipped = {p.name for p in (BACKEND / "study_library" / "load_profiles").iterdir()
                if p.is_file()}
     assert shipped and shipped <= {p.name for p in profiles.iterdir()}

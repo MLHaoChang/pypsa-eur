@@ -4,8 +4,8 @@ U2 WP2 acceptance: every test of the five GS engine test files has a row in
 and every named target exists.
 
 Plan: docs/superpowers/plans/2026-10-05-guided-study-u2-engine-rewire.md WP2.
-After WP10 deletes the source files, the map is the record and only the
-target check runs.
+After WP10 deleted the source files, the map is the record and only the
+target check runs; since WP10 no test may carry `pending()` (gate C8 c).
 """
 from __future__ import annotations
 
@@ -62,16 +62,37 @@ def test_the_workbook_port_drops_nothing():
     assert dropped == []
 
 
-def test_no_target_still_waits_on_a_work_package_that_has_landed():
-    """
-    WP9 is the last package whose targets carried `pending()`; after it, a
-    `pending("WP<n>")` mark may only name WP10 or later (C8 c makes WP10 the
-    one that asserts none at all).
-    """
-    import re
+def _pending_calls(path: pathlib.Path) -> list[str]:
+    """Every `pending(...)` call (`u2_targets.pending`, strict xfail) in a test file."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    out = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            f = node.func
+            name = f.id if isinstance(f, ast.Name) else (f.attr if isinstance(f, ast.Attribute)
+                                                          else None)
+            if name == "pending":
+                out.append(f"{path.name}:{node.lineno}")
+    return out
 
-    mark = re.compile(r"""\bpending\(\s*["']WP(\d+)["']""")
-    early = sorted(f"{p.name}: WP{m.group(1)}" for p in TESTS.glob("test_*.py")
-                   for m in mark.finditer(p.read_text(encoding="utf-8"))
-                   if int(m.group(1)) <= 9)
-    assert early == []
+
+def test_no_target_carries_pending_any_more():
+    """
+    Gate U2-S1 C8 (c), U2 WP10: WP10 is the last package; no port target —
+    nor any other test — still waits on a seam (`pending()`, a strict xfail),
+    whatever package it names.
+    """
+    targets = {row.partition("::")[0] for rows in MAP["map"].values() for row in rows.values()
+               if not row.startswith("dropped: ")}
+    assert targets, "the port map names no target"
+    found = sorted(c for p in TESTS.glob("test_*.py") for c in _pending_calls(p))
+    assert found == []
+
+
+def test_the_pending_scan_sees_a_pending_mark(tmp_path):
+    """The scan's own guard: a `pending("WP11")` mark, in any spelling, is found."""
+    probe = tmp_path / "test_probe.py"
+    probe.write_text("import u2_targets as T\nfrom u2_targets import pending\n"
+                     "@pending('WP11')\ndef test_a(): pass\n"
+                     "@T.pending(\"WP10\", \"why\")\ndef test_b(): pass\n", encoding="utf-8")
+    assert _pending_calls(probe) == ["test_probe.py:3", "test_probe.py:5"]

@@ -354,8 +354,9 @@ def _read_option(n, cfg, opt, fidelity: Fidelity, currency_year, *, compiled) ->
 
 
 def _delta_not_yet() -> DeltaVsBaseline:
-    # NPV, payback and capex against the baseline are the S5 pro forma's;
-    # null with the flag, never 0 (ADR-0001).
+    # NPV, payback and capex against the baseline are the investment case's (S5;
+    # the engine's since U2; the stable code keeps its S5 name): null with the
+    # flag, never 0 (ADR-0001).
     reason = "computed_by_the_pro_forma_s5"
     return DeltaVsBaseline(npv=None, payback=None, capex=None, co2=None,
                            unavailable={"npv": reason, "payback": reason,

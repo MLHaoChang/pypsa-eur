@@ -53,6 +53,21 @@ EARLIER_VERSION = (
     "not shown. Run the study again to bring them up to date.")
 
 
+def not_engine_solved(options) -> str:
+    """
+    The plain reason for options whose fork the engine cannot value although
+    the run recorded its engine inputs (U2 WP10, gate WP8a N7): the network
+    has no record of a solve on the engine (the solve did not finish its
+    record, or the file was replaced). Not "an earlier version": that run
+    would read `EARLIER_VERSION` before this check is reached.
+    """
+    names = ", ".join(sorted(options))
+    return (f"The network of option(s) {names} carries no record of being solved on the "
+            "investment-case engine (its solve did not finish recording the tariff it "
+            "priced, or the file was replaced), so its results cannot be valued. Re-run the "
+            "study to solve it again.")
+
+
 def edited_since_run(options) -> str:
     """The plain reason for options whose tariff or finance settings were edited."""
     names = ", ".join(sorted(options))

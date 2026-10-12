@@ -122,7 +122,7 @@ def test_the_intake_refuses_a_measured_capacity_charge(client, api_project, stud
     from services.study import library as lib
 
     api_project("m0-measured")
-    custom = lib.load_library().tariffs["de_industrial_illustrative"].model_dump()
+    custom = lib.load_defaults().tariffs["de_industrial_illustrative"].model_dump()
     custom.update(tariff_id="site", source="site bill",
                   capacity_charge={"price_per_mw_per_year": 50000.0, "basis": "measured"})
     r = create_pack_study(client, "m0-measured", "m0-measured-base",
@@ -143,7 +143,7 @@ def test_the_intake_refuses_a_measured_capacity_charge(client, api_project, stud
 def _custom_tariff(price):
     from services.study import library as lib
 
-    t = lib.load_library().tariffs["de_industrial_illustrative"].model_dump()
+    t = lib.load_defaults().tariffs["de_industrial_illustrative"].model_dump()
     t.update(tariff_id="site_bill", name="Site bill", source="site bill 2025",
              honesty_notes=[])
     t["demand_charge"]["price_per_mw_per_period"] = price

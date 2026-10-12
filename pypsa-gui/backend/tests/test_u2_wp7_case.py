@@ -26,14 +26,14 @@ The WP2 port of the pro forma's golden tests is
 """
 from __future__ import annotations
 
-import dataclasses
+import json
 import math
 
 import pytest
 
 from tests.golden import oracle
 from tests.golden import site_fixture as sf
-from tests.u2_targets import WP0, close, ic_case_option
+from tests.u2_targets import FIXTURES, WP0, close, ic_case_option, legacy_ledger
 
 OPTIONS = ("bess_2h", "bess_pv_2h")
 GOLDEN = WP0["golden_s5"]
@@ -182,13 +182,11 @@ def test_the_finance_inputs_are_the_real_pre_tax_basis_from_rows_21_to_34():
 def test_a_legacy_ledger_takes_the_guided_rules_disclosed():
     """
     A ledger seeded before rows 21-34 (the legacy `study_library` ledger,
-    production until WP8) compiles to the same inputs and says so
+    production until WP8; frozen since WP10 deleted the files, gate C8 a)
+    compiles to the same inputs and says so
     (`finance_rules_from_guided_defaults`), never silently.
     """
-    from services.study import library as L
-    from services.study import questions as Q
-
-    legacy = L.seed_ledger(Q.BESS_AT_SITE, sf.site_intake(), L.load_library())
+    legacy = legacy_ledger("de")
     assert not any(r.key == "contingency_share" for r in legacy.rows)
     got = _compile(legacy)
     want = _compile(_pack_ledger())
@@ -298,29 +296,17 @@ def test_npv_is_the_live_lp_saving_annuitised(option):
 
 def _gs_bound_npv(option: str, key: str, value: float, kind: str) -> float:
     """
-    GS's `_capex_bound` / `_rate_bound` (the pro forma on the variant ledger,
-    the network copy's FOM or rates rewritten as `findings` does), the WP0
-    oracle of C5.
+    GS's `_capex_bound` / `_rate_bound` NPV (the pro forma on the variant
+    ledger, the network copy's FOM or rates rewritten as `findings` did), the
+    WP0 oracle of C5 — frozen in `tests/fixtures/u2_gs_bound_npvs.json`
+    before U2 WP10 deleted the pro forma.
     """
-    from services.study import findings as F
-    from services.study import packs, proforma
+    [row] = [r for r in _GS_BOUNDS if (r["option"], r["kind"], r["key"]) == (option, kind, key)
+             and r["value"] == value]
+    return float(row["npv"])
 
-    n, cfg, _compiled, ledger = ic_case_option(option)
-    vl = F._with_value(ledger, key, value)
-    net = F.copy_network(n)
-    if kind == "capex":
-        net.storage_units.loc["battery", "fom_cost"] = packs.battery_fom_eur_per_mw(vl)
-    else:
-        net.storage_units.loc["battery", "discount_rate"] = float(value)
-        if "pv" in net.generators.index:
-            net.generators.loc["pv", "discount_rate"] = float(value)
-    b = _bundle(option)
-    tariff = packs.effective_tariff(sf.site_intake(), vl, _defaults(), n.snapshots)
-    cfg_v = dataclasses.replace(cfg, discount_rate=float(packs.ledger_values(vl)["discount_rate"]))
-    case = proforma.build_investment_case(
-        net, cfg_v, None, vl, dict(b.bills), option, study_id=sf.SITE_STUDY_ID,
-        tariff=tariff)
-    return float(case.kpis.npv)
+
+_GS_BOUNDS = json.loads((FIXTURES / "u2_gs_bound_npvs.json").read_text(encoding="utf-8"))["bounds"]
 
 
 def _bounds(kind):

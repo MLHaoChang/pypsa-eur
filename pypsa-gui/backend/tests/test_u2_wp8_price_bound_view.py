@@ -24,7 +24,7 @@ def test_a_price_bound_values_its_case_off_the_centre(monkeypatch):
 
     seen: dict = {}
 
-    def case(ctx, n, cfg, ledger, tariff, bills, option_id, asset_economics=None, **kw):
+    def case(ctx, n, cfg, ledger, bills, option_id, asset_economics=None, **kw):
         seen.update(kw, network=n)
         return "the bound's view"
 
@@ -61,9 +61,9 @@ def test_the_findings_case_passes_centre_to_the_engine(monkeypatch):
     ctx = types.SimpleNamespace(study_id="s", fidelity=None, question=None,
                                 study_currency_year=None, bundles={})
     n = types.SimpleNamespace(snapshots=None)
-    F._case(ctx, n, "cfg", None, None, {}, "bess_2h", keep=False, centre=False)
+    F._case(ctx, n, "cfg", None, {}, "bess_2h", keep=False, centre=False)
     assert seen["centre"] is False
-    F._case(ctx, n, "cfg", None, None, {}, "bess_2h")
+    F._case(ctx, n, "cfg", None, {}, "bess_2h")
     assert seen["centre"] is True
 
 

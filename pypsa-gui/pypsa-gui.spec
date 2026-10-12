@@ -67,13 +67,14 @@ datas = [
     # The decision study (guided investment study MVP-1, S9). Both are read
     # `__file__`-relative, like `presets.json` below: `services/study/
     # render_html.py` resolves `parents[2] / "templates"` and `services/study/
-    # library.py` resolves `parents[2] / "study_library"`, i.e. _MEIPASS root
-    # under `pathex=[str(BACKEND)]`. The library is vendored data (two CSVs,
-    # the finance YAML, `load_profiles/`); the runtime never downloads it.
-    # `tests/test_packaging_requirements.py` rebuilds this layout and loads
-    # both modules from it.
+    # packs.py` resolves `parents[2] / "study_library" / "load_profiles"`,
+    # i.e. _MEIPASS root under `pathex=[str(BACKEND)]`. Since U2 WP10 the
+    # study's defaults are the generic defaults pack (below); of the old
+    # vendored library only the sector load profiles remain (Q7). The runtime
+    # never downloads them. `tests/test_packaging_requirements.py` rebuilds
+    # this layout and loads both modules from it.
     (str(BACKEND / "templates" / "decision_report.html.j2"), "templates"),
-    (str(BACKEND / "study_library"), "study_library"),
+    (str(BACKEND / "study_library" / "load_profiles"), "study_library/load_profiles"),
     # `local_bootstrap` runs `alembic upgrade head` on every launch and points
     # `script_location` at `<backend>/alembic`, so both must ship.
     (str(BACKEND / "alembic"), "alembic"),

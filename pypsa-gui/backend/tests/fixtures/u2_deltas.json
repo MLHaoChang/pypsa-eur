@@ -2,7 +2,7 @@
  "schema": "u2_deltas/1",
  "plan": "docs/superpowers/plans/2026-10-05-guided-study-u2-engine-rewire.md WP2 (deltas), §4",
  "rule": "{test, figure, pre, post, abs, rel, cause}: pre = GS (BillCalculator or the WP0 record), post = the engine through the U2 seam. A cause is a stable code; WP10's assessor gates every row outside tolerance.",
- "stage": "U2 stage 1 (WP1-WP5) + WP6 (LP switch) + WP7 (the case on the finance engine) + WP8 part A (findings, runner, routes on the engine; pack seeding)",
+ "stage": "U2 stage 1 (WP1-WP5) + WP6 (LP switch) + WP7 (the case on the finance engine) + WP8 part A (findings, runner, routes on the engine; pack seeding) + WP10 (the GS engine deleted; the WP0 golden table re-derived on the engine)",
  "deltas": [
   {
    "test": "test_engine_adapter_bill.py::test_a_year_billed_peak_is_prorated_by_the_hours_it_represents",
@@ -595,6 +595,127 @@
    "abs": 0.0,
    "rel": 0.0,
    "cause": "vocabulary_rename_5_4: plan §5.4 (U2 WP8 part B) renames CaseKpis.salvage_eur to terminal_value_eur; the driver records the case's figure under the new name (post_figure). The number does not move (it is compared at the frozen tolerance); the WP0 freeze keeps salvage_eur"
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_the_golden_s5_table_reproduces",
+   "figure": "golden_s5.bess_2h.fom_annual",
+   "pre": 557.3585892776363,
+   "post": 557.35859,
+   "abs": 7.223637794595561e-07,
+   "rel": 1.2960485284631112e-09,
+   "cause": "fom_rounded_by_pypsa_statistics: since U2 WP10 the golden table is re-derived on the engine (the GS pro forma is deleted); the case's FOM is the engine's line, n.statistics.fom rounded to five decimals (the WP7 row of test_engine_adapter_case_golden.py, same figure)"
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_the_golden_s5_table_reproduces",
+   "figure": "golden_s5.bess_2h.lcos_excl_charging",
+   "post_figure": "golden_s5.bess_2h.levelised_cost",
+   "pre": 244.3901945714324,
+   "post": 385.44922235279716,
+   "abs": 141.05902778136476,
+   "rel": 0.5771877551336654,
+   "cause": "lcos_is_the_engines_storage_metric: owner decision 6 (Q8): the case's LCOS is the finance engine's storage LCOS, which includes the charging energy; GS's pro forma figure excluded it (the WP7 row of test_engine_adapter_case_golden.py::test_lcos_is_on_discounted_energy, same figure). Recorded under levelised_cost (post_figure, gate U2-WP7 X5 c); the WP0 freeze keeps lcos_excl_charging"
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_the_golden_s5_table_reproduces",
+   "figure": "golden_s5.bess_pv_2h.lcos_excl_charging",
+   "post_figure": "golden_s5.bess_pv_2h.levelised_cost",
+   "pre": 126.7170106432846,
+   "post": 200.26833387722004,
+   "abs": 73.55132323393545,
+   "rel": 0.5804376449582329,
+   "cause": "lcos_is_the_engines_storage_metric: owner decision 6 (Q8): the case's LCOS is the finance engine's storage LCOS, which includes the charging energy; GS's pro forma figure excluded it (the WP7 row of test_engine_adapter_case_golden.py::test_lcos_is_on_discounted_energy, same figure). Recorded under levelised_cost (post_figure, gate U2-WP7 X5 c); the WP0 freeze keeps lcos_excl_charging"
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_the_golden_s5_table_reproduces",
+   "figure": "golden_s5.bess_2h.ledger_hash",
+   "pre": "5d1cea7bf9b5863d",
+   "post": "974275b95d58a7c2",
+   "abs": null,
+   "rel": null,
+   "cause": "c4_ledger_seeded_from_the_pinned_pack: since U2 WP10 the golden site ledger is seeded from the pinned defaults pack (the legacy study_library is deleted, its rows 1-20 frozen in tests/fixtures/legacy_study_library.json); rows 1-20 hold the same values and rows 21-34 are rows now, so the hash changes. No figure moves"
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_the_golden_s5_table_reproduces",
+   "figure": "golden_s5.bess_pv_2h.ledger_hash",
+   "pre": "5d1cea7bf9b5863d",
+   "post": "974275b95d58a7c2",
+   "abs": null,
+   "rel": null,
+   "cause": "c4_ledger_seeded_from_the_pinned_pack: since U2 WP10 the golden site ledger is seeded from the pinned defaults pack (the legacy study_library is deleted, its rows 1-20 frozen in tests/fixtures/legacy_study_library.json); rows 1-20 hold the same values and rows 21-34 are rows now, so the hash changes. No figure moves"
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_the_golden_s5_table_reproduces",
+   "figure": "golden_s5.bess_2h.salvage_eur",
+   "post_figure": "golden_s5.bess_2h.terminal_value_eur",
+   "pre": 96406.66555854524,
+   "post": 96406.66555854524,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "vocabulary_rename_5_4: plan §5.4 renames CaseKpis.salvage_eur to terminal_value_eur; since U2 WP10 the golden table is re-derived from the engine's case and recorded under the new name (post_figure). The number does not move (compared at the frozen tolerance); the WP0 freeze keeps salvage_eur"
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_the_golden_s5_table_reproduces",
+   "figure": "golden_s5.bess_pv_2h.salvage_eur",
+   "post_figure": "golden_s5.bess_pv_2h.terminal_value_eur",
+   "pre": 1474407.926563838,
+   "post": 1474407.926563838,
+   "abs": 0.0,
+   "rel": 0.0,
+   "cause": "vocabulary_rename_5_4: plan §5.4 renames CaseKpis.salvage_eur to terminal_value_eur; since U2 WP10 the golden table is re-derived from the engine's case and recorded under the new name (post_figure). The number does not move (compared at the frozen tolerance); the WP0 freeze keeps salvage_eur"
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_both_seed_bills_on_the_golden_dispatch_reproduce",
+   "figure": "seed_bills.tou_reference_illustrative.bess_2h.by_component.energy",
+   "pre": 630983.6956579019,
+   "post": 630984.2104895185,
+   "abs": 0.5148316165432334,
+   "rel": 8.159190484414001e-07,
+   "cause": "lp_degenerate_dispatch_ties: since U2 WP10 the golden dispatch is the engine's solve (GS's is deleted). Under the DE seed it was solved on, the energy price is flat, so equal-cost dispatches tie: against GS's, 34 hours shifted by at most 0.018 MW, with the same import and export MWh and the same monthly peaks (the DE bill and the objective are equal within tolerance). The TOU seed rates those hours at different band prices, so its energy line moves; nothing is priced differently (plan §9 R4)"
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_both_seed_bills_on_the_golden_dispatch_reproduce",
+   "figure": "seed_bills.tou_reference_illustrative.bess_2h.total",
+   "pre": 631583.6956579019,
+   "post": 631584.2104895185,
+   "abs": 0.5148316165432334,
+   "rel": 8.151439311728094e-07,
+   "cause": "lp_degenerate_dispatch_ties: since U2 WP10 the golden dispatch is the engine's solve (GS's is deleted). Under the DE seed it was solved on, the energy price is flat, so equal-cost dispatches tie: against GS's, 34 hours shifted by at most 0.018 MW, with the same import and export MWh and the same monthly peaks (the DE bill and the objective are equal within tolerance). The TOU seed rates those hours at different band prices, so its energy line moves; nothing is priced differently (plan §9 R4)"
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_both_seed_bills_on_the_golden_dispatch_reproduce",
+   "figure": "seed_bills.tou_reference_illustrative.bess_2h.annual_bill",
+   "pre": 631583.6956579019,
+   "post": 631584.2104895185,
+   "abs": 0.5148316165432334,
+   "rel": 8.151439311728094e-07,
+   "cause": "lp_degenerate_dispatch_ties: since U2 WP10 the golden dispatch is the engine's solve (GS's is deleted). Under the DE seed it was solved on, the energy price is flat, so equal-cost dispatches tie: against GS's, 34 hours shifted by at most 0.018 MW, with the same import and export MWh and the same monthly peaks (the DE bill and the objective are equal within tolerance). The TOU seed rates those hours at different band prices, so its energy line moves; nothing is priced differently (plan §9 R4)"
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_both_seed_bills_on_the_golden_dispatch_reproduce",
+   "figure": "seed_bills.tou_reference_illustrative.bess_pv_2h.by_component.energy",
+   "pre": 377873.13613160833,
+   "post": 377879.66506250005,
+   "abs": 6.528930891712662,
+   "rel": 1.7278102800720715e-05,
+   "cause": "lp_degenerate_dispatch_ties: since U2 WP10 the golden dispatch is the engine's solve (GS's is deleted). Under the DE seed it was solved on, the energy price is flat, so equal-cost dispatches tie: against GS's, 22 hours shifted by at most 0.369 MW, with the same import and export MWh and the same monthly peaks (the DE bill and the objective are equal within tolerance). The TOU seed rates those hours at different band prices, so its energy line moves; nothing is priced differently (plan §9 R4)"
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_both_seed_bills_on_the_golden_dispatch_reproduce",
+   "figure": "seed_bills.tou_reference_illustrative.bess_pv_2h.total",
+   "pre": 367640.14850753173,
+   "post": 367646.67743842344,
+   "abs": 6.528930891712662,
+   "rel": 1.7759025825164754e-05,
+   "cause": "lp_degenerate_dispatch_ties: since U2 WP10 the golden dispatch is the engine's solve (GS's is deleted). Under the DE seed it was solved on, the energy price is flat, so equal-cost dispatches tie: against GS's, 22 hours shifted by at most 0.369 MW, with the same import and export MWh and the same monthly peaks (the DE bill and the objective are equal within tolerance). The TOU seed rates those hours at different band prices, so its energy line moves; nothing is priced differently (plan §9 R4)"
+  },
+  {
+   "test": "test_u2_pre_numbers_recorded.py::test_both_seed_bills_on_the_golden_dispatch_reproduce",
+   "figure": "seed_bills.tou_reference_illustrative.bess_pv_2h.annual_bill",
+   "pre": 367640.14850753173,
+   "post": 367646.67743842344,
+   "abs": 6.528930891712662,
+   "rel": 1.7759025825164754e-05,
+   "cause": "lp_degenerate_dispatch_ties: since U2 WP10 the golden dispatch is the engine's solve (GS's is deleted). Under the DE seed it was solved on, the energy price is flat, so equal-cost dispatches tie: against GS's, 22 hours shifted by at most 0.369 MW, with the same import and export MWh and the same monthly peaks (the DE bill and the objective are equal within tolerance). The TOU seed rates those hours at different band prices, so its energy line moves; nothing is priced differently (plan §9 R4)"
   }
  ]
 }

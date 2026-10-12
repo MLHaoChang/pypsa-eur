@@ -19,9 +19,10 @@ Sheets, in order:
   live-formula view, the NPV pinned as ``=CF0 + NPV(rate, CF1:CFn)``, the
   IRR and paybacks labelled STATIC. The engine's own sheets
   (``build_workbook``) are in each option's case workbook, not repeated here.
-  A case with no stored series (a record assembled before WP9, or a pro
-  forma case) keeps the earlier sheet (``proforma_xlsx._cash_flows``) over
-  the stored case, and says so; WP10 deletes that path.
+  A case with no stored series (a record assembled before WP9, or before
+  U2) gets its stored years as values, no formula
+  (``workbook_view.stored_cash_flows``), and says so: since U2 WP10 the
+  earlier formula sheet (``proforma_xlsx``) is deleted with the pro forma.
 
 Every text cell goes through ``workbook_view.text``: a string that starts
 with ``=`` (a study name, a ledger source) is stored as a string, never a
@@ -35,7 +36,6 @@ from typing import Any
 from collections.abc import Mapping
 
 from models.study import AssumptionsLedger, DecisionReport, InvestmentCase
-from services.study import proforma_xlsx as PX
 from services.study import report as R
 from services.study import workbook_view as WV
 
@@ -83,10 +83,10 @@ def _verdict(ws, report: DecisionReport, prose: dict[str, list[str]], stale: boo
     _rows(ws, "Verdict", ["field", "value", "", "", "", "", "", ""], rows)
 
 
-#: The earlier sheet's note (a case with no stored engine series).
+#: The stored sheet's note (a case with no stored engine series).
 EARLIER_SHEET = ("the cash flows as stored with a report assembled before the engine's cash "
-                 "series were recorded: the earlier sheet over the stored case; assemble the "
-                 "report again for the live-formula view over the engine's series")
+                 "series were recorded: the stored values, no formula; run the study and "
+                 "assemble the report again for the live-formula view over the engine's series")
 
 
 def _engine_series(case: InvestmentCase, series: Mapping | None) -> Mapping | None:
@@ -133,8 +133,9 @@ def write_report_xlsx(report: DecisionReport, cases: dict[str, InvestmentCase],
             ["generated_at", report.generated_at.isoformat()],
             ["currency_year", report.currency_year],
             ["fidelity", None if report.fidelity is None else report.fidelity.value]]
-    prov += [[k, app.get(k)] for k in ("tariff_id", "library_version", "ledger_hash",
-                                       "base_network_hash")]
+    # Gate U2-WP9 N8: the stored key `library_version` is shown as the defaults version.
+    prov += [[{"library_version": "defaults_version"}.get(k, k), app.get(k)]
+             for k in ("tariff_id", "library_version", "ledger_hash", "base_network_hash")]
     forks = app.get("option_forks") or {}
     prov += [[f"network_hash {forks.get(k, k)}", h]
              for k, h in (app.get("option_network_hashes") or {}).items()]
@@ -149,9 +150,8 @@ def write_report_xlsx(report: DecisionReport, cases: dict[str, InvestmentCase],
         if series is not None:
             npv_row = WV.engine_cash_flows(cf, case, series, title=cf_title)
         else:
-            npv_row = PX._cash_flows(cf, case, title=cf_title)
-            WV.text(cf, 3, 1, "Source")
-            WV.text(cf, 3, 2, EARLIER_SHEET)
+            WV.stored_cash_flows(cf, case, cf_title, EARLIER_SHEET)
+            npv_row = None
         WV.kpis(wb.create_sheet(), case, npv_row, title=kpi_title, cash_flows_title=cf_title)
     buf = io.BytesIO()
     wb.save(buf)

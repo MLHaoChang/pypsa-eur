@@ -20,6 +20,9 @@ from services.study.render_html import num, pct, provenance
 
 __all__ = ["render_docx"]
 
+#: Gate U2-WP9 N8: how a stored appendix key is shown (the key itself stays).
+_SHOWN = {"library_version": "defaults_version"}
+
 
 def _table(doc, header: list[str], rows: list[list[str]], style: str = "Light Grid Accent 1"):
     t = doc.add_table(rows=1, cols=len(header))
@@ -170,8 +173,11 @@ def render_docx(report: DecisionReport, charts: dict[str, bytes] | None = None, 
         if sid == "appendix" and p:
             doc.add_paragraph(p.get("model") or "")
             doc.add_heading("Provenance", level=2)
-            rows = [[k, p.get(k)] for k in ("tariff_id", "tariff_name", "library_version",
-                                            "fidelity", "ledger_hash", "base_network_hash")]
+            # Gate U2-WP9 N8: the stored key `library_version` is shown as the
+            # defaults version (the word "library" is retired from the page).
+            rows = [[_SHOWN.get(k, k), p.get(k)] for k in (
+                "tariff_id", "tariff_name", "library_version", "fidelity", "ledger_hash",
+                "base_network_hash")]
             forks = p.get("option_forks") or {}
             rows += [[f"network hash, {forks.get(fk, fk)}", h]
                      for fk, h in (p.get("option_network_hashes") or {}).items()]

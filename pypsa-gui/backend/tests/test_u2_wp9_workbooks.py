@@ -221,9 +221,10 @@ def test_the_workbooks_name_each_default_by_its_author():
 def test_a_legacy_ledgers_defaults_are_the_earlier_study_library():
     """A ledger seeded before U2 (`technology-data v0.14.0`) names its library."""
     from services.study.workbook_view import provenance_label
-    from tests.golden import site_fixture as sf
+    from tests.u2_targets import legacy_ledger
 
-    legacy = sf.site_ledger()
+    # U2 WP10: the legacy library is deleted; its ledger is frozen (gate C8 a).
+    legacy = legacy_ledger("de")
     assert not legacy.ledger_version.startswith("generic-defaults")
     row = next(r for r in legacy.rows if r.key == "battery_storage_eur_per_kwh")
     assert provenance_label(row, legacy.ledger_version) == "study library (earlier version)"

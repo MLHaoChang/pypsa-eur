@@ -27,9 +27,10 @@ sheets appended after it, and the report workbook's per-option sheets:
   engine's digests); the text helpers are here.
 
 Text is written as text: a string that starts with ``=`` (a ledger source a
-user typed, say) is stored as a string cell, never as a formula. The pro
-forma's workbook (`proforma_xlsx`, the fallback until WP10) reuses these
-helpers.
+user typed, say) is stored as a string cell, never as a formula. A stored
+report record whose cases carry no engine series (assembled before WP9, or
+before U2) gets `stored_cash_flows`: its years as stored, values only (the pro
+forma's workbook, `proforma_xlsx`, was deleted in WP10).
 """
 from __future__ import annotations
 
@@ -189,6 +190,40 @@ def engine_cash_flows(ws, case: InvestmentCase, series: Mapping[str, Any] | None
     return npv_row
 
 
+# ── a stored case without the engine's series ─────────────────────────────
+
+#: The columns of a stored case's years (a report record assembled before the
+#: engine's cash series were stored with it, U2 WP9; or before U2).
+_STORED_CF = (
+    ("Year", "year"), ("CAPEX", "capex"), ("Replacements", "replacements"),
+    ("Fixed O&M", "opex_fixed"), ("Variable O&M", "opex_variable"),
+    ("Bill (baseline)", "bill_baseline"), ("Bill (option)", "bill_option"),
+    ("Savings", "savings"), ("Salvage", "salvage"), ("Net cash flow", "net_cash_flow"),
+    ("Discounted cash flow", "discounted_cash_flow"),
+    ("Cumulative discounted", "cumulative_discounted"),
+    ("Market revenue at duals (excluded)", "market_revenue_at_duals"),
+)
+
+
+def stored_cash_flows(ws, case: InvestmentCase, title: str, note: str) -> None:
+    """
+    A stored case's years AS STORED (U2 WP10 read-compat): values only, no
+    formula and no NPV recomputed — the engine's series that the live view
+    reads was not stored with this record, and the code that once wrote its
+    sheet is gone. `note` says so and how to get the live view.
+    """
+    _header(ws, case, None, title)
+    text(ws, 3, 1, "Source")
+    text(ws, 3, 2, note)
+    for j, (label, _f) in enumerate(_STORED_CF, start=1):
+        text(ws, _HEADER_ROW, j, label)
+    for i, y in enumerate(case.years):
+        for j, (_label, field) in enumerate(_STORED_CF, start=1):
+            v = getattr(y, field)
+            if v is not None:  # a null figure stays an empty cell
+                ws.cell(_HEADER_ROW + 1 + i, j).value = v
+
+
 # ── KPIs ──────────────────────────────────────────────────────────────────
 
 # Gate S5 [N5] (carried to S7): the IRR, the paybacks and the LCOS are the
@@ -226,6 +261,14 @@ def kpis(ws, case: InvestmentCase, npv_row: int | None, title: str = "KPIs",
     for key, value, unit, why in rows:
         text(ws, r, 1, key)
         live = key == "npv" and npv_row is not None
+        if key == "discount_rate" and npv_row is not None:
+            # Gate U2-WP9 N2: the rate IS the formula sheet's rate cell, so a
+            # reader who moves it sees the KPI sheet's rate move with the NPV.
+            formula(ws, r, 2, f"='{cash_flows_title}'!{RATE_CELL.replace('$', '')}")
+            text(ws, r, 3, unit)
+            text(ws, r, 5, LIVE)
+            r += 1
+            continue
         if live:
             formula(ws, r, 2, f"='{cash_flows_title}'!B{npv_row}")
         elif isinstance(value, str):

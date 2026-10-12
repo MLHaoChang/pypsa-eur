@@ -145,22 +145,30 @@ def test_new_writes_name_the_engines():
     assert Bill.model_fields["engine"].default == "tariff_engine"
 
 
-def test_the_gs_fallbacks_state_their_own_label():
+def test_nothing_writes_the_gs_labels_any_more():
     """
-    Decision B1: GS's calculator and pro forma name themselves explicitly,
-    so the new defaults never label their output as the engine's.
+    Decision B1, after U2 WP10: GS's calculator and pro forma (which named
+    themselves `bill_calculator` / `cash_flow_expander`) are deleted, so no
+    study module writes those labels; they stay in `Engine` read-only, for
+    the figures a study stored before U2 holds (the stored case above).
     """
-    import inspect
+    import pathlib
 
-    from services.study import proforma, tariff
+    import services.study as study_pkg
 
-    assert 'engine="bill_calculator"' in inspect.getsource(tariff.BillCalculator)
-    src = inspect.getsource(proforma.build_investment_case)
-    calls = re.findall(r"InvestmentCase\(\s*\*\*(?:\{\*\*)?common\b", src)
-    assert calls and len(calls) == src.count("InvestmentCase(")
-    assert re.search(r"common = dict\([^)]*engine=PROFORMA_ENGINE", src, re.S)
-    assert proforma.PROFORMA_ENGINE == "cash_flow_expander"
-    assert proforma.ENGINES[0] == proforma.PROFORMA_ENGINE
+    root = pathlib.Path(study_pkg.__file__).parent
+    assert not (root / "tariff.py").exists() and not (root / "proforma.py").exists()
+    for p in sorted(root.glob("*.py")):
+        text = p.read_text(encoding="utf-8")
+        for label in ("bill_calculator", "cash_flow_expander"):
+            # A label map's key (`render_html.ENGINE_LABELS`) reads a stored
+            # figure's engine; any other use would write it.
+            assert not re.search(rf'"{label}"(?!\s*:)', text), (p.name, label)
+    from typing import get_args
+
+    from models.study import Engine
+
+    assert {"bill_calculator", "cash_flow_expander"} <= set(get_args(Engine))
 
 
 # ── the stored report record, through the routes ────────────────────────

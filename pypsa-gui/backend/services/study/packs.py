@@ -80,6 +80,7 @@ import hashlib
 import io
 import json
 import math
+import pathlib
 import re
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -89,11 +90,9 @@ import pandas as pd
 import pypsa
 
 from models.study import AssumptionsLedger, DecisionQuestion, OptionSpec, Tariff
-from services.asset_schema import derive
 from services.solver.periodized_costs import _annuity
 from services.study import library as study_library
 from services.study import questions as Q
-from services.study import tariff as study_tariff
 
 __all__ = [
     "HOURS", "LOAD_UNITS", "LoadUpload", "PackError", "PACK_META_KEY", "battery_capital_cost_eur_per_mw",
@@ -112,7 +111,9 @@ GRID_SUPPLY = "grid_supply"
 LOAD_NAME = "site_load"
 BATTERY_NAME = "battery"
 PV_NAME = "pv"
-_PROFILE_DIR = study_library.LIBRARY_DIR / "load_profiles"
+# The sector load profiles (Q7: not in the defaults pack), the one part of
+# `study_library/` U2 WP10 kept.
+_PROFILE_DIR = pathlib.Path(__file__).resolve().parents[2] / "study_library" / "load_profiles"
 
 
 class PackError(ValueError):
@@ -217,9 +218,10 @@ def battery_parts(ledger: AssumptionsLedger) -> dict[str, float]:
 def battery_upfront_eur_per_mw(ledger: AssumptionsLedger,
                                max_hours: float) -> dict[str, float]:
     """
-    The upfront investment per MW the pro forma books in year 0 (S5), from
-    the ledger — never back-calculated from ``capital_cost``, which mixes two
-    lifetimes and so has no single overnight cost behind it.
+    The upfront investment per MW the case books in year 0 (S5; since U2 C1
+    the sum of the battery's two upfront parts), from the ledger — never
+    back-calculated from ``capital_cost``, which mixes two lifetimes and so
+    has no single overnight cost behind it.
     """
     v = ledger_values(ledger)
     inverter = _need(v, "battery_inverter_eur_per_kw") * 1000.0
@@ -266,10 +268,12 @@ def intake_tariff(intake: Mapping[str, Any] | None,
         tariff, _prov = study_library._intake_tariff(intake or {}, library)
     except study_library.LibraryError as exc:
         raise PackError("tariff_invalid", str(exc)) from None
+    from services.study import compile as C
+
     try:
-        study_tariff.validate_tariff_intake(tariff)
-    except study_tariff.TariffError as exc:
-        raise PackError(exc.code, str(exc)) from None
+        C.validate_form(tariff)
+    except C.CompileError as exc:
+        raise PackError(exc.code, exc.message) from None
     chosen = (intake or {}).get("tariff") if isinstance(intake, Mapping) else None
     notes = [] if chosen else ["tariff_not_chosen_library_default"]
     return tariff, notes
@@ -300,7 +304,12 @@ def _snapshots(intake: Mapping[str, Any]) -> pd.DatetimeIndex:
 def effective_tariff(intake: Mapping[str, Any] | None, ledger: AssumptionsLedger,
                      library: study_library.Library,
                      snapshots: pd.DatetimeIndex | None = None) -> Tariff:
-    """The tariff the pack, the LP and the bill price with (ledger applied)."""
+    """
+    The guided tariff form with the ledger's two key drivers applied
+    (`compile.apply_ledger`): what the engine's commercial config is compiled
+    from, and what the findings read the form's structure on (bands, the
+    demand charge, the currency year).
+    """
     tariff, _notes = intake_tariff(intake, library)
     rows = [r for r in ledger.rows if r.key == "tariff"]
     if not rows or rows[0].technical_name != tariff.tariff_id:
@@ -310,10 +319,12 @@ def effective_tariff(intake: Mapping[str, Any] | None, ledger: AssumptionsLedger
             f"the ledger is priced on tariff {held!r} but the intake chose "
             f"{tariff.tariff_id!r}; re-seed the ledger before running")
     idx = snapshots if snapshots is not None else _snapshots(intake or {})
+    from services.study import compile as C
+
     try:
-        return study_tariff.tariff_from_ledger(tariff, ledger, idx)
-    except study_tariff.TariffError as exc:
-        raise PackError(exc.code, str(exc)) from None
+        return C.apply_ledger(tariff, ledger, idx)
+    except C.CompileError as exc:
+        raise PackError(exc.code, exc.message) from None
 
 
 # ── load and PV profiles ──────────────────────────────────────────────────
@@ -678,8 +689,9 @@ def build_site_network(intake: Mapping[str, Any] | None,
         # C1: the two parts; `apply_parts` writes the two-annuity
         # `capital_cost`, the FOM and the lifetime (the storage block's: the
         # case horizon) and leaves `overnight_cost` empty.
-        derive.apply_parts(n, "StorageUnit", BATTERY_NAME, battery_parts(ledger),
-                           discount_rate=r)
+        from services.study import compile as C
+
+        C.apply_parts(n, "StorageUnit", BATTERY_NAME, battery_parts(ledger), discount_rate=r)
         cost_basis[BATTERY_NAME] = "two_upfront_parts"
         upfront[BATTERY_NAME] = battery_upfront_eur_per_mw(ledger, hours)
         notes.append("battery_fom_on_inverter_investment_only")

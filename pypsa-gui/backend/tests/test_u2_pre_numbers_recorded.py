@@ -11,14 +11,17 @@ guided-study engine, before the master merge and before any U2 change.
    engine gives one; the verdict is the §4 record; the recording commit is
    an ancestor of HEAD (it predates WP1).
 2. The figures re-derive on the current code within the fixture's stated
-   ``tolerances``: 1e-9 relative for arithmetic downstream of the dispatch
+   ``tolerances`` (since U2 WP10 on the Investment Case engine: the GS engine
+   they were recorded on is deleted, and ``u2_record_pre_numbers`` derives the
+   same keys from the engine; a figure the engine moves by design is a
+   recorded delta, below): 1e-9 relative for arithmetic downstream of the dispatch
    (money, LCOS, bills), 1e-9 absolute for IRR, paybacks and rates, 1e-6
    relative for LP objectives, 1e-4 MW for sizes and peaks. That is what
    catches a master merge that moves a number.
 
 Real solves: the S5 golden and seed-bill checks reuse
-``site_fixture.solve_site_option``'s per-process cache (the three solves
-``test_proforma_golden.py`` already makes); the toy is one 2,160-h solve;
+``site_fixture.solve_site_option``'s per-process cache (the three engine
+solves the golden tests already make); the toy is one 2,160-h solve;
 the driver re-run (``slow``) is ``qa_decision_study.py`` in a subprocess
 (about 70 s). From WP8 on the driver's figures move by design and the §4
 judging rule takes over from its re-derivation here.
@@ -29,7 +32,9 @@ and whose ``figure`` is the frozen dotted path; the comparison checks the
 row's ``pre`` IS the frozen value, then compares against its ``post``
 (:func:`_with_recorded_deltas`). Since WP7: the driver's
 ``upfront_cost_series_eur_per_mw`` (C1 closes the S4 gap), the FOM line's
-rounding and the engine's LCOS.
+rounding and the engine's LCOS. Since WP10: the golden table's FOM rounding,
+its LCOS (the engine's, under ``levelised_cost``), its ledger hash (the pack
+ledger) and its ``terminal_value_eur`` name.
 """
 from __future__ import annotations
 
@@ -246,25 +251,35 @@ def _json_round_trip(obj):
     return json.loads(json.dumps(obj))
 
 
+GOLDEN_TEST_ID = "test_u2_pre_numbers_recorded.py::test_the_golden_s5_table_reproduces"
+SEEDS_TEST_ID = ("test_u2_pre_numbers_recorded.py::"
+                 "test_both_seed_bills_on_the_golden_dispatch_reproduce")
+TOY_TEST_ID = ("test_u2_pre_numbers_recorded.py::"
+               "test_the_three_month_toy_reproduces_on_the_engine")
+
+
+def _reproduces(section: str, test_id: str, got: dict) -> list[str]:
+    frozen = _frozen()
+    want = _with_recorded_deltas(frozen[section], section, test_id, frozen["tolerances"])
+    return _diff(want, _json_round_trip(got), frozen["tolerances"], section)
+
+
 @pytest.mark.live_solve
 def test_the_golden_s5_table_reproduces():
-    frozen = _frozen()
-    got = _json_round_trip(REC.golden_s5())
-    assert _diff(frozen["golden_s5"], got, frozen["tolerances"], "golden_s5") == []
+    assert _reproduces("golden_s5", GOLDEN_TEST_ID, REC.golden_s5()) == []
 
 
 @pytest.mark.live_solve
 def test_both_seed_bills_on_the_golden_dispatch_reproduce():
-    frozen = _frozen()
-    got = _json_round_trip(REC.seed_bills())
-    assert _diff(frozen["seed_bills"], got, frozen["tolerances"], "seed_bills") == []
+    assert _reproduces("seed_bills", SEEDS_TEST_ID, REC.seed_bills()) == []
 
 
 @pytest.mark.live_solve
-def test_the_three_month_toy_reproduces_with_the_gs_wrapper():
-    frozen = _frozen()
-    got = _json_round_trip(REC.toy_3month())
-    assert _diff(frozen["toy_3month"], got, frozen["tolerances"], "toy_3month") == []
+def test_the_three_month_toy_reproduces_on_the_engine():
+    """U2 WP10: the toy WP0 solved with GS's wrapper, re-derived on the engine's chain."""
+    got = REC.toy_3month()
+    assert got["spec"]["solved_with"] == _frozen()["toy_3month"]["spec"]["solved_with"]
+    assert _reproduces("toy_3month", TOY_TEST_ID, got) == []
 
 
 @pytest.mark.slow

@@ -8,8 +8,9 @@ expectations), WP4.
 
 The GS form (`models.study.Tariff`) stays the guided intake shape (owner
 decision 8); `compile` is the only code that turns it into engine input. The
-compiled tariff is rated by IC's `tariff_engine.rate` here, never by GS's
-`BillCalculator` (which stays only as the WP0 oracle until WP10).
+compiled tariff is rated by IC's `tariff_engine.rate` here. GS's own pricing
+(`tariff.band_prices`, `tariff_from_ledger`), the oracle until U2 WP10
+deleted it, is restated in this file as `_gs_band_prices` (first match wins).
 """
 from __future__ import annotations
 
@@ -27,6 +28,23 @@ from tests.u2_targets import DE, FAKE_REF, TOU, flat_resolver, golden_copy
 JAN_FEB = pd.date_range("2030-01-01", "2030-02-28 23:00", freq="h")
 YEAR = pd.date_range("2025-01-01", periods=8760, freq="h")
 SEVEN = {"energy", "demand", "capacity", "fixed", "network", "export_credit", "taxes_levies"}
+
+
+def _gs_band_prices(idx, bands) -> np.ndarray:
+    """
+    GS's band rule, the test's own oracle (it was `tariff.band_prices`, deleted
+    in U2 WP10): each snapshot takes the FIRST band whose rule matches it.
+    """
+    price = np.full(len(idx), np.nan)
+    for band in bands:
+        a = band.applies
+        m = np.ones(len(idx), dtype=bool)
+        for field_, values in (("month", a.months), ("weekday", a.weekdays), ("hour", a.hours)):
+            if values:
+                m &= np.isin(getattr(idx, field_), values)
+        price[m & np.isnan(price)] = float(band.price_per_mwh)
+    assert not np.isnan(price).any()
+    return price
 
 
 
@@ -151,12 +169,10 @@ def test_the_seeds_compiled_reproduce_gs_prices_on_every_hour(tariff_id):
     WP4: band → periods reproduce GS's band price plus per-MWh network
     charges on 8,760 h of both seeds, rated by `tariff_engine.rate`.
     """
-    from services.study import tariff as T
-
     compiled = _compiled(tariff_id)
     t = compiled.config.import_tariff
-    gs = T.band_prices(YEAR, _defaults().tariffs[tariff_id].energy_bands)
-    np.testing.assert_allclose(_rated_rate_per_mwh(t, YEAR, "energy"), gs.to_numpy(), rtol=1e-12)
+    gs = _gs_band_prices(YEAR, _defaults().tariffs[tariff_id].energy_bands)
+    np.testing.assert_allclose(_rated_rate_per_mwh(t, YEAR, "energy"), gs, rtol=1e-12)
     net = sum((_rated_rate_per_mwh(t, YEAR, i.id) for i in t.items
                if i.id.startswith("network:")), np.zeros(len(YEAR)))
     want = sum((nc.price for nc in _defaults().tariffs[tariff_id].network_charges
@@ -330,14 +346,18 @@ def test_the_ledgers_demand_price_replaces_the_tariffs_own():
 
 def test_the_energy_price_level_rescales_bands_around_their_weighted_mean():
     from services.study import ledger as LG
-    from services.study import tariff as T
 
     led = LG.apply_user_row(_ledger(TOU), "energy_price_level", 1.5, unit="multiplier",
                             changed_by="u")
     compiled = _compiled(TOU, ledger=led)
-    gs = T.tariff_from_ledger(_defaults().tariffs[TOU], led, YEAR)   # the WP0 rule
+    # The WP0 rule (GS's `tariff_from_ledger`): every band m + level x (p - m),
+    # m the bands' time-weighted mean over the snapshots (weights 1 here).
+    bands = _defaults().tariffs[TOU].energy_bands
+    mean = float(_gs_band_prices(YEAR, bands).mean())
+    scaled = [b.model_copy(update={"price_per_mwh": mean + 1.5 * (b.price_per_mwh - mean)})
+              for b in bands]
     got = _rated_rate_per_mwh(compiled.config.import_tariff, YEAR, "energy")
-    np.testing.assert_allclose(got, T.band_prices(YEAR, gs.energy_bands).to_numpy(), rtol=1e-12)
+    np.testing.assert_allclose(got, _gs_band_prices(YEAR, scaled), rtol=1e-12)
     assert "energy_bands_scaled_by_energy_price_level" in compiled.tariff_meta["honesty_notes"]
 
 

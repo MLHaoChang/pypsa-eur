@@ -44,6 +44,19 @@ Checked on the way (plan S9; gate carries S2, S4, S5, S6, S7, S8):
    nothing is left marked study-owned;
 8. deleting a study cascades to its forks.
 
+U2 WP10 (plan docs/superpowers/plans/2026-10-05-guided-study-u2-engine-rewire.md
+WP10, §4): the study runs on the Investment Case engine only. ``_reconcile``
+compiles the fork's config with ``compile`` (no GS tariff path is left) and
+checks that every option fork carries the engine's ``commercial`` and
+``finance`` blocks bound to the study's OWN export series, that the case's
+engines are ``tariff_engine`` / ``finance_engine``, that the case's WACC gate
+is consistent at the centre, and the §4.6 identity on the named option
+(NPV = LP objective saving x AF(r, H)). The §4 judging rule closes the run:
+the verdict class, its drivers, the named option and the skipped options
+equal the WP0 record, and every recorded figure equals it within the
+fixture's tolerances or is a recorded delta with a cause
+(``EVIDENCE["u2_deltas"]``).
+
 Runs through ``tests/run_qa_drivers.py`` (``pixi run gui-qa-drivers``).
 Real solves: 4 (run) + 2 (tornado) + 1-2 (the aborted run). Exit 0 = every
 step passed.
@@ -361,6 +374,7 @@ def _reconcile(sid: str, ledger: dict, run: dict, findings: dict) -> None:
     from services.results.cost_breakdown import compute_cost_breakdown
     from services.solver.periodized_costs import upfront_cost_series
     from services.solver_service import with_periodized_cost_defaults
+    from services.study import compile as C
     from services.study import packs
     from services.study import questions as Q
 
@@ -392,10 +406,12 @@ def _reconcile(sid: str, ledger: dict, run: dict, findings: dict) -> None:
     opex_fixed = sum(y["opex_fixed"] for y in case["years"])
     fork_dir = qa_support.project_dir(f"{BASE}-opt-{oid}")
     n = pypsa.Network(str(fork_dir / "network.nc"))
-    # U2 WP6: the config the fork was solved with (the engine's commercial
-    # block, bound to the study's minted export series).
-    cfg = packs.option_solver_config(led, packs.option_commercial(
-        run["intake"], led, _library(), n.snapshots, export_series=run.get("export_series")))
+    # U2 WP6/WP10: the config the fork was solved with — the engine's
+    # commercial block compiled from the run's ledger and bound to the study's
+    # minted export series (`compile`, the one path; no GS tariff is left).
+    compiled = C.commercial_from_ledger(run["intake"], led, _library(), n.snapshots,
+                                        export_series=run.get("export_series"))
+    cfg = C.solver_config(led, compiled)
     bd = compute_cost_breakdown(n, cfg)
     su_fom = next((float(row["fom"]) for row in bd.get("by_component") or []
                    if row.get("component") == "StorageUnit"), None)
@@ -418,7 +434,76 @@ def _reconcile(sid: str, ledger: dict, run: dict, findings: dict) -> None:
           abs(back - upfront) <= 1e-9 * upfront, f"{back:.0f} vs ledger {upfront:.0f} EUR/MW")
     x = c.get(_study_url(BASE, sid, f"/options/{oid}/case.xlsx"))
     _step("the case workbook downloads", x.status_code == 200 and x.content[:2] == b"PK")
+    _one_engine(sid, led, run, findings, case, compiled)
     _record_figures(run, findings, case)
+
+
+def _one_engine(sid: str, led, run: dict, findings: dict, case: dict, compiled) -> None:
+    """
+    U2 WP10: the study is valued on the Investment Case engine only — the
+    forks carry its inputs, bound to the study's own export series; the case
+    names its engines; its WACC gate is consistent; the §4.6 identity holds.
+    """
+    import json
+    import uuid
+
+    import pypsa
+
+    from routers.projects import _solver_config_from_dict
+    from services.study import compile as C
+    from services.study import engine_adapter as A
+    from tests.golden.oracle import annuity_pv_factor
+
+    oid = case["option_id"]
+    ref = run.get("export_series") or {}
+    base_uuid = str(qa_support.project_row(BASE).id)
+    blocks, refs = {}, {}
+    for o in OPTIONS:
+        raw = json.loads((qa_support.project_dir(f"{BASE}-opt-{o}") / "solver_config.json")
+                         .read_text(encoding="utf-8"))
+        blocks[o] = (raw.get("commercial") is not None, raw.get("finance") is not None,
+                     "demand_charge" in raw)
+        refs[o] = (raw.get("commercial") or {}).get("export_price_ref")
+    _step("every option fork carries the engine's commercial block and every invested "
+          "option its finance block, and no fork the GS demand charge",
+          all(b[0] and not b[2] for b in blocks.values())
+          and all(blocks[o][1] for o in OPTIONS if o != "none"), str(blocks))
+    _step("every fork's export series is the study's own (decision-study:<base>:<study>:export)",
+          C.parse_export_series_name(ref.get("id")) is not None
+          and C.parse_export_series_name(ref.get("id")) == (uuid.UUID(base_uuid), sid)
+          and all(r is not None and r.get("id") == ref.get("id")
+                  and r.get("version") == ref.get("version") for r in refs.values()),
+          f"run={ref.get('id')} forks={sorted({(r or {}).get('id') for r in refs.values()})}")
+    bills = {o: (d.get("bill") or {}).get("engine") for o, d in (run.get("details") or {}).items()}
+    _step("the case's engines are tariff_engine and finance_engine",
+          case.get("engine") == "finance_engine"
+          and case["sources"]["bill_refs"] == ["tariff_engine:counterfactual",
+                                               f"tariff_engine:{oid}"]
+          and {"tariff_engine", "finance_engine"} <= set(case["provenance"]["engines"])
+          and set(bills.values()) == {"tariff_engine"},
+          f"case={case.get('engine')} refs={case['sources']['bill_refs']} bills={bills}")
+    fork = qa_support.project_dir(f"{BASE}-opt-{oid}")
+    n = pypsa.Network(str(fork / "network.nc"))
+    cfg = _solver_config_from_dict(json.loads((fork / "solver_config.json").read_text()))
+    bundle = A.option_case(n, cfg, led, compiled=compiled, option_id=oid, study_id=sid,
+                           fidelity=case.get("fidelity"))
+    gate = bundle.result.gate
+    EVIDENCE["wacc_gate"] = {"consistent": gate["wacc_vs_discount_rate_consistent"],
+                             "legs": gate["legs"]}
+    _step("the case's WACC gate is consistent at the centre (discount rate and asset "
+          "rates ok, inflation n/a)",
+          gate["wacc_vs_discount_rate_consistent"] is True
+          and gate["legs"] == {"discount_rate": "ok", "asset_rates": "ok", "inflation": "n/a"}
+          and abs(bundle.view.kpis.npv - case["kpis"]["npv"]) <= 1e-6 * abs(case["kpis"]["npv"]),
+          str(EVIDENCE["wacc_gate"]))
+    cost = {o["option_id"]: o.get("system_cost") for o in findings["options"]}
+    af = annuity_pv_factor(case["discount_rate"], case["horizon_years"])
+    npv = case["kpis"]["npv"]
+    want = (cost["none"] - cost[oid]) * af
+    EVIDENCE["identity_4_6"] = {"option": oid, "npv": npv, "lp_saving_x_af": want,
+                                "rel": abs(npv - want) / abs(npv)}
+    _step(f"the §4.6 identity holds on {oid}: NPV = LP objective saving x AF(r, H)",
+          abs(npv - want) <= 1e-6 * abs(npv), str(EVIDENCE["identity_4_6"]))
 
 
 def _record_figures(run: dict, findings: dict, case: dict) -> None:
@@ -616,6 +701,46 @@ def _delete(base: str, sid: str) -> None:
     _step("the study record is gone", c.get(_study_url(base, sid)).status_code == 404)
 
 
+def _judge() -> None:
+    """
+    Plan §4 judging rule (U2 WP10): the verdict class, its drivers, the named
+    option and the skipped options equal the WP0 record; every recorded
+    figure equals WP0 within the fixture's tolerances, or is a recorded delta
+    (`tests/fixtures/u2_deltas.json`) with a cause. `EVIDENCE["u2_deltas"]`
+    lists each recorded delta and any figure outside tolerance as
+    `{figure, pre, post, abs, rel, cause}` (cause None: unrecorded).
+    """
+    import json
+
+    from tests import test_u2_pre_numbers_recorded as PRE
+    from tests import u2_record_pre_numbers as REC
+
+    frozen = json.loads(REC.FIXTURE.read_text(encoding="utf-8"))
+    tol = frozen["tolerances"]
+    try:
+        got = PRE._json_round_trip(REC.driver_section({**EVIDENCE, "checks": None}))
+    except KeyError as exc:
+        _step("the §4 judging rule can read the run's figures", False, f"missing {exc}")
+        return
+    want = {k: v for k, v in frozen["driver"].items() if k != "checks"}
+    v, w = got["verdict"], want["verdict"]
+    _step("§4 judging rule: the verdict class, drivers, named option and skipped options "
+          "equal WP0", v == w, f"got={v} WP0={w}")
+    rows = [r for r in json.loads(PRE.DELTAS.read_text(encoding="utf-8"))["deltas"]
+            if r.get("test") == PRE.DRIVER_TEST_ID]
+    moved = PRE._with_recorded_deltas(want, "driver", PRE.DRIVER_TEST_ID, tol, rows)
+    got.pop("checks", None)
+    unrecorded = PRE._diff(moved, got, tol, "driver")
+    out = [{k: r.get(k) for k in ("figure", "post_figure", "pre", "post", "abs", "rel", "cause")}
+           for r in rows]
+    out += [{"figure": line, "pre": None, "post": None, "abs": None, "rel": None,
+             "cause": None} for line in unrecorded]
+    EVIDENCE["u2_deltas"] = out
+    _step("§4 judging rule: every figure equals WP0 within tolerance or is a recorded delta "
+          "with a cause", unrecorded == [] and all(r.get("cause") for r in rows),
+          "; ".join(unrecorded)[:400])
+
+
 def main_() -> int:
     t0 = time.monotonic()
     _enable_studies()
@@ -631,6 +756,7 @@ def main_() -> int:
     if findings is not None:
         _reconcile(sid, ledger, run, findings)
         _report(sid)
+        _judge()
     abort_sid = _abort_mid_run()
     _cap_invariant(cap, user_before)
     _delete(BASE, sid)

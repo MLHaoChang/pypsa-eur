@@ -106,7 +106,7 @@ def test_two_dispatch_drivers_charge_four_solves_on_forks_that_are_gone_afterwar
     assert all(name.startswith("tor-four-var-") for name, _c, _s in tornado_calls)
     # U2 WP6: each variant config carries the engine's commercial block (C6),
     # never GS's demand charge.
-    assert all(cfg.solve_strategy == "full" and cfg.demand_charge is None
+    assert all(cfg.solve_strategy == "full" and not hasattr(cfg, "demand_charge")
                and cfg.commercial["poc_link"] == "grid_import"
                for _n, cfg, _s in tornado_calls)
     assert rec["campaign"]["spent_solves"] == 4 and rec["campaign"]["active"] is False

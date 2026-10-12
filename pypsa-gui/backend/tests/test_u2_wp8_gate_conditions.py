@@ -58,7 +58,8 @@ def _centre_ctx(**kw):
     return types.SimpleNamespace(
         question=Q.BESS_AT_SITE, ledger=None, tariff=types.SimpleNamespace(currency_year=2020),
         baseline_network=types.SimpleNamespace(snapshots=None), baseline_bill=object(),
-        options={"bess_2h": opt}, fidelity=None, export_series={"ref": "x"}, bundles={}, **kw)
+        options={"bess_2h": opt}, fidelity=None, export_series={"ref": "x"}, bundles={},
+        centre_cases={}, **kw)
 
 
 def test_an_engine_refusal_at_the_centre_is_a_422_never_a_500(monkeypatch):
@@ -80,13 +81,14 @@ def test_an_engine_refusal_at_the_centre_is_a_422_never_a_500(monkeypatch):
 # ── Y2 ────────────────────────────────────────────────────────────────────
 
 def _no_fallback(monkeypatch):
+    """
+    A network the engine did not solve. Since U2 WP10 there is no GS
+    fallback to take (its bill calculator and pro forma are deleted): the
+    seams must refuse rather than value it.
+    """
     from services.study import findings as F
 
-    def boom(*a, **kw):
-        raise AssertionError("the GS fallback was taken on a study context")
-
-    monkeypatch.setattr(F, "_gs_bill_of", boom)
-    monkeypatch.setattr(F.proforma, "build_investment_case", boom)
+    assert not hasattr(F, "_gs_bill_of") and not hasattr(F, "proforma")
     monkeypatch.setattr(F.study_engine, "engine_ready", lambda n: False)
 
 
@@ -144,7 +146,7 @@ def test_the_fallback_seams_refuse_on_a_study_context(monkeypatch, seam):
         if seam == "bill":
             F._bill_of(ctx, n)
         else:
-            F._case(ctx, n, "cfg", None, None, {}, "bess_2h")
+            F._case(ctx, n, "cfg", None, {}, "bess_2h")
     assert exc.value.code == "variant_not_engine_solved"
 
 

@@ -719,7 +719,7 @@ def test_the_assumptions_show_the_range_the_tornado_tested_and_mark_it_recentred
     import openpyxl
 
     from services.study import findings as F
-    from services.study.proforma_xlsx import _assumptions
+    from services.study.workbook_view import assumptions as _assumptions
     from services.study.render_docx import render_docx
     from services.study.render_html import num, render_html
     from services.study.report_xlsx import write_report_xlsx

@@ -227,12 +227,28 @@ def start_tornado(study_id: str, *, base_row, db, user_id,
     # queued (no solve: the forks' saved networks), so a refusal the run did
     # not record (a `FinanceRefused` of the engine at the centre) answers with
     # the findings' own 422, code and message — never a 202 and a worker that
-    # fails with a raw string. The worker reuses the context.
+    # fails with a raw string. The worker reuses the context AND the centre
+    # cases valued here (`TornadoContext.centre_cases`, gate U2-WP9 V2 b).
+    #
+    # Gate U2-WP9 V2 (a): this pre-check reads the forks' files after the
+    # UNLOCKED busy check above, so a run that starts meanwhile can replace
+    # them under it (a netCDF read error). Any other failure is therefore
+    # re-checked against the base context: a run now holding it is the 409
+    # `study_running` the locked re-check below would give; otherwise the
+    # failure is typed (`findings_unreadable`), never an untyped 500.
     try:
         tctx = F.context_from_disk(inp)
         F.centre_attributions(tctx)
     except F.FindingsRefused as exc:
         raise _refused(exc) from None
+    except Exception as exc:  # noqa: BLE001 — typed below, never a bare 500
+        now = PyPSAService.get_context(key)
+        if now is not None:
+            R._refuse_busy(now)
+        raise R.RunRefused(500, "findings_unreadable", (
+            "the study's option networks could not be read to value the centre before "
+            f"the tornado ({type(exc).__name__}: {exc}); if a run is starting, wait for it "
+            "to finish, otherwise re-run the study")) from None
     open_campaign = resident is not None and R._on_ctx(resident, campaign.status)["active"]
     if open_campaign:
         try:

@@ -132,9 +132,6 @@ HELP: dict[str, str] = {
     "market_revenue_at_duals_excluded_from_cash_flow": (
         "Revenue at the model's prices is reported beside the case and excluded from the "
         "cash flow: the bill already prices the same energy."),
-    "lcos_excludes_charging_energy_cost": (
-        "The pro forma's levelised cost of storage leaves out the energy bought to charge "
-        "the battery."),
     "npv_nonnegative_at_optimum_by_construction": (
         "At the optimiser's chosen size the NPV cannot be negative: the optimiser only "
         "builds what pays for itself, so the sign restates its choice and is not "
@@ -160,8 +157,8 @@ HELP: dict[str, str] = {
         "The uploaded load has no timestamps; its values were read as the study year's "
         "hours in order, from the first hour of January."),
     "tariff_not_chosen_library_default": (
-        "No tariff was chosen, so the library's default tariff was used; replace it with "
-        "the site's own."),
+        "No tariff was chosen, so the defaults' illustrative tariff was used; replace it "
+        "with the site's own."),
     "tariff_has_uncoded_notes": (
         "The supplied tariff carries notes that are not codes; read them in the tariff."),
     "partial_billing_period_charged_in_full": (
@@ -215,6 +212,9 @@ HELP: dict[str, str] = {
     "best_battery_npv_not_positive_at_centre": (
         "The best battery's NPV is not positive at the centre, so the tornado was not run."),
     "case_not_established": "The option's investment case could not be established.",
+    "case_by_an_earlier_version": (
+        "This option's investment case was valued by an earlier version of the app, s"
+        "o the report does not show it as current. Run the study again to value it on the current engine."),
     "battery_not_solved": "The option's battery was not solved.",
     "uncoded_note_dropped": "A note that was not a clean code was dropped and is named here.",
     # tornado skip codes
@@ -227,7 +227,7 @@ HELP: dict[str, str] = {
         "The tariff has one flat energy band, so scaling its spread changes nothing."),
     "tariff_has_no_demand_charge": "The tariff has no demand charge to vary.",
     "range_recentred_on_user_value": (
-        "The user's value lies outside the library range, so the range's relative width "
+        "The user's value lies outside the default range, so the range's relative width "
         "was centred on it."),
     # the report's own disclosures
     "market_revenue_at_duals_zero_profit_at_optimum": (
@@ -251,10 +251,6 @@ HELP: dict[str, str] = {
         "computed; re-run the study."),
     "intake_changed_since_run": (
         "The study's answers changed after the run; re-run the study."),
-    "lcos_two_definitions": (
-        "Two levelised costs of storage are shown and they answer different questions: "
-        "the pro forma's excludes the energy bought to charge the battery, asset "
-        "economics' includes it."),
     "battery_only_options_sized_to_zero": (
         "Every battery-only option was sized to zero: at this load and on this tariff no "
         "battery pays for itself on its own."),
@@ -401,7 +397,7 @@ _PREFIX_HELP: tuple[tuple[str, str], ...] = (
     ("tariff_currency_year_", "The tariff's currency year differs from the study's."),
     ("study_currency_year_", "The study's currency year differs from the ledger's."),
     ("needs_attention", "A user row no longer applies after a change and must be reset."),
-    ("user_row_not_in_library", "A user row has no library counterpart."),
+    ("user_row_not_in_library", "A user row has no counterpart in the defaults."),
     ("key_drivers_without_a_row", "A key driver of the question has no ledger row."),
     ("bill_unavailable_", "A bill could not be computed, so the case is not established."),
     ("load_upload_qa_", (
@@ -456,7 +452,6 @@ DISCLOSURE_RULES: tuple[tuple[str, str], ...] = (
     ("duals_interior", "market_revenue_at_duals_zero_profit_at_optimum"),
     ("duals_at_limit", "market_revenue_at_duals_exceeds_cost_at_size_limit"),
     ("duals_unknown", "market_revenue_at_duals_relation_not_established"),
-    ("lcos_both", "lcos_two_definitions"),
     ("lcos_engine", "lcos_includes_charging_energy_cost"),
     ("dc_foresight", "demand_charge_perfect_foresight"),
     ("unjudged", "options_not_all_judged"),
@@ -748,10 +743,13 @@ def _has_pv(question: DecisionQuestion, option_id: str | None) -> bool:
 
 
 def _lcos_including_charging(details: Mapping[str, Any], option_id: str) -> float | None:
-    from services.study import packs, proforma
+    """Asset economics' LCOS of the battery (the run record's), the optimisation's figure."""
+    from services.study import packs
 
     econ = (details.get(option_id) or {}).get("asset_economics")
-    row = proforma._econ_row(econ, "storage_units", packs.BATTERY_NAME)
+    rows = (econ or {}).get("storage_units") if isinstance(econ, Mapping) else None
+    row = next((r for r in rows or [] if isinstance(r, Mapping)
+                and r.get("name") == packs.BATTERY_NAME), None)
     v = None if row is None else row.get("lcos_eur_per_mwh")
     return None if v is None else float(v)
 
@@ -831,9 +829,9 @@ def _tighten_advice(reasons, synthetic_load: bool) -> str:
     if synthetic_load or "load" in heads:
         asks.append("the site's metered load instead of a sector profile")
     if any(h not in ("load", "tariff", "no key driver rows") for h in heads):
-        asks.append("quoted values for the key assumptions still at their library defaults")
+        asks.append("quoted values for the key assumptions still at their defaults")
     if "tariff" in heads:
-        asks.append("the site's own tariff instead of an illustrative or library one")
+        asks.append("the site's own tariff instead of an illustrative default one")
     asks.append("more than one weather year")
     if len(asks) == 1:
         return f"What would tighten it: {asks[0]}."
@@ -1003,7 +1001,13 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
     econ_oid = named if named in inp.cases else (
         f.value_streams_option if f.value_streams_option in inp.cases else None)
     case = inp.cases.get(econ_oid) if econ_oid else None
-    if case is None or case.status != "ok" or case.kpis is None:
+    if case is not None and case.engine != "finance_engine":
+        # U2 WP10 (decision B1): only the Investment Case engine values a case
+        # now; a case another engine valued (GS's deleted pro forma) is never
+        # assembled into a new report as if it were the engine's.
+        sections["economics"] = ReportSection(status="not_established",
+                                              note="case_by_an_earlier_version")
+    elif case is None or case.status != "ok" or case.kpis is None:
         sections["economics"] = ReportSection(
             status="skipped" if econ_oid is None and v.status == "ok" else "not_established",
             note="no_option_named" if econ_oid is None else "case_not_established")
@@ -1011,29 +1015,27 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
         k, cy, fid = case.kpis, case.currency_year, case.fidelity
 
         # Gate U2-WP7 X4: the case's money facts name the engine that built the
-        # case (`finance_engine` on the Investment Case engine, else the pro
-        # forma's `cash_flow_expander`); the HTML and XLSX print it.
+        # case (`finance_engine`, the only one since U2 WP10); the HTML and
+        # XLSX print it.
         def cf(key, label, value, unit, engine=case.engine, flag=None):
             facts[key] = _fact(key, label, value, unit, engine, currency_year=cy,
                                fidelity=fid, flag=flag or k.unavailable.get(key.replace(
                                    "case_", "")))
             return key
 
-        # U2 WP7: an engine-built case's LCOS is the finance engine's storage
-        # metric, which INCLUDES the charging energy (owner decision 6). Gate
-        # U2-WP8b Z2: decided by the case's engine, not by the engine's note
-        # (written only when the LCOS exists), so a null engine LCOS is still
-        # the investment case's, with its flag — never the pro forma's.
-        engine_lcos = case.engine == "finance_engine"
-        lcos_key = "lcos_finance_engine" if engine_lcos else "lcos_excl_charging"
+        # U2 WP7: the case's LCOS is the finance engine's storage metric,
+        # which INCLUDES the charging energy (owner decision 6). Gate U2-WP8b
+        # Z2: a null engine LCOS is still the investment case's, with its
+        # flag. U2 WP10: the pro forma's charging-free LCOS, its fact
+        # (`lcos_excl_charging`) and the `lcos_both` disclosure are gone with
+        # it; a stored report keeps its own facts and sentences.
         keys = [
             cf("case_npv", "Option NPV", k.npv, "EUR"),
             cf("case_irr", "IRR", k.irr, "per unit"),
             cf("case_payback_simple", "Simple payback", k.payback_simple, "years"),
             cf("case_payback_discounted", "Discounted payback", k.payback_discounted, "years"),
             cf("case_capex_total", "Total CAPEX", k.capex_total, "EUR"),
-            cf(lcos_key, "LCOS, charging at what the site paid (investment case)"
-               if engine_lcos else "LCOS excluding charging energy (pro forma)",
+            cf("lcos_finance_engine", "LCOS, charging at what the site paid (investment case)",
                k.levelised_cost, "EUR/MWh", flag=k.unavailable.get("levelised_cost")),
             cf("lcos_incl_charging", "LCOS, charging at the model's hourly price (optimisation)",
                _lcos_including_charging(inp.details, econ_oid), "EUR/MWh", "lp",
@@ -1045,12 +1047,8 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
             cf("horizon_years", "Horizon", float(case.horizon_years), "years", "ledger"),
             cf("discount_rate", "Real discount rate", case.discount_rate, "per unit", "ledger"),
         ]
-        if engine_lcos:
-            if facts["lcos_finance_engine"].value is not None:
-                tags.add("lcos_engine")
-        elif facts["lcos_excl_charging"].value is not None and \
-                facts["lcos_incl_charging"].value is not None:
-            tags.add("lcos_both")
+        if facts["lcos_finance_engine"].value is not None:
+            tags.add("lcos_engine")
         tags.add("economics")
         duals = _duals_relation(inp.details, econ_oid,
                                 "size_at_upper_bound" in v.disclosures and named == econ_oid)
@@ -1078,11 +1076,7 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
              "storing it instead of selling it. The optimisation's own accounting gives "
              "{{lcos_incl_charging}}: it counts the battery's own costs the same way, but "
              "prices all charging energy at the model's hourly price at the site, which also "
-             "reflects any demand charge, so the two figures can differ."
-             if engine_lcos else
-             "Two levelised costs of storage answer different questions: "
-             "{{lcos_excl_charging}} leaves out the energy bought to charge the battery (the "
-             "pro forma's figure) and {{lcos_incl_charging}} includes it (asset economics)."),
+             "reflects any demand charge, so the two figures can differ."),
             _DUALS_PROSE[duals],
         ]
         if _has_pv(q, econ_oid):

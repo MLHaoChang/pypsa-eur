@@ -118,7 +118,7 @@ def test_five_options_five_forks_five_solves_charged_on_the_base_context(
     for _name, cfg, _storage in fake.calls:
         assert cfg.solve_strategy == "full" and cfg.sclopf is False
         # U2 WP6 (C6): the engine's commercial config, no GS demand charge.
-        assert cfg.demand_charge is None
+        assert not hasattr(cfg, "demand_charge")   # U2 WP10: the field is gone
         assert cfg.commercial["poc_link"] == "grid_import"
         assert [i["unit"] for i in cfg.commercial["import_tariff"]["items"]
                 if i["id"] == "demand"] == ["per_kw_month"]
@@ -755,14 +755,18 @@ def test_a_study_seeded_from_the_legacy_library_still_loads_and_runs(
     re-seed moves it onto the pack, keeping the user's rows.
     """
     from services.study import library as L
-    from services.study import questions as Q
     from services.study import store
 
     sid = _setup(client, api_project, "run-legacy")
     base = project_storage_dir("run-legacy")
     study = store.load_study(base, sid)
-    legacy = L.seed_ledger(Q.BESS_AT_SITE, study.intake, L.load_library())
+    # U2 WP10: the legacy library is deleted; its ledger is frozen (gate C8 a).
+    from tests.u2_targets import legacy_ledger
+
+    legacy = legacy_ledger("de")
     assert legacy.ledger_version == L.LIBRARY_VERSION
+    tariff_id = (study.intake.get("tariff") or {}).get("tariff_id", "de_industrial_illustrative")
+    assert next(r for r in legacy.rows if r.key == "tariff").technical_name == tariff_id
     store.save_study(base, study.model_copy(update={"ledger": legacy,
                                                     "ledger_version": legacy.ledger_version}))
     led = client.get(f"/api/projects/run-legacy/studies/{sid}/ledger").json()["ledger"]

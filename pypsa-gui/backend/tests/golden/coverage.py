@@ -47,9 +47,11 @@ SURFACES = (
     "compare_curtailment",
     "compare_lost_load",
     "compare_storage_cycling",
-    # ── Plan S5 (guided investment study): the pro forma, JSON and XLSX.
-    # Checked against the SITE golden fixture (`tests/golden/site_fixture.py`,
-    # `tests/test_proforma_golden.py`), not the multi-period one: the case is
+    # ── Plan S5 (guided investment study): the investment case, JSON and
+    # XLSX (since U2 the Investment Case engine's: `engine_adapter.option_case`
+    # / `case_workbook`). Checked against the SITE golden fixture
+    # (`tests/golden/site_fixture.py`, `tests/test_engine_adapter_case_golden.py`),
+    # not the multi-period one: the case is
     # an upfront-cost cash flow of one flat year, a different quantity from
     # the annuitised horizon CAPEX the generic loop compares.
     "investment_case",
@@ -166,10 +168,11 @@ COVERAGE: dict[str, set[str]] = {
     # routers/compare.py::_compute_storage_cycling_summary(). Walks
     # `n.storage_units` / `n.storage_units_t.p` only.
     "compare_storage_cycling": {"StorageUnit"},
-    # routers/studies.py::get_option_case -> services/study/proforma.py::
-    # build_investment_case. Asset-scoped: the option's battery StorageUnit
-    # (CAPEX from the ledger, FOM/VOM and market revenue from asset_economics)
-    # and its PV Generator (CAPEX from upfront_cost_series).
+    # routers/studies.py::get_option_case -> services/study/engine_adapter.py::
+    # option_case (U2 WP7; the pro forma was deleted in WP10). Asset-scoped:
+    # the option's battery StorageUnit (its two upfront parts, C1; FOM from the
+    # engine's asset lines, market revenue from asset_economics) and its PV
+    # Generator (overnight cost).
     "investment_case":         {"Generator", "StorageUnit"},
     # routers/studies.py::get_option_case_xlsx -> services/study/
     # engine_adapter.py::case_workbook over the same case (U2 WP9).
@@ -378,13 +381,13 @@ EXCLUSIONS: dict[tuple[str, str], str] = {
         "cycling is a storage-only concept."
     ),
     ("investment_case", "Line"): (
-        "The pro forma is asset-scoped to the option's own battery and PV "
-        "(services/study/proforma.py::build_investment_case); the site pack "
+        "The investment case is asset-scoped to the option's own battery and PV "
+        "(services/study/engine_adapter.py::option_case); the site pack "
         "has no Line, and a line's cost is never an asset the site owner buys."
     ),
     ("investment_case", "Link"): (
         "The site's only Links are grid_import / grid_export, the connection "
-        "the tariff prices: their energy is costed by the bill calculator "
+        "the tariff prices: their energy is costed by the tariff engine's bills "
         "(savings = bill_baseline - bill_option), never as an asset CAPEX or "
         "OPEX line, which would count the grid bill twice."
     ),
@@ -393,8 +396,8 @@ EXCLUSIONS: dict[tuple[str, str], str] = {
         "(services/study/engine_adapter.py::case_workbook); asset-scoped, no Line in the pack."
     ),
     ("investment_case_xlsx", "Link"): (
-        "Same case as investment_case: the grid links are priced by the bill "
-        "calculator, not booked as an asset of the case."
+        "Same case as investment_case: the grid links are priced by the tariff "
+        "engine's bills, not booked as an asset of the case."
     ),
     ("decision_findings", "Line"): (
         "The findings are built on investment_case (services/study/findings.py"
@@ -403,7 +406,7 @@ EXCLUSIONS: dict[tuple[str, str], str] = {
     ),
     ("decision_findings", "Link"): (
         "The grid links are the tariff's connection: their energy reaches the "
-        "findings only through the bill calculator's bills (value streams and "
+        "findings only through the tariff engine's bills (value streams and "
         "savings), never as an asset of an option."
     ),
     ("decision_report", "Line"): (
@@ -413,7 +416,7 @@ EXCLUSIONS: dict[tuple[str, str], str] = {
     ),
     ("decision_report", "Link"): (
         "The grid links are the tariff's connection: the report shows their energy "
-        "only as the bill calculator's savings and value streams, never as an "
+        "only as the tariff engine's savings and value streams, never as an "
         "asset of an option."
     ),
 }

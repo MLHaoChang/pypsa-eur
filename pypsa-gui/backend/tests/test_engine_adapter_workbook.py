@@ -173,7 +173,8 @@ def test_assumptions_are_the_ledger_with_engine_paths_and_provenance_is_complete
     for col in ("tested_low", "tested_high", "tested_range_note"):
         assert col in header
     prov = {r[0].value: r[1].value for r in wb["Provenance"].iter_rows() if r[0].value}
-    assert prov["library_version"] == ledger.ledger_version
+    # Gate U2-WP9 N8: shown as the defaults version (the stored key stays).
+    assert prov["defaults_version"] == ledger.ledger_version and "library_version" not in prov
     assert prov["ledger_hash"] == packs.ledger_hash(ledger)
     assert prov["compiled_digest"] == bundle.compiled.digest
     assert prov["finance_digest"] == bundle.finance.digest

@@ -22,10 +22,9 @@ and `bound_case`, the tornado's CAPEX and RATE bounds derived from it (C5).
 WP8: the runner, the findings and the routes bill and value every option
 through here (gate C6: `bill` on a fork the engine solved with the same
 compiled config; `bill_meter` only where export ≡ 0 — the intake preview and
-the case's counterfactual baseline). GS's `BillCalculator` and the pro forma
-remain only as the findings' fallback for a network the engine did not solve,
-which no stored study reaches (its readers refuse such forks first,
-`engine_inputs_changed_since_run`); WP10 deletes them. WP9: `case_workbook`,
+the case's counterfactual baseline). WP10 deleted GS's `BillCalculator` and
+the pro forma: a network the engine did not solve is never valued. WP9:
+`case_workbook`,
 the engine's workbook (`export_xlsx.build_workbook`) with the guided sheets
 appended, and `cash_series`, the engine's cash series the formula view
 (`workbook_view`) and the report workbook read.
@@ -61,13 +60,14 @@ from services.study import compile as C
 
 __all__ = [
     "BILL_COMPONENTS", "BILL_COMPONENT_KEYS", "BY_CONSTRUCTION", "CAPEX_ROW_PART", "CaseBundle",
-    "EPSILON_MW", "EngineRefused", "KIND_COMPONENT", "bill", "bill_meter", "bound_case",
+    "CYCLING_DISCLOSURES", "EPSILON_MW", "EngineRefused", "KIND_COMPONENT", "bill", "bill_meter", "bound_case",
     "case_workbook", "cash_series", "component_of", "cycling_flags", "demand_charge_eur",
     "engine_ready", "irr", "is_zero_size", "option_case", "payback",
 ]
 
-#: The guided bill's seven components and their labels (moved from
-#: `proforma.BILL_COMPONENTS`; owner decision 7 adds "Taxes & levies").
+#: The guided bill's seven components and their labels (moved from the
+#: pro forma's `BILL_COMPONENTS`, deleted in WP10; owner decision 7 adds
+#: "Taxes & levies").
 BILL_COMPONENTS: tuple[tuple[str, str], ...] = (
     ("energy", "Energy charges"),
     ("demand", "Demand charge on peak import"),
@@ -442,16 +442,19 @@ def demand_charge_eur(n, compiled: C.CompiledCommercial) -> float | None:
 
 #: The engine preflight's cycling warnings (IC U1 f, the port of GS's F1-B6
 #: check, owner decision 10) → the study's disclosure codes (gate F1
-#: BC-F1-1: the report, the findings and the HELP mirror name these).
+#: BC-F1-1: the report, the findings and the HELP mirror name these). The
+#: last two are the engine's own codes for a network without a commercial
+#: config (`commercial.preflight.network_findings`); GS's copy of that check
+#: in `validation_service` was deleted in WP10.
 CYCLING_CODES: Mapping[str, str] = {
     "commercial.arbitrage_loop": "tariff_export_exceeds_import",
     "commercial.arbitrage_loop_via_storage": "tariff_export_exceeds_import_via_storage",
-    # GS's own check (`validation_service._check_export_cycling`), read until
-    # WP10 removes it: since WP6 the Links carry no price, so it finds none.
     "tariff_export_exceeds_import": "tariff_export_exceeds_import",
     "tariff_export_exceeds_import_via_storage": "tariff_export_exceeds_import_via_storage",
 }
-_CYCLING_ORDER = ("tariff_export_exceeds_import", "tariff_export_exceeds_import_via_storage")
+#: The study's cycling disclosure codes, in their stable order.
+CYCLING_DISCLOSURES = ("tariff_export_exceeds_import", "tariff_export_exceeds_import_via_storage")
+_CYCLING_ORDER = CYCLING_DISCLOSURES
 
 
 def cycling_flags(issues) -> list[str]:
@@ -483,7 +486,7 @@ BY_CONSTRUCTION = ("npv_nonnegative_at_optimum_by_construction",
 _OPERATING_FLAGS = {"resilience_value": "not_in_mvp1", "tax": "pre_tax_basis",
                     "depreciation": "pre_tax_basis", "debt_service": "no_financing_in_mvp1"}
 _RECONCILE_TOL = 1e-6
-#: A size at or below this is "no investment" (`proforma.EPSILON_MW`, C7).
+#: A size at or below this is "no investment" (moved from the pro forma, C7).
 EPSILON_MW = 1e-3
 
 
@@ -547,8 +550,8 @@ def engine_ready(n) -> bool:
     engine's commercial chain solved it (its committed PoC record,
     `lp_bindings.META_LINKS`) and its battery, if any, carries the two upfront
     parts (C1). A fork written before WP7 (a capital-cost battery) or solved
-    outside the engine is not; its callers keep the pro forma until WP8 marks
-    such studies stale.
+    outside the engine is not, and is never valued (WP8 marks such studies
+    stale; WP10 deleted the pro forma).
     """
     from services.asset_schema.derive import has_parts
     from services.commercial.lp_bindings import META_LINKS
@@ -1180,7 +1183,8 @@ def _provenance_sheet(ws, bundle: CaseBundle, ledger: AssumptionsLedger) -> None
         ("perspective", view.perspective.value),
         ("currency_year", view.currency_year),
         ("fidelity", view.fidelity.value if view.fidelity is not None else None),
-        ("library_version", (p.library_version if p else None) or ledger.ledger_version),
+        # Gate U2-WP9 N8: shown as the defaults version (the model key stays).
+        ("defaults_version", (p.library_version if p else None) or ledger.ledger_version),
         ("pack_version", version), ("pack_hash", digest),
         ("tariff_pack_stamp", meta.get("pack_stamp")),
         ("ledger_hash", p.ledger_hash if p else None),
@@ -1243,7 +1247,7 @@ def case_workbook(bundle: CaseBundle, ledger: AssumptionsLedger, *,
     if series is not None:
         compiled, finance = bundle.compiled, bundle.finance
         stamps = {"guided_study": view.study_id, "guided_option": view.option_id,
-                  "library_version": ledger.ledger_version,
+                  "defaults_version": ledger.ledger_version,
                   "ledger_hash": packs.ledger_hash(ledger),
                   "compiled_digest": compiled.digest if compiled is not None else None,
                   "finance_digest": finance.digest if finance is not None else None,

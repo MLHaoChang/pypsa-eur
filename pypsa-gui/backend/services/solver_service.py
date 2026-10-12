@@ -45,7 +45,6 @@ from services.solver.objective import (  # noqa: F401
     _rescale_results_for_objective,
     _wrap_with_capex_budget,
     _wrap_with_curtailment_cost,
-    _wrap_with_demand_charge,
     _wrap_with_objective_scale,
 )
 from services.solver.runtime import (  # noqa: F401
@@ -262,18 +261,6 @@ class SolverConfig:
     # economics. Applied via the extra_functionality wrapper alongside the
     # curtailment-cost penalty.
     capex_budget_per_period: dict = field(default_factory=dict)
-    # ── Site demand charge (decision study MVP-1, S3) ──────────────────────
-    # A charge on peak grid import per billing period, enforced in the LP by
-    # `_wrap_with_demand_charge`. Carries ONLY the demand-charge spec and the
-    # import link names:
-    #   {"price_per_mw_per_period": float, "basis": "billing_period_peak",
-    #    "billing_period": "month" | "year", "import_links": [str, ...]}
-    # Energy and export prices are NOT here: they are permanent network data
-    # (`links_t.marginal_cost`, written by services/study/tariff.py). None =
-    # off, and the LP is untouched. Refused (typed) under myopic or rolling,
-    # SCLOPF, multi-period and non-flat snapshots, and for the `annual_peak`
-    # and `ratchet` bases.
-    demand_charge: dict | None = None
     # ── N-1 Security-Constrained LOPF ──────────────────────────────────────
     # When `sclopf=True` AND mode=="lopf", we route through
     # `n.optimize.optimize_security_constrained()`. The list of branches
@@ -534,12 +521,6 @@ def run_simulation(
         # so PyPSA's LP picks up the linopy constraint. Only adds work when
         # the config dict is non-empty.
         extra_fn = _wrap_with_capex_budget(network, extra_fn, config, log_queue=log_queue)
-        # Site demand charge (decision study S3): Σ price × peak import per
-        # billing period. After the capex budget, before the ENS cap, the
-        # reserve margin and the objective scale (review v1 S3). Adds work
-        # only when `config.demand_charge` is set; refuses (typed) the modes
-        # it cannot honour.
-        extra_fn = _wrap_with_demand_charge(network, extra_fn, config, log_queue=log_queue)
         # Reliability target: per-period ENS cap (+ per-zone ceilings) on the
         # involuntary slack dispatch. Adds work only when a target is set.
         extra_fn = _wrap_with_ens_cap(network, extra_fn, config, log_queue=log_queue)
@@ -1175,13 +1156,6 @@ def run_simulation(
                          "demand_peaks": network.meta.get(_IC_META_DEMAND),
                          "group": network.meta.get(_IC_META_GROUP)}
                         if _ic_conn.facts.get("poc_link") else None))
-                    # Record the demand charge this LP carried (None when none)
-                    # on the network itself, so the objective bridge prices the
-                    # solve that produced the dispatch, not a config changed
-                    # since (gate S3 [N4]). Decision study; removed in U2 WP10.
-                    from services.study.tariff import record_solved_demand_charge
-
-                    record_solved_demand_charge(network, config.demand_charge)
                 # Adequacy report — emitted whenever a target was enforced
                 # AND the solve actually produced a dispatch, INCLUDING the
                 # nothing-shed case (achieved 0, binding=voll).

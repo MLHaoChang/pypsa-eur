@@ -75,7 +75,7 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "validation_service.py": (4, "prose + the Σ weight × hours ≈ 8760 sanity message"),
     # The guided investment study (GS branch, merged in U2 WP0). Its site pack
     # IS hourly by design (MVP-1: one non-leap year of 8760 hourly steps,
-    # weights 1, a leap year refused); `study/tariff.py` goes in U2 WP10.
+    # weights 1, a leap year refused); `study/tariff.py` went in U2 WP10.
     "study/packs.py": (7, "the site pack's own axis: 8760 hourly steps of one non-leap year "
                           "(HOURS, the date_range and the uploaded-load check against it), a "
                           "leap year refused, and prose — a declared hourly model, not an "
@@ -89,9 +89,6 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "study/engine_adapter.py": (1, "a bill is annual when Σ objective weights (hours at any "
                                    "resolution) is a 365- or 366-day year, 8760 or 8784 h — a "
                                    "unit, not a step (GS's annual-bill rule, U2 WP5)"),
-    "study/tariff.py": (3, "a calendar period's length in hours (end − start) / 1 h and a "
-                           "year as 8760 or 8784 h; weights are hours at any resolution — "
-                           "units, not a step (GS bill, removed in U2 WP10)"),
 }
 
 
@@ -114,6 +111,7 @@ def test_every_hourly_assumption_site_is_listed_with_a_reason():
 
 
 def test_the_inventory_is_pinned():
-    assert sum(c for c, _ in ALLOWED.values()) == 75
-    assert len(ALLOWED) == 35
+    # U2 WP10: GS's `study/tariff.py` (3 sites) is deleted.
+    assert sum(c for c, _ in ALLOWED.values()) == 72
+    assert len(ALLOWED) == 34
     assert all(reason for _, reason in ALLOWED.values())

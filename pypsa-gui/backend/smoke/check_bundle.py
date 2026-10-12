@@ -122,11 +122,12 @@ EXPECTED = (
     # and 500s on the first study.
     "case39_units.yaml", "case39.json",
     # The decision study (guided investment study MVP-1, S9): the report's
-    # template and the vendored assumptions library, both read
-    # `__file__`-relative. Without them the app launches and the first report
-    # or study answers 500.
-    "decision_report.html.j2", "study_library", "technology_costs.csv",
-    "tariffs.csv", "finance_defaults.yaml", "load_profiles",
+    # template and the sector load profiles, both read `__file__`-relative.
+    # Without them the app launches and the first report or profile-based
+    # study answers 500. (U2 WP10: the study's other defaults are the generic
+    # defaults pack, checked below; the old library CSVs and YAML are gone.)
+    "decision_report.html.j2", "study_library", "load_profiles",
+    "commercial_office.csv", "industrial_two_shift.csv",
     # python-docx's own template, read by `docx.Document()` for the report's
     # DOCX (gate S9 [S3]).
     "default.docx",

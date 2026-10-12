@@ -98,7 +98,9 @@ ROUTE_FILES: dict[str, str] = {
     "routers/simulation.py": "router",
     "routers/compare.py": "router",
     "routers/asset_results.py": "router",
-    # Plan S5 (review v1 S8): the decision-study routes serve the pro forma.
+    # Plan S5 (review v1 S8): the decision-study routes serve the investment
+    # case (since U2 the Investment Case engine's; the pro forma was deleted
+    # in WP10).
     "routers/studies.py": "router",
 }
 

@@ -70,14 +70,27 @@ def test_a_null_engine_lcos_is_the_investment_cases_with_the_engines_flag():
     assert R.validate_prose(report)["economics"]
 
 
-def test_a_pro_forma_case_keeps_its_own_lcos_label():
-    """B1: the stored pre-U2 case's LCOS stays the pro forma's charging-free figure."""
+def test_a_pro_forma_case_is_never_assembled_as_the_engines():
+    """
+    B1 after U2 WP10: the pro forma is deleted, so a NEW report is assembled
+    on the engine's cases only (`load_inputs` refuses a pre-U2 run first). A
+    stored pre-U2 case handed to the assembler anyway is not shown as
+    current — not under the engine's LCOS label, and not under the pro
+    forma's charging-free one either: the economics section is not
+    established, `case_by_an_earlier_version`, a re-run offered. (A stored
+    pre-U2 REPORT keeps its own facts and sentences:
+    `test_study_engine_literal_compat.py`.)
+    """
+    from services.study import report as R
+
     case = _stored_case()
     assert case.engine == "cash_flow_expander"
-    econ = _report_over(case).sections["economics"]
-    assert "lcos_finance_engine" not in econ.facts
-    assert econ.facts["lcos_excl_charging"].label.endswith("(pro forma)")
-    assert econ.facts["lcos_excl_charging"].value == case.kpis.levelised_cost
+    report = _report_over(case)
+    econ = report.sections["economics"]
+    assert (econ.status, econ.note) == ("not_established", "case_by_an_earlier_version")
+    assert not {"lcos_finance_engine", "lcos_excl_charging", "case_npv"} & set(econ.facts)
+    assert R.help_for("case_by_an_earlier_version")[1] == "study"
+    assert "run the study again" in R.help_for("case_by_an_earlier_version")[0].lower()
 
 
 # ── Z3: the tornado POST and a centre refusal the run did not record ──────

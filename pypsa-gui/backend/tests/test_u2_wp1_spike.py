@@ -14,8 +14,12 @@ U1 follow-up #85, asset schema S0 #78) and adapted to what master ships:
   (`library.export_series.put_flat_export_series`) under the owner-decided name
   `decision-study:<base_uuid>:<study_id>:export`;
 * the export line is the facade's public `results.value_flows.export_revenue`;
-* the GS demand wrapper is the branch's own
-  `services/solver/objective.py::_wrap_with_demand_charge` (no copy);
+* the GS demand wrapper was the branch's own
+  `services/solver/objective.py::_wrap_with_demand_charge` (no copy). U2
+  WP10 deleted it with GS's bill calculator and pro forma: the spike's GS
+  sides are now their recorded figures (WP0's `seed_bills`, the §4.7 toy as
+  the wrapper solved it, frozen as `GS_TOY_47`), and the annuity factor is
+  the golden oracle's;
 * the finance adapter's D11 rule (uncosted meter Links are not investments)
   changes the Q5 facts: the meter Links are skipped with
   `meter_link_not_investment:*` unless a cost is typed on them (way a).
@@ -364,11 +368,12 @@ def test_c4_rate_meter_rates_the_unsolved_baseline_pack(tariff_id):
     rates the UNSOLVED `none` pack (no `p_nom_opt`, no solve record): one
     `RatingResult` for the flat period, no drift flags, capacity on the PoC
     `p_nom`. Its energy + network, demand and fixed equal GS's
-    `BillCalculator` on the same meter (the GS seed from `study_library`) to
+    `BillCalculator` on the same meter (WP0's `seed_bills` of the grid-only
+    option, whose import IS the load; U2 WP10 deleted the calculator) to
     1e-9 relative: the pack's IC tariffs ARE the GS seeds.
     """
     from services.commercial import billing
-    from services.study import tariff as study_tariff
+    from tests.u2_targets import WP0
 
     n = _site_network("none", tariff_id)
     assert not n.links_t.p0.columns.size or n.links_t.p0.empty   # unsolved
@@ -378,10 +383,8 @@ def test_c4_rate_meter_rates_the_unsolved_baseline_pack(tariff_id):
     res = bill.per_period[None]
     assert res is not None and res.total is not None
     assert bill.flags == [], bill.flags
-    gs = study_tariff.BillCalculator().bill(
-        pd.Series(load, index=n.snapshots), pd.Series(0.0, index=n.snapshots),
-        _gs_tariff(tariff_id), n.snapshot_weightings)
-    c = gs.by_component
+    gs = SimpleNamespace(**WP0["seed_bills"][tariff_id]["none"])
+    c = SimpleNamespace(**gs.by_component)
     ic = res.per_item
     ic_energy = ic["energy"]
     ic_network = sum(v for k, v in ic.items() if k.startswith("network:"))
@@ -979,6 +982,15 @@ def _toy_prices(idx) -> np.ndarray:
     return np.where(peak, _TOU_RATE["peak"], _TOU_RATE["off"]) + 20.0
 
 
+#: GS's `_wrap_with_demand_charge` on `_toy()` at 9000 EUR/MW-month (the
+#: Link priced by `_toy_prices`): measured live at WP1, re-run on a clean copy
+#: of 14d0281f before U2 WP10 deleted the wrapper (plan §4.7: objective
+#: 258,314.029548, battery 0.792740 MW both ways).
+GS_TOY_47 = {"objective": 258314.02954762257, "battery_p_nom_mw": 0.7927400206547057,
+             "peaks": {"2025-01": 0.8871637899129601, "2025-02": 0.8871637899129627,
+                       "2025-03": 0.8871637899129636}}
+
+
 @pytest.mark.live_solve
 def test_s47_demand_formulation_gs_wrapper_equals_ic_add_demand_terms():
     """
@@ -991,22 +1003,10 @@ def test_s47_demand_formulation_gs_wrapper_equals_ic_add_demand_terms():
     """
     from services.commercial import connection as conn
     from services.commercial import lp_bindings as LP
-    from services.solver.objective import _wrap_with_demand_charge
 
     price_dc = 9000.0
-    # GS
-    g = _toy()
-    g.links_t.marginal_cost[IMPORT] = _toy_prices(g.snapshots)
-    gcfg = SimpleNamespace(demand_charge={"price_per_mw_per_period": price_dc,
-                                          "basis": "billing_period_peak",
-                                          "billing_period": "month",
-                                          "import_links": [IMPORT]},
-                           solve_strategy="full", sclopf=False, multi_investment_periods=False)
-    st, cond = g.optimize(solver_name="highs",
-                          extra_functionality=_wrap_with_demand_charge(g, None, gcfg))
-    assert (st, cond) == ("ok", "optimal")
-    g_peaks = g.model.variables["peak_import"].solution.to_series()
-    g_obj = float(g.objective)
+    # GS (the wrapper's recorded solve, `GS_TOY_47`)
+    g_obj = GS_TOY_47["objective"]
 
     # IC
     i = _toy()
@@ -1035,16 +1035,15 @@ def test_s47_demand_formulation_gs_wrapper_equals_ic_add_demand_terms():
     applied.commit()
     rec = i.meta.get(LP.META_DEMAND) or {}
 
-    g_by_month = {k: float(v) for k, v in g_peaks.items()}
+    g_by_month = dict(GS_TOY_47["peaks"])
     i_by_month = {}
     for key, v in i_peak.items():
         month = next(m for m in g_by_month if m in key)
         i_by_month[month] = float(v)
-    p0g = g.links_t.p0[IMPORT].groupby(g.snapshots.strftime("%Y-%m")).max()
     p0i = i.links_t.p0[IMPORT].groupby(i.snapshots.strftime("%Y-%m")).max()
     print(f"\n§4.7 objectives GS {g_obj:,.6f} IC {i_obj:,.6f} rel "
           f"{abs(g_obj - i_obj) / abs(g_obj):.2e}; battery GS "
-          f"{float(g.storage_units.p_nom_opt.iloc[0]):.6f} IC "
+          f"{GS_TOY_47['battery_p_nom_mw']:.6f} IC "
           f"{float(i.storage_units.p_nom_opt.iloc[0]):.6f}\n peaks GS {g_by_month}\n peaks IC "
           f"{i_by_month}\n IC keys {list(i_peak.index)}\n billed-peak max diff "
           f"{float((i_billed - i_peak).abs().max()):.2e}; committed record keys "
@@ -1053,9 +1052,8 @@ def test_s47_demand_formulation_gs_wrapper_equals_ic_add_demand_terms():
     assert set(i_by_month) == set(g_by_month) and len(g_by_month) == 3
     for m in g_by_month:
         assert abs(g_by_month[m] - i_by_month[m]) <= 1e-6, m
-        assert abs(p0g[m] - g_by_month[m]) <= 1e-6 and abs(p0i[m] - i_by_month[m]) <= 1e-6
-    assert abs(float(g.storage_units.p_nom_opt.iloc[0])
-               - float(i.storage_units.p_nom_opt.iloc[0])) <= 1e-4
+        assert abs(p0i[m] - i_by_month[m]) <= 1e-6
+    assert abs(GS_TOY_47["battery_p_nom_mw"] - float(i.storage_units.p_nom_opt.iloc[0])) <= 1e-4
 
 
 
@@ -1068,7 +1066,7 @@ def _gs_salvage(n, ledger, *, pv: bool) -> float:
     """GS's annuity-PV salvage (`proforma.build_investment_case`, C2's V)."""
     from services.solver.periodized_costs import _annuity
     from services.study import packs
-    from services.study.proforma import _annuity_pv_factor
+    from tests.golden.oracle import annuity_pv_factor as _annuity_pv_factor
 
     v = packs.ledger_values(ledger)
     r, horizon = v["discount_rate"], int(round(v["battery_storage_lifetime_years"]))
@@ -1101,7 +1099,7 @@ def test_s46_identity_npv_equals_lp_saving_times_af_on_the_ic_engine(option, pv)
     obj_none is the IC-solved grid-only option. Also reports the IRR.
     """
     from services.finance.engine import run_case
-    from services.study.proforma import _annuity_pv_factor
+    from tests.golden.oracle import annuity_pv_factor as _annuity_pv_factor
 
     n, cfg = _solved(option)
     n_none, _c = _solved("none")

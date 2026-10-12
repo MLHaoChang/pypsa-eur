@@ -29,6 +29,19 @@ FAKE_REF = {"id": "decision-study:fake:" + "5" * 32 + ":export", "version": 1,
             "hash": "f" * 64, "source": "decision_study"}
 
 
+def legacy_ledger(name: str = "de"):
+    """
+    A ledger the legacy `study_library` seeded on the golden site intake
+    (`de` / `tou` seed, or `user` tariff): rows 1-20, frozen in
+    `fixtures/legacy_study_library.json` before U2 WP10 deleted the library
+    (gate U2-S1 C8 a). What a study stored before U2 WP8 holds.
+    """
+    from models.study import AssumptionsLedger
+
+    data = json.loads((FIXTURES / "legacy_study_library.json").read_text(encoding="utf-8"))
+    return AssumptionsLedger.model_validate(data["ledgers"][name])
+
+
 def pending(wp: str, why: str = ""):
     """The target waits for ``wp`` (strict xfail: it must fail until then)."""
     return pytest.mark.xfail(strict=True, reason=f"U2 {wp}: {why or 'seam not built yet'}")
@@ -52,9 +65,10 @@ def series_resolver(series: pd.Series):
 
 def golden_copy(option: str):
     """
-    An independent copy of the S5 golden network of `option` (GS-solved,
-    cached per process by `site_fixture`); the solver model is detached first
-    (PyPSA refuses to copy a network with an attached solver model).
+    An independent copy of the S5 golden network of `option` (solved on the
+    engine since U2 WP10, cached per process by `site_fixture`); the solver
+    model is detached first (PyPSA refuses to copy a network with an attached
+    solver model).
     """
     from tests.golden import site_fixture as SF
 
@@ -63,6 +77,51 @@ def golden_copy(option: str):
     if model is not None and getattr(model, "solver_model", None) is not None:
         model.solver_model = None
     return n.copy()
+
+
+def golden_dispatch(option: str):
+    """
+    A copy of the golden option's network as a DISPATCH only (U2 WP10), the
+    way WP0's GS-solved golden network was: the engine's solve record
+    (`n.meta["ic_*"]`, the committed price frame) removed, so a tariff the
+    solve did not price (the TOU seed) is rated on the dispatch rather than
+    refused as a changed config, and no total is vouched for
+    (`solve_provenance_unknown`).
+    """
+    from services.commercial import lp_bindings as LP
+
+    n = golden_copy(option)
+    for key in [k for k in n.meta if str(k).startswith("ic_")]:
+        del n.meta[key]
+    df = getattr(n.links_t, LP.ENERGY_PRICE_ATTR, None)
+    if df is not None and not df.empty:
+        df.drop(columns=list(df.columns), inplace=True)
+    return n
+
+
+#: The pre-numbers test whose recorded deltas move WP0's seed bills (U2 WP10:
+#: the golden dispatch is the engine's, which ties differently under the flat
+#: DE energy price, so the TOU seed's energy line moves; `lp_degenerate_
+#: dispatch_ties`).
+SEED_DELTAS_TEST = ("test_u2_pre_numbers_recorded.py::"
+                    "test_both_seed_bills_on_the_golden_dispatch_reproduce")
+
+
+def wp0_seed_bill(tid: str, option: str) -> dict:
+    """WP0's seed bill of `tid` on `option`'s golden dispatch, its recorded deltas applied."""
+    out = json.loads(json.dumps(WP0["seed_bills"][tid][option]))
+    rows = json.loads((FIXTURES / "u2_deltas.json").read_text(encoding="utf-8"))["deltas"]
+    prefix = f"seed_bills.{tid}.{option}."
+    for r in rows:
+        if r.get("test") != SEED_DELTAS_TEST or not r["figure"].startswith(prefix):
+            continue
+        *parents, leaf = r["figure"][len(prefix):].split(".")
+        node = out
+        for k in parents:
+            node = node[k]
+        assert close(node[leaf], r["pre"]), r["figure"]
+        node[leaf] = r["post"]
+    return out
 
 
 # ── WP6: the guided option on the engine's LP, in process ────────────────
@@ -107,7 +166,8 @@ def ic_site_option(option_id: str, ledger=None):
     """
     (solved network, its SolverConfig) of a site golden option on the
     engine's LP — the production path since WP6 — cached per process and
-    ledger. `site_fixture.solve_site_option` stays the GS oracle (WP0).
+    ledger. (`site_fixture.solve_site_option` is the same engine solve on the
+    fixture's own config, with the option's value flows, since U2 WP10.)
     """
     from services.study import packs
     from tests.golden import site_fixture as SF
@@ -123,32 +183,16 @@ def ic_site_option(option_id: str, ledger=None):
 
 # ── WP7: the option's fork as the engine-valued case reads it ──────────────
 
-_IC_CASE: dict = {}
-
-
 def ic_case_option(option: str):
     """
     (solved network, SolverConfig, compiled commercial, ledger) of a site
-    golden option as WP8's runner will make its fork, once per process: the
+    golden option as WP8's runner makes its fork, once per process: the
     pack-seeded ledger (`library.load_defaults`, rows 21-34), the pack network
     (no prices; the battery's two upfront parts, C1), the compiled commercial
     bound on it (C6) with its `single_owner` value flows, solved through
-    `run_simulation` with `compile.solver_config`.
+    `run_simulation` with `compile.solver_config`. Since U2 WP10 this IS the
+    site golden fixture (`site_fixture.site_case_option`).
     """
-    if option not in _IC_CASE:
-        from services.study import compile as C
-        from services.study import library as L
-        from services.study import packs
-        from services.study import questions as Q
-        from tests.golden import site_fixture as sf
+    from tests.golden import site_fixture as sf
 
-        defaults = L.load_defaults()
-        ledger = L.seed_ledger(Q.BESS_AT_SITE, sf.site_intake(), defaults)
-        n = packs.build_site_network(sf.site_intake(), ledger, option, library=defaults)
-        compiled = C.commercial_from_ledger(sf.site_intake(), ledger, defaults, n.snapshots,
-                                            export_series=FAKE_REF)
-        compiled = C.bind_on_network(n, compiled, resolve_ref=flat_resolver(40.0, n.snapshots))
-        compiled = C.with_value_flows(compiled, n)
-        cfg = C.solver_config(ledger, compiled)
-        _IC_CASE[option] = (ic_solve(n, cfg), cfg, compiled, ledger)
-    return _IC_CASE[option]
+    return sf.site_case_option(option)
