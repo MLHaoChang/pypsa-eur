@@ -610,8 +610,7 @@ def extra_owner_assets(project, replacements: bool = False) -> list:
     (for an existing asset's replacement, how its commissioning year is known:
     a source tag, or ``assumed: mid-life at the first period``); a table from
     before C14 gives ``purchase`` 1 and None for the others. An engine kind
-    that ``IC_KIND`` does not list is refused with
-    422 naming it.
+    that ``IC_KIND`` does not list is refused with 422 naming it.
 
     Read from the run directory: ``campus_investment.csv`` (the items, their
     units, cable length and investment period) and ``campus_assets_used.yaml``
