@@ -377,6 +377,19 @@ export function queueLengthFromGeometry(project: string | null, edgeId: string):
   pendingLengthKeys.set(k, set)
 }
 
+/**
+ * What follows a route edit besides the write itself: with "Derive lengths
+ * from geometry" on, a Line's or Link's length is queued to follow the route
+ * once the PUT lands; off, NOTHING is written (the discrepancy badge informs
+ * instead). Transformers have a route but no length, and a scratch network
+ * has no server routes to measure. The one gate the map's `updateWaypoints`
+ * applies — pinned by `MapCanvas.editableLine.test.tsx`.
+ */
+export function afterRouteEdit(project: string | null, edgeId: string, deriveLengths: boolean): void {
+  if (!deriveLengths || !project || edgeId.startsWith('tr:')) return
+  queueLengthFromGeometry(project, edgeId)
+}
+
 /** MapCanvas registers what to do with a derivation's result; null unregisters. */
 export function setLengthsDerivedSink(sink: ((project: string, result: LengthsFromGeometryResult) => void) | null): void {
   lengthsDerivedSink = sink

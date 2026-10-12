@@ -13,6 +13,8 @@ import type { Carrier, ValidationIssue } from '../api/types'
 import { PageBody, PageSection, RowGrid, StatCard, Btn } from '../components/PageKit'
 import { componentOfKey, usePlacementFindings } from '../site3d/placementFindingsStore'
 import type { FindingKind, PlacementFinding } from '../site3d/placementCheck'
+import { useTopologyFindings } from './useTopologyFindings'
+import { TOPOLOGY_FINDING_TITLES, type TopologyFinding } from '../utils/topologyCheck'
 
 // IssuesPanel — surfaces the backend's preflight validation findings as a
 // browsable list. Reuses /api/simulation/preflight, which is the same gate
@@ -95,6 +97,10 @@ export default function IssuesPanel() {
   // rows. Absent until a site view has been opened this session.
   const layoutSite = usePlacementFindings(s => s.site)
   const layoutFindings = usePlacementFindings(s => s.findings)
+  // The map's topology check (visual-layers plan 2 M5): the model against
+  // the map's routes and the sites' boundaries, computed here from the
+  // shared queries and sidecar stores — no map needs to be open.
+  const topologyFindings = useTopologyFindings(currentProject)
 
   // Jump straight to the offending asset's edit form. The Issues view is
   // itself a slide panel, and PropertiesPanel only mounts when no slide panel
@@ -273,6 +279,21 @@ export default function IssuesPanel() {
             </div>
           </PageSection>
         )}
+
+        {topologyFindings.length > 0 && (
+          <PageSection
+            title="Topology check"
+            count={topologyFindings.length}
+            hint="The model against the map's routes and site boundaries; advisory, nothing blocks a run"
+            bodyClassName=""
+          >
+            <div className="flex flex-col" data-testid="topology-check-group">
+              {topologyFindings.map((f, i) => (
+                <TopologyFindingRow key={`${f.component.type}:${f.component.name}-${f.kind}-${f.other ?? ''}-${i}`} finding={f} onJumpTo={jumpTo} />
+              ))}
+            </div>
+          </PageSection>
+        )}
       </PageBody>
     </div>
   )
@@ -316,6 +337,36 @@ function LayoutFindingRow({ finding, onJumpTo }: { finding: PlacementFinding; on
           View <ArrowRight size={11} />
         </button>
       )}
+    </div>
+  )
+}
+
+// One topology finding (plan 2 M5): the same tile, title/kind and View deep
+// link as a layout finding, over the map's rules instead of the 3D view's.
+function TopologyFindingRow({ finding, onJumpTo }: { finding: TopologyFinding; onJumpTo: (type: string, name: string) => void }) {
+  const { type, name } = finding.component
+  const warn = finding.severity === 'warn'
+  const Icon = warn ? AlertTriangle : Info
+  return (
+    <div className="flex items-start gap-3 px-4 py-3 border-t border-border first:border-t-0 hover:bg-bg-2 transition-colors">
+      <span className={`mt-0.5 shrink-0 w-6 h-6 grid place-items-center rounded-md border ${warn ? 'bg-warn/10 text-warn border-warn/20' : 'bg-bg-2 text-muted border-border'}`}>
+        <Icon size={13} />
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
+          <span className="text-[12px] font-semibold text-text" data-testid="issue-title">{TOPOLOGY_FINDING_TITLES[finding.kind]}</span>
+          <span className="text-[10px] text-muted truncate">{type} <span className="font-mono text-ink-700">{name}</span></span>
+          <span className="ml-auto shrink-0 text-[9.5px] font-mono text-ink-400" title="Finding kind">{finding.kind}</span>
+        </div>
+        <div className="text-[11.5px] text-ink-700 leading-relaxed whitespace-pre-wrap">{finding.message}</div>
+      </div>
+      <button
+        onClick={() => onJumpTo(COMPONENT_TYPE_MAP[type], name)}
+        title={`Open ${type} "${name}" in the editor`}
+        className="shrink-0 flex items-center gap-1 self-center rounded-md border border-accent/30 bg-accent/5 px-2 py-1 text-[10.5px] font-medium text-accent hover:bg-accent/10 hover:border-accent/50 transition-colors"
+      >
+        View <ArrowRight size={11} />
+      </button>
     </div>
   )
 }

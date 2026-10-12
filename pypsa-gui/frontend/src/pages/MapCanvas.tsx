@@ -19,6 +19,12 @@ import ImportGeometryDialog from '../components/ImportGeometryDialog'
 import MapConnectDialog, { type ConnectionParams } from '../components/MapConnectDialog'
 import { registerMapDropTarget, unregisterMapDropTarget, type MapDropTarget } from '../utils/mapDropRegistry'
 import { layoutAround, PLACE_ALL_SPACING_M } from '../utils/placement'
+import { commitBusDrag } from '../utils/busDrag'
+import { lineColor } from '../utils/voltageTiers'
+import { useElementWidth } from '../hooks/useElementWidth'
+import { assetLegend, buildAssetNodes } from './topologyAssets'
+import MapLegend from '../components/MapLegend'
+import MapMiniMap, { MINIMAP_MIN_CANVAS_PX } from '../components/MapMiniMap'
 import { useUIStore, type CanvasView } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { updateAsset } from '../utils/assetWrite'
@@ -43,7 +49,7 @@ import { readActiveSite, writeActiveSite } from '../site3d/activeSite'
 import type { LngLatTuple, Site } from '../site3d/types'
 import type { MapBubble } from '../api/mapLayout'
 import {
-  bubbleKey, queueLengthFromGeometry, routeWaypoints, setLengthsDerivedSink, useMapLayoutLifecycle,
+  afterRouteEdit, bubbleKey, routeWaypoints, setLengthsDerivedSink, useMapLayoutLifecycle,
   useMapLayoutStore, type LatLngTuple,
 } from './mapLayoutStore'
 import type { RouteSource } from '../api/mapLayout'
@@ -251,14 +257,8 @@ const ESRI_TRANSPORTATION_URL =
 const ESRI_PLACES_URL =
   'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'
 
-// Voltage → colour, mirrors the existing TopologyCanvas legend so the two
-// canvases feel like the same network.
-function lineColor(vNom: number): string {
-  if (vNom > 300) return '#dc2626'
-  if (vNom > 200) return '#16a34a'
-  if (vNom > 100) return '#2563eb'
-  return '#374151'
-}
+// Voltage → colour: utils/voltageTiers.ts, the one table the lines, the bus
+// rings and the map legend (plan M5) read, mirroring the schematic's tiers.
 
 interface MapCanvasProps {
   // 'satellite' = Esri imagery only; 'hybrid' = Esri imagery + street/place labels.
@@ -481,7 +481,7 @@ interface EditableLineProps {
   lengthBadge?: LengthBadge
 }
 
-function EditableLine({
+export function EditableLine({
   id, source, target, waypoints, onUpdate, onSelect, color, weight, dashArray, tooltip, permanentLabel, lengthBadge,
 }: EditableLineProps) {
   const [hovered, setHovered] = useState(false)
@@ -887,31 +887,15 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   // Pydantic default. The schematic / blank canvas is decoupled: it keeps
   // its own per-bus position cache in localStorage and is unaffected by
   // changes here for any bus the user has already laid out there.
+  //
+  // `commitBusDrag` (utils/busDrag.ts) owns the whole commit: the PUT through
+  // the asset-write chokepoint (which fetches on a cache miss, ruling 3, so a
+  // drag racing the first buses round-trip succeeds), the provenance mirror
+  // into the map document, and the rescale offer. Tested there without a
+  // Leaflet marker (plan M5).
   const updateBusPosMut = useMutation({
-    // The Asset-write chokepoint (utils/assetWrite.ts) owns fetch, spread,
-    // PUT and invalidation. The old throw-on-cache-miss ("wait for the
-    // buses query to settle") is gone: the chokepoint FETCHES on a miss
-    // (ruling 3), so a drag racing the first buses round-trip now succeeds
-    // instead of asking the user to retry — while the bare-fields PUT the
-    // throw guarded against stays unrepresentable.
-    mutationFn: async ({ name, lat, lng }: { name: string; lat: number; lng: number }) => {
-      const resp = await updateAsset<Bus>(
-        qc, useUIStore.getState().currentProject, 'buses', name, { x: lng, y: lat })
-      return resp as Awaited<ReturnType<typeof networkApi.updateBus>>
-    },
-    onSuccess: (data, vars) => {
-      // The backend's update_bus already recomputed the lengths of THIS bus's
-      // connected branches (_recompute_lengths_for_bus, scoped to the moved
-      // bus — lines by chord, or lines AND links from their geometry with the
-      // project setting on) and logged a changelog entry; the chokepoint's
-      // blanket invalidation covers the buses, lines and links refetch.
-      const sources = data.length_sources ?? {}
-      const n = Object.keys(sources).length
-      appLog('INFO', `Bus '${vars.name}' moved · ${n} connected branch length${n === 1 ? '' : 's'} recalculated${
-        Object.values(sources).includes('route') ? ' (routes followed)' : ''}.`)
-      useMapLayoutStore.getState().applyLengthSources(useUIStore.getState().currentProject, data.length_sources)
-      ingestRescale(qc, data.rescale)
-    },
+    mutationFn: ({ name, lat, lng }: { name: string; lat: number; lng: number }) =>
+      commitBusDrag(qc, useUIStore.getState().currentProject, name, lat, lng),
     onError: (e: Error) => toast.error(`Move failed: ${e.message}`),
   })
 
@@ -1063,12 +1047,31 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   const updateWaypoints = useCallback((edgeId: string, wps: LatLngTuple[], source: RouteSource = 'user') => {
     const project = useUIStore.getState().currentProject
     setRouteWaypoints(project, edgeId, wps, source)
-    if (deriveLengthsRef.current && project && !edgeId.startsWith('tr:')) queueLengthFromGeometry(project, edgeId)
+    afterRouteEdit(project, edgeId, deriveLengthsRef.current)
   }, [setRouteWaypoints])
 
-  // ── Adopt real topology from outside (plan M3) ────────────────────────────
+  // ── Legend and minimap (plan M5) ──────────────────────────────────────────
+  // The legend's asset rows are the schematic's (`assetLegend` over the same
+  // descriptors), so the three layers list the same types; the minimap
+  // follows the schematic's fold rule (hidden under MINIMAP_MIN_CANVAS_PX).
+  const [canvasEl, setCanvasEl] = useState<HTMLDivElement | null>(null)
+  const canvasWidth = useElementWidth(canvasEl)
+  // The Leaflet map, handed out by MapHandle: a ref for the imperative
+  // callers below (address box, drop registry) and a state for the minimap.
   const mapRef = useRef<L.Map | null>(null)
-  const captureMap = useCallback((m: L.Map) => { mapRef.current = m }, [])
+  const [mapHandle, setMapHandle] = useState<L.Map | null>(null)
+  const captureMapForMini = useCallback((m: L.Map) => { mapRef.current = m; setMapHandle(m) }, [])
+  const linkCarriers = useMemo(() => [...new Set((links as LinkT[]).map(l => l.carrier).filter(Boolean))], [links])
+  const legendAssetRows = useMemo(() => {
+    const members = (buses as Bus[]).map(b => b.name)
+    const carrierOf = (name: string) => busByName.get(name)?.carrier
+    return assetLegend(buildAssetNodes(
+      { generators: generators as Generator[], loads: loads as Load[], storageUnits: sus as StorageUnit[], stores: stores as Store[], links: links as LinkT[] },
+      { members, busCarrier: carrierOf },
+    ))
+  }, [buses, busByName, generators, loads, sus, stores, links])
+
+  // ── Adopt real topology from outside (plan M3) ────────────────────────────
   // The palette drop registry (plan M4): a drop on the map resolves to the
   // geographic point under the pointer through this projection.
   useEffect(() => {
@@ -1338,7 +1341,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   const initialCenter: [number, number] = [50.0, 10.0]
 
   return (
-    <div className="relative h-full w-full">
+    <div className="relative h-full w-full" ref={setCanvasEl}>
       <MapContainer
         center={initialCenter}
         zoom={5}
@@ -1361,7 +1364,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
         )}
 
         <FitToNetwork buses={buses as Bus[]} suspended={placing} />
-        <MapHandle onMap={captureMap} />
+        <MapHandle onMap={captureMapForMini} />
         {osmOn && <ViewBoundsWatcher onBounds={onViewBounds} />}
 
         {/* OSM suggestion layer (plan M3): dimmed, dashed, under everything the
@@ -1729,6 +1732,15 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
           )
         })}
       </MapContainer>
+
+      {/* Legend + minimap (plan M5), bottom-left above Leaflet's attribution;
+          the minimap steps aside on a narrow canvas like the schematic's. */}
+      <div className="absolute z-[400] flex flex-col items-start gap-2" style={{ left: 10, bottom: 28 }}>
+        {mapHandle && (canvasWidth == null || canvasWidth >= MINIMAP_MIN_CANVAS_PX) && (
+          <MapMiniMap map={mapHandle} tileUrl={ESRI_IMAGERY_URL} />
+        )}
+        <MapLegend linkCarriers={linkCarriers} assetRows={legendAssetRows} />
+      </div>
 
       {/* Map toolbar (recalculate line lengths). Sits over the map at the
           top-left, below the zoom buttons that Leaflet renders on its own. */}
