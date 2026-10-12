@@ -39,6 +39,8 @@ PKGS=(
   # pandas 3.x breaks network.copy() / frozen re-solves (StringDtype).
   "pandas==2.3.3" "numpy==2.4.6" "scipy==1.17.1"
   netcdf4 openpyxl geopandas pytest pytest-asyncio python-dotenv ruff
+  # Test-only, mirrors pixi.toml's [feature.test.dependencies].
+  jsonschema
   # gridspine + desktop suites; lightsim2grid 1.x lacks LSGrid.get_lineor_res.
   # Exact pins from pixi.toml's [pypi-dependencies] / desktop feature: an
   # unpinned pandapower or pywebview drifts from what CI and pixi test.

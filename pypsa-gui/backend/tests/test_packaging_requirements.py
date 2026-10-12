@@ -41,10 +41,12 @@ import pytest
 BACKEND = Path(__file__).resolve().parent.parent
 REQUIREMENTS = BACKEND.parent / "gui-requirements.txt"
 
-# `tests/` and `smoke/` are development tooling. The frozen app's entry point
-# is `desktop/gui.py` and neither is reachable from it, so `pytest` and
-# `requests` are not shipped dependencies.
-NOT_SHIPPED = {"tests", "smoke"}
+# `tests/`, `smoke/` and `tools/` are development tooling. The frozen app's
+# entry point is `desktop/gui.py` and none of them is reachable from it, so
+# `pytest` and `requests` are not shipped dependencies. `tools/` holds CLIs run
+# from a checkout (`import_legacy`, `merge_audit`, the pilot evaluation gate
+# and its pytest plugin); the spec also lists `pytest` under `excludes`.
+NOT_SHIPPED = {"tests", "smoke", "tools"}
 
 # Third-party modules the backend imports INSIDE a try/except that catches the
 # import failure. Each is allowed to be absent from the bundle, and the value
