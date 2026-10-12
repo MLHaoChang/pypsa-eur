@@ -9,8 +9,9 @@ units between the same two buses) is searched when every one of its units
 has a tap block (plan C13) with ``changer: on_load``. Parallel units move
 together (master-follower): the group has one position, an offset ``o`` from
 neutral, and every unit sits at its own ``neutral + o``. The group's range
-is the offsets every unit can reach. The group starts at its first unit's
-(the master's) offset in the file. Nothing else moves:
+is the offsets every unit can reach. The group's position is its first
+unit's (the master's): units the file puts at other offsets join the
+master's once the group moves. Nothing else moves:
 
 * an ``off_circuit`` tap stays at the file's ``tap.pos`` (owner, 2026-10-12);
 * a group with a unit without tap data, or with an off-circuit unit, has no
@@ -130,7 +131,6 @@ class Group:
     lo: int                      # the offsets from neutral every unit reaches
     hi: int
     neutral: tuple               # per member
-    start: int                   # the master's offset in the file
     depth: int                   # of the HV bus, from the PCC
     fed: frozenset               # buses fed through the group (no PCC)
     zone: frozenset = frozenset()
@@ -202,7 +202,6 @@ class Taps:
                 gname, tuple(members), is_pcc, oltc,
                 oltc and not (is_pcc and pcc_tap_control == "grid_operator"), lo, hi,
                 tuple(tp["neutral"] if tp else 0 for tp in taps),
-                taps[0]["pos"] - taps[0]["neutral"] if oltc else 0,
                 depth.get(hv, math.inf), frozenset(fed)))
         groups.sort(key=lambda g: (g.depth, g.name))
         searched = [g for g in groups if g.controlled]
