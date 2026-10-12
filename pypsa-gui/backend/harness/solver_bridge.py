@@ -16,10 +16,13 @@ from __future__ import annotations
 
 from collections.abc import Callable, Generator
 from typing import Any
+import logging
 import time
 
 from harness.session import ChatSession
 from services.project_context import ProjectContext
+
+logger = logging.getLogger(__name__)
 
 
 def _classify_solver_line(line: str) -> str:
@@ -37,6 +40,60 @@ def _classify_solver_line(line: str) -> str:
     if line.startswith("ERROR"):
         return "ERROR"
     return "INFO"
+
+
+DETACHED_PROGRESS_MAXLEN: int = 200
+
+
+def start_detached_solver_monitor(
+    session: ChatSession,
+    ctx: ProjectContext,
+    *,
+    tool_use_id: str,
+    tool_name: str,
+    poll_interval: float = 0.1,
+    on_terminal: Callable[[], None] | None = None,
+) -> None:
+    """Run ``solver_log_bridge`` on a daemon thread after turn handoff (issue 11).
+
+    Progress is buffered on the session (same payload keys as ``tool_progress``)
+    so the turn can return immediately. Callers drain via
+    ``session.drain_detached_progress()``. ``on_terminal`` runs on the monitor
+    thread once the solver state is terminal (not when only the session aborted).
+    """
+    import threading
+
+    def _done() -> bool:
+        with ctx.solver_state_lock:
+            status = ctx.solver_state.get("status")
+        return status in ("completed", "failed", "aborted", "idle")
+
+    def _run() -> None:
+        session.mark_detached_monitor(tool_use_id, tool_name, active=True)
+        try:
+            for prog in solver_log_bridge(
+                session, ctx,
+                poll_interval=poll_interval,
+                is_solver_done=_done,
+            ):
+                session.append_detached_progress({
+                    "tool_use_id": tool_use_id,
+                    "tool_name": tool_name,
+                    **prog,
+                })
+        finally:
+            if on_terminal is not None and _done():
+                try:
+                    on_terminal()
+                except Exception:  # noqa: BLE001 — a completion hook must not break the monitor
+                    logger.exception("detached solver on_terminal hook failed")
+            session.mark_detached_monitor(tool_use_id, tool_name, active=False)
+
+    threading.Thread(
+        target=_run,
+        name=f"detached-solver-{tool_use_id[:8]}",
+        daemon=True,
+    ).start()
 
 
 def solver_log_bridge(

@@ -274,9 +274,23 @@ def _with_failure(section: Section, reason: str, job: ReportJob) -> Section:
     })
 
 
+def _publish_report_evidence(record: dict[str, Any]) -> None:
+    """Best-effort issue-06 run evidence for generate/regenerate/mapping."""
+    try:
+        from services import run_evidence as _re
+        status = record.get("status")
+        if status == "running" and "_run_evidence" not in record:
+            _re.start_report_run(record)
+        elif status in ("done", "failed", "aborted"):
+            _re.publish_report_run(record)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _set(job: ReportJob, **updates: Any) -> None:
     with job.lock:
         job.record.update(updates)
+        _publish_report_evidence(job.record)
 
 
 def _progress(job: ReportJob, done: int, current: str | None) -> None:
@@ -478,6 +492,7 @@ def run_mapping_job(job: MappingJob) -> dict[str, Any] | None:
             with job.lock:
                 job.record.update(status="aborted", finished_at=time.time(),
                                   progress={"done": 0, "total": 1, "current": None})
+                _publish_report_evidence(job.record)
             return None
         base = {"model": job.model, "max_tokens": job.max_tokens,
                 "system_blocks": system_blocks()}
@@ -501,10 +516,12 @@ def run_mapping_job(job: MappingJob) -> dict[str, Any] | None:
         with job.lock:
             job.record.update(status="done", error=None, finished_at=time.time(),
                               progress={"done": 1, "total": 1, "current": None})
+            _publish_report_evidence(job.record)
         return plan
     except Exception as exc:
         with job.lock:
             job.record.update(status="failed", error=str(exc), finished_at=time.time())
+            _publish_report_evidence(job.record)
         raise
 
 
@@ -562,6 +579,7 @@ def _launch(*, prepare, run, lock: threading.Lock, state: dict[str, Any]) -> str
             job.record["thread"] = thread
             state["report_job"] = job.record
             _ACTIVE = job.record
+            _publish_report_evidence(job.record)
             try:
                 thread.start()
             except BaseException:

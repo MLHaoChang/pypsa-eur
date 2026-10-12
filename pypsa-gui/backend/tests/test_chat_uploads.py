@@ -404,14 +404,15 @@ class TestUploadsEndpoints:
 
     def test_post_docx_zip_upgrade(self, client, route_project):
         """Same upgrade path for .docx so Word files drag-and-drop too."""
-        # Minimum-viable Office zip — just the structural zip layout.
-        # python-magic only sees the magic bytes (`PK\x03\x04`); the
-        # extension upgrade fires before any deeper inspection.
+        # Use an actual OOXML package. A one-entry fake ZIP is detected as
+        # application/octet-stream by some libmagic builds, so it cannot
+        # establish that real Word uploads pass the MIME guard.
         import io as _io
-        import zipfile
+        from docx import Document
         buf = _io.BytesIO()
-        with zipfile.ZipFile(buf, "w") as zf:
-            zf.writestr("[Content_Types].xml", "<x/>")
+        document = Document()
+        document.add_paragraph("Synthetic chatbot upload fixture.")
+        document.save(buf)
         r = client.post(
             f"/api/projects/{route_project}/uploads",
             files={
