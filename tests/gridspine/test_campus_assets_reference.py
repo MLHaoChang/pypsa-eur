@@ -35,13 +35,16 @@ HEADER = PROPOSAL.read_text().split("\ndiscount_rate:")[0]
 COST_FIELDS = ("capex_eur", "capex_eur_per_km", "opex_frac", "lifetime_a")
 KEYS = ("[EI-NVL]", "[DEA-TRANS]", "[DEA-DIST]", "[NEP-2021]")
 
-#: 1 SEK of 2022 in EUR of 2025: ECB 2022 annual average SEK/EUR, then euro-area HICP 2022 -> 2025.
+#: 1 SEK of 2022 in EUR of 2025: ECB 2022 annual average SEK/EUR, then escalated 2022 -> 2025 by the
+#: producer price index for C27.1 (electric motors, generators, transformers and electricity distribution
+#: and control apparatus): Eurostat sts_inpp_a, euro area (EA20), total market, unadjusted, index
+#: 2021=100, annual values (owner's choice of index, 2026-10-12).
 SEK_PER_EUR_2022 = 10.6295750972763
-HICP_2022, HICP_2025 = 116.83, 128.76
+PPI_2022, PPI_2025 = 108.6, 119.8
 
 
 def eur(sek):
-    return round(sek / SEK_PER_EUR_2022 * HICP_2025 / HICP_2022 / 100) * 100
+    return round(sek / SEK_PER_EUR_2022 * PPI_2025 / PPI_2022 / 100) * 100
 
 
 def between(s, lo, y_lo, hi, y_hi):
@@ -171,8 +174,10 @@ def test_only_costs_are_tagged_literature():
 # --------------------------------------------------------------------------
 
 def test_the_conversion_factor_is_the_one_the_header_states():
-    assert 1 / SEK_PER_EUR_2022 * HICP_2025 / HICP_2022 == pytest.approx(0.10368, abs=5e-6)
-    assert "0.10368" in HEADER and "10.6296" in HEADER and "116.83" in HEADER and "128.76" in HEADER
+    assert 1 / SEK_PER_EUR_2022 * PPI_2025 / PPI_2022 == pytest.approx(0.10378, abs=5e-6)
+    for stated in ("0.10378", "10.6296", "sts_inpp_a", "C27.1", "EA20", "108.6", "119.8"):
+        assert stated in HEADER, stated
+    assert "HICP" not in HEADER.split("Conversion.")[1].split("Rounded")[0]
 
 
 @pytest.mark.parametrize("eid", sorted(EI_DIRECT))
