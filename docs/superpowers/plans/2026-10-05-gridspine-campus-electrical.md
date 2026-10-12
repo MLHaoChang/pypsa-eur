@@ -500,6 +500,17 @@ This closes part one's "voltages not re-checked": the *with measures* column is 
 
 **Mutations.** 39 by hand across the campus file, the dispatch and the selector. 26 were caught at once and one, mistyped in the first run, when re-run; tests were added for the 10 survivors (the trim back onto the edge, a saturated STATCOM, the intact margin, an existing pair short of the margin, the grid's bay, the sizing-rule escalation, the directional reactive escalation, the dispatch held in the re-solve, the reactive margin, the STATCOM's fault current), and all are caught now. Two are equivalent: `<` against `<=` on two equal non-zero step distances (an exact float tie), and the early break once the PCC is in the band (the scan cannot then find a better count).
 
+### Reference costs (2026-10-12)
+
+The owner decided "Reference costs from sources". The research is in `docs/superpowers/research/2026-10-12-campus-asset-reference-costs.md`. Its values are a complete library beside it (`…-reference-costs.yaml`), **as a proposal, not shipped**.
+
+- **Why not shipped.** The investment case's defaults pack (2026-10-07) transcribes the shipped costs, and its parity test fails on any price change. The pack is the IC session's, so adopting the values needs its new pack version first. The research note writes out that change.
+- **Sources.** Capex comes from the Swedish regulator Ei's standard values for grid assets 2024–2027, in 2022 SEK, converted at the ECB 2022 rate and the euro-area HICP to **2025 EUR**. That covers transformers at all four voltage pairs, MV cables, switchgear bays and capacitor banks. O&M shares and the 40-year lifetime come from the Danish Energy Agency's technology catalogue for energy transport.
+- **Coverage.** 49 of 81 capex, 72 of 81 O&M shares and 54 of 81 lifetimes are cited.
+- **Still `assumed`, with a note each:** MV shunt reactors and STATCOMs (only 380 kV figures exist), compensation lifetimes, the price step between short-circuit ratings, and sizes outside the source's range.
+- **New tag `literature`.** The loader accepts it on costs and the discount rate only; a rating is copied into the campus file, whose tags it would break. `extra_owner_assets` reports it as `provenance: literature`, `illustrative: false`, which is the pack's meaning of illustrative: "not taken from a cited source".
+- **The Data Center hub, C8 re-run** (same inputs; the shipped library reproduces the table above exactly). The same purchases are made: 1 × 63 MVA 132/33 kV, 3 × 25 MVA 33/11 kV, and switchgear 31.5 kA at 132 kV (2 bays), 25 kA at 33 kV (11) and 11 kV (5). The cost is **EUR 6.70 M capex and EUR 603 k a year**, against EUR 6.89 M and EUR 610 k. The 132/33 kV unit is 34 % cheaper and the three 33/11 kV units 42 % dearer; switchgear is 17 % cheaper. The template has no cables and needs no compensation, so those prices were not exercised.
+
 ### C9: panel
 
 - **The library editor.** It edits the per-project copy, starting from the shipped default, with a reset.
