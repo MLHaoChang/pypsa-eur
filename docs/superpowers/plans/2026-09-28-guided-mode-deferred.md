@@ -1304,3 +1304,8 @@ No processes are left running.
   - New test-only deps: `tests/live-api-requirements.txt` (jsonschema, tiktoken) were installed into the venv, because `test_chat_download_tools.py` and `test_harness_reliability.py` import jsonschema at collection.
 - **Failure found by the merge, fixed test-first.** Master's run evidence (`services/run_evidence.py`) puts a `_run_evidence` worker token on a running study record, and the token's `root` is a `PosixPath`. `finished_study_record` copied the token into the `eh_study_record` mirror, so on load the restricted unpickler refused the whole `results_state.pkl`. That dropped the finished study and every other side result. Seven tests in `test_eh_study_record_survives_reactivation.py` and three in `test_eh_study_edited_since.py` were red. The round-trip test now also asserts that no private key is mirrored, and the fix is that the mirror drops every `_`-prefixed key.
 - **Row 2 on the second merge** (107 files: the first merge's set plus master's new `test_chat*.py` / `test_harness*.py`, two halves): **2842 passed, 19 skipped**, exit 0 (`scratchpad/merge2/row3_a{a,b}.log`). `npx tsc --noEmit` clean.
+- **Gate on `2d8cddb71` (the second merge):**
+  - Full `npx vitest run`: **314 files, 3710 / 3710**.
+  - `--phase P33b` **PASS**, 47 screenshots: (C0) done without a re-run; (C3) both surfaces 2.1 s after the edit.
+  - `--phase P31` **PASS**, 43 screenshots. The two smokes ran one at a time.
+  - Full backend suite `tests/ -m "not slow"`: **12137 passed, 282 skipped, 11 deselected**, exit 0, 1 h 36 m (`scratchpad/merge2/row1.log`, `vitest3.log`, `smoke3-*.log`).
