@@ -596,6 +596,45 @@ fail when its row is deleted:
   guard over all three hub templates.
 - Mutations.
 
+### I2a as built (2026-10-12)
+
+**`services/solver/island.py`**
+- `_wrap_with_island(network, user_fn, cfg)` composes the rows into the
+  solve after the reserve margin. Off (`SolverConfig.island_constraints`
+  false, the default), it returns the callback it was given, so the LP is
+  untouched. On, it reads the solving project's `island_config.json`. On
+  with no sidecar, the solve is refused.
+- **Opt-in (Q5)** is the new `island_constraints` field on `SolverConfig`
+  and `SolverConfigSchema`. The Data Center template ships it on through a
+  per-template `solver_config.json` (`SOLVER_CONFIG_EXTRA`).
+- **Refused paths:** rolling horizon, SCOPF and **myopic** (its future
+  periods are representative snapshots, so the cyclic window is wrong
+  there too). Each is judged as it would actually run: myopic only with
+  investment periods, and rolling falls back to the full LP with them. The
+  refusal is logged as `[PHASE] Refused: …` without a traceback.
+- **Dispatch-only solves skip the rows** (owner, 2026-10-12). Found when the
+  template's Class-C FMEA sweep went infeasible: its operational base pins
+  capacities, and the as-built site cannot hold 24 h at N+1. The rows are a
+  sizing standard, so they are skipped, logged and recorded as `skipped`
+  when nothing is extendable or on an operational re-solve
+  (`_ic_operational`, set by `freeze_capacities`).
+- **ΔP⁺ for the `seamless` bridge** is a parameter (`delta_p_plus`: a
+  number, a Series or a callable) until I2b supplies it. Without it B = 0,
+  and the facts say so. B uses the slowest genset's `start_s + sync_s`.
+- **Fuel** works for gensets modelled as Links from a fuel bus that has
+  Stores: an extendable Store gets the row, a fixed one is reported pass or
+  fail. Generator gensets give "not checked".
+- An extendable genset without `unit_mw` is refused, because the N+k test
+  needs the unit it takes out.
+- The facts land on `n._island_facts`: N+k, the storage, Δ, window length,
+  critical peak, U_max, truncation, the bridge and the fuel status.
+
+**Tests** (`tests/test_island_rows.py`, 31): the plan's list, plus unequal
+units at N+1, `unit_mw`, genset availability, the dispatch-only skips, and
+the two `run_simulation` paths.
+- Mutation testing: 28 of 28 mutants killed. The first round left 3
+  survivors (largest unit, `unit_mw`, availability), closed by new tests.
+
 ### I2b: the instant of islanding in the hub LP — step 1 (M)
 
 This increment adds to the same wrapper.

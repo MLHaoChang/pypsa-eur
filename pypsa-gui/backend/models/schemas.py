@@ -583,6 +583,8 @@ class SolverConfigSchema(BaseModel):
     # 1500 % margin, which is not a margin, and a plan sized against it is a
     # fiction the LP would spend an hour building.
     reserve_margin: float | None = Field(default=None, ge=0, le=5)
+    # Island ride-through rows (campus island I2a), opt-in per project (Q5).
+    island_constraints: bool = False
     # Peak-coincidence window (snapshots) for must-take VRE credit; None ⇒ the
     # spec §2.3 scaling rule. `ge=1`: a window of zero snapshots has no mean.
     prm_peak_hours: int | None = Field(default=None, ge=1)
