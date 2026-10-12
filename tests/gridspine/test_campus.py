@@ -357,6 +357,51 @@ def test_an_impossible_compensation_or_sunk_flag_is_refused(mutate, match):
 
 
 # --------------------------------------------------------------------------
+# the commissioning year (plan C14): optional, tagged, a whole year
+# --------------------------------------------------------------------------
+
+def test_a_commissioning_year_is_accepted_on_transformers_cables_and_compensation_and_changes_nothing():
+    spec = campus_spec()
+    spec["campus"]["transformers"]["TR1"].update(existing=True, commissioning_year=t(2001, "datasheet"))
+    spec["campus"]["cables"]["CB1"].update(existing=True, commissioning_year=t(1995))
+    spec["campus"]["compensation"] = [{"name": "CAP1", "bus": "MV1", "kind": "capacitor_bank", "q_mvar": t(2.0),
+                                       "steps": 1, "commissioning_year": t(2010, "measured")}]
+    camp = build_campus(spec)
+    params = camp.params.set_index(["element", "param"])
+    assert params.at[("TR1", "commissioning_year"), "value"] == 2001.0
+    assert params.at[("TR1", "commissioning_year"), "source"] == "datasheet"
+    assert params.at[("CB1", "commissioning_year"), "value"] == 1995.0
+    assert params.at[("CAP1", "commissioning_year"), "source"] == "measured"
+    plain = build_campus(_with_comp({"name": "CAP1", "bus": "MV1", "kind": "capacitor_bank", "q_mvar": t(2.0),
+                                     "steps": 1}))
+    assert _pcc_q(camp.net) == pytest.approx(_pcc_q(build_campus(campus_spec()).net), abs=1e-12)
+    assert len(camp.net.shunt) == len(plain.net.shunt) == 1
+
+
+@pytest.mark.parametrize("year, match", [
+    (2001.5, "whole year"), (0, "positive"), (-5, "non-negative|positive"), (True, "finite number"),
+    ("2001", "finite number"),
+])
+def test_an_impossible_commissioning_year_is_refused(year, match):
+    spec = campus_spec()
+    spec["campus"]["transformers"]["TR1"]["commissioning_year"] = t(year)
+    with pytest.raises(ContractError, match=match):
+        build_campus(spec)
+    with pytest.raises(ContractError, match="value.*source"):
+        spec["campus"]["transformers"]["TR1"]["commissioning_year"] = 2001
+        build_campus(spec)
+
+
+def test_a_whole_float_commissioning_year_is_accepted_on_a_cable():
+    spec = campus_spec()
+    spec["campus"]["cables"]["CB1"]["commissioning_year"] = t(2001.0)
+    assert build_campus(spec).params.set_index(["element", "param"]).at[("CB1", "commissioning_year"), "value"] == 2001
+    spec["campus"]["cables"]["CB1"]["commissioning_year"] = t(2001.25)
+    with pytest.raises(ContractError, match="cables.CB1.commissioning_year.*whole year"):
+        build_campus(spec)
+
+
+# --------------------------------------------------------------------------
 # the tap changer (plan C13): optional, written into pandapower's tap columns
 # --------------------------------------------------------------------------
 
