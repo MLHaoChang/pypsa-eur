@@ -4,7 +4,8 @@
 // are pure and import nothing, so there is no excuse for that — see
 // docs/superpowers/specs/2026-07-30-unplaced-buses-map-design.md.
 import { describe, expect, it } from 'vitest'
-import { canSkip, nextBusToPlace } from './placement'
+import { canSkip, layoutAround, nextBusToPlace, PLACE_ALL_SPACING_M } from './placement'
+import { haversineKm } from './geo'
 
 describe('nextBusToPlace', () => {
   it('returns undefined when there is nothing left to place', () => {
@@ -74,5 +75,38 @@ describe('canSkip', () => {
 
   it('is false for an empty queue — nothing left to skip', () => {
     expect(canSkip([], new Set())).toBe(false)
+  })
+})
+
+describe('layoutAround (place all buses around one click, M4)', () => {
+  const center: [number, number] = [53.44, 6.83]
+  const metres = (a: [number, number], b: [number, number]) => haversineKm(a, b) * 1000
+
+  it('puts the first bus at the click and nothing else for a single bus', () => {
+    expect(layoutAround(center, ['grid'])).toEqual({ grid: center })
+    expect(layoutAround(center, [])).toEqual({})
+  })
+
+  it('lays the others on a ring with neighbours 200 m apart', () => {
+    const names = ['grid', 'mv', 'it', 'pv', 'bess']
+    const pos = layoutAround(center, names)
+    expect(pos.grid).toEqual(center)
+    const ring = names.slice(1).map(n => pos[n])
+    for (let i = 0; i < ring.length; i++) {
+      const next = ring[(i + 1) % ring.length]
+      expect(metres(ring[i], next)).toBeCloseTo(PLACE_ALL_SPACING_M, -1)   // within ±5 m
+    }
+    const radii = ring.map(p => metres(center, p))
+    expect(Math.max(...radii) - Math.min(...radii)).toBeLessThan(1)
+    expect(new Set(Object.values(pos).map(p => p.join(','))).size).toBe(names.length)
+  })
+
+  it('a pair and a triple sit at the spacing itself, and the spacing is a parameter', () => {
+    const two = layoutAround(center, ['a', 'b'])
+    expect(metres(two.a, two.b)).toBeCloseTo(PLACE_ALL_SPACING_M, -1)
+    const three = layoutAround(center, ['a', 'b', 'c'], 50)
+    expect(metres(three.a, three.b)).toBeCloseTo(50, 0)
+    expect(metres(three.a, three.c)).toBeCloseTo(50, 0)
+    expect(PLACE_ALL_SPACING_M).toBe(200)
   })
 })

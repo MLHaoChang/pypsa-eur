@@ -28,6 +28,16 @@ export const sitesApi = {
   /** Fetch upstream and (re)write the cache; also what Refresh calls, so a failed refresh keeps the old cache. */
   fetchContext: (project: string, siteId: string) =>
     client.post<SiteContext>(site(project, siteId)).then(r => r.data),
+  /**
+   * The site's capture from the south (plan 3 S5): a raw PNG body to
+   * `sites/<id>/thumbnail` (415 / 413 / 422 / 409 as the route says). Quiet:
+   * a thumbnail that could not be stored costs a picture, not a toast.
+   */
+  putThumbnail: (project: string, siteId: string, png: Blob) =>
+    client.put<{ saved: string; site: string; bytes: number }>(
+      `/projects/${encodeURIComponent(project)}/sites/${encodeURIComponent(siteId)}/thumbnail`,
+      png, { headers: { 'Content-Type': 'image/png' }, skipErrorToast: true },
+    ).then(r => r.data),
 }
 
 /**

@@ -30,6 +30,21 @@ describe('SiteResultsReadout', () => {
     act(() => store.set({ idx: 0, iso: '', states: new Map() }))
     expect(screen.queryByRole('list')).toBeNull()
   })
+  it('ends a branch\'s line with its site distance (S3), and says how it was measured', () => {
+    const store = createResultsStore()
+    const distances = new Map([
+      ['line:L1', { metres: 86.4, source: 'grid' as const, far: 'Grid', path: null }],
+      ['line:PV field', { metres: 1, source: 'grid' as const, far: 'x', path: null }],   // another kind's key: not the generator's
+    ])
+    render(<SiteResultsReadout store={store} objects={objects} distances={distances} />)
+    act(() => store.set({ idx: 12, iso: '2030-01-01T12:00:00', states: new Map([
+      ['Generator:PV field', { kind: 'output', mw: 12.3, cap: 20 }],
+      ['Line:L1', { kind: 'branch', p0: 45, cap: 120, unit: 'MVA', bus0: 'B', bus1: 'Grid' }],
+    ]) }))
+    const items = screen.getAllByRole('listitem').map(li => li.textContent)
+    expect(items).toEqual(['PV field · 12.3 MW · 62 % of 20 MW', 'L1 · 45.0 MW → Grid · 38 % of 120 MVA rating · 86 m'])
+    expect(screen.getByTestId('site-distance').getAttribute('title')).toMatch(/routing factor/)
+  })
   it('starts collapsed in a narrow pane, open in a wide one', () => {
     const store = createResultsStore()
     const state = { idx: 1, iso: 't', states: new Map([['Generator:PV field', { kind: 'output' as const, mw: 1, cap: 2 }]]) }

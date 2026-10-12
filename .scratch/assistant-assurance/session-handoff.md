@@ -3,8 +3,9 @@
 
 # Assistant assurance continuation handoff
 
-Status: first approved live golden evaluation recorded on `docs/harness-live-pilot-evidence`,
-following merged gate PR 137. Historical sections below describe earlier
+Status: expanded deterministic calibration and blind-review preparation on
+`feat/harness-reliability-calibration`, following merged live-evidence PR 143.
+Historical sections below describe earlier
 states and commands. The current [implementation status](implementation-status.md)
 and [API contracts](harness-contracts.md) supersede them. Independent domain/release
 approval remains pending.
@@ -784,3 +785,39 @@ supported-profile publication results on the named source/model alias. They do
 not evaluate later master app/domain additions, adversarial live behavior,
 qualitative/population calibration or independent engineering certification.
 Deployment remains opt-in; no production setting is enabled by this evidence.
+
+
+## Expanded reliability evaluation and blind-review preparation (2026-10-12)
+
+The user requested broader calibration and independent review. On clean source
+`f7da26af`, the expanded standalone gate passes **133 / zero skipped**, 111.73
+pytest seconds: 45 positive cases and 88 adverse cases. Supported-slot fulfillment
+is **330/330**, incorrect calculations **0/330**, false acceptance **0/88**, false
+rejection **0/45**, and unchecked publication **0/133**. Eight varied input
+scenarios supplement the core suite. These are scripted synthetic publication
+results, not live generation or a population error estimate.
+
+The focused selection passes **314 / zero skipped**, 186.14 seconds. Final
+calibration follow-up at `3a7361bf` passes **32 / zero skipped**, 3.89 seconds,
+after adding per-profile reporting and offline import safeguards. These selections
+overlap and must not be added as unique test counts. The only Python changes
+after the numeric gate source are the offline review CLI and its tests. Nine-file
+Ruff, diff checks and the unchanged 229-tool / 14-tab / 17-panel inventory pass.
+No complete backend/frontend or remote CI run is claimed for this backend-only
+scope; no new paid inference ran.
+
+See [validation](calibration-validation.json), [the plan](calibration-plan.md),
+[the runbook](calibration-runbook.md) and [the review package](domain-review/README.md).
+The offline workflow rejects stale/duplicate/unknown records and requires two
+independently attested agreeing reviewers and complete observations. It reports
+errors, unresolved cases and separate acceptance/rejection denominators; synthetic
+cases cannot produce population intervals. Complete attested IID samples may
+receive conditional Wilson bounds, with external identity/sampling verification.
+No report grants runtime authority or independent engineering approval.
+
+The supplied package has forty worked profile expectations and ten blind
+interpretations, with unresolved reviewer templates and no observed decisions.
+Its calibration command intentionally exits 1 with `pending_independent_judgments`
+and null rates. Actual expert review, representative population sampling and
+provider observations remain required external inputs. A7.5 and whole-domain
+release remain open. Deployment settings remain opt-in.
