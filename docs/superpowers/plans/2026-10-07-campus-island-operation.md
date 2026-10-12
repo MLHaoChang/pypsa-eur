@@ -485,6 +485,11 @@ energy-hub templates".
   is re-rated to carry the IT load it protects (about 40 MW, tagged
   `assumed` in the island sidecar's provenance), with a test that its
   rating covers the IT peak.
+- Limited foresight (`services/solver/myopic.py`) wrote the objective-based
+  representative weight into `stores` too, which would put 52.14 h back
+  into the state-of-charge balance on these templates. Each column now
+  scales its own step weight, which is the old behaviour when the columns
+  are equal (#96, after S0 landed as #135).
 
 ### S0 as built (2026-10-07)
 
