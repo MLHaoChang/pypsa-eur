@@ -1107,6 +1107,44 @@ On 2026-10-12 the owner accepted the recommended option on every question ("Acce
 
 **Estimated size.** Medium to large: about 450 lines of engine and 400 of tests, with one panel touch. One implementer session, Opus.
 
+### C13 as built (2026-10-12)
+
+Branch `feat/gridspine-campus-add-units`, cut from this plan's branch (PR #100's branch plus Part four) with master and PR #100's latest merged in.
+
+**Where the plan proved wrong, and what was built instead.**
+- **The worked example.** The units of `test_existing_transformers_short_of_the_margin_are_replaced_not_kept` are wound 110/21 kV on a 20 kV busbar, and every library entry at the group's voltages is 110/20 kV. Their no-load ratios are 5.0 % apart (|r_new − r_old| / r_old) against the 0.5 % allowed, so under the plan's own ratio rule nothing can be added, and **that test's outcome does not change**. It keeps every assertion; it now also asserts that no addition was offered and that the row's action is `replace`, and its docstring says why.
+  - The plan's add example is shown on the same campus with the pair wound 110/20 kV (`rewound_spec`): `test_units_are_added_next_to_an_existing_pair_short_of_the_margin` (keep 2 + 1 × T63 at 1.2 M€, against 2 × T63 at 2.4 M€), and `test_an_existing_pair_with_only_an_incompatible_unit_in_the_library_is_replaced_whole` (a library holding only a T63 at 15 %, 25 % off).
+  - The plan's "110/21 kV against 110/20 kV (4.8 %)" is 5.0 % with the deviation measured against the existing unit's ratio, which is how the rule is built.
+- **The vector group on the campus file already existed** (island plan I1): an untagged string, `D|Y|YN` and `d|y|yn`, no zig-zag, assumed Dyn11 for the fault model when absent. C13 reuses it as it is. The library's new `vector_group` is tagged, in the same notation (no `Z|ZN`: the campus fault model has no zig-zag winding, so a library Z unit could not be built). "Not given" means absent from the file; the island build's assumed Dyn11 does not count. An added unit carries the library's vector group as the campus file's plain string; the library's tag stays in the library.
+- The regex and the tap block's checks live in one place, `gridspine/schema/transformer.py` (`check_vector_group`, `check_tap`, `ratio`), used by the library loader and the campus build.
+
+**The choices the plan left open.**
+- **Taps in the compatibility rule.** The new unit is put at the existing units' offset from their neutral (the first existing unit with taps), so all run on the same position, and its ratio is compared there. An existing unit with an off-circuit tap and a new unit without taps: the ratio rule alone, at the existing position. A new unit with taps beside units without: at its neutral. An existing on-load changer with a new off-circuit one is refused (it cannot follow). Tap steps are compared to 1e-9 percentage point, so 1.6 % against 1.5 % is within the 0.1 point; uk and the ratio are compared exactly (11.0 % against 10.0 % is in).
+- **The pre-filter's outage flow** is the group's largest total with one unit out in part one's flows (`_outage_total`); the intact flow is the largest intact total. Replacements keep their old pre-filter unchanged.
+- **The redundancy rule** holds by construction for an addition (m ≥ 1 kept plus k ≥ 1 added), so it has no code of its own there.
+- **Bought units carry the library's tap block and vector group** for replacements as well as additions, so C15 finds tap data on what the study buys. A unit's tap is written at the neutral plus its offset.
+- **The table.** `action` is `buy`, `add`, `keep` or `replace`; `replace` also marks an existing cable re-conductored. The keep row of a fully kept group now carries its units (it said 0). An addition's chosen row says "added in parallel with TR1, TR2 (existing)", then "vector group assumed compatible (not given)" when that applies; an unresolved addition keeps its unresolved reason first.
+- **Timing.** A period with no selected hour is skipped when looking for the first failing one; a group that never fails as described (an addition forced by a later re-check) is bought in the first period.
+- **The MILP.** C8's choice is matched to the open candidates by items, existing and `keep`: a replacement "1 x T40" and the addition "keep TR1 + 1 x T40" have the same items, and without `keep` the warm start took the replacement (a test pins this). `select_assets_milp` and `invest_campus` take `parallel`.
+- **Sizing.** `size_transformers` gives `utilisation` and `worst_unit`; `adequate` is every unit's `S x (1 + margin)` within its own rating plus 1e-9 MVA (the old tolerance). The re-check's failure text names the worst unit and its utilisation.
+- **The IC producer** adds `meta.action` (None for a table written before C13); kept units are existing and stay out.
+- **Panel.** The investment table has an Action column and, under the need, the row's reason (not for an unresolved row, whose reason the alert already lists); a line under the scope note states the rules, all assumed. The copilot's investment notes gain one line on additions and `scope.parallel`; `harness/catalogue.py` is unchanged.
+
+**Tests** (oracles that run no code under test): the 41.1 % share by hand and in a direct pandapower net; per-unit utilisation from direct nets, mixed and three-unit; identical units against the old rule restated (five margin and N-1 settings); a brute force over every replacement and addition of a six-entry library, each solved directly with the per-unit rule (the cheapest is keep 2 + 1 × T20B at 10.8 %, which the selector buys with no escalation); the candidate list by hand from the S_r/uk estimate; every compatibility rule on its boundary; the timing by hand over three periods; the tap sign by hand (1/1.03 pu) and a tapped direct net; and the MILP joint case on an existing pair (adding T_A at 13 % needs a bank, adding T_B at 11 % does not; the brute force over 40 combinations and the MILP agree on T_B alone, C8 does not).
+
+**The Data Center template**, re-run as in "C8 as built" on the same prepared and ranked run (one period, pf 0.95, shipped library), with the merged base and with this branch: the same 1 × 63 MVA 132/33 kV, 3 × 25 MVA 33/11 kV and switchgear, €6.891 M capex, €610.3 k a year; the invested file and the re-checked compliance are byte for byte the same. The only difference is the new `action` column (`buy` on every purchase). Its campus has no existing transformer, so no addition is offered.
+
+**Mutations.** 50 by hand: 44 in the engine (loader 9, sizing 4, compatibility 12, candidates 8, timing 2, table and scope 4, MILP 4, driver 1), 5 in the panel, 1 in the IC producer. 45 were caught at once. Five survived the first run:
+- the tap sign of the ratio (HV side) and a range not covering the existing maximum: tests added (`test_a_tapped_unit_is_compared_at_its_effective_ratio`, which also pins the LV side, a mutation then caught; a range case `-9..8`);
+- the share weights `S_r x uk` for `S_r / uk`: the candidate list is now also checked by hand at 35.5 MW, where only the right weights refuse one 10.8 % unit;
+- k counted from 0: the adequate pair's additions must be k = 1..3;
+- the MILP's open set with the adequacy flag on: **equivalent**, because `open_candidates` passes zero flows, which pass any estimate.
+
+All the others are caught now. The redundancy rule has no code of its own for additions (above), so it has no mutation.
+
+**Gates.** `tests/gridspine -k "campus or island"` 1100 passed; the backend campus, chat-tool, bundle, IC-extra-asset, assistant-inventory and navigation tests 764 passed, 2 skipped (the live probe), and the 2 inventory failures on the first run were the stale copilot inventory, cleared by merging PR #100's inventory commit (12 passed); `tsc` clean and the full `vitest` 4212 passed.
+
+
 ### C14: replacement at end of life
 
 **Goal.**
