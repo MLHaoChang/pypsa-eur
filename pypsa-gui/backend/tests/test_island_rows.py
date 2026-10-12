@@ -520,3 +520,16 @@ def test_a_flat_delta_p_plus_series_lines_up_with_investment_periods():
     n = _solve(n, _island(units=units, k=0, scenarios=("seamless",)), delta_p_plus=step)
     assert _p_nom(n) == pytest.approx((40.0 + 10.0 * 15.0 / 3600.0) / 2.0, abs=TOL)
     assert n._island_facts["seamless_bridge"] == "held"
+
+
+def test_the_initial_soc_is_credited_once_at_the_start_of_the_horizon():
+    """Non-cyclic, carried across periods, starting at 4 MWh with 0.5 h of
+    storage. 10 MW at the first 2040 hour needs SoC(end of 2030) ≥ 10 →
+    p_nom 20. Crediting the initial 4 MWh again at the start of 2040 would
+    ask only 6 MWh → 12 MW."""
+    n = _net(crit=np.zeros(24), cyclic=False, soc_init=4.0, max_hours=0.5)
+    n.set_investment_periods([2030, 2040])
+    p_set = n.loads_t.p_set
+    p_set.iloc[24, p_set.columns.get_loc("crit")] = 10.0
+    n = _solve(n, _island(sustained_h=1.0))
+    assert _p_nom(n) == pytest.approx(20.0, abs=TOL)
