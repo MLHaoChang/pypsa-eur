@@ -66,6 +66,16 @@ from the product's code; the product is only the thing under test.
      operating `not_established`; a missing escalation class → not
      established through the routes; every None renders as None / "not
      established" / `not_established`, never 0.
+  M. IC S0b by hand (plan `2026-10-06-ic-s0b-replacements-terminal.md` S2–S6):
+     a two-part battery (power 400 k · 10 y, energy 1.2 M · 15 y) on 25
+     operating years from COD 2030 under `part_lifetimes` — the power part
+     re-bought in 2039 and 2049, the energy part in 2044, each escalated by
+     capex 2 % from the base year; the `remaining_life_annuity` terms (cost ×
+     crf × annuity-PV factor, 5 years left on each); the identity at 7 %
+     with no escalation and no tax: PV(capex + replacements − TV) =
+     2,199,084.18 and the project NPV = (saving − LP annuity) × af(7 %, 25);
+     `scale_capex` moves parts and total; a fixed entry for a `part_lifetimes`
+     asset refused `replacement_rule_conflict:bess`.
 
 (The P1–P3 drivers — `qa_commercial_lp.py`, `qa_billing_contracts.py`,
 `qa_value_flows.py` — run beside this one in `tests/run_qa_drivers.py`.)
@@ -632,6 +642,86 @@ def scenario_g() -> None:
     op3 = build_operating(book, build_timeline(book))
     _step("F5: book value waits for the tax basis (not established in the operating pass)",
           op3.status["terminal"] == "not_established" and op3.ebitda is None)
+
+
+def scenario_m() -> None:
+    print("\n[M] IC S0b by hand: part replacements and the remaining-life terminal value")
+    from models.finance import FinanceInputs
+    from services.finance.case import (
+        AssetFinance, AssetPart, FinanceCase, FinanceRefused, LpBasis, Template, TemplateLine,
+        scale_capex,
+    )
+    from services.finance.engine import run_case
+    from services.finance.tax import DepreciationClass, TaxLayer, sl_half_year
+
+    def crf(r, life):
+        return 1.0 / life if r == 0 else r / (1.0 - (1.0 + r) ** -life)
+
+    def apf(r, y):
+        return 0.0 if y <= 0 else (float(y) if r == 0 else (1.0 - (1.0 + r) ** -y) / r)
+
+    no_tax = (TaxLayer(name="corp", rate=0.0,
+                       depreciation=(DepreciationClass("all", 1.0, sl_half_year(10)),)),)
+    bess = AssetFinance("bess", "StorageUnit", 1_600_000.0, 15.0, "battery",
+                        (AssetPart("power", 400_000.0, 10.0, None),
+                         AssetPart("energy", 1_200_000.0, 15.0, None)))
+    saving = 300_000.0
+
+    def case(capex_esc: float, **over) -> FinanceCase:
+        kw = dict(financial_close=date(2029, 1, 1), cod_by_asset={}, analysis_years=25,
+                  contingency_share=0.0, capex_phasing=[1.0],
+                  escalation={"opex": 0.0, "tariff": 0.0, "capex": capex_esc},
+                  tax_losses="offset_other_income", financing_fee_tax="not_deducted",
+                  wacc_nominal=0.07, cost_of_equity=0.07, inflation=0.0,
+                  replacement_rule="part_lifetimes",
+                  terminal_value={"method": "remaining_life_annuity"})
+        kw.update(over)
+        return FinanceCase(
+            inputs=FinanceInputs(**kw), owner="o", base_year=2030, cod=date(2030, 1, 1),
+            templates=(Template(2030, (TemplateLine("bill", "energy_import", -700_000.0,
+                                                    "tariff"),)),),
+            counterfactual=(Template(2030, (TemplateLine("bill", "energy_import", -1_000_000.0,
+                                                         "tariff"),)),),
+            assets=(bess,), lp_basis=LpBasis(discount_rate=0.07))
+
+    r = run_case(case(0.02), layers=no_tax)
+    tl = r.tl
+    want = {2039: 400_000.0 * 1.02 ** 9, 2044: 1_200_000.0 * 1.02 ** 14,
+            2049: 400_000.0 * 1.02 ** 19}
+    got = {int(y): float(r.op.replacement[tl.index(y)]) for y in tl.years
+           if r.op.replacement[tl.index(y)] != 0.0}
+    _step("M: part_lifetimes re-buys power in 2039 and 2049, energy in 2044 (the last service "
+          "years), escalated by capex 2 % from 2030, no contingency",
+          got.keys() == want.keys() and all(_cent(got[y], v) for y, v in want.items()), f"{got}")
+    tv_power = want[2049] * crf(0.07, 10) * apf(0.07, 5)          # serves 2050–2059
+    tv_energy = want[2044] * crf(0.07, 15) * apf(0.07, 5)         # serves 2045–2059
+    _step("M: remaining_life_annuity TV = Σ base × crf(7 %, L) × af(7 %, 5) at 2054, inside EBITDA",
+          r.op.terminal is not None and _cent(float(r.op.terminal[-1]), tv_power + tv_energy)
+          and float(sum(r.op.terminal[:-1])) == 0.0,
+          f"{None if r.op.terminal is None else float(r.op.terminal[-1]):.2f} vs "
+          f"{tv_power + tv_energy:.2f}")
+    flat = run_case(case(0.0), layers=no_tax)
+    pv_costs = sum((float(flat.op.capex[i]) + float(flat.op.replacement[i])
+                    - float(flat.op.terminal[i])) / 1.07 ** i for i in range(flat.tl.n))
+    annuity = 400_000.0 * crf(0.07, 10) + 1_200_000.0 * crf(0.07, 15)
+    _step("M: the identity — PV(capex + replacements − TV) = PV of the LP annuities 2,199,084.18",
+          abs(pv_costs - annuity * apf(0.07, 25)) < CENT
+          and abs(annuity * apf(0.07, 25) - 2_199_084.18) < CENT, f"{pv_costs:.4f}")
+    npv_want = (saving - annuity) * apf(0.07, 25)
+    _step("M: the project NPV = (LP saving − annuity) × af(7 %, 25) (GS BY_CONSTRUCTION)",
+          _rel(flat.metrics["project_pre_tax_npv"], npv_want, 1e-9),
+          f"{flat.metrics['project_pre_tax_npv']} vs {npv_want}")
+    s = scale_capex(case(0.0), 1.1).assets[0]
+    _step("M: scale_capex moves every part and the total together",
+          _cent(s.overnight_cost, 1_760_000.0)
+          and [round(p.overnight_cost, 2) for p in s.parts] == [440_000.0, 1_320_000.0])
+    try:
+        run_case(case(0.0, replacement_capex=[(2040, "bess", 1.0)]), layers=no_tax)
+        refused = None
+    except FinanceRefused as exc:
+        refused = exc.code
+    _step("M: a fixed entry for a part_lifetimes asset is refused (double counting)",
+          refused == "replacement_rule_conflict:bess", f"{refused}")
 
 
 # ── through the routes ─────────────────────────────────────────────────────
@@ -1456,7 +1546,7 @@ def main() -> int:
     started = time.monotonic()
     for fn in (scenario_a, scenario_b, scenario_c, scenario_d, scenario_e, scenario_f,
                scenario_g, scenario_h, scenario_i, scenario_j, scenario_k, scenario_i_pack,
-               scenario_l):
+               scenario_l, scenario_m):
         try:
             fn()
         except Exception as exc:  # noqa: BLE001 — a crashed scenario is a failure

@@ -241,3 +241,74 @@ def chat_service_session():
 def _dispatch(session, collected, tu):
     from services import chat_service
     return chat_service._dispatch_real_tool_call(session, tu, collected)
+
+
+
+# ── CH-7: a partial batch must say what landed ─────────────────────────────
+
+
+def _transformer(name: str, v1: float) -> dict:
+    return {"name": name, "bus0": "Hub", "bus1": "Low", "s_nom": 100.0,
+            "x": 0.1, "v_nom_0": 380.0, "v_nom_1": v1}
+
+
+@pytest.fixture
+def two_voltage(base):
+    base.add("Bus", "Low", v_nom=110)
+    return base
+
+
+def test_a_handler_refusal_mid_batch_reports_what_already_landed(two_voltage):
+    """
+    Pass 1 validates the SCHEMA and name uniqueness. The per-class handler
+    validators — the docstring's own "transformer voltage validation" — run in
+    `create_component`, i.e. in pass 2, and they raise HTTPException. Pass 2
+    re-raised an HTTPException BARE, so the branch that says "batch partially
+    applied: created [...]" only ever covered the unlikely, non-HTTP failure.
+    The agent was told "voltage mismatch" and concluded nothing had landed,
+    while T1 and T2 were in the network.
+    """
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.batch_create_components("Transformer", [
+            _transformer("T1", 110.0),
+            _transformer("T2", 110.0),
+            _transformer("T3", 220.0),     # bus Low is 110 kV: refused in pass 2
+        ])
+
+    detail = exc.value.detail
+    text = detail if isinstance(detail, str) else detail.get("message", "")
+    assert "partially applied" in text, (
+        f"a partial batch was reported as a clean refusal: {detail!r}"
+    )
+    assert "T1" in text and "T2" in text
+    # The landing the message claims really happened.
+    assert {"T1", "T2"} <= set(two_voltage.transformers.index)
+    assert "T3" not in two_voltage.transformers.index
+
+
+def test_the_original_status_is_kept(two_voltage):
+    """A voltage mismatch is the caller's data, not a server fault — forcing
+    500 would say otherwise, and the old non-HTTP branch did exactly that."""
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.batch_create_components("Transformer", [
+            _transformer("T1", 110.0),
+            _transformer("T3", 220.0),
+        ])
+    assert 400 <= exc.value.status_code < 500, exc.value.status_code
+
+
+def test_a_failure_on_the_first_entry_is_not_called_partial(two_voltage):
+    """
+    The control. Nothing has landed, so the batch is NOT partial and the
+    handler's own error is the accurate one — prefixing it would be the same
+    kind of wrong claim, in the other direction.
+    """
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.batch_create_components("Transformer", [
+            _transformer("T3", 220.0),
+            _transformer("T1", 110.0),
+        ])
+    detail = exc.value.detail
+    text = detail if isinstance(detail, str) else str(detail)
+    assert "partially applied" not in text
+    assert not set(two_voltage.transformers.index) & {"T1", "T3"}

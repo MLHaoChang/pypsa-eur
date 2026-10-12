@@ -166,23 +166,25 @@ def test_the_stream_path_records_an_owner(client, seeded_identity, monkeypatch):
     receives. The request is allowed to fail afterwards (no LLM is configured in
     the suite); the creation happens first, which is all this asserts.
     """
-    captured: dict = {}
-    real = chat_service.get_or_create_session
+    sid = f"own-{_uuid.uuid4().hex[:8]}"
+    client.post("/api/chat/stream", json={"message": "hello", "session_id": sid})
 
-    def recording(session_id=None, **kwargs):
-        captured.update(kwargs)
-        return real(session_id, **kwargs)
-
-    monkeypatch.setattr(chat_service, "get_or_create_session", recording)
-    client.post("/api/chat/stream", json={"message": "hello",
-                                          "session_id": f"own-{_uuid.uuid4().hex[:8]}"})
-
-    assert "owner_user_id" in captured, (
-        "POST /stream created a session without passing owner_user_id; under "
-        "fail-closed that locks the real owner out of /abort and /rewind"
+    # Asserted on the RESULT, not on which helper the route happened to call.
+    # The earlier version captured the kwargs of `get_or_create_session` by
+    # monkeypatching it, and broke the day /stream switched to the `_reporting`
+    # variant (needed to tell a session it just minted from one that already
+    # belonged to somebody else) — while the property it cares about still
+    # held. A guard that fails when the code gets safer is measuring the wrong
+    # thing, which is the same lesson its own docstring records about the
+    # version before that.
+    sess = chat_service.get_session(sid)
+    assert sess is not None, (
+        "POST /stream did not create the session it was given"
     )
-    assert captured["owner_user_id"] == str(seeded_identity["user_id"]), (
-        f"owner recorded as {captured['owner_user_id']!r}, expected the caller"
+    assert sess.owner_user_id == str(seeded_identity["user_id"]), (
+        f"owner recorded as {sess.owner_user_id!r}, expected the caller; under "
+        "fail-closed a missing or wrong owner locks the real owner out of "
+        "/abort and /rewind"
     )
 
 

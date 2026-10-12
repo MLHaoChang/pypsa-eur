@@ -1,6 +1,10 @@
 """
 The engine facade frozen for the guided study (IC plan
-`2026-10-05-one-investment-engine-two-faces.md` §6; GS Q4, IC U1 follow-up).
+`2026-10-05-one-investment-engine-two-faces.md` §6, the U1 landing plan
+`2026-10-05-ic-u1-engine-landing.md` §3; GS Q4, IC U1 follow-up; the S0b
+additions of `2026-10-06-ic-s0b-replacements-terminal.md` S7: the asset parts,
+`effective_parts`, `scale_capex`, the replacement schedule,
+`FinanceInputs.replacement_rule` and the `remaining_life_annuity` method).
 
 Every facade name is imported and its call signature pinned with
 `inspect.signature` against the expectation below, so any change — a renamed
@@ -52,6 +56,18 @@ SIGNATURES: dict[str, str] = {
     "services.finance.engine.payback": "(cash: 'np.ndarray | None') -> 'float | None'",
     "services.finance.metrics.irr": "(cash) -> 'tuple[float | None, list[str]]'",
     "services.finance.metrics.npv": "(rate: 'float | None', cash) -> 'float | None'",
+    # IC S0b (plan S7): one source of capex truth and the one replacement schedule.
+    "services.finance.case.effective_parts": "(a: 'AssetFinance') -> 'tuple[AssetPart, ...]'",
+    "services.finance.case.scale_capex": "(case: 'FinanceCase', f: 'float') -> 'FinanceCase'",
+    "services.finance.case.AssetPart":
+        "(name: 'str', overnight_cost: 'float | None', lifetime_years: 'float | None', "
+        "fom_share: 'float | None' = None) -> None",
+    "services.finance.case.AssetFinance":
+        "(name: 'str', component: 'str', overnight_cost: 'float | None', "
+        "lifetime_years: 'float | None' = None, carrier: 'str | None' = None, "
+        "parts: 'tuple[AssetPart, ...]' = ()) -> None",
+    "services.finance.replacements.schedule":
+        "(case: 'FinanceCase', tl: 'Timeline') -> 'tuple[Replacement, ...]'",
     "services.finance.report.assemble_finance_sections":
         "(result, case, *, case_id: 'str' = 'investment_case', "
         "assumptions_hash: 'str | None' = None, packs: 'dict[str, str] | None' = None, "
@@ -104,6 +120,19 @@ DATACLASS_FIELDS: dict[str, tuple[str, ...]] = {
     "services.commercial.tariff_engine.RatingResult": (
         "lines", "fixed_lines", "monthly", "annual", "per_item", "total", "total_supported",
         "flags", "notes", "unsupported_items", "per_item_sampled", "demand_lines"),
+    # IC S0b (plan S2, S4): the parts on the case and a scheduled replacement.
+    "services.finance.case.AssetFinance": (
+        "name", "component", "overnight_cost", "lifetime_years", "carrier", "parts"),
+    "services.finance.case.AssetPart": ("name", "overnight_cost", "lifetime_years", "fom_share"),
+    "services.finance.replacements.Replacement": ("year", "asset", "part", "amount", "source"),
+}
+
+# The literal choices the guided study compiles to (IC S0b plan S7: C2 compiles
+# to `remaining_life_annuity`, D9 to `part_lifetimes`).
+LITERALS: dict[tuple[str, str], tuple[str, ...]] = {
+    ("models.finance.TerminalValueRule", "method"): (
+        "none", "book_value", "multiple_of_ebitda", "fixed", "remaining_life_annuity"),
+    ("models.finance.FinanceInputs", "replacement_rule"): ("fixed", "part_lifetimes"),
 }
 
 MODEL_FIELDS: dict[str, tuple[str, ...]] = {
@@ -119,7 +148,8 @@ MODEL_FIELDS: dict[str, tuple[str, ...]] = {
         "cost_of_equity", "currency", "currency_year", "debt", "degradation_by_asset",
         "depreciation_class_by_asset", "escalation", "financial_close", "financing_fee_tax",
         "hebesatz_pct", "incentives", "inflation", "participants", "price_basis", "pwa_met",
-        "replacement_capex", "reserves_rate", "small_business_163j", "solve_ppa", "state_rate",
+        "replacement_capex", "replacement_rule", "reserves_rate", "small_business_163j",
+        "solve_ppa", "state_rate",
         "tax_equity", "tax_losses", "tax_pack_id", "terminal_value", "wacc_nominal"),
 }
 
@@ -153,6 +183,14 @@ def test_a_facade_result_type_keeps_its_fields(path):
 @pytest.mark.parametrize("path", sorted(MODEL_FIELDS))
 def test_the_compiled_model_field_names_are_frozen(path):
     assert sorted(_get(path).model_fields) == sorted(MODEL_FIELDS[path])
+
+
+@pytest.mark.parametrize("path,field", sorted(LITERALS))
+def test_the_compiled_literal_choices_are_frozen(path, field):
+    import typing
+
+    ann = _get(path).model_fields[field].annotation
+    assert typing.get_args(ann) == LITERALS[(path, field)]
 
 
 def test_the_finance_result_keeps_the_fields_the_guided_study_reads():
