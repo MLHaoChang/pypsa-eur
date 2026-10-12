@@ -248,3 +248,36 @@ They show three ways, none of them blocking: the per-object emissive outline (re
 ### Still open from S2
 
 The owner check on the first real campus (a screenshot in the QA note) before the numbers are tuned; the rule numbers themselves (placeholders, sourced in the comments); the sidebar's Issues badge does not count layout findings.
+
+## S3 amendment (2026-10-06) — distances that reach the model
+
+*Visual-layers plan 3 S3; owner decision O1 ("placement carries meaning") and the opt-in of §7a decision 3 ("deriving lengths from geometry follows as an opt-in per project"). Builds on plan 2 M1 (`map_layout.json`) and M2 (length provenance, `POST /api/network/lengths/from_geometry`, the project setting `derive_lengths_from_geometry`). This amends §4.3 (the flow anchor) and §6.4 (the labels); S2's amendment and everything above stand.*
+
+### The distance rule (`site3d/siteDistances.ts`, pure)
+
+For every branch (Line, Link, Transformer) whose two buses are members of the open site — a branch whose far bus has no yard here has no site distance — one number, keyed as the map keys routes (`line:<name>` / `link:<name>` / `tr:<name>`):
+
+- **`route`** — the project's map document holds a route for the branch: its length from the owner bus's yard through the route's waypoints to the far bus's yard, on the site's tangent plane (`site3d/geo.ts`). That is how the map measures a route (bus0 → interior waypoints → bus1, `services/network_geometry.py::route_length_km`), so the site's number *is* the route's length and the two views never disagree (to the tangent-plane approximation; a yard the user moved off its bus's coordinate is the one case they can differ, and the site then shows what the user sees). The path is kept in site metres for the flow chevrons.
+- **`grid`** — no route: the Manhattan distance between the branch object's **connection anchor** and the far yard's origin, times **`ROUTING_FACTOR`**. The connection anchor is the far-side end of the object's flow anchor (templates draw it owner side → far side), turned by its heading, from its origin — where the cable leaves a transformer's LV side or a feeder bay's gantry; an object without a flow anchor measures from its origin. Cables on a campus run in orthogonal trenches and ducts, hence Manhattan rather than Euclidean.
+
+`ROUTING_FACTOR = 1.2` lives in `assetLibrary.ts` beside `PACKING` with its source comment: a placeholder from estimating practice (cable schedules add 10–20 % to the measured run for bends, risers, terminations and slack), the upper end because the grid distance is already the long way round; to be set from one published norm as the S2 numbers are. `layout.ts` never sees it (its source guards still hold).
+
+Shown on the branch's **flow-path label**: the hover label gains a line `TR1 → Campus 33 kV · 86 m` (`distanceLabel`; `fmtKm` from the map, so the two views read alike; the title says how it was measured), and the results readout ends a branch's line with ` · 86 m`. In the scene the branch's flow chevrons run **along the route** when one exists (`Anchors.flow` gains `via`, the route in the object's frame via `flowAnchorsAlong`; `resultsDecor.chevronPolyline` spaces them by arc length, one more chevron per 12 m up to 24, arrowheads capped at 3 m); without a route they stay on the object's own anchor. All of it is computed once per layout (a `useMemo` on the layout and the map document); nothing runs per frame beyond the chevron placement that already did.
+
+### Writing lengths, behind the project setting
+
+With **Derive lengths from geometry** on (M2's setting; off by default), a placement change that moves either end of a branch — a gizmo drag settling, **Arrange**, **Arrange all** — writes, for every affected member branch (the branch itself, or any branch at a moved yard) **that has no user route**, a straight two-point route into `map_layout.json`: the connection anchor and the far yard as `[lng, lat]`, with the new route source **`site`** (`ROUTE_SOURCES` and `RouteSource` gain it; `validate_map_layout` accepts it). Then `mapLayoutStore.queueLengthFromGeometry` queues the branch, so M2's `POST /api/network/lengths/from_geometry` goes out once the debounced PUT has landed — the server measures the route it holds — and the result reaches the same places a map edit's does (`utils/lengthsDerived.ts`: the Line/Link lists invalidated, the provenance mirrored, the log line, the impedance-rescale previews to the one `RescaleDialogHost`). A transformer gets the route (so the map shows it) and no length (PyPSA has none; the endpoint would skip it as `no-length`). The site route then measures as any route: the model's `length` = bus0 → anchor → far yard → bus1, which is the site's `route` number when the yards stand at their buses.
+
+With the setting **off**, nothing is written: the distance is shown only, and the map's discrepancy badge (M2) keeps saying where a stored length disagrees with its geometry.
+
+### The never-overwrite rule
+
+A route the user drew, imported or adopted from OSM (`source: 'user' | 'import' | 'osm'`) is **never** overwritten by the site: `mapLayoutStore.setSiteRoute` writes only when the branch has no route or a `site` route, and returns whether it wrote (`siteMayWriteRoute`). Its length is the route's, and the site shows that route's length. A user edit over a `site` route on the map makes it the user's (`source: 'user'`), and the site leaves it alone from then on; removing a route is the user's act (the site never writes an empty route). The site overwrites its own earlier route on every qualifying placement change.
+
+### Reaching the campus study
+
+`gridspine/producers/campus.py` reads `length` (1 km at zero) when it drafts cables, so a derived length flows into `length_km` with no gridspine change. `backend/tests/test_site_route_lengths.py` mirrors M2's end-to-end test: two member buses 200 m apart, a site document placing both yards and the feeder bay (heading 90, anchor 6 m on), the setting on, the site route PUT through the map_layout route, `apply_lengths_from_geometry`, a save, and the campus electrical draft's cable carrying the derived length (≈ 0.2 km, not the typed 1 km).
+
+### Still open from S3
+
+The routing factor and the connection anchor are placeholders (the anchor is the flow anchor's far end, not a bay's cable termination); a site route's ends are the branch's anchor and the far yard, not the far bus's bay (the far yard draws no bay for a branch it does not own); a yard moved off its bus's coordinate makes the site and the map measure a route from different ends; the chevrons along a long route stay at the anchor's height and ignore the terrain between the yards; the empty-state **Generate 3D site** (S4) arranges without noting a placement change, so its first arrangement writes no routes until the user arranges or drags.
