@@ -486,6 +486,22 @@ energy-hub templates".
   `assumed` in the island sidecar's provenance), with a test that its
   rating covers the IT peak.
 
+### S0 as built (2026-10-07)
+
+- `_base()` sets `objective` and `generators` to 52.14 and `stores` to 1.0.
+  Annual cost and energy are unchanged; a snapshot's state-of-charge step is
+  now one hour of power.
+- **The UPS is 40 MW / 0.25 h (10 MWh)** (owner, sixth round): a realistic
+  15-minute autonomy. It covers the 600 s bridge (about 6.3 MWh at 36 MW and
+  95 %), and it does not arbitrage like a large battery.
+- The SCR comment no longer counts the UPS as inverter-based: its rectifier
+  feeds no fault upstream, as in I1. The `eh_ibr_mva` value is unchanged.
+- **Tests:**
+  - every template pins `stores == 1`, and a solved template's state of
+    charge moves by exactly one hour of power per snapshot;
+  - the UPS covers the IT peak and the bridge.
+- Nothing else in the backend reads the `stores` weighting.
+
 ### I2a: ride-through, fuel and bridge reserve in the hub LP — step 1 (M)
 
 New module: `services/solver/island.py`, an `extra_functionality` wrapper
@@ -920,6 +936,45 @@ includes the losses and the UPS state after the event.
   - the gate is run on a case where a unit saturates.
 - Mutations.
 
+### I4 as built (2026-10-07)
+
+**`gridspine/static/island_flow.py`**
+- `island_flow(campus, rows, online=None, settings=...)` returns an
+  `IslandFlow`: `viable`, `reason`, `df_hz`, `delta_p_ac_mw`, the units,
+  buses, transformers and cables, `sync` (Δf, ΔV at the PCC), and
+  `label = "steady-state screening"`.
+- `island_net` builds the net for inspection, and `check_gate` is the
+  per-unit gate.
+- **The Q laws are gridspine's own** (Q(U), fixed cos φ, cos φ(P)), not
+  pandapower's `DERController`. They are three short functions, tested
+  against their curves. So `QModelCosphiP`'s sin φ (spike 5) is never on the
+  path, and the planned pin test is not needed.
+- **Q sharing through x_v** goes as 1 / (x_v + the tie to the load) on the
+  unit base. The plan's "∝ 1/k_q" holds only with no tie. The test uses the
+  exact form: 2.55 and 2.055 for the two ties, both by hand.
+- **The current limit is judged at the terminal voltage**, not behind x_v.
+  The limited source then carries `i_max · S_n · V_t` at the voltage it ends
+  up at, as part of the fixed point. Building this found the bug of using
+  the auxiliary bus's 1 pu.
+- **Gensets have a P range, not a current limit.** Their overload shows in
+  `loading_pct` and the verdict. The verdict checks, in order: no reference,
+  every reference saturated, convergence, voltage band, overload.
+- `online` picks the units in the island; a unit outside it is out of
+  service. A UPS keeps its battery dispatch and never forms the island.
+
+**`control_law_flow` (I4b)**
+- The hour stays grid-connected: GFM converters sit behind x_v at their
+  dispatched P and V0, GFL units follow their law, and gensets stay in
+  power-factor control.
+- **Without island data it equals today's campus flow**, which the test
+  pins. The comparison with the MILP's free Q is left to the driver that
+  joins the two (I9).
+
+**Tests**
+- 31 tests, each worked by hand.
+- Mutation testing: 29 of 29 mutants killed. The first round left 8
+  survivors, closed by new tests and one dead line removed.
+
 ### I5: short circuit by control mode, grid-connected and islanded — step 3b (M–L)
 
 **Grid-connected** (`static/campus_sc.py`):
@@ -997,6 +1052,69 @@ includes the losses and the UPS state after the event.
 - **The sensitivity:** in an inverter-only island, relay current scales
   linearly with i_max, by hand.
 - Mutations.
+
+### I5 as built (2026-10-12)
+
+**`gridspine/static/island_sc.py`**
+- `machine_net(campus, installed, island=False, case="max", gfm_override=None)`
+  builds the fault net for both sides:
+  - a genset is a pandapower `gen` behind x''d, with `rdss_ohm` from `rx_sc`
+    and cos φ 0.8 (ledgered);
+  - behind its own unit transformer it is a power-station unit, so pandapower
+    applies K_S (new flag `unit_transformer_oltc: true`) or K_SO (false,
+    the default). Without the `power_station_unit` flags pandapower does
+    not apply K_S, which the hand test caught;
+  - converters are current sources at `converter_k`: GFL `k_sc`, GFM
+    `i_max_pu` (max) or `k_gfm_min` (min), UPS 0.
+- `campus_fault_levels` (grid-connected) now uses `machine_net`. Its
+  regression test converts GEN1 independently and shows the change is the
+  machine model alone.
+- `island_fault_levels(campus, online, gfl_min_case, gfm_override)`: max case
+  by IEC 60909 with no `ext_grid`, or by the current-source solve when no
+  genset is online; min case converter-aware, labelled `METHOD_MIN`, also
+  with the largest source out.
+- `current_source_fault`: its own nodal solve (Ybus of the fault's connected
+  part, transformers at nominal ratio, no shunts), giving Ik'' and every
+  branch's current. It replaces pandapower where pandapower crashes (spike 4)
+  and gives the relay currents.
+- **The spike-2 residual is explained:** IEC's K_G = c_max / (1 + x''d·sin φ)
+  = 1.1 / (1 + 0.15·0.6) = 1.0092 gives 1.589 kA, which pandapower matches.
+  The first review's 1.563 kA used K_G = 1.0261, which is not the IEC value.
+- `mu(x, t_min)` and `lam(excitation, xd_sat, ik_sustained_pu)`:
+  - μ = 1 for Ik''/IrG ≤ 2, else a + b·e^(−c·x) for t_min 0.02 / 0.05 /
+    0.10 / 0.25 s. **The coefficients are as recalled, not checked against
+    the standard: tagged assumed in the ledger.**
+  - λ is a first pass, not the IEC curves: 1/x_d,sat without field forcing;
+    with PMG forcing the datasheet's sustained current (new optional
+    `ik_sustained_pu`, else 3 pu, assumed).
+- `relay_check(campus, online, gfl_min_case, sensitivity)`: per relay the
+  branch current (decayed by μ or λ for the genset share; converters held),
+  the fault total, the bypass (on-feeder infeed: the blinding), the verdict
+  at s × pickup (new requirement `relay_sensitivity`, default 1.5), the
+  grid-connected Ik''max and its ratio, and the current at each
+  `i_max_sensitivity_pu`.
+  - **Change from the plan:** the largest-out current (`relay_n1_ka`) is
+    reported, not judged. With its only source out a feeder carries no fault
+    current and has nothing to clear, so a verdict there would only ever
+    read blind.
+
+**Campus YAML**
+- A top-level `relays:` list: `name`, `branch`, `fault_bus`, `i_pickup_ka`
+  (tagged), `timing` (`instantaneous` | `time_delayed`), and `t_min_s` for an
+  instantaneous relay (tagged, one of the four μ times, default 0.02).
+  Read into `Campus.relays`.
+- The C1 ledger line that screened gensets as 1/x''d current sources is
+  retired.
+
+**Tests**
+- 37 test functions in `test_island_sc.py`, `test_island_sc_parts.py` and
+  `test_island_relays.py`, each against a hand value (K_G 1.589 kA, K_SO
+  1.02005, K_S 0.96397, Σ k·In, radial and parallel branch splits, μ, λ, the
+  blinding, both sides of s, the linear i_max sensitivity), plus the
+  pandapower min-case pin.
+- Mutation testing: 29 of 29 killed. The first round left 8 survivors,
+  closed by new tests, removing a cap on μ, and fixing a mutant that changed
+  nothing.
 
 ### I5b: unbalanced faults (L; owner Q9)
 

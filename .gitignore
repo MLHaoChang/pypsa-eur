@@ -133,3 +133,6 @@ doc/img/intro-workflow.svg
 
 # Session tooling installs a root node_modules (SessionStart hook); never part of the repo.
 node_modules/
+pypsa-gui/backend/pilot-evaluation.json
+pypsa-gui/backend/pilot-evaluation.json.log
+pypsa-gui/backend/pilot-evaluation.json.tmp

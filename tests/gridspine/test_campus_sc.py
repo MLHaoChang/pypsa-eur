@@ -43,10 +43,19 @@ def test_installed_units_raise_the_mv_level_and_uninstalled_ones_do_not():
 
 
 def test_the_levels_match_pandapower_on_the_same_net():
+    """Since island plan I5 the genset is a synchronous machine behind x''d
+    (IEC K_G), not the C1 current source of 1/x''d: the oracle net converts
+    GEN1 here, independently of the module."""
     camp = build_campus(campus_spec())
     fl = campus_fault_levels(camp, installed=ALL).set_index("bus")
     import copy
+    import pandapower as pp
     net = copy.deepcopy(camp.net)
+    i = net.sgen.index[net.sgen["name"] == "GEN1"][0]
+    net.sgen.at[i, "in_service"] = False
+    x_ohm = 0.15 * 20.0 ** 2 / 12.5
+    pp.create_gen(net, int(net.sgen.at[i, "bus"]), p_mw=0.0, vm_pu=1.0, sn_mva=12.5, vn_kv=20.0,
+                  xdss_pu=0.15, rdss_ohm=0.07 * x_ohm, cos_phi=0.8, name="GEN1")
     sc.calc_sc(net, case="max", ip=True)
     by = dict(zip(net.bus["name"], net.res_bus_sc["ikss_ka"]))
     ip = dict(zip(net.bus["name"], net.res_bus_sc["ip_ka"]))
