@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { buildSiteLayout, objectKey, type SiteInput } from './layout'
-import { DEFAULT_LIBRARY, type AssetType } from './assetLibrary'
+import { buildSiteLayout, objectKey, type SiteInput, type SiteObject } from './layout'
+import { DEFAULT_LIBRARY, PACKING, type AssetType } from './assetLibrary'
+import { rectOf, rectDistance, rectsOverlap, betweenSegment, segmentRectDistance, bearingDeg, angleDiffDeg } from './placementCheck'
 import type { Generator, Load, StorageUnit, Store, Transformer, Line, Link } from '../api/types'
 
 // Minimal component factories: only the fields the layout reads, cast to the
@@ -179,12 +180,15 @@ describe('buildSiteLayout — several buses, placements, rules (WP3)', () => {
     expect(gC.origin[1]).toBeCloseTo(gCAlone.origin[1] - 50, 6)
   })
 
-  it('a two-terminal component between two member buses is drawn once, at the first member it touches', () => {
+  it('a two-terminal component between two member buses is drawn once, owned by the first member it touches', () => {
     const { objects } = buildSiteLayout(two)
     const ts = objects.filter(o => o.name === 'T')
     expect(ts).toHaveLength(1)
-    // bus0 = B is a member → attributed to B (north of B's yard, i.e. near x≈0).
-    expect(Math.abs(ts[0].origin[0])).toBeLessThan(100)
+    // bus0 = B is a member → attributed to B; its placement rule puts it
+    // between B's yard (x = 0) and C's (x = 300), not in B's north zone (S2).
+    expect(ts[0].bus).toBe('B')
+    expect(ts[0].origin[0]).toBeGreaterThan(0)
+    expect(ts[0].origin[0]).toBeLessThan(300)
     expect(objects.filter(o => o.name === 'L')).toHaveLength(1)
   })
 
@@ -383,6 +387,154 @@ describe('buildSiteLayout — several buses, placements, rules (WP3)', () => {
   it('switchyard width counts bays from the library flags, not kind names', () => {
     const one = buildSiteLayout({ ...empty, lines: Array.from({ length: 5 }, (_, i) => ln({ name: `L${i}` })) })
     expect(one.objects[0].footprint[0]).toBe(12 + 5 * 8)
+  })
+})
+
+// ── S2: placement that is plausible (visual-layers plan 3, owner decision O1) ──
+
+describe('buildSiteLayout — placement rules (S2)', () => {
+  // A campus: a 110 kV grid yard west, the 33 kV campus yard 400 m east, two
+  // transformers between them, and the campus plant at the 33 kV bus.
+  const campus: SiteInput = {
+    ...empty,
+    buses: [{ name: 'HV', v_nom: 110, offset: [0, 0] }, { name: 'MV', v_nom: 33, offset: [400, 0] }],
+    transformers: [tr({ name: 'TR1', bus0: 'HV', bus1: 'MV' }), tr({ name: 'TR2', bus0: 'HV', bus1: 'MV' })],
+    storageUnits: [su({ name: 'BESS', bus: 'MV', p_nom: 10, max_hours: 4 })],
+    generators: [gen({ name: 'GEN', bus: 'MV', carrier: 'gas', p_nom: 20 }), gen({ name: 'PV', bus: 'MV', carrier: 'solar', p_nom: 2 })],
+    loads: [ld({ name: 'HALL', bus: 'MV', p_set: 30 })],
+    stores: [st({ name: 'H2', bus: 'MV', carrier: 'H2', e_nom: 100 })],
+    lines: [ln({ name: 'GRID', bus0: 'HV', bus1: 'EXT' })],
+  }
+  const find = (objects: SiteObject[], name: string) => objects.find(o => o.name === name)!
+  const yardOf = (objects: SiteObject[], bus: string) => objects.find(o => o.type === 'Bus' && o.name === bus)!
+
+  it('a transformer between two member yards lands on the segment between them, within tolerance, and faces the lower-voltage bus', () => {
+    const { objects } = buildSiteLayout(campus)
+    const seg = betweenSegment(rectOf(yardOf(objects, 'HV')), rectOf(yardOf(objects, 'MV')))!
+    expect(seg).not.toBeNull()
+    for (const name of ['TR1', 'TR2']) {
+      const t = find(objects, name)
+      expect(t.bus).toBe('HV')
+      // The inter-yard line passes through (or within tolerance of) its footprint: two transformers straddle it.
+      expect(segmentRectDistance(seg.a, seg.b, rectOf(t)), name).toBeLessThanOrEqual(PACKING.betweenToleranceM)
+      // Clear of both yards, on the segment's span.
+      expect(t.origin[0]).toBeGreaterThan(seg.a[0])
+      expect(t.origin[0]).toBeLessThan(seg.b[0])
+      // Facing MV (33 kV), due east of it: a heading of 90°, within the facing tolerance.
+      expect(angleDiffDeg(t.heading, bearingDeg(t.origin, yardOf(objects, 'MV').origin)), name).toBeLessThanOrEqual(PACKING.facingToleranceDeg)
+      expect(angleDiffDeg(t.heading, 90), name).toBeLessThan(5)
+    }
+    // Two transformers are two objects, side by side, not one on top of the other.
+    expect(rectsOverlap(rectOf(find(objects, 'TR1')), rectOf(find(objects, 'TR2')))).toBe(false)
+    expect(find(objects, 'TR1').origin).not.toEqual(find(objects, 'TR2').origin)
+  })
+
+  it('a transformer whose far bus is not a member falls back to its owner\'s yard zone, facing north', () => {
+    const { objects } = buildSiteLayout({ ...empty, transformers: [tr({ name: 'T', bus0: 'B', bus1: 'ELSEWHERE' })] })
+    const t = find(objects, 'T'), yard = yardOf(objects, 'B')
+    expect(t.heading).toBe(0)
+    // North zone: above the yard's north edge.
+    expect(t.origin[1] - t.footprint[1] / 2).toBeGreaterThanOrEqual(yard.origin[1] + yard.footprint[1] / 2)
+  })
+
+  it('a BESS packs adjacent to a transformer of its bus (one gap away, touching nothing else)', () => {
+    const { objects } = buildSiteLayout(campus)
+    const bess = find(objects, 'BESS')
+    const d = Math.min(rectDistance(rectOf(bess), rectOf(find(objects, 'TR1'))), rectDistance(rectOf(bess), rectOf(find(objects, 'TR2'))))
+    expect(d).toBeLessThanOrEqual(PACKING.gapM + 1e-6)
+    expect(d).toBeGreaterThan(0)
+  })
+
+  it('a BESS without a transformer sits next to its yard', () => {
+    const { objects } = buildSiteLayout({ ...empty, storageUnits: [su({ name: 'BESS' })] })
+    expect(rectDistance(rectOf(find(objects, 'BESS')), rectOf(yardOf(objects, 'B')))).toBeLessThanOrEqual(PACKING.gapM + 1e-6)
+  })
+
+  it('a genset is never inside a hall\'s keep-out after packing', () => {
+    const { objects } = buildSiteLayout(campus)
+    const m = DEFAULT_LIBRARY.find(t => t.id === 'thermal')!.placement!.keepOutM![0].m
+    expect(rectDistance(rectOf(find(objects, 'GEN')), rectOf(find(objects, 'HALL')))).toBeGreaterThanOrEqual(m)
+    // The same when the hall is packed first (it owns the bus's northeast zone; the genset the west zone) — the rule is symmetric.
+    const west = buildSiteLayout({ ...campus, loads: [ld({ name: 'HALL', bus: 'MV', p_set: 300 })] }).objects
+    expect(rectDistance(rectOf(find(west, 'GEN')), rectOf(find(west, 'HALL')))).toBeGreaterThanOrEqual(m)
+  })
+
+  it('H₂ storage keeps its distance from everything', () => {
+    const { objects } = buildSiteLayout(campus)
+    const m = DEFAULT_LIBRARY.find(t => t.id === 'h2store')!.placement!.keepOutM![0].m
+    const h2 = find(objects, 'H2')
+    for (const o of objects) {
+      if (o === h2 || o.elevation) continue
+      expect(rectDistance(rectOf(h2), rectOf(o)), o.name).toBeGreaterThanOrEqual(m)
+    }
+  })
+
+  it('PV keeps its clearance from everything', () => {
+    const { objects } = buildSiteLayout(campus)
+    const m = DEFAULT_LIBRARY.find(t => t.id === 'pv')!.placement!.clearanceM!
+    const pv = find(objects, 'PV')
+    for (const o of objects) {
+      if (o === pv || o.elevation) continue
+      expect(rectDistance(rectOf(pv), rectOf(o)), o.name).toBeGreaterThanOrEqual(m)
+    }
+  })
+
+  it('nothing overlaps anything across the whole site (rotated footprints), and every rule was satisfied', () => {
+    const layout = buildSiteLayout(campus)
+    expect(layout.unresolved).toEqual([])
+    const solid = layout.objects.filter(o => !o.elevation)
+    for (let i = 0; i < solid.length; i++) for (let j = i + 1; j < solid.length; j++) {
+      expect(rectsOverlap(rectOf(solid[i]), rectOf(solid[j])), `${solid[i].name} overlaps ${solid[j].name}`).toBe(false)
+    }
+  })
+
+  it('is deterministic', () => {
+    expect(buildSiteLayout(campus)).toEqual(buildSiteLayout(campus))
+  })
+
+  it('placed objects are left exactly where the user put them, rules or not, and the rest arrange around them', () => {
+    const hall = find(buildSiteLayout(campus).objects, 'HALL')
+    // The genset dropped right beside the hall (inside its keep-out), the transformer far off its segment.
+    const placements = {
+      'Generator:GEN': { x: hall.origin[0] + hall.footprint[0] / 2 + 5, y: hall.origin[1], heading: 17 },
+      'Transformer:TR1': { x: 200, y: 180, heading: 45 },
+    }
+    const layout = buildSiteLayout({ ...campus, placements })
+    expect(find(layout.objects, 'GEN').origin).toEqual([placements['Generator:GEN'].x, placements['Generator:GEN'].y])
+    expect(find(layout.objects, 'GEN').heading).toBe(17)
+    expect(find(layout.objects, 'TR1').origin).toEqual([200, 180])
+    expect(find(layout.objects, 'TR1').heading).toBe(45)
+    expect(layout.placed.sort()).toEqual(['Generator:GEN', 'Transformer:TR1'])
+    // The unplaced transformer still takes its segment; the BESS still finds one.
+    const seg = betweenSegment(rectOf(yardOf(layout.objects, 'HV')), rectOf(yardOf(layout.objects, 'MV')))!
+    expect(segmentRectDistance(seg.a, seg.b, rectOf(find(layout.objects, 'TR2')))).toBeLessThanOrEqual(PACKING.betweenToleranceM)
+  })
+
+  it('a rule the packer cannot satisfy within its reach is reported, not silently dropped', () => {
+    // A library where H₂ storage must keep a kilometre from everything: no
+    // slot within the packer's reach. The rule is symmetric, so what is
+    // packed after it cannot keep its distance from the stranded store either.
+    const lib = DEFAULT_LIBRARY.map(t => t.id !== 'h2store' ? t : { ...t, placement: { keepOutM: [{ from: ['*'], m: 1_000 }] } })
+    const layout = buildSiteLayout({ ...campus, library: lib })
+    expect(layout.unresolved).toContain('Store:H2')
+    expect(find(layout.objects, 'H2').origin).toBeDefined()   // still drawn, where the packer gave up
+    expect(buildSiteLayout(campus).unresolved).toEqual([])
+  })
+
+  it('a feeder faces its far bus when that bus is a member', () => {
+    const { objects } = buildSiteLayout({ ...campus, lines: [ln({ name: 'TIE', bus0: 'MV', bus1: 'HV' })] })
+    const tie = find(objects, 'TIE')
+    expect(tie.bus).toBe('MV')
+    expect(angleDiffDeg(tie.heading, bearingDeg(tie.origin, yardOf(objects, 'HV').origin))).toBeLessThanOrEqual(PACKING.facingToleranceDeg)
+  })
+
+  it('the Phase 1/2 invariants still hold on the campus: part counts, land, orphans', () => {
+    const layout = buildSiteLayout({ ...campus, placements: { 'Generator:gone': { x: 0, y: 0, heading: 0 } } })
+    expect(find(layout.objects, 'BESS').parts.length).toBe(10 + 2)
+    expect(find(layout.objects, 'PV').areaM2).toBeCloseTo(50_000, -2)
+    expect(layout.totalAreaM2).toBe(layout.objects.reduce((a, o) => a + o.areaM2, 0))
+    expect(layout.orphans).toEqual(['Generator:gone'])
+    expect(layout.objects.filter(o => o.type === 'Bus').map(o => o.name)).toEqual(['HV', 'MV'])
   })
 })
 

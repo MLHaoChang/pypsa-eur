@@ -36,12 +36,13 @@ def main():
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--live", action="store_true", help="Also run five bounded paid model cases")
     parser.add_argument("--live-model", default="gpt-6.1-sol")
+    parser.add_argument("--expanded", action="store_true", help="Also require 80 deterministic weighted stress cases")
     args = parser.parse_args()
     if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}", args.live_model):
         parser.error("invalid model identifier")
     destination = args.report.resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
-    initial = report([], live=args.live, execution_failed=True)
+    initial = report([], live=args.live, execution_failed=True, expanded=args.expanded)
     initial.update(source=source_identity(), policy_version="1", model=args.live_model if args.live else None, live_budget=None)
     # Overwrite a previous pass before starting. Interrupted runs cannot leave it green.
     destination.write_text(json.dumps(initial, indent=2) + "\n", encoding="utf-8")
@@ -52,9 +53,12 @@ def main():
     env.pop("PYTEST_ADDOPTS", None)
     env["PYPSA_GUI_PILOT_EVALUATION_LIVE"] = "1" if args.live else "0"
     env["PYPSA_GUI_PILOT_EVALUATION_MODEL"] = args.live_model
+    env["PYPSA_GUI_PILOT_EVALUATION_EXPANDED"] = "1" if args.expanded else "0"
     env["PYPSA_GUI_PILOT_EVALUATION_REPORT"] = str(destination)
     env["PYPSA_GUI_PILOT_EVALUATION_SOURCE"] = json.dumps(initial["source"])
     selections = ["tests/test_pilot_evaluation.py::test_pilot_case"]
+    if args.expanded:
+        selections.append("tests/test_reliability_cases.py::test_stress_case")
     if args.live:
         selections.append("tests/test_pilot_evaluation.py::test_live_pilot_case")
     command = [sys.executable, "-m", "pytest", "-p", "tools.pilot_evaluation_plugin",
