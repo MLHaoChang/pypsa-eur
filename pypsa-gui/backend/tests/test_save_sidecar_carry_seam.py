@@ -210,3 +210,64 @@ def test_the_flat_path_is_still_used_without_a_db(monkeypatch, spy):
                         lambda n: pathlib.Path("/flat") / n)
     _run("A", "B")
     assert spy["copy"][0][0] == "/flat/A"
+
+
+# ── Every bundle sidecar travels on a cross-project save (D15) ──────────────
+#
+# Plan: docs/superpowers/plans/2026-09-29-3d-site-view-phase1.md, Task 1.4.
+# Before this, only chat.jsonl and uploads/ were carried, so Save-As,
+# Save-a-Copy and the Clone wizard lost layout.json (and would have lost
+# sites.json). These run the REAL copier against real directories — the `spy`
+# fixture stubs `_copy_bundle_dirs`, so it is not used here.
+
+SAVE_WRITTEN = {"network.nc", "metadata.json", "solver_config.json", "user_ts.json", "results_state.pkl"}
+
+
+@pytest.fixture
+def real_dirs(tmp_projects_dir, monkeypatch):
+    monkeypatch.setattr(chat_service, "handle_save_lineage", lambda ctx, **kw: None)
+    src = projects_router._safe_project_dir("A")
+    src.mkdir(parents=True, exist_ok=True)
+    for f in projects_router._BUNDLE_FILES:
+        (src / f).write_text(f"source:{f}")
+    (src / "sites" / "s1").mkdir(parents=True)
+    (src / "sites" / "s1" / "context.json").write_text("source:context")
+    (src / "uploads" / "u1").mkdir(parents=True)
+    (src / "uploads" / "u1" / "f.txt").write_text("source:upload")
+    dest = tmp_projects_dir / "B"
+    dest.mkdir()
+    # A STALE sidecar already in the destination (Save-As with force over an
+    # existing project) must be replaced, not kept.
+    (dest / "sites.json").write_text("stale")
+    (dest / "layout.json").write_text("stale")
+    return src, dest
+
+
+@pytest.mark.parametrize("rebind", [False, True])
+def test_carry_on_move_copies_and_replaces_every_bundle_sidecar(real_dirs, rebind):
+    src, dest = real_dirs
+    _run("A", "B", rebind=rebind, dest=str(dest))
+    for f in projects_router._BUNDLE_FILES:
+        if f in SAVE_WRITTEN:
+            assert not (dest / f).exists(), f"{f} is written by the save itself, not carried"
+        else:
+            assert (dest / f).read_text() == f"source:{f}", f
+    assert (dest / "sites" / "s1" / "context.json").read_text() == "source:context"
+    assert (dest / "uploads" / "u1" / "f.txt").read_text() == "source:upload"
+
+
+def test_carry_on_move_is_best_effort(real_dirs, monkeypatch):
+    import shutil
+
+    src, dest = real_dirs
+    real_copy2 = shutil.copy2
+
+    def flaky(s, d, *a, **k):
+        if pathlib.Path(s).name == "sites.json":
+            raise OSError("disk says no")
+        return real_copy2(s, d, *a, **k)
+
+    monkeypatch.setattr(shutil, "copy2", flaky)
+    _run("A", "B", rebind=False, dest=str(dest))  # must not raise
+    assert (dest / "layout.json").read_text() == "source:layout.json"
+    assert (dest / "adequacy_worksheet.json").read_text() == "source:adequacy_worksheet.json"

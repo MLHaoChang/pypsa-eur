@@ -12,6 +12,11 @@ import MapModeSwitcher from './components/MapModeSwitcher'
 import SnapshotPicker from './components/SnapshotPicker'
 import TopologyCanvas from './pages/TopologyCanvas'
 import MapCanvas from './pages/MapCanvas'
+// The 3D site view is the only lazily-loaded canvas: three.js and its React
+// bindings are ~300 kB gzipped that a user who never opens it should never
+// download. Vite splits the dynamic import into its own chunk on its own.
+import { useSitesLifecycle } from './site3d/sitesStore'
+const SiteCanvas = React.lazy(() => import('./pages/SiteCanvas'))
 import TimeSeriesManager from './pages/TimeSeriesManager'
 import SolverSettings from './pages/SolverSettings'
 import ModelHorizon from './pages/ModelHorizon'
@@ -204,6 +209,8 @@ export default function App() {
     lastProjectId, lastSavedByProject, markProjectSaved, pruneRecents, recents, setLastProjectId,
     theme, density, compareRailOpen, setCompareRailOpen, uiMode, guidedTourHolds,
   } = useUIStore()
+  // The 3D site sidecar: load per project, persist on unload (WP1, Task 1.5).
+  useSitesLifecycle(currentProject)
 
   // Results + Time Series take the whole main area (see FULL_SCREEN_TABS);
   // every other sidebar tab opens as a half-width panel beside the canvas.
@@ -671,7 +678,13 @@ export default function App() {
                 <ErrorBoundary label="Canvas crashed">
                   {canvasView === 'blank'
                     ? <TopologyCanvas />
-                    : <MapCanvas mode={canvasView} />}
+                    : canvasView === 'site'
+                      ? (
+                        <React.Suspense fallback={<div className="flex h-full items-center justify-center text-[12px] text-muted">Loading 3D view…</div>}>
+                          <SiteCanvas />
+                        </React.Suspense>
+                      )
+                      : <MapCanvas mode={canvasView} />}
                 </ErrorBoundary>
                 {/* Mode switcher floats over whichever canvas is active */}
                 <MapModeSwitcher />

@@ -61,7 +61,7 @@ _CONVERTER_OPTIONAL = ("neg_seq",)
 
 _GENSET_REQUIRED = ("q_droop_pct", "H_s", "T_g_s", "ramp_pu_per_s", "start_s", "sync_s",
                     "load_step_max_pct", "cos_phi_r", "xd_sat")
-_GENSET_OPTIONAL = ("droop_pct", "p_min_pu", "r_n_ohm", "ik_sustained_pu")
+_GENSET_OPTIONAL = ("droop_pct", "p_min_pu", "r_n_ohm", "ik_sustained_pu", "x2_pu", "x0_pu")
 _GENSET_ENUMS = {"governor": GOVERNORS, "excitation": EXCITATIONS, "neutral_earthing": EARTHINGS}
 _GENSET_FLAGS = ("spinning", "unit_transformer", "unit_transformer_oltc")
 #: Fields only the hub sidecar carries: a campus unit is already built, so it
@@ -123,6 +123,8 @@ _SCALAR = {
     "p_min_pu": (lambda v: 0 <= v < 1, "in [0, 1)"),
     "r_n_ohm": (_pos, "positive"),
     "ik_sustained_pu": (_pos, "positive"),
+    "x2_pu": (_pos, "positive"),
+    "x0_pu": (_pos, "positive"),
     "relay_sensitivity": (lambda v: v >= 1, "at least 1"),
     "unit_mw": (_pos, "positive"),
     "xd_pp": (_pos, "positive"),
@@ -179,6 +181,8 @@ FIELD_USERS = {
     "excitation": ("I5",),
     "neutral_earthing": ("I5b",),
     "r_n_ohm": ("I5b",),
+    "x2_pu": ("I5b",),
+    "x0_pu": ("I5b",),
     "ik_sustained_pu": ("I5",),
     "relay_sensitivity": ("I5",),
     "unit_transformer": ("I5",),

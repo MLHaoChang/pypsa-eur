@@ -372,7 +372,7 @@ def _relay_current(campus, relay, sources, gfl_min_case, override):
 
 
 def relay_check(campus, online=None, gfl_min_case=None, sensitivity=None) -> pd.DataFrame:
-    """One row per relay: the current it sees in the island's minimum case
+    """One row per relay with a phase pickup: the current it sees in the island's minimum case
     (``relay_ka``; ``initial_ka`` before decay), the fault's total there
     (``fault_total_ka``) and what bypasses the relay (``bypass_ka``), the
     verdict at s * pickup, the grid-connected Ik''max at the fault bus and
@@ -396,6 +396,8 @@ def relay_check(campus, online=None, gfl_min_case=None, sensitivity=None) -> pd.
     grid = campus_fault_levels(campus, set(campus.units.index)).set_index("bus")
     rows = []
     for _, r in campus.relays.iterrows():
+        if not r["i_pickup_ka"] == r["i_pickup_ka"]:          # an earth-fault relay only (island_sc_seq)
+            continue
         relay_ka, initial_ka, total_ka = _relay_current(campus, r, sources, gfl_min_case, None)
         need = s * float(r["i_pickup_ka"])
         if relay_ka >= need:
