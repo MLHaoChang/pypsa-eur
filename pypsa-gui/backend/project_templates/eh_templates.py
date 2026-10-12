@@ -15,13 +15,13 @@ right shape and order of magnitude, costs in the range of public cost
 catalogues. They are for learning and demonstrating the workflow, not for a
 real project decision — ``TEMPLATE_META[...]["provenance"]`` says so.
 
-Horizon: one representative 168 h week. The ``objective`` and
-``generators`` weightings are 8760/168 per snapshot, so ``nyears ≈ 1`` (no
-CAPEX scaling warning), annual costs and energy scale to a year, and every
-MTTR here (≤ 72 h) fits the MC's MTTR floor (P11, decision Q2). The
-``stores`` weighting is the snapshot's 1 h duration: PyPSA reads it as the
-elapsed hours in the state-of-charge balance, so 8760/168 there would move
-52 h of energy per hourly dispatch (campus island plan, S0).
+Horizon: one representative 168 h week weighted 8760/168 per snapshot for
+cost and energy (``objective``, ``generators``), so ``nyears ≈ 1`` (no CAPEX
+scaling warning) and every MTTR here (≤ 72 h) fits the MC's MTTR floor (P11,
+decision Q2). The ``stores`` weighting stays 1: PyPSA reads it as the hours
+each snapshot lasts in the state-of-charge balance, and a snapshot here lasts
+one hour (plan 2026-10-07 campus island, S0). Weighting it 52.14 made every
+hourly dispatch move 52 hours of stored energy.
 """
 from __future__ import annotations
 
@@ -32,8 +32,6 @@ import pypsa
 HOURS = 168
 SNAPSHOTS = pd.date_range("2030-07-01", periods=HOURS, freq="h")
 WEIGHT = 8760.0 / HOURS
-# Snapshot duration in hours: the `stores` weighting (elapsed hours).
-STEP_H = 1.0
 
 _H = np.arange(HOURS)
 _HOD = _H % 24
@@ -70,9 +68,8 @@ def _base(name: str) -> pypsa.Network:
     n = pypsa.Network()
     n.name = name
     n.set_snapshots(SNAPSHOTS)
-    n.snapshot_weightings["objective"] = WEIGHT
-    n.snapshot_weightings["generators"] = WEIGHT
-    n.snapshot_weightings["stores"] = STEP_H
+    n.snapshot_weightings.loc[:, ["objective", "generators"]] = WEIGHT
+    n.snapshot_weightings.loc[:, "stores"] = 1.0          # hours per snapshot (S0)
     return n
 
 
@@ -149,9 +146,9 @@ def build_eh_datacenter() -> pypsa.Network:
           marginal_cost=0.0)
     n.generators_t.p_max_pu = pd.DataFrame(
         {"rooftop_pv": _solar()}, index=SNAPSHOTS)
-    # The UPS carries the whole IT load (peak ~37.5 MW) with ~6 % margin.
-    # 15 min of autonomy covers the 10 min bridge to the gensets (plan Q1)
-    # at the IT peak, after dispatch losses, with room for end-of-life fade.
+    # The UPS carries the IT load it protects (about 36 MW) for a realistic
+    # 15 minutes: 40 MW / 10 MWh, enough for the island plan's 600 s bridge
+    # (owner decision, plan 2026-10-07 campus island, S0).
     n.add("StorageUnit", "ups_battery", bus="it_bus", carrier="battery",
           p_nom=40.0, max_hours=0.25, efficiency_store=0.95,
           efficiency_dispatch=0.95, cyclic_state_of_charge=True)
@@ -169,10 +166,8 @@ def build_eh_datacenter() -> pypsa.Network:
     _tag_columns(n)
     n.buses.at["grid", "eh_poc"] = True
     # SCR gate inputs at the PoC: a 250 MVA fault level against ~30 MVA of
-    # inverter-based resources (PV + BESS inverters) → SCR ≈ 8, which
-    # passes. The connection is CAPACITY-weak (40 MW), not SCR-weak. The
-    # 40 MW UPS is not counted: as a double-conversion UPS it faces the grid
-    # through its rectifier and does not export.
+    # inverter-based resources (PV + BESS inverters; the UPS feeds no fault
+    # upstream, its rectifier blocks it) → SCR ≈ 8, which passes. The connection is CAPACITY-weak (40 MW), not SCR-weak.
     n.buses.at["grid", "eh_sk_mva"] = 250.0
     n.buses.at["grid", "eh_ibr_mva"] = 30.0
     n.buses.at["dc_mv", "eh_sk_mva"] = 220.0

@@ -4,6 +4,9 @@ In-tree defaults the guided study seeds its assumptions ledger from (plan "one i
 two faces" §3 rule 4). The pack holds:
 
 - technology costs from technology-data v0.14.0 (DEA), in 2020 EUR;
+- from version 2026-10-07, the campus electrical equipment costs (transformers, cables, capacitor
+  banks, shunt reactors, STATCOMs, switchgear), transcribed from
+  `gridspine/templates/data/campus_assets.yaml`, in 2026 EUR, all illustrative placeholders;
 - finance defaults;
 - two illustrative tariffs;
 - two synthetic load profiles.
@@ -62,12 +65,27 @@ are:
 | EUR/kW | EUR/MW | ×1000 |
 | EUR/kWh | EUR/MWh | ×1000 |
 | %/year | share/year (the asset schema's `fom_share`) | ×0.01 |
+| EUR | EUR/unit (basis `lump`) | ×1 |
+| EUR/km | EUR/km (basis `per_km`) | ×1 |
+| EUR/bay | EUR/bay (basis `per_bay`) | ×1 |
+| share/year | share/year (a campus `opex_frac`) | ×1 |
+
+Each row carries its own money year in `currency` and `currency_year`: 2020 for the catalogue rows
+(technology-data v0.14.0), 2026 for the campus equipment rows (the campus library's `price_year`).
+The finance defaults and the seed tariffs are in 2020 EUR. No row is converted with a price index,
+so a caller that mixes rows of both years converts them itself.
 
 Costs use the asset schema's part vocabulary (S0):
 
 - the battery has a `power` part, priced per MW, which is the inverter;
 - the battery has an `energy` part, priced per MWh, which is the storage block;
 - PV is one `investment` part, priced per MW.
+- Each campus equipment entry is one `investment` part (technology `<kind>.<id lowercased>`, e.g.
+  `transformer.tr_132_33_40`), priced per unit (`lump`: transformers, capacitor banks, reactors,
+  STATCOMs), per km (`per_km`: cables) or per bay (`per_bay`: switchgear), with its lifetime and
+  `fom_share` (the campus `opex_frac`). Electrical ratings stay in the campus YAML; the manifest
+  pins that file's sha256 (`seeded_from.campus_equipment`), and a changed YAML needs a new pack
+  version.
 
 A field the catalogue does not carry is None, never 0. For example, technology-data books the
 battery's FOM on the inverter only, so the energy part's `fom_share` row has no value, status
@@ -90,7 +108,8 @@ Every row carries a source, a year and an `illustrative` flag.
   plausible order of magnitude. This applies to:
   - the two seed tariffs;
   - the synthetic load profiles;
-  - stated assumptions, such as the sizing-limit multiple.
+  - stated assumptions, such as the sizing-limit multiple;
+  - every campus equipment row (`source = "assumed (gridspine campus_assets.yaml placeholder)"`).
 - Catalogue rows (DEA, PyPSA-Eur) are `false`.
 - A range marked `assumed` (±30 %) is flagged on the range itself, not through this flag.
 

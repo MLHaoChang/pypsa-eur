@@ -23,6 +23,9 @@ from __future__ import annotations
 
 import dataclasses
 import math
+import numbers
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -221,6 +224,150 @@ class LpBasis:
     asset_discount_rates: dict[str, float | None] = field(default_factory=dict)
 
 
+# Campus equipment an owner buys outside the network (IC G2 plan G-4): its kinds and
+# the bases of its upfront cost (the defaults pack's campus rows, G1).
+EXTRA_ASSET_KINDS = ("transformer", "cable", "capacitor_bank", "shunt_reactor", "statcom",
+                     "switchgear")
+EXTRA_ASSET_BASES = ("lump", "per_km", "per_bay")
+_UPFRONT_PART_ATTRS = ("name", "upfront_per_unit", "lifetime", "fom_share",
+                       "derived_from_capital_cost")
+_UPFRONT_PART_KEYS = _UPFRONT_PART_ATTRS[:4]            # a mapping part: the flag is optional
+_SOURCE_HASH_RE = re.compile(r"[0-9a-fA-F]{16}")
+
+
+def _real(v) -> float | None:
+    """A finite real number, or None (a bool is not a number here)."""
+    if isinstance(v, bool) or not isinstance(v, numbers.Real):
+        return None
+    f = float(v)
+    return f if math.isfinite(f) else None
+
+
+@dataclass(frozen=True)
+class ExtraAssetPart:
+    """One investment part of an `ExtraOwnerAsset`, finance-side (gate r1 note 2): the
+    fields of `asset_schema.access.UpfrontPart`, which the finance package cannot
+    import (it loads the solve stack). `ExtraOwnerAsset` normalises its parts to it, so
+    the case hash reads these fields, never a repr."""
+
+    name: str
+    upfront_per_unit: float
+    lifetime: float
+    fom_share: float
+    derived_from_capital_cost: bool = False
+
+
+def _extra_part(p) -> ExtraAssetPart | None:
+    """A part as passed (a dataclass with the `UpfrontPart` attributes, e.g. an
+    `asset_schema.access.UpfrontPart`, or a mapping with the keys `name`,
+    `upfront_per_unit`, `lifetime`, `fom_share` and an optional
+    `derived_from_capital_cost` — the campus producer's shape) as an
+    `ExtraAssetPart`; None for anything else."""
+    if isinstance(p, Mapping):
+        if not all(k in p for k in _UPFRONT_PART_KEYS):
+            return None
+        get = p.__getitem__
+        derived = p.get("derived_from_capital_cost", False)
+    elif dataclasses.is_dataclass(p) and not isinstance(p, type) and \
+            all(hasattr(p, a) for a in _UPFRONT_PART_ATTRS):
+        def get(a):
+            return getattr(p, a)
+        derived = p.derived_from_capital_cost
+    else:
+        return None
+    return ExtraAssetPart(get("name"), get("upfront_per_unit"), get("lifetime"), get("fom_share"),
+                          bool(derived))
+
+
+@dataclass(frozen=True)
+class ExtraOwnerAsset:
+    """Equipment the owner buys that is not a network component (IC G2 plan G-4,
+    U1 landing §8): a campus study's chosen transformer, cable, capacitor bank,
+    shunt reactor, STATCOM or switchgear. `parts` (a list or a tuple) are
+    `asset_schema.access.UpfrontPart`s (read by attribute; any dataclass with `name`,
+    `upfront_per_unit`, `lifetime`, `fom_share`, `derived_from_capital_cost`) or
+    mappings with those keys (the flag optional: the campus producer's
+    `extra_owner_assets` shape), normalised to a tuple of `ExtraAssetPart`;
+    `upfront_per_unit` per basis unit in the
+    case's `currency` and `currency_year` (the caller converts); `quantity` is units
+    (`lump`), km (`per_km`: units × length) or bays (`per_bay`); `build_year` the year
+    it is built; `source_hash` sha256[:16] of the solved campus study that chose it.
+    The name may contain ':' (§8's `campus:<library_id>#<k>`): reason codes that end in
+    `:<name>` or `:<name>:<part>` are matched whole, never split on ':'.
+
+    Refused at construction, `ValueError("extra_asset_invalid:<name>:<field>")`: an
+    empty name, an unknown kind or basis, a quantity that is not finite and > 0 (or
+    not whole for `lump` / `per_bay`), no part or a part that is neither such a dataclass
+    nor such a mapping (`parts`), a build year outside 1900..2200, a `source_hash` that is not 16 hex
+    characters, a part lifetime that is None, NaN, infinite or below a year
+    (`lifetime`: every part needs a finite typed lifetime, C12), an upfront cost that
+    is not finite or below 0 (`upfront_per_unit`), a `fom_share` outside [0, 1]
+    (`fom_share`)."""
+
+    name: str
+    kind: str
+    basis: str
+    quantity: float
+    parts: tuple[ExtraAssetPart, ...]
+    build_year: int
+    source: str
+    source_hash: str
+
+    def __post_init__(self):
+        def bad(field_: str, detail: str):
+            raise ValueError(f"extra_asset_invalid:{self.name}:{field_}: {detail}")
+
+        if not isinstance(self.name, str) or not self.name.strip():
+            bad("name", "an extra asset needs a name")
+        if self.kind not in EXTRA_ASSET_KINDS:
+            bad("kind", f"{self.kind!r} is not one of {list(EXTRA_ASSET_KINDS)}")
+        if self.basis not in EXTRA_ASSET_BASES:
+            bad("basis", f"{self.basis!r} is not one of {list(EXTRA_ASSET_BASES)}")
+        q = _real(self.quantity)
+        if q is None or q <= 0:
+            bad("quantity", f"{self.quantity!r} is not a finite number > 0")
+        if self.basis in ("lump", "per_bay") and not float(q).is_integer():
+            bad("quantity", f"{self.quantity!r} {self.basis} is not a whole number of units")
+        if not isinstance(self.parts, (tuple, list)) or not self.parts:
+            bad("parts", "an extra asset needs at least one investment part")
+        parts = []
+        for p in self.parts:
+            got = _extra_part(p)
+            if got is None:
+                bad("parts", f"{p!r} is neither a dataclass with {list(_UPFRONT_PART_ATTRS)} "
+                             f"nor a mapping with {list(_UPFRONT_PART_KEYS)}")
+            parts.append(got)
+        object.__setattr__(self, "parts", tuple(parts))          # frozen: normalised once
+        if isinstance(self.build_year, bool) or not isinstance(self.build_year, numbers.Integral) \
+                or not 1900 <= self.build_year <= 2200:
+            bad("build_year", f"{self.build_year!r} is not a year in 1900..2200")
+        if not isinstance(self.source_hash, str) or not _SOURCE_HASH_RE.fullmatch(self.source_hash):
+            bad("source_hash", f"{self.source_hash!r} is not 16 hex characters (sha256[:16])")
+        for p in self.parts:
+            life = _real(p.lifetime)
+            if life is None or life < 1.0:
+                bad("lifetime", f"part {p.name!r}: lifetime {p.lifetime!r} is not a finite "
+                                "typed lifetime of a year or more")
+            cost = _real(p.upfront_per_unit)
+            if cost is None or cost < 0:
+                bad("upfront_per_unit", f"part {p.name!r}: {p.upfront_per_unit!r} is not a "
+                                        "finite cost >= 0")
+            fom = _real(p.fom_share)
+            if fom is None or not 0.0 <= fom <= 1.0:
+                bad("fom_share", f"part {p.name!r}: {p.fom_share!r} is not a share in [0, 1]")
+
+    def asset_finance(self) -> AssetFinance:
+        """The one `AssetFinance` it becomes (G-5): `campus:<kind>`, no carrier, one
+        `AssetPart` per part with overnight = upfront per unit × quantity, the longest
+        part lifetime; the S0b parts check holds by construction."""
+        parts = tuple(AssetPart(p.name, float(p.upfront_per_unit) * float(self.quantity),
+                                float(p.lifetime), float(p.fom_share)) for p in self.parts)
+        return AssetFinance(name=self.name, component=f"campus:{self.kind}",
+                            overnight_cost=float(sum(p.overnight_cost for p in parts)),
+                            lifetime_years=max(p.lifetime_years for p in parts), carrier=None,
+                            parts=parts)
+
+
 @dataclass(frozen=True)
 class FinanceCase:
     inputs: FinanceInputs
@@ -244,3 +391,7 @@ class FinanceCase:
     # established) for the report's `gates.conservation_ok`; None without a
     # ledger (a hand or SAM case) — P4 gate assessor condition 3c.
     conservation_ok: bool | None = None
+    # Campus equipment bought as owner capex (IC G2 plan G-5): each one is also in
+    # `assets` (after the network assets); this keeps the record (source, hash,
+    # quantity) for the report and the case hash. Never in the counterfactual.
+    extra_assets: tuple[ExtraOwnerAsset, ...] = ()

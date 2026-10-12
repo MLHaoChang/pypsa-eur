@@ -387,7 +387,7 @@ optional earthing transformers as elements (I5b).
 **The Data Center template gains:**
 - `island_config.json`;
 - `bess_new` marked `gfm_droop` (it already exists);
-- the UPS as a `ups` unit, **re-rated to carry the IT load** in S0 (about 36 MW
+- the UPS as a `ups` unit, **re-rated to carry the IT load** (about 36 MW
   plus margin, tagged `assumed`), not today's 15 MW;
 - genset governor and earthing data, tagged `assumed`;
 - per-Load critical tags.
@@ -481,16 +481,31 @@ energy-hub templates".
   cost behind I2c's cost of island capability.
 - **The fix:** `stores = 1.0`, keeping `objective` at 52.14. The test is
   written first, and every changed fixture is explained.
-- **The UPS re-rate lands here too** (owner, fifth round): `ups_battery`
-  becomes 40 MW / 0.25 h. 40 MW carries the ~37.5 MW IT peak with ~6 %
-  margin. 15 min covers the 600 s bridge (Q1) at that peak after dispatch
-  losses (6.6 MWh of 10 MWh), with room for end-of-life fade. The rating
-  stays on the StorageUnit (I1: one source of truth), covered by the
-  template's synthetic provenance; the sidecar keeps the `ups` fields. Tests
-  pin that the rating covers the IT peak and the bridge energy.
+- **The UPS re-rate lands here too** (owner, fifth round). `ups_battery`
+  is re-rated to carry the IT load it protects (about 40 MW, tagged
+  `assumed` in the island sidecar's provenance), with a test that its
+  rating covers the IT peak.
 - Limited foresight (`services/solver/myopic.py`) wrote the objective-based
-  representative weight into `stores` too. Each column now scales its own
-  step weight, which is the old behaviour when the columns are equal.
+  representative weight into `stores` too, which would put 52.14 h back
+  into the state-of-charge balance on these templates. Each column now
+  scales its own step weight, which is the old behaviour when the columns
+  are equal (#96, after S0 landed as #135).
+
+### S0 as built (2026-10-07)
+
+- `_base()` sets `objective` and `generators` to 52.14 and `stores` to 1.0.
+  Annual cost and energy are unchanged; a snapshot's state-of-charge step is
+  now one hour of power.
+- **The UPS is 40 MW / 0.25 h (10 MWh)** (owner, sixth round): a realistic
+  15-minute autonomy. It covers the 600 s bridge (about 6.3 MWh at 36 MW and
+  95 %), and it does not arbitrage like a large battery.
+- The SCR comment no longer counts the UPS as inverter-based: its rectifier
+  feeds no fault upstream, as in I1. The `eh_ibr_mva` value is unchanged.
+- **Tests:**
+  - every template pins `stores == 1`, and a solved template's state of
+    charge moves by exactly one hour of power per snapshot;
+  - the UPS covers the IT peak and the bridge.
+- Nothing else in the backend reads the `stores` weighting.
 
 ### I2a: ride-through, fuel and bridge reserve in the hub LP — step 1 (M)
 
@@ -629,9 +644,9 @@ fail when its row is deleted:
 - The facts land on `n._island_facts`: N+k, the storage, Δ, window length,
   critical peak, U_max, truncation, the bridge and the fuel status.
 
-**Tests** (`tests/test_island_rows.py`, 31): the plan's list, plus unequal
-units at N+1, `unit_mw`, genset availability, the dispatch-only skips, and
-the two `run_simulation` paths.
+**Tests** (`tests/test_island_rows.py`, 32): the plan's list, plus unequal
+units at N+1, `unit_mw`, genset availability, two investment periods, the
+dispatch-only skips, and the two `run_simulation` paths.
 - Mutation testing: 28 of 28 mutants killed. The first round left 3
   survivors (largest unit, `unit_mw`, availability), closed by new tests.
 
@@ -965,6 +980,45 @@ includes the losses and the UPS state after the event.
   - the gate is run on a case where a unit saturates.
 - Mutations.
 
+### I4 as built (2026-10-07)
+
+**`gridspine/static/island_flow.py`**
+- `island_flow(campus, rows, online=None, settings=...)` returns an
+  `IslandFlow`: `viable`, `reason`, `df_hz`, `delta_p_ac_mw`, the units,
+  buses, transformers and cables, `sync` (Δf, ΔV at the PCC), and
+  `label = "steady-state screening"`.
+- `island_net` builds the net for inspection, and `check_gate` is the
+  per-unit gate.
+- **The Q laws are gridspine's own** (Q(U), fixed cos φ, cos φ(P)), not
+  pandapower's `DERController`. They are three short functions, tested
+  against their curves. So `QModelCosphiP`'s sin φ (spike 5) is never on the
+  path, and the planned pin test is not needed.
+- **Q sharing through x_v** goes as 1 / (x_v + the tie to the load) on the
+  unit base. The plan's "∝ 1/k_q" holds only with no tie. The test uses the
+  exact form: 2.55 and 2.055 for the two ties, both by hand.
+- **The current limit is judged at the terminal voltage**, not behind x_v.
+  The limited source then carries `i_max · S_n · V_t` at the voltage it ends
+  up at, as part of the fixed point. Building this found the bug of using
+  the auxiliary bus's 1 pu.
+- **Gensets have a P range, not a current limit.** Their overload shows in
+  `loading_pct` and the verdict. The verdict checks, in order: no reference,
+  every reference saturated, convergence, voltage band, overload.
+- `online` picks the units in the island; a unit outside it is out of
+  service. A UPS keeps its battery dispatch and never forms the island.
+
+**`control_law_flow` (I4b)**
+- The hour stays grid-connected: GFM converters sit behind x_v at their
+  dispatched P and V0, GFL units follow their law, and gensets stay in
+  power-factor control.
+- **Without island data it equals today's campus flow**, which the test
+  pins. The comparison with the MILP's free Q is left to the driver that
+  joins the two (I9).
+
+**Tests**
+- 31 tests, each worked by hand.
+- Mutation testing: 29 of 29 mutants killed. The first round left 8
+  survivors, closed by new tests and one dead line removed.
+
 ### I5: short circuit by control mode, grid-connected and islanded — step 3b (M–L)
 
 **Grid-connected** (`static/campus_sc.py`):
@@ -1043,6 +1097,69 @@ includes the losses and the UPS state after the event.
   linearly with i_max, by hand.
 - Mutations.
 
+### I5 as built (2026-10-12)
+
+**`gridspine/static/island_sc.py`**
+- `machine_net(campus, installed, island=False, case="max", gfm_override=None)`
+  builds the fault net for both sides:
+  - a genset is a pandapower `gen` behind x''d, with `rdss_ohm` from `rx_sc`
+    and cos φ 0.8 (ledgered);
+  - behind its own unit transformer it is a power-station unit, so pandapower
+    applies K_S (new flag `unit_transformer_oltc: true`) or K_SO (false,
+    the default). Without the `power_station_unit` flags pandapower does
+    not apply K_S, which the hand test caught;
+  - converters are current sources at `converter_k`: GFL `k_sc`, GFM
+    `i_max_pu` (max) or `k_gfm_min` (min), UPS 0.
+- `campus_fault_levels` (grid-connected) now uses `machine_net`. Its
+  regression test converts GEN1 independently and shows the change is the
+  machine model alone.
+- `island_fault_levels(campus, online, gfl_min_case, gfm_override)`: max case
+  by IEC 60909 with no `ext_grid`, or by the current-source solve when no
+  genset is online; min case converter-aware, labelled `METHOD_MIN`, also
+  with the largest source out.
+- `current_source_fault`: its own nodal solve (Ybus of the fault's connected
+  part, transformers at nominal ratio, no shunts), giving Ik'' and every
+  branch's current. It replaces pandapower where pandapower crashes (spike 4)
+  and gives the relay currents.
+- **The spike-2 residual is explained:** IEC's K_G = c_max / (1 + x''d·sin φ)
+  = 1.1 / (1 + 0.15·0.6) = 1.0092 gives 1.589 kA, which pandapower matches.
+  The first review's 1.563 kA used K_G = 1.0261, which is not the IEC value.
+- `mu(x, t_min)` and `lam(excitation, xd_sat, ik_sustained_pu)`:
+  - μ = 1 for Ik''/IrG ≤ 2, else a + b·e^(−c·x) for t_min 0.02 / 0.05 /
+    0.10 / 0.25 s. **The coefficients are as recalled, not checked against
+    the standard: tagged assumed in the ledger.**
+  - λ is a first pass, not the IEC curves: 1/x_d,sat without field forcing;
+    with PMG forcing the datasheet's sustained current (new optional
+    `ik_sustained_pu`, else 3 pu, assumed).
+- `relay_check(campus, online, gfl_min_case, sensitivity)`: per relay the
+  branch current (decayed by μ or λ for the genset share; converters held),
+  the fault total, the bypass (on-feeder infeed: the blinding), the verdict
+  at s × pickup (new requirement `relay_sensitivity`, default 1.5), the
+  grid-connected Ik''max and its ratio, and the current at each
+  `i_max_sensitivity_pu`.
+  - **Change from the plan:** the largest-out current (`relay_n1_ka`) is
+    reported, not judged. With its only source out a feeder carries no fault
+    current and has nothing to clear, so a verdict there would only ever
+    read blind.
+
+**Campus YAML**
+- A top-level `relays:` list: `name`, `branch`, `fault_bus`, `i_pickup_ka`
+  (tagged), `timing` (`instantaneous` | `time_delayed`), and `t_min_s` for an
+  instantaneous relay (tagged, one of the four μ times, default 0.02).
+  Read into `Campus.relays`.
+- The C1 ledger line that screened gensets as 1/x''d current sources is
+  retired.
+
+**Tests**
+- 37 test functions in `test_island_sc.py`, `test_island_sc_parts.py` and
+  `test_island_relays.py`, each against a hand value (K_G 1.589 kA, K_SO
+  1.02005, K_S 0.96397, Σ k·In, radial and parallel branch splits, μ, λ, the
+  blinding, both sides of s, the linear i_max sensitivity), plus the
+  pandapower min-case pin.
+- Mutation testing: 29 of 29 killed. The first round left 8 survivors,
+  closed by new tests, removing a cap on μ, and fixing a mutant that changed
+  nothing.
+
 ### I5b: unbalanced faults (L; owner Q9)
 
 This increment comes straight after I5, in its own PR.
@@ -1089,6 +1206,109 @@ earthing.
   sgen.
 - An island that loses its only earth reference is reported as such.
 - Mutations.
+
+### I5b as built (2026-10-12)
+
+**`gridspine/static/island_sc_seq.py`**
+- **One linear system per fault.** It holds the three sequence networks and
+  the fault's own three equations:
+  - Y1·dV1 + e_f·I1 = I_conv, with V1 = c + dV1 (IEC's equivalent source);
+  - Y2·V2 + e_f·I2 = 0;
+  - Y0·V0 + e_f·I0 = 0.
+  - **Not determinable:** a fault the passive network cannot carry is
+    reported as such, never as a number. Example: positive-sequence-only
+    converters with no negative-sequence path.
+  - The fault currents are unique whenever the system is consistent.
+- **`sequence_net(campus, sources, island, case, ...)`** builds the
+  networks:
+  - cables: Z0 from `r0`/`x0`, else drafted as R + 3·0.727 Ω/km and X0 = X
+    (a 25 mm² copper screen, assumed); C0 = C;
+  - transformers: the rated ratio as an off-nominal tap (110/21 kV on a
+    20 kV bus), K_T, and the zero sequence by windings (rules below);
+  - gensets: K_G on Z1, Z2 and Z0, and 3·R_N uncorrected. x2 = x''d and
+    x0 = 0.4·x''d unless given; unearthed without island data;
+  - converters: I5's k, with neg_seq = k2 as an inductive admittance;
+  - the grid: x0x / r0x0, by default X0 = X1 and R0/X0 = R/X;
+  - earthing transformers.
+- **Zero-sequence winding rules:**
+  - earthed star to earthed star: series;
+  - earthed star against a delta: a shunt on the star's bus;
+  - anything else: open.
+- **IEC 60909-0:2016 adds converter currents by magnitude.** Each converter
+  is therefore injected at −arg Z1_fj, so its share of V1 at the fault is in
+  phase with c. That reproduces I5 and pandapower for mixed islands, and
+  IEC's 3·|Z1|/|Z1+Z2+Z0| converter term for earth faults.
+- **neg_seq keeps the converter at its limit:** |I1| + |I2| ≤ k·In, with both
+  scaled together (a fixed point). In a converter-only island this gives
+  Ik1 = 1.5·k·In and Ik2 = (√3/2)·k·In, whatever k2 is.
+  - **Change from the plan's wording:** an uncapped admittance would have
+    given 3·k·In, twice the current limit and optimistic for protection.
+- **Inside a power-station unit** (a fault at the genset's own bus), the
+  genset takes K_G and its unit transformer no correction, as pandapower
+  does.
+- **Studies:**
+  - `unbalanced_fault_levels`: Ik1, Ik2 and Ik3, max and min, per bus,
+    grid-connected or islanded, plus `earth_path`, `earth_assumed`, and
+    `ic_e_ka` (the capacitive earth-fault current √3·ω·C0·Un of an
+    unearthed zone, not IEC 60909);
+  - `earth_reference`: earthed grid-connected, earthed in island, lost on
+    islanding, and earthed only on assumed data;
+  - `earth_fault_relay_check`: the residual 3·I0 through the relay's branch
+    in the island min case, against s × `i_pickup_e_ka`, with the
+    grid-connected value beside it.
+
+**Campus YAML**
+- Transformer `vector_group` (untagged). Without it, Dyn11, or YNyn11 when
+  the HV earthing is given; a neutral brought out without its earthing is
+  solid. Each such default is listed in `Campus.assumptions`.
+- **Refused:** earthing on a delta winding, and solid or resistance earthing
+  on a star without N.
+- New data:
+  - cable `r0_ohm_per_km`, `x0_ohm_per_km`, `c0_nf_per_km`;
+  - PCC `x0x_max/min` and `r0x0_max/min`;
+  - top-level `earthing_transformers`: {bus, x0_ohm, r_n_ohm?};
+  - relay `i_pickup_e_ka` (a relay needs at least one pickup; I5 judges only
+    the relays with a phase pickup);
+  - genset `x2_pu` and `x0_pu`.
+- A campus without the new data builds an identical pandapower net.
+
+**Checked against**
+- **pandapower `1ph` and `2ph`**, max and min, on a solidly earthed net with
+  no converters: equal at every bus to 1e-6.
+- **The 3-phase fault equals I5 and pandapower to 1e-9** on these cases:
+  - genset;
+  - power-station unit with K_SO or K_S, inside and outside the unit,
+    islanded and grid-connected;
+  - converters only;
+  - a mixed feeder;
+  - the off-nominal grid-connected campus;
+  - a STATCOM.
+- **One explained difference:** I5's own min-case solve sends every
+  converter ampere into the fault. IEC's distribution factor sends some into
+  a genset that is not behind the converter. That is 0.5 % at the end of the
+  test feeder.
+- **Hand values:**
+  - Ik1 and Ik2 behind a Dyn11, and with an LV neutral resistor;
+  - off-nominal YNyn with an HV neutral resistor, and YNd on its HV side;
+  - YNy and Yyn passing no zero sequence;
+  - genset earthing: solid, resistance, isolated;
+  - the drafted cable at 20 °C and at 80 °C;
+  - the earthing transformer;
+  - IEC's converter term;
+  - the zero-sequence current divider that blinds an earth-fault relay.
+- **Pinned:** pandapower gives k·In (0.762 kA) for an earth fault on an
+  unearthed delta with a converter (spike 6). The sequence networks give 0.
+
+**Tests and mutations**
+- 87 tests in four files:
+  - `test_island_sc_seq.py`;
+  - `test_island_earth.py`;
+  - `test_campus_sequence_data.py`;
+  - one more in `test_island_relays.py`.
+- **Mutation testing:** 42 of 42 killed. Round 1 left 15 survivors:
+  - two were dead code and were removed: the scale clamp, and the SVD
+    uniqueness check (consistency implies uniqueness, as shown above);
+  - 13 were closed with hand-oracle tests.
 
 ### I6: first-pass frequency check — aggregated inertia and droop — step 4a (M)
 
@@ -1392,7 +1612,7 @@ the session scratchpad. Every finding is folded in, as below.
 |---|---|
 | B1 droop GFM modelled as a lag in I6; it contradicts I2(d) | I6 uses native droop (a filtered measured P, imposed frequency). D'Arco–Suul is tested with two independently coded models. The control-table principle is reworded. |
 | B2 ride-through under-specified | I2a: Δ is the snapshot duration, not the weighting; cyclic windows; D ≤ T; the RT storage set is named; η_dis; e(t−1); d(τ) without t; N+k; avail_g defined; the test uses `max_hours` ≠ D. |
-| B3 ΔP_isl unconservative | I2b: no UPS reduction in `seamless` unless `transfers_on_islanding` with a late walk-in; min(L_it, p_nom_u) through two rows; export headroom; `pickup_blocks`. The template UPS is re-rated (S0, moved from I1). |
+| B3 ΔP_isl unconservative | I2b: no UPS reduction in `seamless` unless `transfers_on_islanding` with a late walk-in; min(L_it, p_nom_u) through two rows; export headroom; `pickup_blocks`. The template UPS is re-rated (I1). |
 | B4 linearised UC gives spinning for free | I2c: spinning implies p ≥ p_min·p_nom with p_min > 0; UC for fixed-size gensets only; solver plumbing listed. |
 | B5 the hourly data does not exist | New I3a `island_hourly` contract. Order updated. Minimum criteria use the (max − x) transformation (I3b). |
 | S1 Q–V droop loop diverges | I4 uses a virtual reactance x_v, tested on the spike-1 ties. |
