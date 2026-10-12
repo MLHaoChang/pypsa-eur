@@ -1355,7 +1355,8 @@ TOOLS: list[dict[str, Any]] = [
         "has_solver_config, bus_count, snapshot_count, objective, "
         "has_orphan_tmp, missing, parent_project, scenario_description, "
         "scenario_type, project_kind (null = capacity_expansion; "
-        "'planning_dynamics' for a gridspine study) (per "
+        "'planning_dynamics' for a gridspine study), settings (the per-project "
+        "settings table: derive_lengths_from_geometry) (per "
         "schemas.py:467-491). `id` is the DB-registry UUID when multi-user "
         "auth is enabled and null in single-user mode. Each entry is "
         "augmented with `resident: bool` "
@@ -1464,8 +1465,8 @@ TOOLS: list[dict[str, Any]] = [
         "list_projects filtered to entries where parent_project == name. Each "
         "entry is a ProjectInfo {name, id, created_at, has_solver_config, "
         "bus_count, snapshot_count, objective, has_orphan_tmp, missing, "
-        "parent_project, scenario_description, scenario_type, project_kind} per "
-        "schemas.py:467-491. "
+        "parent_project, scenario_description, scenario_type, project_kind, "
+        "settings} per schemas.py:467-491. "
         "Safety: read.",
         {"name": {"type": "string"}},
         ["name"],
