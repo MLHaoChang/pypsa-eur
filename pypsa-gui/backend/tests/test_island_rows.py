@@ -229,6 +229,18 @@ def test_the_row_reads_the_soc_before_the_start_hour():
     assert _p_nom(n) == pytest.approx(20.0, abs=TOL)
 
 
+def test_each_investment_period_has_its_own_rows():
+    """Two periods: 10 MW in 2030, 15 MW in 2040. The 2040 window needs
+    60 MWh → 30 MW at 2 h; each period's window wraps within itself."""
+    n = _net()
+    n.set_investment_periods([2030, 2040])
+    p_set = n.loads_t.p_set
+    p_set.loc[p_set.index.get_level_values(0) == 2040, "crit"] = 15.0
+    n = _solve(n, _island())
+    assert _p_nom(n) == pytest.approx(30.0, abs=TOL)
+    assert set(n._island_facts["periods"]) == {"2030", "2040"}
+
+
 # ── (b) the UPS bridge and the seamless GFM bridge ─────────────────────────
 
 

@@ -282,8 +282,8 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> di
                if critical else pd.Series(0.0, index=sns_p))
 
         # (a) the deficit d(τ) ≥ L_c(τ) − G(τ), as d + Σ avail·P_var ≥ L_c + kU − Σ avail·P_fixed.
-        d = m.add_variables(lower=0.0, coords=[sns_p.rename("snapshot")],
-                            name=f"Island-deficit{tag}")
+        coord = _snapshot_coord(m, sns_p)
+        d = m.add_variables(lower=0.0, coords=[coord], name=f"Island-deficit{tag}")
         lhs = d.to_linexpr()
         rhs = l_c + k * u_max
         for g in gensets:
@@ -294,8 +294,8 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> di
             var, fixed = _nominal(n, comp, g)
             rhs = rhs - avail * fixed
             if var is not None:
-                lhs = lhs + var * xr_series(avail)
-        m.add_constraints(lhs >= xr_series(rhs), name=f"Island-deficit-lower{tag}")
+                lhs = lhs + var * xr_series(avail, coord)
+        m.add_constraints(lhs >= xr_series(rhs, coord), name=f"Island-deficit-lower{tag}")
 
         # (a) power: d(τ) ≤ Σ_{s∈RT} p_nom_s.
         p_lhs, p_fixed = d.to_linexpr(), 0.0
@@ -332,19 +332,19 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> di
         in_row = [s for s in gfm if s in rt]
         if in_row:
             e_rhs = e_rhs + bridge
-        m.add_constraints(e_lhs >= xr_series(e_rhs), name=f"Island-energy{tag}")
+        m.add_constraints(e_lhs >= xr_series(e_rhs, coord), name=f"Island-energy{tag}")
 
         # B(t) for GFM storage outside RT: its own row.
         own = [s for s in gfm if s not in rt]
         if own and bridge.gt(0).any():
-            _reserve_row(n, m, sns_p, own, bridge, f"Island-gfm-bridge{tag}")
+            _reserve_row(n, m, sns_p, coord, own, bridge, f"Island-gfm-bridge{tag}")
 
         # (b) every UPS holds its IT load for bridge_s.
         for u in upss:
             it = [x for x in units[u]["it_load"] if x in n.loads.index]
             p_it = (_dense(n, "Load", "p_set", sns_p, it).sum(axis=1)
                     if it else pd.Series(0.0, index=sns_p))
-            _reserve_row(n, m, sns_p, [u], p_it * vals["bridge_s"] / 3600.0,
+            _reserve_row(n, m, sns_p, coord, [u], p_it * vals["bridge_s"] / 3600.0,
                          f"Island-ups-bridge-{u}{tag}")
 
         facts["periods"][str(period)] = {
@@ -359,14 +359,24 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> di
     return facts
 
 
-def xr_series(s: pd.Series):
-    """A snapshot Series as an xarray DataArray on the ``snapshot`` dim."""
+def _snapshot_coord(m, sns_p):
+    """The model's own ``snapshot`` coordinate for the period, so new
+    variables and constants align with PyPSA's (a MultiIndex with investment
+    periods)."""
+    for name in m.variables:
+        var = m.variables[name]
+        if "snapshot" in var.dims:
+            return var.sel(snapshot=sns_p).indexes["snapshot"]
+    raise IslandRefusal("island constraints need a model with snapshot variables")
+
+
+def xr_series(s: pd.Series, coord):
+    """A Series on the period's snapshots as a DataArray on ``coord``."""
     import xarray as xr
-    return xr.DataArray(s.to_numpy(dtype=float), coords={"snapshot": s.index},
-                        dims=["snapshot"])
+    return xr.DataArray(s.to_numpy(dtype=float), coords=[coord], dims=["snapshot"])
 
 
-def _reserve_row(n, m, sns_p, names, need: pd.Series, cname):
+def _reserve_row(n, m, sns_p, coord, names, need: pd.Series, cname):
     """Σ η·e(t−1) ≥ need(t) for the named StorageUnits."""
     lhs, rhs = None, need.copy()
     for s in names:
@@ -377,7 +387,7 @@ def _reserve_row(n, m, sns_p, names, need: pd.Series, cname):
         lhs = term if lhs is None else lhs + term
         if not cyc:
             rhs.iloc[0] -= eta * init
-    m.add_constraints(lhs >= xr_series(rhs), name=cname)
+    m.add_constraints(lhs >= xr_series(rhs, coord), name=cname)
 
 
 def _fuel(n, m, sns, units, gensets, vals, critical) -> dict:
