@@ -6,6 +6,8 @@
 <!-- Upcoming Release -->
 <!-- ================= -->
 
+* Docs(pypsa-gui): Document immutable run evidence, discussed-run resume, current load-flow summaries, and persisted experiment plans in the chat harness contract and the pypsa-gui glossary.
+
 * Feat(pypsa-gui): Add an explicit "Check answers" chat option for the bounded assurance pilot. Keep checking on retries, edits, clarification choices and queued/voice requests; withhold output until the server acknowledges the requested checks and approves the exact answer. Availability rollback cannot silently send an ordinary request. Preserve a conservative retry-policy hint for unavailable checked history; deployment defaults remain disabled.
 
 * Fix(pypsa-gui): Rehydrate discussed run references onto a new chat episode when resuming a durable parent thread, so export and follow-ups still target the discussed run after restart instead of requiring a fresh `discuss_project_run`.
