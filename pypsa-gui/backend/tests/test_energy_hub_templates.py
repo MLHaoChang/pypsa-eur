@@ -144,6 +144,19 @@ def test_eh_templates_build_on_demand_when_network_nc_is_missing(
 
 
 @pytest.mark.parametrize("tid", IDS)
+def test_template_buses_start_unplaced(tid):
+    """Visual layers plan 2, M4: a template campus opens with every bus
+    UNPLACED (PyPSA's (0, 0) default, which the map reads as "no location")
+    so it appears in the map's UnplacedBusesPanel and places itself around
+    the user's first click — never at a placeholder in the Gulf of Guinea."""
+    from services.network_geometry import _bus_coord
+    n = T.BUILDERS[tid]()
+    assert len(n.buses) >= 2
+    for bus in n.buses.index:
+        assert _bus_coord(n, str(bus)) is None, f"{tid}: bus {bus!r} has a real coordinate"
+
+
+@pytest.mark.parametrize("tid", IDS)
 def test_templates_validate_without_gen_zero_costs(tid):
     """P30 (B5): the preflight (`validate_for_run`, what POST
     /api/simulation/preflight runs) raises no `gen_zero_costs` on a template:

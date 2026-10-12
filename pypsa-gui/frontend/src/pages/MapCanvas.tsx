@@ -7,7 +7,7 @@ import toast from 'react-hot-toast'
 import { confirmToast } from '../utils/toasts'
 import { isRenewableCarrier } from '../utils/carriers'
 import { uniformBadge, type BadgeDef } from '../utils/carrierBadges'
-import { Ruler, Flame, Wind, BatteryCharging, Zap, ExternalLink, Upload, Waypoints, Search } from 'lucide-react'
+import { Ruler, Flame, Wind, BatteryCharging, Zap, ExternalLink, Upload, Waypoints, Search, Plus, Cable } from 'lucide-react'
 import axios from 'axios'
 import ReactDOMServer from 'react-dom/server'
 import { formatApiDetail } from '../api/client'
@@ -16,6 +16,9 @@ import { geocodeApi, type GeocodeHit } from '../api/geocode'
 import { sitesApi } from '../api/sites'
 import { describeWay, suggestionCandidates, type SuggestBranch, type SuggestCandidate } from '../utils/osmSuggest'
 import ImportGeometryDialog from '../components/ImportGeometryDialog'
+import MapConnectDialog, { type ConnectionParams } from '../components/MapConnectDialog'
+import { registerMapDropTarget, unregisterMapDropTarget, type MapDropTarget } from '../utils/mapDropRegistry'
+import { layoutAround, PLACE_ALL_SPACING_M } from '../utils/placement'
 import { useUIStore, type CanvasView } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { updateAsset } from '../utils/assetWrite'
@@ -27,6 +30,7 @@ import { CanvasResultsProvider, useCanvasResults, fmtMW, loadingColor } from '..
 import { derivedPortFlow, getLinkColor, linkPorts } from './topologyEdges'
 import { busLatLng, fmtKm, lengthDisagrees, routeLengthKm, unplacedBusNames } from '../utils/geo'
 import { nextBusToPlace, canSkip } from '../utils/placement'
+import type { RescalePreview } from '../utils/rescale'
 import { ingestRescale } from '../utils/rescaleActions'
 import { useRescaleStore } from '../store/rescaleStore'
 import UnplacedBusesPanel from '../components/UnplacedBusesPanel'
@@ -1065,6 +1069,140 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   // ── Adopt real topology from outside (plan M3) ────────────────────────────
   const mapRef = useRef<L.Map | null>(null)
   const captureMap = useCallback((m: L.Map) => { mapRef.current = m }, [])
+  // The palette drop registry (plan M4): a drop on the map resolves to the
+  // geographic point under the pointer through this projection.
+  useEffect(() => {
+    const target: MapDropTarget = {
+      screenToLatLng: (clientX, clientY) => {
+        const map = mapRef.current
+        if (!map) return null
+        const rect = map.getContainer().getBoundingClientRect()
+        const x = clientX - rect.left, y = clientY - rect.top
+        if (x < 0 || y < 0 || x > rect.width || y > rect.height) return null
+        const ll = map.containerPointToLatLng([x, y])
+        return { lat: ll.lat, lng: ll.lng }
+      },
+    }
+    registerMapDropTarget(target)
+    return () => unregisterMapDropTarget(target)
+  }, [])
+
+  // ── Build on the map (plan M4) ────────────────────────────────────────────
+  // One map tool at a time, and never while click-to-place or site drawing
+  // owns the clicks. `addBus` creates a bus where the user clicks (the
+  // schematic's auto-named "Add bus", with x/y from the click instead of
+  // 0, 0); `connect` takes two bus clicks and opens the connect dialog;
+  // `placeAll` lays every unplaced bus out around one click.
+  type MapTool = 'none' | 'addBus' | 'connect' | 'placeAll'
+  const [mapTool, setMapTool] = useState<MapTool>('none')
+  const [connectFirst, setConnectFirst] = useState<string | null>(null)
+  const [connectDialog, setConnectDialog] = useState<{ source: string; target: string; x: number; y: number } | null>(null)
+  const toolActive = mapTool !== 'none' && !placing && !draw.drawing && placementUiAllowed
+  const pickTool = (tool: MapTool) => {
+    if (readOnly) { toast.error('Project is read-only'); return }
+    setConnectFirst(null); setConnectDialog(null)
+    setMapTool(t => (t === tool ? 'none' : tool))
+  }
+  useEffect(() => {
+    if (mapTool === 'none') return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      setMapTool('none'); setConnectFirst(null); setConnectDialog(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [mapTool])
+  useEffect(() => { setMapTool('none'); setConnectFirst(null); setConnectDialog(null) }, [currentProject])
+
+  const nextBusName = () => {
+    const existing = new Set((buses as Bus[]).map(b => b.name))
+    let i = (buses as Bus[]).length + 1
+    let name = `bus_${i}`
+    while (existing.has(name)) { i += 1; name = `bus_${i}` }
+    return name
+  }
+  const addBusMut = useMutation({
+    mutationFn: ({ name, lat, lng }: { name: string; lat: number; lng: number }) =>
+      networkApi.createBus({ name, v_nom: 1, carrier: 'AC', x: lng, y: lat } as Bus),
+    onSuccess: (_r, vars) => {
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') })
+      setSelectedComponent({ type: 'Bus', name: vars.name })
+      toast.success(`Bus ${vars.name} added — rename it in Properties`)
+    },
+    onError: (e: Error) => toast.error(`Could not add the bus: ${e.message}`),
+  })
+
+  const createLineMut = useMutation({
+    mutationFn: (p: { name: string; bus0: string; bus1: string; carrier: 'AC' | 'DC'; s_nom: number; x: number; length: number }) =>
+      networkApi.createLine({ name: p.name, bus0: p.bus0, bus1: p.bus1, carrier: p.carrier, s_nom: p.s_nom, x: p.x, length: p.length, r: 0 } as Partial<LineT>),
+    onSuccess: (_r, p) => {
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
+      setSelectedComponent({ type: 'Line', name: p.name })
+      toast.success(`Line added · ${fmtKm(p.length)}`)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+  const createTransformerMut = useMutation({
+    mutationFn: (p: { name: string; bus0: string; bus1: string; type: string; v_nom_0: number; v_nom_1: number; s_nom: number; x: number; tap_ratio: number }) =>
+      networkApi.createTransformer({
+        name: p.name, bus0: p.bus0, bus1: p.bus1, type: p.type, s_nom: p.s_nom, x: p.x, tap_ratio: p.tap_ratio,
+        v_nom_0: p.v_nom_0, v_nom_1: p.v_nom_1,
+      } as Partial<Transformer>),
+    onSuccess: (_r, p) => {
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'transformers') })
+      setSelectedComponent({ type: 'Transformer', name: p.name })
+      toast.success('Transformer added')
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+  const onBusClick = (bus: Bus, e: L.LeafletMouseEvent) => {
+    if (!(toolActive && mapTool === 'connect')) { setSelectedComponent({ type: 'Bus', name: bus.name }); return }
+    if (!connectFirst) { setConnectFirst(bus.name); return }
+    if (connectFirst === bus.name) { setConnectFirst(null); return }
+    const oe = e.originalEvent as MouseEvent
+    setConnectDialog({ source: connectFirst, target: bus.name, x: oe.clientX, y: oe.clientY })
+  }
+  const confirmConnection = (p: ConnectionParams) => {
+    if (!connectDialog) return
+    const { source: bus0, target: bus1 } = connectDialog
+    if (p.kind === 'line') createLineMut.mutate({ ...p, bus0, bus1 })
+    else createTransformerMut.mutate({ ...p, bus0, bus1 })
+    setConnectDialog(null); setConnectFirst(null); setMapTool('none')
+  }
+  const chordKm = (a: string, b: string): number => {
+    const ba = busByName.get(a), bb = busByName.get(b)
+    const ca = ba ? busLatLng(ba) : null, cb = bb ? busLatLng(bb) : null
+    return ca && cb ? routeLengthKm([ca, cb]) : 0
+  }
+
+  // Place all buses around one click: the first unplaced bus at the click,
+  // the rest on a ring PLACE_ALL_SPACING_M apart, each a PUT through the
+  // same chokepoint a drag uses, so lengths follow and the rescale is
+  // offered once for all of them.
+  const placeAllMut = useMutation({
+    mutationFn: async ({ lat, lng }: { lat: number; lng: number }) => {
+      const project = useUIStore.getState().currentProject
+      const positions = layoutAround([lat, lng], unplaced)
+      const rescale: RescalePreview[] = []
+      let placed = 0
+      for (const [name, [plat, plng]] of Object.entries(positions)) {
+        const resp = await updateAsset<Bus>(qc, project, 'buses', name, { x: plng, y: plat }) as { rescale?: RescalePreview[]; length_sources?: Record<string, 'typed' | 'chord' | 'route'> }
+        placed += 1
+        if (resp?.rescale) rescale.push(...resp.rescale)
+        useMapLayoutStore.getState().applyLengthSources(project, resp?.length_sources)
+      }
+      return { placed, rescale }
+    },
+    onSuccess: ({ placed, rescale }) => {
+      appLog('INFO', `Placed ${placed} bus${placed === 1 ? '' : 'es'} around one point, ${PLACE_ALL_SPACING_M} m apart.`)
+      toast.success(`${placed} bus${placed === 1 ? '' : 'es'} placed — drag any of them to where it really stands`)
+      ingestRescale(qc, rescale)
+    },
+    onError: (e: Error) => toast.error(`Placing stopped: ${e.message}`),
+    onSettled: () => setMapTool('none'),
+  })
   // GeoJSON / KML import: the file goes up for a PREVIEW first, the report
   // dialog shows what would match, and Apply sends it again with
   // `apply=true`. Both sidecars the server wrote are then re-read — the
@@ -1260,6 +1398,18 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
             // advance the queue by exactly one bus.
             if (updateBusPosMut.isPending) return
             updateBusPosMut.mutate({ name: placingBus, lat, lng })
+          }} />
+        )}
+        {toolActive && mapTool === 'addBus' && (
+          <ClickToPlace onPick={(lat, lng) => {
+            if (addBusMut.isPending) return
+            addBusMut.mutate({ name: nextBusName(), lat, lng })
+          }} />
+        )}
+        {toolActive && mapTool === 'placeAll' && (
+          <ClickToPlace onPick={(lat, lng) => {
+            if (placeAllMut.isPending) return
+            placeAllMut.mutate({ lat, lng })
           }} />
         )}
 
@@ -1516,9 +1666,9 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
               key={bus.name}
               position={c}
               draggable
-              icon={busDivIcon(colour, bus.name)}
+              icon={busDivIcon(connectFirst === bus.name ? '#2f81f7' : colour, bus.name)}
               eventHandlers={{
-                click: () => setSelectedComponent({ type: 'Bus', name: bus.name }),
+                click: (e) => onBusClick(bus, e),
                 contextmenu: (e) => {
                   // originalEvent is the underlying DOM mouse event — needed
                   // for client-pixel coords + preventDefault on the native
@@ -1607,6 +1757,28 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
         <input ref={fileInputRef} type="file" accept=".geojson,.json,.kml,application/geo+json,application/json,application/vnd.google-earth.kml+xml" className="hidden" onChange={onImportFile} data-testid="import-geometry-input" />
         <button
           type="button"
+          onClick={() => pickTool('addBus')}
+          disabled={readOnly || placing || draw.drawing}
+          title="Add bus: click the map where it stands (auto-named; rename in Properties)"
+          aria-label="Add bus"
+          aria-pressed={mapTool === 'addBus'}
+          className={`w-8 h-8 flex items-center justify-center bg-bg border rounded shadow transition-colors disabled:opacity-40 ${mapTool === 'addBus' ? 'text-accent border-accent' : 'text-text border-border hover:text-accent hover:border-accent'}`}
+        >
+          <Plus size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={() => pickTool('connect')}
+          disabled={readOnly || placing || draw.drawing}
+          title="Connect: click two buses to add a line (length = the chord) or a transformer between them"
+          aria-label="Connect buses"
+          aria-pressed={mapTool === 'connect'}
+          className={`w-8 h-8 flex items-center justify-center bg-bg border rounded shadow transition-colors disabled:opacity-40 ${mapTool === 'connect' ? 'text-accent border-accent' : 'text-text border-border hover:text-accent hover:border-accent'}`}
+        >
+          <Cable size={14} />
+        </button>
+        <button
+          type="button"
           onClick={toggleOsm}
           title={osmOn ? 'Hide OSM suggestions' : 'Show OSM power lines and substations as route suggestions (click a way to use it as a route)'}
           aria-label="OSM suggestions"
@@ -1669,7 +1841,40 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
           unplacedCount={unplaced.length}
           totalCount={(buses as Bus[]).length}
           placing={placing}
-          onStartPlacing={() => setPlacing(true)}
+          onStartPlacing={() => { setMapTool('none'); setPlacing(true) }}
+          onStartPlacingAll={readOnly || unplaced.length < 2 ? undefined : () => pickTool('placeAll')}
+        />
+      )}
+
+      {/* The active map tool's strip (plan M4): what the next click does. */}
+      {toolActive && !connectDialog && (
+        <div
+          className="absolute z-[900] left-1/2 -translate-x-1/2 flex items-center gap-3 px-3 py-2 bg-bg border border-border rounded-lg shadow-lg text-xs"
+          style={{ bottom: 24 }}
+          data-testid="map-tool-strip"
+        >
+          <span className="text-text">
+            {mapTool === 'addBus' && 'Add bus — click the map where it stands'}
+            {mapTool === 'placeAll' && <>Place all buses — click the grid connection; the other {unplaced.length - 1} land {PLACE_ALL_SPACING_M} m apart around it</>}
+            {mapTool === 'connect' && (connectFirst
+              ? <>Connect — now click the second bus <span className="text-muted">(from <span className="font-mono">{connectFirst}</span>)</span></>
+              : 'Connect — click the first bus')}
+            <span className="text-muted"> · Esc to stop</span>
+          </span>
+          <button type="button" onClick={() => pickTool(mapTool)} className="px-2 py-0.5 border border-border rounded text-muted hover:text-text">Done</button>
+        </div>
+      )}
+      {connectDialog && (
+        <MapConnectDialog
+          source={connectDialog.source}
+          target={connectDialog.target}
+          sourceVNom={busByName.get(connectDialog.source)?.v_nom ?? 0}
+          targetVNom={busByName.get(connectDialog.target)?.v_nom ?? 0}
+          defaultLengthKm={chordKm(connectDialog.source, connectDialog.target)}
+          anchorX={connectDialog.x}
+          anchorY={connectDialog.y}
+          onConfirm={confirmConnection}
+          onClose={() => { setConnectDialog(null); setConnectFirst(null) }}
         />
       )}
 
