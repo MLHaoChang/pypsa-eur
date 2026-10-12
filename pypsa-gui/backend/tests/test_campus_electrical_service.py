@@ -401,6 +401,17 @@ def test_who_moves_the_pcc_taps_reaches_the_engine_and_is_saved_with_the_setting
     assert seen == ["campus", "grid_operator"]
 
 
+def test_the_hours_that_moved_a_tap_are_counted_once_each():
+    """Counted by hand: hour 7 moved two units in two cases, hour 19 one,
+    hour 3 none; a run that did not invest has no count."""
+    row = lambda h, case, unit, moved: {"period": 2030, "hour": h, "case": case, "transformer": unit,
+                                        "group": "TR1+TR2", "tap_pos": moved, "ratio_pct": 100.0, "moved_by": moved}
+    taps = [row(7, "intact", "TR1", -2), row(7, "intact", "TR2", -2), row(7, "N-1:TR1", "TR2", -4),
+            row(19, "intact", "TR1", 1), row(3, "intact", "TR1", 0)]
+    assert ce._tap_hours_moved(taps) == 2
+    assert ce._tap_hours_moved([]) == 0 and ce._tap_hours_moved(None) is None
+
+
 def test_the_taps_are_read_back_with_the_results_and_the_hours_that_moved_one_are_counted(hub):
     """The drafted campus has no tap data: the taps table is empty and no
     hour moved a tap. With on-load taps on every transformer, the table
