@@ -1365,6 +1365,12 @@ def _persist_interrupted_turn(
     replace whatever ended the turn.
     """
     try:
+        # Not for a checked-answer turn: assurance keeps its own records, and
+        # its contract is that an answer it did not publish leaves nothing in
+        # the transcript (`test_commit_failure_never_publishes_or_persists_the_draft`).
+        # Read before `run_turn`'s finally clears it.
+        if session.assurance_turn is not None:
+            return
         fields = trace.interrupted_record(ended_by=ended_by)
         if fields is None or ctx is None:
             return

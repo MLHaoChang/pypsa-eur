@@ -664,7 +664,9 @@ interaction the #82 merge created. The two left open as decisions were settled o
   when it rebuilds the session's history: the step it stopped in can end on a
   `tool_use` with no `tool_result`, which makes every later turn invalid to the
   provider. A refusal before the model's first token still writes nothing; nothing
-  ran, and its error frame said why. Guard: `tests/test_chat_interrupted_turn_record.py`
+  ran, and its error frame said why. Nor does a checked-answer (strict assurance)
+  turn: assurance keeps its own records, and its contract is that an answer it did
+  not publish leaves nothing in the transcript. Guard: `tests/test_chat_interrupted_turn_record.py`
   plus a panel test in `ChatPanelSurfaces.test.tsx`, each checked against its mutation.
 - **`export_to_csv` / `export_to_excel` write model-supplied cells unmodified.**
   VERIFIED and FIXED, and worse than noted for xlsx. openpyxl stores any string
