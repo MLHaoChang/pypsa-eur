@@ -266,6 +266,26 @@ describe('arrange and reset (WP3)', () => {
     expect(useSitesStore.getState().docFor('p').sites[0].placements).toEqual(expected)
   })
 
+  it('rearrangeAll (S2 "Arrange all") replaces every placement with the given positions, orphans and all', () => {
+    useSitesStore.getState().setPlacement('p', 'site_a', 'Store:unplacedBus', { x: 5, y: 5, heading: 5 })
+    useSitesStore.getState().rearrangeAll('p', 'site_a', [
+      { key: 'Generator:kept', origin: [1, 2], heading: 3 },
+      { key: 'Bus:B1', origin: [0, 0], heading: 0 },
+    ])
+    expect(useSitesStore.getState().docFor('p').sites[0].placements).toEqual({
+      'Generator:kept': { x: 1, y: 2, heading: 3 },
+      'Bus:B1': { x: 0, y: 0, heading: 0 },
+    })
+  })
+
+  it('rearrangeAll is refused when read-only', async () => {
+    useUIStore.setState({ readOnly: true, readOnlyReason: 'solving' })
+    useSitesStore.getState().rearrangeAll('p', 'site_a', [{ key: 'Load:x', origin: [1, 1], heading: 0 }])
+    expect(Object.keys(useSitesStore.getState().docFor('p').sites[0].placements).sort()).toEqual(['Generator:kept', 'Generator:orphan'])
+    await vi.advanceTimersByTimeAsync(SITES_SAVE_DEBOUNCE_MS * 2)
+    expect(putSites).not.toHaveBeenCalled()
+  })
+
   it('removePlacement resets one object to packed and leaves the rest', () => {
     useSitesStore.getState().removePlacement('p', 'site_a', 'Generator:kept')
     expect(Object.keys(useSitesStore.getState().docFor('p').sites[0].placements)).toEqual(['Generator:orphan'])

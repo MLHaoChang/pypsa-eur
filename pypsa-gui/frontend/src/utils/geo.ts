@@ -54,3 +54,56 @@ export function isPlaced(b: BusCoords): boolean {
 export function unplacedBusNames<T extends BusCoords & { name: string }>(buses: T[]): string[] {
   return buses.filter(b => !isPlaced(b)).map(b => b.name)
 }
+
+// ── Lengths from geometry (plan M2) ──────────────────────────────────────────
+// The frontend twin of backend/services/network_geometry.py's
+// `_haversine_km` / `route_length_km`, in the map's [lat, lng] order (what
+// `busLatLng` returns and what `EditableLine` holds), so the discrepancy badge
+// can be computed client-side without a round trip. Same sphere radius, same
+// formula; both are tested against the same geodesics (one degree of latitude
+// ≈ 111.19 km, a two-leg route is the sum of its legs).
+
+const EARTH_KM = 6371.0
+
+/** Great-circle distance between two [lat, lng] points, in km. */
+export function haversineKm(a: readonly [number, number], b: readonly [number, number]): number {
+  const toRad = (d: number) => (d * Math.PI) / 180
+  const phi1 = toRad(a[0]), phi2 = toRad(b[0])
+  const dPhi = toRad(b[0] - a[0]), dLam = toRad(b[1] - a[1])
+  const h = Math.sin(dPhi / 2) ** 2 + Math.cos(phi1) * Math.cos(phi2) * Math.sin(dLam / 2) ** 2
+  return 2 * EARTH_KM * Math.asin(Math.min(1, Math.sqrt(h)))
+}
+
+/**
+ * Geodesic length of a polyline of [lat, lng] points — bus0, the interior
+ * waypoints, bus1 — haversine per segment. Fewer than two points is 0.
+ */
+export function routeLengthKm(points: readonly (readonly [number, number])[]): number {
+  let total = 0
+  for (let i = 1; i < points.length; i++) total += haversineKm(points[i - 1], points[i])
+  return total
+}
+
+/**
+ * The discrepancy badge's thresholds: a stored length disagrees with its
+ * geometry when the two differ by more than 10 % of the geometry OR 100 m,
+ * whichever is LARGER — so a 50 m campus feeder is not flagged over a 6 m
+ * drag, and a 400 km line is not flagged over 100 m of waypoint jitter.
+ */
+export const LENGTH_DISCREPANCY_REL = 0.10
+export const LENGTH_DISCREPANCY_ABS_KM = 0.1
+
+/** Does `storedKm` disagree with `geometryKm` beyond the thresholds? Non-finite inputs never flag. */
+export function lengthDisagrees(storedKm: number | null | undefined, geometryKm: number): boolean {
+  if (storedKm == null || !Number.isFinite(storedKm) || !Number.isFinite(geometryKm)) return false
+  const tolerance = Math.max(LENGTH_DISCREPANCY_REL * geometryKm, LENGTH_DISCREPANCY_ABS_KM)
+  return Math.abs(storedKm - geometryKm) > tolerance
+}
+
+/** "2.4 km" / "340 m" / "1,250 km" — one formatter for tooltips and the badge. */
+export function fmtKm(km: number): string {
+  if (!Number.isFinite(km)) return '—'
+  if (km < 1) return `${Math.round(km * 1000)} m`
+  if (km < 100) return `${km.toFixed(1)} km`
+  return `${Math.round(km).toLocaleString('en-US')} km`
+}

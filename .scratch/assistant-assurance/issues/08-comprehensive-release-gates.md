@@ -35,6 +35,24 @@ remaining blockers and next runnable tracer to [handoff](../session-handoff.md).
 
 ## Comments
 
+### Broader calibration and independent-review preparation (2026-10-12)
+
+The user requested the remaining calibration/review scopes. The shared evaluation
+now requires the 53 core cases plus 80 weighted-input stress cases: 133 cases,
+45 positive journeys, 88 adverse cases and 330 expected numerical slots.
+CI selects the expanded manifest. Offline blind judgment reconciliation requires
+two distinct independently attested reviewers, exact packet identity and complete
+observations; missing/disputed/error cases cannot be measured as success.
+Conditional statistical intervals require complete externally attested IID
+sampling. Synthetic reports grant no population estimate or domain approval.
+
+The [review package](../domain-review/README.md) contains forty worked profile
+expectations and ten blind interpretations; reviewer templates are unresolved
+and observations absent. A7.5 remains open pending actual independent domain
+judgments and observed decisions. See the [plan](../calibration-plan.md) and
+[guide](../calibration-runbook.md). No additional paid run or production setting
+change is made by this scope.
+
 ### 2026-10-12 — bounded pilot evaluation
 
 The user approved a repeatable finite-suite gate: all five current profiles,
