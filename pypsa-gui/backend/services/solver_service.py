@@ -1397,6 +1397,15 @@ def run_simulation(
                     for line in tb_str.rstrip().split("\n"):
                         log_queue.put(f"TRACEBACK: {line}")
                     condition = f"{condition}; ac_pf_failed: {exc}"
+            if status in ("ok", "optimal"):
+                # Persist input provenance with results under the SAME solve
+                # lock. Axis alignment alone cannot detect parameter edits.
+                try:
+                    from services.workflow_tools import _record_solve_inputs
+                    _record_solve_inputs(network, config)
+                except Exception as exc:
+                    network.meta.pop("assistant_solve_input_fingerprint", None)
+                    phase(f"Result input provenance unavailable: {type(exc).__name__}")
     except KeyboardInterrupt:
         # The abort watcher injected this to cancel the native HiGHS solve mid-
         # iteration (linopy caught it → h.cancelSolve() → PyPSA returned, then

@@ -1,0 +1,86 @@
+"""Multi-turn scenarios; each step has a state or UI oracle."""
+
+
+def step(tool, args, oracle=None, *, prompt=None, guided=False, deny=False, error=False):
+    return {"tool": tool, "args": args, "oracle": oracle, "prompt": prompt,
+            "guided": guided, "deny": deny, "error": error}
+
+
+SCENARIOS = {
+    "network_crud": [
+        step("list_components", {"component_class": "Bus", "limit": 10}, "two_buses",
+             prompt="List the buses currently in this network."),
+        step("get_component", {"component_class": "Bus", "name": "B1"}, "voltage_110",
+             prompt="What is B1's nominal voltage? Verify it with the network."),
+        step("create_component", {"component_class": "Bus", "name": "ConversationBus", "attrs": {"v_nom": 33, "x": 1, "y": 2}}, "bus_33"),
+        step("update_component", {"component_class": "Bus", "name": "ConversationBus", "attrs": {"v_nom": 66}}, "bus_66",
+             prompt="Change the nominal voltage of the bus you just created to 66 kV."),
+        step("get_component", {"component_class": "Bus", "name": "ConversationBus"}, "voltage_66",
+             prompt="Read that bus back and confirm its voltage."),
+        step("update_component", {"component_class": "Bus", "name": "ConversationBus", "new_name": "RenamedBus"}, "renamed"),
+        step("get_component", {"component_class": "Bus", "name": "RenamedBus"}, "voltage_66"),
+        step("create_component", {"component_class": "Load", "name": "ConversationLoad", "attrs": {"bus": "RenamedBus", "p_set": 3}}, "load_3"),
+        step("batch_create_components", {"component_class": "Generator", "components": [
+            {"name": "G1", "bus": "B1", "p_nom": 2}, {"name": "G2", "bus": "B1", "p_nom": 3},
+            {"name": "G3", "bus": "B1", "p_nom": 5}]}, "three_generators"),
+        step("list_components", {"component_class": "Generator", "limit": 10}, "generator_total_110",
+             prompt="List all generators and calculate their total installed capacity."),
+        step("bulk_update_components", {"component_class": "Generator", "names": ["G1", "G2"], "updates": {"marginal_cost": 12}}, "bulk_cost"),
+        step("get_component", {"component_class": "Generator", "name": "G2"}, "cost_12"),
+        step("create_component", {"component_class": "Bus", "name": "DeclinedBus", "attrs": {"v_nom": 44}}, "denied", guided=True, deny=True),
+        step("delete_component", {"component_class": "Load", "name": "ConversationLoad"}, "load_deleted"),
+        step("batch_delete_components", {"component_class": "Generator", "names": ["G1", "G2", "G3"]}, "generators_deleted"),
+        step("delete_component", {"component_class": "Bus", "name": "RenamedBus"}, "bus_deleted"),
+        step("list_components", {"component_class": "Bus", "limit": 10}, "two_buses",
+             prompt="How many buses remain now? Check the current network."),
+        step("create_carrier", {"name": "probe_solar", "color": "#ffaa00", "co2_emissions": 0}, "carrier"),
+        step("list_carriers", {}, "carrier_list"),
+        step(None, {}, "memory_denied", prompt="From our conversation, which bus did I decline to create? Do not call tools."),
+    ],
+    "timeseries": [
+        step("list_snapshots", {}, "four_snapshots"),
+        step("set_snapshots", {"start": "2026-01-01T00:00:00", "end": "2026-01-01T03:00:00", "freq": "h"}, "four_snapshots"),
+        step("set_snapshot_weightings", {"updates": {"2026-01-01T00:00:00": {"objective": 2}}}, "weight_two"),
+        step("download_snapshot_weightings_csv", {}, "download"),
+        step("download_timeseries_template", {"kind": "loads"}, "download"),
+        step("generate_exemplary_timeseries", {"component": "loads", "name": "L0", "attribute": "p_set", "profile": "constant", "peak": 7}, "constant_seven"),
+        step("get_timeseries", {"component": "loads", "name": "L0", "attribute": "p_set"}, "timeseries_seven"),
+        step("upload_timeseries", {"component": "loads", "name": "L0", "attribute": "p_set", "csv_content":
+             "snapshot,L0\n2026-01-01T00:00:00,1\n2026-01-01T01:00:00,2\n2026-01-01T02:00:00,3\n2026-01-01T03:00:00,4\n"}, "uploaded"),
+        step("get_timeseries", {"component": "loads", "name": "L0", "attribute": "p_set"}, "timeseries_four"),
+        step("list_all_timeseries", {"limit": 5}, "has_series"),
+        step("list_timeseries_profiles", {"profile_kind": "loads"}, "has_series"),
+        step("get_aggregate_load", {}, "has_series"),
+        step("delete_timeseries", {"component": "loads", "name": "L0", "attribute": "p_set"}, "series_deleted"),
+    ],
+    "harness_ui": [
+        step("use_skill", {"name": "grill"}, "skill"),
+        step("start_workflow", {"workflow_id": "build-network"}, "workflow_started"),
+        step("advance_workflow", {"step": "buses"}, "workflow_buses"),
+        step("ask_user", {"title": "Pick bus", "question": "Which bus?", "options": [
+            {"label": "B1", "description": "110 kV", "recommended": True},
+            {"label": "B2", "description": "20 kV"}], "allow_free_text": False}, "choice"),
+        step("get_component", {"component_class": "Bus", "name": "B2"}, "voltage_20",
+             prompt="I choose B2. Check and report the voltage of my selection."),
+        step("ui_select_component", {"component_class": "Bus", "name": "B2"}, "ui_select"),
+        step("ui_open_panel", {"panel_id": "topology"}, "ui_panel"),
+        step("ui_set_snapshot", {"snapshot_iso": "2026-01-01T01:00:00"}, "ui_snapshot"),
+        step("advance_workflow", {"step": "branches"}, "workflow_branches"),
+        step("end_workflow", {}, "workflow_ended"),
+        step("use_skill", {"name": "no-such-skill"}, "unknown_skill", error=True),
+        step("start_workflow", {"workflow_id": "no-such-workflow"}, "unknown_workflow", error=True),
+        step(None, {}, "memory_choice", prompt="Which bus did I select earlier, and what voltage did its real tool result show? Do not call tools."),
+    ],
+    "solver": [
+        step("check_solver_availability", {}, "available"),
+        step("get_solver_capabilities", {}, "result"),
+        step("get_solver_config", {}, "result"),
+        step("validate_network", {}, "result"),
+        step("diagnose_network", {}, "result"),
+        step("run_simulation", {}, "solved"),
+        step("get_simulation_status", {}, "solved_status"),
+        step("get_results", {"result_kind": "cost_breakdown"}, "result"),
+        step("get_results", {"result_kind": "generators"}, "result"),
+        step("get_results", {"result_kind": "loads"}, "result"),
+    ],
+}

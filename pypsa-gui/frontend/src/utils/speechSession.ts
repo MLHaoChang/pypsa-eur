@@ -25,6 +25,7 @@ export class SpeechSession {
   constructor(
     private readonly Ctor: SpeechRecognitionConstructor,
     private readonly handlers: SpeechSessionHandlers,
+    private readonly language: string = 'en-US',
   ) {}
 
   get isListening(): boolean {
@@ -35,7 +36,7 @@ export class SpeechSession {
     this.stop({ silent: true })
     this.wantListen = true
     const recognition = new this.Ctor()
-    recognition.lang = 'en-US'
+    recognition.lang = this.language
     recognition.continuous = true
     recognition.interimResults = true
 

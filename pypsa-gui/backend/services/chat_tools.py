@@ -429,11 +429,23 @@ def list_transformer_types() -> list[dict]:
     return _h()
 
 
-def download_timeseries_template(kind: str) -> Any:
+def _download_descriptor(response: Any, url: str) -> dict:
+    """Expose the authenticated browser download without replaying file bytes.
+
+    Returning a StreamingResponse into chat only produces its Python repr;
+    metadata lets the assistant offer the actual file without billing binary
+    content as prompt tokens or writing a read-tier artifact into the project.
     """
-    Returns the CSV-template StreamingResponse / string the route would emit.
-    For chat-tool callers we want the CSV body text; the handler returns a
-    StreamingResponse whose body we drain.
+    from email.message import Message
+    disposition = Message()
+    disposition["Content-Disposition"] = response.headers.get("content-disposition", "")
+    return {"filename": disposition.get_filename(), "media_type": response.media_type,
+            "download_url": url}
+
+
+def download_timeseries_template(kind: str) -> dict:
+    """
+    Return metadata and an authenticated link for the template spreadsheet.
     """
     if kind == "loads":
         from routers.network import download_load_profile_template as _h
@@ -443,12 +455,12 @@ def download_timeseries_template(kind: str) -> Any:
         from routers.network import download_link_profile_template as _h
     else:
         raise HTTPException(400, f"Unknown kind: {kind!r}")
-    return _h()
+    return _download_descriptor(_h(), f"/api/network/{kind}/template")
 
 
-def download_snapshot_weightings_csv() -> Any:
+def download_snapshot_weightings_csv() -> dict:
     from routers.network import download_snapshot_weightings_csv as _h
-    return _h()
+    return _download_descriptor(_h(), "/api/network/snapshots/weightings.csv")
 
 
 def list_investment_periods() -> dict:
@@ -4131,7 +4143,7 @@ def import_matpower(bytes_b64: str, filename: str = "case.m") -> dict:
     return _import_raw(_h, upload)
 
 
-def _save_agent_export(data: bytes, filename: str, mime: str) -> dict:
+def _save_agent_export(data: bytes, filename: str, mime: str, *, assurance_sha256: str | None = None) -> dict:
     """
     Persist agent-generated export bytes as an `agent_export` upload artifact and
     return lightweight metadata. The frontend's chat file strip renders
@@ -4144,6 +4156,7 @@ def _save_agent_export(data: bytes, filename: str, mime: str) -> dict:
     Requires a loaded project (the artifact lives in that project's uploads dir);
     the HTTP export routes still stream to the browser without one.
     """
+    from urllib.parse import quote
     from services import upload_service
     from services.pypsa_service import PyPSAService
     name = PyPSAService.get_loaded_project()
@@ -4160,13 +4173,25 @@ def _save_agent_export(data: bytes, filename: str, mime: str) -> dict:
     # derived gate cannot cover them as a family, and re-tiering them would
     # change their confirmation behaviour for unrelated reasons.
     _check_foreign_lock("export")
-    meta = upload_service.add_upload(name, data, filename, mime, kind="agent_export")
+    if len(data) > upload_service.MAX_FILE_BYTES:
+        raise HTTPException(413, {"error_kind": "file_too_large", "message": "Export exceeds 25 MB."})
+    ctx = PyPSAService.get_active_context()
+    if ctx.project_uuid:
+        from services.assistant_tools import _project
+        project, directory, _owner = _project()
+        meta = upload_service.add_upload(project.name, data, filename, mime, kind="agent_export", project_dir=directory,
+                                         **({"assurance_sha256": assurance_sha256} if assurance_sha256 is not None else {}))
+    else:
+        meta = upload_service.add_upload(name, data, filename, mime, kind="agent_export")
     return {
         "file_id": meta.file_id,
         "filename": meta.filename,
         "mime": meta.mime,
         "size": meta.size,
         "kind": meta.kind,
+        "sha256": meta.sha256,
+        "project_id": PyPSAService.get_active_context().project_uuid,
+        "download_url": f"/api/projects/{ctx.project_uuid or quote(name, safe='')}/uploads/{meta.file_id}/blob",
         "message": (
             f"Exported '{meta.filename}' ({meta.size} bytes). It's available as a "
             "downloadable file in the chat panel's file strip."
@@ -4251,6 +4276,30 @@ def ui_open_panel(
     ChatPanel applies to uiStore — slide panels, Results sub-tabs, bottom
     asset tabs, and the A|B compare rail.
     """
+    from harness.catalogue import (
+        BOTTOM_TAB_ENUM, COMPARE_TAB_ENUM, RESULTS_TAB_ENUM, SAFETY_PANEL_ENUM,
+    )
+    for key, value, allowed in (
+        ("panel_id", panel_id, SAFETY_PANEL_ENUM),
+        ("results_tab", results_tab, RESULTS_TAB_ENUM),
+        ("bottom_tab", bottom_tab, BOTTOM_TAB_ENUM),
+        ("compare_tab", compare_tab, COMPARE_TAB_ENUM),
+    ):
+        if (key == "panel_id" or value is not None) and (not isinstance(value, str) or value not in allowed):
+            raise HTTPException(400, detail={
+                "error_kind": "invalid_navigation", "field": key,
+                "message": f"Choose a supported {key} from the tool schema.",
+            })
+    for key, value, valid in (
+        ("compare_rail", compare_rail, type(compare_rail) is bool),
+        ("compare_a", compare_a, isinstance(compare_a, str)),
+        ("compare_b", compare_b, isinstance(compare_b, str)),
+    ):
+        if value is not None and not valid:
+            raise HTTPException(400, detail={
+                "error_kind": "invalid_navigation", "field": key,
+                "message": f"Use the declared {key} type from the tool schema.",
+            })
     event: dict[str, Any] = {
         "_ui_event": True,
         "kind": "navigate",
@@ -4274,6 +4323,143 @@ def ui_open_panel(
 def ui_set_snapshot(snapshot_iso: str, period: int | None = None) -> dict:
     return {"_ui_event": True, "kind": "set_snapshot",
             "snapshot_iso": snapshot_iso, "period": period}
+
+
+def discuss_project_run(
+    run_id: str,
+    results_tab: str | None = None,
+    section: str | None = None,
+    baseline_run_id: str | None = None,
+    open_ui: bool = True,
+) -> dict:
+    """
+    Bind conversation follow-ups to a recorded run and optionally open it in
+    the Results chrome. Emits ``open_run_result`` (kind) when ``open_ui``;
+    never restores historical inputs onto the live network.
+    """
+    from harness.catalogue import RESULTS_TAB_ENUM
+    from services import durable_conversation as dc
+    from services import run_evidence as re_
+
+    if results_tab is not None and (
+        not isinstance(results_tab, str) or results_tab not in RESULTS_TAB_ENUM
+    ):
+        raise HTTPException(400, detail={
+            "error_kind": "invalid_navigation",
+            "field": "results_tab",
+            "message": "Choose a supported results_tab from the tool schema.",
+        })
+    if open_ui is not True and open_ui is not False:
+        raise HTTPException(422, detail={
+            "error_kind": "invalid_discussed_run",
+            "message": "open_ui must be true or false.",
+        })
+
+    session = chat_session()
+    if session is None:
+        raise HTTPException(409, detail={
+            "error_kind": "no_chat_session",
+            "message": "Discussing a run requires an active chat session.",
+        })
+
+    summary = re_.get_run_evidence(run_id)
+    if baseline_run_id is not None:
+        re_.get_run_evidence(baseline_run_id)
+
+    root, project_id, _owner = re_._authority()
+    del root  # authority revalidated; project_id is the discussed scope
+    discussed = {
+        "project_id": project_id,
+        "run_id": run_id,
+        "status": summary.get("status"),
+        "mode": summary.get("mode"),
+        "fingerprint": summary.get("fingerprint"),
+        "evidence_available": bool(summary.get("evidence_available")),
+    }
+    if results_tab:
+        discussed["source"] = results_tab
+    if section:
+        discussed["section"] = section
+    if baseline_run_id:
+        discussed["baseline_run_id"] = baseline_run_id
+
+    with session._lock:
+        session.discussed_refs = dict(discussed)
+
+    thread_id = dc.find_thread_for_episode(session.session_id)
+    if thread_id:
+        thread = dc.get_thread(thread_id)
+        dc.set_discussed_run(
+            thread_id,
+            generation=int(thread["generation"]),
+            run_id=run_id,
+            project_id=project_id,
+            baseline_run_id=baseline_run_id,
+            section=section,
+            source=results_tab,
+            clear_baseline=baseline_run_id is None,
+        )
+
+    if not open_ui:
+        return {"ok": True, "discussed": discussed, "ui_navigated": False}
+
+    event: dict[str, Any] = {
+        "_ui_event": True,
+        "kind": "open_run_result",
+        "run_id": run_id,
+        "status": summary.get("status"),
+        "mode": summary.get("mode"),
+        "fingerprint": summary.get("fingerprint"),
+        "evidence_available": bool(summary.get("evidence_available")),
+        "discussed": discussed,
+    }
+    if results_tab:
+        event["results_tab"] = results_tab
+    if section:
+        event["section"] = section
+    if baseline_run_id:
+        event["baseline_run_id"] = baseline_run_id
+    return event
+
+
+def export_run_evidence(
+    run_id: str | None = None,
+    section: str | None = None,
+) -> dict:
+    """
+    Export immutable evidence for a named run, or the session's discussed run
+    when ``run_id`` is omitted. Never substitutes another/newer run.
+    """
+    import json as _json
+
+    from services import run_evidence as re_
+
+    resolved = run_id
+    if resolved is None:
+        session = chat_session()
+        refs = getattr(session, "discussed_refs", None) if session is not None else None
+        if not isinstance(refs, dict) or not refs.get("run_id"):
+            raise HTTPException(409, detail={
+                "error_kind": "discussed_run_required",
+                "message": (
+                    "No run_id was given and no discussed run is bound. "
+                    "Call discuss_project_run or pass run_id from list_project_runs."
+                ),
+            })
+        resolved = str(refs["run_id"])
+
+    evidence = re_.get_run_evidence(resolved, section=section)
+    filename = (
+        f"run_{resolved}_{section}.json" if section else f"run_{resolved}.json"
+    )
+    payload = _json.dumps(evidence, allow_nan=False, sort_keys=True, indent=2).encode("utf-8")
+    meta = _save_agent_export(payload, filename, "application/json")
+    return {
+        **meta,
+        "run_id": resolved,
+        "section": section,
+        "note": "Exported the named (or discussed) run only; current network results were not substituted.",
+    }
 
 
 # ── Harness: ask the user (chat harness issue 04) ──────────────────────────
@@ -6869,7 +7055,48 @@ PRE_DISPATCH_VALIDATORS: dict[str, Any] = {
 # Single source of truth for the (tool_name → callable) mapping. The Phase 2
 # chat session loop iterates this dict to dispatch incoming tool_use blocks.
 # Tools NOT in this dict are NOT exposed to the LLM.
+from services.workflow_tools import (
+    project_readiness, wait_for_job, get_study_evidence, run_sensitivity_sweep, use_toolset,
+)
+
+from services.run_evidence import list_project_runs, get_run_evidence, compare_project_runs
+# discuss_project_run is defined above with the UI-control tools.
+from services.loadflow_summary import get_loadflow_summary
+from services.experiments import start_experiment, list_experiments, get_experiment
+from services.assistant_tasks import list_tasks, start_task, get_task, resume_task, cancel_task, resolve_task_step
+from services.assistant_tools import (find_capabilities, get_file_delivery, inspect_import, import_uploaded_network,
+                                      preview_project_changes, apply_project_changes, create_chart, build_delivery)
+
 DISPATCHERS: dict[str, Any] = {
+    "list_project_runs": list_project_runs,
+    "get_run_evidence": get_run_evidence,
+    "compare_project_runs": compare_project_runs,
+    "discuss_project_run": discuss_project_run,
+    "export_run_evidence": export_run_evidence,
+    "get_loadflow_summary": get_loadflow_summary,
+    "start_experiment": start_experiment,
+    "list_experiments": list_experiments,
+    "get_experiment": get_experiment,
+    "list_tasks": list_tasks,
+    "find_capabilities": find_capabilities,
+    "start_task": start_task,
+    "get_task": get_task,
+    "resume_task": resume_task,
+    "cancel_task": cancel_task,
+    "resolve_task_step": resolve_task_step,
+    "get_file_delivery": get_file_delivery,
+    "inspect_import": inspect_import,
+    "import_uploaded_network": import_uploaded_network,
+    "preview_project_changes": preview_project_changes,
+    "apply_project_changes": apply_project_changes,
+    "create_chart": create_chart,
+    "build_delivery": build_delivery,
+
+    "project_readiness": project_readiness,
+    "wait_for_job": wait_for_job,
+    "get_study_evidence": get_study_evidence,
+    "run_sensitivity_sweep": run_sensitivity_sweep,
+    "use_toolset": use_toolset,
     # read (22)
     "list_components": list_components,
     "diagnose_network": diagnose_network,
@@ -7221,6 +7448,7 @@ _LOCK_GATE_WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 # routed ones — `batch_delete_components` more so than most. The undo capture
 # (`_undo_captured_tool_names`) needs the same list for the same reason.
 _NETWORK_SERVICE_CALL_MUTATORS = frozenset({
+    "apply_project_changes", "import_uploaded_network",
     "batch_create_components",
     "batch_delete_components",
     "generate_exemplary_timeseries",
@@ -7229,6 +7457,7 @@ _NETWORK_SERVICE_CALL_MUTATORS = frozenset({
 })
 
 _LOCK_GATE_SERVICE_CALL_MUTATORS = _NETWORK_SERVICE_CALL_MUTATORS | frozenset({
+    "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery",
     # Write edges into the PROJECT DIRECTORY that call their service layer
     # directly, so they never reach the REST handler that checks the lock.
     # `routers/uploads.py` decided this question the other way and said so:
