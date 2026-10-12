@@ -534,6 +534,8 @@ def test_the_report_block_reads_the_case_assets_and_the_workbook_lists_them(solv
                              "lifetime": 40.0, "fom_share": 0.015}]
     assert "within its build year 2030" in trf["cod"]
     assert "2026 EUR" in trf["money_year"]
+    # IC G3 gate C3: the case does not convert, and the route refuses another money year.
+    assert "converted" not in trf["money_year"] and "refuses" in trf["money_year"]
     assert by["feeder_cable"]["overnight_cost"] == pytest.approx(1.1 * 225_000.0)
     ws = load_workbook(io.BytesIO(build_workbook(rep)))["About"]
     rows = [(ws.cell(i, 1).value, ws.cell(i, 2).value) for i in range(1, ws.max_row + 1)]
@@ -697,6 +699,7 @@ def test_an_unstated_currency_year_with_extras_is_flagged_and_the_text_softened(
     (b,) = assemble_finance_sections(run_case(case), case).sections["project"].payload[
         "extra_assets"]
     assert "not stated" in b["money_year"] and "converted" not in b["money_year"]
+    assert "currency" in b["money_year"].split("not stated", 1)[1]    # the route still checks it
     stated = _build(n, cfg, _fin(currency_year=2026), extras=(_ext(),))
     assert "extra_asset_money_year_unstated" not in stated.flags
     assert "extra_asset_money_year_unstated" not in _build(n, cfg, _fin()).flags   # no extras

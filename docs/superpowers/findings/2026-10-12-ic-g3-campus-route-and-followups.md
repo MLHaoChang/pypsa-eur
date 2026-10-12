@@ -23,7 +23,9 @@ code PASS round 2, §6).
   `campus_study_network_unsaved` is added when a study applies and the in-memory network is not the saved one.
   Refusals are `FinanceRefused` raised in `build()`, so they are refused reports (and the PPA tool's 422
   `investment_case_refused`). Their details are fixed text plus the asset's name; exception text and asset values
-  are only logged.
+  are only logged. The PPA tool's result carries the case's `campus_study_*` flags beside its own (gate C1), so a
+  price solved without the campus extras says so. The report's per-asset money text no longer claims a conversion:
+  the route refuses another currency or price year (gate C3).
 - **R2, staleness.** `assumptions_digest` gains `extra_assets` (always present; `None` without a study; a digest of
   `source_hash`, `stale`, the flags except the unsaved one, and the assets without `meta`; on GET a source that
   cannot be read digests as an error, never a 500). The POST's worker and the GET compute the same key for an
@@ -74,9 +76,23 @@ code PASS round 2, §6).
 3. **`campus_study_network_unsaved` is common**: a solve leaves results unsaved, so a run straight after a solve
    carries it. It means "save the project so the campus study's staleness check sees this network". After that
    save the new `network.nc` may mark the campus study stale, and the report then names `extra_assets`: expected.
+   The flag reads `dirty_state.is_dirty(ctx) or undo depth > 0`; quiet and automatic saves
+   (`saveProjectQuietly`, `clear_undo=False`) write `network.nc` but clear neither, so only an explicit save
+   clears it (gate assessor C2).
 4. **Unresolved campus needs** are dropped by the producer without a flag (the campus session's call; told, R-6).
 5. A stale study is never used (default B); there is no option to value it anyway.
 
 ## Gate assessor
 
-ASSESSOR
+**PASS WITH CONDITIONS (b3179670a).** Every scope item and convention implemented as decided; the "Closed" claims
+true. Own end-to-end probe (a real LP solve, the hub project saved through the route, the real producer, adapter
+and finance engine): baseline capex 2,200,000 with an empty `extra_assets` block and a `null` part; adding the study
+makes GET stale naming only `extra_assets` before any re-run; with the study (EUR, 2026) the block lists
+`campus:TR_132_33_40#1`, `CB_33_AL95#1` (2.5 km) and `SG_132_31p5#1` (3 bays) with `source_hash` 76c3b6aeef33f1ca,
+capex 5,575,000 (+3,375,000 = 1,800,000 + 90,000 × 2.5 + 450,000 × 3 by hand from `campus_assets.yaml`), current;
+one byte in the study's CSV or a library price change → stale naming `extra_assets`, reverted → current; a stale
+study → flagged, no extras, capex 2,200,000; USD or `currency_year` 2025 → refused
+`campus_assets_money_year_mismatch`; `currency_year` None → runs, flagged `extra_asset_money_year_unstated`. 234
+touched tests and `qa_investment_case.py` 259/259 re-run. Conditions, all taken: C1 the PPA tool's result carries
+the campus flags (fixed, tested); C2 the unsaved flag cleared only by an explicit save (limit 3); C3 the report's
+money text (fixed, tested); C4 this section.

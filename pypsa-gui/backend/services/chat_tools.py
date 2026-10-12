@@ -2443,7 +2443,10 @@ def solve_ppa_price(target_irr: float, target_year: int,
         "target_irr": target_irr, "target_year": target_year,
         "equity_post_tax_irr_at_target_year": _ne(out.get("solved_equity_irr_at_target_year"), 6),
         "owner": _cut(case.owner),
-        "flags": [_cut(f, 160) for f in out.get("solve_ppa_flags") or []],
+        # IC G3 gate C1: the case's campus flags too, so a price solved without the
+        # campus extras (a stale study, no engine, an unsaved network) says so.
+        "flags": [_cut(f, 160) for f in [*(out.get("solve_ppa_flags") or []),
+                                         *(f for f in case.flags if f.startswith("campus_study_"))]],
         "basis": ("post-tax equity IRR on the incremental cash against the counterfactual "
                   "supply cost, over operating years 1..target_year (SAM ppa_soln_mode=0)"),
         "stored_inputs_changed": False,
