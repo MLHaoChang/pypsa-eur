@@ -1500,9 +1500,9 @@ def _ic_campus_digest(source_hash, stale, flags, assets) -> str:
 def _ic_asset_label(a, i: int) -> str:
     """An asset as named in a refusal detail: its name when it is a string, else
     its position. Details carry fixed text and this label only, never a value
-    or exception text (those are logged)."""
+    or exception text (those are logged); a name is cut at 80 characters."""
     name = a.get("name") if isinstance(a, dict) else None
-    return repr(name) if isinstance(name, str) else f"asset {i}"
+    return repr(name[:80]) if isinstance(name, str) else f"asset {i}"
 
 
 def _ic_money_year_problem(assets: list, fin) -> str | None:
@@ -1570,7 +1570,7 @@ def _ic_campus_from_response(resp: dict, fin, *, unsaved: bool) -> CampusSource:
     return CampusSource(extras=tuple(extras), unsaved=unsaved, digest=digest)
 
 
-def _ic_campus_source(finance: dict | None = None) -> CampusSource:
+def _ic_campus_source(finance: dict | None) -> CampusSource:
     """The active project's campus study as the case's extra owner assets (R-1),
     checked against `finance` (the raw finance inputs the caller holds, R-3).
     A seam: tests replace it. In this order: no project, no row or no

@@ -307,7 +307,10 @@ def _missing_build_year():
      "'campus:TR_132_33_40#1' is not a valid extra owner asset"),      # a missing field
     (_response([{**_asset(), "name": 7, "quantity": SECRET}]),
      "asset 0 is not a valid extra owner asset"),                       # no str name: the index
-], ids=["assets_not_a_list", "non_dict_entry", "rejected_value", "missing_field", "no_name"])
+    (_response([{**_asset(), "name": "campus:" + "x" * 200, "quantity": SECRET}]),
+     repr("campus:" + "x" * 73) + " is not a valid extra owner asset"),  # a long name: cut at 80
+], ids=["assets_not_a_list", "non_dict_entry", "rejected_value", "missing_field", "no_name",
+        "long_name"])
 def test_a_malformed_or_rejected_campus_response_is_refused_without_its_values(
         resp, detail, client, install_network, session_ctx, _auth_db, monkeypatch):
     from services import campus_electrical_service as ce
@@ -354,7 +357,7 @@ def test_the_ppa_solve_refuses_through_the_real_build_without_the_values(install
 
     monkeypatch.setattr(
         R, "_ic_campus_source",
-        lambda finance=None: R._ic_campus_from_response(
+        lambda finance: R._ic_campus_from_response(
             _response([{**_asset(), "quantity": SECRET}]), None, unsaved=False))
     monkeypatch.setattr(FC, "build_finance_case",
                         lambda *a, **k: pytest.fail("refused before the adapter"))
@@ -377,7 +380,7 @@ def test_a_campus_refusal_never_precedes_the_runners_finance_inputs_422(
 
     _capture_factory(monkeypatch)
     monkeypatch.setattr(R, "_ic_campus_source",
-                        lambda finance=None: R.CampusSource.refused("campus_assets_invalid", "test"))
+                        lambda finance: R.CampusSource.refused("campus_assets_invalid", "test"))
     install_network(build_network(solve=True))
     r = client.post(STUDY_URL, json={})
     assert r.status_code == 422 and r.json()["detail"]["code"] == "finance_inputs_missing"
@@ -522,7 +525,7 @@ def test_a_source_that_cannot_be_read_on_get_digests_as_an_error_never_a_500(
     _put_fin(client, _s2_inputs())
     assert _run(client)["report"]["stale"] is False
 
-    def boom(finance=None):
+    def boom(finance):
         raise RuntimeError("the database is gone")
     monkeypatch.setattr(R, "_ic_campus_source", boom)
     r = client.get(STUDY_URL)
@@ -594,7 +597,7 @@ def test_the_route_and_solve_ppa_price_hand_the_seam_the_same_source(install_net
     source = R.CampusSource(extras=(extra,), digest="campus-digest-for-test")
     finances: list = []
 
-    def seam(finance=None):
+    def seam(finance):
         finances.append(finance)
         return source
     monkeypatch.setattr(R, "_ic_campus_source", seam)
