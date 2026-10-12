@@ -2400,7 +2400,7 @@ def solve_ppa_price(target_irr: float, target_year: int,
     # IC G3 R-2: the campus study read the way the route reads it, so the solved
     # price and the report value the same case.
     build = _ic_build_case(n, cfg, owner=owner, lost_load=sim_state.get("last_lost_load"),
-                           campus=_ic_read_campus())
+                           campus=_ic_read_campus(raw))
     try:
         case = build()
     except FinanceRefused as exc:

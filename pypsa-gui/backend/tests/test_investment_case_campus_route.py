@@ -156,7 +156,8 @@ def test_the_campus_study_assets_are_the_reports_extra_assets_and_its_capex(
 
     n, cfg = _solve(_site(), _commercial(_single_owner(_site())))
     _save(client, install_network, "campus_ic_e2e", n)
-    session_ctx(client).solver_state["solver_config"] = cfg       # the solve's commercial config
+    # `install_network` (inside `_save`) resets the solver config: put the solve's back.
+    session_ctx(client).solver_state["solver_config"] = cfg
     with _row(_auth_db, session_ctx, client) as (_db, row):
         fake_investment(row, _purchase())
         want_hash = ce.campus_study_hash(row)
@@ -280,13 +281,103 @@ def test_a_producer_error_is_a_refused_report_campus_assets_invalid(
     assert rep.status_code == 200 and rep.json()["report"]["stale"] is False
 
 
+SECRET = "SECRET_VALUE"
+NOT_A_LIST = "the campus study's owner assets are not a list of entries"
+
+
+def _no_secret(client, body):
+    """The value text reaches neither the run record, the stored report nor the GET."""
+    assert SECRET not in str(body)
+    assert SECRET not in client.get(REPORT_URL, params={"detail": "full"}).text
+    assert SECRET not in client.get(STUDY_URL).text
+
+
+def _missing_build_year():
+    a = _asset()
+    del a["build_year"]
+    return a
+
+
+@pytest.mark.parametrize("resp,detail", [
+    (_response(SECRET), NOT_A_LIST),                                # `assets` not a list
+    (_response([_asset(), SECRET]), NOT_A_LIST),                    # a non-dict entry
+    (_response([{**_asset(), "quantity": SECRET}]),
+     "'campus:TR_132_33_40#1' is not a valid extra owner asset"),      # ExtraOwnerAsset refuses
+    (_response([_missing_build_year()]),
+     "'campus:TR_132_33_40#1' is not a valid extra owner asset"),      # a missing field
+    (_response([{**_asset(), "name": 7, "quantity": SECRET}]),
+     "asset 0 is not a valid extra owner asset"),                       # no str name: the index
+], ids=["assets_not_a_list", "non_dict_entry", "rejected_value", "missing_field", "no_name"])
+def test_a_malformed_or_rejected_campus_response_is_refused_without_its_values(
+        resp, detail, client, install_network, session_ctx, _auth_db, monkeypatch):
+    from services import campus_electrical_service as ce
+
+    calls = _fake_adapter(monkeypatch)
+    _save(client, install_network, "campus_ic_malformed")
+    with _row(_auth_db, session_ctx, client) as (_db, row):
+        fake_investment(row, _purchase())
+    monkeypatch.setattr(ce, "owner_assets_response", lambda p: resp)
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    body = _run(client)
+    assert body["status"] == "refused" and body["error_code"] == "campus_assets_invalid", body
+    assert calls == []
+    refusal = client.get(REPORT_URL, params={"detail": "full"}).json()[
+        "sections"]["project"]["payload"]["refusal"]
+    assert refusal == {"code": "campus_assets_invalid", "detail": detail}
+    _no_secret(client, body)
+
+
+def test_a_money_year_refusal_names_data_not_exception_text(client, install_network, session_ctx,
+                                                            _auth_db, monkeypatch):
+    from services import campus_electrical_service as ce
+
+    _fake_adapter(monkeypatch)
+    _save(client, install_network, "campus_ic_money_detail")
+    with _row(_auth_db, session_ctx, client) as (_db, row):
+        fake_investment(row, _purchase())
+    monkeypatch.setattr(ce, "owner_assets_response",
+                        lambda p: _response([{**_asset(), "meta": SECRET}]))
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    body = _run(client)
+    assert body["error_code"] == "campus_assets_money_year_mismatch", body
+    _no_secret(client, body)
+
+
+def test_the_ppa_solve_refuses_through_the_real_build_without_the_values(install_network,
+                                                                         monkeypatch):
+    """`solve_ppa_price` with the real factory and `build()`: the campus refusal is the
+    tool's 422 `investment_case_refused`, its code `campus_assets_invalid`."""
+    import routers.results as R
+    import routers.simulation as SIM
+    from services import chat_tools
+    from services.results import finance_case as FC
+
+    monkeypatch.setattr(
+        R, "_ic_campus_source",
+        lambda finance=None: R._ic_campus_from_response(
+            _response([{**_asset(), "quantity": SECRET}]), None, unsaved=False))
+    monkeypatch.setattr(FC, "build_finance_case",
+                        lambda *a, **k: pytest.fail("refused before the adapter"))
+    install_network(build_network(solve=True))
+    SIM.put_finance(SIM.FinanceIn(finance=_s2_inputs()), if_match=None)
+    try:
+        with pytest.raises(HTTPException) as exc:
+            chat_tools.DISPATCHERS["solve_ppa_price"](target_irr=0.1, target_year=10)
+    finally:
+        SIM.put_finance(SIM.FinanceIn(finance=None), if_match=None)
+    assert exc.value.status_code == 422
+    assert exc.value.detail["error_kind"] == "investment_case_refused"
+    assert exc.value.detail["code"] == "campus_assets_invalid"
+    assert SECRET not in str(exc.value.detail)
+
+
 def test_a_campus_refusal_never_precedes_the_runners_finance_inputs_422(
         client, install_network, monkeypatch):
     import routers.results as R
 
     _capture_factory(monkeypatch)
     monkeypatch.setattr(R, "_ic_campus_source",
-                        lambda: R.CampusSource.refused("campus_assets_invalid", "test"))
+                        lambda finance=None: R.CampusSource.refused("campus_assets_invalid", "test"))
     install_network(build_network(solve=True))
     r = client.post(STUDY_URL, json={})
     assert r.status_code == 422 and r.json()["detail"]["code"] == "finance_inputs_missing"
@@ -431,14 +522,14 @@ def test_a_source_that_cannot_be_read_on_get_digests_as_an_error_never_a_500(
     _put_fin(client, _s2_inputs())
     assert _run(client)["report"]["stale"] is False
 
-    def boom():
+    def boom(finance=None):
         raise RuntimeError("the database is gone")
     monkeypatch.setattr(R, "_ic_campus_source", boom)
     r = client.get(STUDY_URL)
     assert r.status_code == 200, r.text
     rep = r.json()["report"]
     assert rep["stale"] is True and rep["changed"] == ["extra_assets"]
-    got = R._ic_read_campus()
+    got = R._ic_read_campus(None)
     assert got.refusal == "campus_assets_invalid"
     assert got.digest == json_digest({"error": "campus_assets_invalid"})
 
@@ -501,7 +592,12 @@ def test_the_route_and_solve_ppa_price_hand_the_seam_the_same_source(install_net
     names = [f.name for f in dataclasses.fields(ExtraOwnerAsset)]
     extra = ExtraOwnerAsset(**{k: _asset()[k] for k in names})
     source = R.CampusSource(extras=(extra,), digest="campus-digest-for-test")
-    monkeypatch.setattr(R, "_ic_campus_source", lambda: source)
+    finances: list = []
+
+    def seam(finance=None):
+        finances.append(finance)
+        return source
+    monkeypatch.setattr(R, "_ic_campus_source", seam)
     seen: list = []
     real_factory = R._ic_build_case
 
@@ -539,5 +635,7 @@ def test_the_route_and_solve_ppa_price_hand_the_seam_the_same_source(install_net
         assert exc.value.detail["error_kind"] == "solve_ppa_no_root", exc.value.detail
         assert seen == [source, source]
         assert [e.name for e in solved_cases[0].extra_assets] == ["campus:TR_132_33_40#1"]
+        # The seam is handed the finance inputs the caller already holds (POST, GETs, PPA).
+        assert finances and all(f == _s2_inputs() for f in finances)
     finally:
         SIM.put_finance(SIM.FinanceIn(finance=None), if_match=None)
