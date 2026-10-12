@@ -32,7 +32,11 @@ The description is one YAML mapping under ``campus``:
     vector group a transformer is taken as Dyn11 (YNyn11 when its HV
     earthing is given), and a star neutral brought out without its earthing
     as solidly earthed; each such assumption is listed in
-    ``Campus.assumptions``.
+    ``Campus.assumptions``. Optionally (plan C13) the tap changer ``tap``,
+    ``{changer, side, neutral, min, max, step_percent, pos}``
+    (``schema/transformer.py``; ``pos`` defaults to ``neutral``), which goes
+    into pandapower's tap columns (``tap_changer_type = "Ratio"``) and
+    ``Campus.taps``. Without it the unit is at its nominal ratio, as before.
 
 ``cables``
     ``{name: {from_bus, to_bus, length_km, r_ohm_per_km, x_ohm_per_km,
@@ -112,6 +116,7 @@ Refused at load, each with a message naming the field:
   field, a non-positive ``q_mvar`` or (a capacitor bank) ``steps`` that is
   not a whole number of at least 1;
 * an inverter whose MVA is below its MW;
+* a malformed ``tap`` block, or a position outside its range;
 * a malformed ``vector_group``, earthing on a delta winding, or solid or
   resistance earthing on a star whose neutral is not brought out;
 * a relay with neither pickup;
@@ -130,7 +135,6 @@ full ``yaml.load``.
 """
 import dataclasses
 import math
-import re
 from collections import deque
 from pathlib import Path
 
@@ -147,6 +151,7 @@ from gridspine.schema.island import (
     validate_unit_island,
 )
 from gridspine.schema.network import validate_canonical
+from gridspine.schema.transformer import VECTOR_GROUP, check_tap
 from gridspine.static.shortcircuit import LINE_ENDTEMP_DEGREE
 
 SOURCES = frozenset({"measured", "datasheet", "assumed"})
@@ -189,8 +194,8 @@ _CABLE_FIELDS = ("length_km", "r_ohm_per_km", "x_ohm_per_km", "c_nf_per_km", "ma
 #: A cable's zero sequence (island plan I5b), tagged and optional.
 _CABLE_ZERO = ("r0_ohm_per_km", "x0_ohm_per_km", "c0_nf_per_km")
 #: ``Dyn11``: the HV winding (``D``, ``Y``, ``YN``), the LV winding (``d``,
-#: ``y``, ``yn``) and the clock number 0-11.
-_VECTOR_GROUP = re.compile(r"(YN|Y|D)(yn|y|d)(1[01]|[0-9])")
+#: ``y``, ``yn``) and the clock number 0-11 (``schema/transformer.py``).
+_VECTOR_GROUP = VECTOR_GROUP
 _UNIT_FIELDS = {
     "load": ("p_mw", "pf"),
     "bess": ("p_mw", "e_mwh", "s_mva", "k_sc", "rx_sc"),
@@ -263,6 +268,9 @@ class Campus:
     earthing_transformers: pd.DataFrame = dataclasses.field(default_factory=lambda: _empty_earthing_transformers())
     #: What the campus took without being told (plan I5b), one line each.
     assumptions: list = dataclasses.field(default_factory=list)
+    #: The tap changers given (plan C13): ``{transformer: {changer, side,
+    #: neutral, min, max, step_percent, pos}}``; empty when none is.
+    taps: dict = dataclasses.field(default_factory=dict)
 
 
 _COMP_COLUMNS = ["name", "kind", "bus", "q_mvar", "steps", "library_id", "pypsa_name"]
@@ -483,11 +491,11 @@ def build_campus(spec) -> Campus:
                        s_sc_min_mva=pv["sk_min_mva"], rx_max=pv["rx_max"], rx_min=pv["rx_min"],
                        name=GRID_NAME)
 
-    edges, earthing, windings, assumptions = [], {}, {}, []
+    edges, earthing, windings, assumptions, taps = [], {}, {}, [], {}
     for tname, ts in trafos.items():
         where = f"transformers.{tname}"
         _fields(where, ts, _TRAFO_FIELDS,
-                ("hv_bus", "lv_bus", "pypsa_name", "vector_group", *_ASSET_FLAGS,
+                ("hv_bus", "lv_bus", "pypsa_name", "vector_group", "tap", *_ASSET_FLAGS,
                  *(f for pair in _TRAFO_EARTHING.values() for f in pair)))
         _flags(where, ts)
         hv, lv = str(ts.get("hv_bus")), str(ts.get("lv_bus"))
@@ -504,10 +512,19 @@ def build_campus(spec) -> Campus:
             raise ContractError(f"{where}: vn_hv_kv must be above vn_lv_kv")
         if not v["vkr_percent"] < v["vk_percent"]:
             raise ContractError(f"{where}: vkr_percent ({v['vkr_percent']}) must be below vk_percent ({v['vk_percent']})")
+        tap_kw = {}
+        if "tap" in ts:
+            def tagged(w, f, spec, tname=str(tname)):
+                x = _tagged(w, f, spec, [])
+                rows.append({"element": tname, "param": f"tap.{f}", "value": x, "source": spec[f]["source"]})
+                return x
+            tp = taps[str(tname)] = check_tap(f"{where}.tap", ts["tap"], tagged, with_pos=True)
+            tap_kw = {"tap_side": tp["side"], "tap_neutral": tp["neutral"], "tap_min": tp["min"], "tap_max": tp["max"],
+                      "tap_step_percent": tp["step_percent"], "tap_pos": tp["pos"], "tap_changer_type": "Ratio"}
         pp.create_transformer_from_parameters(
             net, idx[hv], idx[lv], sn_mva=v["sn_mva"], vn_hv_kv=v["vn_hv_kv"], vn_lv_kv=v["vn_lv_kv"],
             vkr_percent=v["vkr_percent"], vk_percent=v["vk_percent"], pfe_kw=v["pfe_kw"],
-            i0_percent=v["i0_percent"], name=str(tname))
+            i0_percent=v["i0_percent"], name=str(tname), **tap_kw)
         edges.append((hv, lv))
         for side, (field, r_field) in _TRAFO_EARTHING.items():
             if field not in ts:
@@ -630,7 +647,7 @@ def build_campus(spec) -> Campus:
     params = pd.DataFrame(rows, columns=["element", "param", "value", "source"])
     return Campus(name=name, net=net, units=units_df, params=params, registry=registry, compensation=compensation,
                   island=island, earthing=earthing, relays=relays, windings=windings,
-                  earthing_transformers=earthing_transformers, assumptions=assumptions)
+                  earthing_transformers=earthing_transformers, assumptions=assumptions, taps=taps)
 
 
 def _island_requirements(c, units_df, island_units, rows):
