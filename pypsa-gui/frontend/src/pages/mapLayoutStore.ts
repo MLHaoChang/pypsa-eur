@@ -91,6 +91,12 @@ export function assertBubbleValid(key: string, b: MapBubble): void {
   if (!finite(b.dx) || !finite(b.dy)) throw new Error(`bubble ${key}: dx, dy must be finite`)
 }
 
+/** A route the 3D site may write over: none, or one the site wrote before. The user's three sources stand. */
+export const siteMayWriteRoute = (doc: MapLayoutDocument, edgeId: string): boolean => {
+  const existing = doc.routes[edgeId]
+  return !existing || existing.source === 'site'
+}
+
 // ── localStorage: fallback slot + legacy keys ───────────────────────────────
 
 function readLocal(project: string | null): MapLayoutDocument | null {
@@ -166,6 +172,14 @@ interface MapLayoutState {
    * order. An empty list removes the route (a chord needs no entry).
    */
   setRouteWaypoints: (project: string | null, edgeId: string, wps: readonly LatLngTuple[], source?: RouteSource) => void
+  /**
+   * The 3D site's straight two-point route for a branch (S3), source
+   * `site`. Written only when the branch has no route or a `site` route:
+   * a route the user drew, imported or adopted from OSM (`user` | `import` |
+   * `osm`) is never overwritten by the site — its length is the route's.
+   * Returns whether anything was written.
+   */
+  setSiteRoute: (project: string | null, edgeId: string, wps: readonly LatLngTuple[]) => boolean
   setBubble: (project: string | null, key: string, bubble: MapBubble) => void
   /**
    * Re-key `<kind>:old` → `<kind>:new` (route AND length provenance) for a
@@ -255,6 +269,14 @@ export const useMapLayoutStore = create<MapLayoutState>((set, get) => {
         else routes[edgeId] = { ...routes[edgeId], points: toLngLat(wps), source }
         return { ...doc, routes }
       })
+    },
+    setSiteRoute: (project, edgeId, wps) => {
+      assertEdgeIdValid(edgeId)
+      assertLatLngWaypointsValid(wps)
+      if (wps.length === 0 || !canWrite()) return false
+      if (!siteMayWriteRoute(get().docFor(project), edgeId)) return false
+      get().setRouteWaypoints(project, edgeId, wps, 'site')
+      return true
     },
     setBubble: (project, key, bubble) => {
       assertBubbleValid(key, bubble)
