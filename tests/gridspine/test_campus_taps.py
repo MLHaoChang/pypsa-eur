@@ -207,14 +207,14 @@ def test_a_failing_n_minus_1_case_moves_its_taps_while_the_intact_case_keeps_the
 # two groups in series: 110/20 kV at the PCC, 20/10 kV below
 # --------------------------------------------------------------------------
 
-def two_spec(pos1=0, pos3=0):
+def two_spec(pos1=0, pos3=0, lv3_kv=10.0):
     spec = campus_spec()
     c = spec["campus"]
     del c["transformers"]["TR2"]
     c["transformers"]["TR1"].update(sn_mva=t(80.0), vn_lv_kv=t(20.0), tap=oltc(pos=pos1))
     c["buses"]["LV1"] = {"vn_kv": 10.0}
     c["transformers"]["TR3"] = {
-        "hv_bus": "MV2", "lv_bus": "LV1", "sn_mva": t(40.0), "vn_hv_kv": t(20.0), "vn_lv_kv": t(10.0),
+        "hv_bus": "MV2", "lv_bus": "LV1", "sn_mva": t(40.0), "vn_hv_kv": t(20.0), "vn_lv_kv": t(lv3_kv),
         "vk_percent": t(10.0), "vkr_percent": t(0.4), "pfe_kw": t(10.0), "i0_percent": t(0.05), "tap": oltc(pos=pos3)}
     c["cables"]["CB1"]["max_i_ka"] = t(3.0)
     c["units"]["DC_LOAD"].update(pf=t(0.85))
@@ -222,13 +222,13 @@ def two_spec(pos1=0, pos3=0):
     return spec
 
 
-def two_direct(mv_mw, lv_mw, t1, t3):
+def two_direct(mv_mw, lv_mw, t1, t3, lv3_kv=10.0):
     """The worst excursion of the two-group campus, solved directly."""
-    net = two_net(mv_mw, lv_mw, t1, t3)
+    net = two_net(mv_mw, lv_mw, t1, t3, lv3_kv)
     return math.inf if net is None else worst_by_hand(net, ("MV1", "MV2", "LV1"))
 
 
-def two_net(mv_mw, lv_mw, t1, t3):
+def two_net(mv_mw, lv_mw, t1, t3, lv3_kv=10.0):
     net = pp.create_empty_network(sn_mva=1.0, f_hz=50)
     pcc = pp.create_bus(net, 110.0, name="PCC")
     mv1, mv2 = pp.create_bus(net, 20.0, name="MV1"), pp.create_bus(net, 20.0, name="MV2")
@@ -239,7 +239,7 @@ def two_net(mv_mw, lv_mw, t1, t3):
                                           vk_percent=12.0, pfe_kw=25.0, i0_percent=0.05, tap_pos=t1, **tap)
     pp.create_line_from_parameters(net, mv1, mv2, length_km=2.0, r_ohm_per_km=0.0754, x_ohm_per_km=0.11,
                                    c_nf_per_km=330.0, max_i_ka=3.0)
-    pp.create_transformer_from_parameters(net, mv2, lv1, sn_mva=40.0, vn_hv_kv=20.0, vn_lv_kv=10.0, vkr_percent=0.4,
+    pp.create_transformer_from_parameters(net, mv2, lv1, sn_mva=40.0, vn_hv_kv=20.0, vn_lv_kv=lv3_kv, vkr_percent=0.4,
                                           vk_percent=10.0, pfe_kw=10.0, i0_percent=0.05, tap_pos=t3, **tap)
     q = math.tan(math.acos(0.85))
     pp.create_load(net, mv2, p_mw=mv_mw, q_mvar=mv_mw * q)
@@ -281,6 +281,25 @@ def test_two_groups_find_an_in_band_setting_exactly_when_the_brute_force_does(mv
     vm = cases["intact"].bus.set_index("bus")["vm_pu"]
     assert max(max(vm[b] - HI, LO - vm[b], 0.0) for b in ("MV1", "MV2", "LV1")) == pytest.approx(exc, abs=1e-9)
     assert (exc == 0.0) == feasible, (got, exc, feasible)
+
+
+@pytest.mark.parametrize("mv_mw, lv_mw", [(50.0, 5.0), (55.0, 3.0)])
+def test_an_upstream_group_holds_its_own_zone_first(mv_mw, lv_mw):
+    """TR3 wound 20/11 kV and at -9: MV2 is low and LV1 high at once (solved
+    here). Raising MV2 through TR1 raises LV1 further, so a walk on the
+    worst excursion of every bus TR1 feeds would not move it, and TR3 alone
+    cannot lift MV2. Walking on its own zone first, TR1 lifts MV2 and TR3
+    then brings LV1 down: in band, as the brute force over 19 x 19
+    positions says is possible (plan C15 as built)."""
+    net = two_net(mv_mw, lv_mw, 0, -9, 11.0)
+    vm = dict(zip(net.bus["name"], net.res_bus["vm_pu"]))
+    assert vm["MV2"] < LO and vm["LV1"] > HI
+    assert any(two_direct(mv_mw, lv_mw, a, b, 11.0) == 0.0 for a in range(-9, 10) for b in range(-9, 10))
+    camp = build_campus(two_spec(0, -9, lv3_kv=11.0))
+    log = {}
+    solve_cases(camp, two_rows(mv_mw, lv_mw), retap=Taps(camp, PROFILE).hook(True, log))
+    got = log["intact"]
+    assert two_direct(mv_mw, lv_mw, got["TR1"], got["TR3"], 11.0) == 0.0
 
 
 def test_an_upstream_group_helps_a_downstream_one_at_its_range_end():
