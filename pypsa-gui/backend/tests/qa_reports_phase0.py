@@ -73,11 +73,15 @@ def _as_session(fn, *args, **kwargs):
     no project at all (``no_active_project``) — the driver's first defect.
     """
     from services.pypsa_service import PyPSAService
+    from services import chat_tools
 
     token = PyPSAService.bind_request_context(qa_support.session_context())
+    previous_user = chat_tools.acting_user_id()
+    chat_tools.set_acting_user(str(qa_support.user().id))
     try:
         return fn(*args, **kwargs)
     finally:
+        chat_tools.set_acting_user(previous_user)
         PyPSAService.reset_request_context(token)
 
 

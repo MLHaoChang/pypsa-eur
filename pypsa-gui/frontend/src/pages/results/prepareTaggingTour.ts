@@ -16,7 +16,9 @@ const FIRST_TARGET = 'eh-bus-fields'
 /** Resolve once `[data-testid=id]` is in the DOM, or after `ms` (never rejects). */
 function waitForTestId(id: string, ms: number): Promise<void> {
   return new Promise(resolve => {
-    const found = () => document.querySelector(`[data-testid="${id}"]`) !== null
+    // A pending poll can outlive its document environment during teardown.
+    const targetDocument = typeof document === 'undefined' ? null : document
+    const found = () => targetDocument === null || targetDocument.querySelector(`[data-testid="${id}"]`) !== null
     if (ms <= 0 || found()) { resolve(); return }
     const t0 = Date.now()
     const tick = () => {
