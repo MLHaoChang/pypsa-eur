@@ -22,7 +22,12 @@ export interface CampusSettings {
   invest: boolean
   /** The grid operator owns the PCC switchgear: it is not bought or costed. */
   pcc_switchgear_by_operator: boolean
+  /** Who moves the PCC transformer's on-load taps (plan C15); absent in a run
+   *  saved before it existed, which means the campus. */
+  pcc_tap_control: PccTapControl
 }
+
+export type PccTapControl = 'campus' | 'grid_operator'
 
 export interface ComplianceRow {
   check: 'pcc_reactive' | 'pcc_voltage' | 'campus_voltage' | 'transformer_loading' | 'switchgear' | 'cable_loading'
@@ -142,8 +147,27 @@ export interface ParallelScope {
 }
 
 /** Who buys the PCC switchgear, and (plan C13; absent in older runs) the rules
- *  for adding units in parallel. */
-export interface InvestScope { pcc_switchgear: 'campus' | 'grid_operator'; parallel?: ParallelScope }
+ *  for adding units in parallel, and (plan C15; absent in older runs) who moves
+ *  the PCC transformer's taps. */
+export interface InvestScope {
+  pcc_switchgear: 'campus' | 'grid_operator'
+  parallel?: ParallelScope
+  pcc_tap_control?: PccTapControl
+}
+
+/** One transformer's tap in one hour and case of the re-check (plan C15,
+ *  `campus_invest_taps.csv`): `moved_by` is the change from the campus file's
+ *  position, `ratio_pct` the ratio against the rated one. */
+export interface TapRow {
+  period: number
+  hour: number
+  case: string
+  transformer: string
+  group: string
+  tap_pos: number
+  ratio_pct: number
+  moved_by: number
+}
 
 /** The solved hub's own system cost. `per_period` is EUR per year for a
  *  multi-period project; a single-period project has only `total`, as solved. */
@@ -184,6 +208,10 @@ export interface CampusResults {
   scope: InvestScope | null
   /** Null when the run did not invest. */
   cost_basis?: CostBasis | null
+  /** The on-load taps of the re-check and how many critical hours moved one
+   *  (plan C15); null when the run did not invest, absent in older runs. */
+  taps?: TapRow[] | null
+  tap_hours_moved?: number | null
 }
 
 // ── the joint optimisation (MILP) as a background job (plan C12) ────────────

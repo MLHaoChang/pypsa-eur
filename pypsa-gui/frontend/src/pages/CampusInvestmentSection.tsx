@@ -11,13 +11,18 @@
 // project has only its total as solved, and a project whose cost cannot be
 // computed has none, which is said rather than shown as zero.
 //
+// The on-load taps (plan C15) are stated under the table: how they act (per
+// critical hour and per case, an N-1 case after the tap changers act with the
+// reactive dispatch held), how many critical hours moved one, who moves the PCC
+// transformer's, and every position used in a collapsed table.
+//
 // The joint optimisation (plan C12) is a block of its own beside it, when a job
 // has finished: what it buys and its cost against the least-cost choice, need by
 // need, whether it kept the least-cost choice or was cancelled, and its
 // iteration history.
 import {
   type CampusMilp, type CampusState, type CostBasis, type CostRow, type HistoryRow, type HubCost, type InvestmentRow,
-  type InvestStatus, type MilpHistoryRow, type MilpStop, type ParallelScope,
+  type InvestStatus, type MilpHistoryRow, type MilpStop, type ParallelScope, type PccTapControl, type TapRow,
 } from '../api/campusElectrical'
 import { PageSection, Tag } from '../components/PageKit'
 
@@ -45,6 +50,61 @@ const SCOPE_TEXT = {
   campus: 'PCC switchgear: costed to the campus',
   grid_operator: 'PCC switchgear: owned by the grid operator, not costed',
 } as const
+
+const TAP_SCOPE_TEXT: Record<PccTapControl, string> = {
+  campus: 'PCC transformer taps: moved by the campus',
+  grid_operator: "PCC transformer taps: held by the grid operator at the campus file's position",
+}
+
+/** How the on-load taps acted in the re-check (plan C15), and every position
+ *  used, collapsed. Absent for a run from before taps were modelled. */
+function TapsBlock({ taps, moved, hours, control }: {
+  taps: TapRow[]; moved: number | null | undefined; hours: number; control: PccTapControl | undefined
+}) {
+  return (
+    <div className="mt-3">
+      <p data-testid="invest-taps-summary" className="text-[12px]">
+        {taps.length === 0
+          ? "No transformer has on-load tap data: every tap stays at the campus file's position."
+          : `On-load taps: set per critical hour and per case (an N-1 case after the tap changers act, the reactive `
+            + `dispatch held), parallel units together, nearest neutral; ${moved ?? 0} of the ${hours} critical `
+            + `hours moved a tap. Off-circuit taps stay at the campus file's position.`}
+      </p>
+      {control && <p data-testid="invest-tap-scope" className="text-[12px]">{TAP_SCOPE_TEXT[control]}</p>}
+      {taps.length > 0 && (
+        <details data-testid="invest-taps" className="mt-1 text-[12px]">
+          <summary className="cursor-pointer text-muted">Tap positions ({taps.length})</summary>
+          <table className="w-full text-[12px] mt-1">
+            <thead>
+              <tr className="text-left text-muted">
+                <th className="font-normal pr-3">Period</th><th className="font-normal pr-3">Hour</th>
+                <th className="font-normal pr-3">Case</th><th className="font-normal pr-3">Transformer</th>
+                <th className="font-normal pr-3">Group</th><th className="font-normal pr-3 text-right">Tap</th>
+                <th className="font-normal pr-3 text-right">Ratio</th><th className="font-normal text-right">Moved by</th>
+              </tr>
+            </thead>
+            <tbody>
+              {taps.map(t => (
+                <tr key={`${t.period}-${t.hour}-${t.case}-${t.transformer}`}
+                    data-testid={`tap-${t.period}-${t.hour}-${t.case}-${t.transformer}`}
+                    className={`border-t border-border ${t.moved_by !== 0 ? 'font-medium' : ''}`}>
+                  <td className="py-1 pr-3 tabular-nums">{t.period}</td>
+                  <td className="pr-3 tabular-nums">{t.hour}</td>
+                  <td className="pr-3 whitespace-nowrap">{t.case}</td>
+                  <td className="pr-3">{t.transformer}</td>
+                  <td className="pr-3">{t.group}</td>
+                  <td className="pr-3 tabular-nums text-right">{t.tap_pos}</td>
+                  <td className="pr-3 tabular-nums text-right">{Number(t.ratio_pct.toFixed(2))} %</td>
+                  <td className="tabular-nums text-right">{t.moved_by}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
+    </div>
+  )
+}
 
 /** `0.07` as `7 %`, `0.035` as `3.5 %`. */
 function ratePercent(rate: number): string {
@@ -134,6 +194,10 @@ export default function CampusInvestmentSection({ state }: { state: CampusState 
               ))}
             </ul>
           </div>
+        )}
+        {r.taps != null && (
+          <TapsBlock taps={r.taps} moved={r.tap_hours_moved} hours={r.selection.length}
+                     control={r.scope?.pcc_tap_control} />
         )}
         <HistoryList rows={history} />
       </PageSection>
