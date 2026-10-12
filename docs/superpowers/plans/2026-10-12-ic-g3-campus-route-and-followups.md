@@ -61,17 +61,19 @@ staged builds (P5), the campus producer (on master, #97; not edited).
   1. no project (`project_uuid None`), no DB row, or no `project_dir/campus_electrical/run` directory → **none**
      (no extras, no flag, digest `None`). The directory check comes before any producer call, so a run or a GET poll
      never creates `campus_electrical/`.
-  2. a run directory but `CAMPUS_AVAILABLE` False → none, flag **`campus_study_unavailable`**.
-  3. `kind_of(project) != CAPACITY_EXPANSION` → none.
+  2. `kind_of(project) != CAPACITY_EXPANSION` → none (needs no engine; a stray run dir in a non-hub project is
+     not flagged).
+  3. a run directory but `CAMPUS_AVAILABLE` False → none, flag **`campus_study_unavailable`**.
   4. `owner_assets_response(project)` raises (`HTTPException`, `ContractError`, anything) → **refusal**
      `campus_assets_invalid` (the message text kept generic in the reason; detail logged).
   5. R-3's money-year checks fail → refusal `campus_assets_money_year_mismatch`.
   6. `stale` → no extras, flag **`campus_study_stale`**.
   7. otherwise the assets become `ExtraOwnerAsset`s (dropping `meta`) and are passed as `extra_assets`;
      `assets == []` with a `source_hash` is a valid study (all existing / operator-owned): no extras, hash digested.
-  - Additionally, when the active context is dirty or `results_unsaved` and a study applies (6 or 7), flag
-    **`campus_study_network_unsaved`** (the producer's `stale` compares the saved network, the IC values the
-    in-memory one).
+  - Additionally, when a study applies (6 or 7) and the network in memory differs from the saved one
+    (`dirty_state.is_dirty(ctx)` or an undo depth above 0), flag **`campus_study_network_unsaved`** (the producer's
+    `stale` compares the saved network, the IC values the in-memory one). This flag is on the run only, never in
+    the staleness digest (a later save would otherwise read as "the campus study changed").
   - Refusals are raised as `FinanceRefused` **inside `build()`**, so they become refused reports like every adapter
     refusal and never precede the runner's own `finance_inputs_missing` 422. Flags are added with
     `dataclasses.replace(case, flags=case.flags + (...))` (`engine.py:161` carries case flags to the report).
@@ -83,21 +85,23 @@ staged builds (P5), the campus producer (on master, #97; not edited).
   currency must equal `fin.currency` always; the price year must equal `fin.currency_year` when that is stated
   (otherwise G2's `extra_asset_money_year_unstated` applies). Any failure → `campus_assets_money_year_mismatch`.
 - **R-4. `extra_assets` staleness part.** Always present in `assumptions_digest` (keyword `extra_assets=None`):
-  `None` when no study applies; otherwise a digest of `{source_hash, stale, flags, the assets without meta}`; on GET
+  `None` when no study applies; otherwise a digest of `{source_hash, stale, the flags other than `campus_study_network_unsaved`, the assets
+  without meta}`; on GET
   a source that cannot be read digests as `{"error": code}`, never raises (else the report would read
   `current_assumptions_not_established` for good). Removing a study then names `extra_assets` in `changed`.
 - **F-1.** Validate first with `_real` (as today: bools and strings refused), **then** store `float(...)`:
   `quantity` via `object.__setattr__`, the part fields in `_extra_part`. An int and a float of the same value then
-  hash alike. `derived_from_capital_cost` must be a real `bool` or `numpy.bool_`
-  (`extra_asset_invalid:<name>:derived_from_capital_cost` otherwise); a part `name` must be a non-empty `str`
+  hash alike. `derived_from_capital_cost` must be a real `bool` or `numpy.bool_`, stored as `bool(...)` (a stored `numpy.bool_` would hash as the string
+  `"True"`) (`extra_asset_invalid:<name>:derived_from_capital_cost` otherwise); a part `name` must be a non-empty `str`
   (`extra_asset_invalid:<name>:parts`). Signatures unchanged (frozen facade test holds); the no-extras hash pin
   is unaffected.
 - **F-2. `owner_assets` staleness part.** Digests **every** `value_flows.asset_owners` entry read from the raw
   commercial dict (GET does not know the POST's `owner`), without model parsing, never raising: per (component,
   name) the raw values of the §2 investment columns present on that component (`_opt` excluded except
   Transformer's), an absent asset digested as `missing`. Raw columns, not computed parts (computed parts read the
-  config `discount_rate`, which would double-name `finance`). Read under `PyPSAService.get_lock()` inside the
-  `assumptions` lambda (the worker does not hold it).
+  config `discount_rate`, which would double-name `solver_config`). Read under the network lock (an RLock, so GET's
+  re-entry is safe) inside the `assumptions` lambda (the worker does not hold it); the request takes the lock
+  object and the lambda closes over it.
 - **R-5. Hash stability.** The two new parts change every stored report's key once: each reads stale until re-run.
   This also closes S0b limit 4 (reports built before S0b read current). Stated in the findings note; no migration.
 - **R-6. Tell the campus session** (one-shot message, after merge) that the IC route consumes
@@ -118,17 +122,19 @@ from `ctx.project_uuid`, then `fake_investment(row, [inv_row(...)])`):
   written, or through the seam: `campus_study_stale`, no extras), empty assets with a hash, unsaved network flag.
 - Staleness: a new `source_hash` → GET stale with `extra_assets` in `changed`; the study removed → the same; a
   source error on GET → `{"error": …}` digest, no 500.
-- The factory seam: `_ic_build_case` called without `campus` behaves as today.
+- The factory seam: `_ic_build_case` called without `campus` behaves as today; the route and `solve_ppa_price`
+  pass the same source to the seam.
 
 ### WP-F (F-1, F-2)
 - `tests/test_finance_case_extra_assets.py`: int vs float values hash alike; `True` / `"5"` still refused;
   `derived_from_capital_cost="false"` refused, `numpy.bool_` accepted; empty or non-str part name refused.
 - `tests/test_investment_case_runner.py` / `_routes.py`: changing an owner asset's `build_year`, a part cost, its
   `lifetime`, `max_hours` or `carrier` → stale with `owner_assets` in `changed`; a non-owner asset's columns → not;
-  a solve change still names only `dispatch` (routes:498); a `discount_rate` config change names `finance` only
+  a solve change still names only `dispatch` (routes:498); a `discount_rate` config change names `solver_config` only
   (QA J, `qa_investment_case.py:1376`; routes:490).
 - Pins to update deliberately (the parts list grows): `test_investment_case_runner.py:237, 346`,
-  `test_investment_case_routes.py:437`, and routes:478-481 (a `value_flows` edit now also names `owner_assets`).
+  `test_investment_case_routes.py:437`, and routes:478-481 (a `value_flows` edit now also names `owner_assets`); the three `_ic_build_case` fakes gain
+  `campus=None` (`test_investment_case_routes.py:76`, `test_chat_tools_investment_case.py:55, 421`).
 - Frontend: the fallback stale text in `InvestmentCaseView.tsx:365` names the new parts; `types.ts` unchanged.
 
 ## 5. Process
@@ -148,3 +154,7 @@ vitest, tsc, a findings note, an independent assessor); one PR. The owner merges
   (`campus_study_network_unsaved`) and the test setup; P2-9 the currency always checked, `meta` missing or
   disagreeing refused; P3-10 flags via `replace`, frontend text; P3-11 the lock in the lambda; P3-12 unresolved
   needs → R-6 note, `numpy.bool_` accepted.
+- **Plan round 2: PASS**, 3 P2 / 3 P3, all taken: P2-1 `discount_rate` names `solver_config` (F-2, §4); P2-2 the
+  three fakes listed, a same-source test; P2-3 `campus_study_network_unsaved` kept out of the digest; P3-4 `kind_of`
+  before the engine check; P3-5 `bool(...)` stored; P3-6 the unsaved test is `is_dirty` or an undo depth above 0,
+  the lock object closed over.
