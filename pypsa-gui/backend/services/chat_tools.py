@@ -2365,7 +2365,9 @@ def solve_ppa_price(target_irr: float, target_year: int,
     from pydantic import ValidationError
 
     from models.finance import SolvePpa
-    from routers.results import _dispatch_ready, _ic_build_case, _study_mesh_blocker
+    from routers.results import (
+        _dispatch_ready, _ic_build_case, _ic_read_campus, _study_mesh_blocker,
+    )
     from routers.simulation import _state as sim_state
     from services.finance.case import FinanceRefused
     from services.finance.engine import solve_ppa
@@ -2395,7 +2397,10 @@ def solve_ppa_price(target_irr: float, target_year: int,
     if owner is not None and (not isinstance(owner, str) or not owner.strip()):
         _ic_raise(422, "investment_case_request_invalid", "owner must be a non-empty string")
     owner = owner if owner is not None else _ic_default_owner(sim_state)
-    build = _ic_build_case(n, cfg, owner=owner, lost_load=sim_state.get("last_lost_load"))
+    # IC G3 R-2: the campus study read the way the route reads it, so the solved
+    # price and the report value the same case.
+    build = _ic_build_case(n, cfg, owner=owner, lost_load=sim_state.get("last_lost_load"),
+                           campus=_ic_read_campus())
     try:
         case = build()
     except FinanceRefused as exc:
