@@ -149,7 +149,14 @@ REGISTRY_KIND = {"bess": "storage", "ups": "storage", "pv": "res", "wind": "res"
 #: 20 kV busbar). More than this is a wiring mistake.
 WINDING_TOLERANCE = 0.10
 
-_TOP = frozenset({"name", "f_hz", "pcc", "buses", "transformers", "cables", "units", "compensation", "island"})
+_TOP = frozenset({"name", "f_hz", "pcc", "buses", "transformers", "cables", "units", "compensation", "island",
+                  "relays"})
+#: A relay (island plan I5): the branch it protects, the bus whose fault it
+#: must see, its pickup (tagged) and its timing. An instantaneous relay is
+#: judged on the breaking current at ``t_min_s`` (IEC 60909 mu), a
+#: time-delayed one on the steady-state current (lambda).
+_RELAY_TIMINGS = ("instantaneous", "time_delayed")
+_RELAY_T_MIN = (0.02, 0.05, 0.10, 0.25)
 _PCC_FIELDS = ("vm_pu", "sk_max_mva", "sk_min_mva", "rx_max", "rx_min")
 #: Optional at the PCC: the contracted connection capacity, the P_ref of the
 #: reactive requirement. Without it the study uses the year's peak import.
@@ -180,9 +187,10 @@ _MAY_BE_ZERO = frozenset({"pfe_kw", "i0_percent", "c_nf_per_km", "rx_sc", "rx_ma
 CAMPUS_LEDGER = (
     "campus: every generating unit is a PQ injection (sgen) at its dispatched "
     "P; a genset runs in power-factor control on a campus, not voltage control",
-    "campus: a genset is screened for IEC 60909 as a current source of "
-    "1/x''d times its rated current (k = 1/xd_pp): an approximation of a "
-    "synchronous machine for switchgear-duty screening (assumed)",
+    "campus: the campus net carries a genset as a PQ sgen with k = 1/xd_pp; "
+    "IEC 60909 does not use that: since island plan I5 the fault levels "
+    "(static/island_sc.machine_net) make it a synchronous machine behind x''d "
+    "with K_G, or K_S / K_SO behind its own unit transformer",
     "campus: the grid at the PCC is the grid operator's Sk''max/min and R/X "
     "(ext_grid); nothing is derived from the machines on the campus",
     "campus: cable end-of-fault conductor temperature for the IEC 60909 "
@@ -216,9 +224,54 @@ class Campus:
     #: ``{transformer: {"hv": earthing, "lv": earthing}}`` for the windings
     #: whose earthing is given.
     earthing: dict = dataclasses.field(default_factory=dict)
+    #: The relays (plan I5): ``relay``, ``branch``, ``kind`` (line or
+    #: trafo), ``fault_bus``, ``i_pickup_ka``, ``timing``, ``t_min_s``.
+    relays: pd.DataFrame = dataclasses.field(default_factory=lambda: _empty_relays())
 
 
 _COMP_COLUMNS = ["name", "kind", "bus", "q_mvar", "steps", "library_id", "pypsa_name"]
+
+
+_RELAY_COLUMNS = ["relay", "branch", "kind", "fault_bus", "i_pickup_ka", "timing", "t_min_s"]
+
+
+def _empty_relays():
+    return pd.DataFrame(columns=_RELAY_COLUMNS)
+
+
+def _relays(c, buses, trafos, cables, rows):
+    out = []
+    specs = c.get("relays") or []
+    if not isinstance(specs, list):
+        raise ContractError(f"campus.relays must be a list of entries, got {type(specs).__name__}")
+    for n, r in enumerate(specs):
+        where = f"relays[{n}]"
+        if not isinstance(r, dict) or not isinstance(r.get("name"), str) or not r["name"]:
+            raise ContractError(f"{where}: needs a mapping with a string 'name'")
+        where = f"relays.{r['name']}"
+        _fields(where, r, ("i_pickup_ka", "t_min_s"), ("name", "branch", "fault_bus", "timing"))
+        branch = str(r.get("branch"))
+        kind = "line" if branch in cables else "trafo" if branch in trafos else None
+        if kind is None:
+            raise ContractError(f"{where}: branch {branch!r} is not a cable or transformer of the campus")
+        if str(r.get("fault_bus")) not in buses:
+            raise ContractError(f"{where}: fault_bus {r.get('fault_bus')!r} is not a campus bus")
+        timing = r.get("timing")
+        if timing not in _RELAY_TIMINGS:
+            raise ContractError(f"{where}.timing is {timing!r}; allowed {list(_RELAY_TIMINGS)}")
+        pickup = _tagged(where, "i_pickup_ka", r, rows)
+        t_min = 0.02
+        if "t_min_s" in r:
+            if timing != "instantaneous":
+                raise ContractError(f"{where}: t_min_s is for an instantaneous relay only")
+            t_min = _tagged(where, "t_min_s", r, rows)
+            if t_min not in _RELAY_T_MIN:
+                raise ContractError(f"{where}.t_min_s must be one of {list(_RELAY_T_MIN)} s, got {t_min:g}")
+        out.append({"relay": str(r["name"]), "branch": branch, "kind": kind, "fault_bus": str(r["fault_bus"]),
+                    "i_pickup_ka": pickup, "timing": timing, "t_min_s": t_min})
+    if len({x["relay"] for x in out}) != len(out):
+        raise ContractError("campus.relays: duplicate relay names")
+    return pd.DataFrame(out, columns=_RELAY_COLUMNS) if out else _empty_relays()
 
 
 def _empty_compensation():
@@ -479,9 +532,10 @@ def build_campus(spec) -> Campus:
     units_df = pd.DataFrame(unit_rows).set_index("unit_id")
     registry = pd.DataFrame(reg_rows).set_index("unit_id")
     island = {"units": island_units, "requirements": _island_requirements(c, units_df, island_units, rows)}
+    relays = _relays(c, buses, trafos, cables, rows)
     params = pd.DataFrame(rows, columns=["element", "param", "value", "source"])
     return Campus(name=name, net=net, units=units_df, params=params, registry=registry, compensation=compensation,
-                  island=island, earthing=earthing)
+                  island=island, earthing=earthing, relays=relays)
 
 
 def _island_requirements(c, units_df, island_units, rows):

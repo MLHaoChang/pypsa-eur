@@ -61,9 +61,9 @@ _CONVERTER_OPTIONAL = ("neg_seq",)
 
 _GENSET_REQUIRED = ("q_droop_pct", "H_s", "T_g_s", "ramp_pu_per_s", "start_s", "sync_s",
                     "load_step_max_pct", "cos_phi_r", "xd_sat")
-_GENSET_OPTIONAL = ("droop_pct", "p_min_pu", "r_n_ohm")
+_GENSET_OPTIONAL = ("droop_pct", "p_min_pu", "r_n_ohm", "ik_sustained_pu")
 _GENSET_ENUMS = {"governor": GOVERNORS, "excitation": EXCITATIONS, "neutral_earthing": EARTHINGS}
-_GENSET_FLAGS = ("spinning", "unit_transformer")
+_GENSET_FLAGS = ("spinning", "unit_transformer", "unit_transformer_oltc")
 #: Fields only the hub sidecar carries: a campus unit is already built, so it
 #: has its own rating and x''d at unit level.
 _SIDECAR_ONLY = {"genset": ("unit_mw", "xd_pp")}
@@ -72,10 +72,11 @@ _UPS_REQUIRED = ("walk_in_s", "f_window_hz")
 _LOAD_OPTIONAL = ("f_trip_hz",)
 
 _REQ_REQUIRED = ("bridge_s", "sustained_h", "rocof_window_ms", "gfm_margin")
-_REQ_OPTIONAL = ("fuel_autonomy_h", "genset_redundancy_n", "pickup_blocks", "i_max_sensitivity_pu")
+_REQ_OPTIONAL = ("fuel_autonomy_h", "genset_redundancy_n", "pickup_blocks", "i_max_sensitivity_pu",
+                 "relay_sensitivity")
 _REQ_STRUCTURAL = ("scenarios", "frequency_limits", "ride_through_storage", "linearised_uc", "gfl_min_case")
 _LIMIT_FIELDS = ("rocof_hz_per_s", "f_min_hz", "f_max_hz", "qss_band_hz")
-REQ_DEFAULTS = {"genset_redundancy_n": 1, "i_max_sensitivity_pu": [1.2, 1.5, 2.0]}
+REQ_DEFAULTS = {"genset_redundancy_n": 1, "i_max_sensitivity_pu": [1.2, 1.5, 2.0], "relay_sensitivity": 1.5}
 
 
 def _pos(v):
@@ -121,6 +122,8 @@ _SCALAR = {
     "xd_sat": (_pos, "positive"),
     "p_min_pu": (lambda v: 0 <= v < 1, "in [0, 1)"),
     "r_n_ohm": (_pos, "positive"),
+    "ik_sustained_pu": (_pos, "positive"),
+    "relay_sensitivity": (lambda v: v >= 1, "at least 1"),
     "unit_mw": (_pos, "positive"),
     "xd_pp": (_pos, "positive"),
     "walk_in_s": (_nonneg, "non-negative"),
@@ -176,7 +179,10 @@ FIELD_USERS = {
     "excitation": ("I5",),
     "neutral_earthing": ("I5b",),
     "r_n_ohm": ("I5b",),
+    "ik_sustained_pu": ("I5",),
+    "relay_sensitivity": ("I5",),
     "unit_transformer": ("I5",),
+    "unit_transformer_oltc": ("I5",),
     "unit_mw": ("I2a",),
     "xd_pp": ("I5",),
     # UPS
@@ -208,7 +214,7 @@ FIELD_USERS = {
 }
 
 ALL_FIELDS = frozenset(
-    {"control", "neutral_earthing", "governor", "excitation", "spinning", "unit_transformer",
+    {"control", "neutral_earthing", "governor", "excitation", "spinning", "unit_transformer", "unit_transformer_oltc",
      "it_load", "transfers_on_islanding", "critical", "scenarios", "frequency_limits",
      "ride_through_storage", "linearised_uc", "gfl_min_case"}
     | set(_SCALAR) | set(_LISTS)

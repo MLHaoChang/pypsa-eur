@@ -1037,6 +1037,69 @@ includes the losses and the UPS state after the event.
   linearly with i_max, by hand.
 - Mutations.
 
+### I5 as built (2026-10-12)
+
+**`gridspine/static/island_sc.py`**
+- `machine_net(campus, installed, island=False, case="max", gfm_override=None)`
+  builds the fault net for both sides:
+  - a genset is a pandapower `gen` behind x''d, with `rdss_ohm` from `rx_sc`
+    and cos φ 0.8 (ledgered);
+  - behind its own unit transformer it is a power-station unit, so pandapower
+    applies K_S (new flag `unit_transformer_oltc: true`) or K_SO (false,
+    the default). Without the `power_station_unit` flags pandapower does
+    not apply K_S, which the hand test caught;
+  - converters are current sources at `converter_k`: GFL `k_sc`, GFM
+    `i_max_pu` (max) or `k_gfm_min` (min), UPS 0.
+- `campus_fault_levels` (grid-connected) now uses `machine_net`. Its
+  regression test converts GEN1 independently and shows the change is the
+  machine model alone.
+- `island_fault_levels(campus, online, gfl_min_case, gfm_override)`: max case
+  by IEC 60909 with no `ext_grid`, or by the current-source solve when no
+  genset is online; min case converter-aware, labelled `METHOD_MIN`, also
+  with the largest source out.
+- `current_source_fault`: its own nodal solve (Ybus of the fault's connected
+  part, transformers at nominal ratio, no shunts), giving Ik'' and every
+  branch's current. It replaces pandapower where pandapower crashes (spike 4)
+  and gives the relay currents.
+- **The spike-2 residual is explained:** IEC's K_G = c_max / (1 + x''d·sin φ)
+  = 1.1 / (1 + 0.15·0.6) = 1.0092 gives 1.589 kA, which pandapower matches.
+  The first review's 1.563 kA used K_G = 1.0261, which is not the IEC value.
+- `mu(x, t_min)` and `lam(excitation, xd_sat, ik_sustained_pu)`:
+  - μ = 1 for Ik''/IrG ≤ 2, else a + b·e^(−c·x) for t_min 0.02 / 0.05 /
+    0.10 / 0.25 s. **The coefficients are as recalled, not checked against
+    the standard: tagged assumed in the ledger.**
+  - λ is a first pass, not the IEC curves: 1/x_d,sat without field forcing;
+    with PMG forcing the datasheet's sustained current (new optional
+    `ik_sustained_pu`, else 3 pu, assumed).
+- `relay_check(campus, online, gfl_min_case, sensitivity)`: per relay the
+  branch current (decayed by μ or λ for the genset share; converters held),
+  the fault total, the bypass (on-feeder infeed: the blinding), the verdict
+  at s × pickup (new requirement `relay_sensitivity`, default 1.5), the
+  grid-connected Ik''max and its ratio, and the current at each
+  `i_max_sensitivity_pu`.
+  - **Change from the plan:** the largest-out current (`relay_n1_ka`) is
+    reported, not judged. With its only source out a feeder carries no fault
+    current and has nothing to clear, so a verdict there would only ever
+    read blind.
+
+**Campus YAML**
+- A top-level `relays:` list: `name`, `branch`, `fault_bus`, `i_pickup_ka`
+  (tagged), `timing` (`instantaneous` | `time_delayed`), and `t_min_s` for an
+  instantaneous relay (tagged, one of the four μ times, default 0.02).
+  Read into `Campus.relays`.
+- The C1 ledger line that screened gensets as 1/x''d current sources is
+  retired.
+
+**Tests**
+- 37 test functions in `test_island_sc.py`, `test_island_sc_parts.py` and
+  `test_island_relays.py`, each against a hand value (K_G 1.589 kA, K_SO
+  1.02005, K_S 0.96397, Σ k·In, radial and parallel branch splits, μ, λ, the
+  blinding, both sides of s, the linear i_max sensitivity), plus the
+  pandapower min-case pin.
+- Mutation testing: 29 of 29 killed. The first round left 8 survivors,
+  closed by new tests, removing a cap on μ, and fixing a mutant that changed
+  nothing.
+
 ### I5b: unbalanced faults (L; owner Q9)
 
 This increment comes straight after I5, in its own PR.
