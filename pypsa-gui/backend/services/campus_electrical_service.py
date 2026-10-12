@@ -18,6 +18,10 @@ keeps everything under ``<project dir>/campus_electrical/``:
     The project's copy of the asset library (plan C9), once the user has saved
     one. Until then the shipped default is used. Validated by the engine's
     loader before it is kept.
+``run_milp/``
+    The joint optimisation's run directory (plan C12): the least-cost run's
+    inputs, copied, and the MILP's investment files. The least-cost files in
+    ``run/`` are never written by it.
 ``grid_codes/``
     The project's own grid codes: uploaded documents, drafts and published
     profiles (``services/campus_grid_code_service.py``, plan C10). A
@@ -44,6 +48,14 @@ The functions:
   session). ``campus_study_hash`` identifies the study they come from;
   ``owner_assets_response`` is the route's body (assets, hash, stale). Read only;
   ``get_state`` carries only the count, ``owner_assets_count``.
+* ``start_milp_job``, ``milp_job_status``, ``cancel_milp_job``: the joint
+  optimisation (plan C11's MILP) as a background job, in the report job's
+  shape (``services/reports/report_job.py``): one job at a time on a daemon
+  thread, a ``record`` the status route serves without its ``thread`` and
+  ``stop_event``, the stop event honoured between iterations, a slot that
+  refuses a second job. The least-cost run is made first (or reused when it
+  is fresh), in the request, so the thread never reads the NetCDF; the MILP
+  then runs into ``run_milp/``. ``get_state`` carries ``milp``.
 * ``hub_cost``, in ``get_state``: the solved hub's own system cost, from the
   helper the results pages use, for the panel to show beside the electrical
   annualised cost. It never fails the state: when it cannot be computed it is
@@ -55,12 +67,16 @@ unsolved network, a description that does not build, and bad settings are
 422s, each naming what to fix. A pypsa NetCDF read happens under
 ``PyPSAService.get_netcdf_io_lock()``, and the run under a per-project lock.
 """
+import contextvars
 import hashlib
 import json
+import logging
 import math
 import os
+import shutil
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -106,6 +122,7 @@ DEFAULTS = {"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce", "margin": 0.2, "n_mi
 
 _LOCKS: dict = {}
 _LOCKS_GUARD = threading.Lock()
+logger = logging.getLogger(__name__)
 
 
 def _lock(path: Path) -> threading.Lock:
@@ -436,6 +453,7 @@ def get_state(project) -> dict:
         "stale": bool(results) and _stale(project, d),
         "hub_cost": cost,
         "hub_cost_reason": reason,
+        "milp": _milp_state(project, d),
     }
 
 
@@ -771,3 +789,270 @@ def run(project, settings: dict) -> dict:
             raise _unprocessable(exc)
         (d / SETTINGS_FILE).write_text(json.dumps(s))
     return get_state(project)
+
+
+# ── the joint optimisation (MILP) as a background job (plan C12) ────────────
+#
+# The report job's shape (``services/reports/report_job.py``): a ``record``
+# per project, published in ``_MILP_JOBS`` and served without ``thread`` and
+# ``stop_event``; one job at a time in the process (``_MILP_SLOT``); the stop
+# event is the loop's ``should_stop``, asked before each iteration and
+# between the finite-difference solves. The record is in memory: after a
+# restart there is no status, and the results on disk still read back.
+
+MILP_SUBDIR = "run_milp"
+MILP_SUMMARY_FILE = "campus_milp_summary.json"
+MILP_BASIS_FILE = "campus_milp_basis.json"
+THREAD_NAME = "campus-milp"
+
+_MILP_LOCK = threading.Lock()
+_MILP_SLOT: dict = {"active": None}
+_MILP_JOBS: dict = {}
+
+
+def _milp_key(project) -> str:
+    return str(campus_dir(project))
+
+
+def _milp_engine(run_dir, library, **kw):
+    """The engine call the job makes (a seam for the tests)."""
+    return cs.invest_campus(run_dir, library, method="milp", **kw)
+
+
+def _milp_inputs() -> tuple:
+    """The least-cost run's files the MILP is made from: the prepared and
+    ranked campus, the library it bought from and the basis it was costed
+    on, and its investment (the comparison is against it)."""
+    return (cs.CAMPUS_YAML, cs.CAMPUS_MANIFEST, cs.HOURLY_CSV, cs.PCC_CSV, cs.METRICS_CSV, cs.SELECTED_CSV,
+            USED_LIBRARY_FILE, COST_BASIS_FILE, cs.INVESTMENT_CSV)
+
+
+def _record_running(record) -> bool:
+    if not record or record.get("state") != "running":
+        return False
+    t = record.get("thread")
+    return t is None or t.ident is None or t.is_alive()
+
+
+def _public(record):
+    if not record:
+        return None
+    with _MILP_LOCK:
+        return {k: v for k, v in record.items() if k not in ("thread", "stop_event")}
+
+
+def _least_cost_total(run_dir: Path) -> float:
+    inv = pd.read_csv(run_dir / cs.INVESTMENT_CSV)
+    return float(inv.loc[inv["status"].isin(["chosen", "kept"]), "annualised_eur_per_a"].sum())
+
+
+def _least_cost_fresh(project, d: Path, s: dict) -> bool:
+    """A least-cost run the job can stand on: it invested, with these
+    settings, and nothing it was made from has changed."""
+    run_dir, saved = d / "run", d / SETTINGS_FILE
+    if not (run_dir / cs.COMPLIANCE_CSV).is_file() or not (run_dir / cs.INVESTMENT_CSV).is_file():
+        return False
+    if not saved.is_file() or json.loads(saved.read_text()) != s:
+        return False
+    return not _stale(project, d)
+
+
+def _milp_results(milp_dir: Path):
+    """The MILP's results, or None until a job has finished (the summary is
+    written last)."""
+    summary = milp_dir / MILP_SUMMARY_FILE
+    if not summary.is_file():
+        return None
+    meta = json.loads(summary.read_text())
+    return {
+        "investment": _read_csv(milp_dir / cs.INVESTMENT_CSV),
+        "cost": _read_csv(milp_dir / cs.COST_CSV),
+        "compliance_invested": _read_csv(milp_dir / cs.COMPLIANCE_INVESTED_CSV),
+        "history": _read_csv(milp_dir / cs.MILP_HISTORY_CSV),
+        "comparison": _read_csv(milp_dir / cs.MILP_COMPARISON_CSV),
+        "summary": meta["summary"],
+        "fallback": meta["fallback"],
+        "stop": meta["summary"]["stop"],
+    }
+
+
+def _milp_stale(project, d: Path) -> bool:
+    """Stale when the least-cost run is (campus, network, library, cost
+    basis), or when the least-cost run it was made from has been made again
+    with other settings or other results: the files it copied are compared
+    by hash with ``run/`` now. A basis that cannot be read: stale."""
+    if _stale(project, d):
+        return True
+    try:
+        basis = json.loads((d / MILP_SUBDIR / MILP_BASIS_FILE).read_text())
+        saved = json.loads((d / SETTINGS_FILE).read_text())
+        if saved != basis["settings"]:
+            return True
+        for name, digest in basis["inputs"].items():
+            path = d / "run" / name
+            if (_sha256_file(path) if path.is_file() else None) != digest:
+                return True
+    except Exception:                                          # noqa: BLE001 - see the docstring
+        return True
+    return False
+
+
+def _milp_state(project, d: Path) -> dict:
+    results = _milp_results(d / MILP_SUBDIR)
+    return {"status": _public(_MILP_JOBS.get(str(d))), "results": results,
+            "stale": bool(results) and _milp_stale(project, d)}
+
+
+MILP_NOTES = (
+    "The joint optimisation (a MILP) chooses every asset together, starting from the least-cost choice and "
+    "re-checking each step by AC load flow. It is started and cancelled in the panel; it takes minutes.",
+    "The design margin is the owner's rule: it is judged on the least-cost dispatch and is never met by extra "
+    "inverter reactive power; inverter Q may serve only the 100 % loading, the PCC band and the voltages.",
+    "When nothing AC-feasible is cheaper, the least-cost choice is kept (fallback, with its reason); a cancelled "
+    "job keeps the best choice it had found.",
+    INVESTMENT_NOTES[0],
+)
+
+
+def get_milp(project) -> dict:
+    """The joint optimisation, for the copilot: the job's record (None when
+    none has run since the backend started), the last finished job's summary,
+    why it stopped, its fallback reason, the comparison per need with the
+    least-cost choice, and whether it is stale, with the caveats."""
+    require_capacity_expansion(project)
+    m = _milp_state(project, campus_dir(project))
+    res = m["results"] or {}
+    return {"status": m["status"], "summary": res.get("summary"), "stop": res.get("stop"),
+            "fallback": res.get("fallback"), "comparison": res.get("comparison"), "stale": m["stale"],
+            "notes": list(MILP_NOTES)}
+
+
+def milp_job_status(project):
+    """The project's job record, without its thread and stop event; None
+    when no job has run for it since the backend started."""
+    require_capacity_expansion(project)
+    return _public(_MILP_JOBS.get(_milp_key(project)))
+
+
+def cancel_milp_job(project) -> dict:
+    """Ask the running job to stop. The loop ends before its next iteration
+    (or between two finite-difference solves) and the job keeps the best
+    point it has: state ``cancelled``. Idempotent once the job has ended;
+    404 when no job has run for the project."""
+    require_capacity_expansion(project)
+    record = _MILP_JOBS.get(_milp_key(project))
+    if record is None:
+        raise HTTPException(status_code=404, detail="no joint optimisation has run for this project since the backend started")
+    with _MILP_LOCK:
+        running = _record_running(record)
+        if running:
+            record["stop_event"].set()
+            record["message"] = "cancelling: the loop stops before its next iteration"
+        return {"state": record["state"], "cancelling": running}
+
+
+def _prepare_milp_dir(d: Path, s: dict) -> Path:
+    """``run_milp/`` afresh: the least-cost run's inputs copied, and the
+    basis (their hashes and the settings) the staleness test reads."""
+    run_dir, milp_dir = d / "run", d / MILP_SUBDIR
+    with _lock(run_dir):
+        if milp_dir.exists():
+            shutil.rmtree(milp_dir)
+        milp_dir.mkdir()
+        inputs = {}
+        for name in _milp_inputs():
+            shutil.copyfile(run_dir / name, milp_dir / name)
+            inputs[name] = _sha256_file(milp_dir / name)
+    (milp_dir / MILP_BASIS_FILE).write_text(json.dumps({"settings": s, "inputs": inputs}))
+    return milp_dir
+
+
+def _clear_milp_results(milp_dir: Path) -> None:
+    for name in (cs.INVESTMENT_CSV, cs.COST_CSV, cs.INVESTED_YAML, cs.COMPLIANCE_INVESTED_CSV, cs.INVEST_HISTORY_CSV,
+                 cs.INVEST_DISPATCH_CSV, cs.INVEST_SCOPE_JSON, cs.MILP_HISTORY_CSV, cs.MILP_COMPARISON_CSV,
+                 MILP_SUMMARY_FILE):
+        (milp_dir / name).unlink(missing_ok=True)
+
+
+def _run_milp_job(record: dict, milp_dir: Path, kw: dict) -> None:
+    """The worker body: the MILP into ``run_milp/``, its progress published
+    on the record. Reads and writes only ``run_milp/``."""
+    stop = record["stop_event"]
+
+    def progress(iteration, max_iter, summary):
+        with _MILP_LOCK:
+            record.update(iteration=int(iteration), max_iter=int(max_iter), best_cost=summary.get("best_cost"),
+                          c8_cost=summary.get("c8_cost"))
+            if not stop.is_set():
+                record["message"] = ("the least-cost pick re-solved, the warm start" if iteration == 0
+                                     else f"iteration {iteration} of {max_iter}")
+
+    try:
+        out = _milp_engine(milp_dir, milp_dir / USED_LIBRARY_FILE, progress=progress, should_stop=stop.is_set, **kw)
+        summary = {k: (v.item() if hasattr(v, "item") else v) for k, v in out["summary"].items()}
+        (milp_dir / MILP_SUMMARY_FILE).write_text(json.dumps({"summary": summary, "fallback": out["fallback"]}))
+        cancelled = summary["stop"] == "cancelled"
+        with _MILP_LOCK:
+            record.update(state="cancelled" if cancelled else "done", finished_at=time.time(), stop=summary["stop"],
+                          best_cost=summary["milp_cost"], c8_cost=summary["c8_cost"],
+                          message=("cancelled: the best point found so far is kept" if cancelled else
+                                   "done: the least-cost choice is kept" if out["fallback"] else "done"))
+    except Exception as exc:                                    # noqa: BLE001 - recorded on the job
+        logger.exception("campus MILP job failed")
+        _clear_milp_results(milp_dir)
+        with _MILP_LOCK:
+            record.update(state="failed", finished_at=time.time(), error=str(exc) or type(exc).__name__,
+                          message="failed")
+
+
+def start_milp_job(project, settings: dict) -> dict:
+    """Start the joint optimisation (plan C11) for the project as a
+    background job and answer its record (``state`` ``running``).
+
+    In the request: the settings are checked as ``run`` checks them (and
+    must invest); the slot is claimed, so a second job, for this project or
+    any other, is a 409 while one runs; the least-cost run is made, unless
+    one with these settings is there and fresh; and ``run_milp/`` is set up
+    from it. A refusal on the way frees the slot and leaves no record. The
+    thread then runs only the MILP, which reads ``run_milp/`` alone: no
+    NetCDF, no PyPSA lock."""
+    require_capacity_expansion(project)
+    d = campus_dir(project)
+    s = _settings(settings, profiles(project))
+    if not s["invest"]:
+        raise HTTPException(status_code=422, detail="the joint optimisation chooses what to buy: run it with invest on")
+    key = str(d)
+    record = {"state": "running", "project": project.name, "started_at": time.time(), "finished_at": None,
+              "iteration": None, "max_iter": None, "best_cost": None, "c8_cost": None, "stop": None, "error": None,
+              "message": "the least-cost run first", "thread": None, "stop_event": threading.Event()}
+    with _MILP_LOCK:
+        if _record_running(_MILP_SLOT["active"]):
+            other = _MILP_SLOT["active"]["project"]
+            raise HTTPException(status_code=409, detail=f"a joint optimisation (MILP) is already running for project "
+                                                        f"'{other}'; wait for it to finish or cancel it")
+        previous = _MILP_JOBS.get(key)
+        _MILP_JOBS[key] = record
+        _MILP_SLOT["active"] = record
+    try:
+        if not _least_cost_fresh(project, d, s):
+            run(project, s)
+        milp_dir = _prepare_milp_dir(d, s)
+        record["c8_cost"] = _least_cost_total(milp_dir)
+        record["message"] = "starting: the least-cost pick is re-solved as the warm start"
+        kw = {"criteria": SizingCriteria(margin=float(s["margin"]), n_minus_1=s["n_minus_1"]), "profile": s["profile"],
+              "pf": s["pf"], "profile_dirs": (grid_codes_dir(project),),
+              "pcc_switchgear": not s["pcc_switchgear_by_operator"]}
+        ctx = contextvars.copy_context()
+        thread = threading.Thread(target=lambda: ctx.run(_run_milp_job, record, milp_dir, kw), daemon=True,
+                                  name=THREAD_NAME)
+        record["thread"] = thread
+        thread.start()
+    except BaseException:
+        with _MILP_LOCK:
+            if previous is None:
+                _MILP_JOBS.pop(key, None)
+            else:
+                _MILP_JOBS[key] = previous
+            _MILP_SLOT["active"] = None
+        raise
+    return _public(record)
