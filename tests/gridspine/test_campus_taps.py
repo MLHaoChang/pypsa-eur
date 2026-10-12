@@ -23,7 +23,7 @@ import pandas as pd
 import pytest
 
 from gridspine.ingest.campus import build_campus
-from gridspine.static.campus_flow import apply_setpoints, solve_cases
+from gridspine.static.campus_flow import SizingCriteria, apply_setpoints, solve_cases
 from gridspine.static.campus_invest import select_assets
 from gridspine.static.campus_milp import select_assets_milp
 from gridspine.static.campus_reactive import ReactiveRequirement
@@ -223,6 +223,12 @@ def two_spec(pos1=0, pos3=0):
 
 
 def two_direct(mv_mw, lv_mw, t1, t3):
+    """The worst excursion of the two-group campus, solved directly."""
+    net = two_net(mv_mw, lv_mw, t1, t3)
+    return math.inf if net is None else worst_by_hand(net, ("MV1", "MV2", "LV1"))
+
+
+def two_net(mv_mw, lv_mw, t1, t3):
     net = pp.create_empty_network(sn_mva=1.0, f_hz=50)
     pcc = pp.create_bus(net, 110.0, name="PCC")
     mv1, mv2 = pp.create_bus(net, 20.0, name="MV1"), pp.create_bus(net, 20.0, name="MV2")
@@ -241,8 +247,8 @@ def two_direct(mv_mw, lv_mw, t1, t3):
     try:
         pp.runpp(net)
     except pp.LoadflowNotConverged:
-        return math.inf
-    return worst_by_hand(net, ("MV1", "MV2", "LV1"))
+        return None
+    return net
 
 
 def two_rows(mv_mw, lv_mw):
@@ -261,6 +267,7 @@ def test_two_groups_are_visited_top_down_each_holding_its_own_zone():
 @pytest.mark.parametrize("mv_mw, lv_mw, pos1, pos3", [
     (30.0, 20.0, 0, 0), (50.0, 30.0, 0, 0), (10.0, 35.0, 0, 0), (60.0, 10.0, 0, -9), (0.0, 0.0, -9, -9),
     (70.0, 35.0, 0, 0), (20.0, 5.0, 4, -6),
+    (5.0, 40.0, 0, -9),       # MV in band, LV1 low with TR3 at its range end: only TR1 can help
 ])
 def test_two_groups_find_an_in_band_setting_exactly_when_the_brute_force_does(mv_mw, lv_mw, pos1, pos3):
     """All 19 x 19 positions solved directly: where any is in band, the
@@ -274,6 +281,78 @@ def test_two_groups_find_an_in_band_setting_exactly_when_the_brute_force_does(mv
     vm = cases["intact"].bus.set_index("bus")["vm_pu"]
     assert max(max(vm[b] - HI, LO - vm[b], 0.0) for b in ("MV1", "MV2", "LV1")) == pytest.approx(exc, abs=1e-9)
     assert (exc == 0.0) == feasible, (got, exc, feasible)
+
+
+def test_an_upstream_group_helps_a_downstream_one_at_its_range_end():
+    """No load on MV2, 40 MW on LV1, TR3 limited to -2..+2 and at -2: MV1
+    and MV2 are in band at neutral and LV1 is not, and TR3 cannot lift it
+    further (both solved here). TR1's own zone is in band, but it feeds LV1,
+    so it walks as far as its zone allows, and LV1 comes back in band, as
+    the brute force over both ranges says it can."""
+    net = two_net(0.0, 40.0, 0, -2)
+    at_file = dict(zip(net.bus["name"], net.res_bus["vm_pu"]))
+    assert at_file["LV1"] < LO and all(LO <= at_file[b] <= HI for b in ("MV1", "MV2"))
+    assert any(two_direct(0.0, 40.0, a, b) == 0.0 for a in range(-9, 10) for b in range(-2, 3))
+    spec = two_spec(0, -2)
+    spec["campus"]["transformers"]["TR3"]["tap"] = oltc(pos=-2, lo=-2, hi=2)
+    camp = build_campus(spec)
+    log = {}
+    solve_cases(camp, two_rows(0.0, 40.0), retap=Taps(camp, PROFILE).hook(True, log))
+    got = log["intact"]
+    assert got["TR1"] < 0 and two_direct(0.0, 40.0, got["TR1"], got["TR3"]) == 0.0
+
+
+def test_a_lower_group_whose_buses_are_in_band_keeps_its_file_tap():
+    """50 MW on MV2 is out of band at neutral; TR1 brings it back. LV1, under
+    TR3 at -6, is then in band (both by brute force here), so TR3 keeps -6
+    and TR1 takes the in-band position nearest neutral."""
+    in_band = [a for a in range(-9, 10) if two_direct(50.0, 30.0, a, -6) == 0.0]
+    assert in_band and two_direct(50.0, 30.0, 0, -6) > 0.0
+    camp = build_campus(two_spec(0, -6))
+    log = {}
+    solve_cases(camp, two_rows(50.0, 30.0), retap=Taps(camp, PROFILE).hook(True, log))
+    assert log["intact"] == {"TR1": min(in_band, key=abs), "TR3": -6}
+
+
+def test_a_groups_range_is_what_every_unit_reaches_from_its_own_neutral():
+    """TR1 at neutral 0 over -9..9, TR2 at neutral 1 over -6..12: offsets
+    -7..9 by hand. A unit with no on-load data leaves the group fixed."""
+    spec = pair_spec(pos=0)
+    spec["campus"]["transformers"]["TR2"]["tap"] = oltc(pos=1, neutral=1, lo=-6, hi=12)
+    (g,) = Taps(build_campus(spec), PROFILE).groups
+    assert (g.lo, g.hi, g.neutral, g.oltc, g.controlled) == (-7, 9, (0, 1), True, True)
+
+
+def test_the_pcc_bus_has_no_band_in_the_tap_search():
+    """The PCC voltage is the grid's set-point: the search judges every
+    other bus, each against the EU band for its voltage."""
+    camp = build_campus(two_spec())
+    assert Taps(camp, PROFILE).bands == {"MV1": (LO, HI), "MV2": (LO, HI), "LV1": (LO, HI)}
+
+
+def test_each_n_minus_1_case_starts_from_the_intact_taps():
+    """Unequal units (10 % and 16 %) at 40 MW: in band at neutral intact,
+    and each outage needs its own position (brute force here). Each case is
+    searched from the intact taps, not from the case before it."""
+    spec = pair_spec(pos=0)
+    spec["campus"]["transformers"]["TR2"]["vk_percent"] = t(16.0)
+    spec["campus"]["transformers"]["TR1"]["vk_percent"] = t(10.0)
+
+    def direct(pos, out=None):
+        net = pair_direct(40.0, 0.85, pos, out)
+        if net is None:
+            return math.inf
+        for i, vk in ((0, 10.0), (1, 16.0)):
+            net.trafo.at[i, "vk_percent"] = vk
+        pp.runpp(net)
+        return worst_by_hand(net)
+
+    best = {out: min(range(-9, 10), key=lambda p: (round(direct(p, out), 12), abs(p))) for out in (None, 0, 1)}
+    assert best[None] == 0 and best[0] != best[1]
+    camp = build_campus(spec)
+    log = {}
+    solve_cases(camp, dark(40.0), retap=Taps(camp, PROFILE).hook(True, log))
+    assert log == {"intact": {"TR1": 0, "TR2": 0}, "N-1:TR1": {"TR2": best[0]}, "N-1:TR2": {"TR1": best[1]}}
 
 
 # --------------------------------------------------------------------------
@@ -447,6 +526,42 @@ def test_a_pcc_voltage_out_of_band_is_the_grid_set_point_and_never_moves_a_tap(t
     assert "the grid set-point is outside the band: the operator's voltage, not a campus measure" in got["reason"]
 
 
+def test_the_q_dispatch_is_resettled_at_the_taps_it_ends_with(tmp_path):
+    """An existing 80 MVA unit at tap +6 holds the 20 kV buses low; the
+    battery holds the PCC on its 3 Mvar band edge. The taps move, the
+    transformer's reactive losses with them, and Q is dispatched again: on
+    a net written directly with the reported tap and the battery's reported
+    Q, the PCC sits on the band edge (within the dispatch tolerance), and
+    every 20 kV bus is in band."""
+    spec = single_spec()
+    spec["campus"]["transformers"]["TR1"].update(sn_mva=t(80.0), existing=True, tap=oltc(pos=6))
+    hour = {"DC_LOAD": -40.0, "BESS1": -12.0, "PV1": 0.0, "GEN1": 0.0}
+    lib = library(tmp_path, transformers=[t60()])
+    table, sel = hourly((2030, 3, hour, {}))
+    out = select_assets(spec, table, sel, lib, ReactiveRequirement(3.0, "t", "assumed"), PROFILE)
+    assert out["unresolved"] == [] and row(out, "transformer TR1")["status"] == "kept"
+    (tap,) = out["taps"]["tap_pos"]
+    assert tap != 6
+    q = float(out["dispatch"].set_index("element").at["inverters", "q_mvar"])
+    assert q > 0
+    net = direct_net()
+    net.trafo.drop(net.trafo.index, inplace=True)
+    pp.create_transformer_from_parameters(net, 0, 1, sn_mva=80.0, vn_hv_kv=110.0, vn_lv_kv=20.0, vkr_percent=0.4,
+                                          vk_percent=12.0, pfe_kw=25.0, i0_percent=0.05, tap_side="hv", tap_neutral=0,
+                                          tap_min=-9, tap_max=9, tap_step_percent=1.5, tap_pos=int(tap),
+                                          tap_changer_type="Ratio")
+    net.line.at[0, "max_i_ka"] = 3.0
+    net.load.at[0, "p_mw"] = 40.0
+    net.load.at[0, "q_mvar"] = 40.0 * math.tan(math.acos(0.98))
+    for name, p_mw in hour.items():
+        if name != "DC_LOAD":
+            net.sgen.loc[net.sgen["name"] == name, "p_mw"] = p_mw
+    net.sgen.loc[net.sgen["name"] == "BESS1", "q_mvar"] = q
+    pp.runpp(net)
+    assert float(net.res_ext_grid["q_mvar"].sum()) == pytest.approx(3.0, abs=0.011)
+    assert worst_by_hand(net) == 0.0
+
+
 def test_an_investment_whose_hours_pass_is_exactly_todays_with_tap_data_or_without(tmp_path):
     """Every hour in band at neutral: the bought units' on-load taps change
     nothing, not the flows, the dispatch, the investment or the report."""
@@ -464,6 +579,8 @@ def test_an_investment_whose_hours_pass_is_exactly_todays_with_tap_data_or_witho
         pd.testing.assert_frame_equal(x, y)
     assert a["taps"].empty
     assert len(b["taps"]) == 2 * (2 + 1 + 1) and set(b["taps"]["moved_by"]) == {0}   # the units in service
+    for r in b["state"].study.reactive.values():                                  # no tap set-point either
+        assert r.taps == {} and "trafo_tap" not in r.setpoints
     assert b["spec"]["campus"]["transformers"]["TR1"]["tap"]["pos"] == 0
 
 
@@ -508,3 +625,49 @@ def test_the_milp_and_c8_both_take_the_tap_where_a_tap_or_a_statcom_would_fix_th
         assert row(res, "reactive")["kind"] == "none" and res["unresolved"] == []
         assert (res["taps"]["moved_by"] < 0).all()
     assert out["scope"]["pcc_tap_control"] == "campus"
+    # the MILP's own AC evaluation sets the taps: its warm start (C8's choice) is AC-feasible there
+    assert bool(out["milp_history"]["feasible"].iloc[0])
+
+
+def test_the_milps_reference_dispatch_sets_the_taps_as_c8_does(tmp_path):
+    """The margin is judged on C8's dispatch, re-run by the MILP for every
+    point (``reference``): with the taps set, MV2 there is the directly
+    written net's at C8's reported tap."""
+    from gridspine.static.campus_milp import _Problem
+    lib = library(tmp_path, transformers=[t60()])
+    table, sel = hourly((2030, 7, H7, {}))
+    c8 = select_assets(single_spec(), table, sel, lib, WIDE, PROFILE)
+    (tap,) = c8["taps"]["tap_pos"]
+    assert tap < 0
+    prob = _Problem(single_spec(), table, lib, WIDE, SizingCriteria(), c8["state"], "campus")
+    flows, ok = prob.reference(build_campus(c8["spec"]))
+    assert ok
+    net = direct_net()
+    net.trafo.drop(net.trafo.index, inplace=True)
+    pp.create_transformer_from_parameters(net, 0, 1, sn_mva=60.0, vn_hv_kv=110.0, vn_lv_kv=20.0, vkr_percent=0.4,
+                                          vk_percent=30.0, pfe_kw=25.0, i0_percent=0.05, tap_side="hv", tap_neutral=0,
+                                          tap_min=-9, tap_max=9, tap_step_percent=1.5, tap_pos=int(tap),
+                                          tap_changer_type="Ratio")
+    net.line.at[0, "max_i_ka"] = 3.0
+    net.load.at[0, "p_mw"] = 45.0
+    net.load.at[0, "q_mvar"] = 45.0 * math.tan(math.acos(0.98))
+    for name in ("BESS1", "PV1", "GEN1"):
+        net.sgen.loc[net.sgen["name"] == name, "p_mw"] = H7[name]
+    pp.runpp(net)
+    vm = flows[(2030, 7)]["intact"].bus.set_index("bus")["vm_pu"]
+    assert vm["MV2"] == pytest.approx(float(net.res_bus.at[2, "vm_pu"]), abs=1e-9)
+    assert prob.tap_control == "campus"
+
+
+def test_the_milp_leaves_the_grid_operators_pcc_taps_alone(tmp_path):
+    """With pcc_tap_control grid_operator the MILP, C8 inside it and every
+    AC evaluation keep the PCC unit at its file tap. C8 cannot lift MV2; the
+    MILP finds a point of its own (inverter Q may serve the voltages), and
+    its taps, read from its own evaluation, have not moved."""
+    lib = library(tmp_path, transformers=[t60()],
+                  statcoms=[comp("statcoms", "ST10", 10.0, 400e3)])
+    table, sel = hourly((2030, 7, H7, {}))
+    out = select_assets_milp(single_spec(), table, sel, lib, WIDE, PROFILE, pcc_tap_control="grid_operator",
+                             max_iter=2)
+    assert out["scope"]["pcc_tap_control"] == "grid_operator"
+    assert out["fallback"] is None and len(out["taps"]) and set(out["taps"]["moved_by"]) == {0}
