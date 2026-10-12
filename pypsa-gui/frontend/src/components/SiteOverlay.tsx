@@ -29,9 +29,11 @@ interface Props {
   onResetPlacement: () => void
   /** The solver's dispatch matches the network: the as built / optimised switch is offered only then (spec E6). */
   dispatchFresh?: boolean
+  /** The library-gap status (S4): "'x' Generator drawn as a generic block"; null when every object has a specific type. */
+  libraryGaps?: string | null
 }
 
-export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, unplacedMembers, selectedPlacedKey, canArrange, onArrange, onArrangeAll, placedCount = 0, onResetPlacement, dispatchFresh = false }: Props) {
+export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, unplacedMembers, selectedPlacedKey, canArrange, onArrange, onArrangeAll, placedCount = 0, onResetPlacement, dispatchFresh = false, libraryGaps = null }: Props) {
   const readOnly = useUIStore(s => s.readOnly)
   const siteSizing = useUIStore(s => s.siteSizing)
   const setSiteSizing = useUIStore(s => s.setSiteSizing)
@@ -57,6 +59,12 @@ export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, 
       {fit.outside.length > 0 && <span className="text-accent" title={fit.outside.join(', ')}>· {fit.outside.length} outside</span>}
       {unplacedMembers.length > 0 && (
         <span className="text-accent" title={unplacedMembers.join(', ')}>· {unplacedMembers.length} member bus{unplacedMembers.length === 1 ? '' : 'es'} not placed</span>
+      )}
+      {libraryGaps && (
+        // The library, not the model, is the limit (S4): said once, in words.
+        <span data-testid="library-gaps" className="text-muted" title="The asset library has no specific type for this carrier, so its class's generic shape stands in. The model is fine; add a type to the library to draw it (src/site3d/library/README.md).">
+          · {libraryGaps}
+        </span>
       )}
       {dispatchFresh && (
         // A view setting: enabled when read-only too.

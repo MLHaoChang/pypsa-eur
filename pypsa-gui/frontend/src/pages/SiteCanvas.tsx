@@ -59,6 +59,7 @@ import { screenToGround, groundToScreen } from '../site3d/raycast'
 import { registerSiteDropTarget, unregisterSiteDropTarget } from '../site3d/dropRegistry'
 import SiteOverlay from '../components/SiteOverlay'
 import { useDispatchFresh, useSolveSettled } from '../site3d/useDispatchFresh'
+import { useReducedMotion, flyStart, flyPose, flyDuration, type Pose } from '../site3d/motion'
 import { useSiteResults, type SiteComponents, type SiteResultObject } from '../site3d/useSiteResults'
 import { ResultsLayer, ObjectRegistryContext, useRegisterObject, type EasedVisual, type ObjectRegistry } from '../site3d/resultsLayer'
 import { createResultsStore, type ResultsStore } from '../site3d/resultsStore'
@@ -73,6 +74,7 @@ import { boundaryToLocal } from '../site3d/boundary'
 import { busOffsets, siteBounds } from '../site3d/siteModel'
 import { fitReport, type FitObject } from '../site3d/fit'
 import { placementFindings, findingKeys } from '../site3d/placementCheck'
+import { libraryGaps, libraryGapLine } from '../site3d/libraryGaps'
 import { usePlacementFindings } from '../site3d/placementFindingsStore'
 import SiteLayoutFindings from '../components/SiteLayoutFindings'
 import SiteEmptyState from '../components/SiteEmptyState'
@@ -359,22 +361,68 @@ function BoundaryRibbon({ site, heightAt }: { site: Site; heightAt: HeightAt }) 
   return <Line points={points} color="#b3261e" lineWidth={2} />
 }
 
-// ── Camera: fit the packed site once per mount (the Canvas is keyed on the site) ──
+// ── Camera: fit the plot once per mount (the Canvas is keyed on the site) ────
+//
+// The first fit FLIES IN (plan 3 S4; Phase 1 decision 3): from straight above
+// the plot, as the map showed it, down to the fitted view over FLY_IN_MS —
+// a jump cut under reduced motion. Generate 3D site, Open in 3D and the site
+// picker all mount a fresh Canvas, so each of them flies; a parameter edit
+// does not remount and does not. When the controls are swapped later (walk
+// mode on and off) the camera stays where it is and only the orbit target
+// is re-derived from where it looks.
+
+type Controls = { target: THREE.Vector3; update: () => void; enabled: boolean }
 
 function FitCamera({ bounds }: { bounds: Bounds }) {
   const camera = useThree(s => s.camera)
-  const controls = useThree(s => s.controls) as { target: THREE.Vector3; update: () => void } | null
+  const controls = useThree(s => s.controls) as Controls | null
   const size = useThree(s => s.size)
+  const reduced = useReducedMotion()
+  const fitted = useRef(false)
+  const flight = useRef<{ from: Pose; to: Pose; start: number } | null>(null)
+  const apply = (p: Pose) => {
+    camera.position.set(...p.position)
+    camera.lookAt(...p.target)
+    if (controls) { controls.target.set(...p.target); controls.update() }
+  }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const cam = camera as THREE.PerspectiveCamera
     const fit = fitCamera(bounds, size.width / Math.max(size.height, 1), cam.fov)
-    cam.position.set(...fit.position)
+    if (fitted.current) {
+      // Controls (re)mounted under a camera that already stands somewhere:
+      // aim the orbit at the ground point in view, else at the plot centre.
+      if (controls && !flight.current) {
+        const dir = cam.getWorldDirection(new THREE.Vector3())
+        if (dir.y < -1e-3) {
+          const t = -cam.position.y / dir.y
+          controls.target.copy(cam.position).addScaledVector(dir, t)
+        } else controls.target.set(...fit.target)
+        controls.update()
+      }
+      return
+    }
+    fitted.current = true
     cam.far = fit.far
     cam.updateProjectionMatrix()
-    cam.lookAt(...fit.target)
-    if (controls) { controls.target.set(...fit.target); controls.update() }
+    const to: Pose = { position: fit.position, target: fit.target }
+    if (flyDuration(reduced) > 0) {
+      const from = flyStart(to)
+      apply(from)
+      flight.current = { from, to, start: performance.now() }
+    } else apply(to)
   }, [controls])
+  useFrame(() => {
+    const f = flight.current
+    if (!f) return
+    const { pose, done } = flyPose(f.from, f.to, performance.now() - f.start, flyDuration(reduced))
+    if (controls) controls.enabled = false
+    apply(pose)
+    if (done) {
+      flight.current = null
+      if (controls) controls.enabled = true
+    }
+  })
   return null
 }
 
@@ -604,6 +652,9 @@ function SiteCanvas() {
     const bus = buses.find(b => b.name === busName)
     return buildSiteLayout({ buses: [{ name: busName, v_nom: bus?.v_nom ?? 0, offset: [0, 0] }], generators, storageUnits, stores, loads, transformers, lines, links, busCarrier })
   }
+
+  // Every two-port branch, for the readiness checklist (S4).
+  const branches = useMemo(() => [...lines, ...links, ...transformers].map(b => ({ bus0: b.bus0, bus1: b.bus1 })), [lines, links, transformers])
 
   // Member buses with a position; a member that is not placed cannot be
   // drawn and is reported on the status line.
@@ -864,7 +915,7 @@ function SiteCanvas() {
     return <div className="flex h-full items-center justify-center text-[12px] text-muted">Loading network…</div>
   }
   if (!site) {
-    return <SiteEmptyState buses={buses as Bus[]} boundsFor={name => layoutForBus(name).bounds} />
+    return <SiteEmptyState buses={buses as Bus[]} branches={branches} layoutFor={layoutForBus} loading={!allLoaded} />
   }
   if (!layout || !ground || !siteExtent || !plotExtent || !fit) {
     return (
@@ -876,6 +927,8 @@ function SiteCanvas() {
   }
 
   const legend = legendFor(objects)
+  // Where the library, not the model, is the limit (S4): one line in the overlay.
+  const gapLine = libraryGapLine(libraryGaps(objects))
   const selectedName = selectedComponent?.name ?? null
   const selectedType = selectedComponent?.type ?? null
   const selectedKey = selectedType && selectedName ? `${selectedType}:${selectedName}` : null
@@ -1004,6 +1057,7 @@ function SiteCanvas() {
           fit={fit}
           unplacedMembers={unplacedMembers}
           dispatchFresh={solved}
+          libraryGaps={gapLine}
           selectedPlacedKey={selectedPlacedKey}
           canArrange={allLoaded}
           onArrange={() => {
