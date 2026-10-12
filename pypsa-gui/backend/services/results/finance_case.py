@@ -117,6 +117,18 @@ What it builds:
   (`cod_from_build_year:<a>`; PyPSA's 0 is absent — IC S0b S3), one date for
   every owner asset; `LpBasis` from the
   config and the assets' own `discount_rate`; `finance_case_hash`.
+* **Extra (campus) assets, IC G2** — `extra_assets` (`ExtraOwnerAsset`s, a
+  campus study's chosen equipment): each is one `AssetFinance` after the
+  network assets (`campus:<kind>`, no carrier, overnight = Σ upfront per unit ×
+  quantity, in the case's money: the caller converts), with one
+  `extra_asset_fom:<name>` template line per period (Σ fom_share × overnight,
+  `opex`, after the annualise scaling); never in the counterfactual; COD by
+  year against the case COD (`cod_from_build_year:<name>`, `cod_mismatch`,
+  `extra_asset_staged_build:<name>`); refused
+  `extra_asset_duplicates_network_asset:<name>`, `extra_asset_duplicate:<name>`,
+  `extra_asset_derived_upfront:<name>`; flagged
+  `extra_asset_may_double_count:<name>` beside an owned network Transformer or
+  Line.
 
 Refusal vs None: a lossy PoC chain REFUSES the case (a counterfactual that
 cannot be stated makes every return meaningless, and an empty one would read
@@ -135,6 +147,7 @@ import dataclasses
 import hashlib
 import json
 import math
+from collections.abc import Sequence
 from datetime import date
 
 import numpy as np
@@ -150,7 +163,7 @@ from services.commercial import participants as P
 from services.commercial.lp_bindings import same_party
 from services.finance.case import (
     CONTRACT_CLASS, DEGRADATION_SOURCE, UPFRONT_FROM_CAPITAL_COST, AssetFinance, AssetPart,
-    FinanceCase, FinanceRefused, LpBasis, StorageYear, Template, TemplateLine,
+    ExtraOwnerAsset, FinanceCase, FinanceRefused, LpBasis, StorageYear, Template, TemplateLine,
 )
 from services.finance.cashflow import esc_class_for
 
@@ -1336,13 +1349,86 @@ def _scale_storage(years: dict[str, StorageYear], f: float, base_year: int
             for a, sy in years.items()}
 
 
+# ── extra (campus) assets, IC G2 ─────────────────────────────────────────────
+
+def _extra_assets(extras: tuple[ExtraOwnerAsset, ...], owned_list, invest_list
+                  ) -> tuple[tuple[AssetFinance, ...], list[str]]:
+    """Each extra asset's `AssetFinance` (plan G-5: `ExtraOwnerAsset.asset_finance`)
+    and the flags; refused (G-9) when a name is an owner-owned network component
+    (`extra_asset_duplicates_network_asset:<name>`), repeats among the extras
+    (`extra_asset_duplicate:<name>`), or a part's upfront cost was back-calculated
+    from a `capital_cost` (`extra_asset_derived_upfront:<name>`: not established by
+    S1, a caller error here). A transformer or cable beside an owned network
+    Transformer or Line is flagged `extra_asset_may_double_count:<name>` (the names
+    differ; the overlap is a judgement)."""
+    owned_names = {name for _c, name in owned_list}
+    seen: set[str] = set()
+    out, flags = [], []
+    network_lines = any(c in ("Transformer", "Line") for c, _a in invest_list)
+    for e in extras:
+        if e.name in owned_names:
+            raise FinanceRefused(f"extra_asset_duplicates_network_asset:{e.name}",
+                                 f"{e.name!r} is also an owner-owned network component")
+        if e.name in seen:
+            raise FinanceRefused(f"extra_asset_duplicate:{e.name}",
+                                 f"{e.name!r} is passed twice as an extra asset")
+        seen.add(e.name)
+        if any(p.derived_from_capital_cost for p in e.parts):
+            raise FinanceRefused(f"extra_asset_derived_upfront:{e.name}",
+                                 "an upfront cost back-calculated from capital_cost is not "
+                                 "established (it can include fixed O&M); pass the typed cost")
+        if e.kind in ("transformer", "cable") and network_lines:
+            flags.append(f"extra_asset_may_double_count:{e.name}")
+        out.append(e.asset_finance())
+    return tuple(out), flags
+
+
+def _extra_cod_flags(fin, extras: tuple[ExtraOwnerAsset, ...], cod: date) -> list[str]:
+    """G-7: an extra asset is taken at the case COD (from the network owner assets,
+    `_cod`). A typed `cod_by_asset` entry must equal it (`cod_mismatch`); without one
+    its `build_year` is compared BY YEAR: the COD's year is accepted at the case COD
+    (`cod_from_build_year:<name>`), an earlier year is `cod_mismatch`, a later one
+    `extra_asset_staged_build:<name>` (P5) — never moved."""
+    flags = []
+    for e in extras:
+        if e.name in fin.cod_by_asset:
+            if fin.cod_by_asset[e.name] != cod:
+                raise FinanceRefused("cod_mismatch", f"cod_by_asset[{e.name!r}] "
+                                     f"{fin.cod_by_asset[e.name]} differs from the case COD {cod}")
+            continue
+        if e.build_year < cod.year:
+            raise FinanceRefused("cod_mismatch", f"{e.name!r} is built in {e.build_year}, "
+                                 f"before the case COD {cod}")
+        if e.build_year > cod.year:
+            raise FinanceRefused(f"extra_asset_staged_build:{e.name}",
+                                 f"{e.name!r} is built in {e.build_year}, after the case COD "
+                                 f"{cod} (staged builds are P5)")
+        flags.append(f"cod_from_build_year:{e.name}")
+    return flags
+
+
+def _extra_fom_lines(extra_finance: tuple[AssetFinance, ...], k: str, base_year: int
+                     ) -> tuple[TemplateLine, ...]:
+    """G-6: an extra asset has no LP cost row, so its fixed O&M (Σ fom_share ×
+    overnight a year, base-year money, escalated by `opex`) is one template line
+    per asset and period — `stream="fom"`, the closed `CashflowLine` stream set."""
+    return tuple(TemplateLine(key=f"extra_asset_fom:{a.name}", stream="fom",
+                              amount=-sum(p.fom_share * p.overnight_cost for p in a.parts),
+                              esc_class="opex", source="extra_asset_fom", source_id=a.name,
+                              period=k, money_year=base_year)
+                 for a in extra_finance)
+
+
 # ── the entry point ──────────────────────────────────────────────────────────
 
 def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
-                       owner: str | None = None) -> FinanceCase:
+                       owner: str | None = None,
+                       extra_assets: Sequence[ExtraOwnerAsset] = ()) -> FinanceCase:
     """The owner's `FinanceCase` from the solved network `n`, its solver
     config `cfg` and the stored `FinanceInputs` `fin` (see the module
-    docstring); `FinanceRefused(code)` when it cannot be stated."""
+    docstring); `FinanceRefused(code)` when it cannot be stated.
+    `extra_assets` (IC G2): equipment the owner buys outside the network
+    (a campus study's choice), added as owner capex — see `_extra_assets`."""
     from services.results.value_flows import value_flow_ledger
 
     try:
@@ -1364,6 +1450,8 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
     meter_skip = _uncosted_meter_links(n, parsed, owned_list)
     flags += [f"meter_link_not_investment:{m}" for m in meter_skip]
     invest_list = [(c, a) for c, a in owned_list if not (c == "Link" and a in meter_skip)]
+    extras = tuple(extra_assets)
+    extra_finance, extra_flags = _extra_assets(extras, owned_list, invest_list)
 
     # Staged builds are P5 (plan C2).
     if periods[0] is not None:
@@ -1482,7 +1570,10 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                 else:
                     monthly[item] = 12.0 / months
                     flags.append(f"template_annualised_monthly:{item}:{_num(12.0 / months)}")
-        templates.append(Template(first_year=year, lines=_scale(lines, f, monthly),
+        # G-6: the extra assets' fixed O&M, after `_scale` (never annualised).
+        templates.append(Template(first_year=year,
+                                  lines=_scale(lines, f, monthly) + _extra_fom_lines(
+                                      extra_finance, k, base_year),
                                   energy_mwh={g: e * f for g, e in gen.items() if e is not None},
                                   money_year=year,
                                   storage=_scale_storage(storage_years.get(k, {}), f, base_year)))
@@ -1500,23 +1591,33 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
     lp_rate = _fin(getattr(cfg, "discount_rate", None))
     assets, rates, asset_flags = _assets(n, invest_list, discount_rate=lp_rate)
     cod, cod_flags = _cod(n, fin, invest_list)
-    flags += asset_flags + cod_flags
+    flags += asset_flags + cod_flags + extra_flags + _extra_cod_flags(fin, extras, cod)
+    if extras and fin.currency_year is None:
+        # The extras' costs are in the caller's money; with no case currency year
+        # nothing says whether it matches (IC G2 gate r1 note 5).
+        flags.append("extra_asset_money_year_unstated")
     lp = LpBasis(discount_rate=lp_rate,
                  inflation_rate=_fin(getattr(cfg, "inflation_rate", None)),
                  auto_discount_periods=bool(getattr(cfg, "auto_discount_periods", False)),
                  asset_discount_rates=rates)
     return FinanceCase(inputs=fin, owner=owner, base_year=base_year, cod=cod,
-                       templates=tuple(templates), assets=assets,
+                       templates=tuple(templates), assets=assets + extra_finance,
                        flags=tuple(dict.fromkeys(flags)),
                        counterfactual=tuple(counterfactual), lp_basis=lp,
-                       counterfactual_hash=cf_hash, conservation_ok=conservation.ok)
+                       counterfactual_hash=cf_hash, conservation_ok=conservation.ok,
+                       extra_assets=extras)
 
 
 # ── the hash ─────────────────────────────────────────────────────────────────
 
 def _canon(o):
     if dataclasses.is_dataclass(o) and not isinstance(o, type):
-        return {f.name: _canon(getattr(o, f.name)) for f in dataclasses.fields(o)}
+        out = {f.name: _canon(getattr(o, f.name)) for f in dataclasses.fields(o)}
+        # IC G2 plan G-5: exactly `FinanceCase.extra_assets == ()` is omitted, so
+        # a case without extras keeps its S0b hash (no generic empty-tuple rule).
+        if isinstance(o, FinanceCase) and o.extra_assets == ():
+            del out["extra_assets"]
+        return out
     if hasattr(o, "model_dump"):
         return _canon(o.model_dump(mode="json"))
     if isinstance(o, dict):
