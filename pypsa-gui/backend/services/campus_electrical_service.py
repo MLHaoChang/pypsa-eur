@@ -594,20 +594,23 @@ def extra_owner_assets(project, replacements: bool = False) -> list:
     ``upfront_per_unit`` is the library's ``capex_eur_per_km`` for a cable and
     ``capex_eur`` otherwise. ``meta`` is what the IC does not take:
     ``provenance`` is the source tag of that cost in the library (``measured``,
-    ``datasheet`` or ``assumed``) and ``illustrative`` is True when it is
-    ``assumed``. ``action`` is the table's (plan C13: ``buy``, ``add`` for
-    units added next to existing ones, ``replace``; None for a table written
-    before it; ``renew`` for a replacement). Kept units are existing, so they
-    are not here. Plan C14's keys: ``purchase`` (1 for the first buy, k for
-    later ones; an existing asset's first replacement is 1), ``lineage`` (the
-    same for every purchase of one asset), ``replaces`` (the name of the entry
-    this one replaces, or None: always None for a first purchase, and for an
-    existing asset's first replacement, the kept asset being no entry),
-    ``service_to`` (the year its successor starts, or the study horizon's end)
-    and ``commissioned_source`` (for an existing asset's replacement, how its
-    commissioning year is known: a source tag, or ``assumed: mid-life at the
-    first period``); a table from before C14 gives ``purchase`` 1 and None for
-    the others. An engine kind that ``IC_KIND`` does not list is refused with
+    ``datasheet``, ``literature`` or ``assumed``) and ``illustrative`` is True
+    when it is ``assumed``. A ``literature`` cost is a cited reference value,
+    not a quote, and is not illustrative: in the defaults pack's sense that flag
+    means "not taken from a cited source". ``action`` is the table's (plan C13:
+    ``buy``, ``add`` for units added next to existing ones, ``replace``; plan
+    C14: ``renew`` for a replacement; None for a table written before C13).
+    Kept units are existing, so they are not here. Plan C14's keys:
+    ``purchase`` (1 for the first buy, k for later ones; an existing asset's
+    first replacement is 1), ``lineage`` (the same for every purchase of one
+    asset), ``replaces`` (the name of the entry this one replaces, or None:
+    always None for a first purchase, and for an existing asset's first
+    replacement, the kept asset being no entry), ``service_to`` (the year its
+    successor starts, or the study horizon's end) and ``commissioned_source``
+    (for an existing asset's replacement, how its commissioning year is known:
+    a source tag, or ``assumed: mid-life at the first period``); a table from
+    before C14 gives ``purchase`` 1 and None for the others. An engine kind
+    that ``IC_KIND`` does not list is refused with
     422 naming it.
 
     Read from the run directory: ``campus_investment.csv`` (the items, their
