@@ -24,6 +24,7 @@ harness/
   reviewer.py     optional single bounded read-only review of qualitative interpretations
   publication.py  JSON/ZIP from the same validated answer, facts and evidence
   rollout.py      capabilities, profile/effect rollback and bounded shadow observation
+  pilot_evaluation.py  independent finite-suite cases, release scoring and live resource ceilings
   workflows/      the start menu and the step-by-step flows (Markdown + front matter)
   skills/         procedures the model loads on demand (<name>/SKILL.md)
   prompts/        the system-prompt fragments as Markdown, byte-identical to the old constants
@@ -97,6 +98,11 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
+The repeatable pilot evaluation runs 53 independent positive/adversarial cases
+and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
+writes a versioned report; optional live generation has fixed pre-send ceilings.
+See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
+This finite-suite result does not confer production or independent domain approval.
 Shared scope and calculation modules own project/entity/window/metric constraints, required-slot dispositions, units,
 formulas and coverage. Five bounded profiles support generator dispatch,
 declared-basis generator costs, a linear network subset, StorageUnit dispatch

@@ -56,6 +56,11 @@ signature (`tests/test_engine_facade_frozen.py`): an accidental change fails lou
   capex: the parts, `overnight_cost` and the fixed replacement entries together),
   `finance.replacements.schedule` (with `Replacement`), `FinanceInputs.replacement_rule`
   (`fixed | part_lifetimes`) and the `TerminalValueRule` method `remaining_life_annuity`.
+- **Finance, added by G2** (`2026-10-07-ic-g1-g2-campus-equipment.md` G-11): `finance.case.ExtraOwnerAsset`
+  (signature and field pins), `FinanceCase.extra_assets` and the keyword
+  `results.finance_case.build_finance_case(..., extra_assets=())` (§8). After the gate (#97's producer):
+  `parts` takes `UpfrontPart`s or the producer's dicts and is normalised to `finance.case.ExtraAssetPart`
+  (pinned), and a name may contain ':' (§8's `campus:<library_id>#<k>`).
 - **Library:** `library.items.resolve` / `put_item`, `library.series_store.put_series`, the defaults-pack
   loader and the flat export series helper (new, items a and e).
 - **Field names** of `CommercialConfig` and `FinanceInputs` that the guided ledger compiles to.
@@ -159,15 +164,71 @@ imbalance (a year of energy against one month of demand in the objective).
 - **U2 checklist:** once GS merges master both copies emit `tariff_export_exceeds_import`; GS removes its
   copy in U2.
 
+## 8. Campus equipment in the defaults pack and the investment case (G1, G2)
+
+**Owner-approved 2026-10-07**; sent to the gridspine campus session the same day (its PRs #74, #79, #83, #84 are on
+master). Built by IC on a fresh branch from master as one PR, after S0b (#90, merged).
+
+**G1: campus equipment rows in the generic defaults pack.**
+- Kinds: `transformer`, `cable`, `capacitor_bank`, `shunt_reactor`, `statcom` and `switchgear`, with one `technology`
+  per campus library entry (e.g. `transformer.132_33.40mva`).
+- Bases: the S0 vocabulary plus `lump` (EUR per unit: transformers, capacitor banks, reactors, STATCOMs), `per_km`
+  (cables) and `per_bay` (switchgear); the loader gains these bases and their unit conversions.
+- Parameters per entry: `overnight` (EUR per basis unit), `lifetime` (years) and `fom_share` (the campus
+  `opex_frac`), on one part, `investment`.
+- Electrical ratings stay in `gridspine/templates/data/campus_assets.yaml`; it keeps its `id`s and points at the pack
+  key. The pack holds only the cost side.
+- Every row carries `illustrative = true` and `source = "assumed (gridspine campus_assets.yaml placeholder)"` (all
+  campus values are `source: assumed` today), the D2 rule.
+- This is a new pack version, never an edit of 2026-10-05, so pinned hashes stay valid. IC transcribes the YAML unless
+  the campus session supplies the rows.
+
+**G2: `build_finance_case(..., extra_assets: Sequence[ExtraOwnerAsset] = ())`.**
+- `ExtraOwnerAsset(name, kind, basis, quantity, parts: tuple[UpfrontPart, ...], build_year, source, source_hash)`
+  lives in `services/finance/case.py` and joins the frozen facade. `upfront_per_unit` is per basis unit; `quantity`
+  is units, km (units × length) or bays; `source_hash` is sha256[:16] of the solved campus study that chose it.
+- Each becomes one `AssetFinance`:
+  - `overnight_cost` = Σ `upfront_per_unit` × `quantity`;
+  - `component = "campus:<kind>"`;
+  - the part lifetime;
+  - no carrier, so no incentives.
+
+  Its fixed O&M is `fom_share × overnight` per year from COD.
+- COD: 1 January of `build_year` unless `fin.cod_by_asset[name]` says otherwise. An earlier year than the case's COD
+  is `cod_mismatch`. A later one is refused `extra_asset_staged_build:<name>` until P5, never moved.
+- Replacements and the terminal value follow the case's rules (`part_lifetimes`, `remaining_life_annuity`). Every
+  part needs a finite typed lifetime (no-substitution, C12).
+- Never in the counterfactual: the equipment exists because of the project.
+- The report lists the extra assets under their own heading with `source_hash`; the case hash covers them.
+- A name that is also an owner-owned network component is refused
+  `extra_asset_duplicates_network_asset:<name>`.
+
+**Campus mapping.** Each chosen `_investment` row of `gridspine/static/campus_invest.py` (status `chosen`, kind not
+`keep` or `none`) becomes one `ExtraOwnerAsset`:
+- `parts = (UpfrontPart("investment", capex_eur | capex_eur_per_km, lifetime_a, opex_frac),)`;
+- `quantity` = units (lump), units × `length_km` (per_km) or bays (per_bay);
+- `build_year = invest_period`.
+
+Kept existing equipment is not new capex and is not passed.
+
+**Defaults the owner accepted.**
+- (A) Campus equipment is never in the counterfactual; an opt-in can come later.
+- (B) The investment-case route takes the list from the latest solved campus study of the same project, pinned by
+  `source_hash`; a stale study is flagged and not used.
+- (C) Later build years are refused until P5; P5 is not a prerequisite.
+
+Who builds the campus route that passes `extra_assets` (the campus session or IC) is the campus session's answer.
+
 ## 7. Status
 
 | Item | State |
 |---|---|
 | U1 PR | #81 merged to master (aae746e, 2026-10-06) |
-| U1 follow-up PR | #85 open against master (retargeted after #81 merged); gate on af444ac green after df9ad88 |
+| S0b, D9, D10 | #90 merged to master (546f2cb, 2026-10-07) |
+| G1, G2 (campus) | shapes owner-approved and sent (§8); not started |
+| U1 follow-up PR | #85 merged to master (ca06e31, 2026-10-06) |
 | (a) defaults pack, (e) export helper | done (part A, PASS round 3) |
 | (b) site connection, (f) preflight port, D13 | done (part C, PASS round 2) |
 | (d), LCOS, D11, D12, Q12b / Q14 tests, Q4 facade test | done (part B, PASS round 2) |
 | (c) this facade section | done |
 | (g) | done with part B (rule in §5) |
-| S0b, D9, D10 | waiting for PR #78 |
