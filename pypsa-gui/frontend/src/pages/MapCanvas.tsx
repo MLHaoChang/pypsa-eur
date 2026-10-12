@@ -7,8 +7,15 @@ import toast from 'react-hot-toast'
 import { confirmToast } from '../utils/toasts'
 import { isRenewableCarrier } from '../utils/carriers'
 import { uniformBadge, type BadgeDef } from '../utils/carrierBadges'
-import { Ruler, Flame, Wind, BatteryCharging, Zap, ExternalLink } from 'lucide-react'
+import { Ruler, Flame, Wind, BatteryCharging, Zap, ExternalLink, Upload, Waypoints, Search } from 'lucide-react'
+import axios from 'axios'
 import ReactDOMServer from 'react-dom/server'
+import { formatApiDetail } from '../api/client'
+import { mapLayoutApi, type ImportReport, type OsmSuggestions } from '../api/mapLayout'
+import { geocodeApi, type GeocodeHit } from '../api/geocode'
+import { sitesApi } from '../api/sites'
+import { describeWay, suggestionCandidates, type SuggestBranch, type SuggestCandidate } from '../utils/osmSuggest'
+import ImportGeometryDialog from '../components/ImportGeometryDialog'
 import { useUIStore, type CanvasView } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { updateAsset } from '../utils/assetWrite'
@@ -35,6 +42,19 @@ import {
   bubbleKey, queueLengthFromGeometry, routeWaypoints, setLengthsDerivedSink, useMapLayoutLifecycle,
   useMapLayoutStore, type LatLngTuple,
 } from './mapLayoutStore'
+import type { RouteSource } from '../api/mapLayout'
+
+/** The user-facing message of an API failure: the backend's `detail` (which names the setting to change) when there is one. */
+function apiErrorMessage(err: unknown, fallback: string): string {
+  if (axios.isAxiosError(err)) return formatApiDetail(err.response?.data?.detail, err.message || fallback)
+  return err instanceof Error && err.message ? err.message : fallback
+}
+
+/** `[min_lng, min_lat, max_lng, max_lat]` of the map's current view. */
+function viewBbox(map: L.Map): [number, number, number, number] {
+  const b = map.getBounds()
+  return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]
+}
 
 /**
  * HTML-attribute escaping for the divIcon's `html` string. The marker markup
@@ -281,6 +301,24 @@ function ClickToPlace({ onPick }: { onPick: (lat: number, lng: number) => void }
     el.style.cursor = 'crosshair'
     return () => { el.style.cursor = previous }
   }, [map])
+  return null
+}
+
+// Hands the Leaflet map to the parent (a ref): the address box flies to a
+// hit, the import fits the view, the suggestion layer reads the bounds.
+function MapHandle({ onMap }: { onMap: (map: L.Map) => void }) {
+  const map = useMap()
+  useEffect(() => { onMap(map) }, [map, onMap])
+  return null
+}
+
+// The OSM suggestion layer's bounds watcher (plan M3): mounted only while
+// the layer is on, reports the view's bbox once on mount and after every
+// pan/zoom settles, so the fetch (cached server-side per bbox) follows the
+// user without a request per frame.
+function ViewBoundsWatcher({ onBounds }: { onBounds: (bbox: [number, number, number, number]) => void }) {
+  const map = useMapEvents({ moveend: () => onBounds(viewBbox(map)) })
+  useEffect(() => { onBounds(viewBbox(map)) }, [map, onBounds])
   return null
 }
 
@@ -1018,11 +1056,117 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   // length rewrite that the store issues once the route's PUT has landed
   // (the server measures the route it holds, not this cache). Transformers
   // have a route but no length.
-  const updateWaypoints = useCallback((edgeId: string, wps: LatLngTuple[]) => {
+  const updateWaypoints = useCallback((edgeId: string, wps: LatLngTuple[], source: RouteSource = 'user') => {
     const project = useUIStore.getState().currentProject
-    setRouteWaypoints(project, edgeId, wps)
+    setRouteWaypoints(project, edgeId, wps, source)
     if (deriveLengthsRef.current && project && !edgeId.startsWith('tr:')) queueLengthFromGeometry(project, edgeId)
   }, [setRouteWaypoints])
+
+  // ── Adopt real topology from outside (plan M3) ────────────────────────────
+  const mapRef = useRef<L.Map | null>(null)
+  const captureMap = useCallback((m: L.Map) => { mapRef.current = m }, [])
+  // GeoJSON / KML import: the file goes up for a PREVIEW first, the report
+  // dialog shows what would match, and Apply sends it again with
+  // `apply=true`. Both sidecars the server wrote are then re-read — the
+  // stores never learn of a server-side write on their own.
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [importPreview, setImportPreview] = useState<{ file: File; report: ImportReport } | null>(null)
+  const importMut = useMutation({
+    mutationFn: ({ file, apply }: { file: File; apply: boolean }) =>
+      mapLayoutApi.importGeometry(useUIStore.getState().currentProject as string, file, { apply }),
+    onSuccess: async (report, vars) => {
+      if (!vars.apply) { setImportPreview({ file: vars.file, report }); return }
+      const project = useUIStore.getState().currentProject as string
+      setImportPreview(null)
+      const written = report.written ?? { routes: [], sites: [] }
+      try {
+        await useMapLayoutStore.getState().reloadFromServer(project)
+        if (written.sites.length > 0) {
+          const doc = await sitesApi.getSites(project)
+          useSitesStore.setState(s => ({ docs: { ...s.docs, [project]: doc }, loaded: { ...s.loaded, [project]: true } }))
+        }
+      } catch (e) {
+        console.warn('[map] reload after geometry import failed', e)
+      }
+      appLog('INFO', `Imported geometry from '${vars.file.name}': ${written.routes.length} route(s), ${written.sites.length} site(s).`)
+      toast.success(`Imported ${written.routes.length} route${written.routes.length === 1 ? '' : 's'} and ${written.sites.length} site${written.sites.length === 1 ? '' : 's'}`)
+      if (report.lengths) onLengthsDerived(report.lengths)
+    },
+    onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Could not import the geometry')),
+  })
+  const onImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (!currentProject) { toast.error('Save the project first: imported geometry lives in its map_layout.json.'); return }
+    importMut.mutate({ file, apply: false })
+  }
+
+  // OSM suggestions: a dimmed layer of power ways and substations for the
+  // view, fetched when the layer is on and the view settles. Clicking a way
+  // beside a chord offers "Use as route for <branch>"; nothing is computed.
+  const [osmOn, setOsmOn] = useState(false)
+  const [osm, setOsm] = useState<OsmSuggestions | null>(null)
+  const [osmPick, setOsmPick] = useState<{ x: number; y: number; way: string; candidates: SuggestCandidate[] } | null>(null)
+  const osmFetchSeq = useRef(0)
+  const onViewBounds = useCallback((bbox: [number, number, number, number]) => {
+    const project = useUIStore.getState().currentProject
+    if (!project) return
+    const seq = ++osmFetchSeq.current
+    mapLayoutApi.osmSuggestions(project, bbox).then(r => {
+      if (seq === osmFetchSeq.current) setOsm(r)
+    }).catch((e: unknown) => {
+      if (seq !== osmFetchSeq.current) return
+      const status = axios.isAxiosError(e) ? e.response?.status : undefined
+      const msg = apiErrorMessage(e, 'Could not load OSM suggestions')
+      if (status === 422) toast(msg, { id: 'osm-bbox' })
+      else toast.error(msg, { id: 'osm-error', duration: 8000 })
+    })
+  }, [])
+  useEffect(() => { if (!osmOn) { setOsm(null); setOsmPick(null); osmFetchSeq.current++ } }, [osmOn])
+  const toggleOsm = () => {
+    if (!currentProject && !osmOn) { toast.error('Save the project first to fetch OSM suggestions.'); return }
+    setOsmOn(v => !v)
+  }
+  // The branches a suggested way could route: every Line, Link and
+  // Transformer whose two buses are placed, in the map's [lat, lng].
+  const suggestBranches = useMemo((): SuggestBranch[] => {
+    const out: SuggestBranch[] = []
+    const add = (kind: string, name: string, b0: string, b1: string) => {
+      const c0 = busByName.get(b0), c1 = busByName.get(b1)
+      const p0 = c0 ? busLatLng(c0) : null, p1 = c1 ? busLatLng(c1) : null
+      if (p0 && p1) out.push({ key: `${kind}:${name}`, label: `${name} (${b0} → ${b1})`, bus0: p0, bus1: p1 })
+    }
+    for (const l of lines as LineT[]) add('line', l.name, l.bus0, l.bus1)
+    for (const l of links as LinkT[]) add('link', l.name, l.bus0, l.bus1)
+    for (const t of transformers as Transformer[]) add('tr', t.name, t.bus0, t.bus1)
+    return out
+  }, [busByName, lines, links, transformers])
+  const offerWay = (way: OsmSuggestions['lines'][number], at: { x: number; y: number }) => {
+    const latlng = way.points.map(([lng, lat]) => [lat, lng] as const)
+    const candidates = suggestionCandidates(latlng, suggestBranches)
+    if (candidates.length === 0) { toast('No branch has both buses near the ends of this way', { id: 'osm-nopick' }); return }
+    setOsmPick({ x: at.x, y: at.y, way: describeWay(way.kind, way.tags), candidates })
+  }
+  const adoptWay = (c: SuggestCandidate) => {
+    updateWaypoints(c.key, c.waypoints.map(p => [p[0], p[1]] as LatLngTuple), 'osm')
+    setOsmPick(null)
+    toast.success(`${c.key} now follows the OSM way`)
+  }
+
+  // Address box (click-to-place): only when PYPSAGUI_GEOCODER_URL is set.
+  const { data: geocoder } = useQuery({ queryKey: ['geocode', 'status'], queryFn: geocodeApi.status, staleTime: Infinity })
+  const [address, setAddress] = useState('')
+  const [hits, setHits] = useState<GeocodeHit[]>([])
+  const geocodeMut = useMutation({
+    mutationFn: (q: string) => geocodeApi.search(q),
+    onSuccess: (rows) => { setHits(rows); if (rows.length === 0) toast('No place found for that address', { id: 'geocode' }) },
+    onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Address lookup failed')),
+  })
+  const flyToHit = (h: GeocodeHit) => {
+    mapRef.current?.setView([h.lat, h.lon], Math.max(mapRef.current.getZoom(), 15))
+    setHits([])
+  }
   const updateBubble = useCallback((key: string, offset: MapBubble) => {
     setBubble(useUIStore.getState().currentProject, key, offset)
   }, [setBubble])
@@ -1079,6 +1223,32 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
         )}
 
         <FitToNetwork buses={buses as Bus[]} suspended={placing} />
+        <MapHandle onMap={captureMap} />
+        {osmOn && <ViewBoundsWatcher onBounds={onViewBounds} />}
+
+        {/* OSM suggestion layer (plan M3): dimmed, dashed, under everything the
+            model draws. Click a way to adopt it as a branch's route. */}
+        {osmOn && osm && osm.areas.map(a => (
+          <Polygon
+            key={`osm-area-${a.id}`}
+            positions={a.polygon.map(([lng, lat]) => [lat, lng] as [number, number])}
+            pathOptions={{ color: '#64748b', weight: 1, fillColor: '#64748b', fillOpacity: 0.12, dashArray: '3 4' }}
+            interactive={false}
+          >
+            <Tooltip sticky>{a.tags.name ? `${a.tags.name} · ` : ''}substation (OSM)</Tooltip>
+          </Polygon>
+        ))}
+        {osmOn && osm && osm.lines.map(way => (
+          <Polyline
+            key={`osm-way-${way.id}`}
+            positions={way.points.map(([lng, lat]) => [lat, lng] as [number, number])}
+            pathOptions={{ color: '#94a3b8', weight: 3, opacity: 0.55, dashArray: '2 7' }}
+            bubblingMouseEvents={false}
+            eventHandlers={{ click: (e) => offerWay(way, { x: e.containerPoint.x, y: e.containerPoint.y }) }}
+          >
+            <Tooltip sticky>{describeWay(way.kind, way.tags)} · OSM — click to use as a route</Tooltip>
+          </Polyline>
+        ))}
 
         {placing && placingBus && placementUiAllowed && (
           <ClickToPlace onPick={(lat, lng) => {
@@ -1424,7 +1594,71 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
         >
           <Ruler size={14} />
         </button>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={readOnly || importMut.isPending}
+          title="Import geometry: GeoJSON or KML routes and site boundaries (a match report is shown before anything is written)"
+          aria-label="Import geometry"
+          className="w-8 h-8 flex items-center justify-center bg-bg border border-border rounded shadow text-text hover:text-accent hover:border-accent transition-colors disabled:opacity-40"
+        >
+          <Upload size={14} />
+        </button>
+        <input ref={fileInputRef} type="file" accept=".geojson,.json,.kml,application/geo+json,application/json,application/vnd.google-earth.kml+xml" className="hidden" onChange={onImportFile} data-testid="import-geometry-input" />
+        <button
+          type="button"
+          onClick={toggleOsm}
+          title={osmOn ? 'Hide OSM suggestions' : 'Show OSM power lines and substations as route suggestions (click a way to use it as a route)'}
+          aria-label="OSM suggestions"
+          aria-pressed={osmOn}
+          className={`w-8 h-8 flex items-center justify-center bg-bg border rounded shadow transition-colors ${osmOn ? 'text-accent border-accent' : 'text-text border-border hover:text-accent hover:border-accent'}`}
+        >
+          <Waypoints size={14} />
+        </button>
       </div>
+
+      {/* ODbL attribution, whenever the suggestion layer is on. */}
+      {osmOn && (
+        <div className="absolute z-[900] right-2 text-[10px] px-1.5 py-0.5 rounded bg-bg/90 border border-border text-muted" style={{ bottom: 20 }} data-testid="osm-attribution">
+          Suggestions: {osm?.attribution ?? '© OpenStreetMap contributors (ODbL)'}{osm?.cached ? ' · cached' : ''}
+        </div>
+      )}
+
+      {/* "Use as route for <branch>" — the candidates for a clicked OSM way. */}
+      {osmPick && (
+        <div
+          role="menu"
+          aria-label="Use OSM way as route"
+          className="absolute z-[900] flex flex-col min-w-[14rem] max-w-[22rem] rounded-md border border-border bg-bg shadow-lg text-[12px] overflow-hidden"
+          style={{ left: osmPick.x + 8, top: osmPick.y + 8 }}
+        >
+          <div className="px-2.5 py-1.5 border-b border-border text-muted truncate">{osmPick.way}</div>
+          {osmPick.candidates.slice(0, 5).map(c => (
+            <button
+              key={c.key}
+              type="button"
+              role="menuitem"
+              disabled={readOnly}
+              onClick={() => adoptWay(c)}
+              className="text-left px-2.5 py-1.5 hover:bg-accent/5 text-text disabled:opacity-50"
+              title={`Ends ${Math.round(c.gapM)} m from the buses in total`}
+            >
+              Use as route for <span className="font-mono">{c.label}</span>
+            </button>
+          ))}
+          <button type="button" role="menuitem" onClick={() => setOsmPick(null)} className="text-left px-2.5 py-1.5 hover:bg-accent/5 text-muted border-t border-border">Close</button>
+        </div>
+      )}
+
+      {importPreview && (
+        <ImportGeometryDialog
+          report={importPreview.report}
+          fileName={importPreview.file.name}
+          applying={importMut.isPending}
+          onApply={() => importMut.mutate({ file: importPreview.file, apply: true })}
+          onClose={() => setImportPreview(null)}
+        />
+      )}
 
       {/* Hidden while a slide panel or the command palette is open — both are
           higher-priority z-[500]/z-[300] overlays and the panel's z-[900]
@@ -1520,6 +1754,32 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
             Placing <span className="font-mono font-medium">{placingBus}</span> — click the map
             <span className="text-muted"> ({unplaced.length} left)</span>
           </span>
+          {geocoder?.configured && (
+            <form
+              className="relative flex items-center gap-1"
+              onSubmit={(e) => { e.preventDefault(); if (address.trim()) geocodeMut.mutate(address.trim()) }}
+            >
+              <input
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="Find an address…"
+                aria-label="Find an address"
+                className="w-44 rounded border border-border bg-bg px-2 py-1 text-[11px] text-text outline-none focus:border-accent"
+              />
+              <button type="submit" disabled={geocodeMut.isPending || !address.trim()} title="Search the address and move the map there" className="p-1 rounded border border-border text-text hover:bg-border/30 disabled:opacity-35">
+                <Search size={12} />
+              </button>
+              {hits.length > 0 && (
+                <ul className="absolute left-0 bottom-full mb-1 w-72 max-h-48 overflow-auto rounded-md border border-border bg-bg shadow-lg text-[11px]" role="listbox">
+                  {hits.map(h => (
+                    <li key={`${h.lat},${h.lon}`}>
+                      <button type="button" role="option" aria-selected={false} onClick={() => flyToHit(h)} className="w-full text-left px-2 py-1 hover:bg-accent/5 text-text truncate" title={h.display_name}>{h.display_name}</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </form>
+          )}
           <button
             type="button"
             onClick={() => setSkippedNames(prev => new Set(prev).add(placingBus))}
