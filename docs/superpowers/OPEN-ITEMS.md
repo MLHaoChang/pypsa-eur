@@ -117,16 +117,6 @@ The user's exact sequence was never reproduced, so the trigger for the failing
 PUT is still unidentified — the finding lists the candidates in the order worth
 testing. Source: `findings/2026-07-31-blank-canvas-node-drags-revert.md`.
 
-### 8. Component names are not validated at the edge
-
-Names flow from request bodies into the network, into filenames and into
-model-facing text with no character-class check. This is the shared root cause
-behind the untrusted-fence bypass (fixed in #18) and the
-`Content-Disposition` defect (fixed in #7) — both were symptoms treated at the
-sink. `services/upload_service.py`'s `_FILE_ID_RE` shows the right pattern,
-anchored and narrow, and it is not applied to names generally. Source: gap 3 of
-`assessments/2026-09-10-backend-hardening-assessment.md`.
-
 ---
 
 ## Low
@@ -181,6 +171,17 @@ re-opens a project. Where the record is stored was not traced. The P28 smoke
 part (C) works around it by re-running the study. Sources: the plan's "P28
 phase note" (contract drift 3) and
 `qa/2026-09-30-guided-mode-deferred-gate-P28.md`.
+
+### 15. The network CSV and Excel exports write a name that starts with `=` as a formula
+
+Added 2026-10-12, found while fixing item 8 (now closed: component names are
+checked at the edge, `findings/2026-10-12-component-names-are-checked-at-the-edge.md`).
+A leading `=` stays a legal name, and `GET /api/io/export/excel` stores it as a
+live formula cell (reproduced: `data_type='f'`). `GET /api/io/export/csv`
+writes it unescaped. The chat export tools already guard this
+(`_inert_csv_cell`, forced string cells), and these two routes do not. Fix at
+the sink. Source:
+`findings/2026-10-12-network-exports-write-a-formula-name-as-a-formula.md`.
 
 ---
 
