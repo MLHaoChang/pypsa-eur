@@ -215,7 +215,15 @@ def start_tornado(study_id: str, *, base_row, db, user_id,
     # with the tariff written into the Links, which a re-dispatch on the
     # engine's commercial config would price twice) or a fork edited since is
     # refused by `load_inputs` above (409 `engine_inputs_changed_since_run`).
-    # Gate U2-WP8b Z3: the centre cases are valued here, before anything is
+    solves = F.estimate_tornado_solves(inp.question, inp.ledger, inp.tariff, inp.sizes())
+    budget = max(1, solves) if budget_solves is None else int(budget_solves)
+
+    key = project_registry.registry_key(base_row)
+    resident = PyPSAService.get_context(key)
+    if resident is not None:
+        R._refuse_busy(resident)
+    # Gate U2-WP8b Z3: the centre cases are valued here, after the busy check
+    # (a run in flight is replacing the fork files) and before anything is
     # queued (no solve: the forks' saved networks), so a refusal the run did
     # not record (a `FinanceRefused` of the engine at the centre) answers with
     # the findings' own 422, code and message — never a 202 and a worker that
@@ -225,13 +233,6 @@ def start_tornado(study_id: str, *, base_row, db, user_id,
         F.centre_attributions(tctx)
     except F.FindingsRefused as exc:
         raise _refused(exc) from None
-    solves = F.estimate_tornado_solves(inp.question, inp.ledger, inp.tariff, inp.sizes())
-    budget = max(1, solves) if budget_solves is None else int(budget_solves)
-
-    key = project_registry.registry_key(base_row)
-    resident = PyPSAService.get_context(key)
-    if resident is not None:
-        R._refuse_busy(resident)
     open_campaign = resident is not None and R._on_ctx(resident, campaign.status)["active"]
     if open_campaign:
         try:

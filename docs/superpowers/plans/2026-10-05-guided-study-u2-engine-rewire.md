@@ -631,7 +631,7 @@ Adapt in place (WP3–WP8 as their code moves): `test_study_pack.py` (36: no pri
 ### WP9 — Workbooks
 **Do.** `engine_adapter.case_workbook` and `report_xlsx` on `build_workbook`; GS sheets appended: `Assumptions` (ledger + `engine_path` + tested range), `Provenance` (pack version and hash, compiled digest, export series ref, engines, basis, currency year), **`Cash flows (formulas)`** (a view over the engine's cash series with live discount-factor, discounted and cumulative formulas and NPV pinned as `=CF0 + NPV(rate, CF1:CFn)`; owner may drop it, Q13). **Tests:** WP2's workbook targets. **Mutation:** start the NPV range at CF0 → red.
 
-**WP9 status (2026-10-08, on 2ad14b4c = 90f4fabf + the WP8b gate note; uncommitted at the time of writing).** The case workbook is the engine's, with the guided sheets appended; the report workbook values each option on the engine's cash series; rule rows name their author; WP8b's Z1–Z3 and its nits are taken.
+**WP9 status (2026-10-08 to 10-12, on 2ad14b4c = 90f4fabf + the WP8b gate note; partly saved by the coordinating session as the WIP commit ce717d09, the rest uncommitted at the time of writing).** The case workbook is the engine's, with the guided sheets appended; the report workbook values each option on the engine's cash series; rule rows name their author; WP8b's Z1–Z3 and its nits are taken.
 - **`engine_adapter.case_workbook(bundle, ledger, *, project=None) -> bytes`** (§2 C8).
   - IC's own workbook first, unchanged: `build_workbook(assemble_finance_sections(result, case, case_id=…, provenance=<GS stamps>), project=<study name>)` (both facade names). The GS stamps (study, option, library version, ledger hash, compiled and finance digests, export series) land in IC's project provenance.
   - Then the guided sheets: `KPIs`, `Cash flows (formulas)`, `Assumptions`, `Provenance`.
@@ -677,6 +677,7 @@ Adapt in place (WP3–WP8 as their code moves): `test_study_pack.py` (36: no pri
     Each write must be a string constant or an f-string with a literal head; anything else fails with its line. Parametrized tests pin what it reads (6) and what it refuses (8).
   - **Z2.** `report.build_decision_report` chooses the LCOS fact and label by `case.engine == "finance_engine"`. A null engine LCOS is `lcos_finance_engine` with the engine's flag, never "(pro forma)". Neither LCOS disclosure is claimed without a figure.
   - **Z3.** `tornado_runner.start_tornado` values the centre cases (`context_from_disk` + `centre_attributions`, no solve) before anything is queued. An unrecorded centre refusal answers 422 with code and message, as the findings do. The worker reuses that context.
+    - The pre-check sits AFTER the busy check (`_refuse_busy` on the resident base context). The first placement, before it, read fork files that a run in flight was replacing. The suite caught it: `test_findings_refuse_while_a_run_replaces_the_forks` hit a netCDF read error instead of the 409. After the move, the tornado routes and both gate files pass (30), and Z3r is red again.
   - **Nits.**
     - Part B's and WP7's "uncommitted" now name their commits.
     - The Y1 message names options by label without the baseline ("the investment case of Battery, 1 hour and Battery, 2 hours cannot be valued: …"). `compile.currency_year_of` names ledger rows by label and the tariff by name.
@@ -711,6 +712,14 @@ Adapt in place (WP3–WP8 as their code moves): `test_study_pack.py` (36: no pri
   | N10r (own) | the baseline listed in the Y1 message | 1 |
 
   Z1's O4c is red through the coverage test: `ast` reads the single-quoted note, which then has no study sentence. O4a and O4d are red through the unreadable-write test as well.
+
+- **Suite.**
+  - Backend: `tests/test_u2_*.py tests/test_engine_adapter_*.py tests/test_study_*.py tests/test_studies_routes.py tests/test_decision_vocabulary_parity.py tests/test_proforma_*.py`, plus `test_xlsx_formula_eval`, `test_golden_coverage`, `test_golden_economics` and `test_tariff_bill`, including the slow driver re-derivation: **964 passed, 1 failed, 0 xfailed**. The one failure was Z3's placement (above). After the fix, its file and both gate files re-ran green (30 passed). No `pending()` remains anywhere in `tests/`.
+  - `qa_decision_study.py`: **60/60**, `marginal` / `bess_1h` / `["demand_charge_price"]`, 2 h and 4 h skipped by size. It was run before and after the Z3 move. Both workbooks download, and the report workbook has `Cash flows bess_1h`.
+  - ruff is clean on every touched file. The one exception is a `typing.Callable` import in `test_golden_economics.py`, which was already there and is not this package's.
+  - The frontend is not touched: `render_html.ENGINE_LABELS` reads `decisionVocabulary.ts` in a test and does not edit it.
+- **Engine asks.** None new. `build_workbook` and `assemble_finance_sections` are facade names and were enough. One small wish for the record: the engine could export its cash identity's terms as one public structure. GS reads `op.capex`, `op.replacement`, `op_incremental["net"]`, `terminal` and `incentives.grant` from `FinanceResult` to build `cash_series`.
+- **Left for WP10.** Delete `proforma_xlsx` together with the pro forma. Once nothing stores a pre-WP9 report, also delete `report_xlsx`'s earlier-sheet fallback (`EARLIER_SHEET`) and `proforma.ENGINES` / `PROFORMA_ENGINE`. C8 (a) and (c).
 
 ### WP10 — Delete, then driver, golden matrix, packaging, findings note
 **Do (in this order).** (1) Confirm every WP2 target green and the port map complete. (2) Delete §5.1, §5.2, §5.3 code and the five old test files. (3) `qa_decision_study.py`: `_reconcile` uses compile; the §4 judging rule and `EVIDENCE["u2_deltas"]`; new checks — forks carry `commercial` and `finance`; the case's engines are `tariff_engine` / `finance_engine`; the WACC gate consistent; the §4.6 identity on `bess_1h` (else the `BY_CONSTRUCTION` codes are dropped, §4.2); the export series ref is the study's. (4) `tests/golden/site_fixture.py`, `coverage.py`, `test_golden_coverage.py::ROUTE_FILES`. (5) `study_library/` removed (or `load_profiles/` kept per Q7); `pypsa-gui.spec` `datas`, `smoke/check_bundle.py::EXPECTED`, `tests/test_packaging_requirements.py`. (6) Findings note `docs/superpowers/findings/2026-10-05-guided-study-u2.md` (deltas, port map, mutations).
