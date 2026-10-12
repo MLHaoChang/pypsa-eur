@@ -397,7 +397,7 @@ def test_a_solve_with_nothing_extendable_skips_the_rows():
     """The rows are a sizing standard: with nothing to buy, they would only
     make an as-built dispatch infeasible."""
     n = _solve(_fixed_too_small(), _island())
-    assert n._island_facts["skipped"] == "dispatch-only: nothing extendable"
+    assert n._island_facts["skipped"] == "dispatch-only: nothing the rows can size is extendable"
     assert not any(c.startswith("Island-") for c in n.model.constraints)
 
 
@@ -414,3 +414,109 @@ def test_an_operational_re_solve_skips_the_rows():
 def test_a_sizing_solve_is_not_skipped():
     n = _solve(_net(), _island())
     assert n._island_facts.get("skipped") is None
+
+
+# ── review round (2026-10-12) ───────────────────────────────────────────────
+
+
+def test_extendable_assets_the_rows_cannot_buy_do_not_make_a_sizing_solve():
+    """An extendable PV (not a genset, not ride-through storage) cannot hold
+    the reserve, so the solve is still dispatch-only for the rows."""
+    n = _fixed_too_small()
+    n.add("Generator", "pv", bus="site", p_nom_extendable=True, capital_cost=1.0,
+          p_nom_max=10.0, marginal_cost=0.0)
+    n = _solve(n, _island())
+    assert n._island_facts["skipped"] == "dispatch-only: nothing the rows can size is extendable"
+
+
+def test_a_genset_built_later_does_not_count_in_an_earlier_period():
+    """A 10 MW genset built for 2040 is no help in 2030: the 2030 deficit is
+    the whole 10 MW, so 40 MWh → 20 MW of BESS (0 if it were counted)."""
+    n = _net()
+    n.add("Generator", "gx", bus="site", p_nom_extendable=True, p_nom_min=10.0,
+          p_nom_max=10.0, capital_cost=1.0, marginal_cost=1000.0, build_year=2040,
+          lifetime=100)
+    n.set_investment_periods([2030, 2040])
+    units = {"bess": dict(_BESS), "crit": {"kind": "load", "critical": True},
+             "gx": _genset(unit_mw=_a(10.0))}
+    n = _solve(n, _island(units=units, k=0))
+    assert _p_nom(n) == pytest.approx(20.0, abs=TOL)
+
+
+def test_non_cyclic_soc_carries_into_the_next_period():
+    """PyPSA's default (state_of_charge_initial_per_period False) carries the
+    SoC from 2030 into 2040. 10 MW at the first 2040 hour (D = 1 h) is held
+    by the SoC 2030 ended with, not by state_of_charge_initial (0)."""
+    crit = np.zeros(24)
+    n = _net(crit=crit, cyclic=False, soc_init=0.0)
+    n.set_investment_periods([2030, 2040])
+    p_set = n.loads_t.p_set
+    p_set.iloc[24, p_set.columns.get_loc("crit")] = 10.0
+    n = _solve(n, _island(sustained_h=1.0))
+    soc = n.storage_units_t.state_of_charge["bess"]
+    assert float(soc.iloc[23]) >= 10.0 - TOL
+    assert _p_nom(n) == pytest.approx(10.0, abs=TOL)
+
+
+def test_a_fixed_genset_counts_its_unit_mw_in_n_plus_k():
+    """A fixed 40 MW Generator standing for 4 × 10 MW: N+1 takes out 10 MW,
+    not 40. Deficit 50 − 30 = 20 MW → 80 MWh → 40 MW of BESS."""
+    units = {"bess": dict(_BESS), "crit": {"kind": "load", "critical": True},
+             "fleet": _genset(unit_mw=_a(10.0)), "spare": _genset()}
+    n = _solve(_net(crit=50.0, gensets=[("fleet", 40.0), ("spare", 0.0)]),
+               _island(units=units, k=1))
+    assert _p_nom(n) == pytest.approx(40.0, abs=TOL)
+
+
+def test_names_the_network_lacks_are_recorded_and_warned():
+    units = {"bess": dict(_BESS), "crit": {"kind": "load", "critical": True},
+             "g": _genset(), "g9": _genset()}
+    said = []
+    n = _net(gensets=[("g", 6.0)])
+    status, _ = n.optimize(solver_name="highs", extra_functionality=island_extra_functionality(
+        _island(units=units, k=0), emit=said.append))
+    assert n._island_facts["missing"] == {"genset": ["g9"]}
+    assert any("g9" in s for s in said)
+
+
+def test_a_period_shorter_than_the_window_is_a_refusal_not_a_crash():
+    with pytest.raises(IslandRefusal, match="sustained_h"):
+        _net().optimize(solver_name="highs",
+                        extra_functionality=island_extra_functionality(_island(sustained_h=48.0)))
+
+
+def test_pf_runs_and_scopf_without_branches_are_not_refused():
+    """A power flow never builds the LP, and SCOPF with no branch selected
+    falls back to the plain solve."""
+    def fn(n, sns):
+        pass
+    island = _island()
+    assert _wrap_with_island(_net(), fn, SolverConfig(island_constraints=True, mode="pf",
+                                                       solve_strategy="rolling"),
+                             island=island) is fn
+    wrapped = _wrap_with_island(_net(), fn, SolverConfig(island_constraints=True, sclopf=True),
+                                island=island)
+    assert wrapped is not fn
+
+
+def test_an_operational_re_solve_does_not_read_the_sidecar(monkeypatch):
+    from services.solver import island as island_mod
+
+    def boom():
+        raise AssertionError("the sidecar was read")
+    monkeypatch.setattr(island_mod, "load_project_island", boom)
+    n = _net()
+    n._ic_operational = True
+    assert _wrap_with_island(n, None, SolverConfig(island_constraints=True)) is None
+
+
+def test_a_flat_delta_p_plus_series_lines_up_with_investment_periods():
+    """ΔP⁺ given on plain timestamps still reaches both periods' bridge."""
+    units = {"bess": dict(_BESS), "crit": {"kind": "load", "critical": True},
+             "g": _genset(start_s=10.0, sync_s=5.0)}
+    n = _net(gensets=[("g", 0.0)])
+    step = pd.Series(10.0, index=n.snapshots)
+    n.set_investment_periods([2030, 2040])
+    n = _solve(n, _island(units=units, k=0, scenarios=("seamless",)), delta_p_plus=step)
+    assert _p_nom(n) == pytest.approx((40.0 + 10.0 * 15.0 / 3600.0) / 2.0, abs=TOL)
+    assert n._island_facts["seamless_bridge"] == "held"

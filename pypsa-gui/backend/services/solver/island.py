@@ -22,9 +22,14 @@ critical load, k ``genset_redundancy_n``, U_max the largest genset rating
 
 e(t−1) is the state of charge at the end of the hour before the start, so
 the reserve is what the site holds when the outage begins. Windows follow
-the storage's own setting: cyclic wraps to the period's first snapshot (and
-e(t−1) at the first snapshot is the last snapshot's SoC); non-cyclic stops at
-the period end, which is flagged, and reads ``state_of_charge_initial``.
+the storage's own setting: cyclic wraps to the period's first snapshot;
+non-cyclic stops at the period end, which is flagged. e(t−1) follows PyPSA's
+own SoC linkage, unit by unit: within the period when
+``cyclic_state_of_charge_per_period`` / ``state_of_charge_initial_per_period``
+say so, otherwise carried across periods (PyPSA's default), and
+``state_of_charge_initial`` only where PyPSA starts from it. Each period
+counts only the gensets, storage and UPSs active in it (build year and
+lifetime), as the reserve margin does.
 
 **(b) Bridge reserve (Q1).** For every UPS u and every t:
 η_dis,u·e_u(t−1) ≥ P_it,u(t)·bridge_s/3600. Under ``seamless`` the
@@ -45,14 +50,19 @@ hours); U_max over-subtracts when an extendable genset is not built
 outages.
 
 **Dispatch-only solves skip the rows** (owner, 2026-10-12). They are a
-sizing standard (plan step 1): with nothing extendable, or on an operational
-re-solve that pins capacities (``_ic_operational``, set by the FMEA sweep's
-``freeze_capacities``), they could only make an as-built dispatch
-infeasible. The skip is logged and recorded as ``skipped`` in the facts.
+sizing standard (plan step 1): when nothing they can size (a genset, a
+ride-through or GFM storage, a UPS, a fuel store) is extendable, or on an
+operational re-solve that pins capacities (``_ic_operational``, set by the
+FMEA sweep's ``freeze_capacities``; the sidecar is not even read then), they
+could only make an as-built dispatch infeasible. The skip is logged and
+recorded as ``skipped`` in the facts.
 
-**Where it runs.** The plain solve only. Rolling horizon, SCOPF and myopic
-foresight are refused with a reason: their windows cut the cyclic period
-the reserve rows wrap around.
+**Where it runs.** The plain LOPF only, judged as the solve will actually
+run: a power flow builds no LP and passes through; rolling horizon, SCOPF
+(with branches selected) and myopic foresight are refused with a reason,
+because their windows cut the cyclic period the reserve rows wrap around.
+Every refusal, a sidecar that fails validation included, is an
+``IslandRefusal``.
 """
 from __future__ import annotations
 
@@ -93,10 +103,31 @@ def load_project_island() -> dict | None:
     storage = getattr(ctx, "storage_dir", None) if ctx is not None else None
     if not storage:
         return None
-    return load_island_config(pathlib.Path(storage) / SIDECAR_NAME)
+    from services.adequacy.island_config import ContractError
+    try:
+        return load_island_config(pathlib.Path(storage) / SIDECAR_NAME)
+    except ContractError as exc:
+        raise IslandRefusal(f"{SIDECAR_NAME} is not a valid island config: {exc}") from exc
 
 
 _UNSET = object()
+
+
+def _effective_path(network, cfg) -> dict:
+    """The strategy and SCOPF flag the solve will actually run with: SCOPF
+    falls back to the plain LP with no branch selected, rolling falls back to
+    full with SCOPF or investment periods, and myopic needs investment
+    periods (``run_simulation``'s own dispatch)."""
+    from services.commercial.lp_bindings import effective_strategy
+    from services.solver.assumptions import resolve_branch_outages
+
+    multi = bool(getattr(cfg, "multi_investment_periods", False))
+    sclopf = bool(getattr(cfg, "sclopf", False)) and bool(resolve_branch_outages(network, cfg))
+    strategy = effective_strategy(getattr(cfg, "solve_strategy", "full"),
+                                  sclopf=sclopf, multi_period=multi)
+    if strategy == "myopic" and not multi:
+        strategy = "full"
+    return {"solve_strategy": strategy, "sclopf": sclopf}
 
 
 def _wrap_with_island(network, user_fn, cfg, island=_UNSET, log_queue=None,
@@ -105,6 +136,13 @@ def _wrap_with_island(network, user_fn, cfg, island=_UNSET, log_queue=None,
     ``island`` defaults to the solving project's sidecar."""
     if not getattr(cfg, "island_constraints", False):
         return user_fn
+    if getattr(cfg, "mode", "lopf") != "lopf":
+        return user_fn                      # a power flow builds no LP
+    if getattr(network, OPERATIONAL_ATTR, False):
+        return user_fn                      # skipped anyway; no sidecar read per re-solve
+    why = strategy_refusal(**_effective_path(network, cfg))
+    if why:
+        raise IslandRefusal(why)
     if island is _UNSET:
         island = load_project_island()
     if island is None:
@@ -171,25 +209,45 @@ def _nominal(n, component, name, attr="p_nom"):
     return None, float(static.at[name, attr])
 
 
-def _soc_before(n, sns_p, name, cyclic):
-    """e(t−1) for one StorageUnit over the period: (expression with a missing
-    first term when non-cyclic, the initial SoC for that first row)."""
-    soc = n.model.variables["StorageUnit-state_of_charge"].sel(snapshot=sns_p, name=name)
-    if cyclic:
-        return soc.roll(snapshot=1), 0.0
-    return soc.shift(snapshot=1), float(n.storage_units.at[name, "state_of_charge_initial"])
+def _soc_before(n, sns, sns_p, name):
+    """e(t−1) for one StorageUnit over the period, linked as PyPSA links its
+    SoC: (expression with a missing first term where the SoC starts from
+    ``state_of_charge_initial``, that initial value or 0)."""
+    su = n.storage_units
+    cyclic = bool(su.at[name, "cyclic_state_of_charge"])
+    within = isinstance(sns, pd.MultiIndex) and bool(
+        su.at[name, "cyclic_state_of_charge_per_period"] if cyclic
+        else su.at[name, "state_of_charge_initial_per_period"])
+    var = n.model.variables["StorageUnit-state_of_charge"]
+    init = 0.0 if cyclic else float(su.at[name, "state_of_charge_initial"])
+    if within or not isinstance(sns, pd.MultiIndex):
+        soc = var.sel(snapshot=sns_p, name=name)
+        return (soc.roll(snapshot=1) if cyclic else soc.shift(snapshot=1)), init
+    # Carried across periods: shift over the whole horizon, then take the
+    # period. Only the horizon's first snapshot starts from the initial SoC.
+    soc = var.sel(snapshot=sns, name=name)
+    soc = (soc.roll(snapshot=1) if cyclic else soc.shift(snapshot=1)).sel(snapshot=sns_p)
+    starts_here = sns[0] == sns_p[0]
+    return soc, (init if starts_here else 0.0)
 
 
 def _window_sum(d, steps, cyclic):
-    """Σ_{j<D} d(t+j) for every t."""
-    terms = [d.roll(snapshot=-j) if cyclic else d.shift(snapshot=-j) for j in range(steps)]
-    return sum(terms[1:], terms[0].to_linexpr())
+    """Σ_{j<D} d(t+j) for every t, built in one merge (not D chained sums)."""
+    from linopy import merge
+
+    terms = [(d.roll(snapshot=-j) if cyclic else d.shift(snapshot=-j)).to_linexpr()
+             for j in range(steps)]
+    return terms[0] if steps == 1 else merge(terms, dim="_term")
 
 
 def _as_series(value, n, sns_p) -> pd.Series:
     if callable(value):
         value = value(n, sns_p)
     if isinstance(value, pd.Series):
+        if isinstance(sns_p, pd.MultiIndex) and not isinstance(value.index, pd.MultiIndex):
+            # A Series on plain timestamps applies to every period.
+            out = value.reindex(sns_p.get_level_values(-1)).to_numpy(dtype=float)
+            return pd.Series(out, index=sns_p).fillna(0.0)
         return value.reindex(sns_p).astype(float).fillna(0.0)
     return pd.Series(float(value), index=sns_p)
 
@@ -197,20 +255,33 @@ def _as_series(value, n, sns_p) -> pd.Series:
 # The flag `services.adequacy.sweep.freeze_capacities` sets on an operational
 # re-solve (= services.commercial.connection.OPERATIONAL_ATTR; not imported).
 OPERATIONAL_ATTR = "_ic_operational"
-_EXTENDABLE = (("generators", "p_nom"), ("storage_units", "p_nom"), ("stores", "e_nom"),
-               ("links", "p_nom"), ("lines", "s_nom"), ("transformers", "s_nom"))
 
 
-def dispatch_only(n) -> str | None:
-    """Why this solve cannot buy capacity, or None for a sizing solve."""
+def _sizable(n, island) -> list[tuple[str, str]]:
+    """(frame, name) of every asset the rows can size: the gensets, the
+    ride-through, GFM and UPS storage, and the Stores on a genset's fuel bus."""
+    units, req = island["units"], island["requirements"]
+    out = []
+    for u, s in units.items():
+        if s["kind"] == "genset":
+            out += [(f, u) for f in ("generators", "links") if u in getattr(n, f).index]
+        elif s["kind"] in ("bess", "ups") and u in n.storage_units.index:
+            out.append(("storage_units", u))
+    out += [("storage_units", s) for s in req["ride_through_storage"] if s in n.storage_units.index]
+    fuel_buses = {n.links.at[u, "bus0"] for f, u in out if f == "links"}
+    out += [("stores", s) for s in n.stores.index[n.stores.bus.isin(fuel_buses)]]
+    return out
+
+
+def dispatch_only(n, island) -> str | None:
+    """Why this solve cannot buy the reserve, or None for a sizing solve."""
     if getattr(n, OPERATIONAL_ATTR, False):
         return "dispatch-only: operational re-solve"
-    for attr, nom in _EXTENDABLE:
-        df = getattr(n, attr, None)
-        col = f"{nom}_extendable"
-        if df is not None and not df.empty and col in df.columns and df[col].astype(bool).any():
+    for frame, name in _sizable(n, island):
+        col = "e_nom_extendable" if frame == "stores" else "p_nom_extendable"
+        if bool(getattr(n, frame).at[name, col]):
             return None
-    return "dispatch-only: nothing extendable"
+    return "dispatch-only: nothing the rows can size is extendable"
 
 
 # ── the rows ───────────────────────────────────────────────────────────────
@@ -220,10 +291,11 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> di
     """Add (a), (b) and (c) to ``n.model`` and record what was built on
     ``n._island_facts``."""
     # gridspine through the guarded seam (a build without it then says so).
-    from services.adequacy.island_config import GFM_CONTROLS, check_horizon
+    from services.adequacy.activity import active_mask
+    from services.adequacy.island_config import GFM_CONTROLS
 
     emit = emit or (lambda msg: None)
-    skipped = dispatch_only(n)
+    skipped = dispatch_only(n, island)
     if skipped:
         n._island_facts = {"skipped": skipped}
         emit(f"island rows skipped ({skipped}); they size the site, and this solve cannot")
@@ -233,46 +305,81 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> di
     vals = req["values"]
     sns = pd.Index(snapshots) if not isinstance(snapshots, pd.Index) else snapshots
 
-    critical = [u for u, s in units.items() if s["kind"] == "load" and s["critical"]
-                and u in n.loads.index]
-    gensets = [u for u, s in units.items() if s["kind"] == "genset"
-               and (u in n.generators.index or u in n.links.index)]
-    rt = [s for s in req["ride_through_storage"] if s in n.storage_units.index]
-    gfm = [u for u, s in units.items() if s["kind"] in ("bess",)
-           and s.get("control") in GFM_CONTROLS and u in n.storage_units.index]
-    upss = [u for u, s in units.items() if s["kind"] == "ups" and u in n.storage_units.index]
+    # Names the sidecar gives that the network lacks are left out, warned and
+    # recorded: a genset the network does not have would otherwise drop G
+    # silently and size the storage for the whole critical load.
+    missing: dict[str, list[str]] = {}
+
+    def present(kind, names, frames):
+        have = [x for x in names if any(x in getattr(n, f).index for f in frames)]
+        gone = [x for x in names if x not in have]
+        if gone:
+            missing[kind] = gone
+        return have
+
+    critical = present("load", [u for u, s in units.items()
+                                if s["kind"] == "load" and s["critical"]], ("loads",))
+    gensets = present("genset", [u for u, s in units.items() if s["kind"] == "genset"],
+                      ("generators", "links"))
+    rt = present("ride_through_storage", list(req["ride_through_storage"]), ("storage_units",))
+    gfm = present("bess", [u for u, s in units.items() if s["kind"] == "bess"
+                           and s.get("control") in GFM_CONTROLS], ("storage_units",))
+    upss = present("ups", [u for u, s in units.items() if s["kind"] == "ups"],
+                   ("storage_units",))
+    if missing:
+        emit(f"island_config.json names {missing}, which this network does not have; "
+             "they are left out of the rows")
     k = int(vals["genset_redundancy_n"])
     seamless = "seamless" in req["scenarios"]
 
     facts = {"n_plus_k": k, "ride_through_storage": rt, "critical_loads": critical,
              "truncated": False, "periods": {}, "fuel": {"status": "not checked"},
-             "seamless_bridge": None}
+             "seamless_bridge": None, "missing": missing}
 
-    # U_max: the largest unit the N+k test takes out.
-    ratings = []
+    # The unit the N+k test takes out of each genset: its sidecar unit_mw
+    # (a fleet modelled as one asset), else a fixed unit's own rating. An
+    # extendable genset has no rating of its own, so it needs unit_mw.
+    unit_rating = {}
     for g in gensets:
-        if g in n.generators.index:
-            ext = bool(n.generators.at[g, "p_nom_extendable"])
-            rating = float(n.generators.at[g, "p_nom"])
+        comp = "Generator" if g in n.generators.index else "Link"
+        frame = n.generators if comp == "Generator" else n.links
+        unit_mw = units[g]["values"].get("unit_mw")
+        if unit_mw is not None:
+            unit_rating[g] = float(unit_mw)
+        elif bool(frame.at[g, "p_nom_extendable"]):
+            raise IslandRefusal(f"extendable genset {g!r} needs unit_mw in the island "
+                                "sidecar, so the N+k test knows the unit it takes out")
         else:
-            ext = bool(n.links.at[g, "p_nom_extendable"])
-            rating = float(n.links.at[g, "p_nom"]) * float(n.links.at[g, "efficiency"])
-        if ext:
-            unit_mw = units[g]["values"].get("unit_mw")
-            if unit_mw is None:
-                raise IslandRefusal(f"extendable genset {g!r} needs unit_mw in the island "
-                                    "sidecar, so the N+k test knows the unit it takes out")
-            rating = float(unit_mw)
-        ratings.append(rating)
-    u_max = max(ratings) if ratings else 0.0
+            eff = float(n.links.at[g, "efficiency"]) if comp == "Link" else 1.0
+            unit_rating[g] = float(frame.at[g, "p_nom"]) * eff
     joins_s = max((units[g]["values"]["start_s"] + units[g]["values"]["sync_s"]
                    for g in gensets), default=0.0)
 
+    def active(names, comp_of, period):
+        label = "ALL" if period is None else period
+        out = []
+        for x in names:
+            comp = comp_of(x)
+            mask = active_mask(n, comp, label)
+            if bool(mask.get(x, True)):
+                out.append(x)
+        return out
+
+    def genset_comp(g):
+        return "Generator" if g in n.generators.index else "Link"
+
     for period, sns_p in _periods(sns):
+        g_p = active(gensets, genset_comp, period)
+        rt_p = active(rt, lambda _: "StorageUnit", period)
+        gfm_p = active(gfm, lambda _: "StorageUnit", period)
+        ups_p = active(upss, lambda _: "StorageUnit", period)
+        u_max = max((unit_rating[g] for g in g_p), default=0.0)
         tag = "" if period is None else f"-{period}"
         dt = _step_hours(sns_p)
         span_h = dt * len(sns_p)
-        check_horizon(req, span_h)
+        if vals["sustained_h"] > span_h + 1e-9:
+            raise IslandRefusal(f"sustained_h ({vals['sustained_h']:g} h) is longer than the "
+                                f"period ({span_h:g} h) the ride-through is checked over")
         steps_f = vals["sustained_h"] / dt
         steps = int(round(steps_f))
         if not math.isclose(steps_f, steps, abs_tol=1e-9):
@@ -287,8 +394,8 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> di
         d = m.add_variables(lower=0.0, coords=[coord], name=f"Island-deficit{tag}")
         lhs = d.to_linexpr()
         rhs = l_c + k * u_max
-        for g in gensets:
-            comp = "Generator" if g in n.generators.index else "Link"
+        for g in g_p:
+            comp = genset_comp(g)
             avail = _dense(n, comp, "p_max_pu", sns_p, [g])[g]
             if comp == "Link":
                 avail = avail * float(n.links.at[g, "efficiency"])
@@ -300,7 +407,7 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> di
 
         # (a) power: d(τ) ≤ Σ_{s∈RT} p_nom_s.
         p_lhs, p_fixed = d.to_linexpr(), 0.0
-        for s in rt:
+        for s in rt_p:
             var, fixed = _nominal(n, "StorageUnit", s)
             p_fixed += fixed
             if var is not None:
@@ -309,43 +416,44 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> di
 
         # B(t): the seamless GFM bridge.
         bridge = pd.Series(0.0, index=sns_p)
-        if seamless and gfm:
+        if seamless and gfm_p:
             if delta_p_plus is None:
                 facts["seamless_bridge"] = "zero until I2b supplies the islanding step"
             else:
                 bridge = _as_series(delta_p_plus, n, sns_p).clip(lower=0.0) * joins_s / 3600.0
-                facts["seamless_bridge"] = "held"
+                if bridge.gt(0).any():
+                    facts["seamless_bridge"] = "held"
+                elif facts["seamless_bridge"] is None:
+                    facts["seamless_bridge"] = "zero step"
 
         # (a) energy: Σ η·e(t−1) − Σ_window d·Δ ≥ B(t) for storage in RT ∩ GFM.
-        cyclic_all = all(bool(n.storage_units.at[s, "cyclic_state_of_charge"]) for s in rt) \
-            if rt else True
+        cyclic_all = all(bool(n.storage_units.at[s, "cyclic_state_of_charge"]) for s in rt_p) \
+            if rt_p else True
         if not cyclic_all and steps > 1:
             facts["truncated"] = True
         e_lhs = -dt * _window_sum(d, steps, cyclic_all)
         e_rhs = pd.Series(0.0, index=sns_p)
-        for s in rt:
+        for s in rt_p:
             eta = float(n.storage_units.at[s, "efficiency_dispatch"])
-            cyc = bool(n.storage_units.at[s, "cyclic_state_of_charge"])
-            soc, init = _soc_before(n, sns_p, s, cyc)
+            soc, init = _soc_before(n, sns, sns_p, s)
             e_lhs = e_lhs + eta * soc
-            if not cyc:
-                e_rhs.iloc[0] -= eta * init
-        in_row = [s for s in gfm if s in rt]
+            e_rhs.iloc[0] -= eta * init
+        in_row = [s for s in gfm_p if s in rt_p]
         if in_row:
             e_rhs = e_rhs + bridge
         m.add_constraints(e_lhs >= xr_series(e_rhs, coord), name=f"Island-energy{tag}")
 
         # B(t) for GFM storage outside RT: its own row.
-        own = [s for s in gfm if s not in rt]
+        own = [s for s in gfm_p if s not in rt_p]
         if own and bridge.gt(0).any():
-            _reserve_row(n, m, sns_p, coord, own, bridge, f"Island-gfm-bridge{tag}")
+            _reserve_row(n, m, sns, sns_p, coord, own, bridge, f"Island-gfm-bridge{tag}")
 
         # (b) every UPS holds its IT load for bridge_s.
-        for u in upss:
+        for u in ups_p:
             it = [x for x in units[u]["it_load"] if x in n.loads.index]
             p_it = (_dense(n, "Load", "p_set", sns_p, it).sum(axis=1)
                     if it else pd.Series(0.0, index=sns_p))
-            _reserve_row(n, m, sns_p, coord, [u], p_it * vals["bridge_s"] / 3600.0,
+            _reserve_row(n, m, sns, sns_p, coord, [u], p_it * vals["bridge_s"] / 3600.0,
                          f"Island-ups-bridge-{u}{tag}")
 
         facts["periods"][str(period)] = {
@@ -377,17 +485,15 @@ def xr_series(s: pd.Series, coord):
     return xr.DataArray(s.to_numpy(dtype=float), coords=[coord], dims=["snapshot"])
 
 
-def _reserve_row(n, m, sns_p, coord, names, need: pd.Series, cname):
+def _reserve_row(n, m, sns, sns_p, coord, names, need: pd.Series, cname):
     """Σ η·e(t−1) ≥ need(t) for the named StorageUnits."""
     lhs, rhs = None, need.copy()
     for s in names:
         eta = float(n.storage_units.at[s, "efficiency_dispatch"])
-        cyc = bool(n.storage_units.at[s, "cyclic_state_of_charge"])
-        soc, init = _soc_before(n, sns_p, s, cyc)
+        soc, init = _soc_before(n, sns, sns_p, s)
         term = eta * soc
         lhs = term if lhs is None else lhs + term
-        if not cyc:
-            rhs.iloc[0] -= eta * init
+        rhs.iloc[0] -= eta * init
     m.add_constraints(lhs >= xr_series(rhs, coord), name=cname)
 
 

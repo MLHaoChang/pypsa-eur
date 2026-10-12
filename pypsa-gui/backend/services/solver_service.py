@@ -98,7 +98,6 @@ from services.solver.adequacy import (  # noqa: F401
 from services.solver.island import (  # noqa: F401  (re-exported)
     IslandRefusal,
     _wrap_with_island,
-    strategy_refusal as island_strategy_refusal,
 )
 # Edge Investment Case commercial layer (spec §5.1): the PoC price writer and
 # the LP-terms wrapper, re-exported with the rest of the solver seams.
@@ -543,17 +542,7 @@ def run_simulation(
             network, extra_fn, config, log_queue=log_queue)
         # Island ride-through, bridge and fuel rows (campus island I2a).
         # Opt-in; refused, with the reason, on a path that is not the plain
-        # solve: myopic only runs multi-period and rolling falls back to the
-        # full LP there, so those two are judged as they would actually run.
-        if getattr(config, "island_constraints", False):
-            _strategy = getattr(config, "solve_strategy", "full")
-            _multi = bool(config.multi_investment_periods)
-            if (_strategy == "myopic" and not _multi) or (_strategy == "rolling" and _multi):
-                _strategy = "full"
-            _why = island_strategy_refusal(
-                solve_strategy=_strategy, sclopf=bool(getattr(config, "sclopf", False)))
-            if _why:
-                raise IslandRefusal(_why)
+        # LOPF as it will actually run (see `_wrap_with_island`).
         extra_fn = _wrap_with_island(network, extra_fn, config, log_queue=log_queue)
         # Edge Investment Case LP-level commercial terms (peaks, ratchets,
         # tiers, group caps; spec §5.1). After the reserve margin, before the
