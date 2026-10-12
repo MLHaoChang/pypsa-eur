@@ -158,7 +158,7 @@ def _evidence_for(project: AuthorizedProject):
                        "this session. Run a study first (run_eh_study or an "
                        "adequacy study), or create an evidence-only report.",
         })
-    return evidence, _render_figures(eh_report)
+    return evidence, _render_figures(eh_report, project.directory)
 
 
 def _in_flight(exc: Exception) -> HTTPException:
