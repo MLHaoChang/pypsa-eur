@@ -91,7 +91,7 @@ TOOL_NAME_IS_NOT_A_PROJECT: dict[str, str] = {
     **{t: _COMPONENT for t in (
         "attach_tariff", "cascade_delete_bus", "create_carrier",
         "create_component", "delete_component", "delete_timeseries",
-        "delete_vintage_bounds", "explain_investment", "export_asset_results",
+        "delete_vintage_bounds", "explain_investment",
         "generate_exemplary_timeseries", "get_asset_results", "get_component",
         "get_timeseries", "set_vintage_bounds", "ui_open_asset_detail",
         "ui_select_component", "update_component", "upload_timeseries",
