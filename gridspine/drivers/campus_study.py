@@ -66,6 +66,20 @@ files. It writes:
 ``campus_invest_dispatch.csv``
     The reactive dispatch per selected hour: inverters, STATCOMs, steps.
 
+``invest_campus(..., method="milp")`` chooses the assets jointly instead
+(plan C11, ``gridspine.static.campus_milp``), warm-started from the
+least-cost pick, and writes the same files, plus:
+
+``campus_milp_history.csv``
+    One row per iteration of the loop: cost, AC feasibility, worst
+    violation and linearisation error, Delta, beta, rho, accepted, slack.
+``campus_milp_comparison.csv``
+    Per need, C8's choice and cost against the MILP's.
+
+``ASSET_LIBRARY_PATH`` (the shipped library) and ``load_asset_library`` are
+re-exported, so that a backend keeping a project's own copy needs nothing
+but this module.
+
 ``draft_from_project`` is the "generate" step. ``check_campus``,
 ``grid_code_profiles`` and ``SizingCriteria`` complete the seam the backend
 uses, since pypsa-gui reaches gridspine through ``drivers`` and ``schema``
@@ -103,7 +117,9 @@ from gridspine.static.campus_flow import SizingCriteria, size_transformers, solv
 from gridspine.static.campus_reactive import reactive_need, requirement_from, size_compensation
 from gridspine.static.campus_compliance import campus_compliance
 from gridspine.static.campus_invest import select_assets
+from gridspine.static.campus_milp import select_assets_milp
 from gridspine.static.campus_sc import campus_fault_levels
+from gridspine.templates.campus_assets import DEFAULT_PATH as ASSET_LIBRARY_PATH  # noqa: F401  (the backend's seam)
 from gridspine.templates.campus_assets import load_asset_library
 from gridspine.templates.grid_codes import (  # noqa: F401  (re-exported: the backend's seam)
     PROFILE_ID,
@@ -137,6 +153,9 @@ COMPLIANCE_INVESTED_CSV = "campus_compliance_invested.csv"
 INVEST_HISTORY_CSV = "campus_invest_history.csv"
 INVEST_DISPATCH_CSV = "campus_invest_dispatch.csv"
 INVEST_SCOPE_JSON = "campus_invest_scope.json"
+MILP_HISTORY_CSV = "campus_milp_history.csv"
+MILP_COMPARISON_CSV = "campus_milp_comparison.csv"
+METHODS = ("least_cost", "milp")
 DEFAULT_PROFILE = "eu_rfg_dcc_ce"
 
 
@@ -319,7 +338,8 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
 
 
 def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,
-                  pf: float | None = None, profile_dirs=(), pcc_switchgear: bool = True) -> dict:
+                  pf: float | None = None, profile_dirs=(), pcc_switchgear: bool = True,
+                  method: str = "least_cost") -> dict:
     """Least-cost electrical assets for a ranked run, AC-checked (module
     docstring). ``library`` is a path, or None for the shipped library;
     ``profile`` may be a project profile in ``profile_dirs``, as for
@@ -327,7 +347,14 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
     the grid operator (``select_assets``); the choice is written with the
     results.
     Writes the investment files and returns ``{"investment", "cost",
-    "compliance", "history", "dispatch", "spec", "unresolved", "scope"}``."""
+    "compliance", "history", "dispatch", "spec", "unresolved", "scope"}``.
+
+    ``method="milp"`` chooses jointly (plan C11, ``campus_milp``), starting
+    from the least-cost pick, and also writes ``campus_milp_history.csv``
+    and ``campus_milp_comparison.csv``; its result adds ``milp_history``,
+    ``comparison``, ``summary`` and ``fallback``."""
+    if method not in METHODS:
+        raise ContractError(f"unknown investment method {method!r}; allowed {list(METHODS)}")
     run_dir = Path(run_dir)
     hourly, pcc = campus_tables(run_dir)
     selection = selected_hours(run_dir)
@@ -335,8 +362,9 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
     lib = load_asset_library(library)
     p_ref, _ = _p_ref(build_campus(spec), pcc)
     grid_code = load_grid_code(profile, extra_dirs=profile_dirs)
-    out = select_assets(spec, hourly, selection, lib, requirement_from(grid_code, p_ref, pf=pf), grid_code, criteria,
-                        pcc_switchgear=pcc_switchgear)
+    choose = select_assets_milp if method == "milp" else select_assets
+    out = choose(spec, hourly, selection, lib, requirement_from(grid_code, p_ref, pf=pf), grid_code, criteria,
+                 pcc_switchgear=pcc_switchgear)
     build_campus(out["spec"])                                # the invested file must build before it is written
     _write_text_atomic(run_dir / INVESTMENT_CSV, out["investment"].to_csv(index=False))
     _write_text_atomic(run_dir / COST_CSV, out["cost"].to_csv(index=False))
@@ -345,4 +373,7 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
     _write_text_atomic(run_dir / INVEST_HISTORY_CSV, out["history"].to_csv(index=False))
     _write_text_atomic(run_dir / INVEST_DISPATCH_CSV, out["dispatch"].to_csv(index=False))
     _write_text_atomic(run_dir / INVEST_SCOPE_JSON, json.dumps(out["scope"], indent=2))
+    if method == "milp":
+        _write_text_atomic(run_dir / MILP_HISTORY_CSV, out["milp_history"].to_csv(index=False))
+        _write_text_atomic(run_dir / MILP_COMPARISON_CSV, out["comparison"].to_csv(index=False))
     return out

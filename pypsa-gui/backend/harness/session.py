@@ -113,6 +113,10 @@ class ChatSession:
     # creation and never reassigned: letting a later caller claim an existing
     # session would be the hole this closes.
     owner_user_id: str | None = None
+    # Issue 09 / B-I3 — which app replica minted this in-memory session.
+    # Stream/confirm/abort/progress refuse when the current process is not
+    # that replica (failover without distributed coordination).
+    owner_replica_id: str | None = None
     created_at: float = field(default_factory=time.monotonic)
     # Monotonic stamp of the last time this session was touched (created or
     # resolved via get_or_create_session). Drives idle eviction.
@@ -134,6 +138,17 @@ class ChatSession:
     # Set by the start_workflow / advance_workflow / end_workflow tools; the
     # per-turn addendum (`_workflow_addendum`) reads it.
     workflow: dict[str, Any] | None = None
+    # Catalogue view; kept separate from project identity and permissions.
+    toolset: str = "all"
+    task_id: str | None = None
+    job_wait_progress: dict[str, Any] | None = None
+    # Private turn-local checked-answer state; cleared on every exit.
+    assurance_turn: Any | None = None
+    shadow_turn: Any | None = None
+    # Server-only bounded checked scope; never populated from model/client history.
+    assurance_context: dict[str, Any] | None = None
+    # Private checkpoint binding; never supplied by client histories or imports.
+    assurance_checkpoint_project: str | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
     pending_confirmations: dict[str, PendingConfirmation] = field(default_factory=dict)
     confirmation_decisions: dict[str, str] = field(default_factory=dict)
@@ -147,6 +162,13 @@ class ChatSession:
     # cleared in run_turn's try/finally so a concurrent second run_turn on the
     # same session_id (two tabs) is rejected with turn_already_in_flight.
     _turn_in_flight: bool = field(default=False)
+    # CH-3 — the undo stacks this turn has already pushed its one snapshot
+    # onto (each project's `_UndoState` object; see `_snapshot_for_turn_undo`).
+    # A list of objects compared by identity, not a set of names: the state
+    # object is what `reset_network`/`set_network` carry across an in-place
+    # swap (undo, clustering), so it identifies "this project's stack" where a
+    # name would not. Emptied at the start and end of every turn.
+    _undo_snapshotted: list = field(default_factory=list)
     # W-3 (ADR-0001) — whether the provider has EVER reported usage for this
     # session. `stream_options.include_usage` is a request, not a guarantee:
     # an OpenAI-compatible endpoint that omits the usage chunk leaves
@@ -156,6 +178,18 @@ class ChatSession:
     # real value" shape ADR-0001 forbids. This wire is new on this branch,
     # so the state is new too.
     usage_reported: bool = False
+    # Issue 11 — capped ring of detached solver progress frames collected after
+    # a foreground solve handoff (same keys as tool_progress payloads).
+    _detached_progress: collections.deque = field(
+        default_factory=lambda: collections.deque(maxlen=200),
+    )
+    # Issue 11 / D-I2 — durable cursor log for gap/duplicate recovery. Entries
+    # keep a monotonic ``cursor``; drains clear the unread ring only.
+    _progress_seq: int = 0
+    _progress_log: collections.deque = field(
+        default_factory=lambda: collections.deque(maxlen=500),
+    )
+    _detached_monitor: dict[str, Any] | None = None
     # W-3 — turns started on this session, the fallback bound for an endpoint
     # that never reports usage. See the ceiling in `_run_turn_body`.
     turns_started: int = 0
@@ -170,6 +204,9 @@ class ChatSession:
     result_refs: collections.deque = field(
         default_factory=lambda: collections.deque(maxlen=RESULT_REFS_MAXLEN)
     )
+    # Issue 06 — discussed project/run/baseline/section identifiers for
+    # follow-ups. Identifiers only; numerical truth always comes from tools.
+    discussed_refs: dict[str, Any] | None = None
     # Multi-turn message history for the Anthropic Messages API. Each entry
     # is a dict matching the SDK's message shape ({role, content}). Run_turn
     # appends user + assistant + tool_result messages per turn so subsequent
@@ -204,6 +241,11 @@ class ChatSession:
         array is itself a 400, so admitting one would swap the bug this
         branch fixes for a neighbouring one.
         """
+        if self.assurance_turn is not None:
+            content = msg.get("content")
+            if (msg.get("role") == "user" and isinstance(content, list) and content
+                    and all(b.get("type") == "tool_result" for b in content)):
+                msg = {**msg, "content": [{**b, "content": "Previous diagnostic result; retrieve current evidence before answering."} for b in content]}
         sanitised = _sanitise_history_message(msg)
         if sanitised is None:
             return
@@ -376,6 +418,77 @@ class ChatSession:
         with self._lock:
             self.result_refs.append(ref)
 
+    def mark_detached_monitor(
+        self, tool_use_id: str, tool_name: str, *, active: bool,
+    ) -> None:
+        with self._lock:
+            if active:
+                self._detached_monitor = {
+                    'tool_use_id': tool_use_id,
+                    'tool_name': tool_name,
+                    'active': True,
+                }
+            elif (
+                self._detached_monitor
+                and self._detached_monitor.get('tool_use_id') == tool_use_id
+            ):
+                self._detached_monitor = {
+                    **self._detached_monitor,
+                    'active': False,
+                }
+
+    def detached_monitor_active(self, tool_use_id: str | None = None) -> bool:
+        with self._lock:
+            mon = self._detached_monitor
+            if not mon or not mon.get('active'):
+                return False
+            if tool_use_id is None:
+                return True
+            return mon.get('tool_use_id') == tool_use_id
+
+    def append_detached_progress(self, payload: dict[str, Any]) -> None:
+        with self._lock:
+            self._progress_seq += 1
+            item = {**payload, 'cursor': self._progress_seq}
+            self._detached_progress.append(item)
+            self._progress_log.append(item)
+
+    def progress_cursor(self) -> int:
+        with self._lock:
+            return self._progress_seq
+
+    def drain_detached_progress(
+        self, *, after_cursor: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return unread progress, or replay the log after ``after_cursor``.
+
+        When ``after_cursor`` is set (D-I2 recovery), return every logged
+        frame with ``cursor > after_cursor`` and trim the unread ring through
+        that cursor so a follow-up ordinary drain does not re-emit them.
+        When omitted, drain the unread ring (existing observer path).
+        """
+        with self._lock:
+            if after_cursor is not None:
+                after = int(after_cursor)
+                items = [
+                    item for item in self._progress_log
+                    if int(item.get('cursor') or 0) > after
+                ]
+                if items:
+                    high = max(int(i.get('cursor') or 0) for i in items)
+                else:
+                    high = after
+                kept = [
+                    item for item in self._detached_progress
+                    if int(item.get('cursor') or 0) > high
+                ]
+                self._detached_progress.clear()
+                self._detached_progress.extend(kept)
+                return items
+            items = list(self._detached_progress)
+            self._detached_progress.clear()
+            return items
+
 
 _SESSIONS: dict[str, ChatSession] = {}
 
@@ -386,6 +499,40 @@ _SESSIONS_LOCK = threading.Lock()
 def get_session(session_id: str) -> ChatSession | None:
     with _SESSIONS_LOCK:
         return _SESSIONS.get(session_id)
+
+
+# CH-6 — the transcript key naming the user who ran a turn (the session owner).
+TURN_AUTHOR_KEY = "owner_user_id"
+
+
+def turn_is_callers(rec: dict[str, Any], user_id: str | None) -> bool:
+    """
+    Did `user_id` run this transcript turn?
+
+    `chat.jsonl` is per PROJECT and shared by everyone who works on it, but a
+    chat session is per USER. GET /history used to hand back the session of the
+    LAST turn in the file, whoever ran it, and mint it owned by whoever asked
+    first — so a co-member could end up owning another user's thread, which the
+    `/stream` ownership check then refused to its real author. Picking the
+    caller's own last turn removes the conflict at the source.
+
+    A record without an author predates this key, and keeps the behaviour it
+    always had: it counts as the caller's. Treating it as nobody's in server
+    mode was the stricter option and the worse one — every server user would
+    lose session continuity (and the model its prior context) on the first
+    reload after upgrading — while what it would prevent is bounded already:
+    `/history` will not hand back or rebuild a live session with a DIFFERENT
+    known owner, and `/stream` refuses one with `session_not_yours`, which the
+    panel recovers from by starting a new chat. Legacy records age out with
+    each user's next turn. With no caller identity at all there is nothing to
+    distinguish, which is also the pre-existing behaviour.
+    """
+    if user_id is None:
+        return True
+    author = rec.get(TURN_AUTHOR_KEY)
+    if author is None:
+        return True
+    return str(author) == str(user_id)
 
 
 def session_owner_allows(sess: "ChatSession", user_id: str | None) -> bool:
@@ -412,6 +559,21 @@ def session_owner_allows(sess: "ChatSession", user_id: str | None) -> bool:
 
         return local_mode.is_local_mode()
     return sess.owner_user_id == str(user_id)
+
+
+def session_replica_allows(sess: "ChatSession") -> bool:
+    """Is this process the authoritative replica that owns ``sess``?
+
+    Sessions without a pin (legacy / pre-B-I3) are allowed so existing tests
+    and in-flight clients are not locked out. Once stamped at create, only
+    the matching ``security.replica_id()`` may act.
+    """
+    pinned = getattr(sess, 'owner_replica_id', None)
+    if not pinned:
+        return True
+    import security
+
+    return pinned == security.replica_id()
 
 
 def _evict_idle_sessions_locked(now: float) -> None:
@@ -472,6 +634,9 @@ def get_or_create_session_reporting(
         # second caller overwrite the owner would let anyone adopt a live
         # session just by naming its id.
         sess.owner_user_id = owner_user_id
+        import security
+
+        sess.owner_replica_id = security.replica_id()
         if session_id:
             sess.session_id = session_id
         sess.last_activity = now

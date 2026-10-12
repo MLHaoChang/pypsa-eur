@@ -281,3 +281,35 @@ def test_the_pcc_switchgear_scope_is_a_study_setting_and_is_written(tmp_path, pr
     assert json.loads((run / INVEST_SCOPE_JSON).read_text()) == {"pcc_switchgear": "grid_operator"}
     invest_campus(run)
     assert json.loads((run / INVEST_SCOPE_JSON).read_text()) == {"pcc_switchgear": "campus"}
+
+
+def test_investing_by_milp_writes_c8s_files_and_the_milp_history(tmp_path, project):
+    """The hub end to end with ``method="milp"``: the investment files are
+    the same set as C8's, plus the iteration history and the comparison
+    with C8. The default stays the least-cost pick."""
+    import inspect
+    import pandas as pd
+    from gridspine.drivers.campus_study import MILP_COMPARISON_CSV, MILP_HISTORY_CSV
+    from gridspine.static.campus_invest import INVEST_CHECKS
+    assert inspect.signature(invest_campus).parameters["method"].default == "least_cost"
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(project).spec, project)
+    rank_campus(run, k=1)
+    out = invest_campus(run, method="milp")
+    for name in (INVESTMENT_CSV, COST_CSV, INVESTED_YAML, COMPLIANCE_INVESTED_CSV, INVEST_HISTORY_CSV,
+                 INVEST_DISPATCH_CSV, MILP_HISTORY_CSV, MILP_COMPARISON_CSV):
+        assert (run / name).is_file(), name
+    hist = pd.read_csv(run / MILP_HISTORY_CSV)
+    assert list(hist.columns[:4]) == ["iteration", "cost", "feasible", "worst_violation"]
+    assert hist["iteration"].iloc[0] == 0 and len(hist) >= 2
+    comp = pd.read_csv(run / COMPLIANCE_INVESTED_CSV)
+    assert list(comp["check"]) == list(INVEST_CHECKS)
+    assert set(comp["status_with_measures"]) <= {"pass", "not_rated"}
+    s = out["summary"]
+    assert s["milp_cost"] <= s["c8_cost"] + 1e-6
+    cost = pd.read_csv(run / COST_CSV)
+    assert list(cost["period"]) == [2030, 2040]
+    cmp_ = pd.read_csv(run / MILP_COMPARISON_CSV)
+    assert set(cmp_.columns) >= {"need", "c8_choice", "milp_choice"}
+    with pytest.raises(ContractError, match="method"):
+        invest_campus(run, method="greedy")

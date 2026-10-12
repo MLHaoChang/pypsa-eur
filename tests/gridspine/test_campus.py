@@ -179,7 +179,7 @@ def test_the_units_table_carries_kind_bus_ratings_and_every_value_keeps_its_tag(
     assert p.at[("PCC", "sk_max_mva"), "source"] == "measured"
     assert p.at[("TR1", "vk_percent"), "source"] == "datasheet"
     assert p.at[("BESS1", "k_sc"), "source"] == "assumed"
-    assert set(UNIT_KINDS) == {"load", "bess", "pv", "wind", "genset"}
+    assert set(UNIT_KINDS) == {"load", "bess", "pv", "wind", "genset", "ups"}   # ups: island plan I1
 
 
 def test_the_registry_names_the_grid_and_every_generating_unit_by_kind():

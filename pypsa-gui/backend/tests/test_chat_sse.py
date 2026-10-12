@@ -333,6 +333,15 @@ def test_replay_after_consume_returns_404(client, seeded_identity):
     pc = sess.issue_confirmation(
         tool_name="delete_project", args={"name": "P"},
         safety_tier="destructive",
+        # EXPLICIT, not the module default. `issue_confirmation` reads the
+        # module-level `CONFIRMATION_TTL_SECONDS` at call time, and several
+        # test modules monkeypatch it down to 0.1-1.0s; this test asserts the
+        # FIRST confirm succeeds, so inheriting a tiny value makes it a race
+        # against however long one in-process request takes. Observed failing
+        # exactly that way in a full-suite run under load (409
+        # `confirmation_expired` on the first call), and passing alone and
+        # with its own module.
+        ttl_seconds=120.0,
     )
     # First call: should succeed (200)
     r1 = client.post(

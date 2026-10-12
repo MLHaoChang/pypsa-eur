@@ -28,6 +28,8 @@ pins that.
 """
 
 from __future__ import annotations
+import math
+
 import numpy as np
 import pandas as pd
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -229,6 +231,33 @@ def download_snapshot_weightings_csv():
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="snapshot_weightings.csv"'},
     )
+
+def _weight_value(raw, *, label: str) -> float:
+    """Parse one weighting cell, or raise 400.
+
+    A weighting is a FINITE, NON-NEGATIVE multiplier, and every entry point
+    used to take a bare `float(...)`, so `-5`, `inf` and `nan` all passed. A
+    negative weight inverts the sign of that snapshot's or period's
+    contribution to the objective; a non-finite one poisons every sum built
+    on it and reaches the user as `NaN` costs with nothing to point at.
+    Neither is a weaker weight — neither means anything.
+
+    Zero IS legal and deliberately so: a zero-weight snapshot is how a user
+    excludes an hour without deleting it.
+    """
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(400, f"{label} must be a number, got {raw!r}")
+    if not math.isfinite(val):
+        raise HTTPException(
+            400, f"{label} must be a finite number, got {raw!r}")
+    if val < 0.0:
+        raise HTTPException(
+            400, f"{label} must be zero or greater, got {val!r}")
+    return val
+
+
 @router.post("/snapshots/weightings.csv")
 async def upload_snapshot_weightings_csv(file: UploadFile = File(...)):
     """
@@ -318,13 +347,13 @@ async def upload_snapshot_weightings_csv(file: UploadFile = File(...)):
             if v == "":
                 continue
             try:
-                pending.append((idx, c, float(v)))
-            except (TypeError, ValueError):
+                pending.append((idx, c, _weight_value(v, label=f"{c} for {key}")))
+            except HTTPException as exc:
                 raise HTTPException(
                     400,
-                    f"Bad {c} value for {key}: {v!r} — no rows applied "
-                    "(transaction rolled back). Fix the CSV and re-upload."
-                )
+                    f"{exc.detail} — no rows applied (transaction rolled "
+                    "back). Fix the CSV and re-upload.",
+                ) from exc
     applied = 0
     with PyPSAService.get_lock():
         for idx, c, val in pending:
@@ -378,10 +407,7 @@ def update_snapshot_weightings(body: dict):
         all_val = body.get("all")
         all_float: float | None = None
         if all_val is not None:
-            try:
-                all_float = float(all_val)
-            except (TypeError, ValueError):
-                raise HTTPException(400, f"`all` must be a number, got {all_val!r}")
+            all_float = _weight_value(all_val, label="`all`")
         updates = body.get("updates") or {}
         if not isinstance(updates, dict):
             raise HTTPException(400, "`updates` must be a dict keyed by snapshot.")
@@ -437,10 +463,8 @@ def update_snapshot_weightings(body: dict):
             for col, raw in vals.items():
                 if col not in df.columns:
                     continue
-                try:
-                    pending.append((idx, col, float(raw)))
-                except (TypeError, ValueError):
-                    raise HTTPException(400, f"Bad weight value for {key}/{col}: {raw!r}")
+                pending.append(
+                    (idx, col, _weight_value(raw, label=f"weight for {key}/{col}")))
         # Pass 2 — everything validated; apply atomically (the `all` broadcast
         # first, then per-row overrides on top).
         if all_float is not None:
@@ -848,6 +872,35 @@ def set_investment_periods(body: InvestmentPeriods):
 
     new_periods = sorted({int(p) for p in body.periods})
 
+    # Pair every weight with the period the CALLER submitted it beside, and do
+    # it before anything is mutated. `new_periods` is sorted and de-duplicated,
+    # so the previous `ipw["objective"] = body.objective_weightings` assigned
+    # POSITIONALLY against a reordered index: submit
+    # `periods=[2040, 2030], objective_weightings=[0.5, 1.0]` and the weights
+    # landed on the wrong periods, silently, with a correct-looking 200. A
+    # duplicate period shifted every later weight by one for the same reason.
+    #
+    # Validating here rather than beside the write also means a bad list does
+    # not leave the snapshots rebuilt: the refusal is a refusal, not a partial
+    # apply the user has to undo.
+    pending_weights: list[tuple[int, str, float]] = []
+    for col, values in (("objective", body.objective_weightings),
+                        ("years", body.years_weightings)):
+        if not values:
+            continue
+        if len(values) != len(body.periods):
+            raise HTTPException(
+                400,
+                f"`{col}_weightings` has {len(values)} entry/entries for "
+                f"{len(body.periods)} period(s) — send one weight per period, "
+                f"in the same order as `periods`.",
+            )
+        for period, raw in zip(body.periods, values):
+            pending_weights.append((
+                int(period), col,
+                _weight_value(raw, label=f"`{col}_weightings` for period {period}"),
+            ))
+
     with PyPSAService.get_lock():
         is_multi = isinstance(n.snapshots, pd.MultiIndex)
 
@@ -902,10 +955,10 @@ def set_investment_periods(body: InvestmentPeriods):
         # Set / re-set the periods list. PyPSA validates it matches level-0.
         n.investment_periods = new_periods
 
-        if body.objective_weightings:
-            n.investment_period_weightings["objective"] = body.objective_weightings
-        if body.years_weightings:
-            n.investment_period_weightings["years"] = body.years_weightings
+        # By label, never by position — see `pending_weights` above.
+        ipw = n.investment_period_weightings
+        for period, col, val in pending_weights:
+            ipw.at[period, col] = val
 
         # Read inside the lock — the rest of this handler holds it, and a
         # concurrent request between lock-release and this read could change
@@ -963,20 +1016,19 @@ def update_investment_period_weightings(body: dict):
     with PyPSAService.get_lock():
         all_years = body.get("all_years")
         all_obj = body.get("all_objective")
-        if all_years is not None:
-            try:
-                df["years"] = float(all_years)
-            except (TypeError, ValueError):
-                raise HTTPException(400, f"`all_years` must be a number, got {all_years!r}")
-        if all_obj is not None:
-            try:
-                df["objective"] = float(all_obj)
-            except (TypeError, ValueError):
-                raise HTTPException(400, f"`all_objective` must be a number, got {all_obj!r}")
+        # Two-pass validate-then-apply, the same shape the snapshot-weightings
+        # PATCH and the CSV upload use: resolve and parse EVERY cell first,
+        # raise on the first bad one, and only then write. A single-pass loop
+        # leaves rows 0..N-1 mutated when row N is rejected, with no rollback
+        # and no clean way for the user to retry.
+        years_float = (None if all_years is None
+                       else _weight_value(all_years, label="`all_years`"))
+        obj_float = (None if all_obj is None
+                     else _weight_value(all_obj, label="`all_objective`"))
         updates = body.get("updates") or {}
         if not isinstance(updates, dict):
             raise HTTPException(400, "`updates` must be a dict keyed by period (year).")
-        applied = 0
+        pending: list[tuple[int, str, float]] = []
         for key, vals in updates.items():
             if not isinstance(vals, dict):
                 continue
@@ -988,13 +1040,15 @@ def update_investment_period_weightings(body: dict):
                 raise HTTPException(400, f"Unknown period {period}")
             for col in ("years", "objective"):
                 if col in vals:
-                    try:
-                        df.at[period, col] = float(vals[col])
-                        applied += 1
-                    except (TypeError, ValueError):
-                        raise HTTPException(
-                            400, f"Bad {col} value for period {period}: {vals[col]!r}",
-                        )
+                    pending.append((period, col, _weight_value(
+                        vals[col], label=f"{col} for period {period}")))
+        if years_float is not None:
+            df["years"] = years_float
+        if obj_float is not None:
+            df["objective"] = obj_float
+        for period, col, val in pending:
+            df.at[period, col] = val
+        applied = len(pending)
         change_log_service.log(
             "update", "Network", "investment_period_weightings",
             f"Updated period weightings: all_years={all_years}, "
@@ -1198,6 +1252,17 @@ async def upload_timeseries(
     ts_store = getattr(n, f"{component}_t", None)
     if ts_store is None:
         raise HTTPException(404, f"Component '{component}' not found")
+    # An attribute this component has no time-varying table for can never be
+    # applied — `_reapply_user_ts_to_network` would have nowhere to write it —
+    # so it is a typo, not a partial upload. PyPSA initialises every
+    # time-varying attribute as an (empty) frame, so membership is the whole
+    # test.
+    if attribute not in ts_store:
+        raise HTTPException(
+            400,
+            f"'{component}' has no time-varying attribute '{attribute}'. "
+            f"Valid attributes: {', '.join(sorted(ts_store.keys()))}.",
+        )
 
     is_multi = isinstance(n.snapshots, pd.MultiIndex)
     if period is not None:
@@ -1227,9 +1292,23 @@ async def upload_timeseries(
     # an entry that reaches `_user_ts` is re-injected on every solve.
     _reject_nonfinite_timeseries(df, component, attribute)
 
+    # Partition the columns before anything is stored. A column naming no row
+    # on the component's frame cannot be applied to anything, and storing it
+    # anyway is not harmless: `_user_ts` is persisted in every project save
+    # and re-injected on every solve, so the orphan accumulates forever and is
+    # inherited by any later asset that reuses the name — the same failure the
+    # cascade-delete cleanup exists to prevent, reached from the other end.
+    # Reported rather than refused: a partial upload (a file covering more
+    # assets than this network has) is a legitimate thing to do, and the
+    # caller is told exactly which headers went nowhere.
+    static_df = getattr(n, component, None)
+    known = set(map(str, static_df.index)) if static_df is not None else set()
+    matched = [c for c in df.columns if str(c) in known]
+    unmatched = [str(c) for c in df.columns if str(c) not in known]
+
     with PyPSAService.get_lock():
         with _user_ts_lock:
-            for col in df.columns:
+            for col in matched:
                 new_s = df[col]
                 if period is not None:
                     existing = _user_ts.get((component, attribute, col))
@@ -1259,16 +1338,25 @@ async def upload_timeseries(
         # MultiIndex broadcast, MultiIndex+MultiIndex direct).
         _reapply_user_ts_to_network(n)
 
-    cols_preview = ", ".join(list(df.columns)[:3]) + ("…" if len(df.columns) > 3 else "")
+    cols_preview = ", ".join(matched[:3]) + ("…" if len(matched) > 3 else "")
+    unmatched_note = (
+        f" — {len(unmatched)} column(s) matched no {component} and were NOT "
+        f"stored: {', '.join(unmatched[:10])}"
+        + ("…" if len(unmatched) > 10 else "")
+    ) if unmatched else ""
     change_log_service.log(
         "timeseries", component.capitalize(), file.filename or cols_preview,
         f"Uploaded {component}/{attribute} time series '{file.filename}': "
-        f"{len(df.columns)} column(s), {len(df)} rows"
-        + (f", period={period}" if period is not None else ""),
+        f"{len(matched)} column(s), {len(df)} rows"
+        + (f", period={period}" if period is not None else "")
+        + unmatched_note,
     )
     return {
         "rows": len(df),
-        "columns": len(df.columns),
+        # The count APPLIED, not the count submitted. A success count that
+        # includes the columns that went nowhere is worse than no count.
+        "columns": len(matched),
+        "unmatched_columns": unmatched,
         "period": period,
         "mode": "per_period" if period is not None else ("broadcast" if is_multi else "flat"),
     }

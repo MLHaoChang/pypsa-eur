@@ -189,6 +189,25 @@ class _Study:
     converged: bool
 
 
+@dataclasses.dataclass
+class SelectionState:
+    """What C8 ends with, for the MILP's warm start (``campus_milp``): the
+    needs at their final choice, the compensation names each reactive
+    choice was given, the last re-check, and the study's context."""
+    needs: list
+    added: dict
+    study: _Study
+    hours: list
+    rows_of: dict
+    installed: dict
+    periods: list
+    lib_by_id: dict
+    profile: dict
+    as_is: pd.DataFrame
+    skip_buses: frozenset
+    feasible: bool
+
+
 def _label(items):
     return " + ".join(f"{n} x {lid}" for _, lid, n in items)
 
@@ -208,13 +227,23 @@ def _installed(hourly):
 def _study(campus, hours, rows_of, installed, req, criteria, recheck) -> _Study:
     """Part one's calculation on ``campus``. ``recheck`` dispatches the real
     equipment only and solves every case with that dispatch in place."""
-    reactive, flows, bus, trafo, line, q = {}, {}, [], [], [], []
-    converged = True
+    reactive, flows = {}, {}
     for key in hours:
         rows = rows_of[key]
         r = reactive_need(campus, rows, req, residual=not recheck)
-        cases = solve_cases(campus, rows, setpoints=r.setpoints if recheck else None)
-        reactive[key], flows[key] = r, cases
+        reactive[key] = r
+        flows[key] = solve_cases(campus, rows, setpoints=r.setpoints if recheck else None)
+    return study_from(campus, reactive, flows, installed, req, criteria, recheck)
+
+
+def study_from(campus, reactive, flows, installed, req, criteria, recheck=True) -> _Study:
+    """The study tables from solved hours: ``reactive`` and ``flows`` are
+    ``{(period, hour): ReactiveResult}`` and ``{(period, hour): solve_cases(...)}``.
+    Shared with the MILP (``campus_milp``), which brings its own dispatch."""
+    bus, trafo, line, q = [], [], [], []
+    converged = True
+    for key in flows:
+        r, cases = reactive[key], flows[key]
         converged &= r.converged and all(f.converged for f in cases.values())
         period, hour = key
         for case, f in cases.items():
@@ -344,6 +373,27 @@ def _switchgear_candidates(library, kv, ik_ka, ip_ka, f_hz):
     return sorted(out, key=lambda c: c.annual)
 
 
+def open_candidates(need, library, lib_by_id, criteria, f_hz):
+    """Every candidate of ``need`` the library offers, before C8's adequacy
+    filters: the same generators with a requirement of zero. Transformers
+    keep the redundancy rule (a design rule, not a flow) and C8's "keep
+    (existing)"; the reactive need gets "none" and every combination; a
+    cable every section in 1..3 runs; a bus every rating at its voltage.
+    The MILP (``campus_milp``) chooses among these with the AC constraints
+    linearised, which is where adequacy is decided."""
+    t = need.target
+    if need.kind == "transformer":
+        keep = [c for c in need.candidates if c.existing]
+        return keep + _trafo_candidates(library, *t["kv"], 0.0, 0.0, t["n_old"], criteria)
+    if need.kind == "reactive":
+        return _reactive_candidates(library, t["kv"], 0.0, 0.0, lib_by_id)
+    if need.kind == "cable":
+        return _cable_candidates(library, t["kv"], t["length_km"], 0.0, criteria)
+    if need.kind == "switchgear":
+        return _switchgear_candidates(library, t["kv"], 0.0, 0.0, f_hz)
+    return []
+
+
 def _cable_need(name, study, library, criteria, spec):
     rows = study.line[study.line["cable"] == name]
     i_ka = float(rows["i_ka"].max())
@@ -382,7 +432,7 @@ def _needs(spec, study, library, criteria, periods, lib_by_id, skip_buses=frozen
             cands = [Candidate("keep (existing)", (), 0.0, existing=True), *cands]
         needs.append(Need(f"transformer {r.group}", "transformer",
                           {"members": members, "hv_bus": hv, "lv_bus": lv, "s_tot": s_tot, "s_n1": s_n1,
-                           "n_old": int(r.units)}, cands, first))
+                           "n_old": int(r.units), "kv": (kv[hv], kv[lv])}, cands, first))
     comp = study.compensation.set_index("direction")
     cap_need = float(comp.at["capacitive", "required_mvar"]) * (1 + criteria.margin)
     ind_need = float(comp.at["inductive", "required_mvar"]) * (1 + criteria.margin)
@@ -629,6 +679,17 @@ def _investment(needs, added, spec, study, library, lib_by_id, periods):
     return inv, pd.DataFrame(cost)
 
 
+def with_measures(as_is, compliance) -> pd.DataFrame:
+    """The as-is compliance with the re-checked one as its "with measures"
+    columns."""
+    after = compliance.set_index("check")
+    final = as_is.copy()
+    final["status_with_measures"] = final["check"].map(after["status_as_is"])
+    final["value_with_measures"] = final["check"].map(after["value"])
+    final["detail_with_measures"] = final["check"].map(after["detail"])
+    return final
+
+
 def _pcc_table(study):
     return pd.DataFrame([{"period": p, "hour": h, "case": case, "converged": f.converged, "p_mw": f.pcc_p_mw,
                           "q_mvar": f.pcc_q_mvar, "losses_mw": f.losses_mw}
@@ -734,14 +795,12 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
             history.append({"iteration": it, "need": key, "from": before, "to": after, "check": check,
                             "detail": detail})
     investment, cost = _investment(needs, added, spec, study, library, lib_by_id, periods)
-    after = compliance.set_index("check")
-    final = as_is.copy()
-    final["status_with_measures"] = final["check"].map(after["status_as_is"])
-    final["value_with_measures"] = final["check"].map(after["value"])
-    final["detail_with_measures"] = final["check"].map(after["detail"])
+    final = with_measures(as_is, compliance)
     unresolved = [{"need": n.key, "reason": n.unresolved} for n in needs if n.unresolved]
     return {"investment": investment.drop(columns=["lifetime_a"]), "cost": cost, "compliance": final,
             "dispatch": _dispatch_table(study), "spec": spec,
             "history": pd.DataFrame(history, columns=["iteration", "need", "from", "to", "check", "detail"]),
             "unresolved": unresolved, "pcc": _pcc_table(study), "short_circuit": study.short_circuit,
-            "scope": {"pcc_switchgear": "campus" if pcc_switchgear else "grid_operator"}}
+            "scope": {"pcc_switchgear": "campus" if pcc_switchgear else "grid_operator"},
+            "state": SelectionState(needs, added, study, hours, rows_of, installed, periods, lib_by_id, profile, as_is,
+                                    skip, not fails and not unresolved)}

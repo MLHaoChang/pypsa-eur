@@ -346,7 +346,12 @@ warn gate. There is no general "billed ≥ LP" invariant.
 Years from `financial_close` to `max(cod + lifetime)`; construction years carry capex drawdowns
 and interest during construction; operating years replicate the valued representative year with
 escalation, degradation and contract indexation; replacement capex and terminal value at the
-scheduled years.
+scheduled years. Replacements are the stated `replacement_capex` entries (`replacement_rule="fixed"`) or
+each investment part re-bought at the end of its lifetime at its current upfront cost
+(`replacement_rule="part_lifetimes"`, IC S0b D9). The terminal value (`TerminalValueRule.method`, at the
+last operating year, inside EBITDA) is one of `none`, `fixed` (an amount: SAM's salvage),
+`multiple_of_ebitda`, `book_value` (the remaining tax basis) or `remaining_life_annuity` (IC S0b D10: each
+part's purchase alive at the horizon valued on the annuity the LP charged for it, GS's salvage).
 
 ### 6.2 Operating cashflows
 From the billing pass and contract settlement per participant, per value stream, per year.

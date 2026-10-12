@@ -273,10 +273,10 @@ function storedCompareRailWidth(): number {
 }
 
 // Default OPEN. The spec's headline is an assistant "present when the tool
-// launches", and a 40px muted icon is not presence — it is the opt-in panel
-// the dock exists to replace, in a different shape. Only an explicit
-// 'closed' collapses it, so a user who asked for the width back keeps it;
-// re-opening on every launch is how a feature gets switched off for good.
+// launches"; when closed the floating companion overlay carries that presence
+// while the dock column takes no width. Only an explicit 'closed' collapses
+// it, so a user who asked for the width back keeps it; re-opening on every
+// launch is how a feature gets switched off for good.
 const ASSISTANT_DOCK_WIDTH_KEY = 'network-diagram:assistant-dock-width'
 export const DOCK_MIN_W = 320
 export const DOCK_DEFAULT_W = 420
@@ -373,6 +373,19 @@ export interface AssetDetailRequest {
   chart?: boolean
 }
 
+// Issue 06 — discussed historical run selected in Results chrome. Sticky
+// until cleared or the project switches; does not restore run inputs.
+export interface RunResultRequest {
+  runId: string
+  status?: string
+  resultsTab?: string
+  section?: string
+  baselineRunId?: string
+  mode?: string
+  fingerprint?: string
+  evidenceAvailable?: boolean
+}
+
 interface UIStore {
   sidebarExpanded: boolean
   sidebarMode: SidebarMode
@@ -413,6 +426,7 @@ interface UIStore {
   // regression test and the 2026-08-05 presence spec.
   assistantDockOpen: boolean
   assistantDockWidth: number
+  assistantEntry: 'compose' | 'speak' | 'profiles' | null
   // True while a project switch/load is mid-flight (between the moment the
   // backend starts swapping the in-memory network and the moment
   // currentProject is updated to the new project). Autosave checks this and
@@ -462,6 +476,9 @@ interface UIStore {
   // Deep-link into the Asset Detail tab (Task 13). Consumed then cleared by
   // AssetDetail.tsx's effect. Set only via `requestAssetDetail`.
   assetDetailRequest: AssetDetailRequest | null
+  // Issue 06 — discussed run shown in Results chrome. Sticky (not consumed);
+  // cleared by clearDiscussedRun or project switch.
+  discussedRun: RunResultRequest | null
   // Chat / agent: seed CompareView A/B + tab (consumed then cleared).
   compareNavRequest: { a?: string; b?: string; tab?: string } | null
   // Chat / agent: open Import/Export modal ('import' | 'export').
@@ -554,6 +571,7 @@ interface UIStore {
   setSiteSizing: (m: SizingMode) => void
   setSlidePanel: (p: SlidePanel | null) => void
   setAssistantDockOpen: (open: boolean) => void
+  setAssistantEntry: (entry: 'compose' | 'speak' | 'profiles' | null) => void
   toggleAssistantDock: () => void
   setAssistantDockWidth: (px: number) => void
   assistantSpeakEnabled: boolean
@@ -582,6 +600,9 @@ interface UIStore {
   // the selection all move together, so none of them can drift out of step.
   requestAssetDetail: (req: AssetDetailRequest) => void
   clearAssetDetailRequest: () => void
+  // Issue 06 — open Results on a discussed historical run (identifiers only).
+  requestRunResult: (req: RunResultRequest) => void
+  clearDiscussedRun: () => void
   requestCompareNav: (nav: { a?: string; b?: string; tab?: string }) => void
   clearCompareNavRequest: () => void
   requestIoModal: (tab: 'import' | 'export') => void
@@ -635,6 +656,7 @@ export const useUIStore = create<UIStore>((set) => ({
   activeSlidePanel: null,
   assistantDockOpen: storedAssistantDockOpen(),
   assistantDockWidth: storedAssistantDockWidth(),
+  assistantEntry: null,
   assistantSpeakEnabled: storedAssistantSpeak(),
   projectSwitchInProgress: false,
   projectSwitchDepth: 0,
@@ -648,6 +670,7 @@ export const useUIStore = create<UIStore>((set) => ({
   propertiesEditRequest: null,
   ehReportRequest: false,
   assetDetailRequest: null,
+  discussedRun: null,
   compareNavRequest: null,
   ioModalRequest: null,
   readOnly: false,
@@ -792,6 +815,7 @@ export const useUIStore = create<UIStore>((set) => ({
     persistAssistantDockOpen(open)
     set({ assistantDockOpen: open })
   },
+  setAssistantEntry: (entry) => set({ assistantEntry: entry }),
   toggleAssistantDock: () => set(s => {
     const next = !s.assistantDockOpen
     persistAssistantDockOpen(next)
@@ -858,6 +882,12 @@ export const useUIStore = create<UIStore>((set) => ({
     resultsTabRequest: 'asset',
   }),
   clearAssetDetailRequest: () => set({ assetDetailRequest: null }),
+  requestRunResult: (req) => set({
+    discussedRun: req,
+    activeSlidePanel: 'results',
+    ...(req.resultsTab ? { resultsTabRequest: req.resultsTab } : {}),
+  }),
+  clearDiscussedRun: () => set({ discussedRun: null }),
   requestCompareNav: (nav) => set({ compareNavRequest: nav }),
   clearCompareNavRequest: () => set({ compareNavRequest: null }),
   requestIoModal: (tab) => set({ ioModalRequest: tab }),
@@ -902,6 +932,8 @@ export const useUIStore = create<UIStore>((set) => ({
         selectedComponent: null,
         highlightedComponent: null,
         assetDetailRequest: null,
+        // Issue 06 — discussed run ids are project-scoped; drop on switch.
+        discussedRun: null,
         // P30 gate S-2: the same hazard for a pending Edit request — it must
         // not open project B's same-named bus in Edit.
         propertiesEditRequest: null,

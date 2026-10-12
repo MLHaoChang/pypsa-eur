@@ -140,6 +140,8 @@ def build_workbook(report: InvestmentCaseReport, *, project: str | None = None) 
         ["Price basis", project_payload.get("price_basis")],
         ["Currency year", _currency_year(project_payload)],
         ["Basis", project_payload.get("basis_statement")],
+        # The terminal value's method (IC S0b plan S6); its terms are on the project sheet.
+        ["Terminal value method", (project_payload.get("terminal_value") or {}).get("method")],
     ]
     for jur, h in sorted(report.packs.items()):
         rows.append([f"Pack {jur}", h])
