@@ -215,9 +215,17 @@ def score(case: Case, frames: list, answer: dict, *, project_id=None) -> dict:
     }
 
 
-def report(results, *, live=False, execution_failed=False):
+def report(results, *, live=False, execution_failed=False, expanded=False):
     """Absent/duplicate/skipped cases cannot shrink the required denominator."""
     required = [(case.id, "deterministic") for case in CASES]
+    manifest = MANIFEST_SHA256
+    suite, oracle = SUITE_VERSION, ORACLE_VERSION
+    if expanded:
+        from harness import reliability_cases
+
+        required += [(case.id, "deterministic") for case in reliability_cases.CASES]
+        manifest = hashlib.sha256((MANIFEST_SHA256 + reliability_cases.MANIFEST_SHA256).encode()).hexdigest()
+        suite, oracle = reliability_cases.SUITE_VERSION, reliability_cases.ORACLE_VERSION
     if live:
         required += [(case.id, "live") for case in GOLDEN_CASES]
     keys = [(result["case_id"], result["mode"]) for result in results]
@@ -243,8 +251,8 @@ def report(results, *, live=False, execution_failed=False):
         and not any(result.get(key) for key in ("false_accept", "false_reject", "incorrect_calculations", "unchecked_publication"))
         and result.get("fulfilled_slots") == result.get("expected_slots") for result in results
     )
-    return {"version": 1, "suite": SUITE_VERSION, "oracle": ORACLE_VERSION,
-            "manifest_sha256": MANIFEST_SHA256, "passed": passed,
+    return {"version": 1, "suite": suite, "oracle": oracle,
+            "manifest_sha256": manifest, "passed": passed,
             "required_cases": len(required), "missing_cases": missing,
             "duplicate_cases": duplicate, "unexpected_cases": unexpected,
             "execution_failed": execution_failed, "results": results, "metrics": groups,

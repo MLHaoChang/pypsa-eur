@@ -1,0 +1,145 @@
+{
+  "version": "qualitative-review-calibration/1",
+  "packet_sha256": "7d3605bcf4cf1d6ab84d5d8cd57ad9509960a7ad87cd7c6ebece47bc1d86e4cb",
+  "required_cases": 10,
+  "independent_reviewers_attested": 0,
+  "resolved_cases": 0,
+  "unresolved_cases": [
+    "interpretation-01",
+    "interpretation-02",
+    "interpretation-03",
+    "interpretation-04",
+    "interpretation-05",
+    "interpretation-06",
+    "interpretation-07",
+    "interpretation-08",
+    "interpretation-09",
+    "interpretation-10"
+  ],
+  "missing_observations": [
+    "interpretation-01",
+    "interpretation-02",
+    "interpretation-03",
+    "interpretation-04",
+    "interpretation-05",
+    "interpretation-06",
+    "interpretation-07",
+    "interpretation-08",
+    "interpretation-09",
+    "interpretation-10"
+  ],
+  "provider_errors": [],
+  "scored_cases": 0,
+  "false_acceptance": {
+    "count": 0,
+    "denominator": 0,
+    "rate": null,
+    "wilson_95": null
+  },
+  "false_rejection": {
+    "count": 0,
+    "denominator": 0,
+    "rate": null,
+    "wilson_95": null
+  },
+  "profiles": {
+    "generator-cost/1": {
+      "required_cases": 2,
+      "resolved_cases": 0,
+      "scored_cases": 0,
+      "false_acceptance": {
+        "count": 0,
+        "denominator": 0,
+        "rate": null,
+        "wilson_95": null
+      },
+      "false_rejection": {
+        "count": 0,
+        "denominator": 0,
+        "rate": null,
+        "wilson_95": null
+      }
+    },
+    "generator-dispatch/1": {
+      "required_cases": 2,
+      "resolved_cases": 0,
+      "scored_cases": 0,
+      "false_acceptance": {
+        "count": 0,
+        "denominator": 0,
+        "rate": null,
+        "wilson_95": null
+      },
+      "false_rejection": {
+        "count": 0,
+        "denominator": 0,
+        "rate": null,
+        "wilson_95": null
+      }
+    },
+    "network-linear-cost/1": {
+      "required_cases": 2,
+      "resolved_cases": 0,
+      "scored_cases": 0,
+      "false_acceptance": {
+        "count": 0,
+        "denominator": 0,
+        "rate": null,
+        "wilson_95": null
+      },
+      "false_rejection": {
+        "count": 0,
+        "denominator": 0,
+        "rate": null,
+        "wilson_95": null
+      }
+    },
+    "storage-unit-cost/1": {
+      "required_cases": 2,
+      "resolved_cases": 0,
+      "scored_cases": 0,
+      "false_acceptance": {
+        "count": 0,
+        "denominator": 0,
+        "rate": null,
+        "wilson_95": null
+      },
+      "false_rejection": {
+        "count": 0,
+        "denominator": 0,
+        "rate": null,
+        "wilson_95": null
+      }
+    },
+    "storage-unit-dispatch/1": {
+      "required_cases": 2,
+      "resolved_cases": 0,
+      "scored_cases": 0,
+      "false_acceptance": {
+        "count": 0,
+        "denominator": 0,
+        "rate": null,
+        "wilson_95": null
+      },
+      "false_rejection": {
+        "count": 0,
+        "denominator": 0,
+        "rate": null,
+        "wilson_95": null
+      }
+    }
+  },
+  "withholding": {
+    "count": 0,
+    "denominator": 0,
+    "rate": null,
+    "wilson_95": null
+  },
+  "measurement_complete": false,
+  "status": "pending_independent_judgments",
+  "sampling": "synthetic",
+  "population_error_estimate": null,
+  "observation_identity": null,
+  "independent_domain_approval": false,
+  "claim_scope": "offline_measurement_only; identity_and_iid_sampling_are_external_attestations"
+}
