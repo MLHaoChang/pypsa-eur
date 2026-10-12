@@ -354,11 +354,13 @@ def pcc_switchgear_rows(res):
 def test_the_pcc_switchgear_is_costed_to_the_campus_unless_the_operator_owns_it(hub):
     ce.draft(hub)
     mine = ce.run(hub, {"k": 1, "pf": 0.95})
-    assert mine["results"]["scope"] == {"pcc_switchgear": "campus"}
+    from gridspine.static.campus_invest import ParallelRules
+    rules = ParallelRules().scope()                   # plan C13: the rules for adding units, written with the run
+    assert mine["results"]["scope"] == {"pcc_switchgear": "campus", "parallel": rules}
     assert mine["settings"]["pcc_switchgear_by_operator"] is False
     assert [r["status"] for r in pcc_switchgear_rows(mine["results"])] == ["chosen"]
     theirs = ce.run(hub, {"k": 1, "pf": 0.95, "pcc_switchgear_by_operator": True})
-    assert theirs["results"]["scope"] == {"pcc_switchgear": "grid_operator"}
+    assert theirs["results"]["scope"] == {"pcc_switchgear": "grid_operator", "parallel": rules}
     assert theirs["settings"]["pcc_switchgear_by_operator"] is True
     assert not [r for r in pcc_switchgear_rows(theirs["results"]) if r["status"] == "chosen"]
     assert theirs["results"]["cost"][0]["capex_eur"] < mine["results"]["cost"][0]["capex_eur"]
@@ -539,9 +541,11 @@ def test_the_investment_summary_for_the_copilot_carries_the_caveats_with_the_num
     assert out["investment"] and out["cost"] and out["unresolved"] == [] and out["history"] == []
     assert out["compliance_invested"] and out["hub_cost"]["total"] > 0
     assert out["library_is_default"] is True and out["stale"] is False
-    assert out["scope"] == {"pcc_switchgear": "campus"}
+    from gridspine.static.campus_invest import ParallelRules
+    assert out["scope"] == {"pcc_switchgear": "campus", "parallel": ParallelRules().scope()}
     text = " ".join(out["notes"])
     assert "placeholder" in text and "assumed" in text and "tap" in text
+    assert "scope.parallel" in text and "vector group" in text          # plan C13: additions and their rules
     ce.save_library(hub, library_with(scaled_capex(2)))
     out = ce.get_investment(hub)
     assert out["library_is_default"] is False and out["stale"] is True
@@ -843,7 +847,8 @@ def purchase_rows():
 import hashlib
 
 CONTRACT_FIELDS = ["name", "kind", "basis", "quantity", "parts", "build_year", "source", "source_hash"]
-META_FIELDS = {"need", "library_id", "units", "length_km", "currency", "price_year", "provenance", "illustrative"}
+META_FIELDS = {"need", "library_id", "units", "length_km", "currency", "price_year", "provenance", "illustrative",
+               "action"}
 
 
 def total_of(asset):
@@ -862,7 +867,8 @@ def test_each_purchased_item_is_one_owner_asset_in_the_ic_shape(hub):
         "parts": [{"name": "investment", "upfront_per_unit": 2_500_000.0, "lifetime": 40.0, "fom_share": 0.015}],
         "build_year": 2030, "source": "campus_study", "source_hash": digest,
         "meta": {"need": "transformer GRID_IMPORT", "library_id": "TR_132_33_63", "units": 2, "length_km": None,
-                 "currency": "EUR", "price_year": 2026, "provenance": "assumed", "illustrative": True}}
+                 "currency": "EUR", "price_year": 2026, "provenance": "assumed", "illustrative": True,
+                 "action": None}}                         # a table from before plan C13 has no action column
 
 
 def test_the_top_level_keys_are_exactly_the_contract_fields_and_meta(hub):
@@ -955,6 +961,24 @@ def test_existing_and_unresolved_and_empty_needs_are_left_out(hub):
     ]
     fake_investment(hub, rows)
     assert [a["name"] for a in ce.extra_owner_assets(hub)] == ["campus:TR_132_33_63#1"]
+
+
+def test_units_added_next_to_existing_ones_are_purchases_and_say_so_while_the_kept_units_are_left_out(hub):
+    """Plan C13: an addition writes a keep row (existing, zero cost) and an
+    add row. Only the add row is an owner asset, its action under meta; the
+    top-level keys are unchanged."""
+    rows = [
+        {**inv_row("transformer TR1+TR2", None, "keep", 2, existing=True, status="kept", capex=0.0), "action": "keep"},
+        {**inv_row("transformer TR1+TR2", "TR_132_33_63", "transformer", 1,
+                   reason="added in parallel with TR1, TR2 (existing)"), "action": "add"},
+        {**inv_row("transformer TR3+TR4", "TR_132_33_40", "transformer", 2), "action": "replace"},
+    ]
+    run_dir = fake_investment(hub, [])
+    pd.DataFrame(rows, columns=[*INVEST_COLUMNS, "action"]).to_csv(run_dir / ce.cs.INVESTMENT_CSV, index=False)
+    assets = ce.extra_owner_assets(hub)
+    assert [(a["name"], a["quantity"], a["meta"]["action"]) for a in assets] == [
+        ("campus:TR_132_33_63#1", 1.0, "add"), ("campus:TR_132_33_40#1", 2.0, "replace")]
+    assert all(list(a) == [*CONTRACT_FIELDS, "meta"] for a in assets)
 
 
 def test_there_are_no_owner_assets_before_a_run_or_after_a_run_that_did_not_invest(hub):

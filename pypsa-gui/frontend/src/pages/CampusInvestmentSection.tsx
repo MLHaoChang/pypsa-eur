@@ -17,7 +17,7 @@
 // iteration history.
 import {
   type CampusMilp, type CampusState, type CostBasis, type CostRow, type HistoryRow, type HubCost, type InvestmentRow,
-  type InvestStatus, type MilpHistoryRow, type MilpStop,
+  type InvestStatus, type MilpHistoryRow, type MilpStop, type ParallelScope,
 } from '../api/campusElectrical'
 import { PageSection, Tag } from '../components/PageKit'
 
@@ -49,6 +49,22 @@ const SCOPE_TEXT = {
 /** `0.07` as `7 %`, `0.035` as `3.5 %`. */
 function ratePercent(rate: number): string {
   return `${Number((rate * 100).toFixed(2))} %`
+}
+
+/** The rules a unit added next to existing transformers had to meet (plan C13),
+ *  as the run wrote them: every tolerance is assumed. */
+function ParallelLine({ rules }: { rules: ParallelScope }) {
+  const vg = rules.unknown_vector_group === 'refuse'
+    ? 'an unknown vector group is refused'
+    : 'an unknown vector group is assumed compatible and flagged'
+  return (
+    <p data-testid="invest-parallel" className="text-[11.5px] text-muted mb-2">
+      Units added beside existing transformers: impedance within ±{ratePercent(rules.uk_tol.value)} and no-load
+      ratio within ±{ratePercent(rules.ratio_tol.value)} of each existing unit, tap steps within{' '}
+      {Number(rules.step_tol_pct.value.toFixed(3))} point, the same vector-group clock ({vg}); no limit on the
+      rating ratio. These tolerances are assumed, not taken from a standard.
+    </p>
+  )
 }
 
 /** The one plain line of what the costs stand on. The library's costs are in the
@@ -105,6 +121,7 @@ export default function CampusInvestmentSection({ state }: { state: CampusState 
         {r.scope && (
           <p data-testid="invest-scope" className="text-[12px] mb-2">{SCOPE_TEXT[r.scope.pcc_switchgear]}</p>
         )}
+        {r.scope?.parallel && <ParallelLine rules={r.scope.parallel} />}
         <InvestmentTable rows={r.investment} />
         {unresolved.length > 0 && (
           <div data-testid="unresolved" role="alert" className="mt-3 rounded border border-danger/50 bg-danger/5 px-3 py-2">
@@ -247,7 +264,8 @@ function InvestmentTable({ rows, testid = 'invest' }: { rows: InvestmentRow[]; t
     <table className="w-full text-[12px]">
       <thead>
         <tr className="text-left text-muted">
-          <th className="font-normal pr-3">Need</th><th className="font-normal pr-3">Asset</th>
+          <th className="font-normal pr-3">Need</th><th className="font-normal pr-3">Action</th>
+          <th className="font-normal pr-3">Asset</th>
           <th className="font-normal pr-3">Units</th><th className="font-normal pr-3">Invest period</th>
           <th className="font-normal pr-3 text-right">Capex</th><th className="font-normal pr-3 text-right">Annualised cost</th>
           <th className="font-normal pr-3">Existing</th><th className="font-normal">Status</th>
@@ -256,11 +274,17 @@ function InvestmentTable({ rows, testid = 'invest' }: { rows: InvestmentRow[]; t
       <tbody>
         {rows.map(x => (
           <tr
-            key={`${x.need}-${x.library_id ?? ''}`}
+            key={`${x.need}-${x.library_id ?? ''}-${x.action ?? ''}`}
             data-testid={`${testid}-${x.need}`}
             className={`border-t border-border ${x.status === 'unresolved' ? 'bg-danger/10 text-danger' : ''}`}
           >
-            <td className="py-1 pr-3 whitespace-nowrap">{x.need}</td>
+            <td className="py-1 pr-3">
+              <div className="whitespace-nowrap">{x.need}</div>
+              {x.reason && x.status !== 'unresolved' && (
+                <div data-testid="invest-reason" className="text-[11px] text-muted">{x.reason}</div>
+              )}
+            </td>
+            <td data-testid="invest-action" className="pr-3 whitespace-nowrap">{x.action || '—'}</td>
             <td className="pr-3 whitespace-nowrap">
               {x.library_id ?? '—'}
               {x.length_km != null && <span className="text-muted"> · {x.length_km} km</span>}
