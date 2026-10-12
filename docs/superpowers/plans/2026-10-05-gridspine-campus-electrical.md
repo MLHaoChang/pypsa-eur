@@ -948,6 +948,8 @@ C13 here is **not** the reference-costs work. Another agent is replacing the ass
 
 The choices the approval leaves open are the numbered questions at the end. They will be asked as multiple choice. Each has a recommendation, and this plan is written to the recommendation.
 
+On 2026-10-12 the owner accepted the recommended option on every question ("Accept all recommended"), and asked for C13 to start now, with C14 and C15 to follow after it.
+
 ### What exists today (surveyed 2026-10-12, on `feat/gridspine-campus-milp-job` at e671de35e)
 
 **Transformer groups (C8).**
@@ -1363,6 +1365,8 @@ The reference-costs branch changes the costs, and so possibly which candidates w
 - a browser run for C14's and C15's panel changes.
 
 ### Open questions for the owner (multiple choice; recommended first)
+
+**Answered (2026-10-12): the owner accepted the recommended option, (a), on all 16 questions.** The plan below is written to those options and stands as decided.
 
 1. **C13, impedance tolerance for adding a unit in parallel.**
    - **(a) ±10 % of each existing unit's uk (recommended; assumed).**
