@@ -34,6 +34,11 @@ export interface CreationRequest {
   // canvas — dropping onto nothing must stay exactly as permissive as it is
   // today, so this is optional and never validated here.
   dropBusName?: string
+  // A drop onto the map (plan M4, reverting spec D26): the geographic point
+  // under the pointer. CreationForm places a dropped BUS there (x/y seeded),
+  // and prefills any other asset's terminal with the nearest placed bus when
+  // the drop missed a marker.
+  dropLatLng?: { lat: number; lng: number }
   // A drop onto the 3D site view (design D16): which site, and where on its
   // ground (metres east/north of the site origin). CreationForm restricts
   // the terminal bus to the site's members, prefills the primary one, and

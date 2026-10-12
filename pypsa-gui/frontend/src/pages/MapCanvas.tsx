@@ -7,8 +7,24 @@ import toast from 'react-hot-toast'
 import { confirmToast } from '../utils/toasts'
 import { isRenewableCarrier } from '../utils/carriers'
 import { uniformBadge, type BadgeDef } from '../utils/carrierBadges'
-import { Ruler, Flame, Wind, BatteryCharging, Zap, ExternalLink } from 'lucide-react'
+import { Ruler, Flame, Wind, BatteryCharging, Zap, ExternalLink, Upload, Waypoints, Search, Plus, Cable } from 'lucide-react'
+import axios from 'axios'
 import ReactDOMServer from 'react-dom/server'
+import { formatApiDetail } from '../api/client'
+import { mapLayoutApi, type ImportReport, type OsmSuggestions } from '../api/mapLayout'
+import { geocodeApi, type GeocodeHit } from '../api/geocode'
+import { sitesApi } from '../api/sites'
+import { describeWay, suggestionCandidates, type SuggestBranch, type SuggestCandidate } from '../utils/osmSuggest'
+import ImportGeometryDialog from '../components/ImportGeometryDialog'
+import MapConnectDialog, { type ConnectionParams } from '../components/MapConnectDialog'
+import { registerMapDropTarget, unregisterMapDropTarget, type MapDropTarget } from '../utils/mapDropRegistry'
+import { layoutAround, PLACE_ALL_SPACING_M } from '../utils/placement'
+import { commitBusDrag } from '../utils/busDrag'
+import { lineColor } from '../utils/voltageTiers'
+import { useElementWidth } from '../hooks/useElementWidth'
+import { assetLegend, buildAssetNodes } from './topologyAssets'
+import MapLegend from '../components/MapLegend'
+import MapMiniMap, { MINIMAP_MIN_CANVAS_PX } from '../components/MapMiniMap'
 import { useUIStore, type CanvasView } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { updateAsset } from '../utils/assetWrite'
@@ -20,6 +36,7 @@ import { CanvasResultsProvider, useCanvasResults, fmtMW, loadingColor } from '..
 import { derivedPortFlow, getLinkColor, linkPorts } from './topologyEdges'
 import { busLatLng, fmtKm, lengthDisagrees, routeLengthKm, unplacedBusNames } from '../utils/geo'
 import { nextBusToPlace, canSkip } from '../utils/placement'
+import type { RescalePreview } from '../utils/rescale'
 import { ingestRescale } from '../utils/rescaleActions'
 import { useRescaleStore } from '../store/rescaleStore'
 import UnplacedBusesPanel from '../components/UnplacedBusesPanel'
@@ -32,9 +49,22 @@ import { readActiveSite, writeActiveSite } from '../site3d/activeSite'
 import type { LngLatTuple, Site } from '../site3d/types'
 import type { MapBubble } from '../api/mapLayout'
 import {
-  bubbleKey, queueLengthFromGeometry, routeWaypoints, setLengthsDerivedSink, useMapLayoutLifecycle,
+  afterRouteEdit, bubbleKey, routeWaypoints, setLengthsDerivedSink, useMapLayoutLifecycle,
   useMapLayoutStore, type LatLngTuple,
 } from './mapLayoutStore'
+import type { RouteSource } from '../api/mapLayout'
+
+/** The user-facing message of an API failure: the backend's `detail` (which names the setting to change) when there is one. */
+function apiErrorMessage(err: unknown, fallback: string): string {
+  if (axios.isAxiosError(err)) return formatApiDetail(err.response?.data?.detail, err.message || fallback)
+  return err instanceof Error && err.message ? err.message : fallback
+}
+
+/** `[min_lng, min_lat, max_lng, max_lat]` of the map's current view. */
+function viewBbox(map: L.Map): [number, number, number, number] {
+  const b = map.getBounds()
+  return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]
+}
 
 /**
  * HTML-attribute escaping for the divIcon's `html` string. The marker markup
@@ -227,14 +257,8 @@ const ESRI_TRANSPORTATION_URL =
 const ESRI_PLACES_URL =
   'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'
 
-// Voltage → colour, mirrors the existing TopologyCanvas legend so the two
-// canvases feel like the same network.
-function lineColor(vNom: number): string {
-  if (vNom > 300) return '#dc2626'
-  if (vNom > 200) return '#16a34a'
-  if (vNom > 100) return '#2563eb'
-  return '#374151'
-}
+// Voltage → colour: utils/voltageTiers.ts, the one table the lines, the bus
+// rings and the map legend (plan M5) read, mirroring the schematic's tiers.
 
 interface MapCanvasProps {
   // 'satellite' = Esri imagery only; 'hybrid' = Esri imagery + street/place labels.
@@ -281,6 +305,24 @@ function ClickToPlace({ onPick }: { onPick: (lat: number, lng: number) => void }
     el.style.cursor = 'crosshair'
     return () => { el.style.cursor = previous }
   }, [map])
+  return null
+}
+
+// Hands the Leaflet map to the parent (a ref): the address box flies to a
+// hit, the import fits the view, the suggestion layer reads the bounds.
+function MapHandle({ onMap }: { onMap: (map: L.Map) => void }) {
+  const map = useMap()
+  useEffect(() => { onMap(map) }, [map, onMap])
+  return null
+}
+
+// The OSM suggestion layer's bounds watcher (plan M3): mounted only while
+// the layer is on, reports the view's bbox once on mount and after every
+// pan/zoom settles, so the fetch (cached server-side per bbox) follows the
+// user without a request per frame.
+function ViewBoundsWatcher({ onBounds }: { onBounds: (bbox: [number, number, number, number]) => void }) {
+  const map = useMapEvents({ moveend: () => onBounds(viewBbox(map)) })
+  useEffect(() => { onBounds(viewBbox(map)) }, [map, onBounds])
   return null
 }
 
@@ -439,7 +481,7 @@ interface EditableLineProps {
   lengthBadge?: LengthBadge
 }
 
-function EditableLine({
+export function EditableLine({
   id, source, target, waypoints, onUpdate, onSelect, color, weight, dashArray, tooltip, permanentLabel, lengthBadge,
 }: EditableLineProps) {
   const [hovered, setHovered] = useState(false)
@@ -845,31 +887,15 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   // Pydantic default. The schematic / blank canvas is decoupled: it keeps
   // its own per-bus position cache in localStorage and is unaffected by
   // changes here for any bus the user has already laid out there.
+  //
+  // `commitBusDrag` (utils/busDrag.ts) owns the whole commit: the PUT through
+  // the asset-write chokepoint (which fetches on a cache miss, ruling 3, so a
+  // drag racing the first buses round-trip succeeds), the provenance mirror
+  // into the map document, and the rescale offer. Tested there without a
+  // Leaflet marker (plan M5).
   const updateBusPosMut = useMutation({
-    // The Asset-write chokepoint (utils/assetWrite.ts) owns fetch, spread,
-    // PUT and invalidation. The old throw-on-cache-miss ("wait for the
-    // buses query to settle") is gone: the chokepoint FETCHES on a miss
-    // (ruling 3), so a drag racing the first buses round-trip now succeeds
-    // instead of asking the user to retry — while the bare-fields PUT the
-    // throw guarded against stays unrepresentable.
-    mutationFn: async ({ name, lat, lng }: { name: string; lat: number; lng: number }) => {
-      const resp = await updateAsset<Bus>(
-        qc, useUIStore.getState().currentProject, 'buses', name, { x: lng, y: lat })
-      return resp as Awaited<ReturnType<typeof networkApi.updateBus>>
-    },
-    onSuccess: (data, vars) => {
-      // The backend's update_bus already recomputed the lengths of THIS bus's
-      // connected branches (_recompute_lengths_for_bus, scoped to the moved
-      // bus — lines by chord, or lines AND links from their geometry with the
-      // project setting on) and logged a changelog entry; the chokepoint's
-      // blanket invalidation covers the buses, lines and links refetch.
-      const sources = data.length_sources ?? {}
-      const n = Object.keys(sources).length
-      appLog('INFO', `Bus '${vars.name}' moved · ${n} connected branch length${n === 1 ? '' : 's'} recalculated${
-        Object.values(sources).includes('route') ? ' (routes followed)' : ''}.`)
-      useMapLayoutStore.getState().applyLengthSources(useUIStore.getState().currentProject, data.length_sources)
-      ingestRescale(qc, data.rescale)
-    },
+    mutationFn: ({ name, lat, lng }: { name: string; lat: number; lng: number }) =>
+      commitBusDrag(qc, useUIStore.getState().currentProject, name, lat, lng),
     onError: (e: Error) => toast.error(`Move failed: ${e.message}`),
   })
 
@@ -1018,11 +1044,270 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   // length rewrite that the store issues once the route's PUT has landed
   // (the server measures the route it holds, not this cache). Transformers
   // have a route but no length.
-  const updateWaypoints = useCallback((edgeId: string, wps: LatLngTuple[]) => {
+  const updateWaypoints = useCallback((edgeId: string, wps: LatLngTuple[], source: RouteSource = 'user') => {
     const project = useUIStore.getState().currentProject
-    setRouteWaypoints(project, edgeId, wps)
-    if (deriveLengthsRef.current && project && !edgeId.startsWith('tr:')) queueLengthFromGeometry(project, edgeId)
+    setRouteWaypoints(project, edgeId, wps, source)
+    afterRouteEdit(project, edgeId, deriveLengthsRef.current)
   }, [setRouteWaypoints])
+
+  // ── Legend and minimap (plan M5) ──────────────────────────────────────────
+  // The legend's asset rows are the schematic's (`assetLegend` over the same
+  // descriptors), so the three layers list the same types; the minimap
+  // follows the schematic's fold rule (hidden under MINIMAP_MIN_CANVAS_PX).
+  const [canvasEl, setCanvasEl] = useState<HTMLDivElement | null>(null)
+  const canvasWidth = useElementWidth(canvasEl)
+  // The Leaflet map, handed out by MapHandle: a ref for the imperative
+  // callers below (address box, drop registry) and a state for the minimap.
+  const mapRef = useRef<L.Map | null>(null)
+  const [mapHandle, setMapHandle] = useState<L.Map | null>(null)
+  const captureMapForMini = useCallback((m: L.Map) => { mapRef.current = m; setMapHandle(m) }, [])
+  const linkCarriers = useMemo(() => [...new Set((links as LinkT[]).map(l => l.carrier).filter(Boolean))], [links])
+  const legendAssetRows = useMemo(() => {
+    const members = (buses as Bus[]).map(b => b.name)
+    const carrierOf = (name: string) => busByName.get(name)?.carrier
+    return assetLegend(buildAssetNodes(
+      { generators: generators as Generator[], loads: loads as Load[], storageUnits: sus as StorageUnit[], stores: stores as Store[], links: links as LinkT[] },
+      { members, busCarrier: carrierOf },
+    ))
+  }, [buses, busByName, generators, loads, sus, stores, links])
+
+  // ── Adopt real topology from outside (plan M3) ────────────────────────────
+  // The palette drop registry (plan M4): a drop on the map resolves to the
+  // geographic point under the pointer through this projection.
+  useEffect(() => {
+    const target: MapDropTarget = {
+      screenToLatLng: (clientX, clientY) => {
+        const map = mapRef.current
+        if (!map) return null
+        const rect = map.getContainer().getBoundingClientRect()
+        const x = clientX - rect.left, y = clientY - rect.top
+        if (x < 0 || y < 0 || x > rect.width || y > rect.height) return null
+        const ll = map.containerPointToLatLng([x, y])
+        return { lat: ll.lat, lng: ll.lng }
+      },
+    }
+    registerMapDropTarget(target)
+    return () => unregisterMapDropTarget(target)
+  }, [])
+
+  // ── Build on the map (plan M4) ────────────────────────────────────────────
+  // One map tool at a time, and never while click-to-place or site drawing
+  // owns the clicks. `addBus` creates a bus where the user clicks (the
+  // schematic's auto-named "Add bus", with x/y from the click instead of
+  // 0, 0); `connect` takes two bus clicks and opens the connect dialog;
+  // `placeAll` lays every unplaced bus out around one click.
+  type MapTool = 'none' | 'addBus' | 'connect' | 'placeAll'
+  const [mapTool, setMapTool] = useState<MapTool>('none')
+  const [connectFirst, setConnectFirst] = useState<string | null>(null)
+  const [connectDialog, setConnectDialog] = useState<{ source: string; target: string; x: number; y: number } | null>(null)
+  const toolActive = mapTool !== 'none' && !placing && !draw.drawing && placementUiAllowed
+  const pickTool = (tool: MapTool) => {
+    if (readOnly) { toast.error('Project is read-only'); return }
+    setConnectFirst(null); setConnectDialog(null)
+    setMapTool(t => (t === tool ? 'none' : tool))
+  }
+  useEffect(() => {
+    if (mapTool === 'none') return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      setMapTool('none'); setConnectFirst(null); setConnectDialog(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [mapTool])
+  useEffect(() => { setMapTool('none'); setConnectFirst(null); setConnectDialog(null) }, [currentProject])
+
+  const nextBusName = () => {
+    const existing = new Set((buses as Bus[]).map(b => b.name))
+    let i = (buses as Bus[]).length + 1
+    let name = `bus_${i}`
+    while (existing.has(name)) { i += 1; name = `bus_${i}` }
+    return name
+  }
+  const addBusMut = useMutation({
+    mutationFn: ({ name, lat, lng }: { name: string; lat: number; lng: number }) =>
+      networkApi.createBus({ name, v_nom: 1, carrier: 'AC', x: lng, y: lat } as Bus),
+    onSuccess: (_r, vars) => {
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') })
+      setSelectedComponent({ type: 'Bus', name: vars.name })
+      toast.success(`Bus ${vars.name} added — rename it in Properties`)
+    },
+    onError: (e: Error) => toast.error(`Could not add the bus: ${e.message}`),
+  })
+
+  const createLineMut = useMutation({
+    mutationFn: (p: { name: string; bus0: string; bus1: string; carrier: 'AC' | 'DC'; s_nom: number; x: number; length: number }) =>
+      networkApi.createLine({ name: p.name, bus0: p.bus0, bus1: p.bus1, carrier: p.carrier, s_nom: p.s_nom, x: p.x, length: p.length, r: 0 } as Partial<LineT>),
+    onSuccess: (_r, p) => {
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
+      setSelectedComponent({ type: 'Line', name: p.name })
+      toast.success(`Line added · ${fmtKm(p.length)}`)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+  const createTransformerMut = useMutation({
+    mutationFn: (p: { name: string; bus0: string; bus1: string; type: string; v_nom_0: number; v_nom_1: number; s_nom: number; x: number; tap_ratio: number }) =>
+      networkApi.createTransformer({
+        name: p.name, bus0: p.bus0, bus1: p.bus1, type: p.type, s_nom: p.s_nom, x: p.x, tap_ratio: p.tap_ratio,
+        v_nom_0: p.v_nom_0, v_nom_1: p.v_nom_1,
+      } as Partial<Transformer>),
+    onSuccess: (_r, p) => {
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'transformers') })
+      setSelectedComponent({ type: 'Transformer', name: p.name })
+      toast.success('Transformer added')
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+  const onBusClick = (bus: Bus, e: L.LeafletMouseEvent) => {
+    if (!(toolActive && mapTool === 'connect')) { setSelectedComponent({ type: 'Bus', name: bus.name }); return }
+    if (!connectFirst) { setConnectFirst(bus.name); return }
+    if (connectFirst === bus.name) { setConnectFirst(null); return }
+    const oe = e.originalEvent as MouseEvent
+    setConnectDialog({ source: connectFirst, target: bus.name, x: oe.clientX, y: oe.clientY })
+  }
+  const confirmConnection = (p: ConnectionParams) => {
+    if (!connectDialog) return
+    const { source: bus0, target: bus1 } = connectDialog
+    if (p.kind === 'line') createLineMut.mutate({ ...p, bus0, bus1 })
+    else createTransformerMut.mutate({ ...p, bus0, bus1 })
+    setConnectDialog(null); setConnectFirst(null); setMapTool('none')
+  }
+  const chordKm = (a: string, b: string): number => {
+    const ba = busByName.get(a), bb = busByName.get(b)
+    const ca = ba ? busLatLng(ba) : null, cb = bb ? busLatLng(bb) : null
+    return ca && cb ? routeLengthKm([ca, cb]) : 0
+  }
+
+  // Place all buses around one click: the first unplaced bus at the click,
+  // the rest on a ring PLACE_ALL_SPACING_M apart, each a PUT through the
+  // same chokepoint a drag uses, so lengths follow and the rescale is
+  // offered once for all of them.
+  const placeAllMut = useMutation({
+    mutationFn: async ({ lat, lng }: { lat: number; lng: number }) => {
+      const project = useUIStore.getState().currentProject
+      const positions = layoutAround([lat, lng], unplaced)
+      const rescale: RescalePreview[] = []
+      let placed = 0
+      for (const [name, [plat, plng]] of Object.entries(positions)) {
+        const resp = await updateAsset<Bus>(qc, project, 'buses', name, { x: plng, y: plat }) as { rescale?: RescalePreview[]; length_sources?: Record<string, 'typed' | 'chord' | 'route'> }
+        placed += 1
+        if (resp?.rescale) rescale.push(...resp.rescale)
+        useMapLayoutStore.getState().applyLengthSources(project, resp?.length_sources)
+      }
+      return { placed, rescale }
+    },
+    onSuccess: ({ placed, rescale }) => {
+      appLog('INFO', `Placed ${placed} bus${placed === 1 ? '' : 'es'} around one point, ${PLACE_ALL_SPACING_M} m apart.`)
+      toast.success(`${placed} bus${placed === 1 ? '' : 'es'} placed — drag any of them to where it really stands`)
+      ingestRescale(qc, rescale)
+    },
+    onError: (e: Error) => toast.error(`Placing stopped: ${e.message}`),
+    onSettled: () => setMapTool('none'),
+  })
+  // GeoJSON / KML import: the file goes up for a PREVIEW first, the report
+  // dialog shows what would match, and Apply sends it again with
+  // `apply=true`. Both sidecars the server wrote are then re-read — the
+  // stores never learn of a server-side write on their own.
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [importPreview, setImportPreview] = useState<{ file: File; report: ImportReport } | null>(null)
+  const importMut = useMutation({
+    mutationFn: ({ file, apply }: { file: File; apply: boolean }) =>
+      mapLayoutApi.importGeometry(useUIStore.getState().currentProject as string, file, { apply }),
+    onSuccess: async (report, vars) => {
+      if (!vars.apply) { setImportPreview({ file: vars.file, report }); return }
+      const project = useUIStore.getState().currentProject as string
+      setImportPreview(null)
+      const written = report.written ?? { routes: [], sites: [] }
+      try {
+        await useMapLayoutStore.getState().reloadFromServer(project)
+        if (written.sites.length > 0) {
+          const doc = await sitesApi.getSites(project)
+          useSitesStore.setState(s => ({ docs: { ...s.docs, [project]: doc }, loaded: { ...s.loaded, [project]: true } }))
+        }
+      } catch (e) {
+        console.warn('[map] reload after geometry import failed', e)
+      }
+      appLog('INFO', `Imported geometry from '${vars.file.name}': ${written.routes.length} route(s), ${written.sites.length} site(s).`)
+      toast.success(`Imported ${written.routes.length} route${written.routes.length === 1 ? '' : 's'} and ${written.sites.length} site${written.sites.length === 1 ? '' : 's'}`)
+      if (report.lengths) onLengthsDerived(report.lengths)
+    },
+    onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Could not import the geometry')),
+  })
+  const onImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (!currentProject) { toast.error('Save the project first: imported geometry lives in its map_layout.json.'); return }
+    importMut.mutate({ file, apply: false })
+  }
+
+  // OSM suggestions: a dimmed layer of power ways and substations for the
+  // view, fetched when the layer is on and the view settles. Clicking a way
+  // beside a chord offers "Use as route for <branch>"; nothing is computed.
+  const [osmOn, setOsmOn] = useState(false)
+  const [osm, setOsm] = useState<OsmSuggestions | null>(null)
+  const [osmPick, setOsmPick] = useState<{ x: number; y: number; way: string; candidates: SuggestCandidate[] } | null>(null)
+  const osmFetchSeq = useRef(0)
+  const onViewBounds = useCallback((bbox: [number, number, number, number]) => {
+    const project = useUIStore.getState().currentProject
+    if (!project) return
+    const seq = ++osmFetchSeq.current
+    mapLayoutApi.osmSuggestions(project, bbox).then(r => {
+      if (seq === osmFetchSeq.current) setOsm(r)
+    }).catch((e: unknown) => {
+      if (seq !== osmFetchSeq.current) return
+      const status = axios.isAxiosError(e) ? e.response?.status : undefined
+      const msg = apiErrorMessage(e, 'Could not load OSM suggestions')
+      if (status === 422) toast(msg, { id: 'osm-bbox' })
+      else toast.error(msg, { id: 'osm-error', duration: 8000 })
+    })
+  }, [])
+  useEffect(() => { if (!osmOn) { setOsm(null); setOsmPick(null); osmFetchSeq.current++ } }, [osmOn])
+  const toggleOsm = () => {
+    if (!currentProject && !osmOn) { toast.error('Save the project first to fetch OSM suggestions.'); return }
+    setOsmOn(v => !v)
+  }
+  // The branches a suggested way could route: every Line, Link and
+  // Transformer whose two buses are placed, in the map's [lat, lng].
+  const suggestBranches = useMemo((): SuggestBranch[] => {
+    const out: SuggestBranch[] = []
+    const add = (kind: string, name: string, b0: string, b1: string) => {
+      const c0 = busByName.get(b0), c1 = busByName.get(b1)
+      const p0 = c0 ? busLatLng(c0) : null, p1 = c1 ? busLatLng(c1) : null
+      if (p0 && p1) out.push({ key: `${kind}:${name}`, label: `${name} (${b0} → ${b1})`, bus0: p0, bus1: p1 })
+    }
+    for (const l of lines as LineT[]) add('line', l.name, l.bus0, l.bus1)
+    for (const l of links as LinkT[]) add('link', l.name, l.bus0, l.bus1)
+    for (const t of transformers as Transformer[]) add('tr', t.name, t.bus0, t.bus1)
+    return out
+  }, [busByName, lines, links, transformers])
+  const offerWay = (way: OsmSuggestions['lines'][number], at: { x: number; y: number }) => {
+    const latlng = way.points.map(([lng, lat]) => [lat, lng] as const)
+    const candidates = suggestionCandidates(latlng, suggestBranches)
+    if (candidates.length === 0) { toast('No branch has both buses near the ends of this way', { id: 'osm-nopick' }); return }
+    setOsmPick({ x: at.x, y: at.y, way: describeWay(way.kind, way.tags), candidates })
+  }
+  const adoptWay = (c: SuggestCandidate) => {
+    updateWaypoints(c.key, c.waypoints.map(p => [p[0], p[1]] as LatLngTuple), 'osm')
+    setOsmPick(null)
+    toast.success(`${c.key} now follows the OSM way`)
+  }
+
+  // Address box (click-to-place): only when PYPSAGUI_GEOCODER_URL is set.
+  const { data: geocoder } = useQuery({ queryKey: ['geocode', 'status'], queryFn: geocodeApi.status, staleTime: Infinity })
+  const [address, setAddress] = useState('')
+  const [hits, setHits] = useState<GeocodeHit[]>([])
+  const geocodeMut = useMutation({
+    mutationFn: (q: string) => geocodeApi.search(q),
+    onSuccess: (rows) => { setHits(rows); if (rows.length === 0) toast('No place found for that address', { id: 'geocode' }) },
+    onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Address lookup failed')),
+  })
+  const flyToHit = (h: GeocodeHit) => {
+    mapRef.current?.setView([h.lat, h.lon], Math.max(mapRef.current.getZoom(), 15))
+    setHits([])
+  }
   const updateBubble = useCallback((key: string, offset: MapBubble) => {
     setBubble(useUIStore.getState().currentProject, key, offset)
   }, [setBubble])
@@ -1057,7 +1342,8 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
 
   return (
     // isolate: local stacking context so z-40 companion isn't buried under Leaflet panes (see placement-strip z-index note below).
-    <div className="relative isolate h-full w-full">
+    // ref: the canvas measures itself for the minimap's fold rule (plan M5).
+    <div className="relative isolate h-full w-full" ref={setCanvasEl}>
       <MapContainer
         center={initialCenter}
         zoom={5}
@@ -1080,6 +1366,32 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
         )}
 
         <FitToNetwork buses={buses as Bus[]} suspended={placing} />
+        <MapHandle onMap={captureMapForMini} />
+        {osmOn && <ViewBoundsWatcher onBounds={onViewBounds} />}
+
+        {/* OSM suggestion layer (plan M3): dimmed, dashed, under everything the
+            model draws. Click a way to adopt it as a branch's route. */}
+        {osmOn && osm && osm.areas.map(a => (
+          <Polygon
+            key={`osm-area-${a.id}`}
+            positions={a.polygon.map(([lng, lat]) => [lat, lng] as [number, number])}
+            pathOptions={{ color: '#64748b', weight: 1, fillColor: '#64748b', fillOpacity: 0.12, dashArray: '3 4' }}
+            interactive={false}
+          >
+            <Tooltip sticky>{a.tags.name ? `${a.tags.name} · ` : ''}substation (OSM)</Tooltip>
+          </Polygon>
+        ))}
+        {osmOn && osm && osm.lines.map(way => (
+          <Polyline
+            key={`osm-way-${way.id}`}
+            positions={way.points.map(([lng, lat]) => [lat, lng] as [number, number])}
+            pathOptions={{ color: '#94a3b8', weight: 3, opacity: 0.55, dashArray: '2 7' }}
+            bubblingMouseEvents={false}
+            eventHandlers={{ click: (e) => offerWay(way, { x: e.containerPoint.x, y: e.containerPoint.y }) }}
+          >
+            <Tooltip sticky>{describeWay(way.kind, way.tags)} · OSM — click to use as a route</Tooltip>
+          </Polyline>
+        ))}
 
         {placing && placingBus && placementUiAllowed && (
           <ClickToPlace onPick={(lat, lng) => {
@@ -1091,6 +1403,18 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
             // advance the queue by exactly one bus.
             if (updateBusPosMut.isPending) return
             updateBusPosMut.mutate({ name: placingBus, lat, lng })
+          }} />
+        )}
+        {toolActive && mapTool === 'addBus' && (
+          <ClickToPlace onPick={(lat, lng) => {
+            if (addBusMut.isPending) return
+            addBusMut.mutate({ name: nextBusName(), lat, lng })
+          }} />
+        )}
+        {toolActive && mapTool === 'placeAll' && (
+          <ClickToPlace onPick={(lat, lng) => {
+            if (placeAllMut.isPending) return
+            placeAllMut.mutate({ lat, lng })
           }} />
         )}
 
@@ -1347,9 +1671,9 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
               key={bus.name}
               position={c}
               draggable
-              icon={busDivIcon(colour, bus.name)}
+              icon={busDivIcon(connectFirst === bus.name ? '#2f81f7' : colour, bus.name)}
               eventHandlers={{
-                click: () => setSelectedComponent({ type: 'Bus', name: bus.name }),
+                click: (e) => onBusClick(bus, e),
                 contextmenu: (e) => {
                   // originalEvent is the underlying DOM mouse event — needed
                   // for client-pixel coords + preventDefault on the native
@@ -1411,6 +1735,15 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
         })}
       </MapContainer>
 
+      {/* Legend + minimap (plan M5), bottom-left above Leaflet's attribution;
+          the minimap steps aside on a narrow canvas like the schematic's. */}
+      <div className="absolute z-[400] flex flex-col items-start gap-2" style={{ left: 10, bottom: 28 }}>
+        {mapHandle && (canvasWidth == null || canvasWidth >= MINIMAP_MIN_CANVAS_PX) && (
+          <MapMiniMap map={mapHandle} tileUrl={ESRI_IMAGERY_URL} />
+        )}
+        <MapLegend linkCarriers={linkCarriers} assetRows={legendAssetRows} />
+      </div>
+
       {/* Map toolbar (recalculate line lengths). Sits over the map at the
           top-left, below the zoom buttons that Leaflet renders on its own. */}
       <div
@@ -1425,7 +1758,93 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
         >
           <Ruler size={14} />
         </button>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={readOnly || importMut.isPending}
+          title="Import geometry: GeoJSON or KML routes and site boundaries (a match report is shown before anything is written)"
+          aria-label="Import geometry"
+          className="w-8 h-8 flex items-center justify-center bg-bg border border-border rounded shadow text-text hover:text-accent hover:border-accent transition-colors disabled:opacity-40"
+        >
+          <Upload size={14} />
+        </button>
+        <input ref={fileInputRef} type="file" accept=".geojson,.json,.kml,application/geo+json,application/json,application/vnd.google-earth.kml+xml" className="hidden" onChange={onImportFile} data-testid="import-geometry-input" />
+        <button
+          type="button"
+          onClick={() => pickTool('addBus')}
+          disabled={readOnly || placing || draw.drawing}
+          title="Add bus: click the map where it stands (auto-named; rename in Properties)"
+          aria-label="Add bus"
+          aria-pressed={mapTool === 'addBus'}
+          className={`w-8 h-8 flex items-center justify-center bg-bg border rounded shadow transition-colors disabled:opacity-40 ${mapTool === 'addBus' ? 'text-accent border-accent' : 'text-text border-border hover:text-accent hover:border-accent'}`}
+        >
+          <Plus size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={() => pickTool('connect')}
+          disabled={readOnly || placing || draw.drawing}
+          title="Connect: click two buses to add a line (length = the chord) or a transformer between them"
+          aria-label="Connect buses"
+          aria-pressed={mapTool === 'connect'}
+          className={`w-8 h-8 flex items-center justify-center bg-bg border rounded shadow transition-colors disabled:opacity-40 ${mapTool === 'connect' ? 'text-accent border-accent' : 'text-text border-border hover:text-accent hover:border-accent'}`}
+        >
+          <Cable size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={toggleOsm}
+          title={osmOn ? 'Hide OSM suggestions' : 'Show OSM power lines and substations as route suggestions (click a way to use it as a route)'}
+          aria-label="OSM suggestions"
+          aria-pressed={osmOn}
+          className={`w-8 h-8 flex items-center justify-center bg-bg border rounded shadow transition-colors ${osmOn ? 'text-accent border-accent' : 'text-text border-border hover:text-accent hover:border-accent'}`}
+        >
+          <Waypoints size={14} />
+        </button>
       </div>
+
+      {/* ODbL attribution, whenever the suggestion layer is on. */}
+      {osmOn && (
+        <div className="absolute z-[900] right-2 text-[10px] px-1.5 py-0.5 rounded bg-bg/90 border border-border text-muted" style={{ bottom: 20 }} data-testid="osm-attribution">
+          Suggestions: {osm?.attribution ?? '© OpenStreetMap contributors (ODbL)'}{osm?.cached ? ' · cached' : ''}
+        </div>
+      )}
+
+      {/* "Use as route for <branch>" — the candidates for a clicked OSM way. */}
+      {osmPick && (
+        <div
+          role="menu"
+          aria-label="Use OSM way as route"
+          className="absolute z-[900] flex flex-col min-w-[14rem] max-w-[22rem] rounded-md border border-border bg-bg shadow-lg text-[12px] overflow-hidden"
+          style={{ left: osmPick.x + 8, top: osmPick.y + 8 }}
+        >
+          <div className="px-2.5 py-1.5 border-b border-border text-muted truncate">{osmPick.way}</div>
+          {osmPick.candidates.slice(0, 5).map(c => (
+            <button
+              key={c.key}
+              type="button"
+              role="menuitem"
+              disabled={readOnly}
+              onClick={() => adoptWay(c)}
+              className="text-left px-2.5 py-1.5 hover:bg-accent/5 text-text disabled:opacity-50"
+              title={`Ends ${Math.round(c.gapM)} m from the buses in total`}
+            >
+              Use as route for <span className="font-mono">{c.label}</span>
+            </button>
+          ))}
+          <button type="button" role="menuitem" onClick={() => setOsmPick(null)} className="text-left px-2.5 py-1.5 hover:bg-accent/5 text-muted border-t border-border">Close</button>
+        </div>
+      )}
+
+      {importPreview && (
+        <ImportGeometryDialog
+          report={importPreview.report}
+          fileName={importPreview.file.name}
+          applying={importMut.isPending}
+          onApply={() => importMut.mutate({ file: importPreview.file, apply: true })}
+          onClose={() => setImportPreview(null)}
+        />
+      )}
 
       {/* Hidden while a slide panel or the command palette is open — both are
           higher-priority z-[500]/z-[300] overlays and the panel's z-[900]
@@ -1436,7 +1855,40 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
           unplacedCount={unplaced.length}
           totalCount={(buses as Bus[]).length}
           placing={placing}
-          onStartPlacing={() => setPlacing(true)}
+          onStartPlacing={() => { setMapTool('none'); setPlacing(true) }}
+          onStartPlacingAll={readOnly || unplaced.length < 2 ? undefined : () => pickTool('placeAll')}
+        />
+      )}
+
+      {/* The active map tool's strip (plan M4): what the next click does. */}
+      {toolActive && !connectDialog && (
+        <div
+          className="absolute z-[900] left-1/2 -translate-x-1/2 flex items-center gap-3 px-3 py-2 bg-bg border border-border rounded-lg shadow-lg text-xs"
+          style={{ bottom: 24 }}
+          data-testid="map-tool-strip"
+        >
+          <span className="text-text">
+            {mapTool === 'addBus' && 'Add bus — click the map where it stands'}
+            {mapTool === 'placeAll' && <>Place all buses — click the grid connection; the other {unplaced.length - 1} land {PLACE_ALL_SPACING_M} m apart around it</>}
+            {mapTool === 'connect' && (connectFirst
+              ? <>Connect — now click the second bus <span className="text-muted">(from <span className="font-mono">{connectFirst}</span>)</span></>
+              : 'Connect — click the first bus')}
+            <span className="text-muted"> · Esc to stop</span>
+          </span>
+          <button type="button" onClick={() => pickTool(mapTool)} className="px-2 py-0.5 border border-border rounded text-muted hover:text-text">Done</button>
+        </div>
+      )}
+      {connectDialog && (
+        <MapConnectDialog
+          source={connectDialog.source}
+          target={connectDialog.target}
+          sourceVNom={busByName.get(connectDialog.source)?.v_nom ?? 0}
+          targetVNom={busByName.get(connectDialog.target)?.v_nom ?? 0}
+          defaultLengthKm={chordKm(connectDialog.source, connectDialog.target)}
+          anchorX={connectDialog.x}
+          anchorY={connectDialog.y}
+          onConfirm={confirmConnection}
+          onClose={() => { setConnectDialog(null); setConnectFirst(null) }}
         />
       )}
 
@@ -1521,6 +1973,32 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
             Placing <span className="font-mono font-medium">{placingBus}</span> — click the map
             <span className="text-muted"> ({unplaced.length} left)</span>
           </span>
+          {geocoder?.configured && (
+            <form
+              className="relative flex items-center gap-1"
+              onSubmit={(e) => { e.preventDefault(); if (address.trim()) geocodeMut.mutate(address.trim()) }}
+            >
+              <input
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="Find an address…"
+                aria-label="Find an address"
+                className="w-44 rounded border border-border bg-bg px-2 py-1 text-[11px] text-text outline-none focus:border-accent"
+              />
+              <button type="submit" disabled={geocodeMut.isPending || !address.trim()} title="Search the address and move the map there" className="p-1 rounded border border-border text-text hover:bg-border/30 disabled:opacity-35">
+                <Search size={12} />
+              </button>
+              {hits.length > 0 && (
+                <ul className="absolute left-0 bottom-full mb-1 w-72 max-h-48 overflow-auto rounded-md border border-border bg-bg shadow-lg text-[11px]" role="listbox">
+                  {hits.map(h => (
+                    <li key={`${h.lat},${h.lon}`}>
+                      <button type="button" role="option" aria-selected={false} onClick={() => flyToHit(h)} className="w-full text-left px-2 py-1 hover:bg-accent/5 text-text truncate" title={h.display_name}>{h.display_name}</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </form>
+          )}
           <button
             type="button"
             onClick={() => setSkippedNames(prev => new Set(prev).add(placingBus))}

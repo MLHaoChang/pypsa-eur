@@ -320,3 +320,100 @@ def prune_site_dirs(
             rmtree(child)
         except OSError as exc:
             log.warning("could not remove orphan site dir %s: %s", child, exc)
+
+
+# ── boundary geometry ───────────────────────────────────────────────────────
+# The backend twin of `frontend/src/site3d/boundary.ts` (`centroid`,
+# `pointInBoundary`, `busesInside`): a GeoJSON import turns a Polygon feature
+# into a site (plan 2, M3), so the server must decide membership and the
+# origin the same way the canvas does. Everything metric is computed on the
+# tangent plane at the polygon's vertex mean (metres), exactly as the
+# frontend does, so the two agree to well under a metre at any site-sized
+# polygon. Pure stdlib — this module stays free of shapely on purpose.
+
+_EARTH_RADIUS_M = 6378137.0
+_M_PER_DEG_LAT = _EARTH_RADIUS_M * math.pi / 180.0
+
+
+def _to_local(origin: tuple[float, float], p: tuple[float, float]) -> tuple[float, float]:
+    """(lng, lat) → metres east / north of `origin`, equirectangular at the origin's latitude."""
+    per_lng = _M_PER_DEG_LAT * math.cos(math.radians(origin[1]))
+    return (p[0] - origin[0]) * per_lng, (p[1] - origin[1]) * _M_PER_DEG_LAT
+
+
+def _from_local(origin: tuple[float, float], p: tuple[float, float]) -> tuple[float, float]:
+    per_lng = _M_PER_DEG_LAT * math.cos(math.radians(origin[1]))
+    return origin[0] + p[0] / per_lng, origin[1] + p[1] / _M_PER_DEG_LAT
+
+
+def centroid(boundary: list[list[float]]) -> tuple[float, float]:
+    """
+    Area-weighted centroid of a lon/lat ring, as `(lng, lat)`. A degenerate
+    (zero-area) ring falls back to the vertex mean so a site never gets a
+    NaN origin — `boundary.ts::centroid`, line for line.
+    """
+    n = len(boundary)
+    mean = (sum(v[0] for v in boundary) / n, sum(v[1] for v in boundary) / n)
+    if n < 3:
+        return mean
+    pts = [_to_local(mean, (v[0], v[1])) for v in boundary]
+    twice = cx = cy = 0.0
+    for i in range(n):
+        ax, ay = pts[i]
+        bx, by = pts[(i + 1) % n]
+        cross = ax * by - bx * ay
+        twice += cross
+        cx += (ax + bx) * cross
+        cy += (ay + by) * cross
+    if abs(twice) < 1e-9:
+        return mean
+    area = twice / 2.0
+    return _from_local(mean, (cx / (6.0 * area), cy / (6.0 * area)))
+
+
+def _on_segment(p, a, b, eps: float = 1e-6) -> bool:
+    cross = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+    if abs(cross) > eps * max(1.0, math.hypot(b[0] - a[0], b[1] - a[1])):
+        return False
+    return (min(a[0], b[0]) - eps <= p[0] <= max(a[0], b[0]) + eps
+            and min(a[1], b[1]) - eps <= p[1] <= max(a[1], b[1]) + eps)
+
+
+def _point_in_polygon_local(p, poly) -> bool:
+    """Ray casting in local metres; a point on an edge or a vertex is inside."""
+    n = len(poly)
+    if n < 3:
+        return False
+    inside = False
+    j = n - 1
+    for i in range(n):
+        a, b = poly[i], poly[j]
+        if _on_segment(p, a, b):
+            return True
+        if (a[1] > p[1]) != (b[1] > p[1]):
+            x = a[0] + (p[1] - a[1]) * (b[0] - a[0]) / (b[1] - a[1])
+            if p[0] < x:
+                inside = not inside
+        j = i
+    return inside
+
+
+def point_in_boundary(lng: float, lat: float, boundary: list[list[float]]) -> bool:
+    """Is the lon/lat point inside (or on) the ring? False for a ring of fewer than three vertices."""
+    if len(boundary) < 3:
+        return False
+    origin = centroid(boundary)
+    poly = [_to_local(origin, (v[0], v[1])) for v in boundary]
+    return _point_in_polygon_local(_to_local(origin, (lng, lat)), poly)
+
+
+def buses_inside(buses: dict[str, tuple[float, float]], boundary: list[list[float]]) -> list[str]:
+    """
+    Names of the PLACED buses (`name → (lng, lat)`; the caller leaves
+    unplaced ones out) inside the ring, in the order given.
+    """
+    if len(boundary) < 3:
+        return []
+    origin = centroid(boundary)
+    poly = [_to_local(origin, (v[0], v[1])) for v in boundary]
+    return [name for name, (lng, lat) in buses.items() if _point_in_polygon_local(_to_local(origin, (lng, lat)), poly)]

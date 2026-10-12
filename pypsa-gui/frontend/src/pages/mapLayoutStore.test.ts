@@ -571,3 +571,27 @@ describe('lifecycle', () => {
     fetchSpy.mockRestore()
   })
 })
+
+describe('reloadFromServer (a geometry import wrote the sidecar, M3)', () => {
+  it('flushes a pending write first, then adopts the server document as clean', async () => {
+    getMapLayout.mockResolvedValue(doc())
+    await useMapLayoutStore.getState().ensureLoaded('p')
+    useMapLayoutStore.getState().setRouteWaypoints('p', 'line:L1', [[4, 4]])
+    const imported = doc({ routes: { 'line:L1': { points: [[1, 1], [2, 2]], source: 'import' }, 'link:K1': { points: [[3, 3]], source: 'import' } } })
+    getMapLayout.mockResolvedValue(imported)
+    await useMapLayoutStore.getState().reloadFromServer('p')
+    expect(putMapLayout).toHaveBeenCalledTimes(1)          // the pending edit reached the server before the re-read
+    expect(putMapLayout.mock.calls[0][1].routes['line:L1'].points).toEqual([[4, 4]])
+    expect(useMapLayoutStore.getState().docFor('p')).toEqual(imported)
+    expect(useMapLayoutStore.getState().dirty['p']).toBeUndefined()
+  })
+
+  it('a clean document is simply re-read', async () => {
+    getMapLayout.mockResolvedValue(doc())
+    await useMapLayoutStore.getState().ensureLoaded('p')
+    getMapLayout.mockResolvedValue(emptyMapLayoutDocument())
+    await useMapLayoutStore.getState().reloadFromServer('p')
+    expect(putMapLayout).not.toHaveBeenCalled()
+    expect(useMapLayoutStore.getState().docFor('p').routes).toEqual({})
+  })
+})

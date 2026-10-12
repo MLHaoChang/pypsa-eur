@@ -195,6 +195,12 @@ interface MapLayoutState {
   applyLengthSources: (project: string | null, sources: Record<string, LengthSource> | undefined) => void
   /** Replace a project's document wholesale. */
   replaceDocument: (project: string | null, doc: MapLayoutDocument) => void
+  /**
+   * The server wrote the document behind our back (a geometry import,
+   * plan M3): fetch it again and adopt it as clean. A pending local write
+   * is NOT discarded — it is flushed first, so neither side loses an edit.
+   */
+  reloadFromServer: (project: string) => Promise<void>
   resetForTests: () => void
 }
 
@@ -315,6 +321,12 @@ export const useMapLayoutStore = create<MapLayoutState>((set, get) => {
       })
     },
     replaceDocument: (project, doc) => write(project, () => doc),
+    reloadFromServer: async project => {
+      const k = keyOf(project)
+      if (get().dirty[k]) await flushPendingMapLayoutToServer(project)
+      const doc = await mapLayoutApi.getMapLayout(project)
+      set(s => ({ docs: { ...s.docs, [k]: doc }, loaded: { ...s.loaded, [k]: true } }))
+    },
     resetForTests: () => {
       for (const t of timers.values()) clearTimeout(t)
       timers.clear()
@@ -385,6 +397,19 @@ export function queueLengthFromGeometry(project: string | null, edgeId: string):
   const set = pendingLengthKeys.get(k) ?? new Set<string>()
   set.add(edgeId)
   pendingLengthKeys.set(k, set)
+}
+
+/**
+ * What follows a route edit besides the write itself: with "Derive lengths
+ * from geometry" on, a Line's or Link's length is queued to follow the route
+ * once the PUT lands; off, NOTHING is written (the discrepancy badge informs
+ * instead). Transformers have a route but no length, and a scratch network
+ * has no server routes to measure. The one gate the map's `updateWaypoints`
+ * applies — pinned by `MapCanvas.editableLine.test.tsx`.
+ */
+export function afterRouteEdit(project: string | null, edgeId: string, deriveLengths: boolean): void {
+  if (!deriveLengths || !project || edgeId.startsWith('tr:')) return
+  queueLengthFromGeometry(project, edgeId)
 }
 
 /** MapCanvas registers what to do with a derivation's result; null unregisters. */
