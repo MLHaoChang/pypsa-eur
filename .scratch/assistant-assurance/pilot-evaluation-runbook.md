@@ -73,3 +73,5 @@ qualitative calibration or independent engineering approval. Broader language,
 domain/browser/voice/report coverage and production release remain pending.
 
 See the committed [validation record](pilot-evaluation-validation.json) for the first integrated run and its explicit remaining scope.
+
+The first user-approved live run passed five goldens (33 result slots) alongside the 53 deterministic cases on pinned source `53f738ca`. See [the live validation](pilot-live-validation.json). This is finite acceptance evidence, not live adverse/population calibration; future paid runs still require their own opt-in.
