@@ -1,6 +1,6 @@
 // Phase 2 plan Tasks 1.1–1.2: the asset library as data, and matching.
 import { describe, it, expect } from 'vitest'
-import { DEFAULT_LIBRARY, validateLibrary, matchType, legendFor, type AssetType, type MatchContext, type MatchComponent } from './assetLibrary'
+import { DEFAULT_LIBRARY, PACKING, validateLibrary, matchType, legendFor, type AssetType, type MatchContext, type MatchComponent } from './assetLibrary'
 import { PLACEABLE_CLASSES } from './types'
 import { PALETTE_ITEM_IDS, paletteDefaults, type PortFilter } from '../layout/paletteData'
 
@@ -207,5 +207,47 @@ describe('legendFor', () => {
     expect(legend.map(e => e.id)).toEqual(['wind', 'bess', 'thermal'].sort((a, b) => order.indexOf(a) - order.indexOf(b)))
     for (const e of legend) expect(e.color).toBe(DEFAULT_LIBRARY.find(t => t.id === e.id)!.color)
     expect(legend.find(e => e.id === 'thermal')!.label).toMatch(/coal/)
+  })
+})
+
+// ── Placement rules (visual-layers plan 3 S2) ─────────────────────────────────
+
+describe('placement rules', () => {
+  const rule = (id: string) => DEFAULT_LIBRARY.find(t => t.id === id)!.placement
+  it('the defaults by type: transformers between their buses facing the far one, feeders in the yard facing far, BESS next to the transformer or yard, gensets and turbines away from halls, H₂ storage away from everything, PV with clearance', () => {
+    expect(rule('transformer')).toMatchObject({ anchor: 'between', orientation: 'faceFar' })
+    expect(rule('feeder')).toMatchObject({ anchor: 'yard', orientation: 'faceFar' })
+    expect(rule('bess')?.adjacentTo).toEqual(['transformer', 'switchyard'])
+    expect(rule('thermal')?.keepOutM).toEqual([{ from: ['load'], m: expect.any(Number) }])
+    expect(rule('gasTurbine')?.keepOutM).toEqual([{ from: ['load'], m: expect.any(Number) }])
+    expect(rule('h2store')?.keepOutM).toEqual([{ from: ['*'], m: expect.any(Number) }])
+    expect(rule('pv')?.clearanceM).toBeGreaterThan(0)
+    // The hall is what the others arrange around: no rule of its own.
+    expect(rule('load')).toBeUndefined()
+  })
+  it('every rule is frozen with the library', () => {
+    for (const t of DEFAULT_LIBRARY) if (t.placement) expect(Object.isFrozen(t.placement), t.id).toBe(true)
+  })
+  it('the packing constants are positive and finite', () => {
+    for (const [k, v] of Object.entries(PACKING)) expect(Number.isFinite(v) && v > 0, k).toBe(true)
+  })
+
+  const bad = (edit: (lib: AssetType[]) => void) => { const lib = clone(DEFAULT_LIBRARY); edit(lib); return () => validateLibrary(lib) }
+  it('rejects an adjacentTo id the library does not define', () => {
+    expect(bad(lib => { lib.find(t => t.id === 'bess')!.placement = { adjacentTo: ['teapot'] } })).toThrow(/bess.*adjacentTo.*teapot/)
+  })
+  it('rejects a keep-out from an unknown type; accepts "*"', () => {
+    expect(bad(lib => { lib.find(t => t.id === 'thermal')!.placement = { keepOutM: [{ from: ['hall'], m: 30 }] } })).toThrow(/thermal.*keepOutM.*hall/)
+    expect(bad(lib => { lib.find(t => t.id === 'thermal')!.placement = { keepOutM: [{ from: ['*'], m: 30 }] } })).not.toThrow()
+  })
+  it('rejects a negative or non-finite distance, naming the field', () => {
+    expect(bad(lib => { lib.find(t => t.id === 'pv')!.placement = { clearanceM: -1 } })).toThrow(/pv.*clearanceM/)
+    expect(bad(lib => { lib.find(t => t.id === 'pv')!.placement = { clearanceM: NaN } })).toThrow(/pv.*clearanceM/)
+    expect(bad(lib => { lib.find(t => t.id === 'h2store')!.placement = { keepOutM: [{ from: ['*'], m: Infinity }] } })).toThrow(/h2store.*keepOutM.*m/)
+    expect(bad(lib => { lib.find(t => t.id === 'pv')!.placement = { clearanceM: 0 } })).not.toThrow()
+  })
+  it('rejects an unknown anchor or orientation', () => {
+    expect(bad(lib => { lib.find(t => t.id === 'pv')!.placement = { anchor: 'roof' as never } })).toThrow(/pv.*anchor/)
+    expect(bad(lib => { lib.find(t => t.id === 'pv')!.placement = { orientation: 'west' as never } })).toThrow(/pv.*orientation/)
   })
 })

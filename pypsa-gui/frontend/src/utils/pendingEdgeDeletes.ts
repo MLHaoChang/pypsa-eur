@@ -98,7 +98,10 @@ export function drainPendingEdgeDeletesForUnload(): PendingEdgeDelete[] {
 export function keepaliveFlushPendingEdgeDeletes(): void {
   for (const { edgeId } of drainPendingEdgeDeletesForUnload()) {
     const isLink = edgeId.startsWith('link-')
-    const name = edgeId.replace(/^(line-|link-)/, '')
+    // An extra-port link edge is `link-<name>#<port>` (pages/topologyEdges);
+    // the suffix names a port of the same Link, not a different component.
+    let name = edgeId.replace(/^(line-|link-)/, '')
+    if (isLink) name = name.replace(/#\d+$/, '')
     const url = `/api/network/${isLink ? 'links' : 'lines'}/${encodeURIComponent(name)}`
     try {
       fetch(url, {

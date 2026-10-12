@@ -58,4 +58,22 @@ describe('UnplacedBusesPanel', () => {
     )
     expect(container.firstChild).toBeNull()
   })
+
+  it('offers "place all around this point" with the campus prompt when the caller provides it (M4)', async () => {
+    const onStartPlacingAll = vi.fn(), onStartPlacing = vi.fn()
+    render(
+      <UnplacedBusesPanel unplacedCount={3} totalCount={3} placing={false} onStartPlacing={onStartPlacing} onStartPlacingAll={onStartPlacingAll} />,
+    )
+    expect(screen.getByText('Place your campus: pick the grid connection on the map')).toBeDefined()
+    await userEvent.click(screen.getByRole('button', { name: /place all buses around this point/i }))
+    expect(onStartPlacingAll).toHaveBeenCalledTimes(1)
+    await userEvent.click(screen.getByRole('button', { name: /place buses one by one/i }))
+    expect(onStartPlacing).toHaveBeenCalledTimes(1)
+  })
+
+  it('without the place-all action the prompt and button are absent', () => {
+    render(<UnplacedBusesPanel unplacedCount={3} totalCount={3} placing={false} onStartPlacing={noop} />)
+    expect(screen.queryByText(/place your campus/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /around this point/i })).toBeNull()
+  })
 })
