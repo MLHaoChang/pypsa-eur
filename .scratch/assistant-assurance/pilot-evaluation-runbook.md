@@ -1,0 +1,75 @@
+# Run the bounded checked-answer evaluation
+
+The gate evaluates 53 versioned requests through the authenticated public stream
+and owned answer API in disposable projects. Every current default metric in all
+five profiles has an independently specified positive expectation. Network
+aggregation uses two generators (300 EUR), generator economics uses one
+(230 EUR), and the StorageUnit trajectory/accounting oracle totals 51 EUR.
+See the [plan](pilot-evaluation-plan.md) and the hand-worked comments in
+[the catalogue](../../pypsa-gui/backend/harness/pilot_evaluation.py).
+
+## Deterministic gate
+
+From the repository root:
+
+```sh
+pixi run gui-pilot-evaluation
+```
+
+Or from `pypsa-gui/backend`, using the configured test Python environment:
+
+```sh
+python tools/run_pilot_evaluation.py --report /tmp/pilot-evaluation.json
+```
+
+The CI backend job runs this before ordinary backend tests and uploads the JSON
+and bounded pytest log, including on failure. Actions must be enabled in the
+repository for that job to execute; local success is not remote CI success.
+The ordinary backend suite also executes the deterministic cases and scorer/
+budget regressions. Its five optional live cases skip without explicit opt-in;
+the standalone default gate does not collect them or count them as passes.
+
+Missing or duplicate IDs, skips, test/fixture/collection errors, wrong results,
+missing positive fulfillment, false accepts/rejects, unchecked publication and
+timeouts produce a nonzero exit. The runner overwrites any prior passed report
+before launch, checkpoints progress and records source commit, a hash of all
+backend Python sources, oracle/manifest/policy versions and separate deterministic
+and live denominators. A report's metrics include scored failing observations;
+unobserved cases remain explicit failures and cannot silently shrink required
+coverage. Zero-denominator rates are null. No report grants runtime approval.
+
+## Optional live evaluation
+
+This command opts into **paid model generation** for the five golden requests:
+
+```sh
+python tools/run_pilot_evaluation.py --report /tmp/pilot-live.json --live --live-model gpt-6.1-sol
+```
+
+It reads the injected `PYPSA_GUI_OPENAI_API_KEY` or existing `OPENAI_API_KEY` in
+memory and uses the official provider adapter. Profiles, database, projects and
+answer records are disposable; existing application settings are not changed.
+No credential is written to a profile/report or printed.
+
+Fixed shared ceilings reserve **every HTTP attempt**, including adapter retries,
+before send: 10 requests, 65,536 serialized payload bytes per request, 512,000
+aggregate input bytes, 2,048 output tokens per request, 20,480 reserved output
+tokens overall, and a 240-second admission deadline. HTTP connect/read timeouts
+are 10/15 seconds; the standalone live process has a 300-second overall deadline
+including fixtures. No reservation is refunded on absent usage, rejection or
+interruption. Inherited pytest worker/selection options are removed so they
+cannot multiply the meter or reduce coverage. The transport refuses redirects
+and non-official destinations. These are resource ceilings, **not a dollar-cost
+quote**; context accounting and provider pricing remain external.
+
+Deterministic output is scripted at the provider seam. Live output is generated
+by the selected model, but only five supported golden cases run live; adverse
+drafts and source defects remain deterministic. Live failure/incomplete execution
+fails the gate, with raw output, prompts and exceptions omitted from the report.
+Without `--live`, live evaluation is explicitly `pending_opt_in`.
+
+This is a finite-suite acceptance gate, not a population error estimate,
+qualitative calibration or independent engineering approval. Broader language,
+domain/browser/voice/report coverage and production release remain pending.
+
+See the committed [validation record](pilot-evaluation-validation.json) for the first integrated run and its explicit remaining scope.
