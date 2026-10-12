@@ -1,6 +1,6 @@
 # IC G3 gate: findings
 
-**Date:** 2026-10-12/13. **Gate head:** GATE_HEAD (`claude/energy-tool-features-research-fdixs0`, master at bf0b6b5f6
+**Date:** 2026-10-12/13. **Gate head:** 669e407df (suite), 44bf43c4e (the round-2 nits: touched tests, QA, vitest, tsc) (`claude/energy-tool-features-research-fdixs0`, master at bf0b6b5f6
 merged in). **Plan:** `docs/superpowers/plans/2026-10-12-ic-g3-campus-route-and-followups.md` (plan PASS round 2,
 code PASS round 2, §6).
 
@@ -53,9 +53,15 @@ code PASS round 2, §6).
   current; one byte added to the study's `campus_investment.csv` → stale naming only `extra_assets`, reverted →
   current; an owner asset's `build_year` → only `owner_assets`; a non-owner asset's → current. A
   `quantity="SECRET_VALUE"` asset through POST, the stored report, GET and the PPA tool: the value appears nowhere.
-- Touched tests: `test_investment_case_campus_route.py` 31 (new), `test_finance_case_extra_assets.py` 44 → 58,
+- Touched tests: `test_investment_case_campus_route.py` 32 (new), `test_finance_case_extra_assets.py` 44 → 58,
   `test_investment_case_runner.py` 23 → 24, `test_investment_case_routes.py` 21 → 23.
-- GATE_EVIDENCE
+- **Gate.**
+  - Backend on 669e407df: **11,746 passed, 282 skipped, 0 failed** (1 h 46 min). The 26 assistant test files that
+    came with master import `jsonschema`, which the local venv lacked (CI installs it through pixi); installed locally,
+    no dependency change in this PR.
+  - On 44bf43c4e (the round-2 nits: a name cut at 80 characters, the seam's `finance` required): the touched
+    backend files plus the facade and tripwire tests **234 passed**; all **31** QA drivers pass
+    (`qa_investment_case.py` 259/259); vitest **3,689** tests in 313 files pass; tsc clean.
 
 ## Known limits (disclosed, not defects)
 

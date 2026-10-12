@@ -158,3 +158,9 @@ vitest, tsc, a findings note, an independent assessor); one PR. The owner merges
   three fakes listed, a same-source test; P2-3 `campus_study_network_unsaved` kept out of the digest; P3-4 `kind_of`
   before the engine check; P3-5 `bool(...)` stored; P3-6 the unsaved test is `is_dirty` or an undo depth above 0,
   the lock object closed over.
+- **Code round 1: PASS**, 2 P2 / 4 P3: exception and value text in refusal details (fixed: fixed text plus the
+  asset's name, values logged); tests for a malformed response, a rejected asset and the PPA path through the real
+  `build()` (added); a wrong test comment, the stale labels in words, the seam taking the caller's finance inputs
+  (fixed); the per-GET hash of `network.nc` (a known limit in the findings note).
+- **Code round 2: PASS**, 2 P3, both fixed: an asset name cut at 80 characters in a detail; the seam's `finance`
+  required.
