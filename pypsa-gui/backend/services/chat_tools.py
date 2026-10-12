@@ -1025,6 +1025,11 @@ def batch_create_components(component_class: str, components: list[dict]) -> dic
         name = entry.get("name")
         if not name or not isinstance(name, str):
             raise HTTPException(400, f"entry {i} has no 'name'")
+        # OPEN-ITEMS item 8, in pass 1 so a bad entry refuses the whole batch
+        # (each create would also refuse it, but only after earlier ones landed).
+        from services.component_names import require_valid_name
+
+        require_valid_name(name, component_class=component_class)
         if name in existing:
             raise HTTPException(
                 409, f"entry {i}: {component_class} {name!r} already exists",
@@ -5312,6 +5317,8 @@ def reconstruct_network_from_image(
     # the existing create_component helper so the lineage / undo /
     # change_log machinery fires uniformly. Track created names so the
     # response can report them.
+    from services.component_names import name_problem
+
     created_buses: list[str] = []
     created_lines: list[str] = []
     n = PyPSAService.get_network()
@@ -5323,6 +5330,9 @@ def reconstruct_network_from_image(
                 bname = str(b.get("name") or "").strip()
                 if not bname or bname in existing_bus_names or bname.startswith("ic:"):
                     continue  # `ic:` is reserved (P2 WP2.2-0)
+                if name_problem(bname) is not None:  # OPEN-ITEMS item 8
+                    logger.warning("vision: bus name refused: %s", ascii(bname)[:80])
+                    continue
                 px = float(b.get("px") or 0.0)
                 py = float(b.get("py") or 0.0)
                 gx = (px - origin_x) * scale_x
@@ -5342,6 +5352,9 @@ def reconstruct_network_from_image(
                 bus0 = str(ln.get("bus0") or "").strip()
                 bus1 = str(ln.get("bus1") or "").strip()
                 if not lname or lname in existing_line_names:
+                    continue
+                if name_problem(lname) is not None:  # OPEN-ITEMS item 8
+                    logger.warning("vision: line name refused: %s", ascii(lname)[:80])
                     continue
                 if bus0 not in n.buses.index or bus1 not in n.buses.index:
                     logger.warning(

@@ -26,6 +26,7 @@ from services.asset_schema.derive import (
 )
 from services.asset_schema.schema import CLASS_ATTR
 from services.carrier_catalog import ensure_carrier
+from services.component_names import require_valid_name
 from services.pypsa_service import PyPSAService
 from services.serialization import df_to_json
 from services.study_state import refuse_edit_during_live_study
@@ -315,6 +316,8 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
     # /bulk writes, rename, and global-constraint mutations all benefit
     # without each having to call an invalidation helper here.
     n = PyPSAService.get_network()
+    # OPEN-ITEMS item 8: the character class of a NEW name, for every class.
+    require_valid_name(name, component_class=component_class)
     if component_class == "Bus":
         from services.commercial.settlement_inputs import reserved_bus_name
 
@@ -523,6 +526,10 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         merged, current_parts = split_parts(component_class, merged)
         parts = {**current_parts, **submitted_parts}
         _check_investment_parts(component_class, parts, max_hours=merged.get("max_hours"))
+        if merged.get("name", name) != name:
+            # OPEN-ITEMS item 8. Before `ensure_carrier`, which can add a
+            # carrier: a refused rename must leave nothing behind.
+            require_valid_name(merged["name"], component_class=component_class)
         if component_class != "Carrier":
             ensure_carrier(n, merged.get("carrier", ""))
         new_name = merged.pop("name", name)

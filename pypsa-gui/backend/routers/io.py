@@ -239,6 +239,17 @@ def _refuse_reserved_buses(n) -> None:
         raise HTTPException(422, f"bus names starting 'ic:' are reserved: {bad[:5]}")
 
 
+def _refuse_invalid_names(n) -> None:
+    """OPEN-ITEMS item 8: an imported network may not bring in a name the
+    create routes would refuse. The import is undone and refused, as above."""
+    from services.component_names import invalid_names_in_network, refuse_invalid_names
+
+    bad = invalid_names_in_network(n)
+    if bad:
+        _reset_with_ts_clear()
+        refuse_invalid_names(bad)
+
+
 @router.post("/import/netcdf")
 async def import_netcdf(
     file: UploadFile = File(...),
@@ -256,6 +267,7 @@ async def import_netcdf(
             with PyPSAService.get_netcdf_io_lock():
                 PyPSAService.import_network_from_netcdf(n, tmp)
                 _refuse_reserved_buses(n)
+                _refuse_invalid_names(n)
     finally:
         tmp.unlink(missing_ok=True)
     summary = _build_summary(n)
@@ -283,6 +295,7 @@ async def import_csv(
             n = PyPSAService.get_network()
             n.import_from_csv_folder(tmpdir)
             _refuse_reserved_buses(n)
+            _refuse_invalid_names(n)
             from services.adequacy.eh_columns import normalise_eh_columns
             normalise_eh_columns(n)
     summary = _build_summary(n)
@@ -335,6 +348,7 @@ async def import_excel(
                         except Exception:
                             pass
         _refuse_reserved_buses(n)
+        _refuse_invalid_names(n)
         # P14: typed eh_* tags (a sheet's TRUE/1/blank → bool; netCDF-safe).
         from services.adequacy.eh_columns import normalise_eh_columns
         normalise_eh_columns(n)
@@ -359,6 +373,7 @@ async def import_matpower(
         n = PyPSAService.get_network()
         _parse_matpower(n, data)
         _refuse_reserved_buses(n)
+        # No `_refuse_invalid_names`: every MATPOWER name is built from an int.
     summary = _build_summary(n)
     change_log_service.log(
         "import", "Network", file.filename or "network.m",
