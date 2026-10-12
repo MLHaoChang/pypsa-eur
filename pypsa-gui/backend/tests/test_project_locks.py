@@ -474,6 +474,52 @@ def test_put_layout_409s_under_a_foreign_lock(session_local):
         assert "lock" in exc.value.detail
 
 
+# `put_map_layout` (visual layers plan 2, M1) is the map view's twin of
+# `put_layout`: the map PUTs on every waypoint drag-settle, so it is a CHECK
+# for the same reason. Same two properties, same style.
+
+_EMPTY_MAP_LAYOUT = {"version": 1, "routes": {}, "bubbles": {}}
+
+
+def test_put_map_layout_checks_the_lock_without_acquiring_it(session_local):
+    from routers.projects import put_map_layout
+    from services import project_locks
+
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+
+    with session_local() as db:
+        assert project_locks.get_lock(db, project.id) is None
+        put_map_layout(project.name, dict(_EMPTY_MAP_LAYOUT), db=db, user=db.get(User, user_a.id))
+        assert project_locks.get_lock(db, project.id) is None, (
+            "put_map_layout must not become the lock holder"
+        )
+
+
+def test_put_map_layout_409s_under_a_foreign_lock(session_local):
+    from fastapi import HTTPException
+
+    from routers.projects import put_map_layout
+    from services import project_locks
+
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+
+    with session_local() as db:
+        assert project_locks.acquire_lock(db, project.id, user_b.id) is not None
+        with pytest.raises(HTTPException) as exc:
+            put_map_layout(project.name, dict(_EMPTY_MAP_LAYOUT), db=db, user=db.get(User, user_a.id))
+        assert exc.value.status_code == 409
+        assert exc.value.detail["error_kind"] == "project_locked"
+        assert "lock" in exc.value.detail
+
+
 def test_empty_scenario_metadata_patch_does_not_take_the_lock(session_local):
     from models.schemas import UpdateScenarioRequest
     from routers.projects import update_scenario_metadata
@@ -607,3 +653,130 @@ def test_check_project_lock_passes_the_holders_own_lock(session_local):
     with session_local() as db:
         assert acquire_lock(db, project.id, holder.id) is not None
         _check_project_lock(db, project, holder)   # must not raise
+
+
+def test_put_sites_409s_under_a_foreign_lock(session_local):
+    """
+    The 3D site sidecar's write route is gated exactly like the layout's:
+    CHECK-ONLY, never acquiring, 409 `project_locked` under a foreign lock.
+    Plan: docs/superpowers/plans/2026-09-29-3d-site-view-phase1.md, Task 1.3.
+    """
+    from fastapi import HTTPException
+
+    from routers.projects import get_sites, put_sites
+    from services import project_locks
+
+    doc = {
+        "version": 1,
+        "sites": [{
+            "id": "s1", "name": "S", "buses": [],
+            "boundary": [[0.0, 0.0], [0.01, 0.0], [0.01, 0.01]],
+            "origin": {"lng": 0.005, "lat": 0.003}, "placements": {},
+        }],
+    }
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+
+    with session_local() as db:
+        assert project_locks.acquire_lock(db, project.id, user_b.id) is not None
+        with pytest.raises(HTTPException) as exc:
+            put_sites(project.name, doc, db=db, user=db.get(User, user_a.id))
+        assert exc.value.status_code == 409
+        assert exc.value.detail["error_kind"] == "project_locked"
+        # Reads are never gated.
+        assert get_sites(project.name, db=db, user=db.get(User, user_a.id)) == {"version": 1, "sites": []}
+        # And the write never became the lock holder.
+        assert project_locks.get_lock(db, project.id).holder_user_id == user_b.id
+
+
+def test_site_context_writes_409_under_a_foreign_lock(session_local, monkeypatch):
+    """POST/DELETE `/sites/{id}/context` are lock-CHECKED like `put_sites`; GET is not."""
+    from fastapi import HTTPException
+
+    from routers.projects import delete_site_context, fetch_site_context, get_site_context, put_sites
+    from services import project_locks, site_context as sc
+
+    doc = {
+        "version": 1,
+        "sites": [{
+            "id": "s1", "name": "S", "buses": [],
+            "boundary": [[0.0, 0.0], [0.01, 0.0], [0.01, 0.01]],
+            "origin": {"lng": 0.005, "lat": 0.003}, "placements": {},
+        }],
+    }
+    calls = []
+    monkeypatch.setattr(sc, "fetch_context", lambda boundary, **kw: calls.append(boundary) or {"version": 1})
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+
+    with session_local() as db:
+        a = db.get(User, user_a.id)
+        put_sites(project.name, doc, db=db, user=a)
+        assert project_locks.acquire_lock(db, project.id, user_b.id) is not None
+        for handler in (fetch_site_context, delete_site_context):
+            with pytest.raises(HTTPException) as exc:
+                handler(project.name, "s1", db=db, user=a)
+            assert exc.value.status_code == 409
+            assert exc.value.detail["error_kind"] == "project_locked"
+        assert calls == []
+        with pytest.raises(HTTPException) as exc:
+            get_site_context(project.name, "s1", db=db, user=a)
+        assert exc.value.status_code == 404  # a cache miss, not a lock
+        assert project_locks.get_lock(db, project.id).holder_user_id == user_b.id
+
+
+def test_site_thumbnail_put_409s_under_a_foreign_lock(session_local):
+    """PUT `/sites/{id}/thumbnail` (plan 3 S5) is lock-CHECKED like `put_sites`; GET is not."""
+    import asyncio
+
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    from routers.projects import get_site_thumbnail, put_site_thumbnail, put_sites
+    from services import project_locks
+
+    doc = {
+        "version": 1,
+        "sites": [{
+            "id": "s1", "name": "S", "buses": [],
+            "boundary": [[0.0, 0.0], [0.01, 0.0], [0.01, 0.01]],
+            "origin": {"lng": 0.005, "lat": 0.003}, "placements": {},
+        }],
+    }
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+
+    def request_with(body: bytes) -> Request:
+        async def receive():
+            return {"type": "http.request", "body": body, "more_body": False}
+        scope = {"type": "http", "method": "PUT", "path": "/", "query_string": b"",
+                 "headers": [(b"content-type", b"image/png")]}
+        return Request(scope, receive)
+
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+
+    with session_local() as db:
+        a = db.get(User, user_a.id)
+        put_sites(project.name, doc, db=db, user=a)
+        assert project_locks.acquire_lock(db, project.id, user_b.id) is not None
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(put_site_thumbnail(project.name, "s1", request_with(png), db=db, user=a))
+        assert exc.value.status_code == 409
+        assert exc.value.detail["error_kind"] == "project_locked"
+        # Nothing was written, reads are not gated, and the lock holder is unchanged.
+        with pytest.raises(HTTPException) as exc:
+            get_site_thumbnail(project.name, "s1", db=db, user=a)
+        assert exc.value.status_code == 404
+        assert project_locks.get_lock(db, project.id).holder_user_id == user_b.id

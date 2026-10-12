@@ -8,6 +8,7 @@ from models.schemas import (
     CarrierCreate,
     GeneratorCreate,
     ImpedanceRescaleRequest,
+    LengthsFromGeometryRequest,
     LineCreate,
     LinkCreate,
     LoadCreate,
@@ -128,6 +129,7 @@ from services.network_lines import (  # noqa: F401
     apply_recalculate_line_lengths,
     apply_rescale_impedances,
 )
+from services.network_lengths import apply_lengths_from_geometry
 from services.network_global_constraints import (  # noqa: F401
     apply_create_global_constraint,
     apply_delete_global_constraint,
@@ -337,6 +339,16 @@ def recalculate_line_lengths():
 def rescale_impedances(req: ImpedanceRescaleRequest):
     """Write consented impedance values after a length rewrite."""
     return apply_rescale_impedances(req)
+
+
+@router.post("/lengths/from_geometry")
+def lengths_from_geometry(req: LengthsFromGeometryRequest):
+    """
+    Rewrite Line / Link lengths from the project's map geometry — the routed
+    polyline when there is one, else the chord — and return rescale previews
+    (plan M2). Lock-gated by the `/api/network/` foreign-lock middleware.
+    """
+    return apply_lengths_from_geometry(req.keys)
 
 
 # ── Links ────────────────────────────────────────────────────────────────────

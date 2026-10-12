@@ -6,6 +6,10 @@
 <!-- Upcoming Release -->
 <!-- ================= -->
 
+* Feat(pypsa-gui): Expand the checked-answer CI gate to 133 deterministic cases with varied load, weight, price and storage-efficiency oracles. Add offline blind review preparation and calibration reports requiring two agreeing independently attested reviewers, explicit unresolved/missing/error counts and conditional statistical intervals. Synthetic evidence cannot certify production error rates or confer domain approval.
+
+* Feat(pypsa-gui): Add a repeatable checked-answer pilot evaluation gate with independent generator, network and StorageUnit oracles across all five supported profiles. Fail on incomplete coverage, incorrect publication or missing useful results; record versioned denominators and source identity. Add optional live-model golden cases with shared pre-send resource ceilings. The backend CI job retains reports; finite-suite acceptance does not imply production calibration or engineering approval.
+
 * Feat(pypsa-gui): Add an explicit "Check answers" chat option for the bounded assurance pilot. Keep checking on retries, edits, clarification choices and queued/voice requests; withhold output until the server acknowledges the requested checks and approves the exact answer. Availability rollback cannot silently send an ordinary request. Preserve a conservative retry-policy hint for unavailable checked history; deployment defaults remain disabled.
 
 * Fix(pypsa-gui): Rehydrate discussed run references onto a new chat episode when resuming a durable parent thread, so export and follow-ups still target the discussed run after restart instead of requiring a fresh `discuss_project_run`.

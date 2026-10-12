@@ -6,6 +6,11 @@ max case gives Ik'' and the peak ip; the min case gives Ik''. Every unit in
 whatever its dispatch, because a converter or a running genset feeds the
 fault whether or not it is producing. Every other unit is out.
 
+Since island plan I5 the net comes from ``island_sc.machine_net``: a genset
+is a synchronous machine behind x''d with IEC's K_G (or K_S behind its own
+unit transformer), not a current source of 1/x''d, and a GFM converter feeds
+its current limit ``i_max_pu`` instead of ``k_sc``.
+
 A bus (or the PCC) with ``ik_rated_ka`` is judged by ``judge``:
 
 * Ik'' max must not exceed the rated short-time current;
@@ -20,11 +25,12 @@ than passed.
 The calculation runs on a copy; ``campus.net`` is not changed. Allowed to
 import pandapower (``static/``).
 """
-import copy
 import math
 
 import pandapower.shortcircuit as sc
 import pandas as pd
+
+from gridspine.static.island_sc import machine_net
 
 #: Rated peak withstand current over rated short-time current (IEC 62271-1).
 PEAK_FACTOR = {50: 2.5, 60: 2.6}
@@ -47,9 +53,7 @@ def campus_fault_levels(campus, installed) -> pd.DataFrame:
     """One row per bus: ``bus``, ``vn_kv``, ``ikss_max_ka``, ``ip_max_ka``,
     ``ikss_min_ka``, ``rated_ka``, ``rating_source``, ``adequate``,
     ``detail``."""
-    net = copy.deepcopy(campus.net)
-    installed = set(installed)
-    net.sgen["in_service"] = net.sgen["name"].astype(str).isin(installed)
+    net = machine_net(campus, installed)
     sc.calc_sc(net, case="max", ip=True)
     ik_max = net.res_bus_sc["ikss_ka"].copy()
     ip_max = net.res_bus_sc["ip_ka"].copy()
