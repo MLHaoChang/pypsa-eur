@@ -3,6 +3,13 @@
 
 # Answer-assurance acceptance coverage ledger
 
+The current continuation adds a [pilot evaluation catalogue and report gate](pilot-evaluation-runbook.md):
+53 required cases, every default metric in the five bounded profiles, independent
+230/300/51 EUR oracles and six model-draft defects plus stale/missing/unsupported
+data and cost-basis clarification. Optional live generation covers only five
+positive golden cases and remains a separate opt-in. Full P7 coverage,
+qualitative/population calibration and independent domain review remain open.
+
 Status: bounded shared-harness contracts implemented for scoped generator/network
 and storage calculations, retained runs/comparisons, checked publication/artifacts, confirmed
 static-input effects, mounted-view acknowledgements and live conversation carryover. See

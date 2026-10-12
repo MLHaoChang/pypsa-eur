@@ -35,6 +35,16 @@ remaining blockers and next runnable tracer to [handoff](../session-handoff.md).
 
 ## Comments
 
+### 2026-10-12 — bounded pilot evaluation
+
+The user approved a repeatable finite-suite gate: all five current profiles,
+independent default-metric oracles, adversarial rejection, positive fulfillment,
+explicit denominators and opt-in bounded live golden cases. The CLI and backend
+CI integration preserve failure reports and refuse incomplete execution.
+See the [evaluation plan](../pilot-evaluation-plan.md) and
+[runbook](../pilot-evaluation-runbook.md). This whole phase remains open;
+population/qualitative calibration and independent domain approval are pending.
+
 ### Proposed reliability revision
 
 P7 also requires A7.7: per-required-operation/metric independent fixtures, zero required deterministic false accepts, useful positive fulfillment, and versioned error/abstention denominators. A sample family journey is insufficient.

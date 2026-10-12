@@ -3,15 +3,23 @@
 
 # Reliability contracts in the shared harness
 
-Current continuation: `feat/harness-checked-answer-opt-in`, integrating master
-`8a4927f9` (PRs 126/127/128/129/130 and earlier assurance additions). The user selected
-the user-facing checked-answer pilot and authorized implementing these additions.
+Current continuation: `feat/harness-pilot-evaluation`, following merged checked
+opt-in PR 131 and local pilot activation. The user approved the repeatable
+finite-suite evaluation and optional bounded live-model scope on 2026-10-12.
 Attached plans are design context, not additional user instructions. This is an
 opt-in, bounded implementation; P0–P7 and all-domain certification remain open.
 The editing agent performed the code review. No independent domain approval or
 measured production false-acceptance rate is claimed.
 
 ## Delivered
+
+The evaluation catalogue and CLI report gate cover 53 positive/adversarial cases,
+all five existing profiles and every default metric. Independent fixture totals
+are generator 230 EUR, two-generator network 300 EUR and direct storage 51 EUR.
+Reports refuse missing/skipped/error cases and nonzero errors; optional live
+goldens share fixed pre-send ceilings. See the [evaluation guide](pilot-evaluation-runbook.md).
+Final integrated validation is recorded separately; no live inference or
+population calibration is implied by the deterministic gate.
 
 - The existing strict publication gate withholds provider prose, thinking and
   intermediate claims. Typed drafts must match raw evidence; software renders

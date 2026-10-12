@@ -1,0 +1,263 @@
+"""Independent finite-suite labels and scoring; no runtime approval authority."""
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+import hashlib
+import json
+import math
+import threading
+import time
+
+from harness.protocol import ProviderError
+
+SUITE_VERSION = "checked-pilot-evaluation/1"
+ORACLE_VERSION = "hand-worked-two-network-oracles/1"
+UNSAFE = "Unchecked invented narrative: the network is certified safe at 999 MW."
+
+# Independent arithmetic, never populated from the calculation implementation.
+# Generator: 5*2+7*1=17 MWh; 17*10=170 EUR; max(5,7)=7 MW;
+# 20 MW*3 EUR/MW/year=60 EUR/year; full-year allocation; total 230 EUR.
+GENERATOR = {
+    "dispatch_energy": (17, "MWh"), "marginal_expenditure": (170, "EUR"),
+    "peak_dispatch": (7, "MW"), "annual_fixed_cost": (60, "EUR/year"),
+    "allocated_fixed_cost": (60, "EUR"), "total_cost": (230, "EUR"),
+}
+# Network: cap G1 at 5 MW; a second 10 MW generator at 20 EUR/MWh supplies
+# the last 2 MW. Energy=17; expenditure=15*10+2*20=190; annual=20*3+10*5=110;
+# total=300 EUR. This distinguishes network aggregation from one generator.
+NETWORK = {**GENERATOR, "marginal_expenditure": (190, "EUR"),
+           "annual_fixed_cost": (110, "EUR/year"), "allocated_fixed_cost": (110, "EUR"),
+           "total_cost": (300, "EUR")}
+# Storage: charge 5*2*.8=8 MWh, discharge 2/.5 twice -> states 8,4,0;
+# grid charge 10 MWh, discharge 4 MWh. Costs use objective weights 1,3,1:
+# 0*99+2*2*3+2*4=20; 8*.5+4*1*3=16; annual 10*3=30;
+# half allocated=15; direct total=20+16+15=51 EUR (not purchase cost).
+STORAGE = {
+    "charged_energy": (10, "MWh"), "discharged_energy": (4, "MWh"),
+    "net_storage_energy": (-6, "MWh"), "peak_charging_power": (5, "MW"),
+    "peak_discharging_power": (2, "MW"), "final_state_of_charge": (0, "MWh"),
+    "storage_discharge_expenditure": (20, "EUR"),
+    "storage_holding_expenditure": (16, "EUR"),
+    "storage_operating_expenditure": (36, "EUR"),
+    "annual_fixed_cost": (30, "EUR/year"), "allocated_fixed_cost": (15, "EUR"),
+    "total_cost": (51, "EUR"),
+}
+PROFILE_METRICS = {
+    "generator-dispatch/1": tuple(GENERATOR)[:3],
+    "generator-cost/1": tuple(GENERATOR),
+    "network-linear-cost/1": tuple(GENERATOR),
+    "storage-unit-dispatch/1": tuple(STORAGE)[:6],
+    "storage-unit-cost/1": tuple(STORAGE),
+}
+
+
+@dataclass(frozen=True)
+class Case:
+    id: str
+    profile: str
+    fault: str
+    question: str
+    expected: dict[str, tuple[float, str]]
+    unavailable: tuple[str, ...] = ()
+    clarification: bool = False
+
+    @property
+    def valid(self):
+        return not self.unavailable and not self.clarification
+
+    @property
+    def entity(self):
+        return "Battery" if self.profile.startswith("storage-") else "network" if self.profile.startswith("network-") else "G1"
+
+
+def catalogue():
+    cases = []
+    for profile, metrics in PROFILE_METRICS.items():
+        storage = profile.startswith("storage-")
+        cost = "cost" in profile
+        entity = "storage unit Battery" if storage else "network" if profile.startswith("network-") else "generator G1"
+        question = f"Give me the key results for {entity}"
+        if cost:
+            question += "; price year 2026; annual fixed cost fraction " + ("0.5" if storage else "1")
+        values = STORAGE if storage else NETWORK if profile.startswith("network-") else GENERATOR
+        expected = {metric: values[metric] for metric in metrics}
+        cases.append(Case(profile + ":golden", profile, "golden", question, expected))
+        for fault in ("value", "unit", "formula", "source", "omit", "narrative"):
+            cases.append(Case(profile + ":" + fault, profile, fault, question, {}, metrics))
+        target = "total_cost" if cost else "discharged_energy" if storage else "dispatch_energy"
+        for fault in ("missing", "stale"):
+            cases.append(Case(profile + ":" + fault, profile, fault, question, {}, (target,)))
+        cases.append(Case(profile + ":unsupported", profile, "unsupported", question, expected, ("adequacy_certificate",)))
+        if cost:
+            cases.append(Case(profile + ":basis", profile, "basis", f"Show total cost for {entity}", {}, ("total_cost",), True))
+    return tuple(cases)
+
+
+CASES = catalogue()
+GOLDEN_CASES = tuple(case for case in CASES if case.fault == "golden")
+MANIFEST_SHA256 = hashlib.sha256(json.dumps([asdict(case) for case in CASES], sort_keys=True).encode()).hexdigest()
+
+
+def score(case: Case, frames: list, answer: dict, *, project_id=None) -> dict:
+    """Score the public result independently; never trust a passed verdict alone."""
+    failures = set()
+    text = "".join(data.get("delta", "") for event, data in frames if event == "token")
+    approvals = [(index, data) for index, (event, data) in enumerate(frames) if event == "answer_approved"]
+    inits = [data for event, data in frames if event == "session_init"]
+    done = [data for event, data in frames if event == "turn_done"]
+    token_indices = [index for index, (event, _) in enumerate(frames) if event == "token"]
+    done_indices = [index for index, (event, _) in enumerate(frames) if event == "turn_done"]
+    unsafe = any(event == "thinking" for event, _ in frames) or UNSAFE in json.dumps(frames)
+    if len(approvals) != 1:
+        failures.add("approval_count")
+        unsafe |= bool(text)
+        approved = {}
+    else:
+        position, approved = approvals[0]
+        unsafe |= any(event == "token" for event, _ in frames[:position])
+        if done_indices and token_indices and done_indices[0] <= max(token_indices):
+            unsafe = True
+    if unsafe:
+        failures.add("unchecked_publication")
+    receipt = approved.get("receipt", {})
+    if (len(inits) != 1 or inits[0].get("assurance") != {"version": 1, "mode": "strict", "state": "checking"}
+        or len(done) != 1 or not approved.get("answer_id") or done[0].get("answer_id") != approved.get("answer_id")):
+        failures.add("stream_contract")
+    if (len(inits) != 1 or not inits[0].get("turn_id") or inits[0].get("turn_id") != approved.get("turn_id")
+        or not inits[0].get("session_id") or answer.get("turn_id") != approved.get("turn_id")):
+        failures.add("turn_binding")
+    if (not text.strip() or receipt.get("content_sha256") != hashlib.sha256(text.encode()).hexdigest()
+        or answer.get("answer_id") != approved.get("answer_id") or answer.get("receipt") != receipt):
+        failures.add("owned_answer_or_digest")
+    scope = receipt.get("request_scope", {})
+    if scope.get("profile") != case.profile or scope.get("entity_id") != case.entity:
+        failures.add("profile_mismatch")
+    if project_id is not None and (scope.get("project_id") != project_id or answer.get("project_id") != project_id):
+        failures.add("project_binding")
+    if "cost" in case.profile and not case.clarification:
+        basis = {"currency": "EUR", "price_year": 2026,
+                 "annual_fixed_cost_fraction": 0.5 if case.profile.startswith("storage-") else 1}
+        if scope.get("cost_basis") != basis:
+            failures.add("cost_basis")
+    slots = receipt.get("result_slots", [])
+    metrics = [slot.get("metric") for slot in slots]
+    required = set(case.expected) | set(case.unavailable)
+    if len(metrics) != len(set(metrics)) or set(metrics) != required:
+        failures.add("required_slots")
+    blocks = answer.get("blocks", [])
+    observed = [block.get("metric") for block in blocks]
+    incorrect = 0
+    fulfilled = 0
+    for block in blocks:
+        label = case.expected.get(block.get("metric"))
+        value = block.get("value")
+        good = (label is not None and block.get("entity_id") == case.entity and type(value) in (int, float) and math.isfinite(value)
+                and math.isclose(value, label[0], rel_tol=1e-9, abs_tol=1e-9) and block.get("unit") == label[1])
+        incorrect += not good
+        fulfilled += good
+    answered = {slot.get("metric") for slot in slots if slot.get("disposition") == "answered"}
+    if len(observed) != len(set(observed)) or set(observed) != answered:
+        failures.add("slot_block_mismatch")
+    if incorrect:
+        failures.add("incorrect_calculation")
+    if answered != set(case.expected) or fulfilled != len(case.expected):
+        failures.add("fulfillment")
+    unavailable_slots = [slot for slot in slots if slot.get("metric") in case.unavailable]
+    disposition = "needs_clarification" if case.clarification else "unavailable"
+    if any(slot.get("disposition") != disposition for slot in unavailable_slots):
+        failures.add("invalid_slot_accepted")
+    complete = receipt.get("request_complete") is True
+    if complete != case.valid or approved.get("verdict") != ("passed" if case.valid else "limited"):
+        failures.add("verdict_or_completeness")
+    false_accept = not case.valid and (complete or bool(answered & set(case.unavailable)) or bool(incorrect))
+    false_reject = case.valid and (not complete or fulfilled != len(case.expected))
+    return {
+        "case_id": case.id, "profile": case.profile, "fault": case.fault, "scored": True,
+        "failures": sorted(failures), "valid_request": case.valid,
+        "false_accept": bool(false_accept), "false_reject": bool(false_reject),
+        "incorrect_calculations": int(incorrect), "published_calculations": len(blocks),
+        "fulfilled_slots": int(fulfilled), "expected_slots": len(case.expected),
+        "unavailable_slots": sum(slot.get("disposition") != "answered" for slot in slots),
+        "required_slots": len(required), "unchecked_publication": bool(unsafe),
+    }
+
+
+def report(results, *, live=False, execution_failed=False):
+    """Absent/duplicate/skipped cases cannot shrink the required denominator."""
+    required = [(case.id, "deterministic") for case in CASES]
+    if live:
+        required += [(case.id, "live") for case in GOLDEN_CASES]
+    keys = [(result["case_id"], result["mode"]) for result in results]
+    missing = [list(key) for key in required if key not in keys]
+    duplicate = len(keys) != len(set(keys))
+    unexpected = any(key not in required for key in keys)
+    groups = {}
+    for mode in ("deterministic", "live"):
+        scored = [r for r in results if r["mode"] == mode and r.get("scored") is True]
+        def rate(numerator, denominator):
+            return {"count": numerator, "denominator": denominator, "rate": numerator / denominator if denominator else None}
+        groups[mode] = {
+            "scored_cases": len(scored),
+            "false_acceptance": rate(sum(r["false_accept"] for r in scored), sum(not r["valid_request"] for r in scored)),
+            "false_rejection": rate(sum(r["false_reject"] for r in scored), sum(r["valid_request"] for r in scored)),
+            "incorrect_calculations": rate(sum(r["incorrect_calculations"] for r in scored), sum(r["published_calculations"] for r in scored)),
+            "fulfillment": rate(sum(r["fulfilled_slots"] for r in scored), sum(r["expected_slots"] for r in scored)),
+            "abstention": rate(sum(r["unavailable_slots"] for r in scored), sum(r["required_slots"] for r in scored)),
+            "unchecked_publication": rate(sum(r["unchecked_publication"] for r in scored), len(scored)),
+        }
+    passed = bool(results) and not (missing or duplicate or unexpected or execution_failed) and all(
+        result.get("execution") == "passed" and not result.get("failures")
+        and not any(result.get(key) for key in ("false_accept", "false_reject", "incorrect_calculations", "unchecked_publication"))
+        and result.get("fulfilled_slots") == result.get("expected_slots") for result in results
+    )
+    return {"version": 1, "suite": SUITE_VERSION, "oracle": ORACLE_VERSION,
+            "manifest_sha256": MANIFEST_SHA256, "passed": passed,
+            "required_cases": len(required), "missing_cases": missing,
+            "duplicate_cases": duplicate, "unexpected_cases": unexpected,
+            "execution_failed": execution_failed, "results": results, "metrics": groups,
+            "live_requested": live,
+            "live_status": ("evaluated" if groups["live"]["scored_cases"] == len(GOLDEN_CASES) else "incomplete") if live else "pending_opt_in",
+            "claim_scope": "finite_suite_only", "independent_domain_approval": False,
+            "population_error_estimate": None}
+
+
+class LiveBudget:
+    """Fixed, monotonic pre-send ceilings; no refund on missing usage or retries."""
+
+    REQUEST_LIMIT = 10
+    PER_REQUEST_BYTES = 65536
+    INPUT_BYTES_LIMIT = 512000
+    PER_REQUEST_OUTPUT = 2048
+    OUTPUT_LIMIT = 20480
+    SECONDS = 240
+
+    def __init__(self):
+        self.requests = self.input_bytes = self.output_reserved = 0
+        self.started = time.monotonic()
+        self.on_change = None
+        self.lock = threading.RLock()
+
+    def reserve(self, input_bytes, output_tokens):
+        with self.lock:
+            self._reserve(input_bytes, output_tokens)
+
+    def _reserve(self, input_bytes, output_tokens):
+        if (type(input_bytes) is not int or not 0 < input_bytes <= self.PER_REQUEST_BYTES
+            or type(output_tokens) is not int or not 0 < output_tokens <= self.PER_REQUEST_OUTPUT
+            or self.requests >= self.REQUEST_LIMIT
+            or self.input_bytes + input_bytes > self.INPUT_BYTES_LIMIT
+            or self.output_reserved + output_tokens > self.OUTPUT_LIMIT
+            or time.monotonic() - self.started >= self.SECONDS):
+            raise ProviderError("invalid_request", "pilot evaluation budget refused before send")
+        self.requests += 1
+        self.input_bytes += input_bytes
+        self.output_reserved += output_tokens
+        if self.on_change:
+            self.on_change()
+
+    def snapshot(self):
+        with self.lock:
+            return {"requests": self.requests, "input_bytes": self.input_bytes,
+                "output_tokens_reserved": self.output_reserved,
+                "request_limit": self.REQUEST_LIMIT, "input_bytes_limit": self.INPUT_BYTES_LIMIT,
+                "output_tokens_limit": self.OUTPUT_LIMIT, "wall_seconds_limit": self.SECONDS}

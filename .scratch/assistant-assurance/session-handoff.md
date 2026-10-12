@@ -3,8 +3,8 @@
 
 # Assistant assurance continuation handoff
 
-Status: delivered StorageUnit reliability continuation on `feat/harness-checked-storage-results`,
-based on merged PR 123/master `fabda836`. Historical sections below describe earlier
+Status: pilot evaluation continuation on `feat/harness-pilot-evaluation`, following
+merged opt-in PR 131 and isolated local activation. Historical sections below describe earlier
 states and commands. The current [implementation status](implementation-status.md)
 and [API contracts](harness-contracts.md) supersede them. Independent domain/release
 approval remains pending.
