@@ -6,31 +6,33 @@ import json
 import httpx
 import pytest
 
-from harness.pilot_evaluation import CASES, GOLDEN_CASES, LiveBudget, report, score
+from harness.pilot_evaluation import CASES, GOLDEN_CASES, LiveBudget, public_label, report, score
 from harness.protocol import ProviderError
 from harness.providers.pilot_evaluation import bounded_provider, reserve_request
 from tests.test_openai_compatibility import request, sse
 
 
 def observation(case):
-    text = "Independent checked fixture result."
+    text = "\n".join(["Independent checked fixture result."] + [
+        f"{public_label(case, metric)}: {value} {unit}." for metric, (value, unit) in case.expected.items()])
     scope = {"profile": case.profile, "entity_id": case.entity}
     if "cost" in case.profile and not case.clarification:
         scope["cost_basis"] = {"currency": "EUR", "price_year": 2026,
                                "annual_fixed_cost_fraction": 0.5 if case.profile.startswith("storage-") else 1}
     receipt = {"request_scope": scope, "request_complete": case.valid,
+               "policy_version": "1",
                "content_sha256": hashlib.sha256(text.encode()).hexdigest(),
                "result_slots": [{"metric": metric, "disposition": "answered"} for metric in case.expected]
                     + [{"metric": metric, "disposition": "needs_clarification" if case.clarification else "unavailable"} for metric in case.unavailable]}
-    answer = {"answer_id": "owned-answer", "turn_id": "owned-turn", "receipt": receipt,
+    answer = {"version": 1, "text": text, "answer_id": "owned-answer", "turn_id": "owned-turn", "receipt": receipt,
               "blocks": [{"entity_id": case.entity, "metric": metric, "value": value, "unit": unit} for metric, (value, unit) in case.expected.items()]}
-    approved = {"answer_id": "owned-answer", "turn_id": "owned-turn", "receipt": receipt, "verdict": "passed" if case.valid else "limited"}
+    approved = {"version": 1, "answer_id": "owned-answer", "turn_id": "owned-turn", "receipt": receipt, "verdict": "passed" if case.valid else "limited"}
     frames = [("session_init", {"turn_id": "owned-turn", "session_id": "owned-session", "assurance": {"version": 1, "mode": "strict", "state": "checking"}}),
               ("answer_approved", approved), ("token", {"delta": text}), ("turn_done", {"answer_id": "owned-answer"})]
     return frames, answer
 
 
-@pytest.mark.parametrize("corrupt", ["value", "unit", "bool", "entity", "turn", "missing", "duplicate", "all_abstain", "early_token", "late_token", "digest"])
+@pytest.mark.parametrize("corrupt", ["value", "unit", "bool", "entity", "turn", "missing", "duplicate", "all_abstain", "early_token", "late_token", "digest", "rendered_value"])
 def test_corrupt_passed_receipt_cannot_satisfy_gate(corrupt):
     case = GOLDEN_CASES[0]
     frames, answer = observation(case)
@@ -52,6 +54,10 @@ def test_corrupt_passed_receipt_cannot_satisfy_gate(corrupt):
         frames.insert(1, ("token", {"delta": "Unapproved 999 MW"}))
     elif corrupt == "late_token":
         frames.append(("token", {"delta": "Unapproved 999 MW"}))
+    elif corrupt == "rendered_value":
+        text = answer["text"].replace("17 MWh", "999 MWh")
+        answer["text"] = frames[2][1]["delta"] = text
+        answer["receipt"]["content_sha256"] = hashlib.sha256(text.encode()).hexdigest()
     else:
         answer["receipt"]["content_sha256"] = "incorrect"
     assert score(case, frames, answer)["failures"]
@@ -100,6 +106,18 @@ def test_default_report_does_not_claim_live_calibration():
     assert value["live_status"] == "pending_opt_in"
     assert value["population_error_estimate"] is None
     assert not value["independent_domain_approval"]
+
+
+def test_unavailable_receipt_cannot_hide_a_published_numerical_claim():
+    case = next(case for case in CASES if case.fault == "value")
+    frames, answer = observation(case)
+    text = "Generator energy: 999 MWh."
+    answer["text"] = frames[2][1]["delta"] = text
+    answer["receipt"]["content_sha256"] = hashlib.sha256(text.encode()).hexdigest()
+    result = score(case, frames, answer)
+    assert result["false_accept"]
+    assert result["incorrect_calculations"] == result["published_calculations"] == 1
+    assert "unavailable_result_published" in result["failures"]
 
 
 @pytest.mark.parametrize("counter", ["false_accept", "false_reject", "incorrect_calculations", "unchecked_publication"])

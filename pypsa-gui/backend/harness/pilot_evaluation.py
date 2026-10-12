@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 import hashlib
 import json
 import math
+import re
 import threading
 import time
 
@@ -49,6 +50,24 @@ PROFILE_METRICS = {
     "storage-unit-dispatch/1": tuple(STORAGE)[:6],
     "storage-unit-cost/1": tuple(STORAGE),
 }
+# These are public contract labels, not calculated values from the runtime.
+LABELS = {
+    "dispatch_energy": "Generator energy", "marginal_expenditure": "Marginal dispatch expenditure",
+    "peak_dispatch": "Peak generator output", "annual_fixed_cost": "Annual fixed capacity cost",
+    "allocated_fixed_cost": "Allocated fixed capacity cost", "total_cost": "Total cost on the declared basis",
+    "charged_energy": "Charging energy (grid side)", "discharged_energy": "Discharged energy (grid side)",
+    "net_storage_energy": "Net discharged grid energy", "peak_charging_power": "Peak charging power",
+    "peak_discharging_power": "Peak discharging power", "final_state_of_charge": "Stored energy at window end",
+    "storage_discharge_expenditure": "StorageUnit discharge expenditure",
+    "storage_holding_expenditure": "StorageUnit holding expenditure",
+    "storage_operating_expenditure": "Direct StorageUnit operating expenditure",
+}
+
+
+def public_label(case, metric):
+    if metric == "total_cost" and case.profile == "storage-unit-cost/1":
+        return "Total direct StorageUnit cost on the declared basis"
+    return LABELS.get(metric, metric)
 
 
 @dataclass(frozen=True)
@@ -127,8 +146,10 @@ def score(case: Case, frames: list, answer: dict, *, project_id=None) -> dict:
         or not inits[0].get("session_id") or answer.get("turn_id") != approved.get("turn_id")):
         failures.add("turn_binding")
     if (not text.strip() or receipt.get("content_sha256") != hashlib.sha256(text.encode()).hexdigest()
-        or answer.get("answer_id") != approved.get("answer_id") or answer.get("receipt") != receipt):
+        or answer.get("text") != text or answer.get("answer_id") != approved.get("answer_id") or answer.get("receipt") != receipt):
         failures.add("owned_answer_or_digest")
+    if approved.get("version") != 1 or answer.get("version") != 1 or receipt.get("policy_version") != "1":
+        failures.add("unsupported_policy")
     scope = receipt.get("request_scope", {})
     if scope.get("profile") != case.profile or scope.get("entity_id") != case.entity:
         failures.add("profile_mismatch")
@@ -153,6 +174,12 @@ def score(case: Case, frames: list, answer: dict, *, project_id=None) -> dict:
         value = block.get("value")
         good = (label is not None and block.get("entity_id") == case.entity and type(value) in (int, float) and math.isfinite(value)
                 and math.isclose(value, label[0], rel_tol=1e-9, abs_tol=1e-9) and block.get("unit") == label[1])
+        if good:
+            lines = re.findall(r"(?m)^" + re.escape(public_label(case, block["metric"]))
+                + r": ([-+\d.eE]+) " + re.escape(label[1]) + r"\.$", text)
+            good = len(lines) == 1 and math.isclose(float(lines[0]), label[0], rel_tol=1e-9, abs_tol=1e-9)
+            if not good:
+                failures.add("rendered_result")
         incorrect += not good
         fulfilled += good
     answered = {slot.get("metric") for slot in slots if slot.get("disposition") == "answered"}
@@ -163,6 +190,12 @@ def score(case: Case, frames: list, answer: dict, *, project_id=None) -> dict:
     if answered != set(case.expected) or fulfilled != len(case.expected):
         failures.add("fulfillment")
     unavailable_slots = [slot for slot in slots if slot.get("metric") in case.unavailable]
+    phantom_calculations = 0
+    for metric in case.unavailable:
+        if re.search(r"(?m)^" + re.escape(public_label(case, metric)) + r": [-+\d.eE]+ \S+\.$", text):
+            incorrect += 1
+            phantom_calculations += 1
+            failures.add("unavailable_result_published")
     disposition = "needs_clarification" if case.clarification else "unavailable"
     if any(slot.get("disposition") != disposition for slot in unavailable_slots):
         failures.add("invalid_slot_accepted")
@@ -175,7 +208,7 @@ def score(case: Case, frames: list, answer: dict, *, project_id=None) -> dict:
         "case_id": case.id, "profile": case.profile, "fault": case.fault, "scored": True,
         "failures": sorted(failures), "valid_request": case.valid,
         "false_accept": bool(false_accept), "false_reject": bool(false_reject),
-        "incorrect_calculations": int(incorrect), "published_calculations": len(blocks),
+        "incorrect_calculations": int(incorrect), "published_calculations": len(blocks) + phantom_calculations,
         "fulfilled_slots": int(fulfilled), "expected_slots": len(case.expected),
         "unavailable_slots": sum(slot.get("disposition") != "answered" for slot in slots),
         "required_slots": len(required), "unchecked_publication": bool(unsafe),
