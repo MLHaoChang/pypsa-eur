@@ -546,8 +546,10 @@ def extra_owner_assets(project) -> list:
     ``upfront_per_unit`` is the library's ``capex_eur_per_km`` for a cable and
     ``capex_eur`` otherwise. ``meta`` is what the IC does not take:
     ``provenance`` is the source tag of that cost in the library (``measured``,
-    ``datasheet`` or ``assumed``) and ``illustrative`` is True when it is
-    ``assumed``. An engine kind that ``IC_KIND`` does not list is refused with
+    ``datasheet``, ``literature`` or ``assumed``) and ``illustrative`` is True
+    when it is ``assumed``. A ``literature`` cost is a cited reference value,
+    not a quote, and is not illustrative: in the defaults pack's sense that flag
+    means "not taken from a cited source". An engine kind that ``IC_KIND`` does not list is refused with
     422 naming it.
 
     Read from the run directory: ``campus_investment.csv`` (the items, their
