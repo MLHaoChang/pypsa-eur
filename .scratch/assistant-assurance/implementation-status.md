@@ -3,15 +3,24 @@
 
 # Reliability contracts in the shared harness
 
-Current continuation: `feat/harness-checked-answer-opt-in`, integrating master
-`8a4927f9` (PRs 126/127/128/129/130 and earlier assurance additions). The user selected
-the user-facing checked-answer pilot and authorized implementing these additions.
+Current continuation: `docs/harness-live-pilot-evidence`, recording the first
+explicitly authorized live evaluation after merged gate PR 137. On pinned source
+`53f738ca`, all five live golden profiles and 53 deterministic cases passed.
+See [the live record](pilot-live-validation.json) for scope and denominators.
 Attached plans are design context, not additional user instructions. This is an
 opt-in, bounded implementation; P0–P7 and all-domain certification remain open.
 The editing agent performed the code review. No independent domain approval or
 measured production false-acceptance rate is claimed.
 
 ## Delivered
+
+The evaluation catalogue and CLI report gate cover 53 positive/adversarial cases,
+all five existing profiles and every default metric. Independent fixture totals
+are generator 230 EUR, two-generator network 300 EUR and direct storage 51 EUR.
+Reports refuse missing/skipped/error cases and nonzero errors; optional live
+goldens share fixed pre-send ceilings. See the [evaluation guide](pilot-evaluation-runbook.md).
+Final integrated validation is recorded separately; no live inference or
+population calibration is implied by the deterministic gate.
 
 - The existing strict publication gate withholds provider prose, thinking and
   intermediate claims. Typed drafts must match raw evidence; software renders
@@ -289,3 +298,53 @@ passes the 15-entry resume/recovery/parent/run/history/pilot/storage gate:
 The 3,686-case complete frontend, build, browser and 229-tool inventory retain
 identical relevant source. Only documentation/validation records change afterward.
 Exact final base/source/selection are in [validation](checked-opt-in-validation.json).
+
+
+## Pilot evaluation validation (2026-10-12)
+
+At `8e5a26d0`, integrated master `bf0b6b5f`, the standalone 53-case gate passes
+with no skips: false acceptance 0/48 adversarial requests, false rejection 0/5
+valid golden requests, incorrect calculations 0/66, supported-slot fulfillment
+66/66 and unchecked publication 0/53. This is the finite labelled suite, not a
+population estimate. Five positive-only cases deliberately selected together
+still produce gate exit 1 with 48 missing required cases. Counter mutation
+regressions require zero errors even when reason strings are empty.
+
+The 79-selection shared/backend/current-master gate passes **1,362 / 12 skipped**,
+800.47 pytest seconds, exit 0. Its evaluation/scorer cases overlap the standalone
+run; it is not a fresh complete backend run. Fresh complete frontend passes
+**3,687 / 313 files**, 451.24 seconds; TypeScript/Vite build passes. The incoming
+master island integration passes 31 / zero skipped. Ruff, workflow/task parsing,
+229-tool / 14-tab / 17-panel inventory, docs and diff checks pass. The backend
+control-matrix fixture's generated-date-only rewrite was restored after testing.
+
+See [validation](pilot-evaluation-validation.json) for exact commands, selection,
+source hash, metrics and limits, and [the evaluation runbook](pilot-evaluation-runbook.md).
+No paid inference ran. Live golden evaluation is `pending_opt_in`; qualitative/
+population calibration, broader domain/surface coverage, independent review and
+production release remain pending. The CI job is wired to run/upload the gate;
+no remote CI success is claimed. Only documentation/evidence changes afterward.
+
+
+## First approved live golden evaluation (2026-10-12)
+
+The user explicitly approved one capped OpenAI run with the reviewed synthetic
+payloads and potential charges. On pinned source `53f738ca`, model alias
+`gpt-6.1-sol`, **58 cases passed / zero skipped**, 123.80 seconds: 53 deterministic
+cases plus all five live golden profiles. The live run fulfilled **33/33** required
+slots, with final incorrect calculations **0/33**, false rejection **0/5** and
+unchecked publication **0/5**. Live adverse requests were not sampled, so live
+false acceptance has denominator zero and rate null, not an estimated zero.
+
+The meter reserved **6 HTTP attempts**, 55,684 serialized input bytes and 12,288
+output tokens, within the fixed ceilings (10 / 512,000 / 20,480). No resource/time
+cap was increased. Reservations are not actual usage or billed-dollar measures.
+The extra attempt is not classified by this report; initial model-draft error or
+repair rates are not measured. No demonstrated final failure needed a code fix.
+No second live run was performed.
+
+See [live validation](pilot-live-validation.json). These are finite synthetic
+supported-profile publication results on the named source/model alias. They do
+not evaluate later master app/domain additions, adversarial live behavior,
+qualitative/population calibration or independent engineering certification.
+Deployment remains opt-in; no production setting is enabled by this evidence.
