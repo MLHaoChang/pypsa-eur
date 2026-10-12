@@ -486,6 +486,22 @@ energy-hub templates".
   `assumed` in the island sidecar's provenance), with a test that its
   rating covers the IT peak.
 
+### S0 as built (2026-10-07)
+
+- `_base()` sets `objective` and `generators` to 52.14 and `stores` to 1.0.
+  Annual cost and energy are unchanged; a snapshot's state-of-charge step is
+  now one hour of power.
+- **The UPS is 40 MW / 0.25 h (10 MWh)** (owner, sixth round): a realistic
+  15-minute autonomy. It covers the 600 s bridge (about 6.3 MWh at 36 MW and
+  95 %), and it does not arbitrage like a large battery.
+- The SCR comment no longer counts the UPS as inverter-based: its rectifier
+  feeds no fault upstream, as in I1. The `eh_ibr_mva` value is unchanged.
+- **Tests:**
+  - every template pins `stores == 1`, and a solved template's state of
+    charge moves by exactly one hour of power per snapshot;
+  - the UPS covers the IT peak and the bridge.
+- Nothing else in the backend reads the `stores` weighting.
+
 ### I2a: ride-through, fuel and bridge reserve in the hub LP — step 1 (M)
 
 New module: `services/solver/island.py`, an `extra_functionality` wrapper
@@ -919,6 +935,45 @@ includes the losses and the UPS state after the event.
   - the frequency-watt units sit on their law at that Δf;
   - the gate is run on a case where a unit saturates.
 - Mutations.
+
+### I4 as built (2026-10-07)
+
+**`gridspine/static/island_flow.py`**
+- `island_flow(campus, rows, online=None, settings=...)` returns an
+  `IslandFlow`: `viable`, `reason`, `df_hz`, `delta_p_ac_mw`, the units,
+  buses, transformers and cables, `sync` (Δf, ΔV at the PCC), and
+  `label = "steady-state screening"`.
+- `island_net` builds the net for inspection, and `check_gate` is the
+  per-unit gate.
+- **The Q laws are gridspine's own** (Q(U), fixed cos φ, cos φ(P)), not
+  pandapower's `DERController`. They are three short functions, tested
+  against their curves. So `QModelCosphiP`'s sin φ (spike 5) is never on the
+  path, and the planned pin test is not needed.
+- **Q sharing through x_v** goes as 1 / (x_v + the tie to the load) on the
+  unit base. The plan's "∝ 1/k_q" holds only with no tie. The test uses the
+  exact form: 2.55 and 2.055 for the two ties, both by hand.
+- **The current limit is judged at the terminal voltage**, not behind x_v.
+  The limited source then carries `i_max · S_n · V_t` at the voltage it ends
+  up at, as part of the fixed point. Building this found the bug of using
+  the auxiliary bus's 1 pu.
+- **Gensets have a P range, not a current limit.** Their overload shows in
+  `loading_pct` and the verdict. The verdict checks, in order: no reference,
+  every reference saturated, convergence, voltage band, overload.
+- `online` picks the units in the island; a unit outside it is out of
+  service. A UPS keeps its battery dispatch and never forms the island.
+
+**`control_law_flow` (I4b)**
+- The hour stays grid-connected: GFM converters sit behind x_v at their
+  dispatched P and V0, GFL units follow their law, and gensets stay in
+  power-factor control.
+- **Without island data it equals today's campus flow**, which the test
+  pins. The comparison with the MILP's free Q is left to the driver that
+  joins the two (I9).
+
+**Tests**
+- 31 tests, each worked by hand.
+- Mutation testing: 29 of 29 mutants killed. The first round left 8
+  survivors, closed by new tests and one dead line removed.
 
 ### I5: short circuit by control mode, grid-connected and islanded — step 3b (M–L)
 
