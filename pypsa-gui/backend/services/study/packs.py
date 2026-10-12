@@ -95,7 +95,8 @@ from services.study import library as study_library
 from services.study import questions as Q
 
 __all__ = [
-    "HOURS", "LOAD_UNITS", "LoadUpload", "PackError", "PACK_META_KEY", "battery_capital_cost_eur_per_mw",
+    "HOURS", "LOAD_UNITS", "LoadUpload", "PackError", "PACK_META_KEY", "TARIFF_ON_ENGINE", "TARIFF_ON_KEY",
+    "battery_capital_cost_eur_per_mw",
     "battery_fom_eur_per_mw", "battery_parts", "battery_upfront_eur_per_mw", "bind_option",
     "build_site_network",
     "effective_tariff", "option_commercial", "intake_tariff", "ledger_hash", "ledger_values",
@@ -105,6 +106,14 @@ __all__ = [
 
 HOURS = 8760
 PACK_META_KEY = "decision_study_pack"
+# The engine mark (final U2 gate, U2): every network the study writes since U2
+# says where its tariff lives — on the engine, priced at solve from the
+# config, never on the meter Links. `pre_u2` refuses only pack networks
+# WITHOUT it, so a price a user later types on a meter Link of a post-U2
+# network is an ordinary Expert edit. Inside the pack record, so it travels
+# wherever the pack marker does (netCDF, Save-As, scenario, bundle).
+TARIFF_ON_KEY = "tariff_on"
+TARIFF_ON_ENGINE = "engine"
 IMPORT_LINK = "grid_import"
 EXPORT_LINK = "grid_export"
 GRID_SUPPLY = "grid_supply"
@@ -606,7 +615,8 @@ def build_site_network(intake: Mapping[str, Any] | None,
     The network of one option of the site question (see the module
     docstring for every rule). ``option_id="none"`` is the grid-only
     baseline. The pack's provenance (option, ledger hash, cost bases,
-    upfront figures, honesty notes) is written to ``n.meta[PACK_META_KEY]``,
+    upfront figures, honesty notes, and the engine mark
+    ``TARIFF_ON_KEY: TARIFF_ON_ENGINE``) is written to ``n.meta[PACK_META_KEY]``,
     which survives the netCDF round trip.
     """
     intake = intake or {}
@@ -718,6 +728,7 @@ def build_site_network(intake: Mapping[str, Any] | None,
         "cost_basis": cost_basis,
         "upfront_eur_per_mw": upfront,
         "honesty_notes": notes,
+        TARIFF_ON_KEY: TARIFF_ON_ENGINE,
     }
     return n
 

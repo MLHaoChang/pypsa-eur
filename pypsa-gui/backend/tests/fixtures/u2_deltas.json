@@ -697,7 +697,7 @@
    "post": 377879.66506250005,
    "abs": 6.528930891712662,
    "rel": 1.7278102800720715e-05,
-   "cause": "lp_degenerate_dispatch_ties: since U2 WP10 the golden dispatch is the engine's solve (GS's is deleted). Under the DE seed it was solved on, the energy price is flat, so equal-cost dispatches tie: against GS's, 22 hours shifted by at most 0.369 MW, with the same import and export MWh and the same monthly peaks (the DE bill and the objective are equal within tolerance). The TOU seed rates those hours at different band prices, so its energy line moves; nothing is priced differently (plan §9 R4)"
+   "cause": "lp_degenerate_dispatch_ties: since U2 WP10 the golden dispatch is the engine's solve (GS's is deleted). Under the DE seed it was solved on, the energy price is flat, so equal-cost dispatches tie: against GS's, the import Link shifts in 22 hours by at most 0.369 MW and the export Link in 38 hours by at most 0.549 MW (the battery in 60 hours), with the same import and export MWh and the same monthly peaks (the DE bill and the objective are equal within tolerance). The TOU seed rates those hours at different band prices, so its energy line moves; nothing is priced differently (plan §9 R4)"
   },
   {
    "test": "test_u2_pre_numbers_recorded.py::test_both_seed_bills_on_the_golden_dispatch_reproduce",
@@ -706,7 +706,7 @@
    "post": 367646.67743842344,
    "abs": 6.528930891712662,
    "rel": 1.7759025825164754e-05,
-   "cause": "lp_degenerate_dispatch_ties: since U2 WP10 the golden dispatch is the engine's solve (GS's is deleted). Under the DE seed it was solved on, the energy price is flat, so equal-cost dispatches tie: against GS's, 22 hours shifted by at most 0.369 MW, with the same import and export MWh and the same monthly peaks (the DE bill and the objective are equal within tolerance). The TOU seed rates those hours at different band prices, so its energy line moves; nothing is priced differently (plan §9 R4)"
+   "cause": "lp_degenerate_dispatch_ties: since U2 WP10 the golden dispatch is the engine's solve (GS's is deleted). Under the DE seed it was solved on, the energy price is flat, so equal-cost dispatches tie: against GS's, the import Link shifts in 22 hours by at most 0.369 MW and the export Link in 38 hours by at most 0.549 MW (the battery in 60 hours), with the same import and export MWh and the same monthly peaks (the DE bill and the objective are equal within tolerance). The TOU seed rates those hours at different band prices, so its energy line moves; nothing is priced differently (plan §9 R4)"
   },
   {
    "test": "test_u2_pre_numbers_recorded.py::test_both_seed_bills_on_the_golden_dispatch_reproduce",
@@ -715,7 +715,7 @@
    "post": 367646.67743842344,
    "abs": 6.528930891712662,
    "rel": 1.7759025825164754e-05,
-   "cause": "lp_degenerate_dispatch_ties: since U2 WP10 the golden dispatch is the engine's solve (GS's is deleted). Under the DE seed it was solved on, the energy price is flat, so equal-cost dispatches tie: against GS's, 22 hours shifted by at most 0.369 MW, with the same import and export MWh and the same monthly peaks (the DE bill and the objective are equal within tolerance). The TOU seed rates those hours at different band prices, so its energy line moves; nothing is priced differently (plan §9 R4)"
+   "cause": "lp_degenerate_dispatch_ties: since U2 WP10 the golden dispatch is the engine's solve (GS's is deleted). Under the DE seed it was solved on, the energy price is flat, so equal-cost dispatches tie: against GS's, the import Link shifts in 22 hours by at most 0.369 MW and the export Link in 38 hours by at most 0.549 MW (the battery in 60 hours), with the same import and export MWh and the same monthly peaks (the DE bill and the objective are equal within tolerance). The TOU seed rates those hours at different band prices, so its energy line moves; nothing is priced differently (plan §9 R4)"
   }
  ]
 }

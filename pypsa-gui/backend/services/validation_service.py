@@ -1708,9 +1708,11 @@ def _zero_cost_generators(n) -> list[str]:
     indeterminate.
 
     Also exempt (decision study S4, review v2 N2-v2): a site's grid supply
-    is a zero-cost Generator BY DESIGN — the tariff is priced on the
-    import/export Links — so a Generator tagged `eh_role=grid_supply` is not
-    an indeterminate cost-less unit.
+    is a zero-cost Generator BY DESIGN — since U2 WP6 the tariff lives in the
+    solver config's commercial block, and the engine prices it on the meter
+    Links for each solve only (`lp_bindings.materialise_poc_prices`; nothing
+    is stored on the Links) — so a Generator tagged `eh_role=grid_supply` is
+    not an indeterminate cost-less unit.
     """
     g = n.generators
     if g.empty or "capital_cost" not in g.columns or "marginal_cost" not in g.columns:

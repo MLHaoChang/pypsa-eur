@@ -1,10 +1,11 @@
 # U2: the guided investment study runs on the Investment Case engine only
 
-**Status:** WP0–WP10 done on `claude/edge-tool-ux-research-n0n2l6`. WP10 (this note) is uncommitted at the time of writing; the owner validates and commits it. Every work package up to WP9 passed its assessor gate (GO with binding conditions, each closed in the next package); WP10's gate is pending. WP10's evidence: the study and shared-file test set 1264 green (1262 + 2 re-run after a helper fix), the slow driver re-derivation included; `qa_decision_study.py` 67/67, `marginal` / `bess_1h` / `["demand_charge_price"]`; vitest (decision pages, utils) 536 passed; `tsc -b` clean. Not yet done: the master merge right before the PR, and the CI-level checks (the full backend suite, all three QA drivers).
+**Status:** WP0–WP10 done on `claude/edge-tool-ux-research-n0n2l6`. WP10 is committed as `0c31b1b6`; master `fceb886e` (#101 the 2026-10-07 defaults pack, #135, #100 and others) is merged into the branch as `61e09fae`. Every work package passed its assessor gate (GO with binding conditions, each closed in the next package).
+**Final gate:** `docs/superpowers/notes/2026-10-12-u2-final-gate.md`, GO with binding conditions U1–U3. U1 (the pre-U2 fixture's two netCDFs were gitignored and never committed, so 8 of the 10 W4 tests failed on a clean checkout) is fixed in `80730434` (`git add -f`). U2 (the W4 refusal must be true on every network it refuses) and U3 (these records) are fixed in the change after it (see W4 below). Post-merge evidence at the gate, on a clean `git archive` of `61e09fae`: the study and shared-file set 1155 passed, 9 failed (8 = U1; 1 = master's own `test_packaging_requirements` failure, `tools/pilot_evaluation_plugin.py` importing `pytest` unguarded, which fails identically on `fceb886e`), 1 skipped; `qa_decision_study.py` 67/67 (`marginal` / `bess_1h` / `["demand_charge_price"]`), `qa_investment_case.py` 259/259, `qa_value_flows.py` 235/235; vitest (decision pages, utils) 50 files, 569 passed; `tsc -b` clean. Left before the PR: the full backend suite on a clean checkout, `pixi run gui-qa-drivers`, an owner for master's red packaging test, and the owner items below.
 **Date:** 2026-10-12
 **Plan:** `docs/superpowers/plans/2026-10-05-guided-study-u2-engine-rewire.md` (the per-package status blocks are the detailed record; this note is the summary)
 **Parent plan:** `docs/superpowers/plans/2026-10-05-one-investment-engine-two-faces.md` (§4 C1–C6, §5 U2, §6 the facade)
-**Gate notes:** `docs/superpowers/notes/2026-10-0{6,7,8}-u2-*-gate.md`, `2026-10-12-u2-wp9-gate.md`
+**Gate notes:** `docs/superpowers/notes/2026-10-0{6,7,8}-u2-*-gate.md`, `2026-10-12-u2-wp9-gate.md`, `2026-10-12-u2-final-gate.md` (WP10, the merge and U2 as a whole)
 **Before U2:** `docs/superpowers/findings/2026-09-28-guided-investment-study-mvp1.md`
 
 ## What U2 set out to do
@@ -29,7 +30,9 @@ MVP-1 gave the guided study its own engine: a bill calculator, the tariff writte
 | WP7 | `7b3452ed`, `48d023c9` | The case on the finance engine: C1 (the battery's two upfront parts), C2 (remaining-life terminal value), C4 (real basis), C5 (bounds from the one `FinanceCase`) |
 | WP8 | `b4c2da53`, `90f4fabf` | Findings, tornado, runner and routes on the engine; `compiled_hash` and the stale path; pack seeding; §5.4 vocabulary rename with read-compat |
 | WP9 | `ce717d09`, `14d0281f` | The workbooks: IC's own workbook plus the guided sheets (the live-formula view over the engine's cash series) |
-| **WP10** | uncommitted | Deleted GS's engine; W4; the QA driver's judging rule; golden, packaging; the WP9 gate's V1–V3; this note |
+| **WP10** | `0c31b1b6` | Deleted GS's engine; W4; the QA driver's judging rule; golden, packaging; the WP9 gate's V1–V3; this note |
+| Merge | `61e09fae` | master `fceb886e` (#101, #135, #100 and others); conflicts in `routers/projects.py` and `AppHeader.tsx`, both sides kept |
+| Final gate | `80730434`, then the U2/U3 change | U1: the pre-U2 fixture committed; U2: the engine mark and a true W4 message; U3: records |
 
 ## WP10: what was deleted, and what replaced it
 
@@ -57,7 +60,15 @@ Measured on the stored pre-U2 fixture (`tests/fixtures/pre_u2_fork/`, written by
 | re-saved (the field dropped) | 27,248 | **12,600 EUR cheaper, silently** |
 | a commercial block added in Expert | 79,696 | the tariff charged twice |
 
-**Design.** Refuse, typed, in preflight. `services/study/pre_u2.py` recognises a decision-study pack network (`n.meta["decision_study_pack"]`) whose meter Links carry a non-zero price, static or per snapshot. `validation_service.validate_for_run` reports it as the error `study_network_tariff_in_links`, so both the pre-run check and every solve (`run_simulation` runs the same preflight) refuse it with a plain sentence ending "Re-run the study…". The network is the witness, not the config, because the config forgets. A network the study writes today never matches (the pack writes no price since WP6), and a network without the pack marker is the user's own tariff.
+**Design.** Refuse, typed, in preflight. `services/study/pre_u2.py` recognises a decision-study pack network (`n.meta["decision_study_pack"]`) **without the engine mark** whose meter Links carry a non-zero price, static or per snapshot. `validation_service.validate_for_run` reports it as the error `study_network_tariff_in_links`, so both the pre-run check and every solve (`run_simulation` runs the same preflight) refuse it. The network is the witness, not the config, because the config forgets. A network without the pack marker is the user's own tariff.
+
+**The engine mark (final gate, U2).** At WP10 the detector keyed on "pack marker + priced meter Link", and a post-U2 study network has the same pack marker: a Save-As of a post-U2 fork, priced by hand on `grid_import`, was refused as "built by an earlier version… Re-run the study", false on both counts. And re-running never clears a pre-U2 study's **base**: since U2 the runner rebuilds only the forks, and nothing rewrites the base's `network.nc`. Fixed:
+- `packs.build_site_network` (the one writer of the study's base and forks) writes `n.meta["decision_study_pack"]["tariff_on"] = "engine"`. It lives inside the pack record, so it travels wherever the pack marker does; tested through netCDF and, through the routes, on a study's real base and fork, a Save-As of the fork, a scenario branched from it and a bundle round trip.
+- Only pack networks **without** the mark are refused. A price a user types on a marked network's meter Link is an ordinary Expert edit (tested static and hourly, with and without the engine tariff, and through the Properties route). With an engine tariff, IC's commercial layer adds its prices **on top of** the Link's own cost (`lp_bindings`: "base cost + adders"; a typed 100 EUR/MWh makes the materialised import price 230 instead of 130). That is IC's stated contract, the typed price being a separate charge; no IC preflight or GS check flags it.
+- The message says what is wrong in plain words and offers two ways out that work for any copy: start a new study for the same site from a question card; or clear the old prices (for the hourly prices a pre-U2 study wrote: Time series, Links, Marginal cost, upload a profile of zeros for each Link, since the static price in Properties does not replace an hourly one, and a netCDF-borne series is not an "uploaded profile" the Time series page can delete; for a static price: Properties). With them cleared, no tariff applies until one is added in the commercial settings, and the message says so. "Re-run the study" is no longer offered.
+- The refusal lifts once both prices are cleared (unpriced Links are not the old tariff): tested in process (zeros, dropped, NaN; one Link cleared still refuses and names the other) and walked through the real routes on both fixtures (upload zeros; or upload then delete): preflight clean, and still clean after save and reload. The cleared fork then solves optimal; the cleared base has no cost at all and the solver says so ("Objective function could not be created").
+
+**Limits.** Renaming **both** meter Links bypasses the detector (a deliberate Expert edit of both names; accepted). The fixture `tests/fixtures/pre_u2_fork/` cannot be rebuilt (its recorder needs the deleted code); its netCDFs are committed with `git add -f` (`*.nc` is gitignored) and their sha256 are in `make_pre_u2_fork.py`; the W4 tests fail with that explanation when they are missing.
 
 Migration was rejected: the Links hold an 8,760-h price series, not the bands and charges it came from, so an engine tariff rebuilt from it would not be exact.
 
@@ -71,7 +82,7 @@ Every figure the engine moves by design is a row of `tests/fixtures/u2_deltas.js
 | `lcos_is_the_engines_storage_metric` | 5 | +58 % | owner decision 6: the engine's LCOS includes charging (244.39 → 385.45 EUR/MWh on golden `bess_2h`) |
 | `c1_parts_close_the_s4_gap` | 3 | −17 % | the two upfront parts close the S4 back-calculation gap |
 | `fom_rounded_by_pypsa_statistics` | 5 | ≤ 6.9e-9 rel | IC's FOM line is `n.statistics.fom`, rounded to 5 decimals (engine ask) |
-| `lp_degenerate_dispatch_ties` (WP10) | 6 | ≤ 1.8e-5 rel | the TOU seed billed on the engine's golden dispatch: under the flat DE energy price the solve ties differently from GS's (34 and 22 hours shift; same import/export MWh and monthly peaks) |
+| `lp_degenerate_dispatch_ties` (WP10) | 6 | ≤ 1.8e-5 rel | the TOU seed billed on the engine's golden dispatch: under the flat DE energy price the solve ties differently from GS's (import: 34 hours on `bess_2h`, 22 on `bess_pv_2h`; on `bess_pv_2h` the export Link also shifts in 38 hours and the battery in 60; same import/export MWh and monthly peaks) |
 | `c4_ledger_seeded_from_the_pinned_pack` | 3 | hash | the ledger seeds from the pack (rows 21–34 are rows) |
 | `vocabulary_rename_5_4` | 3 | 0 | §5.4 key names |
 | IC semantics (`fixed_prorated_by_covered_hours`, `annual_peak_prorated_by_represented_hours`, `capacity_rated_on_poc_size`, …) | 9 | — | WP5's recorded semantic differences on partial periods |
@@ -114,6 +125,7 @@ Each package's table is in the plan's status block; all ran on scratch copies, e
 
 ## Open items
 
+- **Master's red packaging test** (`tools/pilot_evaluation_plugin.py` imports `pytest` unguarded; red on `fceb886e` too): not U2's, but it fails the PR's CI; the owner names who fixes it.
 - **C3e** — the owner's explicit acceptance of the IC internals the export-series delete reads until `delete_series` / `pinned_by` land.
 - **X6** — the parent plan's C5 amendment (the per-part CAPEX bound WORKAROUND), the coordinating session's.
 - The engine asks above.

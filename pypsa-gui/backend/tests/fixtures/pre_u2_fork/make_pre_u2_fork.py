@@ -22,6 +22,12 @@ it also carries F1-B4's ``n.meta["pypsa_gui_solve_demand_charge"]`` record.
 Both are cut to the first 14 days (336 snapshots) to keep the fixture small:
 the refusal reads the network's shape, not its horizon.
 
+The two netCDFs are committed with ``git add -f`` (``*.nc`` is gitignored) and
+cannot be rebuilt; their sha256 (final U2 gate, U1):
+
+* ``base/network.nc`` 6116c2a3793f8bdb6bf8418edcd05182fc2afd68885beafdb53f4430605e7cbc
+* ``fork/network.nc`` dbdf588a0f86c4a0704bc3f3ddec667eb2aac88a80d796b93a38092f816d05f9
+
     cd pypsa-gui/backend
     PYTHONPATH=.. python tests/fixtures/pre_u2_fork/make_pre_u2_fork.py
 """
