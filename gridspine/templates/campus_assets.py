@@ -15,10 +15,19 @@ is of each figure. An untagged number is refused rather than defaulted.
 The shipped file tags every figure ``assumed``; its costs are
 order-of-magnitude placeholders.
 
+A **cost** (``capex_eur``, ``capex_eur_per_km``, ``opex_frac``,
+``lifetime_a``) and the ``discount_rate`` may also be tagged ``literature``: a
+reference value read from a cited publication (a regulator's catalogue, say),
+with the reference and any conversion in its note. It is not a quote. A
+**rating** may not: the investment copies a bought item's ratings into the
+campus file (``static/campus_invest.py``), whose tags are the three above, so
+a ``literature`` rating is refused here rather than there.
+
 Refused at load, each with a message naming the entry and the field:
 
 * an unknown kind, entry field or tag key, or a missing field;
-* an untagged value, an unknown source, a value that is not a finite number;
+* an untagged value, an unknown source, a ``literature`` tag on a rating, a
+  value that is not a finite number;
 * a non-positive rating or cost (``opex_frac`` may be 0, and so may the
   no-load losses ``pfe_kw`` and ``i0_percent`` and the cable's ``c_nf_per_km``,
   as in a campus file), a lifetime under one year;
@@ -51,7 +60,11 @@ from gridspine.schema.contracts import ContractError
 from gridspine.schema.transformer import check_tap, check_vector_group
 
 DEFAULT_PATH = Path(__file__).parent / "data" / "campus_assets.yaml"
-SOURCES = frozenset({"measured", "datasheet", "assumed"})
+#: The tags a rating may carry: a campus file's, since a bought item's ratings are copied into it.
+RATING_SOURCES = frozenset({"measured", "datasheet", "assumed"})
+#: The tags a cost or the discount rate may carry: a rating's, or a cited reference value.
+COST_SOURCES = RATING_SOURCES | {"literature"}
+SOURCES = COST_SOURCES
 
 _COST = ("capex_eur", "opex_frac", "lifetime_a")
 _FIELDS = {
@@ -70,6 +83,8 @@ OPTIONAL = {"transformers": ("vector_group", "tap")}
 _MAY_BE_ZERO = frozenset({"pfe_kw", "i0_percent", "c_nf_per_km", "opex_frac"})
 _TOP = frozenset({"discount_rate", "currency", "price_year", *KINDS})
 _TAG_KEYS = frozenset({"value", "source", "note"})
+#: The fields that may be tagged ``literature``: every cost, and the library's discount rate.
+_COST_FIELDS = frozenset({"capex_eur_per_km", *_COST, "discount_rate"})
 
 
 def value(field):
@@ -86,8 +101,14 @@ def _tagged(where, field, spec):
     unknown = sorted(set(t) - _TAG_KEYS)
     if unknown:
         raise ContractError(f"{where}.{field}: unknown key(s) {unknown}; allowed {sorted(_TAG_KEYS)}")
-    if t["source"] not in SOURCES:
-        raise ContractError(f"{where}.{field} has unknown source {t['source']!r}; allowed {sorted(SOURCES)}")
+    allowed = COST_SOURCES if field in _COST_FIELDS else RATING_SOURCES
+    if t["source"] not in allowed:
+        if t["source"] in COST_SOURCES:
+            raise ContractError(
+                f"{where}.{field} has source {t['source']!r}, which only a cost may carry "
+                f"({', '.join(sorted(_COST_FIELDS))}): a rating is copied into the campus file, "
+                f"whose tags are {sorted(RATING_SOURCES)}")
+        raise ContractError(f"{where}.{field} has unknown source {t['source']!r}; allowed {sorted(allowed)}")
     v = t["value"]
     if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
         raise ContractError(f"{where}.{field} value must be a finite number, got {v!r}")
