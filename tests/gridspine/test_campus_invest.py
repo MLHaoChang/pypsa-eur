@@ -642,6 +642,21 @@ def test_the_ratio_is_compared_at_the_existing_units_current_tap():
     assert why is None and offset == -2
 
 
+@pytest.mark.parametrize("old", [
+    unit(hv=115.5, tap=taps(changer="off_circuit", lo=-2, hi=2, step=2.5, pos=-2)),     # 115.5 x 0.95 = 109.7 kV
+    unit(lv=19.0, tap=taps(changer="off_circuit", side="lv", lo=-2, hi=2, step=2.5, pos=2)),  # 19 x 1.05 = 19.95 kV
+])
+def test_a_tapped_unit_is_compared_at_its_effective_ratio(old):
+    """The tap's sign by hand: on the HV side the ratio is vn_hv (1 + t s) /
+    vn_lv, on the LV side vn_hv / (vn_lv (1 + t s)). Both units here are
+    within 0.3 % of a plain 110/20 kV unit at their positions, and 5 % or
+    more off it at the neutral or with the sign the other way."""
+    assert abs(115.5 * 0.95 / 20 - 5.5) / (115.5 * 0.95 / 20) < 0.005 < abs(115.5 / 0.95 / 20 - 5.5) / 5.5
+    assert abs(110 / (19 * 1.05) - 5.5) / (110 / (19 * 1.05)) < 0.005 < abs(110 * 1.05 / 19 - 5.5) / 5.5
+    why, _, _ = check(tr("N", 20.0, 1.0), old)
+    assert why is None, why
+
+
 def test_vector_groups_must_share_the_clock_number():
     assert check(tr("N", 20.0, 1.0, vector_group="Dyn5"), unit(vector_group="Dyn11"))[0] is not None
     why, flags, _ = check(tr("N", 20.0, 1.0, vector_group="YNd11"), unit(vector_group="Dyn11"))
@@ -665,6 +680,7 @@ def test_an_unknown_vector_group_is_assumed_compatible_and_flagged(new_vg, old_v
     (taps(step=1.61), taps(step=1.5), False),
     (taps(side="lv"), taps(side="hv"), False),
     (taps(lo=-8, hi=9), taps(lo=-9, hi=9), False),            # cannot reach the existing range
+    (taps(lo=-9, hi=8), taps(lo=-9, hi=9), False),
     (taps(neutral=10, lo=1, hi=19), taps(lo=-9, hi=9), True),  # the same range, numbered from 1
     (taps(neutral=5, lo=1, hi=9), taps(lo=-4, hi=4), True),
     (None, taps(), False),                                    # an OLTC unit and one that cannot follow it
@@ -819,17 +835,20 @@ def test_an_existing_pair_with_only_an_incompatible_unit_in_the_library_is_repla
     assert all("existing" not in x for x in out["spec"]["campus"]["transformers"].values())
 
 
-def test_the_add_candidates_are_k_units_of_each_compatible_entry_costed_for_the_new_units(tmp_path):
+@pytest.mark.parametrize("load", [33.0, 35.5])
+def test_the_add_candidates_are_k_units_of_each_compatible_entry_costed_for_the_new_units(tmp_path, load):
     """The candidate list, by hand: keep the pair and add k = 1..3 of each
     compatible entry, priced k times the entry; the shares estimated by
-    S_r / uk decide which pass, with the outage total from the as-is flows."""
+    S_r / uk decide which pass, with the outage total from the as-is flows.
+    At 35.5 MW the 10.8 % unit's lower impedance makes one of it too small
+    beside a 40 MVA survivor, which only the S_r / uk weights see."""
     lib = library(tmp_path, transformers=[tr(i, s, c, vk=vk) for i, (s, vk, c) in SMALL.items()])
-    table, sel = dark_hours((2030, 33.0))
+    table, sel = dark_hours((2030, load))
     out = select_assets(rewound_spec(), table, sel, lib, WIDE, PROFILE)
     need = next(n for n in out["state"].needs if n.key == "transformer TR1+TR2")
     adds = {(c.items[0][1], c.items[0][2]): c for c in need.candidates if c.keep}
-    s_out = max(sum(s_hv(mixed_direct([(40.0, 12.0)] * 2, 33.0, out=k))) for k in (0, 1))
-    s_int = sum(s_hv(mixed_direct([(40.0, 12.0)] * 2, 33.0)))
+    s_out = max(sum(s_hv(mixed_direct([(40.0, 12.0)] * 2, load, out=k))) for k in (0, 1))
+    s_int = sum(s_hv(mixed_direct([(40.0, 12.0)] * 2, load)))
     want = set()
     for i, (s, vk, _c) in SMALL.items():
         if abs(vk - 12.0) / 12.0 > 0.10:
@@ -844,6 +863,7 @@ def test_the_add_candidates_are_k_units_of_each_compatible_entry_costed_for_the_
             if holds(every, s_int) and all(holds([x for x in every if x != j], s_out) for j in every):
                 want.add((i, k))
     assert set(adds) == want and ("T10", 1) not in want and ("T10", 2) in want
+    assert (("T20B", 1) in want) == (load == 33.0)
     for (i, k), c in adds.items():
         assert c.keep == ("TR1", "TR2") and c.annual == pytest.approx(k * SMALL[i][2] * (crf(RATE, 40) + 0.01))
         assert c.label == f"keep TR1, TR2 + {k} x {i}"
@@ -894,6 +914,7 @@ def test_a_fully_existing_adequate_group_keeps_keep_first_and_the_additions_foll
     need = next(n for n in out["state"].needs if n.key == "transformer TR1+TR2")
     assert need.candidates[0].existing and need.candidates[0].label == "keep (existing)"
     assert any(c.keep for c in need.candidates[1:])
+    assert {c.items[0][2] for c in need.candidates if c.keep} == {1, 2, 3}           # k counts from 1
     kept = row(out, "transformer TR1+TR2")
     assert (kept["action"], kept["status"], kept["units"]) == ("keep", "kept", 2)
 
