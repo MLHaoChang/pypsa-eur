@@ -683,9 +683,13 @@ function StudyTab({ existingProjects, onClose }: { existingProjects: ProjectInfo
   const taken = existingProjects.some(p => p.name === trimmed)
 
   const create = useMutation({
-    mutationFn: () => gridspineApi.createStudy(trimmed, {
-      hours: Number(hours), k: Number(k), window: Number(window_), overlap: Number(overlap), screen,
-    }),
+    mutationFn: async () => {
+      const res = await gridspineApi.createStudy(trimmed, {
+        hours: Number(hours), k: Number(k), window: Number(window_), overlap: Number(overlap), screen,
+      })
+      await projectsApi.activate(res.id)
+      return res
+    },
     onSuccess: (res) => {
       // G4 (guided-mode spec §3.4, literal): a study is a new project too.
       useUIStore.getState().noteNewProjectCreated('study')

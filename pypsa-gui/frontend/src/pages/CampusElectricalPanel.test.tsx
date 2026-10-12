@@ -17,7 +17,10 @@ vi.mock('../store/uiStore', () => ({
   useUIStore: (sel: (s: { currentProject: string | null }) => unknown) => sel({ currentProject: store.currentProject }),
 }))
 
-const api = vi.hoisted(() => ({ state: vi.fn(), draft: vi.fn(), save: vi.fn(), run: vi.fn(), gridCodes: vi.fn() }))
+const api = vi.hoisted(() => ({
+  state: vi.fn(), draft: vi.fn(), save: vi.fn(), run: vi.fn(), gridCodes: vi.fn(),
+  library: vi.fn(), saveLibrary: vi.fn(), resetLibrary: vi.fn(),
+}))
 vi.mock('../api/campusElectrical', async () => {
   const real = await vi.importActual<typeof import('../api/campusElectrical')>('../api/campusElectrical')
   return { ...real, campusApi: api }
@@ -27,14 +30,15 @@ const YAML = 'campus:\n  pcc: {bus: GRID}\n'
 
 const empty: CampusState = {
   campus_yaml: null, skipped: [], profiles: { eu_rfg_dcc_ce: 'EU RfG (2016/631) and DCC (2016/1388), Continental Europe' },
-  settings: null, results: null, stale: false,
+  settings: null, results: null, stale: false, hub_cost: null, hub_cost_reason: 'no study has run yet',
 }
 
 const sized = (): CampusState => ({
   ...empty,
   campus_yaml: YAML,
   skipped: ['storage unit bess_new: built at 0 MW'],
-  settings: { k: 3, pf: 0.95, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true },
+  settings: { k: 3, pf: 0.95, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true, invest: false,
+              pcc_switchgear_by_operator: false },
   results: {
     selection: [{ period: 2030, hour: 158, reasons: ['max_consumption_mw', 'max_trafo_SITE_TRANSFO_mw'] }],
     transformers: [{
@@ -57,6 +61,7 @@ const sized = (): CampusState => ({
     ],
     requirement: { q_limit_mvar: 13.15, clause: 'study connection agreement: power factor 0.95', source: 'assumed',
                    profile: 'eu_rfg_dcc_ce', pf: 0.95, p_ref_mw: 40, p_ref_from: 'peak |import| over every hour' },
+    investment: null, cost: null, compliance_invested: null, history: null, unresolved: null, scope: null,
   },
 })
 
@@ -70,6 +75,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   api.state.mockResolvedValue(empty)
   api.gridCodes.mockResolvedValue({ shipped: {}, published: [], drafts: [], documents: [], extraction_available: false })
+  api.library.mockResolvedValue({ yaml: 'discount_rate: {value: 0.07, source: assumed}\n', is_default: true })
 })
 afterEach(() => cleanup())
 
@@ -131,7 +137,56 @@ describe('CampusElectricalPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Run study' }))
     await waitFor(() => expect(api.run).toHaveBeenCalledWith('Hub A', {
       k: 2, pf: 0.95, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true,
+      invest: true, pcc_switchgear_by_operator: false,
     }))
+  })
+
+  it('buys assets from the library by default, and sends the setting when it is switched off', async () => {
+    api.state.mockResolvedValue({ ...empty, campus_yaml: YAML })
+    api.run.mockResolvedValue(sized())
+    renderPanel()
+    const box = (await screen.findByLabelText('Buy assets from the library (least cost, AC-checked)')) as HTMLInputElement
+    expect(box.checked).toBe(true)
+    await userEvent.click(box)
+    await userEvent.click(screen.getByRole('button', { name: 'Run study' }))
+    await waitFor(() => expect(api.run).toHaveBeenCalledWith('Hub A', expect.objectContaining({ invest: false })))
+  })
+
+  it('leaves the PCC switchgear to the campus by default, and sends the operator setting when it is ticked', async () => {
+    api.state.mockResolvedValue({ ...empty, campus_yaml: YAML })
+    api.run.mockResolvedValue(sized())
+    renderPanel()
+    const box = (await screen.findByLabelText('PCC switchgear owned by the grid operator (not costed)')) as HTMLInputElement
+    expect(box.checked).toBe(false)
+    await userEvent.click(box)
+    await userEvent.click(screen.getByRole('button', { name: 'Run study' }))
+    await waitFor(() => expect(api.run).toHaveBeenCalledWith('Hub A', expect.objectContaining({
+      invest: true, pcc_switchgear_by_operator: true,
+    })))
+  })
+
+  it('takes the checkboxes from the last run, and a run saved before they existed means the defaults', async () => {
+    api.state.mockResolvedValue({
+      ...empty, campus_yaml: YAML,
+      settings: { k: 3, pf: null, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true, invest: false, pcc_switchgear_by_operator: true },
+    })
+    const first = renderPanel()
+    expect(((await screen.findByLabelText('Buy assets from the library (least cost, AC-checked)')) as HTMLInputElement).checked).toBe(false)
+    expect((screen.getByLabelText('PCC switchgear owned by the grid operator (not costed)') as HTMLInputElement).checked).toBe(true)
+    first.unmount()
+    api.state.mockResolvedValue({
+      ...empty, campus_yaml: YAML,
+      settings: { k: 3, pf: null, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true } as never,
+    })
+    renderPanel()
+    expect(((await screen.findByLabelText('Buy assets from the library (least cost, AC-checked)')) as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByLabelText('PCC switchgear owned by the grid operator (not costed)') as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('shows the library section between the grid codes and the settings', async () => {
+    api.state.mockResolvedValue({ ...empty, campus_yaml: YAML })
+    renderPanel()
+    expect(await screen.findByLabelText('Asset library')).toBeTruthy()
   })
 
   it('shows compliance as is and with measures, with the clause and its tag', async () => {

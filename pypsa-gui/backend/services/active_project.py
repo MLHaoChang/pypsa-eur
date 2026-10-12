@@ -105,7 +105,9 @@ def resolve_for_session(db: DBSession, session: SessionRow) -> tuple[ProjectCont
             return resident, key
 
         src = project_registry.project_dir(project)
-        if (src / "network.nc").exists():
+        networkless_study = (project.project_kind == "planning_dynamics"
+                            and (src / "gridspine" / "config.json").is_file())
+        if (src / "network.nc").exists() or networkless_study:
             from routers.projects import _hydrate_context_from_disk
 
             # This function runs TWICE per authenticated request on EVERY route
@@ -118,7 +120,10 @@ def resolve_for_session(db: DBSession, session: SessionRow) -> tuple[ProjectCont
                     return adopted, key
                 ctx = PyPSAService.build_context()
                 try:
-                    _hydrate_context_from_disk(ctx, src, project.name)
+                    if networkless_study:
+                        _hydrate_context_from_disk(ctx, src, project.name, allow_networkless=True)
+                    else:
+                        _hydrate_context_from_disk(ctx, src, project.name)
                     project_registry.bind_context(ctx, project)
                     PyPSAService.register(key, ctx)
                     return ctx, key

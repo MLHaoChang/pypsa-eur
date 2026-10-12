@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { slidePanelClickShouldClose } from './utils/slidePanelDismiss'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { FailureInfo } from './api/types'
 import AppHeader from './layout/AppHeader'
@@ -619,12 +620,7 @@ export default function App() {
   useEffect(() => {
     if (!activeSlidePanel) return
     const onPointerDown = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null
-      if (!target || !document.body.contains(target)) return
-      if (panelRef.current?.contains(target)) return
-      if (target.closest('aside')) return
-      if (target.closest('[data-no-panel-close]')) return
-      setSlidePanel(null)
+      if (slidePanelClickShouldClose(e.target, panelRef.current)) setSlidePanel(null)
     }
     document.addEventListener('mousedown', onPointerDown, true)
     return () => document.removeEventListener('mousedown', onPointerDown, true)
@@ -720,7 +716,9 @@ export default function App() {
                     instead of whitescreening the app, and navigating to another
                     tab or switching project remounts it (clearing the error). */}
                 <ErrorBoundary key={`${activeSlidePanel}-${currentProject ?? ''}`} label="This panel crashed">
-                  <FullPageTab panel={activeSlidePanel} onClose={() => setSlidePanel(null)} />
+                  <div className="flex flex-col flex-1 min-h-0" data-assurance-panel={activeSlidePanel} data-assurance-project={currentProject ?? ''}>
+                    <FullPageTab panel={activeSlidePanel} onClose={() => setSlidePanel(null)} />
+                  </div>
                 </ErrorBoundary>
               </div>
             )}
@@ -734,7 +732,8 @@ export default function App() {
               it must stay on screen while a full-screen tab owns the main
               area, because it is what put that tab there. A direct flex child
               of this row (not nested inside the `flex-1` zone above) so its
-              fixed 380px / 40px width isn't fought over by the flex
+              open width (stored) / zero-width collapsed column (companion is
+              position: fixed) isn't fought over by the flex
               algorithm. */}
           <AssistantDock />
         </div>

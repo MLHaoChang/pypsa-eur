@@ -22,7 +22,9 @@ Two invariants carry the design:
     The tools fixture was re-recorded once, for the report-tool sentence PR #64
     adds to the study guidance (`generate_report` / `get_report_status`): a
     prompt change that is not P25's is re-recorded, with the diff checked to be
-    exactly that change, rather than stripped in the test.
+    exactly that change, rather than stripped in the test. PR 113
+    (master b8bc079f) similarly added companion navigation guidance to the
+    stance paragraph; only that paragraph was updated from master.
 """
 from __future__ import annotations
 

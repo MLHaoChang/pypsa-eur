@@ -11,6 +11,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 
 from services import change_log_service
+from services.network_crud import purge_component_side_data
 from services.network_geometry import _recompute_lengths_for_bus
 from services.pypsa_service import PyPSAService
 from services.study_state import refuse_edit_during_live_study
@@ -75,6 +76,13 @@ def apply_update_bus(name: str, bus, *, update_component):
 
 def apply_delete_bus_cascade(name: str) -> None:
     refuse_edit_during_live_study()  # P27a A1: not routed via _delete_component
+    # Every removal here goes through `purge_component_side_data`, the same
+    # cleanup `_delete_component` runs. Without it the cascade — the path a
+    # user reaches by deleting a node on the map, so the common one — left an
+    # orphaned `_user_ts` entry and a stale vintage bound behind for each of
+    # the up-to-seven classes it removes. The orphan is not inert: it is
+    # re-injected on every solve and inherited by any later component that
+    # reuses the name.
     n = PyPSAService.get_network()
     with PyPSAService.get_lock():
         if name not in n.buses.index:
@@ -89,6 +97,7 @@ def apply_delete_bus_cascade(name: str) -> None:
                 mask = df[cols[0]].eq(name) | df[cols[1]].eq(name)
                 for comp in df[mask].index.tolist():
                     n.remove(cls, comp)
+                    purge_component_side_data(n, cls, attr, comp)
         for cls, attr in [
             ("Generator", "generators"), ("Load", "loads"),
             ("StorageUnit", "storage_units"), ("Store", "stores"),
@@ -97,7 +106,9 @@ def apply_delete_bus_cascade(name: str) -> None:
             if df is not None and not df.empty and "bus" in df.columns:
                 for comp in df[df.bus.eq(name)].index.tolist():
                     n.remove(cls, comp)
+                    purge_component_side_data(n, cls, attr, comp)
         n.remove("Bus", name)
+        purge_component_side_data(n, "Bus", "buses", name)
     change_log_service.log("delete", "Bus", name, f"Deleted bus '{name}' and all connected components")
 
 

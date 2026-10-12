@@ -400,7 +400,17 @@ export const networkApi = {
     kmeans?: { n_init: number; max_iter: number; tol: number; random_state: number }
     hac?: { affinity: string; linkage: string; feature_source: string }
     stubs?: { matching_attrs: string[] }
-  }) => client.post<{ bus_count: number; line_count: number; message: string }>(
+    // `dropped_vintage_bounds` is `{componentClass: assetName[]}` for every
+    // per-period bound the run could not carry across — clustering aggregates
+    // components, so a bound whose asset is gone would otherwise be handed to
+    // the solver to expand. `message` already names the count; the map is here
+    // for a caller that wants to list them.
+  }) => client.post<{
+    bus_count: number
+    line_count: number
+    message: string
+    dropped_vintage_bounds?: Record<string, string[]>
+  }>(
     '/network/cluster', body,
   ).then(r => r.data),
 }

@@ -80,8 +80,11 @@ function TemplateDialog({ built, onClose, onUse }: {
                   <span className="w-48">{field.replace(/_/g, ' ')}</span>
                   <input type="number" min={0} step="any" className={input}
                          value={values[String(d.id)]?.[field] ?? ''}
-                         onChange={e => setValues(v => ({ ...v, [String(d.id)]: {
-                           ...(v[String(d.id)] ?? {}), [field]: e.target.value } }))} />
+                         onChange={e => {
+                           const value = e.target.value
+                           setValues(v => ({ ...v, [String(d.id)]: {
+                             ...(v[String(d.id)] ?? {}), [field]: value } }))
+                         }} />
                 </label>
               ))}
             </div>
