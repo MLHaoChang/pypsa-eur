@@ -53,7 +53,7 @@ vi.mock('../api/uploads', () => ({
 afterEach(() => cleanup())
 
 beforeEach(() => {
-  useUIStore.setState({ currentProject: 'Demo', activeSlidePanel: null })
+  useUIStore.setState({ currentProject: 'Demo', activeSlidePanel: null, assistantDockOpen: true })
   useChatStore.setState({
     sessionId: 'sess-1', pending: null, messages: [], error: null,
     streaming: false, streamCleanup: null,

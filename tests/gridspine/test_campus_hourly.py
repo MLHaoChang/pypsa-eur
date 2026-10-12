@@ -189,3 +189,25 @@ def test_an_off_unit_with_power_breaks_the_contract():
     bad.loc[bad.index[0], ["status", "p_mw"]] = [0, 5.0]
     with pytest.raises(ContractError, match="status 0"):
         validate_hourly(bad)
+
+
+def test_a_ups_takes_its_storage_units_hourly_power():
+    """Island plan I1 (mutation P8): a StorageUnit the sidecar calls a ups is
+    read from storage_units_t like a battery."""
+    from gridspine.schema.island import validate_island_config
+    lim = {"rocof_hz_per_s": {"value": 1.0, "source": "assumed"},
+           "f_min_hz": {"value": 47.5, "source": "assumed"},
+           "f_max_hz": {"value": 51.5, "source": "assumed"},
+           "qss_band_hz": {"value": 1.0, "source": "assumed"}}
+    a = lambda v: {"value": v, "source": "assumed"}  # noqa: E731
+    cfg = validate_island_config({
+        "units": {"bess": {"kind": "ups", "it_load": ["dc_load"], "walk_in_s": a(15.0), "f_window_hz": a(2.0)}},
+        "requirements": {"bridge_s": a(600.0), "sustained_h": a(4.0), "scenarios": ["seamless"],
+                         "frequency_limits": {"transition": lim, "steady_island": lim},
+                         "rocof_window_ms": a(500.0), "gfm_margin": a(0.1)}})
+    n = solved_hub()
+    campus = draft_campus(n, island=cfg).spec
+    hourly, _ = campus_hourly(n, campus)
+    ups = _unit(hourly, campus, "bess")
+    assert next(u for u in campus["campus"]["units"].values() if u["pypsa_name"] == "bess")["kind"] == "ups"
+    assert ups["p_mw"].tolist() == [-5.0, 5.0, -5.0, 5.0, -5.0, 5.0]

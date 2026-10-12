@@ -68,21 +68,42 @@ def compute_asset_economics(n, cfg, *, result_df):
     the frontend can show both the horizon-wide total AND a per-period view
     without re-running the same arithmetic on the client.
 
-    What these numbers reconcile with (measured on a live network, not
-    inferred from the code):
+    SCOPE, first, because two of the three reconciliations below turn on it:
+    this endpoint covers **Generator, StorageUnit, Store and Link**. It has no
+    `lines` key and never walks `Transformer`. Passive branches are not an
+    oversight — they have no dispatch, so there is no per-asset revenue,
+    capacity factor or LCOE to report — but their CAPITAL cost is real and is
+    counted elsewhere.
+
+    What these numbers reconcile with:
 
       • Σ `fixed_cost_eur` == Σ `economics_by_carrier.capex_meur` × 1e6
-        EXACTLY — both 352,864,456.77, Δ = 0.00. That is the Dispatch tab's
-        "CAPEX (annuitised)" KPI, and it is the reconciliation to quote.
-      • Σ `vom_cost_eur` == `cost_breakdown.opex` EXACTLY — both
-        691,055,137.75, Δ = 0.00.
-      • It does NOT reconcile with `cost_breakdown.capex`. That figure was
-        8,420,504,580.76 against Σ `fixed_cost_eur` of 352,864,456.77 — a
-        23.9× difference — because `cost_breakdown` includes Line capex
-        (8,067,640,123.99) and transformers, while this endpoint covers only
-        Generator / StorageUnit / Store / Link. An earlier version of this
-        docstring claimed `cost_breakdown.capex = Σ fixed_cost`; it was
-        false, and comparing against it will look like a bug that isn't one.
+        **only on a network with no branch capex**. `economics_by_carrier`
+        runs through `services/compare/economics.py`, which walks `Line` and
+        `Transformer` capex as well (the 2026-08-13 ruling: a line's capital
+        cost is part of what the system costs), so on any network with priced
+        or expandable transmission the per-carrier total is LARGER by exactly
+        the branch capex — it lands in the branch's own carrier bucket, `ac`
+        or `dc`. Measured both ways in
+        `tests/test_asset_economics_reconciliation.py`.
+
+        An earlier version of this docstring called that identity EXACT,
+        quoted one network's figure for both sides, and told the reader it was
+        "the reconciliation to quote". It was measured on a network whose
+        lines happened to be unpriced. The figure is withdrawn rather than
+        re-measured: a number from one network is not an invariant, and the
+        test is the durable form of the claim.
+
+      • Σ `vom_cost_eur` == `cost_breakdown.opex` EXACTLY. Nothing in the OPEX
+        walk is out of this endpoint's scope, which is why this one is
+        unqualified where the first is not.
+
+      • It does NOT reconcile with `cost_breakdown.capex`, and the gap is the
+        same gap for the same reason: `cost_breakdown` includes Line and
+        Transformer capex. On one measured network that was 8,420,504,580.76
+        against Σ `fixed_cost_eur` of 352,864,456.77 — 23.9× — with
+        8,067,640,123.99 of it in lines. Comparing against it will look like a
+        bug that isn't one.
 
     `capital_costs_available` (top level) is False when the capital-cost
     resolver raised. In that case every capital-cost-derived field —
@@ -101,8 +122,9 @@ def compute_asset_economics(n, cfg, *, result_df):
 
     # ── Pre-compute the effective annualised capital_cost for every asset.
     # Same resolver the cost_breakdown endpoint feeds from, so Σ fixed_cost
-    # here matches `economics_by_carrier`'s Σ capex — see the docstring for
-    # what does and does not reconcile.
+    # here matches `economics_by_carrier`'s Σ capex OVER THE CLASSES BOTH
+    # COVER — the per-carrier roll-up also walks Line and Transformer, which
+    # this endpoint does not. See the docstring for the scoped statement.
     #
     # When this raises, EVERY downstream lookup below falls through to its
     # `.get("capital_cost", 0.0)` default, and the whole tab renders €0.00

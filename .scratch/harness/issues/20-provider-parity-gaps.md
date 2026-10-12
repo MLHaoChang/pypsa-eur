@@ -57,3 +57,13 @@ Tests: `tests/test_harness_provider_parity.py` (13, red first), two stub
 tests, one seam pin updated to the four-key shape. Parity: stub 4/4, live
 Anthropic 4/4 (runbook). Gate: the full chat regression, 3822 passed, 7
 skipped, 0 failed.
+
+2026-10-12 (merge with master): master's PR #102 had added its own partial
+mapping (cache reads reported, but kept inside `input_tokens`) on chat
+completions and in the new Responses adapter, pinned by
+`tests/test_openai_cache_accounting.py`. The owner chose this issue's meaning
+for every wire (spec Q19). Both OpenAI paths now call one function,
+`harness/providers/usage.py:usage_from`; the two cache tests, the Responses
+seam pin and the paid-test meter (`tests/live_api_support.py`, which now
+prices uncached + cached + written input at the uncached rate, the same
+conservative bound as before) were updated with it.

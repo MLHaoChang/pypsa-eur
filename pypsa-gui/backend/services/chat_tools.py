@@ -12,9 +12,18 @@ SSE generator). All call sites that touch an async handler funnel through
 
 Every tool function here calls the underlying FastAPI route handler or service
 helper **directly** (NOT via HTTP). Tools inherit the existing lock policy,
-audit log, undo registration, _user_ts cleanup, and vintage-bounds cleanup
-because they go through the same _create/_update/_delete_component generic
-helpers (and dedicated wrappers for Bus rename / Transformer / GlobalConstraint).
+audit log, _user_ts cleanup, and vintage-bounds cleanup because they go through
+the same _create/_update/_delete_component generic helpers (and dedicated
+wrappers for Bus rename / Transformer / GlobalConstraint).
+
+UNDO is the one they cannot inherit, because `push_undo_snapshot` is driven by
+the HTTP middleware in `main.py`, which an in-process call never passes
+through. For a long time nothing replaced it: a chat edit pushed no snapshot,
+and a later `undo_last` either refused or reverted an OLDER canvas edit while
+reporting `{"undone": true}`. The dispatcher now pushes it instead — ONE
+snapshot per turn, per project, before the turn's first network-changing tool
+(`UNDO_CAPTURED_TOOLS` below; `chat_service._snapshot_for_turn_undo`). So one
+undo reverts everything the assistant changed in its last turn.
 
 Phase 1 invariants enforced here:
   * F1 — update_component dispatches Bus rename to rename_bus (preserves
@@ -420,11 +429,23 @@ def list_transformer_types() -> list[dict]:
     return _h()
 
 
-def download_timeseries_template(kind: str) -> Any:
+def _download_descriptor(response: Any, url: str) -> dict:
+    """Expose the authenticated browser download without replaying file bytes.
+
+    Returning a StreamingResponse into chat only produces its Python repr;
+    metadata lets the assistant offer the actual file without billing binary
+    content as prompt tokens or writing a read-tier artifact into the project.
     """
-    Returns the CSV-template StreamingResponse / string the route would emit.
-    For chat-tool callers we want the CSV body text; the handler returns a
-    StreamingResponse whose body we drain.
+    from email.message import Message
+    disposition = Message()
+    disposition["Content-Disposition"] = response.headers.get("content-disposition", "")
+    return {"filename": disposition.get_filename(), "media_type": response.media_type,
+            "download_url": url}
+
+
+def download_timeseries_template(kind: str) -> dict:
+    """
+    Return metadata and an authenticated link for the template spreadsheet.
     """
     if kind == "loads":
         from routers.network import download_load_profile_template as _h
@@ -434,12 +455,12 @@ def download_timeseries_template(kind: str) -> Any:
         from routers.network import download_link_profile_template as _h
     else:
         raise HTTPException(400, f"Unknown kind: {kind!r}")
-    return _h()
+    return _download_descriptor(_h(), f"/api/network/{kind}/template")
 
 
-def download_snapshot_weightings_csv() -> Any:
+def download_snapshot_weightings_csv() -> dict:
     from routers.network import download_snapshot_weightings_csv as _h
-    return _h()
+    return _download_descriptor(_h(), "/api/network/snapshots/weightings.csv")
 
 
 def list_investment_periods() -> dict:
@@ -1029,17 +1050,36 @@ def batch_create_components(component_class: str, components: list[dict]) -> dic
         try:
             create_component(component_class, name,
                              {k: v for k, v in entry.items() if k != "name"})
-        except HTTPException:
-            raise
         except Exception as exc:  # noqa: BLE001
-            # Validation passed and this still failed, so the batch IS
-            # partial. Say exactly what landed — claiming atomicity we did
-            # not deliver would send the agent looking for the wrong bug.
-            raise HTTPException(
-                500,
-                f"batch partially applied: created {created} before "
-                f"{name!r} failed: {exc}",
-            ) from exc
+            if not created:
+                # Nothing has landed, so the batch is NOT partial and the
+                # handler's own error is the accurate one. Re-raise it as-is.
+                raise
+            # Something HAS landed, so the batch is partial — and this is true
+            # whatever raised. The previous shape re-raised an HTTPException
+            # bare and kept the honest message for every other exception,
+            # which covered the UNLIKELY failure only: pass 1 checks the schema
+            # and name uniqueness, but the per-class handler validators (the
+            # docstring's "transformer voltage validation", a missing bus) run
+            # in `create_component` here, and they raise HTTPException. So the
+            # common partial batch reached the agent as a plain refusal, and it
+            # concluded nothing had been created.
+            #
+            # The original status is kept: a voltage mismatch is the caller's
+            # data, not a server fault, and forcing 500 would say otherwise.
+            prefix = (f"batch partially applied: created {created} before "
+                      f"{name!r} failed")
+            if isinstance(exc, HTTPException):
+                detail = exc.detail
+                if isinstance(detail, dict):
+                    # Keep the structured error (and any `error_kind` the
+                    # frontend routes on); add what landed beside it.
+                    merged = {**detail, "partially_applied": True,
+                              "created": list(created)}
+                    merged["message"] = f"{prefix}: {detail.get('message', '')}".rstrip(": ")
+                    raise HTTPException(exc.status_code, merged) from exc
+                raise HTTPException(exc.status_code, f"{prefix}: {detail}") from exc
+            raise HTTPException(500, f"{prefix}: {exc}") from exc
         created.append(name)
     return {"created": created, "count": len(created)}
 
@@ -3427,8 +3467,25 @@ def gridspine_export_handoff_bundle(project_id: str, hour: int) -> dict:
     from services.gridspine_service import export_handoff_bundle as _h
     with _acting() as (db, user):
         # Pass-through, as above: the service answers 422 on a bad hour.
-        path = _h(_gridspine_project(db, user, project_id), hour)
-        return {"path": str(path), "filename": path.name, "bytes": path.stat().st_size}
+        project = _gridspine_project(db, user, project_id)
+        path = _h(project, hour)
+        # The DOWNLOAD ROUTE, not `str(path)`. The absolute path named the
+        # server's storage root and the org and project UUIDs, and it was
+        # useless to the model and the user alike — nothing can fetch a
+        # server-side path. The route is what the study view links to.
+        # `hour` as the service accepted it — never `int(hour)` here: the
+        # tools are pass-throughs, and coercing in the wrapper turns the
+        # service's 422 into a 500 (test_gridspine_service pins that).
+        from urllib.parse import quote
+
+        return {
+            "download_url": (
+                f"/api/gridspine/{quote(project.name, safe='')}"
+                f"/bundles/{quote(str(hour), safe='')}"
+            ),
+            "filename": path.name,
+            "bytes": path.stat().st_size,
+        }
 
 
 @contextlib.contextmanager
@@ -4019,6 +4076,25 @@ def delete_project_snapshot(name: str, snapshot_id: str) -> None:
 # ── Import / Export (8) ─────────────────────────────────────────────────────
 
 
+def _import_raw(handler, upload) -> dict:
+    """Run one raw-import route (async) with the acting db + session supplied.
+
+    The routes un-point the session after a successful import (see
+    `routers.io._unbind_session`), so they now declare `db` and `session`. The
+    handler is async, so `_route` cannot be used — its `with _acting()` would
+    close `db` before the coroutine ran — and the dependencies are injected by
+    hand inside the block instead, exactly as `import_project_bundle` does.
+
+    With no acting identity (a direct in-process call) there is no session
+    whose pointer could move, and these tools never required one before, so
+    that case keeps working rather than turning into a 401.
+    """
+    if _ACTING_USER_ID.get() is None:
+        return _sync(handler(upload, db=None, session=None))
+    with _acting() as (db, _user):
+        return _sync(handler(upload, db=db, session=_acting_session(db)))
+
+
 def import_network_nc(bytes_b64: str, filename: str = "network.nc") -> dict:
     import base64
     import io
@@ -4026,7 +4102,7 @@ def import_network_nc(bytes_b64: str, filename: str = "network.nc") -> dict:
     from routers.io import import_netcdf as _h
     data = base64.b64decode(bytes_b64)
     upload = UploadFile(filename=filename, file=io.BytesIO(data))
-    return _sync(_h(upload))
+    return _import_raw(_h, upload)
 
 
 def import_csv_bundle(bytes_b64: str, filename: str = "csv.zip") -> dict:
@@ -4036,7 +4112,7 @@ def import_csv_bundle(bytes_b64: str, filename: str = "csv.zip") -> dict:
     from routers.io import import_csv as _h
     data = base64.b64decode(bytes_b64)
     upload = UploadFile(filename=filename, file=io.BytesIO(data))
-    return _sync(_h(upload))
+    return _import_raw(_h, upload)
 
 
 def import_excel(bytes_b64: str, filename: str = "network.xlsx") -> dict:
@@ -4046,7 +4122,7 @@ def import_excel(bytes_b64: str, filename: str = "network.xlsx") -> dict:
     from routers.io import import_excel as _h
     data = base64.b64decode(bytes_b64)
     upload = UploadFile(filename=filename, file=io.BytesIO(data))
-    return _sync(_h(upload))
+    return _import_raw(_h, upload)
 
 
 def import_matpower(bytes_b64: str, filename: str = "case.m") -> dict:
@@ -4056,10 +4132,10 @@ def import_matpower(bytes_b64: str, filename: str = "case.m") -> dict:
     from routers.io import import_matpower as _h
     data = base64.b64decode(bytes_b64)
     upload = UploadFile(filename=filename, file=io.BytesIO(data))
-    return _sync(_h(upload))
+    return _import_raw(_h, upload)
 
 
-def _save_agent_export(data: bytes, filename: str, mime: str) -> dict:
+def _save_agent_export(data: bytes, filename: str, mime: str, *, assurance_sha256: str | None = None) -> dict:
     """
     Persist agent-generated export bytes as an `agent_export` upload artifact and
     return lightweight metadata. The frontend's chat file strip renders
@@ -4072,6 +4148,7 @@ def _save_agent_export(data: bytes, filename: str, mime: str) -> dict:
     Requires a loaded project (the artifact lives in that project's uploads dir);
     the HTTP export routes still stream to the browser without one.
     """
+    from urllib.parse import quote
     from services import upload_service
     from services.pypsa_service import PyPSAService
     name = PyPSAService.get_loaded_project()
@@ -4080,13 +4157,33 @@ def _save_agent_export(data: bytes, filename: str, mime: str) -> dict:
             400, "No project is loaded — save or load a project before exporting "
                  "(the export is attached to the project as a downloadable file)."
         )
-    meta = upload_service.add_upload(name, data, filename, mime, kind="agent_export")
+    # Writing into the project's uploads directory is a write edge, and
+    # `routers/uploads.py::post_upload` refuses it under a foreign lock for
+    # that reason. This helper is the single chokepoint every `export_*` tool
+    # reaches, so the check lives here rather than on ten wrappers — the
+    # export tools are tiered `read` and `write` inconsistently, so the
+    # derived gate cannot cover them as a family, and re-tiering them would
+    # change their confirmation behaviour for unrelated reasons.
+    _check_foreign_lock("export")
+    if len(data) > upload_service.MAX_FILE_BYTES:
+        raise HTTPException(413, {"error_kind": "file_too_large", "message": "Export exceeds 25 MB."})
+    ctx = PyPSAService.get_active_context()
+    if ctx.project_uuid:
+        from services.assistant_tools import _project
+        project, directory, _owner = _project()
+        meta = upload_service.add_upload(project.name, data, filename, mime, kind="agent_export", project_dir=directory,
+                                         **({"assurance_sha256": assurance_sha256} if assurance_sha256 is not None else {}))
+    else:
+        meta = upload_service.add_upload(name, data, filename, mime, kind="agent_export")
     return {
         "file_id": meta.file_id,
         "filename": meta.filename,
         "mime": meta.mime,
         "size": meta.size,
         "kind": meta.kind,
+        "sha256": meta.sha256,
+        "project_id": PyPSAService.get_active_context().project_uuid,
+        "download_url": f"/api/projects/{ctx.project_uuid or quote(name, safe='')}/uploads/{meta.file_id}/blob",
         "message": (
             f"Exported '{meta.filename}' ({meta.size} bytes). It's available as a "
             "downloadable file in the chat panel's file strip."
@@ -4171,6 +4268,30 @@ def ui_open_panel(
     ChatPanel applies to uiStore — slide panels, Results sub-tabs, bottom
     asset tabs, and the A|B compare rail.
     """
+    from harness.catalogue import (
+        BOTTOM_TAB_ENUM, COMPARE_TAB_ENUM, RESULTS_TAB_ENUM, SAFETY_PANEL_ENUM,
+    )
+    for key, value, allowed in (
+        ("panel_id", panel_id, SAFETY_PANEL_ENUM),
+        ("results_tab", results_tab, RESULTS_TAB_ENUM),
+        ("bottom_tab", bottom_tab, BOTTOM_TAB_ENUM),
+        ("compare_tab", compare_tab, COMPARE_TAB_ENUM),
+    ):
+        if (key == "panel_id" or value is not None) and (not isinstance(value, str) or value not in allowed):
+            raise HTTPException(400, detail={
+                "error_kind": "invalid_navigation", "field": key,
+                "message": f"Choose a supported {key} from the tool schema.",
+            })
+    for key, value, valid in (
+        ("compare_rail", compare_rail, type(compare_rail) is bool),
+        ("compare_a", compare_a, isinstance(compare_a, str)),
+        ("compare_b", compare_b, isinstance(compare_b, str)),
+    ):
+        if value is not None and not valid:
+            raise HTTPException(400, detail={
+                "error_kind": "invalid_navigation", "field": key,
+                "message": f"Use the declared {key} type from the tool schema.",
+            })
     event: dict[str, Any] = {
         "_ui_event": True,
         "kind": "navigate",
@@ -4194,6 +4315,143 @@ def ui_open_panel(
 def ui_set_snapshot(snapshot_iso: str, period: int | None = None) -> dict:
     return {"_ui_event": True, "kind": "set_snapshot",
             "snapshot_iso": snapshot_iso, "period": period}
+
+
+def discuss_project_run(
+    run_id: str,
+    results_tab: str | None = None,
+    section: str | None = None,
+    baseline_run_id: str | None = None,
+    open_ui: bool = True,
+) -> dict:
+    """
+    Bind conversation follow-ups to a recorded run and optionally open it in
+    the Results chrome. Emits ``open_run_result`` (kind) when ``open_ui``;
+    never restores historical inputs onto the live network.
+    """
+    from harness.catalogue import RESULTS_TAB_ENUM
+    from services import durable_conversation as dc
+    from services import run_evidence as re_
+
+    if results_tab is not None and (
+        not isinstance(results_tab, str) or results_tab not in RESULTS_TAB_ENUM
+    ):
+        raise HTTPException(400, detail={
+            "error_kind": "invalid_navigation",
+            "field": "results_tab",
+            "message": "Choose a supported results_tab from the tool schema.",
+        })
+    if open_ui is not True and open_ui is not False:
+        raise HTTPException(422, detail={
+            "error_kind": "invalid_discussed_run",
+            "message": "open_ui must be true or false.",
+        })
+
+    session = chat_session()
+    if session is None:
+        raise HTTPException(409, detail={
+            "error_kind": "no_chat_session",
+            "message": "Discussing a run requires an active chat session.",
+        })
+
+    summary = re_.get_run_evidence(run_id)
+    if baseline_run_id is not None:
+        re_.get_run_evidence(baseline_run_id)
+
+    root, project_id, _owner = re_._authority()
+    del root  # authority revalidated; project_id is the discussed scope
+    discussed = {
+        "project_id": project_id,
+        "run_id": run_id,
+        "status": summary.get("status"),
+        "mode": summary.get("mode"),
+        "fingerprint": summary.get("fingerprint"),
+        "evidence_available": bool(summary.get("evidence_available")),
+    }
+    if results_tab:
+        discussed["source"] = results_tab
+    if section:
+        discussed["section"] = section
+    if baseline_run_id:
+        discussed["baseline_run_id"] = baseline_run_id
+
+    with session._lock:
+        session.discussed_refs = dict(discussed)
+
+    thread_id = dc.find_thread_for_episode(session.session_id)
+    if thread_id:
+        thread = dc.get_thread(thread_id)
+        dc.set_discussed_run(
+            thread_id,
+            generation=int(thread["generation"]),
+            run_id=run_id,
+            project_id=project_id,
+            baseline_run_id=baseline_run_id,
+            section=section,
+            source=results_tab,
+            clear_baseline=baseline_run_id is None,
+        )
+
+    if not open_ui:
+        return {"ok": True, "discussed": discussed, "ui_navigated": False}
+
+    event: dict[str, Any] = {
+        "_ui_event": True,
+        "kind": "open_run_result",
+        "run_id": run_id,
+        "status": summary.get("status"),
+        "mode": summary.get("mode"),
+        "fingerprint": summary.get("fingerprint"),
+        "evidence_available": bool(summary.get("evidence_available")),
+        "discussed": discussed,
+    }
+    if results_tab:
+        event["results_tab"] = results_tab
+    if section:
+        event["section"] = section
+    if baseline_run_id:
+        event["baseline_run_id"] = baseline_run_id
+    return event
+
+
+def export_run_evidence(
+    run_id: str | None = None,
+    section: str | None = None,
+) -> dict:
+    """
+    Export immutable evidence for a named run, or the session's discussed run
+    when ``run_id`` is omitted. Never substitutes another/newer run.
+    """
+    import json as _json
+
+    from services import run_evidence as re_
+
+    resolved = run_id
+    if resolved is None:
+        session = chat_session()
+        refs = getattr(session, "discussed_refs", None) if session is not None else None
+        if not isinstance(refs, dict) or not refs.get("run_id"):
+            raise HTTPException(409, detail={
+                "error_kind": "discussed_run_required",
+                "message": (
+                    "No run_id was given and no discussed run is bound. "
+                    "Call discuss_project_run or pass run_id from list_project_runs."
+                ),
+            })
+        resolved = str(refs["run_id"])
+
+    evidence = re_.get_run_evidence(resolved, section=section)
+    filename = (
+        f"run_{resolved}_{section}.json" if section else f"run_{resolved}.json"
+    )
+    payload = _json.dumps(evidence, allow_nan=False, sort_keys=True, indent=2).encode("utf-8")
+    meta = _save_agent_export(payload, filename, "application/json")
+    return {
+        **meta,
+        "run_id": resolved,
+        "section": section,
+        "note": "Exported the named (or discussed) run only; current network results were not substituted.",
+    }
 
 
 # ── Harness: ask the user (chat harness issue 04) ──────────────────────────
@@ -4625,11 +4883,10 @@ def apply_demand_from_excel(
     value_col: str,
     load_name: str,
     sheet_name: str | None = None,
-    replace: bool = False,
 ) -> dict:
     """
     Parse an Excel/CSV upload's `time_col` + `value_col` into a per-snapshot
-    Load demand profile. Two-pass:
+    Load demand profile, replacing any profile the Load already has. Two-pass:
 
       Pass 1 (NO mutation): parse the time + value columns, align to
         n.snapshots, return structured `error_kind` on mismatch.
@@ -5453,6 +5710,30 @@ def set_active_profile(profile_id: str) -> dict:
 # `add_upload`.
 
 
+# A spreadsheet treats a cell that STARTS with one of these as a formula, and
+# the cells these two tools write come from the model — which copies component
+# names, uploaded files and imported networks into them. So a bus named
+# `=HYPERLINK("https://…","open")` became a live link in a file the user was
+# invited to download and open. (Register: lower-confidence notes, 2026-09-28.)
+_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _inert_csv_cell(value):
+    """A CSV cell a spreadsheet will show as text, never evaluate.
+
+    OWASP's mitigation: prefix a leading apostrophe. Applied to strings only,
+    and not to a string that IS a number (`"-5"`, `"+3.2"`): that is data a
+    spreadsheet reads as the number it is, and an apostrophe would turn it
+    into text.
+    """
+    if isinstance(value, str) and value.startswith(_FORMULA_TRIGGERS):
+        try:
+            float(value)
+        except ValueError:
+            return "'" + value
+    return value
+
+
 def export_to_excel(sheets: dict, filename: str) -> dict:
     """
     Materialise a multi-sheet xlsx workbook from `sheets`.
@@ -5476,6 +5757,13 @@ def export_to_excel(sheets: dict, filename: str) -> dict:
         ws = wb.create_sheet(title=str(sheet_name)[:31] or "Sheet")
         for row in (rows or []):
             ws.append(list(row))
+            # openpyxl stores ANY string starting with "=" as a formula
+            # (`data_type == "f"`), which Excel evaluates on open. A string
+            # cell is shown as written, so force the type rather than edit
+            # the text: in xlsx the cell type decides, not the characters.
+            for cell in ws[ws.max_row]:
+                if cell.data_type == "f":
+                    cell.data_type = "s"
     buf = _io.BytesIO()
     wb.save(buf)
     payload = buf.getvalue()
@@ -5507,9 +5795,9 @@ def export_to_csv(rows: list, columns: list, filename: str) -> dict:
     buf = _io.StringIO()
     w = csv.writer(buf, lineterminator="\r\n")
     if columns:
-        w.writerow(list(columns))
+        w.writerow([_inert_csv_cell(c) for c in columns])
     for row in (rows or []):
-        w.writerow(list(row))
+        w.writerow([_inert_csv_cell(c) for c in row])
     payload = buf.getvalue().encode("utf-8")
     if len(payload) > 25 * 1024 * 1024:
         raise HTTPException(
@@ -6331,8 +6619,15 @@ def record_asset_health(name: str, entries: list) -> dict:
     the network, which it cannot be if it writes the network.
     """
     from routers.adequacy_worksheet import AssetHealthPut, put_asset_health as _h
-    return _h(AssetHealthPut(entries=list(entries or [])),
-              project=_authorized_project(name))
+
+    # Through `_route`, not bare. The handler now declares `db` / `user` for
+    # its foreign-lock check, and `_route`'s contract is to "resolve whatever
+    # the target declares" — called bare, those two arrive as raw `Depends`
+    # sentinels and die inside the lock lookup. Routing it is also what makes
+    # the new check real on THIS path: a non-holder editing the provenance
+    # ledger through chat is refused exactly as they are over HTTP.
+    return _route(_h, AssetHealthPut(entries=list(entries or [])),
+                  project=_authorized_project(name))
 
 
 # ── Explanation / synthesis (1) ─────────────────────────────────────────────
@@ -6776,7 +7071,48 @@ PRE_DISPATCH_VALIDATORS: dict[str, Any] = {
 # Single source of truth for the (tool_name → callable) mapping. The Phase 2
 # chat session loop iterates this dict to dispatch incoming tool_use blocks.
 # Tools NOT in this dict are NOT exposed to the LLM.
+from services.workflow_tools import (
+    project_readiness, wait_for_job, get_study_evidence, run_sensitivity_sweep, use_toolset,
+)
+
+from services.run_evidence import list_project_runs, get_run_evidence, compare_project_runs
+# discuss_project_run is defined above with the UI-control tools.
+from services.loadflow_summary import get_loadflow_summary
+from services.experiments import start_experiment, list_experiments, get_experiment
+from services.assistant_tasks import list_tasks, start_task, get_task, resume_task, cancel_task, resolve_task_step
+from services.assistant_tools import (find_capabilities, get_file_delivery, inspect_import, import_uploaded_network,
+                                      preview_project_changes, apply_project_changes, create_chart, build_delivery)
+
 DISPATCHERS: dict[str, Any] = {
+    "list_project_runs": list_project_runs,
+    "get_run_evidence": get_run_evidence,
+    "compare_project_runs": compare_project_runs,
+    "discuss_project_run": discuss_project_run,
+    "export_run_evidence": export_run_evidence,
+    "get_loadflow_summary": get_loadflow_summary,
+    "start_experiment": start_experiment,
+    "list_experiments": list_experiments,
+    "get_experiment": get_experiment,
+    "list_tasks": list_tasks,
+    "find_capabilities": find_capabilities,
+    "start_task": start_task,
+    "get_task": get_task,
+    "resume_task": resume_task,
+    "cancel_task": cancel_task,
+    "resolve_task_step": resolve_task_step,
+    "get_file_delivery": get_file_delivery,
+    "inspect_import": inspect_import,
+    "import_uploaded_network": import_uploaded_network,
+    "preview_project_changes": preview_project_changes,
+    "apply_project_changes": apply_project_changes,
+    "create_chart": create_chart,
+    "build_delivery": build_delivery,
+
+    "project_readiness": project_readiness,
+    "wait_for_job": wait_for_job,
+    "get_study_evidence": get_study_evidence,
+    "run_sensitivity_sweep": run_sensitivity_sweep,
+    "use_toolset": use_toolset,
     # read (22)
     "list_components": list_components,
     "diagnose_network": diagnose_network,
@@ -7098,19 +7434,63 @@ _LOCK_GATE_EXEMPT_PATHS = frozenset({
     "/api/simulation/queue",
     "/api/simulation/queue/clear_finished",
     "/api/simulation/queue/{job_id}/abort",
+    # The study ABORTS, mirroring `main._FOREIGN_LOCK_GATE_EXEMPT_EXACT`. This
+    # set had only the three queue paths, so `abort_adequacy_study` — which
+    # routes to these — was refused under a foreign lock in chat while the
+    # same POST succeeded over HTTP. main.py's own comment says why that is
+    # the wrong way round: "Gating an abort would be actively harmful: a
+    # foreign lock acquired while a study runs would trap it with no way to
+    # stop it." The parity test now compares exemptions, not just prefixes.
+    "/api/results/frontier/abort",
+    "/api/results/mc/abort",
+    "/api/results/fmea_sweep/abort",
+    "/api/results/margin_loop/abort",
+    "/api/results/coupling_loop/abort",
+    "/api/results/eh_study/abort",
+    # Latent today — `validate_network` is tiered `read`, so the tier filter
+    # skips it before this set is consulted — but HTTP exempts preflight on
+    # purpose, and the per-route parity test found the two sets disagreeing
+    # here. Re-tiering that one tool would have made chat refuse a preflight
+    # the middleware deliberately allows: the latent-drift case the parity
+    # test's own docstring was written about.
+    "/api/simulation/preflight",
 })
 _LOCK_GATE_WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 # Tools with no HTTP route (`_service_call_` in TOOL_ROUTES) that nonetheless
 # mutate the resident network. The route-derived rule below cannot see them,
 # and they are exactly as capable of overwriting a lock holder's work as the
-# routed ones — `batch_delete_components` more so than most.
-_LOCK_GATE_SERVICE_CALL_MUTATORS = frozenset({
+# routed ones — `batch_delete_components` more so than most. The undo capture
+# (`_undo_captured_tool_names`) needs the same list for the same reason.
+_NETWORK_SERVICE_CALL_MUTATORS = frozenset({
+    "apply_project_changes", "import_uploaded_network",
     "batch_create_components",
     "batch_delete_components",
     "generate_exemplary_timeseries",
     "apply_demand_from_excel",
     "reconstruct_network_from_image",
+})
+
+_LOCK_GATE_SERVICE_CALL_MUTATORS = _NETWORK_SERVICE_CALL_MUTATORS | frozenset({
+    "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery",
+    # Write edges into the PROJECT DIRECTORY that call their service layer
+    # directly, so they never reach the REST handler that checks the lock.
+    # `routers/uploads.py` decided this question the other way and said so:
+    # the upload POST is "a write edge into `project.directory` same as
+    # save/rename/delete", and the DELETE is "the sharp end of the gap this
+    # router had: a non-holder deleting a file another session is actively
+    # referencing (e.g. mid multimodal turn)". Both REST routes check the
+    # lock; these tools did the same work without it.
+    "delete_upload",
+    "clear_uploads",
+    # Unlinks the project's chat.jsonl and its rotation. No REST equivalent
+    # exists, so there was no handler-level check to inherit either.
+    "clear_chat_history",
+    # Mutate the campaign record in the SHARED resident context's
+    # solver_state, so a non-holder could set a solve budget on the holder's
+    # context or close the campaign they are running.
+    "start_campaign",
+    "end_campaign",
 })
 
 
@@ -7137,8 +7517,22 @@ def _lock_gated_tool_names() -> frozenset[str]:
       * `load_project` / `activate_project` are how a user gets AWAY from a
         locked project; gating them would trap them there. The middleware
         likewise gates neither (one is a GET, the other is an exempt suffix).
-      * Upload / export / chat-history tools write artifacts, not network
-        state, on surfaces the middleware does not gate either.
+      * Export tools are tiered `read` or `write` inconsistently, so the
+        derivation above cannot cover them as a family. They are gated at
+        their single chokepoint instead — `_save_agent_export` calls
+        `_check_foreign_lock` itself, which covers all ten regardless of tier
+        and without re-tiering any of them (re-tiering would change their
+        confirmation behaviour, which is a product decision and not this
+        seam's to make).
+
+        This bullet used to read "Upload / export / chat-history tools write
+        artifacts, not network state, on surfaces the middleware does not gate
+        either", and listed them as deliberately ungated. `routers/uploads.py`
+        had already decided the same question the other way, in writing: the
+        upload POST is "a write edge into `project.directory` same as
+        save/rename/delete", and the DELETE is "the sharp end of the gap".
+        Both REST routes check; the tools bypassed the handler and did the
+        work anyway, so the two paths disagreed about the same bytes.
     """
     from services.chat_tools_schema import TOOL_ROUTES, safety_tier_for
 
@@ -7286,7 +7680,10 @@ def _study_gated_tool_names() -> frozenset[str]:
     for name in _lock_gated_tool_names():
         if name in _STUDY_GATE_SWAP_TOOLS:
             continue
-        if name in _LOCK_GATE_SERVICE_CALL_MUTATORS:
+        # The NETWORK mutators, not the whole lock-gate set: that set also
+        # holds project-folder writes (uploads, chat history, campaigns) that
+        # never touch the network a study re-solves.
+        if name in _NETWORK_SERVICE_CALL_MUTATORS:
             gated.add(name)
             continue
         for route in TOOL_ROUTES.get(name, ()):
@@ -7318,3 +7715,59 @@ DISPATCHERS.update({
     name: _study_gated(name, DISPATCHERS[name])
     for name in _study_gated_tool_names()
 })
+
+
+# ── Undo capture (CH-3) ─────────────────────────────────────────────────────
+#
+# Undo snapshots are pushed by `main.undo_snapshot_middleware`, and a chat tool
+# calls its handler in-process, so a chat edit used to push nothing: a later
+# `undo_last` either refused or reverted an OLDER canvas edit while reporting
+# `{"undone": true}`. The dispatcher now pushes the snapshot itself — see
+# `chat_service._snapshot_for_turn_undo` — for exactly the tools below.
+#
+# Mirrors of main.py's two undo constants. Kept in step by
+# `tests/test_chat_undo_snapshot.py`, which compares them against main's, so
+# this comment is not the only thing holding them together.
+_UNDO_PREFIXES = ("/api/network/", "/api/io/")
+_UNDO_EXCLUDE = frozenset({"/api/network/undo", "/api/network/undo/info"})
+
+
+def _undo_captured_tool_names() -> frozenset[str]:
+    """
+    The tools whose call is preceded by an undo snapshot: middleware parity,
+    derived the way `_lock_gated_tool_names` is.
+
+    A tool is captured when its tier is not "read" AND it either maps to a
+    write route the middleware would snapshot (`_UNDO_PREFIXES`, minus
+    `_UNDO_EXCLUDE`) or is one of the routeless network mutators. Project-
+    folder writes (uploads, chat history, campaigns) are deliberately NOT in
+    it: the undo stack holds the NETWORK, so a snapshot before them would be an
+    undo step that changes nothing.
+    """
+    # From the catalogue's home, per harness/README.md's contract item 7 (new
+    # code imports from `harness.*`); `services.chat_tools_schema` is an alias
+    # of the same module object.
+    from harness.catalogue import TOOL_ROUTES, safety_tier_for
+
+    captured: set[str] = set()
+    for name in DISPATCHERS:
+        if safety_tier_for(name) == "read":
+            continue
+        if name in _NETWORK_SERVICE_CALL_MUTATORS:
+            captured.add(name)
+            continue
+        for route in TOOL_ROUTES.get(name, ()):
+            if not isinstance(route, tuple):
+                continue
+            method, path = route
+            if (
+                method.upper() in _LOCK_GATE_WRITE_METHODS
+                and any(path.startswith(p) for p in _UNDO_PREFIXES)
+                and path not in _UNDO_EXCLUDE
+            ):
+                captured.add(name)
+                break
+    return frozenset(captured)
+
+
+UNDO_CAPTURED_TOOLS = _undo_captured_tool_names()

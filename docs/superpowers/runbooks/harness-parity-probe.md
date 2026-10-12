@@ -77,8 +77,12 @@ frame payloads held.
 | 2026-10-06 | same | `anthropic-sonnet` (live) | **3/3** in 19 s; W1 two tools, W2 three (the model started the workflow and took its first step) |
 | 2026-10-06 | issue 20 (W4 and usage added) | `stub-openai` | **4/4**; per turn `in=6 cached=16 written=0 out=6` on W1–W3 (two model calls each), W4 `in=3 cached=8` with `thinking` |
 | 2026-10-06 | same | `anthropic-sonnet` (live) | **4/4** in 31 s; W1 `in=1359 cached=95062 written=47531`, W4 `in=34 cached=50612`; thinking shown on W1–W3, not on W4 |
+| 2026-10-07 | 158d03b (PR #76: chat undo per turn, turn cell, per-user `/history`, import rebind, ported into `harness/*`) | `stub-openai` | **3/3** |
+| 2026-10-07 | 5cce846 (same changes, on the merged head) | `anthropic-sonnet` (live, `claude-sonnet-5`) | **3/3** in 21 s; repeated **3/3** in 18 s, where W2 again followed the `orient` step on its own (`get_meta`, `list_components` ×5, an `ask_user` card). No errors in the backend log |
 | 2026-10-07 | issue 15 (W5 added) | `stub-openai` | **5/5** |
 | 2026-10-07 | same | `anthropic-sonnet` (live) | **5/5** in 26 s; W5: the model called `ask_user` with `multi_select: true` from the tool description alone |
+| 2026-10-12 | phase-5 branch with 143 master commits merged (checked answers, durable tasks, toolsets, Responses adapter) | `stub-openai` | **5/5** |
+| 2026-10-12 | same | `anthropic-sonnet` (live) | **5/5** in 23 s; usage in the same columns as the stub; W5 again set `multi_select` |
 
 **What the first run found.** The workflow tools read the chat session from
 a ContextVar that `run_turn` set at turn start. The route drives `run_turn`

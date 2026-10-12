@@ -1,6 +1,6 @@
 # Plan: the chat harness — one folder for everything a model-agnostic assistant needs
 
-**Status:** v1.3, 2026-10-06. Phases 0, 1 and 2 landed on `claude/amazing-mendel-m087zw`; owner decisions Q1–Q14 taken (spec §8). The issue-06 follow-up and the parity probe (issue 09) are in. Issue 08 is in (`harness/loop.py` with the alias; `sse`, `fence`, `results`, `history`, `metrics`, `ratelimit`, `session`, `confirm`, `providers/wiring`, `stub`, `budget`, `compose`, `solver_bridge` extracted under the patch-surface rule, moved tunables forwarded live; the turn body itself stays in `loop.py` by design). PR: MLHaoChang/pypsa-eur#86. Still owed: the live OpenAI run. Phase 5 (designs borrowed from DeepSeek Harness, §8) is specified as issues 13–20 and waits for #86 to merge.
+**Status:** v1.4, 2026-10-12. Phases 0, 1 and 2 landed on `claude/amazing-mendel-m087zw`; owner decisions Q1–Q14 taken (spec §8). The issue-06 follow-up and the parity probe (issue 09) are in. Issue 08 is in (`harness/loop.py` with the alias; `sse`, `fence`, `results`, `history`, `metrics`, `ratelimit`, `session`, `confirm`, `providers/wiring`, `stub`, `budget`, `compose`, `solver_bridge` extracted under the patch-surface rule, moved tunables forwarded live; the turn body itself stays in `loop.py` by design). PR: MLHaoChang/pypsa-eur#86. Still owed: the live OpenAI run. PR #86 merged 2026-10-06. Phase 5 (designs borrowed from DeepSeek Harness, §8) is in progress on the same branch: issues 20 and 15 are done; the rest were re-scoped on 2026-10-12 against master's checked answers, durable tasks and threads, effects and toolsets (§9).
 **Spec (contract-level):** [`.scratch/harness/spec.md`](../../../.scratch/harness/spec.md); issues under `.scratch/harness/issues/`.
 **Requested:** 2026-10-05. The assistant should connect to Claude, OpenAI/Codex, Kimi or any other model and not feel different: one harness of functions, workflows and skills that any model drives the same way; a chat opens with a menu of what the user can do; the assistant can run a grill-style interview with recommendations the user picks from; and all of it grouped in one folder instead of spread over files.
 **Builds on:** [`specs/2026-08-05-llm-provider-seam-design.md`](../specs/2026-08-05-llm-provider-seam-design.md) (the harness/provider split and the word "harness"), [`plans/2026-09-09-chat-turn-loop-decomposition.md`](2026-09-09-chat-turn-loop-decomposition.md) (how the loop is cut), [`specs/2026-09-27-guided-mode.md`](../specs/2026-09-27-guided-mode.md) (the Guided addendum and delegation texts), [`plans/2026-10-05-one-investment-engine-two-faces.md`](2026-10-05-one-investment-engine-two-faces.md) §5 U3 and §8 (the investment workflow's steps and tools).
@@ -124,12 +124,12 @@ the loaded network) and borrow seven designs. Each is an issue under
 
 | Issue | Design | Status | Why not now |
 |---|---|---|---|
-| 13 | session event log, replay, fork | ready-for-agent (Q15: adopt, projection kept) | waits for #86 to merge |
-| 14 | user skill roots, invocation policy | ready-for-agent (Q16: app-data root only) | amends D12 in the same change |
+| 13 | session event log, replay, fork | ready-for-agent (Q15; re-scoped 2026-10-12) | largest; must keep checked-answer history and recovery working |
+| 14 | user skill roots, invocation policy | ready-for-agent (Q16) | amends D12 and README rule 4 |
 | 15 | `ask_user` multi-select, detail, intents | done 2026-10-07 | — |
-| 16 | spill store and `read_result` | ready-for-agent | new tool; small-medium |
-| 17 | goal with a round budget | ready-for-agent after 13 (Q17: yes, 5 default, 20 max) | needs 13 |
-| 18 | approval audit events | ready after 13 | log state |
+| 16 | spill store and `read_result` | ready-for-agent (re-scoped 2026-10-12) | never during checked turns; a control tool |
+| 17 | goal with a round budget | ready-for-agent (Q17; re-scoped 2026-10-12) | on the durable thread, through utterance admission |
+| 18 | approval audit events | ready-for-agent (re-scoped 2026-10-12) | owner store now, folded into 13 later |
 | 19 | MCP client | deferred (Q18: later, one spec with 11) | security surface |
 | 20 | cache accounting and reasoning on the OpenAI wire | done 2026-10-06 | — |
 
@@ -147,3 +147,40 @@ Each issue names what exists today by path, the red-first tests, the gate
 (the full chat regression as in issue 08, plus both parity runs where the
 loop is touched), and the docs to update (README module table, CONTEXT.md
 glossary for new user-facing words, the runbook for new probe steps).
+
+## 9. Phase 5 against master, 2026-10-12
+
+143 master commits (other sessions, PRs #95–#131) were merged into the
+phase-5 branch. None of issues 13–19 exists in master, but master added
+durable machinery the remaining issues must build on, and each issue now
+says how in its 2026-10-12 comment:
+
+- **Checked answers** (`harness/assurance*.py`, `calculations.py`,
+  `storage_*`, `reviewer.py`, `publication.py`; mode
+  `PYPSA_GUI_ANSWER_ASSURANCE_MODE`): a checked turn allows only mapped tools
+  and replaces raw results. Issues 16 and 17 must not run inside one; 13 must
+  keep `answer_id` / `receipt` in the history projection.
+- **Owner-scoped record store** (`services/assurance_records.py`) and
+  `harness/durable.py` (`transaction`, `network_guard`): the persistence
+  pattern for 16 and 18.
+- **Effects** (`harness/effects.py`): confirmed-write reservation, read-back
+  and reconciliation; 18 links decisions to its `operation_id`.
+- **Durable tasks** (`services/assistant_tasks.py`, `start_task` … 
+  `resolve_task_step`) and the **durable parent thread**
+  (`services/durable_conversation.py`, with an unused `goals` field and
+  budget reserve/settle): 17 stores its goal there.
+- **Utterance admission** (`services/utterance_admission.py`): one turn
+  lease per session; 17 drives its rounds through it.
+- **Toolsets** (`harness/toolsets.py`, `CONTROL_TOOLS`) and the OpenAI
+  128-tool selection in `providers/wiring`: 16's `read_result` must be a
+  control tool; 19 must respect the budget.
+- **CI inventories** (`smoke/assistant_inventory.py --check`,
+  `assistant_control_matrix.py`): any catalogue change regenerates the
+  committed inventory (done for issue 15's `ask_user` fields).
+
+The usage meaning was decided again when master's PR #102 and issue 20
+disagreed: uncached input on every wire (spec Q19), one mapping for both
+OpenAI wires (`harness/providers/usage.py`).
+
+Order from here: 16, 14 (small, independent), 18 (owner store, no longer
+blocked), 13 (largest), then 17. 19 stays deferred with 11.

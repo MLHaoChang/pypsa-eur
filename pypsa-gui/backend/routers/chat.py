@@ -25,8 +25,8 @@ import logging
 import threading
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from starlette.responses import StreamingResponse
 
 from db.models import Session as SessionRow
@@ -85,6 +85,15 @@ class StreamRequest(BaseModel):
     # reciprocity depends on it and reconstructing it later from timing or
     # content is guesswork. Carried now; the spoken-reply half is not built.
     input_mode: str | None = None
+    # Issue 02 / C-I1 — optional shared utterance admission. Both must be set
+    # together; omitting either keeps the pre-admission /stream behaviour.
+    utterance_id: str | None = None
+    generation: int | None = None
+    # Validate explicitly to preserve the protocol's typed admission errors.
+    assurance: Any = None
+    checked_scope: Any = None
+    checked_operation: Any = None
+    binding_generation: StrictInt = Field(default=0, ge=0, le=2**31 - 1)
 
 
 class ConfirmRequest(BaseModel):
@@ -794,6 +803,13 @@ def chat_history(limit: int = 200,
     # cap and the #27 export route. read_all_turns returns ONLY parsed turns
     # (no session rebuild side-effect); the rehydration below stays local.
     turns, history_gap = chat_service.read_all_turns_with_gap(ctx)
+    from harness import assurance
+    from services import assurance_records
+    if assurance.strict_configured() or any(t.get("answer_id") for t in turns):
+        turns = assurance_records.history_projection(
+            turns, str(actor.id) if actor is not None else assurance_records.actor_id(),
+            strict=assurance.strict_configured(),
+        )
     pending_turn = _recover_pending_turn(ctx)
     if not turns:
         return {"turns": [], "last_session_id": None,
@@ -802,6 +818,15 @@ def chat_history(limit: int = 200,
                 "pending_turn": pending_turn,
                 "workflow": None,
                 "bound_profile_id": None}
+    # CH-6 — the CALLER's last turn, not the file's. The transcript is shared
+    # by everyone on the project; a session is one user's. Searched over the
+    # whole transcript, before `limit` trims it, so a user whose last turn is
+    # older than the window still gets their own session back.
+    actor_id = str(actor.id) if actor is not None else None
+    own_turns = [
+        rec for rec in turns
+        if rec.get("session_id") and chat_service.turn_is_callers(rec, actor_id)
+    ]
     if limit > 0:
         turns = turns[-limit:]
 
@@ -814,8 +839,8 @@ def chat_history(limit: int = 200,
     workflow_state = None
     # P28 A3 — the profile the resumed session is bound to (see the docstring).
     bound_profile_id: str | None = None
-    if turns:
-        last_rec = turns[-1]
+    if own_turns:
+        last_rec = own_turns[-1]
         last_session_id = last_rec.get("session_id")
         if last_session_id:
             # Task 7 — resolve the profile the LATEST turn was recorded
@@ -878,7 +903,20 @@ def chat_history(limit: int = 200,
             # NOT already registered (this GET minted it) adopts the
             # resolved profile; an already-live session is left exactly as
             # `/stream` bound it.
-            if session_was_freshly_minted:
+            # Defence in depth for CH-6: an id that is the caller's by the
+            # transcript but registered to a DIFFERENT known owner (a legacy or
+            # forged record) is neither handed back nor rebuilt — rebuilding
+            # would overwrite another user's live session from this GET. An
+            # owner-less session (no production path creates one) keeps the
+            # pre-CH-6 behaviour, like an author-less record does.
+            if (
+                not session_was_freshly_minted
+                and sess.owner_user_id is not None
+                and not chat_service.session_owner_allows(sess, actor_id)
+            ):
+                last_session_id = None
+                sess = None
+            if sess is not None and session_was_freshly_minted:
                 sess.profile_id = resolved_profile.id
                 sess.bound_wire = resolved_profile.wire
                 sess.model = resolved_profile.model
@@ -887,9 +925,10 @@ def chat_history(limit: int = 200,
                 # construction): `/stream` with no profile keeps it, so the
                 # panel must gate on it, not on the active one (P28 gate N-c).
                 bound_profile_id = resolved_profile.id
-            else:
+            elif sess is not None:
                 # An already-live session keeps what `/stream` bound; report
                 # THAT, and only while it still names a configured profile.
+                # (None — refused above as someone else's — reports nothing.)
                 live_id = sess.profile_id
                 configured = {p.id for p in llm_config.load_profiles()[0]}
                 bound_profile_id = live_id if live_id in configured else None
@@ -903,28 +942,66 @@ def chat_history(limit: int = 200,
             # last turn); blocks that wire can't replay (thinking /
             # redacted_thinking / image / document) are dropped here rather
             # than sent and rejected.
-            with sess._lock:
-                sess.messages.clear()
-                for rec in turns:
-                    user_text = rec.get("user")
-                    assistant_blocks = rec.get("assistant")
-                    if user_text is not None:
-                        sess.append_history_message({
-                            "role": "user",
-                            "content": chat_service._filter_non_portable_blocks(
-                                user_text, resolved_profile.wire,
-                            ),
-                        })
-                    if isinstance(assistant_blocks, list):
-                        sess.append_history_message({
-                            "role": "assistant",
-                            "content": chat_service._filter_non_portable_blocks(
-                                assistant_blocks, resolved_profile.wire,
-                            ),
-                        })
+            # NOT while a turn is in flight. The profile guard above reasons
+            # about exactly this race ("a GET /history racing a same-wire
+            # rebind mid-turn — two tabs sharing a session_id, or a reload")
+            # and was applied to the three profile lines only; the message
+            # rebuild below is the destructive half. A live turn has already
+            # appended its user message and the assistant's `tool_use`, and is
+            # about to append the matching `tool_result` — clearing in between
+            # drops the `tool_use` and leaves an ORPHAN `tool_result`, which
+            # `_sanitise_history_message` does not catch (it drops malformed
+            # thinking blocks, not orphan results), so every later turn of that
+            # session is rejected by the provider.
+            #
+            # The transcript is also the wrong source mid-turn: it holds only
+            # COMPLETED turns, so rebuilding from it discards the in-flight one
+            # wholesale even when the clear itself is survivable.
+            recovered_scope = None
+            if sess is not None and session_was_freshly_minted and history_gap == 0:
+                from harness.assurance_recovery import candidate
+                from harness.durable import network_guard
+                # Validate with the network lock before taking the session lock.
+                with network_guard():
+                    recovered_scope = candidate(sess, ctx, last_rec)
+            if sess is not None:
+                with sess._lock:
+                    # A stream can start after this GET minted its session.
+                    fresh_and_idle = not sess.messages and sess.turns_started == 0
+                    if not sess._turn_in_flight and (not session_was_freshly_minted or fresh_and_idle):
+                        sess.messages.clear()
+                        for rec in turns:
+                            user_text = rec.get("user")
+                            assistant_blocks = rec.get("assistant")
+                            if user_text is not None:
+                                sess.append_history_message({
+                                    "role": "user",
+                                    "content": chat_service._filter_non_portable_blocks(
+                                        user_text, resolved_profile.wire,
+                                    ),
+                                })
+                            if isinstance(assistant_blocks, list):
+                                sess.append_history_message({
+                                    "role": "assistant",
+                                    "content": chat_service._filter_non_portable_blocks(
+                                        assistant_blocks, resolved_profile.wire,
+                                    ),
+                                    **({"_approved_answer_id": rec["answer_id"]}
+                                       if rec.get("answer_id") else {}),
+                                })
+                        if recovered_scope is not None:
+                            assistants = [m for m in sess.messages if m.get("role") == "assistant"]
+                            if assistants and assistants[-1].get("_approved_answer_id") == recovered_scope["anchor"]:
+                                sess.assurance_context = recovered_scope
+                                sess.assurance_checkpoint_project = ctx.project_uuid
 
     return {
-        "turns": turns,
+        # The author key is how THIS route picks a session; it is not part of
+        # the wire, so co-members' user ids do not reach each other's browser.
+        "turns": [
+            {k: v for k, v in rec.items() if k != chat_service.TURN_AUTHOR_KEY}
+            for rec in turns
+        ],
         "last_session_id": last_session_id,
         "bound_project": ctx.loaded_project,
         "history_gap": history_gap,
@@ -932,6 +1009,106 @@ def chat_history(limit: int = 200,
         "workflow": workflow_state,
         "bound_profile_id": bound_profile_id,
     }
+
+
+@router.get("/answers/{answer_id}")
+def checked_answer(answer_id: str, actor: User | None = Depends(optional_user)):
+    from services import assurance_records
+    if actor is None:
+        raise HTTPException(401, "Authentication required")
+    return assurance_records.public(assurance_records.answer(str(actor.id), answer_id))
+
+
+@router.get("/evidence/{evidence_id}")
+def checked_evidence(evidence_id: str, actor: User | None = Depends(optional_user)):
+    from services import assurance_records
+    if actor is None:
+        raise HTTPException(401, "Authentication required")
+    return assurance_records.public(assurance_records.evidence(str(actor.id), evidence_id))
+
+
+@router.get("/answers/{answer_id}/export")
+def export_checked_answer(answer_id: str, format: Literal["json", "zip"] = "json",
+                          actor: User | None = Depends(optional_user)):
+    import hashlib
+    from starlette.responses import Response
+    from harness.publication import export
+    from services.http_filenames import content_disposition
+    if actor is None:
+        raise HTTPException(401, "Authentication required")
+    data, media_type, filename = export(str(actor.id), answer_id, format)
+    return Response(data, media_type=media_type, headers={
+        "Content-Disposition": content_disposition(filename),
+        "X-Content-SHA256": hashlib.sha256(data).hexdigest(),
+        "Cache-Control": "no-store",
+    })
+
+
+@router.get("/reliability/context")
+def checked_context(actor: User | None = Depends(optional_user)):
+    from harness.durable import network_guard
+    from services import assurance_records, workflow_tools
+    from services.pypsa_service import PyPSAService
+    if actor is None:
+        raise HTTPException(401, "Authentication required")
+    with network_guard():
+        ctx = PyPSAService.get_active_context()
+        assurance_records.authorize(str(actor.id), ctx.project_uuid)
+        return {"version": 1, "project_id": ctx.project_uuid,
+                "input_sha256": workflow_tools._network_input_fingerprint(ctx)}
+
+
+@router.get("/reliability/capabilities")
+def checked_capabilities():
+    from harness.rollout import capabilities
+    return capabilities()
+
+
+@router.get("/reliability/contracts")
+def checked_contracts():
+    from harness.assurance_scope import RequestScope
+    from harness.assurance import Draft, ProfileDraft
+    return {"version": 1, "request_scope": RequestScope.model_json_schema(),
+            "observed_draft": Draft.model_json_schema(), "computed_draft": ProfileDraft.model_json_schema()}
+
+
+@router.get("/operations/{operation_id}")
+def checked_operation_record(operation_id: str, actor: User | None = Depends(optional_user)):
+    from harness.effects import operation
+    from services.assurance_records import public
+    if actor is None:
+        raise HTTPException(401, "Authentication required")
+    return public(operation(str(actor.id), operation_id))
+
+
+@router.post("/operations/{operation_id}/reconcile")
+def reconcile_checked_operation(operation_id: str, body: Any = Body(...),
+                                actor: User | None = Depends(optional_user)):
+    from harness.effects import reconcile
+    from services.assurance_records import public
+    if actor is None:
+        raise HTTPException(401, "Authentication required")
+    if (not isinstance(body, dict) or set(body) != {"version", "contract_sha256"}
+            or type(body["version"]) is not int or body["version"] != 1
+            or not isinstance(body["contract_sha256"], str)):
+        raise HTTPException(422, {"error_kind": "invalid_assurance_request"})
+    return public(reconcile(str(actor.id), operation_id, body["contract_sha256"]))
+
+
+@router.post("/ui-ack")
+def checked_ui_ack(body: Any = Body(...), actor: User | None = Depends(optional_user)):
+    from harness.navigation import acknowledge
+    if actor is None:
+        raise HTTPException(401, "Authentication required")
+    return acknowledge(str(actor.id), body)
+
+
+@router.get("/navigation/{action_id}")
+def checked_navigation(action_id: str, actor: User | None = Depends(optional_user)):
+    from services import assurance_records
+    if actor is None:
+        raise HTTPException(401, "Authentication required")
+    return assurance_records.public(assurance_records.load(str(actor.id), action_id, "ui_action"))
 
 
 @router.get("/metrics")
@@ -947,7 +1124,7 @@ def chat_metrics() -> dict[str, Any]:
 
 
 @router.get("/export")
-def chat_export() -> dict[str, Any]:
+def chat_export(actor: User | None = Depends(optional_user)) -> dict[str, Any]:
     """
     Export the active project's chat transcript as a portable envelope (#27).
 
@@ -960,6 +1137,13 @@ def chat_export() -> dict[str, Any]:
     import time as _time
     ctx = PyPSAService.get_active_context()
     turns = chat_service.read_all_turns(ctx)
+    from harness import assurance
+    from services import assurance_records
+    if assurance.strict_configured() or any(t.get("answer_id") for t in turns):
+        turns = assurance_records.history_projection(
+            turns, str(actor.id) if isinstance(actor, User) else assurance_records.actor_id(),
+            strict=assurance.strict_configured(),
+        )
     return {
         "schema": "pypsa-gui-chat-export/1",
         "exported_at": _time.time(),
@@ -1005,6 +1189,13 @@ def chat_import(body: ImportRequest) -> dict[str, Any]:
         return {"imported": 0, "project": ctx.loaded_project}
     imported = 0
     for turn in body.turns:
+        # An author key on an imported turn names a user of ANOTHER install
+        # (or is forged), so here it would either match nobody — stranding the
+        # conversation for the user who imported it — or name someone it
+        # should not. Dropped, the turn reads as a legacy record: continuable
+        # by whoever imports it, and still refused by GET /history if its
+        # session is live under a different owner. CH-6.
+        turn = {k: v for k, v in turn.items() if k != chat_service.TURN_AUTHOR_KEY}
         redacted = chat_service._redact_for_persist(turn)
         chat_service.append_turn(ctx, redacted)
         imported += 1
@@ -1016,6 +1207,41 @@ def chat_import(body: ImportRequest) -> dict[str, Any]:
 # interval is set by how long we are willing to keep paying for a turn nobody
 # will read, not by cost. Module-level so a test can shorten it.
 DISCONNECT_POLL_SECONDS = 2.0
+
+# Issue 11 — how often GET /{session_id}/progress drains the detached ring.
+# Module-level so tests can shorten it without sleeping for a full second.
+PROGRESS_POLL_SECONDS = 0.25
+
+
+def _resolve_owned_session(
+    session_id: str,
+    actor: User | None,
+    *,
+    hide_foreign: bool = True,
+):
+    """Load a session the actor may use on this replica, or None / raise.
+
+    ``hide_foreign`` matches /confirm and /abort: a foreign owner is treated
+    as unknown. Wrong-replica is always a distinct refusal so failover cannot
+    clear another worker's pending work.
+    """
+    session = chat_service.get_session(session_id)
+    if session is None:
+        return None
+    if not chat_service.session_owner_allows(session, getattr(actor, "id", None)):
+        return None if hide_foreign else session
+    if not chat_service.session_replica_allows(session):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "wrong_replica",
+                "message": (
+                    "this chat session is pinned to another application worker"
+                ),
+                "owner_replica_id": session.owner_replica_id,
+            },
+        )
+    return session
 
 
 class _DisconnectWatcher:
@@ -1152,6 +1378,29 @@ async def chat_stream(
     # from, so it survives all of them. Corollary: nothing blocking may be added
     # to this handler body — it runs on the event loop now. `_gen()` itself is
     # still sync and still runs off-loop in the threadpool.
+    from harness import assurance
+    strict_assurance = assurance.admission(body.assurance)
+    if body.checked_scope is not None:
+        from harness.assurance_scope import validate
+        try:
+            validate(body.checked_scope)
+        except (ValueError, TypeError):
+            raise HTTPException(422, {"error_kind": "invalid_assurance_request"}) from None
+        if not strict_assurance or body.attachment_file_ids:
+            raise HTTPException(422, {"error_kind": "invalid_assurance_request"})
+    if body.checked_operation is not None:
+        from harness.effects import validate
+        try:
+            validate(body.checked_operation)
+        except (ValueError, TypeError, KeyError, AttributeError):
+            raise HTTPException(422, {"error_kind": "invalid_assurance_request"}) from None
+        if not strict_assurance or body.checked_scope is not None or body.attachment_file_ids:
+            raise HTTPException(422, {"error_kind": "invalid_assurance_request"})
+    if "assurance" in body.model_fields_set and body.assurance is None:
+        raise HTTPException(422, {"error_kind": "invalid_assurance_request"})
+    if strict_assurance and body.script:
+        raise HTTPException(422, {"error_kind": "invalid_assurance_request",
+                                 "message": "Strict mode does not accept scripted public frames."})
     from services import chat_tools as _chat_tools
     _chat_tools.set_acting_user(getattr(getattr(request.state, "auth_user", None), "id", None))
     # STEP 0b: the SESSION too, so a chat-driven save or activate moves the
@@ -1163,16 +1412,73 @@ async def chat_stream(
     # the note above requires. None (local mode issues no cookie) is legal and
     # is what the HTTP path passes there too.
     _chat_tools.set_acting_session(getattr(acting_session, "id", None))
+    # And the PROJECT, for the same reason and from the same place: a tool that
+    # switches the active project (activate, load, an import, an undo) publishes
+    # through a ContextVar, and `_gen()`'s per-item copies would drop that
+    # publish at the next yield — so the rest of the turn edited the previous
+    # project. The cell is shared by reference across those copies. See
+    # `PyPSAService._turn_cell`.
+    from services.pypsa_service import PyPSAService as _PyPSAService
+    _PyPSAService.bind_turn_cell()
 
-    session = chat_service.get_or_create_session(
+    _acting_user_id = (
+        str(getattr(getattr(request.state, "auth_user", None), "id", None) or "")
+        or None
+    )
+    session, _session_created = chat_service.get_or_create_session_reporting(
         body.session_id, model=body.model or chat_service.DEFAULT_MODEL,
         # Same source the tool layer binds from two lines above, rather than a
         # second resolution that could disagree with it.
-        owner_user_id=(
-            str(getattr(getattr(request.state, "auth_user", None), "id", None) or "")
-            or None
-        ),
+        owner_user_id=_acting_user_id,
     )
+    # Authorization, not just authentication — the fourth route to need it.
+    # `session_owner_allows` was added for /confirm, /rewind and /abort; this
+    # one resolves a CALLER-SUPPLIED session_id through a process-global
+    # registry that sets the owner on CREATE ONLY, so an existing session
+    # belonging to someone else came back as-is and the turn ran inside it.
+    # That is worse than what the three closed: the outbound message array is
+    # seeded from that session's history, so a stranger's conversation (and the
+    # tool results in it) goes to the provider on the caller's behalf and can
+    # be elicited in the reply; the caller's message lands in the stranger's
+    # thread; and the tools run with the CALLER's authority. The id is not
+    # secret — /confirm's own comment records that GET /history hands
+    # `last_session_id` to any co-member who activates the project.
+    #
+    # Scoped to sessions that ALREADY EXISTED: minting one for a caller-chosen
+    # id is what every first turn does, and refusing that would break it.
+    #
+    # A refusal rather than quietly minting a different session for the caller:
+    # the client uses the id it SENT for /abort and /confirm (see this
+    # handler's docstring), so handing back another one would leave both
+    # pointing at a session that is not running the turn. Unlike the three
+    # routes above, this one does not hide the session's existence behind a
+    # 404 — the caller was given the id by /history on a project they belong
+    # to, so there is nothing left to conceal, and a clear refusal beats a turn
+    # that runs and then blocks on a confirmation they can never answer.
+    if not _session_created and not chat_service.session_owner_allows(
+        session, _acting_user_id,
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error_kind": "session_not_yours",
+                "message": (
+                    "that chat session belongs to another user; omit "
+                    "`session_id` to start your own"
+                ),
+            },
+        )
+    if not _session_created and not chat_service.session_replica_allows(session):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "wrong_replica",
+                "message": (
+                    "this chat session is pinned to another application worker"
+                ),
+                "owner_replica_id": session.owner_replica_id,
+            },
+        )
 
     # #26 — in-memory token-bucket rate limit, keyed per session_id (a session
     # is one conversation = one rate-limit subject). Disabled by default
@@ -1328,6 +1634,12 @@ async def chat_stream(
                     session, body.message or "",
                     attachment_file_ids=body.attachment_file_ids,
                     ui_context=body.ui_context,
+                    strict_assurance=strict_assurance,
+                    utterance_id=body.utterance_id,
+                    generation=body.generation,
+                    checked_scope=body.checked_scope,
+                    checked_operation=body.checked_operation,
+                    binding_generation=body.binding_generation,
                 )
             for event_name, payload in events:
                 yield chat_service.sse_frame(event_name, payload)
@@ -1368,7 +1680,6 @@ def chat_confirm(session_id: str, body: ConfirmRequest,
     decisions return 400 `error_kind='invalid_decision'` and keep the token
     alive so the caller can retry with the correct value.
     """
-    session = chat_service.get_session(session_id)
     # Authorization, not just authentication. `_SESSIONS` is a process global and
     # this route used to consult no owner at all, so any signed-in caller who knew
     # a session id could act on a stranger's conversation -- verified cross-ORG.
@@ -1377,11 +1688,9 @@ def chat_confirm(session_id: str, body: ConfirmRequest,
     #
     # A foreign session is made INDISTINGUISHABLE from an unknown one rather than
     # answered with a 403: that keeps this route from confirming the session
-    # exists, and matches the existing never-404 contract below.
-    if session is not None and not chat_service.session_owner_allows(
-        session, getattr(actor, "id", None),
-    ):
-        session = None
+    # exists, and matches the existing never-404 contract below. Wrong-replica
+    # is a distinct 409 so failover cannot clear another worker's tokens.
+    session = _resolve_owned_session(session_id, actor)
     if session is None:
         raise HTTPException(
             status_code=404,
@@ -1421,13 +1730,19 @@ def chat_rewind(session_id: str, body: RewindRequest,
     turn is in flight — see rewind_session for why refusing is the only safe
     answer there.
     """
-    session = chat_service.get_session(session_id)
-    # Same guard and same reasoning as /confirm and /abort above: a foreign
-    # session is made indistinguishable from an unknown one.
-    if session is not None and not chat_service.session_owner_allows(
-        session, getattr(actor, "id", None),
-    ):
-        session = None
+    try:
+        session = _resolve_owned_session(session_id, actor)
+    except HTTPException as exc:
+        if exc.status_code == 409 and (
+            (exc.detail or {}).get("error_kind") == "wrong_replica"
+        ):
+            return {
+                "ok": False,
+                "reason": "wrong_replica",
+                "dropped": 0,
+                "owner_replica_id": (exc.detail or {}).get("owner_replica_id"),
+            }
+        raise
     if session is None:
         return {"ok": False, "reason": "unknown_session", "dropped": 0}
     dropped = chat_service.rewind_session(session, turns=body.turns)
@@ -1442,7 +1757,6 @@ def chat_abort(session_id: str,
     worker shut down. Idempotent: safe to call on an unknown session
     (returns ok=false rather than 404, so a quick double-click is harmless).
     """
-    session = chat_service.get_session(session_id)
     # Authorization, not just authentication. `_SESSIONS` is a process global and
     # this route used to consult no owner at all, so any signed-in caller who knew
     # a session id could act on a stranger's conversation -- verified cross-ORG.
@@ -1451,12 +1765,103 @@ def chat_abort(session_id: str,
     #
     # A foreign session is made INDISTINGUISHABLE from an unknown one rather than
     # answered with a 403: that keeps this route from confirming the session
-    # exists, and matches the existing never-404 contract below.
-    if session is not None and not chat_service.session_owner_allows(
-        session, getattr(actor, "id", None),
-    ):
-        session = None
+    # exists, and matches the existing never-404 contract below. Wrong-replica
+    # returns ok=false without setting abort_event.
+    try:
+        session = _resolve_owned_session(session_id, actor)
+    except HTTPException as exc:
+        if exc.status_code == 409 and (
+            (exc.detail or {}).get("error_kind") == "wrong_replica"
+        ):
+            return {
+                "ok": False,
+                "reason": "wrong_replica",
+                "owner_replica_id": (exc.detail or {}).get("owner_replica_id"),
+            }
+        raise
     if session is None:
         return {"ok": False, "reason": "unknown_session"}
     session.abort_event.set()
     return {"ok": True}
+
+
+@router.get("/{session_id}/progress")
+async def chat_progress(
+    session_id: str,
+    request: Request,
+    cursor: int | None = None,
+    actor: User | None = Depends(optional_user),
+) -> StreamingResponse:
+    """
+    Issue 11 — observe detached solver progress after a foreground handoff.
+
+    Drains the session's detached progress ring and emits existing
+    ``tool_progress`` SSE frames (no new frame names). Each payload carries
+    a monotonic ``cursor`` (D-I2). Pass ``?cursor=N`` to replay frames after
+    N from the session log (gap recovery) without clearing the unread ring.
+    Stays open while a detached monitor is active; exits once the ring is
+    empty and the monitor is inactive. Ownership/replica gates match /confirm.
+    """
+    try:
+        session = _resolve_owned_session(session_id, actor)
+    except HTTPException:
+        raise
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_kind": "unknown_session",
+                "message": f"no chat session bound to {session_id!r}",
+            },
+        )
+    if cursor is not None and cursor < 0:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_kind": "invalid_progress_cursor",
+                "message": "cursor must be a non-negative integer",
+            },
+        )
+
+    async def _gen():
+        # First drain is immediate so a short-lived ring is not held for a
+        # full poll interval before the client sees it. A resume cursor
+        # replays from the log once, then falls through to unread drains.
+        idle_rounds = 0
+        resume_cursor = cursor
+        while True:
+            if await request.is_disconnected():
+                return
+            if resume_cursor is not None:
+                payloads = session.drain_detached_progress(
+                    after_cursor=resume_cursor,
+                )
+                resume_cursor = None
+            else:
+                payloads = session.drain_detached_progress()
+            for payload in payloads:
+                yield chat_service.sse_frame("tool_progress", payload)
+            if session.detached_monitor_active():
+                idle_rounds = 0
+                await asyncio.sleep(PROGRESS_POLL_SECONDS)
+                continue
+            if payloads:
+                idle_rounds = 0
+                await asyncio.sleep(PROGRESS_POLL_SECONDS)
+                continue
+            # Monitor gone and ring empty — one extra short wait for a late
+            # append, then close.
+            idle_rounds += 1
+            if idle_rounds >= 2:
+                return
+            await asyncio.sleep(PROGRESS_POLL_SECONDS)
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )

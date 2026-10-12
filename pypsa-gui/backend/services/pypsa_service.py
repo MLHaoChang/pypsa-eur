@@ -214,9 +214,59 @@ class PyPSAService:
     def bind_request_scratch(cls, key: str | None):
         return cls._request_scratch.set(key)
 
+    # A chat turn's binding CELL — a one-element list shared by reference.
+    #
+    # `_request_ctx` is a ContextVar, and a `set()` only reaches code running
+    # in the same Context. The chat SSE generator never runs in one: Starlette's
+    # `iterate_in_threadpool` drives every `next()` in a FRESH copy of the
+    # request task's context, so a project switch a tool makes — published by
+    # `_publish_active`, adopted by the dispatcher — lands on a per-item copy
+    # and is gone at the next `yield`. The rest of the turn then edits the
+    # PREVIOUS project while the model believes it moved. (The first fix for
+    # this, `adopt_active_from`, was tested by driving the generator in one
+    # context, which is exactly the case where it works.)
+    #
+    # A cell fixes it without any reader caring: the ContextVar holds the same
+    # LIST object in every copy that descends from the task that bound it, so a
+    # write into the list is seen by all of them — including the `asyncio.run`
+    # task an async import handler runs in, two copies further down.
+    # `routers/chat.py` binds it from the event-loop task (the only place a
+    # binding survives the per-item copies, as its `set_acting_user` note
+    # explains); nothing else binds one, so outside a chat turn every read
+    # below is exactly `_request_ctx.get()`.
+    _turn_cell: ContextVar[list | None] = ContextVar("pypsa_turn_cell", default=None)
+
+    @classmethod
+    def bind_turn_cell(cls):
+        """Share this request's binding with every context copied from here.
+
+        No-op (returns None) outside a request: with no request context the
+        process foreground `_active` is used, which is shared already.
+        """
+        current = cls._request_ctx.get()
+        if current is None:
+            return None
+        return cls._turn_cell.set([current])
+
+    @classmethod
+    def _scoped(cls) -> ProjectContext | None:
+        """The request-scoped context: the turn cell's if one is bound."""
+        cell = cls._turn_cell.get()
+        if cell is not None and cell[0] is not None:
+            return cell[0]
+        return cls._request_ctx.get()
+
+    @classmethod
+    def _set_scoped(cls, ctx: ProjectContext) -> None:
+        """Publish `ctx` as the request-scoped context, cell included."""
+        cls._request_ctx.set(ctx)
+        cell = cls._turn_cell.get()
+        if cell is not None:
+            cell[0] = ctx
+
     @classmethod
     def get_request_context(cls) -> ProjectContext | None:
-        return cls._request_ctx.get()
+        return cls._scoped()
 
     @classmethod
     def adopt_process_foreground(cls) -> ProjectContext | None:
@@ -268,8 +318,58 @@ class PyPSAService:
                 if existing_ctx is ctx and existing_key != key:
                     cls._contexts.pop(existing_key, None)
             cls._contexts[key] = ctx
-        if cls._request_ctx.get() is ctx:
+        if cls._scoped() is ctx:
             cls._request_slot.set(key)
+
+    @classmethod
+    def adopt_active_from(cls, snapshot) -> bool:
+        """Carry a project switch made inside `snapshot` into THIS context.
+
+        `snapshot` is a `contextvars.Context` that some other thread ran work
+        in. A `ContextVar.set()` performed inside `Context.run()` mutates that
+        Context and is invisible to the caller once `run()` returns — which is
+        exactly what happens to a chat tool: `chat_service` dispatches every
+        tool as `copy_context().run(...)` on an executor (it has to, because a
+        pool worker inherits no contextvars), so `_publish_active`'s
+        `_request_ctx.set(ctx)` landed on the copy and died with it. In server
+        mode the rest of the turn therefore kept operating on the PREVIOUS
+        project while the model believed it had switched.
+
+        Only the active-project var is carried, deliberately: the acting user
+        and session are bound per request and a tool has no business changing
+        them, so a blanket "copy every var back" would turn this into a
+        privilege-transfer primitive.
+
+        Returns True when a switch was actually adopted. No-op outside a
+        request, where `_publish_active` writes the process foreground
+        (`cls._active`) instead and nothing was ever lost.
+
+        NOT sufficient on its own, and that is why `_turn_cell` exists: this
+        writes `_request_ctx` in the CALLER's context, and the chat generator's
+        caller is itself a per-item copy that is discarded at the next yield.
+        It also cannot see a publish made one copy further down, inside the
+        `asyncio.run` task an async handler (every import) runs in. With a cell
+        bound the publish has already reached the turn and this is a no-op.
+        """
+        if cls._scoped() is None:
+            return False
+        try:
+            switched = snapshot[cls._request_ctx]
+        except (KeyError, TypeError):
+            return False
+        # Compared against the caller's RAW var — what the copy started as —
+        # not against `_scoped()`. Unchanged means the tool published nothing
+        # in this copy, which is not the same as "no switch": an async handler
+        # publishes one copy further down, straight into the cell, and the
+        # snapshot still holds the OLD context. Comparing with the cell would
+        # read that stale value as a switch and adopt it, quietly undoing the
+        # import that just happened.
+        if switched is None or switched is cls._request_ctx.get():
+            return False
+        if switched is cls._scoped():
+            return False
+        cls._set_scoped(switched)
+        return True
 
     @classmethod
     def _publish_active(cls, ctx: ProjectContext) -> None:
@@ -281,8 +381,8 @@ class PyPSAService:
         request — the solve dispatcher, eviction, direct in-process callers —
         it means the process foreground, exactly as before.
         """
-        if cls._request_ctx.get() is not None:
-            cls._request_ctx.set(ctx)
+        if cls._scoped() is not None:
+            cls._set_scoped(ctx)
             # Route by the NEW context's own identity, not by the slot the
             # request arrived on. A `reset_network()` mid-request produces an
             # UNBOUND context; writing it into the previous project's registry
@@ -312,7 +412,7 @@ class PyPSAService:
         fresh + empty; last assignment wins) — same race profile as the previous
         unlocked `_network` self-heal.
         """
-        scoped = cls._request_ctx.get()
+        scoped = cls._scoped()
         if scoped is not None:
             return scoped
         if cls._active is None:
@@ -356,7 +456,7 @@ class PyPSAService:
         A route that mutates anything before swapping must call THIS first.
         The check is pure: it reads the state and raises, and touches nothing.
         """
-        prev = ctx if ctx is not None else (cls._request_ctx.get() or cls._active)
+        prev = ctx if ctx is not None else (cls._scoped() or cls._active)
         if prev is None:
             return
         detail = study_swap_refusal(prev.solver_state, action)
@@ -375,7 +475,7 @@ class PyPSAService:
         # empty transient registry, so a load that fails mid-import leaves
         # identity unbound (rather than dangling on the previous project) and a
         # subsequent autosave can't misdirect.
-        prev = cls._request_ctx.get() or cls._active
+        prev = cls._scoped() or cls._active
         # ★ REFUSE BY DEFAULT while a study is live (Phase 11).
         #
         # A study's worker closes over the `pypsa.Network` object captured
@@ -632,8 +732,8 @@ class PyPSAService:
         """
         with cls._registry_lock:
             ctx.last_interacted_at = time.monotonic()
-            if cls._request_ctx.get() is not None:
-                cls._request_ctx.set(ctx)
+            if cls._scoped() is not None:
+                cls._set_scoped(ctx)
                 cls._request_slot.set(ctx.registry_key)
             else:
                 cls._active = ctx
@@ -1132,10 +1232,10 @@ class PyPSAService:
         with cls._registry_lock:
             ctx = cls._contexts[project_id]
             ctx.last_interacted_at = time.monotonic()  # resident switch → MRU (B9)
-            if cls._request_ctx.get() is not None:
+            if cls._scoped() is not None:
                 # Step 0b: inside a request the switch is per SESSION. Writing
                 # `_active` here would move every other user's foreground too.
-                cls._request_ctx.set(ctx)
+                cls._set_scoped(ctx)
                 cls._request_slot.set(project_id)
             else:
                 cls._active = ctx
@@ -1188,7 +1288,7 @@ class PyPSAService:
         # project was resolved correctly — `/api/network/meta` served the right
         # network with the wrong (None) binding, which the autosave `expect`
         # guard then refused.
-        scoped = cls._request_ctx.get()
+        scoped = cls._scoped()
         if scoped is not None:
             return scoped.registry_key
         return cls._active.registry_key if cls._active is not None else None
@@ -1210,7 +1310,7 @@ class PyPSAService:
         # Read-only: don't materialize a context just to answer "unbound?" — but
         # DO honour the request-scoped binding, or a caller reads its own
         # network under someone else's project name (Step 0b).
-        scoped = cls._request_ctx.get()
+        scoped = cls._scoped()
         if scoped is not None:
             return scoped.loaded_project
         return cls._active.loaded_project if cls._active is not None else None
@@ -1364,7 +1464,7 @@ class PyPSAService:
             return ctx
         if ensure:
             return cls._ensure_active()
-        return cls._request_ctx.get() or cls._active
+        return cls._scoped() or cls._active
 
     @classmethod
     def mark_transient(cls, component_class: str, name: str) -> None:

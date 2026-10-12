@@ -47,56 +47,19 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any, Iterator
+from urllib.parse import urlsplit
 
 from services import redaction
 from harness.protocol import LLMEvent, LLMRequest, ProviderError
+from harness.providers import openai_responses
+from harness.providers.usage import usage_from as _usage_from
 
 logger = logging.getLogger("pypsa_gui.chat")
 
 _REASONING_KEYS = ("reasoning_content", "reasoning")  # passive passthrough
 
 
-def _count(value: Any) -> int:
-    """A token count from a vendor field; anything not a non-negative int is 0."""
-    if isinstance(value, bool):
-        return 0
-    try:
-        n = int(value or 0)
-    except (TypeError, ValueError):
-        return 0
-    return n if n > 0 else 0
 
-
-def _usage_from(u: dict[str, Any]) -> dict[str, int]:
-    """
-    A chat-completions `usage` object in the harness's usage vocabulary
-    (`LLMEvent.usage`), with the ANTHROPIC meaning: `input_tokens` is the
-    uncached input only, cache reads and writes are reported beside it.
-
-    Every OpenAI-compatible vendor folds cached input into `prompt_tokens`,
-    each under its own name (chat harness issue 20):
-      OpenAI    prompt_tokens_details.cached_tokens
-      Kimi      prompt_tokens_details.cached_tokens / .cache_write_tokens,
-                and a top-level cached_tokens
-      DeepSeek  prompt_cache_hit_tokens (prompt = hit + miss)
-    so they are subtracted back out. Without this the daily cap and the
-    metrics counted every cached token as fresh input on this wire only.
-    An inconsistent report (cached > prompt) clamps at zero rather than
-    reporting negative input.
-    """
-    details = u.get("prompt_tokens_details")
-    details = details if isinstance(details, dict) else {}
-    cache_read = (_count(details.get("cached_tokens"))
-                  or _count(u.get("cached_tokens"))
-                  or _count(u.get("prompt_cache_hit_tokens")))
-    cache_create = _count(details.get("cache_write_tokens"))
-    prompt = _count(u.get("prompt_tokens"))
-    return {
-        "input_tokens": max(prompt - cache_read - cache_create, 0),
-        "output_tokens": _count(u.get("completion_tokens")),
-        "cache_read_tokens": cache_read,
-        "cache_create_tokens": cache_create,
-    }
 
 
 def _to_openai_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -247,6 +210,7 @@ class OpenAICompatProvider:
         self._base = base_url.rstrip("/")
         self._key = api_key
         self._http = http_client  # tests inject MockTransport clients
+        self._responses_state: dict[str, Any] = {}
         # Server-derived from the profile's preset (`llm_config
         # .derive_token_param`), never client-set. `max_tokens` is the default
         # because it is what every local and OpenAI-compatible server accepts;
@@ -294,6 +258,8 @@ class OpenAICompatProvider:
                                                                 connect=10.0))
 
     def _stream_payload(self, request: LLMRequest, token_param: str) -> dict:
+        if openai_responses.uses_responses(self._base, request):
+            return openai_responses.payload(request, _to_openai_messages(request), self._responses_state)
         payload: dict[str, Any] = {
             "model": request.model,
             # C-2 — EXACTLY ONE completion-length parameter. See the class
@@ -305,6 +271,12 @@ class OpenAICompatProvider:
         }
         if request.tools:
             payload["tools"] = _to_openai_tools(request.tools)
+            # Luna's default reasoning mode refuses function tools on this
+            # endpoint. Disable reasoning explicitly; other models and
+            # compatible servers retain their existing request parameters.
+            if (urlsplit(self._base).hostname == "api.openai.com"
+                    and request.model == "gpt-6-luna"):
+                payload["reasoning_effort"] = "none"
         return payload
 
     def stream(self, request: LLMRequest) -> Iterator[LLMEvent]:
@@ -338,6 +310,7 @@ class OpenAICompatProvider:
     ) -> Iterator[LLMEvent]:
         import httpx
         payload = self._stream_payload(request, token_param)
+        responses = openai_responses.uses_responses(self._base, request)
         headers = {"content-type": "application/json"}
         if self._key:
             headers["authorization"] = f"Bearer {self._key}"
@@ -356,9 +329,11 @@ class OpenAICompatProvider:
         started_indices: set[int] = set()
         seen_ids: set[str] = set()
         usage: dict[str, int] = {}
+        completed = False
         client = self._client()
         try:
-            with client.stream("POST", f"{self._base}/chat/completions",
+            endpoint = "responses" if responses else "chat/completions"
+            with client.stream("POST", f"{self._base}/{endpoint}",
                                json=payload, headers=headers) as resp:
                 if resp.status_code == 400:
                     # C-2 — the endpoint may want the OTHER spelling. Only a
@@ -375,21 +350,25 @@ class OpenAICompatProvider:
                         body += chunk
                         if len(body) >= 8192:
                             break
-                    if self._refused_the_token_param(body, token_param):
+                    if not responses and self._refused_the_token_param(body, token_param):
                         raise _TokenParamRefused(token_param)
                     raise ProviderError(
                         _kind_for_status(resp.status_code),
-                        f"HTTP {resp.status_code} from chat/completions")
+                        f"HTTP {resp.status_code} from {endpoint}")
                 if resp.status_code != 200:
                     raise ProviderError(
                         _kind_for_status(resp.status_code),
-                        f"HTTP {resp.status_code} from chat/completions")
+                        f"HTTP {resp.status_code} from {endpoint}")
+                if responses:
+                    yield from openai_responses.stream_response(resp, request, self._responses_state)
+                    return
                 for line in resp.iter_lines():
                     if not line.startswith("data:"):
                         yield LLMEvent(type="ping")
                         continue
                     data = line[5:].strip()
                     if data == "[DONE]":
+                        completed = True
                         break
                     try:
                         chunk = json.loads(data)
@@ -399,6 +378,16 @@ class OpenAICompatProvider:
                     if isinstance(chunk.get("usage"), dict):
                         usage = _usage_from(chunk["usage"])
                     for choice in chunk.get("choices", []):
+                        finish_reason = choice.get("finish_reason")
+                        if finish_reason is not None:
+                            completed = True
+                        if (finish_reason in ("length", "content_filter")
+                                and (calls or (choice.get("delta") or {}).get("tool_calls"))):
+                            raise ProviderError(
+                                "invalid_request",
+                                f"completion stopped with {finish_reason}; "
+                                "refusing incomplete tool calls",
+                            )
                         delta = choice.get("delta") or {}
                         for rk in _REASONING_KEYS:
                             if delta.get(rk):
@@ -454,6 +443,10 @@ class OpenAICompatProvider:
             if self._http is None:
                 client.close()
 
+        if not completed:
+            raise ProviderError(
+                "upstream_error", "completion stream ended before a finish marker")
+
         blocks: list[dict[str, Any]] = []
         if text_parts:
             blocks.append({"type": "text", "text": "".join(text_parts)})
@@ -488,8 +481,12 @@ class OpenAICompatProvider:
                                tool_name=slot["name"])
             try:
                 args = json.loads(slot["args"]) if slot["args"] else {}
-            except ValueError:
-                args = {"_raw_arguments": slot["args"]}
+            except ValueError as exc:
+                raise ProviderError(
+                    "invalid_request", "tool-call arguments are not valid JSON") from exc
+            if not isinstance(args, dict):
+                raise ProviderError(
+                    "invalid_request", "tool-call arguments must be a JSON object")
             blocks.append({"type": "tool_use", "id": slot["id"],
                            "name": slot["name"], "input": args})
         yield LLMEvent(type="message_done", blocks=blocks, usage=usage)
@@ -533,8 +530,23 @@ class OpenAICompatProvider:
         client = self._client()
         start = time.monotonic()
         try:
-            resp = client.post(f"{self._base}/chat/completions",
-                               json=payload, headers=headers)
+            # Keep an owned client open until the adaptive retry finishes.
+            for token_param in (self._token_param,
+                                self._other_token_param(self._token_param)):
+                resp = client.post(f"{self._base}/chat/completions",
+                                   json=payload, headers=headers)
+                if resp.status_code == 200:
+                    return "ok", (time.monotonic() - start) * 1000.0
+                if resp.status_code in (401, 403):
+                    return "unauthorized", None
+                if resp.status_code == 404:
+                    return "model_not_found", None
+                if (token_param == self._token_param
+                        and resp.status_code == 400
+                        and self._refused_the_token_param(resp.content, token_param)):
+                    payload[self._other_token_param(token_param)] = payload.pop(token_param)
+                    continue
+                return "invalid_request", None
         except httpx.HTTPError as exc:
             logger.warning(
                 "chat: connection test could not reach the endpoint (%s)",
@@ -544,33 +556,6 @@ class OpenAICompatProvider:
         finally:
             if self._http is None:
                 client.close()
-        elapsed_ms = (time.monotonic() - start) * 1000.0
-        if resp.status_code == 200:
-            return "ok", elapsed_ms
-        if resp.status_code == 401:
-            return "unauthorized", None
-        if resp.status_code == 404:
-            return "model_not_found", None
-        if resp.status_code == 400 and self._refused_the_token_param(
-            resp.content, self._token_param
-        ):
-            # C-2 — same adaptive retry as `stream`, so a `custom` profile
-            # aimed at OpenAI does not report a bogus `invalid_request` from
-            # the one button an operator uses to check their configuration.
-            payload[self._other_token_param(self._token_param)] = payload.pop(
-                self._token_param
-            )
-            try:
-                retry = client.post(f"{self._base}/chat/completions",
-                                    json=payload, headers=headers)
-            except httpx.HTTPError:
-                return "unreachable", None
-            if retry.status_code == 200:
-                return "ok", (time.monotonic() - start) * 1000.0
-            if retry.status_code == 401:
-                return "unauthorized", None
-            if retry.status_code == 404:
-                return "model_not_found", None
         return "invalid_request", None
 
     def probe_models(self) -> list[str] | None:
@@ -609,7 +594,7 @@ class OpenAICompatProvider:
 
 
 def _kind_for_status(status: int) -> str:
-    if status == 401:
+    if status in (401, 403):
         return "unauthorized"
     if status == 429:
         return "rate_limited"
