@@ -7,16 +7,23 @@ Sheets, in order:
   (value, unit, basis, currency year, engine, fidelity, why not established),
   the disclosures with their sentences, the stale flag and its reasons;
 * ``Value streams`` and ``Tornado`` — the drivers section's tables;
-* ``Assumptions`` — the ledger (``proforma_xlsx._assumptions``) plus an
+* ``Assumptions`` — the ledger (``workbook_view.assumptions``: its
+  ``engine_path``, the tested range, who set each default) plus an
   ``edited`` column;
 * ``Provenance`` — hashes, engines, fidelity, library version;
 * per option with an established case, ``Cash flows <option>`` and
-  ``KPIs <option>`` — written by ``services/study/proforma_xlsx.py``'s own
-  sheet writers, so the report's cash flows are the case workbook's (live
-  discounting formulas, the NPV pinned as ``=CF0 + NPV(rate, CF1:CFn)``,
-  the IRR and paybacks labelled STATIC).
+  ``KPIs <option>`` — U2 WP9: the case workbook's own sheets
+  (``workbook_view.engine_cash_flows`` / ``kpis``, as
+  ``engine_adapter.case_workbook`` writes them) over the engine's cash series
+  stored with the record (``engine_cash``, `engine_adapter.cash_series`): the
+  live-formula view, the NPV pinned as ``=CF0 + NPV(rate, CF1:CFn)``, the
+  IRR and paybacks labelled STATIC. The engine's own sheets
+  (``build_workbook``) are in each option's case workbook, not repeated here.
+  A case with no stored series (a record assembled before WP9, or a pro
+  forma case) keeps the earlier sheet (``proforma_xlsx._cash_flows``) over
+  the stored case, and says so; WP10 deletes that path.
 
-Every text cell goes through ``proforma_xlsx._text``: a string that starts
+Every text cell goes through ``workbook_view.text``: a string that starts
 with ``=`` (a study name, a ledger source) is stored as a string, never a
 formula.
 """
@@ -25,9 +32,12 @@ from __future__ import annotations
 import io
 from typing import Any
 
+from collections.abc import Mapping
+
 from models.study import AssumptionsLedger, DecisionReport, InvestmentCase
 from services.study import proforma_xlsx as PX
 from services.study import report as R
+from services.study import workbook_view as WV
 
 __all__ = ["write_report_xlsx"]
 
@@ -35,11 +45,11 @@ __all__ = ["write_report_xlsx"]
 def _rows(ws, title: str, header: list[str], rows: list[list[Any]]) -> None:
     ws.title = title
     for j, h in enumerate(header, start=1):
-        PX._text(ws, 1, j, h)
+        WV.text(ws, 1, j, h)
     for i, row in enumerate(rows, start=2):
         for j, v in enumerate(row, start=1):
             if isinstance(v, str) or v is None:
-                PX._text(ws, i, j, v)
+                WV.text(ws, i, j, v)
             else:
                 ws.cell(i, j).value = v
 
@@ -73,9 +83,25 @@ def _verdict(ws, report: DecisionReport, prose: dict[str, list[str]], stale: boo
     _rows(ws, "Verdict", ["field", "value", "", "", "", "", "", ""], rows)
 
 
+#: The earlier sheet's note (a case with no stored engine series).
+EARLIER_SHEET = ("the cash flows as stored with a report assembled before the engine's cash "
+                 "series were recorded: the earlier sheet over the stored case; assemble the "
+                 "report again for the live-formula view over the engine's series")
+
+
+def _engine_series(case: InvestmentCase, series: Mapping | None) -> Mapping | None:
+    """The stored series when it is this case's (same case id, the engine's)."""
+    if not series or case.engine != "finance_engine":
+        return None
+    if series.get("case_id") != case.case_id or series.get("engine") != "finance_engine":
+        return None
+    return series
+
+
 def write_report_xlsx(report: DecisionReport, cases: dict[str, InvestmentCase],
                       ledger: AssumptionsLedger, *, stale: bool | None = None,
-                      stale_reasons: list[str] | None = None) -> bytes:
+                      stale_reasons: list[str] | None = None,
+                      engine_cash: Mapping[str, Mapping] | None = None) -> bytes:
     import openpyxl
 
     prose = R.validate_prose(report)
@@ -96,12 +122,12 @@ def write_report_xlsx(report: DecisionReport, cases: dict[str, InvestmentCase],
             r.get("high_value"), r.get("npv_low"), r.get("npv_high"), r.get("swing"),
             r.get("evaluation")] for r in drivers.get("tornado") or []])
     ws = wb.create_sheet()
-    PX._assumptions(ws, ledger)
-    col = len(PX._LEDGER_COLUMNS) + 1
-    PX._text(ws, 1, col, "edited")
+    WV.assumptions(ws, ledger)
+    col = len(WV.LEDGER_COLUMNS) + 1
+    WV.text(ws, 1, col, "edited")
     for i, row in enumerate(ledger.rows, start=2):
         edited = row.status == "customised" or row.provenance in ("user", "measured")
-        PX._text(ws, i, col, "edited" if edited else "")
+        WV.text(ws, i, col, "edited" if edited else "")
     app = report.sections["appendix"].payload or {}
     prov = [["study_id", report.study_id], ["question_id", report.question_id],
             ["generated_at", report.generated_at.isoformat()],
@@ -118,8 +144,15 @@ def write_report_xlsx(report: DecisionReport, cases: dict[str, InvestmentCase],
         if case.status != "ok":
             continue
         cf_title, kpi_title = f"Cash flows {oid}"[:31], f"KPIs {oid}"[:31]
-        npv_row = PX._cash_flows(wb.create_sheet(), case, title=cf_title)
-        PX._kpis(wb.create_sheet(), case, npv_row, title=kpi_title, cash_flows_title=cf_title)
+        series = _engine_series(case, (engine_cash or {}).get(oid))
+        cf = wb.create_sheet()
+        if series is not None:
+            npv_row = WV.engine_cash_flows(cf, case, series, title=cf_title)
+        else:
+            npv_row = PX._cash_flows(cf, case, title=cf_title)
+            WV.text(cf, 3, 1, "Source")
+            WV.text(cf, 3, 2, EARLIER_SHEET)
+        WV.kpis(wb.create_sheet(), case, npv_row, title=kpi_title, cash_flows_title=cf_title)
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()

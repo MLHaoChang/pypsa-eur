@@ -53,8 +53,25 @@ def pct(value) -> str:
     return "" if value is None else f"{float(value) * 100:.1f} %"
 
 
+#: The engines in words (gate U2-WP8b N2): the HTML and DOCX name a figure's
+#: engine as the frontend does (`utils/decisionVocabulary.ts::ENGINE_LABELS`,
+#: pinned equal by `test_u2_wp9_workbooks`); the XLSX keeps the codes.
+ENGINE_LABELS: dict[str, str] = {
+    "lp": "optimisation (LP)",
+    "lp_duals": "the model\u2019s own prices (LP duals)",
+    "bill_calculator": "the earlier bill calculator",
+    "contract": "contract",
+    "mc_resilience": "resilience simulation",
+    "cash_flow_expander": "the earlier cash-flow model",
+    "ledger": "assumptions ledger",
+    "method_constant": "a constant of the method",
+    "tariff_engine": "tariff engine",
+    "finance_engine": "finance engine",
+}
+
+
 def provenance(fig: Figure) -> str:
-    parts = [fig.engine]
+    parts = [ENGINE_LABELS.get(fig.engine, fig.engine)]
     if fig.fidelity is not None:
         parts.append(fig.fidelity.value)
     if fig.basis is not None:

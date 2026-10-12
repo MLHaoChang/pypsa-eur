@@ -86,8 +86,8 @@
    "test_bill_lives_in_the_models_with_a_fidelity": "test_engine_adapter_case_golden.py::test_bill_lives_in_the_models_with_a_fidelity"
   },
   "test_proforma_xlsx.py": {
-   "test_the_evaluator_matches_excels_documented_npv_examples": "dropped: tests the in-repo formula evaluator (tests/xlsx_formula_eval.py), not the GS engine; WP9 moves it verbatim beside the workbook target",
-   "test_the_evaluator_refuses_what_it_does_not_implement": "dropped: tests the in-repo formula evaluator (tests/xlsx_formula_eval.py), not the GS engine; WP9 moves it verbatim beside the workbook target",
+   "test_the_evaluator_matches_excels_documented_npv_examples": "test_xlsx_formula_eval.py::test_the_evaluator_matches_excels_documented_npv_examples",
+   "test_the_evaluator_refuses_what_it_does_not_implement": "test_xlsx_formula_eval.py::test_the_evaluator_refuses_what_it_does_not_implement",
    "test_the_sheets": "test_engine_adapter_workbook.py::test_the_engines_sheets_come_first_and_the_guided_sheets_are_appended",
    "test_the_npv_cell_is_cf0_plus_npv_of_cf1_to_cfn_and_evaluates_to_the_case": "test_engine_adapter_workbook.py::test_the_npv_cell_is_cf0_plus_npv_of_cf1_to_cfn_and_evaluates_to_the_case",
    "test_every_year_row_evaluates_to_the_case": "test_engine_adapter_workbook.py::test_every_year_row_evaluates_to_the_engines_cash",

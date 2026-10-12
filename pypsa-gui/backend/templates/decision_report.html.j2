@@ -129,7 +129,7 @@
 
   {% if sid == "assumptions" and s.payload %}
   <div class="wrap"><table class="assumptions"><thead><tr><th>Assumption</th><th>Value</th><th>Unit</th><th>Range</th><th>Source</th><th>Edited</th></tr></thead><tbody>
-  {% for r in s.payload.rows %}<tr class="{{ 'edited' if r.edited else '' }}"><td>{{ r.label }} <span class="code">{{ r.key }}</span></td><td class="num">{{ num(r.value, 4) }}</td><td>{{ r.unit }}</td><td class="num">{% if r.range_note %}{{ num(r.tested_low, 4) }} to {{ num(r.tested_high, 4) }} (re-centred on the edited value; library range {{ num(r.range_low, 4) }} to {{ num(r.range_high, 4) }}) <span class="code">{{ r.range_note }}</span>{% else %}{{ num(r.range_low, 4) }} to {{ num(r.range_high, 4) }}{% endif %}</td><td>{{ r.source }}</td><td>{{ "edited" if r.edited else "" }}</td></tr>{% endfor %}
+  {% for r in s.payload.rows %}<tr class="{{ 'edited' if r.edited else '' }}"><td>{{ r.label }} <span class="code">{{ r.key }}</span></td><td class="num">{{ num(r.value, 4) }}</td><td>{{ r.unit }}</td><td class="num">{% if r.range_note %}{{ num(r.tested_low, 4) }} to {{ num(r.tested_high, 4) }} (re-centred on the edited value; default range {{ num(r.range_low, 4) }} to {{ num(r.range_high, 4) }}) <span class="code">{{ r.range_note }}</span>{% else %}{{ num(r.range_low, 4) }} to {{ num(r.range_high, 4) }}{% endif %}</td><td>{{ r.source }}</td><td>{{ "edited" if r.edited else "" }}</td></tr>{% endfor %}
   </tbody></table></div>
   {% endif %}
 

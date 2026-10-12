@@ -38,11 +38,11 @@ def _table(doc, header: list[str], rows: list[list[str]], style: str = "Light Gr
 
 def _range_cell(r: dict) -> str:
     """The range the tornado tested; a re-centred one says so (gate S9 [S4])."""
-    library = f"{num(r['range_low'], 4)} to {num(r['range_high'], 4)}"
+    default = f"{num(r['range_low'], 4)} to {num(r['range_high'], 4)}"
     if not r.get("range_note"):
-        return library
+        return default
     return (f"{num(r['tested_low'], 4)} to {num(r['tested_high'], 4)} (re-centred on the "
-            f"edited value; library range {library}) ({r['range_note']})")
+            f"edited value; default range {default}) ({r['range_note']})")
 
 
 def render_docx(report: DecisionReport, charts: dict[str, bytes] | None = None, *,

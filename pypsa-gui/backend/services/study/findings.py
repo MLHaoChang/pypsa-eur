@@ -830,6 +830,21 @@ def centre_attributions(ctx: TornadoContext) -> tuple[list[BatteryAttribution],
     return attributions, cases
 
 
+def centre_bundles(ctx: TornadoContext, cases: Mapping[str, InvestmentCase]) -> dict:
+    """
+    {option id: `CaseBundle`} of the centre cases the engine valued (U2 WP9):
+    the bundle `_case` kept for the option's network, when its view is the
+    very case given — the report stores its cash series with the record.
+    """
+    out = {}
+    for oid, case in cases.items():
+        opt = ctx.options.get(oid)
+        bundle = _bundle_of(ctx, opt.network) if opt is not None else None
+        if bundle is not None and bundle.view is case:
+            out[oid] = bundle
+    return out
+
+
 def run_tornado(ctx: TornadoContext, solve: SolveFn, *,
                 stop: Callable[[], bool] = lambda: False,
                 progress: Callable[..., None] = lambda **_kw: None) -> TornadoOutcome:
@@ -1233,7 +1248,7 @@ def load_inputs(study, base_dir, db, base_uuid: str) -> StudyInputs:
             "re-run the study (the options were built from the old ones)"))
     if not run_hashes.engine_recorded(hashes, run):
         raise FindingsRefused(409, run_hashes.ENGINE_STALE, run_hashes.EARLIER_VERSION)
-    _refuse_unavailable_finance(run)
+    _refuse_unavailable_finance(run, question)
     library = study_library.load_defaults()
     try:
         tariff = packs.effective_tariff(study.intake, ledger, library)
@@ -1270,13 +1285,15 @@ def load_inputs(study, base_dir, db, base_uuid: str) -> StudyInputs:
                        recorded, current)
 
 
-def _refuse_unavailable_finance(run: Mapping[str, Any]) -> None:
+def _refuse_unavailable_finance(run: Mapping[str, Any], question=None) -> None:
     """
     Gate U2-WP8a Y1: an option whose finance the run could not compile
     (`details.<option>.finance_unavailable`, e.g. a tariff in another currency
     year) has no investment case, so the findings, the tornado and the report
     answer 422 with the compile's code and message — as the case route does —
-    never a verdict without it, never a 500.
+    never a verdict without it, never a 500. The message names the options
+    by their labels and leaves out the baseline, which has no case (gate
+    U2-WP8b N10).
     """
     details = run.get("details") or {}
     refused = {oid: d for oid, d in sorted(details.items())
@@ -1286,8 +1303,21 @@ def _refuse_unavailable_finance(run: Mapping[str, Any]) -> None:
     code = next(iter(refused.values()))["finance_unavailable"]
     message = next((d.get("finance_unavailable_message") for d in refused.values()
                     if d.get("finance_unavailable_message")), None)
+    labels = []
+    for oid in refused:
+        spec = None
+        if question is not None:
+            try:
+                spec = Q.option(question, oid)
+            except KeyError:
+                spec = None
+        if spec is not None and not spec.free_assets:
+            continue                       # the baseline: every case is measured against it
+        labels.append(spec.label if spec is not None else oid)
+    names = (", ".join(labels[:-1]) + " and " + labels[-1]) if len(labels) > 1 else \
+        (labels[0] if labels else "the options")
     raise FindingsRefused(422, str(code), (
-        f"the investment case of {', '.join(refused)} cannot be valued: "
+        f"the investment case of {names} cannot be valued: "
         f"{message or code}; correct it, then re-run the study"))
 
 

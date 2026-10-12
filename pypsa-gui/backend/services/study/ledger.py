@@ -426,10 +426,14 @@ CSV_COLUMNS = (
     "currency_year", "source", "source_year", "source_url", "range_low",
     "range_high", "range_source", "domain", "provenance", "status", "sensitivity_flag",
     "changed_by", "changed_at", "unavailable",
+    # U2 (plan §1; WP9): the engine field the row compiles to, and the
+    # defaults pack's `illustrative` flag (empty on a legacy ledger).
+    "engine_path", "illustrative",
 )
 _TEXT_COLUMNS = frozenset({
     "key", "label", "technical_name", "help", "unit", "basis", "source", "source_url",
     "range_source", "domain", "provenance", "status", "changed_by", "unavailable",
+    "engine_path",
 })
 # A spreadsheet evaluates a cell that starts with one of these as a formula
 # (OWASP "CSV injection"). The backend has no shared CSV writer that guards
@@ -473,6 +477,9 @@ def ledger_to_csv(ledger: AssumptionsLedger) -> str:
             "changed_by": r.changed_by or "",
             "changed_at": r.changed_at.isoformat() if r.changed_at else "",
             "unavailable": ";".join(f"{k}={v}" for k, v in r.unavailable.items()),
+            "engine_path": r.engine_path or "",
+            "illustrative": "" if r.illustrative is None else
+            ("true" if r.illustrative else "false"),
         }
         w.writerow([_neutralise(cells[c]) if c in _TEXT_COLUMNS else cells[c]
                     for c in CSV_COLUMNS])
@@ -529,6 +536,9 @@ def ledger_rows_from_csv(text: str) -> list[LedgerRow]:
                 changed_at=(datetime.fromisoformat(cell["changed_at"])
                             if cell["changed_at"] else None),
                 unavailable=unavailable,
+                engine_path=cell["engine_path"] or None,
+                illustrative=(None if not cell["illustrative"]
+                              else cell["illustrative"].lower() == "true"),
             ))
         except (ValidationError, ValueError) as exc:
             raise LedgerImportError(f"{where}: {exc}") from None

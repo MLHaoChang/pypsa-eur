@@ -1070,7 +1070,8 @@ def get_ledger_csv(study_id: str,
 def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
                  db: DBSession, user: User | None):
     """
-    (study, ledger, case) for one solved option of a finished run.
+    (study, ledger, bundle) for one solved option of a finished run: the
+    engine's `CaseBundle` (its guided view is `bundle.view`).
 
     Built on the Investment Case engine (U2 WP7/WP8) from the option fork's
     saved network (its own frames, the engine's bills on its solved meter),
@@ -1165,15 +1166,15 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
         econ = (details.get(option_id) or {}).get("asset_economics")
         # U2 WP7: the option's ONE FinanceCase on the Investment Case engine,
         # its bills the engine's (the counterfactual is the baseline).
-        case = study_engine.option_case(
+        bundle = study_engine.option_case(
             network, cfg, ledger, compiled=compiled, option_id=option_id,
             study_id=study_id, fidelity=result.get("fidelity"), asset_economics=econ,
             question=question, project_ref=str(fork.id), model_hash=disk_hash,
-            study_currency_year=study.currency_year).view
+            study_currency_year=study.currency_year)
     except (packs.PackError, study_engine.EngineRefused) as exc:
         raise HTTPException(422, detail={"error_kind": exc.code,
                                          "message": exc.message}) from None
-    return study, ledger, case
+    return study, ledger, bundle
 
 
 @router.get("/{study_id}/options/{option_id}/case")
@@ -1188,7 +1189,8 @@ def get_option_case(study_id: str, option_id: str,
     when the case is not established (a bill or the asset economics missing).
     """
     _refuse_unless_enabled()
-    _study, _ledger, case = _option_case(study_id, option_id, project, db, user)
+    _study, _ledger, bundle = _option_case(study_id, option_id, project, db, user)
+    case = bundle.view
     return {"available": case.status == "ok",
             **case.model_dump(mode="json", by_alias=True)}
 
@@ -1199,19 +1201,21 @@ def get_option_case_xlsx(study_id: str, option_id: str,
                          db: DBSession = Depends(get_db),
                          user: User | None = Depends(optional_user)) -> Response:
     """
-    The same case as a workbook: cash flows with live discounting formulas
-    and the NPV pinned as ``=CF0 + NPV(rate, CF1:CFn)``, the KPIs, the
-    ledger and the provenance (`services/study/proforma_xlsx.py`).
+    The same case as a workbook (U2 WP9): the Investment Case engine's own
+    workbook, then the guided sheets — the KPIs, the live-formula view over
+    the engine's cash series (the NPV pinned as ``=CF0 + NPV(rate,
+    CF1:CFn)``), the ledger and the provenance
+    (`engine_adapter.case_workbook`).
     """
     _refuse_unless_enabled()
-    from services.study.proforma_xlsx import write_proforma_xlsx
+    from services.study import engine_adapter as study_engine
 
-    study, ledger, case = _option_case(study_id, option_id, project, db, user)
+    study, ledger, bundle = _option_case(study_id, option_id, project, db, user)
     return Response(
-        content=write_proforma_xlsx(case, ledger),
+        content=study_engine.case_workbook(bundle, ledger, project=study.name),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": content_disposition(
-            f"{study.name} - {option_id} - pro forma.xlsx")},
+            f"{study.name} - {option_id} - investment case.xlsx")},
     )
 
 
@@ -1379,7 +1383,11 @@ REPORT_AUX = "report"
 
 
 def _report_record(project: AuthorizedProject, study_id: str):
-    """(study, report, cases, ledger) of the stored report; 404 when never assembled."""
+    """
+    (study, report, cases, ledger, engine_cash) of the stored report; 404 when
+    never assembled. ``engine_cash`` (U2 WP9) is each engine case's cash series
+    for the workbook's formula view; a record stored before WP9 has none.
+    """
     from models.study import AssumptionsLedger, DecisionReport, InvestmentCase
 
     study = _load(project, study_id)
@@ -1395,10 +1403,11 @@ def _report_record(project: AuthorizedProject, study_id: str):
         report = DecisionReport.model_validate(raw["report"])
         cases = {k: InvestmentCase.model_validate(v) for k, v in (raw.get("cases") or {}).items()}
         ledger = AssumptionsLedger.model_validate(raw["ledger"])
-    except (KeyError, TypeError, ValidationError):
+        engine_cash = dict(raw.get("engine_cash") or {})
+    except (KeyError, TypeError, ValueError, ValidationError):
         raise HTTPException(500, detail={"code": "study_unreadable",
                                          "message": "The report record cannot be read."}) from None
-    return study, report, cases, ledger
+    return study, report, cases, ledger, engine_cash
 
 
 def _report_stale(report, study: DecisionStudy, project: AuthorizedProject,
@@ -1471,7 +1480,8 @@ def assemble_report(study_id: str,
     record = {"report": report.model_dump(mode="json", by_alias=True),
               "cases": {k: c.model_dump(mode="json", by_alias=True)
                         for k, c in inputs.cases.items()},
-              "ledger": inputs.ledger.model_dump(mode="json", by_alias=True)}
+              "ledger": inputs.ledger.model_dump(mode="json", by_alias=True),
+              "engine_cash": inputs.engine_cash}
     with _WRITE_LOCK:
         try:
             store.save_aux(_project_dir(project), study_id, REPORT_AUX, record)
@@ -1493,7 +1503,7 @@ def get_report(study_id: str,
     ``report_never_assembled`` before the first POST.
     """
     _refuse_unless_enabled()
-    study, report, _cases, _ledger = _report_record(project, study_id)
+    study, report, _cases, _ledger, _cash = _report_record(project, study_id)
     return _report_out(report, _report_stale(report, study, project, db))
 
 
@@ -1512,7 +1522,7 @@ def get_report_html(study_id: str,
     from services.study.render_html import render_html
 
     _refuse_unless_enabled()
-    study, report, _cases, _ledger = _report_record(project, study_id)
+    study, report, _cases, _ledger, _cash = _report_record(project, study_id)
     reasons = _report_stale(report, study, project, db)
     try:
         html = render_html(report, stale=bool(reasons), stale_reasons=reasons)
@@ -1531,7 +1541,7 @@ def get_report_docx(study_id: str,
     from services.study.render_docx import render_docx
 
     _refuse_unless_enabled()
-    study, report, _cases, _ledger = _report_record(project, study_id)
+    study, report, _cases, _ledger, _cash = _report_record(project, study_id)
     reasons = _report_stale(report, study, project, db)
     try:
         content = render_docx(report, stale=bool(reasons), stale_reasons=reasons)
@@ -1547,16 +1557,19 @@ def get_report_docx(study_id: str,
 def get_report_xlsx(study_id: str,
                     project: AuthorizedProject = ProjectAccessDep,
                     db: DBSession = Depends(get_db)) -> Response:
-    """The report workbook: verdict, streams, tornado, ledger, provenance and each case."""
+    """
+    The report workbook: verdict, streams, tornado, ledger, provenance and each
+    case on the engine's cash series (U2 WP9).
+    """
     from services.study import report as study_report
     from services.study.report_xlsx import write_report_xlsx
 
     _refuse_unless_enabled()
-    study, report, cases, ledger = _report_record(project, study_id)
+    study, report, cases, ledger, engine_cash = _report_record(project, study_id)
     reasons = _report_stale(report, study, project, db)
     try:
         content = write_report_xlsx(report, cases, ledger, stale=bool(reasons),
-                                    stale_reasons=reasons)
+                                    stale_reasons=reasons, engine_cash=engine_cash)
     except study_report.ProseError as exc:
         raise HTTPException(422, detail=exc.detail) from None
     return Response(

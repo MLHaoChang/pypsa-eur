@@ -25,8 +25,10 @@ compiled config; `bill_meter` only where export ≡ 0 — the intake preview and
 the case's counterfactual baseline). GS's `BillCalculator` and the pro forma
 remain only as the findings' fallback for a network the engine did not solve,
 which no stored study reaches (its readers refuse such forks first,
-`engine_inputs_changed_since_run`); WP10 deletes them. The workbook (WP9)
-follows.
+`engine_inputs_changed_since_run`); WP10 deletes them. WP9: `case_workbook`,
+the engine's workbook (`export_xlsx.build_workbook`) with the guided sheets
+appended, and `cash_series`, the engine's cash series the formula view
+(`workbook_view`) and the report workbook read.
 """
 from __future__ import annotations
 
@@ -60,8 +62,8 @@ from services.study import compile as C
 __all__ = [
     "BILL_COMPONENTS", "BILL_COMPONENT_KEYS", "BY_CONSTRUCTION", "CAPEX_ROW_PART", "CaseBundle",
     "EPSILON_MW", "EngineRefused", "KIND_COMPONENT", "bill", "bill_meter", "bound_case",
-    "component_of", "cycling_flags", "demand_charge_eur", "engine_ready", "irr",
-    "is_zero_size", "option_case", "payback",
+    "case_workbook", "cash_series", "component_of", "cycling_flags", "demand_charge_eur",
+    "engine_ready", "irr", "is_zero_size", "option_case", "payback",
 ]
 
 #: The guided bill's seven components and their labels (moved from
@@ -1086,3 +1088,179 @@ def bound_case(bundle: CaseBundle, variant, *, kind: str) -> CaseBundle:
                             "re-dispatches: option_case on the variant network)")
     view = _view(bundle.context, case, result, centre=False, extra_notes=extra)
     return dc.replace(bundle, view=view, case=case, result=result)
+
+
+# ── WP9: the workbooks (§2 C8; owner decision 9) ──────────────────────────
+
+#: The serialised engine cash series (`cash_series`), stored with the report.
+CASH_SERIES_SCHEMA = "engine_cash/1"
+
+
+def _floats(xs, n: int) -> list[float]:
+    if xs is None:
+        return [0.0] * n
+    arr = np.broadcast_to(np.asarray(xs, dtype=float), (n,))
+    return [float(v) for v in arr]
+
+
+def cash_series(bundle: CaseBundle) -> dict[str, Any] | None:
+    """
+    The engine's project pre-tax cash series of an established case, in the
+    terms of its own identity (`finance.engine`: operating + terminal value
+    − CAPEX − replacements + grants), as plain JSON: what the formula view
+    (`workbook_view.engine_cash_flows`) is a view OVER. The report stores it
+    with its record, since its reads render without the `FinanceResult`.
+    None when the case is not established (no cash, no view).
+    """
+    view, result = bundle.view, bundle.result
+    if view.status != "ok" or result is None:
+        return None
+    cash = result.cash.get("project_pre_tax")
+    if cash is None:
+        return None
+    n = len(cash)
+    grants = getattr(result.incentives, "grant", None)
+    return {
+        "schema": CASH_SERIES_SCHEMA, "engine": "finance_engine",
+        "series": "project_pre_tax", "case_id": view.case_id,
+        "rate": float(bundle.case.inputs.wacc_nominal), "years": list(range(n)),
+        "capex": _floats(result.op.capex, n), "replacements": _floats(result.op.replacement, n),
+        "operating": _floats(result.op_incremental.get("net"), n),
+        "terminal": _floats(result.terminal, n), "grants": _floats(grants, n),
+        "cash": _floats(cash, n), "npv": float(result.metrics["project_pre_tax_npv"]),
+    }
+
+
+def _ref_text(ref) -> str | None:
+    if ref is None:
+        return None
+    return f"{ref.id} v{ref.version} sha256:{ref.hash}"
+
+
+def _pack_of(ledger: AssumptionsLedger, meta: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    """
+    (pack version, pack hash) of the defaults pack the ledger was seeded
+    from: the full hash from the compiled tariff's pack stamp when it names
+    the same version, else the ledger version's 12-character hash; (None,
+    None) for a ledger seeded before U2.
+    """
+    from services.study import library as L
+
+    parts = (ledger.ledger_version or "").split()
+    if len(parts) != 3 or parts[0] != L.DEFAULTS_VERSION_PREFIX:
+        return None, None
+    version, short = parts[1], parts[2]
+    stamp = str(meta.get("pack_stamp") or "")
+    _pid, _, rest = stamp.partition("@")
+    s_version, _, s_hash = rest.partition(":sha256:")
+    if s_version == version and s_hash.startswith(short):
+        return version, s_hash
+    return version, short
+
+
+def _provenance_sheet(ws, bundle: CaseBundle, ledger: AssumptionsLedger) -> None:
+    from datetime import UTC, datetime
+
+    from services.study import packs
+    from services.study import workbook_view as WV
+
+    ws.title = "Provenance"
+    view = bundle.view
+    p = view.provenance
+    compiled, finance = bundle.compiled, bundle.finance
+    meta = compiled.tariff_meta if compiled is not None else {}
+    version, digest = _pack_of(ledger, meta)
+    inputs = bundle.case.inputs if bundle.case is not None else None
+    rows: list[tuple[str, Any]] = [
+        ("study_id", view.study_id), ("option_id", view.option_id),
+        ("case_id", view.case_id), ("status", view.status),
+        ("engine", view.engine),
+        ("engines", ", ".join(p.engines) if p else None),
+        ("basis", WV.basis_label(view)),
+        ("perspective", view.perspective.value),
+        ("currency_year", view.currency_year),
+        ("fidelity", view.fidelity.value if view.fidelity is not None else None),
+        ("library_version", (p.library_version if p else None) or ledger.ledger_version),
+        ("pack_version", version), ("pack_hash", digest),
+        ("tariff_pack_stamp", meta.get("pack_stamp")),
+        ("ledger_hash", p.ledger_hash if p else None),
+        ("compiled_digest", compiled.digest if compiled is not None else None),
+        ("finance_digest", finance.digest if finance is not None else None),
+        ("export_series", _ref_text(compiled.config.export_price_ref)
+         if compiled is not None else None),
+        ("model_hash", p.model_hash if p else None),
+        ("project_ref", p.project_ref if p else None),
+        ("tariff_id", p.tariff_id if p else None),
+        ("discount_rate", view.discount_rate),
+        ("horizon_years", view.horizon_years),
+        ("terminal_value_method", inputs.terminal_value.method if inputs is not None else None),
+        ("salvage_basis", view.salvage_basis),
+        ("generated_at", datetime.now(tz=UTC).isoformat(timespec="seconds")),
+    ]
+    if p is not None and p.ledger_hash and p.ledger_hash != packs.ledger_hash(ledger):
+        rows.append(("assumptions_ledger_hash", packs.ledger_hash(ledger)))
+    for gap in view.upfront_gaps:
+        rows += [
+            (f"upfront_{gap.asset}_ledger_eur", gap.ledger_upfront_eur),
+            (f"upfront_{gap.asset}_back_calculated_single_lifetime_eur",
+             gap.back_calculated_upfront_eur),
+            (f"upfront_{gap.asset}_gap_eur", gap.gap_eur),
+        ]
+    for note in view.honesty_notes:
+        rows.append(("honesty_note", note))
+    for i, (key, value) in enumerate(rows, start=1):
+        WV.text(ws, i, 1, key)
+        WV.text(ws, i, 2, value)
+
+
+def case_workbook(bundle: CaseBundle, ledger: AssumptionsLedger, *,
+                  project: str | None = None) -> bytes:
+    """
+    The option's case as a workbook (§2 C8, WP9): the Investment Case
+    engine's own workbook (`export_xlsx.build_workbook` over
+    `report.assemble_finance_sections(result, case)`, the GS stamps in its
+    project provenance) with the guided sheets appended — `KPIs`,
+    `Cash flows (formulas)` (the live-formula view over `cash_series`,
+    owner decision 9), `Assumptions` and `Provenance`.
+
+    A case the guided face does not establish (a bill missing, the streams
+    not reconciling, the engine's cash not established) writes no NPV: the
+    engine's sheets are withheld, so its headline never stands in for the
+    case the JSON route calls not established (ADR-0001), and the guided
+    sheets state the reasons.
+    """
+    import io
+
+    import openpyxl
+
+    from services.finance.export_xlsx import build_workbook
+    from services.finance.report import assemble_finance_sections
+    from services.study import packs
+    from services.study import workbook_view as WV
+
+    view = bundle.view
+    series = cash_series(bundle)
+    if series is not None:
+        compiled, finance = bundle.compiled, bundle.finance
+        stamps = {"guided_study": view.study_id, "guided_option": view.option_id,
+                  "library_version": ledger.ledger_version,
+                  "ledger_hash": packs.ledger_hash(ledger),
+                  "compiled_digest": compiled.digest if compiled is not None else None,
+                  "finance_digest": finance.digest if finance is not None else None,
+                  "export_series": _ref_text(compiled.config.export_price_ref)
+                  if compiled is not None else None}
+        ic = assemble_finance_sections(bundle.result, bundle.case, case_id=view.case_id,
+                                       provenance=stamps)
+        wb = openpyxl.load_workbook(io.BytesIO(build_workbook(ic, project=project)))
+        cf_ws = wb.create_sheet()
+    else:
+        wb = openpyxl.Workbook()
+        cf_ws = wb.active
+    kpi_ws = wb.create_sheet(index=wb.sheetnames.index(cf_ws.title))
+    npv_row = WV.engine_cash_flows(cf_ws, view, series)
+    WV.kpis(kpi_ws, view, npv_row)
+    WV.assumptions(wb.create_sheet(), ledger)
+    _provenance_sheet(wb.create_sheet(), bundle, ledger)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

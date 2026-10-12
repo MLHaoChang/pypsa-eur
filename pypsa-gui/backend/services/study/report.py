@@ -713,6 +713,9 @@ class ReportInputs:
     option_forks: dict[str, str] = field(default_factory=dict)  # fork uuid -> option id
     generated_at: datetime | None = None
     run_intake: dict | None = None     # the intake the run's forks were built from
+    # U2 WP9: each engine-valued case's cash series (`engine_adapter.cash_series`),
+    # stored with the record for the report workbook's formula view.
+    engine_cash: dict[str, dict] = field(default_factory=dict)
 
 
 def _para(*texts: str) -> list[ProseParagraph]:
@@ -1017,8 +1020,11 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
             return key
 
         # U2 WP7: an engine-built case's LCOS is the finance engine's storage
-        # metric, which INCLUDES the charging energy (owner decision 6).
-        engine_lcos = "lcos_includes_charging_energy_cost" in case.honesty_notes
+        # metric, which INCLUDES the charging energy (owner decision 6). Gate
+        # U2-WP8b Z2: decided by the case's engine, not by the engine's note
+        # (written only when the LCOS exists), so a null engine LCOS is still
+        # the investment case's, with its flag — never the pro forma's.
+        engine_lcos = case.engine == "finance_engine"
         lcos_key = "lcos_finance_engine" if engine_lcos else "lcos_excl_charging"
         keys = [
             cf("case_npv", "Option NPV", k.npv, "EUR"),
@@ -1040,7 +1046,8 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
             cf("discount_rate", "Real discount rate", case.discount_rate, "per unit", "ledger"),
         ]
         if engine_lcos:
-            tags.add("lcos_engine")
+            if facts["lcos_finance_engine"].value is not None:
+                tags.add("lcos_engine")
         elif facts["lcos_excl_charging"].value is not None and \
                 facts["lcos_incl_charging"].value is not None:
             tags.add("lcos_both")
@@ -1300,10 +1307,14 @@ def assemble_decision_report(study: DecisionStudy, base_dir, db, base_uuid: str
     inp = F.load_inputs(study, base_dir, db, base_uuid)
     ctx = F.context_from_disk(inp)
     findings = F.assemble_findings(study, base_dir, db, base_uuid, loaded=(inp, ctx))
+    from services.study import engine_adapter as study_engine
+
     _atts, cases = F.centre_attributions(ctx)
     forks = {str(row.id): oid for oid, row in inp.rows.items()}
+    engine_cash = {oid: s for oid, b in F.centre_bundles(ctx, cases).items()
+                   if (s := study_engine.cash_series(b)) is not None}
     rinp = ReportInputs(study=study, question=inp.question, findings=findings, cases=cases,
                         ledger=inp.ledger, tariff=inp.tariff,
                         details=inp.run.get("details") or {}, option_forks=forks,
-                        run_intake=inp.run.get("intake"))
+                        run_intake=inp.run.get("intake"), engine_cash=engine_cash)
     return build_decision_report(rinp), rinp

@@ -25,6 +25,12 @@ Four sheets:
 
 Text is written as text: a string that starts with ``=`` (a ledger source a
 user typed, say) is stored as a string cell, never as a formula.
+
+U2 WP9: the guided workbooks are the engine's (`engine_adapter.case_workbook`,
+`services/study/workbook_view.py`). This pro forma workbook stays only for the
+pro forma fallback (a stored report record assembled before WP9, whose cases
+carry no engine series) until WP10 deletes it; its text, KPI and ledger
+sheets are the view module's.
 """
 from __future__ import annotations
 
@@ -33,6 +39,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from models.study import AssumptionsLedger, InvestmentCase
+from services.study import workbook_view as WV
 
 __all__ = ["write_proforma_xlsx"]
 
@@ -57,35 +64,9 @@ _HEADER_ROW = 4
 _COL = {label: j for j, (label, _f) in enumerate(_CF_COLUMNS, start=1)}
 
 
-def _text(ws, row: int, col: int, value: Any):
-    """
-    A value that is never a formula (labels, ledger text, provenance). A
-    control character openpyxl refuses (a study name, a ledger source) is
-    replaced, never an untyped 500 (gate S7 [N9]).
-    """
-    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
-
-    if isinstance(value, str):
-        value = ILLEGAL_CHARACTERS_RE.sub("\ufffd", value)
-    cell = ws.cell(row=row, column=col)
-    cell.value = value
-    if isinstance(value, str) and value.startswith("="):
-        cell.data_type = "s"
-    return cell
-
-
-def _formula(ws, row: int, col: int, formula: str):
-    cell = ws.cell(row=row, column=col)
-    cell.value = formula
-    return cell
-
-
-def _basis_label(case: InvestmentCase) -> str:
-    b = case.basis
-    terms = b.terms.value if hasattr(b.terms, "value") else str(b.terms)
-    tax = "pre-tax" if b.tax == "pre" else "post-tax"
-    subsidy = "without subsidy" if b.subsidy == "excl" else "with subsidy"
-    return f"{terms}, {tax}, {subsidy}"
+_text = WV.text
+_formula = WV.formula
+_basis_label = WV.basis_label
 
 
 def _cash_flows(ws, case: InvestmentCase, title: str = "Cash flows") -> int | None:
@@ -141,105 +122,15 @@ def _cash_flows(ws, case: InvestmentCase, title: str = "Cash flows") -> int | No
     return npv_row
 
 
-# Gate S5 [N5] (carried to S7): the IRR, the paybacks and the LCOS are the
-# model's values at the case's rate; they are written as STATIC cells and
-# labelled so. Only the NPV cell is a live formula (it reads the cash-flow
-# sheet, which reads the rate cell).
-LIVE = "live formula: follows the rate cell and the cash flows"
-STATIC = ("static value from the model at the case's rate: it does not move when "
-          "the rate cell or a cash flow is edited")
+LIVE, STATIC = WV.LIVE, WV.STATIC
+_KPI_UNITS = WV.KPI_UNITS
+_LEDGER_COLUMNS = WV.LEDGER_COLUMNS
+_assumptions = WV.assumptions
 
 
 def _kpis(ws, case: InvestmentCase, npv_row: int | None, title: str = "KPIs",
           cash_flows_title: str = "Cash flows") -> None:
-    ws.title = title
-    for j, h in enumerate(("kpi", "value", "unit", "not available because", "cell"), start=1):
-        _text(ws, 1, j, h)
-    rows: list[tuple[str, Any, str, str | None]] = [
-        ("status", case.status, "", None),
-        ("option_id", case.option_id, "", None),
-        ("horizon_years", case.horizon_years, "years", None),
-        ("discount_rate", case.discount_rate, "per unit (real)", None),
-    ]
-    k = case.kpis
-    if k is not None:
-        for key, unit in _KPI_UNITS.items():
-            rows.append((key, getattr(k, key), unit, k.unavailable.get(key)))
-    r = 2
-    for key, value, unit, why in rows:
-        _text(ws, r, 1, key)
-        live = key == "npv" and npv_row is not None
-        if live:
-            _formula(ws, r, 2, f"='{cash_flows_title}'!B{npv_row}")
-        elif isinstance(value, str):
-            _text(ws, r, 2, value)
-        elif value is not None:
-            ws.cell(r, 2).value = value
-        _text(ws, r, 3, unit)
-        _text(ws, r, 4, why)
-        if k is not None and key in _KPI_UNITS:
-            _text(ws, r, 5, LIVE if live else STATIC)
-        r += 1
-    if case.value_streams:
-        r += 1
-        for j, h in enumerate(("value stream (annual saving by bill component)",
-                               "value", "share", "engine"), start=1):
-            _text(ws, r, j, h)
-        for s in case.value_streams:
-            r += 1
-            _text(ws, r, 1, s.key or s.label)
-            ws.cell(r, 2).value = s.annual_value
-            ws.cell(r, 3).value = s.share
-            _text(ws, r, 4, s.engine)
-    mr = case.market_revenue_at_duals
-    if mr is not None:
-        r += 2
-        _text(ws, r, 1, "market_revenue_at_duals (annual, excluded from the cash flow)")
-        ws.cell(r, 2).value = mr.annual_value
-        _text(ws, r, 3, "EUR")
-        _text(ws, r, 4, mr.engine)
-
-
-# U2 WP8 (§5.4): `levelised_cost` (with its basis) and `terminal_value_eur`.
-_KPI_UNITS = {"npv": "EUR", "irr": "per unit", "payback_simple": "years",
-              "payback_discounted": "years", "lcoe": "EUR/MWh",
-              "levelised_cost": "EUR/MWh", "levelised_cost_basis": "",
-              "lcoh": "EUR/MWh", "dscr_min": "ratio", "capex_total": "EUR",
-              "terminal_value_eur": "EUR"}
-
-_LEDGER_COLUMNS = ("key", "label", "value", "unit", "currency_year", "basis",
-                   "provenance", "status", "sensitivity_flag", "range_low",
-                   "range_high", "source", "source_year", "source_url",
-                   # Gate S9 [S4]: the range the tornado tests a key driver on
-                   # (`findings.bounds_for`), re-centred on an edited value
-                   # outside the library band.
-                   "tested_low", "tested_high", "tested_range_note")
-
-
-def _assumptions(ws, ledger: AssumptionsLedger) -> None:
-    from services.study.findings import bounds_for
-
-    ws.title = "Assumptions"
-    for j, h in enumerate(_LEDGER_COLUMNS, start=1):
-        _text(ws, 1, j, h)
-    for i, row in enumerate(ledger.rows, start=2):
-        values = {
-            "key": row.key, "label": row.label, "value": row.value, "unit": row.unit,
-            "currency_year": row.currency_year,
-            "basis": row.basis.value if hasattr(row.basis, "value") else row.basis,
-            "provenance": row.provenance, "status": row.status,
-            "sensitivity_flag": bool(row.sensitivity_flag),
-            "range_low": row.range.low if row.range else None,
-            "range_high": row.range.high if row.range else None,
-            "source": row.source, "source_year": row.source_year,
-            "source_url": row.source_url,
-        }
-        tested = bounds_for(row) if row.sensitivity_flag else None
-        values["tested_low"] = tested[0] if tested else None
-        values["tested_high"] = tested[1] if tested else None
-        values["tested_range_note"] = tested[2][0] if tested and tested[2] else None
-        for j, col in enumerate(_LEDGER_COLUMNS, start=1):
-            _text(ws, i, j, values[col])
+    WV.kpis(ws, case, npv_row, title=title, cash_flows_title=cash_flows_title)
 
 
 def _provenance(ws, case: InvestmentCase, ledger: AssumptionsLedger) -> None:

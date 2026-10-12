@@ -215,6 +215,16 @@ def start_tornado(study_id: str, *, base_row, db, user_id,
     # with the tariff written into the Links, which a re-dispatch on the
     # engine's commercial config would price twice) or a fork edited since is
     # refused by `load_inputs` above (409 `engine_inputs_changed_since_run`).
+    # Gate U2-WP8b Z3: the centre cases are valued here, before anything is
+    # queued (no solve: the forks' saved networks), so a refusal the run did
+    # not record (a `FinanceRefused` of the engine at the centre) answers with
+    # the findings' own 422, code and message — never a 202 and a worker that
+    # fails with a raw string. The worker reuses the context.
+    try:
+        tctx = F.context_from_disk(inp)
+        F.centre_attributions(tctx)
+    except F.FindingsRefused as exc:
+        raise _refused(exc) from None
     solves = F.estimate_tornado_solves(inp.question, inp.ledger, inp.tariff, inp.sizes())
     budget = max(1, solves) if budget_solves is None else int(budget_solves)
 
@@ -256,7 +266,8 @@ def start_tornado(study_id: str, *, base_row, db, user_id,
     thread = threading.Thread(
         target=lambda: run_ctx.run(_worker, study_id=study_id, base_dir=base_dir,
                                    base_row_id=base_uuid, user_id=user_id, inp=inp,
-                                   record=record, stop_event=stop_event, ctx=ctx),
+                                   record=record, stop_event=stop_event, ctx=ctx,
+                                   tctx=tctx),
         daemon=True, name=f"decision-tornado-{study_id[:8]}")
     record["thread"] = thread
 
@@ -310,7 +321,7 @@ def _shortfall(solves: int, budget: int) -> str:
 
 
 def _worker(*, study_id, base_dir, base_row_id, user_id, inp, record, stop_event,
-            ctx) -> None:
+            ctx, tctx=None) -> None:
     from db.models import Project
     from db.session import SessionLocal
     from services.adequacy import campaign
@@ -323,7 +334,7 @@ def _worker(*, study_id, base_dir, base_row_id, user_id, inp, record, stop_event
     try:
         base_row = db.get(Project, R._uuid(base_row_id))
         solver = ForkSolver(db, user_id, base_row, study_id, stop_event, record, ctx)
-        tctx = F.context_from_disk(inp)
+        tctx = tctx if tctx is not None else F.context_from_disk(inp)
         outcome = F.run_tornado(tctx, solver, stop=stop_event.is_set,
                                 progress=lambda **kw: R._set(ctx, record, **kw))
         status = ("aborted" if stop_event.is_set() or record.get("budget_exhausted")

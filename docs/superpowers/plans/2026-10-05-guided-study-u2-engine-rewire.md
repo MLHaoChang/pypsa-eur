@@ -404,7 +404,7 @@ Adapt in place (WP3–WP8 as their code moves): `test_study_pack.py` (36: no pri
 ### WP7 — `compile.finance_from_ledger` + `engine_adapter.option_case` (C1, C2, C4, C5)
 **Tests.** WP2's case targets green: S5 table = WP0 to 1e-9 (IRR 1e-9 absolute); §4.6 identity ≤ 1e-6; WACC gate consistent at the centre and `differs` (accepted) on rate bounds only; post-tax KPIs `None` with reasons; no `contingency_share` → `contingency_share_missing`; `escalation_tariff=None` → `escalation_missing:tariff`; C1 (once S0 lands): the two upfront parts through `upfront_parts` equal the ledger's and leave the objective and sizes byte-identical; C5 bounds equal GS's `_capex_bound` / `_rate_bound` NPVs (WP0) and re-read no network; `case_streams_reconcile_with_engine`. **Mutations:** `salvage_rule → none` → identity red; set `overnight_cost` on the StorageUnit → LP-identity red; `escalation_tariff = 0.02` → real-basis red.
 
-**WP7 status (2026-10-07, on 8fdbc3c9: master 12fd3c02 with IC #90's S0b, D9, D10).** Done; uncommitted at the time of writing. The case route and the findings now value every engine-solved option on IC's finance engine.
+**WP7 status (2026-10-07, on 8fdbc3c9: master 12fd3c02 with IC #90's S0b, D9, D10).** Done; committed as 7b3452ed, gate GO with X1–X6 (`notes/2026-10-07-u2-wp7-gate.md`), X1–X5 fixed in 48d023c9. The case route and the findings now value every engine-solved option on IC's finance engine.
 - **WP7 gate (2026-10-07): GO with X1–X6; X1–X5 fixed in the commit after `9bcc8dde`** (`docs/superpowers/notes/2026-10-07-u2-wp7-gate.md`). X6 (the parent plan's C5 amendment) is the coordinating session's, relayed through the owner.
   - **Carried to WP8:** these facts are still labelled `cash_flow_expander` on engine-built cases: `option_total_npv`, `battery_only_best_npv`, `tornado_centre_npv` and `BatteryAttribution.engine`. They are the same kind of mislabel X4 fixed for the case facts.
   - **Defaults pack:** pinned to `library.PACK_VERSION = "2026-10-05"` (`91b6ef6d`, coordinating-session decision). A newer vendored pack with unmapped rows fails `test_a_newer_vendored_pack_is_noticed_before_the_pin_is_bumped`.
@@ -541,7 +541,7 @@ Adapt in place (WP3–WP8 as their code moves): `test_study_pack.py` (36: no pri
 - **Engine asks.** A public test helper (or facade name) that records a written dispatch as an engine solve, so GS's fakes stop reading `lp_bindings` internals. The WP6/WP7 asks stand (Q15 `bind_commercial` / `series_store.resolve`, `scale_capex(asset=, part=)`, unrounded statistics, the freeze list).
 - **Open for part B.** §5.4's rename with read-compat (`bill_calculator` / `cash_flow_expander` defaults, `CaseKpis.lcos` / `salvage_eur`, `bill_refs`, the driver's keys); C7's frontend mirror (`taxes_levies` labels, the bill HELP codes); a "defaults updated" offer for legacy ledgers; WP7 N6 (`BY_CONSTRUCTION` on price-bound views); row 30 non-zero (WP7 note) and row 31 `eu_de` (WP7 N9); C3e stays with the owner.
 
-**WP8 status, part B — vocabulary rename, C7 mirror, WP7 N6 (2026-10-08, on b4c2da53; uncommitted at the time of writing).** §5.4's rename with read-compat, the C7 frontend mirror and the price-bound codes. The engine path's figures already named `tariff_engine` / `finance_engine` since WP7, so what remained was the KPI names, the defaults, the GS fallbacks' labels and the frontend.
+**WP8 status, part B — vocabulary rename, C7 mirror, WP7 N6 (2026-10-08, on b4c2da53; committed as 90f4fabf, gate GO with binding conditions Z1–Z3, `notes/2026-10-08-u2-wp8b-gate.md`; Z1–Z3 and the gate's nits are taken in WP9, below).** §5.4's rename with read-compat, the C7 frontend mirror and the price-bound codes. The engine path's figures already named `tariff_engine` / `finance_engine` since WP7, so what remained was the KPI names, the defaults, the GS fallbacks' labels and the frontend.
 - **Decision B1 — GS's two engines keep their own labels; read-compat never relabels them.**
   - `cash_flow_expander` stays the pro forma's label and `bill_calculator` stays GS's calculator's. Both are honest names for the other engine: the findings' fallback until WP10 (`findings._gs_bill_of`, a test's identity solve) and every figure a study stored before U2 holds. A pre-U2 case IS the pro forma's, and its bills ARE the calculator's.
   - So the stored literals are read as themselves, not mapped to the engine's. §5.4 assumed a pure rename (one engine, new name). WP7 made the two engines distinct literals instead, so mapping on read would label pro forma output as `finance_engine` (the rule forbids it) and calculator bills as `tariff_engine` (the same mislabel).
@@ -630,6 +630,87 @@ Adapt in place (WP3–WP8 as their code moves): `test_study_pack.py` (36: no pri
 
 ### WP9 — Workbooks
 **Do.** `engine_adapter.case_workbook` and `report_xlsx` on `build_workbook`; GS sheets appended: `Assumptions` (ledger + `engine_path` + tested range), `Provenance` (pack version and hash, compiled digest, export series ref, engines, basis, currency year), **`Cash flows (formulas)`** (a view over the engine's cash series with live discount-factor, discounted and cumulative formulas and NPV pinned as `=CF0 + NPV(rate, CF1:CFn)`; owner may drop it, Q13). **Tests:** WP2's workbook targets. **Mutation:** start the NPV range at CF0 → red.
+
+**WP9 status (2026-10-08, on 2ad14b4c = 90f4fabf + the WP8b gate note; uncommitted at the time of writing).** The case workbook is the engine's, with the guided sheets appended; the report workbook values each option on the engine's cash series; rule rows name their author; WP8b's Z1–Z3 and its nits are taken.
+- **`engine_adapter.case_workbook(bundle, ledger, *, project=None) -> bytes`** (§2 C8).
+  - IC's own workbook first, unchanged: `build_workbook(assemble_finance_sections(result, case, case_id=…, provenance=<GS stamps>), project=<study name>)` (both facade names). The GS stamps (study, option, library version, ledger hash, compiled and finance digests, export series) land in IC's project provenance.
+  - Then the guided sheets: `KPIs`, `Cash flows (formulas)`, `Assumptions`, `Provenance`.
+  - The sheet writers live in the new GS module `services/study/workbook_view.py`, the "view module" of decision 9. `proforma_xlsx` now reuses its text, KPI and ledger helpers and keeps only its own cash-flow sheet.
+- **`Cash flows (formulas)`: a view over the engine's cash series** (`engine_adapter.cash_series(bundle)`, plain JSON).
+  - The engine's own columns are values: CAPEX (`op.capex`), replacements, the incremental operating cash (`op_incremental["net"]`), the terminal value and grants.
+  - The net cash flow is the engine's identity as a formula, in its order: operating + terminal − CAPEX − replacements + grants. It is not the guided decomposition.
+  - The discount factor, the discounted and the cumulative cash flow are formulas on the rate cell `$B$1`. The NPV is `=CF0+NPV($B$1,CF1:CFn)`, with a sum-of-discounted check and the engine's NPV beside it (static, labelled).
+  - The guided decomposition sits beside it: the bills, savings and fixed and variable O&M from the view, plus a live check column (savings − O&M − operating cash). The excluded market revenue at duals is read by no formula.
+  - Evaluated with the in-repo evaluator, the NPV cell is the engine's `project_pre_tax_npv` to 1e-6 (the old test allowed 1.0). Every year's net cash flow is the engine's cash to 1e-6, and the money cells are the engine's arrays to openpyxl's 16 significant digits.
+- **Decision W1: a case the guided face does not establish shows no engine headline.** When the bill is missing, the streams do not reconcile or the engine's cash is not established, `case_workbook` withholds IC's sheets. It writes the guided sheets with the reasons and no NPV. The JSON route says `available: false` for the same case, and the workbook must not contradict it (ADR-0001).
+- **The report workbook (`report_xlsx`).**
+  - `report.assemble_decision_report` takes each centre case's bundle (`findings.centre_bundles`, the bundle `_case` kept, identity-matched to the view). The POST stores `engine_cash = {option: cash_series}` with the record. `_report_record` returns it, and `GET report.xlsx` passes it on.
+  - Per option, `Cash flows <option>` / `KPIs <option>` are the case workbook's own sheets over that series, row for row (pinned).
+  - **Decision W2: the report does not repeat `build_workbook`'s sheets per option.** The parent's "report_xlsx reuses its sheets" is met through the shared view module. The engine's own sheets are in each option's case workbook. The report renders from its stored record without the `FinanceResult`, and storing IC's whole report per option would press on the 1 MB record cap.
+  - A series is used only for its own case (same `case_id`, engine `finance_engine`).
+- **Which paths still reach `proforma_xlsx`.**
+  - `write_proforma_xlsx`: no route since WP9; only `test_proforma_xlsx`.
+  - `proforma_xlsx._cash_flows`: the report workbook's fallback, for a case with no stored engine series. That is a record assembled before WP9 (a WP8-era engine case, or a stored pre-U2 pro forma case). The sheet says so in plain words (`report_xlsx.EARLIER_SHEET`). WP10 deletes it with the pro forma.
+- **The case route.** `_option_case` returns the bundle. `GET case.xlsx` is `case_workbook(bundle, ledger, project=study.name)` and is named `<study> - <option> - investment case.xlsx` (was "pro forma").
+- **Rule rows 21–34 name their author (WP8a N9).**
+  - The XLSX ledger sheets' `provenance` column now names who set a default (`workbook_view.provenance_label`):
+    - `guided study rule` for rows citing `library.GUIDED_RULE_SOURCE`;
+    - `tariff` for the rows that compile into the import tariff or the export price;
+    - `defaults pack` for a pack-seeded ledger;
+    - `study library (earlier version)` for a legacy one;
+    - the user's own provenance as stated.
+    No ledger sheet prints `library` any more.
+  - Both XLSX ledger sheets also print `engine_path`.
+  - The HTML and DOCX range column says "default range", not "library range".
+  - The HTML and DOCX name each figure's engine in words (`render_html.ENGINE_LABELS`, mirrored from the frontend's and pinned equal). This was WP8b's N2 carry-forward. The XLSX keeps the codes.
+- **The ledger CSV** (the WP5 carry-forward) carries `engine_path` and `illustrative` and round-trips them.
+- **C8 (b).** The two evaluator tests of `test_proforma_xlsx` are ported verbatim to `tests/test_xlsx_formula_eval.py`, and the port map names them as targets, not "dropped". `test_u2_port_map_complete` gains two tests:
+  - no `test_proforma_xlsx` row is dropped;
+  - no `pending("WP<n>")` with n ≤ 9 remains.
+  WP9's `pending` marks are gone, and none remain in the tree (C8 (c), "none at all", stays WP10's).
+- **WP8b gate conditions** (`notes/2026-10-08-u2-wp8b-gate.md`).
+  - **Z1.** The C7 note scan in `test_decision_vocabulary_parity` is `ast`-based (`scan_note_writes`). It covers:
+    - every `.append/.extend/.insert/.add/.update` on the notes dict or an alias of one of its lists;
+    - `notes[…] =` and `+=`;
+    - a non-empty `setdefault` default;
+    - any call handed the notes.
+    Each write must be a string constant or an f-string with a literal head; anything else fails with its line. Parametrized tests pin what it reads (6) and what it refuses (8).
+  - **Z2.** `report.build_decision_report` chooses the LCOS fact and label by `case.engine == "finance_engine"`. A null engine LCOS is `lcos_finance_engine` with the engine's flag, never "(pro forma)". Neither LCOS disclosure is claimed without a figure.
+  - **Z3.** `tornado_runner.start_tornado` values the centre cases (`context_from_disk` + `centre_attributions`, no solve) before anything is queued. An unrecorded centre refusal answers 422 with code and message, as the findings do. The worker reuses that context.
+  - **Nits.**
+    - Part B's and WP7's "uncommitted" now name their commits.
+    - The Y1 message names options by label without the baseline ("the investment case of Battery, 1 hour and Battery, 2 hours cannot be valued: …"). `compile.currency_year_of` names ledger rows by label and the tariff by name.
+    - The pack tripwire has a case per non-default pack tariff (O5b).
+- **Evidence (red first).**
+  - `test_engine_adapter_workbook.py`: 8, `pending` removed. Red on the missing seam (`AttributeError: case_workbook`).
+  - `test_u2_wp9_workbooks.py`: 10. Red on the route name, `engine_cash`, `cash_series`, `workbook_view`, "library range", the CSV `engine_path` and `ENGINE_LABELS`.
+  - `test_xlsx_formula_eval.py`: 2, ported.
+  - `test_u2_wp8b_gate_conditions.py`: 5. Red: Z2's label, Z3's 202, and the two copy nits.
+  - The parity file: +15 (Z1). `test_study_ledger_from_pack`: +2 (O5b).
+  - Adapted: `test_study_case_routes` (the file name), and the workbook notes in `tests/golden/coverage.py` and `test_golden_economics`.
+- **Mutations** (on a scratch copy of the tree, each file restored and compared after its run; only the intended tests red):
+
+  | # | Mutation | Red |
+  |---|---|---|
+  | M1 (plan) | the NPV range starts at CF0 | 5: the NPV formula and the rate-cell NPV (the target file), the case route's and the report route's NPV, the report sheet. A first run showed a 6th, the per-year test, red only because the rate test left its module workbook edited when it failed; it now restores the cell in a `finally`, and the re-run is 5 |
+  | M2 (own) | the net cash flow from the guided decomposition, not the engine's operating cash | 1: the engine-series test |
+  | M3 (own) | IC's sheets written for a not-established case | 1 |
+  | M4 (own) | rule rows labelled `defaults pack` | 1 |
+  | M5 (own) | the report ignores the stored series | 2 |
+  | M6 (own) | a series paired with another case | 1 |
+  | M7 (own) | the CSV drops `engine_path` | 1 |
+  | M8 (own) | the KPI NPV static | 3: the target, the report route, the S7 report route |
+  | M9 (own) | the POST stores no series | 1 |
+  | M10 (own) | "library range" back in the HTML | 1 |
+  | O4a / O4c / O4d (gate Z1) | a note by variable / single quotes / concatenation | 3 / 1 / 3 |
+  | O4b (gate, control) | a new double-quoted note | 1 |
+  | O9 (gate Z2) | the LCOS flag read as `unavailable["lcos"]` | 1 |
+  | Z2r (own) | the LCOS chosen by the note again | 1 |
+  | Z3r (own) | no centre pre-check | 1 |
+  | O5b (gate) | the tripwire compares the default tariff only | 2 |
+  | N10r (own) | the baseline listed in the Y1 message | 1 |
+
+  Z1's O4c is red through the coverage test: `ast` reads the single-quoted note, which then has no study sentence. O4a and O4d are red through the unreadable-write test as well.
 
 ### WP10 — Delete, then driver, golden matrix, packaging, findings note
 **Do (in this order).** (1) Confirm every WP2 target green and the port map complete. (2) Delete §5.1, §5.2, §5.3 code and the five old test files. (3) `qa_decision_study.py`: `_reconcile` uses compile; the §4 judging rule and `EVIDENCE["u2_deltas"]`; new checks — forks carry `commercial` and `finance`; the case's engines are `tariff_engine` / `finance_engine`; the WACC gate consistent; the §4.6 identity on `bess_1h` (else the `BY_CONSTRUCTION` codes are dropped, §4.2); the export series ref is the study's. (4) `tests/golden/site_fixture.py`, `coverage.py`, `test_golden_coverage.py::ROUTE_FILES`. (5) `study_library/` removed (or `load_profiles/` kept per Q7); `pypsa-gui.spec` `datas`, `smoke/check_bundle.py::EXPECTED`, `tests/test_packaging_requirements.py`. (6) Findings note `docs/superpowers/findings/2026-10-05-guided-study-u2.md` (deltas, port map, mutations).

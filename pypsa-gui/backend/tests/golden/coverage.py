@@ -172,7 +172,7 @@ COVERAGE: dict[str, set[str]] = {
     # and its PV Generator (CAPEX from upfront_cost_series).
     "investment_case":         {"Generator", "StorageUnit"},
     # routers/studies.py::get_option_case_xlsx -> services/study/
-    # proforma_xlsx.py::write_proforma_xlsx over the same case.
+    # engine_adapter.py::case_workbook over the same case (U2 WP9).
     "investment_case_xlsx":    {"Generator", "StorageUnit"},
     # routers/studies.py::get_findings -> services/study/findings.py::
     # assemble_findings. The battery StorageUnit (its NPV, alone or against a
@@ -390,7 +390,7 @@ EXCLUSIONS: dict[tuple[str, str], str] = {
     ),
     ("investment_case_xlsx", "Line"): (
         "Same case as investment_case written to a workbook "
-        "(services/study/proforma_xlsx.py); asset-scoped, no Line in the pack."
+        "(services/study/engine_adapter.py::case_workbook); asset-scoped, no Line in the pack."
     ),
     ("investment_case_xlsx", "Link"): (
         "Same case as investment_case: the grid links are priced by the bill "

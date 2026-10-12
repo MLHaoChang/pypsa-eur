@@ -644,7 +644,7 @@ NO_ADAPTER_REASONS: dict[str, str] = {
     ),
     "investment_case_xlsx": (
         "The same case written to a workbook; its NPV cell is evaluated "
-        "against the case's NPV by tests/test_proforma_xlsx.py."
+        "against the case's NPV by tests/test_engine_adapter_workbook.py."
     ),
     # ── Plan S6: the findings ───────────────────────────────────────────
     "decision_findings": (

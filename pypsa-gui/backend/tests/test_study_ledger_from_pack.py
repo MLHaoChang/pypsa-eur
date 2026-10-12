@@ -563,3 +563,28 @@ def test_each_tariff_field_changed_alone_blocks_the_bump(part, field):
     tariffs[tid] = t.model_copy(update={part: _with(getattr(t, part), field)})
     message = _bump_blocker("2026-10-07", pack.model_copy(update={"tariffs": tariffs}), pack)
     assert message and f"tariff {tid}: changed" in message, (part, field, message)
+
+
+def _non_default_tariffs():
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    pack = load_defaults_pack(_L().PACK_VERSION)
+    return [tid for tid in pack.tariffs if tid != pack.default_tariff_id]
+
+
+@pytest.mark.parametrize("part", ("tariff", "meta"))
+@pytest.mark.parametrize("tid", _non_default_tariffs())
+def test_a_change_to_any_pack_tariff_blocks_the_bump(tid, part):
+    """
+    Gate U2-WP8b O5b: the study lists EVERY pack tariff in its library, not
+    only the default, so a change to a non-default one blocks the bump too.
+    """
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    pack = load_defaults_pack(_L().PACK_VERSION)
+    t = pack.tariffs[tid]
+    model = getattr(t, part)
+    field = next(f for f in type(model).model_fields if f != "default")
+    tariffs = {**pack.tariffs, tid: t.model_copy(update={part: _with(model, field)})}
+    message = _bump_blocker("2026-10-07", pack.model_copy(update={"tariffs": tariffs}), pack)
+    assert message and f"tariff {tid}: changed" in message, (tid, part, field, message)

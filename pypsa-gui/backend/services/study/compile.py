@@ -905,16 +905,17 @@ def currency_year_of(ledger: AssumptionsLedger, tariff_meta: Mapping[str, Any],
     years: dict[int, list[str]] = {}
     for row in ledger.rows:
         if row.currency_year is not None and row.unit.startswith("EUR"):
-            years.setdefault(int(row.currency_year), []).append(row.key)
+            # Gate U2-WP8b N10: the user reads the rows by their labels.
+            years.setdefault(int(row.currency_year), []).append(row.label or row.key)
     currency = tariff_meta.get("currency") or "EUR"
     if currency != "EUR":
         raise CompileError("currency_mixed",
                            f"the tariff is in {currency}; the ledger is in EUR")
     if tariff_meta.get("currency_year") is not None:
         years.setdefault(int(tariff_meta["currency_year"]), []).append(
-            f"tariff {tariff_meta.get('tariff_id')}")
+            f"the tariff {tariff_meta.get('name') or tariff_meta.get('tariff_id')!r}")
     if study_year is not None:
-        years.setdefault(int(study_year), []).append("study")
+        years.setdefault(int(study_year), []).append("the study")
     if len(years) > 1:
         detail = "; ".join(f"{y}: {', '.join(sorted(k)[:4])}" for y, k in sorted(years.items()))
         raise CompileError(

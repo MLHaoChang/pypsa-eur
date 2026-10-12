@@ -85,7 +85,7 @@ def test_the_case_and_its_workbook_after_a_run(client, api_project, studies_on, 
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     study = client.get(f"/api/projects/case-run/studies/{sid}").json()
     assert r.headers["content-disposition"] == content_disposition(
-        f"{study['name']} - bess_2h - pro forma.xlsx")
+        f"{study['name']} - bess_2h - investment case.xlsx")
     wb = openpyxl.load_workbook(io.BytesIO(r.content))
     kpis = wb["KPIs"]
     row = next(c.row for c in kpis["A"] if c.value == "npv")
