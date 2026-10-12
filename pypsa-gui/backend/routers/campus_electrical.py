@@ -11,6 +11,10 @@ The asset library the investment step buys from (plan C9) is under
 ``/{name}/library``: ``GET``, ``PUT`` (validated by the engine's loader; 422
 names the entry and field, 413 over 1 MB) and ``POST /library/reset``.
 
+``GET /{name}/owner-assets`` (part three D2) lists what the last investment run
+bought as the extra owner assets of the investment case, with the study's
+``source_hash`` and a ``stale`` flag: ``{assets, source_hash, stale}``. Read only.
+
 The project's own grid codes (plan C10) are under ``/{name}/grid-codes``,
 wrapping ``services/campus_grid_code_service.py``:
 
@@ -188,6 +192,17 @@ def reset_library(
     """Delete the project's copy; the shipped default is used again."""
     _check_lock(proj, db, user)
     return ce.reset_library(_row(proj, db))
+
+
+# ── the chosen equipment as owner assets (plan, part three D2) ──────────────
+
+@router.get("/{name}/owner-assets")
+def owner_assets(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """What the last investment run bought, as the extra owner assets of the
+    investment case: ``{"assets": [...], "source_hash": str | None, "stale": bool}``
+    (``owner_assets_response``); no assets and no hash before an investment run.
+    Read only."""
+    return ce.owner_assets_response(_row(proj, db))
 
 
 # ── the project's grid codes (plan C10) ────────────────────────────────────

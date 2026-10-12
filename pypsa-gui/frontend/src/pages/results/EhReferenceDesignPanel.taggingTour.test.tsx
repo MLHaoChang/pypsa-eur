@@ -73,6 +73,23 @@ describe('tagging tour prepare (obstacle 3)', () => {
     expect(s.rightPanelOpen).toBe(true)
   })
 
+  it('finishes a pending target wait after the document environment is torn down', async () => {
+    vi.useFakeTimers()
+    const qc = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } })
+    qc.setQueryData(nk('Demo', 'buses'), [{ name: 'grid' }])
+    const pending = prepareTaggingTour(qc, 'Demo', { waitMs: 100 })
+    try {
+      vi.stubGlobal('document', undefined)
+      await vi.advanceTimersByTimeAsync(100)
+      await expect(pending).resolves.toBeUndefined()
+      // Continue past the deadline: no later polling callback may throw.
+      await vi.advanceTimersByTimeAsync(1000)
+    } finally {
+      vi.unstubAllGlobals()
+      vi.useRealTimers()
+    }
+  })
+
   it('reads the buses query cache first and falls back to the first bus', async () => {
     const qc = new QueryClient()
     qc.setQueryData(nk('Demo', 'buses'), [{ name: 'a' }, { name: 'b' }])

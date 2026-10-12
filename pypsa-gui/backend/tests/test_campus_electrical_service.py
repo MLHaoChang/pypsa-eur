@@ -590,3 +590,588 @@ def test_an_unresolved_row_reaches_the_state_and_the_copilot_summary(hub):
     want = [{"need": df.loc[1, "need"], "reason": "campus_voltage: needs a tap change"}]
     assert ce.get_state(hub)["results"]["unresolved"] == want
     assert ce.get_investment(hub)["unresolved"] == want
+
+
+# --------------------------------------------------------------------------
+# part three, D1a: the discount rate and the price year come from the project
+# --------------------------------------------------------------------------
+#
+# The library's own 0.07 and price year are stand-alone defaults. A project
+# that has saved a solver config annualises at that config's discount rate,
+# and one that has finance inputs states its money year there. The engine
+# is handed a copy of the library with the project's rate, and that copy is
+# the one kept as run/campus_assets_used.yaml.
+
+def save_solver_config(project, **fields):
+    import json
+    path = project_registry.project_dir(project) / ce.SOLVER_CONFIG_FILE
+    path.write_text(json.dumps(fields))
+    return path
+
+
+def finance_with(currency_year):
+    return {"currency_year": currency_year}
+
+
+def library_rate(text):
+    return yaml.safe_load(text)["discount_rate"]["value"]
+
+
+def library_entry(library_id, text=None):
+    data = yaml.safe_load(text or default_library_text())
+    return next(e for kind in data if isinstance(data[kind], list) for e in data[kind] if e["id"] == library_id)
+
+
+def annualised(row, rate):
+    from gridspine.templates.campus_assets import annuity
+    life = library_entry(row["library_id"])["lifetime_a"]["value"]
+    return row["capex_eur"] * annuity(rate, life) + row["opex_eur_per_a"]
+
+
+def test_without_a_saved_solver_config_the_library_keeps_its_rate_and_year(hub):
+    ce.draft(hub)
+    out = ce.run(hub, {"k": 1})
+    basis = out["results"]["cost_basis"]
+    assert basis["discount_rate"] == 0.07 and basis["discount_rate_from"] == "asset library"
+    assert basis["price_year"] == 2026 and basis["price_year_from"] == "asset library"
+    assert basis["library_price_year"] == 2026 and basis["price_year_mismatch"] is False
+    assert basis["currency"] == "EUR"
+    assert (ce.campus_dir(hub) / "run" / ce.USED_LIBRARY_FILE).read_text() == default_library_text()
+
+
+def test_a_solver_config_that_states_no_discount_rate_leaves_the_librarys(hub):
+    """The loader's 0.07 default is not a rate the project stated: a saved
+    config with only finance inputs keeps the library's rate, labelled as
+    the library's, and hands the library over byte for byte."""
+    ce.draft(hub)
+    save_solver_config(hub, finance=finance_with(2024))
+    basis = ce.run(hub, {"k": 1})["results"]["cost_basis"]
+    assert basis["discount_rate_from"] == "asset library"
+    assert basis["price_year"] == 2024 and basis["price_year_from"] == "project finance inputs"
+    assert (ce.campus_dir(hub) / "run" / ce.USED_LIBRARY_FILE).read_text() == default_library_text()
+
+
+def test_the_projects_discount_rate_replaces_the_librarys_for_the_engine_and_the_snapshot(hub, monkeypatch):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.03)
+    seen = []
+    real = ce.cs.invest_campus
+
+    def spy(run_dir, library=None, **kw):
+        seen.append(open(library).read() if library is not None else None)
+        return real(run_dir, library, **kw)
+    monkeypatch.setattr(ce.cs, "invest_campus", spy)
+    out = ce.run(hub, {"k": 1})
+    assert seen and seen[0] is not None and library_rate(seen[0]) == 0.03
+    assert library_rate((ce.campus_dir(hub) / "run" / ce.USED_LIBRARY_FILE).read_text()) == 0.03
+    basis = out["results"]["cost_basis"]
+    assert basis["discount_rate"] == 0.03 and basis["discount_rate_from"] == "project solver config"
+    chosen = [r for r in out["results"]["investment"] if r["status"] == "chosen"]
+    assert chosen
+    for r in chosen:
+        assert r["annualised_eur_per_a"] == pytest.approx(annualised(r, 0.03))
+        assert r["annualised_eur_per_a"] != pytest.approx(annualised(r, 0.07))
+
+
+def test_the_rate_override_also_applies_to_the_projects_own_library_copy(hub):
+    ce.draft(hub)
+    ce.save_library(hub, library_with(scaled_capex(2)))
+    save_solver_config(hub, discount_rate=0.10)
+    out = ce.run(hub, {"k": 1})
+    used = yaml.safe_load((ce.campus_dir(hub) / "run" / ce.USED_LIBRARY_FILE).read_text())
+    assert used["discount_rate"]["value"] == 0.10
+    assert used["transformers"][0]["capex_eur"]["value"] == 2 * yaml.safe_load(default_library_text())[
+        "transformers"][0]["capex_eur"]["value"]                       # the rest of the copy is as saved
+    assert out["results"]["cost_basis"]["discount_rate_from"] == "project solver config"
+    assert yaml.safe_load(ce.get_library(hub)["yaml"])["discount_rate"]["value"] == 0.07   # the saved copy is not rewritten
+
+
+def test_the_price_year_is_the_projects_when_it_has_finance_inputs(hub):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.07, finance=finance_with(2024))
+    basis = ce.run(hub, {"k": 1})["results"]["cost_basis"]
+    assert basis["price_year"] == 2024 and basis["price_year_from"] == "project finance inputs"
+    assert basis["library_price_year"] == 2026
+    assert basis["price_year_mismatch"] is True                       # flagged; no money is converted
+
+
+def test_a_project_money_year_equal_to_the_librarys_is_not_a_mismatch(hub):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.07, finance=finance_with(2026))
+    basis = ce.run(hub, {"k": 1})["results"]["cost_basis"]
+    assert basis["price_year"] == 2026 and basis["price_year_from"] == "project finance inputs"
+    assert basis["price_year_mismatch"] is False
+
+
+@pytest.mark.parametrize("finance", [None, {}, {"currency_year": None}, {"currency_year": "2024"}])
+def test_finance_inputs_without_a_money_year_leave_the_librarys(hub, finance):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.05, finance=finance)
+    basis = ce.run(hub, {"k": 1})["results"]["cost_basis"]
+    assert basis["price_year"] == 2026 and basis["price_year_from"] == "asset library"
+    assert basis["price_year_mismatch"] is False
+    assert basis["discount_rate"] == 0.05 and basis["discount_rate_from"] == "project solver config"
+
+
+def test_a_mismatched_year_does_not_change_a_single_cost(hub):
+    ce.draft(hub)
+    plain = ce.run(hub, {"k": 1})["results"]["cost"]
+    save_solver_config(hub, discount_rate=0.07, finance=finance_with(2019))
+    assert ce.run(hub, {"k": 1})["results"]["cost"] == plain
+
+
+def test_a_project_rate_outside_the_librarys_range_is_a_422_naming_the_rate(hub):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=1.5)
+    with pytest.raises(HTTPException) as exc:
+        ce.run(hub, {"k": 1})
+    assert exc.value.status_code == 422 and "1.5" in exc.value.detail and "solver config" in exc.value.detail
+    assert not (ce.campus_dir(hub) / "run" / ce.USED_LIBRARY_FILE).exists()
+
+
+def test_a_run_without_invest_has_no_cost_basis(hub):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.03)
+    ce.run(hub, {"k": 1})
+    out = ce.run(hub, {"k": 1, "invest": False})
+    assert out["results"]["cost_basis"] is None
+    assert not (ce.campus_dir(hub) / "run" / ce.COST_BASIS_FILE).exists()
+
+
+def test_a_change_of_the_projects_discount_rate_makes_the_results_stale(hub):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.05)
+    ce.run(hub, {"k": 1})
+    assert not ce.get_state(hub)["stale"]
+    save_solver_config(hub, discount_rate=0.06)
+    assert ce.get_state(hub)["stale"]
+    ce.run(hub, {"k": 1})
+    assert not ce.get_state(hub)["stale"]
+
+
+def test_saving_or_removing_the_solver_config_changes_the_basis_and_so_the_staleness(hub):
+    ce.draft(hub)
+    ce.run(hub, {"k": 1})                                              # the library's 0.07, no config
+    assert not ce.get_state(hub)["stale"]
+    path = save_solver_config(hub, discount_rate=0.04)
+    assert ce.get_state(hub)["stale"]
+    ce.run(hub, {"k": 1})
+    assert not ce.get_state(hub)["stale"]
+    path.unlink()
+    assert ce.get_state(hub)["stale"]
+
+
+def test_a_change_to_something_else_in_the_solver_config_is_not_a_change_of_the_results(hub):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.05, solver_name="highs")
+    ce.run(hub, {"k": 1})
+    save_solver_config(hub, discount_rate=0.05, solver_name="gurobi")
+    assert not ce.get_state(hub)["stale"]
+
+
+def test_a_change_of_the_money_year_makes_the_results_stale_since_the_basis_is_shown(hub):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.05, finance=finance_with(2026))
+    ce.run(hub, {"k": 1})
+    assert not ce.get_state(hub)["stale"]
+    save_solver_config(hub, discount_rate=0.05, finance=finance_with(2024))
+    assert ce.get_state(hub)["stale"]
+
+
+def test_a_run_that_fails_leaves_no_cost_basis_behind(hub, monkeypatch):
+    from gridspine.schema.contracts import ContractError
+    ce.draft(hub)
+    ce.run(hub, {"k": 1})
+    monkeypatch.setattr(ce.cs, "invest_campus", lambda *a, **k: (_ for _ in ()).throw(ContractError("no")))
+    with pytest.raises(HTTPException):
+        ce.run(hub, {"k": 1})
+    assert not (ce.campus_dir(hub) / "run" / ce.COST_BASIS_FILE).exists()
+
+
+def test_the_investment_summary_for_the_copilot_carries_the_cost_basis(hub):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.05)
+    ce.run(hub, {"k": 1})
+    assert ce.get_investment(hub)["cost_basis"]["discount_rate"] == 0.05
+
+
+# --------------------------------------------------------------------------
+# part three, D2: the chosen equipment as extra owner assets
+# --------------------------------------------------------------------------
+#
+# ``extra_owner_assets`` turns what the last investment run bought into the
+# list the investment case (IC) engine takes: one entry per purchased item that
+# is neither existing nor unresolved, in the shape of the IC's ``ExtraOwnerAsset``
+# (``services/finance/case.py``, added by the IC session): eight top-level
+# fields and everything else under ``meta``. ``upfront_per_unit`` is per basis
+# unit (lump: the unit; per_km: the km of one cable; per_bay: the bay), and
+# ``quantity`` the number of basis units.
+
+INVEST_COLUMNS = ["need", "library_id", "kind", "units", "length_km", "invest_period", "capex_eur",
+                  "opex_eur_per_a", "annualised_eur_per_a", "existing", "status", "reason"]
+
+
+def inv_row(need, library_id, kind, units, *, length_km=None, period=2030, capex=1.0, existing=False,
+            status="chosen", reason=None):
+    return {"need": need, "library_id": library_id, "kind": kind, "units": units, "length_km": length_km,
+            "invest_period": period, "capex_eur": capex, "opex_eur_per_a": 0.0, "annualised_eur_per_a": 0.0,
+            "existing": existing, "status": status, "reason": reason}
+
+
+def fake_investment(project, rows, library_text=None, scope="campus"):
+    """Write a run directory as an investment run leaves it, from hand-made rows."""
+    import json
+    run_dir = ce.campus_dir(project) / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows, columns=INVEST_COLUMNS).to_csv(run_dir / ce.cs.INVESTMENT_CSV, index=False)
+    (run_dir / ce.cs.INVEST_SCOPE_JSON).write_text(json.dumps({"pcc_switchgear": scope}))
+    (run_dir / ce.USED_LIBRARY_FILE).write_text(library_text or default_library_text())
+    return run_dir
+
+
+def purchase_rows():
+    return [
+        inv_row("transformer GRID_IMPORT", "TR_132_33_63", "transformer", 2, capex=5_000_000.0),
+        inv_row("cable CBL_1", "CB_33_AL240", "cable", 2, length_km=1.5, period=2032, capex=420_000.0),
+        inv_row("switchgear GRID", "SG_132_31p5", "switchgear", 3, capex=1_350_000.0),
+        inv_row("reactive", "CAP_33_10M", "capacitor_bank", 2, period=2035, capex=300_000.0),
+        inv_row("reactive", "SR_33_5M", "shunt_reactor", 1, period=2035, capex=150_000.0),
+    ]
+
+
+
+import hashlib
+
+CONTRACT_FIELDS = ["name", "kind", "basis", "quantity", "parts", "build_year", "source", "source_hash"]
+META_FIELDS = {"need", "library_id", "units", "length_km", "currency", "price_year", "provenance", "illustrative"}
+
+
+def total_of(asset):
+    return asset["quantity"] * asset["parts"][0]["upfront_per_unit"]
+
+
+def test_each_purchased_item_is_one_owner_asset_in_the_ic_shape(hub):
+    fake_investment(hub, purchase_rows())
+    assets = ce.extra_owner_assets(hub)
+    assert [a["name"] for a in assets] == [
+        "campus:TR_132_33_63#1", "campus:CB_33_AL240#1", "campus:SG_132_31p5#1",
+        "campus:CAP_33_10M#1", "campus:SR_33_5M#1"]
+    digest = ce.campus_study_hash(hub)
+    assert assets[0] == {
+        "name": "campus:TR_132_33_63#1", "kind": "transformer", "basis": "lump", "quantity": 2.0,
+        "parts": [{"name": "investment", "upfront_per_unit": 2_500_000.0, "lifetime": 40.0, "fom_share": 0.015}],
+        "build_year": 2030, "source": "campus_study", "source_hash": digest,
+        "meta": {"need": "transformer GRID_IMPORT", "library_id": "TR_132_33_63", "units": 2, "length_km": None,
+                 "currency": "EUR", "price_year": 2026, "provenance": "assumed", "illustrative": True}}
+
+
+def test_the_top_level_keys_are_exactly_the_contract_fields_and_meta(hub):
+    fake_investment(hub, purchase_rows())
+    for a in ce.extra_owner_assets(hub):
+        assert list(a) == [*CONTRACT_FIELDS, "meta"]
+        assert set(a["meta"]) == META_FIELDS
+        assert [list(p) for p in a["parts"]] == [["name", "upfront_per_unit", "lifetime", "fom_share"]]
+
+
+def test_the_extras_the_ic_does_not_take_sit_under_meta_not_at_the_top(hub):
+    fake_investment(hub, purchase_rows())
+    for a in ce.extra_owner_assets(hub):
+        assert not META_FIELDS & set(a)
+
+
+def test_a_repeated_library_id_counts_up_and_the_names_are_unique(hub):
+    rows = [inv_row("transformer A", "TR_132_33_63", "transformer", 1),
+            inv_row("cable CBL_1", "CB_33_AL240", "cable", 1, length_km=1.0),
+            inv_row("transformer B", "TR_132_33_63", "transformer", 2),
+            inv_row("cable CBL_2", "CB_33_AL240", "cable", 1, length_km=2.0),
+            inv_row("transformer C", "TR_132_33_63", "transformer", 1)]
+    fake_investment(hub, rows)
+    names = [a["name"] for a in ce.extra_owner_assets(hub)]
+    assert names == ["campus:TR_132_33_63#1", "campus:CB_33_AL240#1", "campus:TR_132_33_63#2",
+                     "campus:CB_33_AL240#2", "campus:TR_132_33_63#3"]
+    assert len(set(names)) == len(names)
+
+
+def test_a_left_out_row_does_not_use_up_a_number(hub):
+    rows = [inv_row("transformer OLD", "TR_132_33_63", "transformer", 1, existing=True),
+            inv_row("transformer NEW", "TR_132_33_63", "transformer", 1)]
+    fake_investment(hub, rows)
+    assert [a["name"] for a in ce.extra_owner_assets(hub)] == ["campus:TR_132_33_63#1"]
+
+
+def test_a_transformer_is_a_lump_of_its_units(hub):
+    fake_investment(hub, [inv_row("transformer T", "TR_132_33_63", "transformer", 3, capex=-1.0)])
+    (a,) = ce.extra_owner_assets(hub)
+    assert (a["kind"], a["basis"], a["quantity"]) == ("transformer", "lump", 3.0)
+    assert a["parts"][0]["upfront_per_unit"] == 2_500_000.0          # one transformer, not the three
+
+
+def test_a_cable_is_per_km_with_units_times_length_as_the_quantity(hub):
+    fake_investment(hub, [inv_row("cable CBL_1", "CB_33_AL240", "cable", 2, length_km=1.5, capex=-1.0)])
+    (a,) = ce.extra_owner_assets(hub)
+    assert (a["kind"], a["basis"], a["quantity"]) == ("cable", "per_km", 3.0)
+    assert a["parts"][0]["upfront_per_unit"] == 140_000.0            # EUR per km
+    assert a["parts"][0]["lifetime"] == 40.0 and a["parts"][0]["fom_share"] == 0.005
+    assert a["meta"]["units"] == 2 and a["meta"]["length_km"] == 1.5
+
+
+def test_switchgear_is_per_bay_with_the_bays_as_the_quantity(hub):
+    fake_investment(hub, [inv_row("switchgear MV", "SG_20_25p0", "switchgear", 4, capex=-1.0)])
+    (a,) = ce.extra_owner_assets(hub)
+    assert (a["kind"], a["basis"], a["quantity"]) == ("switchgear", "per_bay", 4.0)
+    assert a["parts"][0]["upfront_per_unit"] == 54_000.0             # one bay
+    assert a["parts"][0]["fom_share"] == 0.01
+
+
+def test_reactive_equipment_is_a_lump_of_its_units(hub):
+    rows = [inv_row("reactive", "CAP_33_10M", "capacitor_bank", 2), inv_row("reactive", "SR_33_5M", "shunt_reactor", 1)]
+    fake_investment(hub, rows)
+    by_kind = {a["kind"]: a for a in ce.extra_owner_assets(hub)}
+    assert {k: (a["basis"], a["quantity"]) for k, a in by_kind.items()} == {
+        "capacitor_bank": ("lump", 2.0), "shunt_reactor": ("lump", 1.0)}
+
+
+def test_quantity_times_the_unit_cost_is_the_old_total_overnight_cost(hub):
+    fake_investment(hub, [inv_row("transformer T", "TR_132_33_63", "transformer", 3),
+                          inv_row("cable CBL_1", "CB_33_AL240", "cable", 2, length_km=1.5),
+                          inv_row("switchgear MV", "SG_20_25p0", "switchgear", 4)])
+    assert [total_of(a) for a in ce.extra_owner_assets(hub)] == [3 * 2_500_000.0, 2 * 140_000.0 * 1.5, 4 * 54_000.0]
+
+
+def test_the_build_year_is_the_invest_period_and_the_source_is_the_campus_study(hub):
+    fake_investment(hub, purchase_rows())
+    assets = ce.extra_owner_assets(hub)
+    assert [a["build_year"] for a in assets] == [2030, 2032, 2030, 2035, 2035]
+    assert {a["source"] for a in assets} == {"campus_study"}
+
+
+def test_existing_and_unresolved_and_empty_needs_are_left_out(hub):
+    rows = [
+        inv_row("transformer T", "TR_132_33_63", "transformer", 1),
+        inv_row("transformer OLD", "TR_132_33_40", "transformer", 1, existing=True),      # sunk, even if 'chosen'
+        inv_row("transformer KEPT", None, "keep", 0, existing=True, status="kept"),
+        inv_row("reactive", "CAP_33_5M", "capacitor_bank", 1, status="unresolved", reason="needs a tap change"),
+        inv_row("cable NONE", None, "none", 0, status="not_needed"),
+    ]
+    fake_investment(hub, rows)
+    assert [a["name"] for a in ce.extra_owner_assets(hub)] == ["campus:TR_132_33_63#1"]
+
+
+def test_there_are_no_owner_assets_before_a_run_or_after_a_run_that_did_not_invest(hub):
+    assert ce.extra_owner_assets(hub) == [] and ce.campus_study_hash(hub) is None
+    ce.draft(hub)
+    assert ce.extra_owner_assets(hub) == [] and ce.campus_study_hash(hub) is None
+    ce.run(hub, {"k": 1, "invest": False})
+    assert ce.extra_owner_assets(hub) == [] and ce.campus_study_hash(hub) is None
+
+
+def test_a_run_that_only_kept_what_exists_has_no_owner_assets(hub):
+    fake_investment(hub, [inv_row("transformer KEPT", None, "keep", 0, existing=True, status="kept")])
+    assert ce.extra_owner_assets(hub) == []
+
+
+def test_a_project_of_another_kind_is_refused_like_every_other_action(study):
+    for call in (ce.extra_owner_assets, ce.owner_assets_response):
+        with pytest.raises(HTTPException) as exc:
+            call(study)
+        assert exc.value.status_code == 409
+
+
+def test_the_engines_kinds_each_map_to_the_ic_vocabulary(hub):
+    from gridspine.static import campus_invest
+    engine_kinds = {"transformer", "cable", "switchgear", *campus_invest._LIB_KIND}      # what the table writes
+    assert set(ce.IC_KIND) == engine_kinds
+    assert set(ce.IC_KIND.values()) <= {"transformer", "cable", "capacitor_bank", "shunt_reactor", "statcom",
+                                        "switchgear"}
+    rows = [inv_row("n", "TR_132_33_63", "transformer", 1), inv_row("n", "CB_33_AL240", "cable", 1, length_km=1.0),
+            inv_row("n", "SG_20_25p0", "switchgear", 1), inv_row("n", "CAP_33_10M", "capacitor_bank", 1),
+            inv_row("n", "SR_33_5M", "shunt_reactor", 1)]
+    lib = yaml.safe_load(default_library_text())
+    stat = lib["statcoms"][0]["id"]
+    rows.append(inv_row("n", stat, "statcom", 1))
+    fake_investment(hub, rows)
+    assert [a["kind"] for a in ce.extra_owner_assets(hub)] == [
+        "transformer", "cable", "switchgear", "capacitor_bank", "shunt_reactor", "statcom"]
+
+
+def test_an_unknown_kind_is_refused_naming_it(hub):
+    fake_investment(hub, [inv_row("transformer T", "TR_132_33_63", "transformers", 1)])
+    with pytest.raises(HTTPException) as exc:
+        ce.extra_owner_assets(hub)
+    assert exc.value.status_code == 422 and "transformers" in exc.value.detail
+
+
+def test_an_unknown_kind_of_a_kept_row_is_not_looked_at(hub):
+    fake_investment(hub, [inv_row("transformer T", "TR_132_33_63", "transformers", 1, existing=True)])
+    assert ce.extra_owner_assets(hub) == []
+
+
+def test_a_cable_whose_library_entry_has_no_per_km_cost_is_refused(hub):
+    fake_investment(hub, [inv_row("cable CBL_1", "TR_132_33_63", "cable", 1, length_km=1.0)])
+    with pytest.raises(HTTPException) as exc:
+        ce.extra_owner_assets(hub)
+    assert exc.value.status_code == 422 and "capex_eur_per_km" in exc.value.detail
+
+
+def test_a_cable_row_without_a_length_is_refused(hub):
+    fake_investment(hub, [inv_row("cable CBL_1", "CB_33_AL240", "cable", 1)])
+    with pytest.raises(HTTPException) as exc:
+        ce.extra_owner_assets(hub)
+    assert exc.value.status_code == 422 and "length_km" in exc.value.detail
+
+
+def test_the_cost_tag_of_the_library_is_the_provenance_and_assumed_alone_is_illustrative(hub):
+    def measured(data):
+        for e in data["transformers"]:
+            if e["id"] == "TR_132_33_63":
+                e["capex_eur"]["source"] = "datasheet"
+    fake_investment(hub, purchase_rows(), library_text=library_with(measured))
+    by_id = {a["meta"]["library_id"]: a["meta"] for a in ce.extra_owner_assets(hub)}
+    assert by_id["TR_132_33_63"]["provenance"] == "datasheet" and by_id["TR_132_33_63"]["illustrative"] is False
+    assert by_id["CB_33_AL240"]["provenance"] == "assumed" and by_id["CB_33_AL240"]["illustrative"] is True
+
+
+def test_a_cable_takes_the_provenance_of_its_per_km_cost(hub):
+    def change(data):
+        for e in data["cables"]:
+            if e["id"] == "CB_33_AL240":
+                e["capex_eur_per_km"]["source"] = "measured"
+    fake_investment(hub, [inv_row("cable CBL_1", "CB_33_AL240", "cable", 1, length_km=2.0)], library_text=library_with(change))
+    (a,) = ce.extra_owner_assets(hub)
+    assert a["meta"]["provenance"] == "measured" and a["meta"]["illustrative"] is False
+
+
+def test_the_currency_and_the_price_year_are_the_libraries_of_the_run(hub):
+    def change(data):
+        data["currency"] = "USD"
+        data["price_year"] = 2021
+    fake_investment(hub, purchase_rows(), library_text=library_with(change))
+    assert {(a["meta"]["currency"], a["meta"]["price_year"]) for a in ce.extra_owner_assets(hub)} == {("USD", 2021)}
+
+
+def test_the_owner_assets_come_from_the_library_the_run_used_not_the_one_saved_since(hub):
+    fake_investment(hub, [inv_row("transformer T", "TR_132_33_63", "transformer", 1)])
+    ce.save_library(hub, library_with(scaled_capex(5)))                 # saved after the run
+    (asset,) = ce.extra_owner_assets(hub)
+    assert asset["parts"][0]["upfront_per_unit"] == 2_500_000.0
+
+
+def test_a_real_run_gives_owner_assets_that_add_up_to_its_cost_table(hub):
+    ce.draft(hub)
+    out = ce.run(hub, {"k": 1, "pf": 0.95})
+    assets = ce.extra_owner_assets(hub)
+    chosen = [r for r in out["results"]["investment"] if r["status"] == "chosen" and not r["existing"]]
+    assert chosen and len(assets) == len(chosen)
+    assert sum(total_of(a) for a in assets) == pytest.approx(sum(r["capex_eur"] for r in chosen))
+    assert sum(total_of(a) for a in assets) == pytest.approx(out["results"]["cost"][0]["capex_eur"])
+    assert out["owner_assets_count"] == len(assets)
+    assert all(a["meta"]["illustrative"] and a["meta"]["provenance"] == "assumed" for a in assets)
+    assert len({a["name"] for a in assets}) == len(assets)
+    assert {a["kind"] for a in assets} <= {"transformer", "cable", "capacitor_bank", "shunt_reactor", "statcom",
+                                           "switchgear"}
+
+
+def test_the_pcc_switchgear_the_operator_owns_is_not_an_owner_asset(hub):
+    ce.draft(hub)
+    mine = ce.run(hub, {"k": 1, "pf": 0.95})
+    assert "switchgear GRID" in [a["meta"]["need"] for a in ce.extra_owner_assets(hub)]
+    theirs = ce.run(hub, {"k": 1, "pf": 0.95, "pcc_switchgear_by_operator": True})
+    assert not [a for a in ce.extra_owner_assets(hub) if a["meta"]["need"] == "switchgear GRID"]
+    assert theirs["owner_assets_count"] == mine["owner_assets_count"] - 1
+
+
+def test_the_state_counts_the_owner_assets(hub):
+    assert ce.get_state(hub)["owner_assets_count"] == 0
+    fake_investment(hub, purchase_rows())
+    assert ce.extra_owner_assets(hub) and ce.get_state(hub)["owner_assets_count"] == 5
+
+
+# --- the source hash --------------------------------------------------------
+
+def hash_by_the_contract(run_dir):
+    """sha256[:16] over investment csv, used library, campus file, cost basis (when present): each file's
+    name, a NUL, then its bytes."""
+    h = hashlib.sha256()
+    for name in ("campus_investment.csv", "campus_assets_used.yaml", "campus.yaml", "campus_cost_basis.json"):
+        f = run_dir / name
+        if f.is_file():
+            h.update(name.encode() + b"\0" + f.read_bytes())
+    return h.hexdigest()[:16]
+
+
+def test_the_source_hash_is_the_documented_digest_of_the_runs_files_in_order(hub):
+    run_dir = fake_investment(hub, purchase_rows())
+    (run_dir / "campus.yaml").write_text("campus: {name: x}\n")
+    (run_dir / ce.COST_BASIS_FILE).write_text('{"discount_rate": 0.07}')
+    digest = ce.campus_study_hash(hub)
+    assert digest == hash_by_the_contract(run_dir)
+    assert len(digest) == 16 and int(digest, 16) >= 0
+    assert ce.cs.CAMPUS_YAML == "campus.yaml"
+
+
+def test_the_source_hash_is_the_same_for_every_entry_and_stable_across_calls(hub):
+    fake_investment(hub, purchase_rows())
+    first, second = ce.extra_owner_assets(hub), ce.extra_owner_assets(hub)
+    assert len({a["source_hash"] for a in first}) == 1 and len(first[0]["source_hash"]) == 16
+    assert first == second and ce.campus_study_hash(hub) == first[0]["source_hash"]
+
+
+@pytest.mark.parametrize("name", ["campus_investment.csv", "campus_assets_used.yaml", "campus.yaml",
+                                  "campus_cost_basis.json"])
+def test_each_file_of_the_study_is_in_the_source_hash(hub, name):
+    run_dir = fake_investment(hub, purchase_rows())
+    (run_dir / "campus.yaml").write_text("campus: {name: x}\n")
+    (run_dir / ce.COST_BASIS_FILE).write_text('{"discount_rate": 0.07}')
+    before = ce.campus_study_hash(hub)
+    with open(run_dir / name, "ab") as f:
+        f.write(b"\n")
+    assert ce.campus_study_hash(hub) != before
+
+
+def test_the_source_hash_does_not_need_the_optional_files(hub):
+    run_dir = fake_investment(hub, purchase_rows())
+    assert ce.campus_study_hash(hub) == hash_by_the_contract(run_dir)
+
+
+def test_the_source_hash_changes_when_the_run_changes(hub):
+    ce.draft(hub)
+    ce.run(hub, {"k": 1, "pf": 0.95})
+    first = ce.campus_study_hash(hub)
+    assert first == ce.campus_study_hash(hub)
+    ce.run(hub, {"k": 1, "pf": 0.95})
+    assert ce.campus_study_hash(hub) == first                           # the same study again: the same hash
+    save_solver_config(hub, discount_rate=0.05)
+    ce.run(hub, {"k": 1, "pf": 0.95})
+    rate_hash = ce.campus_study_hash(hub)
+    assert rate_hash != first
+    ce.save_library(hub, library_with(scaled_capex(2)))
+    ce.run(hub, {"k": 1, "pf": 0.95})
+    assert ce.campus_study_hash(hub) not in (first, rate_hash)
+    assert {a["source_hash"] for a in ce.extra_owner_assets(hub)} == {ce.campus_study_hash(hub)}
+
+
+# --- the response of the route ---------------------------------------------
+
+def test_the_response_is_the_assets_the_hash_and_the_stale_flag(hub):
+    fake_investment(hub, purchase_rows())
+    out = ce.owner_assets_response(hub)
+    assert list(out) == ["assets", "source_hash", "stale"]
+    assert out["assets"] == ce.extra_owner_assets(hub) and out["source_hash"] == ce.campus_study_hash(hub)
+    assert out["stale"] is False
+
+
+def test_an_empty_run_answers_no_assets_no_hash_and_not_stale(hub):
+    assert ce.owner_assets_response(hub) == {"assets": [], "source_hash": None, "stale": False}
+
+
+def test_the_response_is_stale_after_the_discount_rate_changes_and_fresh_after_a_rerun(hub):
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.05)
+    ce.run(hub, {"k": 1, "pf": 0.95})
+    assert ce.owner_assets_response(hub)["stale"] is False
+    save_solver_config(hub, discount_rate=0.06)
+    out = ce.owner_assets_response(hub)
+    assert out["stale"] is True and out["stale"] == ce.get_state(hub)["stale"]
+    assert out["assets"] and out["source_hash"] == ce.campus_study_hash(hub)       # still served, but flagged
+    ce.run(hub, {"k": 1, "pf": 0.95})
+    assert ce.owner_assets_response(hub)["stale"] is False

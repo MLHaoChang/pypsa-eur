@@ -1,0 +1,213 @@
+<!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
+# Assistant implementation session handoff
+
+Status: design published to master; phase A navigation/inventory slice implemented
+and locally verified. Whole-application/live-voice implementation still pending.
+Date: 2026-10-10.
+
+Read [spec](spec.md), [coverage](application-coverage.md), [test plan](test-plan.md),
+[implementation plan](../../docs/superpowers/plans/2026-10-10-live-voice-conversation.md)
+and backend/harness/README.md. Design approval is not production certification.
+
+## Starting state
+
+- Publication branch docs/whole-application-assistant starts from master 3fd3c32a.
+  It contains reviewed documentation only.
+- Existing dictation was, at publication, a separate open draft
+  [PR 106](https://github.com/MLHaoChang/pypsa-eur/pull/106). Preserve it; integrate
+  this prerequisite later without claiming its local baseline is already on master.
+  Superseded 2026-10-10: PR 106 merged as `d43809aed`. It is reviewed dictation,
+  not continuous live voice. See the companion amendment below.
+- Inventory: 220 tools, 14 result tabs, 17 panels. Behavioral/editor mapping is
+  pending. Known first fix: adequacy/FMEA navigation tool enum gaps.
+- First phase: issue 08; write/run failing navigation tests and exhaustive
+  discovery/offering/inventory contracts, then minimal provider-neutral changes.
+- Remaining order: 09/02 durable shared path; 03 and 06/07 UI/evidence; 11 jobs;
+  10 experiments; 01 speech; 04 recovery; 05 comprehensive release.
+- Initial deployment: one authoritative app worker, owner-pinned hosted bridge,
+  LiveKit Build, one user/up to ten conversation hours/month. Hosted credentials,
+  model/API deprecation, resources/device/accuracy/latency remain release gates.
+- No paid calls/subscription started for design/publication. Preserve existing
+  usage ledger/budget and never print credentials or replay completed paid cases.
+- Previous failed environment and existing worktrees remain untouched.
+
+## Resume procedure
+
+Start a fresh implementation branch/worktree from master after publication.
+Current backend venv /workspace/chat-compat-venv is ephemeral; reproduce setup
+with repository guidance in a fresh environment. Frontend uses npm/Vitest/TypeScript.
+Append publication PR/commit, implementation branch, red/green commands/results,
+covered cases, next runnable slice and remaining blockers below after each phase.
+
+## 2026-10-10 session — first typed coverage slice
+
+Publication completed: [PR 107](https://github.com/MLHaoChang/pypsa-eur/pull/107)
+merged into master as `19e6e5fdfedff6b706212d8bf23f7c0f937c0879`.
+Implementation branch: `feat/assistant-capability-coverage`, fresh worktree at
+`/workspace/assistant-implementation`; the dictation branch and earlier environment
+were not modified. No paid APIs, subscription changes or test credentials needed.
+Implementation publication: [PR 108](https://github.com/MLHaoChang/pypsa-eur/pull/108),
+with code/test commit `2e4c919c830786a5cf57e40ee2824a4fa92067df`.
+Local test evidence is recorded below; check the PR for remote merge/check status.
+
+TDD evidence:
+
+| Cases | Executable seam/tests | Observed red | Verified green |
+| --- | --- | --- | --- |
+| A-U2 | `backend/tests/test_assistant_navigation_coverage.py` | 12 failures: missing two tabs/five panels and malformed navigation accepted; three later type cases also failed before fixing | 43 cases: every actual tab/panel, legacy aliases and invalid inputs |
+| A-I2 | `backend/tests/test_assistant_navigation_provider_parity.py` | All 8 transport cases failed at unavailable schema targets | Anthropic, official OpenAI, compatible remote/local adapters; 124 actual navigation calls with fragmented arguments, IDs, continuation and UI events |
+| A-I1 | `backend/tests/test_assistant_tool_reachability.py` | Existing reachability passed after correcting fixture activation/tool name; no provider selection change needed | 7 cases; 1,320 synthetic model requests cover every tool across network/study contexts and three profiles, plus unbound study ineligibility; offering is not handler certification |
+| A-U1/A-C1 source portion | `backend/tests/test_assistant_inventory.py` | CLI absent; later dependency-free/multiline/unknown-target cases failed before correction | 12 cases; standard-library CLI, stale schema/route/toolset/target/missing-tool rejection, mixed quotes/multiline targets and refusal to silently omit unrecognized IDs |
+| A-I2 UI | `frontend/src/components/ChatPanel.applicationNavigation.test.tsx` | 10 failures for five missing panels in Expert/Guided modes | 62 cases covering panel state, every requested tab and compare-rail route |
+
+Broad regression command: `/workspace/chat-compat-venv/bin/python -m pytest -q`
+with the four new backend modules plus schema-panels/schema-match/endpoint-map/
+dispatch/OpenAI-compatibility/profile-binding/stream-ownership/workflow-tools/
+workflow-provider-parity/layout/frame-contract modules. Result: **745 passed,
+2 opt-in skips** (paid OpenAI probe and deliberate frame recording), zero failures.
+After strengthening the reader,
+its final 12-case suite passed separately; three added reader cases make the
+combined unique tested set 748 passed plus the same two skips. JUnit evidence:
+`/tmp/assistant-phase-a-backend.xml`, `/tmp/assistant-phase-a-inventory.xml`.
+
+Full frontend: `npm test -- --maxWorkers=2 --reporter=default --reporter=junit
+--outputFile=/tmp/assistant-phase-a-frontend.xml` — **3,496 passed in 295 files**.
+Production `npm run build` passed; existing large-bundle/mixed-import warnings
+remain. Backend emitted existing scientific/FastAPI warnings; frontend emitted
+existing incomplete-query fixture warnings, with no test failures.
+
+`python -S pypsa-gui/backend/smoke/assistant_inventory.py --check` passes without
+site packages. A separate runtime parity check matched all 220 imported schemas,
+required inputs/routes/safety/toolsets against the dependency-free source reader.
+Inventory CI watches both tool/UI definitions and imported schema-cap sources.
+
+Next runnable slice: finish issue 08's actual GUI control/parameter and per-family
+behavioral-fixture matrix, then implement issue 09's durable parent-thread/owner
+contract with B-U/B-I/B-C tests written first. Shared bridge extraction can proceed
+alongside those prerequisites; integrated acceptance depends on completing them.
+All runtime tool fixtures, acknowledged view/run/source/window mapping, durable
+conversation, nonblocking adapters, experiments, speech and device/latency gates
+remain pending. Do not mark issue 08 or the entire assistant complete.
+
+## 2026-10-11 session — control matrix + durable parent thread
+
+Branch: `cursor/assistant-coverage-matrix-a604` (draft PR).
+
+Issue 08 control/parameter matrix:
+- `python -S pypsa-gui/backend/smoke/assistant_control_matrix.py --check` →
+  `ok controls=165 families=14 ar=mapped`
+- `pytest tests/test_assistant_control_matrix.py` → 9 passed
+- Artifact: `.scratch/live-voice/capability-matrix.json`; CI workflow
+  `assistant-control-matrix.yaml`. Behavioral fixtures remain on issue 05.
+
+Issue 09 first slices (B-U1, ownership, minimal B-I2 resume, B-U2 ledger):
+- `pytest tests/test_durable_conversation_parent_thread.py` → 9 passed
+- Module: `services/durable_conversation.py` (no HTTP/worker pin yet)
+
+Issue 02 C-U1 admission coordinator:
+- `pytest tests/test_utterance_admission_c_u1.py` → 8 passed
+- Module: `services/utterance_admission.py` (not yet wired into `/stream`)
+
+2026-10-11 continued:
+- Issue 02 C-I1: optional `utterance_id`+`generation` on `/stream` → `run_turn`
+  admission gate; `pytest tests/test_utterance_admission_stream_c_i1.py` → 6 passed
+- Issue 09 B-I1 HTTP: `/api/durable-conversations` + generation CAS;
+  `pytest tests/test_durable_conversation_http_b_i1.py` → 4 passed
+
+Issue 11 D-I1 first slice: foreground solve handoff without bridge wait;
+`pytest tests/test_nonblocking_foreground_solve_d_i1.py` → 3 passed.
+
+2026-10-11 continued again:
+- Issue 11 detached progress buffer (3 passed)
+- Issue 02 Live busy→queue (AssistantDock tests)
+- Issue 09 B-I2 rebind credentials (5 passed)
+
+2026-10-11 continued again:
+- Live stream `utterance_id`/`generation` (ChatPanel + chatStore; 4 vitest)
+- `GET /api/chat/{id}/progress` observer SSE (3 pytest)
+- B-I3 worker pin via `owner_replica_id` (5 pytest)
+
+2026-10-11 (post-#118 merge): branch `cursor/live-progress-rebind-a604`
+- Frontend progress observer subscription (vitest)
+- Durable rebind syncs `utteranceGeneration` (vitest)
+- Foreground `wait_for_job` via `fg:…` job adapters (4 pytest)
+
+2026-10-11 (post-#121 merge): branch `cursor/live-drain-adapters-a604`
+- Backend auto-drain of pending utterance after lease release (pytest)
+- Live open creates/rebinds durable parent thread (vitest)
+- Adequacy/study `ad:…` wait_for_job adapter (pytest)
+
+Next runnable slice: report-job adapter; D-I2 cursor recovery; D-C1;
+LiveKit credentials/deployment smoke; B-C1. Do not claim whole-application
+coverage or live voice done.
+
+2026-10-11 (same branch, later): issue 06 `compare_project_runs` + foreground
+solve publication; issue 11 `rpt:` + D-I2 cursors + D-C1; issue 01 F-U1 mocked
+STT/TTS; issue 09 B-C1 prolonged durable journey; issue 07 `get_loadflow_summary`;
+issue 08 full-coverage limitation block; issue 12 companion done.
+
+2026-10-11: branch `cursor/run-publish-paths-a604` — queue/GridSpine, study,
+and report completion paths publish run evidence (pytest domains suite).
+
+2026-10-11: branch `cursor/run-refs-ui-a604` — issue 06 conversational run refs
++ result UI (`discuss_project_run`, durable `set_discussed_run`,
+`open_run_result` chrome) and `export_run_evidence` for discussed/named runs.
+Landed on master via PR #126.
+
+2026-10-11: branch `cursor/experiment-adapters-a604` — issue 10 first slice:
+persist typed experiments without execution (`start_experiment` /
+`list_experiments` / `get_experiment`). Landed on master via PR #127.
+
+2026-10-11: Moonshot/Kimi companion closed-console live proof — profile
+`moonshot-probe` `chat_ready=true`, probe verdict=ok (kimi-k3). Closed dock:
+Live composer sent “Reply with exactly one short sentence confirming you can
+hear me.” → companion outcome “I can hear you loud and clear — ready when you
+are.” Artifacts: `/opt/cursor/artifacts/kimi-companion-closed-*.webp`,
+`kimi-stream-live-sentence.log`.
+
+2026-10-11: branch `cursor/run-evidence-acceptance-a604` — issue 06 three-run
+acceptance + `resume_episode` discussed_refs rehydration. Pytest:
+`test_run_evidence_acceptance.py` + discuss/export suites green.
+
+Next runnable (no credentials / Moonshot): mocked issue 03/04 scaffolding;
+issue 10 case advancement adapters.
+
+**Credential / release blockers (cannot close without external access):**
+LiveKit Build + hosted STT/TTS live probe (01/02/09 deployment smoke);
+issue 03 continuous media UX; issue 04 real vendor billing units;
+issue 05 release journeys / feature-flag gate; issue 10 full experiment
+orchestration. Do not claim whole-application coverage or live voice done.
+
+## 2026-10-10 design amendment — floating companion
+
+PRs 107 and 108 stay the hosted-voice architecture and the navigation/inventory
+slice. They do not ship a live voice agent. The closed assistant in the product
+is still a reserved column, and its microphone button only expands that column.
+
+The companion decision is now in [spec.md](spec.md) under Companion launcher,
+[issue 12](issues/12-companion-launcher.md), and
+[the companion plan](../../docs/superpowers/plans/2026-10-10-assistant-companion.md).
+
+- Closed state: a floating character over the canvas, with Compose, Dictate, and Live.
+  It does not reserve the 40px column and it is not a slide-panel tab.
+- Compose opens the existing console and focuses the typed composer. Dictate
+  opens that console and the reviewed dictation panel from PR 106. The console
+  is where uploads, history, and the composer live. Neither action starts the
+  microphone, a recording, or a LiveKit session. A transcript is inserted only
+  after the user accepts it.
+- Live stays on the page the user is already using. The companion lights up
+  through listening, thinking, and speaking. The same harness navigates to the
+  right project, panel, or result, creates what was asked, asks for confirmation
+  beside the companion, and says when a file is ready to download. Live does
+  not open the console.
+- Idle motion must not look like listening.
+- The profile chip opens the existing model select. Another agent is another
+  profile on the shared harness, not a second planner.
+- Kimi is already the `moonshot` preset on the OpenAI-compatible wire. Grok
+  joins that wire as the `xai` preset. Neither needs a new provider class.
+  Cursor's agent APIs are not a chat provider for this dock.
+
+Issue 12 can land before media. The next coverage slice is unchanged: finish
+issue 08's GUI control/parameter matrix, then issue 09's durable thread.

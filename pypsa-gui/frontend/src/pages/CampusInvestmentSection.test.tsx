@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { CampusState, CampusResults, InvestmentRow } from '../api/campusElectrical'
+import type { CampusState, CampusResults, CostBasis, InvestmentRow } from '../api/campusElectrical'
 import CampusElectricalPanel from './CampusElectricalPanel'
 import { formatEur } from './CampusInvestmentSection'
 
@@ -170,6 +170,53 @@ describe('investment: what was bought', () => {
     renderPanel()
     await screen.findByTestId('compliance-pcc_reactive')
     expect(screen.queryByTestId('campus-investment')).toBeNull()
+  })
+})
+
+// Part three, D1a: the rate and the money year the costs stand on, in one plain line.
+const basis = (over: Partial<CostBasis> = {}): CostBasis => ({
+  discount_rate: 0.07, discount_rate_from: 'asset library', price_year: 2026, price_year_from: 'asset library',
+  library_price_year: 2026, price_year_mismatch: false, currency: 'EUR', ...over,
+})
+
+describe('investment: the cost basis', () => {
+  it('says the rate and the price year, and where each came from', async () => {
+    api.state.mockResolvedValue(stateWith(results({ cost_basis: basis() })))
+    renderPanel()
+    expect((await screen.findByTestId('invest-cost-basis')).textContent)
+      .toBe('Annualised at 7 % (from asset library); costs in 2026 money (from asset library).')
+    expect(screen.queryByTestId('invest-price-year-mismatch')).toBeNull()
+  })
+
+  it('names the project as the source of the rate and the year', async () => {
+    api.state.mockResolvedValue(stateWith(results({ cost_basis: basis({
+      discount_rate: 0.035, discount_rate_from: 'project solver config',
+      price_year_from: 'project finance inputs',
+    }) })))
+    renderPanel()
+    expect((await screen.findByTestId('invest-cost-basis')).textContent)
+      .toBe('Annualised at 3.5 % (from project solver config); costs in 2026 money (from project finance inputs).')
+  })
+
+  it('warns when the project states another money year, and says no escalation is applied', async () => {
+    api.state.mockResolvedValue(stateWith(results({ cost_basis: basis({
+      discount_rate_from: 'project solver config', price_year: 2024, price_year_from: 'project finance inputs',
+      price_year_mismatch: true,
+    }) })))
+    renderPanel()
+    const line = await screen.findByTestId('invest-cost-basis')
+    expect(line.textContent).toContain('costs in 2026 money (from asset library)')   // what the library's costs are in
+    const warn = screen.getByTestId('invest-price-year-mismatch')
+    expect(warn.textContent).toContain('2024')
+    expect(warn.textContent).toContain('2026')
+    expect(warn.textContent).toMatch(/no escalation/i)
+  })
+
+  it('shows no line when the backend sent no basis', async () => {
+    api.state.mockResolvedValue(stateWith(results({ cost_basis: null })))
+    renderPanel()
+    await screen.findByTestId('campus-investment')
+    expect(screen.queryByTestId('invest-cost-basis')).toBeNull()
   })
 })
 
