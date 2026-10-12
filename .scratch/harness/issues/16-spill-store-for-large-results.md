@@ -1,6 +1,6 @@
 # 16 — Spill store: keep the whole tool result, give the model a locator
 
-Status: ready-for-agent (re-scoped 2026-10-12 for checked turns and toolsets, see Comments)
+Status: ready-for-agent (done 2026-10-12: harness/spill.py and read_result)
 Type: task
 Blocked by: 08 (done)
 
@@ -62,3 +62,32 @@ task-step results up to 100k characters via `$step.path`, and file IDs from
   `harness/durable.transaction`); bind locators to owner and session; delete
   on session eviction and a TTL.
 - `smoke/assistant_inventory.py --write` after adding the tool (CI checks it).
+
+2026-10-12 (done). `harness/spill.py` keeps a result whose model-facing JSON
+exceeds the 4,000-character cut, at
+`<app data>/chat-spill/<sha(owner)>/<sha(session)>/<locator>.json` (0700
+directories, 0600 files written atomically under `harness/durable.transaction`,
+redacted with `history._redact_for_persist` and scrubbed of identifying keys).
+The model gets `{spill: {locator, total_chars, shape, read_with}, preview,
+note}` instead of the cut; the panel's `tool_result` frame is unchanged.
+Not spilled: a checked turn, a non-dict/list result, a result over 20 MiB,
+and any tool whose schema has `offset`, `page` or `cursor` (derived from the
+catalogue, so `read_result` itself never spills): its cut now names that
+argument ("call list_components again with its `offset` argument …").
+Bounds: 50 MiB per session, oldest first; session directories untouched for
+24 h are swept on the next write; `drop_session` removes its own. Locators
+are 32 hex characters checked before any path is built; another owner's or
+chat's locator, an expired one and any read during a checked answer are the
+new inline kind `result_unavailable`. `read_result(locator, pointer, offset,
+limit)` takes a JSON pointer, pages lists (shrinking a page to fit), describes
+large objects by key and slices long strings. It is a control tool
+(`toolsets.CONTROL_TOOLS`); the capability inventory is regenerated (230
+tools). Tests: `tests/test_harness_spill.py` (23, red first). The parity
+battery is unchanged: no battery prompt produces an oversized result, and
+the FakeProvider tests drive the real loop.
+Gates: the whole backend suite in three shards, 11,788 passed and 1 failed:
+`test_every_unguarded_third_party_import_is_pinned_for_the_build`, which
+fails identically on clean master (PR #137 put a pytest plugin,
+`tools/pilot_evaluation_plugin.py`, where the scan treats code as shipped;
+merged while Actions was not running). Frontend 314 files / 3,695 tests, tsc
+clean; inventory and control-matrix checks pass.

@@ -1890,6 +1890,25 @@ TOOLS: list[dict[str, Any]] = [
     ),
 
     _t(
+        "read_result",
+        "Read part of a tool result that was too large to show you whole. "
+        "When a result comes back as {spill: {locator, total_chars, shape}, "
+        "preview}, the whole result is kept for this chat: call this with "
+        "the locator and a JSON pointer to the part you need (\"/rows\", "
+        "\"/rows/3/p\"). A list is returned a page at a time (offset, limit; "
+        "follow next_offset), a large object as its keys, a long string in "
+        "slices. Page and narrow; do not try to read everything. Locators "
+        "expire with the chat. Safety: read.",
+        {
+            "locator": {"type": "string", "description": "The 32-character id from the spill block."},
+            "pointer": {"type": "string", "description": "JSON pointer into the result, e.g. /rows. Empty for the top."},
+            "offset": {"type": "integer", "description": "First list index or string character. Default 0."},
+            "limit": {"type": "integer", "description": "List items per page, at most 500 (fewer if they do not fit). Default 50."},
+        },
+        ["locator"],
+    ),
+
+    _t(
         "use_skill",
         "Load a skill — a written procedure for one kind of request — and "
         "follow it. The skills you can load are listed in your instructions "
@@ -3421,6 +3440,7 @@ TOOL_ROUTES: dict[str, list] = {
     "run_sensitivity_sweep": _SERVICE_CALL,
     "use_toolset": _SERVICE_CALL,
     "use_skill": _SERVICE_CALL,
+    "read_result": _SERVICE_CALL,
     "start_workflow": _SERVICE_CALL,
     "advance_workflow": _SERVICE_CALL,
     "end_workflow": _SERVICE_CALL,

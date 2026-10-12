@@ -41,6 +41,7 @@ harness/
   sse.py          the SSE framing of a yielded (event, payload)
   fence.py        the untrusted-content delimiters and the neutraliser
   results.py      tool-result shaping: coercion, truncation, the per-turn result budget, error content
+  spill.py        oversized results kept whole per owner and session; the model gets a preview and a locator for `read_result`
   history.py      the in-memory trim and turn summary, chat.jsonl persistence, the pending-turn WAL, lineage
   metrics.py      the process-wide chat metrics behind GET /api/chat/metrics
 ```
@@ -162,7 +163,12 @@ not block; optional `multi_select`, a Markdown `detail`, and `intent`
 `choice` or `plan_review`), `use_skill` (a skill's body on demand), `start_workflow`,
 `advance_workflow`, `end_workflow` (the session's `{id, step}`; the current
 step's body rides each turn as per-turn user content, after the context
-block and outside the untrusted fence). `use_toolset` changes the session's
+block and outside the untrusted fence), `read_result` (pages a result that
+was too large to show whole: `spill.py` keeps it under the app-data dir per
+owner and session and gives the model a preview and a locator; never in a
+checked turn, never for a tool with its own `offset`/`page`/`cursor`, whose
+cut names that argument instead; a control tool, so every toolset view and
+the OpenAI tool selection keep it). `use_toolset` changes the session's
 catalogue view for the next model request, including within the same turn.
 These controls do not change project access or confirmation rules.
 

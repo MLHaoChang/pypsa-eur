@@ -127,7 +127,7 @@ the loaded network) and borrow seven designs. Each is an issue under
 | 13 | session event log, replay, fork | ready-for-agent (Q15; re-scoped 2026-10-12) | largest; must keep checked-answer history and recovery working |
 | 14 | user skill roots, invocation policy | ready-for-agent (Q16) | amends D12 and README rule 4 |
 | 15 | `ask_user` multi-select, detail, intents | done 2026-10-07 | — |
-| 16 | spill store and `read_result` | ready-for-agent (re-scoped 2026-10-12) | never during checked turns; a control tool |
+| 16 | spill store and `read_result` | done 2026-10-12 (held for the PR after #142) | — |
 | 17 | goal with a round budget | ready-for-agent (Q17; re-scoped 2026-10-12) | on the durable thread, through utterance admission |
 | 18 | approval audit events | ready-for-agent (re-scoped 2026-10-12) | owner store now, folded into 13 later |
 | 19 | MCP client | deferred (Q18: later, one spec with 11) | security surface |

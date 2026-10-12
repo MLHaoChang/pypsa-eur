@@ -171,6 +171,11 @@ What the harness adds to the assistant (all read tier, see the README):
   then Send), or ask you to approve a plan (a "Plan review" card).
 - **Skills.** `use_skill` loads a procedure (`grill` first); the prompt
   carries only the catalogue.
+- **Large results.** A tool result too large to show the assistant whole
+  (an hourly series, a long table) is kept for the chat; the assistant sees
+  the start of it and reads the rest a page at a time with `read_result`.
+  Kept results expire with the chat, after a day at most, and are never used
+  while an answer is being checked.
 
 ## Voice input
 
