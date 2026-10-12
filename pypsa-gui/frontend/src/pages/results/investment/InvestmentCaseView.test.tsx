@@ -124,6 +124,16 @@ describe('InvestmentCaseView', () => {
       .toBe('The case was refused: no owner assets (no_owner)')
   })
 
+  it('a stale report with no named part names every input, the IC G3 ones too', async () => {
+    api.getInvestmentCase.mockResolvedValue({ status: 'done',
+      report: { present: true, stale: true, changed: [], reason: 'hash_differs' } })
+    api.getReport.mockResolvedValue(structuredClone(REPORT))
+    renderView()
+    await screen.findByTestId('ic-report')
+    expect(screen.getByTestId('ic-stale').textContent)
+      .toMatch(/a pack, the owner assets' investment columns or the campus study changed/)
+  })
+
   it('renders a report with not-established headlines and the stale marker', async () => {
     api.getInvestmentCase.mockResolvedValue({ status: 'done',
       report: { present: true, stale: true, changed: ['finance', 'value_flows'] } })

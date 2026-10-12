@@ -362,7 +362,8 @@ export default function InvestmentCaseView() {
             ? <>Unconfirmed: {uncheckableReason(staleness.reason)}.</>
             : <>Stale: {staleness.changed.length
                 ? `${staleness.changed.map(label).join(', ')} changed`
-                : 'the finance inputs, the value flows, the commercial config, the solver config, the dispatch or a pack changed'}
+                : 'the finance inputs, the value flows, the commercial config, the solver config, the dispatch, '
+                  + "a pack, the owner assets' investment columns or the campus study changed"}
               {' '}since this report was computed. Run the investment case again for current figures.</>}</p>
       )}
       {report.isError && !running && (
