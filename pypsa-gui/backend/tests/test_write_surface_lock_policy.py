@@ -68,7 +68,12 @@ import main
 
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _LOCK_PRIMITIVES = frozenset({"_check_project_lock", "_enforce_project_lock"})
-_LOCK_ATTR_PRIMITIVES = frozenset({"project_locks.get_lock"})
+# The same two primitives reached as `projects.<name>` (a function-local
+# `from routers import projects`), as `run_sensitivity_sweep` does.
+_LOCK_ATTR_PRIMITIVES = frozenset({
+    "project_locks.get_lock",
+    "projects._check_project_lock", "projects._enforce_project_lock",
+})
 _OUR_MODULES = ("routers.", "services.")
 # Any canonical uuid: `_foreign_lock_gate_exempt` matches REAL request paths,
 # and its job-scoped patterns are anchored to the dashed-uuid shape.
@@ -143,6 +148,30 @@ _R_STUDY = (
     "(`require_planning`). Whether studies should join the lock is an open "
     "product question, not a gap in a control that exists."
 )
+_R_NO_PROJECT = (
+    "transcribes the caller's audio and returns the text; it resolves no "
+    "project and stores nothing."
+)
+_R_ASSURANCE = (
+    "settles the CALLER's own assurance record, stored per user under "
+    "`app_data_dir()/assistant_assurance/<owner>/`, not in a project dir. It "
+    "only READS the live network's input fingerprint to do so (`harness/"
+    "effects.reconcile`, `harness/navigation.acknowledge`); no project input "
+    "changes."
+)
+_R_DURABLE_THREAD = (
+    "a durable conversation thread: an owner-scoped record under the project "
+    "dir (`durable_conversations/`), reached through `resolve_project` and "
+    "refused to anyone but its owner. Create/checkpoint/resume/rebind move "
+    "chat-episode state and bridge credentials, never network inputs, results "
+    "or config, so a non-holder's thread changes nothing the holder sees."
+)
+_R_EXPERIMENT_PLAN = (
+    "records an experiment PLAN, owner-scoped, under the project dir "
+    "(`experiments/`) and read back only by its owner. It executes nothing "
+    "(#127: 'without hidden execution') and changes no network input, result "
+    "or config."
+)
 
 # HTTP write routes the middleware does not gate and whose handler does not
 # reach a lock check. Each one is a DECISION; the key is (METHOD, path template).
@@ -188,12 +217,19 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/chat/settings/llm/profiles/{profile_id}/test"): (NOT_PROJECT_DATA, _R_LLM_SETTINGS),
     ("PUT", "/api/local-settings/anthropic-key"): (NOT_PROJECT_DATA, _R_LOCAL),
     ("POST", "/api/local-settings/reveal-log"): (NOT_PROJECT_DATA, _R_LOCAL),
+    ("POST", "/api/dictation/transcribe"): (NOT_PROJECT_DATA, _R_NO_PROJECT),
+    ("POST", "/api/chat/operations/{operation_id}/reconcile"): (NOT_PROJECT_DATA, _R_ASSURANCE),
+    ("POST", "/api/chat/ui-ack"): (NOT_PROJECT_DATA, _R_ASSURANCE),
     # chat session
     ("POST", "/api/chat/stream"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/{session_id}/confirm"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/{session_id}/rewind"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/{session_id}/abort"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/import"): (CHAT_SESSION, _R_CHAT_HISTORY),
+    ("POST", "/api/durable-conversations"): (CHAT_SESSION, _R_DURABLE_THREAD),
+    ("POST", "/api/durable-conversations/{thread_id}/checkpoint"): (CHAT_SESSION, _R_DURABLE_THREAD),
+    ("POST", "/api/durable-conversations/{thread_id}/resume"): (CHAT_SESSION, _R_DURABLE_THREAD),
+    ("POST", "/api/durable-conversations/{thread_id}/rebind"): (CHAT_SESSION, _R_DURABLE_THREAD),
     # gridspine studies
     ("POST", "/api/gridspine/{name}/dispatch-source"): (STUDY_NOT_LOCK_COORDINATED, _R_STUDY),
     ("PUT", "/api/gridspine/{name}/config"): (STUDY_NOT_LOCK_COORDINATED, _R_STUDY),
@@ -215,6 +251,12 @@ TOOL_POLICY: dict[str, tuple[str, str]] = {
         "matching `POST /api/chat/settings/llm/active`. Instance scope."
     )),
     "gridspine_create_study": (CREATES_PROJECT, _R_CREATES),
+    "discuss_project_run": (CHAT_SESSION, (
+        "binds the chat session's discussed run (and its durable thread's "
+        "copy, see `_R_DURABLE_THREAD`); it never restores historical inputs "
+        "onto the network and changes no project input."
+    )),
+    "start_experiment": (CHAT_SESSION, _R_EXPERIMENT_PLAN),
     "gridspine_set_dispatch_source": (STUDY_NOT_LOCK_COORDINATED, _R_STUDY),
     "gridspine_update_config": (STUDY_NOT_LOCK_COORDINATED, _R_STUDY),
     "gridspine_run_pipeline": (STUDY_NOT_LOCK_COORDINATED, _R_STUDY),

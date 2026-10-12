@@ -654,6 +654,8 @@ _WRITE_ARGS = {
     # the refusal must come before any of that is read.
     "apply_demand_from_excel": lambda n: (("no-such-file", "t", "v", "D1"), {}),
     "reconstruct_network_from_image": lambda n: (("no-such-file",), {}),
+    "import_uploaded_network": lambda n: (("no-such-file", "netcdf"), {}),
+    "apply_project_changes": lambda n: (("00000000-0000-0000-0000-000000000000",), {}),
 }
 
 # Tools whose effect needs something to act on first (outside the sweep).
