@@ -65,6 +65,7 @@ import { fitReport, type FitObject } from '../site3d/fit'
 import { placementFindings, findingKeys } from '../site3d/placementCheck'
 import { libraryGaps, libraryGapLine } from '../site3d/libraryGaps'
 import { thumbSize, captureDue } from '../site3d/thumbnail'
+import WalkControls from '../site3d/WalkControls'
 import { useThumbnailStore } from '../site3d/thumbnailStore'
 import { usePlacementFindings } from '../site3d/placementFindingsStore'
 import SiteLayoutFindings from '../components/SiteLayoutFindings'
@@ -896,6 +897,10 @@ function SiteCanvas() {
   const groundTexture = mode === 'imagery' ? texture : mode === 'hillshade' ? hillshadeTexture : null
 
   const [hovered, setHovered] = useState<string | null>(null)
+  // Walk the campus (S5): first-person controls replace the orbit while on;
+  // leaving (Escape releases the pointer) puts the orbit back where it was.
+  const [walking, setWalking] = useState(false)
+  useEffect(() => { setWalking(false) }, [siteId])
   // Stable, so the memoised object meshes re-render only when their own props change.
   const onSelectObject = useCallback((obj: SiteObject) => setSelectedComponent({ type: obj.type, name: obj.name }), [setSelectedComponent])
   const labelRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -997,13 +1002,21 @@ function SiteCanvas() {
           )
         })}
         </ObjectRegistryContext.Provider>
-        <OrbitControls
-          makeDefault
-          maxPolarAngle={Math.PI / 2 - 0.05}
-          minDistance={20}
-          maxDistance={halfSizeM * 8}
-          enableDamping
-        />
+        {walking ? (
+          <WalkControls
+            start={{ x: (plotExtent.x0 + plotExtent.x1) / 2, y: (plotExtent.y0 + plotExtent.y1) / 2 }}
+            heightAt={heightAt}
+            onExit={() => setWalking(false)}
+          />
+        ) : (
+          <OrbitControls
+            makeDefault
+            maxPolarAngle={Math.PI / 2 - 0.05}
+            minDistance={20}
+            maxDistance={halfSizeM * 8}
+            enableDamping
+          />
+        )}
         <FitCamera bounds={plotExtent} />
         <ThumbnailCapture nonce={captureNonce} bounds={plotExtent} onPng={onPng} />
         <DropTargetRegistrar siteId={site.id} />
@@ -1047,6 +1060,8 @@ function SiteCanvas() {
           dispatchFresh={solved}
           libraryGaps={gapLine}
           onSnapshot={currentProject ? () => setCaptureNonce(n => n + 1) : undefined}
+          walking={walking}
+          onToggleWalk={() => setWalking(w => !w)}
           selectedPlacedKey={selectedPlacedKey}
           canArrange={allLoaded}
           onArrange={() => arrangeAll(currentProject, site.id, objects.filter(o => !o.elevation).map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading })), layout.orphans)}
