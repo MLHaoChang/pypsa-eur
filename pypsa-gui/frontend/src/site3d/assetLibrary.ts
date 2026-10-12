@@ -110,6 +110,19 @@ export const PACKING = Object.freeze({
   facingToleranceDeg: 15,
 })
 
+/**
+ * Cable run from a grid distance (S3). Without a drawn route the site
+ * measures a branch as the Manhattan distance between its connection anchor
+ * and the far yard — cables on a campus run in orthogonal trenches and
+ * ducts — times this factor for the bends, risers, terminations and slack
+ * the straight grid run leaves out. 1.2 is a placeholder from estimating
+ * practice (cable schedules add 10–20 % to the measured run), the upper end
+ * because the grid distance is already the long way round; to be set from
+ * one published norm as the S2 numbers are. `siteDistances.ts` applies it;
+ * `layout.ts` never sees it.
+ */
+export const ROUTING_FACTOR = 1.2
+
 /** A library entry: the shared type (id, label, colour, icon, match rules) plus its 3D appearance. */
 export type AssetType = AssetTypeSpec & SiteAppearance
 

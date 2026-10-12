@@ -13,7 +13,14 @@ import { client } from './client'
 // with kind `line` | `link` | `tr`; bubble keys are `<bus>|<category>`.
 
 export type LngLatTuple = [number, number]
-export type RouteSource = 'user' | 'import' | 'osm'
+/**
+ * Who drew a route: the user on the map, a GeoJSON/KML import, an OSM
+ * adoption, or the 3D site (S3: a straight two-point route from a branch's
+ * connection anchor to its far yard, so the map shows what the site
+ * measured). A `site` route is the only kind the site may overwrite; the
+ * other three are the user's and stand until the user edits or removes them.
+ */
+export type RouteSource = 'user' | 'import' | 'osm' | 'site'
 /**
  * Where a branch's PyPSA `length` came from (plan M2): a number the user or
  * an import typed, the bus0→bus1 chord, or the geodesic length of its route.
