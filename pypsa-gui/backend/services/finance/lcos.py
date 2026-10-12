@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from services.finance.case import FinanceCase
+from services.finance.case import FinanceCase, effective_parts
 from services.finance.cashflow import Operating, _templates_by_year, degradation_factor
 from services.finance.replacements import on_axis, remaining_life_terms, schedule
 from services.finance.timeline import Timeline
@@ -167,9 +167,14 @@ def storage_lcos(case: FinanceCase, op: Operating, tl: Timeline) -> dict:
         # are netted from its capex (IC S0b plan S6, GS's LCOS); not otherwise.
         tv = None
         if rla:
+            # The asset's own reasons matched WHOLE (an asset name may contain ':', IC
+            # G2 gate r1 note 1): `terminal_needs_part_lifetimes:<a>` and
+            # `terminal_part_unknown:<a>:<part>` for its own parts.
+            own = {f"terminal_needs_part_lifetimes:{a}"} | (
+                {f"terminal_part_unknown:{a}:{p.name}" for p in effective_parts(af)}
+                if af is not None else set())
             mine = [x for x in tv_reasons
-                    if x in ("terminal_needs_lp_rate", "escalation_missing:capex")
-                    or x.split(":")[1:2] == [a]]
+                    if x in ("terminal_needs_lp_rate", "escalation_missing:capex") or x in own]
             rs += mine
             tv = np.zeros(n)
             tv[n - 1] = sum(t.value for t in tv_terms if t.asset == a)

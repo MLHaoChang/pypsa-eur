@@ -161,7 +161,8 @@ def test_inverters_feed_fault_current_up_to_their_k_and_raise_the_mv_level():
     assert with_units["MV1"] > without["MV1"]
     sgen = camp.net.sgen.set_index("name")
     assert sgen.at["BESS1", "k"] == 1.2 and sgen.at["PV1", "k"] == 1.1
-    # a genset is screened as a source of 1/x''d times its rated current (ledgered)
+    # the campus net carries a genset as k = 1/x''d; IEC 60909 models it as a
+    # synchronous machine instead (island_sc.machine_net, island plan I5)
     assert sgen.at["GEN1", "k"] == pytest.approx(1 / 0.15)
 
 
