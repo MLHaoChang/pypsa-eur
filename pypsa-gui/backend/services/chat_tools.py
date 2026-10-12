@@ -3409,11 +3409,13 @@ def campus_draft_campus(project_id: str, overwrite: bool = False) -> dict:
 def campus_run_study(project_id: str, k: int | None = None, pf: float | None = None,
                      profile: str | None = None, margin: float | None = None,
                      n_minus_1: bool | None = None, invest: bool | None = None,
-                     pcc_switchgear_by_operator: bool | None = None) -> dict:
+                     pcc_switchgear_by_operator: bool | None = None,
+                     pcc_tap_control: str | None = None) -> dict:
     from services.campus_electrical_service import run as _h
     settings = {key: v for key, v in (("k", k), ("profile", profile), ("margin", margin),
                                        ("n_minus_1", n_minus_1), ("invest", invest),
-                                       ("pcc_switchgear_by_operator", pcc_switchgear_by_operator))
+                                       ("pcc_switchgear_by_operator", pcc_switchgear_by_operator),
+                                       ("pcc_tap_control", pcc_tap_control))
                 if v is not None}
     settings["pf"] = pf
     with _acting() as (db, user):

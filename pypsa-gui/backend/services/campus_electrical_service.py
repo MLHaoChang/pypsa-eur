@@ -118,7 +118,9 @@ SOLVER_CONFIG_FILE = "solver_config.json"
 MAX_CAMPUS_BYTES = 1_000_000
 MAX_LIBRARY_BYTES = 1_000_000
 DEFAULTS = {"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce", "margin": 0.2, "n_minus_1": True, "invest": True,
-            "pcc_switchgear_by_operator": False}
+            "pcc_switchgear_by_operator": False, "pcc_tap_control": "campus"}
+#: Who moves the PCC transformer's on-load taps (plan C15; the engine's ``PCC_TAP_CONTROL``).
+PCC_TAP_CONTROL = ("campus", "grid_operator")
 
 _LOCKS: dict = {}
 _LOCKS_GUARD = threading.Lock()
@@ -207,12 +209,21 @@ def _unresolved(investment):
     return [{"need": r["need"], "reason": r["reason"]} for r in investment if r["status"] == "unresolved"]
 
 
+def _tap_hours_moved(taps):
+    """How many selected hours moved a tap in any case (plan C15), or None
+    when the run did not invest."""
+    if taps is None:
+        return None
+    return len({(r["period"], r["hour"]) for r in taps if r["moved_by"]})
+
+
 def _results(run: Path):
     if not (run / cs.COMPLIANCE_CSV).is_file():
         return None
     selection = pd.read_csv(run / cs.SELECTED_CSV)
     selection["reasons"] = selection["reasons"].str.split(";")
     investment = _read_csv(run / cs.INVESTMENT_CSV)
+    taps = _read_csv(run / cs.INVEST_TAPS_CSV) if investment is not None else None
     return {
         "selection": _records(selection),
         "transformers": _read_csv(run / cs.SIZING_TRAFO_CSV),
@@ -227,7 +238,12 @@ def _results(run: Path):
         "compliance_invested": _read_csv(run / cs.COMPLIANCE_INVESTED_CSV),
         "history": _read_csv(run / cs.INVEST_HISTORY_CSV),
         "unresolved": _unresolved(investment),
-        # Who buys the PCC switchgear: {"pcc_switchgear": "campus" | "grid_operator"}.
+        # Plan C15: the on-load taps per hour and case of the re-check (period, hour, case, transformer,
+        # group, tap_pos, ratio_pct, moved_by), and how many hours moved one. None when the run did not invest.
+        "taps": taps,
+        "tap_hours_moved": _tap_hours_moved(taps),
+        # Who buys the PCC switchgear: {"pcc_switchgear": "campus" | "grid_operator"}, and who moves the
+        # PCC transformer's taps: {"pcc_tap_control": "campus" | "grid_operator"}.
         "scope": (json.loads((run / cs.INVEST_SCOPE_JSON).read_text())
                   if investment is not None and (run / cs.INVEST_SCOPE_JSON).is_file() else None),
         # Part three D1a: the rate, money year and currency the costs were annualised on, and where
@@ -460,8 +476,12 @@ def get_state(project) -> dict:
 INVESTMENT_NOTES = (
     "Every cost in the shipped asset library is an assumed order-of-magnitude placeholder, tagged assumed; "
     "replace it with quotes before relying on any figure in euro.",
-    "Voltage excursions are met by compensation, not by changing a transformer tap: tap changers are not "
-    "optimised, and an excursion that compensation cannot shrink is reported unresolved.",
+    "Voltage excursions are met first by the on-load taps of the campus transformers, set per critical hour and "
+    "per case (an N-1 case after the tap changers act, the reactive dispatch held), parallel units together and "
+    "nearest neutral; the PCC transformer's only when scope.pcc_tap_control is campus. Off-circuit taps stay where "
+    "the campus file puts them, and a transformer without tap data stays fixed. An excursion the taps and "
+    "compensation cannot shrink is reported unresolved with the reason (range exhausted, or no on-load tap data); "
+    "the PCC voltage is the grid's set-point and never a campus measure. taps lists every position used.",
     "A steady-state study at the critical hours, with an asset bought from the first period that needs it and "
     "no replacement; unresolved needs are priced but not summed.",
     "Each row's action says what it does: buy, add (units added next to existing transformers, beside a keep row "
@@ -488,6 +508,7 @@ def get_investment(project) -> dict:
     return {
         "investment": res["investment"], "cost": res["cost"], "unresolved": res["unresolved"],
         "history": res["history"], "compliance_invested": res["compliance_invested"], "scope": res["scope"],
+        "taps": res["taps"], "tap_hours_moved": res["tap_hours_moved"],
         "hub_cost": state["hub_cost"], "hub_cost_reason": state["hub_cost_reason"],
         "library_is_default": _library_text(campus_dir(project))[1], "cost_basis": res["cost_basis"],
         "stale": state["stale"], "notes": list(INVESTMENT_NOTES),
@@ -744,6 +765,9 @@ def _settings(raw: dict, known: dict) -> dict:
     s["n_minus_1"] = bool(s["n_minus_1"])
     s["invest"] = bool(s["invest"])
     s["pcc_switchgear_by_operator"] = bool(s["pcc_switchgear_by_operator"])
+    if s["pcc_tap_control"] not in PCC_TAP_CONTROL:
+        raise HTTPException(status_code=422, detail=f"pcc_tap_control must be one of {list(PCC_TAP_CONTROL)}, "
+                                                    f"got {s['pcc_tap_control']!r}")
     return s
 
 
@@ -751,8 +775,8 @@ def _clear_investment(run_dir: Path) -> None:
     """Remove the investment files of an earlier run, so that a run that does
     not invest, or fails part way, never sits beside another run's purchases."""
     for name in (cs.INVESTMENT_CSV, cs.COST_CSV, cs.INVESTED_YAML, cs.COMPLIANCE_INVESTED_CSV,
-                 cs.INVEST_HISTORY_CSV, cs.INVEST_DISPATCH_CSV, cs.INVEST_SCOPE_JSON, USED_LIBRARY_FILE,
-                 COST_BASIS_FILE):
+                 cs.INVEST_HISTORY_CSV, cs.INVEST_DISPATCH_CSV, cs.INVEST_SCOPE_JSON, cs.INVEST_TAPS_CSV,
+                 USED_LIBRARY_FILE, COST_BASIS_FILE):
         (run_dir / name).unlink(missing_ok=True)
 
 
@@ -787,7 +811,8 @@ def run(project, settings: dict) -> dict:
                     used.write_bytes(text.encode())
                     cs.invest_campus(run_dir, used if overridden or (d / LIBRARY_FILE).is_file() else None,
                                      criteria=criteria, profile=s["profile"], pf=s["pf"],
-                                     profile_dirs=profile_dirs, pcc_switchgear=not s["pcc_switchgear_by_operator"])
+                                     profile_dirs=profile_dirs, pcc_switchgear=not s["pcc_switchgear_by_operator"],
+                                     pcc_tap_control=s["pcc_tap_control"])
                     (run_dir / COST_BASIS_FILE).write_text(json.dumps(basis))
                 except BaseException:
                     _clear_investment(run_dir)       # never half a purchase beside the new sizing
@@ -873,6 +898,7 @@ def _milp_results(milp_dir: Path):
     meta = json.loads(summary.read_text())
     return {
         "investment": _read_csv(milp_dir / cs.INVESTMENT_CSV),
+        "taps": _read_csv(milp_dir / cs.INVEST_TAPS_CSV),
         "cost": _read_csv(milp_dir / cs.COST_CSV),
         "compliance_invested": _read_csv(milp_dir / cs.COMPLIANCE_INVESTED_CSV),
         "history": _read_csv(milp_dir / cs.MILP_HISTORY_CSV),
@@ -976,8 +1002,8 @@ def _prepare_milp_dir(d: Path, s: dict) -> Path:
 
 def _clear_milp_results(milp_dir: Path) -> None:
     for name in (cs.INVESTMENT_CSV, cs.COST_CSV, cs.INVESTED_YAML, cs.COMPLIANCE_INVESTED_CSV, cs.INVEST_HISTORY_CSV,
-                 cs.INVEST_DISPATCH_CSV, cs.INVEST_SCOPE_JSON, cs.MILP_HISTORY_CSV, cs.MILP_COMPARISON_CSV,
-                 MILP_SUMMARY_FILE):
+                 cs.INVEST_DISPATCH_CSV, cs.INVEST_SCOPE_JSON, cs.INVEST_TAPS_CSV, cs.MILP_HISTORY_CSV,
+                 cs.MILP_COMPARISON_CSV, MILP_SUMMARY_FILE):
         (milp_dir / name).unlink(missing_ok=True)
 
 
@@ -1048,7 +1074,7 @@ def start_milp_job(project, settings: dict) -> dict:
         record["message"] = "starting: the least-cost pick is re-solved as the warm start"
         kw = {"criteria": SizingCriteria(margin=float(s["margin"]), n_minus_1=s["n_minus_1"]), "profile": s["profile"],
               "pf": s["pf"], "profile_dirs": (grid_codes_dir(project),),
-              "pcc_switchgear": not s["pcc_switchgear_by_operator"]}
+              "pcc_switchgear": not s["pcc_switchgear_by_operator"], "pcc_tap_control": s["pcc_tap_control"]}
         ctx = contextvars.copy_context()
         thread = threading.Thread(target=lambda: ctx.run(_run_milp_job, record, milp_dir, kw), daemon=True,
                                   name=THREAD_NAME)

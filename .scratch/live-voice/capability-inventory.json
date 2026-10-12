@@ -4263,13 +4263,14 @@
         "margin",
         "n_minus_1",
         "invest",
-        "pcc_switchgear_by_operator"
+        "pcc_switchgear_by_operator",
+        "pcc_tap_control"
       ],
       "required": [
         "project_id"
       ],
       "safety_tier": "write",
-      "schema_sha256": "9ac24dc57ea0c2a97a397558f6c3126632cddb3c4af1a3dc4efcf4697423640c",
+      "schema_sha256": "c2516f103a5d78e5c75ff13fb31a31febf7e33a4fb0cde85287b1b77e0e16f7d",
       "behavioral_fixture": "pending"
     },
     {

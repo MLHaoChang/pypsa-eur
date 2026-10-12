@@ -337,14 +337,16 @@ def test_a_run_without_invest_has_no_investment_and_clears_the_previous_one(hub)
         assert res[key] is None, key
     assert res["compliance"] and out["settings"]["invest"] is False
     for name in (ce.cs.INVESTMENT_CSV, ce.cs.COST_CSV, ce.cs.INVESTED_YAML, ce.cs.COMPLIANCE_INVESTED_CSV,
-                 ce.cs.INVEST_HISTORY_CSV, ce.cs.INVEST_DISPATCH_CSV, ce.USED_LIBRARY_FILE):
+                 ce.cs.INVEST_HISTORY_CSV, ce.cs.INVEST_DISPATCH_CSV, ce.cs.INVEST_TAPS_CSV, ce.USED_LIBRARY_FILE):
         assert not (run_dir / name).exists(), name
+    assert res["taps"] is None and res["tap_hours_moved"] is None
     assert not out["stale"]
 
 
 def test_invest_defaults_to_on_and_the_operator_owns_no_switchgear_by_default():
     assert ce.DEFAULTS["invest"] is True
     assert ce.DEFAULTS["pcc_switchgear_by_operator"] is False
+    assert ce.DEFAULTS["pcc_tap_control"] == "campus"                  # plan C15: the campus moves its PCC taps
 
 
 def pcc_switchgear_rows(res):
@@ -356,11 +358,12 @@ def test_the_pcc_switchgear_is_costed_to_the_campus_unless_the_operator_owns_it(
     mine = ce.run(hub, {"k": 1, "pf": 0.95})
     from gridspine.static.campus_invest import ParallelRules
     rules = ParallelRules().scope()                   # plan C13: the rules for adding units, written with the run
-    assert mine["results"]["scope"] == {"pcc_switchgear": "campus", "parallel": rules}
+    assert mine["results"]["scope"] == {"pcc_switchgear": "campus", "parallel": rules, "pcc_tap_control": "campus"}
     assert mine["settings"]["pcc_switchgear_by_operator"] is False
     assert [r["status"] for r in pcc_switchgear_rows(mine["results"])] == ["chosen"]
     theirs = ce.run(hub, {"k": 1, "pf": 0.95, "pcc_switchgear_by_operator": True})
-    assert theirs["results"]["scope"] == {"pcc_switchgear": "grid_operator", "parallel": rules}
+    assert theirs["results"]["scope"] == {"pcc_switchgear": "grid_operator", "parallel": rules,
+                                          "pcc_tap_control": "campus"}
     assert theirs["settings"]["pcc_switchgear_by_operator"] is True
     assert not [r for r in pcc_switchgear_rows(theirs["results"]) if r["status"] == "chosen"]
     assert theirs["results"]["cost"][0]["capex_eur"] < mine["results"]["cost"][0]["capex_eur"]
@@ -376,6 +379,49 @@ def test_the_engine_is_told_who_buys_the_pcc_switchgear(hub, monkeypatch):
     ce.run(hub, {"k": 1, "pcc_switchgear_by_operator": True})
     assert seen == [True, False]
 
+
+def test_who_moves_the_pcc_taps_reaches_the_engine_and_is_saved_with_the_settings(hub, monkeypatch):
+    """Plan C15: ``pcc_tap_control`` is a run setting (campus by default),
+    passed to the engine, saved, and written to the scope; anything else
+    is a 422 before the engine runs."""
+    ce.draft(hub)
+    seen = []
+    real = ce.cs.invest_campus
+    monkeypatch.setattr(ce.cs, "invest_campus",
+                        lambda run_dir, library=None, **kw: seen.append(kw["pcc_tap_control"]) or real(run_dir, library, **kw))
+    mine = ce.run(hub, {"k": 1})
+    theirs = ce.run(hub, {"k": 1, "pcc_tap_control": "grid_operator"})
+    assert seen == ["campus", "grid_operator"]
+    assert mine["settings"]["pcc_tap_control"] == "campus"
+    assert theirs["settings"]["pcc_tap_control"] == "grid_operator"
+    assert theirs["results"]["scope"]["pcc_tap_control"] == "grid_operator"
+    with pytest.raises(HTTPException) as e:
+        ce.run(hub, {"k": 1, "pcc_tap_control": "operator"})
+    assert e.value.status_code == 422 and "pcc_tap_control" in e.value.detail
+    assert seen == ["campus", "grid_operator"]
+
+
+def test_the_taps_are_read_back_with_the_results_and_the_hours_that_moved_one_are_counted(hub):
+    """The drafted campus has no tap data: the taps table is empty and no
+    hour moved a tap. With on-load taps on every transformer, the table
+    lists them per hour and case, and the count is the hours where any
+    moved (by hand from the table)."""
+    ce.draft(hub)
+    res = ce.run(hub, {"k": 1})["results"]
+    assert res["taps"] == [] and res["tap_hours_moved"] == 0
+    d = ce.campus_dir(hub)
+    spec = yaml.safe_load((d / ce.CAMPUS_FILE).read_text())
+    for tr in spec["campus"]["transformers"].values():
+        tr["existing"] = True
+        tr["tap"] = {"changer": "on_load", "side": "hv", "neutral": 0, "min": -9, "max": 9,
+                     "step_percent": {"value": 1.5, "source": "assumed"}, "pos": 4}
+    ce.save_campus(hub, yaml.safe_dump(spec, sort_keys=False))
+    res = ce.run(hub, {"k": 1})["results"]
+    taps = res["taps"]
+    assert taps and set(taps[0]) == {"period", "hour", "case", "transformer", "group", "tap_pos", "ratio_pct",
+                                     "moved_by"}
+    moved = {(r["period"], r["hour"]) for r in taps if r["moved_by"] != 0}
+    assert res["tap_hours_moved"] == len(moved)
 
 def test_a_run_without_invest_has_no_scope(hub):
     ce.draft(hub)
@@ -542,9 +588,13 @@ def test_the_investment_summary_for_the_copilot_carries_the_caveats_with_the_num
     assert out["compliance_invested"] and out["hub_cost"]["total"] > 0
     assert out["library_is_default"] is True and out["stale"] is False
     from gridspine.static.campus_invest import ParallelRules
-    assert out["scope"] == {"pcc_switchgear": "campus", "parallel": ParallelRules().scope()}
+    assert out["scope"] == {"pcc_switchgear": "campus", "parallel": ParallelRules().scope(),
+                            "pcc_tap_control": "campus"}
     text = " ".join(out["notes"])
     assert "placeholder" in text and "assumed" in text and "tap" in text
+    # plan C15: the taps act inside the re-check, per hour and case, and the notes say how
+    assert "on-load taps" in text and "pcc_tap_control" in text and "not optimised" not in text
+    assert out["taps"] == [] and out["tap_hours_moved"] == 0
     assert "scope.parallel" in text and "vector group" in text          # plan C13: additions and their rules
     ce.save_library(hub, library_with(scaled_capex(2)))
     out = ce.get_investment(hub)
