@@ -611,6 +611,62 @@ fail when its row is deleted:
   guard over all three hub templates.
 - Mutations.
 
+### I2a as built (2026-10-12)
+
+**`services/solver/island.py`**
+- `_wrap_with_island(network, user_fn, cfg)` composes the rows into the
+  solve after the reserve margin. Off (`SolverConfig.island_constraints`
+  false, the default), it returns the callback it was given, so the LP is
+  untouched. On, it reads the solving project's `island_config.json`. On
+  with no sidecar, the solve is refused.
+- **Opt-in (Q5)** is the new `island_constraints` field on `SolverConfig`
+  and `SolverConfigSchema`. The Data Center template ships it on through a
+  per-template `solver_config.json` (`SOLVER_CONFIG_EXTRA`).
+- **Refused paths:** rolling horizon, SCOPF and **myopic** (its future
+  periods are representative snapshots, so the cyclic window is wrong
+  there too). Each is judged as it would actually run
+  (`lp_bindings.effective_strategy`; SCOPF only with a branch selected;
+  myopic only with investment periods), and a power flow passes through.
+  Every refusal, a sidecar that fails validation or a period shorter than
+  `sustained_h` included, is logged as `[PHASE] Refused: …` without a
+  traceback.
+- **Dispatch-only solves skip the rows** (owner, 2026-10-12). Found when the
+  template's Class-C FMEA sweep went infeasible: its operational base pins
+  capacities, and the as-built site cannot hold 24 h at N+1. The rows are a
+  sizing standard, so they are skipped, logged and recorded as `skipped`
+  when nothing they can size (a genset, ride-through/GFM/UPS storage, a fuel
+  store) is extendable, or on an operational re-solve (`_ic_operational`,
+  set by `freeze_capacities`; the sidecar is not read then).
+- **Investment periods.** Each period counts only the gensets and storage
+  active in it (`activity.active_mask`, as the reserve margin does), and
+  takes U_max from those. e(t−1) follows PyPSA's own SoC linkage per unit:
+  within the period when `cyclic_state_of_charge_per_period` /
+  `state_of_charge_initial_per_period` say so, otherwise carried across
+  periods (PyPSA's default), with `state_of_charge_initial` only at the
+  horizon's start. Windows still wrap within each period (ledgered).
+- **U_max** is a genset's sidecar `unit_mw` when given (a fleet modelled as
+  one asset), else a fixed unit's own rating.
+- **Sidecar names the network lacks** are left out, warned and recorded as
+  `missing` in the facts.
+- **ΔP⁺ for the `seamless` bridge** is a parameter (`delta_p_plus`: a
+  number, a Series or a callable) until I2b supplies it. Without it B = 0,
+  and the facts say so. B uses the slowest genset's `start_s + sync_s`.
+- **Fuel** works for gensets modelled as Links from a fuel bus that has
+  Stores: an extendable Store gets the row, a fixed one is reported pass or
+  fail. Generator gensets give "not checked".
+- An extendable genset without `unit_mw` is refused, because the N+k test
+  needs the unit it takes out.
+- The facts land on `n._island_facts`: N+k, the storage, Δ, window length,
+  critical peak, U_max, truncation, the bridge and the fuel status.
+
+**Tests** (`tests/test_island_rows.py`, 41): the plan's list, plus unequal
+units at N+1, `unit_mw` (extendable and fixed), genset availability, two
+investment periods (activity, SoC carried across), the dispatch-only skips,
+the refusal paths (PF, SCOPF without branches, operational, short period),
+missing names, a flat ΔP⁺ Series, and the two `run_simulation` paths.
+- A code review (2026-10-12) found the multi-period, dispatch-only,
+  refusal and naming gaps above; each was fixed test-first.
+
 ### I2b: the instant of islanding in the hub LP — step 1 (M)
 
 This increment adds to the same wrapper.

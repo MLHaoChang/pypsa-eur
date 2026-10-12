@@ -440,6 +440,15 @@ STRESS_SCENARIOS: dict[str, list[dict]] = {
 # Solver settings a project from these templates starts with: frontier and
 # fmea_top need VOLL > 0 (a template otherwise starts from the default 0).
 SOLVER_CONFIG: dict = {"voll": 5000.0}
+# Per-template additions. The island rows (campus island I2a) are opt-in per
+# project and ship enabled on the templates that carry an island sidecar
+# (owner Q5).
+SOLVER_CONFIG_EXTRA: dict[str, dict] = {"eh_datacenter": {"island_constraints": True}}
+
+
+def solver_config(template_id: str) -> dict:
+    """The solver settings written beside one template."""
+    return {**SOLVER_CONFIG, **SOLVER_CONFIG_EXTRA.get(template_id, {})}
 
 # The island sidecar (plan 2026-10-07 campus island, I1): control modes, unit
 # dynamics and island requirements, keyed by PyPSA name. Its schema is
@@ -515,7 +524,7 @@ def write_sidecars(out_dir, template_id: str) -> None:
         {"__schema__": SCHEMA, "scenarios": STRESS_SCENARIOS[template_id]},
         indent=2, sort_keys=True) + "\n")
     (out_dir / SOLVER_FILE).write_text(
-        json.dumps(SOLVER_CONFIG, indent=2, sort_keys=True) + "\n")
+        json.dumps(solver_config(template_id), indent=2, sort_keys=True) + "\n")
     if template_id in ISLAND_CONFIG:
         (out_dir / ISLAND_FILE).write_text(
             json.dumps(ISLAND_CONFIG[template_id], indent=2, sort_keys=True) + "\n")
