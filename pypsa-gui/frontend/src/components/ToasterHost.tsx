@@ -1,6 +1,7 @@
 import { Toaster } from 'react-hot-toast'
 import { useLocation } from 'react-router-dom'
 import { useUIStore } from '../store/uiStore'
+import { COMPANION_TOAST_OFFSET } from './CompanionLauncher'
 
 /** react-hot-toast's own inset from the viewport edge. */
 export const TOAST_GAP = 16
@@ -24,7 +25,11 @@ export default function ToasterHost() {
   const dockOpen = useUIStore(s => s.assistantDockOpen)
   const dockWidth = useUIStore(s => s.assistantDockWidth)
   const dockOnPage = DOCK_ROUTES.has(useLocation().pathname)
-  const right = dockOpen && dockOnPage ? dockWidth + TOAST_GAP : TOAST_GAP
+  const right = !dockOnPage
+    ? TOAST_GAP
+    : dockOpen
+      ? dockWidth + TOAST_GAP
+      : COMPANION_TOAST_OFFSET + TOAST_GAP
   return (
     <Toaster
       position="bottom-right"
