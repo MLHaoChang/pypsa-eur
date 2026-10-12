@@ -137,15 +137,19 @@ def test_binomial_limits_and_absent_denominator():
     assert rate(100, 100, iid=True)["wilson_95"]["lower"] == pytest.approx(0.9630065017930143)
 
 
-@pytest.mark.parametrize("fault", ["malformed", "duplicate_json", "nonfinite_json", "missing_file"])
+@pytest.mark.parametrize("fault", ["malformed", "duplicate_json", "nonfinite_json", "missing_file", "nested_json", "too_many_reviewers"])
 def test_cli_invalid_inputs_overwrite_a_previous_success(tmp_path, fault):
     report = tmp_path / "report.json"
     report.write_text('{"measurement_complete": true}')
     packet = tmp_path / "packet.json"
     if fault != "missing_file":
-        packet.write_text("{" if fault == "malformed" else '{"version":1,"version":2}' if fault == "duplicate_json" else '{"value":NaN}')
+        packet.write_text("[" * 2000 + "]" * 2000 if fault == "nested_json" else
+                          "{" if fault == "malformed" else '{"version":1,"version":2}' if fault == "duplicate_json" else '{"value":NaN}')
     script = Path(__file__).resolve().parents[1] / "tools/run_review_calibration.py"
-    run = subprocess.run([sys.executable, str(script), "score", "--packet", str(packet), "--report", str(report)],
+    command = [sys.executable, str(script), "score", "--packet", str(packet), "--report", str(report)]
+    if fault == "too_many_reviewers":
+        command += [arg for i in range(11) for arg in ("--judgments", str(tmp_path / f"missing-{i}.json"))]
+    run = subprocess.run(command,
                          capture_output=True, text=True)
     assert run.returncode == 1
     assert not json.loads(report.read_text())["measurement_complete"]

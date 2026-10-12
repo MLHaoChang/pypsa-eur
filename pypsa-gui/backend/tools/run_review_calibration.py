@@ -64,10 +64,12 @@ def main():
         parser.error("report must not overwrite an input")
     write(args.report, {"measurement_complete": False, "status": "invalid_or_interrupted", "independent_domain_approval": False})
     try:
+        if len(args.judgments) > 10:
+            raise ValueError("reviewer_limit")
         value = calibrate(read(args.packet), [read(path) for path in args.judgments],
                           read(args.observations) if args.observations else None)
         write(args.report, value)
-    except (ValueError, OSError, TypeError, KeyError):
+    except (ValueError, OSError, TypeError, KeyError, RecursionError):
         print(json.dumps({"measurement_complete": False, "status": "invalid_input"}))
         return 1
     print(json.dumps({"measurement_complete": value["measurement_complete"], "status": value["status"]}))
