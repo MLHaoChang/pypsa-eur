@@ -199,6 +199,76 @@ def rename_component_on_disk(project_dir: pathlib.Path | str | None, component_c
         log.warning("sites.json rename hook failed for %s %r→%r: %s", component_class, old, new, exc)
 
 
+# ── thumbnail (visual-layers plan 3, S5) ────────────────────────────────────
+#
+# `<project>/sites/<id>/thumb.png`: the site as the 3D view last captured it
+# from the south (once per fresh solve, or on demand). Read by the Guided
+# hub-design Site card and offered to the study report as a figure. It is
+# a cache of a rendering, never the source of anything: a missing or stale
+# file costs a picture, nothing else.
+
+THUMB_FILE = "thumb.png"
+MAX_THUMB_BYTES = 2 * 1024 * 1024
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+class ThumbnailInvalid(ValueError):
+    """Not a PNG."""
+
+
+class ThumbnailTooLarge(ValueError):
+    """Over `MAX_THUMB_BYTES`."""
+
+
+def validate_thumbnail(data: bytes) -> None:
+    """Raise `ThumbnailTooLarge` or `ThumbnailInvalid`; the route maps them to 413 / 422."""
+    if len(data) > MAX_THUMB_BYTES:
+        raise ThumbnailTooLarge(f"thumbnail exceeds the {MAX_THUMB_BYTES // (1024 * 1024)} MB cap")
+    if not data.startswith(_PNG_MAGIC):
+        raise ThumbnailInvalid("thumbnail must be a PNG")
+
+
+def write_thumbnail(target: pathlib.Path, data: bytes) -> pathlib.Path:
+    """Atomic replace of `thumb.png` under a `site_dir` the caller resolved. Validation is the caller's job."""
+    from services.atomic_io import atomic_write_bytes
+
+    target.mkdir(parents=True, exist_ok=True)
+    path = target / THUMB_FILE
+    atomic_write_bytes(path, data)
+    return path
+
+
+def read_thumbnail(target: pathlib.Path) -> bytes | None:
+    """The PNG bytes, or None when there is none (or it is unreadable)."""
+    path = target / THUMB_FILE
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
+def first_thumbnail(project_dir: pathlib.Path) -> bytes | None:
+    """
+    The thumbnail of the first site in document order that has one — what
+    the report takes as its figure. None when no site has a thumbnail or
+    the document is unreadable (a sidecar problem never fails a report).
+    """
+    try:
+        doc = read_sites(project_dir)
+    except (OSError, PermissionError):
+        return None
+    for site in doc.get("sites", []):
+        sid = site.get("id") if isinstance(site, dict) else None
+        try:
+            target = site_dir(project_dir, sid)
+        except SitesInvalid:
+            continue
+        data = read_thumbnail(target)
+        if data:
+            return data
+    return None
+
+
 # ── site directories ────────────────────────────────────────────────────────
 
 def site_dir(project_dir: pathlib.Path, site_id: str) -> pathlib.Path:
