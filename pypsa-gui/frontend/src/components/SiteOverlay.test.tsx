@@ -36,6 +36,19 @@ describe('SiteOverlay', () => {
     expect(screen.queryByTestId('library-gaps')).toBeNull()
   })
 
+  it('Snapshot captures on click, is absent without a project to store to, and disabled read-only (S5)', () => {
+    const base = { sites: [site], site, onPickSite: () => {}, assetCount: 1, fit: { ...fit, over: false, outside: [] }, unplacedMembers: [], selectedPlacedKey: null, canArrange: true, onArrange: () => {}, onResetPlacement: () => {} }
+    const onSnapshot = vi.fn()
+    const { rerender } = render(<SiteOverlay {...base} onSnapshot={onSnapshot} />)
+    fireEvent.click(screen.getByTestId('site-snapshot'))
+    expect(onSnapshot).toHaveBeenCalledTimes(1)
+    rerender(<SiteOverlay {...base} />)
+    expect(screen.queryByTestId('site-snapshot')).toBeNull()
+    useUIStore.setState({ readOnly: true, readOnlyReason: 'solving' })
+    rerender(<SiteOverlay {...base} onSnapshot={onSnapshot} />)
+    expect((screen.getByTestId('site-snapshot') as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('Reset is disabled without a placed selection', () => {
     render(<SiteOverlay sites={[site]} site={site} onPickSite={() => {}} assetCount={1} fit={{ ...fit, over: false, outside: [] }} unplacedMembers={['B2']} selectedPlacedKey={null} canArrange onArrange={() => {}} onResetPlacement={() => {}} />)
     expect((screen.getByRole('button', { name: 'Reset placement' }) as HTMLButtonElement).disabled).toBe(true)
