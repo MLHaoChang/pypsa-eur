@@ -100,10 +100,12 @@ def _asset_costs(n, cfg, parsed, sides) -> list[P.AssetCost]:
     from services.solver_service import with_periodized_cost_defaults
 
     periods = [_key(p) for p in _periods(n)]
+    # round=0: PyPSA rounds statistics to five decimals by default, and these
+    # lines are money the finance case sums (IC engine ask 4).
     with with_periodized_cost_defaults(n, cfg, for_back_calculation=True):
-        capex = _per_asset(n.statistics.capex(groupby=False), periods)
-        fom = _per_asset(n.statistics.fom(groupby=False), periods)
-        opex = _per_asset(n.statistics.opex(groupby=False), periods)
+        capex = _per_asset(n.statistics.capex(groupby=False, round=0), periods)
+        fom = _per_asset(n.statistics.fom(groupby=False, round=0), periods)
+        opex = _per_asset(n.statistics.opex(groupby=False, round=0), periods)
     out = []
     for key in sorted(set(capex) | set(fom) | set(opex)):
         comp, name = key

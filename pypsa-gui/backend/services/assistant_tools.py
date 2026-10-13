@@ -268,6 +268,18 @@ def apply_project_changes(preview_id: str) -> dict:
         record["applying"] = True
         tasks._save(path, record)
         PyPSAService.set_network(candidate.network)
+        # The copy still carries the previous solve. Topology is unchanged, so
+        # dispatch_status would keep calling those tables fresh. Drop them and
+        # the completed status, the same way a network edit does.
+        active = PyPSAService.get_active_context()
+        from services.dispatch_status import clear_dispatch
+        clear_dispatch(active.network)
+        active.network._objective = None
+        active.network._objective_constant = None
+        with PyPSAService.get_solver_state_lock():
+            active.solver_state.update(
+                status="idle", condition=None, objective=None, solve_time=None,
+            )
         dirty_state.mark_dirty()
         from services import change_log_service
         change_log_service.log("update", "Network", preview_id, f"Applied reviewed preview: {len(diffs)} engineering values")

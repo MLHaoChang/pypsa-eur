@@ -760,7 +760,7 @@ export default function ModelHorizon() {
   return (
     <div className="flex flex-col h-full">
       <PageHeader
-        eyebrow="SIMULATION · MODEL HORIZON"
+        eyebrow="TIME · MODEL HORIZON"
         title="Snapshot range &amp; weightings"
         subtitle="Configure the time slice the optimizer sees. Smaller windows solve faster; full-year captures seasonality."
       />

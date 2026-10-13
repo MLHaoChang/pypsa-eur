@@ -44,6 +44,9 @@ SIGNATURES: dict[str, str] = {
     "services.commercial.lp_bindings.materialise_poc_prices":
         "(n, commercial: 'dict | CommercialConfig | None', *, log=None, "
         "solve_strategy: 'str' = 'full', multi_period: 'bool' = False) -> 'Applied'",
+    # IC engine ask 5 (2026-10-13): a written dispatch recorded as an engine solve.
+    "services.commercial.lp_bindings.record_dispatch_as_solve":
+        "(n, commercial: 'dict | CommercialConfig') -> 'pd.DataFrame'",
     "services.commercial.value_flow_templates.build":
         "(name: 'str', n, commercial: 'CommercialConfig', *, dsr_buses=()) -> 'TemplateResult'",
     "services.results.finance_case.build_finance_case":

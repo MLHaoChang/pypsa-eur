@@ -526,6 +526,10 @@ def get_state(project) -> dict:
         "hub_cost": cost,
         "hub_cost_reason": reason,
         "milp": _milp_state(project, d),
+        # A run answers only when it ends: a client whose request timed out reads here whether the
+        # backend is still at it (the run holds this lock throughout, the joint optimisation's
+        # least-cost run too), so it never takes the previous run's results for the new one's.
+        "run_in_progress": _lock(d / "run").locked(),
     }
 
 
