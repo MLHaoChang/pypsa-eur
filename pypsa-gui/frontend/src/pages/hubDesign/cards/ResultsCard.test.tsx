@@ -12,7 +12,7 @@ import { fmtCurrency } from '../../results/shared'
 import { headline } from '../headline'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { REPORT, review } from '../testFixtures'
-import { ResultsCard } from './ResultsCard'
+import { EDITED_TEXT, ResultsCard } from './ResultsCard'
 
 vi.mock('../../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/simulation')>()
@@ -211,5 +211,37 @@ describe('ResultsCard: Set a goal (P26 gate)', () => {
     mount()
     await screen.findByTestId('hub-results-verdict')
     expect(screen.queryByTestId('hub-results-set-goal')).toBeNull()
+  })
+})
+
+// P33b 10b (D-2, D-3): `edited_since_study` on the study record says an edit
+// seam was crossed since the study started. One amber line: the edited
+// banner subsumes the solved-since one; `false` / `null` / absent say nothing.
+describe('ResultsCard: edited since the study (P33b)', () => {
+  const EDITED = 'The network has been edited since this study, so these results describe the design as it was. Run again to refresh.'
+
+  it('edited_since_study: true → the edited banner', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ ...study(), edited_since_study: true })
+    mount()
+    expect((await screen.findByTestId('hub-results-edited')).textContent).toBe(EDITED)
+    expect(EDITED_TEXT).toBe(EDITED)
+    expect(screen.queryByTestId('hub-results-stale')).toBeNull()
+  })
+
+  it('edited and review stale → only the edited banner', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ ...study(), edited_since_study: true })
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ stale: true, edited_since_study: true }))
+    mount()
+    await screen.findByTestId('hub-results-edited')
+    await screen.findByTestId('hub-results-verdict')
+    expect(screen.queryByTestId('hub-results-stale')).toBeNull()
+  })
+
+  it.each([false, null, undefined])('edited_since_study: %s → no edited banner', async (v) => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ ...study(), edited_since_study: v })
+    mount()
+    await screen.findByTestId('hub-results-verdict')
+    expect(screen.queryByTestId('hub-results-edited')).toBeNull()
+    expect(screen.queryByTestId('hub-results-stale')).toBeNull()
   })
 })

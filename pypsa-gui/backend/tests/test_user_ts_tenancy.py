@@ -295,6 +295,33 @@ def test_re_clustering_a_network_keeps_that_projects_uploaded_profiles():
         PyPSAService.reset_request_context(token)
 
 
+@pytest.mark.parametrize("carry,kept", [("same", True), ("copy", True),
+                                        ("fresh", False)])
+def test_reset_network_carries_the_store_only_within_the_same_workspace(
+        carry, kept):
+    """
+    P33b x #71 (master merge): `reset_network(carry=...)` decides per mode.
+    "same" (undo) and "copy" (io import into the open draft) keep the
+    workspace, so they keep a COPY of its profiles; "fresh" (load, template,
+    bundle import, Saved-snapshot restore, New) is another project or a blank
+    draft and starts with its own empty store, like its undo stack, edit
+    counter and result state. The outgoing context's store is never touched.
+    """
+    before = ProjectContext(network=_net_with_one_load())
+    key = ("loads", "p_set", "L1")
+    before.user_ts[key] = pd.Series([UPLOADED_P_SET] * len(SNAPS), index=SNAPS)
+    token = PyPSAService.bind_request_context(before)
+    try:
+        PyPSAService.reset_network(carry=carry)
+        after = PyPSAService.get_active_context()
+        assert after is not before
+        assert (key in after.user_ts) is kept, (carry, dict(after.user_ts))
+        assert after.user_ts is not before.user_ts
+        assert key in before.user_ts, "the project being left lost its profiles"
+    finally:
+        PyPSAService.reset_request_context(token)
+
+
 # ── 6. the save reads the store of the context it is saving ──────────────────
 
 def test_a_save_persists_the_saved_contexts_series_not_the_active_ones(
