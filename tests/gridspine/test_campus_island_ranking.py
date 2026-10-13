@@ -19,6 +19,7 @@ from gridspine.ranking.campus import (
     island_metrics,
     select_campus_hours,
 )
+from gridspine.schema.island import validate_island_hourly, validate_island_unit_hourly
 
 NAN = math.nan
 HOURS = 6
@@ -67,8 +68,14 @@ def _tables(s, scenarios=("seamless",)):
     return campus_hourly, unit, hourly
 
 
+def _metrics(campus_hourly, unit, hourly):
+    """island_metrics on tables validated as the driver validates them."""
+    return island_metrics(campus_hourly, validate_island_unit_hourly(unit),
+                          validate_island_hourly(hourly), _campus())
+
+
 def _picks(series, k=1, scenarios=("seamless",)):
-    m = island_metrics(*_tables(series, scenarios), _campus())
+    m = _metrics(*_tables(series, scenarios))
     sel = select_campus_hours(m, k=k)
     return {r: sorted(int(h) for h, rs in zip(sel["hour"], sel["reasons"]) if r in rs)
             for r, _ in ISLAND_CRITERIA}
@@ -131,7 +138,7 @@ def test_the_minimum_inertia_takes_the_worst_scenario():
     campus_hourly, unit, hourly = _tables(_series(), scenarios=("seamless", "ups_bridged"))
     low = (hourly["scenario"] == "ups_bridged") & (hourly["hour"] == 4)
     hourly.loc[low, "inertia_mws"] = 10.0
-    m = island_metrics(campus_hourly, unit, hourly, _campus())
+    m = _metrics(campus_hourly, unit, hourly)
     sel = select_campus_hours(m, k=1)
     assert [int(h) for h, rs in zip(sel["hour"], sel["reasons"])
             if "min_island_inertia" in rs] == [4]
@@ -141,8 +148,7 @@ def test_the_minimum_inertia_takes_the_worst_scenario():
 
 
 def test_a_minimum_criterion_is_transformed_to_max_minus_x():
-    m = island_metrics(*_tables(_series(inertia=[50.0, 30.0, 40.0, 50.0, 50.0, 45.0])),
-                       _campus())
+    m = _metrics(*_tables(_series(inertia=[50.0, 30.0, 40.0, 50.0, 50.0, 45.0])))
     assert m["island_inertia_short_mws"].tolist() == pytest.approx(
         [0.0, 20.0, 10.0, 0.0, 0.0, 5.0])
     assert (m[[c for _, c in ISLAND_CRITERIA]] >= 0).all().all()
@@ -154,7 +160,7 @@ def test_the_transform_is_per_period():
     a2, b2, c2 = _tables(_series(inertia=_bump(90.0, 4, 100.0)))
     for df in (a2, b2, c2):
         df["period"] = 2040
-    m = island_metrics(pd.concat([a, a2]), pd.concat([b, b2]), pd.concat([c, c2]), _campus())
+    m = _metrics(pd.concat([a, a2]), pd.concat([b, b2]), pd.concat([c, c2]))
     sel = select_campus_hours(m, k=1)
     picked = {(int(p), int(h)) for p, h, rs in zip(sel["period"], sel["hour"], sel["reasons"])
               if "min_island_inertia" in rs}
@@ -188,3 +194,80 @@ def test_without_island_columns_the_selection_is_the_base_one():
     sel = select_campus_hours(m, k=1)
     assert sel.to_dict("list") == {"period": [P, P], "hour": [0, 1],
                                    "reasons": [["max_consumption_mw"], ["max_import_mw"]]}
+
+
+# ── through the campus study driver ────────────────────────────────────────
+
+
+@pytest.fixture
+def prepared(tmp_path):
+    from gridspine.drivers.campus_study import draft_from_project, prepare_campus
+    from tests.gridspine.test_campus_hourly import solved_hub
+
+    path = tmp_path / "network.nc"
+    solved_hub(periods=[2030, 2040]).export_to_netcdf(str(path))
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(path).spec, path)
+    return run
+
+
+def _write_island(run, *, low_inertia_hour):
+    """Island tables keyed like the run's campus_hourly.csv, with one hour
+    of low inertia per period."""
+    from gridspine.schema.island import ISLAND_HOURLY_CSV, ISLAND_UNIT_HOURLY_CSV
+
+    keys = pd.read_csv(run / "campus_hourly.csv")[["period", "hour"]].drop_duplicates()
+    island = keys.assign(scenario="seamless", dp_up_mw=0.0, dp_down_mw=0.0,
+                         inertia_mws=[30.0 if h == low_inertia_hour else 50.0
+                                      for h in keys["hour"]],
+                         k_mw_per_hz=5.0, critical_load_mw=0.0)
+    unit = keys.assign(unit_id="nobody", soc_start_mwh=NAN, online=NAN, headroom_up_mw=NAN,
+                       headroom_down_mw=NAN, p_ups_it_mw=0.0)
+    island.to_csv(run / ISLAND_HOURLY_CSV, index=False)
+    unit.to_csv(run / ISLAND_UNIT_HOURLY_CSV, index=False)
+
+
+def test_ranking_a_run_with_island_tables_adds_the_island_hours(prepared):
+    from gridspine.drivers.campus_study import rank_campus
+
+    base = rank_campus(prepared, k=1)
+    _write_island(prepared, low_inertia_hour=2)
+    sel = rank_campus(prepared, k=1)
+    island = {(int(p), int(h)) for p, h, rs in zip(sel["period"], sel["hour"], sel["reasons"])
+              if "min_island_inertia" in rs}
+    assert island == {(p, 2) for p in set(base["period"])}
+    # The base reasons are still there, unchanged.
+    for p, h, rs in zip(base["period"], base["hour"], base["reasons"]):
+        row = sel[(sel["period"] == p) & (sel["hour"] == h)].iloc[0]
+        assert set(rs) <= set(row["reasons"])
+
+
+def test_a_run_without_island_tables_ranks_exactly_as_before(prepared):
+    from gridspine.drivers.campus_study import METRICS_CSV, rank_campus
+
+    sel = rank_campus(prepared, k=1)
+    metrics = pd.read_csv(prepared / METRICS_CSV)
+    assert not any(c.startswith("island_") for c in metrics.columns)
+    assert not any(r in dict(ISLAND_CRITERIA) for rs in sel["reasons"] for r in rs)
+
+
+def test_one_island_table_without_the_other_is_refused(prepared):
+    from gridspine.drivers.campus_study import rank_campus
+    from gridspine.schema.contracts import ContractError
+    from gridspine.schema.island import ISLAND_UNIT_HOURLY_CSV
+
+    _write_island(prepared, low_inertia_hour=2)
+    (prepared / ISLAND_UNIT_HOURLY_CSV).unlink()
+    with pytest.raises(ContractError, match="one island table"):
+        rank_campus(prepared, k=1)
+
+
+def test_preparing_again_drops_the_previous_solves_island_tables(prepared, tmp_path):
+    from gridspine.drivers.campus_study import draft_from_project, prepare_campus
+    from gridspine.schema.island import ISLAND_HOURLY_CSV, ISLAND_UNIT_HOURLY_CSV
+
+    _write_island(prepared, low_inertia_hour=2)
+    path = tmp_path / "network.nc"
+    prepare_campus(prepared, draft_from_project(path).spec, path)
+    assert not (prepared / ISLAND_HOURLY_CSV).exists()
+    assert not (prepared / ISLAND_UNIT_HOURLY_CSV).exists()
