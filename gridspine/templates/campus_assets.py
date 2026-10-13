@@ -35,7 +35,16 @@ Refused at load, each with a message naming the entry and the field:
 * a duplicate id, across all kinds;
 * a transformer whose hv_kv is not above its lv_kv, or whose vkr_percent is
   not below its vk_percent;
-* a capacitor bank whose ``steps`` is not a whole number.
+* a capacitor bank whose ``steps`` is not a whole number;
+* a malformed optional transformer field (below).
+
+**Optional on a transformer** (plan C13): ``vector_group``, a tagged string
+in the campus notation (``{value: Dyn11, source: assumed}``), and ``tap``,
+the tap changer ``{changer: on_load | off_circuit, side: hv | lv, neutral,
+min, max, step_percent}`` with ``step_percent`` tagged
+(``gridspine/schema/transformer.py``). A unit added next to existing ones is
+offered only when these allow it to run in parallel with them
+(``static/campus_invest.ParallelRules``); the shipped file has neither yet.
 
 ``annuity`` is the same formula as pypsa-gui's ``_annuity``; gridspine does
 not import from pypsa-gui, so a test restates it instead.
@@ -48,6 +57,7 @@ from pathlib import Path
 import yaml
 
 from gridspine.schema.contracts import ContractError
+from gridspine.schema.transformer import check_tap, check_vector_group
 
 DEFAULT_PATH = Path(__file__).parent / "data" / "campus_assets.yaml"
 #: The tags a rating may carry: a campus file's, since a bought item's ratings are copied into it.
@@ -68,6 +78,8 @@ _FIELDS = {
 #: Every field an entry of each kind carries. A cable is priced per km.
 REQUIRED = {k: (*f, *(("capex_eur_per_km", *_COST[1:]) if k == "cables" else _COST)) for k, f in _FIELDS.items()}
 KINDS = tuple(_FIELDS)
+#: Optional fields, untouched by ``REQUIRED`` (plan C13).
+OPTIONAL = {"transformers": ("vector_group", "tap")}
 _MAY_BE_ZERO = frozenset({"pfe_kw", "i0_percent", "c_nf_per_km", "opex_frac"})
 _TOP = frozenset({"discount_rate", "currency", "price_year", *KINDS})
 _TAG_KEYS = frozenset({"value", "source", "note"})
@@ -103,6 +115,20 @@ def _tagged(where, field, spec):
     return v
 
 
+def _tagged_text(where, field, spec):
+    """A tagged string (``vector_group``): the tag rules of ``_tagged``, the
+    value left to the caller."""
+    t = spec[field]
+    if not isinstance(t, dict) or "value" not in t or "source" not in t:
+        raise ContractError(f"{where}.{field} must be a mapping with 'value' and 'source', got {t!r}")
+    unknown = sorted(set(t) - _TAG_KEYS)
+    if unknown:
+        raise ContractError(f"{where}.{field}: unknown key(s) {unknown}; allowed {sorted(_TAG_KEYS)}")
+    if t["source"] not in SOURCES:
+        raise ContractError(f"{where}.{field} has unknown source {t['source']!r}; allowed {sorted(SOURCES)}")
+    return t["value"]
+
+
 def _check_entry(kind, i, e, seen):
     if not isinstance(e, dict):
         raise ContractError(f"{kind}[{i}]: expected a mapping, got {type(e).__name__}")
@@ -113,9 +139,10 @@ def _check_entry(kind, i, e, seen):
     if eid in seen:
         raise ContractError(f"{where}: duplicate id {eid!r} (also in {seen[eid]})")
     seen[eid] = where
-    unknown = sorted(set(e) - set(REQUIRED[kind]) - {"id", "note"})
+    allowed = {*REQUIRED[kind], *OPTIONAL.get(kind, ()), "id", "note"}
+    unknown = sorted(set(e) - allowed)
     if unknown:
-        raise ContractError(f"{where}: unknown field(s) {unknown}; allowed {sorted(set(REQUIRED[kind]) | {'id', 'note'})}")
+        raise ContractError(f"{where}: unknown field(s) {unknown}; allowed {sorted(allowed)}")
     v = {f: _tagged(where, f, e) for f in REQUIRED[kind]}
     for f, x in v.items():
         if x < 0 or (x == 0 and f not in _MAY_BE_ZERO):
@@ -127,6 +154,10 @@ def _check_entry(kind, i, e, seen):
             raise ContractError(f"{where}: hv_kv ({v['hv_kv']}) must be above lv_kv ({v['lv_kv']})")
         if not v["vkr_percent"] < v["vk_percent"]:
             raise ContractError(f"{where}: vkr_percent ({v['vkr_percent']}) must be below vk_percent ({v['vk_percent']})")
+        if "vector_group" in e:
+            check_vector_group(f"{where}.vector_group", _tagged_text(where, "vector_group", e))
+        if "tap" in e:
+            check_tap(f"{where}.tap", e["tap"], _tagged, with_pos=False)
     if kind == "capacitor_banks" and not isinstance(v["steps"], int):
         raise ContractError(f"{where}.steps must be a whole number, got {v['steps']!r}")
 
