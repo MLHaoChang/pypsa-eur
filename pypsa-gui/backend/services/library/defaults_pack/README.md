@@ -7,6 +7,9 @@ two faces" §3 rule 4). The pack holds:
 - from version 2026-10-07, the campus electrical equipment costs (transformers, cables, capacitor
   banks, shunt reactors, STATCOMs, switchgear), transcribed from
   `gridspine/templates/data/campus_assets.yaml`, in 2026 EUR, all illustrative placeholders;
+- from version 2026-10-13, the Energy Hub template technologies (IC S3 seeds): a gas genset (OCGT),
+  a diesel genset (diesel engine farm), onshore wind, a fuel cell (LT-PEMFC) and an electrolyser
+  (AEC), from technology-data v0.14.0 in 2020 EUR, one `investment` part per MW each;
 - finance defaults;
 - two illustrative tariffs;
 - two synthetic load profiles.
