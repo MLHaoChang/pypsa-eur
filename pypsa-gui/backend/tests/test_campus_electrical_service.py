@@ -356,11 +356,14 @@ def test_the_pcc_switchgear_is_costed_to_the_campus_unless_the_operator_owns_it(
     mine = ce.run(hub, {"k": 1, "pf": 0.95})
     from gridspine.static.campus_invest import ParallelRules
     rules = ParallelRules().scope()                   # plan C13: the rules for adding units, written with the run
-    assert mine["results"]["scope"] == {"pcc_switchgear": "campus", "parallel": rules}
+    def scope(res):                                   # plan C14 adds the horizon, the hub's one period: one year
+        assert res["results"]["scope"]["horizon"]["period_years"] == {"2030": 1}
+        return {k: v for k, v in res["results"]["scope"].items() if k != "horizon"}
+    assert scope(mine) == {"pcc_switchgear": "campus", "parallel": rules}
     assert mine["settings"]["pcc_switchgear_by_operator"] is False
     assert [r["status"] for r in pcc_switchgear_rows(mine["results"])] == ["chosen"]
     theirs = ce.run(hub, {"k": 1, "pf": 0.95, "pcc_switchgear_by_operator": True})
-    assert theirs["results"]["scope"] == {"pcc_switchgear": "grid_operator", "parallel": rules}
+    assert scope(theirs) == {"pcc_switchgear": "grid_operator", "parallel": rules}
     assert theirs["settings"]["pcc_switchgear_by_operator"] is True
     assert not [r for r in pcc_switchgear_rows(theirs["results"]) if r["status"] == "chosen"]
     assert theirs["results"]["cost"][0]["capex_eur"] < mine["results"]["cost"][0]["capex_eur"]
@@ -542,10 +545,16 @@ def test_the_investment_summary_for_the_copilot_carries_the_caveats_with_the_num
     assert out["compliance_invested"] and out["hub_cost"]["total"] > 0
     assert out["library_is_default"] is True and out["stale"] is False
     from gridspine.static.campus_invest import ParallelRules
-    assert out["scope"] == {"pcc_switchgear": "campus", "parallel": ParallelRules().scope()}
+    assert {k: v for k, v in out["scope"].items() if k != "horizon"} == {
+        "pcc_switchgear": "campus", "parallel": ParallelRules().scope()}
+    # plan C14: the hub is one period, so the horizon is one year, said with the run
+    h = out["scope"]["horizon"]
+    assert h["period_years"] == {"2030": 1} and h["source"] == {"2030": "single period: one year"}
+    assert any("not ranked" in n for n in h["notes"])
     text = " ".join(out["notes"])
     assert "placeholder" in text and "assumed" in text and "tap" in text
     assert "scope.parallel" in text and "vector group" in text          # plan C13: additions and their rules
+    assert "renew" in text and "scope.horizon" in text and "not ranked" in text and "no replacement" not in text
     ce.save_library(hub, library_with(scaled_capex(2)))
     out = ce.get_investment(hub)
     assert out["library_is_default"] is False and out["stale"] is True
@@ -848,7 +857,7 @@ import hashlib
 
 CONTRACT_FIELDS = ["name", "kind", "basis", "quantity", "parts", "build_year", "source", "source_hash"]
 META_FIELDS = {"need", "library_id", "units", "length_km", "currency", "price_year", "provenance", "illustrative",
-               "study_method", "action"}
+               "study_method", "action", "purchase", "lineage", "replaces", "service_to", "commissioned_source"}
 
 
 def total_of(asset):
@@ -869,7 +878,9 @@ def test_each_purchased_item_is_one_owner_asset_in_the_ic_shape(hub):
         "meta": {"need": "transformer GRID_IMPORT", "library_id": "TR_132_33_63", "units": 2, "length_km": None,
                  "currency": "EUR", "price_year": 2026, "provenance": "assumed", "illustrative": True,
                  "study_method": "least_cost",
-                 "action": None}}                         # a table from before plan C13 has no action column
+                 "action": None,                          # a table from before plan C13 has no action column
+                 # nor the purchase columns of plan C14: one first purchase, no lineage
+                 "purchase": 1, "lineage": None, "replaces": None, "service_to": None, "commissioned_source": None}}
 
 
 def test_the_top_level_keys_are_exactly_the_contract_fields_and_meta(hub):
@@ -1223,3 +1234,119 @@ def test_the_response_is_stale_after_the_discount_rate_changes_and_fresh_after_a
     assert out["assets"] and out["source_hash"] == ce.campus_study_hash(hub)       # still served, but flagged
     ce.run(hub, {"k": 1, "pf": 0.95})
     assert ce.owner_assets_response(hub)["stale"] is False
+
+
+# ── plan C14: one entry per purchase, replacements behind a parameter ────────
+
+C14_COLUMNS = [*INVEST_COLUMNS, "action", "purchase", "build_year", "service_to", "replaces", "lineage", "commissioned",
+               "commissioned_source"]
+
+
+def c14_row(need, lid, kind, units, purchase, year, period, action, lineage, *, replaces=None, service_to=None,
+            existing=False, status="chosen", commissioned=None, commissioned_source=None, length_km=None):
+    return {**inv_row(need, lid, kind, units, period=period, existing=existing, status=status, length_km=length_km),
+            "action": action, "purchase": purchase, "build_year": year, "service_to": service_to,
+            "replaces": replaces, "lineage": lineage, "commissioned": commissioned,
+            "commissioned_source": commissioned_source}
+
+
+def c14_rows():
+    """A hand-made run over 2030/2040/2050, ten years each (H = 2060): two
+    transformers bought in 2030 with L = 12.5 (again in 2043 and 2055), a
+    cable bought in 2040, an existing pair commissioned in 2000 (L = 40:
+    renewed in 2040) and an existing cable assumed at mid-life."""
+    t = "transformer T1"
+    k = "transformer K"
+    return [
+        c14_row(t, "TR_132_33_63", "transformer", 2, 1, 2030, 2030, "buy", f"{t}|TR_132_33_63", service_to=2043),
+        c14_row(t, "TR_132_33_63", "transformer", 2, 2, 2043, 2040, "renew", f"{t}|TR_132_33_63",
+                replaces=f"{t}|TR_132_33_63|1", service_to=2055),
+        c14_row(t, "TR_132_33_63", "transformer", 2, 3, 2055, 2050, "renew", f"{t}|TR_132_33_63",
+                replaces=f"{t}|TR_132_33_63|2", service_to=2060),
+        c14_row("cable CBL_1", "CB_33_AL240", "cable", 1, 1, 2040, 2040, "buy", "cable CBL_1|CB_33_AL240",
+                service_to=2060, length_km=1.5),
+        c14_row(k, "TR_132_33_40", "keep", 2, 0, 2000, 2030, "keep", f"{k}|TR1,TR2", service_to=2040, existing=True,
+                status="kept", commissioned=2000, commissioned_source="datasheet"),
+        c14_row(k, "TR_132_33_40", "transformer", 2, 1, 2040, 2040, "renew", f"{k}|TR1,TR2", replaces=f"{k}|TR1,TR2|0",
+                service_to=2060, commissioned=2000, commissioned_source="datasheet"),
+        c14_row("cable OLD", "CB_33_AL240", "keep", 1, 0, 2010, 2030, "keep", "cable OLD|OLD", service_to=2050,
+                existing=True, status="kept", commissioned=2010,
+                commissioned_source="assumed: mid-life at the first period", length_km=2.0),
+        c14_row("cable OLD", "CB_33_AL240", "cable", 1, 1, 2050, 2050, "renew", "cable OLD|OLD",
+                replaces="cable OLD|OLD|0", service_to=2060, commissioned=2010,
+                commissioned_source="assumed: mid-life at the first period", length_km=2.0),
+    ]
+
+
+def fake_c14(project, rows):
+    run_dir = fake_investment(project, [])
+    pd.DataFrame(rows, columns=C14_COLUMNS).to_csv(run_dir / ce.cs.INVESTMENT_CSV, index=False)
+    return run_dir
+
+
+def test_by_default_only_first_purchases_are_owner_assets_with_their_lineage_under_meta(hub):
+    """The investment case buys again by its own rule and refuses a build
+    year after COD, so the default list is what it was before plan C14:
+    the first purchases, named as before. Their lineage sits under meta."""
+    fake_c14(hub, c14_rows())
+    assets = ce.extra_owner_assets(hub)
+    assert [(a["name"], a["build_year"]) for a in assets] == [
+        ("campus:TR_132_33_63#1", 2030), ("campus:CB_33_AL240#1", 2040)]
+    assert [a["meta"]["purchase"] for a in assets] == [1, 1]
+    assert [a["meta"]["lineage"] for a in assets] == ["transformer T1|TR_132_33_63", "cable CBL_1|CB_33_AL240"]
+    assert [a["meta"]["service_to"] for a in assets] == [2043, 2060]
+    assert all(a["meta"]["replaces"] is None and a["meta"]["commissioned_source"] is None for a in assets)
+    assert all(list(a) == [*CONTRACT_FIELDS, "meta"] and set(a["meta"]) == META_FIELDS for a in assets)
+    assert ce.owner_assets_response(hub)["assets"] == assets
+
+
+def test_with_replacements_every_purchase_is_one_owner_asset_chained_by_its_lineage(hub):
+    fake_c14(hub, c14_rows())
+    assets = ce.extra_owner_assets(hub, replacements=True)
+    got = [(a["name"], a["build_year"], a["meta"]["purchase"], a["meta"]["replaces"], a["meta"]["action"])
+           for a in assets]
+    # the first purchases keep their names; the renewals count on in table order
+    assert got == [
+        ("campus:TR_132_33_63#1", 2030, 1, None, "buy"),
+        ("campus:CB_33_AL240#1", 2040, 1, None, "buy"),
+        ("campus:TR_132_33_63#2", 2043, 2, "campus:TR_132_33_63#1", "renew"),
+        ("campus:TR_132_33_63#3", 2055, 3, "campus:TR_132_33_63#2", "renew"),
+        ("campus:TR_132_33_40#1", 2040, 1, None, "renew"),            # the kept pair is no entry
+        ("campus:CB_33_AL240#2", 2050, 1, None, "renew"),
+    ]
+    names = [a["name"] for a in assets]
+    assert len(set(names)) == len(names)
+    by = {a["name"]: a for a in assets}
+    assert by["campus:TR_132_33_40#1"]["meta"]["commissioned_source"] == "datasheet"
+    assert by["campus:TR_132_33_40#1"]["quantity"] == 2.0
+    assert by["campus:CB_33_AL240#2"]["meta"]["commissioned_source"] == "assumed: mid-life at the first period"
+    assert by["campus:CB_33_AL240#2"]["quantity"] == 2.0                     # 1 run x 2 km, like for like
+    assert by["campus:TR_132_33_63#3"]["meta"]["lineage"] == by["campus:TR_132_33_63#1"]["meta"]["lineage"]
+    assert by["campus:TR_132_33_63#3"]["meta"]["service_to"] == 2060
+    assert all(list(a) == [*CONTRACT_FIELDS, "meta"] and set(a["meta"]) == META_FIELDS for a in assets)
+    assert ce.owner_assets_response(hub, replacements=True)["assets"] == assets
+    # the default list is the same first purchases, by name and content
+    assert ce.extra_owner_assets(hub) == assets[:2]
+
+
+def test_a_renewal_takes_its_own_build_year_not_its_period(hub):
+    fake_c14(hub, c14_rows())
+    assets = ce.extra_owner_assets(hub, replacements=True)
+    assert [a["build_year"] for a in assets] == [2030, 2040, 2043, 2055, 2040, 2050]
+
+
+def test_an_unresolved_purchase_is_left_out_with_its_renewals(hub):
+    rows = c14_rows()[:3]
+    for r in rows:
+        r["status"] = "unresolved"
+    fake_c14(hub, rows)
+    assert ce.extra_owner_assets(hub, replacements=True) == []
+
+
+def test_the_least_cost_total_is_what_the_selection_ranks_without_the_renewals(hub):
+    rows = c14_rows()
+    for i, r in enumerate(rows):
+        r["annualised_eur_per_a"] = 10.0 ** i
+    run_dir = fake_c14(hub, rows)
+    # the first purchases (rows 0 and 3) and the zero-cost keep rows (4 and 6) count; the renewals do not
+    assert ce._least_cost_total(run_dir) == pytest.approx(1.0 + 1e3 + 1e4 + 1e6)

@@ -468,10 +468,16 @@ INVESTMENT_NOTES = (
     "replace it with quotes before relying on any figure in euro.",
     "Voltage excursions are met by compensation, not by changing a transformer tap: tap changers are not "
     "optimised, and an excursion that compensation cannot shrink is reported unresolved.",
-    "A steady-state study at the critical hours, with an asset bought from the first period that needs it and "
-    "no replacement; unresolved needs are priced but not summed.",
+    "A steady-state study at the critical hours, with an asset bought from the first period that needs it; "
+    "unresolved needs are priced but not summed.",
+    "An asset whose life ends inside the study horizon (the project's investment-period weightings, in "
+    "scope.horizon; a single-period study spans one year) is bought again like for like: renew rows, one per "
+    "purchase, linked by lineage and replaces. An existing asset is renewed from its commissioning year, or "
+    "assumed at mid-life at the first period, or in the first period when overdue; without a library entry its "
+    "replacement is unpriced. Renewals are reported, not ranked: the choice is by annualised cost, and keeping an "
+    "existing unit counts zero there although its renewal is costed later.",
     "Each row's action says what it does: buy, add (units added next to existing transformers, beside a keep row "
-    "for the existing units kept at zero cost), keep or replace. A unit is added only when it can run in parallel "
+    "for the existing units kept at zero cost), keep, replace or renew. A unit is added only when it can run in parallel "
     "with the existing ones under the tolerances in scope.parallel, which are assumed, not from a standard; a "
     "vector group that is not given is assumed compatible and the row says so.",
 )
@@ -585,7 +591,15 @@ def campus_study_hash(project):
     return _study_hash(*_owner_source(project))
 
 
-def extra_owner_assets(project) -> list:
+def _int_or_none(v):
+    return None if v is None or (isinstance(v, float) and math.isnan(v)) else int(v)
+
+
+def _str_or_none(v):
+    return v if isinstance(v, str) and v else None
+
+
+def extra_owner_assets(project, replacements: bool = False) -> list:
     """What the investment run the case stands on bought, as the extra owner
     assets of the investment case (IC): one dict per purchased item that is
     neither existing (sunk) nor unresolved. ``[]`` when that run has no
@@ -600,6 +614,18 @@ def extra_owner_assets(project) -> list:
     by C12's rule (``get_state.milp.stale``); otherwise the least-cost ``run/``,
     as before. ``meta.study_method`` says which: ``"milp"`` or ``"least_cost"``.
 
+    Plan C14: the table has one row per purchase, an asset bought again at the
+    end of its life as ``renew`` rows. By default only the first purchases are
+    listed, exactly as before C14 (same entries, same names, same
+    ``build_year``): the IC refuses a ``build_year`` after the case COD
+    (``extra_asset_staged_build``) and its ``part_lifetimes`` rule would buy a
+    listed replacement a second time, so the IC must opt in.
+    ``replacements=True`` lists every purchase, the renewals too (an existing
+    asset's included), each with its own ``build_year`` (the first service year
+    of the new unit); the first purchases keep their names and the renewals
+    count on from them. See the handoff issue
+    ``.scratch/campus-ic-extra-owner-assets/issues/04-campus-replacements.md``.
+
     The TOP-LEVEL keys of an entry are exactly the fields of the IC's
     ``ExtraOwnerAsset`` (``services/finance/case.py``, a frozen dataclass; the
     type is the IC's), so the IC builds it with
@@ -611,11 +637,12 @@ def extra_owner_assets(project) -> list:
          "quantity": float,   # lump: units; per_km: units x length_km; per_bay: bays (the table's units)
          "parts": [{"name": "investment", "upfront_per_unit": EUR per basis unit,
                     "lifetime": years, "fom_share": share}],      # asset_schema.access.UpfrontPart
-         "build_year": int,   # the campus invest_period
+         "build_year": int,   # the campus build_year (its invest_period for a table before plan C14)
          "source": "campus_study",
          "source_hash": str,  # campus_study_hash(project): the same for every entry
          "meta": {"need", "library_id", "units", "length_km", "currency", "price_year",
-                  "provenance", "illustrative", "study_method", "action"}}
+                  "provenance", "illustrative", "study_method", "action",
+                  "purchase", "lineage", "replaces", "service_to", "commissioned_source"}}
 
     ``quantity x upfront_per_unit`` is the item's total overnight cost in the
     library's currency, in the library's price year (no escalation).
@@ -627,9 +654,19 @@ def extra_owner_assets(project) -> list:
     ``literature`` cost is a cited reference value, not a quote, and is not
     illustrative: in the defaults pack's sense that flag means "not taken from
     a cited source". ``action`` is the table's (plan C13: ``buy``, ``add`` for
-    units added next to existing ones, ``replace``; None for a table written
-    before it). Kept units are existing, so they are not here. An engine kind
-    that ``IC_KIND`` does not list is refused with 422 naming it.
+    units added next to existing ones, ``replace``; plan C14: ``renew`` for a
+    replacement; None for a table written before C13). Kept units are
+    existing, so they are not here. Plan C14's keys: ``purchase`` (1 for the
+    first buy, k for later ones; an existing asset's first replacement is 1),
+    ``lineage`` (the same for every purchase of one asset), ``replaces`` (the
+    name of the entry this one replaces, or None: always None for a first
+    purchase, and for an existing asset's first replacement, the kept asset
+    being no entry), ``service_to`` (the year its successor starts, or the
+    study horizon's end) and ``commissioned_source`` (for an existing asset's
+    replacement, how its commissioning year is known: a source tag, or
+    ``assumed: mid-life at the first period``); a table from before C14 gives
+    ``purchase`` 1 and None for the others. An engine kind that ``IC_KIND``
+    does not list is refused with 422 naming it.
 
     Read from that run directory: ``campus_investment.csv`` (the items, their
     units, cable length and investment period) and ``campus_assets_used.yaml``
@@ -640,10 +677,10 @@ def extra_owner_assets(project) -> list:
     grid operator owns it the engine writes no row for it, so none appears here.
     The IC route refuses a stale study (``owner_assets_response``'s ``stale``)."""
     require_capacity_expansion(project)
-    return _owner_assets(*_owner_source(project))
+    return _owner_assets(*_owner_source(project), replacements=replacements)
 
 
-def _owner_assets(method: str, run_dir: Path) -> list:
+def _owner_assets(method: str, run_dir: Path, replacements: bool = False) -> list:
     table, used = run_dir / cs.INVESTMENT_CSV, run_dir / USED_LIBRARY_FILE
     if not table.is_file() or not used.is_file():
         return []
@@ -652,9 +689,13 @@ def _owner_assets(method: str, run_dir: Path) -> list:
     digest = _study_hash(method, run_dir)
     seen: dict = {}
     out = []
-    for r in pd.read_csv(table).to_dict(orient="records"):
-        if bool(r["existing"]) or r["status"] == "unresolved" or not isinstance(r["library_id"], str):
-            continue
+    bought = [r for r in pd.read_csv(table).to_dict(orient="records")
+              if not (bool(r["existing"]) or r["status"] == "unresolved" or not isinstance(r["library_id"], str))]
+    renewal = [r.get("action") == "renew" for r in bought]
+    rows = [r for r, again in zip(bought, renewal) if not again]          # the first purchases keep their names
+    rows += [r for r, again in zip(bought, renewal) if again and replacements]
+    names: dict = {}
+    for r in rows:
         if r["library_id"] not in priced:
             raise HTTPException(status_code=422, detail=f"{r['need']}: {r['library_id']} is not in the library the run used")
         if r["kind"] not in IC_KIND:
@@ -675,24 +716,40 @@ def _owner_assets(method: str, run_dir: Path) -> list:
         quantity = units * float(length) if basis == "per_km" else float(units)
         source = entry[cost]["source"]
         seen[r["library_id"]] = seen.get(r["library_id"], 0) + 1
+        name = f"campus:{r['library_id']}#{seen[r['library_id']]}"
+        purchase = _int_or_none(r.get("purchase"))
+        purchase = 1 if purchase is None else purchase
+        lineage = _str_or_none(r.get("lineage"))
+        if lineage is not None:
+            names[f"{lineage}|{purchase}"] = name
+        build_year = _int_or_none(r.get("build_year"))
+        service_to = r.get("service_to")
+        service_to = None if service_to is None or (isinstance(service_to, float) and math.isnan(service_to)) \
+            else (int(service_to) if float(service_to).is_integer() else float(service_to))
         out.append({
-            "name": f"campus:{r['library_id']}#{seen[r['library_id']]}", "kind": kind, "basis": basis,
+            "name": name, "kind": kind, "basis": basis,
             "quantity": quantity,
             "parts": [{"name": "investment", "upfront_per_unit": float(entry[cost]["value"]),
                        "lifetime": float(entry["lifetime_a"]["value"]),
                        "fom_share": float(entry["opex_frac"]["value"])}],
-            "build_year": int(r["invest_period"]), "source": OWNER_ASSET_SOURCE, "source_hash": digest,
+            "build_year": int(r["invest_period"]) if build_year is None else build_year,
+            "source": OWNER_ASSET_SOURCE, "source_hash": digest,
             "meta": {"need": r["need"], "library_id": r["library_id"], "units": units,
                      "length_km": float(length) if basis == "per_km" else None,
                      "currency": lib["currency"], "price_year": lib["price_year"],
                      "provenance": source, "illustrative": source == "assumed",
                      "study_method": method,
-                     "action": r["action"] if isinstance(r.get("action"), str) and r["action"] else None},
+                     "action": _str_or_none(r.get("action")),
+                     "purchase": purchase, "lineage": lineage,
+                     "replaces": _str_or_none(r.get("replaces")), "service_to": service_to,
+                     "commissioned_source": _str_or_none(r.get("commissioned_source"))},
         })
+    for a in out:                     # the row it replaces, as that row's entry name (None when it is no entry)
+        a["meta"]["replaces"] = names.get(a["meta"]["replaces"])
     return out
 
 
-def owner_assets_response(project) -> dict:
+def owner_assets_response(project, replacements: bool = False) -> dict:
     """The body of ``GET /api/campus-electrical/{name}/owner-assets``:
     ``{"assets": extra_owner_assets, "source_hash": campus_study_hash or None,
     "stale": bool, "study_method": "milp" | "least_cost" | None}``. ``stale`` is
@@ -700,11 +757,13 @@ def owner_assets_response(project) -> dict:
     get_state for the least-cost run (a joint optimisation is used only when it
     is fresh, so it is False then). ``study_method`` is the run's method, None
     when there are no assets. The assets of a stale study are still listed,
-    flagged: the IC refuses to build a case on them."""
+    flagged: the IC refuses to build a case on them. ``replacements`` is
+    ``extra_owner_assets``'s (plan C14; off by default, so the IC route gets
+    the first purchases only)."""
     require_capacity_expansion(project)
     d = campus_dir(project)
     method, run_dir = _owner_source(project)
-    assets = _owner_assets(method, run_dir)
+    assets = _owner_assets(method, run_dir, replacements=replacements)
     stale = False if method == "milp" else bool(_results(d / "run")) and _stale(project, d)
     return {"assets": assets, "source_hash": _study_hash(method, run_dir), "stale": stale,
             "study_method": method if assets else None}
@@ -917,8 +976,14 @@ def _public(record):
 
 
 def _least_cost_total(run_dir: Path) -> float:
+    """What the least-cost pick ranks on (the MILP's ``c8_cost``): the chosen
+    and kept rows' annualised cost, the renewals left out (plan C14: they are
+    reported, not ranked)."""
     inv = pd.read_csv(run_dir / cs.INVESTMENT_CSV)
-    return float(inv.loc[inv["status"].isin(["chosen", "kept"]), "annualised_eur_per_a"].sum())
+    ranked = inv["status"].isin(["chosen", "kept"])
+    if "action" in inv:
+        ranked &= inv["action"] != "renew"
+    return float(inv.loc[ranked, "annualised_eur_per_a"].sum())
 
 
 def _least_cost_fresh(project, d: Path, s: dict) -> bool:
