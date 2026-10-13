@@ -1,6 +1,6 @@
 # Plan: one investment engine, two faces (expert workbench and guided study)
 
-**Date:** 2026-10-05. **Status:** v1.8 (2026-10-13: C5 per-part CAPEX amendment, U2 gate X6). Owner decisions in §8 taken 2026-10-05; independent review PASS WITH CONDITIONS, all conditions applied (§9); C1 corrected after the asset-parameterisation assessment (§9 R12, §10).
+**Date:** 2026-10-05. **Status:** v1.9 (2026-10-13: C5's per-part CAPEX workaround retired by `scale_capex(case, f, *, asset=, part=)`, IC engine ask 2; v1.8 added it, U2 gate X6). Owner decisions in §8 taken 2026-10-05; independent review PASS WITH CONDITIONS, all conditions applied (§9); C1 corrected after the asset-parameterisation assessment (§9 R12, §10).
 **Replaces nothing yet.** It sequences two existing efforts so they converge instead of colliding:
 
 - **Edge Investment Case (IC)**: spec `docs/superpowers/specs/2026-09-26-edge-investment-case-design.md`.
@@ -146,14 +146,6 @@ so post-tax figures read `not_established`, which the report already discloses.
   `remaining_life_annuity` terminal value annuitises and discounts on the LP basis, so a WACC-only bound would
   leave the salvage unchanged (amended 2026-10-06, IC S0b gate). Rate bounds make `wacc_gate` read `differs`;
   the adapter accepts that flag for rate rows only (GS used to refuse `discount_rate_differs_from_lp`).
-  **Per-part CAPEX bounds (amended 2026-10-13, U2 gate X6).** `scale_capex(case, f)` scales every part of
-  every asset by one factor, but a guided CAPEX row prices ONE part of ONE asset: the battery's storage
-  block must move without its inverter or the PV. Until the engine offers `scale_capex(case, f, *, asset=,
-  part=)` (an open IC engine ask), U2's `study/engine_adapter.py` replaces that one part and the asset's
-  `overnight_cost` sum together, so `AssetFinance`'s parts check holds and the replacements and terminal
-  value still follow in the engine. It is marked `WORKAROUND` at the site with the engine ask named, and is
-  the only CAPEX route that bypasses `scale_capex`. When IC adds the `asset=`/`part=` form, U2 switches to it
-  and this paragraph goes.
 - **C6 Study forks.** U2 verifies that `_bind_commercial` (series pins, FCA registry) works on a
   study-owned fork context (`pypsa_service._study_owned`), since OPEN-ITEMS 1 bites there before U3.
 
@@ -204,6 +196,9 @@ Ownership is by files, so the sessions never edit the same module in parallel.
 `library.items.resolve` / `put_item`, `library.series_store.put_series`, the generic defaults pack
 loader and the flat export series helper (new in U1), `commercial.cost_rows.commercial_cost_terms`, and the
 `CommercialConfig` / `FinanceInputs` field names the ledger compiles to.
+
+**Changes (2026-10-13, IC engine asks, `2026-10-13-ic-engine-asks.md`):** `finance.case.scale_capex` gains the
+keyword-only `asset=` / `part=` (ask 2; the whole-case form is unchanged).
 
 ## 7. Coordination protocol
 

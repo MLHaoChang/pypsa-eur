@@ -360,7 +360,7 @@ def test_the_bounds_equal_gs_and_read_no_network(option, kind, monkeypatch):
 @pytest.mark.live_solve
 def test_a_capex_bound_moves_only_its_part():
     """
-    C5 WORKAROUND (engine ask: `scale_capex` by asset and part): the
+    C5 (`scale_capex(case, f, asset=, part=)`, IC engine ask 2): the
     inverter row moves the power part and the FOM, the storage row the energy
     part only; the PV asset never moves.
     """
@@ -382,6 +382,43 @@ def test_a_capex_bound_moves_only_its_part():
     fom = [v.years[1].opex_fixed for v in (b.view, inv.view, sto.view)]
     assert fom[2] == pytest.approx(fom[0], rel=1e-12)
     assert fom[1] - fom[0] == pytest.approx(bat_fom * (300.0 / v0 - 1.0), rel=1e-9)
+
+
+_CAPEX_PINS = json.loads((FIXTURES / "u2_capex_bound_pins.json").read_text(encoding="utf-8"))
+
+
+def _assert_same(got, want, path=""):
+    if isinstance(want, dict):
+        assert set(got) == set(want), path
+        for k in want:
+            _assert_same(got[k], want[k], f"{path}.{k}")
+    elif isinstance(want, list):
+        assert len(got) == len(want), path
+        for i, (g, w) in enumerate(zip(got, want)):
+            _assert_same(g, w, f"{path}[{i}]")
+    elif isinstance(want, float) and not isinstance(got, bool) and isinstance(got, (int, float)):
+        assert got == pytest.approx(want, rel=1e-12, abs=1e-9), path
+    else:
+        assert got == want, path
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("pin", _CAPEX_PINS["bounds"],
+                         ids=lambda p: f"{p['option']}-{'+'.join(sorted(p['variant']))}-"
+                                       f"{'-'.join(str(v) for _k, v in sorted(p['variant'].items()))}")
+def test_the_capex_bound_figures_did_not_move(pin):
+    """
+    IC engine ask 2: the tornado's CAPEX-bound figures (KPIs, every year,
+    every asset's parts) recorded from the C5 WORKAROUND on master 47d9dda2
+    stay put after the switch to `scale_capex(case, f, asset=, part=)`.
+    """
+    bound = _A().bound_case(_bundle(pin["option"]), pin["variant"], kind="capex")
+    got = {"kpis": bound.view.kpis.model_dump(mode="json"),
+           "years": [y.model_dump(mode="json") for y in bound.view.years],
+           "assets": [{"name": a.name, "overnight_cost": a.overnight_cost,
+                       "parts": [[p.name, p.overnight_cost] for p in a.parts]}
+                      for a in bound.case.assets]}
+    _assert_same(got, {k: pin[k] for k in ("kpis", "years", "assets")})
 
 
 def test_a_price_row_is_not_a_bound_case():

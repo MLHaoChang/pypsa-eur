@@ -115,7 +115,7 @@ Each package's table is in the plan's status block; all ran on scratch copies, e
 - **delete_series / pinned_by:** delete a study's minted export series (all versions) and ask whether a config pins it; GS reads `bundle_pins` and `series_store.list_series` meanwhile.
 - **WP7 freeze:** `finance.engine.wacc_gate`, `lp_bindings.META_LINKS`, the `FinanceResult` fields GS reads (`op`, `op_incremental`, `terminal`, `gate`, `flags`, `reasons`, `sections`, `incentives`).
 - **N15:** the asset schema's `derive.apply_parts` / `has_parts` (S0's).
-- `scale_capex(case, f, *, asset=, part=)`, so the per-part CAPEX bound needs no WORKAROUND (X6).
+- `scale_capex(case, f, *, asset=, part=)` (landed 2026-10-13, ask 2): the per-part CAPEX bound needs no WORKAROUND (X6).
 - Unrounded `n.statistics` FOM, CAPEX and OPEX.
 - A public test helper that records a written dispatch as an engine solve (GS's fakes read `lp_bindings` internals).
 - `put_flat_export_series(label=…)`; an inactive `poc_link` refused typed at bind.

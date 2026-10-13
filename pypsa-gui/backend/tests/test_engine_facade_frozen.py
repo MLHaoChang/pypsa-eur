@@ -71,7 +71,10 @@ SIGNATURES: dict[str, str] = {
     "services.finance.metrics.npv": "(rate: 'float | None', cash) -> 'float | None'",
     # IC S0b (plan S7): one source of capex truth and the one replacement schedule.
     "services.finance.case.effective_parts": "(a: 'AssetFinance') -> 'tuple[AssetPart, ...]'",
-    "services.finance.case.scale_capex": "(case: 'FinanceCase', f: 'float') -> 'FinanceCase'",
+    # IC engine ask 2 (2026-10-13): one asset, or one part of one asset.
+    "services.finance.case.scale_capex":
+        "(case: 'FinanceCase', f: 'float', *, asset: 'str | None' = None, "
+        "part: 'str | None' = None) -> 'FinanceCase'",
     "services.finance.case.AssetPart":
         "(name: 'str', overnight_cost: 'float | None', lifetime_years: 'float | None', "
         "fom_share: 'float | None' = None) -> None",
