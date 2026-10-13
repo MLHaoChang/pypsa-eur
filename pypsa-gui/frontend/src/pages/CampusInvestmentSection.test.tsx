@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { CampusMilp, CampusState, CampusResults, CostBasis, InvestmentRow, MilpResults } from '../api/campusElectrical'
+import type { CampusMilp, CampusState, CampusResults, CostBasis, InvestmentRow, MilpResults, TapRow } from '../api/campusElectrical'
 import CampusElectricalPanel from './CampusElectricalPanel'
 import { formatEur } from './CampusInvestmentSection'
 
@@ -549,6 +549,72 @@ describe('investment: units added next to an existing transformer group (plan C1
   })
 })
 
+describe('investment: on-load taps set per hour and case (plan C15)', () => {
+  const tap = (over: Partial<TapRow>): TapRow => ({
+    period: 2030, hour: 158, case: 'intact', transformer: 'TR1', group: 'TR1+TR2', tap_pos: 0, ratio_pct: 100,
+    moved_by: 0, ...over,
+  })
+  const tapped = (over: Partial<CampusResults> = {}) => results({
+    taps: [
+      tap({}), tap({ transformer: 'TR2' }),
+      tap({ hour: 19, tap_pos: -3, ratio_pct: 95.5, moved_by: -3 }), tap({ hour: 19, transformer: 'TR2', tap_pos: -3,
+                                                                            ratio_pct: 95.5, moved_by: -3 }),
+      tap({ hour: 19, case: 'N-1:TR1', transformer: 'TR2', tap_pos: -5, ratio_pct: 92.5, moved_by: -5 }),
+    ],
+    tap_hours_moved: 1,
+    selection: [{ period: 2030, hour: 158, reasons: ['max_consumption_mw'] },
+                { period: 2030, hour: 19, reasons: ['max_import_q_mvar'] }],
+    scope: { pcc_switchgear: 'campus', pcc_tap_control: 'campus' },
+    ...over,
+  })
+
+  it('says how the taps act, how many hours moved one and who moves the PCC taps', async () => {
+    api.state.mockResolvedValue(stateWith(tapped()))
+    renderPanel()
+    const line = (await screen.findByTestId('invest-taps-summary')).textContent
+    expect(line).toContain('set per critical hour and per case')
+    expect(line).toContain('an N-1 case after the tap changers act, the reactive dispatch held')
+    expect(line).toContain('1 of the 2 critical hours moved a tap')
+    expect((await screen.findByTestId('invest-tap-scope')).textContent)
+      .toBe('PCC transformer taps: moved by the campus')
+  })
+
+  it('names the grid operator when it holds the PCC taps', async () => {
+    api.state.mockResolvedValue(stateWith(tapped({ scope: { pcc_switchgear: 'campus', pcc_tap_control: 'grid_operator' } })))
+    renderPanel()
+    expect((await screen.findByTestId('invest-tap-scope')).textContent)
+      .toBe("PCC transformer taps: held by the grid operator at the campus file's position")
+  })
+
+  it('keeps the tap table collapsed until opened, one row per hour, case and transformer', async () => {
+    api.state.mockResolvedValue(stateWith(tapped()))
+    renderPanel()
+    const box = (await screen.findByTestId('invest-taps')) as HTMLDetailsElement
+    expect(box.open).toBe(false)
+    expect(within(box).getByText('Tap positions (5)')).toBeTruthy()
+    const n1 = within(box).getByTestId('tap-2030-19-N-1:TR1-TR2')
+    expect(n1.textContent).toContain('-5')
+    expect(n1.textContent).toContain('92.5 %')
+    expect(n1.className).toContain('font-medium')                  // a moved tap stands out
+    expect(within(box).getByTestId('tap-2030-158-intact-TR1').className).not.toContain('font-medium')
+  })
+
+  it('says so when no transformer has tap data', async () => {
+    api.state.mockResolvedValue(stateWith(tapped({ taps: [], tap_hours_moved: 0 })))
+    renderPanel()
+    expect((await screen.findByTestId('invest-taps-summary')).textContent)
+      .toContain("No transformer has on-load tap data: every tap stays at the campus file's position")
+    expect(screen.queryByTestId('invest-taps')).toBeNull()
+  })
+
+  it('shows nothing about taps for a run from before them', async () => {
+    renderPanel()
+    await screen.findByTestId('campus-investment')
+    expect(screen.queryByTestId('invest-taps-summary')).toBeNull()
+    expect(screen.queryByTestId('invest-tap-scope')).toBeNull()
+  })
+})
+
 describe('investment: replacement at the end of life (plan C14)', () => {
   const horizon = {
     period_years: { '2030': 10, '2040': 10, '2050': 10 },
@@ -676,5 +742,47 @@ describe('which result feeds the investment case', () => {
     renderPanel()
     await screen.findByTestId('campus-investment')
     expect(screen.queryByTestId('invest-ic-source')).toBeNull()
+  })
+})
+
+// Owner decision 2026-10-13: the needs the run the case uses could not meet go to the
+// investment case, which flags the case. The panel says so, only when there are any.
+describe('unresolved needs passed to the investment case', () => {
+  it('says the unresolved needs are passed as a flag, beside the source line', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'least_cost', owner_assets_unresolved: 2 }))
+    renderPanel()
+    expect((await screen.findByTestId('invest-ic-unresolved')).textContent)
+      .toBe('2 unresolved needs are passed to the investment case as a flag: the case is not compliant without them.')
+    expect(screen.getByTestId('invest-ic-source').textContent).toBe('Investment case uses: least cost.')
+  })
+
+  it('says it in the singular for one', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'milp', owner_assets_unresolved: 1 }))
+    renderPanel()
+    expect((await screen.findByTestId('invest-ic-unresolved')).textContent)
+      .toBe('1 unresolved need is passed to the investment case as a flag: the case is not compliant without it.')
+  })
+
+  it('says it when the run bought nothing for the case', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 0, owner_assets_method: null, owner_assets_unresolved: 1 }))
+    renderPanel()
+    expect(await screen.findByTestId('invest-ic-unresolved')).toBeTruthy()
+    expect(screen.queryByTestId('invest-ic-source')).toBeNull()
+  })
+
+  it('says nothing when there are none, or the backend does not say', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'least_cost', owner_assets_unresolved: 0 }))
+    const { unmount } = renderPanel()
+    await screen.findByTestId('invest-ic-source')
+    expect(screen.queryByTestId('invest-ic-unresolved')).toBeNull()
+    unmount()
+    api.state.mockResolvedValue(stateWith(results(), { owner_assets_count: 2, owner_assets_method: 'least_cost' }))
+    renderPanel()
+    await screen.findByTestId('invest-ic-source')
+    expect(screen.queryByTestId('invest-ic-unresolved')).toBeNull()
   })
 })

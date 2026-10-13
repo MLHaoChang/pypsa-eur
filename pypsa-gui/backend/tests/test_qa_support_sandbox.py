@@ -90,9 +90,12 @@ def test_a_file_backed_sandbox_hands_each_thread_its_own_connection():
         try:
             assert isinstance(engine.pool, NullPool)
 
-            # Keep every connection object alive and hold all four sessions
-            # open together: comparing bare `id()`s of connections that were
-            # already closed and freed can collide on a reused address.
+            # Hold the connection OBJECTS, not their ids, and hold all four
+            # sessions open together: NullPool closes and frees each connection
+            # when its session ends, so under load (threads running one after
+            # another) a later connection can reuse a freed one's address and
+            # two distinct connections read as "the same". StaticPool would
+            # still show up as one object held four times.
             seen: list[object] = []
             lock = threading.Lock()
             together = threading.Barrier(4, timeout=10)

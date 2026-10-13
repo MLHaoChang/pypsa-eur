@@ -208,6 +208,30 @@ describe('implemented assurance publication boundary', () => {
     expect(screen.queryByTestId('chat-thinking-block')).toBeNull()
   })
 
+  it('does not publish an approval the receipt parser refuses', async () => {
+    await start(true)
+    const text = 'No completed simulation is available.'
+    emit('answer_approved', {
+      version: 2,
+      answer_id: 'approved-1',
+      turn_id: 'turn-1',
+      verdict: 'limited',
+      receipt: {
+        policy_version: '1',
+        evidence_ids: [],
+        checked_block_ids: [],
+        limitations: [],
+        reviewer_status: 'not_required',
+        content_sha256: createHash('sha256').update(text).digest('hex'),
+      },
+    })
+    emit('token', { delta: text })
+    emit('turn_done', { answer_id: 'approved-1' })
+    expect(screen.queryByText(text)).toBeNull()
+    expect(speechOut.speak).not.toHaveBeenCalled()
+    expect(useChatStore.getState().messages.some(m => m.role === 'assistant' && m.content === text)).toBe(false)
+  })
+
   it('withholds an approved stream whose bytes do not match its receipt', async () => {
     await start(true)
     approve('A checked limited answer.')

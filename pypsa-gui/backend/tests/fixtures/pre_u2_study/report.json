@@ -1,0 +1,486 @@
+{
+ "ai_paragraphs": [],
+ "available": true,
+ "basis": {
+  "subsidy": "excl",
+  "tax": "pre",
+  "terms": "real"
+ },
+ "completeness": {
+  "appendix": "ok",
+  "assumptions": "ok",
+  "drivers": "ok",
+  "economics": "ok",
+  "executive_summary": "ok",
+  "limitations": "ok",
+  "question": "ok",
+  "recommended_system": "ok",
+  "reliability": "skipped",
+  "robustness": "ok"
+ },
+ "currency_year": 2020,
+ "evidence_gaps": [],
+ "facts": {
+  "accuracy_high_pct": {
+   "basis": null,
+   "currency_year": null,
+   "engine": "ledger",
+   "fidelity": null,
+   "key": "accuracy_high_pct",
+   "label": "Accuracy band, high end",
+   "unavailable": null,
+   "unit": "%",
+   "value": 100.0
+  },
+  "accuracy_low_pct": {
+   "basis": null,
+   "currency_year": null,
+   "engine": "ledger",
+   "fidelity": null,
+   "key": "accuracy_low_pct",
+   "label": "Accuracy band, low end",
+   "unavailable": null,
+   "unit": "%",
+   "value": -50.0
+  },
+  "battery_max_hours": {
+   "basis": null,
+   "currency_year": null,
+   "engine": "ledger",
+   "fidelity": null,
+   "key": "battery_max_hours",
+   "label": "Hours of storage",
+   "unavailable": null,
+   "unit": "h",
+   "value": 1.0
+  },
+  "battery_npv": {
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "currency_year": 2020,
+   "engine": "cash_flow_expander",
+   "fidelity": "quick_screen",
+   "key": "battery_npv",
+   "label": "Battery NPV",
+   "unavailable": null,
+   "unit": "EUR",
+   "value": 3531384.450723247
+  },
+  "battery_p_nom_mw": {
+   "basis": null,
+   "currency_year": null,
+   "engine": "lp",
+   "fidelity": "quick_screen",
+   "key": "battery_p_nom_mw",
+   "label": "Battery power",
+   "unavailable": null,
+   "unit": "MW",
+   "value": 0.3
+  },
+  "battery_payback_simple": {
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "currency_year": 2020,
+   "engine": "cash_flow_expander",
+   "fidelity": "quick_screen",
+   "key": "battery_payback_simple",
+   "label": "Battery simple payback",
+   "unavailable": null,
+   "unit": "years",
+   "value": 0.38206819155478505
+  },
+  "case_capex_total": {
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "currency_year": 2020,
+   "engine": "cash_flow_expander",
+   "fidelity": "quick_screen",
+   "key": "case_capex_total",
+   "label": "Total CAPEX",
+   "unavailable": null,
+   "unit": "EUR",
+   "value": 121136.67
+  },
+  "case_irr": {
+   "basis": null,
+   "currency_year": null,
+   "engine": "cash_flow_expander",
+   "fidelity": "quick_screen",
+   "key": "case_irr",
+   "label": "IRR",
+   "unavailable": null,
+   "unit": "per unit",
+   "value": 2.617330206968405
+  },
+  "case_npv": {
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "currency_year": 2020,
+   "engine": "cash_flow_expander",
+   "fidelity": "quick_screen",
+   "key": "case_npv",
+   "label": "Option NPV",
+   "unavailable": null,
+   "unit": "EUR",
+   "value": 3531384.450723247
+  },
+  "case_payback_discounted": {
+   "basis": null,
+   "currency_year": null,
+   "engine": "cash_flow_expander",
+   "fidelity": "quick_screen",
+   "key": "case_payback_discounted",
+   "label": "Discounted payback",
+   "unavailable": null,
+   "unit": "years",
+   "value": 0.40881296496361996
+  },
+  "case_payback_simple": {
+   "basis": null,
+   "currency_year": null,
+   "engine": "cash_flow_expander",
+   "fidelity": "quick_screen",
+   "key": "case_payback_simple",
+   "label": "Simple payback",
+   "unavailable": null,
+   "unit": "years",
+   "value": 0.38206819155478505
+  },
+  "discount_rate": {
+   "basis": null,
+   "currency_year": null,
+   "engine": "ledger",
+   "fidelity": "quick_screen",
+   "key": "discount_rate",
+   "label": "Real discount rate",
+   "unavailable": null,
+   "unit": "per unit",
+   "value": 0.07
+  },
+  "horizon_years": {
+   "basis": null,
+   "currency_year": null,
+   "engine": "ledger",
+   "fidelity": "quick_screen",
+   "key": "horizon_years",
+   "label": "Horizon",
+   "unavailable": null,
+   "unit": "years",
+   "value": 25.0
+  },
+  "lcos_excl_charging": {
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "currency_year": 2020,
+   "engine": "cash_flow_expander",
+   "fidelity": "quick_screen",
+   "key": "lcos_excl_charging",
+   "label": "LCOS excluding charging energy (pro forma)",
+   "unavailable": null,
+   "unit": "EUR/MWh",
+   "value": 32.51547769742616
+  },
+  "lcos_incl_charging": {
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "currency_year": 2020,
+   "engine": "lp",
+   "fidelity": "quick_screen",
+   "key": "lcos_incl_charging",
+   "label": "LCOS including charging energy (asset economics)",
+   "unavailable": null,
+   "unit": "EUR/MWh",
+   "value": 147.54287495770015
+  },
+  "market_revenue_at_duals": {
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "currency_year": 2020,
+   "engine": "lp_duals",
+   "fidelity": "quick_screen",
+   "key": "market_revenue_at_duals",
+   "label": "Market revenue at the model's prices (annual)",
+   "unavailable": null,
+   "unit": "EUR/yr",
+   "value": 0.0
+  },
+  "tornado_centre_npv": {
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "currency_year": 2020,
+   "engine": "cash_flow_expander",
+   "fidelity": "quick_screen",
+   "key": "tornado_centre_npv",
+   "label": "Battery NPV at the centre",
+   "unavailable": null,
+   "unit": "EUR",
+   "value": 3531384.450723247
+  },
+  "value_streams_total": {
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "currency_year": 2020,
+   "engine": "bill_calculator",
+   "fidelity": "quick_screen",
+   "key": "value_streams_total",
+   "label": "Annual saving shown by the streams",
+   "unavailable": null,
+   "unit": "EUR/yr",
+   "value": 317271.70545305085
+  }
+ },
+ "fidelity": "quick_screen",
+ "generated_at": "2026-09-30T02:29:56.327759Z",
+ "hashes_at_findings": {
+  "base_network_hash": "42c163f3decde324",
+  "intake_hash": "4910b1f6e1f85623",
+  "ledger_hash": "4189813f2ef9fcfd",
+  "option_network_hashes": {
+   "6c539996-2327-4d4d-846b-848b5bceae69": "778e558bd53a42a1",
+   "7b59d1ba-5822-4a15-aba0-ed18ec70068e": "adca1ed5ba37f538",
+   "cd74bb8b-a04d-49f2-9bf9-d599e0632c93": "c14f3bc5dea89a30",
+   "d8558488-93c4-418d-a289-bc82a8206351": "eb77f6cfd05f2b96"
+  }
+ },
+ "honesty_help": {
+  "basis_real_pre_tax_no_subsidy": "Money is in real terms, before tax and without subsidy, in the currency year stated beside each figure.",
+  "battery_fom_on_inverter_investment_only": "The battery's fixed operating cost is charged on the inverter investment only.",
+  "battery_upfront_from_ledger_not_back_calculated": "The battery's purchase cost comes from the assumptions ledger; other screens that back-calculate it from an annualised cost show a different upfront figure.",
+  "battery_value_is_the_option_value": "For a battery-only option the battery's value is the option's value.",
+  "currency_year_stated": "Every money figure states the currency year it is expressed in.",
+  "demand_charge_perfect_foresight": "The demand-charge saving assumes the battery knows every month's peak in advance; a real controller misses some peaks, so this stream is an upper bound.",
+  "duals_include_demand_charge": "The model's energy prices include the demand charge's shadow price, so they are not market prices.",
+  "inverter_replaced_at_its_lifetime": "The inverter is replaced at the end of its own lifetime, inside the horizon.",
+  "irr_and_discounted_payback_bounded_at_optimum_by_construction": "For the same reason the IRR is at least the discount rate and the discounted payback is within the horizon; the magnitudes inform, the bounds do not.",
+  "lcos_excludes_charging_energy_cost": "The pro forma's levelised cost of storage leaves out the energy bought to charge the battery.",
+  "lcos_two_definitions": "Two levelised costs of storage are shown and they answer different questions: the pro forma's excludes the energy bought to charge the battery, asset economics' includes it.",
+  "market_revenue_at_duals_excluded_from_cash_flow": "Revenue at the model's prices is reported beside the case and excluded from the cash flow: the bill already prices the same energy.",
+  "market_revenue_at_duals_zero_profit_at_optimum": "The revenue at the model's prices equals the battery's annualised cost at the optimum: zero profit by construction. It is not a second revenue line and is excluded from the cash flow.",
+  "no_degradation": "Battery degradation is not modelled.",
+  "npv_nonnegative_at_optimum_by_construction": "At the optimiser's chosen size the NPV cannot be negative: the optimiser only builds what pays for itself, so the sign restates its choice and is not independent evidence.",
+  "perfect_foresight_dispatch": "The model dispatches the battery knowing the whole year's load and prices in advance; a real controller will capture less.",
+  "question_has_no_reliability_part": "This question does not ask about reliability or resilience.",
+  "salvage_annuity_pv_remaining_life": "Equipment with life left at the end of the horizon is credited with the present value of the annuities the model charged for that remaining life.",
+  "single_year_extrapolated": "One representative year of operation is repeated over the whole horizon.",
+  "synthetic_load_profile": "The load is a synthetic sector profile, not the site's metered load.",
+  "synthetic_load_understates_peak_shaving": "A smooth synthetic load lacks the short spikes a real meter records, so the peak-shaving value is likely understated; upload the site's metered load.",
+  "tariff_illustrative": "The tariff is illustrative, not a published tariff.",
+  "technology_costs_are_projections": "The technology costs are projections for a future year.",
+  "tornado_method_redispatch_fixed_sizes": "The tornado holds the recommended sizes fixed and re-dispatches them at each driver's low and high value, so a bar can turn negative.",
+  "typical_week_not_in_mvp1": "The typical-week operating chart is not part of this version."
+ },
+ "honesty_notes": [
+  "tornado_method_redispatch_fixed_sizes",
+  "perfect_foresight_dispatch",
+  "demand_charge_perfect_foresight",
+  "npv_nonnegative_at_optimum_by_construction",
+  "irr_and_discounted_payback_bounded_at_optimum_by_construction",
+  "basis_real_pre_tax_no_subsidy",
+  "currency_year_stated",
+  "single_year_extrapolated",
+  "duals_include_demand_charge",
+  "no_degradation",
+  "inverter_replaced_at_its_lifetime",
+  "battery_upfront_from_ledger_not_back_calculated",
+  "lcos_excludes_charging_energy_cost",
+  "market_revenue_at_duals_excluded_from_cash_flow",
+  "salvage_annuity_pv_remaining_life",
+  "tariff_illustrative",
+  "synthetic_load_profile",
+  "battery_fom_on_inverter_investment_only",
+  "technology_costs_are_projections"
+ ],
+ "maturity": {
+  "accuracy_band": {
+   "high_pct": 100.0,
+   "high_pct_narrow": 30.0,
+   "low_pct": -50.0,
+   "low_pct_narrow": -20.0,
+   "reference": "AACE International RP 18R-97 (indicative analogy, Class 5)"
+  },
+  "class": "screening",
+  "reasons": [
+   "battery_inverter_eur_per_kw: default (library)",
+   "battery_storage_eur_per_kwh: default (library)",
+   "discount_rate: default (library)",
+   "load: synthetic (upload metered load to raise maturity)"
+  ],
+  "status": "ok",
+  "unavailable": {}
+ },
+ "not_established": [],
+ "question_id": "bess_at_site",
+ "question_title": "Do I need a battery at my site, and what is it worth?",
+ "required_disclosures": [
+  {
+   "code": "npv_nonnegative_at_optimum_by_construction",
+   "source": "study",
+   "text": "At the optimiser's chosen size the NPV cannot be negative: the optimiser only builds what pays for itself, so the sign restates its choice and is not independent evidence."
+  },
+  {
+   "code": "irr_and_discounted_payback_bounded_at_optimum_by_construction",
+   "source": "study",
+   "text": "For the same reason the IRR is at least the discount rate and the discounted payback is within the horizon; the magnitudes inform, the bounds do not."
+  },
+  {
+   "code": "basis_real_pre_tax_no_subsidy",
+   "source": "study",
+   "text": "Money is in real terms, before tax and without subsidy, in the currency year stated beside each figure."
+  },
+  {
+   "code": "single_year_extrapolated",
+   "source": "study",
+   "text": "One representative year of operation is repeated over the whole horizon."
+  },
+  {
+   "code": "perfect_foresight_dispatch",
+   "source": "study",
+   "text": "The model dispatches the battery knowing the whole year's load and prices in advance; a real controller will capture less."
+  },
+  {
+   "code": "market_revenue_at_duals_zero_profit_at_optimum",
+   "source": "study",
+   "text": "The revenue at the model's prices equals the battery's annualised cost at the optimum: zero profit by construction. It is not a second revenue line and is excluded from the cash flow."
+  },
+  {
+   "code": "lcos_two_definitions",
+   "source": "study",
+   "text": "Two levelised costs of storage are shown and they answer different questions: the pro forma's excludes the energy bought to charge the battery, asset economics' includes it."
+  },
+  {
+   "code": "demand_charge_perfect_foresight",
+   "source": "study",
+   "text": "The demand-charge saving assumes the battery knows every month's peak in advance; a real controller misses some peaks, so this stream is an upper bound."
+  },
+  {
+   "code": "synthetic_load_understates_peak_shaving",
+   "source": "study",
+   "text": "A smooth synthetic load lacks the short spikes a real meter records, so the peak-shaving value is likely understated; upload the site's metered load."
+  },
+  {
+   "code": "tariff_illustrative",
+   "source": "study",
+   "text": "The tariff is illustrative, not a published tariff."
+  }
+ ],
+ "sections": {
+  "appendix": {
+   "facts": {},
+   "figures": [],
+   "note": null,
+   "payload": null,
+   "prose": [],
+   "status": "ok"
+  },
+  "assumptions": {
+   "facts": {},
+   "figures": [],
+   "note": null,
+   "payload": null,
+   "prose": [],
+   "status": "ok"
+  },
+  "drivers": {
+   "facts": {},
+   "figures": [
+    "value_stream_waterfall",
+    "tornado"
+   ],
+   "note": null,
+   "payload": null,
+   "prose": [],
+   "status": "ok"
+  },
+  "economics": {
+   "facts": {},
+   "figures": [
+    "cash_flow"
+   ],
+   "note": null,
+   "payload": null,
+   "prose": [],
+   "status": "ok"
+  },
+  "executive_summary": {
+   "facts": {},
+   "figures": [
+    "value_stream_waterfall"
+   ],
+   "note": null,
+   "payload": null,
+   "prose": [],
+   "status": "ok"
+  },
+  "limitations": {
+   "facts": {},
+   "figures": [],
+   "note": null,
+   "payload": null,
+   "prose": [],
+   "status": "ok"
+  },
+  "question": {
+   "facts": {},
+   "figures": [],
+   "note": null,
+   "payload": null,
+   "prose": [],
+   "status": "ok"
+  },
+  "recommended_system": {
+   "facts": {},
+   "figures": [],
+   "note": "typical_week_not_in_mvp1",
+   "payload": null,
+   "prose": [],
+   "status": "ok"
+  },
+  "reliability": {
+   "facts": {},
+   "figures": [],
+   "note": "question_has_no_reliability_part",
+   "payload": null,
+   "prose": [],
+   "status": "skipped"
+  },
+  "robustness": {
+   "facts": {},
+   "figures": [],
+   "note": null,
+   "payload": null,
+   "prose": [],
+   "status": "ok"
+  }
+ },
+ "stale": false,
+ "stale_reasons": [],
+ "study_id": "5cb04667fcc64915acbb6e9704d204d1",
+ "study_name": "Site battery"
+}

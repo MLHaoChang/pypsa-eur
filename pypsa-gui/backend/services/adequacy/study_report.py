@@ -32,6 +32,8 @@ It writes no prose. The caller narrates, and can only narrate what is here.
 """
 from __future__ import annotations
 
+from services import report_sections
+
 # Section id → (what it is, what a reader must be told about its fidelity).
 # The caveats are the routers' own sentences, condensed; they are the reason
 # this module exists, so they live next to the assembly rather than in a
@@ -253,27 +255,32 @@ def _engine_warnings(sections: list[dict]) -> list[str]:
     return out
 
 
+_ENGINE_NAMING = (
+    "Name the engine and its fidelity beside every number — this document "
+    "puts a screening convolution, an LP proxy and a sampler on one page, "
+    "and they are not interchangeable.")
+
+# (section, the sentence its presence requires) — the generic rule shape of
+# `services/report_sections.py`; the decision report keeps its own set.
+_PRESENT_RULES: tuple[tuple[str, str], ...] = (
+    ("reserve_margin",
+     "A met reserve margin is NOT a met reliability target: it is a "
+     "convention justified by its derating factors."),
+    ("copt",
+     "The COPT figure is a screening estimate — thermal-only, "
+     "storage-excluded, network-free — and must not be compared to a "
+     "statutory standard."),
+    ("adequacy",
+     "The target result is engine 'lp_proxy', a deterministic proxy "
+     "rather than a probabilistic one."),
+)
+
+
 def _disclosures(sections: list[dict]) -> list[str]:
     """The sentences the narrative MUST contain, given what is present."""
-    present = {s["id"] for s in sections if s["status"] == "ok"}
-    out = [
-        "Name the engine and its fidelity beside every number — this document "
-        "puts a screening convolution, an LP proxy and a sampler on one page, "
-        "and they are not interchangeable.",
-    ]
-    if "reserve_margin" in present:
-        out.append(
-            "A met reserve margin is NOT a met reliability target: it is a "
-            "convention justified by its derating factors.")
-    if "copt" in present:
-        out.append(
-            "The COPT figure is a screening estimate — thermal-only, "
-            "storage-excluded, network-free — and must not be compared to a "
-            "statutory standard.")
-    if "adequacy" in present:
-        out.append(
-            "The target result is engine 'lp_proxy', a deterministic proxy "
-            "rather than a probabilistic one.")
+    out = report_sections.disclosures(
+        report_sections.present_ids(sections), _PRESENT_RULES,
+        always=(_ENGINE_NAMING,))
     out += _basis_disclosures(sections)
     for section in sections:
         if section["id"] == "mc" and section["status"] == "ok":
@@ -285,12 +292,14 @@ def _disclosures(sections: list[dict]) -> list[str]:
 
 
 def _not_established(sections: list[dict]) -> list[str]:
-    """What this study did NOT answer. The omission is the finding."""
-    return [
+    """
+    What this study did NOT answer. The omission is the finding. The generic
+    status mapping (`report_sections.MISSING_STATUSES`) reads `no_data`, the
+    only missing status these rows carry, and `not_established`.
+    """
+    return report_sections.not_established(sections, lambda s: (
         f"{s['question']} — not established ({s['id']} was never run "
-        f"in this session)"
-        for s in sections if s["status"] == "no_data"
-    ]
+        f"in this session)"))
 
 
 def _evidence_gaps(n, health: dict | None) -> list[dict]:
