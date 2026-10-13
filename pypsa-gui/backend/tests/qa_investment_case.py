@@ -1431,7 +1431,8 @@ def scenario_k() -> None:
         case = S.to_finance_case("s1b", solve=True)
         sp = case.inputs.solve_ppa
         old_build, old_layers = R._ic_build_case, chat_tools._ic_solve_layers
-        R._ic_build_case = lambda n, cfg, *, owner, lost_load: (lambda: case)
+        # IC G3 R-2: the factory takes the campus source too.
+        R._ic_build_case = lambda n, cfg, *, owner, lost_load, campus=None: (lambda: case)
         chat_tools._ic_solve_layers = lambda c: S.sam_tax_layers("s1b")
         try:
             sol = chat_tools.DISPATCHERS["solve_ppa_price"](

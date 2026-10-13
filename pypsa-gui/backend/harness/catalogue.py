@@ -1659,27 +1659,39 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _empty(
         "export_network_nc",
-        "Export the active network as PyPSA netCDF. Saves a downloadable file in "
-        "the chat file strip and returns its metadata {file_id, filename, size}. "
+        "Export the active network as PyPSA netCDF and return the new file's "
+        "metadata {file_id, filename, size}. "
+        "Writes the file into the project's uploads (shown in the chat file "
+        "strip, counted toward the uploads quota, refused while another user "
+        "holds the project lock); the network and the project are unchanged. "
         "Requires a loaded project. Safety: read.",
     ),
     _empty(
         "export_csv_bundle",
-        "Export the active network as a CSV bundle (zip). Saves a downloadable file "
-        "and returns its metadata {file_id, filename, size}. Requires a loaded "
-        "project. Safety: read.",
+        "Export the active network as a CSV bundle (zip) and return the new "
+        "file's metadata {file_id, filename, size}. "
+        "Writes the file into the project's uploads (shown in the chat file "
+        "strip, counted toward the uploads quota, refused while another user "
+        "holds the project lock); the network and the project are unchanged. "
+        "Requires a loaded project. Safety: read.",
     ),
     _empty(
         "export_excel",
-        "Export the active network to an .xlsx workbook. Saves a downloadable file "
-        "and returns its metadata {file_id, filename, size}. Requires a loaded "
-        "project. Safety: read.",
+        "Export the active network to an .xlsx workbook and return the new "
+        "file's metadata {file_id, filename, size}. "
+        "Writes the file into the project's uploads (shown in the chat file "
+        "strip, counted toward the uploads quota, refused while another user "
+        "holds the project lock); the network and the project are unchanged. "
+        "Requires a loaded project. Safety: read.",
     ),
     _empty(
         "export_matpower",
-        "Export the active network in MATPOWER case format. Saves a downloadable "
-        "file and returns its metadata {file_id, filename, size}. Requires a "
-        "loaded project. Safety: read.",
+        "Export the active network in MATPOWER case format and return the new "
+        "file's metadata {file_id, filename, size}. "
+        "Writes the file into the project's uploads (shown in the chat file "
+        "strip, counted toward the uploads quota, refused while another user "
+        "holds the project lock); the network and the project are unchanged. "
+        "Requires a loaded project. Safety: read.",
     ),
 
     # ── Audit / Undo (4) ───────────────────────────────────────────────────
@@ -2714,6 +2726,10 @@ TOOLS: list[dict[str, Any]] = [
         "rating), compliance (per check: status_as_is, status_with_measures, "
         "value, limit, worst hour, clause and its code|assumed tag), "
         "requirement (the PCC reactive band applied and where P_ref came from)}. "
+        "owner_assets_count is how many bought items the investment case takes as "
+        "extra owner assets and owner_assets_method (milp|least_cost, null when "
+        "none) which result they come from: the joint optimisation when it is "
+        "fresh and found its own choice, else the least-cost run; say which. "
         "When stale is true the campus or the project changed since the run: say "
         "so before quoting numbers. It is a steady-state study, not a compliance "
         "certificate. 409 for a project of another kind. Safety: read.",
@@ -2808,7 +2824,10 @@ TOOLS: list[dict[str, Any]] = [
         "compliance_invested (the compliance table re-solved with the assets), "
         "scope ({pcc_switchgear: campus|grid_operator}: whether the PCC switchgear "
         "was costed to the campus or left to the grid operator, say which), "
-        "library_is_default, stale, notes}. Say these with the numbers: costs "
+        "library_is_default, stale, owner_assets_method (milp|least_cost: which "
+        "result the investment case's extra owner assets come from; the joint "
+        "optimisation's when it is fresh and found its own choice, else this "
+        "least-cost one; null when there are none), notes}. Say these with the numbers: costs "
         "are placeholders tagged assumed unless the user replaced them with "
         "quotes (datasheet or measured) or cited reference values "
         "(literature, still not quotes), so quote assumed ones as orders of "
