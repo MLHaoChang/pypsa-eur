@@ -120,13 +120,76 @@ def test_an_outsider_cannot_confirm_someone_elses_destructive_tool(outsider,
     The most serious of the three: the confirmation IS the safety control for
     destructive tools, so supplying it for someone else's turn defeats the tier
     system regardless of how the token was obtained.
+
+    The token here is a REAL live one, minted on the victim's session. That is
+    the whole point of this test and the reason it was rewritten (2026-09-30):
+    it previously posted a fresh `uuid4()`, which `record_decision` rejects with
+    404 `unknown_confirmation_token` on token LOOKUP, before ownership is ever
+    consulted. So the assertion was satisfied by a path that exists with or
+    without the owner guard — removing the guard entirely left this test green,
+    which is the one thing a tripwire must not do. Verified by mutation on
+    2026-09-30: with `session_owner_allows` stubbed to `return True`, the
+    sibling `/rewind`, `/abort` and owner-less tests went red and this one did
+    not.
+
+    The three assertions below are the property ("the outsider cannot affect the
+    victim's pending confirmation"), not the absence of one known path:
+      * the token is STILL PENDING — nothing was consumed;
+      * no decision was recorded against it, so a blocked agent thread is not
+        released with someone else's answer;
+      * the OWNER can still spend it — which is what proves the token was live
+        at the moment the outsider tried, and therefore that the refusal came
+        from the ownership check rather than from token lookup.
     """
+    pc = victim_session.issue_confirmation(
+        tool_name="delete_component", args={"name": "L1"},
+        safety_tier="destructive",
+    )
     r = outsider.post(f"/api/chat/{victim_session.session_id}/confirm",
-                      json={"token": _uuid.uuid4().hex, "decision": "approve"})
+                      json={"token": pc.token, "decision": "approve"})
+
+    assert pc.token in victim_session.pending_confirmations, (
+        f"an outsider consumed the victim's pending confirmation: "
+        f"{r.status_code} {r.text[:200]}"
+    )
+    assert pc.token not in victim_session.confirmation_decisions, (
+        f"an outsider recorded a decision on the victim's confirmation: "
+        f"{victim_session.confirmation_decisions.get(pc.token)!r}"
+    )
     assert r.status_code == 404, (
         f"an outsider reached another user's confirmation gate: "
         f"{r.status_code} {r.text[:200]}"
     )
+
+
+def test_the_owner_can_still_spend_a_token_an_outsider_was_refused(
+    client, outsider, victim_session,
+):
+    """
+    The control for the test above, and the reason its 404 means something.
+
+    If the token were dead — expired, or never registered — the outsider's 404
+    would prove nothing at all. So: the outsider is refused, and then the OWNER
+    spends the SAME token successfully. That ordering is what pins the refusal
+    to the caller's identity rather than to the token's validity, and it is the
+    assertion the previous version of this file had no equivalent of.
+    """
+    pc = victim_session.issue_confirmation(
+        tool_name="delete_component", args={"name": "L1"},
+        safety_tier="destructive",
+    )
+    refused = outsider.post(f"/api/chat/{victim_session.session_id}/confirm",
+                            json={"token": pc.token, "decision": "approve"})
+    assert refused.status_code == 404, refused.text[:200]
+
+    owned = client.post(f"/api/chat/{victim_session.session_id}/confirm",
+                        json={"token": pc.token, "decision": "approve"})
+    assert owned.status_code == 200, (
+        f"the owner could not spend a token that was supposedly still live, so "
+        f"the outsider's 404 above proves nothing: {owned.status_code} "
+        f"{owned.text[:200]}"
+    )
+    assert owned.json().get("decision") == "approve", owned.text[:200]
 
 
 def test_the_owner_can_still_rewind_and_abort(client, victim_session):
