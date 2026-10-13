@@ -6,7 +6,7 @@
 <!-- Upcoming Release -->
 <!-- ================= -->
 
-* Fix(pypsa-gui): Strip `extra_functionality_code` from every imported project bundle, admins included, and report it as `stripped`. Fence pre-dispatch validator errors before they reach the model. Time each chat tool's deadline from when its handler starts, and cancel a call that never got a worker (`tool_not_started`) instead of letting it run after it was reported as failed.
+* Feat(pypsa-gui): Campus island I2c. Linearised unit commitment for the island sidecar's fixed-size gensets (`linearised_uc`, plain solve only, restored after the solve) replaces the spinning flag in the headroom, RoCoF and grid-forming MVA rows at the instant of islanding. `island_study` solves the islanding variants separately and reports the cost of island capability, the cost of seamless islanding and the binding rows with their duals.
 
 * Fix(pypsa-gui): Treat coupling and margin loop verdicts `met` and `unreachable` as finished study outcomes. `wait_for_job` no longer times out after a completed unreachable search, and a target that was met counts as success. Run evidence publishes the unreachable verdict instead of leaving a running marker.
 

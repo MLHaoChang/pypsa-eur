@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Strip `extra_functionality_code` from every imported project bundle, admins included, and report it as `stripped`. Fence pre-dispatch validator errors before they reach the model. Time each chat tool's deadline from when its handler starts, and cancel a call that never got a worker (`tool_not_started`) instead of letting it run after it was reported as failed.
