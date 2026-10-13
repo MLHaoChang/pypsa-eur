@@ -67,7 +67,10 @@ Borrowed designs (phase 5): `docs/superpowers/assessments/2026-10-06-deepseek-ha
    in `events.FRAMES`; the tripwire test fails on a new name.
 4. **Behaviour is Markdown.** A workflow or a skill is a file; adding one
    is a content change. Files are read from this package only — never from
-   a project directory or an upload — because they are instructions.
+   a project directory or an upload — because they are instructions. One
+   exception (issue 14, owner decision Q16): user skills from
+   `<app data>/skills/`, an install's own folder, ranked after the package;
+   a user skill named like a package skill is refused, never shadowing it.
 5. **Per-turn, not system.** Anything that changes with the user's place
    (the workflow step, the Guided rules, `ui_context`) travels as per-turn
    user content. The system prompt stays byte-identical and cached.
@@ -330,6 +333,19 @@ description is what the model sees in its catalogue; it decides when the
 skill is loaded, so front-load the trigger. The same layout as
 `.claude/skills/`, so a procedure can be copied between the developer
 agents and the app.
+
+Two optional flags, both default `true`: `model_invocable: false` keeps a
+skill out of the prompt's catalogue and out of `use_skill`;
+`user_invocable: false` keeps it out of `GET /api/chat/skills`, the listing
+for a future `/skill` command in the panel.
+
+A user can add their own skill to `<app data>/skills/<name>/SKILL.md` (the
+same layout) and pick it up with `POST /api/chat/skills/reload` or a
+restart. A user skill that is malformed, or named like a package skill, is
+refused with a logged reason and shown under `refused` in the listing; it
+never breaks the package skills. The listing shows each skill's provenance
+(`package` or `user`); the prompt never does. User skills are not part of
+`find_capabilities`' tool index.
 
 ## What consumes this today, and what will
 

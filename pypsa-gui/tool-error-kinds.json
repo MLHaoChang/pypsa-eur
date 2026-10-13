@@ -541,7 +541,7 @@
     },
     "unknown_skill": {
       "surface": "inline",
-      "why": "use_skill named a skill that is not in harness/skills. The model reads the message (it lists nothing; the catalogue is in its instructions) and corrects within the turn (chat harness issue 05)."
+      "why": "use_skill named a skill that is not in the registry (harness/skills or the install's <app data>/skills), or one marked model_invocable: false. The model reads the message (it lists nothing; the catalogue is in its instructions) and corrects within the turn (chat harness issues 05 and 14)."
     },
     "unknown_step_kind": {
       "surface": "inline",

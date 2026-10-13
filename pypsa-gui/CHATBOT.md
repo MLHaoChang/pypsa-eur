@@ -170,7 +170,12 @@ What the harness adds to the assistant (all read tier, see the README):
   more context under the question, let you pick several options (tick them,
   then Send), or ask you to approve a plan (a "Plan review" card).
 - **Skills.** `use_skill` loads a procedure (`grill` first); the prompt
-  carries only the catalogue.
+  carries only the catalogue. You can add your own: put
+  `<name>/SKILL.md` (the same layout as `harness/skills/`) in the `skills`
+  folder of the app's data directory, then reload (`POST
+  /api/chat/skills/reload`) or restart. A skill named like a built-in one is
+  refused, not used in its place; `GET /api/chat/skills` lists the skills and
+  any refused ones.
 - **Large results.** A tool result too large to show the assistant whole
   (an hourly series, a long table) is kept for the chat; the assistant sees
   the start of it and reads the rest a page at a time with `read_result`.
