@@ -267,6 +267,11 @@ def test_binding_rows_report_their_hours_and_duals():
     rows = {r["row"]: r for r in out["variants"]["seamless"]["binding"]}
     up = rows["Island-headroom-up"]
     assert up["hours"] and len(up["hours"]) == len(up["duals"])
+    # A slack row (the steady-island MVA, with no critical load) is built but
+    # not binding, and no reported hour has a zero dual.
+    assert "Island-mva-steady" in out["variants"]["seamless"]["facts"]["instant"]["rows"]
+    assert "Island-mva-steady" not in rows
+    assert all(abs(d) > 1e-6 for r in rows.values() for d in r["duals"])
     assert sum(up["duals"]) == pytest.approx(100.0, abs=TOL)
     assert all(not r["row"].startswith("Island-headroom")
                for r in out["variants"]["ups_bridged"]["binding"])

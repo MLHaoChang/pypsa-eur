@@ -1018,7 +1018,7 @@ it replaces nothing.
 - `seamless`, with bess_new's cap lifted, gives 6.87e7, so the cost of
   seamless islanding is **2.89e7**.
 
-**Tests** (`tests/test_island_study.py`, 23):
+**Tests** (`tests/test_island_study.py`, 25 collected):
 - UC buys exactly the online capacity each 0⁺ row needs, by hand:
   - (b↑) u = 1/2. Each MW of minimum load also leaves the import, so the
     step falls with it, and the row is 7 + 6u − p ≥ 10 − p.
@@ -1040,6 +1040,25 @@ it replaces nothing.
   pickup row's dual is 1/ls. The LP may put a degenerate dual on one hour.
 - A refused variant; a scenario the sidecar does not ship; both template
   figures.
+
+**Mutations.** 19 source edits, each run against the file:
+- UC ignored in the headroom, the MVA at 0⁺ and the RoCoF rows;
+- a committed genset counted at its full p_nom;
+- p_max_pu dropped, and a Link genset's η dropped;
+- I2b's spinning minimum-load row kept for a committed genset;
+- an extendable genset committed;
+- the refusals removed: no minimum load, an uncommitted genset, and the
+  strategy refusal's UC note;
+- `committable` and `p_min_pu` not restored, and the sidecar `p_min_pu`
+  not written;
+- `run_simulation` dropping the UC keyword;
+- the baseline keeping the rows, the variants not split, the seamless cost
+  reversed;
+- zero duals kept, and a static row given hours.
+
+All were killed except "zero duals kept", because no test had a built but
+slack row. The binding test now checks the slack steady-island MVA row,
+and it kills that edit.
 
 The first hand values for UC (u = 5/7, 8/15) left out that the committed
 genset's minimum load displaces import, the same correction I2b recorded for
