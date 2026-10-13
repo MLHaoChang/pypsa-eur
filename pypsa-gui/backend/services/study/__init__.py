@@ -11,30 +11,18 @@ store (OPEN-ITEMS 1).
 """
 from __future__ import annotations
 
-import os
-
 import local_mode
-
-# The feature flag. It ENABLES the study routes in local (single-user) mode
-# only; in auth (multi-user) mode they refuse whatever it says, until
-# OPEN-ITEMS 1 is closed (review v2 BC-6). It is not an operator override.
-FLAG_ENV = "PYPSAGUI_DECISION_STUDIES"
-_TRUTHY = frozenset({"1", "true", "yes", "on"})
-
-
-def flag_set() -> bool:
-    """True when `PYPSAGUI_DECISION_STUDIES` is truthy. Read per call."""
-    return os.environ.get(FLAG_ENV, "").strip().lower() in _TRUTHY
 
 
 def decision_studies_enabled() -> bool:
     """
-    The one predicate: local mode AND the flag.
+    The one predicate: local (single-user) mode.
 
-    Auth mode is refused unconditionally because a study's Expert-view fork
-    is saved by the ordinary foreground save, which reapplies the
-    process-global `_user_ts` (`services/user_timeseries.py`) — the
-    cross-tenant path OPEN-ITEMS 1 describes, which a study would load with a
-    client's meter data.
+    Until 2026-10-13 a flag (`PYPSAGUI_DECISION_STUDIES`) also had to be set;
+    U3 dropped it once OPEN-ITEMS 1 (the process-global user-timeseries store,
+    PR #71) was closed. Multi-user mode still refuses: a study builds, forks
+    and solves its own projects in the background, and that path has not been
+    reviewed for several tenants sharing one server (U3; review v2 BC-6 named
+    OPEN-ITEMS 1 as the reason, and that reason is gone, not the review).
     """
-    return local_mode.is_local_mode() and flag_set()
+    return local_mode.is_local_mode()

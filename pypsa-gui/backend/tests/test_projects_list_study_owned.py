@@ -30,7 +30,6 @@ BODY = {"question_id": "bess_site", "name": "Site A battery",
 def studies_on(monkeypatch):
     # As in test_studies_routes: the routes refuse in auth mode (BC-6); the
     # suite opens the "in tests" door through dependency_overrides.
-    monkeypatch.setenv("PYPSAGUI_DECISION_STUDIES", "1")
     dep = studies_router.require_decision_studies_enabled
     main.app.dependency_overrides[dep] = lambda: None
     monkeypatch.setattr(studies_router, "require_decision_studies_enabled", lambda: None)
