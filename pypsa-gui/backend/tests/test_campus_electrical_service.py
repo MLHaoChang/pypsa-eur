@@ -843,7 +843,8 @@ def purchase_rows():
 import hashlib
 
 CONTRACT_FIELDS = ["name", "kind", "basis", "quantity", "parts", "build_year", "source", "source_hash"]
-META_FIELDS = {"need", "library_id", "units", "length_km", "currency", "price_year", "provenance", "illustrative"}
+META_FIELDS = {"need", "library_id", "units", "length_km", "currency", "price_year", "provenance", "illustrative",
+               "study_method"}
 
 
 def total_of(asset):
@@ -862,7 +863,8 @@ def test_each_purchased_item_is_one_owner_asset_in_the_ic_shape(hub):
         "parts": [{"name": "investment", "upfront_per_unit": 2_500_000.0, "lifetime": 40.0, "fom_share": 0.015}],
         "build_year": 2030, "source": "campus_study", "source_hash": digest,
         "meta": {"need": "transformer GRID_IMPORT", "library_id": "TR_132_33_63", "units": 2, "length_km": None,
-                 "currency": "EUR", "price_year": 2026, "provenance": "assumed", "illustrative": True}}
+                 "currency": "EUR", "price_year": 2026, "provenance": "assumed", "illustrative": True,
+                 "study_method": "least_cost"}}
 
 
 def test_the_top_level_keys_are_exactly_the_contract_fields_and_meta(hub):
@@ -1178,13 +1180,13 @@ def test_the_source_hash_changes_when_the_run_changes(hub):
 def test_the_response_is_the_assets_the_hash_and_the_stale_flag(hub):
     fake_investment(hub, purchase_rows())
     out = ce.owner_assets_response(hub)
-    assert list(out) == ["assets", "source_hash", "stale"]
+    assert list(out) == ["assets", "source_hash", "stale", "study_method"]
     assert out["assets"] == ce.extra_owner_assets(hub) and out["source_hash"] == ce.campus_study_hash(hub)
-    assert out["stale"] is False
+    assert out["stale"] is False and out["study_method"] == "least_cost"
 
 
 def test_an_empty_run_answers_no_assets_no_hash_and_not_stale(hub):
-    assert ce.owner_assets_response(hub) == {"assets": [], "source_hash": None, "stale": False}
+    assert ce.owner_assets_response(hub) == {"assets": [], "source_hash": None, "stale": False, "study_method": None}
 
 
 def test_the_response_is_stale_after_the_discount_rate_changes_and_fresh_after_a_rerun(hub):
