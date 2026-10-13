@@ -1872,7 +1872,12 @@ TOOLS: list[dict[str, Any]] = [
         "{status: 'presented'} at once and the user's pick arrives as their "
         "NEXT message (its text is the option label). So after calling it, "
         "end your turn with at most one short sentence; do not call it "
-        "twice in one turn and do not guess the answer. Safety: read.",
+        "twice in one turn and do not guess the answer. Set multi_select "
+        "when several options may be chosen together (the answer is then "
+        "the chosen labels joined by '; '). Put anything longer than the "
+        "question (a plan, a comparison) in detail, as Markdown. Use "
+        "intent 'plan_review' to show a plan in detail for approval: one "
+        "verdict, e.g. options Approve and Revise. Safety: read.",
         {
             "title": {"type": "string", "description": "The decision, as a short heading (Q1 — …)."},
             "question": {"type": "string", "description": "Why it matters, one or two sentences."},
@@ -1892,8 +1897,33 @@ TOOLS: list[dict[str, Any]] = [
                 "description": "The real alternatives; exactly one `recommended: true`.",
             },
             "allow_free_text": {"type": "boolean", "description": "Default true."},
+            "multi_select": {"type": "boolean",
+                             "description": "Several options may be picked together. Default false."},
+            "detail": {"type": "string",
+                       "description": "Markdown shown under the question (a plan, a table). At most 2000 characters."},
+            "intent": {"type": "string", "enum": ["choice", "plan_review"],
+                       "description": "'plan_review' presents detail as a plan to approve. Default 'choice'."},
         },
         ["title", "question", "options"],
+    ),
+
+    _t(
+        "read_result",
+        "Read part of a tool result that was too large to show you whole. "
+        "When a result comes back as {spill: {locator, total_chars, shape}, "
+        "preview}, the whole result is kept for this chat: call this with "
+        "the locator and a JSON pointer to the part you need (\"/rows\", "
+        "\"/rows/3/p\"). A list is returned a page at a time (offset, limit; "
+        "follow next_offset), a large object as its keys, a long string in "
+        "slices. Page and narrow; do not try to read everything. Locators "
+        "expire with the chat. Safety: read.",
+        {
+            "locator": {"type": "string", "description": "The 32-character id from the spill block."},
+            "pointer": {"type": "string", "description": "JSON pointer into the result, e.g. /rows. Empty for the top."},
+            "offset": {"type": "integer", "description": "First list index or string character. Default 0."},
+            "limit": {"type": "integer", "description": "List items per page, at most 500 (fewer if they do not fit). Default 50."},
+        },
+        ["locator"],
     ),
 
     _t(
@@ -3461,6 +3491,7 @@ TOOL_ROUTES: dict[str, list] = {
     "run_sensitivity_sweep": _SERVICE_CALL,
     "use_toolset": _SERVICE_CALL,
     "use_skill": _SERVICE_CALL,
+    "read_result": _SERVICE_CALL,
     "start_workflow": _SERVICE_CALL,
     "advance_workflow": _SERVICE_CALL,
     "end_workflow": _SERVICE_CALL,
@@ -3604,6 +3635,72 @@ SAFETY_TIERS = (
     "write",
     "read",
 )
+
+
+# ── P33b: which chat tools EDIT the live network ──────────────────────────
+#
+# The chat seam of the edit counter (`ProjectContext.network_revision`). Chat
+# tools call their handlers directly, so `undo_snapshot_middleware` (the HTTP
+# seam) never sees them; the dispatch site bumps for every tool this predicate
+# accepts. Derived from TOOL_ROUTES — a non-GET route under the undo prefixes —
+# plus ONE hand list for the write tools that have no route at all, pinned by
+# construction against its complement (`tests/test_eh_study_edited_since.py`:
+# every `_SERVICE_CALL` tool of tier write / destructive is in exactly one).
+# Lives outside TOOLS: no tool description changes.
+
+# Must equal `main._UNDO_PREFIXES` (pinned by a test; main imports services,
+# never the reverse).
+NETWORK_EDIT_PREFIXES = ("/api/network/", "/api/io/")
+
+# `_SERVICE_CALL` write / destructive tools that mutate the live network.
+_SERVICE_CALL_NETWORK_WRITES = frozenset({
+    "batch_create_components",        # loops create_component
+    "batch_delete_components",        # loops delete_component
+    "generate_exemplary_timeseries",  # writes _user_ts / n.*_t
+    "apply_demand_from_excel",        # writes a Load's series under the lock
+    "reconstruct_network_from_image",  # materialises buses / lines
+    # master (assistant tools): an uploaded network replaces the live one
+    # through the /api/io import handlers; an applied preview swaps the live
+    # network through `set_network` (which bumps too: +2, like clustering).
+    "import_uploaded_network",
+    "apply_project_changes",
+})
+
+# `_SERVICE_CALL` write / destructive tools that do NOT touch the live network
+# (gridspine opens its own pypsa.Network from disk; exports write files; the
+# rest are chat / upload / profile state).
+_SERVICE_CALL_NON_NETWORK_WRITES = frozenset({
+    "gridspine_create_study", "gridspine_set_dispatch_source",
+    "gridspine_update_config", "gridspine_edit_template_param",
+    "gridspine_export_handoff_bundle", "gridspine_compute_capacity",
+    "gridspine_assess_connection",
+    # campus (master #84/#89/#91): the study reads the SAVED network.nc and
+    # writes its own files under the project directory; never the live one.
+    "campus_draft_campus", "campus_run_study", "campus_set_library",
+    "campus_extract_grid_code",
+    # master (assistant tasks, experiments, deliveries): task / experiment
+    # records, a preview built on a side context (`build_context`), charts,
+    # delivery and evidence files — none writes the live network.
+    "start_task", "resume_task", "cancel_task", "resolve_task_step",
+    "start_experiment", "preview_project_changes", "create_chart",
+    "build_delivery", "export_run_evidence",
+    "export_to_excel", "export_to_csv", "export_preview_png",
+    "export_chat_summary", "export_eh_report_docx", "export_asset_results",
+    "set_active_profile", "clear_uploads", "start_campaign", "end_campaign",
+})
+
+
+def tool_edits_network(tool_name: str) -> bool:
+    """True when running `tool_name` edits the live network (P33b B2)."""
+    if tool_name in _SERVICE_CALL_NETWORK_WRITES:
+        return True
+    for route in TOOL_ROUTES.get(tool_name) or ():
+        if (isinstance(route, tuple) and len(route) == 2
+                and route[0] != "GET"
+                and route[1] != "/api/network/undo/info"
+                and route[1].startswith(NETWORK_EDIT_PREFIXES)):
+            return True
+    return False
 
 
 def safety_tier_for(tool_name: str) -> str:
