@@ -166,9 +166,16 @@ What the harness adds to the assistant (all read tier, see the README):
   the session on a step; the step's instructions ride every turn. Guided
   mode's rules are the `hub-design` workflow's preamble.
 - **Choice cards.** `ask_user` renders a question with options and a
-  recommendation; your pick is sent as your next message.
+  recommendation; your pick is sent as your next message. A card may show
+  more context under the question, let you pick several options (tick them,
+  then Send), or ask you to approve a plan (a "Plan review" card).
 - **Skills.** `use_skill` loads a procedure (`grill` first); the prompt
   carries only the catalogue.
+- **Large results.** A tool result too large to show the assistant whole
+  (an hourly series, a long table) is kept for the chat; the assistant sees
+  the start of it and reads the rest a page at a time with `read_result`.
+  Kept results expire with the chat, after a day at most, and are never used
+  while an answer is being checked.
 
 ## Voice input
 
@@ -222,6 +229,16 @@ source, not a hardcoded constant.
 Cache-read tokens are shown because on a long session they dominate the
 input count, and an in/out pair that ignores them under-reports the work
 by the widest margin exactly when the session is longest.
+
+"In" means the same thing on every wire: input that was NOT served from the
+provider's cache. Anthropic reports it that way; the OpenAI-shaped wires
+fold cached input into their prompt count (chat completions: OpenAI and Kimi
+under `prompt_tokens_details.cached_tokens`, DeepSeek as
+`prompt_cache_hit_tokens`; the Responses API under
+`input_tokens_details.cached_tokens`), so one shared mapping,
+`harness/providers/usage.py`, subtracts it back out and reports it as cached
+(chat harness issue 20; owner decision Q19). The daily token cap and `GET /api/chat/metrics` count the same
+"in", so a cached prefix is not charged as fresh input on one wire only.
 
 ## Cost caps
 

@@ -98,11 +98,12 @@ def _truncate_result(result: Any, limit: int = 4000) -> Any:
     return result
 
 
-def _truncation_marker(total: int, shown: int) -> str:
-    """The explicit sentinel appended when a tool result is cut for the model."""
+def _truncation_marker(total: int, shown: int, hint: str | None = None) -> str:
+    """The explicit sentinel appended when a tool result is cut for the model.
+    `hint` (issue 16) names the tool's own paging when it has one."""
     return (
         f" …[RESULT TRUNCATED: showed {shown} of {total} chars — "
-        "call a narrower / paginated query for the rest]"
+        f"{hint or 'call a narrower / paginated query for the rest'}]"
     )
 
 
@@ -274,7 +275,7 @@ def _scrub_identities(value: Any) -> Any:
     return value
 
 
-def _result_to_anthropic_content(result: Any) -> Any:
+def _result_to_anthropic_content(result: Any, marker_hint: str | None = None) -> Any:
     """
     Convert a Python tool result into the Anthropic tool_result content
     shape. The SDK accepts strings or content-block lists; for dicts/lists
@@ -322,7 +323,7 @@ def _result_to_anthropic_content(result: Any) -> Any:
         body = result
         if len(body) > _RESULT_CONTENT_CAP:
             body = body[:_RESULT_CONTENT_CAP] + _truncation_marker(
-                len(body), _RESULT_CONTENT_CAP,
+                len(body), _RESULT_CONTENT_CAP, marker_hint,
             )
     else:
         try:
@@ -332,7 +333,7 @@ def _result_to_anthropic_content(result: Any) -> Any:
             body = str(result)
         cap = _RESULT_CONTENT_CAP
         if len(body) > cap:
-            body = body[:cap] + _truncation_marker(len(body), cap)
+            body = body[:cap] + _truncation_marker(len(body), cap, marker_hint)
     # Neutralised at the single return point, not per branch: the string
     # passthrough and the json+truncate path both reach here, so one line
     # covers every body and a future third branch cannot forget it. Order

@@ -33,7 +33,8 @@ def test_dollar_limit_and_unknown_price_block_before_send():
 def test_dollar_settlement_and_cache_conservative_price():
     meter = TokenBudget(10000, dollar_limit=5)
     record = meter.reserve(100, 100, "paid", "gpt-6-luna")
-    meter.settle(record, {"input_tokens": 100, "output_tokens": 20, "cache_read_tokens": 80})
+    # 100 prompt tokens, 80 of them from cache: uncached input is 20.
+    meter.settle(record, {"input_tokens": 20, "output_tokens": 20, "cache_read_tokens": 80})
     assert meter.charged == 120
     assert meter.cost_nanodollars == 100 * 250 + 20 * 750
 
