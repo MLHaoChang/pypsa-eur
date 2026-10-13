@@ -333,7 +333,7 @@ def cleared_result_state() -> dict[str, None]:
 # so `pypsa_service` cannot import `study_state`, but it already imports this
 # module.
 STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
-             "eh_study", "investment_case")
+             "eh_study", "investment_case", "decision_study")
 
 # The studies that re-solve the USER'S OWN network object in place, between
 # their iterates — so an edit landing mid-study is either overwritten by the
@@ -341,8 +341,10 @@ STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
 # refuse component edits; the others do not, and the evidence is in the code:
 # `mc` snapshots the network under the lock and never mutates it
 # (`mc_loop_runner.py`, the `network.copy()` under `lock`), and `eh_study`
-# solves a private `network.copy()` (`eh_study.py`). A key added to STUDY_KEYS
-# must be classified here on purpose.
+# solves a private `network.copy()` (`eh_study.py`). `decision_study` solves
+# study-owned option forks through the queue, never the base network object
+# (`services/study/runner.py`). A key added to STUDY_KEYS must be classified
+# here on purpose.
 LIVE_NETWORK_STUDIES = frozenset({"fmea_sweep", "frontier", "coupling_loop",
                                   "margin_loop"})
 
@@ -355,6 +357,9 @@ STUDY_LABELS = {
     "coupling_loop": "a coupling-loop study",
     "margin_loop": "a margin-loop study",
     "eh_study": "an Energy Hub study",
+    # S4: the guided investment study's option runner. It solves study-owned
+    # forks through the queue, and holds its BASE project while it does.
+    "decision_study": "a decision study",
     # Edge Investment Case P4 WP4.6b: the finance run reads the solved network's
     # result tables, so it holds the mesh like any other study.
     "investment_case": "an investment-case run",
@@ -373,7 +378,8 @@ STUDY_LABELS = {
 # Pinned by a test against the routes that actually exist, so this cannot
 # drift the day someone REMOVES an abort.
 ABORTABLE_STUDIES = ("coupling_loop", "margin_loop", "mc", "frontier",
-                     "fmea_sweep", "eh_study", "investment_case")
+                     "fmea_sweep", "eh_study", "investment_case",
+                     "decision_study")
 
 
 def may_rewrite_user_ts(ctx: Any) -> bool:
@@ -396,7 +402,8 @@ def may_rewrite_user_ts(ctx: Any) -> bool:
 
 
 def record_is_running(record) -> bool:
-    """True while a study record's worker thread is genuinely alive.
+    """
+    True while a study record's worker thread is genuinely alive.
 
     ONE definition, called by `study_state.study_running` (the 409 mesh) and by
     `PyPSAService.reset_network` (which must not clear a live study out from
@@ -435,7 +442,8 @@ def record_is_running(record) -> bool:
 
 
 def running_study_key(state) -> str | None:
-    """The key of the first live study in ``state``, or None.
+    """
+    The key of the first live study in ``state``, or None.
 
     Pure: takes the state dict rather than reaching for the active project, so
     `pypsa_service` can call it without importing `study_state` (which imports
@@ -453,7 +461,8 @@ def running_study_key(state) -> str | None:
 
 
 def study_swap_refusal(state, action: str) -> str | None:
-    """The 409 detail for an action that would REPLACE the network, or None.
+    """
+    The 409 detail for an action that would REPLACE the network, or None.
 
     ``action`` is what the user was trying to do ("load a project", "undo",
     "restore a snapshot"), because a refusal that does not say what it refused
@@ -581,6 +590,7 @@ class ProjectSolverState:
     # code). Its REPORT is result state (`investment_case_report`); the record
     # is not persisted, like every study record above.
     investment_case: Any = None
+    decision_study: Any = None
 
     def as_dict(self) -> dict[str, Any]:
         """A plain dict with the same keys/values — the legacy `_state` shape."""

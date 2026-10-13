@@ -2,6 +2,7 @@
 
 # ruff: noqa: F811 -- Imported pytest fixtures are intentionally used as arguments.
 import json
+import uuid
 
 import pytest
 
@@ -26,6 +27,35 @@ def checked(client, monkeypatch):
     yield harness
     for session_id in harness.session_ids:
         chat_service.drop_session(session_id)
+
+
+@pytest.mark.parametrize("case", ["first", "second"])
+def test_checked_record_store_isolated_between_cases(baseline, checked, case):
+    directory = assurance_records._path(
+        assurance_records.actor_id(), "00000000-0000-0000-0000-000000000000"
+    ).parent
+    assert not list(directory.glob("*.json")), "An earlier test left owned records behind"
+    frames = checked.load_fact()
+    assert approval(frames)["verdict"] == "passed"
+    assert len(list(directory.glob("*.json"))) >= 2
+
+
+def test_default_full_record_store_still_withholds_publication(baseline, checked):
+    from fastapi import HTTPException
+
+    owner = assurance_records.actor_id()
+    for _ in range(512):
+        assurance_records.save(
+            {"owner_id": owner, "record_kind": "evidence"}, str(uuid.uuid4())
+        )
+    with pytest.raises(HTTPException) as blocked:
+        assurance_records.save(
+            {"owner_id": owner, "record_kind": "evidence"}, str(uuid.uuid4())
+        )
+    assert blocked.value.detail["error_kind"] == "assurance_storage_full"
+    frames = checked.load_fact()
+    assert not public_text(frames)
+    assert not any(event == "answer_approved" for event, _ in frames)
 
 
 def test_disabled_server_refuses_explicit_strict_request(checked, monkeypatch):

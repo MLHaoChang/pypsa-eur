@@ -50,6 +50,20 @@ so the canonical-charset guard has no work to do here.
 Record order follows the RAW's machine records (gen table, then ext_grid,
 then sgen), not bus-number order, so a reader can walk the two files side by
 side.
+
+**Governors and exciters** (island plan I8): ``DYR_CONTROLS`` holds the
+layouts of the PSS/E library records a campus genset needs, ICONs then CONs
+in library order, and ``format_record`` writes any record in the same style
+as the machine and converter records::
+
+    I 'DEGOV1' ID  M  T1 T2 T3 K T4 T5 T6 TD TMAX TMIN DROOP TE /      1 ICON, 12 CONs
+    I 'SEXS'   ID  TA/TB TB K TE EMIN EMAX /                            6 CONs
+    I 'GENCLS' ID  H D /                                                2 CONs (H = 0: an infinite bus)
+
+The WECC grid-forming records (REGFM_A1, REGFM_B1) are NOT written here:
+their PSS/E CON order is not verified, and a record in a guessed order is a
+plausible wrong converter. ``handoff/campus_bundle`` carries their
+parameters by name instead (owner decision, I8).
 """
 import math
 
@@ -98,6 +112,34 @@ def _machines(net):
             num = nums[name_of.at[s["bus"]]]
             out.append((s["name"], num, ids.next(num), sgen_mbase(s), False))
     return out
+
+
+#: Governor and exciter layouts: model -> (ICON fields, CON fields), in the
+#: PSS/E model library's order.
+DYR_CONTROLS = {
+    "DEGOV1": (("m",), ("t1", "t2", "t3", "k", "t4", "t5", "t6", "td", "tmax", "tmin", "droop", "te")),
+    "SEXS": ((), ("ta_tb", "tb", "k", "te", "emin", "emax")),
+    "GENCLS": ((), ("h", "d")),
+}
+
+
+def machine_records(net):
+    """``(unit_id, bus_number, machine_id, mbase, synchronous)`` for every
+    machine, in RAW record order with the RAW's own IDs (public for the
+    campus bundle, which attaches its own records to the same identities)."""
+    return _machines(net)
+
+
+def format_record(num, mid, model, values):
+    """One record of a ``DYR_CONTROLS`` model: ``values`` maps each ICON and
+    CON field to its number; a missing one raises (a zero is a plausible
+    wrong control)."""
+    icon_names, con_names = DYR_CONTROLS[model]
+    missing = [n for n in icon_names + con_names if values.get(n) is None or pd.isna(values.get(n))]
+    if missing:
+        raise ContractError(f"{model} at bus {num}: {missing} missing; a zero here is a plausible wrong control")
+    head = f"{num:>6d} '{model}' '{mid:<2s}'" + "".join(f"{int(values[n]):6d}" for n in icon_names)
+    return head + " " + "".join(f"{float(values[n]):10.5f}" for n in con_names) + " /"
 
 
 #: Converter record layout: (model, ICON fields, CON fields). REECA1's leading

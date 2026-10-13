@@ -140,3 +140,21 @@ describe('HorizonFilter', () => {
     expect(screen.getByText('All')).toBeTruthy()
   })
 })
+
+describe('AssetSummary reading notes', () => {
+  // An extendable asset at an interior optimum earns ≈ zero net profit BY
+  // CONSTRUCTION. The backend says so in `reading_notes`; the summary must
+  // show it next to the headline KPIs, and show nothing when there is
+  // nothing to say.
+  it('renders the backend reading note when present', () => {
+    render(<AssetSummary data={response({
+      reading_notes: ['Zero-profit equilibrium: an extendable asset at an interior optimum earns approximately zero net profit BY CONSTRUCTION.'],
+    })} />)
+    expect(screen.getByTestId('asset-reading-notes').textContent).toContain('BY CONSTRUCTION')
+  })
+
+  it('renders no note when the backend sends none', () => {
+    render(<AssetSummary data={response()} />)
+    expect(screen.queryByTestId('asset-reading-notes')).toBeNull()
+  })
+})

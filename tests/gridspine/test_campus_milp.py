@@ -543,7 +543,8 @@ def test_switchgear_is_costed_per_bay_of_the_joint_choice_and_the_pcc_is_a_study
     assert ("switchgear PCC" in inv.index) is pcc_switchgear
     assert ("switchgear PCC" in set(out["comparison"]["need"])) is pcc_switchgear
     assert {k: v for k, v in out["scope"].items() if k != "horizon"} == {
-        "pcc_switchgear": "campus" if pcc_switchgear else "grid_operator", "parallel": ParallelRules().scope()}
+        "pcc_switchgear": "campus" if pcc_switchgear else "grid_operator", "parallel": ParallelRules().scope(),
+        "pcc_tap_control": "campus"}
     assert out["scope"]["horizon"]["period_years"] == {2030: 1}                 # plan C14: one period, one year
 
 
@@ -602,7 +603,7 @@ def test_a_rated_pcc_left_to_the_grid_operator_constrains_nothing(tmp_path):
     assert (h["slack"] == 0).all() and (h.loc[h["feasible"], "worst_violation"] == 0).all()
     assert out["comparison"].set_index("need").at["transformer TR1", "milp_choice"] == "1 x T_B"
     assert {k: v for k, v in out["scope"].items() if k != "horizon"} == {
-        "pcc_switchgear": "grid_operator", "parallel": ParallelRules().scope()}
+        "pcc_switchgear": "grid_operator", "parallel": ParallelRules().scope(), "pcc_tap_control": "campus"}
 
 
 def test_the_battery_is_held_to_the_polygon_not_the_circle(tmp_path):

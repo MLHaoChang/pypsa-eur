@@ -53,6 +53,7 @@ MAX_ENTRIES = 200
 # an unknown study and refused, and the point is that MC is known and free.
 CHARGEABLE = (
     "frontier", "fmea_sweep", "coupling_loop", "margin_loop", "mc", "eh_study",
+    "decision_study",
     "investment_case",
 )
 
@@ -304,6 +305,19 @@ def estimate_solves(n, study: str, **kwargs) -> int:
         from models.energy_hub import DEFAULT_EH_BUDGET_SOLVES
         budget = kwargs.get("budget_solves")
         return (DEFAULT_EH_BUDGET_SOLVES if budget is None else int(budget))
+
+    if study == "decision_study":
+        # One LP solve per option fork (S4 M1); `n` is not read — the options
+        # are the question template's, filtered by the intake. The S6 tornado
+        # is costed by its own engine (`services/study/findings.py::
+        # estimate_tornado_solves`), checked before its first solve and
+        # charged one solve at a time under this same study key.
+        options = kwargs.get("options")
+        if options is None:
+            raise CampaignBudgetError(
+                "'decision_study' is costed from its options list",
+                error_kind="unknown_study")
+        return len(list(options))
 
     raise CampaignBudgetError(f"unknown study '{study}'",
                               error_kind="unknown_study")

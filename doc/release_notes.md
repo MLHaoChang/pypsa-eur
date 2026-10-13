@@ -8,6 +8,8 @@
 
 * Fix(pypsa-gui): Treat coupling and margin loop verdicts `met` and `unreachable` as finished study outcomes. `wait_for_job` no longer times out after a completed unreachable search, and a target that was met counts as success. Run evidence publishes the unreachable verdict instead of leaving a running marker.
 
+* Test(pypsa-gui): Isolate owned assurance records between backend test cases so long suites do not exhaust a shared user's 512-record quota. Add regressions for case isolation and refusal to publish from a full store; production storage limits and within-case recovery remain unchanged.
+
 * Feat(pypsa-gui): Expand the checked-answer CI gate to 133 deterministic cases with varied load, weight, price and storage-efficiency oracles. Add offline blind review preparation and calibration reports requiring two agreeing independently attested reviewers, explicit unresolved/missing/error counts and conditional statistical intervals. Synthetic evidence cannot certify production error rates or confer domain approval.
 
 * Feat(pypsa-gui): Add a repeatable checked-answer pilot evaluation gate with independent generator, network and StorageUnit oracles across all five supported profiles. Fail on incomplete coverage, incorrect publication or missing useful results; record versioned denominators and source identity. Add optional live-model golden cases with shared pre-send resource ceilings. The backend CI job retains reports; finite-suite acceptance does not imply production calibration or engineering approval.
