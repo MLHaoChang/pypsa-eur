@@ -547,6 +547,10 @@
       "surface": "inline",
       "why": "Raised by the chat route for a session id it does not hold. Route-only; a turn cannot be running under a session that does not exist."
     },
+    "unknown_decision": {
+      "surface": "inline",
+      "why": "The confirmation gate got a decision outside approve/deny/expired/aborted/revoked. Defensive: /confirm only accepts approve or deny, so this should not arrive; the action did not run, and the approval log records it as unavailable (chat harness issue 18)."
+    },
     "unknown_skill": {
       "surface": "inline",
       "why": "use_skill named a skill that is not in the registry (harness/skills or the install's <app data>/skills), or one marked model_invocable: false. The model reads the message (it lists nothing; the catalogue is in its instructions) and corrects within the turn (chat harness issues 05 and 14)."

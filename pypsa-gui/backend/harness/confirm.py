@@ -165,7 +165,7 @@ def _confirm_destructive_tool(
         if approvals.decided(session, call_id=tool_use_id, tool=tool_name, tier=tier,
                              outcome="approved", by="policy", link=link):
             return True
-        yield from _deny(tool_use_id, tool_name, "approval_unavailable",
+        yield from _deny(tool_use_id, tool_name, _UNAVAILABLE["error_kind"],
                          f"approval for {tool_name!r} could not be recorded",
                          tool_results_collector)
         return False
@@ -177,7 +177,7 @@ def _confirm_destructive_tool(
                            token=pc.token):
         # A card nobody can audit is never shown.
         session.withdraw_confirmation(pc.token)
-        yield from _deny(tool_use_id, tool_name, "approval_unavailable",
+        yield from _deny(tool_use_id, tool_name, _UNAVAILABLE["error_kind"],
                          f"approval for {tool_name!r} could not be recorded",
                          tool_results_collector)
         return False
@@ -196,19 +196,26 @@ def _confirm_destructive_tool(
     if decision == "approve" and recorded:
         return True
     if decision == "approve":
-        error_kind = "approval_unavailable"
+        error_kind = _UNAVAILABLE["error_kind"]
         message = f"approval for {tool_name!r} could not be recorded"
     else:
-        error_kind = {
-            "deny": "confirmation_denied",
-            "expired": "confirmation_expired",
-            "aborted": "aborted",
-            "revoked": "confirmation_revoked",
-        }.get(decision, "unknown_decision")
+        error_kind = _REFUSALS.get(decision, _UNKNOWN)["error_kind"]
         message = f"{decision} on confirmation for {tool_name!r}"
     yield from _deny(tool_use_id, tool_name, error_kind, message, tool_results_collector)
     return False
 
+
+# The refusal each decision ends in. Written as `{"error_kind": ...}` literals
+# so tests/test_tool_error_kind_manifest.py sees every kind this gate emits.
+_REFUSALS: dict[str, dict[str, str]] = {
+    "deny": {"error_kind": "confirmation_denied"},
+    "expired": {"error_kind": "confirmation_expired"},
+    "aborted": {"error_kind": "aborted"},
+    "revoked": {"error_kind": "confirmation_revoked"},      # issue 18
+}
+_UNKNOWN: dict[str, str] = {"error_kind": "unknown_decision"}
+# Issue 18: an approval that could not be put on record does not run.
+_UNAVAILABLE: dict[str, str] = {"error_kind": "approval_unavailable"}
 
 # Issue 18: what `wait_for_decision` returned, as (outcome, by) for the log.
 _DECISION_OUTCOMES: dict[str, tuple[str, str]] = {
