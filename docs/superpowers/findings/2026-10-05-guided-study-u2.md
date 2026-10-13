@@ -111,10 +111,10 @@ Each package's table is in the plan's status block; all ran on scratch copies, e
 
 ## Engine asks still open (to IC, through the owner)
 
-- **Q15:** `binding.bind_commercial` (binding a fork's in-memory network) and `series_store.resolve` in the facade.
-- **delete_series / pinned_by:** delete a study's minted export series (all versions) and ask whether a config pins it; GS reads `bundle_pins` and `series_store.list_series` meanwhile.
-- **WP7 freeze:** `finance.engine.wacc_gate`, `lp_bindings.META_LINKS`, the `FinanceResult` fields GS reads (`op`, `op_incremental`, `terminal`, `gate`, `flags`, `reasons`, `sections`, `incentives`).
-- **N15:** the asset schema's `derive.apply_parts` / `has_parts` (S0's).
+- **Q15** (frozen 2026-10-13, ask 3): `binding.bind_commercial` (binding a fork's in-memory network) and `series_store.resolve` in the facade.
+- **delete_series / pinned_by** (landed 2026-10-13, ask 1): delete a study's minted export series (all versions) and ask whether a config pins it; GS reads `bundle_pins` and `series_store.list_series` meanwhile.
+- **WP7 freeze** (frozen 2026-10-13, ask 3): `finance.engine.wacc_gate`, `lp_bindings.META_LINKS`, the `FinanceResult` fields GS reads (`op`, `op_incremental`, `terminal`, `gate`, `flags`, `reasons`, `sections`, `incentives`).
+- **N15** (frozen 2026-10-13, ask 3): the asset schema's `derive.apply_parts` / `has_parts` (S0's).
 - `scale_capex(case, f, *, asset=, part=)` (landed 2026-10-13, ask 2): the per-part CAPEX bound needs no WORKAROUND (X6).
 - Unrounded `n.statistics` FOM, CAPEX and OPEX.
 - A public test helper that records a written dispatch as an engine solve (landed 2026-10-13, ask 5: `lp_bindings.record_dispatch_as_solve`; GS's fakes no longer read `lp_bindings` internals).
@@ -126,7 +126,7 @@ Each package's table is in the plan's status block; all ran on scratch copies, e
 ## Open items
 
 **Owner decisions (2026-10-13, relayed to #154 by the coordinating session):**
-- **C3e: accepted for now, and tracked.** The study keeps reading the engine internals the export-series delete needs (`bundle_pins`, `series_store.list_series`, `LibraryItem`) until the engine adds `delete_series` / `pinned_by`, then switches to them.
+- **C3e: retired (2026-10-13, IC engine ask 1):** the study deletes through `series_store.delete_series` and no longer reads the Library rows or pin sidecars. Was: **accepted for now, and tracked.** The study keeps reading the engine internals the export-series delete needs (`bundle_pins`, `series_store.list_series`, `LibraryItem`) until the engine adds `delete_series` / `pinned_by`, then switches to them.
 - **Engine asks approved and commissioned from the engine:** per-part `scale_capex`, unrounded FOM statistics, a frozen engine interface, and a public "record a solve" helper. Each is adopted in a follow-up PR once it lands; #154 does not wait on them.
 - **A hand-typed price on a grid Link:** the engine warns and shows both prices, with no change to the numbers. This is commissioned from the engine side; the study changes nothing.
 - **The report workbook (WP9 decision W2):** accepted. The engine's sheets stay in each option's own case workbook.

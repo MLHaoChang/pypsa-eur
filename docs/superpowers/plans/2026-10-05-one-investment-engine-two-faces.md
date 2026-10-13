@@ -199,6 +199,15 @@ loader and the flat export series helper (new in U1), `commercial.cost_rows.comm
 
 **Changes (2026-10-13, IC engine asks, `2026-10-13-ic-engine-asks.md`):** `finance.case.scale_capex` gains the
 keyword-only `asset=` / `part=` (ask 2; the whole-case form is unchanged).
+**Additions (2026-10-13, IC engine asks, `2026-10-13-ic-engine-asks.md`):** `library.series_store.delete_series`,
+`pinned_by`, `list_series` and the result types `SeriesPin` / `SeriesDeleted` (ask 1; retires the study's C3e).
+**Additions (2026-10-13, ask 3, the freeze):** every engine name and field the study reads:
+`finance.engine.wacc_gate`, `commercial.binding.bind_commercial` / `BindingRefusal`, `library.series_store.resolve` /
+`LibraryRefNotFound` / `LibraryRefStale`, `asset_schema.derive.apply_parts` / `has_parts`, `lp_bindings.META_LINKS`,
+`models.finance.ESCALATION_CLASSES`; the fields read off `FinanceResult`, `Operating`, `Incentives`, `Template`,
+`TemplateLine`, `LpBasis`, `SiteBill`, `TemplateResult`, the commercial models and the defaults pack's models (a
+subset each, additions free); the `run_case` dict keys and the `commercial_cost_terms` / `export_revenue` keys it
+reads. The study's `ALLOWED_EXCEPTIONS` is empty, and its scan covers `models.commercial` / `models.finance`.
 
 ## 7. Coordination protocol
 
