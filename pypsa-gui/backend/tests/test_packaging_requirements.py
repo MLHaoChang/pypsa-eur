@@ -44,7 +44,12 @@ REQUIREMENTS = BACKEND.parent / "gui-requirements.txt"
 # `tests/` and `smoke/` are development tooling. The frozen app's entry point
 # is `desktop/gui.py` and neither is reachable from it, so `pytest` and
 # `requests` are not shipped dependencies.
-NOT_SHIPPED = {"tests", "smoke"}
+# `tools/` holds developer and CI scripts (bootstrap, auth smoke, OpenAPI diff,
+# the pilot-evaluation pytest plugin): nothing the frozen app imports, so their
+# imports (pytest among them) are not promises the bundle has to keep. The
+# first `tools/` file to import pytest unguarded (#137) tripped the pin test and
+# with it the macOS build's gate.
+NOT_SHIPPED = {"tests", "smoke", "tools"}
 
 # Third-party modules the backend imports INSIDE a try/except that catches the
 # import failure. Each is allowed to be absent from the bundle, and the value

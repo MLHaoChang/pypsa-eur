@@ -53,7 +53,11 @@ files. It writes:
 ``campus_investment.csv``
     One row per need and asset: library id, kind, units, length, the period
     it is invested in, capex, opex and annualised cost, existing, status
-    (``chosen``, ``kept``, ``not_needed``, ``unresolved``) and the reason.
+    (``chosen``, ``kept``, ``not_needed``, ``unresolved``), the reason and
+    the ``action`` (``buy``, ``add``, ``keep``, ``replace``; plan C13). Units
+    added next to an existing transformer group give two rows: the kept
+    units (``keep``) and the new ones (``add``), whose reason names the
+    units they join and any assumption (an unknown vector group).
 ``campus_cost.csv``
     The capex invested and the annualised electrical cost, per period.
 ``campus_invested.yaml``
@@ -65,6 +69,10 @@ files. It writes:
     Every escalation: iteration, need, from, to, the failing check.
 ``campus_invest_dispatch.csv``
     The reactive dispatch per selected hour: inverters, STATCOMs, steps.
+``campus_invest_scope.json``
+    Who buys the PCC switchgear (``pcc_switchgear``) and the rules a unit
+    added next to existing transformers had to meet (``parallel``,
+    ``ParallelRules.scope``: tolerances tagged assumed).
 
 ``invest_campus(..., method="milp")`` chooses the assets jointly instead
 (plan C11, ``gridspine.static.campus_milp``), warm-started from the
@@ -116,7 +124,7 @@ from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
 from gridspine.static.campus_reactive import reactive_need, requirement_from, size_compensation
 from gridspine.static.campus_compliance import campus_compliance
-from gridspine.static.campus_invest import select_assets
+from gridspine.static.campus_invest import ParallelRules, select_assets
 from gridspine.static.campus_milp import select_assets_milp
 from gridspine.static.campus_sc import campus_fault_levels
 from gridspine.templates.campus_assets import DEFAULT_PATH as ASSET_LIBRARY_PATH  # noqa: F401  (the backend's seam)
@@ -339,7 +347,8 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
 
 def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,
                   pf: float | None = None, profile_dirs=(), pcc_switchgear: bool = True,
-                  method: str = "least_cost", progress=None, should_stop=None) -> dict:
+                  method: str = "least_cost", progress=None, should_stop=None,
+                  parallel: ParallelRules = ParallelRules()) -> dict:
     """Least-cost electrical assets for a ranked run, AC-checked (module
     docstring). ``library`` is a path, or None for the shipped library;
     ``profile`` may be a project profile in ``profile_dirs``, as for
@@ -356,7 +365,12 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
     ``should_stop`` go to the MILP's loop (``select_assets_milp``): one call
     per iteration, and a cancel that ends the loop with
     ``summary["stop"] == "cancelled"``, its best point still written; the
-    least-cost pick takes neither."""
+    least-cost pick takes neither.
+
+    ``parallel`` are the rules for adding units next to existing
+    transformers (plan C13, ``campus_invest.ParallelRules``); the defaults
+    are the owner's, all assumed, and are written to
+    ``campus_invest_scope.json`` with the PCC switchgear setting."""
     if method not in METHODS:
         raise ContractError(f"unknown investment method {method!r}; allowed {list(METHODS)}")
     if method != "milp" and (progress is not None or should_stop is not None):
@@ -371,7 +385,7 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
     choose = select_assets_milp if method == "milp" else select_assets
     hooks = {"progress": progress, "should_stop": should_stop} if method == "milp" else {}
     out = choose(spec, hourly, selection, lib, requirement_from(grid_code, p_ref, pf=pf), grid_code, criteria,
-                 pcc_switchgear=pcc_switchgear, **hooks)
+                 pcc_switchgear=pcc_switchgear, parallel=parallel, **hooks)
     build_campus(out["spec"])                                # the invested file must build before it is written
     _write_text_atomic(run_dir / INVESTMENT_CSV, out["investment"].to_csv(index=False))
     _write_text_atomic(run_dir / COST_CSV, out["cost"].to_csv(index=False))

@@ -463,3 +463,138 @@ describe('the joint optimisation beside the least-cost choice', () => {
     expect((await screen.findByTestId('milp-stale')).textContent).toMatch(/has changed since/)
   })
 })
+
+describe('investment: units added next to an existing transformer group (plan C13)', () => {
+  const added = () => results({
+    investment: [
+      row({ need: 'transformer TR1+TR2', library_id: null, kind: 'keep', units: 2, capex_eur: 0,
+            annualised_eur_per_a: 0, existing: true, status: 'kept', reason: '', action: 'keep' }),
+      row({ need: 'transformer TR1+TR2', library_id: 'TR_110_20_20', units: 1, capex_eur: 550_000,
+            annualised_eur_per_a: 37_550, action: 'add',
+            reason: 'added in parallel with TR1, TR2 (existing); vector group assumed compatible (not given)' }),
+      row({ need: 'transformer TR3', library_id: 'TR_110_20_63', units: 2, action: 'replace' }),
+      row({ need: 'reactive', library_id: null, kind: 'none', units: 0, capex_eur: 0, annualised_eur_per_a: 0,
+            status: 'not_needed', action: null }),
+    ],
+    scope: {
+      pcc_switchgear: 'campus',
+      parallel: {
+        ratio_tol: { value: 0.005, source: 'assumed', note: 'n' }, uk_tol: { value: 0.1, source: 'assumed', note: 'n' },
+        step_tol_pct: { value: 0.1, source: 'assumed', note: 'n' }, unknown_vector_group: 'assume_compatible',
+        rating_ratio: 'not limited',
+      },
+    },
+  })
+
+  it('shows what each row does: the kept units and the added ones, beside a replacement', async () => {
+    api.state.mockResolvedValue(stateWith(added()))
+    renderPanel()
+    const [keep, add] = await screen.findAllByTestId('invest-transformer TR1+TR2')
+    expect(within(keep).getByTestId('invest-action').textContent).toBe('keep')
+    expect(keep.textContent).toContain('yes')
+    expect(within(add).getByTestId('invest-action').textContent).toBe('add')
+    expect(add.textContent).toContain('TR_110_20_20')
+    expect(add.textContent).toContain('€550,000')
+    expect(within(screen.getByTestId('invest-transformer TR3')).getByTestId('invest-action').textContent)
+      .toBe('replace')
+    expect(within(screen.getByTestId('invest-reactive')).getByTestId('invest-action').textContent).toBe('—')
+  })
+
+  it('shows the reason of an added unit, its assumption included', async () => {
+    api.state.mockResolvedValue(stateWith(added()))
+    renderPanel()
+    const [keep, add] = await screen.findAllByTestId('invest-transformer TR1+TR2')
+    expect(within(add).getByTestId('invest-reason').textContent)
+      .toBe('added in parallel with TR1, TR2 (existing); vector group assumed compatible (not given)')
+    expect(within(keep).queryByTestId('invest-reason')).toBeNull()                 // nothing to say
+  })
+
+  it('does not repeat an unresolved reason in the table: the alert lists it', async () => {
+    api.state.mockResolvedValue(stateWith(results({
+      investment: [row({ status: 'unresolved', reason: 'no library transformer', action: 'buy' })],
+      unresolved: [{ need: 'transformer GRID_IMPORT', reason: 'no library transformer' }],
+    })))
+    renderPanel()
+    const r = await screen.findByTestId('invest-transformer GRID_IMPORT')
+    expect(within(r).queryByTestId('invest-reason')).toBeNull()
+    expect(screen.getByTestId('unresolved').textContent).toContain('no library transformer')
+  })
+
+  it('states the rules a unit added in parallel had to meet, all assumed', async () => {
+    api.state.mockResolvedValue(stateWith(added()))
+    renderPanel()
+    const line = (await screen.findByTestId('invest-parallel')).textContent ?? ''
+    expect(line).toContain('impedance within ±10 %')
+    expect(line).toContain('no-load ratio within ±0.5 %')
+    expect(line).toContain('tap steps within 0.1 point')
+    expect(line).toContain('an unknown vector group is assumed compatible and flagged')
+    expect(line).toContain('no limit on the rating ratio')
+    expect(line).toMatch(/assumed/)
+  })
+
+  it('says a vector group that is not given is refused when the rules say so', async () => {
+    const res = added()
+    res.scope = { ...res.scope!, parallel: { ...res.scope!.parallel!, unknown_vector_group: 'refuse' } }
+    api.state.mockResolvedValue(stateWith(res))
+    renderPanel()
+    expect((await screen.findByTestId('invest-parallel')).textContent)
+      .toContain('an unknown vector group is refused')
+  })
+
+  it('reads a run from before these rules: no action, no rules line', async () => {
+    renderPanel()
+    const t = await screen.findByTestId('invest-transformer GRID_IMPORT')
+    expect(within(t).getByTestId('invest-action').textContent).toBe('—')
+    expect(screen.queryByTestId('invest-parallel')).toBeNull()
+  })
+})
+
+// Owner decision 2026-10-12: the investment case takes the joint optimisation when it is
+// fresh and found its own choice, else the least-cost run. The switch is never silent.
+describe('which result feeds the investment case', () => {
+  const milpOf = (over: Partial<MilpResults> = {}): MilpResults => ({
+    investment: [], cost: [], compliance_invested: [], history: [], comparison: [],
+    summary: { method: 'milp', fallback: false, reason: '', stop: 'converged', c8_cost: 2, milp_cost: 1,
+               c8_feasible: true, iterations: 1 },
+    fallback: null, stop: 'converged', ...over,
+  })
+
+  it('says the joint optimisation feeds it', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'milp', milp: { status: null, stale: false, results: milpOf() } }))
+    renderPanel()
+    const line = await screen.findByTestId('invest-ic-source')
+    expect(line.textContent).toMatch(/^Investment case uses: joint optimisation \(MILP\)\.$/)
+  })
+
+  it('says the least cost feeds it when there is no joint optimisation', async () => {
+    api.state.mockResolvedValue(stateWith(results(), { owner_assets_count: 2, owner_assets_method: 'least_cost' }))
+    renderPanel()
+    const line = await screen.findByTestId('invest-ic-source')
+    expect(line.textContent).toMatch(/^Investment case uses: least cost\.$/)
+  })
+
+  it('says why the least cost feeds it when a joint optimisation is stale', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'least_cost', milp: { status: null, stale: true, results: milpOf() } }))
+    renderPanel()
+    expect((await screen.findByTestId('invest-ic-source')).textContent)
+      .toBe('Investment case uses: least cost. The joint optimisation is stale; run it again to use it.')
+  })
+
+  it('says why the least cost feeds it when the joint optimisation kept the least-cost choice', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'least_cost',
+      milp: { status: null, stale: false, results: milpOf({ fallback: 'no AC-feasible point is cheaper' }) } }))
+    renderPanel()
+    expect((await screen.findByTestId('invest-ic-source')).textContent)
+      .toBe('Investment case uses: least cost. The joint optimisation kept the least-cost choice.')
+  })
+
+  it('shows no line when there is nothing for the investment case', async () => {
+    api.state.mockResolvedValue(stateWith(results(), { owner_assets_count: 0, owner_assets_method: null }))
+    renderPanel()
+    await screen.findByTestId('campus-investment')
+    expect(screen.queryByTestId('invest-ic-source')).toBeNull()
+  })
+})
