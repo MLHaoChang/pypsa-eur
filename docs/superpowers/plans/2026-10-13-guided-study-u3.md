@@ -17,7 +17,7 @@ No second store, no direct writes to `n.meta["asset_params"]`.
 | B | Decision-study entry in Guided's Start card: "Is my site reliable?" beside "Is this investment worth it?" (owner decision 5) | A | branch `claude/u3-start-card` |
 | C | The six study chat tools with Guided confirmation tiers and `delegate()` steps | B | branch `claude/u3-chat-tools` |
 | D | The key-parameter list view | C | branch `claude/u3-key-params` |
-| E | M7 (Guided shell) and M8 (Guided without an API key) | — | |
+| E | M7 (Guided shell) and M8 (Guided without an API key) | D | branch `claude/u3-guided-shell` |
 | F | "Open in Expert" lands on the study's project (today's cards; switch to the S1b cards when they merge) | S1b for the final form | |
 | H | Open the study routes in multi-user mode, with a cross-tenant test of every study route, the study-created base project and its forks (owner, 2026-10-13: a later slice) | — | later |
 | G | S2: ledger rows as a view of the provenance store; pack defaults written through `provenance.record`; Expert edits mark ledger rows | S1a | waits for S1a |
@@ -76,3 +76,20 @@ The assumptions step (`LedgerReview`) is the key-parameter list of owner decisio
 
 The labels live in `KEY_PARAMETER_LABELS`. S2 will later make these rows a view of the provenance store;
 the list does not change shape for that.
+
+## E — the Guided shell (M7, M8)
+
+- **M7.**
+  - Guided does not render the bottom grids (`App.tsx`), the header's stat chips or the component search
+    (`AppHeader.tsx`). The Expert header stays byte-identical, and its snapshot test still holds.
+  - The Site map card was already under the step (`SiteThumbnailCard`).
+  - Autosave is on by default in Guided. A choice the user made (the autosave key in storage) wins in
+    both modes; with none, the mode decides (`uiStore`).
+  - Switching to Guided keeps the decision panel open, since the Start card opens it.
+- **M8.**
+  - Without a usable assistant (`useChatReadiness().ready === false`), the hub-design panel shows one
+    "Set up the assistant" card that opens the assistant panel and its key form (`AssistantSetupCard`).
+  - Every "Let the assistant do this" is disabled with the reason (`DelegateButton`, so the decision
+    panel's buttons too).
+  - The dock's start-menu chips wait for the key.
+  - Unknown readiness changes nothing.

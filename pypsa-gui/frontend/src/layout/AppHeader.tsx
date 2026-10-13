@@ -900,7 +900,9 @@ export default function AppHeader() {
       </div>
 
       {/* Mini stat chips — buses · lines · assets (design system). Rounded
-          bg-2 container with 1px dividers; coloured LED per metric. */}
+          bg-2 container with 1px dividers; coloured LED per metric. Expert
+          chrome: not in Guided (UX M7, U3), nor the component search below. */}
+      {uiMode !== 'guided' && <>
       <div className="inline-flex items-center bg-bg-2 border border-border rounded-lg p-0.5 shrink-0">
         {([
           ['buses',  buses.length,                                      'var(--color-v-red)'],
@@ -954,6 +956,7 @@ export default function AppHeader() {
           </div>
         )}
       </div>
+      </>}
 
       {/* Command palette launcher — the palette (project switch, jump to any
           panel/asset, theme/density) was previously keyboard-only (Ctrl/Cmd+K),

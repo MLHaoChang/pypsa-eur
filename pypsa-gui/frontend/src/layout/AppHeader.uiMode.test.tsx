@@ -187,3 +187,21 @@ describe('AppHeader — the Run button per mode', () => {
     expect(screen.getByTitle(/queues the solve/)).toBeTruthy()
   })
 })
+
+// UX M7 (U3): Guided leaves out the Expert chrome — the stat chips and the
+// component search — and Expert keeps both (the snapshot test pins Expert).
+describe('AppHeader — the Expert chrome per mode', () => {
+  it('Guided: no stat chips and no component search', () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    renderHeader()
+    expect(screen.queryByPlaceholderText('Search components…')).toBeNull()
+    expect(screen.queryByText('buses')).toBeNull()
+  })
+
+  it('Expert: both are there', () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    renderHeader()
+    expect(screen.getByPlaceholderText('Search components…')).toBeTruthy()
+    expect(screen.getByText('buses')).toBeTruthy()
+  })
+})

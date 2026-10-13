@@ -3,13 +3,19 @@
 // click; confirmation cards still gate the writes), Ask only prefills. Every
 // tool the sent text names exists in the backend's catalogue.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render as rtlRender, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement } from 'react'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import StudyAssist from './StudyAssist'
 import { useChatStore } from '../../store/chatStore'
 import { useUIStore } from '../../store/uiStore'
 import { ASSIST_LABELS, assistText, type AssistStep } from '../../utils/decisionVocabulary'
+
+// The delegate button reads the chat's readiness (UX M8) through react-query.
+const render = (ui: ReactElement) => rtlRender(
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>)
 
 const STEPS: AssistStep[] = ['ledger', 'run', 'verdict', 'report']
 
