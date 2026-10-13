@@ -160,6 +160,11 @@ def test_the_recording_commit_predates_wp1():
                              cwd=REC._BACKEND, capture_output=True)
     except (OSError, subprocess.CalledProcessError):
         pytest.skip("no git checkout to check ancestry in")
+    # `--is-ancestor` exits 1 for "not an ancestor" and 128 when it cannot
+    # resolve the commit: CI's shallow checkout (actions/checkout, depth 1)
+    # does not hold the recording commit, so there is nothing to compare.
+    if anc.returncode == 128:
+        pytest.skip(f"{commit} is not in this clone (shallow checkout)")
     assert anc.returncode == 0, f"{commit} is not an ancestor of HEAD {head}"
 
 
