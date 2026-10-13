@@ -42,7 +42,8 @@ non-master refusal, fatal build/pull/push failures, and workflow token permissio
 Shell syntax and changed-test Ruff checks also pass. These offline checks do not
 claim an actual container build or successful registry publication. A new
 read-only PR job builds the real locked image without logging into the registry
-or publishing it; it must pass before merge. Local Docker socket access was
+or publishing it, then imports the bind-mounted GridSpine package from `/tmp`;
+it must pass before merge. Local Docker socket access was
 rejected by automatic approval review because daemon access grants broad host
 control. GitHub CI provides the safer build-validation path.
 

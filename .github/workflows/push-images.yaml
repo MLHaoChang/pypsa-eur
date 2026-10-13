@@ -34,6 +34,11 @@ jobs:
     - uses: actions/checkout@v7
     - name: Build locked environment without publishing
       run: docker build . --file docker/dev-env/Dockerfile --tag dev-env-validation:${{ github.sha }}
+    - name: Verify mounted package imports outside the workspace
+      run: |
+        docker run --rm --workdir /tmp --volume "$GITHUB_WORKSPACE:/workspace" \
+          "dev-env-validation:$GITHUB_SHA" python -c \
+          'from pathlib import Path; import gridspine; assert Path(gridspine.__file__).resolve() == Path("/workspace/gridspine/__init__.py")'
 
   push-image:
     name: dev-env
