@@ -17,6 +17,7 @@ import toast from 'react-hot-toast'
 import type { Bus, Line, Link, Generator, Load, StorageUnit, Store, Transformer } from '../api/types'
 import { PALETTE_COMPONENT_TYPE } from './paletteData'
 import { carrierMatches, type BusFilter } from '../utils/busCarriers'
+import { busLatLng, haversineKm } from '../utils/geo'
 
 // Carrier classification used by the bus-picker filters lives in
 // utils/busCarriers.ts (shared with the 3D asset library).
@@ -257,6 +258,21 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
  * they are unreachable from the live UI and are deleted in the same change as
  * AssetPalette.tsx (spec D29).
  */
+/** The placed bus nearest a map point (great circle), or null when none is placed. */
+export function nearestPlacedBus(
+  at: { lat: number; lng: number },
+  buses: ReadonlyArray<{ name: string; x?: number | null; y?: number | null }>,
+): string | null {
+  let best: string | null = null, bestKm = Infinity
+  for (const b of buses) {
+    const ll = busLatLng({ x: b.x, y: b.y })
+    if (!ll) continue
+    const km = haversineKm([at.lat, at.lng], ll)
+    if (km < bestKm) { best = b.name; bestKm = km }
+  }
+  return best
+}
+
 export const TERMINAL_FIELD: Record<string, 'bus' | 'bus0'> = {
   line: 'bus0', transformer: 'bus0',
   electrolyzer: 'bus0', fuel_cell: 'bus0', power_to_heat: 'bus0', chp: 'bus0',
@@ -392,7 +408,7 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
   const prefix = AUTO_PREFIX[item.id] ?? 'Asset'
 
   const allBuses = useMemo(
-    () => qc.getQueryData<Array<{ name: string; carrier?: string }>>(nk(currentProject, 'buses')) ?? [],
+    () => qc.getQueryData<Array<{ name: string; carrier?: string; x?: number | null; y?: number | null }>>(nk(currentProject, 'buses')) ?? [],
     [qc, currentProject],
   )
   const busNames = useMemo(() => allBuses.map(b => b.name).sort(), [allBuses])
@@ -424,6 +440,21 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
       const spec = fields.find(f => f.key === terminal) as BusFieldSpec | undefined
       if (spec && filteredBusNames(spec.busCarrierFilter).includes(item.dropBusName)) {
         init[terminal] = item.dropBusName
+      }
+    }
+    // A map drop (plan M4): the point under the pointer is a real geographic
+    // position. A dropped BUS lands there; any other asset dropped on empty
+    // map gets the nearest PLACED bus as its terminal (a drop on a marker
+    // already prefilled it above, and wins).
+    if (item.dropLatLng && !item.dropSite) {
+      if (item.id === 'bus') {
+        init.x = String(Math.round(item.dropLatLng.lng * 1e6) / 1e6)
+        init.y = String(Math.round(item.dropLatLng.lat * 1e6) / 1e6)
+      } else if (terminal && !init[terminal]) {
+        const spec = fields.find(f => f.key === terminal) as BusFieldSpec | undefined
+        const allowed = new Set(filteredBusNames(spec?.busCarrierFilter))
+        const nearest = nearestPlacedBus(item.dropLatLng, allBuses.filter(b => allowed.has(b.name)))
+        if (nearest) init[terminal] = nearest
       }
     }
     if (dropSite && item.dropSite) {

@@ -40,3 +40,43 @@ export function useReducedMotion(): boolean {
   }, [])
   return reduced
 }
+
+// ── The fly-in (visual-layers plan 3 S4; Phase 1 decision 3) ────────────────
+//
+// Generate 3D site and Open in 3D start the camera straight above the plot,
+// looking down as the map did, and bring it to the fitted view over
+// FLY_IN_MS. Reduced motion is a jump cut (duration 0). Poses are in scene
+// coordinates (x east, y up, z south), as `fitCamera` returns them.
+
+export const FLY_IN_MS = 900
+
+const clamp01 = (u: number) => Math.min(1, Math.max(0, u))
+
+/** Ease-out cubic: leaves fast, lands gently. */
+export const easeOutCubic = (u: number): number => 1 - Math.pow(1 - clamp01(u), 3)
+
+export interface Pose { position: [number, number, number]; target: [number, number, number] }
+
+/**
+ * Where the flight starts: above the fitted target at `lift` × the fitted
+ * distance, nudged a hair south so the look-down never aligns with the
+ * camera's up vector.
+ */
+export function flyStart(to: Pose, lift = 1.6): Pose {
+  const [px, py, pz] = to.position, [tx, ty, tz] = to.target
+  const dist = Math.hypot(px - tx, py - ty, pz - tz)
+  const h = dist * lift
+  return { position: [tx, ty + h, tz + h * 0.02], target: [tx, ty, tz] }
+}
+
+/** The pose `elapsedMs` into the flight, and whether it has landed. A duration of 0 lands at once. */
+export function flyPose(from: Pose, to: Pose, elapsedMs: number, durationMs = FLY_IN_MS): { pose: Pose; done: boolean } {
+  const u = durationMs <= 0 ? 1 : clamp01(elapsedMs / durationMs)
+  const k = easeOutCubic(u)
+  const lerp = (a: [number, number, number], b: [number, number, number]): [number, number, number] =>
+    [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k]
+  return { pose: { position: lerp(from.position, to.position), target: lerp(from.target, to.target) }, done: u >= 1 }
+}
+
+/** How long the fly-in takes: none under reduced motion. */
+export const flyDuration = (reduced: boolean): number => (reduced ? 0 : FLY_IN_MS)

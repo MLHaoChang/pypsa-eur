@@ -13,6 +13,7 @@ import { GoalCard } from './cards/GoalCard'
 import { ImproveCard } from './cards/ImproveCard'
 import { ResultsCard } from './cards/ResultsCard'
 import { SiteCard } from './cards/SiteCard'
+import { SiteThumbnailCard } from './cards/SiteThumbnailCard'
 import { StartCard } from './cards/StartCard'
 import { useHubReadiness, useHubReview, useHubStudy, useHubTemplate } from './useHubData'
 
@@ -130,6 +131,8 @@ export default function HubDesignPanel() {
         {settled ? <Card /> : (
           <p className="text-[12px] text-muted">Loading the project…</p>
         )}
+        {/* The Site map card (UX IA-6 / M7, plan 3 S5): under the step, only when a site exists. */}
+        {settled && <SiteThumbnailCard />}
       </div>
     </div>
   )

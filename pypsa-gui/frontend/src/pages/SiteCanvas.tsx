@@ -17,17 +17,28 @@
 // Frames. Everything in the scene is metres east/north of the SITE ORIGIN
 // (the boundary's stored centroid); the layout is built in that frame.
 //
+// Distances (S3, owner decision O1). Every member branch's site distance —
+// along its map route, else Manhattan × the routing factor — is computed
+// once per layout (`site3d/siteDistances.ts`), shown on its hover label and
+// in the results readout, and its flow chevrons run along the route. With
+// the project's "Derive lengths from geometry" on, a placement change that
+// moves either end of a branch writes a straight two-point `site` route
+// into the map document (never over a route the user drew) and queues the
+// branch's length to follow once that PUT has landed, exactly as a route
+// edit on the map does; the rescale previews reach the same dialog host.
+//
 // This module is loaded lazily (App.tsx) and is the only importer of three.js
 // (and of the site3d modules that import it).
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls, Line, PivotControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { networkApi } from '../api/network'
+import { projectsApi } from '../api/projects'
 import { busLatLng } from '../utils/geo'
 import { tileRangeAround, mosaicExtent, zoomFor, tileCount, fromLocal, type LngLat, type LocalExtent } from '../site3d/geo'
 import { buildGroundMosaic, ESRI_ATTRIBUTION } from '../site3d/imagery'
@@ -48,6 +59,7 @@ import { screenToGround, groundToScreen } from '../site3d/raycast'
 import { registerSiteDropTarget, unregisterSiteDropTarget } from '../site3d/dropRegistry'
 import SiteOverlay from '../components/SiteOverlay'
 import { useDispatchFresh, useSolveSettled } from '../site3d/useDispatchFresh'
+import { useReducedMotion, flyStart, flyPose, flyDuration, type Pose } from '../site3d/motion'
 import { useSiteResults, type SiteComponents, type SiteResultObject } from '../site3d/useSiteResults'
 import { ResultsLayer, ObjectRegistryContext, useRegisterObject, type EasedVisual, type ObjectRegistry } from '../site3d/resultsLayer'
 import { createResultsStore, type ResultsStore } from '../site3d/resultsStore'
@@ -61,9 +73,22 @@ import { writeActiveSite } from '../site3d/activeSite'
 import { boundaryToLocal } from '../site3d/boundary'
 import { busOffsets, siteBounds } from '../site3d/siteModel'
 import { fitReport, type FitObject } from '../site3d/fit'
+import { placementFindings, findingKeys } from '../site3d/placementCheck'
+import { libraryGaps, libraryGapLine } from '../site3d/libraryGaps'
+import { thumbSize, captureDue } from '../site3d/thumbnail'
+import WalkControls from '../site3d/WalkControls'
+import { useThumbnailStore } from '../site3d/thumbnailStore'
+import { usePlacementFindings } from '../site3d/placementFindingsStore'
+import SiteLayoutFindings from '../components/SiteLayoutFindings'
 import SiteEmptyState from '../components/SiteEmptyState'
-import type { Bus } from '../api/types'
+import type { Bus, ProjectInfo } from '../api/types'
 import type { Site, SiteContext } from '../site3d/types'
+import { queueLengthFromGeometry, setLengthsDerivedSink, useMapLayoutLifecycle, useMapLayoutStore } from './mapLayoutStore'
+import {
+  affectedBranches, distanceLabel, distanceTitle, edgeKeyOf, flowAnchorsAlong, siteDistances, siteRoutePoints, yardsOf,
+  type SiteDistance, type XY,
+} from '../site3d/siteDistances'
+import { applyLengthsDerived } from '../utils/lengthsDerived'
 
 /** The one empty list the component queries fall back to (stable identity). */
 const NONE: never[] = []
@@ -93,12 +118,16 @@ function geometrySignature(o: SiteObject): string {
  * outside-the-boundary warning glow through the emissive channel only
  * (`emissiveFor`); vertex colours keep each part's own colour.
  */
-const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hovered, outside, pivot, onHover, onSelect }: {
+const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hovered, outside, warn, pivot, flowPath = null, onHover, onSelect }: {
   obj: SiteObject
+  /** A branch's map route in site metres (S3): its flow chevrons run along it instead of its own anchor. */
+  flowPath?: XY[] | null
   selected: boolean
   hovered: boolean
-  /** Sticks out of the site boundary (fit check, D9). */
+  /** The red outline: sticks out of the site boundary (fit check, D9) or stands inside a keep-out (S2). */
   outside: boolean
+  /** The amber outline: any other layout finding (S2). */
+  warn: boolean
   /** Wrapped in a PivotControls whose matrix carries position and heading — render at identity. */
   pivot?: boolean
   /** Called with the object's key (`Class:name`) on pointer-over, null on pointer-out. */
@@ -121,12 +150,15 @@ const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hover
   /* eslint-enable react-hooks/exhaustive-deps */
   useEffect(() => () => { all.body?.dispose(); for (const r of all.rotors) r.geometry.dispose() }, [all])
   useEffect(() => () => { rest?.body?.dispose(); for (const r of rest?.rotors ?? []) r.geometry.dispose() }, [rest])
-  const glow = emissiveFor({ selected, hovered, outside }, obj.color)
+  const glow = emissiveFor({ selected, hovered, outside, warn }, obj.color)
   // The results layer drives this group per frame (gauge, glow, spin, flow).
   const groupRef = useRef<THREE.Group>(null)
-  const registered = useMemo(() => ({ type: obj.type, name: obj.name, kind: obj.kind, bus: obj.bus, color: obj.color, anchors: obj.anchors }),
-    [obj.type, obj.name, obj.kind, obj.bus, obj.color, obj.anchors])
-  useRegisterObject(objectKey(obj), groupRef, registered, selected || hovered || outside)
+  // The flow anchor along the route, in the object's frame — computed when the layout or the route changes, never per frame.
+  const anchors = useMemo(() => flowAnchorsAlong(obj, flowPath),
+    [obj.anchors, flowPath, obj.origin[0], obj.origin[1], obj.heading]) // eslint-disable-line react-hooks/exhaustive-deps
+  const registered = useMemo(() => ({ type: obj.type, name: obj.name, kind: obj.kind, bus: obj.bus, color: obj.color, anchors }),
+    [obj.type, obj.name, obj.kind, obj.bus, obj.color, anchors])
+  useRegisterObject(objectKey(obj), groupRef, registered, selected || hovered || outside || warn)
   const material = (
     <meshStandardMaterial vertexColors emissive={glow.color} emissiveIntensity={glow.intensity} roughness={0.7} metalness={0.1} />
   )
@@ -162,11 +194,19 @@ const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hover
     </group>
   )
 }, (a, b) =>
-  a.selected === b.selected && a.hovered === b.hovered && a.outside === b.outside && a.pivot === b.pivot &&
-  a.onHover === b.onHover && a.onSelect === b.onSelect &&
+  a.selected === b.selected && a.hovered === b.hovered && a.outside === b.outside && a.warn === b.warn && a.pivot === b.pivot &&
+  a.onHover === b.onHover && a.onSelect === b.onSelect && samePath(a.flowPath, b.flowPath) &&
   // The same object if the layout rebuilt it with the same content and place.
   (a.obj === b.obj || (objectKey(a.obj) === objectKey(b.obj) && a.obj.origin[0] === b.obj.origin[0] && a.obj.origin[1] === b.obj.origin[1] &&
     a.obj.heading === b.obj.heading && a.obj.elevation === b.obj.elevation && a.obj.summary === b.obj.summary && geometrySignature(a.obj) === geometrySignature(b.obj))))
+
+/** The same flow path (by content: the layout hands out new arrays each build). */
+function samePath(a: XY[] | null | undefined, b: XY[] | null | undefined): boolean {
+  if (a === b) return true
+  if (!a || !b || a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i][0] !== b[i][0] || a[i][1] !== b[i][1]) return false
+  return true
+}
 
 // ── Hover / selection labels: plain DOM over the canvas ──────────────────────
 //
@@ -324,22 +364,68 @@ function BoundaryRibbon({ site, heightAt }: { site: Site; heightAt: HeightAt }) 
   return <Line points={points} color="#b3261e" lineWidth={2} />
 }
 
-// ── Camera: fit the packed site once per mount (the Canvas is keyed on the site) ──
+// ── Camera: fit the plot once per mount (the Canvas is keyed on the site) ────
+//
+// The first fit FLIES IN (plan 3 S4; Phase 1 decision 3): from straight above
+// the plot, as the map showed it, down to the fitted view over FLY_IN_MS —
+// a jump cut under reduced motion. Generate 3D site, Open in 3D and the site
+// picker all mount a fresh Canvas, so each of them flies; a parameter edit
+// does not remount and does not. When the controls are swapped later (walk
+// mode on and off) the camera stays where it is and only the orbit target
+// is re-derived from where it looks.
+
+type Controls = { target: THREE.Vector3; update: () => void; enabled: boolean }
 
 function FitCamera({ bounds }: { bounds: Bounds }) {
   const camera = useThree(s => s.camera)
-  const controls = useThree(s => s.controls) as { target: THREE.Vector3; update: () => void } | null
+  const controls = useThree(s => s.controls) as Controls | null
   const size = useThree(s => s.size)
+  const reduced = useReducedMotion()
+  const fitted = useRef(false)
+  const flight = useRef<{ from: Pose; to: Pose; start: number } | null>(null)
+  const apply = (p: Pose) => {
+    camera.position.set(...p.position)
+    camera.lookAt(...p.target)
+    if (controls) { controls.target.set(...p.target); controls.update() }
+  }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const cam = camera as THREE.PerspectiveCamera
     const fit = fitCamera(bounds, size.width / Math.max(size.height, 1), cam.fov)
-    cam.position.set(...fit.position)
+    if (fitted.current) {
+      // Controls (re)mounted under a camera that already stands somewhere:
+      // aim the orbit at the ground point in view, else at the plot centre.
+      if (controls && !flight.current) {
+        const dir = cam.getWorldDirection(new THREE.Vector3())
+        if (dir.y < -1e-3) {
+          const t = -cam.position.y / dir.y
+          controls.target.copy(cam.position).addScaledVector(dir, t)
+        } else controls.target.set(...fit.target)
+        controls.update()
+      }
+      return
+    }
+    fitted.current = true
     cam.far = fit.far
     cam.updateProjectionMatrix()
-    cam.lookAt(...fit.target)
-    if (controls) { controls.target.set(...fit.target); controls.update() }
+    const to: Pose = { position: fit.position, target: fit.target }
+    if (flyDuration(reduced) > 0) {
+      const from = flyStart(to)
+      apply(from)
+      flight.current = { from, to, start: performance.now() }
+    } else apply(to)
   }, [controls])
+  useFrame(() => {
+    const f = flight.current
+    if (!f) return
+    const { pose, done } = flyPose(f.from, f.to, performance.now() - f.start, flyDuration(reduced))
+    if (controls) controls.enabled = false
+    apply(pose)
+    if (done) {
+      flight.current = null
+      if (controls) controls.enabled = true
+    }
+  })
   return null
 }
 
@@ -460,6 +546,47 @@ function DropTargetRegistrar({ siteId }: { siteId: string }) {
   return null
 }
 
+// ── Thumbnail capture (plan 3 S5): the site from the south, on request ───────
+//
+// A bump of `nonce` captures on the next frame: the scene is rendered once
+// through a camera at the fitted south view (the user's orbit is untouched),
+// read straight off the WebGL canvas — `toDataURL` / `drawImage` right after
+// `gl.render` in the same task is what the spike found reliable, where
+// `page.screenshot` lies — scaled to THUMB_MAX_PX and handed over as a PNG
+// blob. The loop's own render follows in the same frame, so nothing of the
+// capture view is ever shown.
+
+function ThumbnailCapture({ nonce, bounds, onPng }: { nonce: number; bounds: Bounds; onPng: (png: Blob) => void }) {
+  const gl = useThree(s => s.gl)
+  const scene = useThree(s => s.scene)
+  const camera = useThree(s => s.camera)
+  const size = useThree(s => s.size)
+  const pending = useRef(0)
+  useEffect(() => { if (nonce > 0) pending.current = nonce }, [nonce])
+  useFrame(() => {
+    if (!pending.current) return
+    pending.current = 0
+    const cam = (camera as THREE.PerspectiveCamera).clone()
+    const fit = fitCamera(bounds, size.width / Math.max(size.height, 1), cam.fov)
+    cam.position.set(...fit.position)
+    cam.far = fit.far
+    cam.updateProjectionMatrix()
+    cam.lookAt(...fit.target)
+    gl.render(scene, cam)
+    const src = gl.domElement
+    const { w, h } = thumbSize(src.width, src.height)
+    if (!w || !h || typeof document === 'undefined') return
+    const out = document.createElement('canvas')
+    out.width = w
+    out.height = h
+    const ctx = out.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(src, 0, 0, w, h)
+    out.toBlob(blob => { if (blob) onPng(blob) }, 'image/png')
+  })
+  return null
+}
+
 // ── The selected object's gizmo ───────────────────────────────────────────────
 
 function SelectedPivot({ obj, enabled, onCommit, children }: {
@@ -519,6 +646,7 @@ function SiteCanvas() {
   const setPlacement = useSitesStore(s => s.setPlacement)
   const removePlacement = useSitesStore(s => s.removePlacement)
   const arrangeAll = useSitesStore(s => s.arrangeAll)
+  const rearrangeAll = useSitesStore(s => s.rearrangeAll)
   const readOnly = useUIStore(s => s.readOnly)
 
   const qBuses = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
@@ -569,6 +697,9 @@ function SiteCanvas() {
     return buildSiteLayout({ buses: [{ name: busName, v_nom: bus?.v_nom ?? 0, offset: [0, 0] }], generators, storageUnits, stores, loads, transformers, lines, links, busCarrier })
   }
 
+  // Every two-port branch, for the readiness checklist (S4).
+  const branches = useMemo(() => [...lines, ...links, ...transformers].map(b => ({ bus0: b.bus0, bus1: b.bus1 })), [lines, links, transformers])
+
   // Member buses with a position; a member that is not placed cannot be
   // drawn and is reported on the status line.
   const offsets = useMemo(() => (site ? busOffsets(site, buses as Bus[]) : {}), [site, buses])
@@ -597,6 +728,26 @@ function SiteCanvas() {
   const easedRef = useRef(new Map<string, EasedVisual>())
   const siteSizing = useUIStore(s => s.siteSizing)
   const sizing = effectiveSizing(siteSizing, solved)
+
+  // The thumbnail (S5): once per fresh solve, and on demand (Snapshot). The
+  // capture lands in `sites/<id>/thumb.png`; the hub-design card re-reads it
+  // through the store's version. Quiet on failure: a picture, nothing more.
+  const [captureNonce, setCaptureNonce] = useState(0)
+  const capturedFor = useRef(0)
+  useEffect(() => {
+    if (captureDue(solved, freshSince, capturedFor.current)) {
+      capturedFor.current = freshSince
+      setCaptureNonce(n => n + 1)
+    }
+  }, [solved, freshSince])
+  const bumpThumbnail = useThumbnailStore(s => s.bump)
+  const siteIdForPng = site?.id ?? null
+  const onPng = useCallback((png: Blob) => {
+    if (!currentProject || !siteIdForPng) return
+    sitesApi.putThumbnail(currentProject, siteIdForPng, png)
+      .then(() => bumpThumbnail(currentProject, siteIdForPng))
+      .catch(() => { /* read-only, locked or offline: no thumbnail this time */ })
+  }, [currentProject, siteIdForPng, bumpThumbnail])
 
   // The layout is in the SITE frame already: one yard per bus at its
   // offset, placements honoured.
@@ -685,7 +836,21 @@ function SiteCanvas() {
     const fo: FitObject[] = objects.map(o => ({ key: `${o.type}:${o.name}`, origin: o.origin, footprint: o.footprint, heading: o.heading, areaM2: o.areaM2 }))
     return fitReport(fo, site)
   }, [objects, site])
-  const outsideSet = useMemo(() => new Set(fit?.outside ?? []), [fit])
+  // The placement check (S2): outside the plot, overlapping, inside a
+  // keep-out, short of a clearance, off its segment, turned away. Red for
+  // the first and third, amber for the rest; the overlay lists them and the
+  // Issues panel reads them from the store. Advisory: nothing blocks a save.
+  const findings = useMemo(() => placementFindings(objects, DEFAULT_LIBRARY, { outside: fit?.outside ?? [] }), [objects, fit])
+  const redSet = useMemo(() => findingKeys(findings, 'red'), [findings])
+  const amberSet = useMemo(() => findingKeys(findings, 'amber'), [findings])
+  const publishFindings = usePlacementFindings(s => s.publish)
+  const clearFindings = usePlacementFindings(s => s.clear)
+  const siteName = site?.name ?? null
+  useEffect(() => {
+    if (siteId && siteName) publishFindings({ id: siteId, name: siteName }, findings)
+    else clearFindings()
+  }, [siteId, siteName, findings, publishFindings, clearFindings])
+  useEffect(() => () => clearFindings(), [clearFindings])
 
   // Ground: tile range around the SITE origin sized to the extent, stitched
   // once per (site, size). Keyed on the quantised half-size, not the layout
@@ -761,7 +926,54 @@ function SiteCanvas() {
   useEffect(() => () => { hillshadeTexture?.dispose() }, [hillshadeTexture])
   const groundTexture = mode === 'imagery' ? texture : mode === 'hillshade' ? hillshadeTexture : null
 
+  // ── Site distances (S3) ──────────────────────────────────────────────────
+  // The map document holds the routes; the lifecycle loads it (and flushes a
+  // pending write when the view closes), the distances follow it and the layout.
+  useMapLayoutLifecycle(currentProject)
+  const mapDoc = useMapLayoutStore(s => s.docFor(currentProject))
+  const setSiteRoute = useMapLayoutStore(s => s.setSiteRoute)
+  const distances = useMemo(
+    () => (siteOrigin ? siteDistances(objects, mapDoc.routes, siteOrigin) : new Map<string, SiteDistance>()),
+    [objects, mapDoc, siteOrigin],
+  )
+  const distanceOf = (o: SiteObject): SiteDistance | undefined => { const k = edgeKeyOf(o); return k ? distances.get(k) : undefined }
+  // The project setting (metadata.json, through the list query every project
+  // surface shares); every derivation's result goes where the map's go.
+  const qc = useQueryClient()
+  const { data: projects = [] } = useQuery({
+    queryKey: ['projects'], queryFn: () => projectsApi.list(), staleTime: 30_000, enabled: !!currentProject,
+  })
+  const deriveLengths = (projects as ProjectInfo[]).find(p => p.name === currentProject)?.settings?.derive_lengths_from_geometry ?? false
+  useEffect(() => {
+    setLengthsDerivedSink((_project, r) => applyLengthsDerived(qc, r, 'site geometry'))
+    return () => setLengthsDerivedSink(null)
+  }, [qc])
+  // A placement change (a gizmo drag settling, Arrange, Arrange all) notes the
+  // keys it wrote; once the layout has rebuilt from them, every member branch
+  // at a moved end gets its straight site route — unless the user drew one —
+  // and, with the setting on, its length follows after the PUT. A transformer
+  // gets the route (the map shows it) and no length (PyPSA has none).
+  const movedKeys = useRef(new Set<string>())
+  const notePlacementChange = useCallback((keys: Iterable<string>) => { for (const k of keys) movedKeys.current.add(k) }, [])
+  useEffect(() => {
+    if (movedKeys.current.size === 0 || !layout || !siteOrigin) return
+    const moved = movedKeys.current
+    movedKeys.current = new Set()
+    if (!deriveLengths || !currentProject) return
+    const yards = yardsOf(objects)
+    for (const o of affectedBranches(objects, moved)) {
+      const key = edgeKeyOf(o)
+      const pts = siteRoutePoints(o, yards, siteOrigin)
+      if (!key || !pts) continue
+      if (setSiteRoute(currentProject, key, pts) && !key.startsWith('tr:')) queueLengthFromGeometry(currentProject, key)
+    }
+  }, [layout]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const [hovered, setHovered] = useState<string | null>(null)
+  // Walk the campus (S5): first-person controls replace the orbit while on;
+  // leaving (Escape releases the pointer) puts the orbit back where it was.
+  const [walking, setWalking] = useState(false)
+  useEffect(() => { setWalking(false) }, [siteId])
   // Stable, so the memoised object meshes re-render only when their own props change.
   const onSelectObject = useCallback((obj: SiteObject) => setSelectedComponent({ type: obj.type, name: obj.name }), [setSelectedComponent])
   const labelRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -771,7 +983,7 @@ function SiteCanvas() {
     return <div className="flex h-full items-center justify-center text-[12px] text-muted">Loading network…</div>
   }
   if (!site) {
-    return <SiteEmptyState buses={buses as Bus[]} boundsFor={name => layoutForBus(name).bounds} />
+    return <SiteEmptyState buses={buses as Bus[]} branches={branches} layoutFor={layoutForBus} loading={!allLoaded} />
   }
   if (!layout || !ground || !siteExtent || !plotExtent || !fit) {
     return (
@@ -783,6 +995,8 @@ function SiteCanvas() {
   }
 
   const legend = legendFor(objects)
+  // Where the library, not the model, is the limit (S4): one line in the overlay.
+  const gapLine = libraryGapLine(libraryGaps(objects))
   const selectedName = selectedComponent?.name ?? null
   const selectedType = selectedComponent?.type ?? null
   const selectedKey = selectedType && selectedName ? `${selectedType}:${selectedName}` : null
@@ -836,8 +1050,10 @@ function SiteCanvas() {
               obj={o}
               selected={isSelected}
               hovered={key === hovered}
-              outside={outsideSet.has(key)}
+              outside={redSet.has(key)}
+              warn={amberSet.has(key)}
               pivot={isSelected}
+              flowPath={distanceOf(o)?.path ?? null}
               onHover={setHovered}
               onSelect={onSelectObject}
             />
@@ -853,21 +1069,30 @@ function SiteCanvas() {
             <group key={`lift:${key}`} position={[0, lift, 0]}>
               {/* An object on a roof follows its hall; it has no placement of its own to move. */}
               <SelectedPivot obj={o} enabled={!readOnly && !o.elevation}
-                onCommit={p => setPlacement(currentProject, site.id, key, p)}>
+                onCommit={p => { setPlacement(currentProject, site.id, key, p); notePlacementChange([key]) }}>
                 {mesh}
               </SelectedPivot>
             </group>
           )
         })}
         </ObjectRegistryContext.Provider>
-        <OrbitControls
-          makeDefault
-          maxPolarAngle={Math.PI / 2 - 0.05}
-          minDistance={20}
-          maxDistance={halfSizeM * 8}
-          enableDamping
-        />
+        {walking ? (
+          <WalkControls
+            start={{ x: (plotExtent.x0 + plotExtent.x1) / 2, y: (plotExtent.y0 + plotExtent.y1) / 2 }}
+            heightAt={heightAt}
+            onExit={() => setWalking(false)}
+          />
+        ) : (
+          <OrbitControls
+            makeDefault
+            maxPolarAngle={Math.PI / 2 - 0.05}
+            minDistance={20}
+            maxDistance={halfSizeM * 8}
+            enableDamping
+          />
+        )}
         <FitCamera bounds={plotExtent} />
+        <ThumbnailCapture nonce={captureNonce} bounds={plotExtent} onPng={onPng} />
         <DropTargetRegistrar siteId={site.id} />
         <LabelTracker keys={labelObjects.map(objectKey)} refs={labelRefs} results={resultsStore} objects={objects} />
         {DEBUG_ENABLED && <Site3dDebugHook objects={objects} site={site} context={context} groundMode={mode} heightAt={heightAt} results={resultsStore} eased={easedRef} />}
@@ -883,8 +1108,14 @@ function SiteCanvas() {
             <div key={key} ref={el => { labelRefs.current[key] = el }} data-testid="site-label"
               className="absolute left-0 top-0 whitespace-nowrap rounded bg-bg/95 border border-border px-2 py-1 text-[11px] text-text shadow"
               style={{ visibility: 'hidden' }}>
-              <div className="font-semibold">{o.name}{outsideSet.has(key) ? <span className="ml-2 text-[10px] text-accent">outside the boundary</span> : null}</div>
+              <div className="font-semibold">{o.name}{fit.outside.includes(key) ? <span className="ml-2 text-[10px] text-accent">outside the boundary</span> : null}</div>
               <div className="text-muted">{o.summary}</div>
+              {/* A branch's site distance (S3): "TR1 → Campus 33 kV · 86 m". */}
+              {(() => { const d = distanceOf(o); return d ? <div data-testid="site-distance" className="text-muted" title={distanceTitle(d)}>{distanceLabel(o, d)}</div> : null })()}
+              {/* The layout findings about this object, in words (S2: never outline-only). */}
+              {findings.filter(f => f.key === key && f.kind !== 'outsideBoundary').map(f => (
+                <div key={`${f.kind}:${f.other ?? ''}`} className="text-[10px] text-accent">{f.message}</div>
+              ))}
               {/* The result at this snapshot (LabelTracker writes it every frame). */}
               <div data-result-line className="text-text empty:hidden" />
             </div>
@@ -903,19 +1134,38 @@ function SiteCanvas() {
           fit={fit}
           unplacedMembers={unplacedMembers}
           dispatchFresh={solved}
+          libraryGaps={gapLine}
+          onSnapshot={currentProject ? () => setCaptureNonce(n => n + 1) : undefined}
+          walking={walking}
+          onToggleWalk={() => setWalking(w => !w)}
           selectedPlacedKey={selectedPlacedKey}
           canArrange={allLoaded}
-          onArrange={() => arrangeAll(currentProject, site.id, objects.filter(o => !o.elevation).map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading })), layout.orphans)}
+          onArrange={() => {
+            const placed = objects.filter(o => !o.elevation).map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading }))
+            arrangeAll(currentProject, site.id, placed, layout.orphans)
+            notePlacementChange(placed.map(p => p.key))
+          }}
+          placedCount={layout.placed.length}
+          onArrangeAll={() => {
+            // Everything by the rules, as if nothing had ever been moved: the
+            // layout rebuilt with no placements, written as the new placements.
+            const fresh = buildSiteLayout({ buses: memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, busCarrier, sizing })
+            const placed = fresh.objects.filter(o => !o.elevation).map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading }))
+            rearrangeAll(currentProject, site.id, placed)
+            notePlacementChange(placed.map(p => p.key))
+          }}
           onResetPlacement={() => { if (selectedPlacedKey) removePlacement(currentProject, site.id, selectedPlacedKey) }}
         />
 
         {/* Legend — under the picker; the result bands only while results show. */}
         <SiteLegend entries={legend} results={resultsStore} />
+        {/* The placement check's findings, in words, each a deep link (S2). */}
+        <SiteLayoutFindings findings={findings} unresolved={layout.unresolved} />
         {/* Results readout under the legend, only while results show (spec §6.4:
             not hover-only). In this column it never covers the control strip;
             collapsed by default in a narrow pane so it does not cover the scene. */}
         <div className="w-[min(22rem,100%)]">
-          <SiteResultsReadout store={resultsStore} objects={objects} />
+          <SiteResultsReadout store={resultsStore} objects={objects} distances={distances} />
         </div>
       </div>
 

@@ -60,6 +60,7 @@ list_projects,ProjectInfo,project_kind,project_kind,True
 list_projects,ProjectInfo,study_owned,study_owned,True
 list_projects,ProjectInfo,owner_study_id,owner_study_id,True
 list_projects,ProjectInfo,owner_study_name,owner_study_name,True
+list_projects,ProjectInfo,settings,settings,True
 list_scenarios,ProjectInfo,name,name,True
 list_scenarios,ProjectInfo,id,id,True
 list_scenarios,ProjectInfo,created_at,created_at,True
@@ -76,6 +77,7 @@ list_scenarios,ProjectInfo,project_kind,project_kind,True
 list_scenarios,ProjectInfo,study_owned,study_owned,True
 list_scenarios,ProjectInfo,owner_study_id,owner_study_id,True
 list_scenarios,ProjectInfo,owner_study_name,owner_study_name,True
+list_scenarios,ProjectInfo,settings,settings,True
 list_library_items,LibraryItemRef,kind,kind,True
 list_library_items,LibraryItemRef,id,id,True
 list_library_items,LibraryItemRef,version,version,True

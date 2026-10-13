@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictBool, field_validator
 
 from models.commercial import CommercialConfig
 
@@ -160,6 +160,16 @@ class ImpedanceRescaleEntry(BaseModel):
 
 class ImpedanceRescaleRequest(BaseModel):
     lines: list[ImpedanceRescaleEntry]
+
+
+class LengthsFromGeometryRequest(BaseModel):
+    """
+    Body for POST /api/network/lengths/from_geometry (plan M2). `keys` are the
+    map's branch ids, `line:<name>` / `link:<name>`; None means every Line and
+    Link. A key of another kind, or an unknown name, is reported as skipped.
+    """
+
+    keys: list[str] | None = None
 
 
 class LinkCreate(BaseModel):
@@ -583,6 +593,8 @@ class SolverConfigSchema(BaseModel):
     # 1500 % margin, which is not a margin, and a plan sized against it is a
     # fiction the LP would spend an hour building.
     reserve_margin: float | None = Field(default=None, ge=0, le=5)
+    # Island ride-through rows (campus island I2a), opt-in per project (Q5).
+    island_constraints: bool = False
     # Peak-coincidence window (snapshots) for must-take VRE credit; None ⇒ the
     # spec §2.3 scaling rule. `ge=1`: a window of zero snapshots has no mean.
     prm_peak_hours: int | None = Field(default=None, ge=1)
@@ -729,6 +741,28 @@ class ImportFolderRequest(BaseModel):
     apply: bool = False
 
 
+class ProjectSettings(BaseModel):
+    """
+    The per-project settings table of `metadata.json` (`settings`), read by
+    `services/project_settings.py`. Every field has a default so a pre-M2
+    metadata file (no `settings` key) is the default, not an error.
+    """
+
+    # Plan M2: when on, a bus drag, a route edit or an import rewrites the
+    # length of the affected Lines and Links from the map geometry (the route
+    # when one exists, else the chord) and offers the impedance rescale.
+    derive_lengths_from_geometry: bool = False
+
+
+class UpdateProjectSettingsRequest(BaseModel):
+    """
+    Body for PATCH /api/projects/{name}/settings. Partial, like the scenario
+    PATCH: only the keys present are written, read via `exclude_unset`.
+    """
+
+    derive_lengths_from_geometry: StrictBool | None = None
+
+
 class ProjectInfo(BaseModel):
     name: str
     # Stable project identifier. Populated with the DB-registry UUID (as a
@@ -788,6 +822,9 @@ class ProjectInfo(BaseModel):
     study_owned: bool = False
     owner_study_id: str | None = None
     owner_study_name: str | None = None
+    # Per-project settings from `metadata.json` (plan M2). Defaults when the
+    # project has never been saved or its metadata predates the table.
+    settings: ProjectSettings = Field(default_factory=ProjectSettings)
 
     @field_validator("parent_project", "scenario_description", "scenario_type", "project_kind", mode="before")
     @classmethod

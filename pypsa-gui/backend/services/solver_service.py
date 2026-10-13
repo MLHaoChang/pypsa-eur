@@ -95,6 +95,10 @@ from services.solver.adequacy import (  # noqa: F401
     _wrap_with_reserve_margin,
     reserve_margin_facts,
 )
+from services.solver.island import (  # noqa: F401  (re-exported)
+    IslandRefusal,
+    _wrap_with_island,
+)
 # Edge Investment Case commercial layer (spec §5.1): the PoC price writer and
 # the LP-terms wrapper, re-exported with the rest of the solver seams.
 from services.commercial.lp_bindings import (  # noqa: F401
@@ -189,6 +193,11 @@ class SolverConfig:
     #   Σ d_g·P_g (extendable) + Σ d_g·p_nom_g (fixed) ≥ (1 + m) · peak_P
     # Bounds live on `SolverConfigSchema` — this dataclass validates nothing.
     reserve_margin: float | None = None
+    # ── Island ride-through (campus island plan 2026-10-07, I2a) ──────────
+    # Opt-in per project (owner Q5): the ride-through, bridge and fuel rows of
+    # `services/solver/island.py`, read from the project's island_config.json.
+    # Plain solve only; rolling horizon, SCOPF and myopic are refused.
+    island_constraints: bool = False
     # How many of the period's highest-demand snapshots define the
     # peak-coincidence window used for must-take VRE credit. None ⇒ the
     # spec §2.3 rule, N = min(100, max(1, round(0.01 · |P_snapshots|))), with
@@ -531,6 +540,10 @@ def run_simulation(
         # derated installed capacity. Adds work only when a margin is set.
         extra_fn = _wrap_with_reserve_margin(
             network, extra_fn, config, log_queue=log_queue)
+        # Island ride-through, bridge and fuel rows (campus island I2a).
+        # Opt-in; refused, with the reason, on a path that is not the plain
+        # LOPF as it will actually run (see `_wrap_with_island`).
+        extra_fn = _wrap_with_island(network, extra_fn, config, log_queue=log_queue)
         # Edge Investment Case LP-level commercial terms (peaks, ratchets,
         # tiers, group caps; spec §5.1). After the reserve margin, before the
         # objective scale, which must stay last.
@@ -1437,6 +1450,16 @@ def run_simulation(
                 log_queue.put(f"[PHASE] WARN: modelling restore after abort failed: {_rexc}")
         log_queue.put(f"[PHASE] Aborted by user at: {exc}. Modelling assumptions reverted.")
         status, condition = "aborted", f"user_aborted:{exc}"
+    except IslandRefusal as exc:
+        # A refusal, not a crash (campus island I2a): the rows cannot be
+        # built as configured. Nothing was applied yet, but restore anyway.
+        if restore_modelling is not None:
+            try:
+                restore_modelling()
+            except Exception as _rexc:
+                log_queue.put(f"[PHASE] WARN: modelling restore after refusal failed: {_rexc}")
+        log_queue.put(f"[PHASE] Refused: {exc}")
+        status, condition = "error", f"island_refused: {exc}"
     except ValidationRefused as exc:
         # Phase 12f: a refusal, not a failure. Same restore as the generic
         # handler (the network must not autosave carrying the run's vintage

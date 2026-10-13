@@ -58,8 +58,12 @@ export interface Anchors {
   rotors?: { turbine: number; hub: [number, number, number] }[]
   /** The body glows with output or load. */
   emissive?: boolean
-  /** Power flows along this segment, owner (yard) side → far side. */
-  flow?: { from: [number, number, number]; to: [number, number, number] }
+  /**
+   * Power flows along this segment, owner (yard) side → far side. `via`
+   * (S3) runs it along a polyline instead — the branch's map route in the
+   * object's frame (`siteDistances.flowAnchorsAlong`); templates set none.
+   */
+  flow?: { from: [number, number, number]; to: [number, number, number]; via?: [number, number, number][] }
 }
 
 export type TemplateId =

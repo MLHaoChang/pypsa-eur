@@ -109,8 +109,8 @@ def build_eh_datacenter() -> pypsa.Network:
                    ("battery", 0.0), ("grid", 0.35)):
         n.add("Carrier", c, co2_emissions=co2)
     n.add("Bus", "grid", v_nom=132.0, carrier="AC", x=0.0, y=0.0)
-    n.add("Bus", "dc_mv", v_nom=33.0, carrier="AC", x=2.0, y=0.0)
-    n.add("Bus", "it_bus", v_nom=11.0, carrier="AC", x=3.0, y=0.6)
+    n.add("Bus", "dc_mv", v_nom=33.0, carrier="AC", x=0.0, y=0.0)
+    n.add("Bus", "it_bus", v_nom=11.0, carrier="AC", x=0.0, y=0.0)
 
     # Wholesale supply beyond the PoC (not firm capacity of the hub).
     price = 70.0 + 40.0 * np.exp(-((_HOD - 19) ** 2) / 8.0)
@@ -197,8 +197,8 @@ def build_eh_h2_hub() -> pypsa.Network:
                    ("grid", 0.35), ("electrolysis", 0.0), ("fuel cell", 0.0)):
         n.add("Carrier", c, co2_emissions=co2)
     n.add("Bus", "grid", v_nom=220.0, carrier="AC", x=0.0, y=0.0)
-    n.add("Bus", "hub", v_nom=110.0, carrier="AC", x=2.0, y=0.0)
-    n.add("Bus", "h2", carrier="H2", x=3.0, y=-0.8)
+    n.add("Bus", "hub", v_nom=110.0, carrier="AC", x=0.0, y=0.0)
+    n.add("Bus", "h2", carrier="H2", x=0.0, y=0.0)
 
     price = 60.0 + 35.0 * np.exp(-((_HOD - 18) ** 2) / 10.0)
     n.add("Generator", "grid_supply", bus="grid", carrier="grid",
@@ -277,8 +277,8 @@ def build_eh_microgrid() -> pypsa.Network:
                    ("diesel", 0.27), ("battery", 0.0), ("grid", 0.35)):
         n.add("Carrier", c, co2_emissions=co2)
     n.add("Bus", "mainland", v_nom=33.0, carrier="AC", x=0.0, y=0.0)
-    n.add("Bus", "island", v_nom=11.0, carrier="AC", x=2.0, y=0.0)
-    n.add("Bus", "hospital", v_nom=11.0, carrier="AC", x=2.8, y=0.7)
+    n.add("Bus", "island", v_nom=11.0, carrier="AC", x=0.0, y=0.0)
+    n.add("Bus", "hospital", v_nom=11.0, carrier="AC", x=0.0, y=0.0)
 
     n.add("Generator", "mainland_supply", bus="mainland", carrier="grid",
           p_nom=100.0, marginal_cost=110.0)
@@ -440,6 +440,15 @@ STRESS_SCENARIOS: dict[str, list[dict]] = {
 # Solver settings a project from these templates starts with: frontier and
 # fmea_top need VOLL > 0 (a template otherwise starts from the default 0).
 SOLVER_CONFIG: dict = {"voll": 5000.0}
+# Per-template additions. The island rows (campus island I2a) are opt-in per
+# project and ship enabled on the templates that carry an island sidecar
+# (owner Q5).
+SOLVER_CONFIG_EXTRA: dict[str, dict] = {"eh_datacenter": {"island_constraints": True}}
+
+
+def solver_config(template_id: str) -> dict:
+    """The solver settings written beside one template."""
+    return {**SOLVER_CONFIG, **SOLVER_CONFIG_EXTRA.get(template_id, {})}
 
 # The island sidecar (plan 2026-10-07 campus island, I1): control modes, unit
 # dynamics and island requirements, keyed by PyPSA name. Its schema is
@@ -515,7 +524,7 @@ def write_sidecars(out_dir, template_id: str) -> None:
         {"__schema__": SCHEMA, "scenarios": STRESS_SCENARIOS[template_id]},
         indent=2, sort_keys=True) + "\n")
     (out_dir / SOLVER_FILE).write_text(
-        json.dumps(SOLVER_CONFIG, indent=2, sort_keys=True) + "\n")
+        json.dumps(solver_config(template_id), indent=2, sort_keys=True) + "\n")
     if template_id in ISLAND_CONFIG:
         (out_dir / ISLAND_FILE).write_text(
             json.dumps(ISLAND_CONFIG[template_id], indent=2, sort_keys=True) + "\n")

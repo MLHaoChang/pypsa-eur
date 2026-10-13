@@ -7,6 +7,7 @@ import { act, fireEvent, render } from '@testing-library/react'
 import { useAssetDrag, resolveDrop } from './useAssetDrag'
 import { useUIStore } from '../store/uiStore'
 import { registerSiteDropTarget, unregisterSiteDropTarget, siteDropTarget, type SiteDropTarget } from '../site3d/dropRegistry'
+import { registerMapDropTarget, unregisterMapDropTarget, mapDropTarget, type MapDropTarget } from '../utils/mapDropRegistry'
 
 function stubElementFromPoint(el: Element | null) {
   Object.defineProperty(document, 'elementFromPoint', {
@@ -50,11 +51,12 @@ describe('resolveDrop — the four outcomes', () => {
       canvas: 'schematic',
       busName: 'Bus A',
       position: { x: 11, y: 21 },
+      latLng: null,
       site: null,
     })
   })
 
-  it('a bus marker inside the map canvas is a bus drop with NO position', () => {
+  it('a bus marker inside the map canvas is a bus drop with no flow position (and no coordinate until the map registers)', () => {
     const canvas = mount('leaflet-container')
     const marker = document.createElement('div')
     marker.setAttribute('data-bus-name', 'Bus B')
@@ -65,6 +67,7 @@ describe('resolveDrop — the four outcomes', () => {
       canvas: 'map',
       busName: 'Bus B',
       position: null,
+      latLng: null,
       site: null,
     })
   })
@@ -75,28 +78,30 @@ describe('resolveDrop — the four outcomes', () => {
       canvas: 'schematic',
       busName: null,
       position: { x: 11, y: 21 },
+      latLng: null,
       site: null,
     })
   })
 
-  it('empty map canvas is a map drop with no bus and no position', () => {
+  it('empty map canvas is a map drop with no bus and, unregistered, no coordinate', () => {
     stubElementFromPoint(mount('leaflet-container'))
     expect(resolveDrop(10, 20)).toEqual({
       canvas: 'map',
       busName: null,
       position: null,
+      latLng: null,
       site: null,
     })
   })
 
   it('anything else cancels', () => {
     stubElementFromPoint(mount('some-other-panel'))
-    expect(resolveDrop(10, 20)).toEqual({ canvas: null, busName: null, position: null, site: null })
+    expect(resolveDrop(10, 20)).toEqual({ canvas: null, busName: null, position: null, latLng: null, site: null })
   })
 
   it('cancels when the pointer is over nothing at all', () => {
     stubElementFromPoint(null)
-    expect(resolveDrop(10, 20)).toEqual({ canvas: null, busName: null, position: null, site: null })
+    expect(resolveDrop(10, 20)).toEqual({ canvas: null, busName: null, position: null, latLng: null, site: null })
   })
 
   it('a schematic drop with no rfInstance still resolves, with a null position', () => {
@@ -106,6 +111,7 @@ describe('resolveDrop — the four outcomes', () => {
       canvas: 'schematic',
       busName: null,
       position: null,
+      latLng: null,
       site: null,
     })
   })
@@ -230,7 +236,7 @@ describe('resolveDrop — the 3D site view (WP4, D16)', () => {
     const canvas = mount('site3d-canvas')
     stubElementFromPoint(canvas)
     registerSiteDropTarget(target)
-    expect(resolveDrop(10, 20)).toEqual({ canvas: 'site', busName: null, position: null, site: { siteId: 'site_a', ground: { x: 20, y: -20 } } })
+    expect(resolveDrop(10, 20)).toEqual({ canvas: 'site', busName: null, position: null, latLng: null, site: { siteId: 'site_a', ground: { x: 20, y: -20 } } })
   })
 
   it('cancels when no 3D view has registered, and when the ray misses the ground', () => {
@@ -272,5 +278,51 @@ describe('resolveDrop — the 3D site view (WP4, D16)', () => {
     act(() => { fireEvent.pointerMove(window, { clientX: 30, clientY: 40 }) })
     act(() => { fireEvent.pointerUp(window, { clientX: 30, clientY: 40 }) })
     expect(useUIStore.getState().creationItem).toEqual({ id: 'battery', label: 'Battery', dropSite: { siteId: 'site_a', ground: { x: 60, y: -40 } } })
+  })
+})
+
+
+describe('resolveDrop — the map carries a coordinate once it has registered (plan M4, reverting D26)', () => {
+  const target: MapDropTarget = { screenToLatLng: (x, y) => (x < 0 ? null : { lat: 53 + y / 1000, lng: 6 + x / 1000 }) }
+  afterEach(() => { const cur = mapDropTarget(); if (cur) unregisterMapDropTarget(cur) })
+
+  it('an empty-map drop resolves to the geographic point under the pointer', () => {
+    stubElementFromPoint(mount('leaflet-container'))
+    registerMapDropTarget(target)
+    expect(resolveDrop(10, 20)).toEqual({ canvas: 'map', busName: null, position: null, latLng: { lat: 53.02, lng: 6.01 }, site: null })
+  })
+
+  it('a drop on a map bus keeps the bus name AND the coordinate', () => {
+    const canvas = mount('leaflet-container')
+    const marker = document.createElement('div')
+    marker.setAttribute('data-bus-name', 'Bus B')
+    canvas.appendChild(marker)
+    stubElementFromPoint(marker)
+    registerMapDropTarget(target)
+    expect(resolveDrop(10, 20)).toEqual({ canvas: 'map', busName: 'Bus B', position: null, latLng: { lat: 53.02, lng: 6.01 }, site: null })
+  })
+
+  it('a point the projection cannot place still lands as a plain map drop', () => {
+    stubElementFromPoint(mount('leaflet-container'))
+    registerMapDropTarget(target)
+    expect(resolveDrop(-5, 20)).toEqual({ canvas: 'map', busName: null, position: null, latLng: null, site: null })
+  })
+
+  it('the gesture forwards dropLatLng into the creation request', () => {
+    stubElementFromPoint(mount('leaflet-container'))
+    registerMapDropTarget(target)
+    const { getByTestId } = render(<Harness />)
+    fireEvent.pointerDown(getByTestId('item'), { button: 0, clientX: 5, clientY: 5 })
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 60, clientY: 70 }))
+    window.dispatchEvent(new MouseEvent('pointerup', { clientX: 60, clientY: 70 }))
+    expect(useUIStore.getState().creationItem).toEqual({ id: 'thermal', label: 'Thermal', dropLatLng: { lat: 53.07, lng: 6.06 } })
+  })
+
+  it('a stale unregister does not clear a newer registration', () => {
+    const newer: MapDropTarget = { screenToLatLng: () => ({ lat: 1, lng: 2 }) }
+    registerMapDropTarget(target)
+    registerMapDropTarget(newer)
+    unregisterMapDropTarget(target)
+    expect(mapDropTarget()).toBe(newer)
   })
 })

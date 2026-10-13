@@ -11,7 +11,10 @@ import { appLog } from './simulationStore'
 import type { ProjectMismatch } from '../utils/projectMismatch'
 
 interface SelectedComponent { type: string; name: string }
-export interface PropertiesEditRequest { type: 'Bus' | 'Link'; name: string }
+// The classes whose Properties card can be asked to open its editor: the
+// tagging tour (Bus, Link) and the schematic's asset-node double-click
+// (plan 1 A2: Generator, StorageUnit, Store, Load, Link).
+export interface PropertiesEditRequest { type: 'Bus' | 'Link' | 'Generator' | 'StorageUnit' | 'Store' | 'Load'; name: string }
 // CreationRequest is set when the user wants to add a new asset to the network.
 // Two entry points:
 //   • Click in AssetPalette → setCreationItem({id, label}) → renders as
@@ -31,6 +34,11 @@ export interface CreationRequest {
   // canvas — dropping onto nothing must stay exactly as permissive as it is
   // today, so this is optional and never validated here.
   dropBusName?: string
+  // A drop onto the map (plan M4, reverting spec D26): the geographic point
+  // under the pointer. CreationForm places a dropped BUS there (x/y seeded),
+  // and prefills any other asset's terminal with the nearest placed bus when
+  // the drop missed a marker.
+  dropLatLng?: { lat: number; lng: number }
   // A drop onto the 3D site view (design D16): which site, and where on its
   // ground (metres east/north of the site origin). CreationForm restricts
   // the terminal bus to the site's members, prefills the primary one, and
