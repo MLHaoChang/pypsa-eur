@@ -33,7 +33,7 @@ import {
 import { useUIStore } from '../store/uiStore'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
-import CampusInvestmentSection, { formatEur } from './CampusInvestmentSection'
+import CampusInvestmentSection, { TableScroll, formatEur } from './CampusInvestmentSection'
 import CampusLibrarySection from './CampusLibrarySection'
 import { useCampusMilpJob } from './useCampusMilpJob'
 
@@ -418,117 +418,125 @@ function ResultsSection({ state, pending }: { state: CampusState; pending: boole
         title="PCC compliance"
         hint={invested ? 'as the campus is, and with the purchased assets, re-solved' : 'as the campus is, and with the recommended measures'}
       >
-        <table className="w-full text-[12px]">
-          <thead>
-            <tr className="text-left text-muted">
-              <th className="font-normal pr-3">Check</th><th className="font-normal pr-3">As is</th>
-              <th className="font-normal pr-3">{invested ? 'With the assets (AC re-solved)' : 'With measures'}</th>
-              <th className="font-normal pr-3">Worst</th>
-              <th className="font-normal pr-3">Limit</th><th className="font-normal">Detail · rule</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(c => {
-              // With the investment, the "with" side is an AC result of the campus as bought, read at its
-              // own worst hour and case (a run from before they were kept has none: no hour is shown
-              // rather than the as-is one).
-              const w = c as InvestedComplianceRow
-              const value = invested ? w.value_with_measures : c.value
-              const detail = invested ? w.detail_with_measures : c.detail
-              const at = invested
-                ? where(w.worst_period_with_measures, w.worst_hour_with_measures, w.worst_case_with_measures)
-                : where(c.worst_period, c.worst_hour, c.worst_case)
-              return (
-                <tr key={c.check} data-testid={`compliance-${c.check}`} className="border-t border-border">
-                  <td className="py-1 pr-3 whitespace-nowrap align-top">{CHECK_LABEL[c.check] ?? c.check}</td>
-                  <td className="pr-3 align-top"><StatusTag s={c.status_as_is} /></td>
-                  <td className="pr-3 align-top"><StatusTag s={c.status_with_measures} /></td>
-                  <td data-testid={`compliance-worst-${c.check}`} className="pr-3 whitespace-nowrap align-top tabular-nums">
-                    {num(value, 3)} {c.unit} <span className="text-muted">{at}</span>
-                  </td>
-                  <td className="pr-3 whitespace-nowrap align-top tabular-nums text-muted">{num(c.limit, 3)} {c.unit}</td>
-                  <td className="align-top">
-                    <div>{detail}</div>
-                    <div className="text-[11px] text-muted flex items-start gap-1.5 mt-0.5">
-                      <Tag tone={c.source === 'code' ? 'accent' : 'warn'}>{c.source}</Tag><span>{c.clause}</span>
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+        <TableScroll>
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-left text-muted">
+                <th className="font-normal pr-3">Check</th><th className="font-normal pr-3">As is</th>
+                <th className="font-normal pr-3">{invested ? 'With the assets (AC re-solved)' : 'With measures'}</th>
+                <th className="font-normal pr-3">Worst</th>
+                <th className="font-normal pr-3">Limit</th><th className="font-normal">Detail · rule</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(c => {
+                // With the investment, the "with" side is an AC result of the campus as bought, read at its
+                // own worst hour and case (a run from before they were kept has none: no hour is shown
+                // rather than the as-is one).
+                const w = c as InvestedComplianceRow
+                const value = invested ? w.value_with_measures : c.value
+                const detail = invested ? w.detail_with_measures : c.detail
+                const at = invested
+                  ? where(w.worst_period_with_measures, w.worst_hour_with_measures, w.worst_case_with_measures)
+                  : where(c.worst_period, c.worst_hour, c.worst_case)
+                return (
+                  <tr key={c.check} data-testid={`compliance-${c.check}`} className="border-t border-border">
+                    <td className="py-1 pr-3 whitespace-nowrap align-top">{CHECK_LABEL[c.check] ?? c.check}</td>
+                    <td className="pr-3 align-top"><StatusTag s={c.status_as_is} /></td>
+                    <td className="pr-3 align-top"><StatusTag s={c.status_with_measures} /></td>
+                    <td data-testid={`compliance-worst-${c.check}`} className="pr-3 whitespace-nowrap align-top tabular-nums">
+                      {num(value, 3)} {c.unit} <span className="text-muted">{at}</span>
+                    </td>
+                    <td className="pr-3 whitespace-nowrap align-top tabular-nums text-muted">{num(c.limit, 3)} {c.unit}</td>
+                    <td className="align-top">
+                      <div>{detail}</div>
+                      <div className="text-[11px] text-muted flex items-start gap-1.5 mt-0.5">
+                        <Tag tone={c.source === 'code' ? 'accent' : 'warn'}>{c.source}</Tag><span>{c.clause}</span>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </TableScroll>
         <p className="text-[11px] text-muted mt-2">
           PCC reactive band ±{num(req.q_limit_mvar)} Mvar ({req.clause}); P_ref {num(req.p_ref_mw)} MW, {req.p_ref_from}.
         </p>
       </PageSection>
 
       <PageSection title="Transformers" hint="worst selected hour, intact and N-1, with the design margin">
-        <table className="w-full text-[12px]">
-          <thead>
-            <tr className="text-left text-muted">
-              <th className="font-normal pr-3">Group</th><th className="font-normal pr-3">Now</th>
-              <th className="font-normal pr-3">Peak S intact</th><th className="font-normal pr-3">Peak S N-1</th>
-              <th className="font-normal pr-3">Required per unit</th><th className="font-normal pr-3">Recommended</th>
-              <th className="font-normal">Verdict</th>
-            </tr>
-          </thead>
-          <tbody>
-            {r.transformers.map(t => (
-              <tr key={t.group} data-testid={`trafo-${t.group}`} className="border-t border-border">
-                <td className="py-1 pr-3 whitespace-nowrap">{t.group}</td>
-                <td className="pr-3 whitespace-nowrap tabular-nums">{t.units} × {num(t.unit_rating_mva)} MVA</td>
-                <td className="pr-3 tabular-nums">{num(t.max_s_intact_mva)} MVA</td>
-                <td className="pr-3 tabular-nums">{t.n_minus_1 ? `${num(t.max_s_n1_mva)} MVA` : '—'}</td>
-                <td className="pr-3 tabular-nums">{num(t.required_unit_mva)} MVA</td>
-                <td className="pr-3 whitespace-nowrap tabular-nums">{t.units} × {num(t.recommended_unit_mva)} MVA</td>
-                <td><Tag tone={t.adequate ? 'ok' : 'err'}>{t.adequate ? 'adequate' : 'undersized'}</Tag></td>
+        <TableScroll>
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-left text-muted">
+                <th className="font-normal pr-3">Group</th><th className="font-normal pr-3">Now</th>
+                <th className="font-normal pr-3">Peak S intact</th><th className="font-normal pr-3">Peak S N-1</th>
+                <th className="font-normal pr-3">Required per unit</th><th className="font-normal pr-3">Recommended</th>
+                <th className="font-normal">Verdict</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {r.transformers.map(t => (
+                <tr key={t.group} data-testid={`trafo-${t.group}`} className="border-t border-border">
+                  <td className="py-1 pr-3 whitespace-nowrap">{t.group}</td>
+                  <td className="pr-3 whitespace-nowrap tabular-nums">{t.units} × {num(t.unit_rating_mva)} MVA</td>
+                  <td className="pr-3 tabular-nums">{num(t.max_s_intact_mva)} MVA</td>
+                  <td className="pr-3 tabular-nums">{t.n_minus_1 ? `${num(t.max_s_n1_mva)} MVA` : '—'}</td>
+                  <td className="pr-3 tabular-nums">{num(t.required_unit_mva)} MVA</td>
+                  <td className="pr-3 whitespace-nowrap tabular-nums">{t.units} × {num(t.recommended_unit_mva)} MVA</td>
+                  <td><Tag tone={t.adequate ? 'ok' : 'err'}>{t.adequate ? 'adequate' : 'undersized'}</Tag></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
       </PageSection>
 
       <PageSection title="Reactive compensation" hint="after the inverters' own headroom, sized to the worst hour">
-        <table className="w-full text-[12px]">
-          <tbody>
-            {r.compensation.map(c => (
-              <tr key={c.direction} data-testid={`comp-${c.direction}`} className="border-t border-border first:border-0">
-                <td className="py-1 pr-3 capitalize">{c.direction}</td>
-                <td className="pr-3 tabular-nums">required {num(c.required_mvar)} Mvar</td>
-                <td className="pr-3 tabular-nums font-semibold">recommended {num(c.recommended_mvar)} Mvar</td>
-                <td className="text-muted">{where(c.worst_period, c.worst_hour)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <TableScroll>
+          <table className="w-full text-[12px]">
+            <tbody>
+              {r.compensation.map(c => (
+                <tr key={c.direction} data-testid={`comp-${c.direction}`} className="border-t border-border first:border-0">
+                  <td className="py-1 pr-3 capitalize">{c.direction}</td>
+                  <td className="pr-3 tabular-nums">required {num(c.required_mvar)} Mvar</td>
+                  <td className="pr-3 tabular-nums font-semibold">recommended {num(c.recommended_mvar)} Mvar</td>
+                  <td className="text-muted">{where(c.worst_period, c.worst_hour)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
       </PageSection>
 
       <PageSection title="Short circuit" hint="IEC 60909, every installed unit energised, per period">
-        <table className="w-full text-[12px]">
-          <thead>
-            <tr className="text-left text-muted">
-              <th className="font-normal pr-3">Period</th><th className="font-normal pr-3">Bus</th>
-              <th className="font-normal pr-3">kV</th><th className="font-normal pr-3">Ik'' max</th>
-              <th className="font-normal pr-3">ip</th><th className="font-normal pr-3">Ik'' min</th>
-              <th className="font-normal pr-3">Rating</th><th className="font-normal">Verdict</th>
-            </tr>
-          </thead>
-          <tbody>
-            {r.short_circuit.map(f => (
-              <tr key={`${f.bus}-${f.period}`} data-testid={`fault-${f.bus}-${f.period}`} className="border-t border-border">
-                <td className="py-1 pr-3">{f.period}</td><td className="pr-3">{f.bus}</td>
-                <td className="pr-3 tabular-nums">{num(f.vn_kv)}</td>
-                <td className="pr-3 tabular-nums">{num(f.ikss_max_ka)} kA</td>
-                <td className="pr-3 tabular-nums">{num(f.ip_max_ka)} kA</td>
-                <td className="pr-3 tabular-nums">{num(f.ikss_min_ka)} kA</td>
-                <td className="pr-3 tabular-nums">{f.rated_ka == null ? '—' : `${num(f.rated_ka)} kA`}</td>
-                <td>{f.adequate == null ? <Tag tone="neutral">not rated</Tag>
-                  : <Tag tone={f.adequate ? 'ok' : 'err'}>{f.adequate ? 'within rating' : 'over rating'}</Tag>}</td>
+        <TableScroll>
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-left text-muted">
+                <th className="font-normal pr-3">Period</th><th className="font-normal pr-3">Bus</th>
+                <th className="font-normal pr-3">kV</th><th className="font-normal pr-3">Ik'' max</th>
+                <th className="font-normal pr-3">ip</th><th className="font-normal pr-3">Ik'' min</th>
+                <th className="font-normal pr-3">Rating</th><th className="font-normal">Verdict</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {r.short_circuit.map(f => (
+                <tr key={`${f.bus}-${f.period}`} data-testid={`fault-${f.bus}-${f.period}`} className="border-t border-border">
+                  <td className="py-1 pr-3">{f.period}</td><td className="pr-3">{f.bus}</td>
+                  <td className="pr-3 tabular-nums">{num(f.vn_kv)}</td>
+                  <td className="pr-3 tabular-nums">{num(f.ikss_max_ka)} kA</td>
+                  <td className="pr-3 tabular-nums">{num(f.ip_max_ka)} kA</td>
+                  <td className="pr-3 tabular-nums">{num(f.ikss_min_ka)} kA</td>
+                  <td className="pr-3 tabular-nums">{f.rated_ka == null ? '—' : `${num(f.rated_ka)} kA`}</td>
+                  <td>{f.adequate == null ? <Tag tone="neutral">not rated</Tag>
+                    : <Tag tone={f.adequate ? 'ok' : 'err'}>{f.adequate ? 'within rating' : 'over rating'}</Tag>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
       </PageSection>
 
       <PageSection title="Critical hours" count={r.selection.length} hint="selected per investment period">

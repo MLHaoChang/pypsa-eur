@@ -735,6 +735,38 @@ describe('investment: replacement at the end of life (plan C14)', () => {
 
 // Owner decision 2026-10-12: the investment case takes the joint optimisation when it is
 // fresh and found its own choice, else the least-cost run. The switch is never silent.
+describe('wide tables scroll sideways instead of being clipped', () => {
+  // A page section clips its overflow (rounded corners): at 1440 px with the
+  // assistant open the investment table (about 880 px) sat in a 714 px section
+  // and lost its Existing and Status columns, the tap table its Moved by.
+  const scrolls = (el: HTMLElement) => {
+    const wrap = el.closest('table')!.parentElement!
+    expect(wrap.getAttribute('data-testid')).toBe('campus-table-scroll')
+    expect(wrap.className).toContain('overflow-x-auto')
+  }
+
+  it('wraps the investment, tap, cost, comparison and joint-choice tables', async () => {
+    const res = results({
+      taps: [{ period: 2030, hour: 158, case: 'intact', transformer: 'TR1', group: 'TR1', tap_pos: -1,
+               ratio_pct: 98.5, moved_by: -1 }],
+      tap_hours_moved: 1,
+    })
+    api.state.mockResolvedValue(stateWith(res, { milp: { status: null, stale: false, results: {
+      investment: [row({ library_id: 'TR_110_20_50' })], cost: [], compliance_invested: [], history: [],
+      comparison: [{ need: 'transformer GRID_IMPORT', c8_choice: 'a', milp_choice: 'b', c8_annualised_eur_per_a: 1,
+                     milp_annualised_eur_per_a: 1 }],
+      summary: { method: 'milp', fallback: false, reason: '', stop: 'converged', c8_cost: 2, milp_cost: 1,
+                 c8_feasible: true, iterations: 1 },
+      fallback: null, stop: 'converged' } } }))
+    renderPanel()
+    scrolls(await screen.findByTestId('invest-transformer GRID_IMPORT'))
+    scrolls(screen.getByTestId('tap-2030-158-intact-TR1'))
+    scrolls(screen.getByTestId('cost-2030'))
+    scrolls(screen.getByTestId('milp-compare-transformer GRID_IMPORT'))
+    scrolls(screen.getByTestId('milp-invest-transformer GRID_IMPORT'))
+  })
+})
+
 describe('which result feeds the investment case', () => {
   const milpOf = (over: Partial<MilpResults> = {}): MilpResults => ({
     investment: [], cost: [], compliance_invested: [], history: [], comparison: [],

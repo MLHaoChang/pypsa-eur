@@ -249,6 +249,16 @@ describe('CampusElectricalPanel', () => {
     expect(screen.getByText(/bess_new: built at 0 MW/)).toBeTruthy()
   })
 
+  it('lets the compliance, transformer and short-circuit tables scroll sideways rather than clip', async () => {
+    api.state.mockResolvedValue(sized())
+    renderPanel()
+    for (const id of ['compliance-pcc_reactive', 'trafo-GRID_IMPORT', 'fault-IT_BUS-2030']) {
+      const wrap = (await screen.findByTestId(id)).closest('table')!.parentElement!
+      expect(wrap.getAttribute('data-testid')).toBe('campus-table-scroll')
+      expect(wrap.className).toContain('overflow-x-auto')
+    }
+  })
+
   it('warns when the results are stale', async () => {
     api.state.mockResolvedValue({ ...sized(), stale: true })
     renderPanel()
