@@ -130,6 +130,12 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
         lp_basis += weight * (opex_raw + f["extendable"])
         nonext_reported += years * f["nonextendable"]
     cb_total = float(cost_breakdown["total"])
+    # U2 WP10 removed the decision study's `demand_charge_eur` term (F1-B4):
+    # a site demand charge is an Investment Case commercial term, which
+    # reaches `cost_breakdown` as the "Commercial" component
+    # (`cost_rows.commercial_cost_terms`, from what the solve COMMITTED). A
+    # network solved before U2 may still carry F1-B4's
+    # `n.meta["pypsa_gui_solve_demand_charge"]`; it is ignored.
     return {
         "nonextendable_fixed_cost_eur": nonext_reported,
         "period_weighting_adjustment_eur": lp_basis - (cb_total - nonext_reported),

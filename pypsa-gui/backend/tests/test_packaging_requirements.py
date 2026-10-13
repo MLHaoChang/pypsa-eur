@@ -390,6 +390,168 @@ def test_the_bundle_check_expects_the_pipelines_data_files():
     assert {"case39_units.yaml", "case39.json"} <= set(check_bundle.EXPECTED)
 
 
+# --------------------------------------------------------------------------
+# the decision study ships its report template and its assumptions library
+# (plan 2026-09-28 guided investment study MVP-1, S9; gates S2, S4, S7, S8)
+# --------------------------------------------------------------------------
+
+_BACKEND_DATAS = re.compile(r'\(str\(BACKEND((?:\s*/\s*"[^"]+")+)\),\s*"([^"]*)"\)')
+
+
+def _spec_backend_datas() -> dict[str, str]:
+    """
+    ``{source relative to backend: destination}`` for every ``datas`` entry
+    the spec takes from ``BACKEND``. The spec cannot be imported (PyInstaller
+    injects its globals), so its text is read.
+    """
+    out: dict[str, str] = {}
+    for m in _BACKEND_DATAS.finditer(SPEC.read_text(encoding="utf-8")):
+        out["/".join(re.findall(r'"([^"]+)"', m.group(1)))] = m.group(2)
+    return out
+
+
+def _check_bundle():
+    sys.path.insert(0, str(BACKEND / "smoke"))
+    try:
+        import check_bundle
+    finally:
+        sys.path.pop(0)
+    return check_bundle
+
+
+def test_the_decision_studys_template_and_library_are_in_the_spec_and_the_bundle_check():
+    """
+    `services/study/render_html.py` reads `templates/decision_report.html.j2`
+    and `services/study/packs.py` reads `study_library/load_profiles/`, both
+    `__file__`-relative. A bundle without them launches fine and 500s on the
+    first report or the first profile-based study. U2 WP10 deleted the rest of
+    `study_library/` (the defaults are the generic defaults pack, shipped on
+    its own), so neither the spec nor the bundle check names those files.
+    """
+    datas = _spec_backend_datas()
+    assert datas.get("templates/decision_report.html.j2") == "templates", datas
+    assert datas.get("study_library/load_profiles") == "study_library/load_profiles", datas
+    assert "study_library" not in datas, datas
+    expected = set(_check_bundle().EXPECTED)
+    assert {"decision_report.html.j2", "study_library", "load_profiles",
+            "commercial_office.csv", "industrial_two_shift.csv"} <= expected
+    assert not {"technology_costs.csv", "tariffs.csv", "finance_defaults.yaml"} & expected
+    shipped = {p.name for p in (BACKEND / "study_library").iterdir()}
+    assert shipped == {"load_profiles"}, shipped
+
+
+def test_the_report_charts_agg_backend_is_a_declared_hidden_import():
+    """
+    `report_charts._figure` selects `Agg` by NAME (`matplotlib.use("Agg")`)
+    and `Figure.savefig(format="png")` resolves the canvas through a string
+    table, so static analysis sees no import of the Agg backend. PyInstaller's
+    matplotlib hook happens to pick it up from the `use()` call today; the
+    spec says so itself rather than relying on the hook's detection.
+    """
+    text = SPEC.read_text(encoding="utf-8")
+    assert '"matplotlib.backends.backend_agg"' in text
+    assert "matplotlib" in _pinned_distributions()
+
+
+def test_the_decision_studys_data_resolves_in_a_frozen_layout(tmp_path):
+    """
+    The frozen layout, rebuilt from the spec: `pathex=[BACKEND, ...]` puts
+    `services/study/*.py` at `_MEIPASS/services/study/`, and each `datas`
+    entry lands at its destination (a file under the destination directory,
+    a directory's contents AS the destination). The two modules are loaded
+    from that tree, so their `__file__`-relative paths are the frozen ones —
+    the `presets.json` and `matpower.jinja2` precedent — and must find the
+    template and every load profile there (U2 WP10: the rest of the old
+    library is the defaults pack, `test_the_spec_ships_the_generic_defaults_pack_data`).
+    """
+    import importlib.util
+    import shutil
+
+    meipass = tmp_path / "_MEIPASS"
+    for src, dest in _spec_backend_datas().items():
+        source = BACKEND / src
+        if not src.startswith(("templates", "study_library")):
+            continue
+        if source.is_dir():
+            shutil.copytree(source, meipass / dest)
+        else:
+            (meipass / dest).mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, meipass / dest / source.name)
+    frozen = meipass / "services" / "study"
+    frozen.mkdir(parents=True)
+    modules = {}
+    for name in ("render_html", "packs"):
+        shutil.copy2(BACKEND / "services" / "study" / f"{name}.py", frozen / f"{name}.py")
+        spec = importlib.util.spec_from_file_location(
+            f"_frozen_probe_{name}", frozen / f"{name}.py")
+        module = importlib.util.module_from_spec(spec)
+        # dataclasses resolve their annotations through `sys.modules`
+        sys.modules[spec.name] = module
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop(spec.name, None)
+        modules[name] = module
+
+    render_html, packs = modules["render_html"], modules["packs"]
+    assert render_html.TEMPLATES_DIR == meipass / "templates"
+    template = render_html.environment().get_template("decision_report.html.j2")
+    assert template.filename == str(meipass / "templates" / "decision_report.html.j2")
+
+    profiles = packs._PROFILE_DIR
+    assert profiles == meipass / "study_library" / "load_profiles"
+    shipped = {p.name for p in (BACKEND / "study_library" / "load_profiles").iterdir()
+               if p.is_file()}
+    assert shipped and shipped <= {p.name for p in profiles.iterdir()}
+
+
+def test_python_docx_ships_its_templates_and_renders_in_a_frozen_layout(tmp_path):
+    """
+    Gate S9 [S3]: `docx.Document()` opens `docx/templates/default.docx`
+    `__file__`-relative, and `docx/parts/*.py` read `parts/../templates/*.xml`
+    — the `pypsa/optimization/../data` shape, which needs the package written
+    out as a real directory (`pyz+py`) as well as its data collected. The
+    spec must say both, `check_bundle.EXPECTED` must name the template, and a
+    report must render with `docx` imported from the rebuilt layout (the
+    package copied the way `pyz+py` + `collect_data_files` lay it out).
+    """
+    import importlib.util
+    import shutil
+    import subprocess
+
+    text = SPEC.read_text(encoding="utf-8")
+    assert 'collect_data_files("docx")' in text
+    assert '"docx": "pyz+py"' in text
+    assert "default.docx" in set(_check_bundle().EXPECTED)
+
+    meipass = tmp_path / "_MEIPASS"
+    source = Path(importlib.util.find_spec("docx").origin).parent
+    shutil.copytree(source, meipass / "docx",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    from tests.test_study_decision_report import _report
+
+    report_json = tmp_path / "report.json"
+    report_json.write_text(_report().model_dump_json(by_alias=True), encoding="utf-8")
+    out = tmp_path / "report.docx"
+    probe = (
+        "import sys, pathlib\n"
+        f"sys.path[:0] = [{str(meipass)!r}, {str(BACKEND)!r}]\n"
+        "import docx\n"
+        f"assert pathlib.Path(docx.__file__).is_relative_to({str(meipass)!r}), docx.__file__\n"
+        "from models.study import DecisionReport\n"
+        "from services.study.render_docx import render_docx\n"
+        f"r = DecisionReport.model_validate_json(pathlib.Path({str(report_json)!r}).read_text())\n"
+        "doc = docx.Document()\n"
+        "doc.sections[0].header.paragraphs[0].text = 'header'   # parts/../templates\n"
+        f"pathlib.Path({str(out)!r}).write_bytes(render_docx(r, charts={{}}))\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
+                          cwd=str(tmp_path), timeout=300)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    import docx
+
+    doc = docx.Document(str(out))
+    assert any(t.rows[0].cells[0].text == "Assumption" for t in doc.tables)
 def _guarded_gridspine_modules() -> set[str]:
     """Every `gridspine.*` module the backend's import guard names.
 

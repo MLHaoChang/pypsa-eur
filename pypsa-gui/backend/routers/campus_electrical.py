@@ -23,7 +23,8 @@ point (404 when none has run). Starting and cancelling check the edit lock.
 bought as the extra owner assets of the investment case, with the study's
 ``source_hash``, a ``stale`` flag and the run's ``study_method`` (the joint
 optimisation when it is fresh with a choice of its own, else least cost; owner
-decision 2026-10-12): ``{assets, source_hash, stale, study_method}``. Read only.
+decision 2026-10-12), and the needs that run could not meet (owner decision
+2026-10-13): ``{assets, source_hash, stale, study_method, unresolved}``. Read only.
 
 The project's own grid codes (plan C10) are under ``/{name}/grid-codes``,
 wrapping ``services/campus_grid_code_service.py``:
@@ -45,6 +46,7 @@ from __future__ import annotations
 
 import uuid
 from types import SimpleNamespace
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
@@ -86,6 +88,9 @@ class RunSettings(BaseModel):
     invest: bool = True
     #: The grid operator owns the PCC switchgear, so it is not bought or costed.
     pcc_switchgear_by_operator: bool = False
+    #: Who moves the PCC transformer's on-load taps (plan C15): the campus, or
+    #: the grid operator (they then stay at the campus file's position).
+    pcc_tap_control: Literal["campus", "grid_operator"] = "campus"
 
 
 class ExtractRequest(BaseModel):
@@ -242,8 +247,9 @@ def reset_library(
 def owner_assets(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """What the investment run bought, as the extra owner assets of the
     investment case: ``{"assets": [...], "source_hash": str | None, "stale": bool,
-    "study_method": "milp" | "least_cost" | None}`` (``owner_assets_response``);
-    no assets, no hash and no method before an investment run. Read only."""
+    "study_method": "milp" | "least_cost" | None, "unresolved": [{"need", "reason"}]}``
+    (``owner_assets_response``); no assets, no hash, no method and no unresolved
+    need before an investment run. Read only."""
     return ce.owner_assets_response(_row(proj, db))
 
 

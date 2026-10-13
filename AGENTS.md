@@ -32,3 +32,9 @@ Working on the in-app assistant (chat, tools, prompts, provider profiles, Guided
   when the latter is unset. Prefer naming the Cursor secret `MOONSHOT_API_KEY`
   for new setups. LiveKit / STT / TTS remain separate credential gates.
 - Do not commit credentials or paste secret values into logs, PRs, or scratch files.
+- Python, Node, and npm for the GUI come from `.pixi/envs/default` (pixi 0.68.1). Install with `pixi install --frozen -e default -e test`.
+- `pixi run gui-tests` uses the `test` environment, not `default`.
+- The environment's boot script starts the API on `http://127.0.0.1:8000` (tmux session `gui-backend`) and Vite on `http://127.0.0.1:5173` (tmux session `gui-frontend`).
+- Sign in as `admin@example.com`. The password is the single line in `~/.local/share/PyPSA Studio/dev-admin-password`, created on first boot. That account owns a personal workspace, so it can create projects.
+- Leave `pypsa-gui/backend/.env` absent unless you mean to point `DATABASE_URL` at Postgres. With no `.env`, the API uses the SQLite file under the app-data directory.
+- The chat panel stays off until `ANTHROPIC_API_KEY` is set; the app still boots without it.
