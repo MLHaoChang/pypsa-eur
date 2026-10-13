@@ -145,7 +145,7 @@ describe('StartCard', () => {
 
   it('a decision question opens its intake in the decision panel, on the open project', async () => {
     const user = mount()
-    const b = screen.getByTestId('hub-start-question-bess_site') as HTMLButtonElement
+    const b = screen.getByTestId('hub-start-question-bess_at_site') as HTMLButtonElement
     expect(b.textContent).toContain('Do I need a battery at my site?')
     await vi.waitFor(() => expect(b.disabled).toBe(false))
     await user.click(b)
@@ -158,7 +158,7 @@ describe('StartCard', () => {
   it('in multi-user mode the decision question is disabled with the reason, and nothing is called', () => {
     authMode.authEnabled = true
     mount()
-    expect((screen.getByTestId('hub-start-question-bess_site') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByTestId('hub-start-question-bess_at_site') as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByTestId('hub-start-invest-reason').textContent)
       .toContain(ERROR_COPY.decision_studies_unavailable.title)
     expect(availability).not.toHaveBeenCalled()
@@ -167,7 +167,7 @@ describe('StartCard', () => {
   it('without a project the decision question says what to do first', () => {
     useUIStore.setState({ currentProject: null })
     mount()
-    expect((screen.getByTestId('hub-start-question-bess_site') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByTestId('hub-start-question-bess_at_site') as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByTestId('hub-start-invest-reason').textContent).toMatch(/Create or open a project first/)
   })
 })

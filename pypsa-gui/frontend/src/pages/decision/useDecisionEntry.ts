@@ -28,7 +28,7 @@ export interface GuidedQuestion {
 /** The questions a study can answer today, in the owner's order (decision 3). */
 export const GUIDED_QUESTIONS: readonly GuidedQuestion[] = [
   {
-    id: 'bess_site',
+    id: 'bess_at_site',
     title: 'Do I need a battery at my site?',
     blurb: 'From your load and your tariff: whether a battery pays for itself, what size to build, what it is worth, '
       + 'and how sure that is. You get a yes/no, a size, a value and a report.',
