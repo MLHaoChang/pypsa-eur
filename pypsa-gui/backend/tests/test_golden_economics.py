@@ -632,6 +632,37 @@ NO_ADAPTER_REASONS: dict[str, str] = {
         "dimensionless cycles count — no cost field of any kind exists on "
         "StorageCyclingComparison or StorageUnitCycles."
     ),
+    # ── Plan S5: the investment case (the engine's since U2) ─────────────
+    "investment_case": (
+        "Upfront (overnight) CAPEX booked once in year 0 plus replacements, "
+        "on the SITE golden fixture — not the annuitised horizon CAPEX this "
+        "loop compares, and the multi-period golden network has no site, "
+        "tariff or bill for a case to exist on. Reconciled instead by "
+        "tests/test_engine_adapter_case_golden.py: CAPEX against the ledger oracle, FOM "
+        "against asset_economics.fom_cost_eur and cost_breakdown, NPV against "
+        "the oracle NPV and against the LP objective saving."
+    ),
+    "investment_case_xlsx": (
+        "The same case written to a workbook; its NPV cell is evaluated "
+        "against the case's NPV by tests/test_engine_adapter_workbook.py."
+    ),
+    # ── Plan S6: the findings ───────────────────────────────────────────
+    "decision_findings": (
+        "Battery NPVs (alone, or against a PV-only reference) built from "
+        "investment_case on the SITE golden fixture, and tornado bars at "
+        "fixed sizes — no annuitised horizon CAPEX to compare here. Checked "
+        "instead by tests/test_study_tornado_lp.py: the PV rows cancel "
+        "exactly against the reference, a centre bound reproduces the centre "
+        "NPV, and a price bound matches its closed form."
+    ),
+    # ── Plan S7: the decision report ────────────────────────────────────
+    "decision_report": (
+        "Copies, never recomputes: the verdict's facts from decision_findings "
+        "and the named option's KPIs from investment_case, on the SITE-shaped "
+        "study the fake solver runs. tests/test_study_report_routes.py checks "
+        "that every verdict KPI equals the findings payload and every economics "
+        "fact equals the case route's KPI for the same option."
+    ),
 }
 
 

@@ -1,0 +1,91 @@
+{
+ "schema": "u2_gs_bound_npvs/1",
+ "about": "U2 WP10: GS's CAPEX and RATE bound NPVs (findings._capex_bound / _rate_bound: the pro forma on the variant ledger, the network copy's FOM or rates rewritten), the C5 oracle of test_u2_wp7_case.py::test_the_bounds_equal_gs_and_read_no_network, frozen before WP10 deleted the pro forma. Recorded by that test's own _gs_bound_npv on a clean copy of 14d0281f (WP9), on the engine-solved site golden options (u2_targets.ic_case_option).",
+ "recorded_at_commit": "14d0281fb808ba85c50199da79a552822bc94673",
+ "bounds": [
+  {
+   "option": "bess_2h",
+   "kind": "capex",
+   "key": "battery_storage_eur_per_kwh",
+   "value": 132.9027,
+   "npv": 459620.39720594394
+  },
+  {
+   "option": "bess_2h",
+   "kind": "capex",
+   "key": "battery_storage_eur_per_kwh",
+   "value": 246.8193,
+   "npv": 283742.8083442075
+  },
+  {
+   "option": "bess_2h",
+   "kind": "capex",
+   "key": "battery_inverter_eur_per_kw",
+   "value": 149.7495,
+   "npv": 455832.3312599338
+  },
+  {
+   "option": "bess_2h",
+   "kind": "capex",
+   "key": "battery_inverter_eur_per_kw",
+   "value": 278.1063,
+   "npv": 287530.8742902174
+  },
+  {
+   "option": "bess_2h",
+   "kind": "rate",
+   "key": "discount_rate",
+   "value": 0.049,
+   "npv": 550760.9350489405
+  },
+  {
+   "option": "bess_2h",
+   "kind": "rate",
+   "key": "discount_rate",
+   "value": 0.091,
+   "npv": 239982.0349849288
+  },
+  {
+   "option": "bess_pv_2h",
+   "kind": "capex",
+   "key": "battery_storage_eur_per_kwh",
+   "value": 132.9027,
+   "npv": 1659268.4535200605
+  },
+  {
+   "option": "bess_pv_2h",
+   "kind": "capex",
+   "key": "battery_storage_eur_per_kwh",
+   "value": 246.8193,
+   "npv": 1474633.0697575258
+  },
+  {
+   "option": "bess_pv_2h",
+   "kind": "capex",
+   "key": "battery_inverter_eur_per_kw",
+   "value": 149.7495,
+   "npv": 1655291.7614685837
+  },
+  {
+   "option": "bess_pv_2h",
+   "kind": "capex",
+   "key": "battery_inverter_eur_per_kw",
+   "value": 278.1063,
+   "npv": 1478609.7618090024
+  },
+  {
+   "option": "bess_pv_2h",
+   "kind": "rate",
+   "key": "discount_rate",
+   "value": 0.049,
+   "npv": 2517280.190517821
+  },
+  {
+   "option": "bess_pv_2h",
+   "kind": "rate",
+   "key": "discount_rate",
+   "value": 0.091,
+   "npv": 866212.471649621
+  }
+ ]
+}

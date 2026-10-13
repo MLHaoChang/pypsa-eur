@@ -265,6 +265,7 @@ def test_the_job_writes_into_run_milp_and_never_touches_the_least_cost_files(hub
     assert (milp / ce.USED_LIBRARY_FILE).read_bytes() == (run / ce.USED_LIBRARY_FILE).read_bytes()
     kw = engine.calls[0]
     assert kw["pf"] == 0.95 and kw["profile"] == "eu_rfg_dcc_ce" and kw["pcc_switchgear"] is True
+    assert kw["pcc_tap_control"] == "campus"
     assert kw["criteria"].margin == 0.2 and kw["criteria"].n_minus_1 is True
     assert engine.netcdf_free is True                         # the thread never holds the NetCDF lock
 
@@ -275,6 +276,14 @@ def test_the_operator_owned_pcc_switchgear_setting_reaches_the_milp(hub, monkeyp
     ce.start_milp_job(hub, {**SETTINGS, "pcc_switchgear_by_operator": True})
     finish(hub, engine)
     assert engine.calls[0]["pcc_switchgear"] is False
+
+
+def test_who_moves_the_pcc_taps_reaches_the_milp(hub, monkeypatch):
+    engine = FakeEngine(iterations=1)
+    monkeypatch.setattr(ce, "_milp_engine", engine)
+    ce.start_milp_job(hub, {**SETTINGS, "pcc_tap_control": "grid_operator"})
+    finish(hub, engine)
+    assert engine.calls[0]["pcc_tap_control"] == "grid_operator"
 
 
 # ── cancel ──────────────────────────────────────────────────────────────────
@@ -350,7 +359,8 @@ def test_the_state_carries_the_milp_results_beside_the_least_cost_ones(hub, monk
     assert m["status"]["state"] == "done" and m["stale"] is False
     res = m["results"]
     assert set(res) == {"investment", "cost", "compliance_invested", "history", "comparison", "summary",
-                        "fallback", "stop"}
+                        "fallback", "stop", "taps"}
+    assert res["taps"] == []             # plan C15: the tap table, empty: the drafted hub has no tap data
     assert res["investment"] and res["cost"] and res["compliance_invested"]
     assert [r["iteration"] for r in res["history"]] == [0, 1, 2]
     assert res["comparison"][0]["milp_choice"] == "1 x B"

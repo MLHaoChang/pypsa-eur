@@ -807,11 +807,15 @@ def sample_representative_weeks(config: SampleWeeksConfig):
         # Re-apply uploaded profiles — sampled timesteps ⊂ uploaded index so
         # the reindex is exact (no all-NaN columns to skip).
         _reapply_user_ts_to_network(n)
-        # Each sampled hour stands for days_in_month / (weeks × 7) hours. Set
-        # all three weight columns so the LP objective, generator energy
-        # balance and storage SoC equations scale consistently.
+        # Each sampled hour stands for days_in_month / (weeks × 7) hours.
+        # `objective` and `generators` carry that scale so costs and energy
+        # totals reconstruct the year. `stores` is different: PyPSA reads it
+        # as the elapsed hours in the StorageUnit/Store state-of-charge balance,
+        # so it stays the snapshot step (1 h, the sampler builds hourly weeks).
+        # Scaling it would move ~4.3 h of energy per hourly dispatch.
+        # Same rule as the Energy Hub templates (S0) and myopic (#96).
         for col in n.snapshot_weightings.columns:
-            n.snapshot_weightings[col] = full_weights
+            n.snapshot_weightings[col] = 1.0 if col == "stores" else full_weights
 
     change_log_service.log(
         "update", "Network", "snapshots",

@@ -99,3 +99,71 @@ def capital_cost_per_horizon(annual_capital_cost: float, snapshots_per_period: i
     scaling around the solve and every report.
     """
     return annual_capital_cost * (snapshots_per_period / HOURS_PER_YEAR)
+
+
+# ── Pro forma (plan S5): discounting, IRR and payback, from first principles ──
+#
+# The cash-flow vector is indexed by year, year 0 first (the build year, not
+# discounted). These are the textbook definitions, written out here so the
+# pro forma is checked against arithmetic it does not share.
+
+def npv(rate: float, cash_flows: list[float]) -> float:
+    """Σ_t CF_t / (1 + r)^t, t = 0 .. n (year 0 undiscounted)."""
+    return sum(cf / (1.0 + rate) ** t for t, cf in enumerate(cash_flows))
+
+
+def irr(cash_flows: list[float], lo: float = -0.99, hi: float = 10.0,
+        tol: float = 1e-12) -> float | None:
+    """
+    The rate at which `npv` is zero, by bisection on [lo, hi]; None when the
+    NPV has the same sign at both ends (no root bracketed, e.g. no sign
+    change in the cash flows).
+    """
+    f_lo, f_hi = npv(lo, cash_flows), npv(hi, cash_flows)
+    if f_lo == 0.0:
+        return lo
+    if f_hi == 0.0:
+        return hi
+    if (f_lo > 0) == (f_hi > 0):
+        return None
+    for _ in range(500):
+        mid = (lo + hi) / 2.0
+        f_mid = npv(mid, cash_flows)
+        if (f_mid > 0) == (f_lo > 0):
+            lo, f_lo = mid, f_mid
+        else:
+            hi = mid
+        if hi - lo < tol:
+            break
+    return (lo + hi) / 2.0
+
+
+def payback(cash_flows: list[float]) -> float | None:
+    """
+    Years until the cumulative cash flow first reaches zero, interpolated
+    linearly inside the crossing year; None when it never does.
+    """
+    cum = 0.0
+    for t, cf in enumerate(cash_flows):
+        before = cum
+        cum += cf
+        if t > 0 and before < 0.0 <= cum:
+            return (t - 1) + (-before) / cf
+    return None
+
+
+def discounted(rate: float, cash_flows: list[float]) -> list[float]:
+    return [cf / (1.0 + rate) ** t for t, cf in enumerate(cash_flows)]
+
+
+def annuity_pv_factor(rate: float, years: float) -> float:
+    """Present value, one period before the first, of 1 per year for `years`."""
+    if rate == 0:
+        return float(years)
+    return (1.0 - (1.0 + rate) ** -years) / rate
+
+
+def battery_upfront_per_mw(inverter_eur_per_kw: float, storage_eur_per_kwh: float,
+                           max_hours: float) -> float:
+    """The battery's upfront investment per MW of power: inverter + hours x storage."""
+    return (inverter_eur_per_kw + max_hours * storage_eur_per_kwh) * 1000.0

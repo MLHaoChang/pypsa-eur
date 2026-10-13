@@ -1,0 +1,39 @@
+{
+ "campaign": {
+  "active": false,
+  "budget_solves": 4,
+  "entries": [
+   {
+    "at": "2026-09-30T02:29:37Z",
+    "solves_charged": 4,
+    "study": "decision_study"
+   }
+  ],
+  "note": "decision study run done",
+  "objective": "decision study 'Site battery': 4 option(s)",
+  "remaining_solves": 0,
+  "spent_solves": 4,
+  "started_at": "2026-09-30T02:29:37Z"
+ },
+ "current": null,
+ "error": null,
+ "fidelity": "quick_screen",
+ "finished_at": 1790735383.6359076,
+ "options": [
+  "none",
+  "bess_1h",
+  "bess_2h",
+  "bess_4h"
+ ],
+ "pending": [],
+ "solved": [
+  "bess_1h",
+  "bess_2h",
+  "bess_4h",
+  "none"
+ ],
+ "solves_charged": 4,
+ "started_at": 1790735377.3782928,
+ "status": "done",
+ "study_id": "5cb04667fcc64915acbb6e9704d204d1"
+}
