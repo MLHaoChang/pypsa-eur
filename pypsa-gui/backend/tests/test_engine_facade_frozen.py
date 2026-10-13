@@ -75,7 +75,10 @@ SIGNATURES: dict[str, str] = {
     "services.finance.metrics.npv": "(rate: 'float | None', cash) -> 'float | None'",
     # IC S0b (plan S7): one source of capex truth and the one replacement schedule.
     "services.finance.case.effective_parts": "(a: 'AssetFinance') -> 'tuple[AssetPart, ...]'",
-    "services.finance.case.scale_capex": "(case: 'FinanceCase', f: 'float') -> 'FinanceCase'",
+    # IC engine ask 2 (2026-10-13): one asset, or one part of one asset.
+    "services.finance.case.scale_capex":
+        "(case: 'FinanceCase', f: 'float', *, asset: 'str | None' = None, "
+        "part: 'str | None' = None) -> 'FinanceCase'",
     "services.finance.case.AssetPart":
         "(name: 'str', overnight_cost: 'float | None', lifetime_years: 'float | None', "
         "fom_share: 'float | None' = None) -> None",
@@ -113,6 +116,21 @@ SIGNATURES: dict[str, str] = {
     "services.library.series_store.delete_series":
         "(db: 'DBSession', org_id: 'UUID', name: 'str', *, project_dirs: 'Iterable[Path]', "
         "root: 'Path | None' = None) -> 'SeriesDeleted'",
+    # IC engine ask 3 (2026-10-13): the names the study used outside the facade
+    # (its WP7 freeze, N15 and Q15 asks), frozen.
+    "services.finance.engine.wacc_gate": "(case: 'FinanceCase') -> 'dict'",
+    "services.commercial.binding.bind_commercial":
+        "(n, commercial, *, project_dir: 'pathlib.Path | None', "
+        "resolve_ref: 'Callable[[object], pd.Series]', lock=None, "
+        "resolve_item: 'Callable[[object], dict] | None' = None) -> 'dict | None'",
+    "services.library.series_store.resolve":
+        "(db: 'DBSession', org_id: 'UUID', ref: 'PriceSeriesRef', *, root: 'Path | None' = None)"
+        " -> 'pd.Series'",
+    "services.asset_schema.derive.apply_parts":
+        "(n, component_class: 'str', name: 'str', parts: 'Mapping[str, Any]', *, "
+        "discount_rate: 'float') -> 'None'",
+    "services.asset_schema.derive.has_parts":
+        "(component_class: 'str', values: 'Mapping[str, Any]') -> 'bool'",
     "services.commercial.cost_rows.commercial_cost_terms":
         "(n, commercial: 'dict | None', *, years=None) -> 'dict'",
     "services.results.value_flows.export_revenue":
@@ -142,6 +160,80 @@ SIGNATURES: dict[str, str] = {
 # The `FinanceResult` fields the guided study reads (`cash`, `metrics`, `lcos`)
 # must stay; other fields may be added.
 RESULT_FIELDS_READ = ("cash", "metrics", "lcos")
+
+# IC engine ask 3 (2026-10-13): every other attribute the study reads off an
+# engine type (a dataclass or a pydantic model), as a SUBSET: these must
+# stay, others may be added. `FinanceResult` must stay a dataclass (the study
+# replaces its `gate`).
+FIELDS_READ: dict[str, tuple[str, ...]] = {
+    "services.finance.engine.FinanceResult": (
+        "cash", "metrics", "lcos", "op", "op_incremental", "terminal", "reasons", "flags",
+        "incentives", "gate"),
+    "services.finance.cashflow.Operating": ("lines", "line_meta", "capex", "replacement",
+                                            "reasons"),
+    "services.finance.incentives.Incentives": ("grant",),
+    "services.finance.case.Template": ("lines",),
+    "services.finance.case.TemplateLine": ("key", "stream", "amount", "source"),
+    "services.finance.case.LpBasis": ("discount_rate", "asset_discount_rates"),
+    "services.commercial.billing.SiteBill": ("per_period", "flags"),
+    "services.commercial.value_flow_templates.TemplateResult": ("config",),
+    "models.commercial.ConnectionAgreement": ("kind", "import_cap_mw", "export_cap_mw",
+                                              "available_from"),
+    "models.commercial.PriceSeriesRef": ("id", "version", "hash", "source"),
+    "models.commercial.Tariff": ("id", "name", "jurisdiction", "valid_from", "valid_to", "items"),
+    "models.commercial.TariffItem": ("id", "kind", "unit", "periods", "settlement", "measured_on",
+                                     "direction"),
+    "models.commercial.TariffPeriod": ("name", "rate", "months", "weekdays", "start_hour",
+                                       "end_hour"),
+    "models.commercial.ValueFlowConfig": ("asset_owners",),
+    "models.commercial.AssetOwnership": ("asset_id",),
+    "models.finance.TerminalValueRule": ("method",),
+    # The generic defaults pack the study seeds its ledger from (`study/library.py`).
+    "services.library.defaults_pack.loader.DefaultsPack": (
+        "version", "hash", "cost_values", "finance", "tariffs", "stamp", "default_tariff_id"),
+    "services.library.defaults_pack.loader.FinanceDefaults": (
+        "seed_library", "currency", "currency_year", "currency_year_source", "basis",
+        "basis_source", "perspective", "perspective_source", "discount_rate", "horizon_rule",
+        "replacement_rules", "degradation", "sizing_limit"),
+    "services.library.defaults_pack.loader.PackValue": (
+        "key", "value", "unit", "original_value", "original_unit", "conversion_factor", "range",
+        "currency_year", "price_basis", "source", "source_year", "source_url", "projection_year",
+        "domain", "illustrative", "derived", "note"),
+    "services.library.defaults_pack.loader.PackRange": ("low", "high", "source"),
+    "services.library.defaults_pack.loader.HorizonRule": ("horizon_years", "source"),
+    "services.library.defaults_pack.loader.ReplacementRule": ("key", "every_years", "within",
+                                                              "cost", "source"),
+    "services.library.defaults_pack.loader.PackTariff": ("tariff", "meta"),
+    "services.library.defaults_pack.loader.PackTariffMeta": (
+        "currency", "currency_year", "source", "source_year", "illustrative", "billing_period",
+        "export", "honesty", "items"),
+    "services.library.defaults_pack.loader.TariffExport": ("price_per_mwh", "series", "cap_mw"),
+    "services.library.defaults_pack.loader.HonestyNote": ("code", "help"),
+    "services.library.defaults_pack.loader.TariffSourceRow": ("component", "label",
+                                                              "original_price", "basis",
+                                                              "periods"),
+}
+
+# The plain-dict keys the study reads off `run_case`'s result (probed below).
+RESULT_KEYS_READ: dict[str, tuple[str, ...]] = {
+    "cash": ("project_pre_tax",),
+    "metrics": ("project_pre_tax_irr", "project_pre_tax_npv", "lcos_real_per_mwh"),
+    "op_incremental": ("net",),
+    "lcos": ("reasons",),
+}
+
+# Constants and exceptions the study reads.
+CONSTANTS: dict[str, object] = {
+    "services.commercial.lp_bindings.META_LINKS": "ic_poc_links",
+    "models.finance.ESCALATION_CLASSES": ("opex", "fuel", "tariff", "ppa", "export", "capex"),
+}
+EXCEPTIONS: dict[str, tuple[type, str]] = {
+    # path: (base class, constructor signature); the study reads `.code` where it has one.
+    "services.commercial.binding.BindingRefusal":
+        (Exception, "(status: 'int', code: 'str', message: 'str')"),
+    "services.library.series_store.LibraryRefNotFound": (LookupError, ""),
+    "services.library.series_store.LibraryRefStale": (ValueError, ""),
+}
 
 DATACLASS_FIELDS: dict[str, tuple[str, ...]] = {
     "services.commercial.tariff_engine.RatingResult": (
@@ -242,3 +334,67 @@ def test_finance_refused_keeps_its_code_and_detail():
 
     e = FinanceRefused("cod_missing", "x")
     assert isinstance(e, ValueError) and (e.code, e.detail) == ("cod_missing", "x")
+
+
+# ── IC engine ask 3 (2026-10-13): every field the study reads ───────────────
+
+
+@pytest.mark.parametrize("path", sorted(FIELDS_READ))
+def test_a_type_keeps_the_fields_the_guided_study_reads(path):
+    obj = _get(path)
+    if dataclasses.is_dataclass(obj):
+        names = {f.name for f in dataclasses.fields(obj)}
+    else:
+        names = set(obj.model_fields)
+    names |= {k for k, v in vars(obj).items() if isinstance(v, property)}
+    missing = sorted(set(FIELDS_READ[path]) - names)
+    assert missing == [], f"{path} lost {missing}: the guided study reads them"
+
+
+def test_the_finance_result_stays_a_replaceable_dataclass():
+    from services.finance.engine import FinanceResult
+
+    assert dataclasses.is_dataclass(FinanceResult)          # `dataclasses.replace(r, gate=...)`
+    assert "gate" in {f.name for f in dataclasses.fields(FinanceResult)}
+
+
+def test_run_case_keeps_the_result_keys_the_guided_study_reads():
+    from services.finance.engine import run_case
+    from tests.test_finance_engine import _case
+
+    r = run_case(_case())
+    for attr, keys in RESULT_KEYS_READ.items():
+        got = getattr(r, attr)
+        assert isinstance(got, dict) and set(keys) <= set(got), (attr, sorted(got))
+    assert isinstance(r.reasons, dict) and isinstance(r.gate, dict)
+    assert all(hasattr(r.op.line_meta[k], "stream") for k in r.op.lines)
+
+
+@pytest.mark.parametrize("path", sorted(CONSTANTS))
+def test_a_constant_the_guided_study_reads_is_frozen(path):
+    assert _get(path) == CONSTANTS[path]
+
+
+@pytest.mark.parametrize("path", sorted(EXCEPTIONS))
+def test_an_exception_the_guided_study_catches_is_frozen(path):
+    base, sig = EXCEPTIONS[path]
+    exc = _get(path)
+    assert issubclass(exc, base)
+    if sig:
+        assert str(inspect.signature(exc)) == sig
+
+
+@pytest.mark.live_solve
+def test_the_commercial_terms_keep_the_keys_the_guided_study_reads():
+    """`engine_adapter` reads `commercial_cost_terms(...)["block"]` (`energy_export`,
+    `by_item[label][item_id]`) and `export_revenue(...)` on the flat axis `"_"`."""
+    from services.commercial.cost_rows import commercial_cost_terms
+    from services.results.value_flows import export_revenue
+    from tests.golden import site_fixture as sf
+
+    n, _cfg, compiled, _ledger = sf.site_case_option("bess_2h")
+    block = commercial_cost_terms(n, compiled.commercial())["block"]
+    assert {"energy_export", "by_item"} <= set(block)
+    per_item = block["by_item"]["demand_charge"]                # {item id: {period: amount}}
+    assert per_item and all(isinstance(v, dict) and v for v in per_item.values())
+    assert set(export_revenue(n, compiled.config)) == {"_"}
