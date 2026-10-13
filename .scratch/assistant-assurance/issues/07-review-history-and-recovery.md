@@ -41,3 +41,28 @@ P6 also requires A6.6: preserve request constraints and metric/formula/profile v
 
 See the [reliability contract](../reliability-contract.md). Original approval
 does not cover these additions; review/freeze them before implementation.
+
+### 2026-10-11 — shared harness implementation
+
+Immutable retained raw evidence now recalculates after disk reload and foreground edits, with fresh ownership/ACL checks and exact historical scope. A single optional bounded read-only reviewer can admit qualitative cited interpretations only after deterministic checks; numeric prose is withheld. Failures preserve checked facts. The configured model is not an independent expert, and unknown/late usage lacks a durable billing reservation. General conversational constraint recovery and independent domain review remain pending.
+
+See [implementation status](../implementation-status.md), [contracts](../harness-contracts.md) and [coverage ledger](../coverage-ledger.md). The whole ticket remains open; no independent review verdict is inherited by this extension.
+
+
+### User-facing checked pilot (2026-10-11)
+
+The user selected an explicit chat opt-in. The control reads current server
+capabilities, requests the existing strict publication contract and retains
+checking through retry/edit/clarification/queue/Live paths. It cannot disable
+server-required strict mode or silently downgrade after rollback. Unavailable
+checked history has a conservative retry requirement without approval; async
+rewinds reject changed generations, including project round trips.
+
+Final source integrates master `baa3a95e`. The selected shared backend gate
+passes 1,097 / seven skips; complete frontend passes 3,686 / 313 files. Native
+Chromium with mocked API responses checks keyboard/SSE/digest/rollback at a
+380-pixel panel width. Build, 229-tool inventory and touched-file style pass.
+See [validation](../checked-opt-in-validation.json), [coverage ledger](../coverage-ledger.md)
+and [activation/rollback](../checked-opt-in-runbook.md). No paid calls, full-backend
+fresh run, independent domain approval or full-device/calibration release claim.
+Global deployment remains disabled and this whole phase issue stays open.

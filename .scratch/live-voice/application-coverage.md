@@ -167,3 +167,19 @@ Load flow, sensitivity and GridSpine are examples among the matrix above.
 Hosted profile/device/latency gates remain pending; an architectural review pass
 does not certify production behavior. Acknowledgment latency and grounded-answer
 latency are measured separately, including turn detection, tools and TTS.
+
+## Full-coverage limitation block
+
+Whole-application coverage is NOT claimed. The machine-readable source is
+`full_coverage` in [capability-matrix.json](capability-matrix.json); CI
+(`assistant_control_matrix.py --check`, `tests/test_assistant_control_matrix.py`)
+fails if a claim appears while any of these hold:
+
+- Pending family journeys: 14 of 14 (every family is still `pending:issue-05-*`).
+- Behavioral fixtures: pending for every matrix row.
+- UI-control to typed-tool parity: unaudited beyond creation-form fields and catalogue closed sets.
+- Hosted profile/device/latency gates and the prolonged mixed-domain conversation: not run.
+
+Permitted statement until issue 05 journeys pass: tested subsets only, labelled
+accordingly. Load flow (issue 07), run evidence (issue 06) and monitoring adapters
+(issue 11) are examples, not coverage of the application.

@@ -71,6 +71,10 @@
       "surface": "banner",
       "why": "A destructive project operation was refused. The user chooses cascade or rename."
     },
+    "discussed_run_required": {
+      "surface": "inline",
+      "why": "export_run_evidence (or a follow-up) needs a discussed or named run_id. The model calls discuss_project_run or list_project_runs within the turn."
+    },
     "empty_file": {
       "surface": "banner",
       "why": "Upload rejected. The user must supply a different file."
@@ -139,6 +143,10 @@
       "surface": "inline",
       "why": "A confirm request carried something other than approve/deny — a client bug, not a user-actionable state."
     },
+    "invalid_discussed_run": {
+      "surface": "inline",
+      "why": "discuss_project_run / set_discussed_run received a malformed run_id or open_ui flag. The model corrects arguments within the turn."
+    },
     "invalid_filename": {
       "surface": "banner",
       "why": "Upload rejected on the filename. The user must rename."
@@ -202,6 +210,10 @@
     "no_active_project": {
       "surface": "inline",
       "why": "Most tools need a project; the model recovers by asking which one, in prose, inside the same turn. Promoting it would banner a question the assistant is already asking."
+    },
+    "no_chat_session": {
+      "surface": "inline",
+      "why": "A session-bound control tool (discuss_project_run, use_toolset, start/resume_task) ran without an active ChatSession. The turn framework normally supplies one; when it does not, the model reports the refusal and does not invent session state."
     },
     "no_active_workflow": {
       "surface": "inline",
@@ -363,6 +375,18 @@
       "surface": "inline",
       "why": "solve_ppa_price on a contract whose price is not established in the case. The model says the contract needs a price first."
     },
+    "report_failed": {
+      "surface": "inline",
+      "why": "Recorded on a published run-evidence manifest when a report job ends failed; get_run_evidence surfaces the typed error field."
+    },
+    "solver_failed": {
+      "surface": "inline",
+      "why": "Recorded on a published run-evidence manifest when a foreground solve ends failed; not a user-facing tool_error banner — get_run_evidence surfaces the typed error field."
+    },
+    "study_failed": {
+      "surface": "inline",
+      "why": "Recorded on a published run-evidence manifest when an adequacy/study worker ends failed; get_run_evidence surfaces the typed error field."
+    },
     "solver_in_flight": {
       "surface": "banner",
       "why": "A foreground solve is running and the operation was refused. The user waits or aborts."
@@ -422,6 +446,22 @@
     "turn_already_in_flight": {
       "surface": "inline",
       "why": "A second turn arrived while one was running. Route-level, on an `error` frame, and the composer state already says so."
+    },
+    "duplicate": {
+      "surface": "inline",
+      "why": "Shared utterance admission (issue 02): the same utterance_id was already seen. Emitted on an `error` frame before the turn starts; the composer can show the refusal inline."
+    },
+    "queued": {
+      "surface": "inline",
+      "why": "Shared utterance admission (issue 02): a turn lease is held and this utterance became the single pending correction. Not a second turn."
+    },
+    "stale_generation": {
+      "surface": "inline",
+      "why": "Shared utterance admission (issue 02): the client generation no longer matches the coordinator after rebind/restart."
+    },
+    "rejected_empty": {
+      "surface": "inline",
+      "why": "Shared utterance admission (issue 02): blank utterance text with admission fields set. Nothing reached the model."
     },
     "unknown_confirmation_token": {
       "surface": "inline",
@@ -535,6 +575,14 @@
       "surface": "banner",
       "why": "The checked turn lost its project binding before publication, so the answer cannot safely appear for the currently selected project."
     },
+    "assurance_context_persistence_failed": {
+      "surface": "banner",
+      "why": "The prior checked conversation checkpoint could not be durably revoked. The turn or parent control stops before execution or changing generation; retry when storage is available."
+    },
+    "wrong_replica": {
+      "surface": "banner",
+      "why": "The chat or durable parent is pinned to another application worker. Admission refuses this worker before execution and returns the owning replica identity."
+    },
     "assurance_publication_failed": {
       "surface": "banner",
       "why": "The owned answer or public stream could not be committed and verified; no checked answer is available for the turn."
@@ -550,6 +598,10 @@
     "invalid_navigation": {
       "surface": "inline",
       "why": "The navigation tool named an invalid application panel or tab; the specific tool fails without changing the active view."
+    },
+    "invalid_progress_cursor": {
+      "surface": "inline",
+      "why": "GET /api/chat/{id}/progress refuses a negative cursor query; route-only, never a tool completion failure."
     },
     "task_checkpoint_failed": {
       "surface": "banner",

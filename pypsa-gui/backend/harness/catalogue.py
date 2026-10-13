@@ -1355,7 +1355,8 @@ TOOLS: list[dict[str, Any]] = [
         "has_solver_config, bus_count, snapshot_count, objective, "
         "has_orphan_tmp, missing, parent_project, scenario_description, "
         "scenario_type, project_kind (null = capacity_expansion; "
-        "'planning_dynamics' for a gridspine study) (per "
+        "'planning_dynamics' for a gridspine study), settings (the per-project "
+        "settings table: derive_lengths_from_geometry) (per "
         "schemas.py:467-491). `id` is the DB-registry UUID when multi-user "
         "auth is enabled and null in single-user mode. Each entry is "
         "augmented with `resident: bool` "
@@ -1464,8 +1465,8 @@ TOOLS: list[dict[str, Any]] = [
         "list_projects filtered to entries where parent_project == name. Each "
         "entry is a ProjectInfo {name, id, created_at, has_solver_config, "
         "bus_count, snapshot_count, objective, has_orphan_tmp, missing, "
-        "parent_project, scenario_description, scenario_type, project_kind} per "
-        "schemas.py:467-491. "
+        "parent_project, scenario_description, scenario_type, project_kind, "
+        "settings} per schemas.py:467-491. "
         "Safety: read.",
         {"name": {"type": "string"}},
         ["name"],
@@ -1658,27 +1659,39 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _empty(
         "export_network_nc",
-        "Export the active network as PyPSA netCDF. Saves a downloadable file in "
-        "the chat file strip and returns its metadata {file_id, filename, size}. "
+        "Export the active network as PyPSA netCDF and return the new file's "
+        "metadata {file_id, filename, size}. "
+        "Writes the file into the project's uploads (shown in the chat file "
+        "strip, counted toward the uploads quota, refused while another user "
+        "holds the project lock); the network and the project are unchanged. "
         "Requires a loaded project. Safety: read.",
     ),
     _empty(
         "export_csv_bundle",
-        "Export the active network as a CSV bundle (zip). Saves a downloadable file "
-        "and returns its metadata {file_id, filename, size}. Requires a loaded "
-        "project. Safety: read.",
+        "Export the active network as a CSV bundle (zip) and return the new "
+        "file's metadata {file_id, filename, size}. "
+        "Writes the file into the project's uploads (shown in the chat file "
+        "strip, counted toward the uploads quota, refused while another user "
+        "holds the project lock); the network and the project are unchanged. "
+        "Requires a loaded project. Safety: read.",
     ),
     _empty(
         "export_excel",
-        "Export the active network to an .xlsx workbook. Saves a downloadable file "
-        "and returns its metadata {file_id, filename, size}. Requires a loaded "
-        "project. Safety: read.",
+        "Export the active network to an .xlsx workbook and return the new "
+        "file's metadata {file_id, filename, size}. "
+        "Writes the file into the project's uploads (shown in the chat file "
+        "strip, counted toward the uploads quota, refused while another user "
+        "holds the project lock); the network and the project are unchanged. "
+        "Requires a loaded project. Safety: read.",
     ),
     _empty(
         "export_matpower",
-        "Export the active network in MATPOWER case format. Saves a downloadable "
-        "file and returns its metadata {file_id, filename, size}. Requires a "
-        "loaded project. Safety: read.",
+        "Export the active network in MATPOWER case format and return the new "
+        "file's metadata {file_id, filename, size}. "
+        "Writes the file into the project's uploads (shown in the chat file "
+        "strip, counted toward the uploads quota, refused while another user "
+        "holds the project lock); the network and the project are unchanged. "
+        "Requires a loaded project. Safety: read.",
     ),
 
     # ── Audit / Undo (4) ───────────────────────────────────────────────────
@@ -1785,10 +1798,16 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "wait_for_job",
-        "Wait locally for a solve-queue or GridSpine job, avoiding repeated model status polls. "
+        "Wait locally for a solve-queue/GridSpine UUID, foreground simulation/AC-PF "
+        "(fg:… from run_simulation / run_ac_pf_stage), adequacy/study job "
+        "(ad:… from run_fmea_sweep / frontier / mc / coupling / margin / eh / "
+        "investment_case), or report job (rpt:… from generate_report / "
+        "regenerate_report_section / propose_report_mapping), "
+        "avoiding repeated model status polls. "
         "Returns job, terminal, completed, timed_out, wait_cancelled, waited_seconds. "
         "Default 20 seconds, maximum 25. On timeout report pending and end the turn; never busy-poll. "
-        "A cancelled wait leaves the job running; solve_queue_abort stops it. Safety: read.",
+        "A cancelled wait leaves the job running; solve_queue_abort, abort_simulation, "
+        "abort_adequacy_study, or abort_report_generation stops it. Safety: read.",
         {"job_id": {"type": "string"}, "timeout_seconds": {"type": "number", "minimum": 0, "maximum": 25}}, ["job_id"],
     ),
     _t(
@@ -2707,6 +2726,10 @@ TOOLS: list[dict[str, Any]] = [
         "rating), compliance (per check: status_as_is, status_with_measures, "
         "value, limit, worst hour, clause and its code|assumed tag), "
         "requirement (the PCC reactive band applied and where P_ref came from)}. "
+        "owner_assets_count is how many bought items the investment case takes as "
+        "extra owner assets and owner_assets_method (milp|least_cost, null when "
+        "none) which result they come from: the joint optimisation when it is "
+        "fresh and found its own choice, else the least-cost run; say which. "
         "When stale is true the campus or the project changed since the run: say "
         "so before quoting numbers. It is a steady-state study, not a compliance "
         "certificate. 409 for a project of another kind. Safety: read.",
@@ -2761,7 +2784,8 @@ TOOLS: list[dict[str, Any]] = [
         "project buys from: {yaml (the library as text: transformers, cables, "
         "capacitor banks, shunt reactors, STATCOMs and switchgear, each with "
         "its ratings, capex, fixed opex fraction and lifetime, every number "
-        "tagged measured|datasheet|assumed), is_default}. is_default is true "
+        "tagged measured|datasheet|assumed, and a cost also literature: a "
+        "reference value from a cited publication, not a quote), is_default}. is_default is true "
         "until the user saves a copy for the project. Every cost in the shipped "
         "library is an assumed placeholder. 409 for a project of another kind. "
         "Safety: read.",
@@ -2777,7 +2801,9 @@ TOOLS: list[dict[str, Any]] = [
         "(422, naming the entry and the field; 413 over 1 MB) and nothing is "
         "saved. Start from campus_get_library, change only what the user "
         "asked, and keep every value's source tag honest: a price from a quote "
-        "is datasheet or measured, a guess stays assumed. You must ask before replacing "
+        "is datasheet or measured, a cost read from a cited publication is "
+        "literature (only a cost may be; say the reference in its note), a "
+        "guess stays assumed. You must ask before replacing "
         "a library the user already edited (is_default false), because that "
         "discards their copy. Results of an earlier run turn stale. "
         "Safety: write.",
@@ -2798,9 +2824,14 @@ TOOLS: list[dict[str, Any]] = [
         "compliance_invested (the compliance table re-solved with the assets), "
         "scope ({pcc_switchgear: campus|grid_operator}: whether the PCC switchgear "
         "was costed to the campus or left to the grid operator, say which), "
-        "library_is_default, stale, notes}. Say these with the numbers: costs "
+        "library_is_default, stale, owner_assets_method (milp|least_cost: which "
+        "result the investment case's extra owner assets come from; the joint "
+        "optimisation's when it is fresh and found its own choice, else this "
+        "least-cost one; null when there are none), notes}. Say these with the numbers: costs "
         "are placeholders tagged assumed unless the user replaced them with "
-        "quotes, so quote them as orders of magnitude; tap changers are not "
+        "quotes (datasheet or measured) or cited reference values "
+        "(literature, still not quotes), so quote assumed ones as orders of "
+        "magnitude; tap changers are not "
         "optimised, so a voltage excursion compensation cannot shrink is "
         "reported unresolved, not fixed; and when stale is true the campus, "
         "the project or the library changed since the run. Never add the "
@@ -2808,6 +2839,27 @@ TOOLS: list[dict[str, Any]] = [
         "it is reported alongside, and the PyPSA project is unchanged. "
         "investment is null with a reason before a run or after a run with "
         "invest off. 409 for a project of another kind. Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "campus_get_milp",
+        "The joint optimisation (MILP) of a campus study: {status (the background "
+        "job's record: state running|done|cancelled|failed, iteration, max_iter, "
+        "best_cost and c8_cost in EUR per year, message, error; null when no job "
+        "has run since the backend started), summary (c8_cost, milp_cost, "
+        "iterations, stop, fallback), stop (converged|stalled|delta_floor|"
+        "max_iter|cancelled), fallback (why the least-cost choice was kept, or "
+        "null), comparison (per need: c8_choice, milp_choice and each one's "
+        "annualised cost), stale, notes}. You cannot start or cancel it: it "
+        "takes minutes and runs from the panel's Joint optimisation button, so "
+        "tell the user to start it there. Say these with the numbers: the "
+        "design margin is the owner's rule, judged on the least-cost dispatch "
+        "and never met by extra inverter reactive power; costs are placeholder "
+        "figures tagged assumed unless replaced by quotes; a fallback keeps the "
+        "least-cost choice; a cancelled job keeps the best choice it had; when "
+        "stale is true the least-cost run it was based on has changed. 409 for "
+        "a project of another kind. Safety: read.",
         {"project_id": {"type": "string"}},
         ["project_id"],
     ),
@@ -3102,6 +3154,15 @@ TOOLS: list[dict[str, Any]] = [
 # Provider-neutral assistant operations. Every action uses normal dispatch.
 _ENGINEERING_CHANGES = next(t for t in TOOLS if t["name"] == "run_sensitivity_sweep")["input_schema"]["properties"]["cases"]["items"]["properties"]["changes"]
 TOOLS.extend([
+    _t("list_project_runs", "List recorded runs of the active project, newest first, with status (running, completed, failed, interrupted), start/finish timestamps, mode, fingerprint and whether result evidence is still available. Pages of 10 by default, max 50; optional status filter. Returns items, total_count, limit, offset, has_more. Reads immutable run records only; activates nothing. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 50}, "offset": {"type": "integer", "minimum": 0}, "status": {"type": "string", "enum": ["running", "completed", "failed", "interrupted"]}}, []),
+    _t("get_run_evidence", "Read one recorded run of the active project by run_id from list_project_runs. Without section: status, timestamps, mode, fingerprint, warnings, error and software-computed metrics (value + unit) and the section list with availability. With section (lowercase name from that list): the stored section data. Never substitutes another run: missing, pruned, altered or unfinished evidence returns error_kind evidence_unavailable naming this run_id and a reason; an unknown id returns run_not_found. Safety: read.", {"run_id": {"type": "string", "maxLength": 64}, "section": {"type": "string", "maxLength": 32}}, ["run_id"]),
+    _t("compare_project_runs", "Compare two recorded runs of the active project by run_id (from list_project_runs): run minus baseline for each recorded metric, with both values, the unit and the delta computed in software (delta_pct is null for a zero baseline). Runs are comparable only when both completed, have the same mode and the same input fingerprint (set allow_input_changes=true to compare runs whose inputs differ; the result then carries inputs_differ=true). Otherwise comparable=false with incomparable_reasons and no deltas. A metric missing on one run or recorded in different units is listed in unmatched_metrics, never estimated. Optional metrics restricts the names. Missing or pruned evidence returns evidence_unavailable naming that run; an unknown id returns run_not_found. Safety: read.", {"run_id": {"type": "string", "maxLength": 64}, "baseline_run_id": {"type": "string", "maxLength": 64}, "metrics": {"type": "array", "items": {"type": "string", "maxLength": 64}, "minItems": 1, "maxItems": 20}, "allow_input_changes": {"type": "boolean"}}, ["run_id", "baseline_run_id"]),
+    _t("discuss_project_run", "Bind conversation follow-ups to one recorded run of the active project (run_id from list_project_runs). Stores discussed project/run/baseline/section/source identifiers on the chat session and, when a durable parent thread is bound to this episode, on refs.discussed. With open_ui=true (default), emits a ui_event kind=open_run_result so the Results chrome selects that run and optional results_tab — identifiers only; does NOT restore historical inputs onto the live network. Optional baseline_run_id for later compare_project_runs. Unknown ids return run_not_found; ACL revocation refuses. Safety: write.", {"run_id": {"type": "string", "maxLength": 64}, "results_tab": {"type": "string", "enum": RESULTS_TAB_ENUM}, "section": {"type": "string", "maxLength": 32}, "baseline_run_id": {"type": "string", "maxLength": 64}, "open_ui": {"type": "boolean"}}, ["run_id"]),
+    _t("export_run_evidence", "Export immutable evidence for one recorded run as a downloadable JSON agent_export chip. Omit run_id to export the session's discussed run from discuss_project_run; never substitutes the newest or current network results. Optional section exports that section only (same rules as get_run_evidence). Unknown ids return run_not_found; missing discussed run without run_id returns discussed_run_required; pruned evidence returns evidence_unavailable for THAT run. Use get_file_delivery for the authenticated download link. Safety: write.", {"run_id": {"type": "string", "maxLength": 64}, "section": {"type": "string", "maxLength": 32}}, []),
+    _t("start_experiment", "Persist a typed cross-domain experiment plan for the active project without executing any case. domain selects the adapter family (network, commercial, reliability, gridspine). cases carry unique ids and 1–12 typed changes (path, value, value_type number|boolean|string|enum, optional unit). Optional baseline_run_id and limits. Stable request_id deduplicates. Returns experiment_id, status=planned, cases and executed=false. Advance later through ordinary harness tools/approvals; this tool runs no hidden solves. Safety: write.", {"title": {"type": "string", "maxLength": 120}, "request_id": {"type": "string", "maxLength": 64}, "domain": {"type": "string", "enum": ["network", "commercial", "reliability", "gridspine"]}, "baseline_run_id": {"type": "string", "maxLength": 64}, "limits": {"type": "object"}, "cases": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "object", "additionalProperties": False, "properties": {"id": {"type": "string", "maxLength": 32}, "label": {"type": "string", "maxLength": 120}, "changes": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "object", "additionalProperties": False, "properties": {"path": {"type": "string", "maxLength": 128}, "value": {}, "value_type": {"type": "string", "enum": ["number", "boolean", "string", "enum"]}, "unit": {"type": "string", "maxLength": 24}}, "required": ["path", "value", "value_type"]}}}, "required": ["id", "changes"]}}}, ["title", "cases", "request_id"]),
+    _t("list_experiments", "List up to 20 most recently created experiments you own in the active project. Returns status, domain, baseline_run_id and case_count; use get_experiment for case detail. Does not execute plans. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
+    _t("get_experiment", "Read one persisted experiment by id in the active project. Returns typed cases, limits, job_ids and executed=false until a later slice advances cases through ordinary tools. Safety: read.", {"experiment_id": {"type": "string"}}, ["experiment_id"]),
+    _t("get_loadflow_summary", "Summarise the CURRENT load-flow results of the active project: lines and transformers ranked by peak utilisation = flow / (rating * s_max_pu), computed by software from the same results the Load flow tab reads. Per branch (default 5, max 25, trimmed to a bounded payload): both-terminal peak flow, rating (optimized s_nom_opt or configured s_nom), s_max_pu range, peak/mean utilisation, weighted hours at/over the limit. Returns the exact source, snapshot window, freshness, solve state, ranking convention, skipped branches (missing or zero rating, no flow data) and missing_evidence. LOPF results are an ACTIVE-POWER PROXY, not an AC apparent-power assessment; source='ac_pf' uses apparent power where reactive flows exist and excludes unconverged snapshots. Never proof of full AC thermal compliance (no N-1, no voltage limits). Unsolved, stale, running, infeasible or failed results return status unavailable with a typed unavailable_kind; never invent values. window_from/window_to are inclusive snapshot indexes for follow-ups. run_id (historical) returns unavailable until run evidence artifacts exist (issue 06). Safety: read.", {"source": {"type": "string", "enum": ["lopf", "ac_pf"]}, "limit": {"type": "integer", "minimum": 1, "maximum": 25}, "window_from": {"type": "integer", "minimum": 0}, "window_to": {"type": "integer", "minimum": 0}, "run_id": {"type": "string", "maxLength": 64}}, []),
     _t("list_tasks", "List up to 20 most recently updated durable tasks owned by you in the active project. Use a returned ID to resume in a new chat or provider. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
     _t("find_capabilities", "Find relevant supported tools for a goal. Returns required inputs, safety and current project/toolset eligibility. Cached catalogue search grants no authority. Safety: read.", {"goal": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 8}}, ["goal"]),
     _t("start_task", "Persist a project/user-scoped plan of 1–12 ordinary tools. Create/activate the project first; rebinding and task-control tools cannot be steps. Each step has unique id, tool, args. Whole-value $earlier_step.path references resolve saved results. Stable request_id deduplicates identical plans. Returns task_id, status, next_step. Execute next_step via an ordinary offered call; this tool runs no hidden actions. Safety: write.", {"title": {"type": "string", "maxLength": 120}, "request_id": {"type": "string", "maxLength": 64}, "steps": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "object", "additionalProperties": False, "properties": {"id": {"type": "string"}, "tool": {"type": "string"}, "args": {"type": "object"}}, "required": ["id", "tool", "args"]}}}, ["title", "steps", "request_id"]),
@@ -3189,6 +3250,15 @@ _COMP_DELETE_ROUTES = [
 
 
 TOOL_ROUTES: dict[str, list] = {
+    "list_project_runs": _SERVICE_CALL,
+    "get_run_evidence": _SERVICE_CALL,
+    "compare_project_runs": _SERVICE_CALL,
+    "discuss_project_run": _UI_EVENT,
+    "export_run_evidence": _SERVICE_CALL,
+    "start_experiment": _SERVICE_CALL,
+    "list_experiments": _SERVICE_CALL,
+    "get_experiment": _SERVICE_CALL,
+    "get_loadflow_summary": _SERVICE_CALL,
     "list_tasks": _SERVICE_CALL,
     "find_capabilities": _SERVICE_CALL,
     "start_task": _SERVICE_CALL,
@@ -3484,6 +3554,8 @@ TOOL_ROUTES: dict[str, list] = {
     "campus_get_library": _SERVICE_CALL,
     "campus_set_library": _SERVICE_CALL,
     "campus_get_investment": _SERVICE_CALL,
+    # the joint optimisation (1, plan C12) — a read; no start or cancel tool
+    "campus_get_milp": _SERVICE_CALL,
     # campus grid codes (2) — service calls; no publish tool (plan C10)
     "campus_list_grid_codes": _SERVICE_CALL,
     "campus_extract_grid_code": _SERVICE_CALL,
@@ -3527,6 +3599,72 @@ SAFETY_TIERS = (
     "write",
     "read",
 )
+
+
+# ── P33b: which chat tools EDIT the live network ──────────────────────────
+#
+# The chat seam of the edit counter (`ProjectContext.network_revision`). Chat
+# tools call their handlers directly, so `undo_snapshot_middleware` (the HTTP
+# seam) never sees them; the dispatch site bumps for every tool this predicate
+# accepts. Derived from TOOL_ROUTES — a non-GET route under the undo prefixes —
+# plus ONE hand list for the write tools that have no route at all, pinned by
+# construction against its complement (`tests/test_eh_study_edited_since.py`:
+# every `_SERVICE_CALL` tool of tier write / destructive is in exactly one).
+# Lives outside TOOLS: no tool description changes.
+
+# Must equal `main._UNDO_PREFIXES` (pinned by a test; main imports services,
+# never the reverse).
+NETWORK_EDIT_PREFIXES = ("/api/network/", "/api/io/")
+
+# `_SERVICE_CALL` write / destructive tools that mutate the live network.
+_SERVICE_CALL_NETWORK_WRITES = frozenset({
+    "batch_create_components",        # loops create_component
+    "batch_delete_components",        # loops delete_component
+    "generate_exemplary_timeseries",  # writes _user_ts / n.*_t
+    "apply_demand_from_excel",        # writes a Load's series under the lock
+    "reconstruct_network_from_image",  # materialises buses / lines
+    # master (assistant tools): an uploaded network replaces the live one
+    # through the /api/io import handlers; an applied preview swaps the live
+    # network through `set_network` (which bumps too: +2, like clustering).
+    "import_uploaded_network",
+    "apply_project_changes",
+})
+
+# `_SERVICE_CALL` write / destructive tools that do NOT touch the live network
+# (gridspine opens its own pypsa.Network from disk; exports write files; the
+# rest are chat / upload / profile state).
+_SERVICE_CALL_NON_NETWORK_WRITES = frozenset({
+    "gridspine_create_study", "gridspine_set_dispatch_source",
+    "gridspine_update_config", "gridspine_edit_template_param",
+    "gridspine_export_handoff_bundle", "gridspine_compute_capacity",
+    "gridspine_assess_connection",
+    # campus (master #84/#89/#91): the study reads the SAVED network.nc and
+    # writes its own files under the project directory; never the live one.
+    "campus_draft_campus", "campus_run_study", "campus_set_library",
+    "campus_extract_grid_code",
+    # master (assistant tasks, experiments, deliveries): task / experiment
+    # records, a preview built on a side context (`build_context`), charts,
+    # delivery and evidence files — none writes the live network.
+    "start_task", "resume_task", "cancel_task", "resolve_task_step",
+    "start_experiment", "preview_project_changes", "create_chart",
+    "build_delivery", "export_run_evidence",
+    "export_to_excel", "export_to_csv", "export_preview_png",
+    "export_chat_summary", "export_eh_report_docx", "export_asset_results",
+    "set_active_profile", "clear_uploads", "start_campaign", "end_campaign",
+})
+
+
+def tool_edits_network(tool_name: str) -> bool:
+    """True when running `tool_name` edits the live network (P33b B2)."""
+    if tool_name in _SERVICE_CALL_NETWORK_WRITES:
+        return True
+    for route in TOOL_ROUTES.get(tool_name) or ():
+        if (isinstance(route, tuple) and len(route) == 2
+                and route[0] != "GET"
+                and route[1] != "/api/network/undo/info"
+                and route[1].startswith(NETWORK_EDIT_PREFIXES)):
+            return True
+    return False
 
 
 def safety_tier_for(tool_name: str) -> str:

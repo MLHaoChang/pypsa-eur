@@ -26,11 +26,16 @@ import DictationControls from './DictationControls'
  *     never leaks a setInterval.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { acknowledgeMountedView, type NavigationAcknowledgement } from '../utils/verifiedNavigation'
+import { CheckedEvidenceCard } from './CheckedEvidenceCard'
+import { CheckedAnswerControl } from './CheckedAnswerControl'
+import { CHECKED_ANSWERS_QUERY_KEY, getCheckedAnswerCapabilities } from '../api/reliability'
 import toast from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
   createChatStream,
+  createChatProgressStream,
   getChatHistory,
   postChatAbort,
   postChatConfirm,
@@ -364,7 +369,8 @@ export function ChoiceCard() {
   const streaming = useChatStore((s) => s.streaming)
   if (!choice) return null
   const pick = (label: string) => {
-    sendRequest(label, { source: 'choice-card', label: `${choice.title}: ${label}` })
+    sendRequest(label, { source: 'choice-card', label: `${choice.title}: ${label}`,
+      ...(choice.requiresChecked ? { requiresChecked: true } : {}) })
     setChoice(null)
   }
   return (
@@ -504,6 +510,8 @@ export const KIND_COPY: Record<
   internal_error: { title: 'Something went wrong on the server' },
   assurance_unavailable: { title: 'Checked answers are unavailable' },
   assurance_context_changed: { title: 'The project changed while checking the answer' },
+  assurance_context_persistence_failed: { title: 'Checked conversation state could not be saved' },
+  wrong_replica: { title: 'This chat belongs to another application worker' },
   assurance_publication_failed: { title: 'The checked answer could not be published' },
   task_checkpoint_failed: {
     title: 'Task progress could not be saved',
@@ -597,7 +605,8 @@ export const TOOL_ERROR_BANNER_KINDS = new Set([
   'inactive_acting_user',
   'solver_in_flight', 'parallel_destructive_not_allowed',
   'tool_call_cap_exceeded',
-  'assurance_unavailable', 'assurance_context_changed', 'assurance_publication_failed',
+  'assurance_unavailable', 'assurance_context_changed', 'assurance_context_persistence_failed', 'assurance_publication_failed',
+  'wrong_replica',
   'task_checkpoint_failed',
   // `set_active_profile` raises these as HTTPExceptions, which the dispatcher
   // converts to `tool_error` frames — so copy alone was unreachable and the
@@ -1130,9 +1139,18 @@ export default function ChatPanel() {
   const toolTierRef = useRef(new Map<string, string>())
   const streamGenerationRef = useRef(0)
   const streamProjectRef = useRef(useUIStore.getState().currentProject)
+  // Issue 11 — detached solver progress observer (GET …/progress). Independent
+  // of the turn SSE so reads can continue while the solve still emits lines.
+  const progressCleanupRef = useRef<(() => void) | null>(null)
+  const stopProgressObserver = useCallback(() => {
+    try { progressCleanupRef.current?.() } catch { /* idempotent */ }
+    progressCleanupRef.current = null
+  }, [])
   const assuranceRef = useRef<{
     strict: boolean; text: string; approved: ApprovedAnswerFrame | null;
+    requested?: boolean;
     turnId?: string; sessionId?: string; project: string | null; completed: boolean;
+    navigationCompleted?: Set<string>;
   }>({ strict: false, text: '', approved: null, project: null, completed: false })
   const sessionId = useChatStore((s) => s.sessionId)
   const setSessionId = useChatStore((s) => s.setSessionId)
@@ -1180,6 +1198,20 @@ export default function ChatPanel() {
   const mismatchLine = projectMismatch ? mismatchSentence(projectMismatch) : null
 
   const currentProject = useUIStore((s) => s.currentProject)
+  const checkedCapabilities = useQuery({ queryKey: CHECKED_ANSWERS_QUERY_KEY,
+    queryFn: getCheckedAnswerCapabilities, retry: false, refetchInterval: 30_000 })
+  const [checkedSelection, setCheckedSelection] = useState<{ project: string | null; chat: number; on: boolean }>(
+    { project: null, chat: -1, on: false },
+  )
+  const optedIntoChecks = checkedSelection.on && checkedSelection.project === currentProject
+    && checkedSelection.chat === newChatSeq
+  useEffect(() => {
+    setCheckedSelection({ project: currentProject, chat: newChatSeq, on: false })
+  }, [currentProject, newChatSeq])
+  const requiredChecks = checkedCapabilities.data?.mode === 'strict'
+  const checksAvailable = !checkedCapabilities.isError && (requiredChecks
+    || (checkedCapabilities.data?.mode === 'pilot'
+      && Object.values(checkedCapabilities.data.profiles).some(p => p.enabled)))
   // The start menu for where the user is (chat harness issue 03). Fetched
   // whenever the panel is mounted so the chips are known by the time the
   // greeting renders; a click goes through `sendRequest` like a card does.
@@ -1212,6 +1244,7 @@ export default function ChatPanel() {
   useEffect(() => {
     if (prevProjectRef.current !== undefined && prevProjectRef.current !== currentProject) {
       if (streamProjectRef.current !== currentProject) streamGenerationRef.current += 1
+      stopProgressObserver()
       resetChatForProjectSwitch()
       // N-1 — the recovery banners describe ONE hydration of ONE project, as
       // their declaration comment says. They were only ever reassigned inside
@@ -1225,7 +1258,7 @@ export default function ChatPanel() {
     }
     prevProjectRef.current = currentProject
     streamProjectRef.current = currentProject
-  }, [currentProject, resetChatForProjectSwitch])
+  }, [currentProject, resetChatForProjectSwitch, stopProgressObserver])
 
   // N-1 — same for "start a new chat": the banners are about the transcript
   // being replaced, so they must not outlive it. `newChatSeq` is the counter
@@ -1235,11 +1268,12 @@ export default function ChatPanel() {
   useEffect(() => {
     if (prevNewChatSeqRef.current !== newChatSeq) {
       streamGenerationRef.current += 1
+      stopProgressObserver()
       prevNewChatSeqRef.current = newChatSeq
       setHistoryGap(0)
       setInterruptedTurn(null)
     }
-  }, [newChatSeq])
+  }, [newChatSeq, stopProgressObserver])
 
   // Hydrate from chat.jsonl whenever a project becomes active. The backend
   // also rehydrates `session.messages` so subsequent turns can thread prior
@@ -1328,6 +1362,7 @@ export default function ChatPanel() {
             role: 'user',
             content: t.user,
             attachment_file_ids: t.attachment_file_ids,
+            ...(t.requires_checked === true || (t.answer_id && t.receipt) ? { requiresChecked: true } : {}),
             ts: Math.round((t.ts || 0) * 1000),
           })
         }
@@ -1342,7 +1377,9 @@ export default function ChatPanel() {
             assistantText += `\n[tool: ${name}]`
           }
         }
-        if (assistantText.trim()) {
+        // An interrupted turn always gets a bubble, even with no text: the
+        // note on it is what explains tools that ran without an answer.
+        if (assistantText.trim() || t.interrupted) {
           seeded.push({
             id: `replay-a-${counter++}`,
             role: 'assistant',
@@ -1350,6 +1387,7 @@ export default function ChatPanel() {
             answer_id: t.answer_id,
             receipt: t.receipt,
             ts: Math.round((t.ts || 0) * 1000),
+            ...(t.interrupted ? { interrupted: t.interrupted_reason || 'unknown' } : {}),
           })
         }
       }
@@ -1850,8 +1888,22 @@ export default function ChatPanel() {
     switch (frame.event) {
       case 'session_init': {
         const d = _frame_data<SessionInitFrame>(frame)
+        const requested = assuranceRef.current.requested === true
+        if (requested && (d.assurance?.version !== 1 || d.assurance.mode !== 'strict'
+          || d.assurance.state !== 'checking' || typeof d.turn_id !== 'string' || !d.turn_id || d.turn_id.length > 128
+          || typeof d.session_id !== 'string' || !d.session_id || d.session_id.length > 128 || assuranceRef.current.turnId)) {
+          streamGenerationRef.current += 1
+          assuranceRef.current = { strict: true, requested: true, text: '', approved: null,
+            completed: true, project: null }
+          voiceTurnRef.current = false
+          setError({ error_kind: 'assurance_publication_failed',
+            message: 'The server did not acknowledge the requested answer checks. No answer was shown.' })
+          closeStream()
+          break
+        }
         assuranceRef.current = {
           strict: d.assurance?.mode === 'strict', text: '', approved: null,
+          requested,
           turnId: d.turn_id, sessionId: d.session_id,
           project: useUIStore.getState().currentProject, completed: false,
         }
@@ -1993,7 +2045,8 @@ export default function ChatPanel() {
           content: (() => {
             const metadata = (d.result as { _assurance?: { outcome?: string } } | undefined)?._assurance
             if (metadata || assuranceRef.current.strict) {
-              return `${metadata?.outcome === 'completed' ? '✓' : '…'} ${d.tool_name} (${metadata?.outcome ?? 'uncertain'})`
+              const outcome = assuranceRef.current.navigationCompleted?.has(d.tool_use_id) ? 'completed' : metadata?.outcome ?? 'uncertain'
+              return `${outcome === 'completed' ? '✓' : '…'} ${d.tool_name} (${outcome})`
             }
             return `✓ ${d.tool_name}`
           })(),
@@ -2001,6 +2054,32 @@ export default function ChatPanel() {
           tool_result: assuranceRef.current.strict ? undefined : d.result,
           tool_use_id: d.tool_use_id, tool_name: d.tool_name,
         })
+        // Issue 11 — foreground solve handoff: subscribe to the detached
+        // progress ring so PHASE/VALIDATION lines keep arriving after the
+        // turn SSE closes. Same tool_progress frames as an in-turn bridge.
+        {
+          const result = d.result as { detached_progress?: unknown } | undefined
+          if (result?.detached_progress === true) {
+            const sid = useChatStore.getState().sessionId
+            if (sid) {
+              stopProgressObserver()
+              progressCleanupRef.current = createChatProgressStream(
+                sid,
+                (progressFrame) => {
+                  if (progressFrame.event !== 'tool_progress') return
+                  const p = progressFrame.data as {
+                    tool_use_id?: string; kind?: string; line?: string
+                  }
+                  if (p.tool_use_id && typeof p.kind === 'string' && typeof p.line === 'string') {
+                    useChatStore.getState().appendToolProgress(
+                      p.tool_use_id, { kind: p.kind, line: p.line },
+                    )
+                  }
+                },
+              )
+            }
+          }
+        }
         break
       }
       case 'tool_error': {
@@ -2045,6 +2124,7 @@ export default function ChatPanel() {
       case 'choice_request': {
         const d = _frame_data<ChoiceRequestFrame>(frame)
         setChoice({
+          ...(assuranceRef.current.strict ? { requiresChecked: true } : {}),
           tool_use_id: d.tool_use_id,
           title: d.title,
           question: d.question,
@@ -2055,6 +2135,8 @@ export default function ChatPanel() {
       }
       case 'ui_event': {
         const d = _frame_data<{
+          acknowledgement?: NavigationAcknowledgement
+          tool_use_id?: string
           kind?: string
           panel_id?: string
           results_tab?: string
@@ -2069,11 +2151,31 @@ export default function ChatPanel() {
           period?: number | null
           category?: string
           metrics?: string[]
-          mode?: 'chronological' | 'duration' | 'monthly'
+          mode?: 'chronological' | 'duration' | 'monthly' | string
           chart?: boolean
+          run_id?: string
+          section?: string
+          baseline_run_id?: string
+          status?: string
+          fingerprint?: string
+          evidence_available?: boolean
         }>(frame)
         try {
           applyUiNavigate(d)
+          if (d.acknowledgement && assuranceRef.current.strict) {
+            const expected = d.acknowledgement
+            const state = assuranceRef.current
+            acknowledgeMountedView(expected, () => assuranceRef.current === state
+              && streamGenerationRef.current === expected.binding_generation
+              && useUIStore.getState().currentProject === expected.project_name, () => {
+              if (!d.tool_use_id) return
+              state.navigationCompleted ??= new Set()
+              state.navigationCompleted.add(d.tool_use_id)
+              useChatStore.setState(s => ({ messages: s.messages.map(m =>
+                m.role === 'tool' && m.tool_use_id === d.tool_use_id
+                  ? { ...m, content: '✓ ui_open_panel (completed)' } : m) }))
+            })
+          }
         } catch (e) {
           console.warn('ui_event apply failed', e)
         }
@@ -2168,6 +2270,11 @@ export default function ChatPanel() {
                 speechOut.speak(speechOut.plainTextForSpeech(state.text))
               }
             })
+          } else if (state.requested) {
+            state.completed = true
+            state.text = ''
+            setError({ error_kind: 'assurance_publication_failed',
+              message: 'The checked answer ended without a valid approval. No answer was shown.' })
           }
         }
         // Modal reciprocity: a turn begun with the microphone is answered
@@ -2214,7 +2321,8 @@ export default function ChatPanel() {
       }
     }
   }, [qc, setSessionId, appendMessage, appendTokenDelta, appendThinkingDelta, setPending,
-      appendToolProgress, accrueUsage, setStreaming, setError, closeStream])
+      appendToolProgress, accrueUsage, setStreaming, setError, closeStream,
+      stopProgressObserver])
 
   // Phase D polish #3 — auto-uncheck-after-send opt-in setting.
   // Stored in localStorage; OFF by default (matches sticky-chip intent).
@@ -2239,7 +2347,22 @@ export default function ChatPanel() {
   // user's draft (and its dictation flag) stays as it is, and the turn is a
   // typed one.
   const dispatchSend = useCallback((text: string, attachIds: string[],
-    opts?: { fromCard?: boolean; label?: string }) => {
+    opts?: {
+      fromCard?: boolean
+      label?: string
+      /** Live admission only — omit for typed / hub-card sends. */
+      utterance_id?: string
+      generation?: number
+      requiresChecked?: boolean
+    }) => {
+    const requestedChecks = opts?.requiresChecked === true || optedIntoChecks || requiredChecks
+    if (requestedChecks && !checksAvailable) {
+      setError({ error_kind: 'assurance_unavailable',
+        message: 'Answer checks are unavailable. Retry availability, or explicitly turn off checking for a new message.' })
+      if (opts?.fromCard) useChatStore.setState({ requestQueue: [], activeRequest: null })
+      else setInput(text)
+      return
+    }
     const generation = ++streamGenerationRef.current
     streamProjectRef.current = useUIStore.getState().currentProject
     const chatSequence = useChatStore.getState().newChatSeq
@@ -2247,6 +2370,7 @@ export default function ChatPanel() {
       && useUIStore.getState().currentProject === streamProjectRef.current
       && useChatStore.getState().newChatSeq === chatSequence
     assuranceRef.current = { strict: assuranceRef.current.strict, text: '', approved: null,
+      ...(requestedChecks ? { strict: true, requested: true } : {}),
       project: useUIStore.getState().currentProject, completed: false }
     // FIRST, before the composer reset four lines below clears `dictatedRef`.
     // Reading it later — say, next to the createChatStream call that consumes
@@ -2258,6 +2382,7 @@ export default function ChatPanel() {
       role: 'user', content: text,
       attachment_file_ids: attachIds.length > 0 ? attachIds : undefined,
       ...(opts?.label ? { display: opts.label } : {}),
+      ...(requestedChecks ? { requiresChecked: true } : {}),
     })
     // A typed turn is nobody's card request: a denial in it drops nothing.
     if (!opts?.fromCard) useChatStore.getState().setActiveRequest(null)
@@ -2267,10 +2392,18 @@ export default function ChatPanel() {
     }
     setStreaming(true)
     setError(null)
+    const admission = (
+      typeof opts?.utterance_id === 'string'
+      && opts.utterance_id.length > 0
+      && typeof opts?.generation === 'number'
+    )
+      ? { utterance_id: opts.utterance_id, generation: opts.generation }
+      : {}
     const cleanup = createChatStream(
       {
         session_id: sessionId ?? undefined,
         message: text,
+        ...(requestedChecks ? { assurance: { version: 1, mode: 'strict' } as const } : {}),
         // Task 13 — `profile_id` is included ONLY when the user actually
         // picked one. `profileId === null` means "the server's active
         // profile", and OMITTING the field (never sending `model` either) is
@@ -2289,9 +2422,13 @@ export default function ChatPanel() {
         // after dispatchSend has already reset the composer, so reading
         // the composer flag here always yields 'text'.
         input_mode: voiceTurnRef.current ? 'voice' : 'text',
+        ...admission,
+        binding_generation: generation,
       },
       (frame) => {
         if (!isCurrentStream()) return
+        if (requestedChecks && !assuranceRef.current.turnId
+          && !['session_init', 'error', 'session_done', 'turn_done'].includes(frame.event)) return
         // Ordinary chat can deliberately change projects within a turn. Track
         // that server-issued rebind while rejecting callbacks after user changes.
         if (frame.event === 'project_rebound' && !assuranceRef.current.strict) {
@@ -2312,6 +2449,11 @@ export default function ChatPanel() {
         // comes from the project's shared transcript, so a co-member's GET
         // /history can mint it under their name first.
         const kind = (err as Error & { kind?: string })?.kind
+        if (requestedChecks) {
+          setError({ error_kind: kind ?? 'assurance_unavailable',
+            message: (err as Error).message || 'The checked answer request failed.' })
+          void qc.invalidateQueries({ queryKey: CHECKED_ANSWERS_QUERY_KEY })
+        }
         if (kind === 'session_not_yours') {
           startNewChat()
           toast.error(
@@ -2329,7 +2471,8 @@ export default function ChatPanel() {
       setAttachedFileIds([])
     }
   }, [appendMessage, sessionId, profileId, handleFrame, setStreaming, setError,
-      setStreamCleanup, autoUncheckAfterSend, setAttachedFileIds, startNewChat])
+      setStreamCleanup, autoUncheckAfterSend, setAttachedFileIds, startNewChat,
+      optedIntoChecks, requiredChecks, checksAvailable, qc])
 
   const onSend = useCallback(() => {
     const text = input.trim()
@@ -2400,7 +2543,14 @@ export default function ChatPanel() {
     if (streaming || pendingCard != null || pendingSendText != null) return
     const req = useChatStore.getState().takeNextRequest()
     if (!req) return
-    dispatchSend(req.text, [], { fromCard: true, label: req.label })
+    const liveAdmission = req.source === 'live'
+      ? {
+          utterance_id: req.id,
+          generation: useChatStore.getState().utteranceGeneration,
+        }
+      : {}
+    dispatchSend(req.text, [], { fromCard: true, label: req.label, ...liveAdmission,
+      ...(req.requiresChecked ? { requiresChecked: true } : {}) })
   }, [requestCount, streaming, pendingCard, pendingSendText, notReady, mismatchLine, dispatchSend])
 
   // Live companion turns use this same send. The dock only dispatches the
@@ -2413,7 +2563,13 @@ export default function ChatPanel() {
       if (notReady || streaming) return
       if (useChatStore.getState().pending) return
       if (useUIStore.getState().projectMismatch) return
-      dispatchSend(text.trim(), [], { fromCard: true })
+      const utterance_id = globalThis.crypto?.randomUUID?.()
+        ?? `live-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      dispatchSend(text.trim(), [], {
+        fromCard: true,
+        utterance_id,
+        generation: useChatStore.getState().utteranceGeneration,
+      })
     }
     window.addEventListener('companion:live-utterance', onUtterance)
     return () => window.removeEventListener('companion:live-utterance', onUtterance)
@@ -2463,11 +2619,12 @@ export default function ChatPanel() {
   // panel. An idle stream is still closed here.
   useEffect(() => {
     return () => {
+      stopProgressObserver()
       const { streaming, streamCleanup } = useChatStore.getState()
       if (streaming) return
       try { streamCleanup?.() } catch { /* idempotent */ }
     }
-  }, [])
+  }, [stopProgressObserver])
 
   // ── per-message actions ───────────────────────────────────────────────
   //
@@ -2477,6 +2634,9 @@ export default function ChatPanel() {
   // against the turn it is clearing space for, and the model would answer with
   // the discarded exchange still in context.
   const withdrawTurn = useCallback(async (userIdx: number) => {
+    const project = useUIStore.getState().currentProject
+    const sequence = useChatStore.getState().newChatSeq
+    const generation = streamGenerationRef.current
     const sid = useChatStore.getState().sessionId
     if (sid) {
       try {
@@ -2489,6 +2649,8 @@ export default function ChatPanel() {
         return false
       }
     }
+    if (useUIStore.getState().currentProject !== project || useChatStore.getState().newChatSeq !== sequence
+      || streamGenerationRef.current !== generation) return false
     useChatStore.setState((st) => ({
       messages: st.messages.slice(0, userIdx),
       toolProgress: {},
@@ -2523,7 +2685,7 @@ export default function ChatPanel() {
     // Withdraw the ANSWER, keeping the question: it is being re-asked, not
     // retracted. dispatchSend re-appends it, so cut at the question's index.
     if (!await withdrawTurn(idx)) return
-    dispatchSend(question.content, attachIds)
+    dispatchSend(question.content, attachIds, { requiresChecked: question.requiresChecked || !!m.receipt })
   }, [precedingUserIndex, withdrawTurn, dispatchSend])
 
   const onEditMessage = useCallback(async (m: ChatMessage) => {
@@ -2541,6 +2703,8 @@ export default function ChatPanel() {
     // leaving the old phrasing above the new one would show them asking twice.
     if (!await withdrawTurn(idx)) return
     setInput(text)
+    if (m.requiresChecked) setCheckedSelection({ project: useUIStore.getState().currentProject,
+      chat: useChatStore.getState().newChatSeq, on: true })
     useChatStore.getState().setAttachedFileIds(files)
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [withdrawTurn])
@@ -2563,7 +2727,7 @@ export default function ChatPanel() {
     if (idx < 0) return
     const question = msgs[idx]
     if (!await withdrawTurn(idx)) return
-    dispatchSend(question.content, question.attachment_file_ids ?? [])
+    dispatchSend(question.content, question.attachment_file_ids ?? [], { requiresChecked: question.requiresChecked })
   }, [withdrawTurn, dispatchSend])
 
   // ⌘/Ctrl-J toggles the assistant, and the OPEN path lands the caret in the
@@ -3083,12 +3247,19 @@ export default function ChatPanel() {
                 </>
               )
               : <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>}
+            {m.role === 'assistant' && m.answer_id && m.receipt && <CheckedEvidenceCard answerId={m.answer_id} receipt={m.receipt} />}
             {m.role === 'tool' && m.tool_use_id && (
               <>
                 <AssistantResultCard result={m.tool_result} disabled={streaming || notReady || Boolean(mismatchLine)}
                   onRequest={(text) => useChatStore.getState().sendRequest(text, { source: 'assistant-task' })} />
                 <ToolProgressDetails toolUseId={m.tool_use_id} />
               </>
+            )}
+            {m.role === 'assistant' && m.interrupted && (
+              <div className="mt-1 text-[11px] text-amber-400" data-testid="chat-interrupted-note">
+                This turn did not finish ({m.interrupted.replace(/_/g, ' ')}). It is
+                shown for reference; the assistant does not see it on later turns.
+              </div>
             )}
             {m.role === 'user' && m.attachment_file_ids && m.attachment_file_ids.length > 0 && (
               <ReplayAttachmentChips fileIds={m.attachment_file_ids} />
@@ -3130,6 +3301,11 @@ export default function ChatPanel() {
           no uploads exist. Each chip carries a checkbox controlling
           attach-to-next-message + a delete (trash) button. */}
       <WorkflowStrip />
+      <CheckedAnswerControl checked={optedIntoChecks || requiredChecks} required={requiredChecks}
+        available={checksAvailable} loading={checkedCapabilities.isPending} failed={checkedCapabilities.isError}
+        mode={checkedCapabilities.data?.mode} busy={streaming || pendingSendText != null}
+        onChange={on => setCheckedSelection({ project: currentProject, chat: newChatSeq, on })}
+        onRetry={() => { void checkedCapabilities.refetch() }} />
       <UploadChipStrip
         uploads={uploads}
         attachedFileIds={attachedFileIds}

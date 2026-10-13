@@ -48,3 +48,9 @@ P1 also requires A1.7: preserve raw validity/missing masks before sanitization a
 
 See the [reliability contract](../reliability-contract.md). Original approval
 does not cover these additions; review/freeze them before implementation.
+
+### 2026-10-11 — shared harness implementation
+
+Scoped raw evidence is now immutable through the store API, owner/project authorized and recalculated on every public lookup. Explicit retained IDs preserve a bounded historical run after foreground edits; current-source records still invalidate. Per-owner bounded transactions enforce quotas/atomic files across independent POSIX processes. The project/network runtime is still single-worker, Windows locking and complete browser/backend restart journeys are not certified, and retention is 24 hours. Unresolved effect reservations are not pruned or reused.
+
+See [implementation status](../implementation-status.md) and [contracts](../harness-contracts.md). Whole ticket remains open.

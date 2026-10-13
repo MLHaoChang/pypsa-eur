@@ -41,3 +41,9 @@ P0 also requires A0.4 and reviewed request/profile/metric/computed/guard schemas
 
 See the [reliability contract](../reliability-contract.md). Original approval
 does not cover these additions; review/freeze them before implementation.
+
+### 2026-10-11 — shared harness implementation
+
+Version-1 compatible fields now define explicit scope, required-slot dispositions/request completeness, retained/comparison IDs and qualitative interpretations. Capability/schema endpoints and the documented API make the exact implemented bounds reviewable. The user explicitly authorized implementation; prior attached-plan review instructions were design context, not a new user approval gate. This extension has editing-agent review and deterministic regression coverage, but no inherited independent domain approval. Arbitrary request completeness and whole-phase coverage remain pending.
+
+See [implementation status](../implementation-status.md) and [contracts](../harness-contracts.md). Whole ticket remains open.

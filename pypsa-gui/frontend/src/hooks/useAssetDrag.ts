@@ -1,5 +1,9 @@
 import { useState } from 'react'
 import { useUIStore } from '../store/uiStore'
+import toast from 'react-hot-toast'
+import { siteDropTarget } from '../site3d/dropRegistry'
+import { mapDropTarget } from '../utils/mapDropRegistry'
+import { readOnlyMessage, READ_ONLY_MUTATION_MESSAGE } from '../utils/mutationGuard'
 
 // ── Palette drag, extracted from Sidebar.tsx ─────────────────────────────────
 // Manual pointer-event drag, NOT HTML5 drag-and-drop: the HTML5 API was
@@ -15,16 +19,23 @@ import { useUIStore } from '../store/uiStore'
 /** What the pointer was over when the drag was released. */
 export interface DropResult {
   /** 'schematic' = React Flow (.react-flow); 'map' = Leaflet
-   *  (.leaflet-container); null = released outside both, i.e. cancelled. */
-  canvas: 'schematic' | 'map' | null
+   *  (.leaflet-container); 'site' = the 3D site view (.site3d-canvas);
+   *  null = released outside all three, i.e. cancelled. */
+  canvas: 'schematic' | 'map' | 'site' | null
   /** Name of the bus under the pointer, from the nearest [data-bus-name]
    *  ancestor. null when the release did not land on a bus. */
   busName: string | null
   /** React Flow flow-space coordinates. Non-null ONLY for a schematic drop
-   *  with window.rfInstance present. Always null on the map: map drops
-   *  prefill terminals only, so no coordinate conversion is needed and no
-   *  global Leaflet handle exists to do it with (spec D26). */
+   *  with window.rfInstance present. Always null on the map, whose
+   *  coordinate is geographic and travels as `latLng` instead. */
   position: { x: number; y: number } | null
+  /** Map drops only (plan M4, reverting spec D26): the geographic point
+   *  under the pointer, from the registered map projection
+   *  (utils/mapDropRegistry.ts). Null when the map has not registered. */
+  latLng: { lat: number; lng: number } | null
+  /** Site drops only: the site and the ground point under the pointer
+   *  (metres east/north of the site origin). */
+  site: { siteId: string; ground: { x: number; y: number } } | null
 }
 
 export interface AssetDragItem { id: string; label: string }
@@ -46,8 +57,12 @@ function flowPosition(clientX: number, clientY: number): { x: number; y: number 
  * Resolve a release point to a drop outcome. Evaluation order is fixed:
  *   1. [data-bus-name]      → a bus drop, carrying that bus's name
  *   2. .react-flow          → the schematic canvas, no bus
- *   3. .leaflet-container   → the map canvas, no bus
- *   4. otherwise            → cancelled
+ *   3. .leaflet-container   → the map canvas, no bus; with the geographic
+ *                             point under the pointer when the map has
+ *                             registered its projection (plan M4)
+ *   4. .site3d-canvas       → the 3D site view, if it has registered its
+ *                             ground and the ray hits it; else cancelled
+ *   5. otherwise            → cancelled
  * Testing the bus attribute FIRST is what lets one attribute serve both
  * canvases. Using React Flow's own `data-id` instead would tie this to
  * @xyflow/react's internal markup and would still need a second check to tell
@@ -60,13 +75,26 @@ export function resolveDrop(clientX: number, clientY: number): DropResult {
 
   const schematic = target?.closest('.react-flow') ?? null
   if (schematic) {
-    return { canvas: 'schematic', busName, position: flowPosition(clientX, clientY) }
+    return { canvas: 'schematic', busName, position: flowPosition(clientX, clientY), latLng: null, site: null }
   }
   const map = target?.closest('.leaflet-container') ?? null
   if (map) {
-    return { canvas: 'map', busName, position: null }
+    // The map registers its projection on mount (utils/mapDropRegistry.ts).
+    // Without it the drop still lands (terminal prefill only), as before M4.
+    const latLng = mapDropTarget()?.screenToLatLng(clientX, clientY) ?? null
+    return { canvas: 'map', busName, position: null, latLng, site: null }
   }
-  return { canvas: null, busName: null, position: null }
+  const site3d = target?.closest('.site3d-canvas') ?? null
+  if (site3d) {
+    // The 3D view registers its ground on mount (site3d/dropRegistry.ts).
+    // No registration, or a ray that misses the ground (the sky), cancels —
+    // never a drop "somewhere".
+    const t = siteDropTarget()
+    const ground = t?.screenToGround(clientX, clientY) ?? null
+    if (!t || !ground) return { canvas: null, busName: null, position: null, latLng: null, site: null }
+    return { canvas: 'site', busName: null, position: null, latLng: null, site: { siteId: t.siteId, ground } }
+  }
+  return { canvas: null, busName: null, position: null, latLng: null, site: null }
 }
 
 export function useAssetDrag(): {
@@ -109,13 +137,22 @@ export function useAssetDrag(): {
       }
 
       const drop = resolveDrop(ev.clientX, ev.clientY)
-      if (drop.canvas === null) return  // released outside both canvases — cancel silently
+      if (drop.canvas === null) return  // released outside every canvas — cancel silently
+      // The 3D site view is the first canvas that gates editing on read-only
+      // (design D12); the other two rely on the backend's 409. A site drop
+      // would also write a placement, which the store refuses anyway.
+      if (drop.canvas === 'site' && useUIStore.getState().readOnly) {
+        toast.error(readOnlyMessage(useUIStore.getState().readOnlyReason) ?? READ_ONLY_MUTATION_MESSAGE)
+        return
+      }
 
       setCreationItem({
         id: item.id,
         label: item.label,
         ...(drop.position ? { dropPosition: drop.position } : {}),
         ...(drop.busName ? { dropBusName: drop.busName } : {}),
+        ...(drop.latLng ? { dropLatLng: drop.latLng } : {}),
+        ...(drop.site ? { dropSite: drop.site } : {}),
       })
     }
 

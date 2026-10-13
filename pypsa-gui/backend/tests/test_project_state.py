@@ -50,6 +50,11 @@ def test_every_field_is_classified_exactly_once():
     # because they must NOT be persisted: a study measures a network in
     # memory and must not be restored from disk beside a network it may no
     # longer describe.
+    #
+    # Study records are not persisted — except the finished EH record's
+    # mirror, `eh_study_record`, which is result state, compared against
+    # `network_revision` at read time and never trusted as current (P33b D-1).
+    # The live `eh_study` key itself stays in STUDY_KEYS only.
     classified = (set(LIFECYCLE_KEYS) | {"solver_config"}
                   | set(RESULT_STATE_KEYS) | set(STUDY_KEYS))
     assert classified == _field_names()

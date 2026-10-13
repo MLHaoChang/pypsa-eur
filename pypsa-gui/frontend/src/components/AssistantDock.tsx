@@ -9,6 +9,7 @@ import CompanionLauncher, { type CompanionPresence } from './CompanionLauncher'
 import CompanionOutcome from './CompanionOutcome'
 import { KEY_RESULT_TABS, keyResultsWalkRequested, openProjectList, openProjectRequested, startKeyResultsWalk } from './liveWalk'
 import { ErrorBoundary } from './ErrorBoundary'
+import { ensureLiveDurableThread } from '../api/durableConversations'
 
 /**
  * The assistant's own column, mounted beside the main area rather than inside
@@ -87,8 +88,23 @@ export default function AssistantDock() {
       return
     }
     if (ready === true) {
-      if (useChatStore.getState().streaming || useChatStore.getState().pending || useUIStore.getState().projectMismatch) {
+      if (useUIStore.getState().projectMismatch) {
         setLiveCaption('The assistant is busy. Nothing new was sent.')
+        return
+      }
+      if (useChatStore.getState().streaming || useChatStore.getState().pending) {
+        // Keep one pending Live correction without opening the console
+        // (issue 02). ChatPanel drains requestQueue when the turn ends.
+        const queued = useChatStore.getState().sendRequest(text, {
+          source: 'live',
+          openDock: false,
+        })
+        setPresence('listening')
+        setLiveCaption(
+          queued
+            ? 'Queued — will send when the assistant is free.'
+            : 'The assistant is busy. Nothing new was sent.',
+        )
         return
       }
       stopWalk()
@@ -247,6 +263,13 @@ export default function AssistantDock() {
             setLiveOpen(true)
             setPresence('listening')
             setLiveCaption('Listening. Ask to walk through the key results in each tab, or to open a project.')
+            // Issue 02/09 — bind or rebind the durable parent thread so Live
+            // utteranceGeneration tracks the authoritative conversation.
+            void ensureLiveDurableThread().catch(() => {
+              setLiveCaption(
+                'Listening, but the durable conversation could not be bound. Typed chat still works.',
+              )
+            })
           }}
           onProfiles={() => {
             stopWalk()

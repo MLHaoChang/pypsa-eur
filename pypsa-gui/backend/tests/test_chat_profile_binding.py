@@ -892,6 +892,8 @@ def test_default_prompt_bytes_unchanged():
             print(n, hashlib.sha256(getattr(cs, n).encode()).hexdigest())"
     Meaningful (not tautological) because every hash below was computed
     against the pre-Task-8 literal, independently of the current module.
+    The stance pin alone was updated from master b8bc079f (PR 113), whose
+    approved companion navigation guidance changed that fragment.
     """
     import hashlib
 
@@ -909,7 +911,7 @@ def test_default_prompt_bytes_unchanged():
             "991709d96f9cb8b42db7b03d0b28cb5bc3aeeab7e6de57ab63dff962cc79fe1b"
         ),
         "_ASSISTANT_STANCE": (
-            "1dd77952d0cdec42606c4d269adf31aae9d11ae8ef22cf83103ac0659028889b"
+            "7f7ad3efbd93136d9ea17fad812d804d4d2b8dce6f104fa68d196acf9f56ae3d"
         ),
         # Task 11 — `_BASE_IDENTITY` joined the split for the same reason one
         # level down: it names no specific tool (so it never broke the

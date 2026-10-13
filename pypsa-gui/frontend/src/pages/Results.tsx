@@ -144,6 +144,8 @@ export default function Results() {
   const setCompareRailWidth = useUIStore(s => s.setCompareRailWidth)
   const resultsTabRequest = useUIStore(s => s.resultsTabRequest)
   const clearResultsTabRequest = useUIStore(s => s.clearResultsTabRequest)
+  const discussedRun = useUIStore(s => s.discussedRun)
+  const clearDiscussedRun = useUIStore(s => s.clearDiscussedRun)
   const uiMode = useUIStore(s => s.uiMode)
   // Guided (spec §3.7): a STORED tab Guided does not show is displayed as
   // adequacy. Display only — `tab` and `results:active-tab` keep the user's
@@ -535,6 +537,7 @@ export default function Results() {
       className="flex flex-col h-full text-sm"
       data-testid="results-active-tab"
       data-active-results-tab={effectiveTab}
+      data-assurance-tab={effectiveTab}
     >
       <PageHeader
         eyebrow={uiMode === 'guided' ? 'HUB DESIGN · RESULTS' : 'SIMULATION · RESULTS'}
@@ -551,6 +554,35 @@ export default function Results() {
           )
         }
       />
+      {discussedRun && (
+        <div
+          className="mx-4 mt-2 mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/60 pb-2 text-[11px]"
+          data-testid="discussed-run-chrome"
+          data-run-id={discussedRun.runId}
+        >
+          <span className="font-mono text-foreground">
+            Discussed run {discussedRun.runId}
+            {discussedRun.status ? ` · ${discussedRun.status}` : ''}
+            {discussedRun.mode ? ` · ${discussedRun.mode}` : ''}
+          </span>
+          {discussedRun.section && (
+            <span className="text-muted">section {discussedRun.section}</span>
+          )}
+          {discussedRun.baselineRunId && (
+            <span className="text-muted">baseline {discussedRun.baselineRunId}</span>
+          )}
+          <span className="text-muted">
+            Charts below remain the current project results; historical numbers come from run evidence tools.
+          </span>
+          <button
+            type="button"
+            className="ml-auto text-muted underline-offset-2 hover:underline"
+            onClick={() => clearDiscussedRun()}
+          >
+            Clear
+          </button>
+        </div>
+      )}
       {/* ── Tab strip ──────────────────────────────────────────────── */}
       <div className="flex items-center shrink-0 border-b border-border bg-panel px-2 gap-0 overflow-x-auto">
         {TABS.filter(t => (!t.multiOnly || uniquePeriods.length > 0) && (!t.expertOnly || uiMode === 'expert' || t.id === advancedTab)).map(({ id, label, Icon, tip }) => {

@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-10",
+  "generated_at": "2026-10-12",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 220,
+  "tool_count": 230,
   "tools": [
     {
       "name": "list_components",
@@ -4329,6 +4329,24 @@
       "behavioral_fixture": "pending"
     },
     {
+      "name": "campus_get_milp",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
       "name": "campus_list_grid_codes",
       "toolsets": [
         "gridspine"
@@ -4676,6 +4694,215 @@
       "required": [],
       "safety_tier": "read",
       "schema_sha256": "0255989cd003852e2a25c3efca98367e6e231a2e69aa3456b05cde6c544499a9",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_project_runs",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "limit",
+        "offset",
+        "status"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "6589c8ed23a3e16ce50017dfb20fc21f85798d73b376db7f43aa12ad7299fc5c",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_run_evidence",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "run_id",
+        "section"
+      ],
+      "required": [
+        "run_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "4abaac2419832365fa560a3c15252f7900510c90f2b42c052298b438a97032cb",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "compare_project_runs",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "run_id",
+        "baseline_run_id",
+        "metrics",
+        "allow_input_changes"
+      ],
+      "required": [
+        "run_id",
+        "baseline_run_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "5ff81e9828bdd6ccb997ace8ad45a83d40efafd2ac4860887ca0f17247238a5f",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "discuss_project_run",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_ui_event_"
+      ],
+      "input_keys": [
+        "run_id",
+        "results_tab",
+        "section",
+        "baseline_run_id",
+        "open_ui"
+      ],
+      "required": [
+        "run_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "2cbcdc755f7663d691b1b2de5c25420b4a70c294afa85729b38641907c2feba7",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "export_run_evidence",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "run_id",
+        "section"
+      ],
+      "required": [],
+      "safety_tier": "write",
+      "schema_sha256": "90b9ba2879c5659cbe8d1cfbe93242c14dc785c354308d151cf77acd572e812f",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "start_experiment",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "title",
+        "request_id",
+        "domain",
+        "baseline_run_id",
+        "limits",
+        "cases"
+      ],
+      "required": [
+        "title",
+        "cases",
+        "request_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "d45a684b4a5d122878af81db42a3256450f391da06ae29ad1695d8208bfb9c59",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_experiments",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "limit"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "440e1ce843e6a44f64517d8f7540084aa5e990bea1fe374afd091fca0a73ee09",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_experiment",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "experiment_id"
+      ],
+      "required": [
+        "experiment_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "8141d78f100db6a8a9c0e566273a6a97fe92d94493d1912c0d50d2f30462899d",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_loadflow_summary",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "source",
+        "limit",
+        "window_from",
+        "window_to",
+        "run_id"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "0344962bfc2c5846a2638d1651823621d12841a3fd3ccc2b9b906a16daf96f74",
       "behavioral_fixture": "pending"
     },
     {

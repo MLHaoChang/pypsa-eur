@@ -67,6 +67,7 @@ def wait_for_job(job_id: str, timeout_seconds: float = 20) -> dict:
     from routers.solve_queue import _visible_job_or_404
     from services import chat_tools
     from services.solve_queue import _TERMINAL
+    from harness import job_adapters as ja
     if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)) or not math.isfinite(timeout_seconds) or not 0 <= timeout_seconds <= 25:
         _refuse("invalid_wait_timeout", "timeout_seconds must be between 0 and 25.")
     session = chat_tools.chat_session()
@@ -74,6 +75,37 @@ def wait_for_job(job_id: str, timeout_seconds: float = 20) -> dict:
     if session is not None:
         with session._lock:
             session.job_wait_progress = None
+    # Issue 11 — fg:… / ad:… / rpt:… use neutral adapters; solve-queue UUIDs
+    # (incl. GridSpine) keep the ACL path.
+    if (
+        ja.is_foreground_job_id(job_id)
+        or ja.is_study_job_id(job_id)
+        or ja.is_report_job_id(job_id)
+    ):
+        progress: dict = {}
+        actor_id = chat_tools.acting_user_id()
+        if session is not None:
+            # Share the same progress dict the loop polls for tool_progress.
+            with session._lock:
+                session.job_wait_progress = progress
+        if ja.is_foreground_job_id(job_id):
+            waiter = ja.wait_foreground_job
+        elif ja.is_study_job_id(job_id):
+            waiter = ja.wait_study_job
+        else:
+            waiter = ja.wait_report_job
+        try:
+            return waiter(
+                job_id, timeout_seconds,
+                actor_id=actor_id,
+                stop=stop,
+                progress_slot=progress,
+            )
+        finally:
+            if session is not None:
+                with session._lock:
+                    if session.job_wait_progress is progress:
+                        session.job_wait_progress = None
     started = time.monotonic()
     deadline = started + timeout_seconds
     while True:

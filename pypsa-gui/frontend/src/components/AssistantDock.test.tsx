@@ -37,14 +37,23 @@ vi.mock('../hooks/useChatProfiles', () => ({
   useChatReadiness: () => ({ effectiveProfileId: 'claude', ready: true }),
 }))
 
+const { ensureLiveDurableThread } = vi.hoisted(() => ({
+  ensureLiveDurableThread: vi.fn(() => Promise.resolve({ thread_id: 't-live', generation: 1 })),
+}))
+
+vi.mock('../api/durableConversations', () => ({
+  ensureLiveDurableThread,
+}))
+
 import AssistantDock from './AssistantDock'
 
 describe('AssistantDock', () => {
   beforeEach(() => {
     localStorage.clear()
     useUIStore.setState({ assistantDockOpen: false, assistantEntry: null })
-    useChatStore.setState({ pending: null })
+    useChatStore.setState({ pending: null, durableThreadId: null, utteranceGeneration: 1 })
     chatPanelMounts.current = 0
+    ensureLiveDurableThread.mockClear()
   })
 
   it('shows the launcher when collapsed', () => {
@@ -143,6 +152,8 @@ describe('assistant dock prominence', () => {
   beforeEach(() => {
     localStorage.clear()
     useUIStore.setState({ assistantDockOpen: false, assistantEntry: null })
+    useChatStore.setState({ pending: null, durableThreadId: null, utteranceGeneration: 1 })
+    ensureLiveDurableThread.mockClear()
   })
 
   it('offers reviewed dictation from the collapsed companion', async () => {
@@ -164,6 +175,44 @@ describe('assistant dock prominence', () => {
     expect(screen.getByTestId('companion-live-input')).toBeTruthy()
   })
 
+  it('opens the console on the profile list from the profile chip', async () => {
+    const user = userEvent.setup()
+    render(<AssistantDock />)
+    await user.click(screen.getByTestId('companion-profile'))
+    expect(useUIStore.getState().assistantDockOpen).toBe(true)
+    expect(useUIStore.getState().assistantEntry).toBe('profiles')
+  })
+
+  it('does not start the microphone, a recording or a media session when Live is clicked', async () => {
+    const getUserMedia = vi.fn()
+    const fetchSpy = vi.fn(() => Promise.reject(new Error('no network in this test')))
+    vi.stubGlobal('fetch', fetchSpy)
+    vi.stubGlobal('MediaRecorder', vi.fn())
+    vi.stubGlobal('RTCPeerConnection', vi.fn())
+    Object.defineProperty(navigator, 'mediaDevices', { value: { getUserMedia }, configurable: true })
+    try {
+      const user = userEvent.setup()
+      render(<AssistantDock />)
+      await user.click(screen.getByTestId('companion-live'))
+      expect(getUserMedia).not.toHaveBeenCalled()
+      expect(MediaRecorder).not.toHaveBeenCalled()
+      expect(RTCPeerConnection).not.toHaveBeenCalled()
+      expect(fetchSpy).not.toHaveBeenCalled()
+      expect(screen.queryByTestId('dictation-panel')).toBeNull()
+      expect(useUIStore.getState().assistantDockOpen).toBe(false)
+    } finally {
+      vi.unstubAllGlobals()
+      Reflect.deleteProperty(navigator, 'mediaDevices')
+    }
+  })
+
+  it('binds a durable conversation when Live opens', async () => {
+    const user = userEvent.setup()
+    render(<AssistantDock />)
+    await user.click(screen.getByTestId('companion-live'))
+    expect(ensureLiveDurableThread).toHaveBeenCalled()
+  })
+
   it('sends a live sentence other than the walk through the chat stream and leaves the console closed', async () => {
     const user = userEvent.setup()
     const heard: string[] = []
@@ -181,9 +230,9 @@ describe('assistant dock prominence', () => {
     window.removeEventListener('companion:live-utterance', onUtterance)
   })
 
-  it('does not send a live sentence while the assistant is already streaming', async () => {
+  it('queues a live sentence while the assistant is already streaming without opening the console', async () => {
     const user = userEvent.setup()
-    useChatStore.setState({ streaming: true })
+    useChatStore.setState({ streaming: true, requestQueue: [] })
     const heard: string[] = []
     const onUtterance = (ev: Event) => {
       heard.push((ev as CustomEvent<string>).detail)
@@ -194,9 +243,32 @@ describe('assistant dock prominence', () => {
     await user.type(screen.getByTestId('companion-live-input'), 'List the generators')
     await user.click(screen.getByTestId('companion-live-send'))
     expect(heard).toEqual([])
-    expect(screen.getByTestId('companion-live-caption').textContent).toContain('Nothing new was sent.')
+    const queue = useChatStore.getState().requestQueue
+    expect(queue).toHaveLength(1)
+    expect(queue[0]).toMatchObject({ text: 'List the generators', source: 'live' })
+    expect(useUIStore.getState().assistantDockOpen).toBe(false)
+    expect(screen.getByTestId('companion-live-caption').textContent).toContain(
+      'Queued — will send when the assistant is free.',
+    )
     window.removeEventListener('companion:live-utterance', onUtterance)
-    useChatStore.setState({ streaming: false })
+    useChatStore.setState({ streaming: false, requestQueue: [] })
+  })
+
+  it('keeps only the latest live correction while busy', async () => {
+    const user = userEvent.setup()
+    useChatStore.setState({ streaming: true, requestQueue: [] })
+    render(<AssistantDock />)
+    await user.click(screen.getByTestId('companion-live'))
+    await user.type(screen.getByTestId('companion-live-input'), 'First correction')
+    await user.click(screen.getByTestId('companion-live-send'))
+    await user.clear(screen.getByTestId('companion-live-input'))
+    await user.type(screen.getByTestId('companion-live-input'), 'Latest correction')
+    await user.click(screen.getByTestId('companion-live-send'))
+    const queue = useChatStore.getState().requestQueue
+    expect(queue).toHaveLength(1)
+    expect(queue[0].text).toBe('Latest correction')
+    expect(useUIStore.getState().assistantDockOpen).toBe(false)
+    useChatStore.setState({ streaming: false, requestQueue: [] })
   })
 
   it('walks the results tabs from the live composer and leaves the console closed', async () => {
